@@ -27,14 +27,19 @@ export async function loadModelChoices(
   ) => fallback,
 ) {
   const agentRuntimeModule = await loadRinAgentRuntime();
-  const { AuthStorage, ModelRegistry } = agentRuntimeModule as any;
+  const { AuthStorage, ModelRuntime, createModelRegistry } =
+    agentRuntimeModule as any;
   const authPath = installDir ? installAuthPath(installDir) : "";
   const existingAuth = authPath ? readJsonFile<any>(authPath, {}) : {};
   const authStorage = AuthStorage.inMemory(existingAuth);
   const modelsJsonPath = installDir
     ? path.join(installDir, "models.json")
     : undefined;
-  const modelRegistry = new ModelRegistry(authStorage, modelsJsonPath);
+  const modelRuntime = await ModelRuntime.create({
+    credentials: authStorage,
+    modelsPath: modelsJsonPath,
+  });
+  const modelRegistry = createModelRegistry(modelRuntime, authStorage);
   const oauthProviders = Array.isArray(authStorage.getOAuthProviders?.())
     ? authStorage.getOAuthProviders()
     : [];

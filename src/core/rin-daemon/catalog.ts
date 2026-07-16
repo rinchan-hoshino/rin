@@ -82,7 +82,8 @@ async function createCatalogContext(
   const {
     AuthStorage,
     DefaultResourceLoader,
-    ModelRegistry,
+    ModelRuntime,
+    createModelRegistry,
     SettingsManager,
     ExtensionRunner,
   } = agentRuntimeModule as any;
@@ -119,10 +120,12 @@ async function createCatalogContext(
   await resourceLoader.reload();
 
   const authStorage = AuthStorage.create(path.join(agentDir, "auth.json"));
-  const modelRegistry = new ModelRegistry(
-    authStorage,
-    path.join(agentDir, "models.json"),
-  );
+  const modelRuntime = await ModelRuntime.create({
+    credentials: authStorage,
+    authPath: path.join(agentDir, "auth.json"),
+    modelsPath: path.join(agentDir, "models.json"),
+  });
+  const modelRegistry = createModelRegistry(modelRuntime, authStorage);
 
   const loadedExtensions = resourceLoader.getExtensions();
   if (Array.isArray(options.extensionFlagValues)) {

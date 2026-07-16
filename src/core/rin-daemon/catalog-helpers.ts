@@ -224,14 +224,18 @@ function buildOAuthProviderSummary(
   };
 }
 
+function normalizeCredentialProviderId(value: any) {
+  return normalizeProviderId(value?.providerId ?? value);
+}
+
 function collectOAuthCredentials(authStorage: any) {
   const credentials: Record<string, OAuthCredentialSummary | undefined> = {};
-  eachUniqueNormalizedValue<string>(
+  eachUniqueNormalizedValue<any>(
     authStorage?.list?.(),
-    normalizeProviderId,
-    (providerId, normalizedProviderId) => {
+    normalizeCredentialProviderId,
+    (entry, normalizedProviderId) => {
       credentials[normalizedProviderId] = buildOAuthCredentialSummary(
-        authStorage?.get?.(providerId),
+        authStorage?.get?.(entry?.providerId ?? entry),
       );
     },
   );
@@ -265,8 +269,8 @@ function collectOAuthProviderIds(authStorage: any) {
     const providerId = normalizeProviderId(provider?.id);
     if (providerId) providerIds.add(providerId);
   }
-  for (const provider of asArray<string>(authStorage?.list?.())) {
-    const providerId = normalizeProviderId(provider);
+  for (const provider of asArray<any>(authStorage?.list?.())) {
+    const providerId = normalizeCredentialProviderId(provider);
     if (providerId) providerIds.add(providerId);
   }
   return providerIds;

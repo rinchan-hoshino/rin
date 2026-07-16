@@ -261,6 +261,18 @@ function renderWithRuntimeModeModelLabel(
 
   const originalModel = state.model;
   const originalThinkingLevel = state.thinkingLevel;
+  const session = footer?.session;
+  const originalModelRuntime = session?.modelRuntime;
+  if (!originalModelRuntime && session?.modelRegistry) {
+    session.modelRuntime = {
+      isUsingOAuth(provider: string) {
+        return Boolean(
+          session.modelRegistry?.isUsingOAuth?.({ provider }) ||
+          session.modelRegistry?.isUsingOAuth?.(provider),
+        );
+      },
+    };
+  }
   if (model.reasoning) {
     state.thinkingLevel = appendRuntimeModeToThinkingLevel(
       state.thinkingLevel,
@@ -275,6 +287,7 @@ function renderWithRuntimeModeModelLabel(
   } finally {
     state.model = originalModel;
     state.thinkingLevel = originalThinkingLevel;
+    if (!originalModelRuntime && session) delete session.modelRuntime;
   }
 }
 

@@ -1,6 +1,145 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { createRinDefaultResourceLoader } from "./extension-loader.js";
 
 let rinAgentRuntimeModule: any;
+
+function readAuthData(authPath: string | undefined, fallback: any = {}) {
+  if (!authPath) return fallback;
+  try {
+    return JSON.parse(fs.readFileSync(authPath, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeAuthData(authPath: string | undefined, data: any) {
+  if (!authPath) return;
+  fs.mkdirSync(path.dirname(authPath), { recursive: true });
+  fs.writeFileSync(authPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+}
+
+function createAuthStorageCompat(authPath: string | undefined, initial?: any) {
+  const state = {
+    data: initial && typeof initial === "object" ? { ...initial } : undefined,
+    modelRuntime: undefined as any,
+  };
+  const load = () => {
+    if (!state.data) state.data = readAuthData(authPath, {});
+    return state.data || {};
+  };
+  const save = () => writeAuthData(authPath, load());
+  const api = {
+    bindModelRuntime(modelRuntime: any) {
+      state.modelRuntime = modelRuntime;
+      return api;
+    },
+    get(provider: string) {
+      return load()[String(provider || "")];
+    },
+    getAll() {
+      return { ...load() };
+    },
+    list() {
+      return Object.entries(load()).map(
+        ([providerId, credential]: [string, any]) => ({
+          providerId,
+          type: String(credential?.type || "api_key"),
+        }),
+      );
+    },
+    hasAuth(provider: string) {
+      return Boolean(api.get(provider));
+    },
+    getOAuthProviders() {
+      return (state.modelRuntime?.getProviders?.() || [])
+        .filter((provider: any) => Boolean(provider?.auth?.oauth))
+        .map((provider: any) => ({
+          id: String(provider.id || ""),
+          name: String(
+            provider.auth?.oauth?.name || provider.name || provider.id || "",
+          ),
+          usesCallbackServer: Boolean(provider.auth?.oauth?.usesCallbackServer),
+        }))
+        .filter((provider: any) => provider.id);
+    },
+    async read(provider: string) {
+      return api.get(provider);
+    },
+    async modify(provider: string, fn: any) {
+      const id = String(provider || "");
+      const next = await fn(load()[id]);
+      if (typeof next === "undefined") delete load()[id];
+      else load()[id] = next;
+      save();
+      return next;
+    },
+    async delete(provider: string) {
+      delete load()[String(provider || "")];
+      save();
+    },
+    set(provider: string, credential: any) {
+      const id = String(provider || "").trim();
+      if (!id) return;
+      load()[id] = credential;
+      save();
+      const key = String(credential?.key || "").trim();
+      if (key) void state.modelRuntime?.setRuntimeApiKey?.(id, key);
+    },
+    async login(provider: string, callbacks: any = {}) {
+      const id = String(provider || "").trim();
+      if (!id) throw new Error("oauth_provider_id_required");
+      const credential = await state.modelRuntime?.login?.(
+        id,
+        "oauth",
+        callbacks,
+      );
+      if (credential) {
+        load()[id] = credential;
+        save();
+      }
+      return credential;
+    },
+    logout(provider: string) {
+      const id = String(provider || "").trim();
+      if (!id) return;
+      delete load()[id];
+      save();
+      void state.modelRuntime?.logout?.(id);
+    },
+  };
+  return api;
+}
+
+const AuthStorageCompat = {
+  create(authPath?: string) {
+    return createAuthStorageCompat(authPath);
+  },
+  inMemory(data?: any) {
+    return createAuthStorageCompat(undefined, data || {});
+  },
+};
+
+async function createModelRuntimeCompat(PiAgentRuntime: any, options: any) {
+  return await PiAgentRuntime.ModelRuntime.create({
+    credentials: options.authStorage,
+    authPath: options.authPath,
+    modelsPath: options.modelsPath,
+    allowModelNetwork: options.allowModelNetwork,
+  });
+}
+
+function createModelRegistryCompat(
+  PiAgentRuntime: any,
+  modelRuntime: any,
+  authStorage: any,
+) {
+  const modelRegistry = new PiAgentRuntime.ModelRegistry(modelRuntime);
+  modelRegistry.authStorage =
+    authStorage?.bindModelRuntime?.(modelRuntime) || authStorage;
+  return modelRegistry;
+}
 
 function applyExtensionFlagValues(
   extensionsResult: any,
@@ -58,20 +197,22 @@ function createRinAgentSessionServicesFactory(
   return async function createRinAgentSessionServices(options: any) {
     const cwd = options.cwd;
     const agentDir = options.agentDir ?? PiAgentRuntime.getAgentDir?.();
+    const authPath = agentDir ? `${agentDir}/auth.json` : undefined;
     const authStorage =
-      options.authStorage ??
-      PiAgentRuntime.AuthStorage.create(
-        agentDir ? `${agentDir}/auth.json` : undefined,
-      );
+      options.authStorage ?? AuthStorageCompat.create(authPath);
     const settingsManager =
       options.settingsManager ??
       PiAgentRuntime.SettingsManager.create(cwd, agentDir);
+    const modelRuntime =
+      options.modelRuntime ??
+      (await createModelRuntimeCompat(PiAgentRuntime, {
+        authStorage,
+        authPath,
+        modelsPath: agentDir ? `${agentDir}/models.json` : undefined,
+      }));
     const modelRegistry =
       options.modelRegistry ??
-      PiAgentRuntime.ModelRegistry.create(
-        authStorage,
-        `${agentDir}/models.json`,
-      );
+      createModelRegistryCompat(PiAgentRuntime, modelRuntime, authStorage);
     const resourceLoader = new RinDefaultResourceLoader({
       ...(options.resourceLoaderOptions ?? {}),
       cwd,
@@ -104,6 +245,7 @@ function createRinAgentSessionServicesFactory(
       agentDir,
       authStorage,
       settingsManager,
+      modelRuntime,
       modelRegistry,
       resourceLoader,
       diagnostics,
@@ -125,6 +267,9 @@ export async function loadRinAgentRuntime() {
       createRinDefaultResourceLoader(PiAgentRuntime);
     rinAgentRuntimeModule = {
       ...PiAgentRuntime,
+      AuthStorage: AuthStorageCompat,
+      createModelRegistry: (modelRuntime: any, authStorage: any) =>
+        createModelRegistryCompat(PiAgentRuntime, modelRuntime, authStorage),
       DefaultResourceLoader,
       createAgentSessionServices: createRinAgentSessionServicesFactory(
         PiAgentRuntime,
