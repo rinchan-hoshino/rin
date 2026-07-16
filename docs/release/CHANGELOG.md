@@ -126,6 +126,7 @@ f700543 fix(session): cache excluded catalog files
 bb9d4f2 docs(agent): include max thinking level
 c60ef34 fix(chat): retry concurrent WAL initialization
 e564da4 test(installer): allow bounded daemon startup
+f4dd7cf test(installer): match container Node ABI
 -->
 
 ## 0.7.0
