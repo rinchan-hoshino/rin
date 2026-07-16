@@ -21,6 +21,15 @@ import {
 
 type BotIdMap = Record<string, string>;
 
+const BOT_QUALIFIED_CHAT_PLATFORMS = new Set([
+  "telegram",
+  "onebot",
+  "discord",
+  "lark",
+  "slack",
+  "minecraft",
+]);
+
 type SettingsRewriteResult = {
   settings: any;
   rewritten: Record<string, string>;
@@ -207,7 +216,7 @@ export function canonicalizeStoredChatKey(
     );
   }
   const legacy = parseLegacyUnqualifiedChatKey(current);
-  if (!legacy) return "";
+  if (!legacy || !BOT_QUALIFIED_CHAT_PLATFORMS.has(legacy.platform)) return "";
   return composeCanonicalChatKey(
     legacy.platform,
     botIds[legacy.platform],
@@ -526,11 +535,12 @@ function migrateLegacyMessageRecords(agentDir: string) {
   const unresolved: string[] = [];
   for (const item of listStoredRecordFiles(layout.primaryRoot.recordsDir)) {
     const legacy = parseLegacyUnqualifiedChatKey(item.record.chatKey);
-    if (!legacy) continue;
+    if (!legacy || !BOT_QUALIFIED_CHAT_PLATFORMS.has(legacy.platform)) continue;
     const platform = safeString(item.record.platform).trim();
     const botId = safeString(item.record.botId).trim();
     const chatId = safeString(item.record.chatId).trim();
-    if (legacy.platform !== platform || legacy.chatId !== chatId || !botId) {
+    if (!botId) continue;
+    if (legacy.platform !== platform || legacy.chatId !== chatId) {
       unresolved.push(item.filePath);
       continue;
     }
@@ -625,12 +635,17 @@ export function migrateLegacyChatKeys(
   }
 
   const rewrittenSettings = rewriteSettingsChatKeys(settings);
-  const unresolvedLegacySettings = rewrittenSettings.unresolved.filter((key) =>
-    Boolean(parseLegacyUnqualifiedChatKey(key)),
+  const unresolvedActiveSettings = rewrittenSettings.unresolved.filter(
+    (key) => {
+      const legacy = parseLegacyUnqualifiedChatKey(key);
+      return Boolean(
+        legacy && BOT_QUALIFIED_CHAT_PLATFORMS.has(legacy.platform),
+      );
+    },
   );
-  if (unresolvedLegacySettings.length) {
+  if (unresolvedActiveSettings.length) {
     throw new Error(
-      `chat_key_migration_unresolved_settings:${unresolvedLegacySettings.length}`,
+      `chat_key_migration_unresolved_settings:${unresolvedActiveSettings.length}`,
     );
   }
   const records = migrateLegacyMessageRecords(agentDir);

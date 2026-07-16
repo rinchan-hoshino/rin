@@ -119,6 +119,92 @@ test("chat key migration rewrites byChatKey entries without losing settings", ()
   );
 });
 
+test("chat key migration leaves retired platform archives untouched", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-key-archive-migration-"),
+  );
+  try {
+    const settingsPath = path.join(agentDir, "settings.json");
+    const settings = {
+      chat: {
+        byChatKey: {
+          "matrix:archived-room": { quietMode: true },
+        },
+      },
+    };
+    await fs.writeFile(settingsPath, JSON.stringify(settings));
+    const chatKey = "github:archived-thread";
+    const messageId = "archived-assistant";
+    const recordKey = createHash("sha1")
+      .update(`${chatKey}\n${messageId}`)
+      .digest("hex");
+    const recordPath = path.join(
+      agentDir,
+      "data",
+      "chat",
+      "message-store",
+      "records",
+      recordKey.slice(0, 2),
+      `${recordKey}.json`,
+    );
+    await fs.mkdir(path.dirname(recordPath), { recursive: true });
+    await fs.writeFile(
+      recordPath,
+      JSON.stringify({
+        version: 1,
+        recordKey,
+        messageId,
+        role: "assistant",
+        chatKey,
+        platform: "github",
+        botId: "github-app",
+        chatId: "archived-thread",
+        receivedAt: "2026-05-01T00:00:00.000Z",
+      }),
+    );
+
+    const result = migration.migrateLegacyChatKeys(
+      agentDir,
+      settingsPath,
+      settings,
+    );
+
+    assert.equal(result.migratedRecords, 0);
+    assert.deepEqual(result.settings, settings);
+    assert.equal(
+      JSON.parse(await fs.readFile(recordPath, "utf8")).chatKey,
+      chatKey,
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("chat key migration fails closed for active settings without a bot identity", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-key-active-unresolved-"),
+  );
+  try {
+    const settingsPath = path.join(agentDir, "settings.json");
+    const settings = {
+      chat: {
+        telegram: { token: "" },
+        byChatKey: {
+          "telegram:123": { quietMode: true },
+        },
+      },
+    };
+    await fs.writeFile(settingsPath, JSON.stringify(settings));
+
+    assert.throws(
+      () => migration.migrateLegacyChatKeys(agentDir, settingsPath, settings),
+      /chat_key_migration_unresolved_settings:1/,
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("chat key migration rewrites legacy settings and message records before recovery", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-key-migration-"),
@@ -249,6 +335,12 @@ test("chat key migration rewrites legacy settings and message records before rec
     );
     await fs.mkdir(path.dirname(legacyLogPath), { recursive: true });
     await fs.writeFile(legacyLogPath, "legacy derived view");
+    assert.equal(
+      messageStore
+        .listChatMessages(agentDir)
+        .filter((record: any) => record.chatKey === "lark:oc_same").length,
+      2,
+    );
 
     const result = migration.migrateLegacyChatKeys(
       agentDir,
