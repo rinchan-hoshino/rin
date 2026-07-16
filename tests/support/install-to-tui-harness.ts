@@ -633,8 +633,15 @@ export async function assertInstalledRuntimeSmoke() {
 
       let tuiResult: PtyCommandResult;
       try {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        assert.equal(tui.child.exitCode, null);
+        const startupDeadline = Date.now() + 15_000;
+        while (
+          !/Rin can explain its own features/.test(tui.getOutput()) &&
+          Date.now() < startupDeadline
+        ) {
+          assert.equal(tui.child.exitCode, null, tui.getOutput());
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        assert.match(tui.getOutput(), /Rin can explain its own features/);
 
         const restartOutputOffset = tui.getOutput().length;
         await restart();
