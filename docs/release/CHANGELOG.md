@@ -10,6 +10,8 @@
 - macOS daemon restart handling now replaces stale launchd-owned processes while bounding shutdown waits and preserving atomic restart behavior.
 - Runtime usage and maintenance surfaces now include quota-aware trend charts, bounded dashboard queries, dedicated scheduler turn ownership, updated Pi integrations, and removal of obsolete adapter and mirror paths.
 - TUI resync now restores visible history, editable chat progress remains until the final reply, recovered provider failures retry safely, and managed Node bundles include npm for installer handoffs.
+- Chat startup now uses bounded session catalog work, migrates legacy chat identities safely, and stores control-plane state in SQLite for more reliable recovery.
+- Agent guidance now exposes the maximum supported thinking level.
 <!-- rin-changelog-coverage
 dd300e6 chore(upstream): sync Pi 0.80.7
 8b84a8e fix(tui): restore history after rpc resync
@@ -115,6 +117,14 @@ d8f51f3 fix: recover interrupted turns with one terminal outcome
 ada8361 fix(chat): preserve frontend recovery ownership
 5d50f78 fix(chat): migrate active inbox recovery owners
 3374adc fix(daemon): harden recovered turn ownership
+01e3776 refactor(chat): move control plane to SQLite
+33ca6fb fix(chat): reject unidentified active legacy records
+feebce0 fix(chat): scope legacy key migration to direct adapters
+b626136 fix(chat): migrate legacy chat keys before recovery
+f700543 fix(session): cache excluded catalog files
+4707a89 perf(session): bound catalog and trace chat startup
+bb9d4f2 docs(agent): include max thinking level
+c60ef34 fix(chat): retry concurrent WAL initialization
 -->
 
 ## 0.7.0
