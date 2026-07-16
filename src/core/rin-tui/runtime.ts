@@ -1459,7 +1459,7 @@ export class RpcInteractiveSession {
     this.syncPendingCount();
     this.emitQueueUpdate();
     if (!this.client.isConnected() || !this.rpcConnected) {
-      void this.ensureReconnectLoop();
+      this.startReconnectLoop();
     }
     this.emitFrontendStatus(true);
   }
@@ -1569,11 +1569,18 @@ export class RpcInteractiveSession {
     this.isBashRunning = false;
     if (options?.transportClosed) {
       this.setRpcConnected(false);
-      void this.ensureReconnectLoop();
+      this.startReconnectLoop();
       return;
     }
     this.syncStreamingState();
-    void this.ensureReconnectLoop();
+    this.startReconnectLoop();
+  }
+
+  private startReconnectLoop() {
+    const reconnectPromise = this.ensureReconnectLoop();
+    void reconnectPromise?.catch((error) => {
+      if (!/\brin_tui_disposed\b/.test(rawErrorMessage(error))) throw error;
+    });
   }
 
   handleSessionRecovered() {

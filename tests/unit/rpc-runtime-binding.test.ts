@@ -17,6 +17,30 @@ const { createModelRegistry } = await import(
     path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
   ).href
 );
+test("rpc connection loss contains reconnect rejection after disposal", async () => {
+  const session = new RpcInteractiveSession({
+    send() {
+      return Promise.resolve({ success: true, data: {} });
+    },
+    subscribe() {
+      return () => {};
+    },
+    isConnected() {
+      return false;
+    },
+  });
+  let reconnectAttempts = 0;
+  (session as any).ensureReconnectLoop = () => {
+    reconnectAttempts += 1;
+    return Promise.reject(new Error("rin_tui_disposed"));
+  };
+
+  session.handleSessionUnavailable({ transportClosed: true });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(reconnectAttempts, 1);
+});
+
 test("rpc reconnect replaces an ephemeral session lost with the daemon", async () => {
   const sent: any[] = [];
   const session = new RpcInteractiveSession({

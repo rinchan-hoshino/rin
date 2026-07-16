@@ -197,6 +197,154 @@ test("legacy message, inbox, and outbox authority migrates once into chat.sqlite
   );
 });
 
+test("retired adapter archives with unqualified keys migrate from persisted identity", async () => {
+  const agentDir = await tempDir();
+  const chatRoot = path.join(agentDir, "data", "chat");
+  const matrixChatKey = "matrix:!room:matrix.example";
+  await writeJson(
+    path.join(chatRoot, "message-store", "records", "aa", "matrix.json"),
+    {
+      ...legacyMessage("archived-matrix"),
+      chatKey: matrixChatKey,
+      platform: "matrix",
+      botId: "",
+      chatId: "!room:matrix.example",
+    },
+  );
+  const githubChatKey = "github:private:owner/repo#issue/1";
+  await writeJson(path.join(chatRoot, "inbox", "failed", "github.json"), {
+    ...legacyInbox("archived-github"),
+    chatKey: githubChatKey,
+    session: {
+      ...legacyInbox("archived-github").session,
+      platform: "github",
+      selfId: "",
+      channelId: "private:owner/repo#issue/1",
+    },
+  });
+
+  const db = database.openChatDatabase(agentDir);
+  assert.equal(
+    messageStore.getChatMessage(agentDir, matrixChatKey, "archived-matrix")
+      ?.text,
+    "text archived-matrix",
+  );
+  assert.equal(
+    messageStore.getChatMessage(agentDir, githubChatKey, "archived-github")
+      ?.text,
+    "queued",
+  );
+  for (const messageId of ["archived-matrix", "archived-github"]) {
+    assert.equal(
+      db
+        .prepare("SELECT bot_id FROM messages WHERE message_id = ?")
+        .get(messageId).bot_id,
+      null,
+    );
+  }
+  assert.equal(
+    inbox.getChatInboxItem(agentDir, "turn-archived-github")?.state,
+    "failed",
+  );
+  assert.equal(
+    db
+      .prepare(
+        "SELECT value FROM schema_meta WHERE key = 'legacy_control_migration'",
+      )
+      .get().value,
+    "complete_v1",
+  );
+});
+
+test("mismatched archived identity blocks authority cutover", async () => {
+  const agentDir = await tempDir();
+  await writeJson(
+    path.join(
+      agentDir,
+      "data",
+      "chat",
+      "message-store",
+      "records",
+      "aa",
+      "mismatch.json",
+    ),
+    {
+      ...legacyMessage("mismatched-archive"),
+      chatKey: "matrix:!expected:matrix.example",
+      platform: "matrix",
+      botId: "",
+      chatId: "!different:matrix.example",
+    },
+  );
+
+  assert.throws(
+    () => database.openChatDatabase(agentDir),
+    /chat_legacy_migration_invalid_message_identity/,
+  );
+  const inspect = new (await import("better-sqlite3")).default(
+    database.chatDatabasePath(agentDir),
+  );
+  assert.equal(
+    inspect.prepare("SELECT COUNT(*) AS value FROM messages").get().value,
+    0,
+  );
+  inspect.close();
+});
+
+test("archived keys with slash and later colon cannot bypass identity validation", async () => {
+  const agentDir = await tempDir();
+  await writeJson(
+    path.join(
+      agentDir,
+      "data",
+      "chat",
+      "message-store",
+      "records",
+      "aa",
+      "github-mismatch.json",
+    ),
+    {
+      ...legacyMessage("mismatched-github-archive"),
+      chatKey: "github:private:owner/repo#issue/1:thread",
+      platform: "github",
+      botId: "",
+      chatId: "private:owner/repo#issue/2:thread",
+    },
+  );
+
+  assert.throws(
+    () => database.openChatDatabase(agentDir),
+    /chat_legacy_migration_invalid_message_identity/,
+  );
+});
+
+test("active adapter unqualified keys remain invalid at SQLite cutover", async () => {
+  const agentDir = await tempDir();
+  await writeJson(
+    path.join(
+      agentDir,
+      "data",
+      "chat",
+      "message-store",
+      "records",
+      "aa",
+      "active.json",
+    ),
+    {
+      ...legacyMessage("unmigrated-active"),
+      chatKey: "telegram:2",
+      platform: "telegram",
+      botId: "1",
+      chatId: "2",
+    },
+  );
+
+  assert.throws(
+    () => database.openChatDatabase(agentDir),
+    /chat_legacy_migration_invalid_message_identity/,
+  );
+});
+
 test("malformed legacy JSON blocks authority cutover without partial rows", async () => {
   const agentDir = await tempDir();
   const badPath = path.join(

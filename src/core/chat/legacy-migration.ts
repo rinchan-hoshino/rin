@@ -98,6 +98,46 @@ function parseChatKey(chatKey: string) {
   };
 }
 
+const ARCHIVED_UNQUALIFIED_CHAT_PLATFORMS = new Set(["github", "matrix"]);
+
+function parseArchivedUnqualifiedChatKey(chatKey: string) {
+  const colon = chatKey.indexOf(":");
+  if (colon <= 0 || colon >= chatKey.length - 1) return null;
+  const platform = chatKey.slice(0, colon);
+  if (!ARCHIVED_UNQUALIFIED_CHAT_PLATFORMS.has(platform)) return null;
+  return {
+    platform,
+    chatId: chatKey.slice(colon + 1),
+  };
+}
+
+function resolveLegacyMessageIdentity(raw: any) {
+  const chatKey = safeString(raw?.chatKey).trim();
+  const platform = safeString(raw?.platform).trim();
+  const botId = safeString(raw?.botId).trim();
+  const chatId = safeString(raw?.chatId).trim();
+
+  // Retired adapters were intentionally excluded from the earlier
+  // bot-qualified key migration. Parse their platform:chatId shape first so
+  // slashes or later colons inside chatId cannot be mistaken for delimiters.
+  const archived = parseArchivedUnqualifiedChatKey(chatKey);
+  if (archived) {
+    if (platform !== archived.platform || chatId !== archived.chatId) {
+      return null;
+    }
+    return { chatKey, platform, botId, chatId };
+  }
+
+  const canonical = parseChatKey(chatKey);
+  if (!canonical) return null;
+  return {
+    chatKey,
+    platform: platform || canonical.platform,
+    botId: botId || canonical.botId,
+    chatId: chatId || canonical.chatId,
+  };
+}
+
 function optionalText(value: unknown) {
   return safeString(value).trim() || null;
 }
@@ -123,10 +163,9 @@ function optionalJson(value: unknown) {
 }
 
 function normalizeLegacyMessage(raw: any) {
-  const chatKey = safeString(raw?.chatKey).trim();
+  const identity = resolveLegacyMessageIdentity(raw);
   const messageId = safeString(raw?.messageId).trim();
-  const parsed = parseChatKey(chatKey);
-  if (!parsed || !messageId) {
+  if (!identity || !messageId) {
     throw new Error("chat_legacy_migration_invalid_message_identity");
   }
   const receivedAtText =
@@ -138,16 +177,17 @@ function normalizeLegacyMessage(raw: any) {
   }
   const receivedAt = new Date(receivedAtMs).toISOString();
   const recordKey =
-    safeString(raw?.recordKey).trim() || hashKey(`${chatKey}\n${messageId}`);
+    safeString(raw?.recordKey).trim() ||
+    hashKey(`${identity.chatKey}\n${messageId}`);
   const record = {
     ...raw,
     version: 1,
     recordKey,
-    chatKey,
+    chatKey: identity.chatKey,
     messageId,
-    platform: safeString(raw?.platform).trim() || parsed.platform,
-    botId: safeString(raw?.botId).trim() || parsed.botId,
-    chatId: safeString(raw?.chatId).trim() || parsed.chatId,
+    platform: identity.platform,
+    botId: identity.botId,
+    chatId: identity.chatId,
     receivedAt,
     acceptedAt:
       normalizeOptionalLegacyTimestamp(raw?.acceptedAt, "acceptedAt") ||
@@ -325,17 +365,23 @@ function legacyInboxState(filePath: string) {
 
 function legacyInboxToMessage(item: any) {
   const chatKey = safeString(item?.chatKey).trim();
-  const parsed = parseChatKey(chatKey);
   const session =
     item?.session && typeof item.session === "object" ? item.session : {};
-  if (!parsed) throw new Error("chat_legacy_migration_invalid_inbox_chat_key");
-  return {
+  const identity = resolveLegacyMessageIdentity({
     chatKey,
+    platform: session.platform,
+    botId: session.selfId,
+    chatId: session.channelId || session.chatId,
+  });
+  if (!identity) {
+    throw new Error("chat_legacy_migration_invalid_inbox_chat_key");
+  }
+  return {
+    chatKey: identity.chatKey,
     messageId: safeString(item?.messageId).trim(),
-    platform: safeString(session.platform).trim() || parsed.platform,
-    botId: safeString(session.selfId).trim() || parsed.botId,
-    chatId:
-      safeString(session.channelId || session.chatId).trim() || parsed.chatId,
+    platform: identity.platform,
+    botId: identity.botId,
+    chatId: identity.chatId,
     role: "user",
     receivedAt: safeString(item?.createdAt).trim() || nowIso(),
     text: safeString(
