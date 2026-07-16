@@ -205,6 +205,56 @@ test("chat key migration fails closed for active settings without a bot identity
   }
 });
 
+test("chat key migration fails closed for active records without a persisted bot identity", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-key-active-record-unresolved-"),
+  );
+  try {
+    const settingsPath = path.join(agentDir, "settings.json");
+    const settings = { chat: { telegram: { token: "12345:test" } } };
+    await fs.writeFile(settingsPath, JSON.stringify(settings));
+
+    const chatKey = "telegram:123";
+    const messageId = "legacy-active-assistant";
+    const recordKey = createHash("sha1")
+      .update(`${chatKey}\n${messageId}`)
+      .digest("hex");
+    const recordPath = path.join(
+      agentDir,
+      "data",
+      "chat",
+      "message-store",
+      "records",
+      recordKey.slice(0, 2),
+      `${recordKey}.json`,
+    );
+    await fs.mkdir(path.dirname(recordPath), { recursive: true });
+    await fs.writeFile(
+      recordPath,
+      JSON.stringify({
+        version: 1,
+        recordKey,
+        messageId,
+        role: "assistant",
+        chatKey,
+        platform: "telegram",
+        chatId: "123",
+        receivedAt: "2026-05-01T00:00:00.000Z",
+      }),
+    );
+
+    assert.throws(
+      () => migration.migrateLegacyChatKeys(agentDir, settingsPath, settings),
+      /chat_key_migration_unresolved_records:1/,
+    );
+    await assert.rejects(
+      fs.access(path.join(agentDir, "data", "migrations", "chat-key-v1.json")),
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("chat key migration rewrites legacy settings and message records before recovery", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-key-migration-"),

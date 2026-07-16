@@ -539,7 +539,10 @@ function migrateLegacyMessageRecords(agentDir: string) {
     const platform = safeString(item.record.platform).trim();
     const botId = safeString(item.record.botId).trim();
     const chatId = safeString(item.record.chatId).trim();
-    if (!botId) continue;
+    if (!botId) {
+      unresolved.push(item.filePath);
+      continue;
+    }
     if (legacy.platform !== platform || legacy.chatId !== chatId) {
       unresolved.push(item.filePath);
       continue;
