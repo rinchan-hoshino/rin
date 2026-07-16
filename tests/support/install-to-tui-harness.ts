@@ -24,7 +24,7 @@ const persist = await import(
     .href
 );
 export const INNER_CONTAINER_ENV = "RIN_INSTALL_TUI_CONTAINER_INNER";
-export const DEFAULT_CONTAINER_IMAGE = "node:22-bookworm-slim";
+export const DEFAULT_CONTAINER_IMAGE = `node:${process.versions.node.split(".")[0]}-bookworm-slim`;
 
 export function isInnerContainerRun() {
   return process.env[INNER_CONTAINER_ENV] === "1";
