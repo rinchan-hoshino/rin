@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -11,6 +14,10 @@ const migration = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "chat", "chat-key-migration.js"),
   ).href
+);
+const messageStore = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
+    .href
 );
 
 test("chat key migration infers configured bot ids without adapter-specific key shapes", () => {
@@ -29,6 +36,28 @@ test("chat key migration infers configured bot ids without adapter-specific key 
     onebot: "2301401877",
     telegram: "8623230033",
   });
+});
+
+test("chat key migration preserves historical first-bot ownership for unqualified keys", () => {
+  const settings = {
+    chat: {
+      lark: [
+        { appId: "cli_first", appSecret: "first-secret" },
+        { appId: "cli_second", appSecret: "second-secret" },
+      ],
+      byChatKey: {
+        "lark:oc_legacy": { turnPolicy: "record_only" },
+        "lark/cli_second:oc_current": { quietMode: true },
+      },
+    },
+  };
+
+  const result = migration.rewriteSettingsChatKeys(settings);
+
+  assert.deepEqual(Object.keys(result.settings.chat.byChatKey).sort(), [
+    "lark/cli_first:oc_legacy",
+    "lark/cli_second:oc_current",
+  ]);
 });
 
 test("chat key migration canonicalizes legacy unqualified keys through a single bot-qualified shape", () => {
@@ -88,4 +117,208 @@ test("chat key migration rewrites byChatKey entries without losing settings", ()
     ],
     { turnPolicy: "record_only" },
   );
+});
+
+test("chat key migration rewrites legacy settings and message records before recovery", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-key-migration-"),
+  );
+  try {
+    const settingsPath = path.join(agentDir, "settings.json");
+    const settings = {
+      chat: {
+        lark: { appId: "cli_bot", appSecret: "secret" },
+        byChatKey: {
+          "lark:oc_same": {
+            turnPolicy: "record_only",
+            quietMode: false,
+          },
+          "lark/cli_bot:oc_same": {
+            quietMode: true,
+          },
+        },
+      },
+    };
+    await fs.writeFile(settingsPath, JSON.stringify(settings));
+
+    const canonicalSaved = messageStore.saveChatMessage(agentDir, {
+      version: 1,
+      messageId: "duplicate-message",
+      role: "user",
+      chatKey: "lark/cli_bot:oc_same",
+      platform: "lark",
+      botId: "cli_bot",
+      chatId: "oc_same",
+      receivedAt: "2026-07-01T00:00:00.000Z",
+      platformTimestamp: 2000,
+      text: "current canonical message",
+      processedAt: "2026-07-01T00:01:00.000Z",
+    });
+
+    const recordsDir = path.join(
+      agentDir,
+      "data",
+      "chat",
+      "message-store",
+      "records",
+    );
+    const writeLegacyRecord = async (messageId: string, input = {}) => {
+      const chatKey = "lark:oc_same";
+      const recordKey = createHash("sha1")
+        .update(`${chatKey}\n${messageId}`)
+        .digest("hex");
+      const filePath = path.join(
+        recordsDir,
+        recordKey.slice(0, 2),
+        `${recordKey}.json`,
+      );
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(
+        filePath,
+        JSON.stringify({
+          version: 1,
+          recordKey,
+          messageId,
+          role: "user",
+          chatKey,
+          platform: "lark",
+          botId: "cli_bot",
+          chatId: "oc_same",
+          receivedAt: "2026-06-01T00:00:00.000Z",
+          platformTimestamp: 1000,
+          ...input,
+        }),
+      );
+      return { filePath, recordKey };
+    };
+    const duplicateLegacy = await writeLegacyRecord("duplicate-message", {
+      rawContent: "legacy raw content retained during merge",
+      duplicateCount: 2,
+    });
+    const uniqueLegacy = await writeLegacyRecord("legacy-only-message");
+    const storeDir = path.dirname(recordsDir);
+    const indexesDir = path.join(storeDir, "indexes");
+    const refsPath = (messageId: string) => {
+      const key = createHash("sha1").update(messageId).digest("hex");
+      return path.join(
+        indexesDir,
+        "by-message-id",
+        key.slice(0, 2),
+        `${key}.json`,
+      );
+    };
+    const canonicalRecordPath = (messageId: string) => {
+      const recordKey = createHash("sha1")
+        .update(`lark/cli_bot:oc_same\n${messageId}`)
+        .digest("hex");
+      return path.join(recordsDir, recordKey.slice(0, 2), `${recordKey}.json`);
+    };
+    const writeRefs = async (messageId: string, refs: string[]) => {
+      const filePath = refsPath(messageId);
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, JSON.stringify(refs));
+    };
+    await writeRefs("duplicate-message", [
+      path.relative(storeDir, duplicateLegacy.filePath),
+      path.relative(storeDir, canonicalSaved.filePath),
+    ]);
+    await writeRefs("legacy-only-message", [
+      path.relative(storeDir, uniqueLegacy.filePath),
+    ]);
+    const legacyDateIndexPath = path.join(
+      indexesDir,
+      "by-chat-date",
+      "lark",
+      "oc_same",
+      "2026-06-01.json",
+    );
+    await fs.mkdir(path.dirname(legacyDateIndexPath), { recursive: true });
+    await fs.writeFile(
+      legacyDateIndexPath,
+      JSON.stringify({
+        version: 1,
+        recordKeys: [duplicateLegacy.recordKey, uniqueLegacy.recordKey],
+      }),
+    );
+    const legacyLogPath = path.join(
+      storeDir,
+      "chat-log-view",
+      "lark",
+      "oc_same",
+      "2026-06-01.txt",
+    );
+    await fs.mkdir(path.dirname(legacyLogPath), { recursive: true });
+    await fs.writeFile(legacyLogPath, "legacy derived view");
+
+    const result = migration.migrateLegacyChatKeys(
+      agentDir,
+      settingsPath,
+      settings,
+    );
+
+    assert.equal(result.alreadyApplied, false);
+    assert.equal(result.migratedRecords, 2);
+    assert.equal(result.mergedRecords, 1);
+    assert.deepEqual(result.settings.chat.byChatKey, {
+      "lark/cli_bot:oc_same": {
+        turnPolicy: "record_only",
+        quietMode: true,
+      },
+    });
+    assert.deepEqual(
+      JSON.parse(await fs.readFile(settingsPath, "utf8")).chat.byChatKey,
+      result.settings.chat.byChatKey,
+    );
+    await assert.rejects(fs.access(duplicateLegacy.filePath));
+    await assert.rejects(fs.access(uniqueLegacy.filePath));
+    await assert.rejects(fs.access(legacyDateIndexPath));
+    await assert.rejects(fs.access(legacyLogPath));
+    assert.deepEqual(
+      JSON.parse(await fs.readFile(refsPath("legacy-only-message"), "utf8")),
+      [path.relative(storeDir, canonicalRecordPath("legacy-only-message"))],
+    );
+
+    const duplicate = messageStore.getChatMessage(
+      agentDir,
+      "lark/cli_bot:oc_same",
+      "duplicate-message",
+    );
+    assert.equal(duplicate?.text, "current canonical message");
+    assert.equal(
+      duplicate?.rawContent,
+      "legacy raw content retained during merge",
+    );
+    assert.equal(duplicate?.duplicateCount, 2);
+    assert.equal(
+      messageStore.getChatMessage(
+        agentDir,
+        "lark/cli_bot:oc_same",
+        "legacy-only-message",
+      )?.chatKey,
+      "lark/cli_bot:oc_same",
+    );
+    assert.equal(
+      messageStore.getChatMessagesByMessageId(agentDir, "legacy-only-message")
+        .length,
+      1,
+    );
+    assert.equal(
+      messageStore.listChatMessagesByChatAndDate(
+        agentDir,
+        "lark/cli_bot:oc_same",
+        "2026-06-01",
+      ).length,
+      1,
+    );
+
+    const repeated = migration.migrateLegacyChatKeys(
+      agentDir,
+      settingsPath,
+      result.settings,
+    );
+    assert.equal(repeated.alreadyApplied, true);
+    assert.equal(repeated.migratedRecords, 0);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
 });

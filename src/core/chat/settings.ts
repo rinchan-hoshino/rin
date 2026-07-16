@@ -1,5 +1,4 @@
 import { isJsonRecord } from "../json-utils.js";
-import { rewriteSettingsChatKeys } from "./chat-key-migration.js";
 
 export type ChatTurnPolicyMode = "start_on_message" | "record_only";
 
@@ -103,5 +102,5 @@ export function normalizeStoredChatSettings(
   if (options.ensureChat && !isJsonRecord(normalized.chat)) {
     normalized.chat = {};
   }
-  return rewriteSettingsChatKeys(normalized).settings;
+  return normalized;
 }

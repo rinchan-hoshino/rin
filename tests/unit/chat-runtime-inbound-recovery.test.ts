@@ -73,6 +73,30 @@ test("inbound recovery heads use the latest durable user message per bot chat", 
       chatKey: "discord/bot-2:channel-1",
       platformTimestamp: 4000,
     });
+    const legacyRecordsDir = path.join(
+      agentDir,
+      "data",
+      "chat",
+      "message-store",
+      "records",
+      "legacy",
+    );
+    await fs.mkdir(legacyRecordsDir, { recursive: true });
+    await fs.writeFile(
+      path.join(legacyRecordsDir, "legacy-record.json"),
+      JSON.stringify({
+        version: 1,
+        recordKey: "legacy-record",
+        role: "user",
+        platform: "discord",
+        botId: "bot-1",
+        chatId: "channel-1",
+        chatKey: "discord:channel-1",
+        messageId: "legacy-message",
+        receivedAt: "2026-06-28T00:00:00.000Z",
+        platformTimestamp: 6000,
+      }),
+    );
 
     assert.deepEqual(
       recovery.listInboundRecoveryHeads(agentDir, "discord", "bot-1"),

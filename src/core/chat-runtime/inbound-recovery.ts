@@ -1,4 +1,5 @@
 import { listChatMessages } from "../chat/message-store.js";
+import { composeChatKey } from "../chat/support.js";
 import { safeString } from "../text-utils.js";
 
 export type InboundRecoveryHead = {
@@ -83,7 +84,14 @@ export function listInboundRecoveryHeads(
     const chatKey = safeString(record.chatKey).trim();
     const chatId = safeString(record.chatId).trim();
     const messageId = safeString(record.messageId).trim();
-    if (!chatKey || !chatId || !messageId) continue;
+    if (
+      !chatKey ||
+      !chatId ||
+      !messageId ||
+      chatKey !== composeChatKey(nextPlatform, chatId, nextBotId)
+    ) {
+      continue;
+    }
     const platformTimestamp = recoveryTimestamp(record);
     const current = heads.get(chatKey);
     if (

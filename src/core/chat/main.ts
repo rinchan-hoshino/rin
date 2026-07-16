@@ -58,6 +58,7 @@ import {
   markProcessedChatMessage,
 } from "./chat-helpers.js";
 import { buildInboundChatLogInput } from "./inbound-normalization.js";
+import { migrateLegacyChatKeys } from "./chat-key-migration.js";
 import { buildChatMessageRecordKey } from "./message-store.js";
 import { ChatController, loadChatSettings } from "./controller.js";
 import { readChatCommandResponses } from "./command-responses.js";
@@ -401,7 +402,11 @@ export async function startChatBridge(
   if (process.cwd() !== runtime.cwd) process.chdir(runtime.cwd);
   ensureDir(dataDir);
 
-  const settings = loadChatSettings(settingsPath);
+  const settings = migrateLegacyChatKeys(
+    runtime.agentDir,
+    settingsPath,
+    loadChatSettings(settingsPath),
+  ).settings;
 
   const h = createChatRuntimeH();
   const app = createChatRuntimeApp(runtime.agentDir);
