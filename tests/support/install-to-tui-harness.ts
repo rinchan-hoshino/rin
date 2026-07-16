@@ -531,8 +531,14 @@ async function startInstalledDaemon(
   const daemon = spawn(process.execPath, [flow.daemonPath], {
     cwd: flow.installDir,
     env: flow.env,
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
   });
+  let daemonOutput = "";
+  for (const stream of [daemon.stdout, daemon.stderr]) {
+    stream.on("data", (chunk) => {
+      daemonOutput += String(chunk);
+    });
+  }
   const daemonExit = new Promise<{
     code: number | null;
     signal: NodeJS.Signals | null;
@@ -541,10 +547,19 @@ async function startInstalledDaemon(
     daemon.once("exit", (code, signal) => resolve({ code, signal }));
   });
   try {
-    await waitForDoctorSocket(flow.rinPath, flow.env, "yes");
+    await Promise.race([
+      waitForDoctorSocket(flow.rinPath, flow.env, "yes", 15_000),
+      daemonExit.then(({ code, signal }) => {
+        throw new Error(
+          `installed_daemon_exited:${code ?? "null"}:${signal ?? "null"}\n${daemonOutput}`,
+        );
+      }),
+    ]);
     return { daemon, daemonExit };
   } catch (error) {
     await stopDaemon(daemon, daemonExit);
+    const output = daemonOutput.trim();
+    if (output) throw new Error(`${String(error)}\n${output}`);
     throw error;
   }
 }
