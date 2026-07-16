@@ -1636,10 +1636,24 @@ export class RpcInteractiveSession {
       this.reconnectTimer = null;
       try {
         if (this.sessionFile || this.sessionId) {
-          await this.call("select_session", {
-            sessionPath: this.sessionFile,
-            sessionId: this.sessionId || undefined,
-          });
+          try {
+            await this.call("select_session", {
+              sessionPath: this.sessionFile,
+              sessionId: this.sessionId || undefined,
+            });
+          } catch (error) {
+            if (
+              this.sessionFile ||
+              !/\brin_no_attached_session\b/.test(rawErrorMessage(error))
+            ) {
+              throw error;
+            }
+            // An in-memory session id belongs to one daemon process. If that
+            // daemon was replaced, create a fresh ephemeral session instead of
+            // retrying an identifier that can no longer be resolved.
+            this.sessionId = undefined;
+            await this.ensureRemoteSession();
+          }
         }
         this.setRpcConnected(true);
         this.recoveryPending = true;

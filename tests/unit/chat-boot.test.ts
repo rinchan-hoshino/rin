@@ -17,6 +17,13 @@ const outbox = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
     .href
 );
+const database = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
+);
+const messageStore = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
+    .href
+);
 
 test("chat boot exposes the dedicated chat command registry", () => {
   const rows = boot.getChatCommandRows();
@@ -290,6 +297,81 @@ test("chat boot claims outbox files before sending so concurrent drains do not d
   });
 });
 
+test("chat boot does not apply post-delivery after losing the outbox attempt fence", async () => {
+  await withTempDir(async (agentDir) => {
+    messageStore.saveChatMessage(agentDir, {
+      chatKey: "telegram/1:2",
+      platform: "telegram",
+      botId: "1",
+      chatId: "2",
+      messageId: "inbound-raced-delivery",
+      role: "user",
+      receivedAt: new Date().toISOString(),
+      text: "question",
+    });
+    const itemId = outbox.enqueueChatOutboxPayload(
+      agentDir,
+      {
+        createdAt: new Date().toISOString(),
+        chatKey: "telegram/1:2",
+        parts: [{ type: "text", text: "answer" }],
+      },
+      {
+        postDelivery: {
+          markProcessed: {
+            chatKey: "telegram/1:2",
+            messageId: "inbound-raced-delivery",
+          },
+        },
+      },
+    );
+    let replacement;
+    const app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "1",
+          async sendMessage() {
+            database
+              .openChatDatabase(agentDir)
+              .prepare(`UPDATE outbox SET lease_until = ? WHERE outbox_id = ?`)
+              .run(new Date(0).toISOString(), itemId);
+            replacement = outbox.claimChatOutboxItem(agentDir, itemId, {
+              leaseUntil: new Date(Date.now() + 60_000).toISOString(),
+            });
+            return ["stale-provider-result"];
+          },
+        },
+      ],
+    };
+
+    await boot.drainChatOutbox(
+      app,
+      agentDir,
+      {
+        text(content) {
+          return { type: "text", attrs: { content } };
+        },
+      },
+      { warn() {} },
+      { itemId },
+    );
+
+    assert.ok(replacement?.ownerEpoch);
+    assert.equal(
+      messageStore
+        .listChatMessages(agentDir)
+        .find((message) => message.messageId === "inbound-raced-delivery")
+        ?.processedAt,
+      undefined,
+    );
+    assert.equal(
+      outbox.readChatOutboxItemById(agentDir, itemId)?.item.ownerEpoch,
+      replacement.ownerEpoch,
+    );
+  });
+});
+
 test("chat boot drains a target chat without waiting for a slow different chat", async () => {
   await withTempDir(async (agentDir) => {
     outbox.enqueueChatOutboxPayload(agentDir, {
@@ -347,11 +429,9 @@ test("chat boot drains a target chat without waiting for a slow different chat",
     ]);
 
     assert.notEqual(result, "timed-out");
-    assert.ok(
-      outbox.readChatOutboxItem(
-        agentDir,
-        outbox.chatOutboxHistoryItemPath(agentDir, fastId, "delivered"),
-      ),
+    assert.equal(
+      outbox.readChatOutboxItemById(agentDir, fastId)?.item.status,
+      "delivered",
     );
     assert.deepEqual(
       sends.map((send) => send.chatId),
@@ -437,8 +517,11 @@ test("chat boot keeps retryable outbox delivery failures queued", async () => {
         {
           platform: "telegram",
           selfId: "1",
-          async sendMessage() {
-            throw new Error("boom");
+          sendMessage() {
+            const error = new Error("boom");
+            const delivery = Promise.reject(error);
+            delivery.dispatched = Promise.reject(error);
+            return delivery;
           },
         },
       ],

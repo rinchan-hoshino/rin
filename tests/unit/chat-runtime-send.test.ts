@@ -25,6 +25,9 @@ const { EditableTextMessageGroup } = await import(
     ),
   ).href
 );
+const inbox = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
+);
 
 async function withTempDir(fn: (dir: string) => Promise<void>) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-runtime-"));
@@ -1320,11 +1323,7 @@ test("telegram adapter scopes forum topic sessions and outbound payloads", async
       },
     });
 
-    const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");
-    const [fileName] = await fs.readdir(pendingDir);
-    const inboxItem = JSON.parse(
-      await fs.readFile(path.join(pendingDir, fileName), "utf8"),
-    );
+    const [inboxItem] = inbox.listPendingChatInboxItems(agentDir);
     assert.equal(
       inboxItem.chatKey,
       "telegram/8301813220:-1003852739541?thread=184",

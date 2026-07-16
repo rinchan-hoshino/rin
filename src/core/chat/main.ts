@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -42,7 +43,7 @@ import {
   getChatId,
   getChatType,
   lookupReplySession,
-  persistInboundMessage,
+  enrichInboundMessageMetadata,
   pickChatName,
   pickMessageId,
   pickReplyToMessageId,
@@ -69,10 +70,13 @@ import {
 import { appendChatLog } from "./chat-log.js";
 import {
   type ChatInboxItem,
+  classifyClaimedChatInboxItem,
+  getChatInboxItem,
   reconcileChatInboxRecovery,
-  restoreChatInboxFile,
+  releaseClaimedChatInboxItem,
   restoreChatInboxSession,
-  touchChatInboxFile,
+  restoreProcessingChatInboxItems,
+  touchClaimedChatInboxItem,
 } from "./inbox.js";
 import {
   type ClaimedChatInboxJob,
@@ -112,10 +116,16 @@ import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
   cleanupChatOutboxHistory,
   enqueueChatOutboxPayload,
+  hasCommittedTerminalChatOutbox,
+  runWithChatOutboxTurnFence,
   type ChatOutboxPayloadInput,
   type EnqueueChatOutboxOptions,
 } from "../rin-lib/chat-outbox.js";
-import { sendReaction, sendTyping } from "./transport.js";
+import {
+  sendReaction,
+  sendTyping,
+  validateChatOutboxPayloadForDispatch,
+} from "./transport.js";
 import { readConfiguredLanguageFromSettings } from "../language.js";
 import { normalizeSessionRef } from "../session/ref.js";
 import { formatRuntimeErrorForChat } from "../rin-lib/user-facing-errors.js";
@@ -364,7 +374,11 @@ export type ChatBridgeHandle = {
   };
   stop: () => Promise<void>;
   getStatus: () => ChatBridgeStatus;
-  send: (payload: ChatOutboxPayloadInput) => Promise<{ delivered: true }>;
+  send: (
+    payload: ChatOutboxPayloadInput,
+  ) => Promise<
+    { delivered: true } | { delivered: false; pending: true; outboxId: string }
+  >;
   typing: (payload: { chatKey?: string }) => Promise<{ sent: boolean }>;
   react: (payload: {
     chatKey?: string;
@@ -422,29 +436,38 @@ export async function startChatBridge(
       deliveryKind === "error" && !payload.deliveryKind
         ? { ...payload, deliveryKind }
         : payload;
-    enqueueChatOutboxPayload(runtime.agentDir, deliveryPayload, {
-      id,
-      idempotencyKey: options.idempotencyKey,
-      deliveryKind,
-      postDelivery: options.postDelivery,
-    });
+    await validateChatOutboxPayloadForDispatch(deliveryPayload, h);
+    const outboxId = enqueueChatOutboxPayload(
+      runtime.agentDir,
+      deliveryPayload,
+      {
+        id,
+        idempotencyKey: options.idempotencyKey,
+        deliveryKind,
+        postDelivery: options.postDelivery,
+      },
+    );
     options.onEnqueued?.();
     const results = await drainChatOutbox(app, runtime.agentDir, h, logger, {
       chatKey: safeString(deliveryPayload.chatKey).trim(),
-      itemId: id,
+      itemId: outboxId,
     });
     const own = Array.isArray(results)
-      ? results.find((item: any) => item?.id === id)
+      ? results.find((item: any) => item?.id === outboxId)
       : null;
     if (!own) {
       throw new Error("chat_outbox_delivery_missing");
     }
-    if (own.status !== "delivered") {
-      if (own.status === "dispatched") return;
+    if (
+      own.status !== "delivered" &&
+      own.status !== "dispatched" &&
+      own.status !== "queued"
+    ) {
       throw new Error(
         safeString((own as any).error).trim() || "chat_outbox_delivery_pending",
       );
     }
+    return { ...own, id: outboxId };
   };
   const chatRuntimeRoot = path.join(dataDir, "chat-runtime");
   try {
@@ -476,6 +499,13 @@ export async function startChatBridge(
   ];
   const controllers = new Map<string, ChatController>();
   const detachedControllers = new Map<string, ChatController>();
+  const detachedControllerSignatures = new Map<string, string>();
+  const retiredDetachedControllers = new Set<ChatController>();
+  const detachedControllerUsers = new Map<ChatController, number>();
+  const detachedControllerCleanup = new Map<
+    ChatController,
+    "dispose" | "shutdown"
+  >();
   let inboxPollTimer: NodeJS.Timeout | null = null;
   let outboxPollTimer: NodeJS.Timeout | null = null;
   let outboxHistoryCleanupTimer: NodeJS.Timeout | null = null;
@@ -530,6 +560,19 @@ export async function startChatBridge(
       frontendIdentity?: RinFrontendIdentity;
     },
   ) => {
+    const controllerChatKey =
+      safeString(detachedOptions?.chatKey).trim() || `cron:${controllerKey}`;
+    const affectChatBinding = detachedOptions?.affectChatBinding !== false;
+    const signature = JSON.stringify({
+      controllerChatKey,
+      affectChatBinding,
+      frontendIdentity: detachedOptions?.frontendIdentity || null,
+      useChatFrontendIdentity: Boolean(detachedOptions?.chatKey),
+    });
+    const signatureId = crypto
+      .createHash("sha256")
+      .update(signature)
+      .digest("hex");
     const statePath = path.join(
       dataDir,
       "scheduler",
@@ -537,16 +580,28 @@ export async function startChatBridge(
       safeString(controllerKey)
         .trim()
         .replace(/[^A-Za-z0-9._:-]+/g, "_"),
+      signatureId,
       "state.json",
     );
-    const controllerChatKey =
-      safeString(detachedOptions?.chatKey).trim() || `cron:${controllerKey}`;
     let controller = detachedControllers.get(controllerKey);
+    if (
+      controller &&
+      detachedControllerSignatures.get(controllerKey) !== signature
+    ) {
+      if ((detachedControllerUsers.get(controller) || 0) > 0) {
+        retiredDetachedControllers.add(controller);
+      } else {
+        controller.dispose();
+      }
+      detachedControllers.delete(controllerKey);
+      detachedControllerSignatures.delete(controllerKey);
+      controller = undefined;
+    }
     if (!controller) {
       controller = new ChatController(app, dataDir, controllerChatKey, {
         logger,
         h,
-        affectChatBinding: detachedOptions?.affectChatBinding,
+        affectChatBinding,
         statePath,
         frontendClientFactory,
         sleepAfterIdleMs: DETACHED_CONTROLLER_SLEEP_IDLE_MS,
@@ -555,12 +610,7 @@ export async function startChatBridge(
         useChatFrontendIdentity: Boolean(detachedOptions?.chatKey),
       });
       detachedControllers.set(controllerKey, controller);
-      return controller;
-    }
-    if (controller.chatKey !== controllerChatKey) {
-      controller.chatKey = controllerChatKey;
-      controller.state.chatKey = controllerChatKey;
-      controller.dispose();
+      detachedControllerSignatures.set(controllerKey, signature);
     }
     return controller;
   };
@@ -613,7 +663,21 @@ export async function startChatBridge(
         ],
       },
       "error",
-    ).catch(() => {});
+      {
+        idempotencyKey: messageId
+          ? JSON.stringify(["unknown_command", chatKey, messageId])
+          : undefined,
+        postDelivery: messageId
+          ? {
+              markProcessed: {
+                chatKey,
+                messageId,
+                bindSession: false,
+              },
+            }
+          : undefined,
+      },
+    );
     return { retry: false };
   };
 
@@ -664,7 +728,21 @@ export async function startChatBridge(
           parts: [{ type: "text", text: lines.join("\n") }],
         },
         "command_ack",
-      ).catch(() => {});
+        {
+          idempotencyKey: messageId
+            ? JSON.stringify(["help_command", chatKey, messageId])
+            : undefined,
+          postDelivery: messageId
+            ? {
+                markProcessed: {
+                  chatKey,
+                  messageId,
+                  bindSession: false,
+                },
+              }
+            : undefined,
+        },
+      );
       return { retry: false };
     }
 
@@ -673,13 +751,17 @@ export async function startChatBridge(
     const text = `/${command.name}${command.argsText ? ` ${command.argsText}` : ""}`;
     try {
       await controller.runCommand(text, messageId, messageId, "", promptMeta);
-      return { retry: false };
+      return { retry: false, disposition: "actionable" as const };
     } catch (error) {
       logger.warn(
         `chat command failed chatKey=${chatKey} command=${command.name} err=${safeString((error as any)?.message || error)}`,
       );
       return {
-        retry: false,
+        retry: !hasCommittedTerminalChatOutbox(
+          runtime.agentDir,
+          chatKey,
+          messageId,
+        ),
         errorMessage: safeString((error as any)?.message || error),
       };
     }
@@ -862,7 +944,14 @@ export async function startChatBridge(
             },
           );
         } catch {
-          if (!terminalErrorCommitted) {
+          if (
+            !terminalErrorCommitted &&
+            !hasCommittedTerminalChatOutbox(
+              runtime.agentDir,
+              decision.chatKey,
+              messageId,
+            )
+          ) {
             return {
               retry: true,
               errorMessage,
@@ -877,7 +966,7 @@ export async function startChatBridge(
       };
     };
     try {
-      await controller.runTurn({
+      const turnResult = await controller.runTurn({
         text: promptBody,
         attachments,
         promptMeta,
@@ -887,7 +976,13 @@ export async function startChatBridge(
         ...resolveChatModelOptions(settings, decision.chatKey),
         receivedAt,
       });
-      return { retry: false };
+      return {
+        retry: false,
+        disposition: (turnResult as any)?.superseded
+          ? ("superseded" as const)
+          : ("actionable" as const),
+        ...(turnResult?.steered ? { steered: true } : {}),
+      };
     } catch (error) {
       return await handleTurnFailure(error);
     }
@@ -901,9 +996,11 @@ export async function startChatBridge(
     const decision = await shouldProcessText(session, elements, identity, {
       chatKey: sessionChatKey(session),
     });
-    if (!decision.allow) return { retry: false };
+    if (!decision.allow) {
+      return { retry: false, disposition: "record_only" as const };
+    }
     if (isRecordOnlyChatKey(decision.chatKey)) {
-      return { retry: false };
+      return { retry: false, disposition: "record_only" as const };
     }
     return await handleAllowedChatTurnSession(
       session,
@@ -924,7 +1021,18 @@ export async function startChatBridge(
     const controller = getController(chatKey);
     let inactiveSince = 0;
     for (;;) {
-      if (isInboundMessageProcessed(chatKey, messageId)) return result;
+      if (
+        hasCommittedTerminalChatOutbox(runtime.agentDir, chatKey, messageId)
+      ) {
+        await controller.clearProcessingState().catch(() => {});
+        return result;
+      }
+      if (isInboundMessageProcessed(chatKey, messageId)) {
+        return {
+          retry: true,
+          errorMessage: "chat_steered_turn_missing_terminal_outbox",
+        };
+      }
       const stillOwned = Boolean(
         controller.ownsInboundMessage(messageId) || controller.hasActiveTurn(),
       );
@@ -937,7 +1045,7 @@ export async function startChatBridge(
           CHAT_STEERED_INBOX_INACTIVE_GRACE_MS
         ) {
           return {
-            retry: false,
+            retry: true,
             errorMessage: "chat_steered_turn_unprocessed",
           };
         }
@@ -953,11 +1061,12 @@ export async function startChatBridge(
     job: ClaimedChatInboxJob,
     result?: ChatInboxJobResult,
   ) => {
+    if (result?.disposition === "superseded") return;
     if (
       chatBridgeStopping &&
       !isInboundMessageProcessed(job.envelope.chatKey, job.envelope.messageId)
     ) {
-      restoreChatInboxFile(runtime.agentDir, job.claimedPath, job.envelope);
+      releaseClaimedChatInboxItem(runtime.agentDir, job.envelope);
       return;
     }
     finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
@@ -967,28 +1076,53 @@ export async function startChatBridge(
     job: ClaimedChatInboxJob,
     run: () => Promise<ChatInboxJobResult | undefined>,
   ) => {
+    const fence = {
+      agentDir: runtime.agentDir,
+      turnId: job.envelope.itemId,
+      chatKey: job.envelope.chatKey,
+      messageId: job.envelope.messageId,
+      ownerEpoch: job.envelope.ownerEpoch,
+      attempt: job.envelope.attemptCount,
+    };
     const heartbeat = setInterval(() => {
       try {
-        touchChatInboxFile(job.claimedPath, job.envelope);
+        if (!touchClaimedChatInboxItem(runtime.agentDir, job.envelope)) {
+          logger.warn(
+            `chat inbox heartbeat lost claim chatKey=${job.envelope.chatKey} turn=${job.envelope.itemId}`,
+          );
+          const current = getChatInboxItem(
+            runtime.agentDir,
+            job.envelope.itemId,
+          );
+          if (current && current.state !== "terminal") {
+            const controller = controllers.get(job.envelope.chatKey);
+            if (controller?.ownsOutboxTurnFence(fence)) {
+              controller.dispose();
+              controllers.delete(job.envelope.chatKey);
+            }
+          }
+        }
       } catch (error) {
         logger.warn(
-          `chat inbox heartbeat failed chatKey=${job.envelope.chatKey} file=${job.claimedPath} err=${safeString((error as any)?.message || error)}`,
+          `chat inbox heartbeat failed chatKey=${job.envelope.chatKey} turn=${job.envelope.itemId} err=${safeString((error as any)?.message || error)}`,
         );
       }
     }, CHAT_INBOX_PROCESSING_HEARTBEAT_MS);
     try {
-      const result = await waitForSteeredInboxCompletion(job, await run());
+      const result = await runWithChatOutboxTurnFence(fence, async () =>
+        waitForSteeredInboxCompletion(job, await run()),
+      );
       finishClaimedInboxJob(job, result);
     } catch (error) {
       if (
         chatBridgeStopping &&
         !isInboundMessageProcessed(job.envelope.chatKey, job.envelope.messageId)
       ) {
-        restoreChatInboxFile(runtime.agentDir, job.claimedPath, job.envelope);
+        releaseClaimedChatInboxItem(runtime.agentDir, job.envelope);
         return;
       }
       logger.warn(
-        `chat inbox worker failed chatKey=${job.envelope.chatKey} file=${job.claimedPath} err=${safeString((error as any)?.message || error)}`,
+        `chat inbox worker failed chatKey=${job.envelope.chatKey} turn=${job.envelope.itemId} err=${safeString((error as any)?.message || error)}`,
       );
       requeueClaimedChatInboxJob(
         runtime.agentDir,
@@ -1018,7 +1152,11 @@ export async function startChatBridge(
       safeString(envelope.chatKey).trim() || sessionChatKey(queuedSession);
     if (isRecordOnlyChatKey(queuedChatKey)) {
       return {
-        run: () => runClaimedInboxJob(job, async () => ({ retry: false })),
+        run: () =>
+          runClaimedInboxJob(job, async () => ({
+            retry: false,
+            disposition: "record_only",
+          })),
       };
     }
     const identity = getIdentity();
@@ -1032,10 +1170,19 @@ export async function startChatBridge(
       REMOVED_CHAT_COMMAND_NAMES.has(commandRequest.name)
     ) {
       return {
-        run: () => runClaimedInboxJob(job, async () => ({ retry: false })),
+        run: () =>
+          runClaimedInboxJob(job, async () => ({
+            retry: false,
+            disposition: "record_only",
+          })),
       };
     }
     if (commandRequest.command) {
+      if (
+        !classifyClaimedChatInboxItem(runtime.agentDir, envelope, "actionable")
+      ) {
+        throw new Error("chat_inbox_claim_lost_during_classification");
+      }
       return {
         run: () =>
           runClaimedInboxJob(job, () =>
@@ -1048,6 +1195,11 @@ export async function startChatBridge(
       };
     }
     if (commandRequest.commandLike) {
+      if (
+        !classifyClaimedChatInboxItem(runtime.agentDir, envelope, "actionable")
+      ) {
+        throw new Error("chat_inbox_claim_lost_during_classification");
+      }
       return {
         run: () =>
           runClaimedInboxJob(job, () =>
@@ -1068,13 +1220,26 @@ export async function startChatBridge(
     );
     if (!decision.allow) {
       return {
-        run: () => runClaimedInboxJob(job, async () => ({ retry: false })),
+        run: () =>
+          runClaimedInboxJob(job, async () => ({
+            retry: false,
+            disposition: "record_only",
+          })),
       };
     }
     if (isRecordOnlyChatKey(decision.chatKey)) {
       return {
-        run: () => runClaimedInboxJob(job, async () => ({ retry: false })),
+        run: () =>
+          runClaimedInboxJob(job, async () => ({
+            retry: false,
+            disposition: "record_only",
+          })),
       };
+    }
+    if (
+      !classifyClaimedChatInboxItem(runtime.agentDir, envelope, "actionable")
+    ) {
+      throw new Error("chat_inbox_claim_lost_during_classification");
     }
 
     return {
@@ -1095,7 +1260,7 @@ export async function startChatBridge(
     prepare: (job) => prepareClaimedInboxJob(job),
     onPrepareError: (job, chatKey, error) => {
       logger.warn(
-        `chat inbox prepare failed chatKey=${chatKey} file=${job.claimedPath} err=${safeString((error as any)?.message || error)}`,
+        `chat inbox prepare failed chatKey=${chatKey} turn=${job.envelope.itemId} err=${safeString((error as any)?.message || error)}`,
       );
       requeueClaimedChatInboxJob(
         runtime.agentDir,
@@ -1157,7 +1322,7 @@ export async function startChatBridge(
       const elements = ensureSessionElements(session);
       try {
         const chatKey = sessionChatKey(session);
-        persistInboundMessage(
+        enrichInboundMessageMetadata(
           runtime.agentDir,
           session,
           elements,
@@ -1192,10 +1357,6 @@ export async function startChatBridge(
     });
   });
 
-  inboxPollTimer = setInterval(() => {
-    requestDrainChatInbox();
-  }, CHAT_INBOX_POLL_INTERVAL_MS);
-
   app.on("bot-status-updated", (bot: any) => {
     if (bot?.status !== 1) return;
     void syncTelegramCommands(app, logger, commandRows);
@@ -1204,8 +1365,14 @@ export async function startChatBridge(
 
   const startedAt = nowIso();
   const send = async (payload: ChatOutboxPayloadInput) => {
-    await enqueueAndDrainOutbox(payload, "generic");
-    return { delivered: true as const };
+    const result = await enqueueAndDrainOutbox(payload, "generic");
+    return result.status === "delivered"
+      ? { delivered: true as const }
+      : {
+          delivered: false as const,
+          pending: true as const,
+          outboxId: result.id,
+        };
   };
   const typing = async (payload: { chatKey?: string }) => {
     const chatKey = safeString(payload?.chatKey).trim();
@@ -1245,6 +1412,12 @@ export async function startChatBridge(
           affectChatBinding,
           frontendIdentity: normalizeFrontendIdentity(payload?.frontend),
         });
+    if (!useBoundController) {
+      detachedControllerUsers.set(
+        controller,
+        (detachedControllerUsers.get(controller) || 0) + 1,
+      );
+    }
     try {
       const chatModelOptions = chatKey
         ? resolveChatModelOptions(settings, chatKey)
@@ -1273,31 +1446,52 @@ export async function startChatBridge(
         quietMode: payload?.quietMode,
       });
     } finally {
-      if (!useBoundController && (disposeAfterTurn || shutdownAfterTurn)) {
+      if (!useBoundController) {
         if (shutdownAfterTurn) {
-          await controller.terminateSession().catch((error: any) => {
-            logger.warn(
-              `chat detached turn shutdown failed controllerKey=${controllerKey} err=${safeString(error?.message || error)}`,
-            );
-          });
-        } else {
-          controller.dispose();
+          detachedControllerCleanup.set(controller, "shutdown");
+        } else if (
+          disposeAfterTurn &&
+          detachedControllerCleanup.get(controller) !== "shutdown"
+        ) {
+          detachedControllerCleanup.set(controller, "dispose");
         }
-        detachedControllers.delete(controllerKey);
-        try {
-          fs.rmSync(
-            path.join(
-              dataDir,
-              "scheduler",
-              "turns",
-              controllerKey.replace(/[^A-Za-z0-9._:-]+/g, "_"),
-            ),
-            {
-              recursive: true,
-              force: true,
-            },
-          );
-        } catch {}
+        const remainingUsers = Math.max(
+          0,
+          (detachedControllerUsers.get(controller) || 1) - 1,
+        );
+        if (remainingUsers) {
+          detachedControllerUsers.set(controller, remainingUsers);
+        } else {
+          detachedControllerUsers.delete(controller);
+          const cleanup = detachedControllerCleanup.get(controller);
+          const isCurrent =
+            detachedControllers.get(controllerKey) === controller;
+          if (retiredDetachedControllers.has(controller) || cleanup) {
+            if (cleanup === "shutdown") {
+              await controller.terminateSession().catch((error: any) => {
+                logger.warn(
+                  `chat detached turn shutdown failed controllerKey=${controllerKey} err=${safeString(error?.message || error)}`,
+                );
+              });
+            } else {
+              controller.dispose();
+            }
+            retiredDetachedControllers.delete(controller);
+            detachedControllerCleanup.delete(controller);
+            if (isCurrent) {
+              detachedControllers.delete(controllerKey);
+              detachedControllerSignatures.delete(controllerKey);
+            }
+            if (cleanup) {
+              try {
+                fs.rmSync(path.dirname(controller.statePath), {
+                  recursive: true,
+                  force: true,
+                });
+              } catch {}
+            }
+          }
+        }
       }
     }
   };
@@ -1346,6 +1540,7 @@ export async function startChatBridge(
     await controller.terminateSession().catch(() => {});
     controller.dispose();
     detachedControllers.delete(controllerKey);
+    detachedControllerSignatures.delete(controllerKey);
     return { terminated: true, controllerKey };
   };
   const evalBridge = async (payload: ChatBridgeEvalPayload) => {
@@ -1432,6 +1627,16 @@ export async function startChatBridge(
   }
 
   requestDrainChatInbox();
+  inboxPollTimer = setInterval(() => {
+    try {
+      restoreProcessingChatInboxItems(runtime.agentDir);
+    } catch (error) {
+      logger.warn(
+        `chat inbox lease recovery failed err=${safeString((error as any)?.message || error)}`,
+      );
+    }
+    requestDrainChatInbox();
+  }, CHAT_INBOX_POLL_INTERVAL_MS);
   runOutboxHistoryCleanup();
   outboxHistoryCleanupTimer = setInterval(
     () => runOutboxHistoryCleanup(),
@@ -1459,13 +1664,18 @@ export async function startChatBridge(
           controller.dispose();
         }
       }
-      for (const controller of detachedControllers.values()) {
+      const detachedControllersToStop = new Set([
+        ...detachedControllers.values(),
+        ...retiredDetachedControllers,
+      ]);
+      for (const controller of detachedControllersToStop) {
         if (options.hosted === true) {
           await controller.detachForDaemonShutdown().catch(() => {});
         } else {
           controller.dispose();
         }
       }
+      retiredDetachedControllers.clear();
       try {
         await app.stop();
       } catch {}

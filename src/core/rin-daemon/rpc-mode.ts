@@ -728,6 +728,50 @@ export async function runCustomRpcMode(
   };
   let activeTurnPromise: Promise<void> | null = null;
   let activeTurnRequestTag = "";
+  type PendingPromptRequestTag = {
+    requestTag: string;
+    acceptedAs: "prompt" | "steer" | "followUp";
+    text: string;
+  };
+  const pendingPromptRequestTags: PendingPromptRequestTag[] = [];
+  const admittedPromptRequestTags = new Map<
+    string,
+    PendingPromptRequestTag["acceptedAs"]
+  >();
+  const recentPersistedPromptRequestTags = new Map<
+    string,
+    PendingPromptRequestTag["acceptedAs"]
+  >();
+  const rememberPersistedPromptRequestTag = (
+    requestTag: string,
+    acceptedAs: PendingPromptRequestTag["acceptedAs"],
+  ) => {
+    recentPersistedPromptRequestTags.delete(requestTag);
+    recentPersistedPromptRequestTags.set(requestTag, acceptedAs);
+    while (recentPersistedPromptRequestTags.size > 1024) {
+      const oldest = recentPersistedPromptRequestTags.keys().next().value;
+      if (!oldest) break;
+      recentPersistedPromptRequestTags.delete(oldest);
+    }
+  };
+  const admittedPromptRequestTag = (requestTag: string) =>
+    admittedPromptRequestTags.get(requestTag) ||
+    recentPersistedPromptRequestTags.get(requestTag);
+  const queuePromptRequestTag = (
+    requestTag: string,
+    acceptedAs: PendingPromptRequestTag["acceptedAs"],
+    text: string,
+  ) => {
+    const token = { requestTag, acceptedAs, text: safeString(text).trim() };
+    pendingPromptRequestTags.push(token);
+    if (requestTag) admittedPromptRequestTags.set(requestTag, acceptedAs);
+    return token;
+  };
+  const removePendingPromptRequestTag = (token: PendingPromptRequestTag) => {
+    const index = pendingPromptRequestTags.indexOf(token);
+    if (index >= 0) pendingPromptRequestTags.splice(index, 1);
+    if (token.requestTag) admittedPromptRequestTags.delete(token.requestTag);
+  };
   let gracefulSessionShutdown = false;
   let turnGeneration = 0;
   let latestAutoRetryFailureMessage = "";
@@ -1005,6 +1049,9 @@ export async function runCustomRpcMode(
   let userMessageSeq = 0;
   const bindCurrentSession = async () => {
     const session = getSession();
+    pendingPromptRequestTags.length = 0;
+    admittedPromptRequestTags.clear();
+    recentPersistedPromptRequestTags.clear();
     await session.bindExtensions({
       uiContext: createExtensionUiContext(),
       mode: "rpc",
@@ -1044,19 +1091,35 @@ export async function runCustomRpcMode(
     unsubscribeSessionEvents?.();
     restoreSessionAppendMessage?.();
     const userMessageIds = new WeakMap<object, string>();
+    const userMessageRequestTags = new WeakMap<object, string>();
     const sessionManager = session.sessionManager;
     const originalAppendMessage = sessionManager?.appendMessage;
     if (typeof originalAppendMessage === "function") {
       const wrappedAppendMessage = function (this: any, message: any) {
+        const userMessageId =
+          message?.role === "user" && typeof message === "object"
+            ? userMessageIds.get(message)
+            : undefined;
+        const requestTag =
+          message?.role === "user" && typeof message === "object"
+            ? userMessageRequestTags.get(message)
+            : undefined;
+        if (requestTag && message.requestTag === undefined) {
+          message.requestTag = requestTag;
+        }
         const result = originalAppendMessage.call(this, message);
         const sessionLeafId = safeString(result).trim();
         if (message?.role === "user" && sessionLeafId) {
-          const userMessageId =
-            message && typeof message === "object"
-              ? userMessageIds.get(message)
-              : undefined;
+          if (requestTag) {
+            const acceptedAs = admittedPromptRequestTags.get(requestTag);
+            if (acceptedAs) {
+              admittedPromptRequestTags.delete(requestTag);
+              rememberPersistedPromptRequestTag(requestTag, acceptedAs);
+            }
+          }
           if (message && typeof message === "object") {
             userMessageIds.delete(message);
+            userMessageRequestTags.delete(message);
           }
           if (userMessageId) {
             output({
@@ -1078,6 +1141,36 @@ export async function runCustomRpcMode(
       restoreSessionAppendMessage = undefined;
     }
     unsubscribeSessionEvents = session.subscribe((event: any) => {
+      let producerRequestTag = safeString(event?.requestTag).trim();
+      if (event?.type === "message_start" && event.message?.role === "user") {
+        const userText = Array.isArray(event.message?.content)
+          ? event.message.content
+              .map((part: any) => safeString(part?.text || part?.content))
+              .join("")
+              .trim()
+          : safeString(event.message?.content || event.message?.text).trim();
+        const textMatches = producerRequestTag
+          ? []
+          : pendingPromptRequestTags
+              .map((token, index) => ({ token, index }))
+              .filter(({ token }) => token.text && token.text === userText);
+        const pendingIndex = producerRequestTag
+          ? pendingPromptRequestTags.findIndex(
+              (token) => token.requestTag === producerRequestTag,
+            )
+          : textMatches.length >= 1
+            ? textMatches[0].index
+            : -1;
+        const pending =
+          pendingIndex >= 0
+            ? pendingPromptRequestTags.splice(pendingIndex, 1)[0]
+            : undefined;
+        producerRequestTag = producerRequestTag || pending?.requestTag || "";
+      }
+      const taggedEvent =
+        producerRequestTag && event?.requestTag === undefined
+          ? { ...event, requestTag: producerRequestTag }
+          : event;
       if (event?.type === "auto_retry_start") {
         latestAutoRetryFailureMessage = "";
       }
@@ -1097,12 +1190,21 @@ export async function runCustomRpcMode(
       if (event?.type === "message_start" && event.message?.role === "user") {
         const userMessageId = `user-message-${Date.now().toString(36)}-${++userMessageSeq}`;
         userMessageIds.set(event.message, userMessageId);
+        if (producerRequestTag) {
+          if (event.message.requestTag === undefined) {
+            event.message.requestTag = producerRequestTag;
+          }
+          userMessageRequestTags.set(event.message, producerRequestTag);
+        }
         output(
-          withCompactionEventMetadata(session, { ...event, userMessageId }),
+          withCompactionEventMetadata(session, {
+            ...taggedEvent,
+            userMessageId,
+          }),
         );
         return;
       }
-      output(withCompactionEventMetadata(session, event));
+      output(withCompactionEventMetadata(session, taggedEvent));
     });
   };
 
@@ -1133,6 +1235,16 @@ export async function runCustomRpcMode(
             }),
           );
         }
+        const admittedAs = admittedPromptRequestTag(requestTag);
+        if (requestTag && admittedAs) {
+          return done(
+            id,
+            "prompt",
+            promptAdmission(session, admittedAs, requestTag, {
+              turnActive: true,
+            }),
+          );
+        }
         const requestedQueueBehavior = command.streamingBehavior;
         const acceptedQueueBehavior = turnAlreadyActive
           ? normalizePromptQueueBehavior(requestedQueueBehavior)
@@ -1155,14 +1267,24 @@ export async function runCustomRpcMode(
           promptOptions.frontendIdentity = frontendIdentity;
         }
         if (acceptedQueueBehavior) {
-          if (!session.isStreaming) {
-            await promptWithQueueableTurnReceiver(
-              session,
-              command.message,
-              promptOptions,
-            );
-          } else {
-            await session.prompt(command.message, promptOptions);
+          const requestTagToken = queuePromptRequestTag(
+            requestTag,
+            acceptedQueueBehavior,
+            command.message,
+          );
+          try {
+            if (!session.isStreaming) {
+              await promptWithQueueableTurnReceiver(
+                session,
+                command.message,
+                promptOptions,
+              );
+            } else {
+              await session.prompt(command.message, promptOptions);
+            }
+          } catch (error) {
+            removePendingPromptRequestTag(requestTagToken);
+            throw error;
           }
           return done(
             id,
@@ -1177,9 +1299,13 @@ export async function runCustomRpcMode(
             ),
           );
         }
-        startTurnTask(
-          rpcRequestTag(command.requestTag),
-          async (getObservedCompletion) => {
+        const requestTagToken = queuePromptRequestTag(
+          requestTag,
+          "prompt",
+          command.message,
+        );
+        startTurnTask(requestTag, async (getObservedCompletion) => {
+          try {
             return await runSessionTurnProducer(
               session,
               async () => {
@@ -1194,8 +1320,10 @@ export async function runCustomRpcMode(
               },
               { retryFailureMessage: () => latestAutoRetryFailureMessage },
             );
-          },
-        );
+          } finally {
+            removePendingPromptRequestTag(requestTagToken);
+          }
+        });
         return done(
           id,
           "prompt",
@@ -1219,20 +1347,60 @@ export async function runCustomRpcMode(
           },
         );
         return done(id, "resume_interrupted_turn");
-      case "steer":
-        return run(id, type, () =>
-          session.steer(command.message, command.images),
+      case "steer": {
+        const requestTag = safeString(command.requestTag).trim();
+        const admitted = requestTag
+          ? admittedPromptRequestTag(requestTag)
+          : undefined;
+        if (admitted) {
+          return done(id, type, { acceptedAs: admitted, requestTag });
+        }
+        const token = queuePromptRequestTag(
+          requestTag,
+          "steer",
+          command.message,
         );
-      case "follow_up":
-        return run(id, type, () =>
-          session.followUp(command.message, command.images),
+        try {
+          return await run(id, type, () =>
+            session.steer(command.message, command.images),
+          );
+        } catch (error) {
+          removePendingPromptRequestTag(token);
+          throw error;
+        }
+      }
+      case "follow_up": {
+        const requestTag = safeString(command.requestTag).trim();
+        const admitted = requestTag
+          ? admittedPromptRequestTag(requestTag)
+          : undefined;
+        if (admitted) {
+          return done(id, type, { acceptedAs: admitted, requestTag });
+        }
+        const token = queuePromptRequestTag(
+          requestTag,
+          "followUp",
+          command.message,
         );
+        try {
+          return await run(id, type, () =>
+            session.followUp(command.message, command.images),
+          );
+        } catch (error) {
+          removePendingPromptRequestTag(token);
+          throw error;
+        }
+      }
       case "clear_queue":
+        pendingPromptRequestTags.length = 0;
+        admittedPromptRequestTags.clear();
         return done(id, type, session.clearQueue());
       case "abort":
         return run(id, type, async () => {
           session.abortCompaction?.();
           await session.abort();
+          pendingPromptRequestTags.length = 0;
+          admittedPromptRequestTags.clear();
         });
       case "shutdown_session": {
         gracefulSessionShutdown = true;
@@ -1452,6 +1620,7 @@ export async function runCustomRpcMode(
           {
             text: safeString(command.text).trim(),
             sentAt: Number(command.sentAt || 0),
+            requestTag: rpcRequestTag(command.requestTag),
           },
           {
             turnActive: Boolean(

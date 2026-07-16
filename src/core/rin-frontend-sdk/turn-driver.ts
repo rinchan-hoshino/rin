@@ -100,8 +100,13 @@ export type RinFrontendPassiveNoticeEvent = {
 
 export type RinFrontendTurnDriverEvent =
   | { type: "frontend_status"; phase: RinFrontendTurnPhase }
-  | { type: "turn_accepted" }
-  | { type: "user_message_start"; text: string; userMessageId?: string }
+  | { type: "turn_accepted"; requestTag?: string }
+  | {
+      type: "user_message_start";
+      text: string;
+      userMessageId?: string;
+      requestTag?: string;
+    }
   | {
       type: "user_message_persisted";
       sessionLeafId: string;
@@ -109,8 +114,8 @@ export type RinFrontendTurnDriverEvent =
     }
   | RinFrontendPassiveNoticeEvent
   | { type: "compaction_start_notice"; text: string }
-  | { type: "assistant_summary"; text: string }
-  | { type: "assistant_interim"; text: string };
+  | { type: "assistant_summary"; text: string; requestTag?: string }
+  | { type: "assistant_interim"; text: string; requestTag?: string };
 
 export type RinFrontendTurnClient = RinFrontendClient & {
   ensureSessionReady?: (
@@ -173,6 +178,7 @@ export class RinFrontendTurnDriver {
   assistantFinalReplyCommitted = false;
   frontendPhase: RinFrontendTurnPhase = "idle";
   private externalWorkingDepth = 0;
+  private backendTurnRequestTag = "";
   listeners = new Set<(event: RinFrontendTurnDriverEvent) => void>();
   private reconnectingTurnPromise: Promise<void> | null = null;
   private liveTurnRecoveryContext: {
@@ -388,6 +394,7 @@ export class RinFrontendTurnDriver {
     };
     liveTurn.promise.catch(() => {});
     this.liveTurn = liveTurn;
+    this.backendTurnRequestTag = safeString(requestTag).trim();
     return liveTurn;
   }
 
@@ -537,7 +544,7 @@ export class RinFrontendTurnDriver {
     if (!this.liveTurn) return false;
     const current = safeString(this.liveTurn.requestTag || "").trim();
     const incoming = safeString(payload.requestTag || "").trim();
-    return !(current && incoming && current !== incoming);
+    return !(current && current !== incoming);
   }
 
   canSteerActiveTurn() {
@@ -966,11 +973,12 @@ export class RinFrontendTurnDriver {
 
   private async resolveSubmittedTurnForSession(
     sessionFile: string | undefined,
-    input: { text: string; sentAt?: number },
+    input: { text: string; sentAt?: number; requestTag?: string },
   ): Promise<RinSubmittedTurnResolution> {
     if (!this.client) return null;
     const sentAt = Number(input.sentAt || 0);
-    if (!Number.isFinite(sentAt) || sentAt <= 0) return null;
+    const requestTag = safeString(input.requestTag).trim();
+    if ((!Number.isFinite(sentAt) || sentAt <= 0) && !requestTag) return null;
     const text = safeString(input.text).trim();
     if (!text) return null;
     const wanted = safeString(sessionFile || "").trim();
@@ -979,6 +987,7 @@ export class RinFrontendTurnDriver {
         type: "resolve_submitted_turn",
         text,
         sentAt,
+        ...(requestTag ? { requestTag } : {}),
         ...(wanted ? { sessionFile: wanted } : {}),
       })
       .catch(() => null);
@@ -1027,14 +1036,15 @@ export class RinFrontendTurnDriver {
   }
 
   private async waitForExistingSubmittedTurn(
-    input: { text: string; sentAt?: number },
+    input: { text: string; sentAt?: number; requestTag?: string },
     ready?: RinSessionState,
   ) {
     if (!this.client) throw new Error("frontend_session_not_connected");
     this.resetAssistantSegmentTracking();
     this.latestAssistantText = "";
-    const liveTurn = this.liveTurn || this.startLiveTurn("");
-    liveTurn.requestTag = "";
+    const requestTag = safeString(input.requestTag).trim();
+    const liveTurn = this.liveTurn || this.startLiveTurn(requestTag);
+    liveTurn.requestTag = requestTag;
     const targetSessionFile = this.sessionFileFromReady(ready);
     this.liveTurnRecoveryContext = {
       sessionFile: targetSessionFile || undefined,
@@ -1307,6 +1317,31 @@ export class RinFrontendTurnDriver {
       const images = Array.isArray(input.images) ? input.images : [];
       this.throwIfTurnInterrupted(turnInterruptionSeq);
 
+      if (input.streamingBehavior !== "steer") {
+        const existing = await this.resolveSubmittedTurnForSession(
+          targetSessionFile,
+          {
+            text,
+            sentAt: input.promptContext?.sentAt,
+            requestTag: input.requestTag,
+          },
+        );
+        this.throwIfTurnInterrupted(turnInterruptionSeq);
+        if (existing) {
+          if ("submitted" in existing) {
+            return await this.waitForExistingSubmittedTurn(
+              {
+                text,
+                sentAt: input.promptContext?.sentAt,
+                requestTag: input.requestTag,
+              },
+              ready,
+            );
+          }
+          return existing;
+        }
+      }
+
       if (this.hasRemoteOrLiveTurnActive()) {
         this.clearAssistantInterimState();
         const requestTag =
@@ -1339,23 +1374,6 @@ export class RinFrontendTurnDriver {
           return await this.followActiveTurn(ready, requestTag);
         }
         return await this.followActiveTurn(ready);
-      }
-
-      if (input.streamingBehavior !== "steer") {
-        const existing = await this.resolveSubmittedTurnForSession(
-          targetSessionFile,
-          { text, sentAt: input.promptContext?.sentAt },
-        );
-        this.throwIfTurnInterrupted(turnInterruptionSeq);
-        if (existing) {
-          if ("submitted" in existing) {
-            return await this.waitForExistingSubmittedTurn(
-              { text, sentAt: input.promptContext?.sentAt },
-              ready,
-            );
-          }
-          return existing;
-        }
       }
 
       this.throwIfTurnInterrupted(turnInterruptionSeq);
@@ -1549,17 +1567,32 @@ export class RinFrontendTurnDriver {
           this.frontendState.isStreaming = event.isStreaming;
         }
         return;
-      case "turn_accepted":
+      case "turn_accepted": {
         this.frontendState.turnActive = true;
         this.setFrontendPhase("working");
-        this.emit({ type: "turn_accepted" });
+        const acceptedRequestTag = safeString(event.requestTag).trim();
+        if (acceptedRequestTag) {
+          this.backendTurnRequestTag = acceptedRequestTag;
+        }
+        this.emit({
+          type: "turn_accepted",
+          ...(acceptedRequestTag ? { requestTag: acceptedRequestTag } : {}),
+        });
         return;
+      }
       case "user_message_start":
+        this.backendTurnRequestTag =
+          safeString(event.requestTag).trim() ||
+          this.backendTurnRequestTag ||
+          safeString(this.liveTurn?.requestTag).trim();
         this.emit({
           type: "user_message_start",
           text: event.text,
           ...(event.userMessageId
             ? { userMessageId: event.userMessageId }
+            : {}),
+          ...(safeString(event.requestTag).trim()
+            ? { requestTag: safeString(event.requestTag).trim() }
             : {}),
         });
         return;
@@ -1613,10 +1646,18 @@ export class RinFrontendTurnDriver {
         this.latestAssistantText = event.text;
         return;
       case "assistant_summary":
-        this.emit({ type: "assistant_summary", text: event.text });
+        this.emit({
+          type: "assistant_summary",
+          text: event.text,
+          requestTag: safeString(event.requestTag).trim() || undefined,
+        });
         return;
       case "assistant_interim":
-        this.emit({ type: "assistant_interim", text: event.text });
+        this.emit({
+          type: "assistant_interim",
+          text: event.text,
+          requestTag: safeString(event.requestTag).trim() || undefined,
+        });
         return;
       case "assistant_final":
         this.latestAssistantText = event.text;
@@ -1626,7 +1667,7 @@ export class RinFrontendTurnDriver {
         if (!this.liveTurn) return;
         const current = safeString(this.liveTurn.requestTag || "").trim();
         const incoming = safeString(event.requestTag || "").trim();
-        if (current && incoming && current !== incoming) return;
+        if (current && current !== incoming) return;
         this.frontendState.turnActive = false;
         this.frontendState.isStreaming = false;
         this.updateFrontendStateFrom(event);
@@ -1649,7 +1690,7 @@ export class RinFrontendTurnDriver {
         if (!this.liveTurn) return;
         const current = safeString(this.liveTurn.requestTag || "").trim();
         const incoming = safeString(event.requestTag || "").trim();
-        if (current && incoming && current !== incoming) return;
+        if (current && current !== incoming) return;
         this.frontendState.turnActive = false;
         this.frontendState.isStreaming = false;
         this.updateFrontendStateFrom(event);

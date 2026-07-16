@@ -1,4 +1,4 @@
-import { listChatMessages } from "../chat/message-store.js";
+import { openChatDatabase } from "../chat/database.js";
 import { composeChatKey } from "../chat/support.js";
 import { safeString } from "../text-utils.js";
 
@@ -48,17 +48,6 @@ export class InboundRecoveryGate<T> {
   }
 }
 
-function compareRecoveryMessageIds(left: unknown, right: unknown) {
-  const leftId = safeString(left).trim();
-  const rightId = safeString(right).trim();
-  if (/^\d+$/.test(leftId) && /^\d+$/.test(rightId)) {
-    const leftValue = BigInt(leftId);
-    const rightValue = BigInt(rightId);
-    return leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
-  }
-  return leftId.localeCompare(rightId);
-}
-
 function recoveryTimestamp(record: any) {
   const platformTimestamp = Number(record?.platformTimestamp);
   if (Number.isFinite(platformTimestamp) && platformTimestamp > 0) {
@@ -76,44 +65,42 @@ export function listInboundRecoveryHeads(
   const nextPlatform = safeString(platform).trim();
   const nextBotId = safeString(botId).trim();
   if (!nextPlatform || !nextBotId) return [];
-  const heads = new Map<string, InboundRecoveryHead>();
-  for (const record of listChatMessages(agentDir)) {
-    if (record.role !== "user") continue;
-    if (safeString(record.platform).trim() !== nextPlatform) continue;
-    if (safeString(record.botId).trim() !== nextBotId) continue;
-    const chatKey = safeString(record.chatKey).trim();
-    const chatId = safeString(record.chatId).trim();
-    const messageId = safeString(record.messageId).trim();
-    if (
-      !chatKey ||
-      !chatId ||
-      !messageId ||
-      chatKey !== composeChatKey(nextPlatform, chatId, nextBotId)
-    ) {
-      continue;
-    }
-    const platformTimestamp = recoveryTimestamp(record);
-    const current = heads.get(chatKey);
-    if (
-      current &&
-      (current.platformTimestamp > platformTimestamp ||
-        (current.platformTimestamp === platformTimestamp &&
-          compareRecoveryMessageIds(current.messageId, messageId) >= 0))
-    ) {
-      continue;
-    }
-    const providerCursor = safeString(record.providerCursor).trim();
-    heads.set(chatKey, {
-      chatKey,
-      chatId,
-      messageId,
-      platformTimestamp,
-      ...(providerCursor ? { providerCursor } : {}),
-    });
-  }
-  return [...heads.values()].sort((left, right) =>
-    left.chatKey.localeCompare(right.chatKey),
-  );
+  const rows = openChatDatabase(agentDir)
+    .prepare(
+      `SELECT chat_key, chat_id, message_id, platform_timestamp,
+              received_at, provider_cursor
+       FROM inbound_heads
+       WHERE platform = ? AND bot_id = ?
+       ORDER BY chat_key`,
+    )
+    .all(nextPlatform, nextBotId) as any[];
+  return rows
+    .map((row) => {
+      const chatKey = safeString(row.chat_key).trim();
+      const chatId = safeString(row.chat_id).trim();
+      const messageId = safeString(row.message_id).trim();
+      if (
+        !chatKey ||
+        !chatId ||
+        !messageId ||
+        chatKey !== composeChatKey(nextPlatform, chatId, nextBotId)
+      ) {
+        return null;
+      }
+      const platformTimestamp = recoveryTimestamp({
+        platformTimestamp: row.platform_timestamp,
+        receivedAt: row.received_at,
+      });
+      const providerCursor = safeString(row.provider_cursor).trim();
+      return {
+        chatKey,
+        chatId,
+        messageId,
+        platformTimestamp,
+        ...(providerCursor ? { providerCursor } : {}),
+      };
+    })
+    .filter((item): item is InboundRecoveryHead => Boolean(item));
 }
 
 function sessionIdentity(session: any) {

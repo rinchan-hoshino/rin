@@ -50,6 +50,16 @@ function normalizeDateValue(value: unknown): string {
   return "";
 }
 
+export function localDateUtcBounds(value: unknown) {
+  const date = normalizeLocalDateOnly(value);
+  if (!date) return null;
+  const [year, month, day] = date.split("-").map(Number);
+  const start = new Date(year, month - 1, day);
+  const end = new Date(year, month - 1, day + 1);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
 export function normalizeLocalDateOnly(
   value: unknown,
   fallbackDate?: Date | null,

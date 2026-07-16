@@ -235,23 +235,25 @@ export function createRinFrontendBackendEventTranslator(
     deliveredAssistantInterimTexts.clear();
   };
 
-  const takeSummary = (text: string) => {
+  const takeSummary = (text: string, requestTag = "") => {
     const trimmed = safeString(text).trim();
     if (!trimmed || latestDeliveredAssistantSummary === trimmed) return null;
     latestDeliveredAssistantSummary = trimmed;
     return {
       type: "assistant_summary",
       text: trimmed,
+      ...(requestTag ? { requestTag } : {}),
     } satisfies RinFrontendBackendEvent;
   };
 
-  const takeInterim = (text: string) => {
+  const takeInterim = (text: string, requestTag = "") => {
     const trimmed = safeString(text).trim();
     if (!trimmed || deliveredAssistantInterimTexts.has(trimmed)) return null;
     deliveredAssistantInterimTexts.add(trimmed);
     return {
       type: "assistant_interim",
       text: trimmed,
+      ...(requestTag ? { requestTag } : {}),
     } satisfies RinFrontendBackendEvent;
   };
 
@@ -260,6 +262,7 @@ export function createRinFrontendBackendEventTranslator(
     translate(event: unknown) {
       const payload = eventPayload(event);
       if (!payload || typeof payload !== "object") return [];
+      const requestTag = safeString(payload.requestTag).trim();
 
       if (payload.type === "rpc_frontend_status") {
         const phase = statusPhase(payload.phase);
@@ -345,7 +348,12 @@ export function createRinFrontendBackendEventTranslator(
       switch (payload.type) {
         case "agent_start":
           resetAssistantSegments();
-          return [{ type: "turn_accepted" }];
+          return [
+            {
+              type: "turn_accepted",
+              ...(requestTag ? { requestTag } : {}),
+            },
+          ];
         case "message_start":
           if (payload?.message?.role !== "user") return [];
           return [
@@ -362,6 +370,7 @@ export function createRinFrontendBackendEventTranslator(
                     userMessageId: safeString(payload.userMessageId).trim(),
                   }
                 : {}),
+              ...(requestTag ? { requestTag } : {}),
             },
           ];
         case "rin_user_message_persisted": {
@@ -384,12 +393,16 @@ export function createRinFrontendBackendEventTranslator(
           latestAssistantText =
             assistantText(payload.message) || latestAssistantText;
           const events: RinFrontendBackendEvent[] = [];
-          const summary = takeSummary(completedAssistantSummary(payload));
+          const summary = takeSummary(
+            completedAssistantSummary(payload),
+            requestTag,
+          );
           if (summary) events.push(summary);
           if (latestAssistantText) {
             events.push({
               type: "assistant_stream",
               text: latestAssistantText,
+              ...(requestTag ? { requestTag } : {}),
             });
           }
           return events;
@@ -408,15 +421,34 @@ export function createRinFrontendBackendEventTranslator(
             activeToolBatch = null;
             latestAssistantText = finalText;
             latestAssistantFinalText = finalText;
-            return [{ type: "assistant_final", text: finalText }];
+            return [
+              {
+                type: "assistant_final",
+                text: finalText,
+                ...(requestTag ? { requestTag } : {}),
+              },
+            ];
           }
-          const interim = takeInterim(assistantInterimText(payload.message));
+          const interim = takeInterim(
+            assistantInterimText(payload.message),
+            requestTag,
+          );
           return interim ? [interim] : [];
         }
         case "tool_execution_start":
-          return [{ type: "turn_accepted" }];
+          return [
+            {
+              type: "turn_accepted",
+              ...(requestTag ? { requestTag } : {}),
+            },
+          ];
         case "tool_execution_end": {
-          const events: RinFrontendBackendEvent[] = [{ type: "turn_accepted" }];
+          const events: RinFrontendBackendEvent[] = [
+            {
+              type: "turn_accepted",
+              ...(requestTag ? { requestTag } : {}),
+            },
+          ];
           const todoNotice = toolExecutionTodoNotice(payload);
           const currentBatch = activeToolBatch;
           const id = toolCallId(payload.toolCallId);

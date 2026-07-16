@@ -2,7 +2,7 @@
 
 Use this document when a task needs platform chat configuration, chat delivery, stored chat evidence, adapter state, command replies, identity/trust state, or chat-bound assistant turns.
 
-The model-level chat bridge tool surface is unavailable. The operative surfaces are the Agent SDK, configuration files, message-store files, daemon status, and platform adapter/runtime APIs reachable from scripts or shell/file tools.
+The model-level chat bridge tool surface is unavailable. The operative surfaces are the Agent SDK, configuration files, read-only `chat.sqlite` evidence, daemon status, and platform adapter/runtime APIs reachable from scripts or shell/file tools.
 
 ## Prompt brief
 
@@ -310,92 +310,45 @@ Delivery contract:
 - native mentions use the exact platform user id;
 - files/images use local paths or recipient-accessible URLs;
 - generated image/file delivery uses rich-object syntax such as `[image: preview](local-path)` or structured SDK `parts`;
-- recipient-visible attachment delivery is proven by outbox/platform result or a stored delivery record.
+- recipient-visible attachment delivery is proven by outbox/platform result or a stored delivery record;
+- an SDK send result with `delivered: false, pending: true` means the adapter accepted asynchronous dispatch but final delivery remains unknown; verify the returned `outboxId` instead of reporting delivery success.
 
 ## Stored chat context
 
-Read the local message store directly when you need already stored chat evidence. Normal installs store records under:
+`chat.sqlite` is the single durable authority for chat messages and execution state:
 
 ```text
-<agentDir>/data/chat/message-store/
+<agentDir>/data/chat/chat.sqlite
 ```
 
-For a normal agent install, `<agentDir>` is usually `~/.rin`.
+For a normal agent install, `<agentDir>` is usually `~/.rin`. Session JSONL remains under the ordinary session layout and is not stored in this database.
 
-Useful paths:
+The main tables are:
 
-- records: `data/chat/message-store/records/<first-two-record-key-chars>/<recordKey>.json`
-- message-id index: `data/chat/message-store/indexes/by-message-id/<first-two-index-key-chars>/<indexKey>.json`
-- chat/date index: `data/chat/message-store/indexes/by-chat-date/<platform>/<botId-if-present>/<chatId>/<YYYY-MM-DD>.json`
-- plain log view: `data/chat/message-store/chat-log-view/<platform>/<botId-if-present>/<chatId>/<YYYY-MM-DD>.txt`
-- evalBridge audit: `data/chat/eval/<YYYY-MM-DD>.jsonl`
+- `messages`: normalized inbound and delivered assistant messages;
+- `chat_state`: per-chat sequence, reset generation, and authoritative session binding;
+- `inbound_heads`: the latest provider recovery cursor per bot/chat without scanning message history;
+- `turns`: inbox classification, retry, lease, fencing, supersession, and terminal ownership;
+- `outbox`: logical outgoing messages and post-delivery actions;
+- `outbox_deliveries`: ordered delivery fragments, attempts, provider message ids, and ambiguous outcomes.
 
-Stored records may include:
-
-```ts
-type StoredChatMessage = {
-  recordKey: string;
-  messageId: string;
-  role?: "user" | "assistant";
-  replyToMessageId?: string;
-  sessionFile?: string;
-  acceptedAt?: string;
-  processedAt?: string;
-  chatKey: string;
-  platform: string;
-  botId?: string;
-  chatId: string;
-  chatType?: "private" | "group";
-  receivedAt: string;
-  platformTimestamp?: number;
-  userId?: string;
-  nickname?: string;
-  trust?: string;
-  text?: string;
-  strippedContent?: string;
-  elements?: Array<{ type: string; attrs?: Record<string, string> }>;
-  quote?: {
-    messageId?: string;
-    userId?: string;
-    nickname?: string;
-    content?: string;
-  };
-};
-```
+The plain text log projection remains at `data/chat/message-store/chat-log-view/<platform>/<botId>/<chatId>/<YYYY-MM-DD>.txt`. EvalBridge audit records remain at `data/chat/eval/<YYYY-MM-DD>.jsonl`. Neither projection owns execution or recovery state.
 
 Lookup contract:
 
-1. Known `chatKey` and `messageId`: compute the record key, then read the record JSON.
-2. Known `messageId` only: read the message-id index, then read each relative record path it lists.
-3. Known `chatKey` and date: read the chat/date index, then read the listed records and sort by `receivedAt` / `processedAt`.
-4. Around local midnight or cross-timezone reports, inspect adjacent date indexes.
+1. Known `chatKey` and `messageId`: query `messages` by `(chat_key, message_id)`.
+2. Known `messageId` only: query the `messages_message_id_idx` index and preserve `received_at, record_key` order.
+3. Known `chatKey` and date: query by `chat_key` and the local date range using `messages_chat_date_idx`.
+4. Inbox, recovery, and delivery diagnosis must query `turns`, `inbound_heads`, `outbox`, or `outbox_deliveries`; do not infer control state by scanning message history.
+5. Treat direct database access as read-only diagnosis. Runtime writes must use the owning chat APIs so transactions, generations, and fencing stay intact.
 
-Record key for known `chatKey` and `messageId`:
-
-```sh
-agent_dir="$HOME/.rin"
-chat_key='onebot/2301401877:1067390680'
-message_id='1234567890'
-record_key=$(node -e 'const crypto=require("crypto"); const [chatKey,messageId]=process.argv.slice(1); console.log(crypto.createHash("sha1").update(`${chatKey}\n${messageId}`).digest("hex"));' "$chat_key" "$message_id")
-record_path="$agent_dir/data/chat/message-store/records/${record_key:0:2}/$record_key.json"
-```
-
-Message-id index path:
-
-```sh
-agent_dir="$HOME/.rin"
-message_id='1234567890'
-index_key=$(node -e 'const crypto=require("crypto"); console.log(crypto.createHash("sha1").update(process.argv[1]).digest("hex"));' "$message_id")
-index_path="$agent_dir/data/chat/message-store/indexes/by-message-id/${index_key:0:2}/$index_key.json"
-```
-
-For chat/date lookup, read the chat/date index to get `recordKeys`, then read matching record files from `records/`.
+On first open, Rin transactionally imports legacy message records, inbox items, and outbox items. Each controller also imports its legacy `state.json` session binding at most once; afterward that JSON file is projection-only and SQLite remains authoritative. After the database commit, the old control directories move to `data/chat/legacy-migrated-v1/`. Invalid or incomplete legacy data blocks migration instead of silently switching authority. Install and update flows must stop the legacy runtime before first open; a manual cutover must likewise ensure no old process can keep writing the legacy directories. Concurrent first opens of the new runtime serialize through SQLite, and a crash after import reimports any pre-archive legacy writes before completing the one-way archive.
 
 ## Troubleshooting contract
 
 1. Preserve the exact visible symptom: platform, chat key, message id, text, attachment, command, error, timestamp, and expected behavior.
 2. Locate the first producer boundary: adapter connection, inbound normalization, message store, inbox queue, controller command path, frontend turn driver, daemon worker, outbox, platform send path, or renderer.
-3. Inspect that boundary with SDK reads, message-store reads, adapter-local probes, or `rin status --json`.
+3. Inspect that boundary with SDK reads, read-only chat database queries, adapter-local probes, or `rin status --json`.
 4. Add or run the smallest focused test for source changes.
 5. Report the producer boundary, evidence, and remaining runtime/deploy step.
 

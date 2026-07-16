@@ -277,26 +277,40 @@ test("chat key migration rewrites legacy settings and message records before rec
     };
     await fs.writeFile(settingsPath, JSON.stringify(settings));
 
-    const canonicalSaved = messageStore.saveChatMessage(agentDir, {
-      version: 1,
-      messageId: "duplicate-message",
-      role: "user",
-      chatKey: "lark/cli_bot:oc_same",
-      platform: "lark",
-      botId: "cli_bot",
-      chatId: "oc_same",
-      receivedAt: "2026-07-01T00:00:00.000Z",
-      platformTimestamp: 2000,
-      text: "current canonical message",
-      processedAt: "2026-07-01T00:01:00.000Z",
-    });
-
     const recordsDir = path.join(
       agentDir,
       "data",
       "chat",
       "message-store",
       "records",
+    );
+    const canonicalRecordKey = createHash("sha1")
+      .update("lark/cli_bot:oc_same\nduplicate-message")
+      .digest("hex");
+    const canonicalSaved = {
+      filePath: path.join(
+        recordsDir,
+        canonicalRecordKey.slice(0, 2),
+        `${canonicalRecordKey}.json`,
+      ),
+    };
+    await fs.mkdir(path.dirname(canonicalSaved.filePath), { recursive: true });
+    await fs.writeFile(
+      canonicalSaved.filePath,
+      JSON.stringify({
+        version: 1,
+        recordKey: canonicalRecordKey,
+        messageId: "duplicate-message",
+        role: "user",
+        chatKey: "lark/cli_bot:oc_same",
+        platform: "lark",
+        botId: "cli_bot",
+        chatId: "oc_same",
+        receivedAt: "2026-07-01T00:00:00.000Z",
+        platformTimestamp: 2000,
+        text: "current canonical message",
+        processedAt: "2026-07-01T00:01:00.000Z",
+      }),
     );
     const writeLegacyRecord = async (messageId: string, input = {}) => {
       const chatKey = "lark:oc_same";
@@ -386,10 +400,10 @@ test("chat key migration rewrites legacy settings and message records before rec
     await fs.mkdir(path.dirname(legacyLogPath), { recursive: true });
     await fs.writeFile(legacyLogPath, "legacy derived view");
     assert.equal(
-      messageStore
-        .listChatMessages(agentDir)
-        .filter((record: any) => record.chatKey === "lark:oc_same").length,
-      2,
+      (await fs.readdir(recordsDir, { recursive: true })).filter((name) =>
+        String(name).endsWith(".json"),
+      ).length,
+      3,
     );
 
     const result = migration.migrateLegacyChatKeys(

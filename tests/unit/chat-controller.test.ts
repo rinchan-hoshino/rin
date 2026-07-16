@@ -24,20 +24,37 @@ const { lookupReplySession } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js"))
     .href
 );
+const { openChatDatabase, readChatState } = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
+);
 const {
-  chatOutboxHistoryItemsDir,
+  claimChatInboxItem,
+  enqueueChatInboxItem,
+  requeueClaimedChatInboxItem,
+} = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
+);
+const {
+  enqueueChatOutboxPayload,
+  listChatOutboxHistoryItems,
   listChatOutboxItems,
-  readChatOutboxItem,
+  readChatOutboxItemById,
   writeChatOutboxItem,
 } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
     .href
 );
 async function readOnlyChatOutboxHistoryItem(agentDir, status) {
-  const dir = chatOutboxHistoryItemsDir(agentDir, status);
-  const names = await fs.readdir(dir);
-  assert.equal(names.length, 1);
-  return readChatOutboxItem(agentDir, path.join(dir, names[0]));
+  const items = listChatOutboxHistoryItems(agentDir, status);
+  assert.equal(items.length, 1);
+  return items[0];
+}
+
+function rejectedBeforeDispatch(message) {
+  const error = new Error(message);
+  const delivery = Promise.reject(error);
+  delivery.dispatched = Promise.reject(error);
+  return delivery;
 }
 
 function deliveryText(delivery) {
@@ -105,6 +122,68 @@ function createRecoveredController(previousController) {
   installChatControllerSessionClient(controller.constructor);
   return attachTestChatApp(controller);
 }
+
+test("detached controller cannot overwrite authoritative chat session binding", async () => {
+  const owner = await createController("telegram/1:2");
+  const ownerSession = path.join(owner.agentDir, "sessions", "owner.jsonl");
+  const detachedSession = path.join(
+    owner.agentDir,
+    "sessions",
+    "detached.jsonl",
+  );
+  await fs.mkdir(path.dirname(ownerSession), { recursive: true });
+  await fs.writeFile(ownerSession, "");
+  await fs.writeFile(detachedSession, "");
+  owner.updateStoredSessionFile(ownerSession);
+  const detachedStatePath = path.join(owner.dataDir, "detached-state.json");
+  await fs.writeFile(
+    detachedStatePath,
+    JSON.stringify({
+      chatKey: owner.chatKey,
+      sessionFile: detachedSession,
+    }),
+  );
+
+  const detached = new ChatController({}, owner.dataDir, owner.chatKey, {
+    logger: { info() {}, warn() {} },
+    h: owner.h,
+    affectChatBinding: false,
+    statePath: detachedStatePath,
+  });
+  detached.updateStoredSessionFile(detachedSession);
+
+  const stored = openChatDatabase(owner.agentDir)
+    .prepare(`SELECT session_file FROM chat_state WHERE chat_key = ?`)
+    .get(owner.chatKey).session_file;
+  assert.match(stored, /owner\.jsonl$/);
+  assert.match(detached.state.sessionFile, /detached\.jsonl$/);
+
+  const mismatchedStatePath = path.join(
+    owner.dataDir,
+    "mismatched-detached-state.json",
+  );
+  await fs.writeFile(
+    mismatchedStatePath,
+    JSON.stringify({
+      chatKey: owner.chatKey,
+      sessionFile: ownerSession,
+    }),
+  );
+  const otherChatKey = "telegram/1:3";
+  const other = new ChatController({}, owner.dataDir, otherChatKey, {
+    logger: { info() {}, warn() {} },
+    h: owner.h,
+    affectChatBinding: true,
+    statePath: mismatchedStatePath,
+  });
+  assert.equal(other.state.sessionFile, undefined);
+  assert.equal(
+    openChatDatabase(owner.agentDir)
+      .prepare(`SELECT session_file FROM chat_state WHERE chat_key = ?`)
+      .get(otherChatKey)?.session_file || null,
+    null,
+  );
+});
 
 test("chat controller tells the frontend driver not to reconnect for an idle command", async () => {
   const controller = await createController();
@@ -207,6 +286,46 @@ test("chat controller does not assume session readiness after an ineffective res
   assert.equal(commandOptions?.assumeSessionReady, false);
 });
 
+test("chat controller imports legacy session state once and then trusts SQLite", async () => {
+  const first = await createController();
+  await fs.mkdir(path.dirname(first.statePath), { recursive: true });
+  await fs.writeFile(
+    first.statePath,
+    JSON.stringify({
+      chatKey: first.chatKey,
+      sessionFile: "sessions/legacy-binding.jsonl",
+    }),
+  );
+  openChatDatabase(first.agentDir)
+    .prepare(
+      `UPDATE chat_state
+       SET legacy_session_imported = 0, session_file = NULL
+       WHERE chat_key = ?`,
+    )
+    .run(first.chatKey);
+
+  const imported = createRecoveredController(first);
+  assert.equal(imported.state.sessionFile, "sessions/legacy-binding.jsonl");
+  imported.updateStoredSessionFile("sessions/sqlite-binding.jsonl");
+  imported.saveState();
+  await fs.writeFile(
+    imported.statePath,
+    JSON.stringify({
+      chatKey: imported.chatKey,
+      sessionFile: "sessions/stale-json-binding.jsonl",
+    }),
+  );
+
+  const recovered = createRecoveredController(imported);
+  assert.equal(recovered.state.sessionFile, "sessions/sqlite-binding.jsonl");
+  assert.equal(
+    openChatDatabase(recovered.agentDir)
+      .prepare(`SELECT session_file FROM chat_state WHERE chat_key = ?`)
+      .get(recovered.chatKey).session_file,
+    "sessions/sqlite-binding.jsonl",
+  );
+});
+
 test("chat controller keeps the inbox request tag stable across frontend recreation", async () => {
   const first = await createController("discord/1:2");
   const second = createRecoveredController(first);
@@ -220,6 +339,38 @@ test("chat controller keeps the inbox request tag stable across frontend recreat
       text: "same inbox message",
       attachments: [],
       incomingMessageId: "message-1",
+      deliverFinal: false,
+    });
+  }
+
+  assert.equal(seen.length, 2);
+  assert.equal(seen[0], seen[1]);
+  assert.match(seen[0], /^chat-inbox-[a-f0-9]{64}$/);
+});
+
+test("chat controller keeps the logical inbox request tag stable across owner retries", async () => {
+  const controller = await createController("discord/1:2");
+  const seen = [];
+  controller.driver.runTurn = async (input) => {
+    seen.push(input.requestTag);
+    return { finalText: "done" };
+  };
+  for (const [ownerEpoch, attempt] of [
+    ["owner-1", 1],
+    ["owner-2", 2],
+  ]) {
+    await controller.runTurn({
+      text: "same logical inbox turn",
+      attachments: [],
+      incomingMessageId: "message-retry",
+      outboxTurnFence: {
+        agentDir: controller.agentDir,
+        turnId: "turn-retry",
+        chatKey: controller.chatKey,
+        messageId: "message-retry",
+        ownerEpoch,
+        attempt,
+      },
       deliverFinal: false,
     });
   }
@@ -2485,6 +2636,10 @@ test("chat controller starts /new immediately through the TUI new-session path",
   assert.deepEqual(calls, ["newSession:chat", "newSession:chat"]);
   assert.deepEqual(deliveries, ["Started a new session."]);
   assert.equal(controller.state.sessionFile, "new-chat.jsonl");
+  assert.equal(
+    readChatState(controller.agentDir, controller.chatKey).currentGeneration,
+    1,
+  );
 });
 
 test("chat controller leaves externally aborted inbound unprocessed for retry", async () => {
@@ -3010,7 +3165,8 @@ test("chat controller keeps working reaction on current message while steer is q
   );
   assert.equal(
     restoredController.hasPendingSteeredDeliveryTarget("m-steer"),
-    true,
+    false,
+    "restart recovery must reconstruct steering from the SQLite turn ledger",
   );
   assert.deepEqual(actions, []);
   assert.deepEqual(reactions, []);
@@ -3042,8 +3198,13 @@ test("chat controller keeps working reaction on current message while steer is q
     "m-steer",
   );
   assert.ok(
+    steeredMessage?.acceptedAt,
+    "steered inbox item should be accepted when Pi starts the user message",
+  );
+  assert.equal(
     steeredMessage?.processedAt,
-    "steered inbox item should be processed when Pi starts the user message",
+    undefined,
+    "steered inbox remains running until a terminal outbox is committed",
   );
   assert.deepEqual(actions, [
     { chat_id: "2", action: "typing" },
@@ -3884,6 +4045,180 @@ test("chat controller prioritizes reaction over marker while keeping typing inde
   assert.deepEqual(calls, ["typing:tick", "reaction:tick"]);
   assert.equal(await controller.clearWorkingReaction(), true);
   assert.deepEqual(calls, ["typing:tick", "reaction:tick", "reaction:end"]);
+});
+
+test("chat controller combines backend progress identity with the steered turn fence", async () => {
+  const controller = await createController();
+  const fence = {
+    agentDir: controller.agentDir,
+    turnId: "steered-turn",
+    chatKey: controller.chatKey,
+    messageId: "steered-message",
+    ownerEpoch: "steered-owner",
+    attempt: 1,
+  };
+  controller.rememberPendingSteeredDeliveryTarget({
+    incomingMessageId: "steered-message",
+    replyToMessageId: "steered-message",
+    text: "steer me",
+    submittedText: "steer me",
+    requestTag: "backend-active-tag",
+    outboxTurnFence: fence,
+  });
+  let activated;
+  controller.beginVisibleProcessingTurn = async (input) => {
+    activated = input;
+    controller.currentTurn = { ...input, startedAt: Date.now() };
+    return true;
+  };
+
+  await controller.handleFrontendEvent({
+    type: "user_message_start",
+    text: "steer me",
+    requestTag: "backend-active-tag",
+  });
+
+  assert.equal(activated.requestTag, "backend-active-tag");
+  assert.equal(activated.outboxTurnFence, fence);
+  assert.equal(controller.currentTurn.incomingMessageId, "steered-message");
+});
+
+test("chat controller disambiguates identical steers by producer request tag", async () => {
+  const controller = await createController();
+  const firstFence = {
+    agentDir: controller.agentDir,
+    turnId: "first-steered-turn",
+    chatKey: controller.chatKey,
+    messageId: "first-steered-message",
+    ownerEpoch: "first-steered-owner",
+    attempt: 1,
+  };
+  const secondFence = {
+    agentDir: controller.agentDir,
+    turnId: "second-steered-turn",
+    chatKey: controller.chatKey,
+    messageId: "second-steered-message",
+    ownerEpoch: "second-steered-owner",
+    attempt: 1,
+  };
+  controller.rememberPendingSteeredDeliveryTarget({
+    incomingMessageId: "first-steered-message",
+    text: "same steer",
+    submittedText: "same steer",
+    requestTag: "first-producer-tag",
+    outboxTurnFence: firstFence,
+  });
+  controller.rememberPendingSteeredDeliveryTarget({
+    incomingMessageId: "second-steered-message",
+    text: "same steer",
+    submittedText: "same steer",
+    requestTag: "second-producer-tag",
+    outboxTurnFence: secondFence,
+  });
+  let activated;
+  controller.beginVisibleProcessingTurn = async (input) => {
+    activated = input;
+    controller.currentTurn = { ...input, startedAt: Date.now() };
+    return true;
+  };
+
+  await controller.handleFrontendEvent({
+    type: "user_message_start",
+    text: "same steer",
+  });
+  assert.equal(activated, undefined);
+  assert.equal(
+    controller.hasPendingSteeredDeliveryTarget("first-steered-message"),
+    true,
+  );
+  assert.equal(
+    controller.hasPendingSteeredDeliveryTarget("second-steered-message"),
+    true,
+  );
+
+  await controller.handleFrontendEvent({
+    type: "user_message_start",
+    text: "same steer",
+    requestTag: "second-producer-tag",
+  });
+
+  assert.equal(activated.requestTag, "second-producer-tag");
+  assert.equal(activated.outboxTurnFence, secondFence);
+  assert.equal(
+    controller.hasPendingSteeredDeliveryTarget("first-steered-message"),
+    true,
+  );
+  assert.equal(
+    controller.hasPendingSteeredDeliveryTarget("second-steered-message"),
+    false,
+  );
+});
+
+test("chat controller rejects stale tagged assistant progress after turn replacement", async () => {
+  const controller = await createController();
+  const delivered = [];
+  const accepted = [];
+  controller.currentTurn = {
+    incomingMessageId: "replacement",
+    replyToMessageId: "replacement",
+    requestTag: "replacement-tag",
+    outboxTurnFence: {
+      agentDir: controller.agentDir,
+      turnId: "replacement-turn",
+      chatKey: controller.chatKey,
+      messageId: "replacement",
+      ownerEpoch: "replacement-owner",
+      attempt: 2,
+    },
+    startedAt: Date.now(),
+  };
+  assert.equal(
+    controller.ownsOutboxTurnFence({
+      agentDir: controller.agentDir,
+      turnId: "replacement-turn",
+      chatKey: controller.chatKey,
+      messageId: "replacement",
+      ownerEpoch: "expired-owner",
+      attempt: 1,
+    }),
+    false,
+  );
+  assert.equal(
+    controller.ownsOutboxTurnFence(controller.currentTurn.outboxTurnFence),
+    true,
+  );
+  controller.deliverAssistantInterim = async (text) => {
+    delivered.push(text);
+  };
+  controller.markAcceptedMessage = (messageId) => {
+    accepted.push(messageId);
+  };
+
+  await controller.handleFrontendEvent({
+    type: "assistant_interim",
+    text: "stale interim",
+    requestTag: "expired-tag",
+  });
+  await controller.handleFrontendEvent({
+    type: "assistant_interim",
+    text: "current interim",
+    requestTag: "replacement-tag",
+  });
+  await controller.handleFrontendEvent({
+    type: "turn_accepted",
+    requestTag: "expired-tag",
+  });
+  await controller.handleFrontendEvent({
+    type: "frontend_status",
+    phase: "working",
+  });
+  assert.deepEqual(accepted, []);
+  await controller.handleFrontendEvent({
+    type: "turn_accepted",
+    requestTag: "replacement-tag",
+  });
+  assert.deepEqual(delivered, ["current interim"]);
+  assert.deepEqual(accepted, ["replacement"]);
 });
 
 test("chat controller does not deliver text-only assistant messages as interim", async () => {
@@ -5281,7 +5616,97 @@ test("chat controller delivers prompt turn errors through conversation binding",
   assert.equal(controller.state.sessionFile, "failed-turn-chat.jsonl");
 });
 
-test("chat controller leaves inbound unprocessed when final reply delivery fails", async () => {
+test("chat controller drains the actual row returned by same-key adoption", async () => {
+  const controller = await createController("telegram/1:2");
+  const payload = {
+    createdAt: new Date().toISOString(),
+    chatKey: controller.chatKey,
+    parts: [{ type: "text", text: "adopted controller answer" }],
+  };
+  const existingId = enqueueChatOutboxPayload(controller.agentDir, payload, {
+    id: "existing-controller-outbox",
+    idempotencyKey: "controller-shared-key",
+    deliveryKind: "final",
+  });
+
+  const outcome = await controller.enqueueAndDrainDelivery(payload, {
+    id: "requested-controller-outbox",
+    idempotencyKey: "controller-shared-key",
+    deliveryKind: "final",
+    requireDelivery: true,
+    waitUntilDeliverySettled: true,
+  });
+
+  assert.deepEqual(outcome.messageIds, ["m1"]);
+  assert.equal(
+    readChatOutboxItemById(controller.agentDir, existingId).item.status,
+    "delivered",
+  );
+  assert.equal(
+    readChatOutboxItemById(controller.agentDir, "requested-controller-outbox"),
+    null,
+  );
+});
+
+test("chat controller validates missing media before terminal outbox commit", async () => {
+  const controller = await createController("telegram/1:2");
+  const inbound = enqueueChatInboxItem(controller.agentDir, {
+    chatKey: controller.chatKey,
+    messageId: "missing-media-inbound",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "2",
+      messageId: "missing-media-inbound",
+      content: "send missing media",
+      stripped: { content: "send missing media" },
+    },
+    elements: [{ type: "text", attrs: { content: "send missing media" } }],
+  }).item;
+  const claim = claimChatInboxItem(controller.agentDir, inbound.itemId);
+  const fence = {
+    agentDir: controller.agentDir,
+    turnId: claim.itemId,
+    chatKey: claim.chatKey,
+    messageId: claim.messageId,
+    ownerEpoch: claim.ownerEpoch,
+    attempt: claim.attemptCount,
+  };
+
+  await assert.rejects(
+    () =>
+      controller.deliverAssistantReply({
+        parts: [{ type: "image", path: "/definitely/missing/image.png" }],
+        incomingMessageId: claim.messageId,
+        replyToMessageId: claim.messageId,
+        outboxTurnFence: fence,
+      }),
+    /chat_outbox_media_missing:image/,
+  );
+  assert.equal(
+    openChatDatabase(controller.agentDir)
+      .prepare(`SELECT state FROM turns WHERE turn_id = ?`)
+      .get(claim.itemId).state,
+    "running",
+  );
+  assert.equal(listChatOutboxItems(controller.agentDir).length, 0);
+
+  await controller.deliverAssistantReply({
+    text: "Could not attach that file.",
+    incomingMessageId: claim.messageId,
+    replyToMessageId: claim.messageId,
+    outboxTurnFence: fence,
+    deliveryKind: "error",
+  });
+  assert.equal(
+    openChatDatabase(controller.agentDir)
+      .prepare(`SELECT state FROM turns WHERE turn_id = ?`)
+      .get(claim.itemId).state,
+    "terminal",
+  );
+});
+
+test("chat controller keeps confirmed pre-dispatch failure recoverable", async () => {
   const controller = await createController("telegram/1:2");
   const chatKey = "telegram/1:2";
   saveChatMessage(controller.agentDir, {
@@ -5295,9 +5720,8 @@ test("chat controller leaves inbound unprocessed when final reply delivery fails
     receivedAt: new Date().toISOString(),
     text: "hello",
   });
-  controller.app.bots[0].sendMessage = async () => {
-    throw new Error("send failed");
-  };
+  controller.app.bots[0].sendMessage = () =>
+    rejectedBeforeDispatch("send failed");
   controller.session = {
     isStreaming: false,
     messages: [],
@@ -5318,18 +5742,83 @@ test("chat controller leaves inbound unprocessed when final reply delivery fails
   };
 
   await assert.rejects(
-    controller.runTurn({
-      text: "hello",
-      attachments: [],
-      incomingMessageId: "m-send-fail",
-      replyToMessageId: "m-send-fail",
-    }),
+    () =>
+      controller.runTurn({
+        text: "hello",
+        attachments: [],
+        incomingMessageId: "m-send-fail",
+        replyToMessageId: "m-send-fail",
+      }),
     /send failed/,
   );
 
   const stored = getChatMessage(controller.agentDir, chatKey, "m-send-fail");
+  const [queued] = listChatOutboxItems(controller.agentDir).map(
+    ({ item }) => item,
+  );
   assert.ok(stored?.acceptedAt);
   assert.equal(stored?.processedAt, undefined);
+  assert.equal(queued.status, "queued");
+});
+
+test("chat controller durably commits a final when the adapter disappears", async () => {
+  const controller = await createController("telegram/1:2");
+  const chatKey = "telegram/1:2";
+  saveChatMessage(controller.agentDir, {
+    chatKey,
+    platform: "telegram",
+    botId: "1",
+    chatId: "2",
+    chatType: "private",
+    messageId: "m-bot-disappeared",
+    role: "user",
+    receivedAt: new Date().toISOString(),
+    text: "hello",
+  });
+  controller.session = {
+    isStreaming: false,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => "/tmp/bot-disappeared.jsonl",
+      getSessionId: () => "session-bot-disappeared",
+      getSessionName: () => chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: "/tmp/bot-disappeared.jsonl",
+      sessionId: "session-bot-disappeared",
+    }),
+    prompt: async (_text, options = {}) => {
+      await controller.handleSessionEvent({ type: "agent_start" });
+      controller.app.bots = [];
+      emitRpcTurnComplete(controller, options, "durable missing-bot final");
+    },
+    switchSession: async () => {},
+  };
+
+  await assert.rejects(
+    controller.runTurn({
+      text: "hello",
+      attachments: [],
+      incomingMessageId: "m-bot-disappeared",
+      replyToMessageId: "m-bot-disappeared",
+    }),
+    /no_bot_for_platform|chat_outbox_bot_not_found|chat_outbox_delivery_pending/,
+  );
+
+  const stored = getChatMessage(
+    controller.agentDir,
+    chatKey,
+    "m-bot-disappeared",
+  );
+  assert.equal(stored?.processedAt, undefined);
+  const queued = listChatOutboxItems(controller.agentDir).find(
+    ({ item }) => item.deliveryKind === "final",
+  )?.item;
+  assert.ok(queued);
+  assert.equal(
+    queued.postDelivery.markProcessed.messageId,
+    "m-bot-disappeared",
+  );
 });
 
 test("chat controller keeps the turn active while final reply delivery is still in flight", async () => {
@@ -5718,7 +6207,7 @@ test("chat controller lets steer bypass the owned turn queue while the current t
   ]);
 });
 
-test("chat controller marks superseded restored inbox turns processed without duplicate final delivery", async () => {
+test("chat controller fences superseded restored inbox turns without marking processed", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
@@ -5730,23 +6219,35 @@ test("chat controller marks superseded restored inbox turns processed without du
     sessionFile: "/tmp/restored-chat.jsonl",
     sessionId: "session-restored",
   });
-  saveChatMessage(controller.agentDir, {
+  const inbound = enqueueChatInboxItem(controller.agentDir, {
     chatKey: controller.chatKey,
-    platform: "telegram",
-    botId: "1",
-    chatId: "2",
-    chatType: "group",
     messageId: "m-old",
-    role: "user",
-    receivedAt: new Date().toISOString(),
-    text: "older restored input",
-  });
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "2",
+      messageId: "m-old",
+      content: "older restored input",
+      stripped: { content: "older restored input" },
+    },
+    elements: [{ type: "text", attrs: { content: "older restored input" } }],
+  }).item;
+  const claim = claimChatInboxItem(controller.agentDir, inbound.itemId);
+  const fence = {
+    agentDir: controller.agentDir,
+    turnId: claim.itemId,
+    chatKey: claim.chatKey,
+    messageId: claim.messageId,
+    ownerEpoch: claim.ownerEpoch,
+    attempt: claim.attemptCount,
+  };
 
   const result = await controller.runTurn({
     text: "older restored input",
     attachments: [],
     incomingMessageId: "m-old",
     replyToMessageId: "m-old",
+    outboxTurnFence: fence,
   });
 
   assert.deepEqual(deliveries, []);
@@ -5756,7 +6257,17 @@ test("chat controller marks superseded restored inbox turns processed without du
     controller.chatKey,
     "m-old",
   );
-  assert.equal(Boolean(stored?.processedAt), true);
+  assert.equal(Boolean(stored?.processedAt), false);
+  assert.deepEqual(
+    openChatDatabase(controller.agentDir)
+      .prepare(
+        `SELECT turns.state, messages.disposition
+         FROM turns JOIN messages ON messages.id = turns.inbound_message_id
+         WHERE turns.turn_id = ?`,
+      )
+      .get(claim.itemId),
+    { state: "superseded", disposition: "superseded" },
+  );
 });
 
 test("chat controller queues follow-up after an assistant reply is committed", async () => {
@@ -5976,6 +6487,68 @@ test("chat controller clears a stale bound session so ordinary chat can start fr
   );
   assert.equal(persistedState.sessionFile, undefined);
   assert.deepEqual(attempts, [""]);
+});
+
+test("chat controller cannot clear a replacement owner's session binding", async () => {
+  const controller = await createController("telegram/1:2");
+  const inbound = enqueueChatInboxItem(controller.agentDir, {
+    chatKey: controller.chatKey,
+    messageId: "stale-session-owner",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "2",
+      messageId: "stale-session-owner",
+      content: "question",
+      stripped: { content: "question" },
+    },
+    elements: [{ type: "text", attrs: { content: "question" } }],
+  }).item;
+  const stale = claimChatInboxItem(controller.agentDir, inbound.itemId);
+  assert.equal(
+    requeueClaimedChatInboxItem(controller.agentDir, stale, { delayMs: 0 })
+      ?.state,
+    "pending",
+  );
+  const replacement = claimChatInboxItem(controller.agentDir, inbound.itemId, {
+    leaseMs: 60_000,
+  });
+  assert.notEqual(replacement.ownerEpoch, stale.ownerEpoch);
+  const replacementSession = path.join(
+    controller.agentDir,
+    "sessions",
+    "replacement-owner.jsonl",
+  );
+  await fs.mkdir(path.dirname(replacementSession), { recursive: true });
+  await fs.writeFile(replacementSession, "{}\n");
+  openChatDatabase(controller.agentDir)
+    .prepare(`UPDATE chat_state SET session_file = ? WHERE chat_key = ?`)
+    .run(replacementSession, controller.chatKey);
+  controller.state.sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "missing-stale-owner.jsonl",
+  );
+  controller.currentTurn = {
+    incomingMessageId: stale.messageId,
+    outboxTurnFence: {
+      agentDir: controller.agentDir,
+      turnId: stale.itemId,
+      chatKey: stale.chatKey,
+      messageId: stale.messageId,
+      ownerEpoch: stale.ownerEpoch,
+      attempt: stale.attemptCount,
+    },
+    startedAt: Date.now(),
+  };
+
+  assert.equal(controller.getRecoverableSessionFile(), replacementSession);
+  assert.equal(
+    openChatDatabase(controller.agentDir)
+      .prepare(`SELECT session_file FROM chat_state WHERE chat_key = ?`)
+      .get(controller.chatKey).session_file,
+    replacementSession,
+  );
 });
 
 test("chat controller reports an explicit missing resume target", async () => {
@@ -6221,13 +6794,12 @@ test("chat controller does not resend an already delivered final after restart r
   assert.equal(Boolean(message.processedAt), true);
 });
 
-test("chat controller reuses a queued final outbox item on restart recovery", async () => {
+test("chat controller retries a confirmed pre-dispatch final after restart", async () => {
   const controller = await createController("telegram/1:2");
   let sendCount = 0;
-  controller.app.bots[0].sendMessage = async () => {
+  controller.app.bots[0].sendMessage = () => {
     sendCount += 1;
-    if (sendCount === 1) throw new Error("temporary_network_down");
-    return [`sent-${sendCount}`];
+    return rejectedBeforeDispatch("temporary_network_down");
   };
   saveChatMessage(controller.agentDir, {
     chatKey: controller.chatKey,
@@ -6252,14 +6824,13 @@ test("chat controller reuses a queued final outbox item on restart recovery", as
     () => controller.deliverAssistantReply(input),
     /temporary_network_down/,
   );
-  let items = listChatOutboxItems(controller.agentDir).map(({ item }) => item);
-  assert.equal(items.length, 1);
-  assert.equal(items[0].status, "queued");
+  const [queued] = listChatOutboxItems(controller.agentDir).map(
+    ({ item }) => item,
+  );
   writeChatOutboxItem(controller.agentDir, {
-    ...items[0],
+    ...queued,
     nextAttemptAt: new Date(Date.now() - 1000).toISOString(),
   });
-
   const recoveredController = createRecoveredController(controller);
   recoveredController.app.bots[0].sendMessage = async () => {
     sendCount += 1;
@@ -6267,7 +6838,9 @@ test("chat controller reuses a queued final outbox item on restart recovery", as
   };
   await recoveredController.deliverAssistantReply(input);
 
-  items = listChatOutboxItems(controller.agentDir).map(({ item }) => item);
+  const items = listChatOutboxItems(controller.agentDir).map(
+    ({ item }) => item,
+  );
   const delivered = await readOnlyChatOutboxHistoryItem(
     controller.agentDir,
     "delivered",
@@ -6275,15 +6848,15 @@ test("chat controller reuses a queued final outbox item on restart recovery", as
   assert.equal(sendCount, 2);
   assert.equal(items.length, 0);
   assert.equal(delivered.status, "delivered");
-  assert.equal(delivered.deliveryResult[0], "sent-2");
+  assert.equal(delivered.deliveryUnconfirmed, undefined);
 });
 
-test("chat controller leaves an in-flight final outbox item pending on restart recovery", async () => {
+test("chat controller leaves confirmed pre-dispatch failure queued", async () => {
   const controller = await createController("telegram/1:2");
   let sendCount = 0;
-  controller.app.bots[0].sendMessage = async () => {
+  controller.app.bots[0].sendMessage = () => {
     sendCount += 1;
-    throw new Error("temporary_network_down");
+    return rejectedBeforeDispatch("temporary_network_down");
   };
   saveChatMessage(controller.agentDir, {
     chatKey: controller.chatKey,
@@ -6308,21 +6881,6 @@ test("chat controller leaves an in-flight final outbox item pending on restart r
     () => controller.deliverAssistantReply(input),
     /temporary_network_down/,
   );
-  const [item] = listChatOutboxItems(controller.agentDir).map(
-    ({ item }) => item,
-  );
-  writeChatOutboxItem(controller.agentDir, {
-    ...item,
-    status: "sending",
-    nextAttemptAt: new Date(Date.now() + 60_000).toISOString(),
-  });
-  const recoveredController = createRecoveredController(controller);
-  recoveredController.app.bots[0].sendMessage = async () => {
-    sendCount += 1;
-    return [`sent-${sendCount}`];
-  };
-
-  await recoveredController.deliverAssistantReply(input);
 
   const items = listChatOutboxItems(controller.agentDir).map(
     ({ item }) => item,
@@ -6334,16 +6892,16 @@ test("chat controller leaves an in-flight final outbox item pending on restart r
   );
   assert.equal(sendCount, 1);
   assert.equal(items.length, 1);
-  assert.equal(items[0].status, "sending");
+  assert.equal(items[0].status, "queued");
   assert.equal(message.processedAt, undefined);
 });
 
-test("chat controller surfaces a failed final outbox item on restart recovery", async () => {
+test("chat controller does not mark a confirmed permanent adapter rejection processed", async () => {
   const controller = await createController("telegram/1:2");
   let sendCount = 0;
-  controller.app.bots[0].sendMessage = async () => {
+  controller.app.bots[0].sendMessage = () => {
     sendCount += 1;
-    throw new Error("forbidden: bot was kicked");
+    return rejectedBeforeDispatch("forbidden: bot was kicked");
   };
   saveChatMessage(controller.agentDir, {
     chatKey: controller.chatKey,

@@ -55,12 +55,26 @@ import {
 } from "./chat-helpers.js";
 import {
   enqueueChatOutboxPayload,
+  getActiveChatOutboxTurnFence,
   readChatOutboxItemById,
   type ChatMessagePart,
+  type ChatOutboxTurnFence,
 } from "../rin-lib/chat-outbox.js";
 import { drainChatOutbox } from "./boot.js";
-import { listChatMessages } from "./message-store.js";
-import { restorePromptParts } from "./transport.js";
+import {
+  advanceChatGeneration,
+  importLegacyChatSessionBinding,
+  markChatMessageAcceptedWithFence,
+  openChatDatabase,
+  readChatSessionBinding,
+  supersedeChatTurnWithFence,
+  writeChatSessionBinding,
+  writeChatSessionBindingWithFence,
+} from "./database.js";
+import {
+  restorePromptParts,
+  validateChatOutboxPayloadForDispatch,
+} from "./transport.js";
 import { formatRuntimeErrorForChat } from "../rin-lib/user-facing-errors.js";
 import { resolveChatQuietModeEnabled } from "./settings.js";
 
@@ -119,6 +133,8 @@ type ChatTurnTarget = {
   replyToMessageId?: string;
   text?: string;
   submittedText?: string;
+  requestTag?: string;
+  outboxTurnFence?: ChatOutboxTurnFence;
 };
 
 type ChatTurnMeta = ChatTurnTarget & {
@@ -368,6 +384,7 @@ export class ChatController {
   compactionIndicatorTick = 0;
   activeCommandTurnInput: ChatTurnTarget | null = null;
   pendingSteeredDeliveryTargets: ChatTurnTarget[] = [];
+  coalescedSteeredDeliveryTargets: ChatTurnTarget[] = [];
   backendAcceptedIncomingMessageId = "";
   stagedDelivery: ChatAssistantDelivery | null = null;
   pendingPassiveNotices: string[] = [];
@@ -426,9 +443,23 @@ export class ChatController {
     this.statePath =
       deps.statePath || statePathForControllerKey(dataDir, chatKey);
     this.state = readJsonFile<ChatState>(this.statePath, { chatKey });
-    this.pendingSteeredDeliveryTargets = normalizeChatTurnTargets(
-      this.state.pendingSteeredDeliveryTargets,
-    );
+    const persistedChatKey = safeString(this.state.chatKey).trim();
+    if (persistedChatKey && persistedChatKey !== chatKey) {
+      this.state = { chatKey };
+    }
+    if (this.affectChatBinding && parseChatKey(chatKey)) {
+      const legacySessionFile = toStoredSessionFile(
+        this.agentDir,
+        this.state.sessionFile,
+      );
+      importLegacyChatSessionBinding(this.agentDir, chatKey, legacySessionFile);
+      this.state.sessionFile =
+        readChatSessionBinding(this.agentDir, chatKey) || undefined;
+    }
+    // Steering ownership is reconstructed from the SQLite turn ledger. A
+    // process-local owner fence must never be revived from controller JSON.
+    this.pendingSteeredDeliveryTargets = [];
+    this.coalescedSteeredDeliveryTargets = [];
     this.logger = deps.logger;
     this.h = deps.h;
     this.sleepAfterIdleMs = Math.max(0, Number(deps.sleepAfterIdleMs || 0));
@@ -493,6 +524,7 @@ export class ChatController {
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
     this.pendingSteeredDeliveryTargets = [];
+    this.coalescedSteeredDeliveryTargets = [];
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
@@ -545,6 +577,7 @@ export class ChatController {
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
     this.pendingSteeredDeliveryTargets = [];
+    this.coalescedSteeredDeliveryTargets = [];
     this.backendAcceptedIncomingMessageId = "";
     this.saveState();
   }
@@ -574,10 +607,22 @@ export class ChatController {
     ).trim();
   }
 
-  private requestTagForInboundMessage(messageId?: string) {
+  private requestTagForInboundMessage(
+    messageId?: string,
+    fence?: ChatOutboxTurnFence,
+  ) {
     const normalizedMessageId = safeString(messageId).trim();
     if (!normalizedMessageId) return "";
-    return `chat-inbox-${sha256Hex(`${this.chatKey}\n${normalizedMessageId}`)}`;
+    return `chat-inbox-${sha256Hex(
+      JSON.stringify([this.chatKey, normalizedMessageId, fence?.turnId || ""]),
+    )}`;
+  }
+
+  private acceptsAssistantProgressEvent(requestTag?: string) {
+    if (!this.currentTurn?.outboxTurnFence) return true;
+    const expected = safeString(this.currentTurn.requestTag).trim();
+    const actual = safeString(requestTag).trim();
+    return Boolean(expected && actual && expected === actual);
   }
 
   claimsInboundMessage(messageId?: string) {
@@ -611,6 +656,8 @@ export class ChatController {
     incomingMessageId?: string;
     replyToMessageId?: string;
     receivedAt?: string;
+    requestTag?: string;
+    outboxTurnFence?: ChatOutboxTurnFence;
   }) {
     this.todoNoticeOperation?.abort.abort();
     this.todoNoticeOperation = null;
@@ -626,6 +673,8 @@ export class ChatController {
       incomingMessageId: nextIncomingMessageId,
       replyToMessageId: nextReplyToMessageId,
       ...(Number.isFinite(receivedAtMs) ? { receivedAtMs } : {}),
+      requestTag: safeString(input.requestTag).trim() || undefined,
+      outboxTurnFence: input.outboxTurnFence,
       workingNoticeSent: false,
     };
     this.backendAcceptedIncomingMessageId = "";
@@ -639,6 +688,8 @@ export class ChatController {
       incomingMessageId?: string;
       replyToMessageId?: string;
       receivedAt?: string;
+      requestTag?: string;
+      outboxTurnFence?: ChatOutboxTurnFence;
     },
     deliverFinal: boolean,
     startVisibleBeforeConnect = false,
@@ -727,12 +778,23 @@ export class ChatController {
   private setActiveCommandTurnInput(input: {
     incomingMessageId?: string;
     replyToMessageId?: string;
+    requestTag?: string;
+    outboxTurnFence?: ChatOutboxTurnFence;
   }) {
+    const outboxTurnFence =
+      input.outboxTurnFence || getActiveChatOutboxTurnFence();
     this.activeCommandTurnInput = {
       incomingMessageId:
         safeString(input.incomingMessageId || "").trim() || undefined,
       replyToMessageId:
         safeString(input.replyToMessageId || "").trim() || undefined,
+      requestTag:
+        safeString(input.requestTag).trim() ||
+        this.requestTagForInboundMessage(
+          input.incomingMessageId,
+          outboxTurnFence,
+        ),
+      outboxTurnFence,
     };
   }
 
@@ -745,11 +807,20 @@ export class ChatController {
     const replyToMessageId =
       safeString(input.replyToMessageId || "").trim() || incomingMessageId;
     if (!incomingMessageId && !replyToMessageId) return;
+    const existingIndex = this.pendingSteeredDeliveryTargets.findIndex(
+      (target) =>
+        safeString(target.incomingMessageId).trim() === incomingMessageId,
+    );
+    if (existingIndex >= 0) {
+      this.pendingSteeredDeliveryTargets.splice(existingIndex, 1);
+    }
     this.pendingSteeredDeliveryTargets.push({
       incomingMessageId: incomingMessageId || undefined,
       replyToMessageId: replyToMessageId || undefined,
       text: safeString(input.text || "").trim() || undefined,
       submittedText: safeString(input.submittedText || "").trim() || undefined,
+      requestTag: safeString(input.requestTag).trim() || undefined,
+      outboxTurnFence: input.outboxTurnFence,
     });
     this.saveState();
   }
@@ -763,6 +834,23 @@ export class ChatController {
     );
   }
 
+  ownsOutboxTurnFence(fence?: ChatOutboxTurnFence) {
+    if (!fence) return false;
+    const matches = (candidate?: ChatOutboxTurnFence) =>
+      Boolean(
+        candidate &&
+        safeString(candidate.turnId).trim() ===
+          safeString(fence.turnId).trim() &&
+        safeString(candidate.ownerEpoch).trim() ===
+          safeString(fence.ownerEpoch).trim() &&
+        Number(candidate.attempt) === Number(fence.attempt),
+      );
+    return (
+      matches(this.currentTurn?.outboxTurnFence) ||
+      matches(this.activeCommandTurnInput?.outboxTurnFence)
+    );
+  }
+
   ownsInboundMessage(messageId?: string) {
     return (
       this.claimsInboundMessage(messageId) ||
@@ -771,24 +859,41 @@ export class ChatController {
     );
   }
 
-  private async activatePendingSteeredDeliveryTarget(startedText?: string) {
+  private async activatePendingSteeredDeliveryTarget(
+    startedText?: string,
+    backendRequestTag?: string,
+  ) {
     const text = safeString(startedText || "").trim();
     if (!text || !this.pendingSteeredDeliveryTargets.length) return false;
-    const index = this.pendingSteeredDeliveryTargets.findIndex((target) => {
-      const raw = safeString(target.text || "").trim();
-      const submitted = safeString(target.submittedText || "").trim();
-      return Boolean(
-        (submitted && submitted === text) || (raw && raw === text),
+    const requestTag = safeString(backendRequestTag).trim();
+    let index = -1;
+    if (requestTag) {
+      index = this.pendingSteeredDeliveryTargets.findIndex(
+        (target) => safeString(target?.requestTag).trim() === requestTag,
       );
-    });
+    } else {
+      const matches = this.pendingSteeredDeliveryTargets.flatMap(
+        (target, candidateIndex) => {
+          const raw = safeString(target?.text).trim();
+          const submitted = safeString(target?.submittedText).trim();
+          return (submitted && submitted === text) || (raw && raw === text)
+            ? [candidateIndex]
+            : [];
+        },
+      );
+      if (matches.length === 1) index = matches[0];
+    }
     if (index < 0) return false;
     const [target] = this.pendingSteeredDeliveryTargets.splice(index, 1);
+    this.coalescedSteeredDeliveryTargets.push(target);
     this.saveState();
     await this.beginVisibleProcessingTurn({
       incomingMessageId: target?.incomingMessageId,
       replyToMessageId: target?.replyToMessageId,
+      requestTag: requestTag || target?.requestTag,
+      outboxTurnFence: target?.outboxTurnFence,
     });
-    this.markProcessedMessage(target?.incomingMessageId);
+    this.markAcceptedMessage(target?.incomingMessageId);
     return true;
   }
 
@@ -1181,6 +1286,8 @@ export class ChatController {
   private async beginVisibleProcessingTurn(input: {
     incomingMessageId?: string;
     replyToMessageId?: string;
+    requestTag?: string;
+    outboxTurnFence?: ChatOutboxTurnFence;
   }) {
     const turnGeneration = this.turnAbortGeneration;
     const previousIncomingMessageId = this.currentIncomingMessageId();
@@ -1202,6 +1309,7 @@ export class ChatController {
   private currentDeliveryTarget(input: {
     incomingMessageId?: string;
     replyToMessageId?: string;
+    outboxTurnFence?: ChatOutboxTurnFence;
   }) {
     return {
       incomingMessageId:
@@ -1212,25 +1320,51 @@ export class ChatController {
         this.currentReplyToMessageId() ||
         safeString(input.replyToMessageId || "").trim() ||
         undefined,
+      outboxTurnFence:
+        this.currentTurn?.outboxTurnFence || input.outboxTurnFence,
     };
   }
 
-  private markOriginalProcessedIfRetargeted(
+  private coalescedSupersessionFences(
     originalIncomingMessageId: unknown,
     targetIncomingMessageId: unknown,
-    bindSession = true,
+    fence?: ChatOutboxTurnFence,
   ) {
     const original = safeString(originalIncomingMessageId).trim();
     const target = safeString(targetIncomingMessageId).trim();
-    if (!original || !target || original === target) return;
-    this.markProcessedMessage(original, bindSession);
+    const candidates = [
+      ...(original && original !== target
+        ? [fence || this.turnFenceForInboundMessage(original)]
+        : []),
+      ...this.coalescedSteeredDeliveryTargets.map(
+        (entry) =>
+          entry.outboxTurnFence ||
+          this.turnFenceForInboundMessage(entry.incomingMessageId),
+      ),
+    ];
+    const seen = new Set<string>();
+    return candidates.filter((candidate): candidate is ChatOutboxTurnFence => {
+      const turnId = safeString(candidate?.turnId).trim();
+      const messageId = safeString(candidate?.messageId).trim();
+      if (!turnId || messageId === target || seen.has(turnId)) return false;
+      seen.add(turnId);
+      return true;
+    });
   }
 
   private async finishSupersededRecoveredTurn(
-    input: { incomingMessageId?: string },
+    input: {
+      incomingMessageId?: string;
+      outboxTurnFence?: ChatOutboxTurnFence;
+    },
     result: any,
   ) {
-    this.markProcessedMessage(input.incomingMessageId);
+    const fence =
+      input.outboxTurnFence ||
+      this.turnFenceForInboundMessage(input.incomingMessageId);
+    if (fence && !supersedeChatTurnWithFence(this.agentDir, fence)) {
+      throw new Error("chat_turn_fence_lost");
+    }
     await this.clearWorkingReactionFor(input.incomingMessageId);
     this.clearCurrentTurnFor(input.incomingMessageId);
     this.awaitingTurnSettle = false;
@@ -1425,9 +1559,46 @@ export class ChatController {
     return undefined;
   }
 
-  private updateStoredSessionFile(...candidates: unknown[]) {
-    const picked = this.pickStoredValue(...candidates, this.state.sessionFile);
+  private updateStoredSessionFile(...args: unknown[]) {
+    const last = args.at(-1);
+    const hasOptions =
+      last &&
+      typeof last === "object" &&
+      !Array.isArray(last) &&
+      Object.prototype.hasOwnProperty.call(last, "persist");
+    const options = hasOptions
+      ? (args.pop() as { persist?: boolean })
+      : undefined;
+    const picked = this.pickStoredValue(...args, this.state.sessionFile);
     this.state.sessionFile = toStoredSessionFile(this.agentDir, picked);
+    if (
+      this.affectChatBinding &&
+      parseChatKey(this.chatKey) &&
+      options?.persist !== false
+    ) {
+      const fence =
+        this.currentTurn?.outboxTurnFence ||
+        this.activeCommandTurnInput?.outboxTurnFence ||
+        getActiveChatOutboxTurnFence();
+      if (fence) {
+        if (
+          !writeChatSessionBindingWithFence(
+            this.agentDir,
+            fence,
+            this.state.sessionFile,
+          )
+        ) {
+          this.state.sessionFile =
+            readChatSessionBinding(this.agentDir, this.chatKey) || undefined;
+        }
+      } else {
+        writeChatSessionBinding(
+          this.agentDir,
+          this.chatKey,
+          this.state.sessionFile,
+        );
+      }
+    }
     return this.state.sessionFile;
   }
 
@@ -1453,6 +1624,25 @@ export class ChatController {
     const wanted = this.resolveSessionFileForUse(this.state.sessionFile);
     if (!wanted) return "";
     if (sessionFileExists(wanted)) return wanted;
+    if (this.affectChatBinding && parseChatKey(this.chatKey)) {
+      const fence =
+        this.currentTurn?.outboxTurnFence ||
+        this.activeCommandTurnInput?.outboxTurnFence ||
+        getActiveChatOutboxTurnFence();
+      if (fence) {
+        if (!writeChatSessionBindingWithFence(this.agentDir, fence, "")) {
+          this.state.sessionFile =
+            readChatSessionBinding(this.agentDir, this.chatKey) || undefined;
+          const authoritative = this.resolveSessionFileForUse(
+            this.state.sessionFile,
+          );
+          this.saveState();
+          return sessionFileExists(authoritative) ? authoritative : "";
+        }
+      } else {
+        writeChatSessionBinding(this.agentDir, this.chatKey, "");
+      }
+    }
     this.state.sessionFile = undefined;
     this.saveState();
     return "";
@@ -1466,13 +1656,14 @@ export class ChatController {
     if (this.state.chatType === "private" || this.state.chatType === "group") {
       return this.state.chatType;
     }
-    const stored = listChatMessages(this.agentDir)
-      .filter((item) => item.chatKey === this.chatKey)
-      .sort((left, right) =>
-        safeString(right.receivedAt).localeCompare(safeString(left.receivedAt)),
+    const stored = openChatDatabase(this.agentDir)
+      .prepare(
+        `SELECT chat_type FROM messages
+         WHERE chat_key = ? AND chat_type IN ('private', 'group')
+         ORDER BY sequence DESC LIMIT 1`,
       )
-      .find((item) => item.chatType === "private" || item.chatType === "group");
-    return stored?.chatType || "group";
+      .get(this.chatKey) as any;
+    return stored?.chat_type || "group";
   }
 
   private rememberPromptChatType(promptMeta?: PromptContextMeta) {
@@ -1480,6 +1671,37 @@ export class ChatController {
     if (chatType === "private" || chatType === "group") {
       this.state.chatType = chatType;
     }
+  }
+
+  private turnFenceForInboundMessage(messageId?: string) {
+    const nextMessageId = safeString(messageId).trim();
+    if (!nextMessageId) return undefined;
+    return [
+      this.currentTurn?.outboxTurnFence,
+      this.activeCommandTurnInput?.outboxTurnFence,
+      getActiveChatOutboxTurnFence(),
+    ].find(
+      (fence) =>
+        fence &&
+        fence.chatKey === this.chatKey &&
+        fence.messageId === nextMessageId,
+    );
+  }
+
+  private hasManagedTurnForInboundMessage(messageId?: string) {
+    const nextMessageId = safeString(messageId).trim();
+    if (!nextMessageId || !parseChatKey(this.chatKey)) return false;
+    return Boolean(
+      openChatDatabase(this.agentDir)
+        .prepare(
+          `SELECT 1
+           FROM turns
+           JOIN messages ON messages.id = turns.inbound_message_id
+           WHERE turns.chat_key = ? AND messages.message_id = ?
+           LIMIT 1`,
+        )
+        .get(this.chatKey, nextMessageId),
+    );
   }
 
   private markAcceptedMessage(messageId?: string) {
@@ -1491,6 +1713,14 @@ export class ChatController {
     if (!sessionFile) return;
     const storedSessionFile = this.updateStoredSessionFile(sessionFile);
     this.saveState();
+    const fence = this.turnFenceForInboundMessage(nextMessageId);
+    if (fence) {
+      return markChatMessageAcceptedWithFence(this.agentDir, fence, {
+        sessionFile: storedSessionFile || sessionFile,
+        acceptedAt,
+      });
+    }
+    if (this.hasManagedTurnForInboundMessage(nextMessageId)) return false;
     markProcessedChatMessage(this.agentDir, this.chatKey, nextMessageId, {
       sessionFile: storedSessionFile || sessionFile,
       acceptedAt,
@@ -1499,12 +1729,19 @@ export class ChatController {
 
   private markProcessedMessage(messageId?: string, bindSession = true) {
     const nextMessageId = safeString(messageId || "").trim();
-    if (!nextMessageId) return;
+    if (!nextMessageId) return false;
+    if (
+      this.turnFenceForInboundMessage(nextMessageId) ||
+      this.hasManagedTurnForInboundMessage(nextMessageId)
+    ) {
+      return false;
+    }
     markProcessedChatMessage(this.agentDir, this.chatKey, nextMessageId, {
       ...(bindSession ? { sessionFile: this.currentSessionFile() } : {}),
       acceptedAt: nowIso(),
       processedAt: nowIso(),
     });
+    return true;
   }
 
   private currentConversationSessionPayload() {
@@ -1615,6 +1852,8 @@ export class ChatController {
       requireDelivery?: boolean;
       waitForDeliveryMs?: number;
       waitUntilDeliverySettled?: boolean;
+      turnFence?: ChatOutboxTurnFence;
+      supersedeTurnFences?: ChatOutboxTurnFence[];
     } = {},
   ) {
     const idempotencyKey = safeString(options.idempotencyKey).trim();
@@ -1638,10 +1877,20 @@ export class ChatController {
     if (this.shouldSuppressQuietDelivery(effectiveDeliveryKind)) {
       return chatDeliveryOutcome([], { accepted: false });
     }
-    enqueueChatOutboxPayload(this.agentDir, normalizedPayload, {
-      ...options,
-      id,
-    });
+    await validateChatOutboxPayloadForDispatch(normalizedPayload, this.h);
+    const outboxId = enqueueChatOutboxPayload(
+      this.agentDir,
+      normalizedPayload,
+      {
+        ...options,
+        turnFence:
+          options.turnFence ||
+          getActiveChatOutboxTurnFence() ||
+          this.currentTurn?.outboxTurnFence ||
+          this.activeCommandTurnInput?.outboxTurnFence,
+        id,
+      },
+    );
     const results = await drainChatOutbox(
       this.app,
       this.agentDir,
@@ -1649,21 +1898,24 @@ export class ChatController {
       this.logger,
       {
         chatKey: safeString(normalizedPayload?.chatKey).trim(),
-        itemId: id,
+        itemId: outboxId,
       },
     );
     const own = Array.isArray(results)
-      ? results.find((item: any) => item?.id === id)
+      ? results.find((item: any) => item?.id === outboxId)
       : null;
     if (own && own.status !== "delivered") {
       if (own.status === "dispatched") {
         const deliveryResult = options.waitUntilDeliverySettled
-          ? await this.waitForOutboxDelivery(id)
+          ? await this.waitForOutboxDelivery(outboxId)
           : Number.isFinite(options.waitForDeliveryMs)
-            ? await this.waitForOutboxDelivery(id, options.waitForDeliveryMs)
+            ? await this.waitForOutboxDelivery(
+                outboxId,
+                options.waitForDeliveryMs,
+              )
             : null;
         if (deliveryResult) return chatDeliveryOutcome(deliveryResult);
-        const current = readChatOutboxItemById(this.agentDir, id)?.item;
+        const current = readChatOutboxItemById(this.agentDir, outboxId)?.item;
         if (
           (current?.status === "queued" || current?.status === "sending") &&
           /^chat_outbox_delivery_pending$/.test(
@@ -1684,7 +1936,7 @@ export class ChatController {
       throw new Error(errorMessage);
     }
     if (!own && idempotencyKey) {
-      const current = readChatOutboxItemById(this.agentDir, id)?.item;
+      const current = readChatOutboxItemById(this.agentDir, outboxId)?.item;
       if (current?.status === "delivered") {
         return chatDeliveryOutcome(current.deliveryResult || []);
       }
@@ -1701,11 +1953,16 @@ export class ChatController {
   private async commitPendingDelivery(
     clearProcessing = false,
     postDelivery?: any,
-    deliveryOptions: { id?: string; idempotencyKey?: string } = {},
+    deliveryOptions: {
+      id?: string;
+      idempotencyKey?: string;
+      turnFence?: ChatOutboxTurnFence;
+      supersedeTurnFences?: ChatOutboxTurnFence[];
+    } = {},
   ) {
     const pending = this.stagedDelivery;
     if (!pending) return chatDeliveryOutcome([], { accepted: false });
-    if (!this.canDeliverReplies()) {
+    if (!this.affectChatBinding && !this.canDeliverReplies()) {
       this.stagedDelivery = null;
       if (clearProcessing) {
         await this.clearWorkingReaction().catch(() => {});
@@ -1728,6 +1985,7 @@ export class ChatController {
     if (clearProcessing) {
       await this.clearWorkingReaction().catch(() => {});
       this.currentTurn = null;
+      this.coalescedSteeredDeliveryTargets = [];
     }
     return outcome;
   }
@@ -1742,6 +2000,8 @@ export class ChatController {
     bindSession?: boolean;
     deliveryKind?: "final" | "error";
     idempotencyKey?: string;
+    outboxTurnFence?: ChatOutboxTurnFence;
+    supersedeTurnFences?: ChatOutboxTurnFence[];
   }) {
     const bindSession = input.bindSession !== false && this.affectChatBinding;
     const text = this.stageAssistantDelivery({ ...input, bindSession });
@@ -1764,6 +2024,11 @@ export class ChatController {
     const id = idempotencyKey
       ? `${deliveryKind}-${sha256Hex(idempotencyKey)}`
       : "";
+    const activeCommandFence =
+      safeString(this.activeCommandTurnInput?.incomingMessageId).trim() ===
+      incomingMessageId
+        ? this.activeCommandTurnInput?.outboxTurnFence
+        : undefined;
     const delivery = await this.commitPendingDelivery(
       input.clearProcessing,
       {
@@ -1776,9 +2041,14 @@ export class ChatController {
           bindSession,
         },
       },
-      { id, idempotencyKey },
+      {
+        id,
+        idempotencyKey,
+        turnFence: input.outboxTurnFence || activeCommandFence,
+        supersedeTurnFences: input.supersedeTurnFences,
+      },
     );
-    if (delivery?.settled !== false) {
+    if (delivery?.accepted !== false && delivery?.settled !== false) {
       this.markProcessedMessage(input.incomingMessageId, bindSession);
     }
     return text;
@@ -2243,6 +2513,7 @@ export class ChatController {
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
     this.pendingSteeredDeliveryTargets = [];
+    this.coalescedSteeredDeliveryTargets = [];
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
@@ -2307,6 +2578,33 @@ export class ChatController {
     };
   }
 
+  private async advanceGenerationAfterNonterminalSends(input: {
+    preserveInboundMessageId?: string;
+    sessionFile?: string;
+    turnFence?: ChatOutboxTurnFence;
+  }) {
+    const deadline = Date.now() + 30_000;
+    for (;;) {
+      try {
+        return advanceChatGeneration(this.agentDir, this.chatKey, input);
+      } catch (error) {
+        if (
+          safeString((error as any)?.message || error) !==
+          "chat_generation_nonterminal_send_in_flight"
+        ) {
+          throw error;
+        }
+        if (Date.now() >= deadline) {
+          return advanceChatGeneration(this.agentDir, this.chatKey, {
+            ...input,
+            resolveNonterminalSends: true,
+          });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+  }
+
   async runCommand(
     commandLine: string,
     replyToMessageId = "",
@@ -2361,6 +2659,7 @@ export class ChatController {
         await this.clearWorkingReaction().catch(() => {});
         this.clearCurrentTurn();
         this.pendingSteeredDeliveryTargets = [];
+        this.coalescedSteeredDeliveryTargets = [];
         this.stagedDelivery = null;
         this.saveState();
       }
@@ -2383,7 +2682,11 @@ export class ChatController {
       this.turnAbortGeneration += 1;
       this.turnAbortRequested = true;
     }
-    this.setActiveCommandTurnInput({ incomingMessageId, replyToMessageId });
+    this.setActiveCommandTurnInput({
+      incomingMessageId,
+      replyToMessageId,
+      outboxTurnFence: getActiveChatOutboxTurnFence(),
+    });
     try {
       if (interruptingActiveTurn) {
         await this.connect({ restoreSession: true });
@@ -2410,10 +2713,20 @@ export class ChatController {
         sessionFile: explicitSessionFile,
         managedSessionLeaf,
       });
-      this.updateStoredSessionFile(
+      const nextSessionFile = this.updateStoredSessionFile(
         data?.sessionFile,
         this.driver.currentSessionFile(),
+        { persist: commandName !== "new" },
       );
+      if (commandName === "new" && parseChatKey(this.chatKey)) {
+        await this.advanceGenerationAfterNonterminalSends({
+          preserveInboundMessageId: incomingMessageId,
+          sessionFile: nextSessionFile,
+          turnFence:
+            this.activeCommandTurnInput?.outboxTurnFence ||
+            getActiveChatOutboxTurnFence(),
+        });
+      }
       this.saveState();
       data = this.localizeBuiltinCommandResult(commandName, data);
 
@@ -2455,7 +2768,10 @@ export class ChatController {
       if (interruptingActiveTurn) this.turnAbortRequested = false;
       await this.clearWorkingReaction().catch(() => {});
       this.clearCurrentTurn();
-      if (interruptingActiveTurn) this.pendingSteeredDeliveryTargets = [];
+      if (interruptingActiveTurn) {
+        this.pendingSteeredDeliveryTargets = [];
+        this.coalescedSteeredDeliveryTargets = [];
+      }
       this.clearActiveCommandTurnInput();
       this.stagedDelivery = null;
       this.saveState();
@@ -2495,9 +2811,16 @@ export class ChatController {
         disabledRinCapabilities?: string[];
         quietMode?: boolean;
         receivedAt?: string;
+        outboxTurnFence?: ChatOutboxTurnFence;
       },
     mode: "prompt" | "steer" = "prompt",
   ) {
+    input.outboxTurnFence ||= getActiveChatOutboxTurnFence();
+    input.requestTag ||=
+      this.requestTagForInboundMessage(
+        input.incomingMessageId,
+        input.outboxTurnFence,
+      ) || undefined;
     this.rememberPromptChatType(input.promptMeta);
     this.lastActivityAt = Date.now();
     const deliverFinal = input.deliverFinal !== false;
@@ -2573,6 +2896,8 @@ export class ChatController {
             replyToMessageId: input.replyToMessageId,
             text,
             submittedText,
+            requestTag: input.requestTag,
+            outboxTurnFence: input.outboxTurnFence,
           });
         }
         this.backendAcceptedIncomingMessageId = safeString(
@@ -2585,24 +2910,30 @@ export class ChatController {
           sessionFile: this.currentSessionFile(),
         };
       }
+      let originalSuperseded = false;
       if (deliverFinal) {
         await this.beginVisibleProcessingTurn({
           incomingMessageId: input.incomingMessageId,
           replyToMessageId: input.replyToMessageId,
+          outboxTurnFence: input.outboxTurnFence,
         });
         const deliveryTarget = this.currentDeliveryTarget(input);
+        const supersedeTurnFences = this.coalescedSupersessionFences(
+          input.incomingMessageId,
+          deliveryTarget.incomingMessageId,
+          input.outboxTurnFence,
+        );
         await this.deliverAssistantReply({
           text: result.finalText,
           replyToMessageId: deliveryTarget.replyToMessageId,
           sessionFile: result.sessionFile,
           incomingMessageId: deliveryTarget.incomingMessageId,
+          outboxTurnFence: deliveryTarget.outboxTurnFence,
           idempotencyKey: input.deliveryIdempotencyKey,
+          supersedeTurnFences,
           clearProcessing: true,
         });
-        this.markOriginalProcessedIfRetargeted(
-          input.incomingMessageId,
-          deliveryTarget.incomingMessageId,
-        );
+        originalSuperseded = supersedeTurnFences.length > 0;
         this.awaitingTurnSettle = false;
         await new Promise((resolve) => setImmediate(resolve));
         await this.flushPendingPassiveNotices(input.quietMode);
@@ -2612,6 +2943,7 @@ export class ChatController {
         result: result.result,
         sessionId: this.currentSessionId() || undefined,
         sessionFile: this.currentSessionFile(),
+        ...(originalSuperseded ? { superseded: true } : {}),
       };
     }
 
@@ -2645,6 +2977,7 @@ export class ChatController {
           replyToMessageId: input.replyToMessageId,
         }).catch(() => false);
       }
+      let originalSuperseded = false;
       try {
         if (this.turnAbortGeneration !== turnAbortGeneration) {
           throw new Error("chat_turn_aborted");
@@ -2702,6 +3035,8 @@ export class ChatController {
               replyToMessageId: input.replyToMessageId,
               text,
               submittedText,
+              requestTag: input.requestTag,
+              outboxTurnFence: input.outboxTurnFence,
             });
           }
           this.backendAcceptedIncomingMessageId = safeString(
@@ -2716,18 +3051,22 @@ export class ChatController {
         }
         if (deliverFinal) {
           const deliveryTarget = this.currentDeliveryTarget(input);
+          const supersedeTurnFences = this.coalescedSupersessionFences(
+            input.incomingMessageId,
+            deliveryTarget.incomingMessageId,
+            input.outboxTurnFence,
+          );
           await this.deliverAssistantReply({
             text: result.finalText,
             replyToMessageId: deliveryTarget.replyToMessageId,
             sessionFile: result.sessionFile,
             incomingMessageId: deliveryTarget.incomingMessageId,
+            outboxTurnFence: deliveryTarget.outboxTurnFence,
             idempotencyKey: input.deliveryIdempotencyKey,
+            supersedeTurnFences,
             clearProcessing: true,
           });
-          this.markOriginalProcessedIfRetargeted(
-            input.incomingMessageId,
-            deliveryTarget.incomingMessageId,
-          );
+          originalSuperseded = supersedeTurnFences.length > 0;
           this.awaitingTurnSettle = false;
           await new Promise((resolve) => setImmediate(resolve));
           await this.flushPendingPassiveNotices(input.quietMode);
@@ -2738,6 +3077,7 @@ export class ChatController {
           result: result.result,
           sessionId: this.currentSessionId() || undefined,
           sessionFile: this.currentSessionFile(),
+          ...(originalSuperseded ? { superseded: true } : {}),
         };
       } catch (error) {
         const errorMessage = safeString(
@@ -2756,11 +3096,18 @@ export class ChatController {
             this.awaitingTurnSettle = false;
             this.turnAbortRequested = false;
             this.pendingSteeredDeliveryTargets = [];
+            this.coalescedSteeredDeliveryTargets = [];
             this.stagedDelivery = null;
           }
           this.saveState();
           if (!intentionallyAborted) {
             throw error;
+          }
+          if (input.outboxTurnFence) {
+            return await this.finishSupersededRecoveredTurn(
+              input,
+              abortedSession,
+            );
           }
           this.markProcessedMessage(input.incomingMessageId, false);
           return {
@@ -2782,21 +3129,32 @@ export class ChatController {
           );
           if (errorSession.sessionFile && errorMessage) {
             const deliveryTarget = this.currentDeliveryTarget(input);
+            const supersedeTurnFences = this.coalescedSupersessionFences(
+              input.incomingMessageId,
+              deliveryTarget.incomingMessageId,
+              input.outboxTurnFence,
+            );
             await this.deliverAssistantReply({
               text: formatRuntimeErrorForChat(errorMessage),
               replyToMessageId: deliveryTarget.replyToMessageId,
               incomingMessageId: deliveryTarget.incomingMessageId,
+              outboxTurnFence: deliveryTarget.outboxTurnFence,
               sessionFile: errorSessionFile || this.currentSessionFile(),
               idempotencyKey: input.deliveryIdempotencyKey,
+              supersedeTurnFences,
               clearProcessing: true,
               deliveryKind: "error",
             });
-            this.markOriginalProcessedIfRetargeted(
-              input.incomingMessageId,
-              deliveryTarget.incomingMessageId,
-            );
+            originalSuperseded = supersedeTurnFences.length > 0;
             this.awaitingTurnSettle = false;
           }
+        }
+        if (originalSuperseded) {
+          return {
+            superseded: true,
+            sessionId: this.currentSessionId() || undefined,
+            sessionFile: this.currentSessionFile(),
+          };
         }
         const ownsCurrentTurn = this.hasCurrentTurnMatching(
           input.incomingMessageId,
@@ -2807,6 +3165,7 @@ export class ChatController {
           this.awaitingTurnSettle = false;
           this.turnAbortRequested = false;
           this.pendingSteeredDeliveryTargets = [];
+          this.coalescedSteeredDeliveryTargets = [];
           this.stagedDelivery = null;
         }
         this.saveState();
@@ -2847,7 +3206,9 @@ export class ChatController {
             this.externalWorkingVisible = true;
           }
           const createdCommandTurn = this.ensureVisibleCommandTurn();
-          this.markAcceptedMessage(this.currentIncomingMessageId());
+          if (!this.currentTurn?.outboxTurnFence) {
+            this.markAcceptedMessage(this.currentIncomingMessageId());
+          }
           if (createdCommandTurn) await this.pollTyping().catch(() => false);
         }
         if (event.phase === "idle") {
@@ -2863,6 +3224,16 @@ export class ChatController {
         }
         return;
       case "turn_accepted": {
+        const expectedRequestTag = safeString(
+          this.currentTurn?.requestTag,
+        ).trim();
+        const acceptedRequestTag = safeString(event.requestTag).trim();
+        if (
+          this.currentTurn?.outboxTurnFence &&
+          (!acceptedRequestTag || acceptedRequestTag !== expectedRequestTag)
+        ) {
+          return;
+        }
         const turn = this.currentTurn;
         if (
           turn &&
@@ -2892,6 +3263,7 @@ export class ChatController {
         const userMessageId = safeString(event.userMessageId).trim();
         const activation = this.activatePendingSteeredDeliveryTarget(
           event.text,
+          event.requestTag,
         ).then(() => this.currentTodoNoticeTurnKey());
         if (userMessageId) {
           this.todoTurnKeyByUserMessageId.set(userMessageId, activation);
@@ -2931,10 +3303,14 @@ export class ChatController {
         await this.deliverCompactionStartNotice(event.text);
         return;
       case "assistant_summary":
-        await this.showAssistantSummary(event.text);
+        if (this.acceptsAssistantProgressEvent(event.requestTag)) {
+          await this.showAssistantSummary(event.text);
+        }
         return;
       case "assistant_interim":
-        await this.deliverAssistantInterim(event.text);
+        if (this.acceptsAssistantProgressEvent(event.requestTag)) {
+          await this.deliverAssistantInterim(event.text);
+        }
         return;
     }
   }

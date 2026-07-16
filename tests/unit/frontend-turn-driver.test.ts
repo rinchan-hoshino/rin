@@ -115,6 +115,7 @@ function createFrontendClient() {
         return resolveSubmittedTurnFromMessages(await this.getMessages(), {
           text: String(command.text || ""),
           sentAt: Number(command.sentAt || 0),
+          requestTag: String(command.requestTag || ""),
         });
       }
       if (command.type === "run_command") {
@@ -1240,6 +1241,71 @@ test("submitted turn resolution treats earlier steered inputs as superseded by t
   );
 });
 
+test("submitted turn resolution disambiguates identical steers by durable request tag", () => {
+  const messages = [
+    {
+      role: "user",
+      timestamp: 1778774581000,
+      requestTag: "first-identical-tag",
+      content: "same restored input",
+    },
+    {
+      role: "user",
+      timestamp: 1778774581000,
+      requestTag: "second-identical-tag",
+      content: "same restored input",
+    },
+    {
+      role: "assistant",
+      timestamp: 1778774590000,
+      content: [{ type: "text", text: "latest identical final" }],
+    },
+  ];
+
+  assert.deepEqual(
+    resolveSubmittedTurnFromMessages(messages, {
+      text: "same restored input",
+      requestTag: "first-identical-tag",
+    }),
+    { superseded: true },
+  );
+  assert.deepEqual(
+    resolveSubmittedTurnFromMessages(messages, {
+      text: "same restored input",
+      requestTag: "second-identical-tag",
+    }),
+    {
+      finalText: "latest identical final",
+      result: { messages: [{ type: "text", text: "latest identical final" }] },
+    },
+  );
+  assert.equal(
+    resolveSubmittedTurnFromMessages(messages, {
+      text: "same restored input",
+      sentAt: 1778774580000,
+      requestTag: "missing-tag",
+    }),
+    null,
+  );
+  assert.deepEqual(
+    resolveSubmittedTurnFromMessages(
+      [
+        {
+          role: "user",
+          timestamp: 1778774581000,
+          content: "legacy identical input",
+        },
+      ],
+      {
+        text: "legacy identical input",
+        sentAt: 1778774580000,
+        requestTag: "modern-request-tag",
+      },
+    ),
+    { submitted: true },
+  );
+});
+
 test("submitted turn resolution preserves provider failure instead of final-missing", () => {
   const resolved = resolveSubmittedTurnFromMessages(
     [
@@ -1431,6 +1497,85 @@ test("frontend SDK turn driver carries sessionFile on restored commands", async 
       customInstructions: undefined,
       options: { sessionFile },
     },
+  );
+});
+
+test("frontend SDK turn driver rejoins an active already-submitted turn without resubmitting", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const sessionFile = "/tmp/frontend-active-submitted.jsonl";
+  let resolveCalls = 0;
+  client.getState = async () => ({
+    sessionFile,
+    sessionId: "frontend-session",
+    isStreaming: true,
+    turnActive: true,
+  });
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command.type === "get_state") return await client.getState();
+    if (command.type === "resolve_submitted_turn") {
+      resolveCalls += 1;
+      if (resolveCalls === 1) {
+        setImmediate(() => {
+          void emitDriverEvent(driver as any, {
+            type: "rpc_turn_event",
+            event: "complete",
+            requestTag: "persisted-active-tag",
+            finalText: "recovered active final",
+            result: {
+              messages: [{ type: "text", text: "recovered active final" }],
+            },
+            sessionId: "frontend-session",
+            sessionFile,
+          });
+        });
+        return { submitted: true };
+      }
+      return {
+        finalText: "recovered active final",
+        sessionId: "frontend-session",
+        sessionFile,
+      };
+    }
+    if (command.type === "replay_pending_terminal_turn_event") {
+      return { replayed: false };
+    }
+    if (command.type === "get_active_tools") return { tools: [] };
+    if (command.type === "set_active_tools") return { tools: [] };
+    return {};
+  };
+  client.prompt = async () => {
+    throw new Error("prompt_should_not_be_resubmitted");
+  };
+
+  const result = await driver.runTurn({
+    text: "restored active job",
+    requestTag: "persisted-active-tag",
+    restoreSessionFile: sessionFile,
+    promptContext: {
+      source: "chat-bridge",
+      chatKey: "telegram/1:2",
+      sentAt: 1778774580000,
+    },
+  });
+
+  assert.equal(result.finalText, "recovered active final");
+  assert.ok(
+    client.calls
+      .filter(
+        (call: any) =>
+          call.type === "request" &&
+          call.command.type === "resolve_submitted_turn",
+      )
+      .every((call: any) => call.command.requestTag === "persisted-active-tag"),
+  );
+  assert.equal(
+    client.calls.some((call: any) => call.type === "prompt"),
+    false,
   );
 });
 
@@ -1643,6 +1788,34 @@ test("frontend SDK turn driver trusts backend prompt admission over stale local 
   const promptCall = client.calls.find((call: any) => call.type === "prompt");
   assert.equal(promptCall.text, "backend says steer");
   assert.equal(promptCall.options.streamingBehavior, undefined);
+});
+
+test("frontend SDK turn driver does not relabel untagged progress with mutable turn state", async () => {
+  const driver = createDriver();
+  const progress: any[] = [];
+  driver.subscribe((event: any) => {
+    if (event.type === "assistant_interim") progress.push(event);
+  });
+  (driver as any).backendTurnRequestTag = "replacement-tag";
+
+  await emitDriverEvent(driver, {
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [
+        { type: "text", text: "old progress" },
+        { type: "toolCall", id: "old-call", name: "read" },
+      ],
+    },
+  });
+
+  assert.deepEqual(progress, [
+    {
+      type: "assistant_interim",
+      text: "old progress",
+      requestTag: undefined,
+    },
+  ]);
 });
 
 test("frontend SDK turn driver forwards a completed summary without assistant content", async () => {
@@ -1977,11 +2150,7 @@ test("frontend SDK turn driver lets backend rejoin a restored active inbox turn"
         turnActive: true,
       };
     }
-    if (command.type === "resolve_submitted_turn") {
-      throw new Error(
-        "active turn identity must be decided by backend admission",
-      );
-    }
+    if (command.type === "resolve_submitted_turn") return null;
     if (command.type === "replay_pending_terminal_turn_event") {
       replayCalls += 1;
       await emitDriverEvent(driver as any, {
@@ -2357,8 +2526,10 @@ test(
       isStreaming: false,
       turnActive: false,
     });
+    let submittedRequestTag = "";
     client.prompt = async (text: string, options: any = {}) => {
       client.calls.push({ type: "prompt", text, options });
+      submittedRequestTag = options.requestTag;
       await client.disconnect();
       throw new Error("rin_disconnected:req_1");
     };
@@ -2373,6 +2544,7 @@ test(
         await emitDriverEvent(driver as any, {
           type: "rpc_turn_event",
           event: "complete",
+          requestTag: submittedRequestTag,
           finalText: "recovered by daemon replay",
           result: {
             messages: [{ type: "text", text: "recovered by daemon replay" }],

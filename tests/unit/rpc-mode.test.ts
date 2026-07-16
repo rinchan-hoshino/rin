@@ -2067,6 +2067,11 @@ test(
           return () => sessionSubscribers.delete(handler);
         },
         prompt: async () => {
+          const userMessage = {
+            role: "user",
+            timestamp: Date.now(),
+            content: [{ type: "text", text: "hello" }],
+          };
           const assistantMessage = {
             role: "assistant",
             timestamp: Date.now(),
@@ -2075,11 +2080,7 @@ test(
           durableEntries.push({
             id: "user-entry",
             type: "message",
-            message: {
-              role: "user",
-              timestamp: Date.now(),
-              content: [{ type: "text", text: "hello" }],
-            },
+            message: userMessage,
           });
           durableEntries.push({
             id: "assistant-entry",
@@ -2088,6 +2089,7 @@ test(
             message: assistantMessage,
           });
           for (const handler of sessionSubscribers) {
+            handler({ type: "message_start", message: userMessage });
             handler({ type: "message_end", message: assistantMessage });
           }
         },
@@ -2161,6 +2163,21 @@ test(
       const completion = events.find(
         (event) =>
           event.type === "rpc_turn_event" && event.event === "complete",
+      );
+      const userStart = events.find(
+        (event) =>
+          event.type === "message_start" && event.message?.role === "user",
+      );
+      const assistantEnd = events.find(
+        (event) =>
+          event.type === "message_end" && event.message?.role === "assistant",
+      );
+      assert.equal(userStart?.requestTag, "tag-1");
+      assert.equal(assistantEnd?.requestTag, undefined);
+      assert.equal(
+        durableEntries.find((entry) => entry.message?.role === "user")?.message
+          ?.requestTag,
+        "tag-1",
       );
       assert.equal(completion?.turnGeneration, 1);
       assert.equal(completion?.requestTag, "tag-1");
@@ -4067,8 +4084,14 @@ test(
     const handlers = new Map();
     const lines = [];
     const calls = [];
+    const sessionSubscribers = new Set();
+    const delayedUserMessages = [];
     const activeRunSignal = new AbortController().signal;
     const agentState = { isStreaming: false, activeRun: false };
+    let releaseFirstPrompt;
+    const firstPromptGate = new Promise((resolve) => {
+      releaseFirstPrompt = resolve;
+    });
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -4095,12 +4118,28 @@ test(
           waitForIdle: async () => {},
         },
         bindExtensions: async () => {},
-        subscribe: () => () => {},
+        subscribe: (handler) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
         async prompt(message, options) {
           calls.push(["prompt", message, options, this.isStreaming]);
+          const userMessage = {
+            role: "user",
+            timestamp: Date.now(),
+            content: [{ type: "text", text: message }],
+          };
+          if (options?.streamingBehavior) {
+            delayedUserMessages.push(userMessage);
+          } else {
+            for (const handler of sessionSubscribers) {
+              handler({ type: "message_start", message: userMessage });
+            }
+            this.sessionManager.appendMessage(userMessage);
+          }
           if (!options?.streamingBehavior) {
             agentState.activeRun = true;
-            await new Promise(() => {});
+            await firstPromptGate;
           }
         },
         steer: async (message, images) => {
@@ -4111,7 +4150,12 @@ test(
         },
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
+        sessionManager: {
+          ...testSessionManager(() => session.messages || []),
+          appendMessage() {
+            return `persisted-${Date.now()}`;
+          },
+        },
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -4152,13 +4196,25 @@ test(
       assert.equal(typeof onData, "function");
       onData(
         Buffer.from(
-          `${JSON.stringify({ id: "turn-1", type: "prompt", message: "first" })}\n`,
+          `${JSON.stringify({ id: "turn-1", type: "prompt", message: "first", requestTag: "tag-1" })}\n`,
         ),
       );
       await wait(10);
       onData(
         Buffer.from(
           `${JSON.stringify({ id: "queue-1", type: "prompt", message: "steer me", streamingBehavior: "steer", requestTag: "tag-2" })}\n`,
+        ),
+      );
+      await wait(20);
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "queue-2", type: "prompt", message: "steer me", streamingBehavior: "steer", requestTag: "tag-3" })}\n`,
+        ),
+      );
+      await wait(20);
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "queue-duplicate", type: "prompt", message: "steer me", streamingBehavior: "steer", requestTag: "tag-2" })}\n`,
         ),
       );
       await wait(20);
@@ -4171,6 +4227,7 @@ test(
             images: undefined,
             streamingBehavior: undefined,
             source: "rpc",
+            requestTag: "tag-1",
           },
           false,
         ],
@@ -4185,9 +4242,56 @@ test(
           },
           true,
         ],
+        [
+          "prompt",
+          "steer me",
+          {
+            images: undefined,
+            streamingBehavior: "steer",
+            source: "rpc",
+            requestTag: "tag-3",
+          },
+          true,
+        ],
       ]);
       assert.equal(agentState.isStreaming, false);
       assert.ok(lines.join("").includes('"id":"queue-1"'));
+      const duplicateResponse = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .find((event) => event?.id === "queue-duplicate");
+      assert.equal(duplicateResponse?.data?.acceptedAs, "steer");
+      assert.equal(duplicateResponse?.data?.requestTag, "tag-2");
+      releaseFirstPrompt();
+      await wait(20);
+      for (const userMessage of delayedUserMessages) {
+        for (const handler of sessionSubscribers) {
+          handler({ type: "message_start", message: userMessage });
+        }
+        session.sessionManager.appendMessage(userMessage);
+      }
+      await wait(10);
+      const userStarts = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(
+          (event) =>
+            event?.type === "message_start" && event.message?.role === "user",
+        );
+      assert.deepEqual(
+        userStarts.map((event) => event.requestTag),
+        ["tag-1", "tag-2", "tag-3"],
+      );
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

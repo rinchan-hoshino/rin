@@ -17,6 +17,56 @@ const { createModelRegistry } = await import(
     path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
   ).href
 );
+test("rpc reconnect replaces an ephemeral session lost with the daemon", async () => {
+  const sent: any[] = [];
+  const session = new RpcInteractiveSession({
+    connect: async () => {},
+    send(payload: any) {
+      sent.push(payload);
+      if (payload.type === "select_session") {
+        return Promise.resolve({
+          success: false,
+          error: "rin_no_attached_session",
+        });
+      }
+      if (payload.type === "new_session") {
+        return Promise.resolve({
+          success: true,
+          data: { sessionId: "replacement-ephemeral" },
+        });
+      }
+      if (payload.type === "get_state") {
+        return Promise.resolve({
+          success: true,
+          data: { sessionId: "replacement-ephemeral" },
+        });
+      }
+      return Promise.resolve({ success: true, data: {} });
+    },
+    subscribe() {
+      return () => {};
+    },
+    isConnected() {
+      return true;
+    },
+  });
+  (session as any).sessionId = "lost-ephemeral";
+  (session as any).recoveryPending = true;
+
+  await (session as any).handleConnectionRestored();
+
+  assert.deepEqual(
+    sent
+      .filter((payload) =>
+        ["select_session", "new_session"].includes(payload.type),
+      )
+      .map((payload) => payload.type),
+    ["select_session", "new_session"],
+  );
+  assert.equal((session as any).sessionId, "replacement-ephemeral");
+  assert.equal((session as any).recoveryPending, false);
+});
+
 test("rpc prompt routes extension slash commands using daemon catalog authority", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({

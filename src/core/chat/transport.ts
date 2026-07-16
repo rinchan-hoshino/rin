@@ -15,6 +15,7 @@ import type {
   ChatOutboxPayload,
 } from "../rin-lib/chat-outbox.js";
 import { formatRinTodoChecklistCharacterContent } from "../rin-lib/todo-state.js";
+import { validateChatOutboxPayloadParts } from "./outbox-payload-validation.js";
 import {
   findBot,
   inferChatType,
@@ -327,8 +328,22 @@ function sendChatNodes(
   nodes: any[],
   options: Record<string, any> = {},
 ) {
+  const { beforeDispatch, ...sendOptions } = options;
   const { parsed, bot } = requireChatTarget(app, chatKey);
-  return sendBotMessage(bot, parsed.chatId, nodes, options);
+  if (typeof bot?.sendMessage !== "function") {
+    throw new Error(`chat_bot_send_unavailable:${parsed.platform}`);
+  }
+  beforeDispatch?.();
+  try {
+    return sendBotMessage(bot, parsed.chatId, nodes, sendOptions);
+  } catch (error: any) {
+    const preDispatchError =
+      error && typeof error === "object"
+        ? error
+        : new Error(safeString(error).trim() || "chat_dispatch_failed");
+    preDispatchError.chatOutboxPreDispatchFailure = true;
+    throw preDispatchError;
+  }
 }
 
 const CHAT_OUTBOX_ASYNC_PLATFORMS = new Set([
@@ -659,6 +674,9 @@ export async function messagePartToNode(part: ChatMessagePart, h: any) {
     if (!localPath && !remoteUrl) {
       throw new Error(`chat_outbox_invalid_part:${part.type}`);
     }
+    if (localPath && !fs.existsSync(localPath)) {
+      throw new Error(`chat_outbox_media_missing:${part.type}`);
+    }
     const attrs = {
       src: localPath ? localAssetUrl(localPath) : remoteUrl,
       mimeType:
@@ -677,11 +695,41 @@ export async function messagePartToNode(part: ChatMessagePart, h: any) {
   if (!localPath && !remoteUrl) {
     throw new Error("chat_outbox_invalid_part:file");
   }
+  if (localPath && !fs.existsSync(localPath)) {
+    throw new Error("chat_outbox_media_missing:file");
+  }
   return h.file(
     localPath ? localAssetUrl(localPath) : remoteUrl,
     safeString(filePart.mimeType).trim() || undefined,
     name ? { name } : undefined,
   );
+}
+
+export async function validateChatOutboxPayloadForDispatch(
+  payload: {
+    parts?: ChatMessagePart[];
+    replyToMessageId?: string;
+  },
+  h: any,
+) {
+  validateChatOutboxPayloadParts(payload);
+  const rawParts = Array.isArray(payload.parts)
+    ? payload.parts.filter(Boolean)
+    : [];
+  const replyToMessageId = safeString(payload.replyToMessageId).trim();
+  const deliveryParts =
+    replyToMessageId && !rawParts.some((part) => part.type === "quote")
+      ? ([
+          { type: "quote", id: replyToMessageId },
+          ...rawParts,
+        ] as ChatMessagePart[])
+      : rawParts;
+  if (!deliveryParts.length) throw new Error("chat_outbox_empty_message");
+  const nodes = (
+    await Promise.all(deliveryParts.map((part) => messagePartToNode(part, h)))
+  ).filter(Boolean);
+  if (!nodes.length) throw new Error("chat_outbox_empty_message");
+  return { deliveryParts, nodes };
 }
 
 function buildOutboundMessageRecord(rawParts: ChatMessagePart[]) {
@@ -722,23 +770,13 @@ export function sendOutboxPayload(
   payload: ChatOutboxPayload,
   h: any,
   outboxId = "",
+  options: { beforeDispatch?: () => void } = {},
 ) {
   const chatKey = normalizeOutboxChatKey(payload.chatKey);
   const session =
     payload.sessionBinding === "conversation"
       ? normalizeSessionRef(payload)
       : { sessionFile: undefined };
-  const rawParts = Array.isArray(payload.parts)
-    ? payload.parts.filter(Boolean)
-    : [];
-  const payloadReplyToMessageId = safeString(payload.replyToMessageId).trim();
-  const deliveryParts =
-    payloadReplyToMessageId && !rawParts.some((part) => part.type === "quote")
-      ? ([
-          { type: "quote", id: payloadReplyToMessageId },
-          ...rawParts,
-        ] as ChatMessagePart[])
-      : rawParts;
   let resolveDispatched: () => void = () => {};
   let rejectDispatched: (error: unknown) => void = () => {};
   const dispatched = new Promise<void>((resolve, reject) => {
@@ -747,33 +785,45 @@ export function sendOutboxPayload(
   });
   const delivery = (async () => {
     try {
-      if (!deliveryParts.length) throw new Error("chat_outbox_empty_message");
-      const nodes = (
-        await Promise.all(
-          deliveryParts.map((part) => messagePartToNode(part, h)),
-        )
-      ).filter(Boolean);
-      if (!nodes.length) throw new Error("chat_outbox_empty_message");
-
+      const { deliveryParts, nodes } =
+        await validateChatOutboxPayloadForDispatch(payload, h);
       const deliveryKind = safeString(payload.deliveryKind).trim() || "final";
       const chatDelivery = sendChatNodes(app, chatKey, nodes, {
         deliveryKind,
+        beforeDispatch: options.beforeDispatch,
         ...(payload.coalesceWithWorkingMessage
           ? { coalesceWithWorkingMessage: true }
           : {}),
         ...(outboxId ? { outboxId } : {}),
       });
-      resolveDispatched();
+      const providerDispatched = getChatDeliveryDispatchPromise(chatDelivery);
+      if (providerDispatched) {
+        void providerDispatched.then(resolveDispatched, rejectDispatched);
+      } else {
+        resolveDispatched();
+      }
       const deliveryResult = await chatDelivery;
 
-      return finalizeDeliveredAssistantOutput(agentDir, {
-        chatKey,
-        deliveryResult,
-        sessionFile: session.sessionFile,
-        sessionBinding: payload.sessionBinding,
-        deliveryKind,
-        ...buildOutboundMessageRecord(deliveryParts),
-      });
+      try {
+        return finalizeDeliveredAssistantOutput(agentDir, {
+          chatKey,
+          deliveryResult,
+          sessionFile: session.sessionFile,
+          sessionBinding: payload.sessionBinding,
+          deliveryKind,
+          ...buildOutboundMessageRecord(deliveryParts),
+        });
+      } catch (error: any) {
+        const persistenceError =
+          error && typeof error === "object"
+            ? error
+            : new Error(
+                safeString(error).trim() || "chat_delivery_persist_failed",
+              );
+        persistenceError.partialDelivery = true;
+        persistenceError.deliveredMessageIds = deliveryResult;
+        throw persistenceError;
+      }
     } catch (error) {
       rejectDispatched(error);
       throw error;

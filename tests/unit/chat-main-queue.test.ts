@@ -34,6 +34,7 @@ test("chat main consumes inbound localized help messages through the inbox path 
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const databaseMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
@@ -80,8 +81,18 @@ test("chat main consumes inbound localized help messages through the inbox path 
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
       const text = rows[0]?.text || "";
+      const db = databaseMod.openChatDatabase(agentDir);
+      const terminal = db.prepare(
+        "SELECT outbox.idempotency_key, outbox.post_delivery_json, turns.state " +
+        "FROM outbox JOIN turns ON turns.turn_id = outbox.turn_id " +
+        "WHERE outbox.delivery_kind = 'command_ack'",
+      ).all();
       if (
         rows.length !== 1 ||
+        terminal.length !== 1 ||
+        !terminal[0].idempotency_key ||
+        JSON.parse(terminal[0].post_delivery_json).markProcessed.messageId !== "m1" ||
+        terminal[0].state !== "terminal" ||
         !text.includes("/help — \u663e\u793a\u53ef\u7528\u547d\u4ee4") ||
         !text.includes("/usage — \u663e\u793a\u7528\u91cf\u548c\u914d\u989d\u72b6\u6001") ||
         text.includes("/model —") ||
@@ -108,6 +119,88 @@ test("chat main consumes inbound localized help messages through the inbox path 
           RIN_DIR: agentDir,
         },
         timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("chat send reports adapter dispatch as pending until delivery settles", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-main-dispatch-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const outboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js")).href);
+      const bridge = await mainMod.startChatBridge({ hosted: true });
+      bridge.app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        sendMessage() {
+          const delivery = new Promise((resolve) =>
+            setTimeout(() => resolve(["provider-late"]), 100),
+          );
+          delivery.dispatched = Promise.resolve();
+          return delivery;
+        },
+      });
+      const result = await bridge.send({
+        chatKey: "telegram/1:2",
+        parts: [{ type: "text", text: "async delivery" }],
+      });
+      if (result.delivered !== false || result.pending !== true || !result.outboxId) {
+        throw new Error(JSON.stringify(result));
+      }
+      const deadline = Date.now() + 3000;
+      let item;
+      while (Date.now() < deadline) {
+        item = outboxMod.readChatOutboxItemById(agentDir, result.outboxId)?.item;
+        if (item?.status === "delivered") break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      if (item?.status !== "delivered") throw new Error(JSON.stringify(item));
+      bridge.app.bots[0].sendMessage = () => {
+        const error = new Error("temporary network failure");
+        const delivery = Promise.reject(error);
+        delivery.dispatched = Promise.reject(error);
+        return delivery;
+      };
+      const queuedResult = await bridge.send({
+        chatKey: "telegram/1:2",
+        parts: [{ type: "text", text: "durably queued" }],
+      });
+      const queuedItem = outboxMod.readChatOutboxItemById(
+        agentDir,
+        queuedResult.outboxId,
+      )?.item;
+      await bridge.stop();
+      if (
+        queuedResult.delivered !== false ||
+        queuedResult.pending !== true ||
+        queuedItem?.status !== "queued"
+      ) {
+        throw new Error(JSON.stringify({ queuedResult, queuedItem }));
+      }
+      process.exit(0);
+    `;
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15_000,
       },
     );
   } finally {
@@ -326,8 +419,14 @@ test("chat startup does not restore inbox work before adapters are ready", async
         },
         elements: [{ type: "text", attrs: { content: "hello" } }],
       });
-      const pending = inbox.listPendingChatInboxFiles(agentDir);
-      if (pending.length !== 1 || !inbox.claimChatInboxFile(agentDir, pending[0])) {
+      const pending = inbox.listPendingChatInboxItems(agentDir);
+      if (
+        pending.length !== 1 ||
+        !inbox.claimChatInboxItem(agentDir, pending[0].itemId, {
+          nowMs: 0,
+          leaseMs: 1,
+        })
+      ) {
         throw new Error("processing_fixture_not_ready");
       }
 
@@ -391,7 +490,7 @@ test("chat startup does not restore inbox work before adapters are ready", async
   }
 });
 
-test("chat main restores every stranded processing inbox item on startup", async () => {
+test("chat main periodically restores processing inbox items whose startup lease expires later", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -435,19 +534,25 @@ test("chat main restores every stranded processing inbox item on startup", async
           elements: [{ type: "text", attrs: { content: "hello" } }],
         });
       }
-      for (const filePath of inbox.listPendingChatInboxFiles(agentDir)) {
-        inbox.claimChatInboxFile(agentDir, filePath);
+      for (const item of inbox.listPendingChatInboxItems(agentDir)) {
+        inbox.claimChatInboxItem(agentDir, item.itemId, {
+          nowMs: Date.now(),
+          leaseMs: 2500,
+        });
       }
-      if (inbox.listProcessingChatInboxFiles(agentDir).length !== 9) {
+      if (inbox.listRunningChatInboxItems(agentDir).length !== 9) {
         throw new Error("processing_fixture_not_ready");
       }
 
       const bridge = await mainMod.startChatBridge();
       try {
-        const deadline = Date.now() + 5000;
+        if (inbox.listRunningChatInboxItems(agentDir).length !== 9) {
+          throw new Error("startup_recovered_unexpired_lease");
+        }
+        const deadline = Date.now() + 6000;
         let processingCount = Infinity;
         while (Date.now() < deadline) {
-          processingCount = inbox.listProcessingChatInboxFiles(agentDir).length;
+          processingCount = inbox.listRunningChatInboxItems(agentDir).length;
           if (processingCount === 0) break;
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
@@ -1918,6 +2023,7 @@ test("chat main submits same-chat follow-up plainly before backend steer admissi
       const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.ts")).href);
       installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const inbox = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -1989,17 +2095,9 @@ test("chat main submits same-chat follow-up plainly before backend steer admissi
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
 
-      const listInbox = (name) => {
-        const dir = path.join(agentDir, "data", "chat", "inbox", name);
-        return fs.existsSync(dir)
-          ? fs.readdirSync(dir)
-              .filter((entry) => entry.endsWith(".json"))
-              .map((entry) => JSON.parse(fs.readFileSync(path.join(dir, entry), "utf8")))
-          : [];
-      };
-      const pendingItems = listInbox("pending");
-      const processingItems = listInbox("processing");
-      const failedItems = listInbox("failed");
+      const pendingItems = inbox.listChatInboxItems(agentDir, ["pending"]);
+      const processingItems = inbox.listChatInboxItems(agentDir, ["running"]);
+      const failedItems = inbox.listChatInboxItems(agentDir, ["failed"]);
       if (promptModes.length !== 2 || promptModes[0] !== "prompt" || promptModes[1] !== "prompt" || pendingItems.length || failedItems.length || processingItems.length < 1) {
         throw new Error(JSON.stringify({ promptModes, pendingItems, processingItems, failedItems }));
       }
@@ -2024,7 +2122,7 @@ test("chat main submits same-chat follow-up plainly before backend steer admissi
   }
 });
 
-test("chat main completes a steered inbox item after the inbound message is processed", async () => {
+test("chat main retries an inactive steered inbox item until terminal ownership commits", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2044,6 +2142,8 @@ test("chat main completes a steered inbox item after the inbound message is proc
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const chatHelpersMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js")).href);
+      const outbox = await import(pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js")).href);
+      const inbox = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -2052,21 +2152,34 @@ test("chat main completes a steered inbox item after the inbound message is proc
         trusted: [],
       });
 
-      const listInbox = (name) => {
-        const dir = path.join(agentDir, "data", "chat", "inbox", name);
-        return fs.existsSync(dir) ? fs.readdirSync(dir).filter((entry) => entry.endsWith(".json")) : [];
-      };
+      const listInbox = (name) =>
+        inbox.listChatInboxItems(agentDir, [name === "processing" ? "running" : name]);
 
       let runTurnCalls = 0;
       controllerMod.ChatController.prototype.runTurn = async function (input) {
         runTurnCalls += 1;
-        setTimeout(() => {
-          chatHelpersMod.markProcessedChatMessage(agentDir, this.chatKey, input.incomingMessageId, {
-            acceptedAt: new Date().toISOString(),
-            processedAt: new Date().toISOString(),
-            sessionFile: "/tmp/delivered-steer.jsonl",
+        if (runTurnCalls >= 2) {
+          outbox.enqueueChatOutboxPayload(agentDir, {
+            createdAt: new Date().toISOString(),
+            chatKey: this.chatKey,
+            parts: [{ type: "text", text: "delivered steer" }],
+          }, {
+            deliveryKind: "final",
+            postDelivery: {
+              markProcessed: {
+                chatKey: this.chatKey,
+                messageId: input.incomingMessageId,
+              },
+            },
           });
-        }, 100);
+          setTimeout(() => {
+            chatHelpersMod.markProcessedChatMessage(agentDir, this.chatKey, input.incomingMessageId, {
+              acceptedAt: new Date().toISOString(),
+              processedAt: new Date().toISOString(),
+              sessionFile: "/tmp/delivered-steer.jsonl",
+            });
+          }, 100);
+        }
         return { steered: true, sessionFile: "/tmp/delivered-steer.jsonl" };
       };
 
@@ -2094,10 +2207,10 @@ test("chat main completes a steered inbox item after the inbound message is proc
         elements: [h.createChatRuntimeH().text("delivered steer")],
       });
 
-      const deadline = Date.now() + 5000;
+      const deadline = Date.now() + 18000;
       while (Date.now() < deadline) {
         if (
-          runTurnCalls === 1 &&
+          runTurnCalls === 2 &&
           listInbox("pending").length === 0 &&
           listInbox("processing").length === 0 &&
           listInbox("failed").length === 0
@@ -2124,7 +2237,7 @@ test("chat main completes a steered inbox item after the inbound message is proc
           RIN_REPO_ROOT: rootDir,
           RIN_DIR: agentDir,
         },
-        timeout: 15000,
+        timeout: 22000,
       },
     );
   } finally {
@@ -2284,6 +2397,7 @@ test("hosted chat bridge shutdown detaches active frontends without aborting ses
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const inbox = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -2340,10 +2454,8 @@ test("hosted chat bridge shutdown detaches active frontends without aborting ses
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       await bridge.stop();
-      const processingDir = path.join(agentDir, "data", "chat", "inbox", "processing");
-      const failedDir = path.join(agentDir, "data", "chat", "inbox", "failed");
-      const processingFiles = fs.existsSync(processingDir) ? fs.readdirSync(processingDir).filter((name) => name.endsWith(".json")) : [];
-      const failedFiles = fs.existsSync(failedDir) ? fs.readdirSync(failedDir).filter((name) => name.endsWith(".json")) : [];
+      const processingFiles = inbox.listChatInboxItems(agentDir, ["pending", "running"]);
+      const failedFiles = inbox.listChatInboxItems(agentDir, ["failed"]);
       const assistantRows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
@@ -2391,6 +2503,7 @@ test("chat main requeues frontend lifecycle aborts without delivering an error",
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const inbox = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -2427,17 +2540,15 @@ test("chat main requeues frontend lifecycle aborts without delivering an error",
         elements: [h.createChatRuntimeH().text("update now")],
       });
 
-      const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");
-      const failedDir = path.join(agentDir, "data", "chat", "inbox", "failed");
       const deadline = Date.now() + 8000;
       let pendingFiles = [];
       while (Date.now() < deadline) {
-        pendingFiles = fs.existsSync(pendingDir) ? fs.readdirSync(pendingDir).filter((name) => name.endsWith(".json")) : [];
+        pendingFiles = inbox.listChatInboxItems(agentDir, ["pending"]);
         if (runTurnCalls >= 1 && pendingFiles.length) break;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
       await bridge.stop();
-      const failedFiles = fs.existsSync(failedDir) ? fs.readdirSync(failedDir).filter((name) => name.endsWith(".json")) : [];
+      const failedFiles = inbox.listChatInboxItems(agentDir, ["failed"]);
       const assistantRows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");

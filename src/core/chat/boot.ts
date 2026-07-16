@@ -1,8 +1,12 @@
 import {
   type ChatOutboxItem,
-  chatOutboxItemPath,
+  claimChatOutboxItem,
   listChatOutboxItems,
-  readChatOutboxItem,
+  listCommittedChatOutboxItems,
+  isCommittedTerminalChatOutboxItem,
+  markChatOutboxDispatchStarted,
+  markChatOutboxPostDeliveryApplied,
+  readChatOutboxItemById,
   writeChatOutboxItem,
 } from "../rin-lib/chat-outbox.js";
 import { createRinI18n } from "../i18n.js";
@@ -241,7 +245,7 @@ function isPermanentChatOutboxError(error: unknown) {
   const message = chatOutboxErrorMessage(error);
   return (
     isPartialChatDeliveryError(error) ||
-    /^(invalid_chatKey|no_bot_for_platform|chat_outbox_empty_message|chat_outbox_invalid_part|unsupported_chat_part|chat_part_file_missing|chat_media_file_missing)\b/.test(
+    /^(invalid_chatKey|chat_outbox_empty_message|chat_outbox_invalid_part|unsupported_chat_part|chat_part_file_missing|chat_media_file_missing)\b/.test(
       message,
     ) ||
     /\b(?:forbidden|blocked|bot was kicked|chat not found|recipient not found|not enough rights|message thread not found)\b/i.test(
@@ -342,7 +346,7 @@ function isOutboxItemDrainable(
 }
 
 function readCurrentOutboxItem(agentDir: string, itemId: string) {
-  return readChatOutboxItem(agentDir, chatOutboxItemPath(agentDir, itemId));
+  return readChatOutboxItemById(agentDir, itemId)?.item || null;
 }
 
 function isSameSendingAttempt(
@@ -352,7 +356,8 @@ function isSameSendingAttempt(
   return (
     current?.id === sending.id &&
     current.status === "sending" &&
-    current.attempts === sending.attempts
+    current.attempts === sending.attempts &&
+    current.ownerEpoch === sending.ownerEpoch
   );
 }
 
@@ -362,12 +367,6 @@ function createChatOutboxTimeoutError(timeoutMs: number) {
 
 function isChatOutboxTimeoutError(error: unknown) {
   return /^chat_outbox_delivery_timeout:/.test(chatOutboxErrorMessage(error));
-}
-
-function isAmbiguousDeliveryTimeout(error: unknown) {
-  return /(?:^chat_outbox_delivery_timeout:|\b(?:onebot_action_timeout|timeout|timed out)\b)/i.test(
-    chatOutboxErrorMessage(error),
-  );
 }
 
 async function withChatOutboxSendTimeout<T>(
@@ -417,22 +416,25 @@ function applyPostDelivery(agentDir: string, item: ChatOutboxItem) {
   const chatKey = safeString(
     markProcessed?.chatKey || item.payload?.chatKey,
   ).trim();
-  if (!messageId || !chatKey) return;
-  const bindSession = markProcessed?.bindSession !== false;
-  markProcessedChatMessage(agentDir, chatKey, messageId, {
-    ...(bindSession
-      ? { sessionFile: markProcessed?.sessionFile || item.payload?.sessionFile }
-      : {}),
-    acceptedAt: new Date().toISOString(),
-    processedAt: new Date().toISOString(),
-  });
+  if (messageId && chatKey) {
+    const bindSession = markProcessed?.bindSession !== false;
+    markProcessedChatMessage(agentDir, chatKey, messageId, {
+      ...(bindSession
+        ? {
+            sessionFile:
+              markProcessed?.sessionFile || item.payload?.sessionFile,
+          }
+        : {}),
+      acceptedAt: new Date().toISOString(),
+      processedAt: new Date().toISOString(),
+    });
+  }
+  markChatOutboxPostDeliveryApplied(agentDir, item.id);
 }
 
 export function reconcileCommittedChatOutboxProcessing(agentDir: string) {
   let reconciled = 0;
-  for (const { item } of listChatOutboxItems(agentDir)) {
-    if (item.deliveryKind !== "final" && item.deliveryKind !== "error")
-      continue;
+  for (const item of listCommittedChatOutboxItems(agentDir)) {
     if (!item.postDelivery?.markProcessed) continue;
     applyPostDelivery(agentDir, item);
     reconciled += 1;
@@ -466,7 +468,10 @@ function deliveredUnconfirmedChatOutboxItem(
     status: "delivered",
     updatedAt: new Date().toISOString(),
     deliveredAt: new Date().toISOString(),
-    deliveryResult: item.deliveryResult || [],
+    deliveryResult:
+      partialDeliveryMessageIds(error).length > 0
+        ? partialDeliveryMessageIds(error)
+        : item.deliveryResult || [],
     deliveryUnconfirmed: true,
     lastError: chatOutboxErrorMessage(error),
     nextAttemptAt: undefined,
@@ -477,12 +482,13 @@ function deliveredUnconfirmedChatOutboxItem(
 function failedChatOutboxItem(
   sending: ChatOutboxItem,
   error: unknown,
+  options: { preserveRetryable?: boolean } = {},
 ): ChatOutboxItem | null {
   const message = chatOutboxErrorMessage(error);
   const partialDelivered = partialDeliveryMessageIds(error);
   const permanent = isPermanentChatOutboxError(error);
   const exhausted = sending.attempts >= CHAT_OUTBOX_MAX_ATTEMPTS;
-  if (!permanent && !exhausted) return null;
+  if (!permanent && (options.preserveRetryable || !exhausted)) return null;
   return {
     ...sending,
     status: "failed",
@@ -535,9 +541,35 @@ function settleChatOutboxFailure(
   sending: ChatOutboxItem,
   error: unknown,
 ) {
-  const failed = failedChatOutboxItem(sending, error);
+  if (
+    sending.dispatchStartedAt &&
+    !(error as any)?.chatOutboxPreDispatchFailure
+  ) {
+    const delivered = deliveredUnconfirmedChatOutboxItem(sending, error);
+    if (!writeChatOutboxItem(agentDir, delivered)) {
+      return {
+        status: "superseded" as const,
+        error: "chat_outbox_attempt_superseded",
+      };
+    }
+    applyPostDelivery(agentDir, delivered);
+    warnChatOutboxDeliveryUnconfirmed(logger, delivered, error);
+    return {
+      status: "delivered" as const,
+      deliveryUnconfirmed: true,
+      error: chatOutboxErrorMessage(error),
+    };
+  }
+  const failed = failedChatOutboxItem(sending, error, {
+    preserveRetryable: isCommittedTerminalChatOutboxItem(agentDir, sending.id),
+  });
   if (failed) {
-    writeChatOutboxItem(agentDir, failed);
+    if (!writeChatOutboxItem(agentDir, failed)) {
+      return {
+        status: "superseded" as const,
+        error: "chat_outbox_attempt_superseded",
+      };
+    }
     warnChatOutboxFailure(logger, failed, error, "failed");
     return {
       status: "failed" as const,
@@ -545,7 +577,12 @@ function settleChatOutboxFailure(
     };
   }
   const queued = queuedChatOutboxItem(sending, error);
-  writeChatOutboxItem(agentDir, queued);
+  if (!writeChatOutboxItem(agentDir, queued)) {
+    return {
+      status: "superseded" as const,
+      error: "chat_outbox_attempt_superseded",
+    };
+  }
   warnChatOutboxFailure(logger, queued, error, "queued");
   return {
     status: "queued" as const,
@@ -561,7 +598,7 @@ function settleLateChatOutboxSuccess(
   const current = readCurrentOutboxItem(agentDir, sending.id);
   if (!isSameSendingAttempt(current, sending)) return;
   const delivered = deliveredChatOutboxItem(current, deliveryResult);
-  writeChatOutboxItem(agentDir, delivered);
+  if (!writeChatOutboxItem(agentDir, delivered)) return;
   applyPostDelivery(agentDir, delivered);
 }
 
@@ -573,20 +610,23 @@ function settleLateChatOutboxFailure(
 ) {
   const current = readCurrentOutboxItem(agentDir, sending.id);
   if (!isSameSendingAttempt(current, sending)) return;
-  const failed = failedChatOutboxItem(current, error);
-  if (failed) {
-    writeChatOutboxItem(agentDir, failed);
-    warnChatOutboxFailure(logger, failed, error, "failed");
-    return;
-  }
-  if (isAmbiguousDeliveryTimeout(error)) {
+  if (current.dispatchStartedAt) {
     const delivered = deliveredUnconfirmedChatOutboxItem(current, error);
-    writeChatOutboxItem(agentDir, delivered);
+    if (!writeChatOutboxItem(agentDir, delivered)) return;
+    applyPostDelivery(agentDir, delivered);
     warnChatOutboxDeliveryUnconfirmed(logger, delivered, error);
     return;
   }
+  const failed = failedChatOutboxItem(current, error, {
+    preserveRetryable: isCommittedTerminalChatOutboxItem(agentDir, current.id),
+  });
+  if (failed) {
+    if (!writeChatOutboxItem(agentDir, failed)) return;
+    warnChatOutboxFailure(logger, failed, error, "failed");
+    return;
+  }
   const queued = queuedChatOutboxItem(current, error);
-  writeChatOutboxItem(agentDir, queued);
+  if (!writeChatOutboxItem(agentDir, queued)) return;
   warnChatOutboxFailure(logger, queued, error, "queued");
 }
 
@@ -604,9 +644,38 @@ async function drainChatOutboxItem(
   if (!isOutboxItemDrainable(item, Date.now(), options)) {
     return null;
   }
-  if (isOutboxItemExpired(item, options)) {
-    const failed = expiredChatOutboxItem(item);
-    writeChatOutboxItem(agentDir, failed);
+  const timeoutMs = getChatOutboxSendTimeoutMs(item, options);
+  const leaseUntil = new Date(
+    Date.now() + timeoutMs + retryLeaseMs(options),
+  ).toISOString();
+  const sending = claimChatOutboxItem(agentDir, item.id, { leaseUntil });
+  if (!sending) return null;
+  if (sending.claimedFromStatus === "sending" && sending.dispatchStartedAt) {
+    const recoveryError = new Error("chat_outbox_recovered_ambiguous");
+    const delivered = deliveredUnconfirmedChatOutboxItem(
+      sending,
+      recoveryError,
+    );
+    if (!writeChatOutboxItem(agentDir, delivered)) return null;
+    applyPostDelivery(agentDir, delivered);
+    warnChatOutboxDeliveryUnconfirmed(logger, delivered, recoveryError);
+    return {
+      status: "delivered" as const,
+      deliveryUnconfirmed: true,
+      error: recoveryError.message,
+    };
+  }
+  if (
+    isOutboxItemExpired(sending, options) &&
+    !isCommittedTerminalChatOutboxItem(agentDir, sending.id)
+  ) {
+    const failed = expiredChatOutboxItem(sending);
+    if (!writeChatOutboxItem(agentDir, failed)) {
+      return {
+        status: "superseded" as const,
+        error: "chat_outbox_attempt_superseded",
+      };
+    }
     warnChatOutboxFailure(
       logger,
       failed,
@@ -618,17 +687,6 @@ async function drainChatOutboxItem(
       error: "chat_outbox_expired",
     };
   }
-  const timeoutMs = getChatOutboxSendTimeoutMs(item, options);
-  const sending: ChatOutboxItem = {
-    ...item,
-    status: "sending",
-    attempts: item.attempts + 1,
-    updatedAt: new Date().toISOString(),
-    nextAttemptAt: new Date(
-      Date.now() + timeoutMs + retryLeaseMs(options),
-    ).toISOString(),
-  };
-  writeChatOutboxItem(agentDir, sending);
   let deliveryTask: ReturnType<typeof sendOutboxPayload>;
   try {
     deliveryTask = sendOutboxPayload(
@@ -637,6 +695,18 @@ async function drainChatOutboxItem(
       sending.payload,
       h,
       sending.id,
+      {
+        beforeDispatch() {
+          const dispatchStartedAt = markChatOutboxDispatchStarted(
+            agentDir,
+            sending,
+          );
+          if (!dispatchStartedAt) {
+            throw new Error("chat_outbox_attempt_superseded");
+          }
+          sending.dispatchStartedAt = dispatchStartedAt;
+        },
+      },
     );
   } catch (error: any) {
     return settleChatOutboxFailure(agentDir, logger, sending, error);
@@ -659,19 +729,59 @@ async function drainChatOutboxItem(
           retryAfterMs: timeoutMs + retryLeaseMs(options),
         },
       );
-      writeChatOutboxItem(agentDir, queued);
+      const queuedWritten = writeChatOutboxItem(agentDir, queued);
       void deliveryTask.then(
         (deliveryResult) =>
           settleLateChatOutboxSuccess(agentDir, sending, deliveryResult),
         (lateError) =>
           settleLateChatOutboxFailure(agentDir, logger, sending, lateError),
       );
-      return {
-        status: "dispatched" as const,
-      };
+      return queuedWritten
+        ? { status: "dispatched" as const }
+        : {
+            status: "superseded" as const,
+            error: "chat_outbox_attempt_superseded",
+          };
     } catch (error: any) {
+      if (isChatOutboxTimeoutError(error)) {
+        const inFlight = queuedChatOutboxItem(sending, error, {
+          keepSending: true,
+          retryAfterMs: retryLeaseMs(options),
+        });
+        const inFlightWritten = writeChatOutboxItem(agentDir, inFlight);
+        if (inFlightWritten) {
+          warnChatOutboxFailure(logger, inFlight, error, "queued");
+        }
+        void deliveryTask.then(
+          (deliveryResult) =>
+            settleLateChatOutboxSuccess(agentDir, sending, deliveryResult),
+          (lateError) =>
+            settleLateChatOutboxFailure(agentDir, logger, sending, lateError),
+        );
+        return inFlightWritten
+          ? {
+              status: "dispatched" as const,
+              error: chatOutboxErrorMessage(error),
+            }
+          : {
+              status: "superseded" as const,
+              error: "chat_outbox_attempt_superseded",
+            };
+      }
       void deliveryTask.catch(() => {});
-      return settleChatOutboxFailure(agentDir, logger, sending, error);
+      const preDispatchError =
+        error && typeof error === "object"
+          ? error
+          : new Error(chatOutboxErrorMessage(error));
+      if (!partialDeliveryMessageIds(preDispatchError).length) {
+        (preDispatchError as any).chatOutboxPreDispatchFailure = true;
+      }
+      return settleChatOutboxFailure(
+        agentDir,
+        logger,
+        sending,
+        preDispatchError,
+      );
     }
   }
   try {
@@ -680,7 +790,12 @@ async function drainChatOutboxItem(
       timeoutMs,
     );
     const delivered = deliveredChatOutboxItem(sending, deliveryResult);
-    writeChatOutboxItem(agentDir, delivered);
+    if (!writeChatOutboxItem(agentDir, delivered)) {
+      return {
+        status: "superseded" as const,
+        error: "chat_outbox_attempt_superseded",
+      };
+    }
     applyPostDelivery(agentDir, delivered);
     return {
       status: "delivered" as const,
@@ -692,18 +807,25 @@ async function drainChatOutboxItem(
         keepSending: true,
         retryAfterMs: retryLeaseMs(options),
       });
-      writeChatOutboxItem(agentDir, queued);
-      warnChatOutboxFailure(logger, queued, error, "queued");
+      const queuedWritten = writeChatOutboxItem(agentDir, queued);
+      if (queuedWritten) {
+        warnChatOutboxFailure(logger, queued, error, "queued");
+      }
       void deliveryTask.then(
         (deliveryResult) =>
           settleLateChatOutboxSuccess(agentDir, sending, deliveryResult),
         (lateError) =>
           settleLateChatOutboxFailure(agentDir, logger, sending, lateError),
       );
-      return {
-        status: "queued" as const,
-        error: chatOutboxErrorMessage(error),
-      };
+      return queuedWritten
+        ? {
+            status: "queued" as const,
+            error: chatOutboxErrorMessage(error),
+          }
+        : {
+            status: "superseded" as const,
+            error: "chat_outbox_attempt_superseded",
+          };
     }
     return settleChatOutboxFailure(agentDir, logger, sending, error);
   }
@@ -733,7 +855,31 @@ async function drainChatOutboxNowForChat(
   chatKey: string,
   options: ChatOutboxDrainOptions = {},
 ) {
-  const results: Array<{ id: string; status?: string }> = [];
+  const results: Array<{
+    id: string;
+    status?: string;
+    deliveryResult?: string[];
+    error?: string;
+  }> = [];
+  const targetId = safeString(options.itemId).trim();
+  if (targetId) {
+    const terminal = readChatOutboxItemById(agentDir, targetId)?.item;
+    if (
+      terminal?.payload.chatKey === chatKey &&
+      (terminal.status === "delivered" || terminal.status === "failed")
+    ) {
+      if (terminal.status === "delivered")
+        applyPostDelivery(agentDir, terminal);
+      return [
+        {
+          id: terminal.id,
+          status: terminal.status,
+          deliveryResult: terminal.deliveryResult || [],
+          ...(terminal.lastError ? { error: terminal.lastError } : {}),
+        },
+      ];
+    }
+  }
   for (const item of filterDrainableChatOutboxItems(agentDir, {
     ...options,
     chatKey,

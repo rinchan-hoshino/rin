@@ -51,8 +51,8 @@ test("chat runtime persists inbound sessions before emitting message events", as
   };
 
   const delivered = app.emit("message", session);
-  const files = inbox.listPendingChatInboxFiles(agentDir);
-  const stored = inbox.readChatInboxItem(files[0]);
+  const files = inbox.listPendingChatInboxItems(agentDir);
+  const stored = files[0];
 
   assert.equal(delivered, true);
   assert.deepEqual(seen, ["m1"]);
@@ -82,8 +82,8 @@ test("chat runtime qualifies second bot keys for the same platform", async () =>
     elements: [{ type: "text", attrs: { content: "hello" } }],
   });
 
-  const files = inbox.listPendingChatInboxFiles(agentDir);
-  const stored = inbox.readChatInboxItem(files[0]);
+  const files = inbox.listPendingChatInboxItems(agentDir);
+  const stored = files[0];
 
   assert.equal(files.length, 1);
   assert.equal(stored.chatKey, "discord/bot-2:channel-1");
@@ -151,8 +151,8 @@ test("discord runtime persists guild channel paths as chat names", async () => {
       content: "hello",
     });
 
-    const files = inbox.listPendingChatInboxFiles(agentDir);
-    const stored = inbox.readChatInboxItem(files[0]);
+    const files = inbox.listPendingChatInboxItems(agentDir);
+    const stored = files[0];
 
     assert.equal(files.length, 1);
     assert.equal(stored?.chatKey, "discord/bot-discord:thread-1");
@@ -236,8 +236,8 @@ test("chat runtime derives the durable chat key from normalized chat identity", 
   };
 
   app.emit("message", session);
-  const files = inbox.listPendingChatInboxFiles(agentDir);
-  const stored = inbox.readChatInboxItem(files[0]);
+  const files = inbox.listPendingChatInboxItems(agentDir);
+  const stored = files[0];
 
   assert.equal(files.length, 1);
   assert.equal(stored.chatKey, "onebot/1:private:42");
@@ -284,8 +284,8 @@ test("onebot group sessions preserve both group card and account nickname", asyn
   assert.equal(seen[0].author.nickname, "AccountNick");
   assert.equal(seen[0].author.groupNickname, "GroupCard");
   assert.equal(seen[0].author.accountNickname, undefined);
-  const files = inbox.listPendingChatInboxFiles(agentDir);
-  const stored = inbox.readChatInboxItem(files[0]);
+  const files = inbox.listPendingChatInboxItems(agentDir);
+  const stored = files[0];
   assert.equal(stored.routing?.nickname, "AccountNick");
   assert.equal(stored.session?.author?.nickname, "AccountNick");
   assert.equal(stored.session?.author?.groupNickname, "GroupCard");
@@ -549,7 +549,7 @@ test("slack runtime acks only after the inbound event is emitted", async () => {
   const envelope = {
     type: "events_api",
     ack: async () => {
-      order.push(`ack:${inbox.listPendingChatInboxFiles(agentDir).length}`);
+      order.push(`ack:${inbox.listPendingChatInboxItems(agentDir).length}`);
     },
     body: {
       event: {
@@ -841,8 +841,8 @@ test("lark runtime reads merged forward messages into inbound text", async () =>
   assert.match(seen[0].content, /Bob: image: img-key/);
   assert.doesNotMatch(seen[0].content, /Merged and Forwarded Message/);
 
-  const files = inbox.listPendingChatInboxFiles(agentDir);
-  const stored = inbox.readChatInboxItem(files[0]);
+  const files = inbox.listPendingChatInboxItems(agentDir);
+  const stored = files[0];
   assert.match(stored.routing?.text, /Alice: hello/);
   assert.doesNotMatch(stored.routing?.text, /Merged and Forwarded Message/);
 });
@@ -884,8 +884,8 @@ test("lark runtime maps reply parent ids to canonical quote metadata", async () 
 
   assert.equal(seen.length, 1);
   assert.deepEqual(seen[0].quote, { messageId: "om-parent" });
-  const files = inbox.listPendingChatInboxFiles(agentDir);
-  const stored = inbox.readChatInboxItem(files[0]);
+  const files = inbox.listPendingChatInboxItems(agentDir);
+  const stored = files[0];
   assert.equal(stored.routing?.replyToMessageId, "om-parent");
 });
 
@@ -990,8 +990,8 @@ test("lark runtime downloads image message resources before inbox persistence", 
   assert.match(seen[0].elements[0].attrs.src, /^file:\/\//);
   assert.equal(seen[0].elements[0].attrs.mimeType, "image/png");
 
-  const files = inbox.listPendingChatInboxFiles(agentDir);
-  const stored = inbox.readChatInboxItem(files[0]);
+  const files = inbox.listPendingChatInboxItems(agentDir);
+  const stored = files[0];
   assert.match(stored.elements[0].attrs.src, /^file:\/\//);
   assert.equal(stored.elements[0].attrs.mimeType, "image/png");
 });
@@ -1063,8 +1063,8 @@ test("onebot runtime reads merged forward messages into inbound text", async () 
   assert.doesNotMatch(seen[0].content, /\[CQ:forward/);
   assert.equal(seen[0].elements[0].type, "forward");
 
-  const files = inbox.listPendingChatInboxFiles(agentDir);
-  const stored = inbox.readChatInboxItem(files[0]);
+  const files = inbox.listPendingChatInboxItems(agentDir);
+  const stored = files[0];
   assert.match(stored.routing?.text, /Alice: hello/);
   assert.doesNotMatch(stored.routing?.text, /\[CQ:forward/);
 });

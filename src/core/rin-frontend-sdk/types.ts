@@ -84,7 +84,12 @@ export type RinFrontendBackendEvent =
       isStreaming?: boolean;
     }
   | { type: "turn_accepted"; requestTag?: string }
-  | { type: "user_message_start"; text: string; userMessageId?: string }
+  | {
+      type: "user_message_start";
+      text: string;
+      userMessageId?: string;
+      requestTag?: string;
+    }
   | {
       type: "user_message_persisted";
       sessionLeafId: string;
@@ -103,9 +108,9 @@ export type RinFrontendBackendEvent =
   | { type: "external_working_start" }
   | { type: "external_working_end" }
   | { type: "working_visible"; visible: boolean }
-  | { type: "assistant_stream"; text: string }
-  | { type: "assistant_summary"; text: string }
-  | { type: "assistant_interim"; text: string }
+  | { type: "assistant_stream"; text: string; requestTag?: string }
+  | { type: "assistant_summary"; text: string; requestTag?: string }
+  | { type: "assistant_interim"; text: string; requestTag?: string }
   | {
       type: "assistant_final";
       text: string;

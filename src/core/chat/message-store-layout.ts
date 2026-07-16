@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { normalizeLocalDateOnly } from "./date.js";
 import { parseChatKey } from "./support.js";
-import { chatDataPath } from "../data-layout.js";
+import { chatDataPath, dataPath } from "../data-layout.js";
 import { safeString } from "../text-utils.js";
 
 export type ChatMessageStoreRoot = {
@@ -75,7 +75,10 @@ function detectChatMessageStoreLayout(rootDir: string) {
   const preferredRoot = buildChatMessageStoreRoot(
     chatDataPath(rootDir, "message-store"),
   );
-  return buildChatMessageStoreLayout(preferredRoot, []);
+  return buildChatMessageStoreLayout(preferredRoot, [
+    buildChatMessageStoreRoot(dataPath(rootDir, "koishi-message-store")),
+    buildChatMessageStoreRoot(dataPath(rootDir, "chat-message-store")),
+  ]);
 }
 
 export function getChatMessageStoreLayout(agentDir: string) {

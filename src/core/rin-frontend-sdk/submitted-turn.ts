@@ -46,6 +46,13 @@ function messageText(message: unknown) {
   return safeString(value?.text).trim();
 }
 
+function messageRequestTag(message: unknown) {
+  const outer = message && typeof message === "object" ? (message as any) : {};
+  return safeString(
+    messageValue(message)?.requestTag || outer?.requestTag,
+  ).trim();
+}
+
 function messageTimestampMs(message: unknown) {
   const outer = message && typeof message === "object" ? (message as any) : {};
   const raw = messageValue(message)?.timestamp ?? outer?.timestamp;
@@ -71,22 +78,36 @@ function findSubmittedTurnFailure(messages: unknown[]) {
 
 export function resolveSubmittedTurnFromMessages(
   messages: unknown[],
-  input: { text: string; sentAt?: number },
+  input: { text: string; sentAt?: number; requestTag?: string },
   options: { turnActive?: boolean } = {},
 ): RinSubmittedTurnResolution {
   const sentAt = Number(input.sentAt || 0);
-  if (!Number.isFinite(sentAt) || sentAt <= 0) return null;
+  const validSentAt = Number.isFinite(sentAt) && sentAt > 0;
   const promptText = safeString(input.text).trim();
-  if (!promptText) return null;
+  const requestTag = safeString(input.requestTag).trim();
+  if (!promptText || (!requestTag && !validSentAt)) return null;
 
   let submittedIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (messageRole(message) !== "user") continue;
-    if (messageTimestampMs(message) < sentAt) continue;
-    if (messageText(message) !== promptText) continue;
-    submittedIndex = index;
-    break;
+  if (requestTag) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (messageRole(message) !== "user") continue;
+      if (messageRequestTag(message) !== requestTag) continue;
+      submittedIndex = index;
+      break;
+    }
+  }
+  if (submittedIndex < 0) {
+    const legacyMatches: number[] = [];
+    for (let index = 0; index < messages.length; index += 1) {
+      const message = messages[index];
+      if (messageRole(message) !== "user") continue;
+      if (messageRequestTag(message)) continue;
+      if (!validSentAt || messageTimestampMs(message) < sentAt) continue;
+      if (messageText(message) !== promptText) continue;
+      legacyMatches.push(index);
+    }
+    if (legacyMatches.length === 1) submittedIndex = legacyMatches[0];
   }
   if (submittedIndex < 0) return null;
 

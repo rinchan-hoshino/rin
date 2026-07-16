@@ -64,12 +64,53 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat controller setup is missing a controller key. Recreate the chat binding.",
   chat_controller_disposed: () =>
     "Rin restarted the chat controller while handling this message.",
+  chat_database_chatKey_required: () =>
+    "Chat database access failed because the chat key is missing.",
+  chat_database_future_schema: (detail) =>
+    withDetail("The chat database was created by a newer Rin version", detail),
+  chat_database_incomplete_schema: () =>
+    "The chat database schema is incomplete.",
+  chat_database_partial_schema: () =>
+    "The chat database contains a partial schema.",
+  chat_database_schema_fingerprint_mismatch: () =>
+    "The chat database schema integrity check failed.",
+  chat_database_schema_version_mismatch: () =>
+    "The chat database schema version does not match its metadata.",
+  chat_database_unsupported_schema: (detail) =>
+    withDetail("The chat database schema version is unsupported", detail),
   chat_final_assistant_text_missing: () =>
     "Rin finished the chat turn but did not produce reply text.",
   chat_inbox_chatKey_required: () =>
     "Chat inbox write failed because the chat key is missing. Check the adapter event.",
   chat_inbox_messageId_required: () =>
     "Chat inbox write failed because the message id is missing. Check the adapter event.",
+  chat_inbox_claim_required: () =>
+    "Chat inbox update failed because its processing claim is missing.",
+  chat_inbox_claim_lost_during_classification: () =>
+    "Chat inbox ownership changed while classifying the message.",
+  chat_inbox_message_commit_failed: () =>
+    "Chat inbox write failed while committing the inbound message.",
+  chat_inbox_message_identity_required: () =>
+    "Chat inbox write failed because the inbound message identity is incomplete.",
+  chat_inbox_turn_commit_failed: () =>
+    "Chat inbox write failed while committing the turn ledger.",
+  chat_legacy_migration_archive_collision: (detail) =>
+    withDetail("Legacy chat migration found an existing archive", detail),
+  chat_legacy_migration_invalid_inbox: (detail) =>
+    withDetail("Legacy chat migration found an invalid inbox item", detail),
+  chat_legacy_migration_invalid_inbox_chat_key: () =>
+    "Legacy chat migration found an invalid inbox chat key.",
+  chat_legacy_migration_invalid_json: (detail) =>
+    withDetail("Legacy chat migration found invalid JSON", detail),
+  chat_legacy_migration_invalid_message_identity: () =>
+    "Legacy chat migration found a message with incomplete identity.",
+  chat_legacy_migration_invalid_outbox: (detail) =>
+    withDetail("Legacy chat migration found an invalid outbox item", detail),
+  chat_legacy_migration_unknown_state: (detail) =>
+    withDetail(
+      "Legacy chat migration found an unknown migration state",
+      detail,
+    ),
   chat_message_id_required: () =>
     "Chat action failed because the target message is missing. Choose a message.",
   chat_reaction_emoji_required: () =>
@@ -86,6 +127,10 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat reply is still waiting in the outbox.",
   chat_outbox_empty_message: () =>
     "Chat send failed because the outgoing message is empty. Add text or an attachment.",
+  chat_outbox_claim_read_failed: () =>
+    "Chat outbox could not read back its delivery claim.",
+  chat_outbox_attempt_superseded: () =>
+    "Chat delivery was replaced by a newer outbox attempt.",
   chat_outbox_idempotency_collision: () =>
     "Chat outbox found a duplicate delivery key. Check the outgoing payload.",
   chat_outbox_invalid_json: () =>
@@ -94,6 +139,22 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat send failed because the outgoing payload is invalid. Add text or message parts.",
   chat_outbox_invalid_part: () =>
     "Chat send failed because one message part is invalid. Fix the rich message part.",
+  chat_outbox_media_missing: () =>
+    "Chat send failed because a local attachment is missing.",
+  chat_generation_nonterminal_send_in_flight: () =>
+    "Chat reset is waiting for an earlier delivery to settle.",
+  chat_legacy_migration_archive_changed: () =>
+    "Chat data migration stopped because the legacy archive changed.",
+  chat_legacy_migration_invalid_message_timestamp: () =>
+    "Chat data migration stopped because a legacy message timestamp is invalid.",
+  chat_legacy_migration_invalid_timestamp: () =>
+    "Chat data migration stopped because a legacy control timestamp is invalid.",
+  chat_legacy_migration_source_changed: () =>
+    "Chat data migration stopped because legacy data changed after import.",
+  chat_legacy_migration_source_changed_during_import: () =>
+    "Chat data migration stopped because legacy data changed during import.",
+  chat_legacy_migration_source_recreated: () =>
+    "Chat data migration stopped because legacy data reappeared after cutover.",
   chat_restored_session_mismatch: () =>
     "Rin detected that the chat turn switched to a different session while recovering.",
   chat_send_at_id_required: () =>
@@ -103,6 +164,12 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   chat_text_required: () =>
     "Chat handling failed because the incoming text is empty. Send a non-empty message.",
   chat_turn_aborted: () => "The chat turn was aborted.",
+  chat_turn_fence_lost: () =>
+    "The chat turn expired before its reply could be committed. Rin will use the current turn owner.",
+  chat_turn_id_required: () =>
+    "Chat turn update failed because the turn id is missing.",
+  chat_turn_owner_epoch_required: () =>
+    "Chat turn update failed because the owner fence is missing.",
 
   agent_practices_fetch_failed: () =>
     "Agent practice document refresh failed because a remote file could not be downloaded.",

@@ -1,5 +1,4 @@
-import path from "node:path";
-import { createHash } from "node:crypto";
+import crypto, { createHash } from "node:crypto";
 
 import {
   asArray,
@@ -7,23 +6,19 @@ import {
   cloneJsonIfObject,
   isJsonRecord,
 } from "../json-utils.js";
-import {
-  claimFileToDir,
-  listJsonFiles,
-  moveFileToDir,
-  removeFileIfExists,
-  writeJsonAtomic,
-} from "../platform/fs.js";
-import {
-  buildChatInboxRouting,
-  serializeChatInboxSession,
-} from "./inbound-normalization.js";
-import { hasInboundChatMessageReplyBoundary } from "./chat-helpers.js";
-import { listChatMessages, type StoredChatMessage } from "./message-store.js";
-import { parseChatKey, readJsonFile } from "./support.js";
 import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
-import { chatDataPath } from "../data-layout.js";
+import {
+  buildChatInboxRouting,
+  buildInboundStoredChatMessageInput,
+  serializeChatInboxSession,
+} from "./inbound-normalization.js";
+import { openChatDatabase } from "./database.js";
+import {
+  saveInboundChatMessageInDatabase,
+  type StoredChatMessage,
+} from "./message-store.js";
+import { parseChatKey } from "./support.js";
 
 function hashKey(value: string) {
   return createHash("sha1").update(value).digest("hex");
@@ -41,6 +36,13 @@ export type ChatInboxItemRouting = {
   replyToMessageId?: string;
 };
 
+export type ChatInboxItemState =
+  | "pending"
+  | "running"
+  | "terminal"
+  | "failed"
+  | "superseded";
+
 export type ChatInboxItem = {
   version: 1;
   itemId: string;
@@ -56,16 +58,24 @@ export type ChatInboxItem = {
   routing: ChatInboxItemRouting;
   session: Record<string, unknown>;
   elements: any[];
+  state?: ChatInboxItemState;
+  ownerEpoch?: string;
+  leaseUntil?: string;
+};
+
+export type ClaimedChatInboxItem = ChatInboxItem & {
+  state: "running";
+  ownerEpoch: string;
 };
 
 export type RestoredChatInboxProcessingItem = {
   itemId: string;
-  filePath: string;
+  chatKey: string;
+  messageId: string;
 };
 
 export type RestoredChatInboxOrphanedItem = {
   itemId: string;
-  filePath: string;
   chatKey: string;
   messageId: string;
 };
@@ -86,27 +96,8 @@ export type ChatInboxRecoveryReport = {
   skippedOrphans: ChatInboxOrphanRecoverySkippedCounts;
 };
 
-export function chatInboxDir(agentDir: string) {
-  return chatDataPath(agentDir, "inbox");
-}
-
-function pendingDir(agentDir: string) {
-  return path.join(chatInboxDir(agentDir), "pending");
-}
-
-function processingDir(agentDir: string) {
-  return path.join(chatInboxDir(agentDir), "processing");
-}
-
-function failedDir(agentDir: string) {
-  return path.join(chatInboxDir(agentDir), "failed");
-}
-
-function itemFileName(itemId: string) {
-  return `${itemId}.json`;
-}
-
 const RECOVERABLE_ACCEPTED_INBOX_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_CHAT_INBOX_LEASE_MS = 5 * 60 * 1000;
 
 export function buildChatInboxItem(input: {
   chatKey: string;
@@ -131,37 +122,109 @@ export function buildChatInboxItem(input: {
     routing: buildChatInboxRouting(input.session, input.elements),
     session: serializeChatInboxSession(input.session),
     elements: cloneJson(asArray(input.elements)),
+    state: "pending" as const,
   } satisfies ChatInboxItem;
 }
 
-function findExistingChatInboxItem(agentDir: string, itemId: string) {
-  const fileName = itemFileName(itemId);
-  for (const dir of [processingDir(agentDir), pendingDir(agentDir)]) {
-    const filePath = path.join(dir, fileName);
-    const item = readChatInboxItem(filePath);
-    if (item) return { item, filePath };
+function parseJsonObject(value: unknown) {
+  try {
+    const parsed = JSON.parse(safeString(value));
+    return isJsonRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
   }
-  return null;
 }
 
-function isChatInboxFileInDir(filePath: string, dir: string) {
-  return path.resolve(path.dirname(filePath)) === path.resolve(dir);
+function parseJsonArray(value: unknown) {
+  try {
+    const parsed = JSON.parse(safeString(value));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
-function mergeDuplicatePendingChatInboxItem(
-  current: ChatInboxItem,
-  incoming: ChatInboxItem,
-): ChatInboxItem {
-  const now = nowIso();
+function rowToChatInboxItem(row: any): ChatInboxItem | null {
+  if (!row) return null;
+  const chatKey = safeString(row.chat_key).trim();
+  const messageId = safeString(row.message_id).trim();
+  if (!chatKey || !messageId) return null;
+  const state = safeString(row.state) as ChatInboxItemState;
   return {
-    ...current,
-    routing: incoming.routing || current.routing,
-    session: incoming.session || current.session,
-    elements: incoming.elements?.length ? incoming.elements : current.elements,
-    updatedAt: now,
-    lastReceivedAt: now,
-    duplicateCount: Math.max(0, Number(current.duplicateCount || 0)) + 1,
+    version: 1,
+    itemId: safeString(row.turn_id),
+    chatKey,
+    messageId,
+    createdAt: safeString(row.created_at),
+    updatedAt: safeString(row.updated_at),
+    attemptCount: Math.max(0, Number(row.attempt || 0)),
+    nextAttemptAt: safeString(row.next_attempt_at).trim() || undefined,
+    lastError: safeString(row.last_error).trim() || undefined,
+    routing: parseJsonObject(row.routing_json) as ChatInboxItemRouting,
+    session: parseJsonObject(row.session_json),
+    elements: parseJsonArray(row.elements_json),
+    state,
+    ownerEpoch: safeString(row.owner_epoch).trim() || undefined,
+    leaseUntil: safeString(row.lease_until).trim() || undefined,
   };
+}
+
+const INBOX_SELECT = `
+  SELECT turns.*, messages.message_id
+  FROM turns
+  JOIN messages ON messages.id = turns.inbound_message_id
+`;
+
+function getTurnRow(db: ReturnType<typeof openChatDatabase>, itemId: string) {
+  return db
+    .prepare(`${INBOX_SELECT} WHERE turns.turn_id = ?`)
+    .get(safeString(itemId).trim()) as any;
+}
+
+export function isChatInboxItemAccepted(agentDir: string, itemId: string) {
+  return Boolean(
+    openChatDatabase(agentDir)
+      .prepare(
+        `SELECT 1
+         FROM turns
+         JOIN messages ON messages.id = turns.inbound_message_id
+         WHERE turns.turn_id = ? AND messages.accepted_at IS NOT NULL
+         LIMIT 1`,
+      )
+      .get(safeString(itemId).trim()),
+  );
+}
+
+export function getChatInboxItem(agentDir: string, itemId: string) {
+  return rowToChatInboxItem(getTurnRow(openChatDatabase(agentDir), itemId));
+}
+
+export function listChatInboxItems(
+  agentDir: string,
+  states: ChatInboxItemState[] = ["pending"],
+) {
+  const normalized = states.filter((state) =>
+    ["pending", "running", "terminal", "failed", "superseded"].includes(state),
+  );
+  if (!normalized.length) return [];
+  const placeholders = normalized.map(() => "?").join(", ");
+  return openChatDatabase(agentDir)
+    .prepare(
+      `${INBOX_SELECT}
+       WHERE turns.state IN (${placeholders})
+       ORDER BY turns.chat_key, turns.sequence, turns.turn_id`,
+    )
+    .all(...normalized)
+    .map(rowToChatInboxItem)
+    .filter((item): item is ChatInboxItem => Boolean(item));
+}
+
+export function listPendingChatInboxItems(agentDir: string) {
+  return listChatInboxItems(agentDir, ["pending"]);
+}
+
+export function listRunningChatInboxItems(agentDir: string) {
+  return listChatInboxItems(agentDir, ["running"]);
 }
 
 export function enqueueChatInboxItem(
@@ -169,32 +232,502 @@ export function enqueueChatInboxItem(
   input: { chatKey: string; messageId: string; session: any; elements: any[] },
 ) {
   const item = buildChatInboxItem(input);
-  const existing = findExistingChatInboxItem(agentDir, item.itemId);
-  if (existing) {
-    if (isChatInboxFileInDir(existing.filePath, processingDir(agentDir))) {
-      return existing;
-    }
-    return writeChatInboxItem(
-      existing.filePath,
-      mergeDuplicatePendingChatInboxItem(existing.item, item),
-    );
-  }
-  return writeChatInboxItem(
-    path.join(pendingDir(agentDir), itemFileName(item.itemId)),
-    item,
+  const messageInput = buildInboundStoredChatMessageInput(
+    input.session,
+    input.elements,
+    { chatKey: item.chatKey, receivedAt: item.createdAt },
   );
+  if (!messageInput) throw new Error("chat_inbox_message_identity_required");
+  const db = openChatDatabase(agentDir);
+  return db
+    .transaction(() => {
+      const record = saveInboundChatMessageInDatabase(
+        db,
+        agentDir,
+        messageInput,
+      );
+      const messageRow = db
+        .prepare(
+          `SELECT id, sequence, generation FROM messages WHERE chat_key = ? AND message_id = ?`,
+        )
+        .get(item.chatKey, item.messageId) as any;
+      if (!messageRow) throw new Error("chat_inbox_message_commit_failed");
+      const existing = getTurnRow(db, item.itemId);
+      if (!existing) {
+        db.prepare(
+          `INSERT INTO turns (
+            turn_id, inbound_message_id, chat_key, generation, sequence, state,
+            terminal_kind, owner_epoch, attempt, lease_until, heartbeat_at,
+            next_attempt_at, last_error, routing_json, session_json,
+            elements_json, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, 0, NULL, NULL,
+                    NULL, NULL, ?, ?, ?, ?, ?)`,
+        ).run(
+          item.itemId,
+          messageRow.id,
+          item.chatKey,
+          Number(messageRow.generation),
+          Number(messageRow.sequence),
+          JSON.stringify(item.routing),
+          JSON.stringify(item.session),
+          JSON.stringify(item.elements),
+          item.createdAt,
+          item.updatedAt,
+        );
+      } else if (existing.state === "pending") {
+        db.prepare(
+          `UPDATE turns
+           SET routing_json = ?, session_json = ?, elements_json = ?, updated_at = ?
+           WHERE turn_id = ? AND state = 'pending'`,
+        ).run(
+          JSON.stringify(item.routing),
+          JSON.stringify(item.session),
+          JSON.stringify(item.elements),
+          nowIso(),
+          item.itemId,
+        );
+      }
+      const next = rowToChatInboxItem(getTurnRow(db, item.itemId));
+      if (!next) throw new Error("chat_inbox_turn_commit_failed");
+      const duplicateCount = Math.max(0, Number(record.duplicateCount || 0));
+      return {
+        item: {
+          ...next,
+          duplicateCount: duplicateCount || undefined,
+          lastReceivedAt: record.lastReceivedAt,
+        },
+      };
+    })
+    .immediate();
 }
 
-export function listPendingChatInboxFiles(agentDir: string) {
-  return listJsonFiles(pendingDir(agentDir));
+export function claimChatInboxItem(
+  agentDir: string,
+  itemId: string,
+  options: { leaseMs?: number; nowMs?: number } = {},
+): ClaimedChatInboxItem | null {
+  const db = openChatDatabase(agentDir);
+  const ownerEpoch = crypto.randomUUID();
+  const nowMs = Number(options.nowMs ?? Date.now());
+  const timestamp = new Date(nowMs).toISOString();
+  const leaseUntil = new Date(
+    nowMs + Math.max(1, Number(options.leaseMs || DEFAULT_CHAT_INBOX_LEASE_MS)),
+  ).toISOString();
+  return db
+    .transaction(() => {
+      const result = db
+        .prepare(
+          `UPDATE turns
+         SET state = 'running', owner_epoch = ?, attempt = attempt + 1,
+             lease_until = ?, heartbeat_at = ?, updated_at = ?
+         WHERE turn_id = ? AND state = 'pending'
+           AND (next_attempt_at IS NULL OR next_attempt_at <= ?)`,
+        )
+        .run(ownerEpoch, leaseUntil, timestamp, timestamp, itemId, timestamp);
+      if (result.changes !== 1) return null;
+      return rowToChatInboxItem(getTurnRow(db, itemId)) as ClaimedChatInboxItem;
+    })
+    .immediate();
 }
 
-export function listProcessingChatInboxFiles(agentDir: string) {
-  return listJsonFiles(processingDir(agentDir));
+function requireClaim(item: ChatInboxItem) {
+  const itemId = safeString(item?.itemId).trim();
+  const ownerEpoch = safeString(item?.ownerEpoch).trim();
+  const attempt = Math.max(0, Number(item?.attemptCount || 0));
+  if (!itemId || !ownerEpoch || attempt < 1) {
+    throw new Error("chat_inbox_claim_required");
+  }
+  return { itemId, ownerEpoch, attempt };
 }
 
-export function readChatInboxItem(filePath: string) {
-  return readJsonFile<ChatInboxItem | null>(filePath, null);
+export function classifyClaimedChatInboxItem(
+  agentDir: string,
+  item: ClaimedChatInboxItem,
+  disposition: "record_only" | "actionable" | "superseded",
+) {
+  const claim = requireClaim(item);
+  const db = openChatDatabase(agentDir);
+  return db
+    .transaction(() => {
+      const owned = db
+        .prepare(
+          `SELECT inbound_message_id FROM turns
+           WHERE turn_id = ? AND state = 'running'
+             AND owner_epoch = ? AND attempt = ?`,
+        )
+        .get(claim.itemId, claim.ownerEpoch, claim.attempt) as any;
+      if (!owned) return false;
+      return (
+        db
+          .prepare(`UPDATE messages SET disposition = ? WHERE id = ?`)
+          .run(disposition, owned.inbound_message_id).changes === 1
+      );
+    })
+    .immediate();
+}
+
+export function touchClaimedChatInboxItem(
+  agentDir: string,
+  item: ClaimedChatInboxItem,
+  options: { leaseMs?: number; nowMs?: number } = {},
+) {
+  const claim = requireClaim(item);
+  const nowMs = Number(options.nowMs ?? Date.now());
+  const timestamp = new Date(nowMs).toISOString();
+  const leaseUntil = new Date(
+    nowMs + Math.max(1, Number(options.leaseMs || DEFAULT_CHAT_INBOX_LEASE_MS)),
+  ).toISOString();
+  const result = openChatDatabase(agentDir)
+    .prepare(
+      `UPDATE turns
+     SET lease_until = ?, heartbeat_at = ?, updated_at = ?
+     WHERE turn_id = ? AND state = 'running' AND owner_epoch = ? AND attempt = ?`,
+    )
+    .run(
+      leaseUntil,
+      timestamp,
+      timestamp,
+      claim.itemId,
+      claim.ownerEpoch,
+      claim.attempt,
+    );
+  return result.changes === 1;
+}
+
+export function completeClaimedChatInboxItem(
+  agentDir: string,
+  item: ClaimedChatInboxItem,
+  options: {
+    terminalKind?: string;
+    disposition?: "record_only" | "actionable" | "superseded";
+  } = {},
+) {
+  const claim = requireClaim(item);
+  const db = openChatDatabase(agentDir);
+  return db
+    .transaction(() => {
+      const current = getTurnRow(db, claim.itemId);
+      if (current?.state === "terminal") return true;
+      const timestamp = nowIso();
+      const result = db
+        .prepare(
+          `UPDATE turns
+         SET state = 'terminal', terminal_kind = ?, owner_epoch = NULL,
+             lease_until = NULL, heartbeat_at = NULL, next_attempt_at = NULL,
+             last_error = NULL, updated_at = ?
+         WHERE turn_id = ? AND state = 'running' AND owner_epoch = ? AND attempt = ?`,
+        )
+        .run(
+          safeString(options.terminalKind).trim() || "completed",
+          timestamp,
+          claim.itemId,
+          claim.ownerEpoch,
+          claim.attempt,
+        );
+      if (result.changes !== 1) return false;
+      db.prepare(
+        `UPDATE messages SET disposition = ?
+         WHERE id = (SELECT inbound_message_id FROM turns WHERE turn_id = ?)`,
+      ).run(options.disposition || "actionable", claim.itemId);
+      return true;
+    })
+    .immediate();
+}
+
+export function requeueClaimedChatInboxItem(
+  agentDir: string,
+  item: ClaimedChatInboxItem,
+  options: { delayMs: number; error?: string },
+) {
+  const claim = requireClaim(item);
+  const timestamp = nowIso();
+  const nextAttemptAt = new Date(
+    Date.now() + Math.max(0, Number(options.delayMs || 0)),
+  ).toISOString();
+  const result = openChatDatabase(agentDir)
+    .prepare(
+      `UPDATE turns
+     SET state = 'pending', owner_epoch = NULL, lease_until = NULL,
+         heartbeat_at = NULL, next_attempt_at = ?, last_error = ?, updated_at = ?
+     WHERE turn_id = ? AND state = 'running' AND owner_epoch = ? AND attempt = ?`,
+    )
+    .run(
+      nextAttemptAt,
+      safeString(options.error).trim() || null,
+      timestamp,
+      claim.itemId,
+      claim.ownerEpoch,
+      claim.attempt,
+    );
+  return result.changes === 1 ? getChatInboxItem(agentDir, claim.itemId) : null;
+}
+
+export function failClaimedChatInboxItem(
+  agentDir: string,
+  item: ClaimedChatInboxItem,
+  error?: string,
+) {
+  const claim = requireClaim(item);
+  const timestamp = nowIso();
+  const result = openChatDatabase(agentDir)
+    .prepare(
+      `UPDATE turns
+     SET state = 'failed', terminal_kind = 'attempts_exhausted',
+         owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL,
+         next_attempt_at = NULL, last_error = ?, updated_at = ?
+     WHERE turn_id = ? AND state = 'running' AND owner_epoch = ? AND attempt = ?`,
+    )
+    .run(
+      safeString(error).trim() || null,
+      timestamp,
+      claim.itemId,
+      claim.ownerEpoch,
+      claim.attempt,
+    );
+  return result.changes === 1 ? getChatInboxItem(agentDir, claim.itemId) : null;
+}
+
+export function releaseClaimedChatInboxItem(
+  agentDir: string,
+  item: ClaimedChatInboxItem,
+) {
+  return requeueClaimedChatInboxItem(agentDir, item, { delayMs: 0 });
+}
+
+export function restoreProcessingChatInboxItems(
+  agentDir: string,
+  options: { nowMs?: number; limit?: number } = {},
+) {
+  const db = openChatDatabase(agentDir);
+  const timestamp = new Date(Number(options.nowMs ?? Date.now())).toISOString();
+  const limit = Math.max(0, Math.floor(Number(options.limit || 0)));
+  return db
+    .transaction(() => {
+      const rows = db
+        .prepare(
+          `${INBOX_SELECT}
+         WHERE turns.state = 'running'
+           AND (turns.lease_until IS NULL OR turns.lease_until <= ?)
+         ORDER BY turns.sequence, turns.turn_id
+         ${limit ? `LIMIT ${limit}` : ""}`,
+        )
+        .all(timestamp) as any[];
+      const restored: RestoredChatInboxProcessingItem[] = [];
+      for (const row of rows) {
+        const result = db
+          .prepare(
+            `UPDATE turns
+           SET state = 'pending', owner_epoch = NULL, lease_until = NULL,
+               heartbeat_at = NULL, updated_at = ?
+           WHERE turn_id = ? AND state = 'running'
+             AND (lease_until IS NULL OR lease_until <= ?)`,
+          )
+          .run(timestamp, row.turn_id, timestamp);
+        if (result.changes === 1) {
+          restored.push({
+            itemId: safeString(row.turn_id),
+            chatKey: safeString(row.chat_key),
+            messageId: safeString(row.message_id),
+          });
+        }
+      }
+      return restored;
+    })
+    .immediate();
+}
+
+function storedChatMessageToInboxSession(record: StoredChatMessage) {
+  const text = safeString(
+    record.strippedContent || record.text || record.rawContent,
+  ).trim();
+  const timestamp =
+    Number(record.platformTimestamp) ||
+    Date.parse(record.receivedAt) ||
+    Date.now();
+  const session: Record<string, any> = {
+    platform: safeString(record.platform).trim(),
+    selfId: safeString(record.botId).trim(),
+    channelId: safeString(record.chatId).trim(),
+    userId: safeString(record.userId).trim(),
+    messageId: safeString(record.messageId).trim(),
+    timestamp,
+    content: safeString(record.rawContent || record.text || text),
+    stripped: { content: text },
+    isDirect: record.chatType === "private",
+  };
+  if (record.nickname) session.author = { name: record.nickname };
+  if (record.chatName) session.channelName = record.chatName;
+  if (record.quote && typeof record.quote === "object")
+    session.quote = record.quote;
+  return session;
+}
+
+function storedChatMessageToInboxElements(record: StoredChatMessage) {
+  if (Array.isArray(record.elements) && record.elements.length)
+    return cloneJson(record.elements);
+  const text = safeString(record.strippedContent || record.text).trim();
+  return text ? [{ type: "text", attrs: { content: text } }] : [];
+}
+
+function emptySkippedCounts(): ChatInboxOrphanRecoverySkippedCounts {
+  return {
+    invalid: 0,
+    notAccepted: 0,
+    stale: 0,
+    processed: 0,
+    replyBoundary: 0,
+    superseded: 0,
+    existingInbox: 0,
+  };
+}
+
+export function restoreOrphanedAcceptedChatInboxItems(
+  agentDir: string,
+  options: { nowMs?: number; maxAgeMs?: number; limit?: number } = {},
+) {
+  return restoreOrphanedAcceptedChatInboxItemsWithReport(agentDir, options)
+    .restored;
+}
+
+function restoreOrphanedAcceptedChatInboxItemsWithReport(
+  agentDir: string,
+  options: { nowMs?: number; maxAgeMs?: number; limit?: number } = {},
+) {
+  const db = openChatDatabase(agentDir);
+  const nowMs = Number(options.nowMs ?? Date.now());
+  const maxAgeMs = Math.max(
+    0,
+    Number(options.maxAgeMs ?? RECOVERABLE_ACCEPTED_INBOX_MAX_AGE_MS),
+  );
+  const cutoff = new Date(nowMs - maxAgeMs).toISOString();
+  const limit = Math.max(0, Math.floor(Number(options.limit || 0)));
+  const skipped = emptySkippedCounts();
+  const restored: RestoredChatInboxOrphanedItem[] = [];
+  db.transaction(() => {
+    const rows = db
+      .prepare(
+        `SELECT messages.*
+       FROM messages
+       WHERE role = 'user' AND accepted_at IS NOT NULL AND processed_at IS NULL
+         AND disposition = 'unclassified' AND accepted_at >= ?
+         AND NOT EXISTS (
+           SELECT 1 FROM turns WHERE turns.inbound_message_id = messages.id
+         )
+       ORDER BY chat_key, sequence
+       ${limit ? `LIMIT ${limit}` : ""}`,
+      )
+      .all(cutoff) as any[];
+    for (const row of rows) {
+      let record: StoredChatMessage;
+      try {
+        record = JSON.parse(safeString(row.record_json));
+      } catch {
+        skipped.invalid += 1;
+        continue;
+      }
+      if (
+        !parseChatKey(record.chatKey) ||
+        !safeString(record.messageId).trim()
+      ) {
+        skipped.invalid += 1;
+        continue;
+      }
+      const replyBoundary = db
+        .prepare(
+          `SELECT 1 FROM messages
+         WHERE chat_key = ? AND role = 'assistant' AND reply_to_message_id = ?
+           AND processed_at IS NOT NULL
+           AND COALESCE(delivery_kind, 'final') NOT IN ('interim', 'passive_notice')
+         LIMIT 1`,
+        )
+        .get(record.chatKey, record.messageId);
+      if (replyBoundary) {
+        skipped.replyBoundary += 1;
+        continue;
+      }
+      const laterHandled = db
+        .prepare(
+          `SELECT 1 FROM messages
+         WHERE chat_key = ? AND role = 'user' AND sequence > ?
+           AND processed_at IS NOT NULL
+         LIMIT 1`,
+        )
+        .get(record.chatKey, Number(row.sequence));
+      if (laterHandled) {
+        skipped.superseded += 1;
+        db.prepare(
+          `UPDATE messages SET disposition = 'superseded' WHERE id = ?`,
+        ).run(row.id);
+        continue;
+      }
+      const session = storedChatMessageToInboxSession(record);
+      const elements = storedChatMessageToInboxElements(record);
+      const item = buildChatInboxItem({
+        chatKey: record.chatKey,
+        messageId: record.messageId,
+        session,
+        elements,
+      });
+      const inserted = db
+        .prepare(
+          `INSERT INTO turns (
+            turn_id, inbound_message_id, chat_key, generation, sequence, state,
+            terminal_kind, owner_epoch, attempt, lease_until, heartbeat_at,
+            next_attempt_at, last_error, routing_json, session_json,
+            elements_json, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, 0, NULL, NULL,
+                    NULL, NULL, ?, ?, ?, ?, ?)
+          ON CONFLICT(inbound_message_id) DO NOTHING`,
+        )
+        .run(
+          item.itemId,
+          row.id,
+          record.chatKey,
+          Number(row.generation),
+          Number(row.sequence),
+          JSON.stringify(item.routing),
+          JSON.stringify(item.session),
+          JSON.stringify(item.elements),
+          item.createdAt,
+          item.updatedAt,
+        );
+      if (inserted.changes === 1) {
+        restored.push({
+          itemId: item.itemId,
+          chatKey: record.chatKey,
+          messageId: record.messageId,
+        });
+      }
+    }
+  }).immediate();
+  return { restored, skipped };
+}
+
+export function reconcileChatInboxRecovery(
+  agentDir: string,
+  options: {
+    nowMs?: number;
+    processing?: { limit?: number };
+    orphans?: { maxAgeMs?: number; limit?: number };
+  } = {},
+): ChatInboxRecoveryReport {
+  const nowMs = Number(options.nowMs ?? Date.now());
+  const restoredProcessing = restoreProcessingChatInboxItems(agentDir, {
+    ...(options.processing || {}),
+    nowMs,
+  });
+  const orphanReport = restoreOrphanedAcceptedChatInboxItemsWithReport(
+    agentDir,
+    {
+      ...(options.orphans || {}),
+      nowMs,
+    },
+  );
+  return {
+    restoredProcessing,
+    restoredOrphans: orphanReport.restored,
+    skippedOrphans: orphanReport.skipped,
+  };
 }
 
 function asRecord(value: unknown): Record<string, any> {
@@ -218,59 +751,7 @@ function mergeSessionRecord(
     Object.entries(patch).filter(([, value]) => value !== undefined),
   );
   if (!Object.keys(next).length) return;
-  session[key] = {
-    ...asRecord(session[key]),
-    ...next,
-  };
-}
-
-function updateChatInboxItem(
-  item: ChatInboxItem,
-  patch: Partial<ChatInboxItem>,
-): ChatInboxItem {
-  return {
-    ...item,
-    attemptCount: Number(item.attemptCount || 0) + 1,
-    updatedAt: nowIso(),
-    ...patch,
-  };
-}
-
-function writeChatInboxItem(filePath: string, item: ChatInboxItem) {
-  writeJsonAtomic(filePath, item);
-  return { item, filePath };
-}
-
-function moveChatInboxItem(
-  filePath: string,
-  targetDir: string,
-  item: ChatInboxItem,
-) {
-  const targetPath = path.join(targetDir, itemFileName(item.itemId));
-  writeJsonAtomic(targetPath, item);
-  completeChatInboxFile(filePath);
-  return { item, filePath: targetPath };
-}
-
-function normalizeChatInboxError(value: unknown) {
-  return safeString(value).trim() || undefined;
-}
-
-function applyChatInboxAttemptState(
-  item: ChatInboxItem,
-  options: {
-    delayMs?: number;
-    error?: string;
-    clearNextAttemptAt?: boolean;
-  } = {},
-) {
-  const delayMs = Math.max(0, Number(options.delayMs || 0));
-  return updateChatInboxItem(item, {
-    nextAttemptAt: options.clearNextAttemptAt
-      ? undefined
-      : new Date(Date.now() + delayMs).toISOString(),
-    lastError: normalizeChatInboxError(options.error),
-  });
+  session[key] = { ...asRecord(session[key]), ...next };
 }
 
 export function restoreChatInboxSession(item: ChatInboxItem, bot?: any) {
@@ -279,10 +760,8 @@ export function restoreChatInboxSession(item: ChatInboxItem, bot?: any) {
     item?.routing && typeof item.routing === "object" ? item.routing : null;
   if (bot) session.bot = bot;
   if (!routing) return session;
-
   session.isDirect = Boolean(routing.isDirect);
   session.userId = pickTrimmedString(session.userId, routing.userId);
-
   if (routing.text || routing.mentionLike) {
     mergeSessionRecord(session, "stripped", {
       content: routing.text
@@ -291,7 +770,6 @@ export function restoreChatInboxSession(item: ChatInboxItem, bot?: any) {
       appel: routing.mentionLike ? true : undefined,
     });
   }
-
   if (routing.replyToMessageId) {
     mergeSessionRecord(session, "quote", {
       messageId: pickTrimmedString(
@@ -300,302 +778,16 @@ export function restoreChatInboxSession(item: ChatInboxItem, bot?: any) {
       ),
     });
   }
-
   if (routing.nickname) {
     mergeSessionRecord(session, "author", {
       name: pickTrimmedString(session?.author?.name, routing.nickname),
     });
   }
-
   if (routing.chatName) {
     session.channelName = pickTrimmedString(
       session?.channelName,
       routing.chatName,
     );
   }
-
   return session;
-}
-
-export function claimChatInboxFile(agentDir: string, filePath: string) {
-  const claimedPath = claimFileToDir(filePath, processingDir(agentDir));
-  const item = claimedPath ? readChatInboxItem(claimedPath) : null;
-  if (item) touchChatInboxFile(claimedPath, item);
-  return claimedPath;
-}
-
-export function completeChatInboxFile(filePath: string) {
-  removeFileIfExists(filePath);
-}
-
-export function touchChatInboxFile(filePath: string, item: ChatInboxItem) {
-  writeChatInboxItem(filePath, {
-    ...item,
-    updatedAt: nowIso(),
-  });
-}
-
-export function restoreChatInboxFile(
-  agentDir: string,
-  filePath: string,
-  item: ChatInboxItem,
-) {
-  const targetPath = moveFileToDir(
-    filePath,
-    pendingDir(agentDir),
-    itemFileName(item.itemId),
-  );
-  return { item, filePath: targetPath };
-}
-
-export function requeueChatInboxFile(
-  agentDir: string,
-  filePath: string,
-  item: ChatInboxItem,
-  options: { delayMs: number; error?: string },
-) {
-  return moveChatInboxItem(
-    filePath,
-    pendingDir(agentDir),
-    applyChatInboxAttemptState(item, options),
-  );
-}
-
-export function failChatInboxFile(
-  agentDir: string,
-  filePath: string,
-  item: ChatInboxItem,
-  error?: string,
-) {
-  return moveChatInboxItem(
-    filePath,
-    failedDir(agentDir),
-    applyChatInboxAttemptState(item, {
-      error,
-      clearNextAttemptAt: true,
-    }),
-  );
-}
-
-export function restoreProcessingChatInboxFiles(
-  agentDir: string,
-  options: { staleMs?: number; nowMs?: number; limit?: number } = {},
-) {
-  const restored: RestoredChatInboxProcessingItem[] = [];
-  const staleMs = Number(options.staleMs || 0);
-  const nowMs = Number(options.nowMs ?? Date.now());
-  const limit = Math.max(0, Number(options.limit || 0));
-  for (const filePath of listProcessingChatInboxFiles(agentDir)) {
-    if (limit > 0 && restored.length >= limit) break;
-    const item = readChatInboxItem(filePath);
-    if (!item) {
-      completeChatInboxFile(filePath);
-      continue;
-    }
-    if (staleMs > 0) {
-      const updatedAtMs = Date.parse(safeString(item.updatedAt || ""));
-      if (Number.isFinite(updatedAtMs) && nowMs - updatedAtMs < staleMs) {
-        continue;
-      }
-    }
-    const next = restoreChatInboxFile(agentDir, filePath, item);
-    restored.push({ itemId: item.itemId, filePath: next.filePath });
-  }
-  return restored;
-}
-
-function chatMessageReceivedAtMs(record: StoredChatMessage) {
-  const receivedAt = Date.parse(safeString(record.receivedAt || ""));
-  if (Number.isFinite(receivedAt)) return receivedAt;
-  const platformTimestamp = Number(record.platformTimestamp);
-  return Number.isFinite(platformTimestamp) ? platformTimestamp : 0;
-}
-
-function hasExistingInboxFile(agentDir: string, itemId: string) {
-  const fileName = itemFileName(itemId);
-  const matches = (filePath: string) => {
-    const baseName = path.basename(filePath);
-    return baseName === fileName || baseName.startsWith(`${itemId}.`);
-  };
-  return [
-    ...listPendingChatInboxFiles(agentDir),
-    ...listProcessingChatInboxFiles(agentDir),
-    ...listJsonFiles(failedDir(agentDir)),
-  ].some(matches);
-}
-
-function storedChatMessageToInboxSession(record: StoredChatMessage) {
-  const text = safeString(
-    record.strippedContent || record.text || record.rawContent || "",
-  ).trim();
-  const timestamp = chatMessageReceivedAtMs(record) || Date.now();
-  const session: Record<string, any> = {
-    platform: safeString(record.platform).trim(),
-    selfId: safeString(record.botId).trim(),
-    channelId: safeString(record.chatId).trim(),
-    userId: safeString(record.userId).trim(),
-    messageId: safeString(record.messageId).trim(),
-    timestamp,
-    content: safeString(record.rawContent || record.text || text),
-    stripped: { content: text },
-    isDirect: record.chatType === "private",
-  };
-  const nickname = safeString(record.nickname).trim();
-  if (nickname) session.author = { name: nickname };
-  const chatName = safeString(record.chatName).trim();
-  if (chatName) session.channelName = chatName;
-  if (record.quote && typeof record.quote === "object") {
-    session.quote = Object.fromEntries(
-      Object.entries(record.quote).filter(([, value]) =>
-        Boolean(safeString(value).trim()),
-      ),
-    );
-  }
-  return session;
-}
-
-function storedChatMessageToInboxElements(record: StoredChatMessage) {
-  if (Array.isArray(record.elements) && record.elements.length) {
-    return cloneJson(record.elements);
-  }
-  const text = safeString(record.strippedContent || record.text || "").trim();
-  return text ? [{ type: "text", attrs: { content: text } }] : [];
-}
-
-function hasLaterHandledUserMessage(
-  agentDir: string,
-  record: StoredChatMessage,
-  messages: StoredChatMessage[],
-) {
-  const recordTime = chatMessageReceivedAtMs(record);
-  if (!recordTime) return false;
-  return messages.some((item) => {
-    if (item.role !== "user") return false;
-    if (item.chatKey !== record.chatKey) return false;
-    if (item.messageId === record.messageId) return false;
-    if (chatMessageReceivedAtMs(item) <= recordTime) return false;
-    return Boolean(
-      safeString(item.processedAt || "").trim() ||
-      hasInboundChatMessageReplyBoundary(
-        agentDir,
-        item.chatKey,
-        item.messageId,
-      ),
-    );
-  });
-}
-
-function emptyChatInboxOrphanRecoverySkippedCounts(): ChatInboxOrphanRecoverySkippedCounts {
-  return {
-    invalid: 0,
-    notAccepted: 0,
-    stale: 0,
-    processed: 0,
-    replyBoundary: 0,
-    superseded: 0,
-    existingInbox: 0,
-  };
-}
-
-function restoreOrphanedAcceptedChatInboxItemsWithReport(
-  agentDir: string,
-  options: { nowMs?: number; maxAgeMs?: number; limit?: number } = {},
-) {
-  const restored: RestoredChatInboxOrphanedItem[] = [];
-  const skipped = emptyChatInboxOrphanRecoverySkippedCounts();
-  const nowMs = Number(options.nowMs ?? Date.now());
-  const maxAgeMs = Math.max(
-    0,
-    Number(options.maxAgeMs ?? RECOVERABLE_ACCEPTED_INBOX_MAX_AGE_MS),
-  );
-  const limit = Math.max(0, Number(options.limit || 0));
-  const messages = listChatMessages(agentDir);
-  for (const record of messages) {
-    if (limit > 0 && restored.length >= limit) break;
-    if (record.role !== "user") continue;
-    const chatKey = safeString(record.chatKey).trim();
-    const messageId = safeString(record.messageId).trim();
-    if (!chatKey || !parseChatKey(chatKey) || !messageId) {
-      skipped.invalid += 1;
-      continue;
-    }
-    const acceptedAtMs = Date.parse(safeString(record.acceptedAt || ""));
-    if (!Number.isFinite(acceptedAtMs)) {
-      skipped.notAccepted += 1;
-      continue;
-    }
-    if (maxAgeMs > 0 && nowMs - acceptedAtMs > maxAgeMs) {
-      skipped.stale += 1;
-      continue;
-    }
-    if (safeString(record.processedAt || "").trim()) {
-      skipped.processed += 1;
-      continue;
-    }
-    if (hasInboundChatMessageReplyBoundary(agentDir, chatKey, messageId)) {
-      skipped.replyBoundary += 1;
-      continue;
-    }
-    if (hasLaterHandledUserMessage(agentDir, record, messages)) {
-      skipped.superseded += 1;
-      continue;
-    }
-    const itemId = hashKey(`${chatKey}\n${messageId}`);
-    if (hasExistingInboxFile(agentDir, itemId)) {
-      skipped.existingInbox += 1;
-      continue;
-    }
-    const item = buildChatInboxItem({
-      chatKey,
-      messageId,
-      session: storedChatMessageToInboxSession(record),
-      elements: storedChatMessageToInboxElements(record),
-    });
-    const next = writeChatInboxItem(
-      path.join(pendingDir(agentDir), itemFileName(item.itemId)),
-      item,
-    );
-    restored.push({
-      itemId: item.itemId,
-      filePath: next.filePath,
-      chatKey,
-      messageId,
-    });
-  }
-  return { restored, skipped };
-}
-
-export function restoreOrphanedAcceptedChatInboxItems(
-  agentDir: string,
-  options: { nowMs?: number; maxAgeMs?: number; limit?: number } = {},
-) {
-  return restoreOrphanedAcceptedChatInboxItemsWithReport(agentDir, options)
-    .restored;
-}
-
-export function reconcileChatInboxRecovery(
-  agentDir: string,
-  options: {
-    nowMs?: number;
-    processing?: { staleMs?: number; limit?: number };
-    orphans?: { maxAgeMs?: number; limit?: number };
-  } = {},
-): ChatInboxRecoveryReport {
-  const nowMs = Number(options.nowMs ?? Date.now());
-  const restoredProcessing = restoreProcessingChatInboxFiles(agentDir, {
-    ...(options.processing || {}),
-    nowMs,
-  });
-  const orphanReport = restoreOrphanedAcceptedChatInboxItemsWithReport(
-    agentDir,
-    {
-      ...(options.orphans || {}),
-      nowMs,
-    },
-  );
-  return {
-    restoredProcessing,
-    restoredOrphans: orphanReport.restored,
-    skippedOrphans: orphanReport.skipped,
-  };
 }

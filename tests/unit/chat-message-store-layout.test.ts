@@ -37,20 +37,33 @@ test("message store layout defaults to the preferred root", async () => {
   await withTempRoot(async (root) => {
     const layout = getChatMessageStoreLayout(root);
     const preferredStoreDir = path.join(root, "data", "chat", "message-store");
+    const legacyStoreDirs = [
+      path.join(root, "data", "koishi-message-store"),
+      path.join(root, "data", "chat-message-store"),
+    ];
 
     assert.equal(layout.storeDir, preferredStoreDir);
     assert.equal(layout.primaryRoot.storeDir, preferredStoreDir);
     assert.deepEqual(
       layout.readRoots.map((item: { storeDir: string }) => item.storeDir),
-      [preferredStoreDir],
+      [preferredStoreDir, ...legacyStoreDirs],
     );
-    assert.deepEqual(chatMessageStoreRoots(root), [preferredStoreDir]);
-    assert.deepEqual(recordRoots(root), [
-      path.join(preferredStoreDir, "records"),
+    assert.deepEqual(chatMessageStoreRoots(root), [
+      preferredStoreDir,
+      ...legacyStoreDirs,
     ]);
-    assert.deepEqual(indexRoots(root), [
-      path.join(preferredStoreDir, "indexes"),
-    ]);
+    assert.deepEqual(
+      recordRoots(root),
+      [preferredStoreDir, ...legacyStoreDirs].map((dir) =>
+        path.join(dir, "records"),
+      ),
+    );
+    assert.deepEqual(
+      indexRoots(root),
+      [preferredStoreDir, ...legacyStoreDirs].map((dir) =>
+        path.join(dir, "indexes"),
+      ),
+    );
   });
 });
 
@@ -65,10 +78,15 @@ test("message store layout keeps using the preferred root when a previous root e
 
     assert.equal(layout.storeDir, preferredStoreDir);
     assert.equal(layout.primaryRoot.storeDir, preferredStoreDir);
+    const expectedRoots = [
+      preferredStoreDir,
+      path.join(root, "data", "koishi-message-store"),
+      path.join(root, "data", "chat-message-store"),
+    ];
     assert.deepEqual(
       layout.readRoots.map((item: { storeDir: string }) => item.storeDir),
-      [preferredStoreDir],
+      expectedRoots,
     );
-    assert.deepEqual(chatMessageStoreRoots(root), [preferredStoreDir]);
+    assert.deepEqual(chatMessageStoreRoots(root), expectedRoots);
   });
 });

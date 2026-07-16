@@ -634,6 +634,68 @@ test("frontend backend event translator treats overflow compaction as ordinary b
   );
 });
 
+test("frontend backend event translator preserves producer request tags on progress", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "message_start",
+      requestTag: "producer-tag",
+      userMessageId: "user-1",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "continue" }],
+      },
+    }),
+    [
+      {
+        type: "user_message_start",
+        text: "continue",
+        userMessageId: "user-1",
+        requestTag: "producer-tag",
+      },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "message_update",
+      requestTag: "producer-tag",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: {
+        type: "thinking_end",
+        content: "Checking ownership",
+      },
+    }),
+    [
+      {
+        type: "assistant_summary",
+        text: "Checking ownership",
+        requestTag: "producer-tag",
+      },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "message_end",
+      requestTag: "producer-tag",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "I will inspect this" },
+          { type: "toolCall", id: "call-1", name: "read" },
+        ],
+      },
+    }),
+    [
+      {
+        type: "assistant_interim",
+        text: "I will inspect this",
+        requestTag: "producer-tag",
+      },
+    ],
+  );
+});
+
 test("frontend backend event translator returns final typed turn events after completion", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 

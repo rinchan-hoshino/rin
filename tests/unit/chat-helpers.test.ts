@@ -528,3 +528,54 @@ test("chat chat helpers only auto-attach explicit file URLs, not plain paths", a
     );
   });
 });
+
+test("chat metadata enrichment preserves first-seen rich inbound evidence", async () => {
+  await withTempDir(async (agentDir) => {
+    const receivedAt = "2026-07-14T01:00:00.000Z";
+    messageStore.saveInboundChatMessage(agentDir, {
+      chatKey: "telegram/1:2",
+      messageId: "rich-duplicate",
+      role: "user",
+      platform: "telegram",
+      botId: "1",
+      chatId: "2",
+      receivedAt,
+      text: "rich first content",
+      rawContent: "rich first content",
+      elements: [
+        { type: "text", attrs: { content: "rich first content" } },
+        { type: "at", attrs: { id: "1" } },
+      ],
+    });
+
+    helpers.enrichInboundMessageMetadata(
+      agentDir,
+      {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        messageId: "rich-duplicate",
+        userId: "trusted-user",
+        timestamp: Date.now(),
+        content: "",
+        stripped: { content: "" },
+      },
+      [],
+      {},
+      () => "TRUSTED",
+      { chatKey: "telegram/1:2" },
+    );
+
+    const stored = messageStore.getChatMessage(
+      agentDir,
+      "telegram/1:2",
+      "rich-duplicate",
+    );
+    assert.equal(stored.receivedAt, receivedAt);
+    assert.equal(stored.text, "rich first content");
+    assert.equal(stored.elements.length, 2);
+    assert.equal(stored.duplicateCount || 0, 0);
+    assert.equal(stored.userId, "trusted-user");
+    assert.equal(stored.trust, "TRUSTED");
+  });
+});

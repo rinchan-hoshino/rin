@@ -5,11 +5,11 @@ import { ensureExtension, ensureFileName, fileNameFromUrl } from "./support.js";
 import { ensureDir } from "../platform/fs.js";
 import {
   findChatMessageByChatAndId,
-  listChatMessages,
-  listChatMessagesByReplyTo,
   saveInboundChatMessage,
   updateChatMessage,
+  upsertChatMessage,
 } from "./message-store.js";
+import { openChatDatabase } from "./database.js";
 import {
   buildInboundStoredChatMessageInput,
   pickReplyToMessageId,
@@ -132,7 +132,7 @@ export function extractExistingFilePaths(text: string) {
   return extractExistingFilePathsFromText(text);
 }
 
-export function persistInboundMessage(
+export function enrichInboundMessageMetadata(
   agentDir: string,
   session: any,
   elements: any[],
@@ -146,7 +146,46 @@ export function persistInboundMessage(
     trust: trustOf(identity, platform, userId),
     chatKey: options.chatKey,
   });
-  return normalized ? saveInboundChatMessage(agentDir, normalized) : null;
+  if (!normalized) return null;
+  const existing = findChatMessageByChatAndId(
+    agentDir,
+    normalized.chatKey,
+    normalized.messageId,
+  );
+  if (!existing) return null;
+  updateChatMessage(agentDir, normalized.chatKey, normalized.messageId, {
+    platform: existing.platform || normalized.platform,
+    botId: existing.botId || normalized.botId,
+    chatId: existing.chatId || normalized.chatId,
+    chatThreadId: existing.chatThreadId || normalized.chatThreadId,
+    messageThreadId: existing.messageThreadId || normalized.messageThreadId,
+    chatType: existing.chatType || normalized.chatType,
+    userId: existing.userId || normalized.userId,
+    nickname: existing.nickname || normalized.nickname,
+    chatName: existing.chatName || normalized.chatName,
+    trust: existing.trust || normalized.trust,
+  });
+  return existing;
+}
+
+export function persistInboundMessage(
+  agentDir: string,
+  session: any,
+  elements: any[],
+  identity: any,
+  trustOf: (identity: any, platform: string, userId: string) => string,
+  options: { chatKey?: string; mergeDuplicate?: boolean } = {},
+) {
+  const platform = safeString(session?.platform || "").trim();
+  const userId = pickUserId(session);
+  const normalized = buildInboundStoredChatMessageInput(session, elements, {
+    trust: trustOf(identity, platform, userId),
+    chatKey: options.chatKey,
+  });
+  if (!normalized) return null;
+  return options.mergeDuplicate === false
+    ? { record: upsertChatMessage(agentDir, normalized) }
+    : saveInboundChatMessage(agentDir, normalized);
 }
 
 export function lookupReplyMessage(
@@ -223,19 +262,6 @@ export function prependQuoteTextToPromptBody(text: string, quoteText: string) {
   return `${quoteBody}\n\n${body}`;
 }
 
-function chatMessageSortTime(record: any) {
-  return Date.parse(safeString(record?.receivedAt || record?.processedAt)) || 0;
-}
-
-function compareChatMessageOrder(left: any, right: any) {
-  const leftTime = chatMessageSortTime(left);
-  const rightTime = chatMessageSortTime(right);
-  if (leftTime !== rightTime) return leftTime - rightTime;
-  return safeString(left?.recordKey).localeCompare(
-    safeString(right?.recordKey),
-  );
-}
-
 function isSubstantiveAssistantChatMessage(record: any) {
   return record?.role === "assistant" && isSubstantiveAssistantDelivery(record);
 }
@@ -247,15 +273,16 @@ export function isReplyToLatestAssistantMessage(
 ) {
   const replied = lookupReplyMessage(agentDir, chatKey, replyToMessageId);
   if (!replied || !isSubstantiveAssistantChatMessage(replied)) return false;
-  let latest: any = null;
-  for (const item of listChatMessages(agentDir)) {
-    if (item.chatKey !== chatKey || !isSubstantiveAssistantChatMessage(item)) {
-      continue;
-    }
-    if (!latest || compareChatMessageOrder(latest, item) < 0) latest = item;
-  }
+  const latest = openChatDatabase(agentDir)
+    .prepare(
+      `SELECT message_id FROM messages
+       WHERE chat_key = ? AND role = 'assistant'
+         AND delivery_kind IN ('final', 'generic')
+       ORDER BY received_at DESC, record_key DESC LIMIT 1`,
+    )
+    .get(chatKey) as any;
   return (
-    safeString(latest?.messageId).trim() ===
+    safeString(latest?.message_id).trim() ===
     safeString(replied.messageId).trim()
   );
 }
@@ -270,11 +297,16 @@ export function hasDeliveredAssistantReplyForMessage(
   chatKey: string,
   messageId: string,
 ) {
-  return listChatMessagesByReplyTo(agentDir, chatKey, messageId).some(
-    (item) =>
-      item.role === "assistant" &&
-      isSubstantiveAssistantDelivery(item) &&
-      Boolean(safeString(item.processedAt).trim()),
+  return Boolean(
+    openChatDatabase(agentDir)
+      .prepare(
+        `SELECT 1 FROM messages
+         WHERE chat_key = ? AND role = 'assistant'
+           AND reply_to_message_id = ? AND processed_at IS NOT NULL
+           AND delivery_kind IN ('final', 'generic')
+         LIMIT 1`,
+      )
+      .get(chatKey, messageId),
   );
 }
 
@@ -294,13 +326,6 @@ export function isInboundChatMessageProcessed(
   );
 }
 
-function commandNameFromStoredText(text: unknown) {
-  const value = safeString(text).trim();
-  if (!value.startsWith("/")) return "";
-  const name = value.slice(1).split(/\s+/, 1)[0]?.trim().toLowerCase() || "";
-  return /^[a-z][a-z0-9_-]*$/.test(name) ? name : "";
-}
-
 export function hasLaterNewSessionBoundary(
   agentDir: string,
   chatKey: string,
@@ -309,21 +334,25 @@ export function hasLaterNewSessionBoundary(
   const nextChatKey = safeString(chatKey).trim();
   const nextMessageId = safeString(messageId).trim();
   if (!nextChatKey || !nextMessageId) return false;
-  const original = findChatMessageByChatAndId(
-    agentDir,
-    nextChatKey,
-    nextMessageId,
+  return Boolean(
+    openChatDatabase(agentDir)
+      .prepare(
+        `SELECT 1
+         FROM messages AS later
+         JOIN messages AS original
+           ON original.chat_key = later.chat_key
+          AND original.message_id = ?
+         WHERE later.chat_key = ? AND later.role = 'user'
+           AND later.sequence > original.sequence
+           AND later.processed_at IS NOT NULL
+           AND (
+             LOWER(TRIM(COALESCE(later.text, later.raw_content, ''))) = '/new'
+             OR LOWER(TRIM(COALESCE(later.text, later.raw_content, ''))) LIKE '/new %'
+           )
+         LIMIT 1`,
+      )
+      .get(nextMessageId, nextChatKey),
   );
-  const originalTime = chatMessageSortTime(original);
-  if (!original || !originalTime) return false;
-  return listChatMessages(agentDir).some((item) => {
-    if (item.chatKey !== nextChatKey) return false;
-    if (item.role !== "user") return false;
-    if (safeString(item.messageId).trim() === nextMessageId) return false;
-    if (!safeString(item.processedAt).trim()) return false;
-    if (compareChatMessageOrder(original, item) >= 0) return false;
-    return commandNameFromStoredText(item.text || item.rawContent) === "new";
-  });
 }
 
 export function hasInboundChatMessageReplyBoundary(

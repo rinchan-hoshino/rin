@@ -1,15 +1,14 @@
 import type { ChatController } from "./controller.js";
 import {
   type ChatInboxItem,
-  claimChatInboxFile,
-  completeChatInboxFile,
-  failChatInboxFile,
-  listPendingChatInboxFiles,
-  readChatInboxItem,
-  requeueChatInboxFile,
-  restoreChatInboxFile,
+  type ClaimedChatInboxItem,
+  claimChatInboxItem,
+  completeClaimedChatInboxItem,
+  failClaimedChatInboxItem,
+  isChatInboxItemAccepted,
+  listPendingChatInboxItems,
+  requeueClaimedChatInboxItem,
 } from "./inbox.js";
-import { parseChatKey } from "./support.js";
 import { safeString } from "../text-utils.js";
 
 const CHAT_INBOX_RETRY_MIN_MS = 2000;
@@ -17,13 +16,14 @@ const CHAT_INBOX_RETRY_MAX_MS = 60_000;
 const CHAT_INBOX_MAX_ATTEMPTS = 5;
 
 export type ClaimedChatInboxJob = {
-  claimedPath: string;
-  envelope: ChatInboxItem;
+  envelope: ClaimedChatInboxItem;
 };
 
 export type ChatInboxJobResult = {
   retry?: boolean;
   errorMessage?: string;
+  disposition?: "record_only" | "actionable" | "superseded";
+  terminalKind?: string;
 };
 
 export function computeChatInboxRetryDelay(attemptCount: number) {
@@ -34,8 +34,15 @@ export function computeChatInboxRetryDelay(attemptCount: number) {
   );
 }
 
-export function completeClaimedChatInboxJob(job: ClaimedChatInboxJob) {
-  completeChatInboxFile(job.claimedPath);
+export function completeClaimedChatInboxJob(
+  agentDir: string,
+  job: ClaimedChatInboxJob,
+  result: ChatInboxJobResult = {},
+) {
+  return completeClaimedChatInboxItem(agentDir, job.envelope, {
+    terminalKind: result.terminalKind,
+    disposition: result.disposition,
+  });
 }
 
 export function requeueClaimedChatInboxJob(
@@ -43,13 +50,15 @@ export function requeueClaimedChatInboxJob(
   job: ClaimedChatInboxJob,
   error?: unknown,
 ) {
-  const nextAttemptCount = Number(job.envelope.attemptCount || 0) + 1;
+  const nextAttemptCount = Number(job.envelope.attemptCount || 0);
   const errorMessage = safeString(error || "chat_inbound_retry_needed");
-  if (nextAttemptCount >= CHAT_INBOX_MAX_ATTEMPTS) {
-    failChatInboxFile(agentDir, job.claimedPath, job.envelope, errorMessage);
-    return;
+  if (
+    nextAttemptCount >= CHAT_INBOX_MAX_ATTEMPTS &&
+    !isChatInboxItemAccepted(agentDir, job.envelope.itemId)
+  ) {
+    return failClaimedChatInboxItem(agentDir, job.envelope, errorMessage);
   }
-  requeueChatInboxFile(agentDir, job.claimedPath, job.envelope, {
+  return requeueClaimedChatInboxItem(agentDir, job.envelope, {
     delayMs: computeChatInboxRetryDelay(nextAttemptCount),
     error: errorMessage,
   });
@@ -61,32 +70,27 @@ export function finalizeClaimedChatInboxJob(
   result: ChatInboxJobResult | undefined,
 ) {
   if (result?.retry) {
-    requeueClaimedChatInboxJob(
+    return requeueClaimedChatInboxJob(
       agentDir,
       job,
       result.errorMessage || "chat_inbound_retry_needed",
     );
-    return;
   }
-  completeClaimedChatInboxJob(job);
-}
-
-function invalidChatKeyError(chatKey: string) {
-  return `invalid_chatKey:${safeString(chatKey).trim()}`;
+  return completeClaimedChatInboxJob(agentDir, job, result);
 }
 
 function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
   return Boolean(value && typeof (value as any).then === "function");
 }
 
-type ClaimPendingFileResult =
+type ClaimPendingItemResult =
   | "claimed"
   | "consumed"
   | "retryLater"
   | "unavailable";
 
 function shouldRedrainAfterAsyncAdmissionResult(
-  result: ClaimPendingFileResult,
+  result: ClaimPendingItemResult,
 ) {
   return result !== "retryLater";
 }
@@ -109,63 +113,45 @@ export function createChatInboxDrain(deps: {
   const drainChatInboxOnce = async () => {
     const claimedChatKeys = new Set<string>();
 
-    const claimPendingFile = (
-      filePath: string,
+    const claimPendingItem = (
+      pending: ChatInboxItem,
       pendingController: ChatController,
       pendingChatKey: string,
-    ): ClaimPendingFileResult => {
-      let claimedPath = "";
-      try {
-        claimedPath = claimChatInboxFile(deps.agentDir, filePath);
-      } catch {
-        return "unavailable";
-      }
-      if (!claimedPath) return "unavailable";
-      const envelope = readChatInboxItem(claimedPath);
+    ): ClaimPendingItemResult => {
+      const envelope = claimChatInboxItem(deps.agentDir, pending.itemId);
       if (!envelope) {
-        completeChatInboxFile(claimedPath);
-        return "consumed";
-      }
-      const envelopeChatKey = safeString(envelope.chatKey || "").trim();
-      if (!envelopeChatKey || !parseChatKey(envelopeChatKey)) {
-        failChatInboxFile(
-          deps.agentDir,
-          claimedPath,
-          envelope,
-          invalidChatKeyError(envelopeChatKey),
-        );
-        return "consumed";
-      }
-      const nextAttemptAt = Date.parse(
-        safeString(envelope.nextAttemptAt || "").trim(),
-      );
-      if (Number.isFinite(nextAttemptAt) && nextAttemptAt > Date.now()) {
-        restoreChatInboxFile(deps.agentDir, claimedPath, envelope);
-        return "retryLater";
+        const dueAt = Date.parse(safeString(pending.nextAttemptAt).trim());
+        return Number.isFinite(dueAt) && dueAt > Date.now()
+          ? "retryLater"
+          : "unavailable";
       }
       const controller =
-        envelope.chatKey && envelope.chatKey === pendingChatKey
+        envelope.chatKey === pendingChatKey
           ? pendingController
-          : envelope.chatKey
-            ? deps.getController(envelope.chatKey)
-            : null;
+          : deps.getController(envelope.chatKey);
       if (controller?.ownsInboundMessage?.(envelope.messageId)) {
-        completeChatInboxFile(claimedPath);
-        return "consumed";
+        requeueClaimedChatInboxItem(deps.agentDir, envelope, {
+          delayMs: CHAT_INBOX_RETRY_MIN_MS,
+          error: "chat_inbound_still_owned",
+        });
+        return "retryLater";
       }
       if (
         deps.isInboundMessageProcessed(envelope.chatKey, envelope.messageId)
       ) {
-        completeChatInboxFile(claimedPath);
+        completeClaimedChatInboxItem(deps.agentDir, envelope, {
+          terminalKind: "already_processed",
+          disposition: "actionable",
+        });
         return "consumed";
       }
-      deps.enqueueClaimedInboxItem({ claimedPath, envelope });
+      deps.enqueueClaimedInboxItem({ envelope });
       claimedChatKeys.add(envelope.chatKey);
       return "claimed";
     };
 
     const scheduleAsyncBusyAdmission = (
-      filePath: string,
+      pending: ChatInboxItem,
       pendingController: ChatController,
       pendingChatKey: string,
       admission: Promise<boolean>,
@@ -178,7 +164,7 @@ export function createChatInboxDrain(deps: {
           if (!canClaim) return;
           shouldRequestDrainAfterAdmission =
             shouldRedrainAfterAsyncAdmissionResult(
-              claimPendingFile(filePath, pendingController, pendingChatKey),
+              claimPendingItem(pending, pendingController, pendingChatKey),
             );
         })
         .catch((error: any) => {
@@ -192,22 +178,8 @@ export function createChatInboxDrain(deps: {
         });
     };
 
-    for (const filePath of listPendingChatInboxFiles(deps.agentDir)) {
-      const pendingEnvelope = readChatInboxItem(filePath);
-      if (!pendingEnvelope) {
-        completeChatInboxFile(filePath);
-        continue;
-      }
-      const pendingChatKey = safeString(pendingEnvelope.chatKey || "").trim();
-      if (!pendingChatKey || !parseChatKey(pendingChatKey)) {
-        failChatInboxFile(
-          deps.agentDir,
-          filePath,
-          pendingEnvelope,
-          invalidChatKeyError(pendingChatKey),
-        );
-        continue;
-      }
+    for (const pendingEnvelope of listPendingChatInboxItems(deps.agentDir)) {
+      const pendingChatKey = pendingEnvelope.chatKey;
       const pendingController = deps.getController(pendingChatKey);
       const hasBusyChatKey = Boolean(
         claimedChatKeys.has(pendingChatKey) ||
@@ -223,7 +195,7 @@ export function createChatInboxDrain(deps: {
         );
         if (isPromiseLike(admission)) {
           scheduleAsyncBusyAdmission(
-            filePath,
+            pendingEnvelope,
             pendingController,
             pendingChatKey,
             admission,
@@ -232,7 +204,7 @@ export function createChatInboxDrain(deps: {
         }
         if (!admission) continue;
       }
-      claimPendingFile(filePath, pendingController, pendingChatKey);
+      claimPendingItem(pendingEnvelope, pendingController, pendingChatKey);
     }
   };
 
@@ -259,8 +231,5 @@ export function createChatInboxDrain(deps: {
     })();
   };
 
-  return {
-    requestDrainChatInbox,
-    drainChatInboxOnce,
-  };
+  return { requestDrainChatInbox, drainChatInboxOnce };
 }
