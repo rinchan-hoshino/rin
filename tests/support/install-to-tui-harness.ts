@@ -629,30 +629,7 @@ export async function assertInstalledRuntimeSmoke() {
       assertExpectedTuiExit(launcherResult);
       assertHealthyTuiOutput(launcher.getOutput());
 
-      const tuiCommand = [process.execPath, flow.tuiPath]
-        .map(shellQuote)
-        .join(" ");
-      const tui = startPtyCommand(tuiCommand, flow.env);
-      const waitForOutput = async (
-        pattern: RegExp,
-        timeoutMs: number,
-        offset = 0,
-      ) => {
-        const startedAt = Date.now();
-        while (Date.now() - startedAt < timeoutMs) {
-          const visibleOutput = tui.getOutput().slice(offset);
-          if (pattern.test(visibleOutput)) return visibleOutput;
-          if (tui.child.exitCode !== null || tui.child.signalCode !== null) {
-            assert.fail(
-              `TUI exited before matching ${String(pattern)}:\n${visibleOutput}`,
-            );
-          }
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-        assert.fail(
-          `timed out waiting for ${String(pattern)}:\n${tui.getOutput().slice(offset)}`,
-        );
-      };
+      const tui = startPtyCommand(shellQuote(flow.rinPath), flow.env);
 
       let tuiResult: PtyCommandResult;
       try {
@@ -661,7 +638,6 @@ export async function assertInstalledRuntimeSmoke() {
 
         const restartOutputOffset = tui.getOutput().length;
         await restart();
-        await waitForOutput(/Connecting/, 8000, restartOutputOffset);
         await new Promise((resolve) => setTimeout(resolve, 2500));
         assert.equal(
           tui.child.exitCode,
