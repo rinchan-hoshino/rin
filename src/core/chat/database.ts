@@ -62,11 +62,25 @@ const CHAT_DATABASE_TABLES = [
   "turns",
 ] as const;
 
+function setWalJournalMode(db: BetterSqlite3.Database) {
+  const deadline = Date.now() + 120_000;
+  for (;;) {
+    try {
+      db.pragma("journal_mode = WAL");
+      return;
+    } catch (error: any) {
+      if (error?.code !== "SQLITE_BUSY" || Date.now() >= deadline) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
+  }
+}
+
 function initializeChatDatabase(db: BetterSqlite3.Database) {
   // Set this before journal_mode, which can itself need a write lock during
-  // concurrent cold opens and legacy cutover.
+  // concurrent cold opens and legacy cutover. SQLite's journal_mode pragma
+  // can still fail immediately with SQLITE_BUSY, so retry that transition.
   db.pragma("busy_timeout = 120000");
-  db.pragma("journal_mode = WAL");
+  setWalJournalMode(db);
   db.pragma("synchronous = FULL");
   db.pragma("foreign_keys = ON");
 
