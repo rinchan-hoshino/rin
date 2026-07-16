@@ -295,25 +295,23 @@ test("runBuiltinCommand lists available sessions and reports missing session ids
   };
 
   const listed = await workerHelpers.runBuiltinCommand(runtime, "/resume", {
-    SessionManager: {
-      list: async () => [{ id: "abc", path: "/tmp/sessions/abc.jsonl" }],
-    },
+    listSessions: async () => [{ id: "abc", path: "/tmp/sessions/abc.jsonl" }],
   });
   assert.equal(listed.handled, true);
   assert.match(String(listed.text || ""), /Available sessions:/);
   assert.match(String(listed.text || ""), /abc — abc/);
 
   const empty = await workerHelpers.runBuiltinCommand(runtime, "/resume", {
-    SessionManager: { list: async () => [] },
+    listSessions: async () => [],
   });
   assert.equal(empty.text, "No sessions available.");
 
   await assert.rejects(
     () =>
       workerHelpers.runBuiltinCommand(runtime, "/resume missing", {
-        SessionManager: {
-          list: async () => [{ id: "abc", path: "/tmp/sessions/abc.jsonl" }],
-        },
+        listSessions: async () => [
+          { id: "abc", path: "/tmp/sessions/abc.jsonl" },
+        ],
       }),
     /session not found: missing/,
   );
@@ -533,9 +531,9 @@ test("runBuiltinCommand uses runtime for session replacement commands", async ()
     runtime,
     "/resume abc",
     {
-      SessionManager: {
-        list: async () => [{ id: "abc", path: "/tmp/sessions/abc.jsonl" }],
-      },
+      listSessions: async () => [
+        { id: "abc", path: "/tmp/sessions/abc.jsonl" },
+      ],
     },
   );
   assert.equal(resultResume.handled, true);

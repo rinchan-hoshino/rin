@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -60,7 +61,7 @@ async function directorySize(root) {
 
 function readRawCatalogRow(sessionDir, sessionFile) {
   const db = new BetterSqlite3(
-    path.join(sessionDir, ".rin-session-catalog", "v2", "catalog.sqlite"),
+    path.join(sessionDir, ".rin-session-catalog", "v3", "catalog.sqlite"),
     { readonly: true },
   );
   try {
@@ -176,11 +177,6 @@ test("listBoundSessions reads only canonical root sessions", async () => {
     const sessions = await factory.listBoundSessions({
       cwd,
       sessionDir,
-      SessionManager: {
-        async list() {
-          throw new Error("catalog must own canonical listing");
-        },
-      },
     });
 
     assert.deepEqual(
@@ -362,6 +358,75 @@ test("session catalog updates from a session manager without deleting sessions",
   }
 });
 
+test("managed session persistence does not dirty the root session catalog", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-managed-project";
+  const managedDir = path.join(sessionDir, "managed", "chat");
+  const managedFile = path.join(managedDir, "managed.jsonl");
+
+  try {
+    await writeSessionRecord(
+      sessionDir,
+      "root.jsonl",
+      sessionEntries({
+        id: "root",
+        cwd,
+        first: "2026-04-03T00:00:00.000Z",
+        last: "2026-04-03T00:05:00.000Z",
+      }),
+    );
+    await fs.mkdir(managedDir, { recursive: true });
+    await writeSessionRecord(
+      managedDir,
+      "managed.jsonl",
+      sessionEntries({
+        id: "managed",
+        cwd,
+        first: "2026-04-03T00:00:00.000Z",
+        last: "2026-04-03T00:05:00.000Z",
+      }),
+    );
+    await catalog.rebuildSessionCatalog(sessionDir);
+    const dbPath = path.join(
+      sessionDir,
+      ".rin-session-catalog",
+      "v3",
+      "catalog.sqlite",
+    );
+    const beforeDb = new BetterSqlite3(dbPath, { readonly: true });
+    const before = Object.fromEntries(
+      beforeDb
+        .prepare("SELECT key, value FROM catalog_meta")
+        .all()
+        .map((row) => [row.key, row.value]),
+    );
+    beforeDb.close();
+
+    assert.equal(
+      catalog.updateSessionCatalogFromSessionManagerSync({
+        sessionFile: managedFile,
+        fileEntries: [],
+        getSessionDir: () => sessionDir,
+        isPersisted: () => true,
+      }),
+      false,
+    );
+
+    const afterDb = new BetterSqlite3(dbPath, { readonly: true });
+    const after = Object.fromEntries(
+      afterDb
+        .prepare("SELECT key, value FROM catalog_meta")
+        .all()
+        .map((row) => [row.key, row.value]),
+    );
+    afterDb.close();
+    assert.equal(after.dirty, before.dirty);
+    assert.equal(after.revision, before.revision);
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
 test("session catalog reconcile repairs files persisted before a catalog update", async () => {
   const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
   const cwd = "/tmp/rin-catalog-reconcile-project";
@@ -460,7 +525,7 @@ test("session catalog rebuild replaces a malformed same-version cache schema", a
         last: "2026-04-03T00:05:00.000Z",
       }),
     );
-    const root = path.join(sessionDir, ".rin-session-catalog", "v2");
+    const root = path.join(sessionDir, ".rin-session-catalog", "v3");
     await fs.mkdir(root, { recursive: true });
     const db = new BetterSqlite3(path.join(root, "catalog.sqlite"));
     db.exec(`
@@ -469,7 +534,7 @@ test("session catalog rebuild replaces a malformed same-version cache schema", a
     `);
     db.prepare("INSERT INTO catalog_meta(key, value) VALUES(?, ?)").run(
       "schema_version",
-      "2",
+      "3",
     );
     db.close();
 
@@ -542,7 +607,7 @@ test("session catalog rebuild publishes atomically without exposing incomplete r
     const dbPath = path.join(
       sessionDir,
       ".rin-session-catalog",
-      "v2",
+      "v3",
       "catalog.sqlite",
     );
     while (!settled) {
@@ -759,6 +824,26 @@ test("session catalog matches Pi tie ordering and malformed-session exclusion", 
       indexed.map((session) => path.basename(session.path)),
       pi.map((session) => path.basename(session.path)),
     );
+
+    const originalCreateReadStream = fsSync.createReadStream;
+    let jsonlBodyReads = 0;
+    fsSync.createReadStream = function (...args) {
+      if (String(args[0]).endsWith(".jsonl")) jsonlBodyReads += 1;
+      return originalCreateReadStream.apply(this, args);
+    };
+    try {
+      await catalog.ensureSessionCatalog(sessionDir);
+      await catalog.tryListSessionCatalogPage({
+        cwd,
+        sessionDir,
+        offset: 0,
+        limit: 100,
+      });
+      await catalog.listAllSessionCatalog({ sessionDir, cwd });
+    } finally {
+      fsSync.createReadStream = originalCreateReadStream;
+    }
+    assert.equal(jsonlBodyReads, 0);
   } finally {
     await fs.rm(sessionDir, { recursive: true, force: true });
   }
@@ -977,11 +1062,6 @@ test("unpaginated session listing uses the catalog instead of reparsing session 
     const sessions = await factory.listBoundSessions({
       cwd,
       sessionDir,
-      SessionManager: {
-        async list() {
-          throw new Error("session history must not be reparsed");
-        },
-      },
     });
     assert.deepEqual(
       sessions.map((session) => session.id),

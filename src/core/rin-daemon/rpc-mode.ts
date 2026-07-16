@@ -1597,7 +1597,7 @@ export async function runCustomRpcMode(
             }),
           );
         }
-        const sessions = await listBoundSessions({ SessionManager });
+        const sessions = await listBoundSessions();
         return done(id, type, { sessions });
       }
       case "set_model": {

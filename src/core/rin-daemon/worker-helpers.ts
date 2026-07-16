@@ -355,7 +355,11 @@ export function formatSessionStats(stats: any) {
 export async function runBuiltinCommand(
   runtime: any,
   commandLine: string,
-  deps: { SessionManager: any; uiContext?: any },
+  deps: {
+    SessionManager?: any;
+    uiContext?: any;
+    listSessions?: typeof listBoundSessions;
+  },
 ) {
   const session = runtime.session;
   const parsedCommand = parseBuiltinCommand(commandLine);
@@ -407,10 +411,9 @@ export async function runBuiltinCommand(
       );
     }
     case "resume": {
-      const sessions = await listBoundSessions({
+      const sessions = await (deps.listSessions || listBoundSessions)({
         cwd: session.sessionManager.getCwd(),
         sessionDir: session.sessionManager.getSessionDir(),
-        SessionManager: deps.SessionManager,
       });
       if (!argsText) {
         return handledText(

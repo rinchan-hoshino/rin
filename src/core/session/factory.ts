@@ -86,14 +86,18 @@ export async function listBoundSessions(
   }
   const { cwd, agentDir } = resolveRuntimeProfile(options);
   const sessionDir = options.sessionDir || getRuntimeSessionDir(cwd, agentDir);
+  if (options.SessionManager) {
+    const sessions = await options.SessionManager.list(cwd, sessionDir).catch(
+      () => [],
+    );
+    return normalizeBoundSessionList(sessions);
+  }
   const catalogSessions = await listAllSessionCatalog({
     sessionDir,
     cwd,
   }).catch(() => undefined);
   if (catalogSessions) return normalizeBoundSessionList(catalogSessions);
-  const { SessionManager } = options.SessionManager
-    ? { SessionManager: options.SessionManager }
-    : await loadRinSessionManagerModule();
+  const { SessionManager } = await loadRinSessionManagerModule();
   const sessions = await SessionManager.list(cwd, sessionDir).catch(() => []);
   return normalizeBoundSessionList(sessions);
 }

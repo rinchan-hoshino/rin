@@ -11,10 +11,10 @@ import { normalizeSessionValue } from "./ref.js";
 import type { BoundSessionListItem } from "./listing.js";
 
 const SESSION_CATALOG_DIR_NAME = ".rin-session-catalog";
-const SESSION_CATALOG_VERSION = "v2";
-const SESSION_CATALOG_SCHEMA_VERSION = 2;
+const SESSION_CATALOG_VERSION = "v3";
+const SESSION_CATALOG_SCHEMA_VERSION = 3;
 const SESSION_CATALOG_DB_NAME = "catalog.sqlite";
-const LEGACY_SESSION_CATALOG_VERSIONS = ["v1"];
+const LEGACY_SESSION_CATALOG_VERSIONS = ["v1", "v2"];
 const HEAD_READ_BYTES = 256 * 1024;
 const TAIL_READ_BYTES = 128 * 1024;
 const MAX_CONCURRENT_SESSION_SUMMARY_LOADS = 20;
@@ -40,6 +40,13 @@ type SessionCatalogRecord = {
   fileSize: number;
   fileMtimeMs: number;
   fileCtimeMs: number;
+};
+
+type SessionCatalogExcludedRow = {
+  path: string;
+  file_size: number;
+  file_mtime_ms: number;
+  file_ctime_ms: number;
 };
 
 type SessionCatalogRow = {
@@ -476,6 +483,7 @@ function initializeCatalogDb(db: BetterSqlite3.Database): void {
   if (
     (storedVersion &&
       storedVersion !== String(SESSION_CATALOG_SCHEMA_VERSION)) ||
+    (storedVersion && !sessionsTable) ||
     (!storedVersion && sessionsTable)
   ) {
     throw new Error(
@@ -521,6 +529,32 @@ function initializeCatalogDb(db: BetterSqlite3.Database): void {
         );
       });
     if (!valid) throw new Error("Invalid session catalog schema");
+    const excludedColumns = db
+      .prepare("PRAGMA table_info(excluded_files)")
+      .all() as Array<{
+      name: string;
+      type: string;
+      notnull: number;
+      pk: number;
+    }>;
+    const expectedExcludedColumns = [
+      ["path", "TEXT", 0, 1],
+      ["file_size", "INTEGER", 1, 0],
+      ["file_mtime_ms", "REAL", 1, 0],
+      ["file_ctime_ms", "REAL", 1, 0],
+    ] as const;
+    const excludedValid =
+      excludedColumns.length === expectedExcludedColumns.length &&
+      expectedExcludedColumns.every((expected, index) => {
+        const column = excludedColumns[index];
+        return (
+          column?.name === expected[0] &&
+          column.type.toUpperCase() === expected[1] &&
+          column.notnull === expected[2] &&
+          column.pk === expected[3]
+        );
+      });
+    if (!excludedValid) throw new Error("Invalid excluded catalog schema");
   }
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -539,6 +573,12 @@ function initializeCatalogDb(db: BetterSqlite3.Database): void {
       indexed_last_entry_signature TEXT,
       indexed_entries_hash TEXT NOT NULL,
       directory_ordinal INTEGER NOT NULL,
+      file_size INTEGER NOT NULL,
+      file_mtime_ms REAL NOT NULL,
+      file_ctime_ms REAL NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS excluded_files (
+      path TEXT PRIMARY KEY,
       file_size INTEGER NOT NULL,
       file_mtime_ms REAL NOT NULL,
       file_ctime_ms REAL NOT NULL
@@ -664,6 +704,21 @@ function upsertCatalogRecord(
   });
 }
 
+function upsertExcludedFile(
+  db: BetterSqlite3.Database,
+  filePath: string,
+  freshness: SessionFileFreshness,
+): void {
+  db.prepare(
+    `INSERT INTO excluded_files(path, file_size, file_mtime_ms, file_ctime_ms)
+     VALUES(?, ?, ?, ?)
+     ON CONFLICT(path) DO UPDATE SET
+       file_size = excluded.file_size,
+       file_mtime_ms = excluded.file_mtime_ms,
+       file_ctime_ms = excluded.file_ctime_ms`,
+  ).run(filePath, freshness.size, freshness.mtimeMs, freshness.ctimeMs);
+}
+
 function catalogLockOptions() {
   return {
     realpath: false,
@@ -732,6 +787,9 @@ export function updateSessionCatalogFromSessionManagerSync(
     const sessionDir =
       normalizeSessionValue(sessionManager?.getSessionDir?.()) ||
       path.dirname(sessionFile);
+    if (path.dirname(path.resolve(sessionFile)) !== path.resolve(sessionDir)) {
+      return false;
+    }
     return withCatalogWriteLockSync(sessionDir, () => {
       const db = openCatalogDb(sessionDir);
       try {
@@ -783,10 +841,15 @@ type SessionCatalogReconcilePlan = {
   observed: Map<string, SessionFileFreshness>;
   replacements: SessionCatalogRecord[];
   removals: string[];
+  excludedReplacements: Array<{
+    path: string;
+    freshness: SessionFileFreshness;
+  }>;
+  excludedRemovals: string[];
 };
 
 function rowMatchesFreshness(
-  row: SessionCatalogRow,
+  row: SessionCatalogRow | SessionCatalogExcludedRow,
   freshness: SessionFileFreshness,
 ): boolean {
   return (
@@ -808,9 +871,20 @@ async function prepareCatalogReconciliation(
   const existing = new Map(
     (existingRows || []).map((row) => [path.resolve(row.path), row]),
   );
+  const excludedRows = db
+    .prepare("SELECT * FROM excluded_files")
+    .all() as SessionCatalogExcludedRow[];
+  const excluded = new Map(
+    excludedRows.map((row) => [path.resolve(row.path), row]),
+  );
   const observed = new Map<string, SessionFileFreshness>();
   const replacements: SessionCatalogRecord[] = [];
   const removals: string[] = [];
+  const excludedReplacements: Array<{
+    path: string;
+    freshness: SessionFileFreshness;
+  }> = [];
+  const excludedRemovals: string[] = [];
   const fileStats = await Promise.all(
     files.map(async (filePath) => {
       try {
@@ -825,6 +899,7 @@ async function prepareCatalogReconciliation(
     if (!item) return null;
     const resolvedPath = path.resolve(item.filePath);
     const row = existing.get(resolvedPath);
+    const excludedRow = excluded.get(resolvedPath);
     if (row && rowMatchesFreshness(row, item.freshness)) {
       observed.set(resolvedPath, item.freshness);
       if (Number(row.directory_ordinal) !== directoryOrdinal) {
@@ -833,6 +908,12 @@ async function prepareCatalogReconciliation(
           directoryOrdinal,
         });
       }
+      if (excludedRow) excludedRemovals.push(excludedRow.path);
+      continue;
+    }
+    if (excludedRow && rowMatchesFreshness(excludedRow, item.freshness)) {
+      observed.set(resolvedPath, item.freshness);
+      if (row) removals.push(row.path);
       continue;
     }
     const stableRead = await readCompleteSessionRecord(item.filePath);
@@ -840,10 +921,20 @@ async function prepareCatalogReconciliation(
     observed.set(resolvedPath, stableRead.freshness);
     if (stableRead.record) {
       replacements.push({ ...stableRead.record, directoryOrdinal });
-    } else if (row) removals.push(row.path);
+      if (excludedRow) excludedRemovals.push(excludedRow.path);
+    } else {
+      if (row) removals.push(row.path);
+      excludedReplacements.push({
+        path: item.filePath,
+        freshness: stableRead.freshness,
+      });
+    }
   }
   for (const row of existing.values()) {
     if (!observed.has(path.resolve(row.path))) removals.push(row.path);
+  }
+  for (const row of excluded.values()) {
+    if (!observed.has(path.resolve(row.path))) excludedRemovals.push(row.path);
   }
   return {
     baseRevision,
@@ -851,6 +942,8 @@ async function prepareCatalogReconciliation(
     observed,
     replacements,
     removals,
+    excludedReplacements,
+    excludedRemovals,
   };
 }
 
@@ -892,10 +985,17 @@ function applyCatalogReconciliation(
     return null;
   }
   const remove = db.prepare("DELETE FROM sessions WHERE path = ?");
+  const removeExcluded = db.prepare(
+    "DELETE FROM excluded_files WHERE path = ?",
+  );
   let indexed = 0;
   db.transaction(() => {
     for (const sessionPath of plan.removals) remove.run(sessionPath);
+    for (const filePath of plan.excludedRemovals) removeExcluded.run(filePath);
     for (const record of plan.replacements) upsertCatalogRecord(db, record);
+    for (const excluded of plan.excludedReplacements) {
+      upsertExcludedFile(db, excluded.path, excluded.freshness);
+    }
     setCatalogMeta(db, "checked", String(plan.checked));
     const count = db
       .prepare("SELECT COUNT(*) AS total FROM sessions")
@@ -927,12 +1027,16 @@ async function buildSessionCatalogGeneration(
     setCatalogMeta(db, "checked", String(files.length));
     for (const [directoryOrdinal, filePath] of files.entries()) {
       const stableRead = await readCompleteSessionRecord(filePath);
-      if (!stableRead?.record) continue;
-      upsertCatalogRecord(db, {
-        ...stableRead.record,
-        directoryOrdinal,
-      });
-      indexed += 1;
+      if (!stableRead) continue;
+      if (stableRead.record) {
+        upsertCatalogRecord(db, {
+          ...stableRead.record,
+          directoryOrdinal,
+        });
+        indexed += 1;
+      } else {
+        upsertExcludedFile(db, filePath, stableRead.freshness);
+      }
     }
     setCatalogMeta(db, "indexed", String(indexed));
     setCatalogMeta(db, "rebuilt_at", new Date().toISOString());
@@ -980,6 +1084,7 @@ async function publishSessionCatalogGeneration(
         try {
           liveDb.transaction(() => {
             liveDb.prepare("DELETE FROM sessions").run();
+            liveDb.prepare("DELETE FROM excluded_files").run();
             liveDb.exec(`
               INSERT INTO sessions (
                 path, id, name, first_message, modified, modified_ms,
@@ -995,6 +1100,11 @@ async function publishSessionCatalogGeneration(
                 indexed_last_entry_signature, indexed_entries_hash,
                 directory_ordinal, file_size, file_mtime_ms, file_ctime_ms
               FROM next_catalog.sessions;
+              INSERT INTO excluded_files (
+                path, file_size, file_mtime_ms, file_ctime_ms
+              )
+              SELECT path, file_size, file_mtime_ms, file_ctime_ms
+              FROM next_catalog.excluded_files;
               DELETE FROM catalog_meta;
               INSERT INTO catalog_meta(key, value)
               SELECT key, value FROM next_catalog.catalog_meta;

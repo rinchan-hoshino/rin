@@ -527,14 +527,12 @@ export async function startDaemon(
         return true;
       }
 
-      const { SessionManager } = await getSessionManagerModule();
       writeLine(
         connection.socket,
         response(id, type, true, {
           sessions: await listBoundSessions({
             cwd: runtime.cwd,
             agentDir: runtime.agentDir,
-            SessionManager,
           }),
         }),
       );
