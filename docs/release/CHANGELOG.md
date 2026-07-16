@@ -125,6 +125,7 @@ f700543 fix(session): cache excluded catalog files
 4707a89 perf(session): bound catalog and trace chat startup
 bb9d4f2 docs(agent): include max thinking level
 c60ef34 fix(chat): retry concurrent WAL initialization
+e564da4 test(installer): allow bounded daemon startup
 -->
 
 ## 0.7.0
