@@ -2884,6 +2884,7 @@ test("chat main passes quoted reply session metadata through one normal prompt s
           mode,
           sessionFile: input?.sessionFile || null,
           replyToMessageId: input?.replyToMessageId || null,
+          receivedAt: input?.receivedAt || null,
         });
         return { retry: false };
       };
@@ -2927,7 +2928,8 @@ test("chat main passes quoted reply session metadata through one normal prompt s
       if (
         first.mode !== undefined ||
         first.sessionFile !== replySessionFile ||
-        first.replyToMessageId !== "m-follow"
+        first.replyToMessageId !== "m-follow" ||
+        !Number.isFinite(Date.parse(first.receivedAt || ""))
       ) {
         throw new Error(JSON.stringify({ seen, replySessionFile }));
       }

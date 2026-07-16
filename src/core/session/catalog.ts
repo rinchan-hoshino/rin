@@ -2,18 +2,21 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
+import readline from "node:readline";
+
+import BetterSqlite3 from "better-sqlite3";
+import lockfile from "proper-lockfile";
 
 import { normalizeSessionValue } from "./ref.js";
 import type { BoundSessionListItem } from "./listing.js";
 
 const SESSION_CATALOG_DIR_NAME = ".rin-session-catalog";
-const SESSION_CATALOG_VERSION = "v1";
-const SESSION_CATALOG_SCHEMA_VERSION = 1;
-const CATALOG_TAIL_READ_BYTES = 64 * 1024;
+const SESSION_CATALOG_VERSION = "v2";
+const SESSION_CATALOG_SCHEMA_VERSION = 2;
+const SESSION_CATALOG_DB_NAME = "catalog.sqlite";
+const LEGACY_SESSION_CATALOG_VERSIONS = ["v1"];
 const HEAD_READ_BYTES = 256 * 1024;
 const TAIL_READ_BYTES = 128 * 1024;
-const MAX_TEXT_SAMPLE_CHARS = 16_000;
-const MAX_MESSAGE_TEXT_CHARS = 2_000;
 const MAX_CONCURRENT_SESSION_SUMMARY_LOADS = 20;
 
 export type SessionSummary = BoundSessionListItem & {
@@ -21,7 +24,6 @@ export type SessionSummary = BoundSessionListItem & {
 };
 
 type SessionCatalogRecord = {
-  schemaVersion: 1;
   path: string;
   id: string;
   name?: string;
@@ -31,6 +33,34 @@ type SessionCatalogRecord = {
   cwd?: string;
   parentSessionPath?: string;
   allMessagesText: string;
+  indexedEntryCount: number;
+  indexedLastEntrySignature?: string;
+  indexedEntriesHash: string;
+  directoryOrdinal: number;
+  fileSize: number;
+  fileMtimeMs: number;
+  fileCtimeMs: number;
+};
+
+type SessionCatalogRow = {
+  path: string;
+  id: string;
+  name: string | null;
+  first_message: string;
+  modified: string;
+  modified_ms: number;
+  message_count: number;
+  cwd: string | null;
+  resolved_cwd: string | null;
+  parent_session_path: string | null;
+  all_messages_text: string;
+  indexed_entry_count: number;
+  indexed_last_entry_signature: string | null;
+  indexed_entries_hash: string;
+  directory_ordinal: number;
+  file_size: number;
+  file_mtime_ms: number;
+  file_ctime_ms: number;
 };
 
 export type SessionCatalogPage = {
@@ -102,47 +132,192 @@ function normalizeEntryTimestamp(entry: any): Date | undefined {
   return Number.isFinite(date.getTime()) ? date : undefined;
 }
 
-function extractTextFromContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((part) => {
-      if (!part || typeof part !== "object") return "";
-      const value = part as { type?: unknown; text?: unknown };
-      if (value.type !== "text" || typeof value.text !== "string") return "";
-      return value.text;
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-function sanitizeMessageText(text: string): string {
-  return Array.from(text)
-    .map((char) => {
-      const code = char.charCodeAt(0);
-      return code <= 31 || code === 127 ? " " : char;
-    })
-    .join("")
-    .trim();
+function isMessageWithContent(message: any): boolean {
+  // Keep this deliberately aligned with Pi's buildSessionInfo behavior.
+  return typeof message.role === "string" && "content" in message;
 }
 
 function extractMessageText(entry: any): string {
   if (entry?.type !== "message") return "";
   const message = entry.message;
-  if (!message || typeof message !== "object") return "";
+  if (!isMessageWithContent(message)) return "";
   if (message.role !== "user" && message.role !== "assistant") return "";
-  return sanitizeMessageText(extractTextFromContent(message.content)).slice(
-    0,
-    MAX_MESSAGE_TEXT_CHARS,
+  const content = message.content;
+  if (typeof content === "string") return content;
+  return content
+    .filter((block: any) => block.type === "text")
+    .map((block: any) => block.text)
+    .join(" ");
+}
+
+function messageActivityTime(entry: any): number | undefined {
+  if (entry?.type !== "message") return undefined;
+  const message = entry.message;
+  if (!isMessageWithContent(message)) return undefined;
+  if (message.role !== "user" && message.role !== "assistant") {
+    return undefined;
+  }
+  if (typeof message.timestamp === "number") return message.timestamp;
+  const timestamp = new Date(entry.timestamp).getTime();
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
+function entrySignature(entry: any): string {
+  if (!entry) return "";
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(entry))
+    .digest("hex");
+}
+
+type SessionFileFreshness = {
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+  dev: number;
+  ino: number;
+};
+
+function fileFreshness(stats: fsSync.Stats): SessionFileFreshness {
+  return {
+    size: stats.size,
+    mtimeMs: stats.mtimeMs,
+    ctimeMs: stats.ctimeMs,
+    dev: Number(stats.dev),
+    ino: Number(stats.ino),
+  };
+}
+
+function sameFileFreshness(
+  left: SessionFileFreshness,
+  right: SessionFileFreshness,
+): boolean {
+  return (
+    left.size === right.size &&
+    left.mtimeMs === right.mtimeMs &&
+    left.ctimeMs === right.ctimeMs &&
+    left.dev === right.dev &&
+    left.ino === right.ino
   );
 }
 
-function appendTextSample(parts: string[], value: string): void {
-  const text = value.trim();
-  if (!text) return;
-  const currentLength = parts.reduce((sum, part) => sum + part.length + 1, 0);
-  if (currentLength >= MAX_TEXT_SAMPLE_CHARS) return;
-  parts.push(text.slice(0, MAX_TEXT_SAMPLE_CHARS - currentLength));
+function createSessionRecordAccumulator(
+  filePath: string,
+  fallbackModified?: Date,
+  freshness: Partial<SessionFileFreshness> = {},
+) {
+  let id = "";
+  let sawEntry = false;
+  let sawHeader = false;
+  let invalidHeader = false;
+  let cwd: string | undefined;
+  let parentSessionPath: string | undefined;
+  let headerModified: Date | undefined;
+  let lastActivityTime: number | undefined;
+  let name: string | undefined;
+  let firstUserMessage = "";
+  let messageCount = 0;
+  let indexedEntryCount = 0;
+  let indexedLastEntrySignature = "";
+  const indexedEntriesHasher = crypto.createHash("sha256");
+  const allMessages: string[] = [];
+
+  return {
+    add(entry: any) {
+      indexedEntryCount += 1;
+      indexedLastEntrySignature = entrySignature(entry);
+      indexedEntriesHasher.update(JSON.stringify(entry));
+      indexedEntriesHasher.update("\n");
+      if (!sawEntry) {
+        sawEntry = true;
+        invalidHeader = entry?.type !== "session";
+        if (!invalidHeader) {
+          sawHeader = true;
+          // Pi keeps the raw header id, then Rin's common list normalizer turns
+          // malformed ids into text/path fallbacks. Store that final equivalent.
+          id = normalizeSessionValue(entry.id) || filePath;
+          cwd = typeof entry.cwd === "string" ? entry.cwd : "";
+          parentSessionPath = entry.parentSession;
+          if (typeof entry.timestamp === "string") {
+            const headerTime = new Date(entry.timestamp);
+            if (Number.isFinite(headerTime.getTime())) {
+              headerModified = headerTime;
+            }
+          }
+        }
+      }
+      if (entry?.type === "session_info") {
+        name = entry.name?.trim() || undefined;
+      }
+      if (entry?.type !== "message") return;
+      messageCount += 1;
+      const activityTime = messageActivityTime(entry);
+      if (typeof activityTime === "number") {
+        lastActivityTime = Math.max(lastActivityTime || 0, activityTime);
+      }
+      const text = extractMessageText(entry);
+      if (!text) return;
+      allMessages.push(text);
+      if (!firstUserMessage && entry.message?.role === "user") {
+        firstUserMessage = text;
+      }
+    },
+    finish(): SessionCatalogRecord | null {
+      if (!sawHeader || invalidHeader) return null;
+      const modified =
+        typeof lastActivityTime === "number" && lastActivityTime > 0
+          ? new Date(lastActivityTime)
+          : headerModified || fallbackModified || new Date();
+      const firstMessage = firstUserMessage || "(no messages)";
+      return {
+        path: filePath,
+        id,
+        name,
+        firstMessage,
+        modified: modified.toISOString(),
+        messageCount,
+        cwd,
+        parentSessionPath,
+        allMessagesText: allMessages.join(" "),
+        indexedEntryCount,
+        indexedLastEntrySignature: indexedLastEntrySignature || undefined,
+        indexedEntriesHash: indexedEntriesHasher.digest("hex"),
+        directoryOrdinal: 0,
+        fileSize: Math.max(0, Number(freshness.size) || 0),
+        fileMtimeMs: Math.max(0, Number(freshness.mtimeMs) || 0),
+        fileCtimeMs: Math.max(0, Number(freshness.ctimeMs) || 0),
+      };
+    },
+  };
+}
+
+function summarizeEntries(
+  filePath: string,
+  entries: Iterable<any>,
+  fallbackModified?: Date,
+): SessionCatalogRecord | null {
+  const accumulator = createSessionRecordAccumulator(
+    filePath,
+    fallbackModified,
+  );
+  for (const entry of entries) accumulator.add(entry);
+  return accumulator.finish();
+}
+
+function catalogRecordToSummary(record: SessionCatalogRecord): SessionSummary {
+  return {
+    id: record.id,
+    path: record.path,
+    name: record.name,
+    firstMessage: record.firstMessage,
+    modified: new Date(record.modified),
+    messageCount: record.messageCount,
+    cwd: record.cwd,
+    allMessagesText: record.allMessagesText,
+    ...(record.parentSessionPath
+      ? { parentSessionPath: record.parentSessionPath }
+      : {}),
+  };
 }
 
 export function summarizeSessionEntries(
@@ -150,52 +325,8 @@ export function summarizeSessionEntries(
   entries: any[],
   fallbackModified?: Date,
 ): SessionSummary | null {
-  const header = entries.find((entry) => entry?.type === "session");
-  if (!header) return null;
-
-  const id = normalizeSessionValue(header.id) || path.basename(filePath);
-  const cwd = normalizeSessionValue(header.cwd);
-  const parentSessionPath = normalizeSessionValue(header.parentSession);
-  const created = normalizeEntryTimestamp(header);
-  let modified = created || fallbackModified || new Date();
-  let firstMessage = "";
-  let name: string | undefined;
-  let messageCount = 0;
-  const allMessages: string[] = [];
-
-  for (const entry of entries) {
-    const timestamp = normalizeEntryTimestamp(entry);
-    if (timestamp && timestamp.getTime() > modified.getTime()) {
-      modified = timestamp;
-    }
-
-    if (entry?.type === "session_info") {
-      const nextName = normalizeSessionValue(entry.name);
-      name = nextName || undefined;
-    }
-
-    if (entry?.type !== "message") continue;
-    messageCount += 1;
-    const text = extractMessageText(entry);
-    if (!text) continue;
-    appendTextSample(allMessages, text);
-    if (!firstMessage && entry.message?.role === "user") {
-      firstMessage = text;
-    }
-  }
-
-  const fallbackTitle = firstMessage || name || "(no messages)";
-  return {
-    id,
-    path: filePath,
-    name,
-    firstMessage: fallbackTitle,
-    modified,
-    messageCount,
-    cwd,
-    allMessagesText: allMessages.join(" ") || fallbackTitle,
-    ...(parentSessionPath ? { parentSessionPath } : {}),
-  };
+  const record = summarizeEntries(filePath, entries, fallbackModified);
+  return record ? catalogRecordToSummary(record) : null;
 }
 
 export async function readSessionSummary(
@@ -224,6 +355,53 @@ export async function readSessionSummary(
   } catch {
     return null;
   }
+}
+
+type StableSessionRecordRead = {
+  record: SessionCatalogRecord | null;
+  freshness: SessionFileFreshness;
+};
+
+async function readCompleteSessionRecord(
+  filePath: string,
+): Promise<StableSessionRecordRead | null> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let beforeStats: fsSync.Stats;
+    try {
+      beforeStats = await fs.stat(filePath);
+    } catch {
+      return null;
+    }
+    if (!beforeStats.isFile()) return null;
+    const before = fileFreshness(beforeStats);
+    try {
+      const accumulator = createSessionRecordAccumulator(
+        filePath,
+        beforeStats.mtime,
+        before,
+      );
+      const lines = readline.createInterface({
+        input: fsSync.createReadStream(filePath, { encoding: "utf8" }),
+        crlfDelay: Infinity,
+      });
+      for await (const line of lines) {
+        const entry = parseJsonLine(line);
+        if (entry) accumulator.add(entry);
+      }
+      const after = fileFreshness(await fs.stat(filePath));
+      if (!sameFileFreshness(before, after)) continue;
+      return { record: accumulator.finish(), freshness: after };
+    } catch {
+      try {
+        const after = fileFreshness(await fs.stat(filePath));
+        if (!sameFileFreshness(before, after)) continue;
+        return { record: null, freshness: after };
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
 }
 
 export async function loadSessionSummaries(
@@ -267,125 +445,280 @@ export async function loadSessionSummaries(
   );
 }
 
+function catalogBaseRoot(sessionDir: string): string {
+  return path.join(path.resolve(sessionDir), SESSION_CATALOG_DIR_NAME);
+}
+
 function catalogRoot(sessionDir: string): string {
-  return path.join(
-    path.resolve(sessionDir),
-    SESSION_CATALOG_DIR_NAME,
-    SESSION_CATALOG_VERSION,
-  );
+  return path.join(catalogBaseRoot(sessionDir), SESSION_CATALOG_VERSION);
 }
 
-function catalogStatePath(sessionDir: string): string {
-  return path.join(catalogRoot(sessionDir), "state.json");
+function catalogDbPath(sessionDir: string): string {
+  return path.join(catalogRoot(sessionDir), SESSION_CATALOG_DB_NAME);
 }
 
-function allCatalogPath(sessionDir: string): string {
-  return path.join(catalogRoot(sessionDir), "all.jsonl");
-}
-
-function cwdCatalogPath(sessionDir: string, cwd: string): string {
-  const resolved = path.resolve(cwd);
-  const digest = crypto.createHash("sha256").update(resolved).digest("hex");
-  return path.join(catalogRoot(sessionDir), "cwd", `${digest}.jsonl`);
-}
-
-function catalogPathForScope(sessionDir: string, cwd?: string): string {
-  const normalizedCwd = normalizeSessionValue(cwd);
-  return normalizedCwd
-    ? cwdCatalogPath(sessionDir, normalizedCwd)
-    : allCatalogPath(sessionDir);
-}
-
-function summaryToCatalogRecord(summary: SessionSummary): SessionCatalogRecord {
-  return {
-    schemaVersion: SESSION_CATALOG_SCHEMA_VERSION,
-    path: summary.path,
-    id: summary.id,
-    name: summary.name,
-    firstMessage: summary.firstMessage,
-    modified: summary.modified.toISOString(),
-    messageCount: summary.messageCount,
-    cwd: summary.cwd,
-    parentSessionPath: summary.parentSessionPath,
-    allMessagesText: summary.allMessagesText,
-  };
-}
-
-function normalizeCatalogRecord(value: unknown): SessionCatalogRecord | null {
-  const record = value && typeof value === "object" ? (value as any) : null;
-  if (!record || record.schemaVersion !== SESSION_CATALOG_SCHEMA_VERSION) {
-    return null;
+function initializeCatalogDb(db: BetterSqlite3.Database): void {
+  db.pragma("journal_mode = DELETE");
+  db.pragma("synchronous = NORMAL");
+  db.pragma("busy_timeout = 5000");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS catalog_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+  const storedVersion = readCatalogMeta(db, "schema_version");
+  const sessionsTable = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sessions'",
+    )
+    .get();
+  if (
+    (storedVersion &&
+      storedVersion !== String(SESSION_CATALOG_SCHEMA_VERSION)) ||
+    (!storedVersion && sessionsTable)
+  ) {
+    throw new Error(
+      `Unsupported session catalog schema: ${storedVersion || "missing"}`,
+    );
   }
-  const sessionPath = normalizeSessionValue(record.path);
-  const id = normalizeSessionValue(record.id) || path.basename(sessionPath);
-  const firstMessage = normalizeSessionValue(record.firstMessage) || id;
-  const modified = new Date(normalizeSessionValue(record.modified));
-  const messageCount = Number(record.messageCount);
-  if (!sessionPath || !id || !Number.isFinite(modified.getTime())) return null;
+  if (storedVersion && sessionsTable) {
+    const columns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{
+      name: string;
+      type: string;
+      notnull: number;
+      pk: number;
+    }>;
+    const expectedColumns = [
+      ["path", "TEXT", 0, 1],
+      ["id", "TEXT", 1, 0],
+      ["name", "TEXT", 0, 0],
+      ["first_message", "TEXT", 1, 0],
+      ["modified", "TEXT", 1, 0],
+      ["modified_ms", "INTEGER", 1, 0],
+      ["message_count", "INTEGER", 1, 0],
+      ["cwd", "TEXT", 0, 0],
+      ["resolved_cwd", "TEXT", 0, 0],
+      ["parent_session_path", "TEXT", 0, 0],
+      ["all_messages_text", "TEXT", 1, 0],
+      ["indexed_entry_count", "INTEGER", 1, 0],
+      ["indexed_last_entry_signature", "TEXT", 0, 0],
+      ["indexed_entries_hash", "TEXT", 1, 0],
+      ["directory_ordinal", "INTEGER", 1, 0],
+      ["file_size", "INTEGER", 1, 0],
+      ["file_mtime_ms", "REAL", 1, 0],
+      ["file_ctime_ms", "REAL", 1, 0],
+    ] as const;
+    const valid =
+      columns.length === expectedColumns.length &&
+      expectedColumns.every((expected, index) => {
+        const column = columns[index];
+        return (
+          column?.name === expected[0] &&
+          column.type.toUpperCase() === expected[1] &&
+          column.notnull === expected[2] &&
+          column.pk === expected[3]
+        );
+      });
+    if (!valid) throw new Error("Invalid session catalog schema");
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      path TEXT PRIMARY KEY,
+      id TEXT NOT NULL,
+      name TEXT,
+      first_message TEXT NOT NULL,
+      modified TEXT NOT NULL,
+      modified_ms INTEGER NOT NULL,
+      message_count INTEGER NOT NULL,
+      cwd TEXT,
+      resolved_cwd TEXT,
+      parent_session_path TEXT,
+      all_messages_text TEXT NOT NULL,
+      indexed_entry_count INTEGER NOT NULL,
+      indexed_last_entry_signature TEXT,
+      indexed_entries_hash TEXT NOT NULL,
+      directory_ordinal INTEGER NOT NULL,
+      file_size INTEGER NOT NULL,
+      file_mtime_ms REAL NOT NULL,
+      file_ctime_ms REAL NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS sessions_modified_idx
+      ON sessions(modified_ms DESC, directory_ordinal ASC);
+    CREATE INDEX IF NOT EXISTS sessions_cwd_modified_idx
+      ON sessions(resolved_cwd, modified_ms DESC, directory_ordinal ASC);
+  `);
+  if (!storedVersion) {
+    setCatalogMeta(
+      db,
+      "schema_version",
+      String(SESSION_CATALOG_SCHEMA_VERSION),
+    );
+  }
+}
+
+function openCatalogDbPath(dbPath: string): BetterSqlite3.Database {
+  fsSync.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new BetterSqlite3(dbPath);
+  try {
+    initializeCatalogDb(db);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+}
+
+function openCatalogDb(sessionDir: string): BetterSqlite3.Database {
+  return openCatalogDbPath(catalogDbPath(sessionDir));
+}
+
+function setCatalogMeta(
+  db: BetterSqlite3.Database,
+  key: string,
+  value: string,
+): void {
+  db.prepare(
+    `INSERT INTO catalog_meta(key, value) VALUES(?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  ).run(key, value);
+}
+
+function readCatalogMeta(
+  db: BetterSqlite3.Database,
+  key: string,
+): string | undefined {
+  const row = db
+    .prepare("SELECT value FROM catalog_meta WHERE key = ?")
+    .get(key) as { value?: unknown } | undefined;
+  return normalizeSessionValue(row?.value) || undefined;
+}
+
+function rowToCatalogRecord(row: SessionCatalogRow): SessionCatalogRecord {
   return {
-    schemaVersion: SESSION_CATALOG_SCHEMA_VERSION,
-    path: sessionPath,
-    id,
-    name: normalizeSessionValue(record.name) || undefined,
-    firstMessage,
-    modified: modified.toISOString(),
-    messageCount:
-      Number.isFinite(messageCount) && messageCount >= 0
-        ? Math.floor(messageCount)
-        : 0,
-    cwd: normalizeSessionValue(record.cwd) || undefined,
+    path: row.path,
+    id: row.id,
+    name: normalizeSessionValue(row.name) || undefined,
+    firstMessage: row.first_message,
+    modified: row.modified,
+    messageCount: Math.max(0, Number(row.message_count) || 0),
+    cwd: normalizeSessionValue(row.cwd) || undefined,
     parentSessionPath:
-      normalizeSessionValue(record.parentSessionPath) || undefined,
-    allMessagesText:
-      normalizeSessionValue(record.allMessagesText) || firstMessage,
+      normalizeSessionValue(row.parent_session_path) || undefined,
+    allMessagesText: row.all_messages_text,
+    indexedEntryCount: Math.max(0, Number(row.indexed_entry_count) || 0),
+    indexedLastEntrySignature:
+      normalizeSessionValue(row.indexed_last_entry_signature) || undefined,
+    indexedEntriesHash: normalizeSessionValue(row.indexed_entries_hash),
+    directoryOrdinal: Math.max(0, Number(row.directory_ordinal) || 0),
+    fileSize: Math.max(0, Number(row.file_size) || 0),
+    fileMtimeMs: Math.max(0, Number(row.file_mtime_ms) || 0),
+    fileCtimeMs: Math.max(0, Number(row.file_ctime_ms) || 0),
   };
 }
 
-function catalogRecordToSummary(record: SessionCatalogRecord): SessionSummary {
-  return {
-    id: record.id,
-    path: record.path,
-    name: record.name,
-    firstMessage: record.firstMessage,
-    modified: new Date(record.modified),
-    messageCount: record.messageCount,
-    cwd: record.cwd,
-    allMessagesText: record.allMessagesText,
-    ...(record.parentSessionPath
-      ? { parentSessionPath: record.parentSessionPath }
-      : {}),
-  };
-}
-
-function appendCatalogRecordSync(
-  sessionDir: string,
+function upsertCatalogRecord(
+  db: BetterSqlite3.Database,
   record: SessionCatalogRecord,
 ): void {
-  const line = `${JSON.stringify(record)}\n`;
+  db.prepare(
+    `
+    INSERT INTO sessions (
+      path, id, name, first_message, modified, modified_ms, message_count,
+      cwd, resolved_cwd, parent_session_path, all_messages_text,
+      indexed_entry_count, indexed_last_entry_signature, indexed_entries_hash,
+      directory_ordinal, file_size, file_mtime_ms, file_ctime_ms
+    ) VALUES (
+      @path, @id, @name, @firstMessage, @modified, @modifiedMs, @messageCount,
+      @cwd, @resolvedCwd, @parentSessionPath, @allMessagesText,
+      @indexedEntryCount, @indexedLastEntrySignature, @indexedEntriesHash,
+      @directoryOrdinal, @fileSize, @fileMtimeMs, @fileCtimeMs
+    )
+    ON CONFLICT(path) DO UPDATE SET
+      id = excluded.id,
+      name = excluded.name,
+      first_message = excluded.first_message,
+      modified = excluded.modified,
+      modified_ms = excluded.modified_ms,
+      message_count = excluded.message_count,
+      cwd = excluded.cwd,
+      resolved_cwd = excluded.resolved_cwd,
+      parent_session_path = excluded.parent_session_path,
+      all_messages_text = excluded.all_messages_text,
+      indexed_entry_count = excluded.indexed_entry_count,
+      indexed_last_entry_signature = excluded.indexed_last_entry_signature,
+      indexed_entries_hash = excluded.indexed_entries_hash,
+      directory_ordinal = excluded.directory_ordinal,
+      file_size = excluded.file_size,
+      file_mtime_ms = excluded.file_mtime_ms,
+      file_ctime_ms = excluded.file_ctime_ms
+  `,
+  ).run({
+    ...record,
+    name: record.name || null,
+    modifiedMs: new Date(record.modified).getTime(),
+    cwd: record.cwd || null,
+    resolvedCwd: record.cwd ? path.resolve(record.cwd) : null,
+    parentSessionPath: record.parentSessionPath || null,
+    indexedLastEntrySignature: record.indexedLastEntrySignature || null,
+  });
+}
+
+function catalogLockOptions() {
+  return {
+    realpath: false,
+    stale: 60_000,
+    update: 10_000,
+    retries: {
+      retries: 200,
+      factor: 1.1,
+      minTimeout: 25,
+      maxTimeout: 250,
+    },
+  } as const;
+}
+
+function ensureCatalogLockTargets(sessionDir: string) {
   const root = catalogRoot(sessionDir);
   fsSync.mkdirSync(root, { recursive: true });
-  fsSync.appendFileSync(allCatalogPath(sessionDir), line, "utf8");
-  if (record.cwd) {
-    const cwdPath = cwdCatalogPath(sessionDir, record.cwd);
-    fsSync.mkdirSync(path.dirname(cwdPath), { recursive: true });
-    fsSync.appendFileSync(cwdPath, line, "utf8");
+  const rebuildTarget = path.join(root, ".rebuild-target");
+  if (!fsSync.existsSync(rebuildTarget))
+    fsSync.writeFileSync(rebuildTarget, "");
+  return { root, rebuildTarget };
+}
+
+function withCatalogWriteLockSync<T>(sessionDir: string, task: () => T): T {
+  const { root } = ensureCatalogLockTargets(sessionDir);
+  const deadline = Date.now() + 5000;
+  let release: (() => void) | undefined;
+  while (!release) {
+    try {
+      release = lockfile.lockSync(root, {
+        realpath: false,
+        stale: 60_000,
+      });
+    } catch (error: any) {
+      if (error?.code !== "ELOCKED" || Date.now() >= deadline) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
   }
-  const statePath = catalogStatePath(sessionDir);
-  if (!fsSync.existsSync(statePath)) {
-    fsSync.writeFileSync(
-      statePath,
-      `${JSON.stringify(
-        {
-          schemaVersion: SESSION_CATALOG_SCHEMA_VERSION,
-          rebuiltAt: null,
-          checked: 0,
-          indexed: 0,
-        },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
+  try {
+    return task();
+  } finally {
+    release();
+  }
+}
+
+async function withCatalogWriteLock<T>(
+  sessionDir: string,
+  task: () => T,
+): Promise<T> {
+  const { root } = ensureCatalogLockTargets(sessionDir);
+  const release = await lockfile.lock(root, catalogLockOptions());
+  try {
+    return task();
+  } finally {
+    await release();
   }
 }
 
@@ -395,149 +728,418 @@ export function updateSessionCatalogFromSessionManagerSync(
   try {
     if (sessionManager?.isPersisted?.() === false) return false;
     const sessionFile = normalizeSessionValue(sessionManager?.sessionFile);
-    const entries = Array.isArray(sessionManager?.fileEntries)
-      ? sessionManager.fileEntries
-      : [];
-    if (!sessionFile || entries.length === 0) return false;
-    const summary = summarizeSessionEntries(sessionFile, entries);
-    if (!summary) return false;
+    if (!sessionFile || !fsSync.existsSync(sessionFile)) return false;
     const sessionDir =
       normalizeSessionValue(sessionManager?.getSessionDir?.()) ||
       path.dirname(sessionFile);
-    appendCatalogRecordSync(sessionDir, summaryToCatalogRecord(summary));
-    return true;
+    return withCatalogWriteLockSync(sessionDir, () => {
+      const db = openCatalogDb(sessionDir);
+      try {
+        db.transaction(() => {
+          // Keep Pi persistence O(1). Public listing hides dirty catalogs and
+          // refreshes this file from a stable disk read before returning rows.
+          setCatalogMeta(db, "dirty", "1");
+          setCatalogMeta(
+            db,
+            "revision",
+            String(Number(readCatalogMeta(db, "revision") || 0) + 1),
+          );
+        })();
+        return true;
+      } finally {
+        db.close();
+      }
+    });
   } catch {
     return false;
   }
 }
 
-export async function rebuildSessionCatalog(sessionDir: string): Promise<{
+function removeLegacyCatalogs(sessionDir: string): void {
+  for (const version of LEGACY_SESSION_CATALOG_VERSIONS) {
+    fsSync.rmSync(path.join(catalogBaseRoot(sessionDir), version), {
+      recursive: true,
+      force: true,
+    });
+  }
+}
+
+function removeDatabaseArtifacts(dbPath: string): void {
+  for (const suffix of ["", "-journal", "-wal", "-shm"]) {
+    fsSync.rmSync(`${dbPath}${suffix}`, { force: true });
+  }
+}
+
+type SessionCatalogRebuildResult = {
   checked: number;
   indexed: number;
-}> {
-  const root = catalogRoot(sessionDir);
-  await fs.rm(root, { recursive: true, force: true });
-  await fs.mkdir(path.join(root, "cwd"), { recursive: true });
+};
 
-  const files = await listSessionRecordFiles(sessionDir);
-  const summaries = await loadSessionSummaries(files);
-  summaries.sort(
-    (left, right) => left.modified.getTime() - right.modified.getTime(),
-  );
+const catalogRebuilds = new Map<string, Promise<SessionCatalogRebuildResult>>();
 
-  const allLines: string[] = [];
-  const cwdLines = new Map<string, string[]>();
-  for (const summary of summaries) {
-    const record = summaryToCatalogRecord(summary);
-    const line = JSON.stringify(record);
-    allLines.push(line);
-    if (record.cwd) {
-      const cwdPath = cwdCatalogPath(sessionDir, record.cwd);
-      const lines = cwdLines.get(cwdPath) || [];
-      lines.push(line);
-      cwdLines.set(cwdPath, lines);
-    }
-  }
+type SessionCatalogReconcilePlan = {
+  baseRevision: string;
+  checked: number;
+  observed: Map<string, SessionFileFreshness>;
+  replacements: SessionCatalogRecord[];
+  removals: string[];
+};
 
-  await fs.writeFile(
-    allCatalogPath(sessionDir),
-    allLines.length ? `${allLines.join("\n")}\n` : "",
-    "utf8",
-  );
-  for (const [filePath, lines] of cwdLines) {
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, `${lines.join("\n")}\n`, "utf8");
-  }
-  await fs.writeFile(
-    catalogStatePath(sessionDir),
-    `${JSON.stringify(
-      {
-        schemaVersion: SESSION_CATALOG_SCHEMA_VERSION,
-        rebuiltAt: new Date().toISOString(),
-        checked: files.length,
-        indexed: summaries.length,
-      },
-      null,
-      2,
-    )}\n`,
-    "utf8",
-  );
-  return { checked: files.length, indexed: summaries.length };
-}
-
-async function readCatalogState(sessionDir: string): Promise<any | undefined> {
-  try {
-    return JSON.parse(await fs.readFile(catalogStatePath(sessionDir), "utf8"));
-  } catch {
-    return undefined;
-  }
-}
-
-async function hasCatalogState(sessionDir: string): Promise<boolean> {
-  const state = await readCatalogState(sessionDir);
-  return state?.schemaVersion === SESSION_CATALOG_SCHEMA_VERSION;
-}
-
-async function hasFullCatalogState(sessionDir: string): Promise<boolean> {
-  const state = await readCatalogState(sessionDir);
+function rowMatchesFreshness(
+  row: SessionCatalogRow,
+  freshness: SessionFileFreshness,
+): boolean {
   return (
-    state?.schemaVersion === SESSION_CATALOG_SCHEMA_VERSION &&
-    Boolean(normalizeSessionValue(state.rebuiltAt))
+    Number(row.file_size) === freshness.size &&
+    Number(row.file_mtime_ms) === freshness.mtimeMs &&
+    Number(row.file_ctime_ms) === freshness.ctimeMs
   );
 }
 
-async function readCatalogRecordsFromTail(
-  filePath: string,
-  options: { needed: number; cwd?: string },
-): Promise<{ records: SessionCatalogRecord[]; exhausted: boolean }> {
-  const needed = Math.max(0, options.needed);
-  if (needed <= 0) return { records: [], exhausted: true };
-  let handle: fs.FileHandle | undefined;
-  try {
-    handle = await fs.open(filePath, "r");
-    const stat = await handle.stat();
-    let position = stat.size;
-    let carry = "";
-    const records: SessionCatalogRecord[] = [];
-    const seen = new Set<string>();
-    const resolvedCwd = normalizeSessionValue(options.cwd)
-      ? path.resolve(String(options.cwd))
-      : undefined;
-
-    while (position > 0 && records.length < needed) {
-      const length = Math.min(CATALOG_TAIL_READ_BYTES, position);
-      position -= length;
-      const buffer = Buffer.allocUnsafe(length);
-      const { bytesRead } = await handle.read(buffer, 0, length, position);
-      const text = buffer.subarray(0, bytesRead).toString("utf8") + carry;
-      const lines = text.split("\n");
-      carry = position > 0 ? lines.shift() || "" : "";
-
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        if (records.length >= needed) break;
-        const line = lines[index]?.trim();
-        if (!line) continue;
-        const record = normalizeCatalogRecord(parseJsonLine(line));
-        if (!record) continue;
-        const resolvedPath = path.resolve(record.path);
-        if (seen.has(resolvedPath)) continue;
-        seen.add(resolvedPath);
-        if (
-          resolvedCwd &&
-          (!record.cwd || path.resolve(record.cwd) !== resolvedCwd)
-        ) {
-          continue;
-        }
-        if (!fsSync.existsSync(record.path)) continue;
-        records.push(record);
+async function prepareCatalogReconciliation(
+  db: BetterSqlite3.Database,
+  sessionDir: string,
+): Promise<SessionCatalogReconcilePlan | null> {
+  const baseRevision = readCatalogMeta(db, "revision") || "0";
+  const files = await listSessionRecordFiles(sessionDir);
+  const existingRows = db.prepare("SELECT * FROM sessions").all() as
+    | SessionCatalogRow[]
+    | undefined;
+  const existing = new Map(
+    (existingRows || []).map((row) => [path.resolve(row.path), row]),
+  );
+  const observed = new Map<string, SessionFileFreshness>();
+  const replacements: SessionCatalogRecord[] = [];
+  const removals: string[] = [];
+  const fileStats = await Promise.all(
+    files.map(async (filePath) => {
+      try {
+        return { filePath, freshness: fileFreshness(await fs.stat(filePath)) };
+      } catch {
+        return null;
       }
+    }),
+  );
+
+  for (const [directoryOrdinal, item] of fileStats.entries()) {
+    if (!item) return null;
+    const resolvedPath = path.resolve(item.filePath);
+    const row = existing.get(resolvedPath);
+    if (row && rowMatchesFreshness(row, item.freshness)) {
+      observed.set(resolvedPath, item.freshness);
+      if (Number(row.directory_ordinal) !== directoryOrdinal) {
+        replacements.push({
+          ...rowToCatalogRecord(row),
+          directoryOrdinal,
+        });
+      }
+      continue;
     }
-    return { records, exhausted: position <= 0 };
-  } catch {
-    return { records: [], exhausted: true };
-  } finally {
-    await handle?.close().catch(() => undefined);
+    const stableRead = await readCompleteSessionRecord(item.filePath);
+    if (!stableRead) return null;
+    observed.set(resolvedPath, stableRead.freshness);
+    if (stableRead.record) {
+      replacements.push({ ...stableRead.record, directoryOrdinal });
+    } else if (row) removals.push(row.path);
   }
+  for (const row of existing.values()) {
+    if (!observed.has(path.resolve(row.path))) removals.push(row.path);
+  }
+  return {
+    baseRevision,
+    checked: files.length,
+    observed,
+    replacements,
+    removals,
+  };
+}
+
+function validateCatalogSourceSnapshotSync(
+  sessionDir: string,
+  observed: Map<string, SessionFileFreshness>,
+): boolean {
+  let files: string[];
+  try {
+    files = fsSync
+      .readdirSync(sessionDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && isSessionRecordFile(entry.name))
+      .map((entry) => path.resolve(sessionDir, entry.name));
+  } catch {
+    return observed.size === 0;
+  }
+  if (files.length !== observed.size) return false;
+  for (const filePath of files) {
+    const expected = observed.get(filePath);
+    if (!expected) return false;
+    try {
+      if (
+        !sameFileFreshness(fileFreshness(fsSync.statSync(filePath)), expected)
+      ) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+function applyCatalogReconciliation(
+  db: BetterSqlite3.Database,
+  plan: SessionCatalogReconcilePlan,
+): SessionCatalogRebuildResult | null {
+  if ((readCatalogMeta(db, "revision") || "0") !== plan.baseRevision) {
+    return null;
+  }
+  const remove = db.prepare("DELETE FROM sessions WHERE path = ?");
+  let indexed = 0;
+  db.transaction(() => {
+    for (const sessionPath of plan.removals) remove.run(sessionPath);
+    for (const record of plan.replacements) upsertCatalogRecord(db, record);
+    setCatalogMeta(db, "checked", String(plan.checked));
+    const count = db
+      .prepare("SELECT COUNT(*) AS total FROM sessions")
+      .get() as {
+      total: number;
+    };
+    indexed = Number(count.total) || 0;
+    setCatalogMeta(db, "indexed", String(indexed));
+    setCatalogMeta(db, "reconciled_at", new Date().toISOString());
+    setCatalogMeta(db, "complete", "1");
+    setCatalogMeta(db, "dirty", "0");
+    setCatalogMeta(db, "revision", String(Number(plan.baseRevision) + 1));
+  })();
+  return { checked: plan.checked, indexed };
+}
+
+async function buildSessionCatalogGeneration(
+  sessionDir: string,
+  dbPath: string,
+): Promise<SessionCatalogRebuildResult> {
+  removeDatabaseArtifacts(dbPath);
+  const files = await listSessionRecordFiles(sessionDir);
+  const db = openCatalogDbPath(dbPath);
+  let indexed = 0;
+  try {
+    setCatalogMeta(db, "complete", "0");
+    setCatalogMeta(db, "dirty", "1");
+    setCatalogMeta(db, "revision", "0");
+    setCatalogMeta(db, "checked", String(files.length));
+    for (const [directoryOrdinal, filePath] of files.entries()) {
+      const stableRead = await readCompleteSessionRecord(filePath);
+      if (!stableRead?.record) continue;
+      upsertCatalogRecord(db, {
+        ...stableRead.record,
+        directoryOrdinal,
+      });
+      indexed += 1;
+    }
+    setCatalogMeta(db, "indexed", String(indexed));
+    setCatalogMeta(db, "rebuilt_at", new Date().toISOString());
+  } finally {
+    db.close();
+  }
+  return { checked: files.length, indexed };
+}
+
+async function publishSessionCatalogGeneration(
+  sessionDir: string,
+  generationPath: string,
+): Promise<SessionCatalogRebuildResult> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const generationDb = openCatalogDbPath(generationPath);
+    let plan: SessionCatalogReconcilePlan | null;
+    try {
+      plan = await prepareCatalogReconciliation(generationDb, sessionDir);
+    } finally {
+      generationDb.close();
+    }
+    if (!plan) continue;
+    const published = await withCatalogWriteLock(sessionDir, () => {
+      if (!validateCatalogSourceSnapshotSync(sessionDir, plan.observed)) {
+        return null;
+      }
+      const generation = openCatalogDbPath(generationPath);
+      try {
+        const result = applyCatalogReconciliation(generation, plan);
+        if (!result) return null;
+      } finally {
+        generation.close();
+      }
+
+      const livePath = catalogDbPath(sessionDir);
+      let liveDb: BetterSqlite3.Database;
+      try {
+        liveDb = openCatalogDb(sessionDir);
+      } catch {
+        removeDatabaseArtifacts(livePath);
+        liveDb = openCatalogDb(sessionDir);
+      }
+      try {
+        liveDb.prepare("ATTACH DATABASE ? AS next_catalog").run(generationPath);
+        try {
+          liveDb.transaction(() => {
+            liveDb.prepare("DELETE FROM sessions").run();
+            liveDb.exec(`
+              INSERT INTO sessions (
+                path, id, name, first_message, modified, modified_ms,
+                message_count, cwd, resolved_cwd, parent_session_path,
+                all_messages_text, indexed_entry_count,
+                indexed_last_entry_signature, indexed_entries_hash,
+                directory_ordinal, file_size, file_mtime_ms, file_ctime_ms
+              )
+              SELECT
+                path, id, name, first_message, modified, modified_ms,
+                message_count, cwd, resolved_cwd, parent_session_path,
+                all_messages_text, indexed_entry_count,
+                indexed_last_entry_signature, indexed_entries_hash,
+                directory_ordinal, file_size, file_mtime_ms, file_ctime_ms
+              FROM next_catalog.sessions;
+              DELETE FROM catalog_meta;
+              INSERT INTO catalog_meta(key, value)
+              SELECT key, value FROM next_catalog.catalog_meta;
+            `);
+          })();
+        } finally {
+          liveDb.exec("DETACH DATABASE next_catalog");
+        }
+        return {
+          checked: Number(readCatalogMeta(liveDb, "checked") || 0),
+          indexed: Number(readCatalogMeta(liveDb, "indexed") || 0),
+        };
+      } finally {
+        liveDb.close();
+      }
+    });
+    if (published) {
+      removeLegacyCatalogs(sessionDir);
+      return published;
+    }
+  }
+  throw new Error("Session catalog source did not stabilize");
+}
+
+async function runSessionCatalogRebuild(
+  sessionDir: string,
+  skipIfComplete: boolean,
+): Promise<SessionCatalogRebuildResult> {
+  const key = path.resolve(sessionDir);
+  const existing = catalogRebuilds.get(key);
+  if (existing) return await existing;
+  const rebuild = (async () => {
+    const { rebuildTarget } = ensureCatalogLockTargets(key);
+    const release = await lockfile.lock(rebuildTarget, catalogLockOptions());
+    const generationPath = path.join(
+      catalogRoot(key),
+      `catalog.sqlite.rebuild-${process.pid}-${crypto.randomBytes(6).toString("hex")}`,
+    );
+    try {
+      if (skipIfComplete && hasFullCatalogState(key)) {
+        return await reconcileSessionCatalog(key);
+      }
+      await buildSessionCatalogGeneration(key, generationPath);
+      return await publishSessionCatalogGeneration(key, generationPath);
+    } finally {
+      removeDatabaseArtifacts(generationPath);
+      await release();
+    }
+  })();
+  catalogRebuilds.set(key, rebuild);
+  try {
+    return await rebuild;
+  } finally {
+    if (catalogRebuilds.get(key) === rebuild) catalogRebuilds.delete(key);
+  }
+}
+
+export async function rebuildSessionCatalog(
+  sessionDir: string,
+): Promise<SessionCatalogRebuildResult> {
+  return await runSessionCatalogRebuild(sessionDir, false);
+}
+
+function hasCatalogDb(sessionDir: string): boolean {
+  return fsSync.existsSync(catalogDbPath(sessionDir));
+}
+
+function hasFullCatalogState(sessionDir: string): boolean {
+  if (!hasCatalogDb(sessionDir)) return false;
+  try {
+    const db = openCatalogDb(sessionDir);
+    try {
+      return readCatalogMeta(db, "complete") === "1";
+    } finally {
+      db.close();
+    }
+  } catch {
+    return false;
+  }
+}
+
+async function reconcileSessionCatalog(
+  sessionDir: string,
+): Promise<SessionCatalogRebuildResult> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const planningDb = openCatalogDb(sessionDir);
+    let plan: SessionCatalogReconcilePlan | null;
+    try {
+      plan = await prepareCatalogReconciliation(planningDb, sessionDir);
+    } finally {
+      planningDb.close();
+    }
+    if (!plan) continue;
+    const result = await withCatalogWriteLock(sessionDir, () => {
+      if (!validateCatalogSourceSnapshotSync(sessionDir, plan.observed)) {
+        return null;
+      }
+      const db = openCatalogDb(sessionDir);
+      try {
+        return applyCatalogReconciliation(db, plan);
+      } finally {
+        db.close();
+      }
+    });
+    if (result) return result;
+  }
+  throw new Error("Session catalog source did not stabilize");
+}
+
+function queryCatalogRecords(options: {
+  db: BetterSqlite3.Database;
+  cwd?: string;
+  offset: number;
+  limit?: number;
+}): { records: SessionCatalogRecord[]; total: number } | undefined {
+  const resolvedCwd = normalizeSessionValue(options.cwd)
+    ? path.resolve(String(options.cwd))
+    : undefined;
+  const where = resolvedCwd ? "WHERE resolved_cwd = ?" : "";
+  const parameters = resolvedCwd ? [resolvedCwd] : [];
+  return options.db.transaction(() => {
+    if (
+      readCatalogMeta(options.db, "complete") !== "1" ||
+      readCatalogMeta(options.db, "dirty") !== "0"
+    ) {
+      return undefined;
+    }
+    const totalRow = options.db
+      .prepare(`SELECT COUNT(*) AS total FROM sessions ${where}`)
+      .get(...parameters) as { total: number };
+    const limitClause = options.limit === undefined ? "" : "LIMIT ? OFFSET ?";
+    const rows = options.db
+      .prepare(
+        `SELECT * FROM sessions ${where}
+         ORDER BY modified_ms DESC, directory_ordinal ASC ${limitClause}`,
+      )
+      .all(
+        ...parameters,
+        ...(options.limit === undefined ? [] : [options.limit, options.offset]),
+      ) as SessionCatalogRow[];
+    return {
+      records: rows.map(rowToCatalogRecord),
+      total: Math.max(0, Number(totalRow?.total) || 0),
+    };
+  })();
 }
 
 export async function tryListSessionCatalogPage(options: {
@@ -546,31 +1148,64 @@ export async function tryListSessionCatalogPage(options: {
   offset: number;
   limit: number;
 }): Promise<SessionCatalogPage | undefined> {
-  if (!(await hasCatalogState(options.sessionDir))) return undefined;
-  const needed = options.offset + options.limit + 1;
-  const filePath = catalogPathForScope(options.sessionDir, options.cwd);
-  const { records } = await readCatalogRecordsFromTail(filePath, {
-    needed,
-    cwd: options.cwd,
-  });
-  const pageRecords = records.slice(
-    options.offset,
-    options.offset + options.limit,
-  );
-  const hasMore = records.length > options.offset + options.limit;
-  const sessions = pageRecords.map(catalogRecordToSummary);
-  const nextOffset = options.offset + sessions.length;
-  return {
-    sessions,
-    offset: options.offset,
-    limit: options.limit,
-    total: hasMore ? nextOffset + 1 : nextOffset,
-    hasMore,
-    ...(hasMore ? { nextOffset } : {}),
-  };
+  if (!hasCatalogDb(options.sessionDir)) return undefined;
+  try {
+    const db = openCatalogDb(options.sessionDir);
+    try {
+      const result = queryCatalogRecords({
+        db,
+        cwd: options.cwd,
+        offset: options.offset,
+        limit: options.limit,
+      });
+      if (!result) return undefined;
+      const { records, total } = result;
+      const sessions = records.map(catalogRecordToSummary);
+      const nextOffset = options.offset + sessions.length;
+      const hasMore = nextOffset < total;
+      return {
+        sessions,
+        offset: options.offset,
+        limit: options.limit,
+        total,
+        hasMore,
+        ...(hasMore ? { nextOffset } : {}),
+      };
+    } finally {
+      db.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+export async function listAllSessionCatalog(options: {
+  sessionDir: string;
+  cwd?: string;
+}): Promise<SessionSummary[] | undefined> {
+  await ensureSessionCatalog(options.sessionDir);
+  if (!hasCatalogDb(options.sessionDir)) return undefined;
+  try {
+    const db = openCatalogDb(options.sessionDir);
+    try {
+      const result = queryCatalogRecords({
+        db,
+        cwd: options.cwd,
+        offset: 0,
+      });
+      return result?.records.map(catalogRecordToSummary);
+    } finally {
+      db.close();
+    }
+  } catch {
+    return undefined;
+  }
 }
 
 export async function ensureSessionCatalog(sessionDir: string): Promise<void> {
-  if (await hasFullCatalogState(sessionDir)) return;
-  await rebuildSessionCatalog(sessionDir);
+  if (!hasFullCatalogState(sessionDir)) {
+    await runSessionCatalogRebuild(sessionDir, true);
+    return;
+  }
+  await reconcileSessionCatalog(sessionDir);
 }

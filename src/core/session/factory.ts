@@ -3,7 +3,10 @@ import {
   getRuntimeSessionDir,
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
-import { updateSessionCatalogFromSessionManagerSync } from "./catalog.js";
+import {
+  listAllSessionCatalog,
+  updateSessionCatalogFromSessionManagerSync,
+} from "./catalog.js";
 import { normalizeBoundSessionList } from "./listing.js";
 import {
   listBoundSessionPage as listFastBoundSessionPage,
@@ -83,6 +86,11 @@ export async function listBoundSessions(
   }
   const { cwd, agentDir } = resolveRuntimeProfile(options);
   const sessionDir = options.sessionDir || getRuntimeSessionDir(cwd, agentDir);
+  const catalogSessions = await listAllSessionCatalog({
+    sessionDir,
+    cwd,
+  }).catch(() => undefined);
+  if (catalogSessions) return normalizeBoundSessionList(catalogSessions);
   const { SessionManager } = options.SessionManager
     ? { SessionManager: options.SessionManager }
     : await loadRinSessionManagerModule();

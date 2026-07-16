@@ -685,6 +685,7 @@ export async function startChatBridge(
     elements: any[],
     identity: any,
     decision: Awaited<ReturnType<typeof shouldProcessText>>,
+    receivedAt?: string,
   ) => {
     const messageId = pickMessageId(session);
     const replyToMessageId = pickReplyToMessageId(session);
@@ -879,6 +880,7 @@ export async function startChatBridge(
         incomingMessageId: messageId,
         sessionFile: linkedSessionFile || undefined,
         ...resolveChatModelOptions(settings, decision.chatKey),
+        receivedAt,
       });
       return { retry: false };
     } catch (error) {
@@ -1078,6 +1080,7 @@ export async function startChatBridge(
             queuedElements,
             identity,
             decision,
+            envelope.createdAt,
           ),
         ),
     };

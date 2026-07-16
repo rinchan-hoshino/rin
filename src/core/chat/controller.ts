@@ -124,6 +124,9 @@ type ChatTurnTarget = {
 type ChatTurnMeta = ChatTurnTarget & {
   workingNoticeSent?: boolean;
   startedAt: number;
+  receivedAtMs?: number;
+  frontendReadyAt?: number;
+  startupTimingLogged?: boolean;
   ackIncomingMessageId?: string;
   ackReplyToMessageId?: string;
 };
@@ -607,6 +610,7 @@ export class ChatController {
   private setCurrentTurn(input: {
     incomingMessageId?: string;
     replyToMessageId?: string;
+    receivedAt?: string;
   }) {
     this.todoNoticeOperation?.abort.abort();
     this.todoNoticeOperation = null;
@@ -616,10 +620,12 @@ export class ChatController {
       safeString(input.incomingMessageId || "").trim() || undefined;
     const nextReplyToMessageId =
       safeString(input.replyToMessageId || "").trim() || undefined;
+    const receivedAtMs = Date.parse(safeString(input.receivedAt).trim());
     this.currentTurn = {
       startedAt: Date.now(),
       incomingMessageId: nextIncomingMessageId,
       replyToMessageId: nextReplyToMessageId,
+      ...(Number.isFinite(receivedAtMs) ? { receivedAtMs } : {}),
       workingNoticeSent: false,
     };
     this.backendAcceptedIncomingMessageId = "";
@@ -632,6 +638,7 @@ export class ChatController {
       attachments: SavedAttachment[];
       incomingMessageId?: string;
       replyToMessageId?: string;
+      receivedAt?: string;
     },
     deliverFinal: boolean,
     startVisibleBeforeConnect = false,
@@ -659,6 +666,7 @@ export class ChatController {
     }
     try {
       const frontendReady = await this.connect();
+      if (this.currentTurn) this.currentTurn.frontendReadyAt = Date.now();
       return {
         ...(await restorePromptParts({
           text: input.text,
@@ -2486,6 +2494,7 @@ export class ChatController {
         deliverFinal?: boolean;
         disabledRinCapabilities?: string[];
         quietMode?: boolean;
+        receivedAt?: string;
       },
     mode: "prompt" | "steer" = "prompt",
   ) {
@@ -2853,10 +2862,32 @@ export class ChatController {
           this.clearCurrentTurn();
         }
         return;
-      case "turn_accepted":
+      case "turn_accepted": {
+        const turn = this.currentTurn;
+        if (
+          turn &&
+          !turn.startupTimingLogged &&
+          typeof turn.receivedAtMs === "number"
+        ) {
+          turn.startupTimingLogged = true;
+          const acceptedAt = Date.now();
+          const receivedToRunMs = Math.max(
+            0,
+            turn.startedAt - turn.receivedAtMs,
+          );
+          const connectMs = Math.max(
+            0,
+            (turn.frontendReadyAt || acceptedAt) - turn.startedAt,
+          );
+          const runToAcceptedMs = Math.max(0, acceptedAt - turn.startedAt);
+          this.logger.info(
+            `chat turn startup chatKey=${this.chatKey} messageId=${this.currentIncomingMessageId() || "unknown"} receivedToRunMs=${receivedToRunMs} connectMs=${connectMs} runToAcceptedMs=${runToAcceptedMs} receivedToAcceptedMs=${Math.max(0, acceptedAt - turn.receivedAtMs)}`,
+          );
+        }
         this.backendAcceptedIncomingMessageId = this.currentIncomingMessageId();
         this.markAcceptedMessage(this.backendAcceptedIncomingMessageId);
         return;
+      }
       case "user_message_start": {
         const userMessageId = safeString(event.userMessageId).trim();
         const activation = this.activatePendingSteeredDeliveryTarget(

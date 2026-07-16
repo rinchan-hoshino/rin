@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import BetterSqlite3 from "better-sqlite3";
+
 const rootDir = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   "..",
@@ -43,6 +45,29 @@ async function writeSessionRecord(sessionDir, name, entries) {
     new Date("2020-01-01T00:00:00.000Z"),
   );
   return filePath;
+}
+
+async function directorySize(root) {
+  let total = 0;
+  for (const entry of await fs.readdir(root, { withFileTypes: true })) {
+    const entryPath = path.join(root, entry.name);
+    total += entry.isDirectory()
+      ? await directorySize(entryPath)
+      : (await fs.stat(entryPath)).size;
+  }
+  return total;
+}
+
+function readRawCatalogRow(sessionDir, sessionFile) {
+  const db = new BetterSqlite3(
+    path.join(sessionDir, ".rin-session-catalog", "v2", "catalog.sqlite"),
+    { readonly: true },
+  );
+  try {
+    return db.prepare("SELECT * FROM sessions WHERE path = ?").get(sessionFile);
+  } finally {
+    db.close();
+  }
 }
 
 function sessionEntries({ id, cwd, first, last, name, parentSession }) {
@@ -112,42 +137,59 @@ test("listBoundSessions does not create cwd-encoded empty session dirs", async (
 
 test("listBoundSessions reads only canonical root sessions", async () => {
   const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-sessions-"));
-  await fs.mkdir(path.join(sessionDir, "legacy"));
-  const listed = [];
-  const sessions = await factory.listBoundSessions({
-    cwd: "/tmp/project",
-    sessionDir,
-    SessionManager: {
-      async list(_cwd, dir) {
-        listed.push(dir);
-        if (dir !== sessionDir) return [];
-        return [
-          {
-            id: "older",
-            path: path.join(dir, "older.jsonl"),
-            modified: new Date("2026-04-16T00:00:00.000Z"),
-          },
-          {
-            id: "newer",
-            path: path.join(dir, "newer.jsonl"),
-            modified: new Date("2026-04-17T00:00:00.000Z"),
-          },
-          {
-            id: "duplicate-newer",
-            path: path.join(dir, "newer.jsonl"),
-            modified: new Date("2026-04-18T00:00:00.000Z"),
-          },
-        ];
-      },
-    },
-  });
+  const cwd = "/tmp/project";
+  const legacyDir = path.join(sessionDir, "legacy");
+  await fs.mkdir(legacyDir);
 
-  assert.deepEqual(
-    sessions.map((item) => item.id),
-    ["newer", "older"],
-  );
-  assert.deepEqual(listed, [sessionDir]);
-  await fs.rm(sessionDir, { recursive: true, force: true });
+  try {
+    await writeSessionRecord(
+      sessionDir,
+      "older.jsonl",
+      sessionEntries({
+        id: "older",
+        cwd,
+        first: "2026-04-16T00:00:00.000Z",
+        last: "2026-04-16T00:05:00.000Z",
+      }),
+    );
+    await writeSessionRecord(
+      sessionDir,
+      "newer.jsonl",
+      sessionEntries({
+        id: "newer",
+        cwd,
+        first: "2026-04-17T00:00:00.000Z",
+        last: "2026-04-17T00:05:00.000Z",
+      }),
+    );
+    await writeSessionRecord(
+      legacyDir,
+      "legacy.jsonl",
+      sessionEntries({
+        id: "legacy",
+        cwd,
+        first: "2026-04-18T00:00:00.000Z",
+        last: "2026-04-18T00:05:00.000Z",
+      }),
+    );
+
+    const sessions = await factory.listBoundSessions({
+      cwd,
+      sessionDir,
+      SessionManager: {
+        async list() {
+          throw new Error("catalog must own canonical listing");
+        },
+      },
+    });
+
+    assert.deepEqual(
+      sessions.map((item) => item.id),
+      ["newer", "older"],
+    );
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
 });
 
 test("listBoundSessionPage returns a bounded recent page from root session records", async () => {
@@ -259,8 +301,6 @@ test("listBoundSessionPage uses a built catalog without reparsing session jsonl 
     );
 
     await catalog.rebuildSessionCatalog(sessionDir);
-    await fs.writeFile(path.join(sessionDir, "old.jsonl"), "not jsonl\n");
-    await fs.writeFile(path.join(sessionDir, "new.jsonl"), "not jsonl\n");
 
     const page = await factory.listBoundSessionPage({
       cwd,
@@ -285,19 +325,29 @@ test("session catalog updates from a session manager without deleting sessions",
   const sessionFile = path.join(sessionDir, "live.jsonl");
 
   try {
-    await fs.writeFile(sessionFile, "placeholder\n");
+    const entries = sessionEntries({
+      id: "live",
+      cwd,
+      first: "2026-04-03T00:00:00.000Z",
+      last: "2026-04-03T00:05:00.000Z",
+      name: "Live indexed session",
+    });
+    await writeSessionRecord(sessionDir, "live.jsonl", entries);
     await catalog.updateSessionCatalogFromSessionManagerSync({
       sessionFile,
-      fileEntries: sessionEntries({
-        id: "live",
-        cwd,
-        first: "2026-04-03T00:00:00.000Z",
-        last: "2026-04-03T00:05:00.000Z",
-        name: "Live indexed session",
-      }),
+      fileEntries: entries,
       isPersisted: () => true,
     });
 
+    const partialPage = await catalog.tryListSessionCatalogPage({
+      cwd,
+      sessionDir,
+      offset: 0,
+      limit: 1,
+    });
+    assert.equal(partialPage, undefined);
+
+    await catalog.ensureSessionCatalog(sessionDir);
     const page = await catalog.tryListSessionCatalogPage({
       cwd,
       sessionDir,
@@ -307,6 +357,636 @@ test("session catalog updates from a session manager without deleting sessions",
     assert.equal(page?.sessions[0]?.id, "live");
     assert.equal(page.sessions[0]?.name, "Live indexed session");
     assert.equal(await pathExists(sessionFile), true);
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("session catalog reconcile repairs files persisted before a catalog update", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-reconcile-project";
+  const sessionFile = path.join(sessionDir, "reconcile.jsonl");
+  const entries = sessionEntries({
+    id: "reconcile",
+    cwd,
+    first: "2026-04-03T00:00:00.000Z",
+    last: "2026-04-03T00:05:00.000Z",
+  });
+
+  try {
+    await writeSessionRecord(sessionDir, "reconcile.jsonl", entries);
+    await catalog.rebuildSessionCatalog(sessionDir);
+    entries.push({
+      type: "message",
+      id: "reconcile-after-crash",
+      timestamp: "2026-04-03T00:06:00.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "persisted-before-index-update" }],
+      },
+    });
+    await fs.writeFile(
+      sessionFile,
+      `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    );
+
+    await catalog.ensureSessionCatalog(sessionDir);
+    const page = await catalog.tryListSessionCatalogPage({
+      cwd,
+      sessionDir,
+      offset: 0,
+      limit: 10,
+    });
+    assert.match(
+      page?.sessions[0]?.allMessagesText || "",
+      /persisted-before-index-update/,
+    );
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("session catalog reconcile detects same-size rewrites with restored mtime", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-same-size-project";
+  const sessionFile = path.join(sessionDir, "same-size.jsonl");
+  const entries = sessionEntries({
+    id: "same-size",
+    cwd,
+    first: "2026-04-03T00:00:00.000Z",
+    last: "2026-04-03T00:05:00.000Z",
+  });
+  entries[2].message.content[0].text = "same-size-old-key";
+
+  try {
+    await writeSessionRecord(sessionDir, "same-size.jsonl", entries);
+    await catalog.rebuildSessionCatalog(sessionDir);
+    const before = await fs.stat(sessionFile);
+    entries[2].message.content[0].text = "same-size-new-key";
+    await fs.writeFile(
+      sessionFile,
+      `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    );
+    const rewritten = await fs.stat(sessionFile);
+    assert.equal(rewritten.size, before.size);
+    await fs.utimes(sessionFile, before.atime, before.mtime);
+
+    await catalog.ensureSessionCatalog(sessionDir);
+    const page = await catalog.tryListSessionCatalogPage({
+      cwd,
+      sessionDir,
+      offset: 0,
+      limit: 10,
+    });
+    assert.doesNotMatch(page?.sessions[0]?.allMessagesText || "", /old-key/);
+    assert.match(page?.sessions[0]?.allMessagesText || "", /new-key/);
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("session catalog rebuild replaces a malformed same-version cache schema", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-schema-project";
+
+  try {
+    await writeSessionRecord(
+      sessionDir,
+      "schema.jsonl",
+      sessionEntries({
+        id: "schema",
+        cwd,
+        first: "2026-04-03T00:00:00.000Z",
+        last: "2026-04-03T00:05:00.000Z",
+      }),
+    );
+    const root = path.join(sessionDir, ".rin-session-catalog", "v2");
+    await fs.mkdir(root, { recursive: true });
+    const db = new BetterSqlite3(path.join(root, "catalog.sqlite"));
+    db.exec(`
+      CREATE TABLE catalog_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE sessions(path TEXT PRIMARY KEY);
+    `);
+    db.prepare("INSERT INTO catalog_meta(key, value) VALUES(?, ?)").run(
+      "schema_version",
+      "2",
+    );
+    db.close();
+
+    await catalog.ensureSessionCatalog(sessionDir);
+    const page = await catalog.tryListSessionCatalogPage({
+      cwd,
+      sessionDir,
+      offset: 0,
+      limit: 10,
+    });
+    assert.deepEqual(
+      page?.sessions.map((session) => session.id),
+      ["schema"],
+    );
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("session catalog rebuild publishes atomically without exposing incomplete rows", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-atomic-project";
+  const entries = sessionEntries({
+    id: "atomic",
+    cwd,
+    first: "2026-04-03T00:00:00.000Z",
+    last: "2026-04-03T00:05:00.000Z",
+  });
+
+  try {
+    await writeSessionRecord(sessionDir, "atomic.jsonl", entries);
+    await catalog.rebuildSessionCatalog(sessionDir);
+    entries.push({
+      type: "message",
+      id: "atomic-new",
+      timestamp: "2026-04-03T00:06:00.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "atomic-new-content" }],
+      },
+    });
+    await fs.writeFile(
+      path.join(sessionDir, "atomic.jsonl"),
+      `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    );
+    await writeSessionRecord(sessionDir, "large.jsonl", [
+      {
+        type: "session",
+        version: 3,
+        id: "large",
+        timestamp: "2026-04-03T00:00:00.000Z",
+        cwd,
+      },
+      {
+        type: "message",
+        id: "large-user",
+        timestamp: "2026-04-03T00:01:00.000Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "x".repeat(8 * 1024 * 1024) }],
+        },
+      },
+    ]);
+
+    let settled = false;
+    let sawIncomplete = false;
+    const rebuilding = catalog.rebuildSessionCatalog(sessionDir).finally(() => {
+      settled = true;
+    });
+    const dbPath = path.join(
+      sessionDir,
+      ".rin-session-catalog",
+      "v2",
+      "catalog.sqlite",
+    );
+    while (!settled) {
+      const db = new BetterSqlite3(dbPath, { readonly: true });
+      const row = db
+        .prepare("SELECT value FROM catalog_meta WHERE key = 'complete'")
+        .get();
+      db.close();
+      if (row?.value !== "1") sawIncomplete = true;
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    await rebuilding;
+
+    assert.equal(sawIncomplete, false);
+    const page = await catalog.tryListSessionCatalogPage({
+      cwd,
+      sessionDir,
+      offset: 0,
+      limit: 10,
+    });
+    assert.match(
+      page?.sessions.find((session) => session.id === "atomic")
+        ?.allMessagesText || "",
+      /atomic-new-content/,
+    );
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("session catalog storage stays bounded when one live session updates repeatedly", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-bounded-project";
+  const sessionFile = path.join(sessionDir, "live.jsonl");
+  const entries = sessionEntries({
+    id: "live",
+    cwd,
+    first: "2026-04-03T00:00:00.000Z",
+    last: "2026-04-03T00:05:00.000Z",
+    name: "Live bounded session",
+  });
+
+  try {
+    await writeSessionRecord(sessionDir, "live.jsonl", entries);
+    await catalog.rebuildSessionCatalog(sessionDir);
+    const catalogRoot = path.join(sessionDir, ".rin-session-catalog");
+    const initialSize = await directorySize(catalogRoot);
+
+    for (let index = 0; index < 50; index += 1) {
+      catalog.updateSessionCatalogFromSessionManagerSync({
+        sessionFile,
+        fileEntries: entries,
+        getSessionDir: () => sessionDir,
+        isPersisted: () => true,
+      });
+    }
+
+    const finalSize = await directorySize(catalogRoot);
+    assert.ok(
+      finalSize <= initialSize * 3,
+      `catalog grew from ${initialSize} to ${finalSize} bytes for one session`,
+    );
+    await catalog.ensureSessionCatalog(sessionDir);
+    const page = await catalog.tryListSessionCatalogPage({
+      cwd,
+      sessionDir,
+      offset: 0,
+      limit: 10,
+    });
+    assert.deepEqual(
+      page?.sessions.map((session) => session.id),
+      ["live"],
+    );
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("session catalog matches Pi for named sessions without messages", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-no-message-project";
+  const sessionFile = path.join(sessionDir, "no-message.jsonl");
+  const entries = [
+    {
+      type: "session",
+      version: 3,
+      id: "no-message",
+      timestamp: "2026-04-01T00:00:00.000Z",
+      cwd,
+    },
+    {
+      type: "session_info",
+      id: "no-message-name",
+      timestamp: "2026-04-03T00:00:00.000Z",
+      name: "Named without messages",
+    },
+  ];
+
+  try {
+    await writeSessionRecord(sessionDir, "no-message.jsonl", entries);
+    await catalog.rebuildSessionCatalog(sessionDir);
+    const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+    const [pi] = await SessionManager.list(cwd, sessionDir);
+    const [indexed] = await catalog.listAllSessionCatalog({ sessionDir, cwd });
+    assert.deepEqual(
+      {
+        id: indexed.id,
+        name: indexed.name,
+        firstMessage: indexed.firstMessage,
+        modified: indexed.modified.toISOString(),
+        messageCount: indexed.messageCount,
+        allMessagesText: indexed.allMessagesText,
+      },
+      {
+        id: pi.id,
+        name: pi.name,
+        firstMessage: pi.firstMessage,
+        modified: pi.modified.toISOString(),
+        messageCount: pi.messageCount,
+        allMessagesText: pi.allMessagesText,
+      },
+    );
+
+    entries.push({
+      type: "message",
+      id: "no-message-first-activity",
+      timestamp: "2025-01-01T00:00:00.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "first activity is older" }],
+      },
+    });
+    await fs.writeFile(
+      sessionFile,
+      `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    );
+    assert.equal(
+      catalog.updateSessionCatalogFromSessionManagerSync({
+        sessionFile,
+        fileEntries: entries,
+        getSessionDir: () => sessionDir,
+        isPersisted: () => true,
+      }),
+      true,
+    );
+    await catalog.ensureSessionCatalog(sessionDir);
+    assert.equal(
+      readRawCatalogRow(sessionDir, sessionFile)?.modified,
+      "2025-01-01T00:00:00.000Z",
+    );
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("session catalog matches Pi tie ordering and malformed-session exclusion", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-tie-project";
+  const tied = (id) =>
+    sessionEntries({
+      id,
+      cwd,
+      first: "2026-04-03T00:00:00.000Z",
+      last: "2026-04-03T00:05:00.000Z",
+    });
+
+  try {
+    await writeSessionRecord(sessionDir, "z-tie.jsonl", tied("z-tie"));
+    await writeSessionRecord(sessionDir, "a-tie.jsonl", tied("a-tie"));
+    await writeSessionRecord(sessionDir, "malformed.jsonl", [
+      {
+        type: "session",
+        version: 3,
+        id: "malformed",
+        timestamp: "2026-04-01T00:00:00.000Z",
+        cwd,
+      },
+      {
+        type: "message",
+        id: "malformed-message",
+        timestamp: "2026-04-03T00:05:00.000Z",
+      },
+    ]);
+    await writeSessionRecord(sessionDir, "bad-name.jsonl", [
+      {
+        type: "session",
+        version: 3,
+        id: "bad-name",
+        timestamp: "2026-04-01T00:00:00.000Z",
+        cwd,
+      },
+      {
+        type: "session_info",
+        id: "bad-name-info",
+        timestamp: "2026-04-03T00:05:00.000Z",
+        name: 1,
+      },
+    ]);
+    await fs.writeFile(
+      path.join(sessionDir, "invalid-json.jsonl"),
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "invalid-json",
+        timestamp: "2026-04-01T00:00:00.000Z",
+        cwd,
+      })}\n{invalid\n`,
+    );
+    await catalog.rebuildSessionCatalog(sessionDir);
+    const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+    const pi = await SessionManager.list(cwd, sessionDir);
+    const indexed = await catalog.listAllSessionCatalog({ sessionDir, cwd });
+    assert.deepEqual(
+      indexed.map((session) => path.basename(session.path)),
+      pi.map((session) => path.basename(session.path)),
+    );
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("session catalog preserves searchable text beyond the summary preview", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-search-project";
+  const keyword = "late-search-keyword-7f4d";
+  const entries = sessionEntries({
+    id: "searchable",
+    cwd,
+    first: "2026-04-03T00:00:00.000Z",
+    last: "2026-04-03T00:05:00.000Z",
+  });
+  for (let index = 0; index < 12; index += 1) {
+    entries.splice(entries.length - 1, 0, {
+      type: "message",
+      id: `searchable-extra-${index}`,
+      timestamp: `2026-04-03T00:04:${String(index).padStart(2, "0")}.000Z`,
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: `${"x".repeat(1900)}${index === 11 ? keyword : ""}`,
+          },
+        ],
+      },
+    });
+  }
+
+  try {
+    await writeSessionRecord(sessionDir, "searchable.jsonl", entries);
+    await catalog.rebuildSessionCatalog(sessionDir);
+    const page = await factory.listBoundSessionPage({
+      cwd,
+      sessionDir,
+      limit: 10,
+    });
+    assert.match(page.sessions[0]?.allMessagesText || "", new RegExp(keyword));
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("session catalog refreshes appended messages and rewrites after dirty marking", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-incremental-project";
+  const sessionFile = path.join(sessionDir, "incremental.jsonl");
+  const entries = sessionEntries({
+    id: "incremental",
+    cwd,
+    first: "2026-04-03T00:00:00.000Z",
+    last: "2026-04-03T00:05:00.000Z",
+  });
+
+  try {
+    await writeSessionRecord(sessionDir, "incremental.jsonl", entries);
+    await catalog.rebuildSessionCatalog(sessionDir);
+    entries.push({
+      type: "message",
+      id: "incremental-late",
+      timestamp: "2026-04-03T00:06:00.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "incremental-late-keyword" }],
+      },
+    });
+    await fs.writeFile(
+      sessionFile,
+      `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    );
+    assert.equal(
+      catalog.updateSessionCatalogFromSessionManagerSync({
+        sessionFile,
+        fileEntries: entries,
+        getSessionDir: () => sessionDir,
+        isPersisted: () => true,
+      }),
+      true,
+    );
+    assert.equal(
+      await catalog.tryListSessionCatalogPage({
+        cwd,
+        sessionDir,
+        offset: 0,
+        limit: 10,
+      }),
+      undefined,
+    );
+    await catalog.ensureSessionCatalog(sessionDir);
+    let row = readRawCatalogRow(sessionDir, sessionFile);
+    assert.match(row?.all_messages_text || "", /incremental-late-keyword/);
+
+    const rewritten = entries.map((entry) =>
+      entry.id === "incremental-late"
+        ? {
+            ...entry,
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "rewritten-late-keyword" }],
+            },
+          }
+        : entry,
+    );
+    await fs.writeFile(
+      sessionFile,
+      `${rewritten.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    );
+    assert.equal(
+      catalog.updateSessionCatalogFromSessionManagerSync({
+        sessionFile,
+        fileEntries: rewritten,
+        getSessionDir: () => sessionDir,
+        isPersisted: () => true,
+      }),
+      true,
+    );
+    await catalog.ensureSessionCatalog(sessionDir);
+    row = readRawCatalogRow(sessionDir, sessionFile);
+    assert.doesNotMatch(
+      row?.all_messages_text || "",
+      /incremental-late-keyword/,
+    );
+    assert.match(row?.all_messages_text || "", /rewritten-late-keyword/);
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("session catalog reconciliation handles an older prefix rewrite", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-prefix-project";
+  const sessionFile = path.join(sessionDir, "prefix.jsonl");
+  const entries = sessionEntries({
+    id: "prefix",
+    cwd,
+    first: "2026-04-03T00:00:00.000Z",
+    last: "2026-04-03T00:05:00.000Z",
+  });
+
+  try {
+    await writeSessionRecord(sessionDir, "prefix.jsonl", entries);
+    await catalog.rebuildSessionCatalog(sessionDir);
+    const changed = entries.map((entry) =>
+      entry.id === "prefix-user"
+        ? {
+            ...entry,
+            message: {
+              role: "user",
+              content: [{ type: "text", text: "prefix-rewritten-keyword" }],
+            },
+          }
+        : entry,
+    );
+    changed.push({
+      type: "message",
+      id: "prefix-appended",
+      timestamp: "2026-04-03T00:06:00.000Z",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "prefix-appended-keyword" }],
+      },
+    });
+    await fs.writeFile(
+      sessionFile,
+      `${changed.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    );
+    assert.equal(
+      catalog.updateSessionCatalogFromSessionManagerSync({
+        sessionFile,
+        fileEntries: changed,
+        getSessionDir: () => sessionDir,
+        isPersisted: () => true,
+      }),
+      true,
+    );
+    await catalog.ensureSessionCatalog(sessionDir);
+    const row = readRawCatalogRow(sessionDir, sessionFile);
+    assert.doesNotMatch(row?.all_messages_text || "", /prefix first message/);
+    assert.match(row?.all_messages_text || "", /prefix-rewritten-keyword/);
+    assert.match(row?.all_messages_text || "", /prefix-appended-keyword/);
+  } finally {
+    await fs.rm(sessionDir, { recursive: true, force: true });
+  }
+});
+
+test("unpaginated session listing uses the catalog instead of reparsing session history", async () => {
+  const sessionDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-catalog-"));
+  const cwd = "/tmp/rin-catalog-all-project";
+
+  try {
+    await writeSessionRecord(
+      sessionDir,
+      "old.jsonl",
+      sessionEntries({
+        id: "old",
+        cwd,
+        first: "2026-04-02T00:00:00.000Z",
+        last: "2026-04-02T00:05:00.000Z",
+      }),
+    );
+    await writeSessionRecord(
+      sessionDir,
+      "new.jsonl",
+      sessionEntries({
+        id: "new",
+        cwd,
+        first: "2026-04-03T00:00:00.000Z",
+        last: "2026-04-03T00:05:00.000Z",
+      }),
+    );
+    await catalog.rebuildSessionCatalog(sessionDir);
+
+    const sessions = await factory.listBoundSessions({
+      cwd,
+      sessionDir,
+      SessionManager: {
+        async list() {
+          throw new Error("session history must not be reparsed");
+        },
+      },
+    });
+    assert.deepEqual(
+      sessions.map((session) => session.id),
+      ["new", "old"],
+    );
   } finally {
     await fs.rm(sessionDir, { recursive: true, force: true });
   }
@@ -350,22 +1030,14 @@ test("listBoundSessions uses the fast page path when pagination is requested", a
   }
 });
 
-test("listBoundSessions normalizes legacy session metadata into canonical fields", async () => {
-  const sessions = await factory.listBoundSessions({
-    cwd: "/tmp/project",
-    sessionDir: "/tmp/sessions",
-    SessionManager: {
-      async list() {
-        return [
-          {
-            id: "session-1",
-            title: "Legacy title",
-            subtitle: "2026-04-18T00:00:00.000Z",
-          },
-        ];
-      },
+test("session listing normalizes legacy session metadata into canonical fields", () => {
+  const sessions = listing.normalizeBoundSessionList([
+    {
+      id: "session-1",
+      title: "Legacy title",
+      subtitle: "2026-04-18T00:00:00.000Z",
     },
-  });
+  ]);
 
   assert.deepEqual(
     {

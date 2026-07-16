@@ -78,14 +78,18 @@ export async function listBoundSessionPage(options: {
 }): Promise<BoundSessionPage> {
   const offset = normalizeSessionPageOffset(options.offset);
   const limit = normalizeSessionPageLimit(options.limit);
-  await ensureSessionCatalog(options.sessionDir);
-  const catalogPage = await tryListSessionCatalogPage({
-    sessionDir: options.sessionDir,
-    cwd: options.cwd,
-    offset,
-    limit,
-  });
-  if (catalogPage) return catalogPage;
+  const catalogReady = await ensureSessionCatalog(options.sessionDir)
+    .then(() => true)
+    .catch(() => false);
+  if (catalogReady) {
+    const catalogPage = await tryListSessionCatalogPage({
+      sessionDir: options.sessionDir,
+      cwd: options.cwd,
+      offset,
+      limit,
+    });
+    if (catalogPage) return catalogPage;
+  }
   return await listBoundSessionPageFromFiles({
     sessionDir: options.sessionDir,
     cwd: options.cwd,

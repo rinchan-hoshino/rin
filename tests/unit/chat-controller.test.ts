@@ -324,6 +324,35 @@ function emitRpcTurnComplete(controller, options, finalText, result) {
   });
 }
 
+test("chat controller logs one received-to-backend startup timing decomposition", async () => {
+  const logs = [];
+  const controller = await createController("telegram/1:2", {
+    logger: {
+      info(...args) {
+        logs.push(args.join(" "));
+      },
+      warn() {},
+    },
+  });
+  const now = Date.now();
+  controller.currentTurn = {
+    incomingMessageId: "m-latency",
+    replyToMessageId: "m-latency",
+    startedAt: now - 80,
+    receivedAtMs: now - 150,
+    frontendReadyAt: now - 20,
+  };
+
+  await controller.handleFrontendEvent({ type: "turn_accepted" });
+  await controller.handleFrontendEvent({ type: "turn_accepted" });
+
+  assert.equal(logs.length, 1);
+  assert.match(
+    logs[0],
+    /chat turn startup .*messageId=m-latency .*receivedToRunMs=70 .*connectMs=60 .*runToAcceptedMs=/,
+  );
+});
+
 test("chat controller delivers compact collapsed notice without summary text", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
