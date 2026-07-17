@@ -378,7 +378,39 @@ test("shutdown resume hint uses rin command name", async () => {
   });
 });
 
-test("fatal runtime errors restore the terminal before writing a readable error", () => {
+test("recoverable runtime errors stay in the TUI without stopping it", () => {
+  const overridesUrl = pathToFileURL(
+    path.join(rootDir, "dist", "core", "pi", "tui-patches", "index.js"),
+  ).href;
+  const script = `
+    const overrides = await import(${JSON.stringify(overridesUrl)});
+    const codingAgent = await import("@earendil-works/pi-coding-agent");
+    await overrides.applyRinTuiOverrides();
+    const outcome = await codingAgent.InteractiveMode.prototype.handleFatalRuntimeError.call({
+      stop() { process.stderr.write("terminal-stopped\\n"); },
+      showError(message) { process.stderr.write(\`shown: \${message}\\n\`); },
+    }, "Failed to resume session", new Error("renderer exploded"));
+    process.stderr.write(\`outcome: \${JSON.stringify(outcome)}\\n\`);
+    process.stderr.write("tui-still-running\\n");
+  `;
+
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "--eval", script],
+    { cwd: rootDir, encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    result.stderr,
+    /shown: Failed to resume session: renderer exploded/,
+  );
+  assert.match(result.stderr, /outcome: \{"cancelled":true\}/);
+  assert.match(result.stderr, /tui-still-running/);
+  assert.doesNotMatch(result.stderr, /terminal-stopped|Rin fatal error/);
+});
+
+test("runtime error reporting failures fall back without exiting", () => {
   const overridesUrl = pathToFileURL(
     path.join(rootDir, "dist", "core", "pi", "tui-patches", "index.js"),
   ).href;
@@ -388,8 +420,9 @@ test("fatal runtime errors restore the terminal before writing a readable error"
     await overrides.applyRinTuiOverrides();
     await codingAgent.InteractiveMode.prototype.handleFatalRuntimeError.call({
       stop() { process.stderr.write("terminal-stopped\\n"); },
-      showError() {},
+      showError() { throw new Error("error panel failed"); },
     }, "Failed to resume session", new Error("renderer exploded"));
+    process.stderr.write("tui-still-running\\n");
   `;
 
   const result = spawnSync(
@@ -398,18 +431,18 @@ test("fatal runtime errors restore the terminal before writing a readable error"
     { cwd: rootDir, encoding: "utf8" },
   );
 
-  assert.equal(result.status, 1, result.stderr);
-  assert.match(result.stderr, /terminal-stopped/);
-  assert.match(result.stderr, /Rin fatal error/);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /Rin TUI error/);
   assert.match(result.stderr, /Failed to resume session: renderer exploded/);
-  assert.ok(
-    result.stderr.indexOf("terminal-stopped") <
-      result.stderr.indexOf("Rin fatal error"),
+  assert.match(
     result.stderr,
+    /Unable to render this error: error panel failed/,
   );
+  assert.match(result.stderr, /tui-still-running/);
+  assert.doesNotMatch(result.stderr, /terminal-stopped|Rin fatal error/);
 });
 
-test("fatal runtime output survives terminal cleanup failures", () => {
+test("async runtime error reporting failures fall back without exiting", () => {
   const overridesUrl = pathToFileURL(
     path.join(rootDir, "dist", "core", "pi", "tui-patches", "index.js"),
   ).href;
@@ -418,12 +451,11 @@ test("fatal runtime output survives terminal cleanup failures", () => {
     const codingAgent = await import("@earendil-works/pi-coding-agent");
     await overrides.applyRinTuiOverrides();
     await codingAgent.InteractiveMode.prototype.handleFatalRuntimeError.call({
-      stop() {
-        process.stderr.write("terminal-stop-attempted\\n");
-        throw new Error("terminal stop failed");
-      },
-      showError() {},
+      stop() { process.stderr.write("terminal-stopped\\n"); },
+      showError() { return Promise.reject(new Error("async error panel failed")); },
     }, "Failed to resume session", new Error("renderer exploded"));
+    await new Promise((resolve) => setImmediate(resolve));
+    process.stderr.write("tui-still-running\\n");
   `;
 
   const result = spawnSync(
@@ -432,11 +464,15 @@ test("fatal runtime output survives terminal cleanup failures", () => {
     { cwd: rootDir, encoding: "utf8" },
   );
 
-  assert.equal(result.status, 1, result.stderr);
-  assert.match(result.stderr, /terminal-stop-attempted/);
-  assert.match(result.stderr, /Rin fatal error/);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /Rin TUI error/);
   assert.match(result.stderr, /Failed to resume session: renderer exploded/);
-  assert.match(result.stderr, /TUI cleanup also failed: terminal stop failed/);
+  assert.match(
+    result.stderr,
+    /Unable to render this error: async error panel failed/,
+  );
+  assert.match(result.stderr, /tui-still-running/);
+  assert.doesNotMatch(result.stderr, /terminal-stopped|Rin fatal error/);
 });
 
 test("startup header override replaces upstream Pi branding with Rin", async () => {
@@ -2217,11 +2253,12 @@ test("rpc compaction start keeps the dedicated compaction status indicator", asy
   }
 });
 
-test("async TUI event failures route through the fatal runtime error boundary", async () => {
+test("async TUI event failures are reported without stopping the TUI", async () => {
   await overrides.applyRinTuiOverrides();
 
   let listener;
-  let fatal;
+  const shownErrors = [];
+  let stops = 0;
   const instance = {
     session: {
       subscribe(callback) {
@@ -2230,20 +2267,25 @@ test("async TUI event failures route through the fatal runtime error boundary", 
       },
     },
     async handleEvent() {
-      throw new Error("compaction render failed");
+      throw new Error("rin_disconnected:req_28");
     },
-    async handleFatalRuntimeError(prefix, error) {
-      fatal = { prefix, error };
+    showError(message) {
+      shownErrors.push(message);
+    },
+    stop() {
+      stops += 1;
     },
   };
 
   codingAgentModule.InteractiveMode.prototype.subscribeToAgent.call(instance);
-  const listenerResult = listener({ type: "compaction_end" });
+  const listenerResult = listener({ type: "rpc_session_resynced" });
   await Promise.resolve(listenerResult).catch(() => {});
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(fatal?.prefix, "Failed to handle session event");
-  assert.equal(fatal?.error?.message, "compaction render failed");
+  assert.deepEqual(shownErrors, [
+    "Failed to handle session event: daemon disconnected; reconnecting",
+  ]);
+  assert.equal(stops, 0);
 });
 
 test("zero-extension compaction end rebuilds history containing Rin core custom entries", async () => {

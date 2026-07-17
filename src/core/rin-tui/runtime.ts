@@ -72,7 +72,7 @@ type RpcExtensionBindings = {
   uiContext?: any;
   commandContextActions?: any;
   shutdownHandler?: () => void;
-  onError?: (error: any) => void;
+  onError?: (error: any) => void | Promise<void>;
 };
 
 type RpcExtensionUiResponse =
@@ -1189,15 +1189,61 @@ export class RpcInteractiveSession {
     ]);
   }
 
+  private formatExtensionUiFailure(error: unknown) {
+    try {
+      return formatRuntimeErrorForFrontendDisplay(error);
+    } catch {
+      return "unknown error";
+    }
+  }
+
+  private emitExtensionUiFailureStatus(
+    detail: string,
+    reportingError?: unknown,
+  ) {
+    const reportingDetail = reportingError
+      ? `. Error reporter also failed: ${this.formatExtensionUiFailure(reportingError)}`
+      : "";
+    const text = `Extension UI request failed: ${detail}${reportingDetail}`;
+    try {
+      this.emitEvent({ type: "status", level: "error", text } as any);
+    } catch {
+      try {
+        process.stderr.write(`\nRin TUI error\n${text}\n`);
+      } catch {}
+    }
+  }
+
+  private async reportExtensionUiRequestFailure(payload: any, error: unknown) {
+    const detail = this.formatExtensionUiFailure(error);
+    try {
+      const onError = this.extensionBindings.onError;
+      if (!onError) {
+        this.emitExtensionUiFailureStatus(detail);
+        return;
+      }
+      await onError({
+        extensionPath: "rpc:extension_ui_request",
+        event: payload?.method || "extension_ui_request",
+        error: detail,
+      });
+    } catch (reportingError) {
+      this.emitExtensionUiFailureStatus(detail, reportingError);
+    }
+  }
+
   private handleRpcEvent(payload: any) {
     if (payload?.type === "extension_ui_request") {
-      void this.handleExtensionUiRequest(payload).catch((error) => {
-        this.extensionBindings.onError?.({
-          extensionPath: "rpc:extension_ui_request",
-          event: payload?.method || "extension_ui_request",
-          error: error instanceof Error ? error.message : String(error),
+      void this.handleExtensionUiRequest(payload)
+        .catch((error) => this.reportExtensionUiRequestFailure(payload, error))
+        .catch((error) => {
+          const detail = this.formatExtensionUiFailure(error);
+          try {
+            process.stderr.write(
+              `\nRin TUI error\nFailed to report extension UI request failure: ${detail}\n`,
+            );
+          } catch {}
         });
-      });
       return;
     }
     void handleRpcSessionEvent(

@@ -787,6 +787,49 @@ test("rpc runtime answers daemon extension UI requests through the bound UI cont
   ]);
 });
 
+test("rpc runtime contains extension UI error reporter failures", async () => {
+  const session = new RpcInteractiveSession({
+    send() {
+      return Promise.resolve({ success: true });
+    },
+    subscribe() {
+      return () => {};
+    },
+  });
+  session.extensionBindings = {
+    uiContext: {
+      async select() {
+        throw new Error("selector failed");
+      },
+    },
+    async onError() {
+      throw new Error("error reporter failed");
+    },
+  };
+
+  const events = [];
+  session.subscribe((event) => events.push(event));
+  session.handleRpcEvent({
+    type: "extension_ui_request",
+    id: "select-failure",
+    method: "select",
+    title: "Pick",
+    options: ["Allow", "Block"],
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(
+    events.filter((event) => event.type === "status"),
+    [
+      {
+        type: "status",
+        level: "error",
+        text: "Extension UI request failed: selector failed. Error reporter also failed: error reporter failed",
+      },
+    ],
+  );
+});
+
 test("rpc runtime keeps control methods bound and leaves settings persistence to the daemon", async () => {
   const sent = [];
   const model = { provider: "test", id: "demo-model", name: "Demo Model" };

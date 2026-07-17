@@ -1,5 +1,3 @@
-import { writeSync } from "node:fs";
-
 import {
   DynamicBorder,
   FooterComponent,
@@ -15,7 +13,6 @@ import {
   formatKeyText,
   getToolPath,
   onThemeChange,
-  stopThemeWatcher,
   theme,
 } from "../private-api.js";
 import {
@@ -97,54 +94,88 @@ function dim(text: string) {
   return `${ANSI_DIM}${text}${ANSI_RESET}`;
 }
 
-export function formatRinFatalError(prefix: unknown, error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  const headline = `${String(prefix || "TUI failure")}: ${message}`;
-  const stack = error instanceof Error ? String(error.stack || "").trim() : "";
-  const stackHeader =
-    error instanceof Error ? `${error.name}: ${error.message}` : "";
-  const details = stack && stack !== stackHeader ? `\n${stack}` : "";
-  return `\nRin fatal error\n${headline}${details}\n`;
-}
-
-export function writeRinFatalError(prefix: unknown, error: unknown) {
-  let output = "\nRin fatal error\nUnable to format the original failure.\n";
+function rawRinTuiErrorMessage(error: unknown) {
   try {
-    output = formatRinFatalError(prefix, error);
-  } catch {}
-  try {
-    writeSync(2, output);
+    return error instanceof Error ? error.message : String(error);
   } catch {
-    try {
-      process.stderr.write(output);
-    } catch {}
+    return "unknown error";
   }
 }
 
-function exitRinTuiAfterFatalError(
+function formatRecoverableRinTuiError(prefix: unknown, error: unknown) {
+  const rawMessage = rawRinTuiErrorMessage(error);
+  const message =
+    /\brin_(?:tui_not_connected|disconnected|session_recovering)\b/.test(
+      rawMessage,
+    )
+      ? "daemon disconnected; reconnecting"
+      : formatRuntimeErrorForFrontendDisplay(error);
+  return `${String(prefix || "TUI operation failed")}: ${message}`;
+}
+
+function writeRecoverableRinTuiError(
+  message: string,
+  reportingError?: unknown,
+) {
+  const reportingMessage = reportingError
+    ? `\nUnable to render this error: ${rawRinTuiErrorMessage(reportingError)}`
+    : "";
+  try {
+    process.stderr.write(`\nRin TUI error\n${message}${reportingMessage}\n`);
+  } catch {}
+}
+
+function reportRecoverableRinTuiError(
   instance: any,
   prefix: unknown,
   error: unknown,
-): never {
-  const cleanupErrors: unknown[] = [];
+  priorReportingError?: unknown,
+) {
+  let message: string;
   try {
-    try {
-      stopThemeWatcher();
-    } catch (cleanupError) {
-      cleanupErrors.push(cleanupError);
-    }
-    try {
-      instance.stop();
-    } catch (cleanupError) {
-      cleanupErrors.push(cleanupError);
-    }
-  } finally {
-    writeRinFatalError(prefix, error);
-    for (const cleanupError of cleanupErrors) {
-      writeRinFatalError("TUI cleanup also failed", cleanupError);
-    }
-    process.exit(1);
+    message = formatRecoverableRinTuiError(prefix, error);
+  } catch (formattingError) {
+    message = `${String(prefix || "TUI operation failed")}: ${rawRinTuiErrorMessage(error)}`;
+    priorReportingError ??= formattingError;
   }
+  let reportingResult: unknown;
+  try {
+    if (typeof instance?.showError !== "function") {
+      writeRecoverableRinTuiError(message, priorReportingError);
+      return;
+    }
+    reportingResult = instance.showError(message);
+  } catch (reportingError) {
+    writeRecoverableRinTuiError(message, priorReportingError || reportingError);
+    return;
+  }
+  try {
+    void Promise.resolve(reportingResult).catch((reportingError) => {
+      writeRecoverableRinTuiError(
+        message,
+        priorReportingError || reportingError,
+      );
+    });
+  } catch (reportingError) {
+    writeRecoverableRinTuiError(message, priorReportingError || reportingError);
+  }
+}
+
+function runRecoverableRinTuiOperation(
+  instance: any,
+  prefix: string,
+  operation: () => unknown,
+) {
+  let result: unknown;
+  try {
+    result = operation();
+  } catch (error) {
+    reportRecoverableRinTuiError(instance, prefix, error);
+    return;
+  }
+  void Promise.resolve(result).catch((error) => {
+    reportRecoverableRinTuiError(instance, prefix, error);
+  });
 }
 
 const RESUME_SESSION_PROMPT_TEXT = "To resume this session:";
@@ -554,7 +585,11 @@ export function showRinUpdateNotification(
 }
 
 function scheduleRinUpdateNotificationWhenReady(instance: any) {
-  void sleep(0).then(() => showRinUpdateNotificationWhenReady(instance));
+  runRecoverableRinTuiOperation(
+    instance,
+    "Failed to check for Rin updates",
+    () => sleep(0).then(() => showRinUpdateNotificationWhenReady(instance)),
+  );
 }
 
 async function showRinUpdateNotificationWhenReady(instance: any) {
@@ -982,25 +1017,24 @@ function enhanceBuiltInExtensionSettings(instance: any) {
   settingsList.onChange = (id: string, newValue: string) => {
     if (String(id).startsWith("rin-built-in-extension:")) {
       const extensionId = String(id).slice("rin-built-in-extension:".length);
-      void setBuiltInRinExtensionState(
-        instance.settingsManager,
-        extensionId,
-        newValue === "true",
-      )
-        .then(async () => {
-          if (typeof instance.session?.reload === "function") {
-            await instance.session.reload();
-            instance.setupAutocompleteProvider?.();
-            instance.showStatus?.("Built-in extension settings reloaded.");
-            return;
-          }
-          await instance.session?.call?.("reload").catch?.(() => {});
-        })
-        .catch((error) => {
-          instance.showError?.(
-            error instanceof Error ? error.message : String(error),
-          );
-        });
+      runRecoverableRinTuiOperation(
+        instance,
+        "Failed to update built-in extension setting",
+        () =>
+          setBuiltInRinExtensionState(
+            instance.settingsManager,
+            extensionId,
+            newValue === "true",
+          ).then(async () => {
+            if (typeof instance.session?.reload === "function") {
+              await instance.session.reload();
+              instance.setupAutocompleteProvider?.();
+              instance.showStatus?.("Built-in extension settings reloaded.");
+              return;
+            }
+            await instance.session?.call?.("reload").catch?.(() => {});
+          }),
+      );
       return;
     }
     originalOnChange.call(settingsList, id, newValue);
@@ -1163,6 +1197,7 @@ function createSessionSelectorPageState(
 }
 
 function maybeLoadNextSessionSelectorPage(
+  instance: any,
   selector: any,
   states: SessionSelectorPageStates,
 ) {
@@ -1177,11 +1212,16 @@ function maybeLoadNextSessionSelectorPage(
     ? Number(sessionList.selectedIndex)
     : 0;
   if (filteredCount === 0 || selectedIndex >= filteredCount - 3) {
-    void state.loadNext(selector, scope);
+    runRecoverableRinTuiOperation(
+      instance,
+      "Failed to load more sessions",
+      () => state.loadNext(selector, scope),
+    );
   }
 }
 
 function attachSessionSelectorPagination(
+  instance: any,
   selector: any,
   states: SessionSelectorPageStates,
 ) {
@@ -1200,7 +1240,7 @@ function attachSessionSelectorPagination(
   );
   selector.sessionList.handleInput = (data: unknown) => {
     originalHandleInput(data);
-    maybeLoadNextSessionSelectorPage(selector, states);
+    maybeLoadNextSessionSelectorPage(instance, selector, states);
   };
 }
 
@@ -1330,9 +1370,16 @@ export async function applyRinTuiOverrides() {
       for (const warning of this.options?.rinStartupWarnings || []) {
         if (warning) this.showWarning(warning);
       }
-      this.checkTmuxKeyboardSetup?.().then((warning: string | undefined) => {
-        if (warning) this.showWarning(warning);
-      });
+      runRecoverableRinTuiOperation(
+        this,
+        "Failed to check terminal keyboard support",
+        () =>
+          this.checkTmuxKeyboardSetup?.().then(
+            (warning: string | undefined) => {
+              if (warning) this.showWarning(warning);
+            },
+          ),
+      );
 
       const {
         migratedProviders,
@@ -1352,7 +1399,11 @@ export async function applyRinTuiOverrides() {
       if (modelsJsonError)
         this.showError(`models.json error: ${modelsJsonError}`);
       if (modelFallbackMessage) this.showWarning(modelFallbackMessage);
-      void this.maybeWarnAboutAnthropicSubscriptionAuth?.();
+      runRecoverableRinTuiOperation(
+        this,
+        "Failed to check subscription authentication",
+        () => this.maybeWarnAboutAnthropicSubscriptionAuth?.(),
+      );
 
       if (initialMessage) {
         try {
@@ -1421,12 +1472,13 @@ export async function applyRinTuiOverrides() {
   const originalHandleFatalRuntimeError =
     interactiveModeProto?.handleFatalRuntimeError;
   if (typeof originalHandleFatalRuntimeError === "function") {
+    // Pi treats session-operation failures as fatal. Rin's daemon-backed TUI can
+    // recover those operations (especially transport loss), so keep the process
+    // and terminal alive and report the failure inside the existing UI instead.
     interactiveModeProto.handleFatalRuntimeError =
-      function handleFatalRuntimeErrorWithReadableTerminalOutput(
-        prefix: unknown,
-        error: unknown,
-      ) {
-        exitRinTuiAfterFatalError(this, prefix, error);
+      function handleRecoverableRuntimeError(prefix: unknown, error: unknown) {
+        reportRecoverableRinTuiError(this, prefix, error);
+        return { cancelled: true };
       };
   }
 
@@ -1506,7 +1558,11 @@ export async function applyRinTuiOverrides() {
               this.ui.requestRender();
             },
             () => {
-              void this.shutdown();
+              runRecoverableRinTuiOperation(
+                this,
+                "Failed to shut down the TUI",
+                () => this.shutdown(),
+              );
             },
             () => this.ui.requestRender(),
             {
@@ -1517,7 +1573,7 @@ export async function applyRinTuiOverrides() {
             this.sessionManager.getSessionFile(),
           );
           configureRootSessionSelectorPresentation(selector);
-          attachSessionSelectorPagination(selector, pageStates);
+          attachSessionSelectorPagination(this, selector, pageStates);
           return { component: selector, focus: selector };
         });
       };
@@ -1551,23 +1607,39 @@ export async function applyRinTuiOverrides() {
   const originalSubscribeToAgent = interactiveModeProto?.subscribeToAgent;
   if (typeof originalSubscribeToAgent === "function") {
     interactiveModeProto.subscribeToAgent =
-      function subscribeToAgentWithFatalErrorBoundary() {
-        const handleReportingFailure = (error: unknown) => {
-          writeRinFatalError("Failed to report session event failure", error);
-          process.exit(1);
-        };
+      function subscribeToAgentWithRecoverableErrorBoundary() {
         const handleFailure = (error: unknown) => {
           let result: unknown;
           try {
+            if (typeof this.handleFatalRuntimeError !== "function") {
+              reportRecoverableRinTuiError(
+                this,
+                "Failed to handle session event",
+                error,
+              );
+              return;
+            }
             result = this.handleFatalRuntimeError(
               "Failed to handle session event",
               error,
             );
           } catch (reportingError) {
-            handleReportingFailure(reportingError);
+            reportRecoverableRinTuiError(
+              this,
+              "Failed to handle session event",
+              error,
+              reportingError,
+            );
             return;
           }
-          void Promise.resolve(result).catch(handleReportingFailure);
+          void Promise.resolve(result).catch((reportingError) => {
+            reportRecoverableRinTuiError(
+              this,
+              "Failed to handle session event",
+              error,
+              reportingError,
+            );
+          });
         };
         this.unsubscribe = this.session.subscribe((event: unknown) => {
           let result: unknown;
