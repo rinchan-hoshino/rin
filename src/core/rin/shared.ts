@@ -33,6 +33,7 @@ import {
 } from "../rin-install/paths.js";
 import { tryManagedSystemdAction } from "../rin-install/managed-service.js";
 import { type ReleaseChannel } from "../rin-lib/release.js";
+import { launchDaemonIndependentUpdateJob } from "./update-job.js";
 import {
   extractSubcommandArgv,
   safeString,
@@ -415,12 +416,43 @@ function buildRinInstallUpdateArgs(parsed: ParsedArgs, installDir: string) {
 export async function runUpdate(parsed: ParsedArgs) {
   const installDir = resolveInstallDirForTarget(parsed);
   const repoRoot = repoRootFromHere();
-  await runInteractiveCommand(
-    rinInstallUpdateNodeCommand(installDir),
-    [
-      path.join(repoRoot, "dist", "app", "rin-install", "main.js"),
-      ...buildRinInstallUpdateArgs(parsed, installDir),
-    ],
-    { env: { ...process.env }, cwd: repoRoot },
+  const nodePath = rinInstallUpdateNodeCommand(installDir);
+  const updateEntryPath = path.join(
+    repoRoot,
+    "dist",
+    "app",
+    "rin-install",
+    "main.js",
   );
+  const updateArgs = buildRinInstallUpdateArgs(parsed, installDir);
+  const detachedJob = launchDaemonIndependentUpdateJob({
+    targetUser: parsed.targetUser,
+    installDir,
+    nodePath,
+    updateEntryPath,
+    executorEntryPath: path.join(
+      repoRoot,
+      "dist",
+      "app",
+      "rin-install",
+      "update-job.js",
+    ),
+    updateArgs,
+    cwd: repoRoot,
+  });
+  if (detachedJob) {
+    process.stdout.write(
+      [
+        `Rin update job accepted: ${detachedJob.id}`,
+        `Status: ${detachedJob.jobPath}`,
+        `Logs: journalctl --user -u ${detachedJob.unit}`,
+        "",
+      ].join("\n"),
+    );
+    return;
+  }
+  await runInteractiveCommand(nodePath, [updateEntryPath, ...updateArgs], {
+    env: { ...process.env },
+    cwd: repoRoot,
+  });
 }

@@ -512,6 +512,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rin_tui_failed: () => "Rin TUI failed before it could start.",
   rin_update_installed_release_channel_missing: () =>
     "Rin update could not find the installed release channel. Repair the installed release metadata before updating.",
+  rin_update_job_invalid: () =>
+    "Rin update could not read its job file. Start the update again.",
   rin_update_platform_bundle_checksum_missing: () =>
     "Rin update could not verify the platform bundle because its checksum is missing.",
   rin_update_platform_bundle_checksum_mismatch: () =>

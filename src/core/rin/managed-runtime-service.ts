@@ -145,7 +145,7 @@ function managedRuntimeServiceForAction(
   return service;
 }
 
-function tryManagedSystemdServiceAction(
+export function runManagedSystemdServiceAction(
   context: ManagedRuntimeServiceActionContext,
   service: ManagedRuntimeService,
   action: "start" | "stop" | "restart",
@@ -159,10 +159,9 @@ function tryManagedSystemdServiceAction(
       context.capture([context.systemctl, "--user", "daemon-reload"], {
         stdio: "ignore",
       }),
-    probeUnit: (candidate) =>
-      context.capture([context.systemctl, "--user", "status", candidate], {
-        stdio: "ignore",
-      }),
+    // `systemctl status` exits non-zero for a loaded but intentionally
+    // inactive unit. The recorded unit is authoritative; the action itself is
+    // the correct existence and permission check.
     runAction: (candidate) =>
       context.exec([context.systemctl, "--user", effectiveAction, candidate]),
   });
@@ -330,7 +329,7 @@ export async function tryManagedServiceAction(
 ) {
   const service = managedRuntimeServiceForAction(context, explicitService);
   if (service.kind === "systemd") {
-    return tryManagedSystemdServiceAction(context, service, action);
+    return runManagedSystemdServiceAction(context, service, action);
   }
   if (service.kind === "launchd") {
     return tryManagedLaunchdServiceAction(context, service, action);

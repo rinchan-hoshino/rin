@@ -258,7 +258,11 @@ test("rin update is a thin wrapper around rin-install update", () => {
   );
 
   assert.match(source, /buildRinInstallUpdateArgs/);
-  assert.match(source, /dist", "app", "rin-install", "main\.js"/);
+  assert.match(
+    source,
+    /path\.join\(\s*repoRoot,\s*"dist",\s*"app",\s*"rin-install",\s*"main\.js"/,
+  );
+  assert.match(source, /launchDaemonIndependentUpdateJob/);
   assert.match(source, /"--update"/);
   assert.match(source, /"--target-user"/);
   assert.match(source, /"--install-dir"/);
