@@ -69,6 +69,8 @@ Rin's built-in direct chat runtime supports these adapter families:
 - Slack
 - Minecraft / QueQiao
 
+Adapter lifecycle failures are isolated. If one configured adapter cannot initialize or connect, its status is `degraded`; other adapters continue starting and the core daemon remains available. If the whole hosted Chat service cannot start, daemon status reports Chat as degraded and Chat commands fail explicitly without taking down TUI, scheduler, workers, or daemon RPC.
+
 Chat bridge configuration is agent-owned: edit `settings.json -> chat` directly, validate the JSON, then restart the target daemon so the hosted chat runtime reloads adapter entries. Do not rely on installer or TUI interactive adapter setup; those flows are intentionally absent.
 
 Minimal built-in adapter examples:
@@ -342,7 +344,7 @@ Lookup contract:
 4. Inbox, recovery, and delivery diagnosis must query `turns`, `inbound_heads`, `outbox`, or `outbox_deliveries`; do not infer control state by scanning message history.
 5. Treat direct database access as read-only diagnosis. Runtime writes must use the owning chat APIs so transactions, generations, and fencing stay intact.
 
-On first open, Rin transactionally imports legacy message records, inbox items, and outbox items. Each controller also imports its legacy `state.json` session binding at most once; afterward that JSON file is projection-only and SQLite remains authoritative. After the database commit, the old control directories move to `data/chat/legacy-migrated-v1/`. Invalid or incomplete legacy data blocks migration instead of silently switching authority. Install and update flows must stop the legacy runtime before first open; a manual cutover must likewise ensure no old process can keep writing the legacy directories. Concurrent first opens of the new runtime serialize through SQLite, and a crash after import reimports any pre-archive legacy writes before completing the one-way archive.
+Install and update own every Chat authority migration. Before restarting the daemon, the installer stops the old runtime, rewrites legacy chat keys, creates or upgrades `chat.sqlite`, transactionally imports legacy message/inbox/outbox authority, imports legacy `state.json` session bindings, and archives old control directories under `data/chat/legacy-migrated-v1/`. Invalid or incomplete legacy data fails the install/update instead of starting a partially migrated runtime. Runtime database opens only validate the current schema and never import legacy authority or upgrade an old schema; an unmet migration therefore degrades Chat while the core daemon remains available. Migration retries serialize through SQLite, and a crash after import reimports any pre-archive legacy writes before completing the one-way archive.
 
 ## Troubleshooting contract
 

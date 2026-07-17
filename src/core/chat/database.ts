@@ -75,60 +75,70 @@ function setWalJournalMode(db: BetterSqlite3.Database) {
   }
 }
 
-function initializeChatDatabase(db: BetterSqlite3.Database) {
-  // Set this before journal_mode, which can itself need a write lock during
-  // concurrent cold opens and legacy cutover. SQLite's journal_mode pragma
-  // can still fail immediately with SQLITE_BUSY, so retry that transition.
+function configureChatDatabase(db: BetterSqlite3.Database) {
+  // Configure connection behavior before journal_mode, which can itself need
+  // a write lock during concurrent cold opens.
   db.pragma("busy_timeout = 120000");
   setWalJournalMode(db);
   db.pragma("synchronous = FULL");
   db.pragma("foreign_keys = ON");
+}
+
+function readChatDatabaseTables(db: BetterSqlite3.Database) {
+  return new Set(
+    (
+      db
+        .prepare(
+          `SELECT name FROM sqlite_master
+           WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
+        )
+        .all() as Array<{ name: string }>
+    ).map((row) => row.name),
+  );
+}
+
+function validateRecordedChatDatabaseSchema(
+  db: BetterSqlite3.Database,
+  version: number,
+) {
+  const currentTables = readChatDatabaseTables(db);
+  if (CHAT_DATABASE_TABLES.some((table) => !currentTables.has(table))) {
+    throw new Error("chat_database_incomplete_schema");
+  }
+  const storedVersion = Number(
+    (
+      db
+        .prepare(`SELECT value FROM schema_meta WHERE key = 'schema_version'`)
+        .get() as any
+    )?.value,
+  );
+  if (storedVersion !== version) {
+    throw new Error("chat_database_schema_version_mismatch");
+  }
+  const storedFingerprint = safeString(
+    (
+      db
+        .prepare(
+          `SELECT value FROM schema_meta WHERE key = 'schema_fingerprint'`,
+        )
+        .get() as any
+    )?.value,
+  ).trim();
+  if (
+    !storedFingerprint ||
+    storedFingerprint !== chatDatabaseSchemaFingerprint(db)
+  ) {
+    throw new Error("chat_database_schema_fingerprint_mismatch");
+  }
+}
+
+function initializeChatDatabase(db: BetterSqlite3.Database) {
+  configureChatDatabase(db);
 
   db.transaction(() => {
-    const readTables = () =>
-      new Set(
-        (
-          db
-            .prepare(
-              `SELECT name FROM sqlite_master
-               WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
-            )
-            .all() as Array<{ name: string }>
-        ).map((row) => row.name),
-      );
-    const validateRecordedSchema = (version: number) => {
-      const currentTables = readTables();
-      if (CHAT_DATABASE_TABLES.some((table) => !currentTables.has(table))) {
-        throw new Error("chat_database_incomplete_schema");
-      }
-      const storedVersion = Number(
-        (
-          db
-            .prepare(
-              `SELECT value FROM schema_meta WHERE key = 'schema_version'`,
-            )
-            .get() as any
-        )?.value,
-      );
-      if (storedVersion !== version) {
-        throw new Error("chat_database_schema_version_mismatch");
-      }
-      const storedFingerprint = safeString(
-        (
-          db
-            .prepare(
-              `SELECT value FROM schema_meta WHERE key = 'schema_fingerprint'`,
-            )
-            .get() as any
-        )?.value,
-      ).trim();
-      if (
-        !storedFingerprint ||
-        storedFingerprint !== chatDatabaseSchemaFingerprint(db)
-      ) {
-        throw new Error("chat_database_schema_fingerprint_mismatch");
-      }
-    };
+    const readTables = () => readChatDatabaseTables(db);
+    const validateRecordedSchema = (version: number) =>
+      validateRecordedChatDatabaseSchema(db, version);
     const currentVersion = Number(db.pragma("user_version", { simple: true }));
     if (currentVersion > CHAT_DATABASE_SCHEMA_VERSION) {
       throw new Error(`chat_database_future_schema:${currentVersion}`);
@@ -398,15 +408,58 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
   }).immediate();
 }
 
+export function migrateChatDatabaseForInstall(
+  agentDir: string,
+): BetterSqlite3.Database {
+  const dbPath = chatDatabasePath(agentDir);
+  const existing = databaseCache.get(dbPath);
+  const db = existing?.open
+    ? existing
+    : (() => {
+        fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+        return new BetterSqlite3(dbPath);
+      })();
+  try {
+    initializeChatDatabase(db);
+    migrateLegacyChatControlData(agentDir, db);
+    databaseCache.set(dbPath, db);
+    return db;
+  } catch (error) {
+    if (!existing?.open) db.close();
+    throw error;
+  }
+}
+
 export function openChatDatabase(agentDir: string): BetterSqlite3.Database {
   const dbPath = chatDatabasePath(agentDir);
   const existing = databaseCache.get(dbPath);
   if (existing?.open) return existing;
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const databaseExists = fs.existsSync(dbPath);
   const db = new BetterSqlite3(dbPath);
   try {
-    initializeChatDatabase(db);
-    migrateLegacyChatControlData(agentDir, db);
+    if (!databaseExists) {
+      initializeChatDatabase(db);
+    } else {
+      configureChatDatabase(db);
+      const currentVersion = Number(
+        db.pragma("user_version", { simple: true }),
+      );
+      if (currentVersion === 0) {
+        // Another process can create the SQLite file before its immediate
+        // schema transaction begins. Enter the same initializer so the write
+        // lock serializes fresh creation; a true partial schema still fails.
+        initializeChatDatabase(db);
+      } else if (currentVersion > CHAT_DATABASE_SCHEMA_VERSION) {
+        throw new Error(`chat_database_future_schema:${currentVersion}`);
+      } else if (currentVersion < CHAT_DATABASE_SCHEMA_VERSION) {
+        throw new Error(
+          `chat_database_schema_upgrade_required:${currentVersion}:${CHAT_DATABASE_SCHEMA_VERSION}`,
+        );
+      } else {
+        validateRecordedChatDatabaseSchema(db, CHAT_DATABASE_SCHEMA_VERSION);
+      }
+    }
     databaseCache.set(dbPath, db);
     return db;
   } catch (error) {

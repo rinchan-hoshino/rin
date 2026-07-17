@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { runChatInstallMigrations } from "../chat/install-migration.js";
 import { normalizeStoredChatSettings } from "../chat/settings.js";
 import { stripRemovedBuiltInRinExtensionEntries } from "../rin-bundled-extensions.js";
 import {
@@ -138,6 +139,9 @@ type InstallMigrationCommandDeps = {
 type InstallMigrationOptions = {
   targetUser: string;
   elevated?: boolean;
+  installDir?: string;
+  migrationRuntimeRoot?: string;
+  targetNodePath?: string;
 };
 
 type InstallMigrationFileOps = {
@@ -823,11 +827,46 @@ function removeInstalledBrowseRuntime(
   };
 }
 
+function migrateInstalledChatAuthority(
+  options: InstallMigrationOptions & { installDir: string },
+  deps: InstallMigrationCommandDeps,
+) {
+  const runtimeRoot = safeString(options.migrationRuntimeRoot).trim();
+  if (!runtimeRoot) return null;
+  if (options.elevated) {
+    const runnerPath = path.join(
+      runtimeRoot,
+      "dist",
+      "app",
+      "rin-install",
+      "chat-migrations.js",
+    );
+    runMigrationCommandAsTargetUser(
+      options,
+      deps,
+      safeString(options.targetNodePath).trim() || process.execPath,
+      [runnerPath, path.resolve(options.installDir)],
+    );
+    return {
+      id: "chat-authority-install-migration-v1",
+      skipped: false,
+      executedAs: options.targetUser,
+    };
+  }
+  return {
+    id: "chat-authority-install-migration-v1",
+    skipped: false,
+    ...runChatInstallMigrations(options.installDir),
+  };
+}
+
 export function applyInstallUpgradeMigrations(
   options: {
     targetUser: string;
     installDir: string;
     elevated?: boolean;
+    migrationRuntimeRoot?: string;
+    targetNodePath?: string;
   },
   deps: InstallMigrationCommandDeps,
 ) {
@@ -839,6 +878,7 @@ export function applyInstallUpgradeMigrations(
     migrateAssistantDeliveryKindsFromOutboxHistory(options.installDir, fileOps),
     rewriteInstalledChatStateSessionFileKeys(options.installDir, fileOps),
     migrateInstalledChatSessionFilesToManaged(options.installDir, fileOps),
+    migrateInstalledChatAuthority(options, deps),
   ].filter(Boolean);
 }
 
@@ -1163,6 +1203,9 @@ export function normalizeInstalledChatSettings(
     targetUser: string;
     installDir: string;
     elevated?: boolean;
+    currentReleaseRoot?: string;
+    migrationRuntimeRoot?: string;
+    targetNodePath?: string;
   },
   deps: {
     findSystemUser: (targetUser: string) => any;
@@ -1195,7 +1238,14 @@ export function normalizeInstalledChatSettings(
     options.targetUser,
     deps.findSystemUser,
   );
-  const migrations = applyInstallUpgradeMigrations(options, deps);
+  const migrations = applyInstallUpgradeMigrations(
+    {
+      ...options,
+      migrationRuntimeRoot:
+        options.migrationRuntimeRoot || options.currentReleaseRoot,
+    },
+    deps,
+  );
   const settingsPath = installSettingsPath(options.installDir);
   const settingsJson = normalizeStoredChatSettings(
     deps.readInstallerJson<any>(settingsPath, {}, Boolean(options.elevated)),
@@ -1223,6 +1273,8 @@ export async function persistInstallerOutputs(
     release?: InstalledReleaseInfo;
     currentReleaseName?: string;
     currentReleaseRoot?: string;
+    migrationRuntimeRoot?: string;
+    targetNodePath?: string;
     managedFiles?: ManagedFilesManifest;
     previousReleaseName?: string;
     previousReleaseRoot?: string;
@@ -1278,7 +1330,14 @@ export async function persistInstallerOutputs(
   if (!options.elevated) deps.ensureDir(options.installDir);
   ensureRuntimeUserDirs(options, deps);
 
-  const migrations = applyInstallUpgradeMigrations(options, deps);
+  const migrations = applyInstallUpgradeMigrations(
+    {
+      ...options,
+      migrationRuntimeRoot:
+        options.migrationRuntimeRoot || options.currentReleaseRoot,
+    },
+    deps,
+  );
   const settingsPath = installSettingsPath(options.installDir);
   const settingsJson = normalizeStoredChatSettings(
     deps.readInstallerJson<any>(settingsPath, {}, Boolean(options.elevated)),

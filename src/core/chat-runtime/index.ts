@@ -317,9 +317,27 @@ function partialChatDeliveryError(error: unknown, delivered: string[]) {
   return next;
 }
 
+export type ChatRuntimeAdapterStatus = {
+  platform: string;
+  selfId: string;
+  status: "registered" | "starting" | "ready" | "degraded" | "stopped";
+  error?: string;
+};
+
+type RegisteredChatRuntimeAdapter = {
+  adapter: any;
+  bot: any;
+  status: ChatRuntimeAdapterStatus["status"];
+  error?: string;
+};
+
 export class ChatRuntimeApp extends EventEmitter {
   bots: any[] = [];
   private readonly adapters = new Set<any>();
+  private readonly adapterEntries = new Map<
+    any,
+    RegisteredChatRuntimeAdapter
+  >();
   readonly agentDir?: string;
 
   constructor(agentDir?: string) {
@@ -368,22 +386,91 @@ export class ChatRuntimeApp extends EventEmitter {
 
   register(adapter: any, bot: any) {
     if (bot) this.bots.push(bot);
-    if (adapter) this.adapters.add(adapter);
+    if (adapter) {
+      this.adapters.add(adapter);
+      this.adapterEntries.set(adapter, {
+        adapter,
+        bot,
+        status: "registered",
+      });
+    }
+  }
+
+  registerAdapterFailure(
+    identity: { platform?: string; selfId?: string },
+    error: unknown,
+  ) {
+    const entry: RegisteredChatRuntimeAdapter = {
+      adapter: null,
+      bot: identity,
+      status: "degraded",
+      error:
+        safeString((error as any)?.message || error).trim() ||
+        "adapter_init_failed",
+    };
+    this.adapterEntries.set(entry, entry);
+    this.emit("adapter-start-failed", {
+      platform: safeString(identity.platform).trim() || "unknown",
+      selfId: safeString(identity.selfId).trim(),
+      status: "degraded",
+      error: entry.error,
+    } satisfies ChatRuntimeAdapterStatus);
+  }
+
+  getAdapterStatuses(): ChatRuntimeAdapterStatus[] {
+    return [...this.adapterEntries.values()].map((entry) => ({
+      platform: safeString(entry.bot?.platform).trim() || "unknown",
+      selfId: safeString(entry.bot?.selfId).trim(),
+      status: entry.status,
+      ...(entry.error ? { error: entry.error } : {}),
+    }));
   }
 
   async start() {
-    for (const adapter of this.adapters) {
-      if (typeof adapter?.start === "function") {
-        await adapter.start();
+    for (const entry of this.adapterEntries.values()) {
+      const { adapter, bot } = entry;
+      if (!adapter) continue;
+      entry.status = "starting";
+      delete entry.error;
+      try {
+        if (typeof adapter?.start === "function") {
+          await adapter.start();
+        }
+        entry.status = "ready";
+      } catch (error: any) {
+        entry.status = "degraded";
+        entry.error =
+          safeString(error?.message || error).trim() || "adapter_start_failed";
+        if (bot) emitBotStatus(this, bot, 0);
+        try {
+          await adapter?.stop?.();
+        } catch {}
+        this.emit("adapter-start-failed", {
+          platform: safeString(bot?.platform).trim() || "unknown",
+          selfId: safeString(bot?.selfId).trim(),
+          status: "degraded",
+          error: entry.error,
+        } satisfies ChatRuntimeAdapterStatus);
       }
     }
   }
 
   async stop() {
-    const adapters = [...this.adapters].reverse();
-    for (const adapter of adapters) {
-      if (typeof adapter?.stop === "function") {
-        await adapter.stop();
+    const entries = [...this.adapterEntries.values()].reverse();
+    for (const entry of entries) {
+      try {
+        await entry.adapter?.stop?.();
+      } catch (error: any) {
+        entry.error =
+          safeString(error?.message || error).trim() || "adapter_stop_failed";
+        this.emit("adapter-stop-failed", {
+          platform: safeString(entry.bot?.platform).trim() || "unknown",
+          selfId: safeString(entry.bot?.selfId).trim(),
+          status: "degraded",
+          error: entry.error,
+        } satisfies ChatRuntimeAdapterStatus);
+      } finally {
+        if (entry.status !== "degraded") entry.status = "stopped";
       }
     }
   }
@@ -2591,6 +2678,10 @@ export function instantiateBuiltInChatRuntimeAdapters(
         created.push({ key: entry.key, name: entry.name });
       }
     } catch (error: any) {
+      app.registerAdapterFailure(
+        { platform: entry.key, selfId: entry.name },
+        error,
+      );
       input.logger?.warn?.(
         `chat runtime adapter init failed key=${entry.key} name=${entry.name} err=${safeString(error?.message || error)}`,
       );
@@ -2659,6 +2750,10 @@ export async function instantiateExternalChatRuntimeAdapters(
       await instantiateExternalChatRuntimeAdapter(app, input, entry);
       created.push({ key: entry.key, name: entry.name });
     } catch (error: any) {
+      app.registerAdapterFailure(
+        { platform: entry.key, selfId: entry.name },
+        error,
+      );
       input.logger?.warn?.(
         `external chat runtime adapter init failed key=${entry.key} name=${entry.name} err=${safeString(error?.message || error)}`,
       );
@@ -2678,6 +2773,10 @@ export async function instantiateChatRuntimeAdapters(
         created.push({ key: entry.key, name: entry.name });
       }
     } catch (error: any) {
+      app.registerAdapterFailure(
+        { platform: entry.key, selfId: entry.name },
+        error,
+      );
       input.logger?.warn?.(
         `chat runtime adapter init failed key=${entry.key} name=${entry.name} err=${safeString(error?.message || error)}`,
       );

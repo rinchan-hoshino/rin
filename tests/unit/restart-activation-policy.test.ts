@@ -38,6 +38,17 @@ test("rin update writes service files passively, restarts once, and waits for th
   );
 
   assert.match(restartBlock, /tryManagedServiceAction\([\s\S]*"restart"/);
+  const persistIndex = restartBlock.indexOf("const written =");
+  const stopIndex = restartBlock.indexOf('"stop"');
+  const restartIndex = restartBlock.indexOf('"restart"', persistIndex);
+  assert.ok(
+    stopIndex >= 0 && stopIndex < persistIndex,
+    "the old daemon must stop before installer-owned migrations",
+  );
+  assert.ok(
+    persistIndex >= 0 && persistIndex < restartIndex,
+    "installer persistence and migrations must finish before daemon restart",
+  );
   assert.match(restartBlock, /waitForSocket/);
   assert.doesNotMatch(restartBlock, /queryInstalledDaemonStatus/);
   assert.doesNotMatch(restartBlock, /activateDaemonRestart/);

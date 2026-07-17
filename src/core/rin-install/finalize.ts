@@ -215,7 +215,6 @@ async function applyInstalledRuntime(
   options: FinalizeInstallOptions & {
     persistInstallerState?: boolean;
     daemonFailureCode: string;
-    stopRuntimeBeforePublish?: boolean;
     publishRuntime?: boolean;
     manageDaemon?: boolean;
     prepareManagedTools?: boolean;
@@ -311,6 +310,18 @@ async function applyInstalledRuntime(
     },
     serviceDeps,
   );
+  if (manageDaemon && publishRuntime) {
+    await tryManagedServiceAction(
+      createManagedRuntimeServiceActionContext({
+        currentUser,
+        targetUser,
+        installDir,
+      }),
+      "stop",
+      buildInstallStageManagedRuntimeService(targetUser, installDir),
+    );
+  }
+
   const coreUpdateLaunchers =
     !persistInstallerState && writeLaunchers
       ? refreshCoreUpdateLaunchers({
@@ -362,21 +373,6 @@ async function applyInstalledRuntime(
   const daemonReadyTimeoutMs = Number.isFinite(options.daemonReadyTimeoutMs)
     ? Math.max(0, Number(options.daemonReadyTimeoutMs))
     : defaultDaemonReadyTimeoutMs();
-  const shouldRestartBeforePersist =
-    manageDaemon && !options.stopRuntimeBeforePublish;
-  if (shouldRestartBeforePersist) {
-    await tryManagedServiceAction(
-      createManagedRuntimeServiceActionContext({
-        currentUser,
-        targetUser,
-        installDir,
-      }),
-      "restart",
-      managedRuntimeServiceFromInstallSpec(installedService) ||
-        buildInstallStageManagedRuntimeService(targetUser, installDir),
-    );
-  }
-
   const written = persistInstallerState
     ? await persistInstallerOutputs(
         {
@@ -392,6 +388,8 @@ async function applyInstalledRuntime(
           release,
           currentReleaseName,
           currentReleaseRoot: publishedRuntime.releaseRoot,
+          migrationRuntimeRoot: publishedRuntime.releaseRoot || sourceRoot,
+          targetNodePath: executionContext.targetNodePath,
           managedFiles: buildInstalledManagedFilesManifest(sourceRoot),
           previousReleaseName,
           previousReleaseRoot: previousReleaseName
@@ -426,6 +424,9 @@ async function applyInstalledRuntime(
           targetUser,
           installDir,
           elevated: useElevatedWrite,
+          currentReleaseRoot: publishedRuntime.releaseRoot,
+          migrationRuntimeRoot: publishedRuntime.releaseRoot || sourceRoot,
+          targetNodePath: executionContext.targetNodePath,
         },
         {
           findSystemUser,
@@ -471,7 +472,7 @@ async function applyInstalledRuntime(
     },
   );
 
-  if (manageDaemon && !shouldRestartBeforePersist) {
+  if (manageDaemon) {
     await tryManagedServiceAction(
       createManagedRuntimeServiceActionContext({
         currentUser,
@@ -542,7 +543,6 @@ export async function finalizeCoreUpdate(options: {
   const result = await applyInstalledRuntime({
     ...options,
     persistInstallerState: false,
-    stopRuntimeBeforePublish: true,
     daemonFailureCode: "rin_core_update_daemon_not_ready",
   });
   return { ...result, mode: "core-only" as const };

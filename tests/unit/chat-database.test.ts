@@ -100,7 +100,7 @@ test("chat database rejects unknown future and partial schemas instead of relabe
     partial.exec(`CREATE TABLE stray_state (id TEXT PRIMARY KEY)`);
     partial.close();
     assert.throws(
-      () => chatDatabase.openChatDatabase(partialDir),
+      () => chatDatabase.migrateChatDatabaseForInstall(partialDir),
       /chat_database_partial_schema/,
     );
   } finally {
@@ -123,7 +123,7 @@ test("chat database rejects unknown future and partial schemas instead of relabe
     );
     incomplete.close();
     assert.throws(
-      () => chatDatabase.openChatDatabase(incompleteDir),
+      () => chatDatabase.migrateChatDatabaseForInstall(incompleteDir),
       /chat_database_incomplete_schema/,
     );
   } finally {
@@ -163,7 +163,7 @@ test("chat database migrates the version 1 terminal outbox index", async () => {
     ).run(fingerprint);
     chatDatabase.closeChatDatabase(agentDir);
 
-    const migrated = chatDatabase.openChatDatabase(agentDir);
+    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
     assert.equal(migrated.pragma("user_version", { simple: true }), 4);
     assert.equal(
       migrated
@@ -209,7 +209,7 @@ test("chat database migrates version 2 session binding authority", async () => {
     ).run(createHash("sha256").update(JSON.stringify(objects)).digest("hex"));
     chatDatabase.closeChatDatabase(agentDir);
 
-    const migrated = chatDatabase.openChatDatabase(agentDir);
+    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
     assert.equal(migrated.pragma("user_version", { simple: true }), 4);
     assert.ok(
       migrated
@@ -242,7 +242,7 @@ test("chat database migrates version 3 dispatch evidence", async () => {
     ).run(createHash("sha256").update(JSON.stringify(objects)).digest("hex"));
     chatDatabase.closeChatDatabase(agentDir);
 
-    const migrated = chatDatabase.openChatDatabase(agentDir);
+    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
     assert.equal(migrated.pragma("user_version", { simple: true }), 4);
     assert.ok(
       migrated
@@ -311,12 +311,7 @@ test("chat database serializes concurrent cold initialization", async () => {
         .prepare(`SELECT key FROM schema_meta ORDER BY key`)
         .all()
         .map((row) => row.key),
-      [
-        "legacy_control_migration",
-        "legacy_control_migration_source_fingerprint",
-        "schema_fingerprint",
-        "schema_version",
-      ],
+      ["schema_fingerprint", "schema_version"],
     );
   } finally {
     chatDatabase.closeChatDatabase(agentDir);

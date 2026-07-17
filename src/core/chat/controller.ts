@@ -63,7 +63,6 @@ import {
 import { drainChatOutbox } from "./boot.js";
 import {
   advanceChatGeneration,
-  importLegacyChatSessionBinding,
   markChatMessageAcceptedWithFence,
   openChatDatabase,
   readChatSessionBinding,
@@ -448,11 +447,6 @@ export class ChatController {
       this.state = { chatKey };
     }
     if (this.affectChatBinding && parseChatKey(chatKey)) {
-      const legacySessionFile = toStoredSessionFile(
-        this.agentDir,
-        this.state.sessionFile,
-      );
-      importLegacyChatSessionBinding(this.agentDir, chatKey, legacySessionFile);
       this.state.sessionFile =
         readChatSessionBinding(this.agentDir, chatKey) || undefined;
     }

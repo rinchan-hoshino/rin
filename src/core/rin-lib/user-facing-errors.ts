@@ -57,6 +57,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat bridge setup is incomplete. Configure the chat bridge entry.",
   chat_bridge_send_empty: () =>
     "Chat bridge send failed because the message is empty. Add text or an attachment.",
+  chat_bridge_unavailable: (detail) =>
+    withDetail("Chat is currently unavailable", detail),
   chat_command_failed: () => "Rin could not run that chat command.",
   chat_command_text_missing: () =>
     "Rin ran the chat command, but it returned no reply text.",
@@ -76,6 +78,11 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "The chat database schema integrity check failed.",
   chat_database_schema_version_mismatch: () =>
     "The chat database schema version does not match its metadata.",
+  chat_database_schema_upgrade_required: (detail) =>
+    withDetail(
+      "The chat database needs an install or update migration before Chat can start",
+      detail,
+    ),
   chat_database_unsupported_schema: (detail) =>
     withDetail("The chat database schema version is unsupported", detail),
   chat_final_assistant_text_missing: () =>
@@ -94,6 +101,12 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat inbox write failed because the inbound message identity is incomplete.",
   chat_inbox_turn_commit_failed: () =>
     "Chat inbox write failed while committing the turn ledger.",
+  chat_install_migration_install_dir_required: () =>
+    "Chat migration needs the target Rin install directory.",
+  chat_install_migration_invalid_session_state: (detail) =>
+    withDetail("Chat migration found invalid legacy session state", detail),
+  chat_install_migration_invalid_settings: (detail) =>
+    withDetail("Chat migration could not read the installed settings", detail),
   chat_legacy_migration_archive_collision: (detail) =>
     withDetail("Legacy chat migration found an existing archive", detail),
   chat_legacy_migration_invalid_inbox: (detail) =>

@@ -130,7 +130,7 @@ test("legacy message, inbox, and outbox authority migrates once into chat.sqlite
     deliveryResult: [],
   });
 
-  const db = database.openChatDatabase(agentDir);
+  const db = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
     messageStore.getChatMessage(agentDir, "telegram/1:2", "legacy-message")
       ?.text,
@@ -182,7 +182,7 @@ test("legacy message, inbox, and outbox authority migrates once into chat.sqlite
   await assert.rejects(fs.stat(path.join(chatRoot, "outbox")));
 
   database.closeChatDatabase(agentDir);
-  const reopened = database.openChatDatabase(agentDir);
+  const reopened = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
     reopened.prepare("SELECT COUNT(*) AS value FROM messages").get().value,
     3,
@@ -223,7 +223,7 @@ test("retired adapter archives with unqualified keys migrate from persisted iden
     },
   });
 
-  const db = database.openChatDatabase(agentDir);
+  const db = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
     messageStore.getChatMessage(agentDir, matrixChatKey, "archived-matrix")
       ?.text,
@@ -275,7 +275,7 @@ test("non-authoritative manual and invalid outbox archives do not re-enter deliv
     );
   }
 
-  const db = database.openChatDatabase(agentDir);
+  const db = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
     outbox.readChatOutboxItemById(agentDir, "active-outbox")?.item.status,
     "queued",
@@ -330,7 +330,7 @@ test("mismatched archived identity blocks authority cutover", async () => {
   );
 
   assert.throws(
-    () => database.openChatDatabase(agentDir),
+    () => database.migrateChatDatabaseForInstall(agentDir),
     /chat_legacy_migration_invalid_message_identity/,
   );
   const inspect = new (await import("better-sqlite3")).default(
@@ -365,7 +365,7 @@ test("archived keys with slash and later colon cannot bypass identity validation
   );
 
   assert.throws(
-    () => database.openChatDatabase(agentDir),
+    () => database.migrateChatDatabaseForInstall(agentDir),
     /chat_legacy_migration_invalid_message_identity/,
   );
 });
@@ -392,7 +392,7 @@ test("active adapter unqualified keys remain invalid at SQLite cutover", async (
   );
 
   assert.throws(
-    () => database.openChatDatabase(agentDir),
+    () => database.migrateChatDatabaseForInstall(agentDir),
     /chat_legacy_migration_invalid_message_identity/,
   );
 });
@@ -411,12 +411,12 @@ test("malformed legacy JSON blocks authority cutover without partial rows", asyn
   await fs.writeFile(badPath, "{bad json\n");
 
   assert.throws(
-    () => database.openChatDatabase(agentDir),
+    () => database.migrateChatDatabaseForInstall(agentDir),
     /chat_legacy_migration_invalid_json/,
   );
   database.closeChatDatabase(agentDir);
   await writeJson(badPath, legacyInbox("repaired"));
-  const db = database.openChatDatabase(agentDir);
+  const db = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
     db.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
     1,
@@ -443,7 +443,7 @@ test("legacy outbox missing media blocks authority cutover", async () => {
   );
 
   assert.throws(
-    () => database.openChatDatabase(agentDir),
+    () => database.migrateChatDatabaseForInstall(agentDir),
     /chat_outbox_media_missing:image/,
   );
   const inspect = new (await import("better-sqlite3")).default(
@@ -469,7 +469,7 @@ test("terminal legacy outbox history tolerates cleaned local media", async () =>
     legacy,
   );
 
-  database.openChatDatabase(agentDir);
+  database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
     outbox.readChatOutboxItemById(agentDir, "delivered-missing-media").item
       .status,
@@ -497,7 +497,7 @@ test("concurrent cold opens serialize one legacy import and archive", async () =
   ).href;
   const code = `
     const database = await import(process.env.CHAT_DATABASE_URL);
-    database.openChatDatabase(process.env.AGENT_DIR);
+    database.migrateChatDatabaseForInstall(process.env.AGENT_DIR);
     database.closeChatDatabase(process.env.AGENT_DIR);
   `;
   await Promise.all(
@@ -512,7 +512,7 @@ test("concurrent cold opens serialize one legacy import and archive", async () =
       }),
     ),
   );
-  const db = database.openChatDatabase(agentDir);
+  const db = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
     db.prepare("SELECT COUNT(*) AS value FROM messages").get().value,
     20,
@@ -537,7 +537,7 @@ test("legacy archive resumes after a process dies between path renames", async (
     path.join(chatRoot, "inbox", "pending", "resumed.json"),
     legacyInbox("archive-resume"),
   );
-  const db = database.openChatDatabase(agentDir);
+  const db = database.migrateChatDatabaseForInstall(agentDir);
   database.closeChatDatabase(agentDir);
   await fs.rename(
     path.join(chatRoot, "legacy-migrated-v1", "inbox"),
@@ -553,7 +553,7 @@ test("legacy archive resumes after a process dies between path renames", async (
   );
   raw.close();
 
-  const reopened = database.openChatDatabase(agentDir);
+  const reopened = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
     reopened
       .prepare(
@@ -573,7 +573,7 @@ test("legacy archive resumes after a process dies between path renames", async (
 
 test("legacy authority recreated after completed cutover blocks startup", async () => {
   const agentDir = await tempDir();
-  database.openChatDatabase(agentDir);
+  database.migrateChatDatabaseForInstall(agentDir);
   database.closeChatDatabase(agentDir);
   await writeJson(
     path.join(agentDir, "data", "chat", "outbox", "items", "late.json"),
@@ -581,7 +581,7 @@ test("legacy authority recreated after completed cutover blocks startup", async 
   );
 
   assert.throws(
-    () => database.openChatDatabase(agentDir),
+    () => database.migrateChatDatabaseForInstall(agentDir),
     /chat_legacy_migration_source_recreated/,
   );
 });
@@ -604,7 +604,7 @@ test("legacy timeline sequence prevents replaying older pending work after newer
   );
   await writeJson(path.join(chatRoot, "inbox", "pending", "z.json"), older);
 
-  const db = database.openChatDatabase(agentDir);
+  const db = database.migrateChatDatabaseForInstall(agentDir);
   const rows = db
     .prepare("SELECT message_id, sequence FROM messages ORDER BY sequence")
     .all();
@@ -618,7 +618,7 @@ test("legacy timeline sequence prevents replaying older pending work after newer
 
 test("atomic cutover retry imports legacy writes after marker rollback", async () => {
   const agentDir = await tempDir();
-  const db = database.openChatDatabase(agentDir);
+  const db = database.migrateChatDatabaseForInstall(agentDir);
   database.closeChatDatabase(agentDir);
   const source = path.join(agentDir, "data", "chat", "inbox");
   await writeJson(
@@ -636,7 +636,7 @@ test("atomic cutover retry imports legacy writes after marker rollback", async (
   );
   raw.close();
 
-  const reopened = database.openChatDatabase(agentDir);
+  const reopened = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
     reopened.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
     1,

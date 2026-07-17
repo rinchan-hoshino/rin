@@ -30,6 +30,7 @@ import {
 } from "../../core/rin-builtin-extension-controls.js";
 import { loadRinAgentRuntime } from "../../core/rin-lib/agent-runtime.js";
 import { applyRinSettingsDefaults } from "../../core/rin-lib/runtime.js";
+import { createHostedChatService } from "./hosted-chat-service.js";
 
 async function main() {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -52,13 +53,10 @@ async function main() {
   const daemonSocketPath = process.argv[2] || defaultDaemonSocketPath();
   let daemonLock: DaemonInstanceLock | null = null;
   let backgroundExtensionManager: RinBackgroundExtensionManager | null = null;
-  let chatBridge: Awaited<ReturnType<typeof startChatBridge>> | null = null;
-  let servicesPromise: Promise<
-    Awaited<ReturnType<typeof startChatBridge>>
-  > | null = null;
+  const hostedChatService = createHostedChatService({ logger: console });
 
   const stopHostedServices = async () => {
-    await chatBridge?.stop().catch(() => {});
+    await hostedChatService.stop();
   };
 
   const stopAllServices = async () => {
@@ -86,9 +84,9 @@ async function main() {
       agentDir: runtime.agentDir,
       logger: console,
     });
-    servicesPromise = (async () => {
+    void hostedChatService.start(async () => {
       await backgroundExtensionManager!.start();
-      chatBridge = await startChatBridge({
+      return await startChatBridge({
         hosted: true,
         chatAdapterProviders:
           backgroundExtensionManager!.getChatAdapterProviders(),
@@ -98,17 +96,8 @@ async function main() {
             connectSocket: async () => (await localFrontendConnector)(),
           }),
       });
-      return chatBridge;
-    })();
-    void servicesPromise.catch(async (error) => {
-      console.error(
-        `rin_app_daemon_services_failed:${String(error?.message || error || "unknown")}`,
-      );
-      await stopAllServices().catch(() => {});
-      await daemonLock?.release().catch(() => {});
-      process.exit(1);
     });
-    const getHostedChatBridge = async () => await servicesPromise!;
+    const getHostedChatBridge = async () => await hostedChatService.getBridge();
 
     await startDaemon({
       backgroundExtensionManager,
@@ -130,9 +119,7 @@ async function main() {
         terminateTurn: async (payload) =>
           await (await getHostedChatBridge()).terminateTurn(payload),
       },
-      getExtraStatus: () => ({
-        chat: chatBridge?.getStatus() || { status: "starting" },
-      }),
+      getExtraStatus: () => ({ chat: hostedChatService.getStatus() }),
       handleLocalCommand: async (command) => {
         const type = String(command?.type || "").trim();
         if (type === "list_builtin_extensions") {

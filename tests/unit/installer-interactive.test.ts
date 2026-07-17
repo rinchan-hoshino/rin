@@ -453,28 +453,24 @@ test("installer steps show progress after user input before work runs", () => {
   assert.match(sources, /refreshingInstalledTargetMessage/);
 });
 
-test("core update restarts runtime only after manifest persistence", () => {
+test("install and core update stop runtime before migrations and restart afterward", () => {
   const source = readFileSync(
     path.join(rootDir, "src", "core", "rin-install", "finalize.ts"),
     "utf8",
   );
-  const updateBlock = source.slice(
+  const applyBlock = source.slice(
+    source.indexOf("async function applyInstalledRuntime"),
     source.indexOf("export async function finalizeCoreUpdate"),
-    source.indexOf("export async function finalizeInstallPlan"),
   );
-  const installBlock = source.slice(
-    source.indexOf("export async function finalizeInstallPlan"),
-    source.indexOf("export async function finalizeQuickRunInstall"),
-  );
+  const stopIndex = applyBlock.indexOf('"stop"');
+  const persistIndex = applyBlock.indexOf("const written =");
+  const restartIndex = applyBlock.indexOf('"restart"', persistIndex);
 
   assert.doesNotMatch(source, /stopInstalledBrowseSidecars/);
   assert.doesNotMatch(source, /prepareBrowseRuntime/);
   assert.doesNotMatch(source, /builtInExtensions/);
-  assert.match(source, /const shouldRestartBeforePersist =\s*manageDaemon &&/);
-  assert.match(source, /!options\.stopRuntimeBeforePublish/);
-  assert.match(source, /if \(manageDaemon && !shouldRestartBeforePersist\)/);
-  assert.match(updateBlock, /stopRuntimeBeforePublish: true/);
-  assert.doesNotMatch(installBlock, /stopRuntimeBeforePublish: true/);
+  assert.ok(stopIndex >= 0 && stopIndex < persistIndex);
+  assert.ok(persistIndex >= 0 && persistIndex < restartIndex);
 });
 
 test("installer i18n source keeps localized copy in one display table", () => {

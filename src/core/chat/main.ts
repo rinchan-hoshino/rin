@@ -59,7 +59,6 @@ import {
   markProcessedChatMessage,
 } from "./chat-helpers.js";
 import { buildInboundChatLogInput } from "./inbound-normalization.js";
-import { migrateLegacyChatKeys } from "./chat-key-migration.js";
 import { buildChatMessageRecordKey } from "./message-store.js";
 import { ChatController, loadChatSettings } from "./controller.js";
 import { readChatCommandResponses } from "./command-responses.js";
@@ -355,12 +354,19 @@ export type ChatBridgeEvalPayload = {
 
 export type ChatBridgeStatus = {
   ready: boolean;
+  status: "ready" | "degraded";
   startedAt: string;
   settingsPath: string;
   adapterCount: number;
   botCount: number;
   controllerCount: number;
   detachedControllerCount: number;
+  adapters: Array<{
+    platform: string;
+    selfId: string;
+    status: "registered" | "starting" | "ready" | "degraded" | "stopped";
+    error?: string;
+  }>;
   stopping?: boolean;
 };
 
@@ -416,14 +422,20 @@ export async function startChatBridge(
   if (process.cwd() !== runtime.cwd) process.chdir(runtime.cwd);
   ensureDir(dataDir);
 
-  const settings = migrateLegacyChatKeys(
-    runtime.agentDir,
-    settingsPath,
-    loadChatSettings(settingsPath),
-  ).settings;
+  const settings = loadChatSettings(settingsPath);
 
   const h = createChatRuntimeH();
   const app = createChatRuntimeApp(runtime.agentDir);
+  app.on("adapter-start-failed", (adapter: any) => {
+    logger.warn(
+      `chat adapter startup degraded platform=${safeString(adapter?.platform).trim() || "unknown"} selfId=${safeString(adapter?.selfId).trim()} err=${safeString(adapter?.error).trim() || "adapter_start_failed"}`,
+    );
+  });
+  app.on("adapter-stop-failed", (adapter: any) => {
+    logger.warn(
+      `chat adapter shutdown degraded platform=${safeString(adapter?.platform).trim() || "unknown"} selfId=${safeString(adapter?.selfId).trim()} err=${safeString(adapter?.error).trim() || "adapter_stop_failed"}`,
+    );
+  });
   const enqueueAndDrainOutbox = async (
     payload: ChatOutboxPayloadInput,
     deliveryKind: "command_ack" | "error" | "generic" = "generic",
@@ -477,26 +489,19 @@ export async function startChatBridge(
       `chat runtime dependency install failed err=${String(error?.message || error)}`,
     );
   }
-  const builtInRuntimeAdapters = await instantiateChatRuntimeAdapters(app, {
+  await instantiateChatRuntimeAdapters(app, {
     dataDir,
     adapterEntries: listChatRuntimeAdapterEntries(settings),
     logger,
   });
-  const externalRuntimeAdapters = await instantiateExternalChatRuntimeAdapters(
-    app,
-    {
-      agentDir: runtime.agentDir,
-      dataDir,
-      runtimeRoot: chatRuntimeRoot,
-      h,
-      adapterEntries: options.chatAdapterProviders || [],
-      logger,
-    },
-  );
-  const runtimeAdapters = [
-    ...builtInRuntimeAdapters,
-    ...externalRuntimeAdapters,
-  ];
+  await instantiateExternalChatRuntimeAdapters(app, {
+    agentDir: runtime.agentDir,
+    dataDir,
+    runtimeRoot: chatRuntimeRoot,
+    h,
+    adapterEntries: options.chatAdapterProviders || [],
+    logger,
+  });
   const controllers = new Map<string, ChatController>();
   const detachedControllers = new Map<string, ChatController>();
   const detachedControllerSignatures = new Map<string, string>();
@@ -1682,16 +1687,23 @@ export async function startChatBridge(
     })();
     return await stoppingPromise;
   };
-  const getStatus = (): ChatBridgeStatus => ({
-    ready: true,
-    startedAt,
-    settingsPath,
-    adapterCount: runtimeAdapters.length,
-    botCount: Array.isArray(app.bots) ? app.bots.length : 0,
-    controllerCount: controllers.size,
-    detachedControllerCount: detachedControllers.size,
-    stopping: chatBridgeStopping,
-  });
+  const getStatus = (): ChatBridgeStatus => {
+    const adapters = app.getAdapterStatuses();
+    return {
+      ready: true,
+      status: adapters.some((adapter: any) => adapter.status === "degraded")
+        ? "degraded"
+        : "ready",
+      startedAt,
+      settingsPath,
+      adapterCount: adapters.length,
+      botCount: Array.isArray(app.bots) ? app.bots.length : 0,
+      controllerCount: controllers.size,
+      detachedControllerCount: detachedControllers.size,
+      adapters,
+      stopping: chatBridgeStopping,
+    };
+  };
 
   if (!options.hosted) {
     const handleSignal = (code = 0) => {

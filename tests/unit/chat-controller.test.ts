@@ -286,7 +286,7 @@ test("chat controller does not assume session readiness after an ineffective res
   assert.equal(commandOptions?.assumeSessionReady, false);
 });
 
-test("chat controller imports legacy session state once and then trusts SQLite", async () => {
+test("chat controller never imports legacy session state at runtime and trusts SQLite", async () => {
   const first = await createController();
   await fs.mkdir(path.dirname(first.statePath), { recursive: true });
   await fs.writeFile(
@@ -305,7 +305,7 @@ test("chat controller imports legacy session state once and then trusts SQLite",
     .run(first.chatKey);
 
   const imported = createRecoveredController(first);
-  assert.equal(imported.state.sessionFile, "sessions/legacy-binding.jsonl");
+  assert.equal(imported.state.sessionFile, undefined);
   imported.updateStoredSessionFile("sessions/sqlite-binding.jsonl");
   imported.saveState();
   await fs.writeFile(

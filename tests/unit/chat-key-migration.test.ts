@@ -19,6 +19,9 @@ const messageStore = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
     .href
 );
+const database = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
+);
 
 test("chat key migration infers configured bot ids without adapter-specific key shapes", () => {
   const botIds = migration.inferChatBotIdsFromSettings({
@@ -434,6 +437,7 @@ test("chat key migration rewrites legacy settings and message records before rec
       [path.relative(storeDir, canonicalRecordPath("legacy-only-message"))],
     );
 
+    database.migrateChatDatabaseForInstall(agentDir);
     const duplicate = messageStore.getChatMessage(
       agentDir,
       "lark/cli_bot:oc_same",
@@ -475,6 +479,7 @@ test("chat key migration rewrites legacy settings and message records before rec
     assert.equal(repeated.alreadyApplied, true);
     assert.equal(repeated.migratedRecords, 0);
   } finally {
+    database.closeChatDatabase(agentDir);
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
