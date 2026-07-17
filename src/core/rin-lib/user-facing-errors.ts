@@ -484,6 +484,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "The selected rollback target is already the current Rin release.",
   rin_session_file_required: () =>
     "Rin needs a session file before it can resume that session.",
+  rin_session_model_runtime_unavailable: () =>
+    "Rin could not access the session model runtime.",
   rin_session_recovering: () =>
     "Rin is still recovering the session after a disconnect or restart.",
   rin_session_worker_unavailable: () =>

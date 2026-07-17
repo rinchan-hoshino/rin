@@ -208,7 +208,7 @@ test("worker helpers expose extension command argument completions", async () =>
   });
 });
 
-test("worker helpers expose normalized slash commands and oauth state", () => {
+test("worker helpers expose normalized slash commands and oauth state", async () => {
   const session = createSessionFixture();
   const commands = workerHelpers.getSlashCommands(session);
 
@@ -247,7 +247,7 @@ test("worker helpers expose normalized slash commands and oauth state", () => {
     commands.some((command) => command.name === "model"),
     true,
   );
-  assert.deepEqual(workerHelpers.getOAuthState(session), {
+  assert.deepEqual(await workerHelpers.getOAuthState(session), {
     credentials: {
       gemini: { type: "api_key" },
     },

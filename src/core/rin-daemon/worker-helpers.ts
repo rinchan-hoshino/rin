@@ -432,7 +432,9 @@ export async function runBuiltinCommand(
       return handledText(`Resumed session: ${String(match.id || "").trim()}`);
     }
     case "model": {
-      const models = await session.modelRegistry.getAvailable();
+      const models = await (
+        session.modelRuntime || session.modelRegistry
+      ).getAvailable();
       if (!args.length) {
         return handledText(formatModelList(models));
       }

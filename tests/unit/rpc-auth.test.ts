@@ -81,6 +81,7 @@ test("rpc auth proxy responds to oauth login events and applies completion state
   const progressEvents = [];
   const promptEvents = [];
   const selectPrompts = [];
+  const manualCodePrompts = [];
   const auth = createAuthStorageProxy({
     send(payload) {
       sent.push(payload);
@@ -112,7 +113,10 @@ test("rpc auth proxy responds to oauth login events and applies completion state
       selectPrompts.push(prompt);
       return "device";
     },
-    onManualCodeInput: async () => "123456",
+    onManualCodeInput: async (prompt) => {
+      manualCodePrompts.push(prompt);
+      return "123456";
+    },
   });
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -163,6 +167,8 @@ test("rpc auth proxy responds to oauth login events and applies completion state
     loginId: "login-1",
     event: "manual_code",
     requestId: " req-3 ",
+    message: "Paste authorization code",
+    placeholder: "code",
   });
 
   await new Promise((resolve) => setImmediate(resolve));
@@ -187,13 +193,11 @@ test("rpc auth proxy responds to oauth login events and applies completion state
     },
   ]);
   assert.deepEqual(progressEvents, ["Waiting"]);
-  assert.deepEqual(promptEvents, [
-    {
-      message: "Enter code",
-      placeholder: "optional.example.com",
-      allowEmpty: true,
-    },
-  ]);
+  assert.equal(promptEvents.length, 1);
+  assert.equal(promptEvents[0].message, "Enter code");
+  assert.equal(promptEvents[0].placeholder, "optional.example.com");
+  assert.equal(promptEvents[0].allowEmpty, true);
+  assert.ok(promptEvents[0].signal instanceof AbortSignal);
   assert.deepEqual(deviceCodeEvents, [
     {
       userCode: "ABCD-EFGH",
@@ -202,15 +206,17 @@ test("rpc auth proxy responds to oauth login events and applies completion state
       expiresInSeconds: 900,
     },
   ]);
-  assert.deepEqual(selectPrompts, [
-    {
-      message: "Choose login method",
-      options: [
-        { id: "browser", label: "Browser" },
-        { id: "device", label: "Device code" },
-      ],
-    },
+  assert.equal(selectPrompts.length, 1);
+  assert.equal(selectPrompts[0].message, "Choose login method");
+  assert.deepEqual(selectPrompts[0].options, [
+    { id: "browser", label: "Browser" },
+    { id: "device", label: "Device code" },
   ]);
+  assert.ok(selectPrompts[0].signal instanceof AbortSignal);
+  assert.equal(manualCodePrompts.length, 1);
+  assert.equal(manualCodePrompts[0].message, "Paste authorization code");
+  assert.equal(manualCodePrompts[0].placeholder, "code");
+  assert.ok(manualCodePrompts[0].signal instanceof AbortSignal);
   assert.deepEqual(sent, [
     { type: "oauth_login_start", providerId: "openai" },
     {
@@ -236,6 +242,58 @@ test("rpc auth proxy responds to oauth login events and applies completion state
   assert.deepEqual(auth.getOAuthProviders(), [
     { id: "openai", name: "OpenAI" },
   ]);
+});
+
+test("rpc auth proxy cancels stale interactive prompts without responding", async () => {
+  const sent = [];
+  let promptSignal;
+  let resolvePrompt;
+  const auth = createAuthStorageProxy({
+    send(payload) {
+      sent.push(payload);
+      if (payload.type === "oauth_login_start") {
+        return Promise.resolve({
+          success: true,
+          data: { loginId: "login-cancel" },
+        });
+      }
+      return Promise.resolve({ success: true, data: {} });
+    },
+  });
+  const loginPromise = auth.login("openai", {
+    onPrompt(prompt) {
+      promptSignal = prompt.signal;
+      return new Promise((resolve) => {
+        resolvePrompt = resolve;
+      });
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  auth.handleEvent({
+    type: "oauth_login_event",
+    loginId: "login-cancel",
+    event: "prompt",
+    requestId: "request-cancel",
+    message: "Waiting for callback",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  auth.handleEvent({
+    type: "oauth_login_event",
+    loginId: "login-cancel",
+    event: "prompt_cancel",
+    requestId: "request-cancel",
+  });
+  assert.equal(promptSignal.aborted, true);
+  resolvePrompt("stale response");
+  await new Promise((resolve) => setImmediate(resolve));
+  auth.handleEvent({
+    type: "oauth_login_event",
+    loginId: "login-cancel",
+    event: "complete",
+    success: true,
+  });
+  await loginPromise;
+  assert.deepEqual(sent, [{ type: "oauth_login_start", providerId: "openai" }]);
 });
 
 test("rpc auth proxy stores API keys through the daemon", async () => {

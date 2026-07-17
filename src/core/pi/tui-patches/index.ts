@@ -1346,7 +1346,9 @@ export async function applyRinTuiOverrides() {
           `Migrated credentials to auth.json: ${migratedProviders.join(", ")}`,
         );
       }
-      const modelsJsonError = this.session.modelRegistry.getError();
+      const modelsJsonError =
+        this.session.modelRuntime?.getError?.() ||
+        this.session.modelRegistry?.getError?.();
       if (modelsJsonError)
         this.showError(`models.json error: ${modelsJsonError}`);
       if (modelFallbackMessage) this.showWarning(modelFallbackMessage);

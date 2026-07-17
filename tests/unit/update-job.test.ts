@@ -313,6 +313,7 @@ test("update job launcher stays synchronous outside the target daemon", () => {
     {
       platform: "linux",
       cgroupText: "0::/user.slice/rin-update-rin-job.service\n",
+      env: {},
       execFileSync() {
         throw new Error("must not launch");
       },

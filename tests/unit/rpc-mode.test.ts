@@ -1227,7 +1227,7 @@ test(
           getDefaultModel: () => "gpt-5.5",
           getDefaultThinkingLevel: () => "high",
         },
-        modelRegistry: {
+        modelRuntime: {
           getAvailable: async () => [targetModel],
           hasConfiguredAuth: () => true,
         },

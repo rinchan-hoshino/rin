@@ -318,9 +318,11 @@ async function setSessionModel(
     await session.setModel(model);
     return model;
   }
+  const models = sessionModelRuntime(session);
+  const authTarget = session?.modelRuntime ? model?.provider : model;
   if (
-    typeof session.modelRegistry?.hasConfiguredAuth === "function" &&
-    !session.modelRegistry.hasConfiguredAuth(model)
+    typeof models.hasConfiguredAuth === "function" &&
+    !models.hasConfiguredAuth(authTarget)
   ) {
     throw new Error(`No API key for ${model.provider}/${model.id}`);
   }
@@ -329,6 +331,114 @@ async function setSessionModel(
   session.sessionManager?.appendModelChange?.(model.provider, model.id);
   setSessionThinkingLevel(session, thinkingLevel, { persistSettings: false });
   return model;
+}
+
+function sessionModelRuntime(session: any) {
+  const runtime = session?.modelRuntime || session?.modelRegistry;
+  if (!runtime) throw new Error("rin_session_model_runtime_unavailable");
+  return runtime;
+}
+
+function sessionAllModels(session: any) {
+  const runtime = sessionModelRuntime(session);
+  const models =
+    typeof runtime.getModels === "function"
+      ? runtime.getModels()
+      : runtime.getAll?.();
+  return Array.isArray(models) ? [...models] : [];
+}
+
+async function sessionAvailableModels(session: any) {
+  const models = await sessionModelRuntime(session).getAvailable();
+  return Array.isArray(models) ? [...models] : [];
+}
+
+function combinedLoginPromptSignal(
+  promptSignal?: AbortSignal,
+  loginSignal?: AbortSignal,
+) {
+  const signals = [promptSignal, loginSignal].filter(Boolean) as AbortSignal[];
+  if (!signals.length) return undefined;
+  if (signals.length === 1) return signals[0];
+  return AbortSignal.any(signals);
+}
+
+export async function loginSessionProvider(
+  session: any,
+  providerId: string,
+  callbacks: any,
+) {
+  const runtime = sessionModelRuntime(session);
+  if (runtime.authStorage?.login) {
+    return await runtime.authStorage.login(providerId, callbacks);
+  }
+  return await runtime.login(providerId, "oauth", {
+    signal: callbacks.signal,
+    prompt: async (prompt: any) => {
+      const signal = combinedLoginPromptSignal(prompt.signal, callbacks.signal);
+      if (prompt.type === "select") {
+        return await callbacks.onSelect({ ...prompt, signal });
+      }
+      if (prompt.type === "manual_code") {
+        return await callbacks.onManualCodeInput({ ...prompt, signal });
+      }
+      return await callbacks.onPrompt({
+        message: prompt.message,
+        placeholder: prompt.placeholder,
+        // Current Pi AuthPrompt leaves blank-input policy to the provider.
+        // Preserve flows such as GitHub Enterprise's blank-for-default host.
+        allowEmpty: true,
+        signal,
+      });
+    },
+    notify: (event: any) => {
+      if (event.type === "auth_url") return callbacks.onAuth(event);
+      if (event.type === "device_code") return callbacks.onDeviceCode(event);
+      if (event.type === "info") return callbacks.onProgress(event.message);
+      if (event.type === "progress") return callbacks.onProgress(event.message);
+    },
+  });
+}
+
+async function refreshSessionModels(session: any) {
+  const runtime = sessionModelRuntime(session);
+  await runtime.refresh?.();
+}
+
+export async function setSessionApiKey(
+  session: any,
+  providerId: string,
+  key: string,
+) {
+  const runtime = sessionModelRuntime(session);
+  if (runtime.authStorage?.set) {
+    runtime.authStorage.set(providerId, { type: "api_key", key });
+  } else {
+    let promptAnswered = false;
+    await runtime.login(providerId, "api_key", {
+      prompt: async (prompt: any) => {
+        if (promptAnswered || prompt?.type !== "secret") {
+          throw new Error(
+            `Provider ${providerId} requires interactive API-key setup`,
+          );
+        }
+        promptAnswered = true;
+        return key;
+      },
+      notify: () => {},
+    });
+  }
+  await refreshSessionModels(session);
+}
+
+async function logoutSessionProvider(session: any, providerId: string) {
+  const runtime = sessionModelRuntime(session);
+  if (runtime.authStorage?.logout) {
+    await runtime.authStorage.logout(providerId);
+  } else {
+    await runtime.logout(providerId);
+  }
+  await refreshSessionModels(session);
 }
 
 async function resetSessionModelOptionsFromSettings(session: any) {
@@ -351,7 +461,7 @@ async function resetSessionModelOptionsFromSettings(session: any) {
 
   let model: any;
   if (provider && modelId) {
-    const models = await session.modelRegistry.getAvailable();
+    const models = await sessionAvailableModels(session);
     model = models.find(
       (item: any) => item?.provider === provider && item?.id === modelId,
     );
@@ -492,6 +602,22 @@ function isWorkerLocalSessionReplacementCommand(commandLine: string) {
   if (trimmed === "/new") return true;
   if (!trimmed.startsWith("/resume ")) return false;
   return Boolean(trimmed.slice("/resume ".length).trim());
+}
+
+export function nextOAuthLoginRequestId(
+  login: { nextWaitSeq: number },
+  loginId: string,
+  kind: string,
+) {
+  return `${loginId}:${kind}:${++login.nextWaitSeq}`;
+}
+
+export function deferOAuthLoginStart(task: () => void | Promise<void>) {
+  setImmediate(() => {
+    void Promise.resolve()
+      .then(task)
+      .catch(() => {});
+  });
 }
 
 export async function runCustomRpcMode(
@@ -1012,6 +1138,7 @@ export async function runCustomRpcMode(
         string,
         { resolve: (value: string) => void; reject: (error: Error) => void }
       >;
+      nextWaitSeq: number;
     }
   >();
   const emitLoginEvent = (
@@ -1028,12 +1155,32 @@ export async function runCustomRpcMode(
     loginId: string,
     kind: string,
     payload: Record<string, unknown> = {},
+    signal?: AbortSignal,
   ) => {
     const login = ensureLogin(loginId);
-    const requestId = `${loginId}:${kind}:${login.waits.size + 1}`;
+    const requestId = nextOAuthLoginRequestId(login, loginId, kind);
     emitLoginEvent(loginId, kind, { requestId, ...payload });
     return new Promise<string>((resolve, reject) => {
-      login.waits.set(requestId, { resolve, reject });
+      const cleanup = () => signal?.removeEventListener("abort", onAbort);
+      const resolveInput = (value: string) => {
+        cleanup();
+        resolve(value);
+      };
+      const rejectInput = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+      const onAbort = () => {
+        login.waits.delete(requestId);
+        emitLoginEvent(loginId, "prompt_cancel", { requestId });
+        rejectInput(new Error("OAuth login prompt cancelled"));
+      };
+      if (signal?.aborted) return onAbort();
+      signal?.addEventListener("abort", onAbort, { once: true });
+      login.waits.set(requestId, {
+        resolve: resolveInput,
+        reject: rejectInput,
+      });
     });
   };
   const finishLogin = (loginId: string) => {
@@ -1463,16 +1610,16 @@ export async function runCustomRpcMode(
           (value) => value ?? null,
         );
       case "get_all_models":
-        return done(id, type, { models: session.modelRegistry.getAll() });
+        return done(id, type, { models: sessionAllModels(session) });
       case "get_available_models":
         return run(
           id,
           type,
-          () => session.modelRegistry.getAvailable(),
+          () => sessionAvailableModels(session),
           (models) => ({ models }),
         );
       case "get_oauth_state":
-        return done(id, type, getOAuthState(session));
+        return run(id, type, () => getOAuthState(session));
       case "get_resource_diagnostics":
         return done(id, type, getResourceDiagnostics(session));
       case "get_command_argument_completions":
@@ -1770,7 +1917,7 @@ export async function runCustomRpcMode(
         return done(id, type, { sessions });
       }
       case "set_model": {
-        const models = await session.modelRegistry.getAvailable();
+        const models = await sessionAvailableModels(session);
         const model = models.find(
           (m: any) =>
             m.provider === command.provider && m.id === command.modelId,
@@ -1808,10 +1955,16 @@ export async function runCustomRpcMode(
         if (!providerId) throw new Error("providerId is required");
         const loginId = `login_${++loginSeq}`;
         const abort = new AbortController();
-        activeLogins.set(loginId, { abort, waits: new Map() });
-        (async () => {
+        activeLogins.set(loginId, {
+          abort,
+          waits: new Map(),
+          nextWaitSeq: 0,
+        });
+        // Let the start response reach the frontend before a provider can
+        // synchronously emit its first auth prompt.
+        deferOAuthLoginStart(async () => {
           try {
-            await session.modelRegistry.authStorage.login(providerId, {
+            await loginSessionProvider(session, providerId, {
               onAuth: (info: { url: string; instructions?: string }) =>
                 emitLoginEvent(loginId, "auth", {
                   url: info.url,
@@ -1833,30 +1986,54 @@ export async function runCustomRpcMode(
                 message: string;
                 placeholder?: string;
                 allowEmpty?: boolean;
+                signal?: AbortSignal;
               }) =>
-                waitForLoginInput(loginId, "prompt", {
-                  message: prompt.message,
-                  placeholder: prompt.placeholder,
-                  allowEmpty: prompt.allowEmpty,
-                }),
+                waitForLoginInput(
+                  loginId,
+                  "prompt",
+                  {
+                    message: prompt.message,
+                    placeholder: prompt.placeholder,
+                    allowEmpty: prompt.allowEmpty,
+                  },
+                  prompt.signal,
+                ),
               onSelect: (prompt: {
                 message: string;
-                options: { id: string; label: string }[];
+                options: readonly { id: string; label: string }[];
+                signal?: AbortSignal;
               }) =>
-                waitForLoginInput(loginId, "select", {
-                  message: prompt.message,
-                  options: prompt.options,
-                }),
+                waitForLoginInput(
+                  loginId,
+                  "select",
+                  {
+                    message: prompt.message,
+                    options: prompt.options,
+                  },
+                  prompt.signal,
+                ),
               onProgress: (message: string) =>
                 emitLoginEvent(loginId, "progress", { message }),
-              onManualCodeInput: () =>
-                waitForLoginInput(loginId, "manual_code"),
+              onManualCodeInput: (prompt: {
+                message?: string;
+                placeholder?: string;
+                signal?: AbortSignal;
+              }) =>
+                waitForLoginInput(
+                  loginId,
+                  "manual_code",
+                  {
+                    message: prompt.message,
+                    placeholder: prompt.placeholder,
+                  },
+                  prompt.signal,
+                ),
               signal: abort.signal,
             });
-            session.modelRegistry.refresh();
+            await refreshSessionModels(session);
             emitLoginEvent(loginId, "complete", {
               success: true,
-              state: getOAuthState(session),
+              state: await getOAuthState(session),
             });
           } catch (error: any) {
             emitLoginEvent(loginId, "complete", {
@@ -1866,7 +2043,7 @@ export async function runCustomRpcMode(
           } finally {
             finishLogin(loginId);
           }
-        })().catch(() => {});
+        });
         return done(id, type, { loginId });
       }
       case "oauth_login_respond": {
@@ -1891,19 +2068,14 @@ export async function runCustomRpcMode(
         const key = String(command.key || "").trim();
         if (!providerId) throw new Error("providerId is required");
         if (!key) throw new Error("key is required");
-        session.modelRegistry.authStorage.set(providerId, {
-          type: "api_key",
-          key,
-        });
-        session.modelRegistry.refresh();
-        return done(id, type, getOAuthState(session));
+        await setSessionApiKey(session, providerId, key);
+        return done(id, type, await getOAuthState(session));
       }
       case "oauth_logout": {
         const providerId = String(command.providerId || "").trim();
         if (!providerId) throw new Error("providerId is required");
-        session.modelRegistry.authStorage.logout(providerId);
-        session.modelRegistry.refresh();
-        return done(id, type, getOAuthState(session));
+        await logoutSessionProvider(session, providerId);
+        return done(id, type, await getOAuthState(session));
       }
       default:
         throw new Error(`Unknown command: ${type}`);

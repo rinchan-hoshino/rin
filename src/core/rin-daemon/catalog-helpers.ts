@@ -256,7 +256,11 @@ function collectOAuthProviders(authStorage: any) {
 
 function collectModelProviderIds(modelRegistry: any) {
   const providerIds = new Set<string>();
-  for (const model of asArray<any>(modelRegistry?.getAll?.())) {
+  const models =
+    typeof modelRegistry?.getModels === "function"
+      ? modelRegistry.getModels()
+      : modelRegistry?.getAll?.();
+  for (const model of asArray<any>(models)) {
     const providerId = normalizeProviderId(model?.provider);
     if (providerId) providerIds.add(providerId);
   }
@@ -279,6 +283,9 @@ function collectOAuthProviderIds(authStorage: any) {
 function collectProviderIds(modelRegistry: any, authStorage: any) {
   return new Set([
     ...collectModelProviderIds(modelRegistry),
+    ...asArray<any>(modelRegistry?.getProviders?.())
+      .map((provider) => normalizeProviderId(provider?.id))
+      .filter(Boolean),
     ...collectOAuthProviderIds(authStorage),
   ]);
 }
@@ -297,7 +304,8 @@ function collectProviderDisplayNames(modelRegistry: any, authStorage: any) {
   const displayNames: Record<string, string> = {};
   for (const providerId of collectProviderIds(modelRegistry, authStorage)) {
     const displayName = trimText(
-      modelRegistry?.getProviderDisplayName?.(providerId),
+      modelRegistry?.getProviderDisplayName?.(providerId) ||
+        modelRegistry?.getProvider?.(providerId)?.name,
     );
     if (displayName) displayNames[providerId] = displayName;
   }
@@ -344,6 +352,45 @@ export function getOAuthStateFromModelRegistry(modelRegistry: any) {
   };
 }
 
-export function getSessionOAuthState(session: any) {
+async function getOAuthStateFromModelRuntime(modelRuntime: any) {
+  const credentialInfos = asArray<any>(await modelRuntime.listCredentials?.());
+  const credentials: Record<string, OAuthCredentialSummary> = {};
+  for (const info of credentialInfos) {
+    const providerId = normalizeProviderId(info?.providerId);
+    const type = normalizeOAuthCredentialType(info?.type);
+    if (providerId && type) credentials[providerId] = { type };
+  }
+  const providers = asArray<any>(modelRuntime.getProviders?.())
+    .filter((provider) => provider?.auth?.oauth)
+    .map((provider) => ({
+      id: normalizeProviderId(provider?.id),
+      name: trimText(provider?.name),
+      usesCallbackServer: false,
+    }))
+    .filter((provider) => provider.id);
+  const providerDisplayNames = collectProviderDisplayNames(
+    modelRuntime,
+    undefined,
+  );
+  const providerAuthStatuses = collectProviderAuthStatuses(
+    modelRuntime,
+    undefined,
+  );
+  return {
+    credentials,
+    providers,
+    ...(Object.keys(providerDisplayNames).length
+      ? { providerDisplayNames }
+      : {}),
+    ...(Object.keys(providerAuthStatuses).length
+      ? { providerAuthStatuses }
+      : {}),
+  };
+}
+
+export async function getSessionOAuthState(session: any) {
+  if (session?.modelRuntime) {
+    return await getOAuthStateFromModelRuntime(session.modelRuntime);
+  }
   return getOAuthStateFromModelRegistry(session?.modelRegistry);
 }

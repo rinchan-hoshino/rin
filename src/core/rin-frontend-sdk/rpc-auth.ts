@@ -24,16 +24,23 @@ type LoginState = {
     message: string;
     placeholder?: string;
     allowEmpty?: boolean;
+    signal?: AbortSignal;
   }) => Promise<string>;
   onSelect?: (prompt: {
     message: string;
     options: { id: string; label: string }[];
+    signal?: AbortSignal;
   }) => Promise<string | undefined>;
   onProgress?: (message: string) => void;
-  onManualCodeInput?: () => Promise<string>;
+  onManualCodeInput?: (prompt: {
+    message?: string;
+    placeholder?: string;
+    signal?: AbortSignal;
+  }) => Promise<string>;
   resolve: () => void;
   reject: (error: Error) => void;
   cleanup?: () => void;
+  interactiveRequests: Map<string, AbortController>;
 };
 
 function trimText(value: unknown) {
@@ -160,6 +167,10 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
     const login = state.logins.get(loginId);
     if (!login) return undefined;
     state.logins.delete(loginId);
+    for (const controller of login.interactiveRequests.values()) {
+      controller.abort();
+    }
+    login.interactiveRequests.clear();
     try {
       login.cleanup?.();
     } catch {}
@@ -209,13 +220,27 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
 
   const handleInteractiveEvent = (
     payload: any,
-    handler: (() => Promise<string>) | undefined,
+    login: LoginState,
+    handler: ((signal: AbortSignal) => Promise<string>) | undefined,
   ) => {
-    Promise.resolve(handler?.() ?? "")
-      .then((value) =>
-        sendLoginResponse(payload?.loginId, payload?.requestId, value),
-      )
-      .catch(() => sendLoginCancel(payload?.loginId));
+    const requestId = normalizeRequestId(payload?.requestId);
+    if (!requestId) {
+      void sendLoginCancel(payload?.loginId);
+      return;
+    }
+    const controller = new AbortController();
+    login.interactiveRequests.set(requestId, controller);
+    Promise.resolve(handler?.(controller.signal) ?? "")
+      .then((value) => {
+        if (login.interactiveRequests.get(requestId) !== controller) return;
+        login.interactiveRequests.delete(requestId);
+        return sendLoginResponse(payload?.loginId, requestId, value);
+      })
+      .catch(() => {
+        if (login.interactiveRequests.get(requestId) !== controller) return;
+        login.interactiveRequests.delete(requestId);
+        return sendLoginCancel(payload?.loginId);
+      });
   };
 
   const handleEvent = (payload: any) => {
@@ -251,10 +276,20 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
       });
       return;
     }
+    if (payload.event === "prompt_cancel") {
+      const requestId = normalizeRequestId(payload.requestId);
+      const controller = login.interactiveRequests.get(requestId);
+      if (controller) {
+        login.interactiveRequests.delete(requestId);
+        controller.abort();
+      }
+      return;
+    }
     if (payload.event === "prompt") {
       handleInteractiveEvent(
         payload,
-        () =>
+        login,
+        (signal) =>
           login.onPrompt?.({
             message: String(payload.message || ""),
             placeholder:
@@ -264,6 +299,7 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
             ...(typeof payload.allowEmpty === "undefined"
               ? {}
               : { allowEmpty: Boolean(payload.allowEmpty) }),
+            signal,
           }) ?? Promise.resolve(""),
       );
       return;
@@ -271,7 +307,8 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
     if (payload.event === "select") {
       handleInteractiveEvent(
         payload,
-        () =>
+        login,
+        (signal) =>
           login.onSelect?.({
             message: String(payload.message || ""),
             options: Array.isArray(payload.options)
@@ -280,6 +317,7 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
                   label: String(option?.label || option?.id || ""),
                 }))
               : [],
+            signal,
           }) ?? Promise.resolve(""),
       );
       return;
@@ -287,7 +325,17 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
     if (payload.event === "manual_code") {
       handleInteractiveEvent(
         payload,
-        () => login.onManualCodeInput?.() ?? Promise.resolve(""),
+        login,
+        (signal) =>
+          login.onManualCodeInput?.({
+            message:
+              typeof payload.message === "string" ? payload.message : undefined,
+            placeholder:
+              typeof payload.placeholder === "string"
+                ? payload.placeholder
+                : undefined,
+            signal,
+          }) ?? Promise.resolve(""),
       );
       return;
     }
@@ -382,6 +430,7 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
           onManualCodeInput: callbacks.onManualCodeInput,
           resolve,
           reject,
+          interactiveRequests: new Map(),
         };
         state.logins.set(loginId, login);
         if (callbacks.signal) {

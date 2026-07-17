@@ -21,6 +21,7 @@ const {
   getExtensionSlashCommands,
   getOAuthStateFromModelRegistry,
   getOAuthStateFromStorage,
+  getSessionOAuthState,
   getPromptSlashCommands,
   getSkillSlashCommands,
 } = helperModule;
@@ -240,6 +241,43 @@ test("catalog helpers read oauth state from auth storage", () => {
         usesCallbackServer: true,
       },
     ],
+  });
+});
+
+test("catalog helpers expose non-secret ModelRuntime auth state", async () => {
+  const state = await getSessionOAuthState({
+    modelRuntime: {
+      listCredentials: async () => [
+        { providerId: "openai-codex", type: "oauth" },
+      ],
+      getProviders: () => [
+        {
+          id: "openai-codex",
+          name: "OpenAI Codex",
+          auth: { oauth: {} },
+        },
+      ],
+      getModels: () => [{ provider: "openai-codex", id: "gpt-5.5" }],
+      getProvider: () => ({ name: "OpenAI Codex" }),
+      getProviderAuthStatus: () => ({
+        configured: true,
+        source: "oauth",
+      }),
+    },
+  });
+  assert.deepEqual(state, {
+    credentials: { "openai-codex": { type: "oauth" } },
+    providers: [
+      {
+        id: "openai-codex",
+        name: "OpenAI Codex",
+        usesCallbackServer: false,
+      },
+    ],
+    providerDisplayNames: { "openai-codex": "OpenAI Codex" },
+    providerAuthStatuses: {
+      "openai-codex": { configured: true, source: "oauth" },
+    },
   });
 });
 

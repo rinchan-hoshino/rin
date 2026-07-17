@@ -375,7 +375,10 @@ function bindCapabilitySetToSession(
       setActiveTools: (toolNames) => session.setActiveToolsByName?.(toolNames),
       refreshTools: () => refreshPiSessionToolRegistry(session),
       setModel: async (model) => {
-        if (!session.modelRegistry?.hasConfiguredAuth?.(model)) return false;
+        const hasConfiguredAuth = session.modelRuntime
+          ? session.modelRuntime.hasConfiguredAuth?.(model?.provider)
+          : session.modelRegistry?.hasConfiguredAuth?.(model);
+        if (!hasConfiguredAuth) return false;
         await session.setModel?.(model);
         return true;
       },
