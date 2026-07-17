@@ -8,7 +8,7 @@ import { chatDataPath } from "../data-layout.js";
 import { safeString } from "../text-utils.js";
 import { migrateLegacyChatControlData } from "./legacy-migration.js";
 
-const CHAT_DATABASE_SCHEMA_VERSION = 4;
+const CHAT_DATABASE_SCHEMA_VERSION = 5;
 
 const databaseCache = new Map<string, BetterSqlite3.Database>();
 
@@ -152,6 +152,18 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
       ).run(chatDatabaseSchemaFingerprint(db));
       db.pragma(`user_version = ${CHAT_DATABASE_SCHEMA_VERSION}`);
     };
+    const inboundRecoveryLeaseUpgradeSql = `
+      ALTER TABLE inbound_heads ADD COLUMN recovery_failure_count INTEGER NOT NULL DEFAULT 0
+        CHECK (recovery_failure_count >= 0);
+      ALTER TABLE inbound_heads ADD COLUMN recovery_first_failed_at TEXT;
+      ALTER TABLE inbound_heads ADD COLUMN recovery_last_failed_at TEXT;
+      ALTER TABLE inbound_heads ADD COLUMN recovery_paused_at TEXT;
+      ALTER TABLE inbound_heads ADD COLUMN recovery_next_attempt_at TEXT;
+      ALTER TABLE inbound_heads ADD COLUMN recovery_version INTEGER NOT NULL DEFAULT 0
+        CHECK (recovery_version >= 0);
+      CREATE INDEX inbound_heads_recovery_idx
+        ON inbound_heads(platform, bot_id, recovery_next_attempt_at, chat_key);
+    `;
     if (currentVersion === 1) {
       validateRecordedSchema(1);
       db.exec(`
@@ -165,6 +177,7 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
         ALTER TABLE chat_state ADD COLUMN legacy_session_imported INTEGER NOT NULL DEFAULT 0
           CHECK (legacy_session_imported IN (0, 1));
         ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
+        ${inboundRecoveryLeaseUpgradeSql}
       `);
       finishSchemaUpgrade();
       return;
@@ -176,13 +189,23 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
         ALTER TABLE chat_state ADD COLUMN legacy_session_imported INTEGER NOT NULL DEFAULT 0
           CHECK (legacy_session_imported IN (0, 1));
         ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
+        ${inboundRecoveryLeaseUpgradeSql}
       `);
       finishSchemaUpgrade();
       return;
     }
     if (currentVersion === 3) {
       validateRecordedSchema(3);
-      db.exec(`ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT`);
+      db.exec(`
+        ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
+        ${inboundRecoveryLeaseUpgradeSql}
+      `);
+      finishSchemaUpgrade();
+      return;
+    }
+    if (currentVersion === 4) {
+      validateRecordedSchema(4);
+      db.exec(inboundRecoveryLeaseUpgradeSql);
       finishSchemaUpgrade();
       return;
     }
@@ -287,8 +310,19 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
       provider_cursor TEXT,
       sequence INTEGER NOT NULL CHECK (sequence >= 1),
       updated_at TEXT NOT NULL,
+      recovery_failure_count INTEGER NOT NULL DEFAULT 0
+        CHECK (recovery_failure_count >= 0),
+      recovery_first_failed_at TEXT,
+      recovery_last_failed_at TEXT,
+      recovery_paused_at TEXT,
+      recovery_next_attempt_at TEXT,
+      recovery_version INTEGER NOT NULL DEFAULT 0
+        CHECK (recovery_version >= 0),
       PRIMARY KEY (platform, bot_id, chat_key)
     );
+
+    CREATE INDEX IF NOT EXISTS inbound_heads_recovery_idx
+      ON inbound_heads(platform, bot_id, recovery_next_attempt_at, chat_key);
 
     CREATE TABLE IF NOT EXISTS turns (
       turn_id TEXT PRIMARY KEY,

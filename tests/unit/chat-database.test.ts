@@ -143,6 +143,13 @@ test("chat database migrates the version 1 terminal outbox index", async () => {
       ALTER TABLE chat_state DROP COLUMN legacy_session_imported;
       ALTER TABLE chat_state DROP COLUMN session_file;
       ALTER TABLE outbox DROP COLUMN dispatch_started_at;
+      DROP INDEX inbound_heads_recovery_idx;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_version;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_next_attempt_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_paused_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_last_failed_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_first_failed_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_failure_count;
       UPDATE schema_meta SET value = '1' WHERE key = 'schema_version';
       PRAGMA user_version = 1;
     `);
@@ -164,12 +171,12 @@ test("chat database migrates the version 1 terminal outbox index", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 4);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 5);
     assert.equal(
       migrated
         .prepare(`SELECT value FROM schema_meta WHERE key = 'schema_version'`)
         .get().value,
-      "4",
+      "5",
     );
     const indexSql = migrated
       .prepare(
@@ -192,6 +199,13 @@ test("chat database migrates version 2 session binding authority", async () => {
       ALTER TABLE chat_state DROP COLUMN legacy_session_imported;
       ALTER TABLE chat_state DROP COLUMN session_file;
       ALTER TABLE outbox DROP COLUMN dispatch_started_at;
+      DROP INDEX inbound_heads_recovery_idx;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_version;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_next_attempt_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_paused_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_last_failed_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_first_failed_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_failure_count;
       UPDATE schema_meta SET value = '2' WHERE key = 'schema_version';
       PRAGMA user_version = 2;
     `);
@@ -210,7 +224,7 @@ test("chat database migrates version 2 session binding authority", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 4);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 5);
     assert.ok(
       migrated
         .prepare(`PRAGMA table_info(chat_state)`)
@@ -225,6 +239,13 @@ test("chat database migrates version 3 dispatch evidence", async () => {
     const db = chatDatabase.openChatDatabase(agentDir);
     db.exec(`
       ALTER TABLE outbox DROP COLUMN dispatch_started_at;
+      DROP INDEX inbound_heads_recovery_idx;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_version;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_next_attempt_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_paused_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_last_failed_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_first_failed_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_failure_count;
       UPDATE schema_meta SET value = '3' WHERE key = 'schema_version';
       PRAGMA user_version = 3;
     `);
@@ -243,13 +264,56 @@ test("chat database migrates version 3 dispatch evidence", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 4);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 5);
     assert.ok(
       migrated
         .prepare(`PRAGMA table_info(outbox)`)
         .all()
         .some((column) => column.name === "dispatch_started_at"),
     );
+  });
+});
+
+test("chat database migrates version 4 inbound recovery lease state", async () => {
+  await withTempDir(async (agentDir) => {
+    const db = chatDatabase.openChatDatabase(agentDir);
+    db.exec(`
+      DROP INDEX inbound_heads_recovery_idx;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_version;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_next_attempt_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_paused_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_last_failed_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_first_failed_at;
+      ALTER TABLE inbound_heads DROP COLUMN recovery_failure_count;
+      UPDATE schema_meta SET value = '4' WHERE key = 'schema_version';
+      PRAGMA user_version = 4;
+    `);
+    const objects = db
+      .prepare(
+        `SELECT type, name, sql FROM sqlite_master
+         WHERE type IN ('table', 'index', 'trigger', 'view')
+           AND name NOT LIKE 'sqlite_%'
+           AND sql IS NOT NULL
+         ORDER BY type, name`,
+      )
+      .all();
+    db.prepare(
+      `UPDATE schema_meta SET value = ? WHERE key = 'schema_fingerprint'`,
+    ).run(createHash("sha256").update(JSON.stringify(objects)).digest("hex"));
+    chatDatabase.closeChatDatabase(agentDir);
+
+    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 5);
+    const columns = new Set(
+      migrated
+        .prepare(`PRAGMA table_info(inbound_heads)`)
+        .all()
+        .map((column) => column.name),
+    );
+    assert.ok(columns.has("recovery_failure_count"));
+    assert.ok(columns.has("recovery_paused_at"));
+    assert.ok(columns.has("recovery_next_attempt_at"));
+    assert.ok(columns.has("recovery_version"));
   });
 });
 
@@ -305,7 +369,7 @@ test("chat database serializes concurrent cold initialization", async () => {
       ),
     );
     const db = chatDatabase.openChatDatabase(agentDir);
-    assert.equal(db.pragma("user_version", { simple: true }), 4);
+    assert.equal(db.pragma("user_version", { simple: true }), 5);
     assert.deepEqual(
       db
         .prepare(`SELECT key FROM schema_meta ORDER BY key`)

@@ -48,9 +48,10 @@ import {
   SlackAdapter,
 } from "./adapters.js";
 import {
+  applyInboundRecoveryResult,
   InboundRecoveryGate,
-  listInboundRecoveryHeads,
   mergeInboundRecoverySessions,
+  recoverInboundHeads,
 } from "./inbound-recovery.js";
 
 function toSnakeCase(value: string) {
@@ -1908,28 +1909,14 @@ class OneBotAdapter {
     const agentDir = safeString(this.app?.agentDir).trim();
     const botId = safeString(this.bot?.selfId).trim();
     if (!agentDir || !botId) return [] as any[];
-    const recovered: any[] = [];
-    const failures: string[] = [];
-    for (const head of listInboundRecoveryHeads(agentDir, "onebot", botId)) {
-      try {
-        recovered.push(...(await this.fetchOneBotMessagesAfter(head)));
-      } catch (error: any) {
-        const detail = safeString(error?.message || error).trim();
-        failures.push(`${head.chatKey}:${detail || "history_failed"}`);
-      }
-    }
-    if (failures.length) {
-      this.bot.inboundRecovery = {
-        status: "degraded",
-        failures,
-      };
-      this.logger.warn(
-        `inbound recovery degraded failures=${JSON.stringify(failures)}`,
-      );
-    } else {
-      this.bot.inboundRecovery = { status: "ready" };
-    }
-    return recovered;
+    const result = await recoverInboundHeads(
+      agentDir,
+      "onebot",
+      botId,
+      async (head) => await this.fetchOneBotMessagesAfter(head),
+    );
+    applyInboundRecoveryResult(this.bot, this.logger, result);
+    return result.recovered;
   }
 
   private async finishOneBotRecovery(recoveredPayloads: any[]) {

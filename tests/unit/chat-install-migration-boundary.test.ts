@@ -172,7 +172,7 @@ test("installer upgrade migrations own chat key and SQLite authority migration",
       { "lark/cli_bot:oc_same": { quietMode: true } },
     );
     const db = database.openChatDatabase(installDir);
-    assert.equal(Number(db.pragma("user_version", { simple: true })), 4);
+    assert.equal(Number(db.pragma("user_version", { simple: true })), 5);
     assert.equal(
       db
         .prepare(
@@ -206,7 +206,7 @@ test("runtime database open rejects an old schema instead of upgrading it", asyn
 
     assert.throws(
       () => database.openChatDatabase(agentDir),
-      /chat_database_schema_upgrade_required:3:4/,
+      /chat_database_schema_upgrade_required:3:5/,
     );
   } finally {
     database.closeChatDatabase(agentDir);

@@ -7,8 +7,9 @@ import WebSocket from "ws";
 
 import { EditableTextMessageGroup } from "./editable-text-message-group.js";
 import {
+  applyInboundRecoveryResult,
   InboundRecoveryGate,
-  listInboundRecoveryHeads,
+  recoverInboundHeads,
 } from "./inbound-recovery.js";
 import { getWorkingReactionFrame } from "../chat/transport.js";
 import { formatRinTodoChecklistMarkdownContent } from "../rin-lib/todo-state.js";
@@ -868,34 +869,20 @@ export class DiscordAdapter {
     const agentDir = safeString(this.app?.agentDir).trim();
     const botId = safeString(this.bot?.selfId).trim();
     if (!agentDir || !botId) return [] as any[];
-    const recovered: any[] = [];
-    const failures: string[] = [];
-    for (const head of listInboundRecoveryHeads(agentDir, "discord", botId)) {
-      try {
+    const result = await recoverInboundHeads(
+      agentDir,
+      "discord",
+      botId,
+      async (head) => {
         const channel = await this.fetchChannel(head.chatId);
         if (!channel?.messages?.fetch) {
           throw new Error("Discord message history is unavailable");
         }
-        recovered.push(
-          ...(await this.fetchDiscordMessagesAfter(channel, head.messageId)),
-        );
-      } catch (error: any) {
-        const detail = safeString(error?.message || error).trim();
-        failures.push(`${head.chatKey}:${detail || "history_failed"}`);
-      }
-    }
-    if (failures.length) {
-      this.bot.inboundRecovery = {
-        status: "degraded",
-        failures,
-      };
-      this.logger?.warn?.(
-        `inbound recovery degraded failures=${JSON.stringify(failures)}`,
-      );
-    } else {
-      this.bot.inboundRecovery = { status: "ready" };
-    }
-    return recovered;
+        return await this.fetchDiscordMessagesAfter(channel, head.messageId);
+      },
+    );
+    applyInboundRecoveryResult(this.bot, this.logger, result);
+    return result.recovered;
   }
 
   private async finishDiscordRecovery(recovered: any[]) {
@@ -2226,28 +2213,14 @@ export class LarkAdapter {
     const agentDir = safeString(this.app?.agentDir).trim();
     const botId = safeString(this.bot?.selfId).trim();
     if (!agentDir || !botId) return [] as any[];
-    const recovered: any[] = [];
-    const failures: string[] = [];
-    for (const head of listInboundRecoveryHeads(agentDir, "lark", botId)) {
-      try {
-        recovered.push(...(await this.fetchLarkMessagesAfter(head)));
-      } catch (error: any) {
-        const detail = safeString(error?.message || error).trim();
-        failures.push(`${head.chatKey}:${detail || "history_failed"}`);
-      }
-    }
-    if (failures.length) {
-      this.bot.inboundRecovery = {
-        status: "degraded",
-        failures,
-      };
-      this.logger.warn(
-        `inbound recovery degraded failures=${JSON.stringify(failures)}`,
-      );
-    } else {
-      this.bot.inboundRecovery = { status: "ready" };
-    }
-    return recovered;
+    const result = await recoverInboundHeads(
+      agentDir,
+      "lark",
+      botId,
+      async (head) => await this.fetchLarkMessagesAfter(head),
+    );
+    applyInboundRecoveryResult(this.bot, this.logger, result);
+    return result.recovered;
   }
 
   private mergeLarkRecoveryMessages(

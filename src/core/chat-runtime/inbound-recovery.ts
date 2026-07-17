@@ -8,7 +8,32 @@ export type InboundRecoveryHead = {
   messageId: string;
   platformTimestamp: number;
   providerCursor?: string;
+  failureCount?: number;
+  firstFailedAt?: string;
+  lastFailedAt?: string;
+  pausedAt?: string;
+  nextAttemptAt?: string;
+  recoveryVersion?: number;
 };
+
+export type InboundRecoveryLeasePolicy = {
+  minFailures: number;
+  minFailureAgeMs: number;
+  retryBaseMs: number;
+  retryMaxMs: number;
+  maxRetirements: number;
+};
+
+const activeRecoveryAttempts = new Map<string, number>();
+
+export const DEFAULT_INBOUND_RECOVERY_LEASE_POLICY: InboundRecoveryLeasePolicy =
+  {
+    minFailures: 3,
+    minFailureAgeMs: 24 * 60 * 60 * 1000,
+    retryBaseMs: 60 * 60 * 1000,
+    retryMaxMs: 8 * 60 * 60 * 1000,
+    maxRetirements: 100,
+  };
 
 export class InboundRecoveryGate<T> {
   private buffering = false;
@@ -61,6 +86,7 @@ export function listInboundRecoveryHeads(
   agentDir: string,
   platform: string,
   botId: string,
+  options: { includeLeaseState?: boolean } = {},
 ): InboundRecoveryHead[] {
   const nextPlatform = safeString(platform).trim();
   const nextBotId = safeString(botId).trim();
@@ -68,7 +94,9 @@ export function listInboundRecoveryHeads(
   const rows = openChatDatabase(agentDir)
     .prepare(
       `SELECT chat_key, chat_id, message_id, platform_timestamp,
-              received_at, provider_cursor
+              received_at, provider_cursor, recovery_failure_count,
+              recovery_first_failed_at, recovery_last_failed_at,
+              recovery_paused_at, recovery_next_attempt_at, recovery_version
        FROM inbound_heads
        WHERE platform = ? AND bot_id = ?
        ORDER BY chat_key`,
@@ -92,15 +120,422 @@ export function listInboundRecoveryHeads(
         receivedAt: row.received_at,
       });
       const providerCursor = safeString(row.provider_cursor).trim();
+      const leaseState = options.includeLeaseState
+        ? {
+            failureCount: Math.max(0, Number(row.recovery_failure_count || 0)),
+            ...(safeString(row.recovery_first_failed_at).trim()
+              ? {
+                  firstFailedAt: safeString(
+                    row.recovery_first_failed_at,
+                  ).trim(),
+                }
+              : {}),
+            ...(safeString(row.recovery_last_failed_at).trim()
+              ? {
+                  lastFailedAt: safeString(row.recovery_last_failed_at).trim(),
+                }
+              : {}),
+            ...(safeString(row.recovery_paused_at).trim()
+              ? {
+                  pausedAt: safeString(row.recovery_paused_at).trim(),
+                }
+              : {}),
+            ...(safeString(row.recovery_next_attempt_at).trim()
+              ? {
+                  nextAttemptAt: safeString(
+                    row.recovery_next_attempt_at,
+                  ).trim(),
+                }
+              : {}),
+            recoveryVersion: Math.max(0, Number(row.recovery_version || 0)),
+          }
+        : {};
       return {
         chatKey,
         chatId,
         messageId,
         platformTimestamp,
         ...(providerCursor ? { providerCursor } : {}),
+        ...leaseState,
       };
     })
     .filter((item): item is InboundRecoveryHead => Boolean(item));
+}
+
+function normalizedRecoveryPolicy(
+  input: Partial<InboundRecoveryLeasePolicy> = {},
+): InboundRecoveryLeasePolicy {
+  const positive = (value: unknown, fallback: number) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : fallback;
+  };
+  const retryBaseMs = positive(
+    input.retryBaseMs,
+    DEFAULT_INBOUND_RECOVERY_LEASE_POLICY.retryBaseMs,
+  );
+  return {
+    minFailures: Math.max(
+      1,
+      Math.floor(
+        positive(
+          input.minFailures,
+          DEFAULT_INBOUND_RECOVERY_LEASE_POLICY.minFailures,
+        ),
+      ),
+    ),
+    minFailureAgeMs: positive(
+      input.minFailureAgeMs,
+      DEFAULT_INBOUND_RECOVERY_LEASE_POLICY.minFailureAgeMs,
+    ),
+    retryBaseMs,
+    retryMaxMs: Math.max(
+      retryBaseMs,
+      positive(
+        input.retryMaxMs,
+        DEFAULT_INBOUND_RECOVERY_LEASE_POLICY.retryMaxMs,
+      ),
+    ),
+    maxRetirements: Math.max(
+      0,
+      Math.floor(
+        positive(
+          input.maxRetirements,
+          DEFAULT_INBOUND_RECOVERY_LEASE_POLICY.maxRetirements,
+        ),
+      ),
+    ),
+  };
+}
+
+function recoveryAttemptIdentity(
+  agentDir: string,
+  platform: string,
+  botId: string,
+  head: InboundRecoveryHead,
+) {
+  return [
+    agentDir,
+    platform,
+    botId,
+    head.chatKey,
+    head.messageId,
+    safeString(head.providerCursor).trim(),
+  ].join("\u0000");
+}
+
+function recoveryHeadCursorMatchesSql() {
+  return `platform = @platform AND bot_id = @bot_id AND chat_key = @chat_key
+    AND message_id = @message_id
+    AND COALESCE(provider_cursor, '') = @provider_cursor`;
+}
+
+function recoveryHeadVersionMatchesSql() {
+  return `${recoveryHeadCursorMatchesSql()}
+    AND recovery_version = @recovery_version`;
+}
+
+function settleInboundRecoveryLeases(
+  agentDir: string,
+  platform: string,
+  botId: string,
+  succeeded: InboundRecoveryHead[],
+  failed: InboundRecoveryHead[],
+  nowMs: number,
+  policy: InboundRecoveryLeasePolicy,
+  protectedFromRetirement: Set<string>,
+) {
+  const retired: string[] = [];
+  const db = openChatDatabase(agentDir);
+  db.transaction(() => {
+    const cursorMatchSql = recoveryHeadCursorMatchesSql();
+    const versionMatchSql = recoveryHeadVersionMatchesSql();
+    const clearFailure = db.prepare(
+      `UPDATE inbound_heads
+       SET recovery_failure_count = 0,
+           recovery_first_failed_at = NULL,
+           recovery_last_failed_at = NULL,
+           recovery_paused_at = NULL,
+           recovery_next_attempt_at = NULL,
+           recovery_version = recovery_version + 1
+       WHERE ${cursorMatchSql}`,
+    );
+    const readFailure = db.prepare(
+      `SELECT recovery_failure_count, recovery_first_failed_at,
+              recovery_paused_at
+       FROM inbound_heads WHERE ${versionMatchSql}`,
+    );
+    const recordFailure = db.prepare(
+      `UPDATE inbound_heads
+       SET recovery_failure_count = @next_failure_count,
+           recovery_first_failed_at = @first_failed_at,
+           recovery_last_failed_at = @failed_at,
+           recovery_paused_at = NULL,
+           recovery_next_attempt_at = @next_attempt_at,
+           recovery_version = recovery_version + 1
+       WHERE ${versionMatchSql}`,
+    );
+    const retire = db.prepare(
+      `DELETE FROM inbound_heads
+       WHERE platform = @platform AND bot_id = @bot_id
+         AND chat_key = @chat_key AND message_id = @message_id
+         AND COALESCE(provider_cursor, '') = @provider_cursor
+         AND recovery_version = @recovery_version
+         AND recovery_failure_count = @failure_count`,
+    );
+    const parameters = (head: InboundRecoveryHead) => ({
+      platform,
+      bot_id: botId,
+      chat_key: head.chatKey,
+      message_id: head.messageId,
+      provider_cursor: safeString(head.providerCursor).trim(),
+      recovery_version: Math.max(0, Number(head.recoveryVersion || 0)),
+    });
+    for (const head of succeeded) clearFailure.run(parameters(head));
+    for (const head of failed) {
+      const current = readFailure.get(parameters(head)) as any;
+      if (!current) continue;
+      const failureCount = Math.max(
+        0,
+        Number(current.recovery_failure_count || 0),
+      );
+      const nextFailureCount = failureCount + 1;
+      const storedFirstFailedAt = safeString(
+        current.recovery_first_failed_at,
+      ).trim();
+      const storedFirstFailedAtMs = Date.parse(storedFirstFailedAt);
+      const pausedAtMs = Date.parse(
+        safeString(current.recovery_paused_at).trim(),
+      );
+      const adjustedFirstFailedAtMs =
+        Number.isFinite(storedFirstFailedAtMs) && Number.isFinite(pausedAtMs)
+          ? storedFirstFailedAtMs + Math.max(0, nowMs - pausedAtMs)
+          : storedFirstFailedAtMs;
+      const firstFailedAt = Number.isFinite(adjustedFirstFailedAtMs)
+        ? new Date(adjustedFirstFailedAtMs).toISOString()
+        : new Date(nowMs).toISOString();
+      const failureAgeMs = Math.max(0, nowMs - Date.parse(firstFailedAt));
+      const retryDelayMs = Math.min(
+        policy.retryMaxMs,
+        policy.retryBaseMs * 2 ** Math.min(30, failureCount),
+      );
+      const nextVersion = Math.max(0, Number(head.recoveryVersion || 0)) + 1;
+      const nextParameters = {
+        ...parameters(head),
+        next_failure_count: nextFailureCount,
+        first_failed_at: firstFailedAt,
+        failed_at: new Date(nowMs).toISOString(),
+        next_attempt_at: new Date(nowMs + retryDelayMs).toISOString(),
+      };
+      if (recordFailure.run(nextParameters).changes !== 1) continue;
+      if (
+        nextFailureCount < policy.minFailures ||
+        failureAgeMs < policy.minFailureAgeMs ||
+        retired.length >= policy.maxRetirements ||
+        protectedFromRetirement.has(head.chatKey)
+      ) {
+        continue;
+      }
+      const result = retire.run({
+        ...nextParameters,
+        recovery_version: nextVersion,
+        failure_count: nextFailureCount,
+      });
+      if (result.changes === 1) retired.push(head.chatKey);
+    }
+  }).immediate();
+  return retired;
+}
+
+function deferUnhealthyRecoveryScope(
+  agentDir: string,
+  platform: string,
+  botId: string,
+  failed: InboundRecoveryHead[],
+  nowMs: number,
+  policy: InboundRecoveryLeasePolicy,
+) {
+  const db = openChatDatabase(agentDir);
+  db.transaction(() => {
+    const update = db.prepare(
+      `UPDATE inbound_heads
+       SET recovery_paused_at = CASE
+             WHEN recovery_first_failed_at IS NOT NULL
+             THEN COALESCE(recovery_paused_at, @paused_at)
+             ELSE NULL
+           END,
+           recovery_next_attempt_at = @next_attempt_at,
+           recovery_version = recovery_version + 1
+       WHERE ${recoveryHeadVersionMatchesSql()}`,
+    );
+    const retryFailureCount = Math.max(
+      0,
+      ...failed.map((head) => Math.max(0, Number(head.failureCount || 0))),
+    );
+    const retryDelayMs = Math.min(
+      policy.retryMaxMs,
+      policy.retryBaseMs * 2 ** Math.min(30, retryFailureCount),
+    );
+    for (const head of failed) {
+      update.run({
+        platform,
+        bot_id: botId,
+        chat_key: head.chatKey,
+        message_id: head.messageId,
+        provider_cursor: safeString(head.providerCursor).trim(),
+        recovery_version: Math.max(0, Number(head.recoveryVersion || 0)),
+        paused_at: new Date(nowMs).toISOString(),
+        next_attempt_at: new Date(nowMs + retryDelayMs).toISOString(),
+      });
+    }
+  }).immediate();
+}
+
+export async function recoverInboundHeads<T>(
+  agentDir: string,
+  platform: string,
+  botId: string,
+  recover: (head: InboundRecoveryHead) => Promise<T[]>,
+  options: {
+    nowMs?: number;
+    policy?: Partial<InboundRecoveryLeasePolicy>;
+  } = {},
+) {
+  const nowMs = Number.isFinite(Number(options.nowMs))
+    ? Number(options.nowMs)
+    : Date.now();
+  const policy = normalizedRecoveryPolicy(options.policy);
+  const allHeads = listInboundRecoveryHeads(agentDir, platform, botId, {
+    includeLeaseState: true,
+  });
+  const heads = allHeads.filter((head) => {
+    const nextAttemptAt = Date.parse(safeString(head.nextAttemptAt).trim());
+    return !Number.isFinite(nextAttemptAt) || nextAttemptAt <= nowMs;
+  });
+  const nextPlatform = safeString(platform).trim();
+  const nextBotId = safeString(botId).trim();
+  const attemptIdentities = new Map(
+    heads.map((head) => [
+      head,
+      recoveryAttemptIdentity(agentDir, nextPlatform, nextBotId, head),
+    ]),
+  );
+  for (const identity of attemptIdentities.values()) {
+    activeRecoveryAttempts.set(
+      identity,
+      (activeRecoveryAttempts.get(identity) || 0) + 1,
+    );
+  }
+  try {
+    const recovered: T[] = [];
+    const succeeded: InboundRecoveryHead[] = [];
+    const failed: Array<{ head: InboundRecoveryHead; detail: string }> = [];
+    for (const head of heads) {
+      try {
+        recovered.push(...(await recover(head)));
+        succeeded.push(head);
+      } catch (error: any) {
+        const detail = safeString(error?.message || error).trim();
+        failed.push({ head, detail: detail || "history_failed" });
+      }
+    }
+    // A shared outage is only established when every persisted checkpoint
+    // was due, attempted, and failed. Deferred peers make a lone due failure
+    // checkpoint-local rather than evidence about the whole adapter scope.
+    const scopeHealthy =
+      failed.length === 0 ||
+      succeeded.length > 0 ||
+      heads.length < allHeads.length;
+    const protectedFromRetirement = new Set(
+      failed
+        .filter(
+          (entry) =>
+            (activeRecoveryAttempts.get(
+              attemptIdentities.get(entry.head) || "",
+            ) || 0) > 1,
+        )
+        .map((entry) => entry.head.chatKey),
+    );
+    const retired = scopeHealthy
+      ? settleInboundRecoveryLeases(
+          agentDir,
+          nextPlatform,
+          nextBotId,
+          succeeded,
+          failed.map((entry) => entry.head),
+          nowMs,
+          policy,
+          protectedFromRetirement,
+        )
+      : [];
+    if (!scopeHealthy) {
+      deferUnhealthyRecoveryScope(
+        agentDir,
+        nextPlatform,
+        nextBotId,
+        failed.map((entry) => entry.head),
+        nowMs,
+        policy,
+      );
+    }
+    const retiredSet = new Set(retired);
+    const failures = failed
+      .filter((entry) => !retiredSet.has(entry.head.chatKey))
+      .map((entry) => `${entry.head.chatKey}:${entry.detail}`);
+    const failedThisRun = new Set(failed.map((entry) => entry.head.chatKey));
+    const deferred = listInboundRecoveryHeads(agentDir, platform, botId, {
+      includeLeaseState: true,
+    })
+      .filter((head) => {
+        const nextAttemptAt = Date.parse(safeString(head.nextAttemptAt).trim());
+        return (
+          !failedThisRun.has(head.chatKey) &&
+          Number.isFinite(nextAttemptAt) &&
+          nextAttemptAt > nowMs
+        );
+      })
+      .map((head) => head.chatKey);
+    return {
+      recovered,
+      failures,
+      deferred,
+      retired,
+      scopeHealthy,
+    };
+  } finally {
+    for (const identity of attemptIdentities.values()) {
+      const count = activeRecoveryAttempts.get(identity) || 0;
+      if (count <= 1) activeRecoveryAttempts.delete(identity);
+      else activeRecoveryAttempts.set(identity, count - 1);
+    }
+  }
+}
+
+export function applyInboundRecoveryResult(
+  bot: any,
+  logger: any,
+  result: {
+    failures: string[];
+    deferred: string[];
+    retired: string[];
+  },
+) {
+  if (result.retired.length) {
+    logger?.info?.(
+      `inbound recovery retired checkpoints=${JSON.stringify(result.retired)}`,
+    );
+  }
+  const pending = [
+    ...result.failures,
+    ...result.deferred.map((chatKey) => `${chatKey}:recovery_deferred`),
+  ];
+  bot.inboundRecovery = pending.length
+    ? { status: "degraded", failures: pending }
+    : { status: "ready" };
+  if (result.failures.length) {
+    logger?.warn?.(
+      `inbound recovery degraded failures=${JSON.stringify(result.failures)}`,
+    );
+  }
 }
 
 function sessionIdentity(session: any) {

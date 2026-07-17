@@ -458,7 +458,13 @@ function updateInboundHeadInDatabase(
       received_at = excluded.received_at,
       provider_cursor = excluded.provider_cursor,
       sequence = excluded.sequence,
-      updated_at = excluded.updated_at
+      updated_at = excluded.updated_at,
+      recovery_failure_count = 0,
+      recovery_first_failed_at = NULL,
+      recovery_last_failed_at = NULL,
+      recovery_paused_at = NULL,
+      recovery_next_attempt_at = NULL,
+      recovery_version = inbound_heads.recovery_version + 1
     WHERE COALESCE(excluded.platform_timestamp, 0) >
             COALESCE(inbound_heads.platform_timestamp, 0)
        OR (
