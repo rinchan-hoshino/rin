@@ -12,7 +12,24 @@
 - TUI resync now restores visible history, editable chat progress remains until the final reply, recovered provider failures retry safely, and managed Node bundles include npm for installer handoffs.
 - Chat startup now uses bounded session catalog work, migrates legacy chat identities safely, and stores control-plane state in SQLite for more reliable recovery.
 - Agent guidance now exposes the maximum supported thinking level.
+- Chat identity, command reset, archive migration, and session compatibility paths now recover legacy state without blocking control-plane actions or crashing the TUI.
+- Update and CLI/TUI error handling now preserves actionable failures through migration rollback, release pruning, detached updater ownership, and session recovery.
+- Scheduler ownership is simpler, stale recovery checkpoints are retired, and the Pi runtime is updated to 0.80.9.
 <!-- rin-changelog-coverage
+8994e75 fix(tui): keep recoverable errors in session
+91b9f9b fix(cli): preserve errors after release pruning
+2b0f1cf fix(chat): recover legacy bot identities during install
+ca19f4f fix(chat): let reset commands bypass inbox chatter
+c2c6937 fix(update): recover safely from migration failures
+a670f0c fix(chat): retire stale recovery checkpoints
+a8521ee Fix model runtime chat session compatibility
+53179e5 fix(update): own jobs across supported platforms
+6054602 fix(update): detach daemon-owned updater jobs
+471b335 fix(chat): isolate migrations and adapter failures
+f53f7f8 refactor(scheduler): unbind TUI and drop continuation
+65aca18 fix(chat): exclude retired outbox quarantine from migration
+4c32c39 fix(chat): migrate retired archives without TUI crash
+7a7e93b chore(pi): sync 0.80.9 runtime
 dd300e6 chore(upstream): sync Pi 0.80.7
 8b84a8e fix(tui): restore history after rpc resync
 e6a3a2e fix(usage): bound dashboard query cost
