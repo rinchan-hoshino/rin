@@ -28,7 +28,7 @@
     "release:bootstrap": "tsx scripts/release/export-bootstrap-branch.ts",
     "release:bundle": "tsx scripts/release/build-platform-bundle.ts",
     "prepare": "tsx scripts/install-git-hooks.ts",
-    "test": "npm run build && npm run test:unit:coverage:run && npm run test:coverage:run",
+    "test": "npm run build && npm run test:coverage:run",
     "test:release": "npm run build && npm run test:release:run",
     "test:release:run": "tsx scripts/test/run-test-files.ts --concurrency=4 tests/characterization/installer-modules.test.ts tests/characterization/rin-cli.test.ts tests/characterization/rpc-and-shared.test.ts tests/integration/bootstrap-entrypoint.test.ts tests/system/install-to-tui-user-flow.test.ts tests/characterization/release.test.ts tests/integration/release-scripts.test.ts",
     "test:architecture": "npm run build && npm run test:architecture:run",

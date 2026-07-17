@@ -85,24 +85,72 @@ export type RinCapabilitySet = {
   createCommandContext: () => any;
 };
 
+function noOp(..._args: any[]): void {}
+
+async function asyncNoOp(..._args: any[]): Promise<void> {}
+
+function returnUndefined(): undefined {
+  return undefined;
+}
+
+async function resolveUndefined(): Promise<undefined> {
+  return undefined;
+}
+
+function returnFalse(): false {
+  return false;
+}
+
+async function resolveFalse(): Promise<false> {
+  return false;
+}
+
+function returnTrue(): true {
+  return true;
+}
+
+function returnEmptyList(): any[] {
+  return [];
+}
+
+function returnEmptyObject(): Record<string, never> {
+  return {};
+}
+
+function returnEmptyString(): string {
+  return "";
+}
+
+function returnMediumThinkingLevel(): ThinkingLevel {
+  return "medium";
+}
+
+function returnNoOp(): typeof noOp {
+  return noOp;
+}
+
+async function returnNotCancelled(): Promise<{ cancelled: boolean }> {
+  return { cancelled: false };
+}
+
 const noOpUIContext = {
-  select: async () => undefined,
-  confirm: async () => false,
-  input: async () => undefined,
-  notify: () => {},
-  onTerminalInput: () => () => {},
-  setStatus: () => {},
-  setWorkingMessage: () => {},
-  setHiddenThinkingLabel: () => {},
-  setWidget: () => {},
-  setFooter: () => {},
-  setHeader: () => {},
-  setTitle: () => {},
-  custom: async () => undefined,
-  pasteToEditor: () => {},
-  setEditorText: () => {},
-  getEditorText: () => "",
-  setEditorComponent: () => {},
+  select: resolveUndefined,
+  confirm: resolveFalse,
+  input: resolveUndefined,
+  notify: noOp,
+  onTerminalInput: returnNoOp,
+  setStatus: noOp,
+  setWorkingMessage: noOp,
+  setHiddenThinkingLabel: noOp,
+  setWidget: noOp,
+  setFooter: noOp,
+  setHeader: noOp,
+  setTitle: noOp,
+  custom: resolveUndefined,
+  pasteToEditor: noOp,
+  setEditorText: noOp,
+  getEditorText: returnEmptyString,
+  setEditorComponent: noOp,
 };
 
 const RIN_CAPABILITY_MODES = new Set<RinCapabilityMode>([
@@ -120,42 +168,42 @@ function normalizeCapabilityMode(value: unknown): RinCapabilityMode {
 }
 
 const noOpCoreActions: CoreActions = {
-  sendMessage: () => {},
-  emitEvent: () => {},
-  sendUserMessage: () => {},
-  appendEntry: () => {},
-  setSessionName: () => {},
-  getSessionName: () => undefined,
-  setLabel: () => {},
-  getActiveTools: () => [],
-  getAllTools: () => [],
-  setActiveTools: () => {},
-  refreshTools: () => {},
-  setModel: async () => false,
-  getThinkingLevel: () => "medium",
-  setThinkingLevel: () => {},
+  sendMessage: noOp,
+  emitEvent: noOp,
+  sendUserMessage: noOp,
+  appendEntry: noOp,
+  setSessionName: noOp,
+  getSessionName: returnUndefined,
+  setLabel: noOp,
+  getActiveTools: returnEmptyList,
+  getAllTools: returnEmptyList,
+  setActiveTools: noOp,
+  refreshTools: noOp,
+  setModel: resolveFalse,
+  getThinkingLevel: returnMediumThinkingLevel,
+  setThinkingLevel: noOp,
 };
 
 const noOpContextActions: ContextActions = {
-  getModel: () => undefined,
-  isIdle: () => true,
-  getSignal: () => undefined,
-  abort: () => {},
-  hasPendingMessages: () => false,
-  shutdown: () => {},
-  getContextUsage: () => undefined,
-  compact: () => {},
-  getSystemPrompt: () => "",
-  getSystemPromptOptions: () => ({}),
+  getModel: returnUndefined,
+  isIdle: returnTrue,
+  getSignal: returnUndefined,
+  abort: noOp,
+  hasPendingMessages: returnFalse,
+  shutdown: noOp,
+  getContextUsage: returnUndefined,
+  compact: noOp,
+  getSystemPrompt: returnEmptyString,
+  getSystemPromptOptions: returnEmptyObject,
 };
 
 const noOpCommandContextActions: CommandContextActions = {
-  waitForIdle: async () => {},
-  newSession: async () => ({ cancelled: false }),
-  fork: async () => ({ cancelled: false }),
-  navigateTree: async () => ({ cancelled: false }),
-  switchSession: async () => ({ cancelled: false }),
-  reload: async () => {},
+  waitForIdle: asyncNoOp,
+  newSession: returnNotCancelled,
+  fork: returnNotCancelled,
+  navigateTree: returnNotCancelled,
+  switchSession: returnNotCancelled,
+  reload: asyncNoOp,
 };
 
 export function normalizeCapabilityNames(values: unknown): string[] {

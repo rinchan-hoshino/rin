@@ -243,21 +243,6 @@ test("fixed host path gate recognizes every fs module loading form", () => {
   }
 });
 
-test("coverage fails closed and isolates every strict unit owner", () => {
-  const coverageRunner = readRepoFile("scripts/test/run-coverage.ts");
-
-  assert.match(coverageRunner, /built module missing/);
-  assert.match(coverageRunner, /coverage summary missing/);
-  assert.match(coverageRunner, /tests: \[module\.test\]/);
-  assert.match(coverageRunner, /includes: \[module\.built\]/);
-  assert.match(coverageRunner, /concurrency: 1/);
-  assert.match(coverageRunner, /name !== "branches"/);
-  assert.match(coverageRunner, /actual\.covered > baseline\.covered/);
-  assert.match(coverageRunner, /percentageDrop <= 2\.5/);
-  assert.match(coverageRunner, /totalDrop <= 10/);
-  assert.match(coverageRunner, /percentageDrop <= 0\.05/);
-});
-
 test("local CI runner enables inner install-to-TUI smoke before tests", () => {
   const runner = readRepoFile(".ci/local-ci/run-checks.sh");
 

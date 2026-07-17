@@ -106,18 +106,26 @@ npm run test:manual:install-tui:scripted
 
 The manual command enters the same disposable product path used by automation. It must never install into the developer's real HOME or control the live daemon.
 
-## Coverage policy
+## Coverage ownership and policy
 
-`tests/coverage-policy.json` owns every TypeScript production module. A source file missing from the policy fails the architecture gate; coverage cannot be improved by silently excluding a module. `productionSourceRef` identifies the measured product source, while `baselineHarnessVersion` identifies the newer test runner that generated the baseline.
+`tests/coverage-policy.json` owns every TypeScript production module. A source file missing from the policy fails the architecture gate; coverage cannot be improved by excluding a module. Every entry records exactly one `ownerSuite`: `unit`, `integration`, or `system`. Regression and characterization tests preserve evidence but can never satisfy a module's strict coverage gate.
 
-Each module has one status:
+Choose the owner by the behavior boundary, not by which existing test happens to execute the file:
 
-- `strict`: its unit test must meet at least 90% lines, 90% functions, and 85% branches per file;
-- `ratchet`: the pre-restructure percentage baseline is the minimum, and the module must be migrated to strict ownership rather than allowed to decline. Lines and functions always enforce that floor. Branches allow at most 2.5 percentage points of V8 discovery drift when the reported total changes and the covered branch count strictly increases. A pinned-container run may instead report at most 10 fewer total branches with at most the same covered-count reduction and a 0.05-point drop. Unchanged covered count never excuses an increased total from new uncovered code. The baseline ref, schema, targets, and ratchet digest are locked by the architecture gate, so lowering the JSON values alone fails.
+- `unit`: one module's public contract is complete with deterministic local collaborators; a disposable filesystem is allowed;
+- `integration`: correctness depends on several modules, an adapter protocol, or a controlled process boundary cooperating;
+- `system`: confidence requires a built entrypoint or complete process/user lifecycle.
 
-`npm test` builds once, verifies strict unit coverage, runs every automated layer under combined coverage, and enforces both strict thresholds and the per-file ratchet. Ratchet floors use the lower observed metric from Node 22.19 host and pinned non-root local-CI runs when host tool availability changes a characterization branch; this calibration is explicit in the locked harness version rather than treated as product coverage loss. The networkless system container writes raw V8 coverage to an explicit writable handoff; the host remaps container paths and merges it into the same report. Reports are written under `coverage/` and are not committed.
+A strict unit-owned module also has exactly one entry in `tests/unit/catalog.json`. That test runs alone with only its module included in c8, so incidental execution by another test cannot satisfy its gate. Integration- and system-owned modules are measured only while their respective suite runs. The architecture verifier rejects transitional or evidence-only suites as owners, duplicate owners, wrong built paths, legacy fields, incomplete source inventories, and unit catalog mismatches.
 
-The ratchet and characterization bucket are transitional debt, not the target. Migrate a module by replacing requirement-shaped checks with module-contract unit tests, raising it to the strict thresholds, changing its policy status to `strict`, and shrinking the characterization catalog in the same change.
+Each module has one migration status:
+
+- `strict`: its owner suite must meet at least 90% lines, 90% functions, and 85% branches for that file;
+- `ratchet`: the pre-restructure combined-suite baseline remains the temporary floor until the test is rewritten under its correct owner. Lines and functions always enforce that floor. Branches allow at most 2.5 percentage points of V8 discovery drift when the covered branch count strictly increases. A pinned-container run may instead report at most 10 fewer total branches with at most the same covered-count reduction and a 0.05-point drop. Unchanged covered count never excuses an increased total.
+
+`npm test` builds once, verifies every strict unit owner in isolation, verifies strict integration and system owners from only their suite, and runs every automated layer under combined coverage to preserve remaining ratchets. The networkless system container writes raw V8 coverage to an explicit writable handoff; the host remaps container paths into the owner report. Reports are written under `coverage/` and are not committed.
+
+Ratchets are transitional debt, not the target. Migrate a module by first choosing its truthful owner, then writing requirement-shaped contracts at that layer. Existing characterization evidence remains immutable and must not be renamed, moved, or used as the permanent owner. Promote the module only after its isolated owner report reaches 90/90/85. Completion requires all production modules to be strict and no ratchets to remain.
 
 ## Bugfix workflow
 

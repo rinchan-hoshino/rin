@@ -3,27 +3,24 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  type CoverageMetric,
+  type CoverageMetricName,
+  type CoveragePolicy,
+  type CoverageSummary,
+  type CoverageSummaryEntry,
+  type UnitCatalog,
+  verifyOwnedCoverage,
+  verifyRatchetMetric,
+} from "./coverage-ownership.js";
 import { networkIsolatedNodeInvocation } from "./network-isolated-process.js";
 import { findTestFiles, TEST_SUITES } from "./run-test-suite.js";
 import { createTestProcessEnvironment } from "./test-process-environment.js";
 import { verifyTestArchitecture } from "./verify-test-architecture.js";
 
-type MetricName = "lines" | "functions" | "branches";
-type Metric = { total: number; covered: number; pct: number };
-type SummaryEntry = Record<MetricName, Metric>;
-type CoveragePolicy = {
-  target: Record<MetricName, number>;
-  modules: Array<{
-    source: string;
-    built: string;
-    status: "strict" | "ratchet";
-    baseline: Record<MetricName, Metric>;
-  }>;
-};
-type UnitCatalog = {
-  thresholds: Record<MetricName, number>;
-  modules: Array<{ source: string; test: string; built: string }>;
-};
+type MetricName = CoverageMetricName;
+type Metric = CoverageMetric;
+type SummaryEntry = CoverageSummaryEntry;
 
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -40,6 +37,7 @@ function runCoverage(options: {
   tests: string[];
   includes: string[];
   concurrency: number;
+  preloads?: string[];
 }) {
   const reportDir = path.join(rootDir, "coverage", options.name);
   fs.rmSync(reportDir, { recursive: true, force: true });
@@ -61,6 +59,10 @@ function runCoverage(options: {
         `--reports-dir=${reportDir}`,
         ...options.includes.flatMap((value) => [`--include=${value}`]),
         process.execPath,
+        ...(options.preloads || []).flatMap((value) => [
+          "--import",
+          path.resolve(rootDir, value),
+        ]),
         "--import",
         "tsx",
         "scripts/test/run-node-tests.ts",
@@ -96,6 +98,20 @@ function summaryFor(
   return summary[path.join(rootDir, built)];
 }
 
+function relativeCoverageSummary(
+  summary: Record<string, SummaryEntry>,
+): CoverageSummary {
+  return Object.fromEntries(
+    Object.entries(summary).flatMap(([file, entry]) => {
+      if (file === "total") return [];
+      const relative = path.isAbsolute(file)
+        ? path.relative(rootDir, file)
+        : file;
+      return [[relative.split(path.sep).join("/"), entry]];
+    }),
+  );
+}
+
 function verifyMetric(
   failures: string[],
   built: string,
@@ -108,46 +124,6 @@ function verifyMetric(
   if (pct + 0.005 < minimum) {
     failures.push(
       `${built} ${name} ${pct.toFixed(2)}% < ${minimum.toFixed(2)}% (${rule})`,
-    );
-  }
-}
-
-function verifyRatchetMetric(
-  failures: string[],
-  built: string,
-  name: MetricName,
-  actual: Metric,
-  baseline: Metric,
-) {
-  if (
-    name !== "branches" ||
-    actual.total === baseline.total ||
-    actual.pct + 0.005 >= baseline.pct
-  ) {
-    verifyMetric(
-      failures,
-      built,
-      name,
-      actual,
-      baseline.pct,
-      "coverage ratchet",
-    );
-    return;
-  }
-  const percentageDrop = baseline.pct - actual.pct;
-  const boundedAddedDiscovery =
-    actual.covered > baseline.covered && percentageDrop <= 2.5;
-  const totalDrop = baseline.total - actual.total;
-  const coveredDrop = baseline.covered - actual.covered;
-  const boundedReducedDiscovery =
-    totalDrop > 0 &&
-    totalDrop <= 10 &&
-    coveredDrop >= 0 &&
-    coveredDrop <= totalDrop &&
-    percentageDrop <= 0.05;
-  if (!boundedAddedDiscovery && !boundedReducedDiscovery) {
-    failures.push(
-      `${built} ${name} ${actual.covered}/${actual.total} (${actual.pct.toFixed(2)}%) < baseline ${baseline.covered}/${baseline.total} (${baseline.pct.toFixed(2)}%) (coverage ratchet)`,
     );
   }
 }
@@ -196,17 +172,123 @@ function runUnitCoverage() {
   );
 }
 
-function runCombinedCoverage() {
-  const policy = readJson<CoveragePolicy>("tests/coverage-policy.json");
+function runNonUnitOwnerCoverage(policy: CoveragePolicy) {
+  const catalog = readJson<{
+    thresholds: CoveragePolicy["thresholds"];
+    modules: Array<{
+      source: string;
+      built: string;
+      suite: "integration" | "system";
+      tests: string[];
+      preloads?: string[];
+    }>;
+  }>("tests/non-unit/catalog.json");
+  const failures: string[] = [];
+  const strictModules = policy.modules.filter(
+    (module) => module.status === "strict" && module.ownerSuite !== "unit",
+  );
+
+  for (const [index, entry] of catalog.modules.entries()) {
+    const module = strictModules.find(
+      (candidate) =>
+        candidate.source === entry.source &&
+        candidate.built === entry.built &&
+        candidate.ownerSuite === entry.suite,
+    );
+    if (!module) {
+      failures.push(`non_unit_catalog_owner_mismatch:${entry.source}`);
+      continue;
+    }
+    if (!fs.existsSync(path.join(rootDir, entry.built))) {
+      failures.push(`${entry.built} built module missing`);
+      continue;
+    }
+    const plan = {
+      suite: entry.suite,
+      tests: entry.tests,
+      includes: [entry.built],
+    };
+    const summary = relativeCoverageSummary(
+      runCoverage({
+        name: `owner/${entry.suite}/${index}`,
+        tests: entry.tests,
+        includes: [entry.built],
+        concurrency: entry.suite === "system" ? 2 : 1,
+        preloads: entry.preloads,
+      }),
+    );
+    failures.push(
+      ...verifyOwnedCoverage(plan, [module], summary, catalog.thresholds),
+    );
+  }
+  const catalogSources = new Set(catalog.modules.map((entry) => entry.source));
+  for (const module of strictModules) {
+    if (!catalogSources.has(module.source)) {
+      failures.push(`non_unit_catalog_missing:${module.source}`);
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`owner_coverage_failed:\n${failures.join("\n")}`);
+  }
+  const counts = Object.fromEntries(
+    ["integration", "system"].map((suite) => [
+      suite,
+      policy.modules.filter(
+        (module) => module.status === "strict" && module.ownerSuite === suite,
+      ).length,
+    ]),
+  );
+  console.log(
+    `Non-unit owner coverage: integration=${counts.integration} system=${counts.system}.`,
+  );
+}
+
+function runCombinedRatchetCoverage(policy: CoveragePolicy) {
+  const tests = findTestFiles(TEST_SUITES);
+  const ratchetCount = policy.modules.filter(
+    (entry) => entry.status === "ratchet",
+  ).length;
+  if (ratchetCount === 0) {
+    const unitCatalog = readJson<UnitCatalog>("tests/unit/catalog.json");
+    const nonUnitCatalog = readJson<{
+      modules: Array<{ tests: string[] }>;
+    }>("tests/non-unit/catalog.json");
+    const ownerTests = new Set([
+      ...unitCatalog.modules.map((entry) => entry.test),
+      ...nonUnitCatalog.modules.flatMap((entry) => entry.tests),
+    ]);
+    const behaviorTests = tests.filter((testFile) => !ownerTests.has(testFile));
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "scripts/test/run-test-files.ts",
+        "--concurrency=2",
+        ...behaviorTests,
+      ],
+      { cwd: rootDir, env: process.env, stdio: "inherit" },
+    );
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error(`combined_behavior_failed:${result.status ?? "unknown"}`);
+    }
+    console.log(
+      `Combined behavior suite: ${behaviorTests.length} non-owner files, no ratchet modules.`,
+    );
+    return;
+  }
   const summary = runCoverage({
     name: "combined",
-    tests: findTestFiles(TEST_SUITES),
+    tests,
     includes: ["dist/**/*.js"],
     concurrency: 2,
   });
   const failures: string[] = [];
 
   for (const module of policy.modules) {
+    if (module.status !== "ratchet") continue;
     if (!fs.existsSync(path.join(rootDir, module.built))) {
       failures.push(`${module.built} built module missing`);
       continue;
@@ -217,39 +299,33 @@ function runCombinedCoverage() {
       continue;
     }
     for (const name of metricNames) {
-      if (module.status === "strict") {
-        verifyMetric(
-          failures,
-          module.built,
-          name,
-          actual[name],
-          policy.target[name],
-          "strict target",
-        );
-      } else {
-        verifyRatchetMetric(
-          failures,
-          module.built,
-          name,
-          actual[name],
-          module.baseline[name],
-        );
-      }
+      const failure = verifyRatchetMetric(
+        name,
+        actual[name],
+        module.baseline[name],
+      );
+      if (failure) failures.push(`${module.built} ${failure}`);
     }
   }
 
   if (failures.length > 0) {
     throw new Error(`combined_coverage_failed:\n${failures.join("\n")}`);
   }
-  const strictCount = policy.modules.filter(
-    (entry) => entry.status === "strict",
-  ).length;
-  console.log(
-    `Combined coverage: ${strictCount} strict modules and ${policy.modules.length - strictCount} ratcheted modules passed.`,
-  );
+  console.log(`Combined behavior suite: ${ratchetCount} ratchets passed.`);
 }
 
 verifyTestArchitecture();
 const unitOnly = process.argv.includes("--unit");
+const nonUnitOnly = process.argv.includes("--non-unit");
+const combinedOnly = process.argv.includes("--combined");
 if (unitOnly) runUnitCoverage();
-else runCombinedCoverage();
+else {
+  const policy = readJson<CoveragePolicy>("tests/coverage-policy.json");
+  if (nonUnitOnly) runNonUnitOwnerCoverage(policy);
+  else if (combinedOnly) runCombinedRatchetCoverage(policy);
+  else {
+    runUnitCoverage();
+    runNonUnitOwnerCoverage(policy);
+    runCombinedRatchetCoverage(policy);
+  }
+}

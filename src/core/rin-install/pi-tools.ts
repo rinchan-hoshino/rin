@@ -99,7 +99,9 @@ export async function preparePiManagedToolsForInstall(
     const env = deps.env ?? process.env;
     let ensureTool: EnsureTool;
     try {
-      ensureTool = deps.ensureTool ?? (await importPiEnsureTool());
+      ensureTool =
+        deps.ensureTool ??
+        (await importPiEnsureTool(deps.toolsManagerModuleUrl));
     } catch (error) {
       warnOptionalToolFailure(
         warnings,

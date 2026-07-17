@@ -1,0 +1,1253 @@
+import assert from "node:assert/strict";
+import path from "node:path";
+import test from "node:test";
+import { pathToFileURL } from "node:url";
+
+await import("../support/register-rin-runtime-owner-fixture.ts");
+const runtime = await import(
+  pathToFileURL(path.resolve("dist/core/rin-lib/runtime.js")).href
+);
+
+const owner = (globalThis as any).__rinRuntimeOwner as Record<string, any>;
+const lazyPromptKey = Symbol.for("rin.lazySystemPromptState");
+const ephemeralForkKey = Symbol.for(
+  "rin.ephemeralForkDisableRoutineCompaction",
+);
+
+function resetOwner() {
+  owner.events.length = 0;
+  owner.moduleOptions = {};
+  owner.profile = { cwd: process.cwd(), agentDir: "/owner/agent" };
+  owner.language = "zh_CN";
+  owner.selfImproveCompiled = { prompt: "Self improve owner" };
+  owner.selfImproveError = undefined;
+  owner.completeSimpleError = undefined;
+  owner.completeSimpleResponse = {
+    stopReason: "stop",
+    content: [
+      { type: "text", text: " owner summary " },
+      { type: "image", data: "ignored" },
+      { type: "text", text: "tail" },
+    ],
+  };
+  owner.contextOverflow = false;
+  owner.estimatedContextTokens = { tokens: 12 };
+  owner.mappedMessages = undefined;
+  owner.compactionAuth = {
+    apiKey: "owner-key",
+    headers: { owner: "yes" },
+  };
+  owner.promptToolStateError = undefined;
+  owner.promptToolState = {
+    validToolNames: ["read", "bash", "unknown"],
+    toolSnippets: { read: "Read owner", bash: "Run owner" },
+    promptGuidelines: [
+      "Owner guideline.",
+      "Be concise in your responses",
+      "Owner guideline",
+    ],
+  };
+  owner.resourcePromptState = {
+    agentDir: "/owner/agent",
+    systemPrompt: "",
+    appendSystemPrompt: ["Appended owner"],
+    skills: [
+      {
+        name: "owner<&\"'",
+        description: "description<&\"'",
+        baseDir: "/owner/skill<&\"'",
+      },
+      { name: "hidden", disableModelInvocation: true },
+      {},
+      null,
+    ],
+    agentsFiles: [
+      { path: "/owner/AGENTS.md", content: " Owner project " },
+      { path: "/owner/EMPTY.md" },
+    ],
+  };
+  owner.servicesSettingsManager = {
+    settings: {},
+    getSteeringMode: () => "native-steering",
+  };
+  owner.knownModels = new Map();
+  owner.diagnostics = [{ level: "owner" }];
+  owner.resourceLoader = {
+    getExtensions: () => [{ id: "owner-extension" }],
+  };
+  owner.toolDefinitions = [{ name: "owner_tool" }];
+  owner.capabilityHandlerTypes = new Set(["session_shutdown"]);
+  owner.sessionStartEvent = {
+    reason: "resume",
+    previousSessionFile: "/owner/previous.jsonl",
+  };
+  owner.modelFallbackMessage = "owner fallback";
+  owner.teardownResult = "owner teardown";
+  owner.disposeResult = "owner dispose";
+  owner.currentSessionName = "";
+  owner.providerMessages = [{ role: "user", content: "provider owner" }];
+  owner.sessionMessages = [{ role: "user", content: "session owner" }];
+  owner.contextUsage = { tokens: 10, contextWindow: 100, percent: 10 };
+  owner.sessionModel = {
+    provider: "owner",
+    id: "model",
+    contextWindow: 20_000,
+    maxTokens: 2_000,
+    reasoning: true,
+  };
+  owner.activeToolNames = ["read", "bash"];
+  owner.nativePrompt = "native owner prompt";
+  owner.nativeCheckResult = "native-check-owner";
+  owner.autoCompactionResult = "owner-compacted";
+  owner.autoCompactionError = undefined;
+  owner.promptResult = "owner-prompted";
+  owner.reloadResult = "owner-reloaded";
+  owner.compactResult = "owner-manual-compacted";
+  owner.customMessageError = undefined;
+  owner.streamFn = undefined;
+  owner.isCompacting = false;
+  owner.createSessionError = undefined;
+  owner.listener = undefined;
+  owner.runtime = undefined;
+  owner.session = undefined;
+  owner.services = undefined;
+  owner.capabilityOptions = undefined;
+  owner.capabilityDefinitions = undefined;
+  owner.attachOptions = undefined;
+}
+
+function makeManager() {
+  return owner.makeSessionManager(process.cwd(), "/owner/sessions");
+}
+
+function eventNames() {
+  return owner.events.map((entry: any[]) => entry[0]);
+}
+
+function makeThresholdSession(overrides: Record<string, any> = {}) {
+  return {
+    settingsManager: {
+      getCompactionSettings: () => ({ enabled: true, triggerPercent: 0.85 }),
+    },
+    model: { provider: "owner", id: "model", contextWindow: 1000 },
+    sessionManager: { getBranch: () => [] },
+    agent: {
+      state: { messages: [{ role: "user", content: "owner" }] },
+      prepareNextTurn: async () => ({ owner: "native" }),
+    },
+    async _checkCompaction() {
+      return "native";
+    },
+    async _runAutoCompaction() {
+      return "compacted";
+    },
+    ...overrides,
+  } as any;
+}
+
+test("runtime capability definitions integrate owner modules and hook payloads", async () => {
+  resetOwner();
+  const compactEvents: any[] = [];
+  const definitions = runtime.createRinCapabilityDefinitions({
+    cwd: "/owner/cwd",
+    agentDir: "/owner/agent",
+    compactWithRinPrompt: async (event: any) => {
+      compactEvents.push(event);
+      return { compacted: event.id };
+    },
+  });
+
+  assert.deepEqual(
+    definitions.map((definition: any) => definition.name),
+    [
+      "todo-owner",
+      "memory-owner",
+      "self-improve-owner",
+      "task-owner",
+      "chat-owner",
+      "token-usage-owner",
+      "rin_compaction_prompt",
+      "rin_provider_bound_context",
+    ],
+  );
+  assert.equal(owner.moduleOptions.memory.cwd, "/owner/cwd");
+  assert.deepEqual(
+    await definitions[6].hooks.session_before_compact[0]({ id: "compact" }),
+    { compacted: "compact" },
+  );
+  assert.equal(compactEvents.length, 1);
+  assert.deepEqual(
+    definitions[7].hooks.context[0]({ type: "context" }, { cwd: "/ctx" }),
+    { type: "context", ownerCwd: "/ctx" },
+  );
+  assert.deepEqual(
+    definitions[7].hooks.context[0]({ type: "fallback" }, null),
+    { type: "fallback", ownerCwd: "/owner/cwd" },
+  );
+
+  const noCompactor = runtime.createRinCapabilityDefinitions({
+    cwd: "",
+    agentDir: "/owner/agent",
+  });
+  assert.equal(
+    await noCompactor[6].hooks.session_before_compact[0]({ id: "none" }),
+    undefined,
+  );
+  const context = noCompactor[7].hooks.context[0]({ type: "cwd" }, {});
+  assert.equal(context.ownerCwd, process.cwd());
+});
+
+test("compaction summary integration covers native completion, streaming, budgets, and failures", async () => {
+  resetOwner();
+  assert.equal(runtime.estimateRinCompactionTextTokens("éa🙂"), 3);
+  assert.equal(runtime.estimateRinCompactionTextTokens(undefined), 0);
+  assert.equal(
+    runtime.buildRinCompactionPromptText({
+      conversationText: "conversation",
+      instruction: "instruction",
+      previousSummary: "previous",
+    }),
+    "<conversation>\nconversation\n</conversation>\n\n<previous-summary>\nprevious\n</previous-summary>\n\ninstruction",
+  );
+  assert.doesNotMatch(
+    runtime.buildRinCompactionPromptText({
+      conversationText: "conversation",
+      instruction: "instruction",
+    }),
+    /previous-summary/,
+  );
+  assert.equal(
+    runtime.buildRinCompactionPromptText({
+      conversationText: "",
+      instruction: "",
+    }),
+    "<conversation>\n\n</conversation>",
+  );
+
+  const direct = await runtime.completeRinCompactionSummaryBudgeted({
+    model: { reasoning: true, contextWindow: 20_000, maxTokens: 1000 },
+    messages: [{ text: "one" }, { text: "two" }],
+    instruction: "summarize",
+    maxTokens: 200,
+    apiKey: "key",
+    headers: { owner: "yes" },
+    thinkingLevel: "high",
+    serializeMessages: (messages: any[]) =>
+      messages.map((message) => message.text).join("|"),
+  });
+  assert.equal(direct, "owner summary \ntail");
+  const completion = owner.events.find(
+    ([name]: any[]) => name === "complete-simple",
+  );
+  assert.equal(completion[3].reasoning, "high");
+  assert.equal(completion[3].apiKey, "key");
+
+  owner.completeSimpleResponse = { stopReason: "stop", content: [] };
+  const streamedCalls: any[] = [];
+  const streamed = await runtime.completeRinCompactionSummaryBudgeted({
+    model: { reasoning: false, contextWindow: 0 },
+    messages: [{ text: "stream" }],
+    instruction: "summarize",
+    maxTokens: 50,
+    thinkingLevel: "high",
+    streamFn: async (...args: any[]) => {
+      streamedCalls.push(args);
+      return {
+        result: async () => ({
+          stopReason: "stop",
+          content: [{ type: "text", text: "stream owner" }],
+        }),
+      };
+    },
+    serializeMessages: (messages: any[]) => messages[0].text,
+  });
+  assert.equal(streamed, "stream owner");
+  assert.equal(streamedCalls.length, 1);
+  assert.equal("reasoning" in streamedCalls[0][2], false);
+
+  owner.completeSimpleResponse = { stopReason: "stop", content: null };
+  assert.equal(
+    await runtime.completeRinCompactionSummaryBudgeted({
+      model: null,
+      messages: [{ text: "empty response" }],
+      instruction: "summarize",
+      maxTokens: 0,
+      serializeMessages: (messages: any[]) => messages[0].text,
+    }),
+    "",
+  );
+  owner.completeSimpleResponse = {
+    stopReason: "stop",
+    content: [{ type: "text" }, null],
+  };
+  assert.equal(
+    await runtime.completeRinCompactionSummaryBudgeted({
+      model: {},
+      messages: [{ text: "empty text" }],
+      instruction: "summarize",
+      maxTokens: 0,
+      serializeMessages: (messages: any[]) => messages[0].text,
+    }),
+    "",
+  );
+
+  owner.completeSimpleResponse = {
+    stopReason: "error",
+    errorMessage: "owner provider failed",
+  };
+  await assert.rejects(
+    runtime.completeRinCompactionSummaryBudgeted({
+      model: { contextWindow: 20_000 },
+      messages: [{ text: "failure" }],
+      instruction: "summarize",
+      maxTokens: 50,
+      serializeMessages: (messages: any[]) => messages[0].text,
+    }),
+    /owner provider failed/,
+  );
+  owner.completeSimpleResponse = { stopReason: "error" };
+  await assert.rejects(
+    runtime.completeRinCompactionSummaryBudgeted({
+      model: {},
+      messages: [{ text: "failure" }],
+      instruction: "summarize",
+      maxTokens: 50,
+      serializeMessages: () => "failure",
+    }),
+    /Unknown error/,
+  );
+
+  let called = false;
+  assert.equal(
+    await runtime.completeRinCompactionSummaryBudgeted({
+      model: {},
+      messages: null as any,
+      instruction: "unused",
+      previousSummary: " existing summary ",
+      maxTokens: 50,
+      serializeMessages: () => "",
+      completeSummary: async () => {
+        called = true;
+        return "unused";
+      },
+    }),
+    "existing summary",
+  );
+  assert.equal(
+    await runtime.completeRinCompactionSummaryBudgeted({
+      model: {},
+      messages: [],
+      instruction: "unused",
+      previousSummary: " existing summary ",
+      maxTokens: 50,
+      serializeMessages: () => "",
+      completeSummary: async () => {
+        called = true;
+        return "unused";
+      },
+    }),
+    "existing summary",
+  );
+  assert.equal(called, false);
+  assert.equal(
+    await runtime.completeRinCompactionSummaryBudgeted({
+      model: {},
+      messages: [{ text: "" }],
+      instruction: "unused",
+      maxTokens: 50,
+      serializeMessages: () => "",
+      completeSummary: async () => "unused",
+    }),
+    "",
+  );
+
+  const prompts: string[] = [];
+  const chunked = await runtime.completeRinCompactionSummaryBudgeted({
+    model: { contextWindow: 300, maxTokens: 30 },
+    messages: [
+      { text: "a".repeat(120) },
+      { text: "b".repeat(120) },
+      { text: "c".repeat(120) },
+    ],
+    instruction: "I".repeat(90),
+    previousSummary: "P".repeat(400),
+    maxTokens: 20,
+    promptBudgetTokens: 220,
+    serializeMessages: (messages: any[]) => messages[0].text,
+    completeSummary: async ({ promptText }: any) => {
+      prompts.push(promptText);
+      return `summary-${prompts.length}`;
+    },
+  });
+  assert.equal(chunked, `summary-${prompts.length}`);
+  assert.ok(prompts.length >= 3);
+  assert.ok(
+    prompts.every(
+      (prompt) => runtime.estimateRinCompactionTextTokens(prompt) <= 220,
+    ),
+  );
+});
+
+test("prompt exports preserve empty, duplicate, persisted, and lazy fallback behavior", () => {
+  resetOwner();
+  const plain: any = { _baseSystemPrompt: "base" };
+  runtime.applySessionBaseSystemPrompt(plain, "next");
+  assert.equal(plain._baseSystemPrompt, "next");
+  assert.equal(runtime.ensureSessionBaseSystemPrompt(null), "");
+  assert.equal(runtime.ensureSessionBaseSystemPrompt(plain), "next");
+  runtime.clearSessionBaseSystemPrompt(null);
+  runtime.clearSessionBaseSystemPrompt(plain, { ignorePersistedPrompt: true });
+  assert.equal(plain._baseSystemPrompt, "");
+
+  assert.equal(runtime.appendPromptContextSystemPrompt("base", null), "base");
+  const withBlock = runtime.appendPromptContextSystemPrompt("base ", {
+    owner: true,
+  });
+  assert.match(withBlock, /^base\n\nPrompt context owner:/);
+  assert.equal(
+    runtime.appendPromptContextSystemPrompt(withBlock, { owner: true }),
+    withBlock,
+  );
+  assert.match(
+    runtime.appendPromptContextSystemPrompt("", { owner: true }),
+    /^Prompt context owner:/,
+  );
+
+  const manager = makeManager();
+  const session: any = { sessionManager: manager };
+  assert.equal(
+    runtime.persistPromptContextSystemPrompt(session, "base", null),
+    "base",
+  );
+  const persisted = runtime.persistPromptContextSystemPrompt(session, "base", {
+    owner: 1,
+  });
+  assert.match(persisted, /Prompt context owner/);
+  runtime.persistPromptContextSystemPrompt(session, persisted, { owner: 1 });
+  assert.equal(
+    manager.__ownerBranch.filter(
+      (entry: any) => entry.customType === "rin-system-prompt-blocks",
+    ).length,
+    1,
+  );
+  assert.doesNotThrow(() =>
+    runtime.persistPromptContextSystemPrompt({ sessionManager: {} }, "base", {
+      owner: 2,
+    }),
+  );
+});
+
+test("configured runtime integrates profile, services, prompt, compaction, and shutdown ownership", async () => {
+  resetOwner();
+  const model = {
+    provider: "owner",
+    id: "model",
+    contextWindow: 20_000,
+    maxTokens: 1000,
+    reasoning: true,
+    hasAuth: true,
+  };
+  owner.knownModels.set("owner/model", model);
+  const manager = makeManager();
+  manager[ephemeralForkKey] = true;
+
+  const configured = await runtime.createConfiguredAgentSession({
+    cwd: process.cwd(),
+    agentDir: "/owner/agent",
+    sessionManager: manager,
+    sessionName: "Owner session",
+    modelRef: "owner/model",
+    thinkingLevel: "high",
+    additionalSkillPaths: [
+      "/owner/extra-skill",
+      "/owner/agent/self_improve/skills",
+    ],
+    additionalExtensionPaths: ["/owner/extension"],
+    additionalPromptTemplatePaths: ["/owner/prompt"],
+    additionalThemePaths: ["/owner/theme"],
+    noExtensions: false,
+    noSkills: false,
+    noPromptTemplates: false,
+    noThemes: false,
+    noContextFiles: false,
+    disabledRinCapabilities: ["disabled-owner"],
+    extensionFlagValues: new Map([["owner", true]]),
+    tools: ["read", "bash"],
+    excludeTools: ["edit"],
+    noTools: false,
+    piAgentSessionServicesOptions: {
+      ownerService: true,
+      resourceLoaderOptions: { ownerResource: true },
+    } as any,
+    piAgentSessionOptions: { ownerSession: true } as any,
+  });
+
+  assert.equal(configured.session.model, model);
+  assert.equal(configured.runtime.session, configured.session);
+  assert.deepEqual(configured.extensionsResult, [{ id: "owner-extension" }]);
+  assert.equal(configured.modelFallbackMessage, "owner fallback");
+  assert.equal(owner.currentSessionName, "Owner session");
+  assert.equal(manager.__ownerPersistencePatched, true);
+  assert.equal(configured.session[ephemeralForkKey], true);
+  assert.equal(owner.attachOptions.reason, "resume");
+  assert.equal(
+    owner.attachOptions.previousSessionFile,
+    "/owner/previous.jsonl",
+  );
+  assert.deepEqual(owner.capabilityOptions.disabledNames, ["disabled-owner"]);
+  assert.deepEqual(
+    owner.events.find(([name]: any[]) => name === "create-services")[1]
+      .resourceLoaderOptions,
+    {
+      ownerResource: true,
+      additionalExtensionPaths: ["/owner/extension"],
+      noExtensions: false,
+      additionalSkillPaths: [
+        "/owner/agent/self_improve/skills",
+        "/owner/agent/docs/rin/builtin-skills",
+        "/owner/extra-skill",
+      ],
+      noSkills: false,
+      additionalPromptTemplatePaths: ["/owner/prompt"],
+      noPromptTemplates: false,
+      additionalThemePaths: ["/owner/theme"],
+      noThemes: false,
+      noContextFiles: false,
+      systemPrompt: undefined,
+      appendSystemPrompt: undefined,
+    },
+  );
+
+  assert.equal(configured.session.settingsManager.getSteeringMode(), "all");
+  configured.session.settingsManager.settings.steeringMode = "one-at-a-time";
+  assert.equal(
+    configured.session.settingsManager.getSteeringMode(),
+    "one-at-a-time",
+  );
+  configured.session.settingsManager.settings.steeringMode = "bad";
+  assert.equal(configured.session.settingsManager.getSteeringMode(), "all");
+
+  assert.equal(configured.session._baseSystemPrompt, "");
+  assert.equal(
+    await configured.session.prompt("hello", {
+      source: "chat",
+      promptContext: { chat: "owner" },
+      frontendIdentity: { kind: "discord", key: "owner" },
+    }),
+    "owner-prompted",
+  );
+  const builtPrompt = configured.session._baseSystemPrompt;
+  assert.match(
+    builtPrompt,
+    /^As the assistant, you must fulfill the user's requests\./,
+  );
+  assert.match(builtPrompt, /You are running in the Rin runtime environment/);
+  assert.match(builtPrompt, /Always use a search engine/);
+  assert.match(
+    builtPrompt,
+    /Available tools:\n- read: Read owner\n- bash: Run owner/,
+  );
+  assert.match(builtPrompt, /Rin and Pi documentation/);
+  assert.match(builtPrompt, /Language owner: zh_CN/);
+  assert.match(builtPrompt, /Appended owner/);
+  assert.match(builtPrompt, /# Project Context/);
+  assert.match(builtPrompt, /Self improve owner/);
+  assert.match(builtPrompt, /<name>owner&lt;&amp;&quot;&apos;<\/name>/);
+  assert.doesNotMatch(builtPrompt, /<name>hidden<\/name>/);
+  assert.match(builtPrompt, /Current date: \d{4}-\d{2}-\d{2}/);
+  assert.match(builtPrompt, /Prompt context owner/);
+  assert.equal(manager.__rinLastPromptSource, "chat");
+  assert.deepEqual(manager.__rinLastPromptContext, { chat: "owner" });
+  assert.deepEqual(manager.__rinFrontend, {
+    kind: "discord",
+    key: "owner",
+  });
+  assert.equal(
+    owner.events.some(
+      ([name, text]: any[]) =>
+        name === "native-prompt" && text.startsWith("[owner-context]"),
+    ),
+    true,
+  );
+
+  await configured.session.prompt("plain", {
+    source: "",
+    frontendIdentity: { kind: "missing-key" },
+  });
+  assert.equal(manager.__rinFrontend, undefined);
+  assert.equal(
+    await configured.session._rebuildSystemPrompt(["read"]),
+    "native owner prompt",
+  );
+  assert.equal(await configured.session.reload("owner"), "owner-reloaded");
+  assert.equal(configured.session._baseSystemPrompt, "");
+  assert.equal(configured.session[lazyPromptKey].ignorePersistedPrompt, true);
+  assert.match(
+    runtime.ensureSessionBaseSystemPrompt(configured.session),
+    /Available tools/,
+  );
+
+  const runtimeCapabilityOptions = owner.moduleOptions.memory;
+  assert.equal(runtimeCapabilityOptions.getThinkingLevel(), "high");
+  runtimeCapabilityOptions.sendMessage("owner message", { channel: "owner" });
+  runtimeCapabilityOptions.emitEvent({ type: "owner_event" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(eventNames().includes("custom-message"), true);
+  assert.equal(eventNames().includes("core-event"), true);
+
+  owner.estimatedContextTokens = { tokens: 777 };
+  owner.mappedMessages = [{ text: "mapped owner" }];
+  owner.completeSimpleResponse = {
+    stopReason: "stop",
+    content: [{ type: "text", text: "compacted owner" }],
+  };
+  const compactionDefinition = owner.capabilityDefinitions.find(
+    (definition: any) => definition.name === "rin_compaction_prompt",
+  );
+  const compaction = await compactionDefinition.hooks.session_before_compact[0](
+    {
+      preparation: {
+        settings: { reserveTokens: 500 },
+        messagesToSummarize: [{ text: "history" }],
+        previousSummary: "previous owner",
+        isSplitTurn: true,
+        turnPrefixMessages: [{ text: "prefix" }],
+        firstKeptEntryId: "kept-owner",
+        tokensBefore: 999,
+      },
+      customInstructions: "focus owner",
+      signal: new AbortController().signal,
+    },
+  );
+  assert.deepEqual(compaction, {
+    compaction: {
+      summary:
+        "compacted owner\n\n---\n\n**Turn Context (split turn):**\n\ncompacted owner",
+      firstKeptEntryId: "kept-owner",
+      tokensBefore: 777,
+    },
+  });
+  assert.equal(
+    owner.events.filter(([name]: any[]) => name === "compaction-auth").length,
+    1,
+  );
+
+  configured.session.model.maxTokens = 0;
+  owner.estimatedContextTokens = { tokens: 0 };
+  owner.mappedMessages = [];
+  const emptyCompaction =
+    await compactionDefinition.hooks.session_before_compact[0]({
+      preparation: {
+        messagesToSummarize: [],
+        firstKeptEntryId: "empty-owner",
+        tokensBefore: 321,
+      },
+    });
+  assert.deepEqual(emptyCompaction, {
+    compaction: {
+      summary: "No prior history.",
+      firstKeptEntryId: "empty-owner",
+      tokensBefore: 321,
+    },
+  });
+
+  owner.customMessageError = new Error("ignored custom message failure");
+  assert.doesNotThrow(() =>
+    runtimeCapabilityOptions.sendMessage("ignored", undefined),
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    await configured.runtime.teardownCurrent("new", "/owner/next.jsonl"),
+    "owner teardown",
+  );
+  assert.equal(await configured.runtime.dispose("arg"), "owner dispose");
+  const shutdownEvents = owner.events.filter(
+    ([name]: any[]) => name === "capability-set-emit",
+  );
+  assert.deepEqual(
+    shutdownEvents.map(([, event]: any[]) => [
+      event.type,
+      event.reason,
+      event.targetSessionFile,
+    ]),
+    [
+      ["session_shutdown", "new", "/owner/next.jsonl"],
+      ["session_shutdown", "quit", undefined],
+    ],
+  );
+});
+
+test("configured prompt reuses persisted state and falls back to Pi rebuild on Rin prompt failure", async () => {
+  resetOwner();
+  const manager = makeManager();
+  manager.__ownerBranch.push(
+    {
+      type: "custom",
+      customType: "rin-system-prompt-state",
+      data: { systemPrompt: "persisted owner prompt" },
+    },
+    {
+      type: "custom",
+      customType: "rin-system-prompt-blocks",
+      data: { blocks: ["persisted block", "persisted block", ""] },
+    },
+    { type: "custom", customType: "other", data: {} },
+  );
+  const configured = await runtime.createConfiguredAgentSession({
+    cwd: process.cwd(),
+    agentDir: "/owner/agent",
+    sessionManager: manager,
+  });
+  assert.equal(
+    runtime.ensureSessionBaseSystemPrompt(configured.session),
+    "persisted owner prompt\n\npersisted block",
+  );
+  const promptToolCalls = owner.events.filter(
+    ([name]: any[]) => name === "prompt-tool-state",
+  ).length;
+  assert.equal(promptToolCalls, 0);
+  runtime.clearSessionBaseSystemPrompt(configured.session, {
+    ignorePersistedPrompt: true,
+  });
+  owner.promptToolStateError = new Error("owner prompt builder failed");
+  assert.equal(
+    runtime.ensureSessionBaseSystemPrompt(configured.session),
+    "native owner prompt",
+  );
+  assert.equal(eventNames().includes("native-rebuild"), true);
+
+  const noRebuilder = { _baseSystemPrompt: "kept" } as any;
+  assert.equal(runtime.ensureSessionBaseSystemPrompt(noRebuilder), "kept");
+  runtime.clearSessionBaseSystemPrompt(noRebuilder);
+  assert.equal(noRebuilder._baseSystemPrompt, "");
+});
+
+test("configured prompt keeps loader-owned minimal and missing optional resource fallbacks", async (t) => {
+  resetOwner();
+  const previousRinDir = process.env.RIN_DIR;
+  t.after(() => {
+    if (previousRinDir === undefined) delete process.env.RIN_DIR;
+    else process.env.RIN_DIR = previousRinDir;
+  });
+  process.env.RIN_DIR = "/owner/env-agent";
+  owner.language = "";
+  owner.selfImproveError = new Error("optional self improve unavailable");
+  owner.promptToolState = {
+    validToolNames: ["unknown"],
+    toolSnippets: {},
+    promptGuidelines: [null, "", "."],
+  };
+  owner.resourcePromptState = {
+    agentDir: "",
+    systemPrompt: "Loader owner prompt",
+    appendSystemPrompt: [],
+    skills: [],
+    agentsFiles: [],
+  };
+  owner.sessionStartEvent = undefined;
+  const configured = await runtime.createConfiguredAgentSession({
+    cwd: process.cwd(),
+    agentDir: "/owner/agent",
+  });
+  configured.session.getActiveToolNames = () => "not-an-array";
+  assert.match(
+    configured.session[lazyPromptKey].compute("not-an-array"),
+    /Loader owner prompt/,
+  );
+  assert.equal(await configured.session._rebuildSystemPrompt(), "");
+  assert.equal(
+    await configured.session.prompt("minimal owner"),
+    "owner-prompted",
+  );
+  assert.match(configured.session._baseSystemPrompt, /Loader owner prompt/);
+  assert.match(
+    configured.session._baseSystemPrompt,
+    /\/owner\/env-agent\/docs\/rin/,
+  );
+  assert.doesNotMatch(configured.session._baseSystemPrompt, /Language owner/);
+  assert.doesNotMatch(
+    configured.session._baseSystemPrompt,
+    /Self improve owner/,
+  );
+  assert.doesNotMatch(configured.session._baseSystemPrompt, /available_skills/);
+  assert.equal(owner.attachOptions.reason, "startup");
+  assert.equal(
+    runtime.getManagedSkillPaths(" ")[0],
+    "/owner/agent/self_improve/skills",
+  );
+
+  runtime.clearSessionBaseSystemPrompt(configured.session, {
+    ignorePersistedPrompt: true,
+  });
+  configured.session.getActiveToolNames = () => {
+    throw new Error("owner active tools unavailable");
+  };
+  configured.session.sessionManager = undefined;
+  assert.equal(
+    await configured.session.prompt("without manager"),
+    "owner-prompted",
+  );
+});
+
+test("configured session validates model refs and compaction early exits without changing public data", async () => {
+  resetOwner();
+  for (const [modelRef, pattern] of [
+    ["owner", /invalid_model_ref:owner/],
+    ["/model", /invalid_model_ref:\/model/],
+    ["owner/", /invalid_model_ref:owner\//],
+    ["owner/missing", /unknown_model:owner\/missing/],
+  ] as const) {
+    await assert.rejects(
+      runtime.createConfiguredAgentSession({
+        cwd: process.cwd(),
+        agentDir: "/owner/agent",
+        modelRef,
+      }),
+      pattern,
+    );
+  }
+  owner.knownModels.set("owner/no-auth", {
+    provider: "owner",
+    id: "no-auth",
+    hasAuth: false,
+  });
+  await assert.rejects(
+    runtime.createConfiguredAgentSession({
+      cwd: process.cwd(),
+      agentDir: "/owner/agent",
+      modelRef: "owner/no-auth",
+    }),
+    /No API key for owner\/no-auth/,
+  );
+
+  resetOwner();
+  const configured = await runtime.createConfiguredAgentSession({
+    cwd: process.cwd(),
+    agentDir: "/owner/agent",
+    thinkingLevel: "",
+  });
+  const compactionDefinition = owner.capabilityDefinitions.find(
+    (definition: any) => definition.name === "rin_compaction_prompt",
+  );
+  const hook = compactionDefinition.hooks.session_before_compact[0];
+  assert.equal(await hook({}), undefined);
+  const previousModel = configured.session.model;
+  configured.session.model = undefined;
+  assert.equal(
+    await hook({ preparation: { messagesToSummarize: [] } }),
+    undefined,
+  );
+  configured.session.model = previousModel;
+  assert.equal(owner.moduleOptions.memory.getThinkingLevel(), "medium");
+});
+
+test("pruned usage and provider preflight keep guard, fallback, retry, and dedup semantics", async () => {
+  resetOwner();
+  assert.doesNotThrow(() => runtime.applyRinPrunedContextUsage(null));
+  assert.doesNotThrow(() => runtime.applyRinPrunedContextUsage({}));
+  const noEstimator = { getContextUsage: () => ({ tokens: 1 }) };
+  runtime.applyRinPrunedContextUsage(noEstimator);
+  assert.equal(noEstimator.getContextUsage().tokens, 1);
+
+  const usage: any = {
+    model: { contextWindow: 200 },
+    messages: [{ role: "user" }],
+    current: { tokens: null, contextWindow: 200, percent: 0 },
+    getContextUsage() {
+      return this.current;
+    },
+  };
+  runtime.applyRinPrunedContextUsage(usage, {
+    estimateContextTokens: () => ({ tokens: 50 }),
+  });
+  runtime.applyRinPrunedContextUsage(usage, {
+    estimateContextTokens: () => ({ tokens: 99 }),
+  });
+  assert.equal(usage.getContextUsage().tokens, null);
+  usage.current = { tokens: 5, contextWindow: 0, percent: 5 };
+  usage.model.contextWindow = 0;
+  assert.equal(usage.getContextUsage().tokens, 5);
+  usage.current = { tokens: 5, contextWindow: 200, percent: 5 };
+  usage.model.contextWindow = 200;
+  assert.deepEqual(usage.getContextUsage(), {
+    tokens: 50,
+    contextWindow: 200,
+    percent: 25,
+  });
+
+  for (const invalid of [null, {}, { agent: {} }]) {
+    assert.doesNotThrow(() =>
+      runtime.applyRinProviderOverflowPreflight(invalid as any, {
+        estimateContextTokens: () => 1,
+      }),
+    );
+  }
+  const noEstimatorSession: any = {
+    agent: { transformContext: async (messages: any[]) => messages },
+  };
+  runtime.applyRinProviderOverflowPreflight(noEstimatorSession);
+  const untouched = [1];
+  assert.equal(
+    await noEstimatorSession.agent.transformContext(untouched),
+    untouched,
+  );
+
+  let settings = { enabled: false, triggerPercent: 0.85 };
+  let compacting = false;
+  let compactResult = false;
+  const providerMessages: any[] = [{ role: "user", content: "fallback" }];
+  const calls: any[] = [];
+  const session: any = {
+    settingsManager: { getCompactionSettings: () => settings },
+    model: { contextWindow: 100 },
+    get isCompacting() {
+      return compacting;
+    },
+    agent: {
+      state: { messages: providerMessages },
+      async transformContext(messages: any[]) {
+        calls.push(["transform", messages]);
+        return messages;
+      },
+    },
+    sessionManager: {},
+    messages: providerMessages,
+    async _runAutoCompaction(reason: string, retry: boolean) {
+      calls.push(["compact", reason, retry]);
+      return compactResult;
+    },
+  };
+  runtime.applyRinProviderOverflowPreflight(session, {
+    estimateContextTokens: () => ({ tokens: 90 }),
+  });
+  runtime.applyRinProviderOverflowPreflight(session, {
+    estimateContextTokens: () => ({ tokens: 90 }),
+  });
+  const userTail = [{ role: "user", content: "owner" }];
+  assert.equal(await session.agent.transformContext(userTail), userTail);
+  settings = { enabled: true, triggerPercent: 0.85 };
+  compacting = true;
+  assert.equal(await session.agent.transformContext(userTail), userTail);
+  compacting = false;
+  assert.equal(await session.agent.transformContext(userTail), userTail);
+  assert.equal(calls.filter(([kind]) => kind === "compact").length, 1);
+  compactResult = true;
+  assert.equal(await session.agent.transformContext(userTail), userTail);
+  assert.equal(
+    calls.filter(([kind]) => kind === "compact").length,
+    1,
+    "same tail is not retried",
+  );
+  const assistantTail = [{ role: "assistant", content: "done" }];
+  assert.equal(
+    await session.agent.transformContext(assistantTail),
+    assistantTail,
+  );
+  const newTail = [{ role: "toolResult", content: "new" }];
+  session.sessionManager.buildSessionContext = () => ({
+    messages: [{ role: "user", content: "refreshed" }],
+  });
+  assert.deepEqual(await session.agent.transformContext(newTail), [
+    { role: "user", content: "refreshed" },
+  ]);
+  assert.deepEqual(newTail, [{ role: "user", content: "refreshed" }]);
+});
+
+test("percent compaction preserves native exits, overflow recovery, thresholds, and mid-turn snapshots", async () => {
+  resetOwner();
+  for (const invalid of [null, {}, { _checkCompaction() {} }]) {
+    assert.doesNotThrow(() =>
+      runtime.applyRinCompactionPercentThreshold(invalid as any, {
+        calculateContextTokens: () => 1,
+        estimateContextTokens: () => 1,
+      }),
+    );
+  }
+
+  const disabled = makeThresholdSession({
+    settingsManager: { getCompactionSettings: () => ({ enabled: false }) },
+  });
+  runtime.applyRinCompactionPercentThreshold(disabled, {
+    calculateContextTokens: () => 900,
+    estimateContextTokens: () => ({ tokens: 900 }),
+  });
+  assert.equal(
+    await disabled._checkCompaction({ stopReason: "stop" }),
+    "native",
+  );
+  assert.equal(
+    await disabled._checkCompaction({ stopReason: "aborted" }, true),
+    "native",
+  );
+
+  const recent = makeThresholdSession({
+    sessionManager: {
+      getBranch: () => [
+        { type: "compaction", id: "recent", timestamp: "2030-01-01T00:00:00Z" },
+      ],
+    },
+  });
+  runtime.applyRinCompactionPercentThreshold(recent, {
+    calculateContextTokens: () => 900,
+    estimateContextTokens: () => ({ tokens: 900 }),
+    getLatestCompactionEntry: (entries: any[]) => entries[0],
+  });
+  assert.equal(
+    await recent._checkCompaction({ timestamp: Date.now() }, false),
+    false,
+  );
+
+  owner.contextOverflow = true;
+  const overflow = makeThresholdSession();
+  runtime.applyRinCompactionPercentThreshold(overflow, {
+    calculateContextTokens: () => 900,
+    estimateContextTokens: () => ({ tokens: 900 }),
+  });
+  assert.equal(
+    await overflow._checkCompaction(
+      {
+        stopReason: "error",
+        provider: "owner",
+        model: "model",
+        timestamp: Date.now(),
+      },
+      false,
+    ),
+    "native",
+  );
+  assert.equal(
+    await overflow._checkCompaction(
+      {
+        stopReason: "error",
+        provider: "other",
+        model: "model",
+        timestamp: Date.now(),
+      },
+      true,
+    ),
+    false,
+  );
+
+  let tokens: number = Number.NaN;
+  const threshold = makeThresholdSession({
+    settingsManager: {
+      getCompactionSettings: () => ({
+        enabled: true,
+        triggerPercent: 2,
+        reserveTokens: 20,
+      }),
+    },
+  });
+  runtime.applyRinCompactionPercentThreshold(threshold, {
+    calculateContextTokens: () => tokens,
+    estimateContextTokens: () => ({ tokens }),
+  });
+  assert.equal(
+    await threshold._checkCompaction({ stopReason: "stop" }, true),
+    false,
+  );
+  assert.equal(
+    await threshold._checkCompaction({ stopReason: "stop" }, false),
+    false,
+  );
+  tokens = 1;
+  threshold.model.contextWindow = 0;
+  assert.equal(
+    await threshold._checkCompaction({ stopReason: "stop" }, false),
+    false,
+  );
+  threshold.model.contextWindow = 1000;
+  assert.equal(
+    await threshold._checkCompaction({ stopReason: "stop" }, false),
+    false,
+  );
+  tokens = 980;
+  assert.equal(
+    await threshold._checkCompaction({ stopReason: "stop" }, false),
+    "compacted",
+  );
+
+  let branch: any[] = [];
+  const midTurn = makeThresholdSession({
+    _lastAssistantMessage: {
+      stopReason: "toolUse",
+      timestamp: Date.now(),
+      usage: { totalTokens: 900 },
+    },
+    agent: {
+      state: {
+        systemPrompt: "current system",
+        messages: [{ role: "toolResult", content: "current" }],
+        tools: [{ name: "owner" }],
+      },
+      async prepareNextTurn() {
+        return {
+          context: { fallback: true, tools: [{ name: "fallback" }] },
+          thinkingLevel: "low",
+        };
+      },
+    },
+    sessionManager: {
+      getBranch: () => branch,
+      buildSessionContext: () => ({
+        messages: [{ role: "user", content: "manager" }],
+      }),
+    },
+    async _runAutoCompaction() {
+      branch = [
+        { type: "compaction", id: "new", timestamp: new Date().toISOString() },
+      ];
+      return false;
+    },
+  });
+  runtime.applyRinCompactionPercentThreshold(midTurn, {
+    calculateContextTokens: () => 900,
+    estimateContextTokens: () => ({ tokens: 900 }),
+    getLatestCompactionEntry: (entries: any[]) => entries.at(-1),
+  });
+  assert.deepEqual(await midTurn.agent.prepareNextTurn(), {
+    context: {
+      fallback: true,
+      tools: [{ name: "owner" }],
+      systemPrompt: "current system",
+      messages: [{ role: "user", content: "manager" }],
+    },
+    thinkingLevel: "low",
+  });
+
+  midTurn._lastAssistantMessage = { stopReason: "stop", timestamp: Date.now() };
+  assert.deepEqual(await midTurn.agent.prepareNextTurn(), {
+    context: { fallback: true, tools: [{ name: "fallback" }] },
+    thinkingLevel: "low",
+  });
+});
+
+test("compaction reason, reload, shutdown, and settings wrappers remain idempotent and failure-safe", async () => {
+  resetOwner();
+  for (const invalid of [null, {}, { compact: "no" }]) {
+    assert.doesNotThrow(() =>
+      runtime.applyRinCompactionReasonTracking(invalid),
+    );
+  }
+  const reasonEvents: any[] = [];
+  const reasonSession: any = {
+    __rinCurrentCompactionReason: "outer",
+    async _runAutoCompaction(reason: string) {
+      reasonEvents.push(["auto", reason, this.__rinCurrentCompactionReason]);
+      throw new Error("owner auto failed");
+    },
+    async compact() {
+      reasonEvents.push(["manual", this.__rinCurrentCompactionReason]);
+      return "manual";
+    },
+  };
+  runtime.applyRinCompactionReasonTracking(reasonSession);
+  runtime.applyRinCompactionReasonTracking(reasonSession);
+  await assert.rejects(
+    reasonSession._runAutoCompaction("overflow"),
+    /owner auto failed/,
+  );
+  assert.equal(reasonSession.__rinCurrentCompactionReason, "outer");
+  assert.equal(await reasonSession.compact(), "manual");
+  assert.equal(reasonSession.__rinCurrentCompactionReason, "outer");
+  assert.deepEqual(reasonEvents, [
+    ["auto", "overflow", "overflow"],
+    ["manual", "manual"],
+  ]);
+  const defaultReasonSession: any = {
+    async _runAutoCompaction() {
+      assert.equal(this.__rinCurrentCompactionReason, "auto");
+      return "default-auto";
+    },
+  };
+  runtime.applyRinCompactionReasonTracking(defaultReasonSession);
+  assert.equal(
+    await defaultReasonSession._runAutoCompaction(""),
+    "default-auto",
+  );
+  assert.equal(defaultReasonSession.__rinCurrentCompactionReason, undefined);
+
+  for (const invalid of [null, {}, { subscribe() {} }, { reload() {} }]) {
+    assert.doesNotThrow(() => runtime.applyAutoReloadAfterCompaction(invalid));
+  }
+  const listeners: any[] = [];
+  const reloadEvents: string[] = [];
+  const reloadSession: any = {
+    subscribe(listener: any) {
+      listeners.push(listener);
+      return () => reloadEvents.push("unsubscribe");
+    },
+    async reload() {
+      reloadEvents.push("reload");
+      if (reloadEvents.length === 1) throw new Error("ignored reload");
+    },
+    async _runAutoCompaction() {
+      listeners[0]({
+        type: "compaction_end",
+        result: { summary: "auto" },
+        aborted: false,
+      });
+      return "auto";
+    },
+    async compact() {
+      listeners[0]({
+        type: "compaction_end",
+        result: { summary: "manual" },
+        aborted: false,
+      });
+      return "manual";
+    },
+  };
+  runtime.applyAutoReloadAfterCompaction(reloadSession);
+  runtime.applyAutoReloadAfterCompaction(reloadSession);
+  listeners[0]({ type: "other" });
+  listeners[0]({ type: "compaction_end", result: {}, aborted: true });
+  listeners[0]({ type: "compaction_end", result: null, aborted: false });
+  assert.equal(await reloadSession._runAutoCompaction(), "auto");
+  assert.equal(await reloadSession.compact(), "manual");
+  assert.deepEqual(reloadEvents, ["reload", "reload"]);
+
+  assert.doesNotThrow(() => runtime.patchRinRuntimeSessionShutdown(null));
+  const shutdownCalls: any[] = [];
+  const shutdownRuntime: any = {
+    session: {
+      __rinCapabilities: {
+        hasHandlers: () => false,
+        emit: async (event: any) => shutdownCalls.push(["emit", event]),
+      },
+    },
+    async teardownCurrent(...args: any[]) {
+      shutdownCalls.push(["teardown", ...args]);
+      return "teardown";
+    },
+  };
+  runtime.patchRinRuntimeSessionShutdown(shutdownRuntime);
+  runtime.patchRinRuntimeSessionShutdown(shutdownRuntime);
+  assert.equal(await shutdownRuntime.teardownCurrent("owner"), "teardown");
+  assert.deepEqual(shutdownCalls, [["teardown", "owner", undefined]]);
+
+  const emitWithoutHasHandlers: any[] = [];
+  const disposeOnly: any = {
+    session: {
+      __rinCapabilities: {
+        emit: async (event: any) => emitWithoutHasHandlers.push(event),
+      },
+    },
+    async dispose() {
+      return "disposed";
+    },
+  };
+  runtime.patchRinRuntimeSessionShutdown(disposeOnly);
+  assert.equal(await disposeOnly.dispose(), "disposed");
+  assert.equal(emitWithoutHasHandlers[0].reason, "quit");
+
+  assert.doesNotThrow(() => runtime.applyRinSettingsDefaults(null));
+  const settings: any = { settings: { steeringMode: "all" } };
+  runtime.applyRinSettingsDefaults(settings);
+  runtime.applyRinSettingsDefaults(settings);
+  assert.equal(settings.__rinSettingsDefaultsApplied, true);
+  const noGetter: any = { settings: {} };
+  runtime.applyRinSettingsDefaults(noGetter);
+  assert.equal(noGetter.getSteeringMode, undefined);
+});

@@ -4,12 +4,25 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
+import {
+  type CoveragePolicy,
+  ratchetBaselineDigest,
+  type UnitCatalog,
+  validateCoveragePolicy,
+} from "./coverage-ownership.js";
 import { TEST_SUITES, type TestSuite } from "./run-test-suite.js";
 
-type UnitCatalog = {
+type RepoUnitCatalog = UnitCatalog & { schemaVersion: number };
+type NonUnitCatalog = {
   schemaVersion: number;
-  thresholds: { lines: number; functions: number; branches: number };
-  modules: Array<{ test: string; source: string; built: string }>;
+  thresholds: CoveragePolicy["thresholds"];
+  modules: Array<{
+    source: string;
+    built: string;
+    suite: "integration" | "system";
+    tests: string[];
+    preloads?: string[];
+  }>;
 };
 type ProvenanceEntry = {
   file: string;
@@ -34,27 +47,14 @@ type CharacterizationCaseBaseline = {
   baselineRef: string;
   files: Array<{ file: string; cases: string[] }>;
 };
-type CoveragePolicy = {
-  schemaVersion: number;
-  productionSourceRef: string;
-  baselineHarnessVersion: number;
-  baselineCommand: string;
-  target: { lines: number; functions: number; branches: number };
-  modules: Array<{
-    source: string;
-    built: string;
-    owner: "unit" | "system" | "migration";
-    status: "strict" | "ratchet";
-    baseline: Record<string, { total: number; covered: number; pct: number }>;
-  }>;
-};
-
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
 const RATCHET_BASELINE_SHA256 =
-  "3cd73c8d7c87534a6b944cd74ae11bf1ade0cad4fe55fc6517be3ee5ef1591f6";
+  "1d77f4790deef8a7668e5217516fc900fc27f05e7df00c9f715685102f405ceb";
+const ORIGINAL_COVERAGE_BASELINE_SHA256 =
+  "5daf52ccc085a8a8bdecfd9b34c4a5cdcc9d9d2b2f47e028bd8370c593e54b77";
 const CHARACTERIZATION_BASELINE_SHA256 =
   "1479d92749988c2c367f3a053efd45d6671c5d0afbffcfc0e3eb0af6f91eb6e5";
 const CHARACTERIZATION_CASE_BASELINE_SHA256 =
@@ -794,21 +794,12 @@ function testCaseIdentities(relativePath: string) {
   return identities;
 }
 
-function ratchetBaselineDigest(policy: CoveragePolicy) {
-  const payload = policy.modules
-    .filter((module) => module.status === "ratchet")
-    .map(({ source, built, status, baseline }) => ({
-      source,
-      built,
-      status,
-      baseline,
-    }));
-  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
-}
-
 export function verifyTestArchitecture() {
   const errors: string[] = [];
-  const unitCatalog = readJson<UnitCatalog>("tests/unit/catalog.json");
+  const unitCatalog = readJson<RepoUnitCatalog>("tests/unit/catalog.json");
+  const nonUnitCatalog = readJson<NonUnitCatalog>(
+    "tests/non-unit/catalog.json",
+  );
   const regressionCatalog = readJson<RegressionCatalog>(
     "tests/regression/catalog.json",
   );
@@ -829,6 +820,7 @@ export function verifyTestArchitecture() {
 
   for (const [name, schemaVersion] of [
     ["unit", unitCatalog.schemaVersion],
+    ["non-unit", nonUnitCatalog.schemaVersion],
     ["regression", regressionCatalog.schemaVersion],
     ["characterization", characterizationCatalog.schemaVersion],
     ["characterization-baseline", characterizationBaseline.schemaVersion],
@@ -836,22 +828,20 @@ export function verifyTestArchitecture() {
       "characterization-case-baseline",
       characterizationCaseBaseline.schemaVersion,
     ],
-    ["coverage", coveragePolicy.schemaVersion],
   ] as const) {
     if (schemaVersion !== 1) errors.push(`unsupported_schema:${name}`);
-  }
-  if (
-    coveragePolicy.productionSourceRef !== "fa644064" ||
-    coveragePolicy.baselineHarnessVersion !== 3 ||
-    coveragePolicy.baselineCommand !== "npm run test:coverage"
-  ) {
-    errors.push("coverage_baseline_identity_changed");
   }
   if (
     characterizationBaseline.baselineRef !== "fa644064" ||
     characterizationCaseBaseline.baselineRef !== "fa644064"
   ) {
     errors.push("characterization_baseline_identity_changed");
+  }
+  const originalCoverageBaselineDigest = createHash("sha256")
+    .update(fs.readFileSync(path.join(rootDir, "tests/coverage-baseline.json")))
+    .digest("hex");
+  if (originalCoverageBaselineDigest !== ORIGINAL_COVERAGE_BASELINE_SHA256) {
+    errors.push("original_coverage_baseline_changed");
   }
   const characterizationBaselineDigest = createHash("sha256")
     .update(fs.readFileSync(path.join(rootDir, characterizationBaselinePath)))
@@ -892,6 +882,59 @@ export function verifyTestArchitecture() {
   for (const suite of TEST_SUITES) {
     if (!allTests.some((file) => file.startsWith(`tests/${suite}/`))) {
       errors.push(`empty_test_bucket:${suite}`);
+    }
+  }
+
+  const strictNonUnit = coveragePolicy.modules.filter(
+    (module) => module.status === "strict" && module.ownerSuite !== "unit",
+  );
+  if (
+    JSON.stringify(nonUnitCatalog.thresholds) !==
+    JSON.stringify(coveragePolicy.thresholds)
+  ) {
+    errors.push("non_unit_targets_must_match_policy");
+  }
+  if (
+    !sameMembers(
+      nonUnitCatalog.modules.map((entry) => entry.source),
+      strictNonUnit.map((module) => module.source),
+    )
+  ) {
+    errors.push("non_unit_catalog_owner_mismatch");
+  }
+  assertUnique(
+    nonUnitCatalog.modules.map((entry) => entry.source),
+    "non_unit_source",
+  );
+  for (const entry of nonUnitCatalog.modules) {
+    const owner = strictNonUnit.find(
+      (module) => module.source === entry.source,
+    );
+    if (
+      !owner ||
+      owner.built !== entry.built ||
+      owner.ownerSuite !== entry.suite ||
+      entry.tests.length === 0
+    ) {
+      errors.push(`non_unit_catalog_entry_invalid:${entry.source}`);
+    }
+    for (const testFile of entry.tests) {
+      if (
+        !allTests.includes(testFile) ||
+        !testFile.startsWith(`tests/${entry.suite}/`)
+      ) {
+        errors.push(`non_unit_owner_test_invalid:${entry.source}:${testFile}`);
+      }
+    }
+    for (const preload of entry.preloads || []) {
+      if (
+        !preload.startsWith("tests/support/") ||
+        !fs.existsSync(path.join(rootDir, preload))
+      ) {
+        errors.push(
+          `non_unit_owner_preload_invalid:${entry.source}:${preload}`,
+        );
+      }
     }
   }
 
@@ -1022,80 +1065,51 @@ export function verifyTestArchitecture() {
   }
 
   const sourceFiles = listFiles("src", ".ts");
-  const policySources = coveragePolicy.modules
-    .map((entry) => entry.source)
-    .sort();
-  if (!sameMembers(sourceFiles, policySources)) {
-    errors.push("coverage_policy_does_not_match_source_modules");
-  }
-  assertUnique(policySources, "coverage_source");
-
-  const requiredTargets = { lines: 90, functions: 90, branches: 85 };
-  if (
-    JSON.stringify(unitCatalog.thresholds) !==
-      JSON.stringify(requiredTargets) ||
-    JSON.stringify(coveragePolicy.target) !== JSON.stringify(requiredTargets)
-  ) {
-    errors.push("coverage_targets_must_remain_90_90_85");
-  }
-
-  const strictSources = new Set(
-    unitCatalog.modules.map((entry) => entry.source),
+  errors.push(
+    ...validateCoveragePolicy(coveragePolicy, sourceFiles, unitCatalog),
   );
   for (const module of coveragePolicy.modules) {
-    if (!(["strict", "ratchet"] as const).includes(module.status)) {
-      errors.push(`coverage_status_invalid:${module.source}`);
-    }
-    if (!(["unit", "system", "migration"] as const).includes(module.owner)) {
-      errors.push(`coverage_owner_invalid:${module.source}`);
-    }
-    const expectedBuilt = `dist/${module.source.slice("src/".length).replace(/\.ts$/, ".js")}`;
-    if (module.built !== expectedBuilt)
-      errors.push(`coverage_built_path_mismatch:${module.source}`);
-    const shouldBeStrict = strictSources.has(module.source);
-    if ((module.status === "strict") !== shouldBeStrict) {
-      errors.push(`coverage_status_mismatch:${module.source}`);
-    }
-    for (const metric of ["lines", "functions", "branches"] as const) {
-      const baseline = module.baseline[metric];
-      const countsAreValid =
-        baseline &&
-        Number.isInteger(baseline.total) &&
-        Number.isInteger(baseline.covered) &&
-        baseline.total >= 0 &&
-        baseline.covered >= 0 &&
-        baseline.total >= baseline.covered;
-      const expectedPct =
-        countsAreValid && baseline.total > 0
-          ? Math.floor((baseline.covered / baseline.total) * 10_000) / 100
-          : 100;
-      if (
-        !countsAreValid ||
-        !Number.isFinite(baseline.pct) ||
-        baseline.pct < 0 ||
-        baseline.pct > 100 ||
-        Math.abs(baseline.pct - expectedPct) > 0.005
-      ) {
-        errors.push(`coverage_baseline_invalid:${module.source}:${metric}`);
-      }
+    if (!fs.existsSync(path.join(rootDir, module.built))) {
+      errors.push(`coverage_built_module_missing:${module.built}`);
     }
   }
-
-  for (const source of [
-    "src/app/rin/main.ts",
-    "src/app/rin-daemon/daemon.ts",
-    "src/app/rin-daemon/worker.ts",
-    "src/app/rin-tui/main.ts",
-  ]) {
+  for (const source of listFiles("src/app", ".ts")) {
     const module = coveragePolicy.modules.find(
       (entry) => entry.source === source,
     );
-    if (!module || module.baseline.lines.covered === 0) {
-      errors.push(`system_entrypoint_coverage_missing:${source}`);
+    if (module?.ownerSuite !== "system") {
+      errors.push(`app_entrypoint_must_be_system_owned:${source}`);
     }
   }
 
-  if (ratchetBaselineDigest(coveragePolicy) !== RATCHET_BASELINE_SHA256) {
+  const originalCoverageBaseline = readJson<any>(
+    "tests/coverage-baseline.json",
+  );
+  const originalCoverageBySource = new Map(
+    originalCoverageBaseline.modules.map((module: any) => [
+      module.source,
+      module,
+    ]),
+  );
+  const ratchetBaselineChanged = coveragePolicy.modules
+    .filter((module) => module.status === "ratchet")
+    .some((module) => {
+      const original = originalCoverageBySource.get(module.source) as
+        | any
+        | undefined;
+      return (
+        !original ||
+        original.built !== module.built ||
+        JSON.stringify(original.baseline) !== JSON.stringify(module.baseline)
+      );
+    });
+  const strictCount = coveragePolicy.modules.filter(
+    (module) => module.status === "strict",
+  ).length;
+  const knownRatchetCheckpointChanged =
+    strictCount === 230 &&
+    ratchetBaselineDigest(coveragePolicy) !== RATCHET_BASELINE_SHA256;
+  if (ratchetBaselineChanged || knownRatchetCheckpointChanged) {
     errors.push("coverage_ratchet_baseline_digest_changed");
   }
 

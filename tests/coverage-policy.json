@@ -1,5307 +1,1393 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "productionSourceRef": "fa644064",
   "baselineHarnessVersion": 3,
   "baselineCommand": "npm run test:coverage",
-  "target": {
+  "thresholds": {
     "lines": 90,
     "functions": 90,
     "branches": 85
-  },
-  "rules": {
-    "strict": "Must meet every target per file in the unit suite.",
-    "ratchet": "Must not fall below the recorded per-file baseline; migrate to strict module ownership incrementally."
   },
   "modules": [
     {
       "source": "src/app/rin/main.ts",
       "built": "dist/app/rin/main.js",
-      "owner": "system",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 7,
-          "covered": 4,
-          "pct": 57.14
-        },
-        "functions": {
-          "total": 0,
-          "covered": 0,
-          "pct": 100
-        },
-        "branches": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/app/rin-daemon/daemon.ts",
       "built": "dist/app/rin-daemon/daemon.js",
-      "owner": "system",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 178,
-          "covered": 98,
-          "pct": 55.05
-        },
-        "functions": {
-          "total": 16,
-          "covered": 4,
-          "pct": 25
-        },
-        "branches": {
-          "total": 21,
-          "covered": 8,
-          "pct": 38.09
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/app/rin-daemon/worker.ts",
       "built": "dist/app/rin-daemon/worker.js",
-      "owner": "system",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 15,
-          "covered": 13,
-          "pct": 86.66
-        },
-        "functions": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        },
-        "branches": {
-          "total": 3,
-          "covered": 2,
-          "pct": 66.66
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/app/rin-desktop-host/main.ts",
       "built": "dist/app/rin-desktop-host/main.js",
-      "owner": "system",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 12,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/app/rin-gui/main.ts",
       "built": "dist/app/rin-gui/main.js",
-      "owner": "system",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 10,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/app/rin-install/main.ts",
       "built": "dist/app/rin-install/main.js",
-      "owner": "system",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 10,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/app/rin-tui/main.ts",
       "built": "dist/app/rin-tui/main.js",
-      "owner": "system",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 9,
-          "covered": 9,
-          "pct": 100
-        },
-        "functions": {
-          "total": 0,
-          "covered": 0,
-          "pct": 100
-        },
-        "branches": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/boot.ts",
       "built": "dist/core/chat/boot.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 532,
-          "covered": 486,
-          "pct": 91.35
-        },
-        "functions": {
-          "total": 52,
-          "covered": 48,
-          "pct": 92.3
-        },
-        "branches": {
-          "total": 189,
-          "covered": 163,
-          "pct": 86.24
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/chat-helpers.ts",
       "built": "dist/core/chat/chat-helpers.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 385,
-          "covered": 360,
-          "pct": 93.5
-        },
-        "functions": {
-          "total": 32,
-          "covered": 30,
-          "pct": 93.75
-        },
-        "branches": {
-          "total": 180,
-          "covered": 132,
-          "pct": 73.33
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/chat-key-migration.ts",
       "built": "dist/core/chat/chat-key-migration.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 197,
-          "covered": 175,
-          "pct": 88.83
-        },
-        "functions": {
-          "total": 15,
-          "covered": 15,
-          "pct": 100
-        },
-        "branches": {
-          "total": 76,
-          "covered": 49,
-          "pct": 64.47
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/chat-key-worker.ts",
       "built": "dist/core/chat/chat-key-worker.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 92,
-          "covered": 76,
-          "pct": 82.6
-        },
-        "functions": {
-          "total": 7,
-          "covered": 6,
-          "pct": 85.71
-        },
-        "branches": {
-          "total": 24,
-          "covered": 20,
-          "pct": 83.33
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/chat-log.ts",
       "built": "dist/core/chat/chat-log.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 80,
-          "covered": 80,
-          "pct": 100
-        },
-        "functions": {
-          "total": 5,
-          "covered": 5,
-          "pct": 100
-        },
-        "branches": {
-          "total": 33,
-          "covered": 25,
-          "pct": 75.75
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/command-responses.ts",
       "built": "dist/core/chat/command-responses.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 36,
-          "covered": 36,
-          "pct": 100
-        },
-        "functions": {
-          "total": 3,
-          "covered": 3,
-          "pct": 100
-        },
-        "branches": {
-          "total": 16,
-          "covered": 16,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/controller.ts",
       "built": "dist/core/chat/controller.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 2231,
-          "covered": 2079,
-          "pct": 93.18
-        },
-        "functions": {
-          "total": 144,
-          "covered": 135,
-          "pct": 93.75
-        },
-        "branches": {
-          "total": 828,
-          "covered": 667,
-          "pct": 80.55
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/date.ts",
       "built": "dist/core/chat/date.js",
-      "owner": "unit",
-      "status": "strict",
-      "baseline": {
-        "lines": {
-          "total": 50,
-          "covered": 50,
-          "pct": 100
-        },
-        "functions": {
-          "total": 6,
-          "covered": 6,
-          "pct": 100
-        },
-        "branches": {
-          "total": 31,
-          "covered": 31,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/decision.ts",
       "built": "dist/core/chat/decision.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 261,
-          "covered": 222,
-          "pct": 85.05
-        },
-        "functions": {
-          "total": 17,
-          "covered": 16,
-          "pct": 94.11
-        },
-        "branches": {
-          "total": 113,
-          "covered": 83,
-          "pct": 73.45
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/file-utils.ts",
       "built": "dist/core/chat/file-utils.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 93,
-          "covered": 93,
-          "pct": 100
-        },
-        "functions": {
-          "total": 15,
-          "covered": 15,
-          "pct": 100
-        },
-        "branches": {
-          "total": 38,
-          "covered": 37,
-          "pct": 97.36
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/inbound-normalization.ts",
       "built": "dist/core/chat/inbound-normalization.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 297,
-          "covered": 296,
-          "pct": 99.66
-        },
-        "functions": {
-          "total": 25,
-          "covered": 25,
-          "pct": 100
-        },
-        "branches": {
-          "total": 208,
-          "covered": 165,
-          "pct": 79.32
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/inbox-drain.ts",
       "built": "dist/core/chat/inbox-drain.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 168,
-          "covered": 150,
-          "pct": 89.28
-        },
-        "functions": {
-          "total": 13,
-          "covered": 12,
-          "pct": 92.3
-        },
-        "branches": {
-          "total": 62,
-          "covered": 46,
-          "pct": 74.19
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/inbox.ts",
       "built": "dist/core/chat/inbox.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 392,
-          "covered": 374,
-          "pct": 95.4
-        },
-        "functions": {
-          "total": 40,
-          "covered": 40,
-          "pct": 100
-        },
-        "branches": {
-          "total": 155,
-          "covered": 119,
-          "pct": 76.77
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/index.ts",
       "built": "dist/core/chat/index.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 3,
-          "covered": 3,
-          "pct": 100
-        },
-        "functions": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        },
-        "branches": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/main.ts",
       "built": "dist/core/chat/main.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1048,
-          "covered": 662,
-          "pct": 63.16
-        },
-        "functions": {
-          "total": 55,
-          "covered": 37,
-          "pct": 67.27
-        },
-        "branches": {
-          "total": 221,
-          "covered": 154,
-          "pct": 69.68
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/message-store-layout.ts",
       "built": "dist/core/chat/message-store-layout.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 75,
-          "covered": 75,
-          "pct": 100
-        },
-        "functions": {
-          "total": 13,
-          "covered": 13,
-          "pct": 100
-        },
-        "branches": {
-          "total": 20,
-          "covered": 17,
-          "pct": 85
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/message-store.ts",
       "built": "dist/core/chat/message-store.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 567,
-          "covered": 550,
-          "pct": 97
-        },
-        "functions": {
-          "total": 80,
-          "covered": 77,
-          "pct": 96.25
-        },
-        "branches": {
-          "total": 238,
-          "covered": 191,
-          "pct": 80.25
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/rich-text.ts",
       "built": "dist/core/chat/rich-text.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 433,
-          "covered": 371,
-          "pct": 85.68
-        },
-        "functions": {
-          "total": 34,
-          "covered": 30,
-          "pct": 88.23
-        },
-        "branches": {
-          "total": 183,
-          "covered": 132,
-          "pct": 72.13
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/runtime-config.ts",
       "built": "dist/core/chat/runtime-config.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 180,
-          "covered": 172,
-          "pct": 95.55
-        },
-        "functions": {
-          "total": 18,
-          "covered": 17,
-          "pct": 94.44
-        },
-        "branches": {
-          "total": 57,
-          "covered": 49,
-          "pct": 85.96
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/settings.ts",
       "built": "dist/core/chat/settings.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 81,
-          "covered": 81,
-          "pct": 100
-        },
-        "functions": {
-          "total": 10,
-          "covered": 10,
-          "pct": 100
-        },
-        "branches": {
-          "total": 54,
-          "covered": 49,
-          "pct": 90.74
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/support.ts",
       "built": "dist/core/chat/support.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 321,
-          "covered": 312,
-          "pct": 97.19
-        },
-        "functions": {
-          "total": 29,
-          "covered": 29,
-          "pct": 100
-        },
-        "branches": {
-          "total": 143,
-          "covered": 118,
-          "pct": 82.51
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat/transport.ts",
       "built": "dist/core/chat/transport.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 655,
-          "covered": 562,
-          "pct": 85.8
-        },
-        "functions": {
-          "total": 42,
-          "covered": 38,
-          "pct": 90.47
-        },
-        "branches": {
-          "total": 264,
-          "covered": 194,
-          "pct": 73.48
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat-bridge/adapters.ts",
       "built": "dist/core/chat-bridge/adapters.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 74,
-          "covered": 74,
-          "pct": 100
-        },
-        "functions": {
-          "total": 3,
-          "covered": 3,
-          "pct": 100
-        },
-        "branches": {
-          "total": 7,
-          "covered": 6,
-          "pct": 85.71
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat-bridge/eval.ts",
       "built": "dist/core/chat-bridge/eval.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 204,
-          "covered": 115,
-          "pct": 56.37
-        },
-        "functions": {
-          "total": 18,
-          "covered": 7,
-          "pct": 38.88
-        },
-        "branches": {
-          "total": 63,
-          "covered": 39,
-          "pct": 61.9
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat-bridge/prompt-context.ts",
       "built": "dist/core/chat-bridge/prompt-context.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/chat-bridge/runtime.ts",
       "built": "dist/core/chat-bridge/runtime.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 295,
-          "covered": 220,
-          "pct": 74.57
-        },
-        "functions": {
-          "total": 25,
-          "covered": 14,
-          "pct": 56
-        },
-        "branches": {
-          "total": 80,
-          "covered": 43,
-          "pct": 53.75
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat-runtime/adapters.ts",
       "built": "dist/core/chat-runtime/adapters.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 2795,
-          "covered": 1969,
-          "pct": 70.44
-        },
-        "functions": {
-          "total": 165,
-          "covered": 124,
-          "pct": 75.15
-        },
-        "branches": {
-          "total": 805,
-          "covered": 474,
-          "pct": 58.88
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat-runtime/common.ts",
       "built": "dist/core/chat-runtime/common.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 428,
-          "covered": 404,
-          "pct": 94.39
-        },
-        "functions": {
-          "total": 42,
-          "covered": 39,
-          "pct": 92.85
-        },
-        "branches": {
-          "total": 186,
-          "covered": 145,
-          "pct": 77.95
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat-runtime/editable-text-message-group.ts",
       "built": "dist/core/chat-runtime/editable-text-message-group.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 331,
-          "covered": 319,
-          "pct": 96.37
-        },
-        "functions": {
-          "total": 20,
-          "covered": 20,
-          "pct": 100
-        },
-        "branches": {
-          "total": 136,
-          "covered": 95,
-          "pct": 69.85
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat-runtime/inbound-recovery.ts",
       "built": "dist/core/chat-runtime/inbound-recovery.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 140,
-          "covered": 136,
-          "pct": 97.14
-        },
-        "functions": {
-          "total": 14,
-          "covered": 14,
-          "pct": 100
-        },
-        "branches": {
-          "total": 62,
-          "covered": 42,
-          "pct": 67.74
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/chat-runtime/index.ts",
       "built": "dist/core/chat-runtime/index.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 2187,
-          "covered": 1544,
-          "pct": 70.59
-        },
-        "functions": {
-          "total": 151,
-          "covered": 109,
-          "pct": 72.18
-        },
-        "branches": {
-          "total": 544,
-          "covered": 288,
-          "pct": 52.94
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/data-layout.ts",
       "built": "dist/core/data-layout.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 97,
-          "covered": 93,
-          "pct": 95.87
-        },
-        "functions": {
-          "total": 8,
-          "covered": 6,
-          "pct": 75
-        },
-        "branches": {
-          "total": 7,
-          "covered": 7,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/docs/practices-sync.ts",
       "built": "dist/core/docs/practices-sync.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 118,
-          "covered": 99,
-          "pct": 83.89
-        },
-        "functions": {
-          "total": 8,
-          "covered": 8,
-          "pct": 100
-        },
-        "branches": {
-          "total": 31,
-          "covered": 19,
-          "pct": 61.29
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/i18n.ts",
       "built": "dist/core/i18n.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 40,
-          "covered": 40,
-          "pct": 100
-        },
-        "functions": {
-          "total": 4,
-          "covered": 4,
-          "pct": 100
-        },
-        "branches": {
-          "total": 16,
-          "covered": 11,
-          "pct": 68.75
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/json-utils.ts",
       "built": "dist/core/json-utils.js",
-      "owner": "unit",
-      "status": "strict",
-      "baseline": {
-        "lines": {
-          "total": 15,
-          "covered": 15,
-          "pct": 100
-        },
-        "functions": {
-          "total": 5,
-          "covered": 5,
-          "pct": 100
-        },
-        "branches": {
-          "total": 12,
-          "covered": 12,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/language.ts",
       "built": "dist/core/language.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 142,
-          "covered": 136,
-          "pct": 95.77
-        },
-        "functions": {
-          "total": 13,
-          "covered": 13,
-          "pct": 100
-        },
-        "branches": {
-          "total": 48,
-          "covered": 42,
-          "pct": 87.5
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/memory/external-results.ts",
       "built": "dist/core/memory/external-results.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 65,
-          "covered": 65,
-          "pct": 100
-        },
-        "functions": {
-          "total": 4,
-          "covered": 4,
-          "pct": 100
-        },
-        "branches": {
-          "total": 49,
-          "covered": 23,
-          "pct": 46.93
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/memory/external.ts",
       "built": "dist/core/memory/external.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 38,
-          "covered": 36,
-          "pct": 94.73
-        },
-        "functions": {
-          "total": 3,
-          "covered": 3,
-          "pct": 100
-        },
-        "branches": {
-          "total": 7,
-          "covered": 5,
-          "pct": 71.42
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/memory/index.ts",
       "built": "dist/core/memory/index.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 326,
-          "covered": 280,
-          "pct": 85.88
-        },
-        "functions": {
-          "total": 25,
-          "covered": 22,
-          "pct": 88
-        },
-        "branches": {
-          "total": 106,
-          "covered": 50,
-          "pct": 47.16
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/memory/transcript-archive.ts",
       "built": "dist/core/memory/transcript-archive.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 346,
-          "covered": 292,
-          "pct": 84.39
-        },
-        "functions": {
-          "total": 27,
-          "covered": 26,
-          "pct": 96.29
-        },
-        "branches": {
-          "total": 153,
-          "covered": 94,
-          "pct": 61.43
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/memory/transcript-search.ts",
       "built": "dist/core/memory/transcript-search.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 659,
-          "covered": 602,
-          "pct": 91.35
-        },
-        "functions": {
-          "total": 32,
-          "covered": 30,
-          "pct": 93.75
-        },
-        "branches": {
-          "total": 153,
-          "covered": 93,
-          "pct": 60.78
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/memory/transcript-types.ts",
       "built": "dist/core/memory/transcript-types.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/memory/transcripts.ts",
       "built": "dist/core/memory/transcripts.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "functions": {
-          "total": 0,
-          "covered": 0,
-          "pct": 100
-        },
-        "branches": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/memory/utils.ts",
       "built": "dist/core/memory/utils.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 23,
-          "covered": 19,
-          "pct": 82.6
-        },
-        "functions": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "branches": {
-          "total": 8,
-          "covered": 5,
-          "pct": 62.5
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/message-content.ts",
       "built": "dist/core/message-content.js",
-      "owner": "unit",
-      "status": "strict",
-      "baseline": {
-        "lines": {
-          "total": 198,
-          "covered": 193,
-          "pct": 97.47
-        },
-        "functions": {
-          "total": 23,
-          "covered": 23,
-          "pct": 100
-        },
-        "branches": {
-          "total": 116,
-          "covered": 103,
-          "pct": 88.79
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/model-thinking-levels.ts",
       "built": "dist/core/model-thinking-levels.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 42,
-          "covered": 42,
-          "pct": 100
-        },
-        "functions": {
-          "total": 4,
-          "covered": 4,
-          "pct": 100
-        },
-        "branches": {
-          "total": 21,
-          "covered": 20,
-          "pct": 95.23
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/pi/internal-extension-bridge.ts",
       "built": "dist/core/pi/internal-extension-bridge.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 94,
-          "covered": 78,
-          "pct": 82.97
-        },
-        "functions": {
-          "total": 5,
-          "covered": 5,
-          "pct": 100
-        },
-        "branches": {
-          "total": 48,
-          "covered": 28,
-          "pct": 58.33
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/pi/private-api.ts",
       "built": "dist/core/pi/private-api.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 26,
-          "covered": 22,
-          "pct": 84.61
-        },
-        "functions": {
-          "total": 4,
-          "covered": 1,
-          "pct": 25
-        },
-        "branches": {
-          "total": 7,
-          "covered": 6,
-          "pct": 85.71
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/pi/render-utils.ts",
       "built": "dist/core/pi/render-utils.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 391,
-          "covered": 284,
-          "pct": 72.63
-        },
-        "functions": {
-          "total": 31,
-          "covered": 26,
-          "pct": 83.87
-        },
-        "branches": {
-          "total": 139,
-          "covered": 105,
-          "pct": 75.53
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/pi/session-host.ts",
       "built": "dist/core/pi/session-host.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 213,
-          "covered": 193,
-          "pct": 90.61
-        },
-        "functions": {
-          "total": 32,
-          "covered": 26,
-          "pct": 81.25
-        },
-        "branches": {
-          "total": 68,
-          "covered": 49,
-          "pct": 72.05
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/pi/tool-continuation.ts",
       "built": "dist/core/pi/tool-continuation.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 46,
-          "covered": 24,
-          "pct": 52.17
-        },
-        "functions": {
-          "total": 7,
-          "covered": 4,
-          "pct": 57.14
-        },
-        "branches": {
-          "total": 9,
-          "covered": 7,
-          "pct": 77.77
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/pi/tui-patches/index.ts",
       "built": "dist/core/pi/tui-patches/index.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1234,
-          "covered": 872,
-          "pct": 70.66
-        },
-        "functions": {
-          "total": 95,
-          "covered": 80,
-          "pct": 84.21
-        },
-        "branches": {
-          "total": 332,
-          "covered": 229,
-          "pct": 68.97
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/platform/fs.ts",
       "built": "dist/core/platform/fs.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 120,
-          "covered": 117,
-          "pct": 97.5
-        },
-        "functions": {
-          "total": 18,
-          "covered": 18,
-          "pct": 100
-        },
-        "branches": {
-          "total": 42,
-          "covered": 36,
-          "pct": 85.71
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/platform/process.ts",
       "built": "dist/core/platform/process.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 16,
-          "covered": 14,
-          "pct": 87.5
-        },
-        "functions": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "branches": {
-          "total": 9,
-          "covered": 7,
-          "pct": 77.77
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/platform/rpc-socket.ts",
       "built": "dist/core/platform/rpc-socket.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 64,
-          "covered": 38,
-          "pct": 59.37
-        },
-        "functions": {
-          "total": 8,
-          "covered": 4,
-          "pct": 50
-        },
-        "branches": {
-          "total": 10,
-          "covered": 7,
-          "pct": 70
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/control.ts",
       "built": "dist/core/rin/control.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 49,
-          "covered": 7,
-          "pct": 14.28
-        },
-        "functions": {
-          "total": 6,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/docs.ts",
       "built": "dist/core/rin/docs.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 19,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/doctor.ts",
       "built": "dist/core/rin/doctor.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 180,
-          "covered": 107,
-          "pct": 59.44
-        },
-        "functions": {
-          "total": 15,
-          "covered": 8,
-          "pct": 53.33
-        },
-        "branches": {
-          "total": 42,
-          "covered": 33,
-          "pct": 78.57
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/interactive-list.ts",
       "built": "dist/core/rin/interactive-list.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 111,
-          "covered": 1,
-          "pct": 0.9
-        },
-        "functions": {
-          "total": 4,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/launch.ts",
       "built": "dist/core/rin/launch.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 71,
-          "covered": 69,
-          "pct": 97.18
-        },
-        "functions": {
-          "total": 7,
-          "covered": 7,
-          "pct": 100
-        },
-        "branches": {
-          "total": 16,
-          "covered": 11,
-          "pct": 68.75
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/main.ts",
       "built": "dist/core/rin/main.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 227,
-          "covered": 77,
-          "pct": 33.92
-        },
-        "functions": {
-          "total": 30,
-          "covered": 10,
-          "pct": 33.33
-        },
-        "branches": {
-          "total": 60,
-          "covered": 40,
-          "pct": 66.66
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/managed-runtime-service.ts",
       "built": "dist/core/rin/managed-runtime-service.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 240,
-          "covered": 68,
-          "pct": 28.33
-        },
-        "functions": {
-          "total": 12,
-          "covered": 3,
-          "pct": 25
-        },
-        "branches": {
-          "total": 24,
-          "covered": 14,
-          "pct": 58.33
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/memory-index.ts",
       "built": "dist/core/rin/memory-index.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 65,
-          "covered": 15,
-          "pct": 23.07
-        },
-        "functions": {
-          "total": 6,
-          "covered": 1,
-          "pct": 16.66
-        },
-        "branches": {
-          "total": 4,
-          "covered": 4,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/report-format.ts",
       "built": "dist/core/rin/report-format.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 52,
-          "covered": 49,
-          "pct": 94.23
-        },
-        "functions": {
-          "total": 4,
-          "covered": 4,
-          "pct": 100
-        },
-        "branches": {
-          "total": 26,
-          "covered": 18,
-          "pct": 69.23
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/run-lite.ts",
       "built": "dist/core/rin/run-lite.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 48,
-          "covered": 48,
-          "pct": 100
-        },
-        "functions": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "branches": {
-          "total": 12,
-          "covered": 10,
-          "pct": 83.33
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/run.ts",
       "built": "dist/core/rin/run.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 427,
-          "covered": 210,
-          "pct": 49.18
-        },
-        "functions": {
-          "total": 20,
-          "covered": 12,
-          "pct": 60
-        },
-        "branches": {
-          "total": 120,
-          "covered": 92,
-          "pct": 76.66
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/self-improve.ts",
       "built": "dist/core/rin/self-improve.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 545,
-          "covered": 368,
-          "pct": 67.52
-        },
-        "functions": {
-          "total": 34,
-          "covered": 27,
-          "pct": 79.41
-        },
-        "branches": {
-          "total": 159,
-          "covered": 62,
-          "pct": 38.99
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/shared-lite.ts",
       "built": "dist/core/rin/shared-lite.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 207,
-          "covered": 201,
-          "pct": 97.1
-        },
-        "functions": {
-          "total": 17,
-          "covered": 17,
-          "pct": 100
-        },
-        "branches": {
-          "total": 119,
-          "covered": 112,
-          "pct": 94.11
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/shared.ts",
       "built": "dist/core/rin/shared.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 287,
-          "covered": 167,
-          "pct": 58.18
-        },
-        "functions": {
-          "total": 24,
-          "covered": 17,
-          "pct": 70.83
-        },
-        "branches": {
-          "total": 54,
-          "covered": 42,
-          "pct": 77.77
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/status.ts",
       "built": "dist/core/rin/status.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 438,
-          "covered": 283,
-          "pct": 64.61
-        },
-        "functions": {
-          "total": 33,
-          "covered": 22,
-          "pct": 66.66
-        },
-        "branches": {
-          "total": 102,
-          "covered": 55,
-          "pct": 53.92
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/targets.ts",
       "built": "dist/core/rin/targets.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 93,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/tasks.ts",
       "built": "dist/core/rin/tasks.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 95,
-          "covered": 31,
-          "pct": 32.63
-        },
-        "functions": {
-          "total": 7,
-          "covered": 1,
-          "pct": 14.28
-        },
-        "branches": {
-          "total": 11,
-          "covered": 8,
-          "pct": 72.72
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/tui-report.ts",
       "built": "dist/core/rin/tui-report.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 7,
-          "covered": 7,
-          "pct": 100
-        },
-        "functions": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        },
-        "branches": {
-          "total": 4,
-          "covered": 4,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/usage-chart.ts",
       "built": "dist/core/rin/usage-chart.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 506,
-          "covered": 459,
-          "pct": 90.71
-        },
-        "functions": {
-          "total": 34,
-          "covered": 32,
-          "pct": 94.11
-        },
-        "branches": {
-          "total": 123,
-          "covered": 99,
-          "pct": 80.48
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/usage.ts",
       "built": "dist/core/rin/usage.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 922,
-          "covered": 630,
-          "pct": 68.32
-        },
-        "functions": {
-          "total": 58,
-          "covered": 47,
-          "pct": 81.03
-        },
-        "branches": {
-          "total": 228,
-          "covered": 130,
-          "pct": 57.01
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin/versions.ts",
       "built": "dist/core/rin/versions.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 80,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-agent-sdk/index.ts",
       "built": "dist/core/rin-agent-sdk/index.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 89,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-builtin-extension-controls.ts",
       "built": "dist/core/rin-builtin-extension-controls.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 94,
-          "covered": 27,
-          "pct": 28.72
-        },
-        "functions": {
-          "total": 18,
-          "covered": 4,
-          "pct": 22.22
-        },
-        "branches": {
-          "total": 14,
-          "covered": 6,
-          "pct": 42.85
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-bundled-extensions.ts",
       "built": "dist/core/rin-bundled-extensions.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 138,
-          "covered": 105,
-          "pct": 76.08
-        },
-        "functions": {
-          "total": 17,
-          "covered": 14,
-          "pct": 82.35
-        },
-        "branches": {
-          "total": 47,
-          "covered": 37,
-          "pct": 78.72
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/catalog-helpers.ts",
       "built": "dist/core/rin-daemon/catalog-helpers.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 227,
-          "covered": 227,
-          "pct": 100
-        },
-        "functions": {
-          "total": 40,
-          "covered": 40,
-          "pct": 100
-        },
-        "branches": {
-          "total": 104,
-          "covered": 99,
-          "pct": 95.19
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/catalog.ts",
       "built": "dist/core/rin-daemon/catalog.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 122,
-          "covered": 118,
-          "pct": 96.72
-        },
-        "functions": {
-          "total": 9,
-          "covered": 9,
-          "pct": 100
-        },
-        "branches": {
-          "total": 24,
-          "covered": 22,
-          "pct": 91.66
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/client.ts",
       "built": "dist/core/rin-daemon/client.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 233,
-          "covered": 186,
-          "pct": 79.82
-        },
-        "functions": {
-          "total": 15,
-          "covered": 14,
-          "pct": 93.33
-        },
-        "branches": {
-          "total": 51,
-          "covered": 42,
-          "pct": 82.35
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/cron-condition.ts",
       "built": "dist/core/rin-daemon/cron-condition.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 68,
-          "covered": 65,
-          "pct": 95.58
-        },
-        "functions": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "branches": {
-          "total": 9,
-          "covered": 3,
-          "pct": 33.33
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/cron-execution.ts",
       "built": "dist/core/rin-daemon/cron-execution.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 534,
-          "covered": 462,
-          "pct": 86.51
-        },
-        "functions": {
-          "total": 23,
-          "covered": 22,
-          "pct": 95.65
-        },
-        "branches": {
-          "total": 217,
-          "covered": 159,
-          "pct": 73.27
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/cron-utils.ts",
       "built": "dist/core/rin-daemon/cron-utils.js",
-      "owner": "unit",
-      "status": "strict",
-      "baseline": {
-        "lines": {
-          "total": 135,
-          "covered": 133,
-          "pct": 98.51
-        },
-        "functions": {
-          "total": 14,
-          "covered": 14,
-          "pct": 100
-        },
-        "branches": {
-          "total": 83,
-          "covered": 79,
-          "pct": 95.18
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/cron.ts",
       "built": "dist/core/rin-daemon/cron.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 931,
-          "covered": 867,
-          "pct": 93.12
-        },
-        "functions": {
-          "total": 50,
-          "covered": 49,
-          "pct": 98
-        },
-        "branches": {
-          "total": 358,
-          "covered": 275,
-          "pct": 76.81
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/daemon.ts",
       "built": "dist/core/rin-daemon/daemon.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 571,
-          "covered": 395,
-          "pct": 69.17
-        },
-        "functions": {
-          "total": 43,
-          "covered": 23,
-          "pct": 53.48
-        },
-        "branches": {
-          "total": 165,
-          "covered": 115,
-          "pct": 69.69
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/extensions.ts",
       "built": "dist/core/rin-daemon/extensions.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 519,
-          "covered": 315,
-          "pct": 60.69
-        },
-        "functions": {
-          "total": 64,
-          "covered": 38,
-          "pct": 59.37
-        },
-        "branches": {
-          "total": 153,
-          "covered": 102,
-          "pct": 66.66
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/lock.ts",
       "built": "dist/core/rin-daemon/lock.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 165,
-          "covered": 131,
-          "pct": 79.39
-        },
-        "functions": {
-          "total": 14,
-          "covered": 12,
-          "pct": 85.71
-        },
-        "branches": {
-          "total": 37,
-          "covered": 17,
-          "pct": 45.94
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/pending-turn-events.ts",
       "built": "dist/core/rin-daemon/pending-turn-events.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 94,
-          "covered": 89,
-          "pct": 94.68
-        },
-        "functions": {
-          "total": 9,
-          "covered": 9,
-          "pct": 100
-        },
-        "branches": {
-          "total": 38,
-          "covered": 28,
-          "pct": 73.68
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/rpc-mode.ts",
       "built": "dist/core/rin-daemon/rpc-mode.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1367,
-          "covered": 1008,
-          "pct": 73.73
-        },
-        "functions": {
-          "total": 101,
-          "covered": 67,
-          "pct": 66.33
-        },
-        "branches": {
-          "total": 444,
-          "covered": 299,
-          "pct": 67.34
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/running-workers.ts",
       "built": "dist/core/rin-daemon/running-workers.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 120,
-          "covered": 118,
-          "pct": 98.33
-        },
-        "functions": {
-          "total": 7,
-          "covered": 6,
-          "pct": 85.71
-        },
-        "branches": {
-          "total": 63,
-          "covered": 60,
-          "pct": 95.23
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/worker-cgroup-isolation.ts",
       "built": "dist/core/rin-daemon/worker-cgroup-isolation.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 197,
-          "covered": 169,
-          "pct": 85.78
-        },
-        "functions": {
-          "total": 22,
-          "covered": 14,
-          "pct": 63.63
-        },
-        "branches": {
-          "total": 58,
-          "covered": 42,
-          "pct": 72.41
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/worker-helpers.ts",
       "built": "dist/core/rin-daemon/worker-helpers.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 361,
-          "covered": 304,
-          "pct": 84.21
-        },
-        "functions": {
-          "total": 31,
-          "covered": 27,
-          "pct": 87.09
-        },
-        "branches": {
-          "total": 148,
-          "covered": 77,
-          "pct": 52.02
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/worker-pool.ts",
       "built": "dist/core/rin-daemon/worker-pool.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1832,
-          "covered": 1644,
-          "pct": 89.73
-        },
-        "functions": {
-          "total": 90,
-          "covered": 88,
-          "pct": 97.77
-        },
-        "branches": {
-          "total": 729,
-          "covered": 597,
-          "pct": 81.89
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-daemon/worker.ts",
       "built": "dist/core/rin-daemon/worker.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 108,
-          "covered": 85,
-          "pct": 78.7
-        },
-        "functions": {
-          "total": 6,
-          "covered": 5,
-          "pct": 83.33
-        },
-        "branches": {
-          "total": 21,
-          "covered": 6,
-          "pct": 28.57
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-extension-settings.ts",
       "built": "dist/core/rin-extension-settings.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 59,
-          "covered": 59,
-          "pct": 100
-        },
-        "functions": {
-          "total": 6,
-          "covered": 6,
-          "pct": 100
-        },
-        "branches": {
-          "total": 22,
-          "covered": 13,
-          "pct": 59.09
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/backend-events.ts",
       "built": "dist/core/rin-frontend-sdk/backend-events.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 395,
-          "covered": 392,
-          "pct": 99.24
-        },
-        "functions": {
-          "total": 20,
-          "covered": 20,
-          "pct": 100
-        },
-        "branches": {
-          "total": 143,
-          "covered": 118,
-          "pct": 82.51
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/command-dispatcher.ts",
       "built": "dist/core/rin-frontend-sdk/command-dispatcher.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 91,
-          "covered": 91,
-          "pct": 100
-        },
-        "functions": {
-          "total": 9,
-          "covered": 8,
-          "pct": 88.88
-        },
-        "branches": {
-          "total": 39,
-          "covered": 37,
-          "pct": 94.87
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/command-responses.ts",
       "built": "dist/core/rin-frontend-sdk/command-responses.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 95,
-          "covered": 95,
-          "pct": 100
-        },
-        "functions": {
-          "total": 6,
-          "covered": 6,
-          "pct": 100
-        },
-        "branches": {
-          "total": 38,
-          "covered": 34,
-          "pct": 89.47
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/compaction-summary-format.ts",
       "built": "dist/core/rin-frontend-sdk/compaction-summary-format.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 49,
-          "covered": 47,
-          "pct": 95.91
-        },
-        "functions": {
-          "total": 6,
-          "covered": 6,
-          "pct": 100
-        },
-        "branches": {
-          "total": 34,
-          "covered": 29,
-          "pct": 85.29
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/daemon-client.ts",
       "built": "dist/core/rin-frontend-sdk/daemon-client.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 467,
-          "covered": 317,
-          "pct": 67.88
-        },
-        "functions": {
-          "total": 45,
-          "covered": 30,
-          "pct": 66.66
-        },
-        "branches": {
-          "total": 104,
-          "covered": 62,
-          "pct": 59.61
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/entrypoint.ts",
       "built": "dist/core/rin-frontend-sdk/entrypoint.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 11,
-          "covered": 2,
-          "pct": 18.18
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/frontend-identity.ts",
       "built": "dist/core/rin-frontend-sdk/frontend-identity.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 26,
-          "covered": 18,
-          "pct": 69.23
-        },
-        "functions": {
-          "total": 4,
-          "covered": 3,
-          "pct": 75
-        },
-        "branches": {
-          "total": 13,
-          "covered": 11,
-          "pct": 84.61
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/frontend-surface.ts",
       "built": "dist/core/rin-frontend-sdk/frontend-surface.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/index.ts",
       "built": "dist/core/rin-frontend-sdk/index.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 19,
-          "covered": 19,
-          "pct": 100
-        },
-        "functions": {
-          "total": 0,
-          "covered": 0,
-          "pct": 100
-        },
-        "branches": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/input-submission.ts",
       "built": "dist/core/rin-frontend-sdk/input-submission.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 49,
-          "covered": 49,
-          "pct": 100
-        },
-        "functions": {
-          "total": 3,
-          "covered": 3,
-          "pct": 100
-        },
-        "branches": {
-          "total": 24,
-          "covered": 22,
-          "pct": 91.66
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/lifecycle-errors.ts",
       "built": "dist/core/rin-frontend-sdk/lifecycle-errors.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 13,
-          "covered": 13,
-          "pct": 100
-        },
-        "functions": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "branches": {
-          "total": 9,
-          "covered": 9,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/model-registry.ts",
       "built": "dist/core/rin-frontend-sdk/model-registry.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 76,
-          "covered": 71,
-          "pct": 93.42
-        },
-        "functions": {
-          "total": 10,
-          "covered": 7,
-          "pct": 70
-        },
-        "branches": {
-          "total": 25,
-          "covered": 18,
-          "pct": 72
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/model-settings.ts",
       "built": "dist/core/rin-frontend-sdk/model-settings.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 155,
-          "covered": 106,
-          "pct": 68.38
-        },
-        "functions": {
-          "total": 28,
-          "covered": 16,
-          "pct": 57.14
-        },
-        "branches": {
-          "total": 52,
-          "covered": 43,
-          "pct": 82.69
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/pending-terminal-turn.ts",
       "built": "dist/core/rin-frontend-sdk/pending-terminal-turn.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 14,
-          "covered": 14,
-          "pct": 100
-        },
-        "functions": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        },
-        "branches": {
-          "total": 8,
-          "covered": 4,
-          "pct": 50
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/prompt-context.ts",
       "built": "dist/core/rin-frontend-sdk/prompt-context.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 176,
-          "covered": 154,
-          "pct": 87.5
-        },
-        "functions": {
-          "total": 16,
-          "covered": 16,
-          "pct": 100
-        },
-        "branches": {
-          "total": 76,
-          "covered": 55,
-          "pct": 72.36
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/rpc-auth.ts",
       "built": "dist/core/rin-frontend-sdk/rpc-auth.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 335,
-          "covered": 315,
-          "pct": 94.02
-        },
-        "functions": {
-          "total": 31,
-          "covered": 31,
-          "pct": 100
-        },
-        "branches": {
-          "total": 138,
-          "covered": 94,
-          "pct": 68.11
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/rpc-session-events.ts",
       "built": "dist/core/rin-frontend-sdk/rpc-session-events.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 81,
-          "covered": 78,
-          "pct": 96.29
-        },
-        "functions": {
-          "total": 4,
-          "covered": 4,
-          "pct": 100
-        },
-        "branches": {
-          "total": 48,
-          "covered": 45,
-          "pct": 93.75
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/runtime-wrapper.ts",
       "built": "dist/core/rin-frontend-sdk/runtime-wrapper.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 82,
-          "covered": 68,
-          "pct": 82.92
-        },
-        "functions": {
-          "total": 10,
-          "covered": 8,
-          "pct": 80
-        },
-        "branches": {
-          "total": 22,
-          "covered": 15,
-          "pct": 68.18
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/session-helpers.ts",
       "built": "dist/core/rin-frontend-sdk/session-helpers.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 122,
-          "covered": 97,
-          "pct": 79.5
-        },
-        "functions": {
-          "total": 10,
-          "covered": 10,
-          "pct": 100
-        },
-        "branches": {
-          "total": 55,
-          "covered": 46,
-          "pct": 83.63
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/state-utils.ts",
       "built": "dist/core/rin-frontend-sdk/state-utils.js",
-      "owner": "unit",
-      "status": "strict",
-      "baseline": {
-        "lines": {
-          "total": 184,
-          "covered": 177,
-          "pct": 96.19
-        },
-        "functions": {
-          "total": 10,
-          "covered": 9,
-          "pct": 90
-        },
-        "branches": {
-          "total": 78,
-          "covered": 71,
-          "pct": 91.02
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/stats.ts",
       "built": "dist/core/rin-frontend-sdk/stats.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 82,
-          "covered": 78,
-          "pct": 95.12
-        },
-        "functions": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "branches": {
-          "total": 29,
-          "covered": 24,
-          "pct": 82.75
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/submitted-turn.ts",
       "built": "dist/core/rin-frontend-sdk/submitted-turn.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 105,
-          "covered": 96,
-          "pct": 91.42
-        },
-        "functions": {
-          "total": 7,
-          "covered": 7,
-          "pct": 100
-        },
-        "branches": {
-          "total": 46,
-          "covered": 32,
-          "pct": 69.56
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/turn-completion.ts",
       "built": "dist/core/rin-frontend-sdk/turn-completion.js",
-      "owner": "unit",
-      "status": "strict",
-      "baseline": {
-        "lines": {
-          "total": 39,
-          "covered": 39,
-          "pct": 100
-        },
-        "functions": {
-          "total": 4,
-          "covered": 4,
-          "pct": 100
-        },
-        "branches": {
-          "total": 22,
-          "covered": 22,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/turn-driver.ts",
       "built": "dist/core/rin-frontend-sdk/turn-driver.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1283,
-          "covered": 1126,
-          "pct": 87.76
-        },
-        "functions": {
-          "total": 87,
-          "covered": 78,
-          "pct": 89.65
-        },
-        "branches": {
-          "total": 555,
-          "covered": 434,
-          "pct": 78.19
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-frontend-sdk/types.ts",
       "built": "dist/core/rin-frontend-sdk/types.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-gui/host-launch.ts",
       "built": "dist/core/rin-gui/host-launch.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 17,
-          "covered": 17,
-          "pct": 100
-        },
-        "functions": {
-          "total": 3,
-          "covered": 3,
-          "pct": 100
-        },
-        "branches": {
-          "total": 9,
-          "covered": 8,
-          "pct": 88.88
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-gui/main.ts",
       "built": "dist/core/rin-gui/main.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 25,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-gui/native-desktop.ts",
       "built": "dist/core/rin-gui/native-desktop.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 571,
-          "covered": 271,
-          "pct": 47.46
-        },
-        "functions": {
-          "total": 17,
-          "covered": 7,
-          "pct": 41.17
-        },
-        "branches": {
-          "total": 21,
-          "covered": 19,
-          "pct": 90.47
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-gui/web-assets.ts",
       "built": "dist/core/rin-gui/web-assets.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 19,
-          "covered": 19,
-          "pct": 100
-        },
-        "functions": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "branches": {
-          "total": 10,
-          "covered": 7,
-          "pct": 70
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/apply-plan.ts",
       "built": "dist/core/rin-install/apply-plan.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 114,
-          "covered": 100,
-          "pct": 87.71
-        },
-        "functions": {
-          "total": 7,
-          "covered": 4,
-          "pct": 57.14
-        },
-        "branches": {
-          "total": 26,
-          "covered": 13,
-          "pct": 50
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/candidate-loader.ts",
       "built": "dist/core/rin-install/candidate-loader.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 11,
-          "covered": 11,
-          "pct": 100
-        },
-        "functions": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        },
-        "branches": {
-          "total": 6,
-          "covered": 6,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/common.ts",
       "built": "dist/core/rin-install/common.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 75,
-          "covered": 66,
-          "pct": 88
-        },
-        "functions": {
-          "total": 7,
-          "covered": 7,
-          "pct": 100
-        },
-        "branches": {
-          "total": 22,
-          "covered": 15,
-          "pct": 68.18
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/deployment-targets.ts",
       "built": "dist/core/rin-install/deployment-targets.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 305,
-          "covered": 15,
-          "pct": 4.91
-        },
-        "functions": {
-          "total": 15,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/execution-context.ts",
       "built": "dist/core/rin-install/execution-context.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 41,
-          "covered": 6,
-          "pct": 14.63
-        },
-        "functions": {
-          "total": 3,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/finalize.ts",
       "built": "dist/core/rin-install/finalize.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 350,
-          "covered": 55,
-          "pct": 15.71
-        },
-        "functions": {
-          "total": 14,
-          "covered": 5,
-          "pct": 35.71
-        },
-        "branches": {
-          "total": 20,
-          "covered": 14,
-          "pct": 70
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/fs-utils.ts",
       "built": "dist/core/rin-install/fs-utils.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 857,
-          "covered": 539,
-          "pct": 62.89
-        },
-        "functions": {
-          "total": 60,
-          "covered": 43,
-          "pct": 71.66
-        },
-        "branches": {
-          "total": 190,
-          "covered": 119,
-          "pct": 62.63
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/gui.ts",
       "built": "dist/core/rin-install/gui.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 547,
-          "covered": 428,
-          "pct": 78.24
-        },
-        "functions": {
-          "total": 16,
-          "covered": 12,
-          "pct": 75
-        },
-        "branches": {
-          "total": 64,
-          "covered": 35,
-          "pct": 54.68
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/i18n.ts",
       "built": "dist/core/rin-install/i18n.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 773,
-          "covered": 689,
-          "pct": 89.13
-        },
-        "functions": {
-          "total": 73,
-          "covered": 40,
-          "pct": 54.79
-        },
-        "branches": {
-          "total": 105,
-          "covered": 77,
-          "pct": 73.33
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/install-record.ts",
       "built": "dist/core/rin-install/install-record.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 54,
-          "covered": 54,
-          "pct": 100
-        },
-        "functions": {
-          "total": 9,
-          "covered": 9,
-          "pct": 100
-        },
-        "branches": {
-          "total": 26,
-          "covered": 25,
-          "pct": 96.15
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/interactive.ts",
       "built": "dist/core/rin-install/interactive.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 553,
-          "covered": 406,
-          "pct": 73.41
-        },
-        "functions": {
-          "total": 38,
-          "covered": 32,
-          "pct": 84.21
-        },
-        "branches": {
-          "total": 162,
-          "covered": 121,
-          "pct": 74.69
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/main.ts",
       "built": "dist/core/rin-install/main.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 391,
-          "covered": 141,
-          "pct": 36.06
-        },
-        "functions": {
-          "total": 24,
-          "covered": 8,
-          "pct": 33.33
-        },
-        "branches": {
-          "total": 54,
-          "covered": 11,
-          "pct": 20.37
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/managed-service.ts",
       "built": "dist/core/rin-install/managed-service.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 90,
-          "covered": 88,
-          "pct": 97.77
-        },
-        "functions": {
-          "total": 10,
-          "covered": 10,
-          "pct": 100
-        },
-        "branches": {
-          "total": 43,
-          "covered": 34,
-          "pct": 79.06
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/paths.ts",
       "built": "dist/core/rin-install/paths.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 326,
-          "covered": 322,
-          "pct": 98.77
-        },
-        "functions": {
-          "total": 76,
-          "covered": 74,
-          "pct": 97.36
-        },
-        "branches": {
-          "total": 118,
-          "covered": 112,
-          "pct": 94.91
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/persist.ts",
       "built": "dist/core/rin-install/persist.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 893,
-          "covered": 840,
-          "pct": 94.06
-        },
-        "functions": {
-          "total": 52,
-          "covered": 52,
-          "pct": 100
-        },
-        "branches": {
-          "total": 309,
-          "covered": 214,
-          "pct": 69.25
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/pi-tools.ts",
       "built": "dist/core/rin-install/pi-tools.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 99,
-          "covered": 4,
-          "pct": 4.04
-        },
-        "functions": {
-          "total": 4,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/progress.ts",
       "built": "dist/core/rin-install/progress.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 42,
-          "covered": 18,
-          "pct": 42.85
-        },
-        "functions": {
-          "total": 5,
-          "covered": 2,
-          "pct": 40
-        },
-        "branches": {
-          "total": 8,
-          "covered": 5,
-          "pct": 62.5
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/provider-auth.ts",
       "built": "dist/core/rin-install/provider-auth.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 176,
-          "covered": 135,
-          "pct": 76.7
-        },
-        "functions": {
-          "total": 16,
-          "covered": 9,
-          "pct": 56.25
-        },
-        "branches": {
-          "total": 66,
-          "covered": 26,
-          "pct": 39.39
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/quick-run.ts",
       "built": "dist/core/rin-install/quick-run.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 272,
-          "covered": 26,
-          "pct": 9.55
-        },
-        "functions": {
-          "total": 21,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/runtime-dependency-prune.ts",
       "built": "dist/core/rin-install/runtime-dependency-prune.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 100,
-          "covered": 88,
-          "pct": 88
-        },
-        "functions": {
-          "total": 6,
-          "covered": 5,
-          "pct": 83.33
-        },
-        "branches": {
-          "total": 37,
-          "covered": 26,
-          "pct": 70.27
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/service.ts",
       "built": "dist/core/rin-install/service.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 434,
-          "covered": 241,
-          "pct": 55.52
-        },
-        "functions": {
-          "total": 32,
-          "covered": 23,
-          "pct": 71.87
-        },
-        "branches": {
-          "total": 64,
-          "covered": 36,
-          "pct": 56.25
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/update-targets.ts",
       "built": "dist/core/rin-install/update-targets.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 126,
-          "covered": 124,
-          "pct": 98.41
-        },
-        "functions": {
-          "total": 13,
-          "covered": 13,
-          "pct": 100
-        },
-        "branches": {
-          "total": 45,
-          "covered": 40,
-          "pct": 88.88
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/update-workflow.ts",
       "built": "dist/core/rin-install/update-workflow.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 406,
-          "covered": 251,
-          "pct": 61.82
-        },
-        "functions": {
-          "total": 25,
-          "covered": 19,
-          "pct": 76
-        },
-        "branches": {
-          "total": 81,
-          "covered": 54,
-          "pct": 66.66
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/updater.ts",
       "built": "dist/core/rin-install/updater.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 241,
-          "covered": 152,
-          "pct": 63.07
-        },
-        "functions": {
-          "total": 12,
-          "covered": 6,
-          "pct": 50
-        },
-        "branches": {
-          "total": 34,
-          "covered": 15,
-          "pct": 44.11
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-install/users.ts",
       "built": "dist/core/rin-install/users.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 186,
-          "covered": 179,
-          "pct": 96.23
-        },
-        "functions": {
-          "total": 16,
-          "covered": 15,
-          "pct": 93.75
-        },
-        "branches": {
-          "total": 88,
-          "covered": 68,
-          "pct": 77.27
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/agent-runtime.ts",
       "built": "dist/core/rin-lib/agent-runtime.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 107,
-          "covered": 70,
-          "pct": 65.42
-        },
-        "functions": {
-          "total": 6,
-          "covered": 6,
-          "pct": 100
-        },
-        "branches": {
-          "total": 26,
-          "covered": 15,
-          "pct": 57.69
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/capability-session.ts",
       "built": "dist/core/rin-lib/capability-session.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 347,
-          "covered": 322,
-          "pct": 92.79
-        },
-        "functions": {
-          "total": 110,
-          "covered": 32,
-          "pct": 29.09
-        },
-        "branches": {
-          "total": 89,
-          "covered": 62,
-          "pct": 69.66
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/capability-types.ts",
       "built": "dist/core/rin-lib/capability-types.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/changelog.ts",
       "built": "dist/core/rin-lib/changelog.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 64,
-          "covered": 62,
-          "pct": 96.87
-        },
-        "functions": {
-          "total": 6,
-          "covered": 6,
-          "pct": 100
-        },
-        "branches": {
-          "total": 24,
-          "covered": 21,
-          "pct": 87.5
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/chat-outbox.ts",
       "built": "dist/core/rin-lib/chat-outbox.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 249,
-          "covered": 244,
-          "pct": 97.99
-        },
-        "functions": {
-          "total": 19,
-          "covered": 18,
-          "pct": 94.73
-        },
-        "branches": {
-          "total": 128,
-          "covered": 109,
-          "pct": 85.15
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/common.ts",
       "built": "dist/core/rin-lib/common.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 62,
-          "covered": 51,
-          "pct": 82.25
-        },
-        "functions": {
-          "total": 9,
-          "covered": 7,
-          "pct": 77.77
-        },
-        "branches": {
-          "total": 23,
-          "covered": 16,
-          "pct": 69.56
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/context-token-estimator.ts",
       "built": "dist/core/rin-lib/context-token-estimator.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 41,
-          "covered": 35,
-          "pct": 85.36
-        },
-        "functions": {
-          "total": 5,
-          "covered": 5,
-          "pct": 100
-        },
-        "branches": {
-          "total": 14,
-          "covered": 6,
-          "pct": 42.85
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/extension-loader.ts",
       "built": "dist/core/rin-lib/extension-loader.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 298,
-          "covered": 194,
-          "pct": 65.1
-        },
-        "functions": {
-          "total": 50,
-          "covered": 27,
-          "pct": 54
-        },
-        "branches": {
-          "total": 71,
-          "covered": 46,
-          "pct": 64.78
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/interruption.ts",
       "built": "dist/core/rin-lib/interruption.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 28,
-          "covered": 28,
-          "pct": 100
-        },
-        "functions": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "branches": {
-          "total": 5,
-          "covered": 3,
-          "pct": 60
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/loader.ts",
       "built": "dist/core/rin-lib/loader.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 25,
-          "covered": 4,
-          "pct": 16
-        },
-        "functions": {
-          "total": 12,
-          "covered": 2,
-          "pct": 16.66
-        },
-        "branches": {
-          "total": 5,
-          "covered": 4,
-          "pct": 80
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/memory-task-config.ts",
       "built": "dist/core/rin-lib/memory-task-config.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        },
-        "functions": {
-          "total": 0,
-          "covered": 0,
-          "pct": 100
-        },
-        "branches": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/pi-passthrough.ts",
       "built": "dist/core/rin-lib/pi-passthrough.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/profile.ts",
       "built": "dist/core/rin-lib/profile.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 20,
-          "covered": 20,
-          "pct": 100
-        },
-        "functions": {
-          "total": 3,
-          "covered": 3,
-          "pct": 100
-        },
-        "branches": {
-          "total": 8,
-          "covered": 8,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/provider-context.ts",
       "built": "dist/core/rin-lib/provider-context.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 66,
-          "covered": 62,
-          "pct": 93.93
-        },
-        "functions": {
-          "total": 8,
-          "covered": 8,
-          "pct": 100
-        },
-        "branches": {
-          "total": 35,
-          "covered": 22,
-          "pct": 62.85
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/release.ts",
       "built": "dist/core/rin-lib/release.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 351,
-          "covered": 274,
-          "pct": 78.06
-        },
-        "functions": {
-          "total": 25,
-          "covered": 20,
-          "pct": 80
-        },
-        "branches": {
-          "total": 109,
-          "covered": 77,
-          "pct": 70.64
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/rpc-types.ts",
       "built": "dist/core/rin-lib/rpc-types.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/rpc.ts",
       "built": "dist/core/rin-lib/rpc.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 150,
-          "covered": 147,
-          "pct": 98
-        },
-        "functions": {
-          "total": 11,
-          "covered": 11,
-          "pct": 100
-        },
-        "branches": {
-          "total": 30,
-          "covered": 23,
-          "pct": 76.66
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/runtime.ts",
       "built": "dist/core/rin-lib/runtime.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1287,
-          "covered": 1049,
-          "pct": 81.5
-        },
-        "functions": {
-          "total": 83,
-          "covered": 67,
-          "pct": 80.72
-        },
-        "branches": {
-          "total": 329,
-          "covered": 177,
-          "pct": 53.79
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/session-pruning.ts",
       "built": "dist/core/rin-lib/session-pruning.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 130,
-          "covered": 126,
-          "pct": 96.92
-        },
-        "functions": {
-          "total": 12,
-          "covered": 12,
-          "pct": 100
-        },
-        "branches": {
-          "total": 69,
-          "covered": 54,
-          "pct": 78.26
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/system.ts",
       "built": "dist/core/rin-lib/system.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 223,
-          "covered": 136,
-          "pct": 60.98
-        },
-        "functions": {
-          "total": 21,
-          "covered": 13,
-          "pct": 61.9
-        },
-        "branches": {
-          "total": 59,
-          "covered": 40,
-          "pct": 67.79
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/todo-state.ts",
       "built": "dist/core/rin-lib/todo-state.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 173,
-          "covered": 172,
-          "pct": 99.42
-        },
-        "functions": {
-          "total": 16,
-          "covered": 16,
-          "pct": 100
-        },
-        "branches": {
-          "total": 97,
-          "covered": 83,
-          "pct": 85.56
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/todo.ts",
       "built": "dist/core/rin-lib/todo.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 240,
-          "covered": 223,
-          "pct": 92.91
-        },
-        "functions": {
-          "total": 18,
-          "covered": 17,
-          "pct": 94.44
-        },
-        "branches": {
-          "total": 76,
-          "covered": 51,
-          "pct": 67.1
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/tool-options.ts",
       "built": "dist/core/rin-lib/tool-options.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 60,
-          "covered": 56,
-          "pct": 93.33
-        },
-        "functions": {
-          "total": 8,
-          "covered": 8,
-          "pct": 100
-        },
-        "branches": {
-          "total": 29,
-          "covered": 23,
-          "pct": 79.31
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/update-notices.ts",
       "built": "dist/core/rin-lib/update-notices.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 275,
-          "covered": 255,
-          "pct": 92.72
-        },
-        "functions": {
-          "total": 29,
-          "covered": 24,
-          "pct": 82.75
-        },
-        "branches": {
-          "total": 158,
-          "covered": 116,
-          "pct": 73.41
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-lib/user-facing-errors.ts",
       "built": "dist/core/rin-lib/user-facing-errors.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 387,
-          "covered": 260,
-          "pct": 67.18
-        },
-        "functions": {
-          "total": 237,
-          "covered": 5,
-          "pct": 2.1
-        },
-        "branches": {
-          "total": 16,
-          "covered": 10,
-          "pct": 62.5
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-targets/registry.ts",
       "built": "dist/core/rin-targets/registry.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 95,
-          "covered": 91,
-          "pct": 95.78
-        },
-        "functions": {
-          "total": 4,
-          "covered": 2,
-          "pct": 50
-        },
-        "branches": {
-          "total": 10,
-          "covered": 10,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-targets/runner.ts",
       "built": "dist/core/rin-targets/runner.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 68,
-          "covered": 22,
-          "pct": 32.35
-        },
-        "functions": {
-          "total": 4,
-          "covered": 1,
-          "pct": 25
-        },
-        "branches": {
-          "total": 8,
-          "covered": 7,
-          "pct": 87.5
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-targets/store.ts",
       "built": "dist/core/rin-targets/store.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 94,
-          "covered": 75,
-          "pct": 79.78
-        },
-        "functions": {
-          "total": 11,
-          "covered": 8,
-          "pct": 72.72
-        },
-        "branches": {
-          "total": 25,
-          "covered": 21,
-          "pct": 84
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-tui/cli-options.ts",
       "built": "dist/core/rin-tui/cli-options.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 295,
-          "covered": 229,
-          "pct": 77.62
-        },
-        "functions": {
-          "total": 7,
-          "covered": 7,
-          "pct": 100
-        },
-        "branches": {
-          "total": 106,
-          "covered": 76,
-          "pct": 71.69
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-tui/events.ts",
       "built": "dist/core/rin-tui/events.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 7,
-          "covered": 7,
-          "pct": 100
-        },
-        "functions": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        },
-        "branches": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-tui/launcher.ts",
       "built": "dist/core/rin-tui/launcher.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 330,
-          "covered": 189,
-          "pct": 57.27
-        },
-        "functions": {
-          "total": 31,
-          "covered": 23,
-          "pct": 74.19
-        },
-        "branches": {
-          "total": 64,
-          "covered": 53,
-          "pct": 82.81
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-tui/main.ts",
       "built": "dist/core/rin-tui/main.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 4,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-tui/runtime-host.ts",
       "built": "dist/core/rin-tui/runtime-host.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 53,
-          "covered": 53,
-          "pct": 100
-        },
-        "functions": {
-          "total": 10,
-          "covered": 10,
-          "pct": 100
-        },
-        "branches": {
-          "total": 13,
-          "covered": 12,
-          "pct": 92.3
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/rin-tui/runtime.ts",
       "built": "dist/core/rin-tui/runtime.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1556,
-          "covered": 1231,
-          "pct": 79.11
-        },
-        "functions": {
-          "total": 177,
-          "covered": 105,
-          "pct": 59.32
-        },
-        "branches": {
-          "total": 409,
-          "covered": 310,
-          "pct": 75.79
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/scheduled-task-options.ts",
       "built": "dist/core/scheduled-task-options.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 25,
-          "covered": 23,
-          "pct": 92
-        },
-        "functions": {
-          "total": 2,
-          "covered": 1,
-          "pct": 50
-        },
-        "branches": {
-          "total": 5,
-          "covered": 4,
-          "pct": 80
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/agent-dir.ts",
       "built": "dist/core/self-improve/agent-dir.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 6,
-          "covered": 6,
-          "pct": 100
-        },
-        "functions": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        },
-        "branches": {
-          "total": 4,
-          "covered": 4,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/async-jobs.ts",
       "built": "dist/core/self-improve/async-jobs.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 414,
-          "covered": 349,
-          "pct": 84.29
-        },
-        "functions": {
-          "total": 28,
-          "covered": 26,
-          "pct": 92.85
-        },
-        "branches": {
-          "total": 100,
-          "covered": 65,
-          "pct": 65
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/compile.ts",
       "built": "dist/core/self-improve/compile.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 38,
-          "covered": 38,
-          "pct": 100
-        },
-        "functions": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "branches": {
-          "total": 9,
-          "covered": 8,
-          "pct": 88.88
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/core/index.ts",
       "built": "dist/core/self-improve/core/index.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/core/schema.ts",
       "built": "dist/core/self-improve/core/schema.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 163,
-          "covered": 157,
-          "pct": 96.31
-        },
-        "functions": {
-          "total": 10,
-          "covered": 10,
-          "pct": 100
-        },
-        "branches": {
-          "total": 68,
-          "covered": 20,
-          "pct": 29.41
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/core/types.ts",
       "built": "dist/core/self-improve/core/types.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 14,
-          "covered": 14,
-          "pct": 100
-        },
-        "functions": {
-          "total": 0,
-          "covered": 0,
-          "pct": 100
-        },
-        "branches": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/core/utils.ts",
       "built": "dist/core/self-improve/core/utils.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 28,
-          "covered": 28,
-          "pct": 100
-        },
-        "functions": {
-          "total": 4,
-          "covered": 4,
-          "pct": 100
-        },
-        "branches": {
-          "total": 10,
-          "covered": 8,
-          "pct": 80
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/docs.ts",
       "built": "dist/core/self-improve/docs.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 127,
-          "covered": 116,
-          "pct": 91.33
-        },
-        "functions": {
-          "total": 12,
-          "covered": 10,
-          "pct": 83.33
-        },
-        "branches": {
-          "total": 31,
-          "covered": 22,
-          "pct": 70.96
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/format.ts",
       "built": "dist/core/self-improve/format.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 193,
-          "covered": 193,
-          "pct": 100
-        },
-        "functions": {
-          "total": 20,
-          "covered": 20,
-          "pct": 100
-        },
-        "branches": {
-          "total": 95,
-          "covered": 71,
-          "pct": 74.73
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/index.ts",
       "built": "dist/core/self-improve/index.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 253,
-          "covered": 223,
-          "pct": 88.14
-        },
-        "functions": {
-          "total": 21,
-          "covered": 18,
-          "pct": 85.71
-        },
-        "branches": {
-          "total": 94,
-          "covered": 70,
-          "pct": 74.46
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/maintainer.ts",
       "built": "dist/core/self-improve/maintainer.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 173,
-          "covered": 23,
-          "pct": 13.29
-        },
-        "functions": {
-          "total": 9,
-          "covered": 2,
-          "pct": 22.22
-        },
-        "branches": {
-          "total": 3,
-          "covered": 3,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/onboarding.ts",
       "built": "dist/core/self-improve/onboarding.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 89,
-          "covered": 83,
-          "pct": 93.25
-        },
-        "functions": {
-          "total": 9,
-          "covered": 7,
-          "pct": 77.77
-        },
-        "branches": {
-          "total": 13,
-          "covered": 11,
-          "pct": 84.61
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/paths.ts",
       "built": "dist/core/self-improve/paths.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 40,
-          "covered": 40,
-          "pct": 100
-        },
-        "functions": {
-          "total": 10,
-          "covered": 10,
-          "pct": 100
-        },
-        "branches": {
-          "total": 11,
-          "covered": 11,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/processing.ts",
       "built": "dist/core/self-improve/processing.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 53,
-          "covered": 51,
-          "pct": 96.22
-        },
-        "functions": {
-          "total": 5,
-          "covered": 5,
-          "pct": 100
-        },
-        "branches": {
-          "total": 15,
-          "covered": 12,
-          "pct": 80
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/relevance.ts",
       "built": "dist/core/self-improve/relevance.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 182,
-          "covered": 156,
-          "pct": 85.71
-        },
-        "functions": {
-          "total": 16,
-          "covered": 15,
-          "pct": 93.75
-        },
-        "branches": {
-          "total": 43,
-          "covered": 33,
-          "pct": 76.74
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/skill-usage.ts",
       "built": "dist/core/self-improve/skill-usage.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 126,
-          "covered": 126,
-          "pct": 100
-        },
-        "functions": {
-          "total": 10,
-          "covered": 10,
-          "pct": 100
-        },
-        "branches": {
-          "total": 45,
-          "covered": 28,
-          "pct": 62.22
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/store.ts",
       "built": "dist/core/self-improve/store.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 104,
-          "covered": 95,
-          "pct": 91.34
-        },
-        "functions": {
-          "total": 7,
-          "covered": 6,
-          "pct": 85.71
-        },
-        "branches": {
-          "total": 30,
-          "covered": 14,
-          "pct": 46.66
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/self-improve/worker.ts",
       "built": "dist/core/self-improve/worker.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 33,
-          "covered": 25,
-          "pct": 75.75
-        },
-        "functions": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "branches": {
-          "total": 6,
-          "covered": 3,
-          "pct": 50
-        }
-      }
+      "ownerSuite": "system",
+      "status": "strict"
     },
     {
       "source": "src/core/session/catalog.ts",
       "built": "dist/core/session/catalog.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 464,
-          "covered": 445,
-          "pct": 95.9
-        },
-        "functions": {
-          "total": 32,
-          "covered": 31,
-          "pct": 96.87
-        },
-        "branches": {
-          "total": 163,
-          "covered": 116,
-          "pct": 71.16
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/session/factory.ts",
       "built": "dist/core/session/factory.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 62,
-          "covered": 34,
-          "pct": 54.83
-        },
-        "functions": {
-          "total": 8,
-          "covered": 4,
-          "pct": 50
-        },
-        "branches": {
-          "total": 21,
-          "covered": 15,
-          "pct": 71.42
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/session/fork.ts",
       "built": "dist/core/session/fork.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 87,
-          "covered": 83,
-          "pct": 95.4
-        },
-        "functions": {
-          "total": 6,
-          "covered": 6,
-          "pct": 100
-        },
-        "branches": {
-          "total": 43,
-          "covered": 39,
-          "pct": 90.69
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/session/listing.ts",
       "built": "dist/core/session/listing.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 155,
-          "covered": 155,
-          "pct": 100
-        },
-        "functions": {
-          "total": 22,
-          "covered": 22,
-          "pct": 100
-        },
-        "branches": {
-          "total": 88,
-          "covered": 79,
-          "pct": 89.77
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/session/managed-paths.ts",
       "built": "dist/core/session/managed-paths.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 50,
-          "covered": 43,
-          "pct": 86
-        },
-        "functions": {
-          "total": 9,
-          "covered": 8,
-          "pct": 88.88
-        },
-        "branches": {
-          "total": 10,
-          "covered": 10,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/session/metadata.ts",
       "built": "dist/core/session/metadata.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 31,
-          "covered": 31,
-          "pct": 100
-        },
-        "functions": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "branches": {
-          "total": 22,
-          "covered": 18,
-          "pct": 81.81
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/session/names.ts",
       "built": "dist/core/session/names.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 115,
-          "covered": 115,
-          "pct": 100
-        },
-        "functions": {
-          "total": 9,
-          "covered": 9,
-          "pct": 100
-        },
-        "branches": {
-          "total": 51,
-          "covered": 50,
-          "pct": 98.03
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/session/paged-listing.ts",
       "built": "dist/core/session/paged-listing.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 57,
-          "covered": 30,
-          "pct": 52.63
-        },
-        "functions": {
-          "total": 4,
-          "covered": 3,
-          "pct": 75
-        },
-        "branches": {
-          "total": 11,
-          "covered": 8,
-          "pct": 72.72
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/session/ref.ts",
       "built": "dist/core/session/ref.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 110,
-          "covered": 110,
-          "pct": 100
-        },
-        "functions": {
-          "total": 16,
-          "covered": 16,
-          "pct": 100
-        },
-        "branches": {
-          "total": 60,
-          "covered": 54,
-          "pct": 90
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/session/runner.ts",
       "built": "dist/core/session/runner.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 50,
-          "covered": 0,
-          "pct": 0
-        },
-        "functions": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        },
-        "branches": {
-          "total": 1,
-          "covered": 0,
-          "pct": 0
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/session/turn-result.ts",
       "built": "dist/core/session/turn-result.js",
-      "owner": "unit",
-      "status": "strict",
-      "baseline": {
-        "lines": {
-          "total": 123,
-          "covered": 123,
-          "pct": 100
-        },
-        "functions": {
-          "total": 12,
-          "covered": 12,
-          "pct": 100
-        },
-        "branches": {
-          "total": 71,
-          "covered": 67,
-          "pct": 94.36
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/sidecar/common.ts",
       "built": "dist/core/sidecar/common.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 29,
-          "covered": 27,
-          "pct": 93.1
-        },
-        "functions": {
-          "total": 4,
-          "covered": 4,
-          "pct": 100
-        },
-        "branches": {
-          "total": 11,
-          "covered": 10,
-          "pct": 90.9
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/task/index.ts",
       "built": "dist/core/task/index.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 6,
-          "covered": 6,
-          "pct": 100
-        },
-        "functions": {
-          "total": 1,
-          "covered": 1,
-          "pct": 100
-        },
-        "branches": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/text-utils.ts",
       "built": "dist/core/text-utils.js",
-      "owner": "unit",
-      "status": "strict",
-      "baseline": {
-        "lines": {
-          "total": 51,
-          "covered": 51,
-          "pct": 100
-        },
-        "functions": {
-          "total": 10,
-          "covered": 10,
-          "pct": 100
-        },
-        "branches": {
-          "total": 29,
-          "covered": 29,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/time-utils.ts",
       "built": "dist/core/time-utils.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 6,
-          "covered": 6,
-          "pct": 100
-        },
-        "functions": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "branches": {
-          "total": 3,
-          "covered": 3,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/token-usage/index.ts",
       "built": "dist/core/token-usage/index.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 364,
-          "covered": 247,
-          "pct": 67.85
-        },
-        "functions": {
-          "total": 19,
-          "covered": 12,
-          "pct": 63.15
-        },
-        "branches": {
-          "total": 49,
-          "covered": 31,
-          "pct": 63.26
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/token-usage/store.ts",
       "built": "dist/core/token-usage/store.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 619,
-          "covered": 618,
-          "pct": 99.83
-        },
-        "functions": {
-          "total": 37,
-          "covered": 37,
-          "pct": 100
-        },
-        "branches": {
-          "total": 112,
-          "covered": 99,
-          "pct": 88.39
-        }
-      }
+      "ownerSuite": "integration",
+      "status": "strict"
     },
     {
       "source": "src/core/tui-runtime-env.ts",
       "built": "dist/core/tui-runtime-env.js",
-      "owner": "migration",
-      "status": "ratchet",
-      "baseline": {
-        "lines": {
-          "total": 15,
-          "covered": 15,
-          "pct": 100
-        },
-        "functions": {
-          "total": 2,
-          "covered": 2,
-          "pct": 100
-        },
-        "branches": {
-          "total": 3,
-          "covered": 3,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     },
     {
       "source": "src/core/usage-metrics.ts",
       "built": "dist/core/usage-metrics.js",
-      "owner": "unit",
-      "status": "strict",
-      "baseline": {
-        "lines": {
-          "total": 41,
-          "covered": 41,
-          "pct": 100
-        },
-        "functions": {
-          "total": 8,
-          "covered": 8,
-          "pct": 100
-        },
-        "branches": {
-          "total": 15,
-          "covered": 15,
-          "pct": 100
-        }
-      }
+      "ownerSuite": "unit",
+      "status": "strict"
     }
   ]
 }
