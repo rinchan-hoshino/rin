@@ -387,6 +387,89 @@ test("chat inbox drain requeues a reclaimed lease while the old controller still
   assert.ok(Date.parse(current.nextAttemptAt) > Date.now());
 });
 
+test("chat inbox drain skips rejected active-turn chatter and claims a later command", async () => {
+  const agentDir = await tempDir();
+  const chatter = inbox.enqueueChatInboxItem(
+    agentDir,
+    input("chatter", "telegram/1:active"),
+  ).item;
+  const abort = inbox.enqueueChatInboxItem(
+    agentDir,
+    input("abort", "telegram/1:active"),
+  ).item;
+  const jobs = [];
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({
+      hasActiveTurn: () => true,
+      ownsInboundMessage: () => false,
+    }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => jobs.push(job),
+    hasActiveChatKeyWorker: () => true,
+    canClaimDuringActiveChatKeyWorker: async (item) =>
+      item.messageId === abort.messageId,
+  });
+
+  await drain.drainChatInboxOnce();
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline && jobs.length < 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.deepEqual(
+    jobs.map((job) => job.envelope.messageId),
+    ["abort"],
+  );
+  assert.equal(
+    inbox.getChatInboxItem(agentDir, chatter.itemId).state,
+    "pending",
+  );
+  assert.equal(inbox.getChatInboxItem(agentDir, abort.itemId).state, "running");
+});
+
+test("chat inbox drain prioritizes reset commands over earlier admissible follow-ups", async () => {
+  const agentDir = await tempDir();
+  const followUp = inbox.enqueueChatInboxItem(
+    agentDir,
+    input("follow-up", "telegram/1:active"),
+  ).item;
+  const abort = inbox.enqueueChatInboxItem(
+    agentDir,
+    input("abort-priority", "telegram/1:active"),
+  ).item;
+  const jobs = [];
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({
+      hasActiveTurn: () => true,
+      ownsInboundMessage: () => false,
+    }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => jobs.push(job),
+    hasActiveChatKeyWorker: () => true,
+    isPriorityDuringActiveChatKeyWorker: (item) =>
+      item.messageId === abort.messageId,
+    canClaimDuringActiveChatKeyWorker: async () => true,
+  });
+
+  await drain.drainChatInboxOnce();
+  const deadline = Date.now() + 1000;
+  while (Date.now() < deadline && jobs.length < 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.deepEqual(
+    jobs.map((job) => job.envelope.messageId),
+    ["abort-priority"],
+  );
+  assert.equal(
+    inbox.getChatInboxItem(agentDir, followUp.itemId).state,
+    "pending",
+  );
+  assert.equal(inbox.getChatInboxItem(agentDir, abort.itemId).state, "running");
+});
+
 test("chat inbox drain claims unrelated chats concurrently and serializes each chat", async () => {
   const agentDir = await tempDir();
   inbox.enqueueChatInboxItem(agentDir, input("a1", "telegram/1:a"));

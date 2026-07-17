@@ -1942,11 +1942,11 @@ test("chat main submits /abort without waiting for a same-chat prompt to finish"
         },
       });
 
-      const makeMessage = (messageId, content) => ({
+      const makeMessage = (messageId, content, userId = "owner-1") => ({
         platform: "telegram",
         selfId: "1",
         channelId: "2",
-        userId: "owner-1",
+        userId,
         messageId,
         isDirect: true,
         content,
@@ -1963,6 +1963,10 @@ test("chat main submits /abort without waiting for a same-chat prompt to finish"
         throw new Error(JSON.stringify({ stage: "prompt-not-started", promptTags }));
       }
 
+      app.emit(
+        "message",
+        makeMessage("m-untrusted-chatter", "not for Rin", "stranger-1"),
+      );
       app.emit("message", makeMessage("m-abort", "/abort"));
       const deadline = Date.now() + 5000;
       let rows = [];

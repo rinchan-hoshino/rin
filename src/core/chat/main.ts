@@ -1261,6 +1261,7 @@ export async function startChatBridge(
     };
   };
 
+  let requestDrainChatInbox: () => void = () => {};
   const chatKeyWorkers = createChatKeyWorkerPool<ClaimedChatInboxJob>({
     prepare: (job) => prepareClaimedInboxJob(job),
     onPrepareError: (job, chatKey, error) => {
@@ -1273,6 +1274,7 @@ export async function startChatBridge(
         (error as any)?.message || error,
       );
     },
+    onIdle: () => requestDrainChatInbox(),
     logger,
   });
 
@@ -1283,6 +1285,23 @@ export async function startChatBridge(
     enqueueClaimedInboxItem: (job) =>
       chatKeyWorkers.enqueue(job.envelope.chatKey, job),
     hasActiveChatKeyWorker: (chatKey) => chatKeyWorkers.hasWorker(chatKey),
+    isPriorityDuringActiveChatKeyWorker: (envelope) => {
+      const queuedSession = restoreChatInboxSession(
+        envelope,
+        findRuntimeBot(
+          safeString(envelope?.session?.platform || "").trim(),
+          safeString(envelope?.session?.selfId || "").trim(),
+        ),
+      );
+      const commandRequest = parseInboundCommandRequest(
+        queuedSession,
+        elementsToText(
+          Array.isArray(envelope.elements) ? envelope.elements : [],
+        ),
+        commandRows,
+      );
+      return ["abort", "new"].includes(commandRequest.command?.name || "");
+    },
     canClaimDuringActiveChatKeyWorker: async (envelope) => {
       const queuedSession = restoreChatInboxSession(
         envelope,
@@ -1316,7 +1335,7 @@ export async function startChatBridge(
     logger,
   });
 
-  const requestDrainChatInbox = () => {
+  requestDrainChatInbox = () => {
     if (chatBridgeStopping) return;
     inboxDrain.requestDrainChatInbox();
   };

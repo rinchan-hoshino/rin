@@ -32,9 +32,23 @@ export function createChatKeyWorkerPool<T>(deps: {
     chatKey: string,
     error: unknown,
   ) => void | Promise<void>;
+  onIdle?: (chatKey: string) => void | Promise<void>;
   logger?: { warn?: (...args: any[]) => void };
 }): ChatKeyWorkerPool<T> {
   const workers = new Map<string, ChatKeyWorker<T>>();
+
+  const releaseIdleWorker = (worker: ChatKeyWorker<T>, chatKey: string) => {
+    if (worker.queue.length || worker.activeTasks.size) return;
+    if (workers.get(chatKey) !== worker) return;
+    workers.delete(chatKey);
+    void Promise.resolve()
+      .then(() => deps.onIdle?.(chatKey))
+      .catch((error: any) => {
+        deps.logger?.warn?.(
+          `chat inbox worker idle callback failed chatKey=${chatKey} err=${safeString(error?.message || error)}`,
+        );
+      });
+  };
 
   const startPreparedTask = (
     worker: ChatKeyWorker<T>,
@@ -50,9 +64,7 @@ export function createChatKeyWorkerPool<T>(deps: {
       })
       .finally(() => {
         worker.activeTasks.delete(task);
-        if (!worker.queue.length && !worker.activeTasks.size) {
-          workers.delete(chatKey);
-        }
+        releaseIdleWorker(worker, chatKey);
       });
     worker.activeTasks.add(task);
     return task;
@@ -92,7 +104,7 @@ export function createChatKeyWorkerPool<T>(deps: {
       } finally {
         worker.pumping = false;
         if (worker.queue.length) pump(chatKey);
-        else if (!worker.activeTasks.size) workers.delete(chatKey);
+        else releaseIdleWorker(worker, chatKey);
       }
     })().catch((error: any) => {
       worker.pumping = false;

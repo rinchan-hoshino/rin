@@ -105,14 +105,16 @@ export function createChatInboxDrain(deps: {
     envelope: ChatInboxItem,
     controller: ChatController,
   ) => boolean | Promise<boolean>;
+  isPriorityDuringActiveChatKeyWorker?: (
+    envelope: ChatInboxItem,
+    controller: ChatController,
+  ) => boolean;
   logger?: { warn?: (...args: any[]) => void };
 }) {
   const activeAdmissionChatKeys = new Set<string>();
   let requestDrainChatInbox: () => void = () => {};
 
   const drainChatInboxOnce = async () => {
-    const claimedChatKeys = new Set<string>();
-
     const claimPendingItem = (
       pending: ChatInboxItem,
       pendingController: ChatController,
@@ -146,26 +148,59 @@ export function createChatInboxDrain(deps: {
         return "consumed";
       }
       deps.enqueueClaimedInboxItem({ envelope });
-      claimedChatKeys.add(envelope.chatKey);
       return "claimed";
     };
 
+    const prioritizeActiveCandidates = (
+      pendingItems: ChatInboxItem[],
+      controller: ChatController,
+    ) => {
+      if (!deps.isPriorityDuringActiveChatKeyWorker) return pendingItems;
+      const priority: ChatInboxItem[] = [];
+      const ordinary: ChatInboxItem[] = [];
+      for (const pending of pendingItems) {
+        (deps.isPriorityDuringActiveChatKeyWorker(pending, controller)
+          ? priority
+          : ordinary
+        ).push(pending);
+      }
+      return [...priority, ...ordinary];
+    };
+
     const scheduleAsyncBusyAdmission = (
-      pending: ChatInboxItem,
+      pendingItems: ChatInboxItem[],
       pendingController: ChatController,
       pendingChatKey: string,
-      admission: Promise<boolean>,
+      firstAdmission: Promise<boolean>,
     ) => {
-      claimedChatKeys.add(pendingChatKey);
       activeAdmissionChatKeys.add(pendingChatKey);
       let shouldRequestDrainAfterAdmission = false;
-      void admission
-        .then((canClaim) => {
-          if (!canClaim) return;
-          shouldRequestDrainAfterAdmission =
-            shouldRedrainAfterAsyncAdmissionResult(
-              claimPendingItem(pending, pendingController, pendingChatKey),
-            );
+      void (async () => {
+        for (let index = 0; index < pendingItems.length; index += 1) {
+          const pending = pendingItems[index]!;
+          const canClaim =
+            index === 0
+              ? await firstAdmission
+              : await deps.canClaimDuringActiveChatKeyWorker?.(
+                  pending,
+                  pendingController,
+                );
+          if (!canClaim) continue;
+          const result = claimPendingItem(
+            pending,
+            pendingController,
+            pendingChatKey,
+          );
+          if (result === "unavailable") continue;
+          return result;
+        }
+        return null;
+      })()
+        .then((result) => {
+          if (result !== null) {
+            shouldRequestDrainAfterAdmission =
+              shouldRedrainAfterAsyncAdmissionResult(result);
+          }
         })
         .catch((error: any) => {
           deps.logger?.warn?.(
@@ -178,33 +213,52 @@ export function createChatInboxDrain(deps: {
         });
     };
 
-    for (const pendingEnvelope of listPendingChatInboxItems(deps.agentDir)) {
-      const pendingChatKey = pendingEnvelope.chatKey;
+    const pendingByChatKey = new Map<string, ChatInboxItem[]>();
+    for (const pending of listPendingChatInboxItems(deps.agentDir)) {
+      const items = pendingByChatKey.get(pending.chatKey) || [];
+      items.push(pending);
+      pendingByChatKey.set(pending.chatKey, items);
+    }
+
+    for (const [pendingChatKey, pendingItems] of pendingByChatKey) {
       const pendingController = deps.getController(pendingChatKey);
-      const hasBusyChatKey = Boolean(
-        claimedChatKeys.has(pendingChatKey) ||
-        activeAdmissionChatKeys.has(pendingChatKey) ||
-        deps.hasActiveChatKeyWorker?.(pendingChatKey),
+      if (activeAdmissionChatKeys.has(pendingChatKey)) continue;
+      if (!deps.hasActiveChatKeyWorker?.(pendingChatKey)) {
+        const pending = pendingItems[0];
+        if (pending) {
+          claimPendingItem(pending, pendingController, pendingChatKey);
+        }
+        continue;
+      }
+      if (!pendingController?.hasActiveTurn?.()) continue;
+
+      const candidates = prioritizeActiveCandidates(
+        pendingItems,
+        pendingController,
       );
-      if (hasBusyChatKey) {
-        if (activeAdmissionChatKeys.has(pendingChatKey)) continue;
-        if (!(pendingController as any)?.hasActiveTurn?.()) continue;
+      for (let index = 0; index < candidates.length; index += 1) {
+        const pending = candidates[index]!;
         const admission = deps.canClaimDuringActiveChatKeyWorker?.(
-          pendingEnvelope,
+          pending,
           pendingController,
         );
         if (isPromiseLike(admission)) {
           scheduleAsyncBusyAdmission(
-            pendingEnvelope,
+            candidates.slice(index),
             pendingController,
             pendingChatKey,
             admission,
           );
-          continue;
+          break;
         }
         if (!admission) continue;
+        const result = claimPendingItem(
+          pending,
+          pendingController,
+          pendingChatKey,
+        );
+        if (result !== "unavailable") break;
       }
-      claimPendingItem(pendingEnvelope, pendingController, pendingChatKey);
     }
   };
 

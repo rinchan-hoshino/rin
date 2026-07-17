@@ -193,6 +193,43 @@ test("chat key worker treats undefined prepare rejection as an error", async () 
   ]);
 });
 
+test("chat key worker requests another inbox drain after a chat becomes idle", async () => {
+  const idleChatKeys: string[] = [];
+  const pool = createChatKeyWorkerPool<{ kind: string }>({
+    prepare: async () => ({ run: async () => {} }),
+    onIdle: (chatKey) => idleChatKeys.push(chatKey),
+  });
+
+  pool.enqueue("telegram/1:idle", { kind: "record-only" });
+
+  await waitUntil(
+    () => idleChatKeys.length === 1,
+    "idle worker did not request another drain",
+  );
+  assert.deepEqual(idleChatKeys, ["telegram/1:idle"]);
+});
+
+test("chat key worker reports synchronous idle callback errors", async () => {
+  const warnings: string[] = [];
+  const pool = createChatKeyWorkerPool<{ kind: string }>({
+    prepare: async () => ({ run: async () => {} }),
+    onIdle: () => {
+      throw new Error("idle failed");
+    },
+    logger: {
+      warn: (message) => warnings.push(String(message)),
+    },
+  });
+
+  pool.enqueue("telegram/1:idle-error", { kind: "record-only" });
+
+  await waitUntil(
+    () => warnings.length === 1,
+    "idle callback error was not reported",
+  );
+  assert.match(warnings[0], /idle callback failed.*idle failed/);
+});
+
 test("chat key worker releases queued jobs immediately after submission starts", async () => {
   const events: string[] = [];
   let releaseActive!: () => void;
