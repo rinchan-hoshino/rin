@@ -480,6 +480,11 @@ function normalizeLegacyOutboxState(value: unknown) {
     : "queued";
 }
 
+const NON_AUTHORITATIVE_OUTBOX_DIRECTORIES = new Set([
+  "archived-manual",
+  "invalid",
+]);
+
 function importLegacyOutbox(db: BetterSqlite3.Database, outboxRoot: string) {
   let fallbackSequence = Number(
     (
@@ -489,6 +494,10 @@ function importLegacyOutbox(db: BetterSqlite3.Database, outboxRoot: string) {
     )?.value || 0,
   );
   for (const filePath of collectJsonFiles(outboxRoot)) {
+    const topLevelDirectory = path
+      .relative(outboxRoot, filePath)
+      .split(path.sep, 1)[0];
+    if (NON_AUTHORITATIVE_OUTBOX_DIRECTORIES.has(topLevelDirectory)) continue;
     const item = readLegacyJson(filePath);
     const payload =
       item?.payload && typeof item.payload === "object" ? item.payload : item;

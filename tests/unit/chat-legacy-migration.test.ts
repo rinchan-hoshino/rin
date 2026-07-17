@@ -256,6 +256,58 @@ test("retired adapter archives with unqualified keys migrate from persisted iden
   );
 });
 
+test("non-authoritative manual and invalid outbox archives do not re-enter delivery", async () => {
+  const agentDir = await tempDir();
+  const chatRoot = path.join(agentDir, "data", "chat");
+  await writeJson(
+    path.join(chatRoot, "outbox", "items", "active.json"),
+    legacyOutbox("active-outbox"),
+  );
+  for (const directory of ["archived-manual", "invalid"]) {
+    await writeJson(
+      path.join(chatRoot, "outbox", directory, `${directory}.json`),
+      {
+        id: `${directory}-outbox`,
+        status: "queued",
+        createdAt: "2026-07-14T02:00:00.000Z",
+        payload: { chatKey: "telegram/1:2" },
+      },
+    );
+  }
+
+  const db = database.openChatDatabase(agentDir);
+  assert.equal(
+    outbox.readChatOutboxItemById(agentDir, "active-outbox")?.item.status,
+    "queued",
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS value FROM outbox").get().value,
+    1,
+  );
+  assert.ok(
+    await fs.stat(
+      path.join(
+        chatRoot,
+        "legacy-migrated-v1",
+        "outbox",
+        "archived-manual",
+        "archived-manual.json",
+      ),
+    ),
+  );
+  assert.ok(
+    await fs.stat(
+      path.join(
+        chatRoot,
+        "legacy-migrated-v1",
+        "outbox",
+        "invalid",
+        "invalid.json",
+      ),
+    ),
+  );
+});
+
 test("mismatched archived identity blocks authority cutover", async () => {
   const agentDir = await tempDir();
   await writeJson(
