@@ -16,6 +16,11 @@ const { WorkerPool } = await import(
     path.join(rootDir, "dist", "core", "rin-daemon", "worker-pool.js"),
   ).href
 );
+const { takePendingTerminalTurnEvent } = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-daemon", "pending-turn-events.js"),
+  ).href
+);
 
 const activeDirs = new Set<string>();
 const activePools = new Set<any>();
@@ -34,6 +39,66 @@ WorkerPool.prototype.createWorker = function trackedCreateWorker(...args) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function terminalTurnResult(payload: any, sessionFile: string) {
+  if (payload?.event === "error") {
+    throw new Error(String(payload.error || "rin_turn_failed"));
+  }
+  return {
+    finalText: String(payload?.finalText || ""),
+    result: payload?.result,
+    sessionFile: String(payload?.sessionFile || sessionFile),
+    sessionId: String(payload?.sessionId || ""),
+  };
+}
+
+async function resumeInterruptedTurnForTest(
+  pool: any,
+  item: { sessionFile: string; source?: string; requestTag?: string },
+) {
+  const sessionFile = path.resolve(item.sessionFile);
+  const selector = { sessionFile };
+  const requestTag = item.requestTag ?? `test-resume-${Date.now()}`;
+  const pendingTerminal = takePendingTerminalTurnEvent(
+    pool.options.agentDir,
+    selector,
+    { requestTag },
+  );
+  if (pendingTerminal) return terminalTurnResult(pendingTerminal, sessionFile);
+  const worker = await pool.ensureWorkerForSession(selector);
+  const pendingAfterSelection = takePendingTerminalTurnEvent(
+    pool.options.agentDir,
+    selector,
+    { requestTag },
+  );
+  if (pendingAfterSelection) {
+    return terminalTurnResult(pendingAfterSelection, sessionFile);
+  }
+  const followActiveTurn = Boolean(
+    worker.turnActive ||
+    worker.rpcTurnActive ||
+    worker.turnRecoveryPending ||
+    worker.isStreaming,
+  );
+  const { promise, waiter } = pool.waitForTerminalTurnEvent(
+    worker,
+    selector,
+    followActiveTurn ? undefined : requestTag,
+  );
+  if (!followActiveTurn) {
+    try {
+      await pool.sendInternalCommand(worker, {
+        type: "resume_interrupted_turn",
+        requestTag,
+        source: item.source || "test",
+      });
+    } catch (error) {
+      pool.terminalTurnWaiters.delete(waiter);
+      throw error;
+    }
+  }
+  return terminalTurnResult(await promise, sessionFile);
 }
 
 async function readCommandLog(logPath: string) {
@@ -1239,7 +1304,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("resumeInterruptedTurnSession resumes selected session and returns terminal result", async () => {
+test("test lifecycle helper resumes a selected session and returns its terminal result", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   const logPath = path.join(dir, "commands.log");
@@ -1282,14 +1347,14 @@ setInterval(() => {}, 1000);
   );
 
   const pool = new WorkerPool({ workerPath, cwd: dir, gcIdleMs: 50 });
-  const result = await pool.resumeInterruptedTurnSession({
+  const result = await resumeInterruptedTurnForTest(pool, {
     sessionFile: "/tmp/session.jsonl",
-    source: "scheduled-task",
+    source: "test-recovery",
     requestTag: "run-1",
   });
 
   assert.deepEqual(await readCommandLog(logPath), [
-    "resume_interrupted_turn:scheduled-task:run-1",
+    "resume_interrupted_turn:test-recovery:run-1",
   ]);
   assert.equal(result.finalText, "continued final");
   assert.equal(result.sessionFile, "/tmp/session.jsonl");
@@ -1299,7 +1364,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("resumeInterruptedTurnSession consumes its pending terminal without resuming again", async () => {
+test("test lifecycle helper consumes a pending terminal without resuming again", async () => {
   const dir = await makeTempDir("rin-worker-pool-pending-terminal-");
   const workerPath = path.join(dir, "worker-source");
   const logPath = path.join(dir, "commands.log");
@@ -1354,9 +1419,9 @@ setInterval(() => {}, 1000);
     agentDir: dir,
     gcIdleMs: 1000,
   });
-  const result = await pool.resumeInterruptedTurnSession({
+  const result = await resumeInterruptedTurnForTest(pool, {
     sessionFile,
-    source: "scheduled-task",
+    source: "test-recovery",
     requestTag: "scheduled:run-1",
   });
 
@@ -1372,7 +1437,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("resumeInterruptedTurnSession drops unowned terminals before forwarding or resolving", async () => {
+test("test lifecycle helper drops unowned terminals before forwarding or resolving", async () => {
   const dir = await makeTempDir("rin-worker-pool-active-terminal-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = path.join(dir, "session.jsonl");
@@ -1398,9 +1463,9 @@ test("resumeInterruptedTurnSession drops unowned terminals before forwarding or 
   assert.ok(worker);
 
   let settled = false;
-  const resultPromise = pool.resumeInterruptedTurnSession({
+  const resultPromise = resumeInterruptedTurnForTest(pool, {
     sessionFile,
-    source: "scheduled-task",
+    source: "test-recovery",
     requestTag: "run-1",
   });
   void resultPromise.then(() => {
@@ -1753,9 +1818,9 @@ test("a duplicate in-flight spaced command id cannot replace the lifecycle owner
     turnRecoveryPending: worker.turnRecoveryPending,
   };
   const stateBefore = await fs.readFile(statePath, "utf8");
-  const terminalWaiter = pool.resumeInterruptedTurnSession({
+  const terminalWaiter = resumeInterruptedTurnForTest(pool, {
     sessionFile,
-    source: "scheduled-task",
+    source: "test-recovery",
   });
 
   pool.requestWorker(
@@ -2005,9 +2070,9 @@ test("a delayed recovery intent cannot overwrite an owner installed while worker
     lifecycleEpoch: worker.lifecycleEpoch,
   };
   (pool as any).ensureWorkerForSession = originalEnsureWorkerForSession;
-  const terminalWaiter = pool.resumeInterruptedTurnSession({
+  const terminalWaiter = resumeInterruptedTurnForTest(pool, {
     sessionFile,
-    source: "scheduled-task",
+    source: "test-recovery",
   });
   await sleep(0);
   worker.turnRecoveryPending = false;
@@ -2104,9 +2169,9 @@ test("an overlapping get_state response cannot clear a prompt lifecycle owner", 
     },
     true,
   );
-  const terminalWaiter = pool.resumeInterruptedTurnSession({
+  const terminalWaiter = resumeInterruptedTurnForTest(pool, {
     sessionFile,
-    source: "scheduled-task",
+    source: "test-recovery",
   });
   let waiterSettled = false;
   void terminalWaiter.then(
@@ -2288,9 +2353,9 @@ test("overlapping prompt responses preserve the active lifecycle owner", async (
           sessionId: `session-${protocol}`,
         })}\n`,
       );
-      const terminalWaiter = pool.resumeInterruptedTurnSession({
+      const terminalWaiter = resumeInterruptedTurnForTest(pool, {
         sessionFile,
-        source: "scheduled-task",
+        source: "test-recovery",
       });
       let waiterSettled = false;
       void terminalWaiter.then(
@@ -2428,15 +2493,15 @@ test("explicit empty recovery tags remain empty through command ownership and du
   const worker = pool.restoreSessionWorker({ sessionFile });
   assert.ok(worker);
   pool.attachWorkerToConnection(connection, worker);
-  const resultPromise = pool.resumeInterruptedTurnSession({
+  const resultPromise = resumeInterruptedTurnForTest(pool, {
     sessionFile,
-    source: "scheduled-task",
+    source: "test-recovery",
     requestTag: "",
   });
   const commands = await waitForCommandLogPrefix(commandLogPath, [
     JSON.stringify({
       type: "resume_interrupted_turn",
-      source: "scheduled-task",
+      source: "test-recovery",
       requestTag: "",
       id: "rin_internal_1",
     }),
@@ -2626,9 +2691,9 @@ test("lifecycle request tags use exact raw string ownership", async () => {
         sessionId: "session-1",
       })}\n`,
     );
-    const terminalWaiter = pool.resumeInterruptedTurnSession({
+    const terminalWaiter = resumeInterruptedTurnForTest(pool, {
       sessionFile,
-      source: "scheduled-task",
+      source: "test-recovery",
     });
     let waiterSettled = false;
     void terminalWaiter.then(
@@ -2760,9 +2825,9 @@ test("owned lifecycle events reject malformed generation fields without side eff
       sessionId: "session-1",
     })}\n`,
   );
-  const terminalWaiter = pool.resumeInterruptedTurnSession({
+  const terminalWaiter = resumeInterruptedTurnForTest(pool, {
     sessionFile,
-    source: "scheduled-task",
+    source: "test-recovery",
   });
   let waiterSettled = false;
   void terminalWaiter.then(
@@ -2974,9 +3039,9 @@ test("legacy terminals with an empty tag cannot cross the owned session selector
       sessionId: "session-a",
     })}\n`,
   );
-  const resultPromise = pool.resumeInterruptedTurnSession({
+  const resultPromise = resumeInterruptedTurnForTest(pool, {
     sessionFile,
-    source: "scheduled-task",
+    source: "test-recovery",
   });
   let settled = false;
   void resultPromise.then(
@@ -3087,9 +3152,9 @@ test("an unowned versioned heartbeat cannot supersede active legacy lifecycle", 
       sessionFile,
     })}\n`,
   );
-  const legacyResult = pool.resumeInterruptedTurnSession({
+  const legacyResult = resumeInterruptedTurnForTest(pool, {
     sessionFile,
-    source: "scheduled-task",
+    source: "test-recovery",
   });
   let legacySettled = false;
   void legacyResult.then(
@@ -3209,9 +3274,9 @@ test("an owned versioned start supersedes legacy lifecycle before switching prot
       sessionFile,
     })}\n`,
   );
-  const legacyWaiter = pool.resumeInterruptedTurnSession({
+  const legacyWaiter = resumeInterruptedTurnForTest(pool, {
     sessionFile,
-    source: "scheduled-task",
+    source: "test-recovery",
   });
   const legacyRejected = assert.rejects(legacyWaiter, /rin_turn_superseded/);
   await sleep(0);

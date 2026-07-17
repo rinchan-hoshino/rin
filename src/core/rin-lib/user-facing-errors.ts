@@ -182,30 +182,20 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Scheduled task finished but produced no final reply. Check the task session.",
   cron_frontend_key_required: () =>
     "Scheduled task frontend binding needs a frontend key. Add the key or remove the binding.",
+  cron_frontend_tui_unbindable: () =>
+    "Scheduled tasks cannot bind to a TUI because TUI frontends are not addressable. Remove the task frontend binding.",
   cron_invalid_agent_task: () =>
     "Scheduled task configuration is not a valid agent task. Fix the task target.",
   cron_invalid_expression: () =>
     "Scheduled task cron expression is invalid. Fix the schedule.",
-  cron_invalid_session_continue_task: () =>
-    "Scheduled task configuration is not a valid current-session continuation task. Fix the task target.",
   cron_invalid_shell_task: () =>
     "Scheduled task configuration is not a valid shell task. Fix the task target.",
+  cron_invalid_target_kind: () =>
+    "Scheduled task target kind is invalid. Choose an agent prompt or shell command target.",
   cron_next_run_not_found: () =>
     "Scheduled task has no next run time. Check the schedule.",
   cron_prompt_required: () =>
     "Scheduled task needs a prompt before it can run. Add the prompt.",
-  cron_session_file_not_found: () =>
-    "Scheduled task session file was not found. Recreate or rebind the task session.",
-  cron_session_file_required: () =>
-    "Scheduled task needs a session file before it can run. Rebind the task session.",
-  cron_session_continue_frontend_forbidden: () =>
-    "Scheduled task current-session continuations cannot specify a separate frontend target. Remove the task frontend binding.",
-  cron_session_continue_requires_session: () =>
-    "Scheduled task current-session continuation needs a current-session mode with a session file.",
-  cron_session_continue_requires_target: () =>
-    "Scheduled task current-session continuation cannot include a prompt or command. Use the current-session continuation target.",
-  cron_session_continue_unavailable: () =>
-    "Scheduled task current-session continuation is unavailable because the daemon session worker bridge is not ready.",
   cron_target_required: () =>
     "Scheduled task needs a target before it can run. Choose a target.",
   cron_tasks_file_invalid: () =>

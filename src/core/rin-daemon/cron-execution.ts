@@ -15,7 +15,6 @@ import { resolveTurnCompletion } from "../session/turn-result.js";
 import { cronTaskRunId, nowIso, summarizeText } from "./cron-utils.js";
 import { normalizeScheduledTaskSessionMode } from "../scheduled-task-options.js";
 import { maintenanceHistoryPath } from "../self-improve/paths.js";
-import { resolveStoredSessionFile } from "../session/ref.js";
 import type {
   CronSessionInvocation,
   CronTaskFrontendBinding,
@@ -35,12 +34,6 @@ type CronChatCapability = {
     chatKey?: string;
   }) => Promise<any>;
 };
-
-type CronSessionResumeCapability = (payload: {
-  sessionFile: string;
-  source?: string;
-  requestTag?: string;
-}) => Promise<any>;
 
 export async function sendChatText(
   options: { chat?: CronChatCapability },
@@ -165,9 +158,10 @@ function resolveCronTaskFrontend(task: Pick<CronTaskRecord, "frontend">) {
   const frontend = (task as any).frontend as
     | CronTaskFrontendBinding
     | undefined;
+  const kind = String(frontend?.kind || "").trim() || undefined;
+  if (kind === "tui") return undefined;
   const key = String(frontend?.key || "").trim();
   if (!key) return undefined;
-  const kind = String(frontend?.kind || "").trim() || undefined;
   return {
     key,
     ...(kind ? { kind } : {}),
@@ -222,18 +216,6 @@ export function buildCronTaskPromptContext(
     taskContextKind: "scheduled-task",
     selfImproveEligible: true,
   };
-}
-
-function resolveCronSessionContinueSessionFile(
-  agentDir: string,
-  sessionFile: string,
-) {
-  const resolvedSessionFile = resolveStoredSessionFile(agentDir, sessionFile);
-  if (!resolvedSessionFile) throw new Error("cron_session_file_required");
-  if (!existsSync(resolvedSessionFile)) {
-    throw new Error("cron_session_file_not_found");
-  }
-  return resolvedSessionFile;
 }
 
 function isSelfImproveDistillationTask(task: CronTaskRecord) {
@@ -407,45 +389,6 @@ export async function executeCronAgentTask(
   };
 }
 
-export async function executeCronSessionContinueTask(
-  task: CronTaskRecord,
-  options: {
-    agentDir: string;
-    additionalExtensionPaths?: string[];
-    chat?: CronChatCapability;
-    resumeSessionTurn?: CronSessionResumeCapability;
-    runId?: string;
-  },
-) {
-  if ((task.session as any)?.mode !== "session_continue") {
-    throw new Error("cron_invalid_session_continue_task");
-  }
-  if (task.target.kind !== "session_continue") {
-    throw new Error("cron_session_continue_requires_target");
-  }
-  if (typeof options.resumeSessionTurn !== "function") {
-    throw new Error("cron_session_continue_unavailable");
-  }
-  const sessionFile = resolveCronSessionContinueSessionFile(
-    options.agentDir,
-    (task.session as any).sessionFile || "",
-  );
-  const result = await options.resumeSessionTurn({
-    sessionFile,
-    source: "scheduled-task",
-    requestTag:
-      options.runId || cronTaskRunId(task, task.lastStartedAt || nowIso()),
-  });
-  const completion = resolveTurnCompletion(result);
-  const finalText = summarizeText(completion.finalText, 4000);
-  if (!finalText) throw new Error("cron_final_assistant_text_missing");
-  return {
-    text: finalText,
-    sessionId: String(result?.sessionId || "").trim() || undefined,
-    sessionFile: String(result?.sessionFile || sessionFile).trim() || undefined,
-  };
-}
-
 export type CronTaskTerminal = {
   status: "completed" | "failed";
   text?: string;
@@ -457,22 +400,17 @@ export function createCronSessionInvocation(
   task: CronTaskRecord,
   agentDir: string,
 ): CronSessionInvocation {
-  if (
-    task.target.kind !== "agent_prompt" &&
-    task.target.kind !== "session_continue"
-  ) {
+  if (task.target.kind !== "agent_prompt") {
     throw new Error("cron_invalid_agent_task");
   }
   const startedAt = task.lastStartedAt || nowIso();
   const id = cronTaskRunId(task, startedAt);
   const sessionMode = normalizeScheduledTaskSessionMode(task.session.mode);
   const sessionFile =
-    sessionMode === "session_continue"
-      ? String(task.session.sessionFile || "").trim()
-      : sessionMode === "dedicated"
-        ? String(task.dedicatedSessionFile || "").trim() ||
-          getManagedTaskSessionFile(agentDir, task.id)
-        : getManagedTaskSessionFile(agentDir, id);
+    sessionMode === "dedicated"
+      ? String(task.dedicatedSessionFile || "").trim() ||
+        getManagedTaskSessionFile(agentDir, task.id)
+      : getManagedTaskSessionFile(agentDir, id);
   return {
     id,
     requestTag: `scheduled:${id}`,
@@ -539,16 +477,9 @@ export async function executeCronSessionInvocation(
     agentDir: string;
     additionalExtensionPaths?: string[];
     chat?: CronChatCapability;
-    resumeSessionTurn?: CronSessionResumeCapability;
   },
 ) {
   const task = taskFromSessionInvocation(invocation);
-  if (invocation.target.kind === "session_continue") {
-    return await executeCronSessionContinueTask(task, {
-      ...options,
-      runId: invocation.requestTag,
-    });
-  }
   return await executeCronAgentTask(task, {
     ...options,
     runId: invocation.requestTag,
@@ -633,30 +564,17 @@ export async function executeCronTask(
     agentDir: string;
     additionalExtensionPaths?: string[];
     chat?: CronChatCapability;
-    resumeSessionTurn?: CronSessionResumeCapability;
   },
 ) {
   const startedAt = task.lastStartedAt || nowIso();
   const runId = cronTaskRunId(task, startedAt);
-  const isSessionContinueTask = task.session.mode === "session_continue";
-  const showExternalWorking =
-    task.target.kind === "shell_command" && !isSessionContinueTask;
+  const showExternalWorking = task.target.kind === "shell_command";
   let terminal: CronTaskTerminal;
   try {
     if (showExternalWorking) {
       await setCronTaskFrontendWorking(task, options, true);
     }
-    if (isSessionContinueTask) {
-      const result = await executeCronSessionContinueTask(task, {
-        ...options,
-        runId,
-      });
-      terminal = {
-        status: "completed",
-        text: result.text,
-        sessionFile: result.sessionFile,
-      };
-    } else if (task.target.kind === "shell_command") {
+    if (task.target.kind === "shell_command") {
       const text = await executeCronShellTask(task, {
         agentDir: options.agentDir,
       });

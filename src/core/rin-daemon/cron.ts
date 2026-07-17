@@ -8,6 +8,10 @@ import {
 } from "../model-thinking-levels.js";
 import { writeJsonAtomic } from "../platform/fs.js";
 import { safeString } from "../platform/process.js";
+import {
+  normalizeFrontendIdentity,
+  type RinFrontendIdentity,
+} from "../rin-frontend-sdk/frontend-identity.js";
 import { shellQuote } from "../rin-lib/system.js";
 import {
   normalizeScheduledTaskSessionMode,
@@ -42,9 +46,6 @@ export type CronTaskTarget =
   | {
       kind: Extract<ScheduledTaskTargetKind, "shell_command">;
       command: string;
-    }
-  | {
-      kind: Extract<ScheduledTaskTargetKind, "session_continue">;
     };
 
 export type CronTaskTrigger = {
@@ -69,7 +70,6 @@ export type CronTaskCondition = {
 
 export type CronTaskSessionBinding = {
   mode: ScheduledTaskSessionMode;
-  sessionFile?: string;
 };
 
 export type CronTaskFrontendBinding = {
@@ -96,10 +96,7 @@ export type CronSessionInvocation = {
   thinkingLevel?: CronTaskThinkingLevel;
   disabledRinCapabilities?: string[];
   session: CronTaskSessionBinding;
-  target: Extract<
-    CronTaskTarget,
-    { kind: "agent_prompt" | "session_continue" }
-  >;
+  target: Extract<CronTaskTarget, { kind: "agent_prompt" }>;
   promptMeta: Record<string, unknown> & { sentAt: number };
 };
 
@@ -113,7 +110,7 @@ export type CronTaskRecord = {
     sessionFile?: string;
     sessionId?: string;
     sessionName?: string;
-    frontend?: CronTaskFrontendBinding;
+    frontend?: RinFrontendIdentity;
   };
   name?: string;
   enabled: boolean;
@@ -166,7 +163,7 @@ type CronTaskUpsertDefaults = {
   sessionFile?: string;
   sessionId?: string;
   sessionName?: string;
-  frontend?: CronTaskFrontendBinding;
+  frontend?: RinFrontendIdentity;
 };
 
 function normalizeThinkingLevel(
@@ -232,14 +229,7 @@ function normalizeTaskSession(session: CronTaskSessionBinding | undefined) {
       `cron_invalid_session_mode:${safeString((session as any)?.mode).trim() || "unknown"}`,
     );
   }
-  const normalizedSession: CronTaskSessionBinding = { mode: requestedMode };
-  if (requestedMode === "session_continue") {
-    normalizedSession.sessionFile = requireNonEmptyString(
-      session?.sessionFile,
-      "cron_session_file_required",
-    );
-  }
-  return { normalizedSession };
+  return { normalizedSession: { mode: requestedMode } };
 }
 
 function normalizeTaskTarget(target: CronTaskTarget | undefined) {
@@ -254,13 +244,15 @@ function normalizeTaskTarget(target: CronTaskTarget | undefined) {
       continuationPrompt: continuationPrompt || undefined,
     };
   }
-  if (target.kind === "session_continue") {
-    return { kind: "session_continue" as const };
+  if (target.kind === "shell_command") {
+    return {
+      kind: "shell_command" as const,
+      command: requireNonEmptyString(target.command, "cron_command_required"),
+    };
   }
-  return {
-    kind: "shell_command" as const,
-    command: requireNonEmptyString(target.command, "cron_command_required"),
-  };
+  throw new Error(
+    `cron_invalid_target_kind:${safeString((target as any).kind).trim() || "unknown"}`,
+  );
 }
 
 function normalizeTaskTermination(
@@ -307,11 +299,12 @@ function normalizeTaskFrontend(
 ): CronTaskFrontendBinding | undefined {
   if (frontend === null) return undefined;
   if (frontend === undefined) return existing?.frontend;
+  const kind = safeString((frontend as any).kind).trim() || undefined;
+  if (kind === "tui") throw new Error("cron_frontend_tui_unbindable");
   const key = requireNonEmptyString(
     (frontend as any).key,
     "cron_frontend_key_required",
   );
-  const kind = safeString((frontend as any).kind).trim() || undefined;
   return {
     ...(kind ? { kind } : {}),
     key,
@@ -500,13 +493,7 @@ function normalizeCronSessionInvocation(
   }
   const { normalizedSession: session } = normalizeTaskSession(raw.session);
   const target = normalizeTaskTarget(raw.target);
-  if (target.kind !== "agent_prompt" && target.kind !== "session_continue") {
-    throw new Error("cron_tasks_file_invalid");
-  }
-  if (
-    (session.mode === "session_continue") !==
-    (target.kind === "session_continue")
-  ) {
+  if (target.kind !== "agent_prompt") {
     throw new Error("cron_tasks_file_invalid");
   }
   const sessionFile = requireNonEmptyString(
@@ -549,6 +536,7 @@ export class CronScheduler {
   private activeExecutions = new Map<string, { startedAt: number }>();
   private timer: NodeJS.Timeout | null = null;
   private dispatching = false;
+  private persistenceBlocked = false;
 
   constructor(
     private options: {
@@ -567,18 +555,12 @@ export class CronScheduler {
           chatKey?: string;
         }) => Promise<any>;
       };
-      resumeSessionTurn?: (payload: {
-        sessionFile: string;
-        source?: string;
-        requestTag?: string;
-      }) => Promise<any>;
     },
   ) {}
 
   start() {
     if (!this.load({ persist: true })) {
-      this.installBuiltInTasks();
-      this.save();
+      throw new Error("cron_tasks_file_invalid");
     }
     this.resumeActiveInvocations();
     this.timer = setInterval(() => {
@@ -643,6 +625,7 @@ export class CronScheduler {
   }
 
   upsertTask(input: CronTaskInput, defaults: CronTaskUpsertDefaults = {}) {
+    this.assertPersistenceWritable();
     const existing = input.id ? this.tasks.get(String(input.id)) : undefined;
     assertMutableTask(existing);
     const id =
@@ -659,14 +642,7 @@ export class CronScheduler {
       input.trigger ?? existing?.trigger,
     );
     const rawSession = input.session ?? existing?.session;
-    const rawSessionMode = normalizeScheduledTaskSessionMode(
-      (rawSession as any)?.mode,
-    );
-    const { normalizedSession } = normalizeTaskSession(
-      rawSessionMode === "session_continue" && !(rawSession as any).sessionFile
-        ? { ...rawSession, sessionFile: defaults.sessionFile }
-        : rawSession,
-    );
+    const { normalizedSession } = normalizeTaskSession(rawSession);
     const session = normalizedSession;
     const model =
       input.model !== undefined
@@ -681,22 +657,9 @@ export class CronScheduler {
       input.disabledRinCapabilities,
       existing,
     );
-    const targetInput =
-      session.mode === "session_continue"
-        ? (input.target ??
-          (existing?.session?.mode === "session_continue"
-            ? existing?.target
-            : { kind: "session_continue" as const }))
-        : (input.target ?? existing?.target);
-    const normalizedTarget = normalizeTaskTarget(targetInput);
-    if (session.mode === "session_continue") {
-      if (frontend) throw new Error("cron_session_continue_frontend_forbidden");
-      if (normalizedTarget.kind !== "session_continue") {
-        throw new Error("cron_session_continue_requires_target");
-      }
-    } else if (normalizedTarget.kind === "session_continue") {
-      throw new Error("cron_session_continue_requires_session");
-    }
+    const normalizedTarget = normalizeTaskTarget(
+      input.target ?? existing?.target,
+    );
     const { dedicatedSessionFile, dedicatedSessionPersistent } =
       resolveDedicatedSessionBinding({
         agentDir: this.options.agentDir,
@@ -718,7 +681,7 @@ export class CronScheduler {
         sessionFile: defaults.sessionFile,
         sessionId: defaults.sessionId,
         sessionName: defaults.sessionName,
-        frontend: normalizeTaskFrontend(defaults.frontend, undefined),
+        frontend: normalizeFrontendIdentity(defaults.frontend),
       },
       name,
       enabled,
@@ -771,6 +734,7 @@ export class CronScheduler {
   }
 
   deleteTask(taskId: string) {
+    this.assertPersistenceWritable();
     const task = this.tasks.get(taskId);
     assertMutableTask(task);
     const ok = this.tasks.delete(taskId);
@@ -782,6 +746,7 @@ export class CronScheduler {
   }
 
   completeTask(taskId: string, reason = "completed_by_agent") {
+    this.assertPersistenceWritable();
     const task = this.tasks.get(taskId);
     assertMutableTask(task);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
@@ -797,6 +762,7 @@ export class CronScheduler {
   }
 
   pauseTask(taskId: string) {
+    this.assertPersistenceWritable();
     const task = this.tasks.get(taskId);
     assertMutableTask(task);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
@@ -811,6 +777,7 @@ export class CronScheduler {
   }
 
   resumeTask(taskId: string) {
+    this.assertPersistenceWritable();
     const task = this.tasks.get(taskId);
     assertMutableTask(task);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
@@ -823,6 +790,7 @@ export class CronScheduler {
   }
 
   rescheduleOneTimeTask(taskId: string, runAt: string) {
+    this.assertPersistenceWritable();
     const task = this.tasks.get(taskId);
     assertMutableTask(task);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
@@ -845,6 +813,7 @@ export class CronScheduler {
   }
 
   wakeTaskNow(taskId: string) {
+    this.assertPersistenceWritable();
     const task = this.tasks.get(taskId);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
     if (task.completedAt) throw new Error(`cron_task_completed:${taskId}`);
@@ -857,6 +826,7 @@ export class CronScheduler {
   }
 
   runTaskNow(taskId: string) {
+    this.assertPersistenceWritable();
     const task = this.tasks.get(taskId);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
     if (task.completedAt) throw new Error(`cron_task_completed:${taskId}`);
@@ -878,10 +848,7 @@ export class CronScheduler {
     } else {
       task.nextRunAt = undefined;
     }
-    if (
-      task.target.kind === "agent_prompt" ||
-      task.target.kind === "session_continue"
-    ) {
+    if (task.target.kind === "agent_prompt") {
       task.activeInvocation = createCronSessionInvocation(
         task,
         this.options.agentDir,
@@ -906,17 +873,33 @@ export class CronScheduler {
   ) {
     const file = cronTasksPath(this.options.agentDir);
     const rows = readCronTaskRows(file);
-    if (!rows) return false;
+    if (!rows) {
+      this.persistenceBlocked = true;
+      return false;
+    }
 
     const loadedTasks = new Map<string, CronTaskRecord>();
     try {
       for (const row of rows) {
-        if (!row || typeof row !== "object" || !row.id) continue;
+        if (!row || typeof row !== "object") {
+          throw new Error("cron_tasks_file_invalid");
+        }
+        const rowId = typeof row.id === "string" ? row.id.trim() : "";
+        if (!rowId || loadedTasks.has(rowId)) {
+          throw new Error("cron_tasks_file_invalid");
+        }
+        row.id = rowId;
         row.running = false;
         row.lastError = row.lastError ? safeString(row.lastError) : undefined;
         row.thinkingLevel = normalizeThinkingLevel(row.thinkingLevel);
         row.model = normalizeModelOverride(row.model);
         row.deliverFinal = row.deliverFinal !== false;
+        if (row.createdFrom?.frontend) {
+          row.createdFrom = {
+            ...row.createdFrom,
+            frontend: normalizeFrontendIdentity(row.createdFrom.frontend),
+          };
+        }
         const legacyChatKey = safeString((row as any).chatKey).trim();
         row.frontend = normalizeTaskFrontend(
           row.frontend ||
@@ -930,16 +913,7 @@ export class CronScheduler {
         if (rawSessionMode && !normalizedMode) {
           throw new Error(`cron_invalid_session_mode:${rawSessionMode}`);
         }
-        row.session =
-          normalizedMode === "session_continue"
-            ? {
-                mode: normalizedMode,
-                sessionFile: requireNonEmptyString(
-                  (row.session as any)?.sessionFile,
-                  "cron_session_file_required",
-                ),
-              }
-            : { mode: normalizedMode || "none" };
+        row.session = { mode: normalizedMode || "none" };
         row.trigger = normalizeTaskTrigger(row.trigger);
         row.condition = normalizeTaskCondition(row.condition, undefined);
         row.target = normalizeTaskTarget(row.target);
@@ -947,16 +921,6 @@ export class CronScheduler {
           row.activeInvocation,
           String(row.id),
         );
-        if (row.session.mode === "session_continue") {
-          if (row.frontend) {
-            throw new Error("cron_session_continue_frontend_forbidden");
-          }
-          if (row.target.kind !== "session_continue") {
-            throw new Error("cron_session_continue_requires_target");
-          }
-        } else if (row.target.kind === "session_continue") {
-          throw new Error("cron_session_continue_requires_session");
-        }
         if (row.session.mode === "dedicated") {
           row.dedicatedSessionPersistent = true;
           row.dedicatedSessionFile = getManagedTaskSessionFile(
@@ -972,14 +936,16 @@ export class CronScheduler {
           : row.activeInvocation
             ? safeString(row.nextRunAt).trim() || undefined
             : row.nextRunAt || computeNextRunAt(row, Date.now());
-        loadedTasks.set(String(row.id), row);
+        loadedTasks.set(rowId, row);
       }
     } catch {
+      this.persistenceBlocked = true;
       return false;
     }
 
     const previousTasks = this.tasks;
     this.tasks = loadedTasks;
+    this.persistenceBlocked = false;
     this.installBuiltInTasks();
     if (options.terminateRemovedActiveTasks) {
       for (const [taskId, previousTask] of previousTasks) {
@@ -1063,7 +1029,12 @@ export class CronScheduler {
     return this.getStatusSnapshot();
   }
 
+  private assertPersistenceWritable() {
+    if (this.persistenceBlocked) throw new Error("cron_tasks_file_invalid");
+  }
+
   private save() {
+    if (this.persistenceBlocked) return;
     writeJsonAtomic(
       cronTasksPath(this.options.agentDir),
       Array.from(this.tasks.values()).map((task) => this.persistedTask(task)),
@@ -1192,7 +1163,7 @@ export class CronScheduler {
   }
 
   private async tick() {
-    if (this.dispatching) return;
+    if (this.persistenceBlocked || this.dispatching) return;
     this.resumeActiveInvocations();
     this.dispatching = true;
     try {
@@ -1220,11 +1191,7 @@ export class CronScheduler {
   }
 
   private terminateTaskSession(task: CronTaskRecord | undefined) {
-    if (
-      !task ||
-      task.id.startsWith("builtin_self_improve_") ||
-      task.session.mode === "session_continue"
-    ) {
+    if (!task || task.id.startsWith("builtin_self_improve_")) {
       return;
     }
     const controllerKey =

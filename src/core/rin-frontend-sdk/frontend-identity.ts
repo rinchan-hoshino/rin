@@ -5,7 +5,7 @@ export type RinFrontendIdentity = {
   key?: string;
 };
 
-export const TUI_FRONTEND_IDENTITY: RinFrontendIdentity = { kind: "tui" };
+export const TUI_FRONTEND_IDENTITY = Object.freeze({ kind: "tui" } as const);
 
 export function normalizeFrontendIdentity(
   value: unknown,
@@ -13,6 +13,9 @@ export function normalizeFrontendIdentity(
   const identity = value as any;
   const kind = safeString(identity?.kind).trim();
   if (!kind) return undefined;
+  if (kind === TUI_FRONTEND_IDENTITY.kind) {
+    return { kind: TUI_FRONTEND_IDENTITY.kind };
+  }
   const key = safeString(identity?.key ?? identity?.id).trim();
   return key ? { kind, key } : { kind };
 }
@@ -31,6 +34,12 @@ export function sourceFrontendIdentity(source: string): RinFrontendIdentity {
 export function sameFrontendIdentity(left: unknown, right: unknown): boolean {
   const normalizedLeft = normalizeFrontendIdentity(left);
   const normalizedRight = normalizeFrontendIdentity(right);
+  if (
+    normalizedLeft?.kind === TUI_FRONTEND_IDENTITY.kind ||
+    normalizedRight?.kind === TUI_FRONTEND_IDENTITY.kind
+  ) {
+    return false;
+  }
   return Boolean(
     normalizedLeft &&
     normalizedRight &&
