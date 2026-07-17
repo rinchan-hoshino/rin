@@ -4,6 +4,7 @@ import path from "node:path";
 import { chatDataPath } from "../data-layout.js";
 import { safeString } from "../text-utils.js";
 import {
+  finalizeLegacyChatKeyMigration,
   migrateLegacyChatKeys,
   preflightLegacyChatKeys,
 } from "./chat-key-migration.js";
@@ -13,6 +14,10 @@ import {
   migrateChatDatabaseForInstall,
   preflightChatDatabaseMigrationForInstall,
 } from "./database.js";
+import {
+  retryUnresolvedLegacyChatKeyMessages,
+  validateResolvedChatKeyLedger,
+} from "./legacy-migration.js";
 import { listChatStateFiles } from "./support.js";
 
 function readInstalledSettings(settingsPath: string) {
@@ -63,6 +68,7 @@ export function preflightChatInstallMigrations(
     : path.join(agentDir, "settings.json");
   const settings = readInstalledSettings(settingsPath);
   const keyMigration = preflightLegacyChatKeys(agentDir, settings);
+  validateResolvedChatKeyLedger(agentDir);
   const database = preflightChatDatabaseMigrationForInstall(agentDir);
   const stateFiles = listChatStateFiles(
     chatDataPath(agentDir, "session-state"),
@@ -98,13 +104,33 @@ export function runChatInstallMigrations(
   );
   try {
     const db = migrateChatDatabaseForInstall(agentDir);
+    validateResolvedChatKeyLedger(agentDir);
+    const deferredRecords = keyMigration.alreadyApplied
+      ? {
+          resolvedRecords: 0,
+          unresolvedRecords: 0,
+          unresolvedRecordReasons: {},
+        }
+      : retryUnresolvedLegacyChatKeyMessages(agentDir, db);
+    const keyMigrationStatus = finalizeLegacyChatKeyMigration(agentDir, {
+      unresolvedSettings: keyMigration.unresolvedSettings,
+      unresolvedRecords: deferredRecords.unresolvedRecords,
+      unresolvedRecordReasons: deferredRecords.unresolvedRecordReasons,
+    });
     const sessionBindings = importInstalledLegacySessionBindings(agentDir);
     return {
       keyMigration: {
         id: keyMigration.id,
         alreadyApplied: keyMigration.alreadyApplied,
+        complete: keyMigrationStatus.complete,
         migratedRecords: keyMigration.migratedRecords,
         mergedRecords: keyMigration.mergedRecords,
+        resolvedRecords: keyMigration.resolvedRecords,
+        deferredResolvedRecords: deferredRecords.resolvedRecords,
+        unresolvedSettings: keyMigrationStatus.unresolvedSettings,
+        unresolvedRecords: keyMigrationStatus.unresolvedRecords,
+        unresolvedRecordReasons:
+          keyMigrationStatus.unresolvedRecordReasons || {},
       },
       database: {
         path: path.join(agentDir, "data", "chat", "chat.sqlite"),

@@ -107,6 +107,21 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     withDetail("Chat migration found invalid legacy session state", detail),
   chat_install_migration_invalid_settings: (detail) =>
     withDetail("Chat migration could not read the installed settings", detail),
+  chat_key_migration_invalid_marker: (detail) =>
+    withDetail("Chat migration found an invalid progress marker", detail),
+  chat_key_migration_marker_id_mismatch: () =>
+    "Chat migration found a progress marker owned by another migration.",
+  chat_key_migration_invalid_marker_state: () =>
+    "Chat migration found an incomplete progress marker state.",
+  chat_key_migration_invalid_resolved_ledger: (detail) =>
+    withDetail(
+      "Chat migration found an invalid resolved-record ledger",
+      detail,
+    ),
+  chat_key_migration_resolved_ledger_collision: () =>
+    "Chat migration found conflicting resolved-record ledger identities.",
+  chat_key_migration_invalid_resolved_ledger_entry: () =>
+    "Chat migration found a resolved-record ledger entry that does not match its archived message.",
   chat_legacy_migration_archive_collision: (detail) =>
     withDetail("Legacy chat migration found an existing archive", detail),
   chat_legacy_migration_invalid_inbox: (detail) =>

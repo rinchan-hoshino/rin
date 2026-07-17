@@ -183,7 +183,60 @@ test("chat key migration leaves retired platform archives untouched", async () =
   }
 });
 
-test("chat key migration fails closed for active settings without a bot identity", async () => {
+test("chat key migration treats legacy markers without complete as successful", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-key-legacy-marker-"),
+  );
+  try {
+    const markerPath = path.join(
+      agentDir,
+      "data",
+      "migrations",
+      "chat-key-v1.json",
+    );
+    await fs.mkdir(path.dirname(markerPath), { recursive: true });
+    await fs.writeFile(
+      markerPath,
+      JSON.stringify({ id: "chat-key-v1", appliedAt: "2026-07-01T00:00:00Z" }),
+    );
+    const preflight = migration.preflightLegacyChatKeys(agentDir, {
+      chat: { byChatKey: { "telegram:room": { quietMode: true } } },
+    });
+    assert.equal(preflight.alreadyApplied, true);
+    assert.equal(preflight.complete, true);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("chat key migration rejects malformed or unowned marker files", async () => {
+  for (const [name, content, expected] of [
+    ["malformed", "{bad json", /chat_key_migration_invalid_marker/],
+    ["unowned", "{}", /chat_key_migration_marker_id_mismatch/],
+  ] as const) {
+    const agentDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), `rin-chat-key-${name}-marker-`),
+    );
+    try {
+      const markerPath = path.join(
+        agentDir,
+        "data",
+        "migrations",
+        "chat-key-v1.json",
+      );
+      await fs.mkdir(path.dirname(markerPath), { recursive: true });
+      await fs.writeFile(markerPath, content);
+      assert.throws(
+        () => migration.preflightLegacyChatKeys(agentDir, {}),
+        expected,
+      );
+    } finally {
+      await fs.rm(agentDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("chat key migration reports unresolved settings without blocking migration", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-key-active-unresolved-"),
   );
@@ -199,16 +252,29 @@ test("chat key migration fails closed for active settings without a bot identity
     };
     await fs.writeFile(settingsPath, JSON.stringify(settings));
 
-    assert.throws(
-      () => migration.migrateLegacyChatKeys(agentDir, settingsPath, settings),
-      /chat_key_migration_unresolved_settings:1/,
+    const result = migration.migrateLegacyChatKeys(
+      agentDir,
+      settingsPath,
+      settings,
+    );
+    assert.equal(result.complete, false);
+    assert.equal(result.unresolvedSettings, 1);
+    assert.deepEqual(result.settings, settings);
+    assert.equal(
+      JSON.parse(
+        await fs.readFile(
+          path.join(agentDir, "data", "migrations", "chat-key-v1.json"),
+          "utf8",
+        ),
+      ).complete,
+      false,
     );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
 
-test("chat key migration fails closed for active records without a persisted bot identity", async () => {
+test("chat key migration preserves unresolved records without blocking migration", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-key-active-record-unresolved-"),
   );
@@ -246,20 +312,32 @@ test("chat key migration fails closed for active records without a persisted bot
       }),
     );
 
-    assert.throws(
-      () => migration.preflightLegacyChatKeys(agentDir, settings),
-      /chat_key_migration_unresolved_records:1/,
-    );
+    const preflight = migration.preflightLegacyChatKeys(agentDir, settings);
+    assert.equal(preflight.unresolvedRecords, 1);
+    assert.equal(preflight.complete, false);
     assert.deepEqual(
       JSON.parse(await fs.readFile(settingsPath, "utf8")),
       settings,
     );
-    assert.throws(
-      () => migration.migrateLegacyChatKeys(agentDir, settingsPath, settings),
-      /chat_key_migration_unresolved_records:1/,
+    const result = migration.migrateLegacyChatKeys(
+      agentDir,
+      settingsPath,
+      settings,
     );
-    await assert.rejects(
-      fs.access(path.join(agentDir, "data", "migrations", "chat-key-v1.json")),
+    assert.equal(result.unresolvedRecords, 1);
+    assert.equal(result.complete, false);
+    assert.equal(
+      JSON.parse(await fs.readFile(recordPath, "utf8")).chatKey,
+      chatKey,
+    );
+    assert.equal(
+      JSON.parse(
+        await fs.readFile(
+          path.join(agentDir, "data", "migrations", "chat-key-v1.json"),
+          "utf8",
+        ),
+      ).complete,
+      false,
     );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -446,6 +524,10 @@ test("chat key migration rewrites legacy settings and message records before rec
     );
 
     database.migrateChatDatabaseForInstall(agentDir);
+    migration.finalizeLegacyChatKeyMigration(agentDir, {
+      unresolvedSettings: 0,
+      unresolvedRecords: 0,
+    });
     const duplicate = messageStore.getChatMessage(
       agentDir,
       "lark/cli_bot:oc_same",

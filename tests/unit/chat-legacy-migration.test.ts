@@ -16,6 +16,11 @@ const rootDir = path.resolve(
 const database = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
 );
+const legacyMigration = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "chat", "legacy-migration.js"),
+  ).href
+);
 const inbox = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
 );
@@ -370,7 +375,7 @@ test("archived keys with slash and later colon cannot bypass identity validation
   );
 });
 
-test("active adapter unqualified keys remain invalid at SQLite cutover", async () => {
+test("active unqualified records defer without blocking SQLite cutover", async () => {
   const agentDir = await tempDir();
   await writeJson(
     path.join(
@@ -391,9 +396,24 @@ test("active adapter unqualified keys remain invalid at SQLite cutover", async (
     },
   );
 
-  assert.throws(
-    () => database.migrateChatDatabaseForInstall(agentDir),
-    /chat_legacy_migration_invalid_message_identity/,
+  const db = database.migrateChatDatabaseForInstall(agentDir);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS value FROM messages").get().value,
+    0,
+  );
+  const retry = legacyMigration.retryUnresolvedLegacyChatKeyMessages(
+    agentDir,
+    db,
+  );
+  assert.equal(retry.resolvedRecords, 1);
+  assert.equal(retry.unresolvedRecords, 0);
+  assert.equal(
+    db
+      .prepare(
+        "SELECT COUNT(*) AS value FROM messages WHERE chat_key = 'telegram/1:2'",
+      )
+      .get().value,
+    1,
   );
 });
 

@@ -5,9 +5,17 @@ import path from "node:path";
 import type BetterSqlite3 from "better-sqlite3";
 
 import { chatDataPath } from "../data-layout.js";
+import { writeJsonAtomic } from "../platform/fs.js";
 import { safeString } from "../text-utils.js";
 import { getChatMessageStoreLayout } from "./message-store-layout.js";
 import { validateChatOutboxPayloadParts } from "./outbox-payload-validation.js";
+import {
+  BOT_QUALIFIED_CHAT_PLATFORMS,
+  composeCanonicalChatKeyValue,
+  parseLegacyUnqualifiedChatKeyValue,
+  resolveLegacyChatKeyRecordBotIds,
+} from "./chat-key-record-resolution.js";
+import type { StoredChatMessage } from "./message-store.js";
 
 const MIGRATION_KEY = "legacy_control_migration";
 const MIGRATION_SOURCE_FINGERPRINT_KEY =
@@ -725,6 +733,10 @@ function importLegacyControlData(agentDir: string, db: BetterSqlite3.Database) {
   for (const recordsRoot of recordRoots) {
     for (const filePath of collectJsonFiles(recordsRoot)) {
       const raw = readLegacyJson(filePath);
+      const legacy = parseLegacyUnqualifiedChatKeyValue(raw?.chatKey);
+      if (legacy && BOT_QUALIFIED_CHAT_PLATFORMS.has(legacy.platform)) {
+        continue;
+      }
       const record = normalizeLegacyMessage(raw);
       const key = JSON.stringify([record.chatKey, record.messageId]);
       if (storedMessageKeys.has(key)) continue;
@@ -751,6 +763,261 @@ function importLegacyControlData(agentDir: string, db: BetterSqlite3.Database) {
   for (const outboxRoot of outboxRoots) {
     importLegacyOutbox(db, outboxRoot);
   }
+}
+
+const RESOLVED_CHAT_KEY_LEDGER = "chat-key-v1-resolved-records.json";
+
+type ResolvedChatKeyLedgerEntry = {
+  sourceChatKey: string;
+  messageId: string;
+  canonicalChatKey: string;
+  botId: string;
+  resolvedAt: string;
+};
+
+type ResolvedChatKeyLedger = {
+  version: 1;
+  records: Record<string, ResolvedChatKeyLedgerEntry>;
+};
+
+function resolvedChatKeyLedgerPath(agentDir: string) {
+  return path.join(agentDir, "data", "migrations", RESOLVED_CHAT_KEY_LEDGER);
+}
+
+function resolvedChatKeyLedgerRecordIdFromIdentity(
+  sourceChatKey: string,
+  messageId: string,
+) {
+  return hashKey(JSON.stringify([sourceChatKey, messageId]));
+}
+
+function readResolvedChatKeyLedger(agentDir: string): ResolvedChatKeyLedger {
+  const filePath = resolvedChatKeyLedgerPath(agentDir);
+  let text: string;
+  try {
+    text = fs.readFileSync(filePath, "utf8");
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return { version: 1, records: {} };
+    throw new Error(
+      `chat_key_migration_invalid_resolved_ledger:${safeString(error?.message || error)}`,
+    );
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (
+      parsed?.version !== 1 ||
+      !parsed.records ||
+      typeof parsed.records !== "object" ||
+      Array.isArray(parsed.records)
+    ) {
+      throw new Error("expected version 1 records object");
+    }
+    for (const [recordId, rawEntry] of Object.entries(parsed.records)) {
+      if (
+        !rawEntry ||
+        typeof rawEntry !== "object" ||
+        Array.isArray(rawEntry)
+      ) {
+        throw new Error("expected record entry object");
+      }
+      const entry = rawEntry as ResolvedChatKeyLedgerEntry;
+      const sourceChatKey = safeString(entry.sourceChatKey).trim();
+      const messageId = safeString(entry.messageId).trim();
+      const canonicalChatKey = safeString(entry.canonicalChatKey).trim();
+      const botId = safeString(entry.botId).trim();
+      const resolvedAt = safeString(entry.resolvedAt).trim();
+      const legacy = parseLegacyUnqualifiedChatKeyValue(sourceChatKey);
+      if (
+        !legacy ||
+        !BOT_QUALIFIED_CHAT_PLATFORMS.has(legacy.platform) ||
+        !messageId ||
+        !botId ||
+        canonicalChatKey !==
+          composeCanonicalChatKeyValue(legacy.platform, botId, legacy.chatId) ||
+        !Number.isFinite(Date.parse(resolvedAt)) ||
+        recordId !==
+          resolvedChatKeyLedgerRecordIdFromIdentity(sourceChatKey, messageId)
+      ) {
+        throw new Error("invalid record entry identity");
+      }
+    }
+    return parsed as ResolvedChatKeyLedger;
+  } catch (error: any) {
+    throw new Error(
+      `chat_key_migration_invalid_resolved_ledger:${safeString(error?.message || error)}`,
+    );
+  }
+}
+
+export function validateResolvedChatKeyLedger(agentDirInput: string) {
+  const ledger = readResolvedChatKeyLedger(path.resolve(agentDirInput));
+  return { records: Object.keys(ledger.records).length };
+}
+
+function resolvedChatKeyLedgerRecordId(record: StoredChatMessage) {
+  return resolvedChatKeyLedgerRecordIdFromIdentity(
+    safeString(record.chatKey).trim(),
+    safeString(record.messageId).trim(),
+  );
+}
+
+function unresolvedReasonCounts(reasons: string[]) {
+  const counts: Record<string, number> = {};
+  for (const reason of reasons) counts[reason] = (counts[reason] || 0) + 1;
+  return counts;
+}
+
+export function retryUnresolvedLegacyChatKeyMessages(
+  agentDirInput: string,
+  db: BetterSqlite3.Database,
+) {
+  const agentDir = path.resolve(agentDirInput);
+  const archivedRecords: StoredChatMessage[] = [];
+  const seenRecords = new Set<string>();
+  for (const group of legacyControlArchiveGroups(agentDir)) {
+    if (!group.key.startsWith("message-records")) continue;
+    for (const root of [group.source, group.archive]) {
+      for (const filePath of collectJsonFiles(root)) {
+        const raw = readLegacyJson(filePath) as StoredChatMessage;
+        const legacy = parseLegacyUnqualifiedChatKeyValue(raw?.chatKey);
+        if (!legacy || !BOT_QUALIFIED_CHAT_PLATFORMS.has(legacy.platform)) {
+          continue;
+        }
+        const key = JSON.stringify([
+          safeString(raw.chatKey).trim(),
+          safeString(raw.messageId).trim(),
+        ]);
+        if (seenRecords.has(key)) continue;
+        seenRecords.add(key);
+        archivedRecords.push(raw);
+      }
+    }
+  }
+  if (!archivedRecords.length) {
+    return {
+      resolvedRecords: 0,
+      unresolvedRecords: 0,
+      unresolvedRecordReasons: {},
+    };
+  }
+
+  const currentRecords = (
+    db.prepare(`SELECT record_json FROM messages`).all() as Array<{
+      record_json: string;
+    }>
+  )
+    .map((row) => {
+      try {
+        return JSON.parse(row.record_json) as StoredChatMessage;
+      } catch {
+        return null;
+      }
+    })
+    .filter((record): record is StoredChatMessage => Boolean(record));
+  const combined = [...currentRecords, ...archivedRecords];
+  const resolutions = resolveLegacyChatKeyRecordBotIds(combined).slice(
+    currentRecords.length,
+  );
+  const ledger = readResolvedChatKeyLedger(agentDir);
+  const nextLedger: ResolvedChatKeyLedger = {
+    version: 1,
+    records: { ...ledger.records },
+  };
+  const unresolvedReasons: string[] = [];
+  let addedLedgerEntries = 0;
+  archivedRecords.forEach((record, index) => {
+    const legacy = parseLegacyUnqualifiedChatKeyValue(record.chatKey);
+    const messageId = safeString(record.messageId).trim();
+    if (!messageId) {
+      throw new Error("chat_legacy_migration_invalid_message_identity");
+    }
+    const recordId = resolvedChatKeyLedgerRecordId(record);
+    const existing = nextLedger.records[recordId];
+    if (existing) {
+      if (
+        existing.sourceChatKey !== safeString(record.chatKey).trim() ||
+        existing.messageId !== messageId
+      ) {
+        throw new Error("chat_key_migration_resolved_ledger_collision");
+      }
+      return;
+    }
+    const resolution = resolutions[index];
+    const botId = safeString(resolution.botId).trim();
+    if (
+      !legacy ||
+      !botId ||
+      safeString(record.platform).trim() !== legacy.platform ||
+      safeString(record.chatId).trim() !== legacy.chatId
+    ) {
+      unresolvedReasons.push(resolution.reason || "invalid_identity");
+      return;
+    }
+    nextLedger.records[recordId] = {
+      sourceChatKey: safeString(record.chatKey).trim(),
+      messageId,
+      canonicalChatKey: composeCanonicalChatKeyValue(
+        legacy.platform,
+        botId,
+        legacy.chatId,
+      ),
+      botId,
+      resolvedAt: nowIso(),
+    };
+    addedLedgerEntries += 1;
+  });
+  if (addedLedgerEntries) {
+    // Freeze each accepted historical identity before mutating SQLite. A
+    // failed insert can then retry the same identity instead of reinterpreting
+    // later evidence and creating a second canonical copy.
+    writeJsonAtomic(resolvedChatKeyLedgerPath(agentDir), nextLedger);
+  }
+
+  const nextSequence = new Map<string, number>();
+  let resolvedRecords = 0;
+  for (const record of archivedRecords) {
+    const entry = nextLedger.records[resolvedChatKeyLedgerRecordId(record)];
+    if (!entry) continue;
+    const legacy = parseLegacyUnqualifiedChatKeyValue(record.chatKey);
+    const expectedChatKey = legacy
+      ? composeCanonicalChatKeyValue(
+          legacy.platform,
+          entry.botId,
+          legacy.chatId,
+        )
+      : "";
+    if (
+      !legacy ||
+      entry.canonicalChatKey !== expectedChatKey ||
+      safeString(record.platform).trim() !== legacy.platform ||
+      safeString(record.chatId).trim() !== legacy.chatId
+    ) {
+      throw new Error("chat_key_migration_invalid_resolved_ledger_entry");
+    }
+    const exists = db
+      .prepare(
+        `SELECT 1 FROM messages WHERE chat_key = ? AND message_id = ? LIMIT 1`,
+      )
+      .get(entry.canonicalChatKey, entry.messageId);
+    insertLegacyMessage(
+      db,
+      {
+        ...record,
+        recordKey: hashKey(`${entry.canonicalChatKey}\n${entry.messageId}`),
+        chatKey: entry.canonicalChatKey,
+        botId: entry.botId,
+        platform: legacy.platform,
+        chatId: legacy.chatId,
+      },
+      nextSequence,
+    );
+    if (!exists) resolvedRecords += 1;
+  }
+  return {
+    resolvedRecords,
+    unresolvedRecords: unresolvedReasons.length,
+    unresolvedRecordReasons: unresolvedReasonCounts(unresolvedReasons),
+  };
 }
 
 export function migrateLegacyChatControlData(

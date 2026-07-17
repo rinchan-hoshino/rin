@@ -18,17 +18,16 @@ import {
   sanitizePathSegment,
   type ChatMessageStoreLayout,
 } from "./message-store-layout.js";
+import {
+  BOT_QUALIFIED_CHAT_PLATFORMS,
+  composeCanonicalChatKeyValue,
+  parseCanonicalChatKeyValue,
+  parseLegacyUnqualifiedChatKeyValue,
+  resolveLegacyChatKeyRecordBotIds,
+  type LegacyChatKeyResolutionSource,
+} from "./chat-key-record-resolution.js";
 
 type BotIdMap = Record<string, string>;
-
-const BOT_QUALIFIED_CHAT_PLATFORMS = new Set([
-  "telegram",
-  "onebot",
-  "discord",
-  "lark",
-  "slack",
-  "minecraft",
-]);
 
 type SettingsRewriteResult = {
   settings: any;
@@ -168,26 +167,11 @@ export function inferChatBotIdsFromSettings(settings: unknown): BotIdMap {
 }
 
 export function parseLegacyUnqualifiedChatKey(chatKey: string) {
-  const match = safeString(chatKey)
-    .trim()
-    .match(/^([^/:]+):(.+)$/);
-  if (!match) return null;
-  const platform = normalizePlatform(match[1]);
-  const chatId = safeString(match[2]).trim();
-  if (!platform || !chatId) return null;
-  return { platform, chatId };
+  return parseLegacyUnqualifiedChatKeyValue(chatKey);
 }
 
 function parseCanonicalChatKey(chatKey: string) {
-  const match = safeString(chatKey)
-    .trim()
-    .match(/^([^/:]+)\/([^:]+):(.+)$/);
-  if (!match) return null;
-  const platform = normalizePlatform(match[1]);
-  const botId = normalizeBotId(match[2]);
-  const chatId = safeString(match[3]).trim();
-  if (!platform || !botId || !chatId) return null;
-  return { platform, botId, chatId };
+  return parseCanonicalChatKeyValue(chatKey);
 }
 
 function composeCanonicalChatKey(
@@ -195,11 +179,7 @@ function composeCanonicalChatKey(
   botId: string,
   chatId: string,
 ) {
-  const nextPlatform = normalizePlatform(platform);
-  const nextBotId = normalizeBotId(botId);
-  const nextChatId = safeString(chatId).trim();
-  if (!nextPlatform || !nextBotId || !nextChatId) return "";
-  return `${nextPlatform}/${nextBotId}:${nextChatId}`;
+  return composeCanonicalChatKeyValue(platform, botId, chatId);
 }
 
 export function canonicalizeStoredChatKey(
@@ -523,8 +503,23 @@ function updateMigratedRecordIndexes(
   }
 }
 
+type ResolvedRecordSummary = Record<LegacyChatKeyResolutionSource, number>;
+
+type UnresolvedRecord = {
+  filePath: string;
+  reason: string;
+};
+
+function emptyResolvedRecordSummary(): ResolvedRecordSummary {
+  return { persisted: 0, reply: 0, session: 0, neighbor: 0 };
+}
+
 function planLegacyMessageRecords(agentDir: string) {
   const layout = getChatMessageStoreLayout(agentDir);
+  const stored = listStoredRecordFiles(layout.primaryRoot.recordsDir);
+  const resolutions = resolveLegacyChatKeyRecordBotIds(
+    stored.map((item) => item.record),
+  );
   const candidates: Array<
     StoredRecordFile & {
       chatKey: string;
@@ -532,21 +527,24 @@ function planLegacyMessageRecords(agentDir: string) {
       targetPath: string;
     }
   > = [];
-  const unresolved: string[] = [];
-  for (const item of listStoredRecordFiles(layout.primaryRoot.recordsDir)) {
+  const unresolved: UnresolvedRecord[] = [];
+  const resolvedRecords = emptyResolvedRecordSummary();
+  stored.forEach((item, index) => {
     const legacy = parseLegacyUnqualifiedChatKey(item.record.chatKey);
-    if (!legacy || !BOT_QUALIFIED_CHAT_PLATFORMS.has(legacy.platform)) continue;
+    if (!legacy || !BOT_QUALIFIED_CHAT_PLATFORMS.has(legacy.platform)) return;
     const platform = safeString(item.record.platform).trim();
-    const botId = safeString(item.record.botId).trim();
     const chatId = safeString(item.record.chatId).trim();
-    if (!botId) {
-      unresolved.push(item.filePath);
-      continue;
+    const resolution = resolutions[index];
+    const botId = safeString(resolution.botId).trim();
+    if (!botId || legacy.platform !== platform || legacy.chatId !== chatId) {
+      unresolved.push({
+        filePath: item.filePath,
+        reason: resolution.reason || "invalid_identity",
+      });
+      return;
     }
-    if (legacy.platform !== platform || legacy.chatId !== chatId) {
-      unresolved.push(item.filePath);
-      continue;
-    }
+    const source = resolution.source || "persisted";
+    resolvedRecords[source] += 1;
     const chatKey = composeCanonicalChatKey(platform, botId, chatId);
     const recordKey = buildChatMessageRecordKey(
       chatKey,
@@ -554,25 +552,21 @@ function planLegacyMessageRecords(agentDir: string) {
     );
     candidates.push({
       ...item,
+      record: { ...item.record, botId },
       chatKey,
       recordKey,
       targetPath: storedRecordPath(layout.primaryRoot.recordsDir, recordKey),
     });
-  }
-  if (unresolved.length) {
-    throw new Error(
-      `chat_key_migration_unresolved_records:${unresolved.length}`,
-    );
-  }
+  });
 
-  return { layout, candidates };
+  return { layout, candidates, unresolved, resolvedRecords };
 }
 
 function migrateLegacyMessageRecords(
   agentDir: string,
   planned = planLegacyMessageRecords(agentDir),
 ) {
-  const { layout, candidates } = planned;
+  const { layout, candidates, unresolved, resolvedRecords } = planned;
   let mergedRecords = 0;
   for (const candidate of candidates) {
     let current: StoredChatMessage | null = null;
@@ -616,7 +610,13 @@ function migrateLegacyMessageRecords(
       fs.rmSync(candidate.filePath, { force: true });
     }
   }
-  return { migratedRecords: candidates.length, mergedRecords };
+  return {
+    migratedRecords: candidates.length,
+    mergedRecords,
+    unresolvedRecords: unresolved.length,
+    unresolvedRecordDetails: unresolved,
+    resolvedRecords,
+  };
 }
 
 function chatKeyMigrationMarkerPath(agentDir: string) {
@@ -626,6 +626,63 @@ function chatKeyMigrationMarkerPath(agentDir: string) {
     "migrations",
     `${CHAT_KEY_MIGRATION_ID}.json`,
   );
+}
+
+type ChatKeyMigrationMarker = {
+  id?: string;
+  complete?: boolean;
+  pendingAuthorityFinalize?: boolean;
+  appliedAt?: string;
+  updatedAt?: string;
+  migratedSettings?: number;
+  migratedRecords?: number;
+  mergedRecords?: number;
+  unresolvedSettings?: number;
+  unresolvedRecords?: number;
+  unresolvedRecordReasons?: Record<string, number>;
+};
+
+function readChatKeyMigrationMarker(markerPath: string) {
+  let text: string;
+  try {
+    text = fs.readFileSync(markerPath, "utf8");
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    const marker = JSON.parse(text);
+    if (!isJsonRecord(marker)) throw new Error("expected object");
+    return marker as ChatKeyMigrationMarker;
+  } catch (error: any) {
+    throw new Error(
+      `chat_key_migration_invalid_marker:${safeString(error?.message || error)}`,
+    );
+  }
+}
+
+function isCompleteChatKeyMigrationMarker(
+  marker: ChatKeyMigrationMarker | null,
+) {
+  if (!marker) return false;
+  if (marker.id !== CHAT_KEY_MIGRATION_ID) {
+    throw new Error("chat_key_migration_marker_id_mismatch");
+  }
+  if (marker.complete === false) return false;
+  if (
+    (marker.complete === true || marker.complete === undefined) &&
+    Number.isFinite(Date.parse(safeString(marker.appliedAt).trim()))
+  ) {
+    return true;
+  }
+  throw new Error("chat_key_migration_invalid_marker_state");
+}
+
+function summarizeUnresolvedRecords(records: UnresolvedRecord[]) {
+  const counts: Record<string, number> = {};
+  for (const record of records)
+    counts[record.reason] = (counts[record.reason] || 0) + 1;
+  return counts;
 }
 
 function planLegacyChatKeyMigration(agentDir: string, settings: unknown) {
@@ -638,23 +695,23 @@ function planLegacyChatKeyMigration(agentDir: string, settings: unknown) {
       );
     },
   );
-  if (unresolvedActiveSettings.length) {
-    throw new Error(
-      `chat_key_migration_unresolved_settings:${unresolvedActiveSettings.length}`,
-    );
-  }
   const records = planLegacyMessageRecords(agentDir);
-  return { rewrittenSettings, records };
+  return { rewrittenSettings, unresolvedActiveSettings, records };
 }
 
 export function preflightLegacyChatKeys(agentDir: string, settings: unknown) {
   const markerPath = chatKeyMigrationMarkerPath(agentDir);
-  if (fs.existsSync(markerPath)) {
+  const marker = readChatKeyMigrationMarker(markerPath);
+  if (isCompleteChatKeyMigrationMarker(marker)) {
     return {
       id: CHAT_KEY_MIGRATION_ID,
       markerPath,
       alreadyApplied: true,
+      complete: true,
       migratedRecords: 0,
+      unresolvedSettings: 0,
+      unresolvedRecords: 0,
+      resolvedRecords: emptyResolvedRecordSummary(),
     };
   }
   const plan = planLegacyChatKeyMigration(agentDir, settings);
@@ -662,7 +719,14 @@ export function preflightLegacyChatKeys(agentDir: string, settings: unknown) {
     id: CHAT_KEY_MIGRATION_ID,
     markerPath,
     alreadyApplied: false,
+    complete: false,
     migratedRecords: plan.records.candidates.length,
+    unresolvedSettings: plan.unresolvedActiveSettings.length,
+    unresolvedRecords: Math.max(
+      plan.records.unresolved.length,
+      Number(marker?.unresolvedRecords || 0),
+    ),
+    resolvedRecords: plan.records.resolvedRecords,
   };
 }
 
@@ -672,19 +736,27 @@ export function migrateLegacyChatKeys(
   settings: unknown,
 ) {
   const markerPath = chatKeyMigrationMarkerPath(agentDir);
-  if (fs.existsSync(markerPath)) {
+  const marker = readChatKeyMigrationMarker(markerPath);
+  if (isCompleteChatKeyMigrationMarker(marker)) {
     return {
       id: CHAT_KEY_MIGRATION_ID,
       markerPath,
       alreadyApplied: true,
+      complete: true,
       migratedRecords: 0,
       mergedRecords: 0,
+      unresolvedSettings: 0,
+      unresolvedRecords: 0,
+      resolvedRecords: emptyResolvedRecordSummary(),
       settings,
     };
   }
 
-  const { rewrittenSettings, records: plannedRecords } =
-    planLegacyChatKeyMigration(agentDir, settings);
+  const {
+    rewrittenSettings,
+    unresolvedActiveSettings,
+    records: plannedRecords,
+  } = planLegacyChatKeyMigration(agentDir, settings);
   const records = migrateLegacyMessageRecords(agentDir, plannedRecords);
   if (
     Object.keys(rewrittenSettings.rewritten).length ||
@@ -692,18 +764,63 @@ export function migrateLegacyChatKeys(
   ) {
     writeJsonAtomic(settingsPath, rewrittenSettings.settings);
   }
+  const unresolvedRecords = Math.max(
+    records.unresolvedRecords,
+    records.unresolvedRecords ? 0 : Number(marker?.unresolvedRecords || 0),
+  );
   writeJsonAtomic(markerPath, {
     id: CHAT_KEY_MIGRATION_ID,
-    appliedAt: nowIso(),
-    migratedSettings: Object.keys(rewrittenSettings.rewritten).length,
-    migratedRecords: records.migratedRecords,
-    mergedRecords: records.mergedRecords,
+    complete: false,
+    pendingAuthorityFinalize: true,
+    updatedAt: nowIso(),
+    migratedSettings:
+      Number(marker?.migratedSettings || 0) +
+      Object.keys(rewrittenSettings.rewritten).length,
+    migratedRecords:
+      Number(marker?.migratedRecords || 0) + records.migratedRecords,
+    mergedRecords: Number(marker?.mergedRecords || 0) + records.mergedRecords,
+    unresolvedSettings: unresolvedActiveSettings.length,
+    unresolvedRecords,
+    unresolvedRecordReasons:
+      records.unresolvedRecords > 0
+        ? summarizeUnresolvedRecords(records.unresolvedRecordDetails)
+        : marker?.unresolvedRecordReasons || {},
   });
   return {
     id: CHAT_KEY_MIGRATION_ID,
     markerPath,
     alreadyApplied: false,
+    complete: false,
     ...records,
+    unresolvedSettings: unresolvedActiveSettings.length,
+    unresolvedRecords,
     settings: rewrittenSettings.settings,
   };
+}
+
+export function finalizeLegacyChatKeyMigration(
+  agentDir: string,
+  input: {
+    unresolvedSettings: number;
+    unresolvedRecords: number;
+    unresolvedRecordReasons?: Record<string, number>;
+  },
+) {
+  const markerPath = chatKeyMigrationMarkerPath(agentDir);
+  const marker = readChatKeyMigrationMarker(markerPath) || {};
+  const complete =
+    input.unresolvedSettings === 0 && input.unresolvedRecords === 0;
+  const next = {
+    ...marker,
+    id: CHAT_KEY_MIGRATION_ID,
+    complete,
+    pendingAuthorityFinalize: false,
+    ...(complete ? { appliedAt: marker.appliedAt || nowIso() } : {}),
+    updatedAt: nowIso(),
+    unresolvedSettings: input.unresolvedSettings,
+    unresolvedRecords: input.unresolvedRecords,
+    unresolvedRecordReasons: input.unresolvedRecordReasons || {},
+  };
+  writeJsonAtomic(markerPath, next);
+  return { markerPath, complete, ...input };
 }
