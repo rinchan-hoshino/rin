@@ -50,6 +50,102 @@ function createLauncherDeps(options: { metadata?: any } = {}) {
   };
 }
 
+test("managed runtime transition attempts restart when stop reports failure", async () => {
+  const events: string[] = [];
+  await assert.rejects(
+    finalize.runManagedRuntimeTransition({
+      stop: async () => {
+        events.push("stop");
+        throw new Error("stop incomplete");
+      },
+      mutate: async () => events.push("mutate"),
+      activate: async () => events.push("activate"),
+      restart: async () => events.push("restart"),
+    }),
+    /stop incomplete/,
+  );
+  assert.deepEqual(events, ["stop", "restart"]);
+});
+
+test("managed runtime transition restarts the current runtime after mutation failure", async () => {
+  const events: string[] = [];
+  const failure = new Error("migration failed");
+  await assert.rejects(
+    finalize.runManagedRuntimeTransition({
+      stop: async () => events.push("stop"),
+      mutate: async () => {
+        events.push("mutate");
+        throw failure;
+      },
+      activate: async () => events.push("activate"),
+      restart: async () => events.push("restart"),
+    }),
+    (error: unknown) => error === failure,
+  );
+  assert.deepEqual(events, ["stop", "mutate", "restart"]);
+});
+
+test("managed runtime transition restarts after activation failure", async () => {
+  const events: string[] = [];
+  await assert.rejects(
+    finalize.runManagedRuntimeTransition({
+      stop: async () => events.push("stop"),
+      mutate: async () => {
+        events.push("mutate");
+        return "migrated";
+      },
+      activate: async () => {
+        events.push("activate");
+        throw new Error("activation failed");
+      },
+      restart: async () => events.push("restart"),
+    }),
+    /activation failed/,
+  );
+  assert.deepEqual(events, ["stop", "mutate", "activate", "restart"]);
+});
+
+test("managed runtime transition does not loop when restart itself fails", async () => {
+  const events: string[] = [];
+  await assert.rejects(
+    finalize.runManagedRuntimeTransition({
+      stop: async () => events.push("stop"),
+      mutate: async () => {
+        events.push("mutate");
+        return "migrated";
+      },
+      activate: async () => events.push("activate"),
+      restart: async () => {
+        events.push("restart");
+        throw new Error("restart failed");
+      },
+    }),
+    /restart failed/,
+  );
+  assert.deepEqual(events, ["stop", "mutate", "activate", "restart"]);
+});
+
+test("managed runtime transition reports both mutation and recovery failures", async () => {
+  const mutationFailure = new Error("migration failed");
+  const restartFailure = new Error("restart failed");
+  await assert.rejects(
+    finalize.runManagedRuntimeTransition({
+      stop: async () => {},
+      mutate: async () => {
+        throw mutationFailure;
+      },
+      activate: async () => {},
+      restart: async () => {
+        throw restartFailure;
+      },
+    }),
+    (error: any) =>
+      error instanceof AggregateError &&
+      error.errors[0] === mutationFailure &&
+      error.errors[1] === restartFailure,
+  );
+});
+
 test("core update launcher refresh rewrites the target user's launchers", () => {
   const { calls, deps } = createLauncherDeps();
   const result = finalize.refreshCoreUpdateLaunchers(

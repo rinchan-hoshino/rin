@@ -30,7 +30,7 @@ test("rin restart performs one managed restart and waits only for daemon availab
   assert.doesNotMatch(restartBlock, /waitForDaemonDrain/);
 });
 
-test("rin update writes service files passively, restarts once, and waits for the socket", () => {
+test("rin update preflights, stops, migrates, activates, and restarts in order", () => {
   const finalize = source("src/core/rin-install/finalize.ts");
   const restartBlock = finalize.slice(
     finalize.indexOf("function managedRuntimeServiceFromInstallSpec"),
@@ -38,16 +38,28 @@ test("rin update writes service files passively, restarts once, and waits for th
   );
 
   assert.match(restartBlock, /tryManagedServiceAction\([\s\S]*"restart"/);
-  const persistIndex = restartBlock.indexOf("const written =");
+  const preflightIndex = restartBlock.indexOf(
+    "preflightInstallUpgradeMigrations",
+  );
   const stopIndex = restartBlock.indexOf('"stop"');
-  const restartIndex = restartBlock.indexOf('"restart"', persistIndex);
+  const mutateIndex = restartBlock.indexOf("mutate: writeInstalledState");
+  const activateIndex = restartBlock.indexOf("activate:", mutateIndex);
+  const restartIndex = restartBlock.indexOf("restart:", activateIndex);
   assert.ok(
-    stopIndex >= 0 && stopIndex < persistIndex,
+    preflightIndex >= 0 && preflightIndex < stopIndex,
+    "read-only migration preflight must finish before daemon stop",
+  );
+  assert.ok(
+    stopIndex >= 0 && stopIndex < mutateIndex,
     "the old daemon must stop before installer-owned migrations",
   );
   assert.ok(
-    persistIndex >= 0 && persistIndex < restartIndex,
-    "installer persistence and migrations must finish before daemon restart",
+    mutateIndex >= 0 && mutateIndex < activateIndex,
+    "migrations must finish before runtime activation",
+  );
+  assert.ok(
+    activateIndex >= 0 && activateIndex < restartIndex,
+    "runtime activation must finish before daemon restart",
   );
   assert.match(restartBlock, /waitForSocket/);
   assert.doesNotMatch(restartBlock, /queryInstalledDaemonStatus/);

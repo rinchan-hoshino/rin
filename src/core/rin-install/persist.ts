@@ -2,7 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { runChatInstallMigrations } from "../chat/install-migration.js";
+import {
+  preflightChatInstallMigrations,
+  runChatInstallMigrations,
+} from "../chat/install-migration.js";
 import { normalizeStoredChatSettings } from "../chat/settings.js";
 import { stripRemovedBuiltInRinExtensionEntries } from "../rin-bundled-extensions.js";
 import {
@@ -827,6 +830,36 @@ function removeInstalledBrowseRuntime(
   };
 }
 
+function preflightInstalledChatAuthority(
+  options: InstallMigrationOptions & { installDir: string },
+  deps: InstallMigrationCommandDeps,
+) {
+  const runtimeRoot = safeString(options.migrationRuntimeRoot).trim();
+  if (!runtimeRoot) return null;
+  if (options.elevated) {
+    const runnerPath = path.join(
+      runtimeRoot,
+      "dist",
+      "app",
+      "rin-install",
+      "chat-migrations.js",
+    );
+    runMigrationCommandAsTargetUser(
+      options,
+      deps,
+      safeString(options.targetNodePath).trim() || process.execPath,
+      [runnerPath, "--preflight", path.resolve(options.installDir)],
+    );
+  } else {
+    preflightChatInstallMigrations(options.installDir);
+  }
+  return {
+    id: "chat-authority-install-migration-v1-preflight",
+    skipped: false,
+    executedAs: options.targetUser,
+  };
+}
+
 function migrateInstalledChatAuthority(
   options: InstallMigrationOptions & { installDir: string },
   deps: InstallMigrationCommandDeps,
@@ -858,6 +891,19 @@ function migrateInstalledChatAuthority(
     skipped: false,
     ...runChatInstallMigrations(options.installDir),
   };
+}
+
+export function preflightInstallUpgradeMigrations(
+  options: {
+    targetUser: string;
+    installDir: string;
+    elevated?: boolean;
+    migrationRuntimeRoot?: string;
+    targetNodePath?: string;
+  },
+  deps: InstallMigrationCommandDeps,
+) {
+  return [preflightInstalledChatAuthority(options, deps)].filter(Boolean);
 }
 
 export function applyInstallUpgradeMigrations(

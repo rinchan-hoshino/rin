@@ -247,6 +247,14 @@ test("chat key migration fails closed for active records without a persisted bot
     );
 
     assert.throws(
+      () => migration.preflightLegacyChatKeys(agentDir, settings),
+      /chat_key_migration_unresolved_records:1/,
+    );
+    assert.deepEqual(
+      JSON.parse(await fs.readFile(settingsPath, "utf8")),
+      settings,
+    );
+    assert.throws(
       () => migration.migrateLegacyChatKeys(agentDir, settingsPath, settings),
       /chat_key_migration_unresolved_records:1/,
     );

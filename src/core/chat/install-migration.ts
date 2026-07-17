@@ -3,11 +3,15 @@ import path from "node:path";
 
 import { chatDataPath } from "../data-layout.js";
 import { safeString } from "../text-utils.js";
-import { migrateLegacyChatKeys } from "./chat-key-migration.js";
+import {
+  migrateLegacyChatKeys,
+  preflightLegacyChatKeys,
+} from "./chat-key-migration.js";
 import {
   closeChatDatabase,
   importLegacyChatSessionBinding,
   migrateChatDatabaseForInstall,
+  preflightChatDatabaseMigrationForInstall,
 } from "./database.js";
 import { listChatStateFiles } from "./support.js";
 
@@ -47,6 +51,36 @@ function importInstalledLegacySessionBindings(agentDir: string) {
     }
   }
   return { scanned: stateFiles.length, imported };
+}
+
+export function preflightChatInstallMigrations(
+  agentDirInput: string,
+  settingsPathInput?: string,
+) {
+  const agentDir = path.resolve(agentDirInput);
+  const settingsPath = settingsPathInput
+    ? path.resolve(settingsPathInput)
+    : path.join(agentDir, "settings.json");
+  const settings = readInstalledSettings(settingsPath);
+  const keyMigration = preflightLegacyChatKeys(agentDir, settings);
+  const database = preflightChatDatabaseMigrationForInstall(agentDir);
+  const stateFiles = listChatStateFiles(
+    chatDataPath(agentDir, "session-state"),
+  );
+  for (const item of stateFiles) {
+    try {
+      JSON.parse(fs.readFileSync(item.statePath, "utf8"));
+    } catch (error: any) {
+      throw new Error(
+        `chat_install_migration_invalid_session_state:${item.statePath}:${String(error?.message || error)}`,
+      );
+    }
+  }
+  return {
+    keyMigration,
+    database,
+    sessionBindings: { scanned: stateFiles.length },
+  };
 }
 
 export function runChatInstallMigrations(

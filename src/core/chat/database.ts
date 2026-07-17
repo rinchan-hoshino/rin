@@ -442,6 +442,41 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
   }).immediate();
 }
 
+export function preflightChatDatabaseMigrationForInstall(agentDir: string) {
+  const dbPath = chatDatabasePath(agentDir);
+  if (!fs.existsSync(dbPath)) {
+    return {
+      path: dbPath,
+      fromVersion: 0,
+      toVersion: CHAT_DATABASE_SCHEMA_VERSION,
+    };
+  }
+  const db = new BetterSqlite3(dbPath, {
+    readonly: true,
+    fileMustExist: true,
+  });
+  try {
+    const currentVersion = Number(db.pragma("user_version", { simple: true }));
+    if (currentVersion > CHAT_DATABASE_SCHEMA_VERSION) {
+      throw new Error(`chat_database_future_schema:${currentVersion}`);
+    }
+    if (currentVersion === 0) {
+      if (readChatDatabaseTables(db).size) {
+        throw new Error("chat_database_partial_schema");
+      }
+    } else {
+      validateRecordedChatDatabaseSchema(db, currentVersion);
+    }
+    return {
+      path: dbPath,
+      fromVersion: currentVersion,
+      toVersion: CHAT_DATABASE_SCHEMA_VERSION,
+    };
+  } finally {
+    db.close();
+  }
+}
+
 export function migrateChatDatabaseForInstall(
   agentDir: string,
 ): BetterSqlite3.Database {

@@ -2,13 +2,20 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { runChatInstallMigrations } from "../../core/chat/install-migration.js";
+import {
+  preflightChatInstallMigrations,
+  runChatInstallMigrations,
+} from "../../core/chat/install-migration.js";
 
 export function main(args = process.argv.slice(2)) {
-  const installDir = String(args[0] || "").trim();
+  const preflight = args[0] === "--preflight";
+  const positional = preflight ? args.slice(1) : args;
+  const installDir = String(positional[0] || "").trim();
   if (!installDir)
     throw new Error("chat_install_migration_install_dir_required");
-  return runChatInstallMigrations(installDir, args[1]);
+  return preflight
+    ? preflightChatInstallMigrations(installDir, positional[1])
+    : runChatInstallMigrations(installDir, positional[1]);
 }
 
 const isDirectEntry =

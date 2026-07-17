@@ -932,6 +932,7 @@ export function publishInstalledRuntime(
   deps: {
     findSystemUser: (user: string) => any;
     release?: InstalledReleaseInfo;
+    activate?: boolean;
   },
 ) {
   const releaseRoot = installedReleaseRoot(
@@ -940,65 +941,125 @@ export function publishInstalledRuntime(
   );
   const currentLink = currentRuntimeRoot(installDir);
   const currentTmpLink = `${currentLink}.tmp`;
+  let stagedReleaseOwned = false;
   if (elevated && process.platform === "win32") {
     throw new Error("rin_elevated_install_unsupported_on_windows");
   }
-  if (elevated) {
-    const target = deps.findSystemUser(targetUser) as any;
-    const targetGroup = target?.name ? String(target?.gid ?? "") : "";
-    const owner = ownerSpec(target?.name, targetGroup);
-    ensurePrivilegedOwnedDir(
-      path.dirname(path.dirname(releaseRoot)),
-      target?.name,
-      targetGroup,
-    );
-    ensurePrivilegedOwnedDir(
-      path.dirname(releaseRoot),
-      target?.name,
-      targetGroup,
-    );
-    ensurePrivilegedOwnedDir(releaseRoot, target?.name, targetGroup);
+  const publish = () => {
+    if (deps.activate === false) {
+      if (elevated) {
+        const target = deps.findSystemUser(targetUser) as any;
+        const targetGroup = target?.name ? String(target?.gid ?? "") : "";
+        ensurePrivilegedOwnedDir(
+          path.dirname(path.dirname(releaseRoot)),
+          target?.name,
+          targetGroup,
+        );
+        ensurePrivilegedOwnedDir(
+          path.dirname(releaseRoot),
+          target?.name,
+          targetGroup,
+        );
+        runPrivileged("mkdir", [releaseRoot]);
+      } else {
+        ensureDir(path.dirname(releaseRoot));
+        fs.mkdirSync(releaseRoot);
+      }
+      stagedReleaseOwned = true;
+    }
+    if (elevated) {
+      const target = deps.findSystemUser(targetUser) as any;
+      const targetGroup = target?.name ? String(target?.gid ?? "") : "";
+      const owner = ownerSpec(target?.name, targetGroup);
+      ensurePrivilegedOwnedDir(
+        path.dirname(path.dirname(releaseRoot)),
+        target?.name,
+        targetGroup,
+      );
+      ensurePrivilegedOwnedDir(
+        path.dirname(releaseRoot),
+        target?.name,
+        targetGroup,
+      );
+      if (deps.activate !== false) {
+        ensurePrivilegedOwnedDir(releaseRoot, target?.name, targetGroup);
+      }
+      for (const name of RUNTIME_COPY_ENTRY_NAMES) {
+        const sourcePath = path.join(sourceRoot, name);
+        if (!fs.existsSync(sourcePath)) continue;
+        runPrivileged("rm", ["-rf", path.join(releaseRoot, name)]);
+        runPrivileged("cp", ["-a", sourcePath, path.join(releaseRoot, name)]);
+      }
+      runPrivileged(process.execPath, [
+        "-e",
+        `import(${JSON.stringify(new URL("./runtime-dependency-prune.js", import.meta.url).href)}).then((mod)=>mod.pruneDuplicatePiCodingAgentDependencies(process.argv[1]))`,
+        releaseRoot,
+      ]);
+      runPrivileged("touch", [releaseRoot]);
+      if (deps.activate !== false) {
+        try {
+          runPrivileged("rm", ["-rf", currentTmpLink]);
+        } catch {}
+        runPrivileged("ln", ["-s", releaseRoot, currentTmpLink]);
+        try {
+          runPrivileged("rm", ["-rf", currentLink]);
+        } catch {}
+        runPrivileged("mv", [currentTmpLink, currentLink]);
+      }
+      if (owner) {
+        runPrivileged("chown", ["-R", owner, releaseRoot]);
+        if (deps.activate !== false) {
+          try {
+            runPrivileged("chown", ["-h", owner, currentLink]);
+          } catch {}
+        }
+      }
+      return { releaseRoot, currentLink };
+    }
+    ensureDir(path.dirname(releaseRoot));
     for (const name of RUNTIME_COPY_ENTRY_NAMES) {
       const sourcePath = path.join(sourceRoot, name);
-      if (!fs.existsSync(sourcePath)) continue;
-      runPrivileged("rm", ["-rf", path.join(releaseRoot, name)]);
-      runPrivileged("cp", ["-a", sourcePath, path.join(releaseRoot, name)]);
+      if (fs.existsSync(sourcePath)) {
+        syncTree(sourcePath, path.join(releaseRoot, name));
+      }
     }
-    runPrivileged(process.execPath, [
-      "-e",
-      `import(${JSON.stringify(new URL("./runtime-dependency-prune.js", import.meta.url).href)}).then((mod)=>mod.pruneDuplicatePiCodingAgentDependencies(process.argv[1]))`,
-      releaseRoot,
-    ]);
-    runPrivileged("touch", [releaseRoot]);
+    pruneDuplicatePiCodingAgentDependencies(releaseRoot);
     try {
-      runPrivileged("rm", ["-rf", currentTmpLink]);
+      fs.utimesSync(releaseRoot, new Date(), new Date());
     } catch {}
-    runPrivileged("ln", ["-s", releaseRoot, currentTmpLink]);
-    try {
-      runPrivileged("rm", ["-rf", currentLink]);
-    } catch {}
-    runPrivileged("mv", [currentTmpLink, currentLink]);
-    if (owner) {
-      runPrivileged("chown", ["-R", owner, releaseRoot]);
-      try {
-        runPrivileged("chown", ["-h", owner, currentLink]);
-      } catch {}
+    if (deps.activate !== false) {
+      replaceCurrentRuntimeLink(currentLink, releaseRoot);
     }
     return { releaseRoot, currentLink };
-  }
-  ensureDir(path.dirname(releaseRoot));
-  for (const name of RUNTIME_COPY_ENTRY_NAMES) {
-    const sourcePath = path.join(sourceRoot, name);
-    if (fs.existsSync(sourcePath)) {
-      syncTree(sourcePath, path.join(releaseRoot, name));
-    }
-  }
-  pruneDuplicatePiCodingAgentDependencies(releaseRoot);
+  };
   try {
-    fs.utimesSync(releaseRoot, new Date(), new Date());
-  } catch {}
-  replaceCurrentRuntimeLink(currentLink, releaseRoot);
-  return { releaseRoot, currentLink };
+    return publish();
+  } catch (error) {
+    if (deps.activate === false && stagedReleaseOwned) {
+      try {
+        discardStagedInstalledRuntime(installDir, releaseRoot, elevated);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          "rin_staged_release_cleanup_failed",
+          { cause: error },
+        );
+      }
+    }
+    if (
+      deps.activate === false &&
+      !stagedReleaseOwned &&
+      listInstalledReleaseNames(installDir, elevated).includes(
+        path.basename(releaseRoot),
+      )
+    ) {
+      throw new Error(
+        `rin_staged_release_already_exists:${path.basename(releaseRoot)}`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
 }
 
 export type InstalledReleaseEntry = {
@@ -1140,6 +1201,31 @@ export function switchInstalledCurrentRelease(
   }
   replaceCurrentRuntimeLink(currentLink, targetRoot);
   return { releaseRoot: targetRoot, currentLink };
+}
+
+export function discardStagedInstalledRuntime(
+  installDir: string,
+  releaseRoot: string,
+  elevated = false,
+) {
+  const releasesDir = path.resolve(installedReleasesRoot(installDir));
+  const targetRoot = path.resolve(releaseRoot);
+  if (
+    !targetRoot.startsWith(`${releasesDir}${path.sep}`) ||
+    path.dirname(targetRoot) !== releasesDir
+  ) {
+    throw new Error(`rin_invalid_staged_release:${releaseRoot}`);
+  }
+  const releaseName = path.basename(targetRoot);
+  if (
+    !releaseName ||
+    currentInstalledReleaseName(installDir, elevated) === releaseName
+  ) {
+    return false;
+  }
+  if (elevated) runPrivileged("rm", ["-rf", targetRoot]);
+  else fs.rmSync(targetRoot, { recursive: true, force: true });
+  return true;
 }
 
 export function pruneInstalledReleases(

@@ -551,6 +551,78 @@ test("publishInstalledRuntime names releases from release version metadata", asy
   );
 });
 
+test("publishInstalledRuntime can stage a release without activating it", async () => {
+  const tempRoot = await makeRuntimeSource();
+  const installDir = await fs.mkdtemp(
+    path.join(tempBaseDir, "rin-install-stage-"),
+  );
+  const release = (version: string) => ({
+    channel: "stable",
+    version,
+    branch: "stable",
+    ref: `v${version}`,
+    sourceLabel: `stable ${version}`,
+    archiveUrl: `https://example.invalid/rin-${version}.tgz`,
+  });
+  fsUtils.publishInstalledRuntime(tempRoot, installDir, "rin", false, {
+    findSystemUser: () => null,
+    release: release("1.0.0"),
+  });
+  assert.throws(
+    () =>
+      fsUtils.publishInstalledRuntime(tempRoot, installDir, "rin", false, {
+        findSystemUser: () => null,
+        release: release("1.0.0"),
+        activate: false,
+      }),
+    /rin_staged_release_already_exists:1\.0\.0/,
+  );
+  assert.equal(fsUtils.currentInstalledReleaseName(installDir, false), "1.0.0");
+
+  const staged = fsUtils.publishInstalledRuntime(
+    tempRoot,
+    installDir,
+    "rin",
+    false,
+    {
+      findSystemUser: () => null,
+      release: release("2.0.0"),
+      activate: false,
+    },
+  );
+  assert.equal(fsUtils.currentInstalledReleaseName(installDir, false), "1.0.0");
+  await fs.access(staged.releaseRoot);
+  assert.throws(
+    () =>
+      fsUtils.publishInstalledRuntime(tempRoot, installDir, "rin", false, {
+        findSystemUser: () => null,
+        release: release("2.0.0"),
+        activate: false,
+      }),
+    /rin_staged_release_already_exists:2\.0\.0/,
+  );
+  await fs.access(staged.releaseRoot);
+  assert.equal(
+    fsUtils.discardStagedInstalledRuntime(
+      installDir,
+      staged.releaseRoot,
+      false,
+    ),
+    true,
+  );
+  await assert.rejects(fs.access(staged.releaseRoot));
+  fsUtils.publishInstalledRuntime(tempRoot, installDir, "rin", false, {
+    findSystemUser: () => null,
+    release: release("2.0.0"),
+    activate: false,
+  });
+
+  fsUtils.switchInstalledCurrentRelease(installDir, "2.0.0", "rin", false, {
+    findSystemUser: () => null,
+  });
+  assert.equal(fsUtils.currentInstalledReleaseName(installDir, false), "2.0.0");
+});
+
 test("publishManagedNodeRuntime provisions current node for source installs", async () => {
   const sourceRoot = await fs.mkdtemp(
     path.join(tempBaseDir, "rin-source-no-node-"),

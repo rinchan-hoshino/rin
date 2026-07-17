@@ -124,6 +124,80 @@ test("chat bridge startup never runs legacy key migration", async () => {
   }
 });
 
+test("installer migration preflight is read-only", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-installer-preflight-"),
+  );
+  const settingsPath = path.join(installDir, "settings.json");
+  const settings = {
+    chat: {
+      lark: { appId: "cli_bot", appSecret: "secret" },
+      byChatKey: { "lark:oc_same": { quietMode: true } },
+    },
+  };
+  await writeJson(settingsPath, settings);
+  try {
+    const preflight = installerPersist.preflightInstallUpgradeMigrations(
+      {
+        targetUser: "test-user",
+        installDir,
+        migrationRuntimeRoot: rootDir,
+      },
+      { runPrivileged() {} },
+    );
+    assert.ok(
+      preflight.some(
+        (migration) =>
+          migration.id === "chat-authority-install-migration-v1-preflight",
+      ),
+    );
+    assert.deepEqual(
+      JSON.parse(await fs.readFile(settingsPath, "utf8")),
+      settings,
+    );
+    await assert.rejects(
+      fs.access(
+        path.join(installDir, "data", "migrations", "chat-key-v1.json"),
+      ),
+    );
+    await assert.rejects(
+      fs.access(path.join(installDir, "data", "chat", "chat.sqlite")),
+    );
+  } finally {
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
+test("elevated installer preflight runs the staged migration as target user", async () => {
+  const calls: any[] = [];
+  installerPersist.preflightInstallUpgradeMigrations(
+    {
+      targetUser: "service-user",
+      installDir: "/srv/rin",
+      elevated: true,
+      migrationRuntimeRoot: "/srv/rin/app/releases/staged",
+      targetNodePath: "/srv/rin/runtime/node/current/bin/node",
+    },
+    {
+      runPrivileged() {},
+      runCommandAsUser(targetUser, command, args) {
+        calls.push({ targetUser, command, args });
+      },
+    },
+  );
+  assert.deepEqual(calls, [
+    {
+      targetUser: "service-user",
+      command: "/srv/rin/runtime/node/current/bin/node",
+      args: [
+        "/srv/rin/app/releases/staged/dist/app/rin-install/chat-migrations.js",
+        "--preflight",
+        "/srv/rin",
+      ],
+    },
+  ]);
+});
+
 test("installer upgrade migrations own chat key and SQLite authority migration", async () => {
   const installDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-installer-migration-"),

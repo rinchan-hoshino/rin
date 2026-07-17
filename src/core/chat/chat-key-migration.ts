@@ -523,7 +523,7 @@ function updateMigratedRecordIndexes(
   }
 }
 
-function migrateLegacyMessageRecords(agentDir: string) {
+function planLegacyMessageRecords(agentDir: string) {
   const layout = getChatMessageStoreLayout(agentDir);
   const candidates: Array<
     StoredRecordFile & {
@@ -565,6 +565,14 @@ function migrateLegacyMessageRecords(agentDir: string) {
     );
   }
 
+  return { layout, candidates };
+}
+
+function migrateLegacyMessageRecords(
+  agentDir: string,
+  planned = planLegacyMessageRecords(agentDir),
+) {
+  const { layout, candidates } = planned;
   let mergedRecords = 0;
   for (const candidate of candidates) {
     let current: StoredChatMessage | null = null;
@@ -620,6 +628,44 @@ function chatKeyMigrationMarkerPath(agentDir: string) {
   );
 }
 
+function planLegacyChatKeyMigration(agentDir: string, settings: unknown) {
+  const rewrittenSettings = rewriteSettingsChatKeys(settings);
+  const unresolvedActiveSettings = rewrittenSettings.unresolved.filter(
+    (key) => {
+      const legacy = parseLegacyUnqualifiedChatKey(key);
+      return Boolean(
+        legacy && BOT_QUALIFIED_CHAT_PLATFORMS.has(legacy.platform),
+      );
+    },
+  );
+  if (unresolvedActiveSettings.length) {
+    throw new Error(
+      `chat_key_migration_unresolved_settings:${unresolvedActiveSettings.length}`,
+    );
+  }
+  const records = planLegacyMessageRecords(agentDir);
+  return { rewrittenSettings, records };
+}
+
+export function preflightLegacyChatKeys(agentDir: string, settings: unknown) {
+  const markerPath = chatKeyMigrationMarkerPath(agentDir);
+  if (fs.existsSync(markerPath)) {
+    return {
+      id: CHAT_KEY_MIGRATION_ID,
+      markerPath,
+      alreadyApplied: true,
+      migratedRecords: 0,
+    };
+  }
+  const plan = planLegacyChatKeyMigration(agentDir, settings);
+  return {
+    id: CHAT_KEY_MIGRATION_ID,
+    markerPath,
+    alreadyApplied: false,
+    migratedRecords: plan.records.candidates.length,
+  };
+}
+
 export function migrateLegacyChatKeys(
   agentDir: string,
   settingsPath: string,
@@ -637,21 +683,9 @@ export function migrateLegacyChatKeys(
     };
   }
 
-  const rewrittenSettings = rewriteSettingsChatKeys(settings);
-  const unresolvedActiveSettings = rewrittenSettings.unresolved.filter(
-    (key) => {
-      const legacy = parseLegacyUnqualifiedChatKey(key);
-      return Boolean(
-        legacy && BOT_QUALIFIED_CHAT_PLATFORMS.has(legacy.platform),
-      );
-    },
-  );
-  if (unresolvedActiveSettings.length) {
-    throw new Error(
-      `chat_key_migration_unresolved_settings:${unresolvedActiveSettings.length}`,
-    );
-  }
-  const records = migrateLegacyMessageRecords(agentDir);
+  const { rewrittenSettings, records: plannedRecords } =
+    planLegacyChatKeyMigration(agentDir, settings);
+  const records = migrateLegacyMessageRecords(agentDir, plannedRecords);
   if (
     Object.keys(rewrittenSettings.rewritten).length ||
     Object.keys(rewrittenSettings.conflicts).length

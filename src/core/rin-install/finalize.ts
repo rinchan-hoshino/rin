@@ -6,6 +6,7 @@ import { type FinalizeInstallOptions } from "./apply-plan.js";
 import {
   launcherMetadataPathForUser,
   currentInstalledReleaseName,
+  discardStagedInstalledRuntime,
   ensureDir,
   publishInstalledRuntime,
   publishManagedNodeRuntime,
@@ -17,6 +18,7 @@ import {
   captureCommandAsUser,
   buildInstalledManagedFilesManifest,
   syncInstalledDocs,
+  switchInstalledCurrentRelease,
   writeJsonFile,
   writeJsonFileWithPrivilege,
   writeLaunchersForUser,
@@ -26,6 +28,7 @@ import { defaultInstallDirForHome, installedReleaseRoot } from "./paths.js";
 import {
   normalizeInstalledChatSettings,
   persistInstallerOutputs,
+  preflightInstallUpgradeMigrations,
   reconcileInstallerManifest,
 } from "./persist.js";
 import {
@@ -211,6 +214,42 @@ export function refreshCoreUpdateLaunchers(
   return { targetLaunchers, currentLaunchers: null };
 }
 
+export async function runManagedRuntimeTransition<
+  TMutation,
+  TActivation,
+>(steps: {
+  stop: () => unknown | Promise<unknown>;
+  mutate: () => TMutation | Promise<TMutation>;
+  activate: (mutation: TMutation) => TActivation | Promise<TActivation>;
+  restart: () => unknown | Promise<unknown>;
+}) {
+  let stopAttempted = false;
+  let restartAttempted = false;
+  try {
+    stopAttempted = true;
+    await steps.stop();
+    const mutation = await steps.mutate();
+    const activation = await steps.activate(mutation);
+    restartAttempted = true;
+    await steps.restart();
+    return { mutation, activation };
+  } catch (error) {
+    if (stopAttempted && !restartAttempted) {
+      try {
+        restartAttempted = true;
+        await steps.restart();
+      } catch (restartError) {
+        throw new AggregateError(
+          [error, restartError],
+          "rin_update_failure_recovery_restart_failed",
+          { cause: error },
+        );
+      }
+    }
+    throw error;
+  }
+}
+
 async function applyInstalledRuntime(
   options: FinalizeInstallOptions & {
     persistInstallerState?: boolean;
@@ -263,6 +302,9 @@ async function applyInstalledRuntime(
   const previousReleaseName = publishRuntime
     ? currentInstalledReleaseName(installDir, useElevatedWrite)
     : "";
+  const deferRuntimeActivation = Boolean(
+    publishRuntime && !persistInstallerState,
+  );
   const publishedRuntime = publishRuntime
     ? publishInstalledRuntime(
         sourceRoot,
@@ -272,132 +314,203 @@ async function applyInstalledRuntime(
         {
           findSystemUser,
           release,
+          activate: !deferRuntimeActivation,
         },
       )
     : { releaseRoot: "", currentLink: "" };
-  const currentReleaseName = publishedRuntime.releaseRoot
-    ? publishedRuntime.releaseRoot.split(/[\\/]/).pop() || ""
-    : "";
-  const installedDocs = syncInstalledDocs(
-    sourceRoot,
-    installDir,
-    targetUser,
-    useElevatedWrite,
-    { findSystemUser },
-  );
-  const prunedReleases = publishRuntime
-    ? pruneInstalledReleases(
-        installDir,
-        3,
-        publishedRuntime.releaseRoot,
-        useElevatedWrite,
-      )
-    : [];
-  const managedNodeRuntime = publishManagedNodeRuntime(
-    sourceRoot,
-    installDir,
-    targetUser,
-    useElevatedWrite,
-    { findSystemUser },
-  );
-  const executionContext = createInstallExecutionContext(
-    {
-      currentUser,
-      targetUser,
-      targetHome,
+  let stagedRuntimeNeedsCleanup = deferRuntimeActivation;
+  try {
+    const currentReleaseName = publishedRuntime.releaseRoot
+      ? publishedRuntime.releaseRoot.split(/[\\/]/).pop() || ""
+      : "";
+    const installedDocs = syncInstalledDocs(
+      sourceRoot,
       installDir,
-      targetNodePath: managedNodeRuntime?.nodeExecutable,
-    },
-    serviceDeps,
-  );
-  if (manageDaemon && publishRuntime) {
-    await tryManagedServiceAction(
-      createManagedRuntimeServiceActionContext({
+      targetUser,
+      useElevatedWrite,
+      { findSystemUser },
+    );
+    let prunedReleases =
+      publishRuntime && !deferRuntimeActivation
+        ? pruneInstalledReleases(
+            installDir,
+            3,
+            publishedRuntime.releaseRoot,
+            useElevatedWrite,
+          )
+        : { keepCount: 3, kept: [], removed: [] };
+    const managedNodeRuntime = publishManagedNodeRuntime(
+      sourceRoot,
+      installDir,
+      targetUser,
+      useElevatedWrite,
+      { findSystemUser },
+    );
+    const executionContext = createInstallExecutionContext(
+      {
         currentUser,
         targetUser,
+        targetHome,
         installDir,
-      }),
-      "stop",
-      buildInstallStageManagedRuntimeService(targetUser, installDir),
-    );
-  }
-
-  const coreUpdateLaunchers =
-    !persistInstallerState && writeLaunchers
-      ? refreshCoreUpdateLaunchers({
-          currentUser,
-          targetUser,
-          installDir,
-          elevated: useElevatedWrite,
-        })
-      : null;
-  if (manageDaemon) {
-    refreshManagedServiceFiles(
-      targetUser,
-      installDir,
-      useElevatedWrite,
+        targetNodePath: managedNodeRuntime?.nodeExecutable,
+      },
       serviceDeps,
     );
-  }
-  if (prepareManagedTools) {
-    await preparePiManagedToolsForInstall({
-      currentUser,
-      targetUser,
-      targetHome,
-      installDir,
-      targetNodePath: executionContext.targetNodePath,
-    });
-  }
-  let installedService: null | {
-    kind: "launchd" | "systemd" | "windows-startup";
-    label: string;
-    servicePath: string;
-    stdoutPath?: string;
-    stderrPath?: string;
-    service?: string;
-  } = null;
-  if (installServiceNow) {
-    try {
-      installedService = installDaemonService(
+    const coreUpdateLaunchers =
+      !persistInstallerState && writeLaunchers
+        ? refreshCoreUpdateLaunchers({
+            currentUser,
+            targetUser,
+            installDir,
+            elevated: useElevatedWrite,
+          })
+        : null;
+    if (manageDaemon) {
+      refreshManagedServiceFiles(
         targetUser,
         installDir,
-        useElevatedService,
+        useElevatedWrite,
         serviceDeps,
-        { activate: false },
       );
-    } catch (error) {
-      if (persistInstallerState) throw error;
     }
-  }
-
-  const daemonReadyTimeoutMs = Number.isFinite(options.daemonReadyTimeoutMs)
-    ? Math.max(0, Number(options.daemonReadyTimeoutMs))
-    : defaultDaemonReadyTimeoutMs();
-  const written = persistInstallerState
-    ? await persistInstallerOutputs(
-        {
-          currentUser,
+    if (prepareManagedTools) {
+      await preparePiManagedToolsForInstall({
+        currentUser,
+        targetUser,
+        targetHome,
+        installDir,
+        targetNodePath: executionContext.targetNodePath,
+      });
+    }
+    let installedService: null | {
+      kind: "launchd" | "systemd" | "windows-startup";
+      label: string;
+      servicePath: string;
+      stdoutPath?: string;
+      stderrPath?: string;
+      service?: string;
+    } = null;
+    if (installServiceNow) {
+      try {
+        installedService = installDaemonService(
           targetUser,
           installDir,
-          provider,
-          modelId,
-          thinkingLevel,
-          language,
-          setDefaultTarget,
-          authData,
+          useElevatedService,
+          serviceDeps,
+          { activate: false },
+        );
+      } catch (error) {
+        if (persistInstallerState) throw error;
+      }
+    }
+
+    const daemonReadyTimeoutMs = Number.isFinite(options.daemonReadyTimeoutMs)
+      ? Math.max(0, Number(options.daemonReadyTimeoutMs))
+      : defaultDaemonReadyTimeoutMs();
+    const migrationRuntimeRoot = publishedRuntime.releaseRoot || sourceRoot;
+    const migrationOptions = {
+      targetUser,
+      installDir,
+      elevated: useElevatedWrite,
+      currentReleaseRoot: publishedRuntime.releaseRoot,
+      migrationRuntimeRoot,
+      targetNodePath: executionContext.targetNodePath,
+    };
+    const migrationDeps = {
+      findSystemUser,
+      readInstallerJson,
+      writeJsonFileWithPrivilege,
+      writeJsonFile,
+      runPrivileged,
+      runCommandAsUser,
+      captureCommandAsUser,
+    };
+    if (!persistInstallerState && publishRuntime) {
+      preflightInstallUpgradeMigrations(migrationOptions, migrationDeps);
+    }
+
+    const writeInstalledState = async () =>
+      persistInstallerState
+        ? await persistInstallerOutputs(
+            {
+              currentUser,
+              targetUser,
+              installDir,
+              provider,
+              modelId,
+              thinkingLevel,
+              language,
+              setDefaultTarget,
+              authData,
+              release,
+              currentReleaseName,
+              currentReleaseRoot: publishedRuntime.releaseRoot,
+              migrationRuntimeRoot,
+              targetNodePath: executionContext.targetNodePath,
+              managedFiles: buildInstalledManagedFilesManifest(sourceRoot),
+              previousReleaseName,
+              previousReleaseRoot: previousReleaseName
+                ? installedReleaseRoot(installDir, previousReleaseName)
+                : undefined,
+              elevated: useElevatedWrite,
+              initializationComplete: existingInitializationComplete,
+              writeLaunchers,
+            },
+            {
+              findSystemUser,
+              ensureDir,
+              readInstallerJson,
+              writeJsonFileWithPrivilege,
+              writeJsonFile,
+              launcherMetadataPathForUser: (user) =>
+                launcherMetadataPathForUser(user, homeForUser),
+              readJsonFile,
+              writeLaunchersForUser: (user, dir, launcherOptions) =>
+                writeLaunchersForUser(user, dir, homeForUser, {
+                  ...launcherOptions,
+                  findSystemUser,
+                }),
+              reconcileInstallerManifest,
+              runPrivileged,
+              runCommandAsUser,
+              captureCommandAsUser,
+            },
+          )
+        : normalizeInstalledChatSettings(migrationOptions, migrationDeps);
+
+    const reconcileInstalledState = () => {
+      if (deferRuntimeActivation) {
+        switchInstalledCurrentRelease(
+          installDir,
+          currentReleaseName,
+          targetUser,
+          useElevatedWrite,
+          { findSystemUser },
+        );
+        stagedRuntimeNeedsCleanup = false;
+      }
+      return reconcileInstallerManifest(
+        {
+          targetUser,
+          installDir,
           release,
           currentReleaseName,
           currentReleaseRoot: publishedRuntime.releaseRoot,
-          migrationRuntimeRoot: publishedRuntime.releaseRoot || sourceRoot,
-          targetNodePath: executionContext.targetNodePath,
           managedFiles: buildInstalledManagedFilesManifest(sourceRoot),
           previousReleaseName,
           previousReleaseRoot: previousReleaseName
             ? installedReleaseRoot(installDir, previousReleaseName)
             : undefined,
           elevated: useElevatedWrite,
-          initializationComplete: existingInitializationComplete,
-          writeLaunchers,
+          ...(installedService
+            ? {
+                service: {
+                  kind: installedService.kind,
+                  label: installedService.label,
+                  path: installedService.servicePath,
+                },
+              }
+            : {}),
         },
         {
           findSystemUser,
@@ -405,132 +518,107 @@ async function applyInstalledRuntime(
           readInstallerJson,
           writeJsonFileWithPrivilege,
           writeJsonFile,
-          launcherMetadataPathForUser: (user) =>
-            launcherMetadataPathForUser(user, homeForUser),
-          readJsonFile,
-          writeLaunchersForUser: (user, dir, launcherOptions) =>
-            writeLaunchersForUser(user, dir, homeForUser, {
-              ...launcherOptions,
-              findSystemUser,
-            }),
-          reconcileInstallerManifest,
           runPrivileged,
-          runCommandAsUser,
-          captureCommandAsUser,
-        },
-      )
-    : normalizeInstalledChatSettings(
-        {
-          targetUser,
-          installDir,
-          elevated: useElevatedWrite,
-          currentReleaseRoot: publishedRuntime.releaseRoot,
-          migrationRuntimeRoot: publishedRuntime.releaseRoot || sourceRoot,
-          targetNodePath: executionContext.targetNodePath,
-        },
-        {
-          findSystemUser,
-          readInstallerJson,
-          writeJsonFileWithPrivilege,
-          writeJsonFile,
-          runPrivileged,
-          runCommandAsUser,
-          captureCommandAsUser,
         },
       );
-
-  const installerManifest = reconcileInstallerManifest(
-    {
+    };
+    const serviceContext = createManagedRuntimeServiceActionContext({
+      currentUser,
       targetUser,
       installDir,
-      release,
-      currentReleaseName,
-      currentReleaseRoot: publishedRuntime.releaseRoot,
-      managedFiles: buildInstalledManagedFilesManifest(sourceRoot),
-      previousReleaseName,
-      previousReleaseRoot: previousReleaseName
-        ? installedReleaseRoot(installDir, previousReleaseName)
-        : undefined,
-      elevated: useElevatedWrite,
-      ...(installedService
-        ? {
-            service: {
-              kind: installedService.kind,
-              label: installedService.label,
-              path: installedService.servicePath,
-            },
-          }
-        : {}),
-    },
-    {
-      findSystemUser,
-      ensureDir,
-      readInstallerJson,
-      writeJsonFileWithPrivilege,
-      writeJsonFile,
-      runPrivileged,
-    },
-  );
-
-  if (manageDaemon) {
-    await tryManagedServiceAction(
-      createManagedRuntimeServiceActionContext({
-        currentUser,
-        targetUser,
-        installDir,
-      }),
-      "restart",
+    });
+    const service =
       managedRuntimeServiceFromInstallSpec(installedService) ||
-        buildInstallStageManagedRuntimeService(targetUser, installDir),
-    );
-  }
+      buildInstallStageManagedRuntimeService(targetUser, installDir);
+    const transition = await runManagedRuntimeTransition({
+      stop: async () => {
+        if (manageDaemon && publishRuntime) {
+          await tryManagedServiceAction(serviceContext, "stop", service);
+        }
+      },
+      mutate: writeInstalledState,
+      activate: async () => reconcileInstalledState(),
+      restart: async () => {
+        if (manageDaemon) {
+          await tryManagedServiceAction(serviceContext, "restart", service);
+        }
+      },
+    });
+    const written = transition.mutation;
+    const installerManifest = transition.activation;
+    if (publishRuntime && deferRuntimeActivation) {
+      prunedReleases = pruneInstalledReleases(
+        installDir,
+        3,
+        publishedRuntime.releaseRoot,
+        useElevatedWrite,
+      );
+    }
 
-  const daemonReady = installedService
-    ? await waitForSocket(
-        daemonSocketPathForUser(targetUser, serviceDeps),
-        daemonReadyTimeoutMs,
-        targetUser,
-        {
-          currentUser,
-          targetNodePath: executionContext.targetNodePath,
-        },
-      )
-    : false;
-  if (!daemonReady && installServiceNow && installedService) {
-    throw new Error(
-      `${options.daemonFailureCode}\n${collectDaemonFailureDetails(targetUser, installDir, { findSystemUser, targetHomeForUser })}`,
-    );
-  }
+    const daemonReady = installedService
+      ? await waitForSocket(
+          daemonSocketPathForUser(targetUser, serviceDeps),
+          daemonReadyTimeoutMs,
+          targetUser,
+          {
+            currentUser,
+            targetNodePath: executionContext.targetNodePath,
+          },
+        )
+      : false;
+    if (!daemonReady && installServiceNow && installedService) {
+      throw new Error(
+        `${options.daemonFailureCode}\n${collectDaemonFailureDetails(targetUser, installDir, { findSystemUser, targetHomeForUser })}`,
+      );
+    }
 
-  return {
-    currentUser,
-    targetUser,
-    installDir,
-    written,
-    installerManifest,
-    publishedRuntime,
-    managedNodeRuntime,
-    coreUpdateLaunchers,
-    installedDocs,
-    installedDocsDir: installedDocs.rin,
-    prunedReleases,
-    installedService,
-    daemonReady,
-    initializationRequired: !existingInitializationComplete,
-    ownership,
-    serviceHint:
-      process.platform === "darwin"
-        ? installServiceNow
-          ? "A macOS launchd LaunchAgent will be installed and started for this daemon."
-          : "You skipped launchd installation for now; start the daemon explicitly when needed."
-        : process.platform === "linux"
+    return {
+      currentUser,
+      targetUser,
+      installDir,
+      written,
+      installerManifest,
+      publishedRuntime,
+      managedNodeRuntime,
+      coreUpdateLaunchers,
+      installedDocs,
+      installedDocsDir: installedDocs.rin,
+      prunedReleases,
+      installedService,
+      daemonReady,
+      initializationRequired: !existingInitializationComplete,
+      ownership,
+      serviceHint:
+        process.platform === "darwin"
           ? installServiceNow
-            ? "A Linux user service will be installed and started for this daemon when supported."
-            : "You skipped dedicated Linux service installation for now; start the daemon explicitly when needed."
-          : process.platform === "win32"
-            ? "A Windows Startup launcher will be installed for this daemon."
-            : "No dedicated service was installed; the installer will not start the daemon for you.",
-  };
+            ? "A macOS launchd LaunchAgent will be installed and started for this daemon."
+            : "You skipped launchd installation for now; start the daemon explicitly when needed."
+          : process.platform === "linux"
+            ? installServiceNow
+              ? "A Linux user service will be installed and started for this daemon when supported."
+              : "You skipped dedicated Linux service installation for now; start the daemon explicitly when needed."
+            : process.platform === "win32"
+              ? "A Windows Startup launcher will be installed for this daemon."
+              : "No dedicated service was installed; the installer will not start the daemon for you.",
+    };
+  } catch (error) {
+    if (stagedRuntimeNeedsCleanup) {
+      try {
+        discardStagedInstalledRuntime(
+          installDir,
+          publishedRuntime.releaseRoot,
+          useElevatedWrite,
+        );
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          "rin_staged_release_cleanup_failed",
+          { cause: error },
+        );
+      }
+    }
+    throw error;
+  }
 }
 
 export async function finalizeCoreUpdate(options: {

@@ -453,7 +453,7 @@ test("installer steps show progress after user input before work runs", () => {
   assert.match(sources, /refreshingInstalledTargetMessage/);
 });
 
-test("install and core update stop runtime before migrations and restart afterward", () => {
+test("core update preflights before stop and activates after migrations", () => {
   const source = readFileSync(
     path.join(rootDir, "src", "core", "rin-install", "finalize.ts"),
     "utf8",
@@ -462,15 +462,27 @@ test("install and core update stop runtime before migrations and restart afterwa
     source.indexOf("async function applyInstalledRuntime"),
     source.indexOf("export async function finalizeCoreUpdate"),
   );
-  const stopIndex = applyBlock.indexOf('"stop"');
-  const persistIndex = applyBlock.indexOf("const written =");
-  const restartIndex = applyBlock.indexOf('"restart"', persistIndex);
+  const preflightIndex = applyBlock.indexOf(
+    "preflightInstallUpgradeMigrations",
+  );
+  const transitionIndex = applyBlock.indexOf("runManagedRuntimeTransition");
+  const stopIndex = applyBlock.indexOf('"stop"', transitionIndex);
+  const mutateIndex = applyBlock.indexOf("mutate: writeInstalledState");
+  const activateIndex = applyBlock.indexOf("activate:", mutateIndex);
+  const restartIndex = applyBlock.indexOf("restart:", activateIndex);
 
   assert.doesNotMatch(source, /stopInstalledBrowseSidecars/);
   assert.doesNotMatch(source, /prepareBrowseRuntime/);
   assert.doesNotMatch(source, /builtInExtensions/);
-  assert.ok(stopIndex >= 0 && stopIndex < persistIndex);
-  assert.ok(persistIndex >= 0 && persistIndex < restartIndex);
+  assert.match(
+    applyBlock,
+    /deferRuntimeActivation = Boolean\(\s*publishRuntime && !persistInstallerState/,
+  );
+  assert.match(applyBlock, /activate: !deferRuntimeActivation/);
+  assert.ok(preflightIndex >= 0 && preflightIndex < transitionIndex);
+  assert.ok(stopIndex >= 0 && stopIndex < mutateIndex);
+  assert.ok(mutateIndex >= 0 && mutateIndex < activateIndex);
+  assert.ok(activateIndex >= 0 && activateIndex < restartIndex);
 });
 
 test("installer i18n source keeps localized copy in one display table", () => {
