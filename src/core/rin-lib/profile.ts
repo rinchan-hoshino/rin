@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 
 export const RIN_DIR_ENV = "RIN_DIR";
+export const RIN_DAEMON_WORKER_OWNER_ENV = "RIN_DAEMON_WORKER_OWNER";
 export const PI_CODING_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 
 export function resolveRuntimeProfile(

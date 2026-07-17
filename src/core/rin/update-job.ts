@@ -4,6 +4,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 
 import { managedSystemdUnitName } from "../rin-install/paths.js";
+import { RIN_DAEMON_WORKER_OWNER_ENV } from "../rin-lib/profile.js";
 
 export type UpdateJobRecord = {
   version: 1;
@@ -19,6 +20,11 @@ export type UpdateJobRecord = {
   command: string;
   args: string[];
   cwd: string;
+  cleanup?: {
+    command: string;
+    args: string[];
+    removePaths?: string[];
+  };
 };
 
 function safeUnitFragment(value: string) {
@@ -57,6 +63,28 @@ export function isProcessInTargetDaemonCgroup(
     });
 }
 
+export function isDaemonOwnedUpdate(
+  targetUser: string,
+  options: {
+    platform?: NodeJS.Platform;
+    cgroupText?: string;
+    env?: NodeJS.ProcessEnv;
+  } = {},
+) {
+  if (
+    isProcessInTargetDaemonCgroup(targetUser, {
+      platform: options.platform,
+      cgroupText: options.cgroupText,
+    })
+  ) {
+    return true;
+  }
+  const owner = String(
+    (options.env || process.env)[RIN_DAEMON_WORKER_OWNER_ENV] || "",
+  ).trim();
+  return Boolean(owner && owner === String(targetUser || "").trim());
+}
+
 function writeJobRecord(jobPath: string, record: UpdateJobRecord) {
   fs.mkdirSync(path.dirname(jobPath), { recursive: true, mode: 0o700 });
   const temporaryPath = `${jobPath}.${process.pid}.tmp`;
@@ -68,7 +96,7 @@ function writeJobRecord(jobPath: string, record: UpdateJobRecord) {
   fs.chmodSync(jobPath, 0o600);
 }
 
-function forwardedSystemdEnvironment(env: NodeJS.ProcessEnv) {
+function forwardedUpdateEnvironment(env: NodeJS.ProcessEnv) {
   const names = [
     "HOME",
     "USER",
@@ -77,6 +105,7 @@ function forwardedSystemdEnvironment(env: NodeJS.ProcessEnv) {
     "LANG",
     "LC_ALL",
     "LC_CTYPE",
+    "RIN_DIR",
     "XDG_CACHE_HOME",
     "XDG_RUNTIME_DIR",
     "DBUS_SESSION_BUS_ADDRESS",
@@ -90,8 +119,52 @@ function forwardedSystemdEnvironment(env: NodeJS.ProcessEnv) {
   return names.flatMap((name) => {
     const value = env[name];
     if (!value || /[\r\n\0]/.test(value)) return [];
-    return [`--setenv=${name}=${value}`];
+    return [[name, value] as const];
   });
+}
+
+function forwardedSystemdEnvironment(env: NodeJS.ProcessEnv) {
+  return forwardedUpdateEnvironment(env).map(
+    ([name, value]) => `--setenv=${name}=${value}`,
+  );
+}
+
+function escapeXml(value: string) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function buildUpdateLaunchAgent(options: {
+  id: string;
+  nodePath: string;
+  executorEntryPath: string;
+  jobPath: string;
+  cwd: string;
+  logPath: string;
+  env: NodeJS.ProcessEnv;
+}) {
+  const args = [options.nodePath, options.executorEntryPath, options.jobPath]
+    .map((value) => `      <string>${escapeXml(value)}</string>`)
+    .join("\n");
+  const environment = forwardedUpdateEnvironment(options.env)
+    .map(
+      ([name, value]) =>
+        `      <key>${escapeXml(name)}</key>\n      <string>${escapeXml(value)}</string>`,
+    )
+    .join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n  <dict>\n    <key>Label</key>\n    <string>${escapeXml(options.id)}</string>\n    <key>ProgramArguments</key>\n    <array>\n${args}\n    </array>\n    <key>EnvironmentVariables</key>\n    <dict>\n${environment}\n    </dict>\n    <key>WorkingDirectory</key>\n    <string>${escapeXml(options.cwd)}</string>\n    <key>RunAtLoad</key>\n    <true/>\n    <key>StandardOutPath</key>\n    <string>${escapeXml(options.logPath)}</string>\n    <key>StandardErrorPath</key>\n    <string>${escapeXml(options.logPath)}</string>\n  </dict>\n</plist>\n`;
+}
+
+function cleanupLaunchFailure(paths: string[]) {
+  for (const filePath of paths) {
+    try {
+      fs.rmSync(filePath, { force: true });
+    } catch {}
+  }
 }
 
 export function launchDaemonIndependentUpdateJob(
@@ -110,14 +183,20 @@ export function launchDaemonIndependentUpdateJob(
     now?: () => Date;
     randomId?: () => string;
     systemdRunPath?: string;
+    launchctlPath?: string;
+    uid?: number;
     execFileSync?: typeof execFileSync;
+    spawnImpl?: typeof spawn;
     env?: NodeJS.ProcessEnv;
   } = {},
 ) {
+  const platform = deps.platform || process.platform;
+  const env = deps.env || process.env;
   if (
-    !isProcessInTargetDaemonCgroup(options.targetUser, {
-      platform: deps.platform,
+    !isDaemonOwnedUpdate(options.targetUser, {
+      platform,
       cgroupText: deps.cgroupText,
+      env,
     })
   ) {
     return null;
@@ -134,14 +213,15 @@ export function launchDaemonIndependentUpdateJob(
     .toLowerCase();
   const id = `rin-update-${safeUnitFragment(options.targetUser)}-${timestamp}-${safeUnitFragment(randomId())}`;
   const unit = `${id}.service`;
-  const jobPath = path.join(
+  const jobDir = path.join(
     options.installDir,
     "data",
     "core",
     "updates",
     "jobs",
-    `${id}.json`,
   );
+  const jobPath = path.join(jobDir, `${id}.json`);
+  const logPath = path.join(jobDir, `${id}.log`);
   const record: UpdateJobRecord = {
     version: 1,
     id,
@@ -152,16 +232,86 @@ export function launchDaemonIndependentUpdateJob(
     args: [options.updateEntryPath, ...options.updateArgs],
     cwd: options.cwd,
   };
-  writeJobRecord(jobPath, record);
 
   const run = deps.execFileSync || execFileSync;
+  if (platform === "darwin") {
+    record.unit = id;
+    const launchctlPath = deps.launchctlPath || "/bin/launchctl";
+    const uid = deps.uid ?? process.getuid?.();
+    if (!Number.isInteger(uid) || Number(uid) < 0) {
+      throw new Error("rin_update_launchd_user_domain_missing");
+    }
+    const domain = `gui/${uid}`;
+    const plistPath = path.join(jobDir, `${id}.plist`);
+    record.cleanup = {
+      command: launchctlPath,
+      args: ["bootout", `${domain}/${id}`],
+      removePaths: [plistPath],
+    };
+    try {
+      writeJobRecord(jobPath, record);
+      fs.writeFileSync(
+        plistPath,
+        buildUpdateLaunchAgent({
+          id,
+          nodePath: options.nodePath,
+          executorEntryPath: options.executorEntryPath,
+          jobPath,
+          cwd: options.cwd,
+          logPath,
+          env,
+        }),
+        { encoding: "utf8", mode: 0o600 },
+      );
+      run(launchctlPath, ["bootstrap", domain, plistPath], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env,
+      });
+    } catch (error) {
+      cleanupLaunchFailure([jobPath, plistPath, logPath]);
+      throw error;
+    }
+    return {
+      detached: true as const,
+      launcher: "launchd" as const,
+      id,
+      unit: id,
+      jobPath,
+      logHint: logPath,
+    };
+  }
+
+  if (platform === "win32") record.unit = id;
+  if (platform === "win32") {
+    try {
+      writeJobRecord(jobPath, record);
+      run(options.nodePath, [options.executorEntryPath, "--detach", jobPath], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env,
+      });
+    } catch (error) {
+      cleanupLaunchFailure([jobPath, logPath]);
+      throw error;
+    }
+    return {
+      detached: true as const,
+      launcher: "windows-detached" as const,
+      id,
+      unit: id,
+      jobPath,
+      logHint: logPath,
+    };
+  }
+
+  writeJobRecord(jobPath, record);
   const systemdRunPath =
     deps.systemdRunPath ||
     ["/usr/bin/systemd-run", "/bin/systemd-run"].find((candidate) =>
       fs.existsSync(candidate),
     ) ||
     "systemd-run";
-  const env = deps.env || process.env;
   try {
     run(
       systemdRunPath,
@@ -183,12 +333,17 @@ export function launchDaemonIndependentUpdateJob(
       },
     );
   } catch (error) {
-    try {
-      fs.rmSync(jobPath, { force: true });
-    } catch {}
+    cleanupLaunchFailure([jobPath]);
     throw error;
   }
-  return { detached: true as const, id, unit, jobPath };
+  return {
+    detached: true as const,
+    launcher: "systemd" as const,
+    id,
+    unit,
+    jobPath,
+    logHint: `journalctl --user -u ${unit}`,
+  };
 }
 
 function readUpdateJob(jobPath: string): UpdateJobRecord {
@@ -208,11 +363,58 @@ function readUpdateJob(jobPath: string): UpdateJobRecord {
   return record as UpdateJobRecord;
 }
 
+export async function launchWindowsDetachedUpdateJob(
+  executorEntryPath: string,
+  jobPath: string,
+  deps: { spawnImpl?: typeof spawn } = {},
+) {
+  const record = readUpdateJob(jobPath);
+  const logPath = path.join(path.dirname(jobPath), `${record.id}.log`);
+  const logFd = fs.openSync(logPath, "a", 0o600);
+  try {
+    const child = (deps.spawnImpl || spawn)(
+      record.command,
+      [executorEntryPath, jobPath],
+      {
+        cwd: record.cwd,
+        detached: true,
+        env: process.env,
+        stdio: ["ignore", logFd, logFd],
+        windowsHide: true,
+      },
+    );
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
+    });
+    child.unref();
+  } finally {
+    fs.closeSync(logFd);
+  }
+}
+
+function cleanupCompletedJob(
+  record: UpdateJobRecord,
+  run: typeof execFileSync = execFileSync,
+) {
+  const cleanup = record.cleanup;
+  if (!cleanup) return;
+  for (const filePath of cleanup.removePaths || []) {
+    try {
+      fs.rmSync(filePath, { force: true });
+    } catch {}
+  }
+  try {
+    run(cleanup.command, cleanup.args, { stdio: "ignore" });
+  } catch {}
+}
+
 export async function runUpdateJobExecutor(
   jobPath: string,
   deps: {
     now?: () => Date;
     spawnImpl?: typeof spawn;
+    execFileSync?: typeof execFileSync;
   } = {},
 ) {
   const now = deps.now || (() => new Date());
@@ -239,6 +441,7 @@ export async function runUpdateJobExecutor(
     record.finishedAt = now().toISOString();
     record.exitCode = null;
     writeJobRecord(jobPath, record);
+    cleanupCompletedJob(record, deps.execFileSync);
     throw error;
   });
 
@@ -248,5 +451,6 @@ export async function runUpdateJobExecutor(
   record.exitCode = result.code;
   record.signal = result.signal;
   writeJobRecord(jobPath, record);
+  cleanupCompletedJob(record, deps.execFileSync);
   return exitCode;
 }

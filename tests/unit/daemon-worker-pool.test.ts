@@ -168,6 +168,17 @@ afterEach(async () => {
   activeDirs.clear();
 });
 
+test("daemon workers mark cross-platform update ownership", () => {
+  const source = fsSync.readFileSync(
+    path.join(rootDir, "src", "core", "rin-daemon", "worker-pool.ts"),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /\[RIN_DAEMON_WORKER_OWNER_ENV\]: os\.userInfo\(\)\.username/,
+  );
+});
+
 test("daemon workers hide Windows console windows", () => {
   const source = fsSync.readFileSync(
     path.join(rootDir, "src", "core", "rin-daemon", "worker-pool.ts"),

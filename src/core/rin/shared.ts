@@ -445,7 +445,7 @@ export async function runUpdate(parsed: ParsedArgs) {
       [
         `Rin update job accepted: ${detachedJob.id}`,
         `Status: ${detachedJob.jobPath}`,
-        `Logs: journalctl --user -u ${detachedJob.unit}`,
+        `Logs: ${detachedJob.logHint}`,
         "",
       ].join("\n"),
     );

@@ -19,6 +19,7 @@ import {
 } from "./worker-cgroup-isolation.js";
 import { parseJsonl } from "../rin-lib/common.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
+import { RIN_DAEMON_WORKER_OWNER_ENV } from "../rin-lib/profile.js";
 import {
   hasSessionRef as hasSessionSelector,
   normalizeSessionRef as normalizeSessionSelector,
@@ -1484,7 +1485,10 @@ export class WorkerPool {
       ...this.writeWorkerResourceOptionsFile(workerResourceOptions),
     ];
     const workerId = `worker_${++this.workerSeq}`;
-    const workerEnv = { ...process.env };
+    const workerEnv = {
+      ...process.env,
+      [RIN_DAEMON_WORKER_OWNER_ENV]: os.userInfo().username,
+    };
     delete workerEnv[WORKER_CGROUP_DELEGATION_ENV];
     const child = spawn(process.execPath, workerArgs, {
       cwd: this.options.cwd,

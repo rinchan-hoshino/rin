@@ -41,6 +41,25 @@ test("updater detects only the target daemon systemd cgroup", () => {
   );
 });
 
+test("daemon worker ownership marker works across supported platforms", () => {
+  for (const platform of ["darwin", "win32"]) {
+    assert.equal(
+      updateJob.isDaemonOwnedUpdate("rin", {
+        platform,
+        env: { RIN_DAEMON_WORKER_OWNER: "rin" },
+      }),
+      true,
+    );
+    assert.equal(
+      updateJob.isDaemonOwnedUpdate("other", {
+        platform,
+        env: { RIN_DAEMON_WORKER_OWNER: "rin" },
+      }),
+      false,
+    );
+  }
+});
+
 test("daemon-owned update launches an installer-owned transient service", async () => {
   const installDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-update-job-"),
@@ -97,6 +116,189 @@ test("daemon-owned update launches an installer-owned transient service", async 
   }
 });
 
+test("daemon-owned macOS update launches a separate LaunchAgent", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-update-mac-"),
+  );
+  const calls = [];
+  try {
+    const launched = updateJob.launchDaemonIndependentUpdateJob(
+      {
+        targetUser: "rin",
+        installDir,
+        nodePath: "/runtime/node",
+        updateEntryPath: "/release/updater.js",
+        executorEntryPath: "/release/executor.js",
+        updateArgs: ["--update"],
+        cwd: "/release",
+      },
+      {
+        platform: "darwin",
+        env: {
+          RIN_DAEMON_WORKER_OWNER: "rin",
+          RIN_DIR: "/Users/rin/.rin-custom",
+          HTTPS_PROXY: "http://proxy.example",
+          HOME: "/Users/rin",
+        },
+        uid: 501,
+        now: () => new Date("2026-07-17T04:00:00.000Z"),
+        randomId: () => "mac123",
+        launchctlPath: "/bin/launchctl",
+        execFileSync(command, args) {
+          calls.push({ command, args });
+          return "";
+        },
+      },
+    );
+    assert.equal(launched?.launcher, "launchd");
+    assert.equal(calls[0].command, "/bin/launchctl");
+    assert.deepEqual(calls[0].args.slice(0, 2), ["bootstrap", "gui/501"]);
+    const plistPath = calls[0].args[2];
+    const plist = await fs.readFile(plistPath, "utf8");
+    assert.match(plist, /<string>\/runtime\/node<\/string>/);
+    assert.match(plist, /<string>\/release\/executor\.js<\/string>/);
+    assert.match(plist, new RegExp(launched.id));
+    assert.match(
+      plist,
+      /<key>RIN_DIR<\/key>\s*<string>\/Users\/rin\/\.rin-custom<\/string>/,
+    );
+    assert.match(
+      plist,
+      /<key>HTTPS_PROXY<\/key>\s*<string>http:\/\/proxy\.example<\/string>/,
+    );
+    assert.doesNotMatch(plist, /RIN_DAEMON_WORKER_OWNER/);
+    assert.equal(
+      launched.logHint,
+      path.join(path.dirname(launched.jobPath), `${launched.id}.log`),
+    );
+  } finally {
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
+test("daemon-owned Windows update launches a detached executor", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-update-win-"),
+  );
+  const calls = [];
+  try {
+    const launched = updateJob.launchDaemonIndependentUpdateJob(
+      {
+        targetUser: "rin",
+        installDir,
+        nodePath: "C:\\Rin\\node.exe",
+        updateEntryPath: "C:\\Rin\\updater.js",
+        executorEntryPath: "C:\\Rin\\executor.js",
+        updateArgs: ["--update"],
+        cwd: "C:\\Rin",
+      },
+      {
+        platform: "win32",
+        env: { RIN_DAEMON_WORKER_OWNER: "rin" },
+        now: () => new Date("2026-07-17T04:00:00.000Z"),
+        randomId: () => "win123",
+        execFileSync(command, args, options) {
+          calls.push({ command, args, options });
+          return "";
+        },
+      },
+    );
+    assert.equal(launched?.launcher, "windows-detached");
+    assert.equal(calls[0].command, "C:\\Rin\\node.exe");
+    assert.deepEqual(calls[0].args, [
+      "C:\\Rin\\executor.js",
+      "--detach",
+      launched.jobPath,
+    ]);
+    assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "pipe"]);
+    assert.equal(
+      launched.logHint,
+      path.join(path.dirname(launched.jobPath), `${launched.id}.log`),
+    );
+  } finally {
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
+test("Windows detached launcher waits for a successful spawn", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-update-win-ack-"));
+  const jobPath = path.join(dir, "job.json");
+  await fs.writeFile(
+    jobPath,
+    `${JSON.stringify({
+      version: 1,
+      id: "job-win",
+      status: "queued",
+      createdAt: "2026-07-17T04:00:00.000Z",
+      command: "/runtime/node",
+      args: ["updater.js"],
+      cwd: "/release",
+    })}\n`,
+    { mode: 0o600 },
+  );
+  const child = new EventEmitter();
+  let unrefCount = 0;
+  child.unref = () => {
+    unrefCount += 1;
+  };
+  try {
+    const launched = updateJob.launchWindowsDetachedUpdateJob(
+      "/release/executor.js",
+      jobPath,
+      {
+        spawnImpl(command, args, options) {
+          assert.equal(command, "/runtime/node");
+          assert.deepEqual(args, ["/release/executor.js", jobPath]);
+          assert.equal(options.detached, true);
+          process.nextTick(() => child.emit("spawn"));
+          return child;
+        },
+      },
+    );
+    await launched;
+    assert.equal(unrefCount, 1);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Windows detached launcher rejects an asynchronous spawn error", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-update-win-error-"));
+  const jobPath = path.join(dir, "job.json");
+  await fs.writeFile(
+    jobPath,
+    `${JSON.stringify({
+      version: 1,
+      id: "job-win-error",
+      status: "queued",
+      createdAt: "2026-07-17T04:00:00.000Z",
+      command: "/missing/node",
+      args: ["updater.js"],
+      cwd: "/release",
+    })}\n`,
+    { mode: 0o600 },
+  );
+  const child = new EventEmitter();
+  child.unref = () => assert.fail("failed spawn must not be unrefed");
+  try {
+    await assert.rejects(
+      updateJob.launchWindowsDetachedUpdateJob(
+        "/release/executor.js",
+        jobPath,
+        {
+          spawnImpl() {
+            process.nextTick(() => child.emit("error", new Error("ENOENT")));
+            return child;
+          },
+        },
+      ),
+      /ENOENT/,
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("update job launcher stays synchronous outside the target daemon", () => {
   const launched = updateJob.launchDaemonIndependentUpdateJob(
     {
@@ -119,7 +321,7 @@ test("update job launcher stays synchronous outside the target daemon", () => {
   assert.equal(launched, null);
 });
 
-test("update job executor persists terminal success", async () => {
+test("update job executor persists terminal success and unloads a temporary launcher", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-update-executor-"));
   const jobPath = path.join(dir, "job.json");
   await fs.writeFile(
@@ -132,11 +334,18 @@ test("update job executor persists terminal success", async () => {
       command: "/runtime/node",
       args: ["updater.js"],
       cwd: "/release",
+      cleanup: {
+        command: "/bin/launchctl",
+        args: ["bootout", "gui/501/job-1"],
+        removePaths: [path.join(dir, "job-1.plist")],
+      },
     })}\n`,
     { mode: 0o600 },
   );
+  await fs.writeFile(path.join(dir, "job-1.plist"), "plist");
   const child = new EventEmitter();
   child.pid = 42;
+  const cleanupCalls = [];
   try {
     const resultPromise = updateJob.runUpdateJobExecutor(jobPath, {
       now: () => new Date("2026-07-17T04:01:00.000Z"),
@@ -147,6 +356,10 @@ test("update job executor persists terminal success", async () => {
         process.nextTick(() => child.emit("exit", 0, null));
         return child;
       },
+      execFileSync(command, args) {
+        cleanupCalls.push({ command, args });
+        return "";
+      },
     });
     assert.equal(await resultPromise, 0);
     const record = JSON.parse(await fs.readFile(jobPath, "utf8"));
@@ -154,6 +367,16 @@ test("update job executor persists terminal success", async () => {
     assert.equal(record.pid, 42);
     assert.equal(record.exitCode, 0);
     assert.equal(record.finishedAt, "2026-07-17T04:01:00.000Z");
+    assert.equal(
+      await fs.stat(path.join(dir, "job-1.plist")).catch(() => null),
+      null,
+    );
+    assert.deepEqual(cleanupCalls, [
+      {
+        command: "/bin/launchctl",
+        args: ["bootout", "gui/501/job-1"],
+      },
+    ]);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
