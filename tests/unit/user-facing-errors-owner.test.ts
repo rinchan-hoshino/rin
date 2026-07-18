@@ -7,8 +7,7 @@ const errors = await import(
   pathToFileURL(path.resolve("dist/core/rin-lib/user-facing-errors.js")).href
 );
 
-const OWNED_MARKERS = `
-chat_accepted_inbound_turn_not_active
+const OWNED_MARKERS = `chat_accepted_inbound_turn_not_active
 chat_bridge_at_id_required
 chat_bridge_chat_required
 chat_bridge_entry_missing
@@ -44,16 +43,9 @@ cron_final_assistant_text_missing
 cron_frontend_key_required
 cron_invalid_agent_task
 cron_invalid_expression
-cron_invalid_session_continue_task
 cron_invalid_shell_task
 cron_next_run_not_found
 cron_prompt_required
-cron_session_file_not_found
-cron_session_file_required
-cron_session_continue_frontend_forbidden
-cron_session_continue_requires_session
-cron_session_continue_requires_target
-cron_session_continue_unavailable
 cron_target_required
 cron_tasks_file_invalid
 cron_trigger_required
@@ -228,12 +220,61 @@ unknown_run_option
 web_fetch_invalid_url
 fetch_failed
 unknown_error
-`
+chat_bridge_unavailable
+chat_database_future_schema
+chat_database_incomplete_schema
+chat_database_partial_schema
+chat_database_schema_fingerprint_mismatch
+chat_database_schema_version_mismatch
+chat_database_schema_upgrade_required
+chat_database_unsupported_schema
+chat_inbox_claim_required
+chat_inbox_claim_lost_during_classification
+chat_inbox_message_commit_failed
+chat_inbox_message_identity_required
+chat_inbox_turn_commit_failed
+chat_install_migration_install_dir_required
+chat_install_migration_invalid_session_state
+chat_install_migration_invalid_settings
+chat_key_migration_invalid_marker
+chat_key_migration_marker_id_mismatch
+chat_key_migration_invalid_marker_state
+chat_key_migration_invalid_resolved_ledger
+chat_key_migration_resolved_ledger_collision
+chat_key_migration_invalid_resolved_ledger_entry
+chat_legacy_migration_archive_collision
+chat_legacy_migration_invalid_inbox
+chat_legacy_migration_invalid_inbox_chat_key
+chat_legacy_migration_invalid_json
+chat_legacy_migration_invalid_message_identity
+chat_legacy_migration_invalid_outbox
+chat_legacy_migration_unknown_state
+chat_outbox_claim_read_failed
+chat_outbox_attempt_superseded
+chat_outbox_media_missing
+chat_generation_nonterminal_send_in_flight
+chat_legacy_migration_archive_changed
+chat_legacy_migration_invalid_message_timestamp
+chat_legacy_migration_invalid_timestamp
+chat_legacy_migration_source_changed
+chat_legacy_migration_source_changed_during_import
+chat_legacy_migration_source_recreated
+chat_turn_fence_lost
+chat_turn_id_required
+chat_turn_owner_epoch_required
+cron_frontend_tui_unbindable
+cron_invalid_target_kind
+rin_managed_node_npm_missing
+rin_managed_npm_cache_write_failed
+rin_managed_npm_checksum_mismatch
+rin_session_model_runtime_unavailable
+rin_update_job_invalid
+rin_update_launchd_user_domain_missing`
   .trim()
   .split(/\s+/);
 
 test("every owned runtime marker has a human-facing formatter", () => {
-  assert.equal(OWNED_MARKERS.length, 220);
+  assert.equal(OWNED_MARKERS.length, 263);
   assert.equal(new Set(OWNED_MARKERS).size, OWNED_MARKERS.length);
   for (const marker of OWNED_MARKERS) {
     assert.equal(errors.hasUserFacingRuntimeErrorMapping(marker), true, marker);

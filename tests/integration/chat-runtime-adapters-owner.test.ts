@@ -10,10 +10,10 @@ await import("../support/register-chat-runtime-adapters-owner-fixture.ts");
 const adapters = await import(
   pathToFileURL(path.resolve("dist/core/chat-runtime/adapters.js")).href
 );
-// Keep the immutable historical behavior contracts running in this owner lane;
-// the cases below add real SDK lifecycle and provider-boundary coverage.
-await import("../characterization/chat-runtime-discord.test.ts");
-await import("../characterization/chat-runtime-send.test.ts");
+// Reuse the current integration contracts; immutable characterization evidence
+// remains outside strict owner coverage.
+await import("./chat-runtime-discord.test.ts");
+await import("./chat-runtime-send.test.ts");
 
 const owner = (globalThis as any).__chatRuntimeAdaptersOwner as Record<
   string,

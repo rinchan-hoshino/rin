@@ -103,7 +103,7 @@ test("inbound recovery heads choose the newest durable user message", async () =
         {
           chatKey: "discord/bot-1:channel-a",
           chatId: "channel-a",
-          messageId: "opaque-z",
+          messageId: "opaque-a",
           platformTimestamp: Date.parse("2026-07-16T01:00:00.000Z"),
         },
         {
@@ -115,6 +115,134 @@ test("inbound recovery heads choose the newest durable user message", async () =
         },
       ],
     );
+  });
+});
+
+test("inbound recovery settles successful, failed, deferred, and retired checkpoints", async () => {
+  await withAgentDir(async (agentDir) => {
+    const saveHead = (chatId: string, messageId: string) =>
+      messageStore.saveChatMessage(agentDir, {
+        role: "user",
+        platform: "discord",
+        botId: "bot-1",
+        chatId,
+        chatKey: `discord/bot-1:${chatId}`,
+        messageId,
+        receivedAt: "2026-07-16T00:00:00.000Z",
+        platformTimestamp: 5_000,
+      } as any);
+    saveHead("success", "success-message");
+    saveHead("retire", "retire-message");
+
+    const nowMs = Date.parse("2026-07-17T00:00:00.000Z");
+    const succeeded = await recovery.recoverInboundHeads(
+      agentDir,
+      " discord ",
+      " bot-1 ",
+      async (head) => [head.messageId],
+      { nowMs, policy: { retryBaseMs: 0, retryMaxMs: 0 } },
+    );
+    assert.deepEqual(succeeded.recovered.sort(), [
+      "retire-message",
+      "success-message",
+    ]);
+    assert.deepEqual(succeeded.failures, []);
+    assert.equal(succeeded.scopeHealthy, true);
+
+    const mixed = await recovery.recoverInboundHeads(
+      agentDir,
+      "discord",
+      "bot-1",
+      async (head) => {
+        if (head.chatId === "retire") throw new Error("history unavailable");
+        return [head.chatId];
+      },
+      {
+        nowMs: nowMs + 1,
+        policy: {
+          minFailures: 1,
+          minFailureAgeMs: 0,
+          retryBaseMs: 0,
+          retryMaxMs: 0,
+          maxRetirements: 1,
+        },
+      },
+    );
+    assert.deepEqual(mixed.recovered, ["success"]);
+    assert.deepEqual(mixed.retired, ["discord/bot-1:retire"]);
+    assert.deepEqual(mixed.failures, []);
+
+    const logs: string[] = [];
+    const bot: any = {};
+    recovery.applyInboundRecoveryResult(
+      bot,
+      {
+        info: (message: string) => logs.push(message),
+        warn: (message: string) => logs.push(message),
+      },
+      {
+        failures: ["discord/bot-1:failed:history"],
+        deferred: ["discord/bot-1:deferred"],
+        retired: mixed.retired,
+      },
+    );
+    assert.equal(bot.inboundRecovery.status, "degraded");
+    assert.equal(bot.inboundRecovery.failures.length, 2);
+    assert.ok(logs.some((message) => message.includes("retired checkpoints")));
+    assert.ok(logs.some((message) => message.includes("degraded failures")));
+    recovery.applyInboundRecoveryResult(
+      bot,
+      {},
+      { failures: [], deferred: [], retired: [] },
+    );
+    assert.deepEqual(bot.inboundRecovery, { status: "ready" });
+  });
+
+  await withAgentDir(async (agentDir) => {
+    messageStore.saveChatMessage(agentDir, {
+      role: "user",
+      platform: "discord",
+      botId: "bot-1",
+      chatId: "outage",
+      chatKey: "discord/bot-1:outage",
+      messageId: "outage-message",
+      receivedAt: "2026-07-16T00:00:00.000Z",
+    } as any);
+    const nowMs = Date.parse("2026-07-17T00:00:00.000Z");
+    const unhealthy = await recovery.recoverInboundHeads(
+      agentDir,
+      "discord",
+      "bot-1",
+      async () => {
+        throw "provider outage";
+      },
+      {
+        nowMs,
+        policy: { retryBaseMs: 1_000, retryMaxMs: 1_000 },
+      },
+    );
+    assert.equal(unhealthy.scopeHealthy, false);
+    assert.deepEqual(unhealthy.failures, [
+      "discord/bot-1:outage:provider outage",
+    ]);
+    const [leased] = recovery.listInboundRecoveryHeads(
+      agentDir,
+      "discord",
+      "bot-1",
+      { includeLeaseState: true },
+    );
+    assert.equal(leased.failureCount, 0);
+    assert.ok(leased.nextAttemptAt);
+
+    const deferred = await recovery.recoverInboundHeads(
+      agentDir,
+      "discord",
+      "bot-1",
+      async () => assert.fail("deferred checkpoint should not run"),
+      { nowMs: nowMs + 500 },
+    );
+    assert.equal(deferred.scopeHealthy, true);
+    assert.deepEqual(deferred.deferred, ["discord/bot-1:outage"]);
   });
 });
 

@@ -27,7 +27,7 @@ const replacements: Record<string, string> = {
   "dist/core/rin-daemon/cron.js": `
     export class CronScheduler {
       constructor(options) { this.options = options; this.tasks = new Map([["owner-task", { id: "owner-task" }]]); }
-      start() { void this.options.resumeSessionTurn({ owner: true }); }
+      start() {}
       stop() {}
       listTasks() { return [...this.tasks.values()]; }
       reloadTasks() { return { reloaded: true }; }

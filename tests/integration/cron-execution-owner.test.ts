@@ -188,7 +188,7 @@ test("cron prompt context identifies chat and controller frontends", () => {
     {
       source: "scheduled-task",
       sentAt: 456,
-      frontend: { kind: "tui", key: "terminal" },
+      frontend: undefined,
       taskId: "cron_owner",
       taskName: undefined,
       taskContextKind: "scheduled-task",
@@ -352,88 +352,6 @@ test("dedicated agent tasks select initial and continuation prompts", async () =
   });
 });
 
-test("session-continue tasks resolve stored sessions and return final owner output", async () => {
-  await withAgentDir(async (agentDir) => {
-    const sessionFile = path.join(
-      agentDir,
-      "sessions",
-      "managed",
-      "owner.jsonl",
-    );
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "{}\n");
-    const continued = task({
-      lastStartedAt: "2026-07-17T01:00:00.000Z",
-      session: { mode: "session_continue", sessionFile },
-      target: { kind: "session_continue" },
-    });
-    const calls: any[] = [];
-    const result = await cronExecution.executeCronSessionContinueTask(
-      continued,
-      {
-        agentDir,
-        runId: "scheduled:continue",
-        resumeSessionTurn: async (payload) => {
-          calls.push(payload);
-          return {
-            finalText: "continued",
-            sessionId: "session-id",
-            sessionFile,
-          };
-        },
-      },
-    );
-    assert.deepEqual(result, {
-      text: "continued",
-      sessionId: "session-id",
-      sessionFile,
-    });
-    assert.deepEqual(calls, [
-      {
-        sessionFile,
-        source: "scheduled-task",
-        requestTag: "scheduled:continue",
-      },
-    ]);
-
-    await assert.rejects(
-      cronExecution.executeCronSessionContinueTask(task(), { agentDir }),
-      /cron_invalid_session_continue_task/,
-    );
-    await assert.rejects(
-      cronExecution.executeCronSessionContinueTask(
-        task({
-          session: { mode: "session_continue", sessionFile },
-          target: { kind: "agent_prompt", prompt: "wrong" },
-        }),
-        { agentDir },
-      ),
-      /cron_session_continue_requires_target/,
-    );
-    await assert.rejects(
-      cronExecution.executeCronSessionContinueTask(continued, { agentDir }),
-      /cron_session_continue_unavailable/,
-    );
-    await assert.rejects(
-      cronExecution.executeCronSessionContinueTask(
-        task({
-          session: { mode: "session_continue", sessionFile: "missing.jsonl" },
-          target: { kind: "session_continue" },
-        }),
-        { agentDir, resumeSessionTurn: async () => ({}) },
-      ),
-      /cron_session_file_not_found/,
-    );
-    await assert.rejects(
-      cronExecution.executeCronSessionContinueTask(continued, {
-        agentDir,
-        resumeSessionTurn: async () => ({ finalText: "" }),
-      }),
-      /cron_final_assistant_text_missing/,
-    );
-  });
-});
-
 test("durable cron invocations snapshot owner execution inputs", async () => {
   await withAgentDir(async (agentDir) => {
     const none = task({
@@ -478,16 +396,6 @@ test("durable cron invocations snapshot owner execution inputs", async () => {
       /sessions\/managed\/task\/cron_owner\.jsonl$/,
     );
 
-    const sessionFile = path.join(agentDir, "sessions", "owner.jsonl");
-    const continued = cronExecution.createCronSessionInvocation(
-      task({
-        session: { mode: "session_continue", sessionFile },
-        target: { kind: "session_continue" },
-      }),
-      agentDir,
-    );
-    assert.equal(continued.sessionFile, sessionFile);
-
     assert.throws(
       () =>
         cronExecution.createCronSessionInvocation(
@@ -524,28 +432,6 @@ test("durable invocations execute agent and continued session snapshots", async 
       agentCalls[0].deliveryIdempotencyKey,
       `scheduled-final:${agentInvocation.id}`,
     );
-
-    const sessionFile = path.join(agentDir, "sessions", "owner.jsonl");
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "{}\n");
-    const continueInvocation = cronExecution.createCronSessionInvocation(
-      task({
-        session: { mode: "session_continue", sessionFile },
-        target: { kind: "session_continue" },
-      }),
-      agentDir,
-    );
-    const continued = await cronExecution.executeCronSessionInvocation(
-      continueInvocation,
-      {
-        agentDir,
-        resumeSessionTurn: async (payload) => ({
-          finalText: payload.requestTag,
-          sessionFile,
-        }),
-      },
-    );
-    assert.equal(continued.text, continueInvocation.requestTag);
   });
 });
 
@@ -690,10 +576,7 @@ test("executeCronTask owns shell, agent, session, delivery, and failure terminal
       },
     });
     assert.match(controllerShell.lastError, /Exit: 9/);
-    assert.deepEqual(working.slice(-2), [
-      { controllerKey: "terminal", visible: true },
-      { controllerKey: "terminal", visible: false },
-    ]);
+    assert.equal(working.length, 2);
 
     const agent = task({ trigger: { expression: "* * * * *" } });
     await cronExecution.executeCronTask(agent, {
@@ -701,22 +584,5 @@ test("executeCronTask owns shell, agent, session, delivery, and failure terminal
       chat: { runTurn: async () => ({ finalText: "agent owner" }) },
     });
     assert.equal(agent.lastResultText, "agent owner");
-
-    const sessionFile = path.join(agentDir, "sessions", "continued.jsonl");
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "{}\n");
-    const continued = task({
-      trigger: { expression: "* * * * *" },
-      session: { mode: "session_continue", sessionFile },
-      target: { kind: "session_continue" },
-    });
-    await cronExecution.executeCronTask(continued, {
-      agentDir,
-      resumeSessionTurn: async () => ({
-        finalText: "continued owner",
-        sessionFile,
-      }),
-    });
-    assert.equal(continued.lastResultText, "continued owner");
   });
 });

@@ -36,7 +36,6 @@ const replacements: Record<string, string> = {
     export async function startDaemon(options) {
       globalThis.__rinAppDaemonOwnerEvents.push(["daemon-start", options.socketPath, options.workerPath]);
       if (process.env.RIN_TEST_APP_DAEMON_MODE === "daemon-fail") {
-        await new Promise((resolve) => setTimeout(resolve, 0));
         throw new Error("owner daemon failed");
       }
       const connector = () => "owner-connected-socket";

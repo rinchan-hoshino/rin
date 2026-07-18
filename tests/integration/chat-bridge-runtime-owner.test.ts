@@ -106,11 +106,15 @@ test("chat bridge runtime owns scoped delivery, safe facades, storage, identity,
 
     const first = await runtime.helpers.send("owner text");
     assert.deepEqual(first, ["owner-message-1"]);
+    const imagePath = path.join(agentDir, "owner.png");
+    const audioPath = path.join(agentDir, "owner.ogg");
+    await fs.writeFile(imagePath, "image");
+    await fs.writeFile(audioPath, "audio");
     const rich = await runtime.helpers.send({
       parts: [
         { type: "at", id: "42", name: "Owner" },
         { type: "markdown", content: "**owner**" },
-        { type: "image", path: "/tmp/owner.png", mimeType: "image/png" },
+        { type: "image", path: imagePath, mimeType: "image/png" },
         {
           type: "file",
           url: "https://example.test/owner.txt",
@@ -122,7 +126,7 @@ test("chat bridge runtime owns scoped delivery, safe facades, storage, identity,
           url: "https://example.test/owner.mp4",
           name: "owner.mp4",
         },
-        { type: "audio", path: "/tmp/owner.ogg", mimeType: "audio/ogg" },
+        { type: "audio", path: audioPath, mimeType: "audio/ogg" },
         { type: "sticker", url: "https://example.test/owner.webp" },
       ],
     });

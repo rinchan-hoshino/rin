@@ -47,6 +47,115 @@ test("Rin runtime composes the Pi runtime and caches the composed surface", asyn
   );
 });
 
+test("Rin runtime auth storage persists credentials and delegates provider operations", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-runtime-auth-owner-"),
+  );
+  const authPath = path.join(root, "auth.json");
+  try {
+    await fs.writeFile(
+      authPath,
+      JSON.stringify({ existing: { type: "api_key", key: "stored" } }),
+    );
+    const runtime: any = await agentRuntime.loadRinAgentRuntime();
+    const auth = runtime.AuthStorage.create(authPath);
+    const calls: any[] = [];
+    auth.bindModelRuntime({
+      getProviders: () => [
+        {
+          id: "oauth-owner",
+          name: "OAuth Owner",
+          auth: { oauth: { name: "Owner Login", usesCallbackServer: true } },
+        },
+        {
+          id: "oauth-name-fallback",
+          name: "Fallback Name",
+          auth: { oauth: {} },
+        },
+        { id: "oauth-id-fallback", auth: { oauth: {} } },
+        { id: "", auth: { oauth: {} } },
+        { id: "api-owner", name: "API Owner" },
+      ],
+      setRuntimeApiKey: async (...args: any[]) => calls.push(["key", ...args]),
+      login: async (...args: any[]) => {
+        calls.push(["login", ...args]);
+        return { type: "oauth", access: "owner-token" };
+      },
+      logout: async (...args: any[]) => calls.push(["logout", ...args]),
+    });
+
+    assert.equal(auth.get("existing").key, "stored");
+    assert.deepEqual(await auth.read("missing"), undefined);
+    assert.equal(auth.hasAuth("existing"), true);
+    assert.deepEqual(auth.list(), [
+      { providerId: "existing", type: "api_key" },
+    ]);
+    assert.deepEqual(auth.getOAuthProviders(), [
+      {
+        id: "oauth-owner",
+        name: "Owner Login",
+        usesCallbackServer: true,
+      },
+      {
+        id: "oauth-name-fallback",
+        name: "Fallback Name",
+        usesCallbackServer: false,
+      },
+      {
+        id: "oauth-id-fallback",
+        name: "oauth-id-fallback",
+        usesCallbackServer: false,
+      },
+    ]);
+    auth.set("api-owner", { type: "api_key", key: "owner-key" });
+    auth.set("oauth-static", {
+      type: "oauth",
+      access: "static-owner-token",
+    });
+    auth.set("", { type: "api_key", key: "ignored" });
+    await auth.modify("api-owner", (credential: any) => ({
+      ...credential,
+      key: "modified",
+    }));
+    assert.equal(auth.get("api-owner").key, "modified");
+    await auth.login("oauth-owner", { onAuth: () => {} });
+    assert.equal(auth.get("oauth-owner").access, "owner-token");
+    auth.logout("oauth-owner");
+    await auth.delete("api-owner");
+    await auth.modify("created", () => ({
+      type: "api_key",
+      key: "created-owner-key",
+    }));
+    assert.equal(auth.get("created").key, "created-owner-key");
+    await auth.delete("created");
+    assert.equal(auth.hasAuth("api-owner"), false);
+    assert.ok(calls.some(([name]) => name === "key"));
+    assert.ok(calls.some(([name]) => name === "login"));
+    assert.ok(calls.some(([name]) => name === "logout"));
+
+    const memory = runtime.AuthStorage.inMemory({
+      plain: { type: "api_key", key: "memory-owner-key" },
+    });
+    assert.deepEqual(memory.list(), [{ providerId: "plain", type: "api_key" }]);
+    assert.deepEqual(memory.getOAuthProviders(), []);
+    memory.set("owner", { type: "api_key", key: "owner-key" });
+    assert.equal(await memory.login("owner"), undefined);
+    memory.logout("owner");
+    memory.set("", { type: "api_key", key: "ignored" });
+    memory.logout("");
+    await assert.rejects(memory.login(""), /oauth_provider_id_required/);
+
+    const noPath = runtime.AuthStorage.create();
+    noPath.set("owner", { type: "api_key", key: "owner-key" });
+    assert.equal(noPath.getAll().owner.key, "owner-key");
+
+    await fs.writeFile(authPath, "not-json");
+    assert.deepEqual(runtime.AuthStorage.create(authPath).getAll(), {});
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Rin session services own extension loading, defaults, and flag diagnostics", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-runtime-owner-"),
@@ -62,9 +171,15 @@ test("Rin session services own extension loading, defaults, and flag diagnostics
     const runtime: any = await agentRuntime.loadRinAgentRuntime();
     const authStorage = runtime.AuthStorage.inMemory({});
     const settingsManager = runtime.SettingsManager.create(agentDir, agentDir);
-    const modelRegistry = runtime.ModelRegistry.create(
+    const modelRuntime = await runtime.ModelRuntime.create({
+      credentials: authStorage,
+      authPath: path.join(agentDir, "auth.json"),
+      modelsPath: path.join(agentDir, "models.json"),
+      allowModelNetwork: false,
+    });
+    const modelRegistry = runtime.createModelRegistry(
+      modelRuntime,
       authStorage,
-      path.join(agentDir, "models.json"),
     );
     let trustChecks = 0;
     const services = await runtime.createAgentSessionServices({

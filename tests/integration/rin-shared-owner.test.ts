@@ -79,6 +79,12 @@ test("Rin shared boundary owns target reads, execution context, daemon readiness
   );
   assert.deepEqual(localReads, [["/owner/local.json", { fallback: true }]]);
   assert.deepEqual(
+    shared.readTargetJsonFile("/owner/missing-default.json", {
+      fallback: true,
+    }),
+    { fallback: true },
+  );
+  assert.deepEqual(
     shared.readTargetJsonFile(
       "/owner/cross.json",
       {},
@@ -111,6 +117,18 @@ test("Rin shared boundary owns target reads, execution context, daemon readiness
     shared.createUpdateI18n("/home/target/.rin", "target").displayLanguage,
     "zh_CN",
   );
+  owner.__rinSharedOwnerPrivilegedValue = {};
+  assert.equal(
+    shared.readUpdateDisplayLanguage("/home/target/.rin", {
+      targetUser: "target",
+      currentUser: "operator",
+    }),
+    "",
+  );
+  owner.__rinSharedOwnerPrivilegedValue = {
+    language: "zh_CN",
+    currentRelease: { release: { channel: "git", branch: "owner-branch" } },
+  };
   assert.deepEqual(
     shared.readInstallerManifestForTarget("/home/target/.rin", {
       targetUser: "target",

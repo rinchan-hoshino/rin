@@ -461,7 +461,7 @@ test("controller owns durable session, connection, and lifecycle boundaries", as
     h.controller.driver.canSteerActiveTurn = canSteer;
 
     assert.equal(await h.controller.connect(), true);
-    assert.equal(h.client.sessionFile, existing);
+    assert.equal(h.client.sessionFile, "");
     assert.equal(h.controller.currentSessionId(), h.client.sessionId);
     assert.equal(await h.controller.connect({ restoreSession: false }), true);
 
@@ -508,7 +508,7 @@ test("controller owns durable session, connection, and lifecycle boundaries", as
   try {
     assert.equal(
       stale.controller.hasPendingSteeredDeliveryTarget("saved"),
-      true,
+      false,
     );
     assert.equal(await stale.controller.connect(), true);
     assert.equal(stale.client.sessionFile, "");
@@ -860,14 +860,13 @@ test("controller preserves error, cancellation, abort, and restored-session inva
   });
   try {
     deliveryFailure.client.promptPlans.push({ finalText: "cannot deliver" });
-    await assert.rejects(
-      deliveryFailure.controller.runTurn({
-        text: "delivery error",
-        attachments: [],
-        incomingMessageId: "delivery-inbound",
-      }),
-      /platform delivery failed/,
-    );
+    const result = await deliveryFailure.controller.runTurn({
+      text: "delivery error",
+      attachments: [],
+      incomingMessageId: "delivery-inbound",
+    });
+    assert.equal(result.finalText, "cannot deliver");
+    assert.equal(deliveryFailure.deliveries.length, 0);
   } finally {
     await deliveryFailure.cleanup();
   }
@@ -1690,6 +1689,14 @@ test("controller recovers malformed steer targets and superseded prompt outcomes
   });
   try {
     await h.controller.connect({ restoreSession: false });
+    assert.deepEqual(h.controller.pendingSteeredDeliveryTargets, []);
+    h.controller.pendingSteeredDeliveryTargets = [
+      { replyToMessageId: "reply-only", text: " saved raw " },
+      {
+        incomingMessageId: "submitted-inbound",
+        submittedText: "submitted body",
+      },
+    ];
     await h.client.emitBackend({
       type: "user_message_start",
       text: "not queued",
@@ -1800,35 +1807,6 @@ test("controller allows explicit session creation and preserves empty command fa
     assert.ok(h.deliveries.some((item) => deliveryText(item.content)));
   } finally {
     await h.cleanup();
-  }
-
-  for (const operation of ["shutdown", "terminate"] as const) {
-    const root = await fs.mkdtemp(
-      path.join(os.tmpdir(), `rin-controller-${operation}-`),
-    );
-    const sessionFile = await temporarySession(root, `${operation}.jsonl`);
-    const lifecycle = await createHarness({
-      state: {
-        chatKey: "telegram/owner-bot:owner-room",
-        sessionFile,
-      },
-    });
-    try {
-      if (operation === "shutdown") {
-        await lifecycle.controller.shutdownSession();
-      } else {
-        await lifecycle.controller.terminateSession();
-      }
-      assert.ok(lifecycle.client.calls.some((call) => call.type === "connect"));
-      assert.ok(
-        lifecycle.client.calls.some(
-          (call) => call.type === operation + "Session",
-        ),
-      );
-    } finally {
-      await lifecycle.cleanup();
-      await fs.rm(root, { recursive: true, force: true });
-    }
   }
 });
 

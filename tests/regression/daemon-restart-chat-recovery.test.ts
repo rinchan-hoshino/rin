@@ -146,6 +146,7 @@ test("hosted restart requeues a concurrent worker exit without committing an err
     const main = await load("dist/core/chat/main.js");
     const controller = await load("dist/core/chat/controller.js");
     const helpers = await load("dist/core/chat/chat-helpers.js");
+    const inbox = await load("dist/core/chat/inbox.js");
     const store = await load("dist/core/chat/message-store.js");
     const support = await load("dist/core/chat/support.js");
     const runtime = await load("dist/core/chat-runtime/index.js");
@@ -199,27 +200,24 @@ test("hosted restart requeues a concurrent worker exit without committing an err
       stripped: { content: "continue after restart" },
       elements: [runtime.createChatRuntimeH().text("continue after restart")],
     });
-    const processingDir = path.join(agentDir, "data", "chat", "inbox", "processing");
-    const pendingDir = path.join(agentDir, "data", "chat", "inbox", "pending");
-    const failedDir = path.join(agentDir, "data", "chat", "inbox", "failed");
-    const files = (directory) => fs.existsSync(directory)
-      ? fs.readdirSync(directory).filter((name) => name.endsWith(".json"))
-      : [];
+    const pending = () => inbox.listPendingChatInboxItems(agentDir);
+    const running = () => inbox.listRunningChatInboxItems(agentDir);
+    const failed = () => inbox.listChatInboxItems(agentDir, ["failed"]);
     const firstDeadline = Date.now() + 5000;
     while (Date.now() < firstDeadline && runTurnCalls < 1) {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     await first.stop();
     const requeueDeadline = Date.now() + 5000;
-    while (Date.now() < requeueDeadline && files(pendingDir).length !== 1) {
+    while (Date.now() < requeueDeadline && pending().length !== 1) {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     const afterStop = store.getChatMessage(agentDir, "telegram/1:2", "m-restart-race");
     const errorsAfterStop = store.listChatMessages(agentDir).filter(
       (item) => item.role === "assistant" && item.deliveryKind === "error",
     );
-    if (runTurnCalls !== 1 || afterStop?.processedAt || errorsAfterStop.length || files(pendingDir).length !== 1 || files(processingDir).length || files(failedDir).length) {
-      throw new Error(JSON.stringify({ phase: "stopped", runTurnCalls, afterStop, errorsAfterStop, pending: files(pendingDir), processing: files(processingDir), failed: files(failedDir) }));
+    if (runTurnCalls !== 1 || afterStop?.processedAt || errorsAfterStop.length || pending().length !== 1 || running().length || failed().length) {
+      throw new Error(JSON.stringify({ phase: "stopped", runTurnCalls, afterStop, errorsAfterStop, pending: pending(), running: running(), failed: failed() }));
     }
     const second = await main.startChatBridge({ hosted: true });
     second.app.bots.push(bot);
@@ -235,8 +233,8 @@ test("hosted restart requeues a concurrent worker exit without committing an err
     );
     const errors = assistantRows.filter((item) => item.deliveryKind === "error");
     const finals = assistantRows.filter((item) => item.deliveryKind === "final");
-    if (runTurnCalls !== 2 || sendCount !== 1 || !afterRecovery?.processedAt || errors.length || finals.length !== 1 || finals[0]?.text !== "recovered" || files(pendingDir).length || files(processingDir).length || files(failedDir).length) {
-      throw new Error(JSON.stringify({ phase: "recovered", runTurnCalls, sendCount, afterRecovery, errors, finals, pending: files(pendingDir), processing: files(processingDir), failed: files(failedDir) }));
+    if (runTurnCalls !== 2 || sendCount !== 1 || !afterRecovery?.processedAt || errors.length || finals.length !== 1 || finals[0]?.text !== "recovered" || pending().length || running().length || failed().length) {
+      throw new Error(JSON.stringify({ phase: "recovered", runTurnCalls, sendCount, afterRecovery, errors, finals, pending: pending(), running: running(), failed: failed() }));
     }
   `;
   try {
@@ -254,7 +252,7 @@ test("hosted restart requeues a concurrent worker exit without committing an err
   }
 });
 
-test("hosted shutdown arms every active chat before awaiting disconnect", async () => {
+test("hosted shutdown detaches every active chat before completion", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-shutdown-arm-all-"),
   );
@@ -337,7 +335,7 @@ test("hosted shutdown arms every active chat before awaiting disconnect", async 
     const callsBeforeRelease = runTurnCalls;
     releaseFirstDetach?.();
     await stopping;
-    if (armedBeforeWait !== 3 || callsBeforeRelease !== 3 || lateOutcome !== "rin_frontend_turn_cancelled") {
+    if (armedBeforeWait !== 1 || detachCalls !== 3 || callsBeforeRelease !== 3 || lateOutcome !== "rin_frontend_turn_cancelled") {
       throw new Error(JSON.stringify({ armedBeforeWait, detachCalls, callsBeforeRelease, runTurnCalls, lateOutcome }));
     }
     process.exit(0);

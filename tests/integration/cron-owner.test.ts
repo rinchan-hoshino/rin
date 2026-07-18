@@ -199,14 +199,6 @@ test("cron upsert validates trigger, session, target, frontend, condition, and m
       () =>
         scheduler.upsertTask({
           trigger: { runAt: futureIso() },
-          session: { mode: "session_continue" },
-        } as any),
-      /cron_session_file_required/,
-    );
-    assert.throws(
-      () =>
-        scheduler.upsertTask({
-          trigger: { runAt: futureIso() },
           session: { mode: "none" },
         } as any),
       /cron_target_required/,
@@ -233,6 +225,32 @@ test("cron upsert validates trigger, session, target, frontend, condition, and m
       () =>
         scheduler.upsertTask({
           trigger: { runAt: futureIso() },
+          session: { mode: "none" },
+          target: { kind: "unknown" },
+        } as any),
+      /cron_invalid_target_kind:unknown/,
+    );
+    assert.throws(
+      () =>
+        scheduler.upsertTask({
+          trigger: { runAt: futureIso() },
+          frontend: { kind: "tui", key: "terminal" },
+          target: { kind: "shell_command", command: "owner" },
+        } as any),
+      /cron_frontend_tui_unbindable/,
+    );
+    const defaulted = scheduler.upsertTask({
+      id: "defaulted",
+      trigger: { runAt: futureIso() },
+      frontend: { key: "owner-front" },
+      target: { kind: "shell_command", command: "owner" },
+    } as any);
+    assert.deepEqual(defaulted.session, { mode: "none" });
+    assert.deepEqual(defaulted.frontend, { key: "owner-front" });
+    assert.throws(
+      () =>
+        scheduler.upsertTask({
+          trigger: { runAt: futureIso() },
           frontend: { key: " " },
           session: { mode: "none" },
           target: { kind: "shell_command", command: "owner" },
@@ -249,41 +267,6 @@ test("cron upsert validates trigger, session, target, frontend, condition, and m
         } as any),
       /cron_condition_code_required/,
     );
-    assert.throws(
-      () =>
-        scheduler.upsertTask({
-          trigger: { runAt: futureIso() },
-          frontend: { kind: "chat", key: "owner-chat" },
-          session: {
-            mode: "session_continue",
-            sessionFile: "/tmp/owner.jsonl",
-          },
-          target: { kind: "session_continue" },
-        } as any),
-      /cron_session_continue_frontend_forbidden/,
-    );
-    assert.throws(
-      () =>
-        scheduler.upsertTask({
-          trigger: { runAt: futureIso() },
-          session: {
-            mode: "session_continue",
-            sessionFile: "/tmp/owner.jsonl",
-          },
-          target: { kind: "agent_prompt", prompt: "owner" },
-        } as any),
-      /cron_session_continue_requires_target/,
-    );
-    assert.throws(
-      () =>
-        scheduler.upsertTask({
-          trigger: { runAt: futureIso() },
-          session: { mode: "none" },
-          target: { kind: "session_continue" },
-        } as any),
-      /cron_session_continue_requires_session/,
-    );
-
     const normalized = scheduler.upsertTask(
       {
         id: "normalized",
@@ -559,12 +542,9 @@ test("cron merges a finishing execution into a task updated while it runs", asyn
   });
 });
 
-test("cron session invocations route prompt and continuation work through owned adapters", async () => {
+test("cron session invocations route prompt work through the owned adapter", async () => {
   await withAgentDir(async (agentDir) => {
     const events: Array<[string, any]> = [];
-    const continuedSession = path.join(agentDir, "sessions", "continued.jsonl");
-    fs.mkdirSync(path.dirname(continuedSession), { recursive: true });
-    fs.writeFileSync(continuedSession, '{"type":"session"}\n');
     const scheduler = new CronScheduler({
       agentDir,
       chat: {
@@ -585,13 +565,6 @@ test("cron session invocations route prompt and continuation work through owned 
         async terminateTurn(payload) {
           events.push(["terminate", payload]);
         },
-      },
-      async resumeSessionTurn(payload) {
-        events.push(["resume", payload]);
-        return {
-          finalText: "owner continued result",
-          sessionFile: payload.sessionFile,
-        };
       },
     });
 
@@ -614,28 +587,8 @@ test("cron session invocations route prompt and continuation work through owned 
     const prompt = await waitForTaskSettled(scheduler, "prompt-task");
     assert.equal(prompt.lastResultText, "owner prompt result");
 
-    const continued = scheduler.upsertTask(
-      {
-        id: "continue-task",
-        trigger: { runAt: pastIso() },
-        session: { mode: "session_continue" },
-      },
-      { sessionFile: continuedSession },
-    );
-    assert.equal(continued.target.kind, "session_continue");
-    assert.equal(continued.session.sessionFile, continuedSession);
-    scheduler.runTaskNow("continue-task");
-    const continuedSettled = await waitForTaskSettled(
-      scheduler,
-      "continue-task",
-    );
-    assert.equal(continuedSettled.lastResultText, "owner continued result");
     assert.equal(
       events.some(([type]) => type === "runTurn"),
-      true,
-    );
-    assert.equal(
-      events.some(([type]) => type === "resume"),
       true,
     );
     scheduler.stop();
@@ -649,14 +602,12 @@ test("cron reload accepts legacy persisted bindings and rejects invalid task fil
     fs.writeFileSync(
       filePath,
       `${JSON.stringify([
-        null,
-        {},
         {
           id: "legacy-chat",
           createdAt: "2026-07-17T00:00:00.000Z",
           updatedAt: "2026-07-17T00:00:00.000Z",
           enabled: true,
-          chatKey: "telegram:legacy-owner",
+          chatKey: "telegram/bot:legacy-owner",
           deliverFinal: undefined,
           model: " owner/model ",
           thinkingLevel: "invalid",
@@ -675,7 +626,7 @@ test("cron reload accepts legacy persisted bindings and rejects invalid task fil
     const legacy = scheduler.getTask("legacy-chat");
     assert.deepEqual(legacy?.frontend, {
       kind: "chat",
-      key: "telegram:legacy-owner",
+      key: "telegram/bot:legacy-owner",
     });
     assert.equal(legacy?.deliverFinal, true);
     assert.equal(legacy?.thinkingLevel, undefined);

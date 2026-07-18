@@ -16,7 +16,6 @@ const replacements = {
     export function tryManagedSystemdAction(candidates,actions){
       globalThis.__rinManagedOwnerEvents.push(["systemd-candidates",candidates]);
       actions.daemonReload();
-      actions.probeUnit(candidates[0]);
       actions.runAction(candidates[0]);
       return globalThis.__rinManagedOwnerSystemdFails ? "" : candidates[0];
     }

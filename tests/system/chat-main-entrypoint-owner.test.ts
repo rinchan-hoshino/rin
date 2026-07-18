@@ -82,6 +82,14 @@ async function runDirectSignal(signal: "SIGINT" | "SIGTERM") {
       }
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
+    // The startup log is emitted before the direct entrypoint installs its
+    // process signal handlers. Let the final startup microtasks settle first.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    if (child.exitCode !== null) {
+      throw new Error(
+        `chat_main_exited_before_signal:${child.exitCode}\n${stdout}\n${stderr}`,
+      );
+    }
     child.kill(signal);
     const result = await withTimeout(
       exitPromise,

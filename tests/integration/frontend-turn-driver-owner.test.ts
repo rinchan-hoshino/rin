@@ -1456,7 +1456,10 @@ test("frontend turn owner keeps session and terminal fallbacks deterministic", a
   );
   const interrupted = interrupt.driver.interruptActiveTurnLikeTui();
   assert.equal(interrupted.sessionId, interrupt.client.sessionId);
-  await assert.rejects(pending, /chat_turn_aborted/);
+  await assert.rejects(
+    within(pending, "interrupt-fallback"),
+    /chat_turn_aborted/,
+  );
 
   const terminal = createDriver();
   await terminal.driver.connect();
@@ -1475,11 +1478,12 @@ test("frontend turn owner keeps session and terminal fallbacks deterministic", a
   await terminal.client.emitUi({ type: "session_recovered" });
   await terminal.client.emitBackend({
     type: "turn_complete",
-    finalText: "tagless final",
+    requestTag: "terminal-owned",
+    finalText: "owned final",
   });
   assert.equal(
-    (await within(pendingComplete, "tagless-complete")).finalText,
-    "tagless final",
+    (await within(pendingComplete, "owned-complete")).finalText,
+    "owned final",
   );
 
   const terminalError = createDriver();
@@ -1497,11 +1501,12 @@ test("frontend turn owner keeps session and terminal fallbacks deterministic", a
   );
   await terminalError.client.emitBackend({
     type: "turn_error",
-    error: "tagless terminal error",
+    requestTag: "terminal-error-owned",
+    error: "owned terminal error",
   });
   await assert.rejects(
-    within(pendingError, "tagless-error"),
-    /tagless terminal error/,
+    within(pendingError, "owned-error"),
+    /owned terminal error/,
   );
 
   let releaseResume!: () => void;

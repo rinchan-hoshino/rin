@@ -831,7 +831,6 @@ test("chat outbox supports synchronous adapters and metadata-only native parts",
           type: "image" as const,
           url: "https://example.test/owner.png",
         },
-        { type: "todo" as const, items: undefined as any },
         { type: "file" as const, url: "https://example.test/owner.bin" },
       ],
     };
@@ -849,6 +848,17 @@ test("chat outbox supports synchronous adapters and metadata-only native parts",
     assert.match(stored[0].rawContent ?? "", /\[@\] 42/);
     assert.match(stored[0].rawContent ?? "", /\[#image\]/);
     assert.match(stored[0].rawContent ?? "", /\[#file\]/);
+
+    await assert.rejects(
+      transport.validateChatOutboxPayloadForDispatch(
+        {
+          ...payload,
+          parts: [{ type: "todo" as any, items: [] }],
+        },
+        h,
+      ),
+      /chat_outbox_invalid_part:todo/,
+    );
   });
 });
 

@@ -204,6 +204,25 @@ test("usage parser owns wrapper extraction, time normalization, defaults, and fa
     () => usage.parseUsageArgs(["usage", "--bad"]),
     /unknown_usage_arg:--bad/,
   );
+  assert.throws(
+    () => usage.parseUsageArgs(["usage", "--all-time"]),
+    /--all-time requires --json/,
+  );
+  assert.throws(
+    () =>
+      usage.parseUsageArgs([
+        "usage",
+        "--all-time",
+        "--json",
+        "--from",
+        "2026-07-18",
+      ]),
+    /--all-time cannot be combined with --from or --to/,
+  );
+  assert.equal(
+    usage.parseUsageArgs(["usage", "--all-time", "--json"]).allTime,
+    true,
+  );
 });
 
 test("usage subscription parsers normalize provider windows and credits", () => {

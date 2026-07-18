@@ -45,15 +45,24 @@ test("message store layout uses one preferred root and derived subdirectories", 
     const storeDir = path.join(root, "data", "chat", "message-store");
     assert.equal(result.storeDir, storeDir);
     assert.equal(result.primaryRoot.storeDir, storeDir);
+    const storeDirs = [
+      storeDir,
+      path.join(root, "data", "koishi-message-store"),
+      path.join(root, "data", "chat-message-store"),
+    ];
     assert.deepEqual(
       result.readRoots.map((item) => item.storeDir),
-      [storeDir],
+      storeDirs,
     );
-    assert.deepEqual(layout.chatMessageStoreRoots(root), [storeDir]);
-    assert.deepEqual(layout.recordRoots(root), [
-      path.join(storeDir, "records"),
-    ]);
-    assert.deepEqual(layout.indexRoots(root), [path.join(storeDir, "indexes")]);
+    assert.deepEqual(layout.chatMessageStoreRoots(root), storeDirs);
+    assert.deepEqual(
+      layout.recordRoots(root),
+      storeDirs.map((dir) => path.join(dir, "records")),
+    );
+    assert.deepEqual(
+      layout.indexRoots(root),
+      storeDirs.map((dir) => path.join(dir, "indexes")),
+    );
     assert.equal(
       layout.recordsDirForStoreDir(storeDir),
       path.join(storeDir, "records"),
@@ -73,11 +82,16 @@ test("message store layout keeps the preferred root when a legacy root exists", 
     const preferred = path.join(root, "data", "chat", "message-store");
     const result = layout.getChatMessageStoreLayout(root);
     assert.equal(result.storeDir, preferred);
+    const storeDirs = [
+      preferred,
+      path.join(root, "data", "koishi-message-store"),
+      path.join(root, "data", "chat-message-store"),
+    ];
     assert.deepEqual(
       result.readRoots.map((item) => item.storeDir),
-      [preferred],
+      storeDirs,
     );
-    assert.deepEqual(layout.chatMessageStoreRoots(root), [preferred]);
+    assert.deepEqual(layout.chatMessageStoreRoots(root), storeDirs);
   });
 });
 

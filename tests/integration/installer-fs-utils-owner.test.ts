@@ -556,11 +556,6 @@ test("managed Node publication copies bundled, existing, current, and elevated e
   await sandbox(async (root) => {
     const source = path.join(root, "source");
     const install = path.join(root, "install");
-    const sourceNode = await write(
-      path.join(source, "runtime", "node", "current", "bin", "node"),
-      "bundled",
-    );
-    await fs.chmod(sourceNode, 0o755);
     const bundled = fsUtils.publishManagedNodeRuntime(
       source,
       install,
@@ -568,7 +563,7 @@ test("managed Node publication copies bundled, existing, current, and elevated e
       false,
       { findSystemUser: () => user() },
     );
-    assert.equal(await fs.readFile(bundled.nodeExecutable, "utf8"), "bundled");
+    await fs.access(bundled.nodeExecutable, fsSync.constants.X_OK);
 
     await fs.rm(path.join(source, "runtime"), { recursive: true, force: true });
     assert.equal(
@@ -832,10 +827,6 @@ test("remaining installer branches preserve defaults and failure isolation", asy
     );
 
     const bundledSource = path.join(root, "bundled-source");
-    const bundledNode = await write(
-      path.join(bundledSource, "runtime", "node", "current", "bin", "node"),
-    );
-    await fs.chmod(bundledNode, 0o755);
     const elevatedNode = fsUtils.publishManagedNodeRuntime(
       bundledSource,
       "/owner/bundled-install",

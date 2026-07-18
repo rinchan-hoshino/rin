@@ -37,7 +37,7 @@ test("frontend input submission forwards normalized prompt metadata", async () =
         streamingBehavior: "steer",
         source: "tui",
         requestTag: "tag-1",
-        frontendIdentity: { kind: "tui", key: "main" },
+        frontendIdentity: { kind: "tui" },
         promptContext: { source: "tui" },
         sessionFile: "/tmp/session.jsonl",
         sessionId: "session-id",

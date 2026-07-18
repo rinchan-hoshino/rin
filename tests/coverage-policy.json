@@ -22,6 +22,12 @@
       "status": "strict"
     },
     {
+      "source": "src/app/rin-daemon/hosted-chat-service.ts",
+      "built": "dist/app/rin-daemon/hosted-chat-service.js",
+      "ownerSuite": "system",
+      "status": "strict"
+    },
+    {
       "source": "src/app/rin-daemon/worker.ts",
       "built": "dist/app/rin-daemon/worker.js",
       "ownerSuite": "system",
@@ -40,8 +46,20 @@
       "status": "strict"
     },
     {
+      "source": "src/app/rin-install/chat-migrations.ts",
+      "built": "dist/app/rin-install/chat-migrations.js",
+      "ownerSuite": "system",
+      "status": "strict"
+    },
+    {
       "source": "src/app/rin-install/main.ts",
       "built": "dist/app/rin-install/main.js",
+      "ownerSuite": "system",
+      "status": "strict"
+    },
+    {
+      "source": "src/app/rin-install/update-job.ts",
+      "built": "dist/app/rin-install/update-job.js",
       "ownerSuite": "system",
       "status": "strict"
     },
@@ -66,7 +84,13 @@
     {
       "source": "src/core/chat/chat-key-migration.ts",
       "built": "dist/core/chat/chat-key-migration.js",
-      "ownerSuite": "unit",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/chat/chat-key-record-resolution.ts",
+      "built": "dist/core/chat/chat-key-record-resolution.js",
+      "ownerSuite": "integration",
       "status": "strict"
     },
     {
@@ -90,6 +114,12 @@
     {
       "source": "src/core/chat/controller.ts",
       "built": "dist/core/chat/controller.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/chat/database.ts",
+      "built": "dist/core/chat/database.js",
       "ownerSuite": "integration",
       "status": "strict"
     },
@@ -136,6 +166,18 @@
       "status": "strict"
     },
     {
+      "source": "src/core/chat/install-migration.ts",
+      "built": "dist/core/chat/install-migration.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/chat/legacy-migration.ts",
+      "built": "dist/core/chat/legacy-migration.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/chat/main.ts",
       "built": "dist/core/chat/main.js",
       "ownerSuite": "system",
@@ -151,6 +193,12 @@
       "source": "src/core/chat/message-store.ts",
       "built": "dist/core/chat/message-store.js",
       "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/chat/outbox-payload-validation.ts",
+      "built": "dist/core/chat/outbox-payload-validation.js",
+      "ownerSuite": "unit",
       "status": "strict"
     },
     {
@@ -487,6 +535,12 @@
       "source": "src/core/rin/tui-report.ts",
       "built": "dist/core/rin/tui-report.js",
       "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin/update-job.ts",
+      "built": "dist/core/rin/update-job.js",
+      "ownerSuite": "integration",
       "status": "strict"
     },
     {
@@ -1278,7 +1332,7 @@
     {
       "source": "src/core/session/catalog.ts",
       "built": "dist/core/session/catalog.js",
-      "ownerSuite": "unit",
+      "ownerSuite": "integration",
       "status": "strict"
     },
     {

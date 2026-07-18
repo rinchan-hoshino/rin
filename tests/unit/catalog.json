@@ -7,16 +7,6 @@
   },
   "modules": [
     {
-      "test": "tests/unit/chat-bridge-prompt-context.test.ts",
-      "source": "src/core/chat-bridge/prompt-context.ts",
-      "built": "dist/core/chat-bridge/prompt-context.js"
-    },
-    {
-      "test": "tests/unit/chat-key-migration.test.ts",
-      "source": "src/core/chat/chat-key-migration.ts",
-      "built": "dist/core/chat/chat-key-migration.js"
-    },
-    {
       "test": "tests/unit/chat-key-worker.test.ts",
       "source": "src/core/chat/chat-key-worker.ts",
       "built": "dist/core/chat/chat-key-worker.js"
@@ -47,6 +37,11 @@
       "built": "dist/core/chat/message-store-layout.js"
     },
     {
+      "test": "tests/unit/chat-outbox-payload-validation.test.ts",
+      "source": "src/core/chat/outbox-payload-validation.ts",
+      "built": "dist/core/chat/outbox-payload-validation.js"
+    },
+    {
       "test": "tests/unit/rich-text.test.ts",
       "source": "src/core/chat/rich-text.ts",
       "built": "dist/core/chat/rich-text.js"
@@ -55,6 +50,11 @@
       "test": "tests/unit/chat-settings.test.ts",
       "source": "src/core/chat/settings.ts",
       "built": "dist/core/chat/settings.js"
+    },
+    {
+      "test": "tests/unit/chat-bridge-prompt-context.test.ts",
+      "source": "src/core/chat-bridge/prompt-context.ts",
+      "built": "dist/core/chat-bridge/prompt-context.js"
     },
     {
       "test": "tests/unit/data-layout.test.ts",
@@ -100,6 +100,21 @@
       "test": "tests/unit/rpc-socket.test.ts",
       "source": "src/core/platform/rpc-socket.ts",
       "built": "dist/core/platform/rpc-socket.js"
+    },
+    {
+      "test": "tests/unit/report-format.test.ts",
+      "source": "src/core/rin/report-format.ts",
+      "built": "dist/core/rin/report-format.js"
+    },
+    {
+      "test": "tests/unit/run-lite.test.ts",
+      "source": "src/core/rin/run-lite.ts",
+      "built": "dist/core/rin/run-lite.js"
+    },
+    {
+      "test": "tests/unit/tui-report.test.ts",
+      "source": "src/core/rin/tui-report.ts",
+      "built": "dist/core/rin/tui-report.js"
     },
     {
       "test": "tests/unit/bundled-extensions.test.ts",
@@ -317,21 +332,6 @@
       "built": "dist/core/rin-tui/runtime-host.js"
     },
     {
-      "test": "tests/unit/report-format.test.ts",
-      "source": "src/core/rin/report-format.ts",
-      "built": "dist/core/rin/report-format.js"
-    },
-    {
-      "test": "tests/unit/run-lite.test.ts",
-      "source": "src/core/rin/run-lite.ts",
-      "built": "dist/core/rin/run-lite.js"
-    },
-    {
-      "test": "tests/unit/tui-report.test.ts",
-      "source": "src/core/rin/tui-report.ts",
-      "built": "dist/core/rin/tui-report.js"
-    },
-    {
       "test": "tests/unit/scheduled-task-options.test.ts",
       "source": "src/core/scheduled-task-options.ts",
       "built": "dist/core/scheduled-task-options.js"
@@ -390,11 +390,6 @@
       "test": "tests/unit/self-improve-skill-usage.test.ts",
       "source": "src/core/self-improve/skill-usage.ts",
       "built": "dist/core/self-improve/skill-usage.js"
-    },
-    {
-      "test": "tests/unit/session-catalog-owner.test.ts",
-      "source": "src/core/session/catalog.ts",
-      "built": "dist/core/session/catalog.js"
     },
     {
       "test": "tests/unit/session-fork.test.ts",

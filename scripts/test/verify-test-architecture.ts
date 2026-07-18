@@ -105,7 +105,11 @@ function assertUnique(values: string[], label: string) {
 }
 
 const allowedUnitNodeModule =
-  /^node:(?:assert(?:\/strict)?|fs(?:\/promises)?|os|path|test|url)$/;
+  /^node:(?:assert(?:\/strict)?|crypto|fs(?:\/promises)?|os|path|test|url)$/;
+
+export function sourceImportsCharacterization(sourceText: string): boolean {
+  return /characterization[\\/]/.test(sourceText);
+}
 
 export function sourceUsesAmbientNetwork(
   sourceText: string,
@@ -934,6 +938,20 @@ export function verifyTestArchitecture() {
         errors.push(
           `non_unit_owner_preload_invalid:${entry.source}:${preload}`,
         );
+      }
+    }
+  }
+
+  for (const directory of [
+    "tests/unit",
+    "tests/integration",
+    "tests/system",
+    "tests/support",
+  ]) {
+    for (const file of listFiles(directory, ".ts")) {
+      const sourceText = fs.readFileSync(path.join(rootDir, file), "utf8");
+      if (sourceImportsCharacterization(sourceText)) {
+        errors.push(`strict_test_imports_characterization:${file}`);
       }
     }
   }

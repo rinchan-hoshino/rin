@@ -23,6 +23,7 @@ const replacements = {
     import fs from "node:fs";
     import path from "node:path";
     export function preparedRuntimeNodeExecutable(root){return path.join(root,"runtime","node","current","bin","node")}
+    export function provisionPreparedCurrentNodeRuntime(root){return {nodeExecutable:preparedRuntimeNodeExecutable(root),npmCli:path.join(root,"runtime","node","current","lib","node_modules","npm","bin","npm-cli.js")}}
     export function isInstalledReleaseCurrent(installed,resolved){globalThis.__rinUpdaterOwnerEvents.push(["current",installed,resolved]);return globalThis.__rinUpdaterOwnerCurrent === true}
     export async function resolveGitCommitForRelease(repo,request){globalThis.__rinUpdaterOwnerEvents.push(["resolve",repo,request]);return {...request,ref:"owner-ref",archiveUrl:"https://example.test/archive",sourceLabel:request.sourceLabel||"owner resolved"}}
     export function createUpdateRuntimeSourceWorkspace(release){const tempRoot=path.join(process.env.RIN_TEST_UPDATER_ROOT,"workspace");const sourceRoot=path.join(tempRoot,"source");fs.mkdirSync(sourceRoot,{recursive:true});const releaseFile=path.join(tempRoot,"release.json");fs.writeFileSync(releaseFile,JSON.stringify(release));globalThis.__rinUpdaterOwnerEvents.push(["workspace",release]);return {tempRoot,sourceRoot,releaseFile}}

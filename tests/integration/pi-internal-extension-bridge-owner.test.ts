@@ -30,7 +30,7 @@ test("capability bridge adds canonical frontend and compaction metadata", () => 
     ),
     {
       type: "session_before_compact",
-      frontend: { kind: "tui", key: "main" },
+      frontend: { kind: "tui" },
       reason: "manual",
     },
   );

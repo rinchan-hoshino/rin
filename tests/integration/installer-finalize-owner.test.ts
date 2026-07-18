@@ -129,11 +129,12 @@ test("core update publishes runtime, refreshes bound launchers, and restarts aft
       ],
     );
     assert.equal(
-      eventNames().indexOf("manifest") < eventNames().indexOf("service-action"),
+      eventNames().indexOf("manifest") <
+        eventNames().lastIndexOf("service-action"),
       true,
     );
     assert.equal(
-      eventNames().indexOf("service-action") <
+      eventNames().lastIndexOf("service-action") <
         eventNames().indexOf("wait-socket"),
       true,
     );

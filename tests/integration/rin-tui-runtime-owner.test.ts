@@ -983,6 +983,10 @@ test("rpc runtime connection events expose deterministic frontend phases and cle
     },
   });
   client.emit({
+    type: "extension_ui_request",
+    payload: { type: "extension_ui_request", method: "owner-unknown" },
+  });
+  client.emit({
     type: "ui",
     name: "oauth",
     payload: { type: "oauth_login_event", event: "unknown" },

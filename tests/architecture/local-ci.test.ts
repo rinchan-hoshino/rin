@@ -7,7 +7,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { networkIsolatedNodeInvocation } from "../../scripts/test/network-isolated-process.js";
+import { isCharacterizationModuleUrl } from "../../scripts/test/owner-characterization-guard.js";
 import {
+  sourceImportsCharacterization,
   sourceUsesAmbientNetwork,
   sourceWritesFixedHostPath,
 } from "../../scripts/test/verify-test-architecture.js";
@@ -96,12 +98,73 @@ test("repository test scripts route classified buckets through the shared runner
     );
   }
   assert.match(packageJson.scripts["test:release:run"], /--concurrency=4/);
+  assert.match(
+    packageJson.scripts["test:release:run"],
+    /tests\/integration\/rin-cli\.test\.ts/,
+  );
+  assert.doesNotMatch(
+    packageJson.scripts["test:release:run"],
+    /tests\/characterization\/rin-cli\.test\.ts/,
+  );
   for (const [name, command] of Object.entries<string>(packageJson.scripts)) {
     if (name.startsWith("test:")) {
       assert.doesNotMatch(command, /(^|\s)node\b[^&]*--test\b/);
     }
   }
   assert.match(runner, /suites\.includes\("system"\) \? 2 : 4/);
+});
+
+test("strict coverage gates exclude immutable characterization evidence", () => {
+  const coverageRunner = readRepoFile("scripts/test/run-coverage.ts");
+  assert.match(
+    coverageRunner,
+    /TEST_SUITES\.filter\([\s\S]*suite !== "characterization"/,
+  );
+  assert.equal(
+    [...coverageRunner.matchAll(/owner-characterization-guard/g)].length,
+    2,
+  );
+  for (const sourceText of [
+    'import "../characterization/owner.test.ts";',
+    'import("../characterization/owner.test.ts")',
+    'require("../characterization/owner.test.ts")',
+    "const target = `../characterization/${name}.test.ts`;",
+  ]) {
+    assert.equal(sourceImportsCharacterization(sourceText), true);
+  }
+  assert.equal(
+    sourceImportsCharacterization('import "./owner-contract.test.ts";'),
+    false,
+  );
+  assert.equal(
+    isCharacterizationModuleUrl(
+      path.join(rootDir, "tests", "characterization", "changelog.test.ts"),
+    ),
+    true,
+  );
+  const blocked = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      "--import",
+      path.join(rootDir, "scripts", "test", "owner-characterization-guard.ts"),
+      "--input-type=module",
+      "-e",
+      'const bucket="characterization"; await import(`./tests/${bucket}/changelog.test.ts`);',
+    ],
+    { cwd: rootDir, encoding: "utf8" },
+  );
+  assert.notEqual(blocked.status, 0);
+  assert.match(
+    blocked.stderr,
+    /^Error: strict_owner_characterization_import_forbidden:/m,
+  );
+  assert.doesNotMatch(blocked.stderr, /ERR_MODULE_NOT_FOUND/);
+  assert.match(
+    readRepoFile("scripts/test/verify-test-architecture.ts"),
+    /strict_test_imports_characterization/,
+  );
 });
 
 test("all automated test launchers use the isolated process environment", () => {

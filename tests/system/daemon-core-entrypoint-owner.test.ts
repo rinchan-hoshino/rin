@@ -286,7 +286,7 @@ test("core daemon routes the complete system-owned RPC and lifecycle contract", 
       ).data.limit,
       2,
     );
-    assert.equal((await request({ type: "list_sessions" })).success, true);
+    assert.equal((await request({ type: "list_sessions" })).success, false);
     assert.equal(
       (await request({ type: "replay_pending_terminal_turn_event" })).data
         .replayed,

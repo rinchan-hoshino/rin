@@ -87,6 +87,7 @@ const replacements: Record<string, string> = {
     export function getChatId(session) { return session.channelId || session.chatId || "chat"; }
     export function getChatType(session) { return session.chatType || (session.isDirect ? "private" : "group"); }
     export function lookupReplySession() { return state().replySession; }
+    export function enrichInboundMessageMetadata(agentDir, session, elements, identity, trust, options) { state().events.push(["enrich-inbound", session.messageId, options?.chatKey]); return session; }
     export function persistInboundMessage(agentDir, session, elements) {
       state().events.push(["persist", session.messageId]);
       if (session.persistError) throw new Error("persist-owner");
@@ -153,10 +154,13 @@ const replacements: Record<string, string> = {
   `,
   "dist/core/chat/inbox.js": `
     const state = () => globalThis.__chatMainOwner;
-    export function reconcileChatInboxRecovery() { return state().recovery || { restoredProcessing: [], restoredOrphans: [] }; }
-    export function restoreChatInboxFile(agentDir, claimedPath, envelope) { state().events.push(["restore-file", claimedPath, envelope.messageId]); }
+    export function reconcileChatInboxRecovery() { const recovery = state().recovery || { restoredProcessing: [], restoredOrphans: [], skippedOrphans: {} }; if (recovery.restoredProcessing?.length) state().events.push(["restore-file", "processing"]); return recovery; }
+    export function restoreProcessingChatInboxItems() { state().events.push(["restore-file", "processing"]); return state().recovery?.restoredProcessing || []; }
     export function restoreChatInboxSession(envelope, bot) { return { ...envelope.session, bot: bot || envelope.session?.bot }; }
-    export function touchChatInboxFile(claimedPath, envelope) { state().events.push(["touch", claimedPath]); if (state().touchError) throw new Error("touch-owner"); }
+    export function classifyClaimedChatInboxItem(agentDir, envelope, disposition) { state().events.push(["classify", envelope.messageId, disposition]); return !state().classifyLost; }
+    export function touchClaimedChatInboxItem(agentDir, envelope) { state().events.push(["touch", envelope.itemId || envelope.messageId]); if (state().touchError) throw new Error("touch-owner"); return !state().touchLost; }
+    export function getChatInboxItem(agentDir, itemId) { return state().currentInboxItem || null; }
+    export function releaseClaimedChatInboxItem(agentDir, envelope) { state().events.push(["release", envelope.messageId]); return envelope; }
   `,
   "dist/core/chat/inbox-drain.js": `
     const state = () => globalThis.__chatMainOwner;
@@ -200,7 +204,8 @@ const replacements: Record<string, string> = {
       const app = {
         bots: state().initialBots || [], handlers,
         on(name, handler) { const list = handlers.get(name) || []; list.push(handler); handlers.set(name, list); },
-        emit(name, value) { for (const handler of handlers.get(name) || []) handler(value); },
+        emit(name, value) { if (name === "message" && value?.enqueue !== false) { const chatKey = value.ownerChatKey || ((value.platform || "telegram") + "/" + (value.selfId || "bot") + ":" + (value.channelId || "chat")); const messageId = value.messageId || "message"; state().jobs.push({ envelope: { itemId: "turn-" + messageId, ownerEpoch: "owner-epoch", attemptCount: 1, chatKey, messageId, session: value, elements: [{ text: value.content || "" }] } }); } for (const handler of handlers.get(name) || []) handler(value); },
+        getAdapterStatuses() { return state().adapterStatuses || [{ platform: "builtin", status: "ready" }, { platform: "external", status: "ready" }]; },
         async start() { state().events.push(["app-start"]); if (state().appStartError) throw new Error(state().appStartError); },
         async stop() { state().events.push(["app-stop"]); if (state().appStopError) throw new Error(state().appStopError); },
       };
@@ -223,13 +228,16 @@ const replacements: Record<string, string> = {
   `,
   "dist/core/rin-lib/chat-outbox.js": `
     const state = () => globalThis.__chatMainOwner;
-    export function enqueueChatOutboxPayload(agentDir, payload, options) { state().events.push(["enqueue-outbox", payload, options]); state().outbox.push({ payload, options }); if (state().enqueueError) throw new Error("enqueue-owner"); }
+    export function enqueueChatOutboxPayload(agentDir, payload, options) { state().events.push(["enqueue-outbox", payload, options]); state().outbox.push({ payload, options }); if (state().enqueueError) throw new Error("enqueue-owner"); const processedId = options?.postDelivery?.markProcessed?.messageId; if (processedId && (!state().drainOutboxMode || state().drainOutboxMode === "delivered")) state().processed.add(processedId); return options?.id || "owner-outbox"; }
     export function cleanupChatOutboxHistory(agentDir) { state().events.push(["cleanup-outbox", agentDir]); return state().cleanupResult || { delivered: 0, failed: 0 }; }
+    export function hasCommittedTerminalChatOutbox(agentDir, chatKey, messageId) { return state().committedTerminal?.has(messageId) || false; }
+    export async function runWithChatOutboxTurnFence(fence, run) { state().events.push(["outbox-fence", fence]); return await run(); }
   `,
   "dist/core/chat/transport.js": `
     const state = () => globalThis.__chatMainOwner;
     export async function sendTyping(app, chatKey, h) { state().events.push(["typing", chatKey]); return state().typingSent !== false; }
     export async function sendReaction(app, chatKey, messageId, emoji) { state().events.push(["reaction", chatKey, messageId, emoji]); return state().reactionSent !== false; }
+    export function validateChatOutboxPayloadForDispatch(agentDir, payload) { state().events.push(["validate-outbox", payload]); return payload; }
   `,
   "dist/core/language.js": `export function readConfiguredLanguageFromSettings() { return globalThis.__chatMainOwner.language || "en"; }`,
   "dist/core/session/ref.js": `export function normalizeSessionRef(value) { return { sessionId: value?.sessionId || undefined, sessionFile: value?.sessionFile || undefined }; }`,

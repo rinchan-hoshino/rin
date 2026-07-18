@@ -19,6 +19,12 @@
       "tests": ["tests/system/app-daemon-entrypoint-owner.test.ts"]
     },
     {
+      "source": "src/app/rin-daemon/hosted-chat-service.ts",
+      "built": "dist/app/rin-daemon/hosted-chat-service.js",
+      "suite": "system",
+      "tests": ["tests/system/hosted-chat-service.test.ts"]
+    },
+    {
       "source": "src/app/rin-daemon/worker.ts",
       "built": "dist/app/rin-daemon/worker.js",
       "suite": "system",
@@ -37,10 +43,22 @@
       "tests": ["tests/system/gui-entrypoint-owner.test.ts"]
     },
     {
+      "source": "src/app/rin-install/chat-migrations.ts",
+      "built": "dist/app/rin-install/chat-migrations.js",
+      "suite": "system",
+      "tests": ["tests/system/chat-migrations-entrypoint-owner.test.ts"]
+    },
+    {
       "source": "src/app/rin-install/main.ts",
       "built": "dist/app/rin-install/main.js",
       "suite": "system",
       "tests": ["tests/system/installer-entrypoint-owner.test.ts"]
+    },
+    {
+      "source": "src/app/rin-install/update-job.ts",
+      "built": "dist/app/rin-install/update-job.js",
+      "suite": "system",
+      "tests": ["tests/system/update-job-entrypoint-owner.test.ts"]
     },
     {
       "source": "src/app/rin-tui/main.ts",
@@ -54,7 +72,7 @@
       "suite": "integration",
       "tests": [
         "tests/integration/chat-boot-owner.test.ts",
-        "tests/integration/chat-boot.test.ts"
+        "tests/integration/chat-boot-main-contract.test.ts"
       ]
     },
     {
@@ -62,6 +80,18 @@
       "built": "dist/core/chat/chat-helpers.js",
       "suite": "integration",
       "tests": ["tests/integration/chat-helpers-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat/chat-key-migration.ts",
+      "built": "dist/core/chat/chat-key-migration.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-key-migration-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat/chat-key-record-resolution.ts",
+      "built": "dist/core/chat/chat-key-record-resolution.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-key-migration-recovery.test.ts"]
     },
     {
       "source": "src/core/chat/chat-log.ts",
@@ -82,8 +112,23 @@
       "source": "src/core/chat/controller.ts",
       "built": "dist/core/chat/controller.js",
       "suite": "integration",
-      "tests": ["tests/integration/chat-controller-owner.test.ts"],
+      "tests": [
+        "tests/integration/chat-controller-owner.test.ts",
+        "tests/integration/chat-controller.test.ts"
+      ],
       "preloads": ["tests/support/register-chat-controller-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/chat/database.ts",
+      "built": "dist/core/chat/database.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-database.test.ts",
+        "tests/integration/chat-database-owner-branches.test.ts",
+        "tests/integration/chat-key-migration-recovery.test.ts",
+        "tests/integration/chat-legacy-migration.test.ts",
+        "tests/integration/chat-install-migration-boundary.test.ts"
+      ]
     },
     {
       "source": "src/core/chat/decision.ts",
@@ -97,20 +142,46 @@
       "suite": "integration",
       "tests": [
         "tests/integration/chat-inbox-drain-owner.test.ts",
-        "tests/integration/chat-inbox.test.ts"
+        "tests/integration/chat-inbox-main-contract.test.ts"
       ]
     },
     {
       "source": "src/core/chat/inbox.ts",
       "built": "dist/core/chat/inbox.js",
       "suite": "integration",
-      "tests": ["tests/integration/chat-inbox-owner.test.ts"]
+      "tests": [
+        "tests/integration/chat-inbox-owner.test.ts",
+        "tests/integration/chat-inbox-main-contract.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/chat/install-migration.ts",
+      "built": "dist/core/chat/install-migration.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-key-migration-recovery.test.ts",
+        "tests/integration/chat-install-migration-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/chat/legacy-migration.ts",
+      "built": "dist/core/chat/legacy-migration.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-legacy-migration.test.ts",
+        "tests/integration/chat-legacy-migration-owner-branches.test.ts",
+        "tests/integration/chat-key-migration-recovery.test.ts",
+        "tests/integration/chat-database.test.ts"
+      ]
     },
     {
       "source": "src/core/chat/main.ts",
       "built": "dist/core/chat/main.js",
       "suite": "system",
-      "tests": ["tests/system/chat-main-entrypoint-owner.test.ts"]
+      "tests": [
+        "tests/system/chat-main-entrypoint-owner.test.ts",
+        "tests/system/chat-main-contract.test.ts"
+      ]
     },
     {
       "source": "src/core/chat/message-store.ts",
@@ -380,6 +451,12 @@
       "tests": ["tests/integration/rin-tasks-owner.test.ts"]
     },
     {
+      "source": "src/core/rin/update-job.ts",
+      "built": "dist/core/rin/update-job.js",
+      "suite": "integration",
+      "tests": ["tests/integration/update-job.test.ts"]
+    },
+    {
       "source": "src/core/rin/usage-chart.ts",
       "built": "dist/core/rin/usage-chart.js",
       "suite": "integration",
@@ -443,7 +520,10 @@
       "source": "src/core/rin-daemon/cron.ts",
       "built": "dist/core/rin-daemon/cron.js",
       "suite": "integration",
-      "tests": ["tests/integration/cron-owner.test.ts"]
+      "tests": [
+        "tests/integration/cron-owner.test.ts",
+        "tests/integration/cron-execution.test.ts"
+      ]
     },
     {
       "source": "src/core/rin-daemon/daemon.ts",
@@ -470,6 +550,10 @@
       "suite": "integration",
       "tests": [
         "tests/integration/rpc-mode-owner.test.ts",
+        "tests/integration/rpc-mode.test.ts",
+        "tests/integration/rpc-auth.test.ts",
+        "tests/integration/rpc-model-runtime.test.ts",
+        "tests/integration/rpc-runtime-binding.test.ts",
         "tests/integration/rpc-settings-persistence.test.ts"
       ],
       "preloads": ["tests/support/register-rpc-mode-owner-fixture.ts"]
@@ -484,7 +568,10 @@
       "source": "src/core/rin-daemon/worker-pool.ts",
       "built": "dist/core/rin-daemon/worker-pool.js",
       "suite": "integration",
-      "tests": ["tests/integration/worker-pool-owner.test.ts"],
+      "tests": [
+        "tests/integration/worker-pool-owner.test.ts",
+        "tests/integration/daemon-worker-pool.test.ts"
+      ],
       "preloads": ["tests/support/register-worker-pool-owner-fixture.ts"]
     },
     {
@@ -527,7 +614,10 @@
       "source": "src/core/rin-frontend-sdk/rpc-auth.ts",
       "built": "dist/core/rin-frontend-sdk/rpc-auth.js",
       "suite": "integration",
-      "tests": ["tests/integration/rpc-auth-owner.test.ts"]
+      "tests": [
+        "tests/integration/rpc-auth-owner.test.ts",
+        "tests/integration/rpc-auth.test.ts"
+      ]
     },
     {
       "source": "src/core/rin-frontend-sdk/rpc-session-events.ts",
@@ -672,7 +762,10 @@
       "source": "src/core/rin-install/update-workflow.ts",
       "built": "dist/core/rin-install/update-workflow.js",
       "suite": "integration",
-      "tests": ["tests/integration/update-workflow.test.ts"],
+      "tests": [
+        "tests/integration/update-workflow.test.ts",
+        "tests/integration/update-workflow-main-contract.test.ts"
+      ],
       "preloads": ["tests/support/register-update-workflow-owner-fixture.ts"]
     },
     {
@@ -715,7 +808,10 @@
       "source": "src/core/rin-lib/chat-outbox.ts",
       "built": "dist/core/rin-lib/chat-outbox.js",
       "suite": "integration",
-      "tests": ["tests/integration/chat-outbox-and-binding.test.ts"]
+      "tests": [
+        "tests/integration/chat-outbox-and-binding.test.ts",
+        "tests/integration/chat-outbox-and-binding-main-contract.test.ts"
+      ]
     },
     {
       "source": "src/core/rin-lib/common.ts",
@@ -859,6 +955,12 @@
       "tests": ["tests/system/self-improve-worker-owner.test.ts"]
     },
     {
+      "source": "src/core/session/catalog.ts",
+      "built": "dist/core/session/catalog.js",
+      "suite": "integration",
+      "tests": ["tests/integration/session-catalog-owner.test.ts"]
+    },
+    {
       "source": "src/core/session/factory.ts",
       "built": "dist/core/session/factory.js",
       "suite": "integration",
@@ -868,7 +970,10 @@
       "source": "src/core/session/paged-listing.ts",
       "built": "dist/core/session/paged-listing.js",
       "suite": "integration",
-      "tests": ["tests/integration/session-paged-listing-owner.test.ts"]
+      "tests": [
+        "tests/integration/session-paged-listing-owner.test.ts",
+        "tests/integration/session-paged-listing-fallback-owner.test.ts"
+      ]
     },
     {
       "source": "src/core/session/runner.ts",

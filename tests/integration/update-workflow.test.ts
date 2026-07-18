@@ -105,10 +105,26 @@ async function createSourcePackage(
     version: "1.0.0",
     private: true,
     scripts,
+    dependencies: { "better-sqlite3": "file:vendor/better-sqlite3" },
   };
   await fs.writeFile(
     path.join(source, "package.json"),
     JSON.stringify(packageJson),
+  );
+  await fs.mkdir(path.join(source, "vendor", "better-sqlite3"), {
+    recursive: true,
+  });
+  await fs.writeFile(
+    path.join(source, "vendor", "better-sqlite3", "package.json"),
+    JSON.stringify({
+      name: "better-sqlite3",
+      version: "0.0.0",
+      main: "index.js",
+    }),
+  );
+  await fs.writeFile(
+    path.join(source, "vendor", "better-sqlite3", "index.js"),
+    "module.exports = class Database { prepare() { return { get() { return {}; } }; } close() {} };\n",
   );
   await fs.writeFile(path.join(source, "payload.txt"), name);
   if (options.lock) {
@@ -119,7 +135,16 @@ async function createSourcePackage(
         version: packageJson.version,
         lockfileVersion: 3,
         requires: true,
-        packages: { "": packageJson },
+        packages: {
+          "": packageJson,
+          "node_modules/better-sqlite3": {
+            version: "0.0.0",
+            resolved: "file:vendor/better-sqlite3",
+          },
+          "vendor/better-sqlite3": {
+            version: "0.0.0",
+          },
+        },
       }),
     );
   }
@@ -171,6 +196,14 @@ test("update commands preserve exit, signal, logging, and listener behavior", as
         new RegExp(`owner-exit:${exitCode}`),
       );
     }
+    await assert.rejects(
+      workflow.runUpdateCommand(
+        process.execPath,
+        ["-e", "process.kill(process.pid, 'SIGKILL')"],
+        { stdio: "ignore" },
+      ),
+      /owner-exit:1/,
+    );
     const forwarded = workflow.runUpdateCommand(
       process.execPath,
       ["-e", "setTimeout(() => {}, 10000)"],
@@ -229,6 +262,15 @@ test("update commands preserve exit, signal, logging, and listener behavior", as
         ),
         /rin_update_command_failed:5/,
       );
+      await assert.rejects(
+        workflow.runLoggedUpdateCommandSync(
+          path.join(root, "missing-command"),
+          [],
+          "spawn failure",
+          logFile,
+        ),
+        /ENOENT/,
+      );
     } finally {
       (process.stderr as any).write = originalWrite;
       if (ttyDescriptor)
@@ -262,6 +304,11 @@ test("update commands preserve exit, signal, logging, and listener behavior", as
 test("update release and workspace helpers retain concrete identity and bounded cleanup", async () => {
   await withTempRoot(async (root) => {
     const oldCache = process.env.XDG_CACHE_HOME;
+    process.env.XDG_CACHE_HOME = " ";
+    assert.equal(
+      workflow.updateWorkRoot().endsWith(path.join(".cache", "rin-update")),
+      true,
+    );
     process.env.XDG_CACHE_HOME = path.join(root, "cache");
     try {
       assert.equal(
@@ -275,7 +322,13 @@ test("update release and workspace helpers retain concrete identity and bounded 
 
     const explicit = path.join(root, "owner-tool");
     await fs.writeFile(explicit, "owner");
-    assert.equal(workflow.requireTool("ignored", ["", explicit]), explicit);
+    assert.equal(
+      workflow.requireTool("ignored", [
+        path.join(root, "missing-tool"),
+        explicit,
+      ]),
+      explicit,
+    );
     assert.match(workflow.requireTool("git"), /git$/);
     assert.throws(
       () => workflow.requireTool("rin-owner-tool-that-does-not-exist"),
@@ -315,23 +368,36 @@ test("update release and workspace helpers retain concrete identity and bounded 
       workflow.resolveGitCommitForRelease(repo, unresolved),
       unresolved,
     );
+    const defaultSelector = release({
+      channel: "git",
+      version: "",
+      ref: "",
+      branch: "",
+    });
+    assert.equal(
+      workflow.resolveGitCommitForRelease(repo, defaultSelector).ref,
+      hash,
+    );
 
     const workRoot = path.join(root, "work");
     await fs.mkdir(workRoot);
     const stale = path.join(workRoot, "work-stale");
     const kept = path.join(workRoot, "work-kept");
     const fresh = path.join(workRoot, "work-fresh");
+    const zeroTime = path.join(workRoot, "work-zero-time");
     const unrelated = path.join(workRoot, "other");
-    for (const dir of [stale, kept, fresh, unrelated]) await fs.mkdir(dir);
+    for (const dir of [stale, kept, fresh, zeroTime, unrelated])
+      await fs.mkdir(dir);
     const old = new Date(1_000);
     await fs.utimes(stale, old, old);
     await fs.utimes(kept, old, old);
+    await fs.utimes(zeroTime, new Date(0), new Date(0));
     const removed = workflow.cleanupStaleUpdateWorkDirs(workRoot, {
       keepPaths: [kept],
       nowMs: 20_000,
       staleAfterMs: 5_000,
     });
-    assert.deepEqual(removed, [stale]);
+    assert.deepEqual(removed, [stale, zeroTime]);
     await fs.access(kept);
     await fs.access(fresh);
     await fs.access(unrelated);
@@ -434,6 +500,17 @@ test("platform bundles verify checksums and extract zip or tar without package c
     );
     await fs.mkdir(path.dirname(runtimeNode), { recursive: true });
     await fs.writeFile(runtimeNode, "#!/bin/sh\n", { mode: 0o755 });
+    const runtimeNpm = path.join(
+      bundle,
+      "runtime",
+      "node",
+      "current",
+      ...(process.platform === "win32"
+        ? ["node_modules", "npm", "bin", "npm-cli.js"]
+        : ["lib", "node_modules", "npm", "bin", "npm-cli.js"]),
+    );
+    await fs.mkdir(path.dirname(runtimeNpm), { recursive: true });
+    await fs.writeFile(runtimeNpm, "// owner npm cli\n");
 
     const zip = path.join(root, "bundle.zip");
     createZip(bundle, zip);

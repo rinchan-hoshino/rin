@@ -84,22 +84,8 @@ async function flush() {
 
 privateApi.initTheme("dark", false);
 
-test("TUI patch exports preserve fatal, resume, chrome, update, and branding contracts", (t) => {
+test("TUI patch exports preserve resume, chrome, update, and branding contracts", (t) => {
   resetFixture();
-  const fatal = patches.formatRinFatalError(
-    "Owner failure",
-    new TypeError("broken owner runtime"),
-  );
-  assert.match(
-    fatal,
-    /^\nRin fatal error\nOwner failure: broken owner runtime/,
-  );
-  assert.match(fatal, /TypeError/);
-  assert.equal(
-    patches.formatRinFatalError("", "plain failure"),
-    "\nRin fatal error\nTUI failure: plain failure\n",
-  );
-
   assert.equal(patches.rewriteRinResumeCommandOutput(42), 42);
   assert.equal(
     patches.rewriteRinResumeCommandOutput(
@@ -114,6 +100,10 @@ test("TUI patch exports preserve fatal, resume, chrome, update, and branding con
       "To resume this session: pixel owner",
     ),
     "To resume this session: pixel owner",
+  );
+  assert.equal(
+    patches.rewriteRinResumeCommandOutput("To resume this session: pi"),
+    "To resume this session: rin",
   );
 
   assert.equal(
@@ -131,6 +121,10 @@ test("TUI patch exports preserve fatal, resume, chrome, update, and branding con
       "nightly-owner",
     ),
     "Rin nightly-owner",
+  );
+  assert.equal(
+    patches.rewriteRinStartupHeaderText("pi v0.80.0", "0.80.0", "v1.2.3"),
+    "rin v1.2.3",
   );
   const previousQuickRun = process.env.RIN_QUICK_RUN;
   t.after(() => {
@@ -559,7 +553,10 @@ test("patched settings, selectors, signals, and event bridge keep one native own
   fixture.extensionError = new Error("owner extension rejected");
   settingsList.onChange("rin-built-in-extension:todo", "true");
   await flush();
-  assert.deepEqual(settingEvents.at(-1), ["error", "owner extension rejected"]);
+  assert.deepEqual(settingEvents.at(-1), [
+    "error",
+    "Failed to update built-in extension setting: owner extension rejected",
+  ]);
 
   fixture.pages = [
     {
@@ -669,6 +666,7 @@ test("patched event bridge coordinates RPC transport, resync, local echo, and th
     },
     sessionManager: {
       buildSessionContext: () => ({ messages: [] }),
+      buildContextEntries: () => [],
     },
     settingsManager: { getShowTerminalProgress: () => false },
     ui: {
@@ -689,6 +687,8 @@ test("patched event bridge coordinates RPC transport, resync, local echo, and th
     pendingTools: new Map(),
     compactionQueuedMessages: [],
     renderSessionContext: (_context: any, options: any) =>
+      renders.push(`history:${options.populateHistory}`),
+    renderSessionEntries: (_entries: any[], options: any) =>
       renders.push(`history:${options.populateHistory}`),
     handleRuntimeSessionChange: async () => renders.push("session-change"),
   });

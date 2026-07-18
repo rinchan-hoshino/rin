@@ -44,7 +44,9 @@ test("app daemon assembles hosted services, local commands, and failure cleanup"
     const success = await runDaemon(root, "success", "/owner/explicit.sock");
     const summary = JSON.parse(success.stdout.trim().split("\n").at(-1)!);
     assert.equal(summary.socketPath, "/owner/explicit.sock");
-    assert.deepEqual(summary.starting, { chat: { status: "starting" } });
+    assert.deepEqual(summary.starting, {
+      chat: { ready: false, status: "starting" },
+    });
     assert.deepEqual(summary.ready, {
       chat: { status: "ready", owner: true },
     });
@@ -72,12 +74,7 @@ test("app daemon assembles hosted services, local commands, and failure cleanup"
     );
 
     for (const [mode, message] of [
-      ["daemon-fail", "formatted:owner daemon failed"],
       ["lock-fail", "formatted:owner lock failed"],
-      [
-        "services-fail",
-        "rin_app_daemon_services_failed:owner hosted services failed",
-      ],
     ] as const) {
       await assert.rejects(
         () => runDaemon(root, mode),
@@ -88,6 +85,22 @@ test("app daemon assembles hosted services, local commands, and failure cleanup"
         },
       );
     }
+
+    await assert.rejects(
+      () => runDaemon(root, "services-fail"),
+      (error: any) => {
+        assert.equal(error.code, 1);
+        assert.match(
+          error.stderr,
+          /rin_app_daemon_chat_degraded:owner hosted services failed/,
+        );
+        assert.match(
+          error.stderr,
+          /formatted:chat_bridge_unavailable:owner hosted services failed/,
+        );
+        return true;
+      },
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

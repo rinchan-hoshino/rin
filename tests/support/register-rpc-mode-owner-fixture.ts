@@ -12,6 +12,7 @@ const modules = {
   "dist/core/pi/session-host.js": [
     "emitPiSessionEvent",
     "refreshPiSessionToolRegistry",
+    "resumePiSessionTurn",
   ],
   "dist/core/session/factory.js": [
     "listBoundSessionPage",

@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
 );
@@ -694,6 +694,114 @@ test("frontend backend event translator preserves producer request tags on progr
       },
     ],
   );
+});
+
+test("frontend backend event translator handles wrapped, invalid, and incomplete events", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(translator.translate(null), []);
+  assert.deepEqual(
+    translator.translate({
+      type: "ui",
+      payload: {
+        type: "rpc_frontend_status",
+        phase: "unknown",
+        label: " ",
+        connected: "yes",
+        turnActive: 1,
+        isStreaming: false,
+      },
+    }),
+    [
+      {
+        type: "status",
+        phase: "idle",
+        label: undefined,
+        connected: undefined,
+        turnActive: undefined,
+        isStreaming: false,
+      },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "extension_ui_request",
+      payload: { type: "extension_ui_request", method: "unknown" },
+    }),
+    [],
+  );
+  assert.deepEqual(
+    translator.translate({ type: "rpc_turn_event", event: "start" }),
+    [{ type: "turn_accepted", requestTag: undefined }],
+  );
+  assert.deepEqual(
+    translator.translate({ type: "rpc_turn_event", event: "complete" }),
+    [
+      {
+        type: "turn_complete",
+        finalText: "",
+        result: undefined,
+        sessionId: undefined,
+        sessionFile: undefined,
+        requestTag: undefined,
+      },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({ type: "rpc_turn_event", event: "error" }),
+    [
+      {
+        type: "turn_error",
+        error: "rpc_turn_failed",
+        sessionId: undefined,
+        sessionFile: undefined,
+        requestTag: undefined,
+      },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "message_start",
+      message: { role: "assistant", content: "ignored" },
+    }),
+    [],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "message_start",
+      message: { role: "user", content: " hello " },
+    }),
+    [{ type: "user_message_start", text: "hello" }],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "rin_user_message_persisted",
+      userMessageId: "orphan",
+    }),
+    [],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "rin_user_message_persisted",
+      sessionLeafId: "leaf",
+    }),
+    [{ type: "user_message_persisted", sessionLeafId: "leaf" }],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "message_update",
+      message: { role: "user", content: "ignored" },
+    }),
+    [],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "message_end",
+      message: { role: "user", content: "ignored" },
+    }),
+    [],
+  );
+  assert.deepEqual(translator.translate({ type: "unknown" }), []);
 });
 
 test("frontend backend event translator returns final typed turn events after completion", () => {

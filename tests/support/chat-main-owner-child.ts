@@ -94,9 +94,10 @@ await assert.rejects(
   /chat_outbox_delivery_pending/,
 );
 state.drainOutboxMode = "dispatched";
-assert.deepEqual(await bridge.send({ chatKey: "owner/chat", parts: [] }), {
-  delivered: true,
-});
+const dispatchedSend = await bridge.send({ chatKey: "owner/chat", parts: [] });
+assert.equal(dispatchedSend.delivered, false);
+assert.equal(dispatchedSend.pending, true);
+assert.ok(dispatchedSend.outboxId);
 state.drainOutboxMode = "delivered";
 assert.deepEqual(await bridge.send({ chatKey: "owner/chat", parts: [] }), {
   delivered: true,

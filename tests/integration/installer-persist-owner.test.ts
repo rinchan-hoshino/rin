@@ -765,7 +765,7 @@ test("elevated installer writes use target ownership and normalize chat settings
     const installDir = path.join(root, "install");
     const home = path.join(root, "home");
     const { deps, privilegedWrites } = createFsDeps(home);
-    (deps as any).findSystemUser = () => ({ home, gid: 1200 });
+    (deps as any).findSystemUser = () => ({ name: "", home: "", gid: 1200 });
     writeJson(installSettingsPath(installDir), {
       koishi: { removed: true },
       chat: { quietMode: "quiet" },

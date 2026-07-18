@@ -342,19 +342,17 @@ test("worker helpers own RPC-safe state, diagnostics, completion, and built-in c
     );
 
     const listed = await helpers.runBuiltinCommand(runtime, "/resume", {
-      SessionManager: {
-        list: async () => [
-          { id: "s1", name: "First", path: "/sessions/s1.jsonl" },
-          { id: "s2", path: "/sessions/s2.jsonl" },
-        ],
-      },
+      listSessions: async () => [
+        { id: "s1", name: "First", path: "/sessions/s1.jsonl" },
+        { id: "s2", path: "/sessions/s2.jsonl" },
+      ],
     });
     assert.match(String(listed.text), /s1 — First/);
     assert.match(String(listed.text), /s2 — s2/);
     assert.equal(
       (
         await helpers.runBuiltinCommand(runtime, "/resume", {
-          SessionManager: { list: async () => [] },
+          listSessions: async () => [],
         })
       ).text,
       "No sessions available.",
@@ -362,16 +360,14 @@ test("worker helpers own RPC-safe state, diagnostics, completion, and built-in c
     await assert.rejects(
       () =>
         helpers.runBuiltinCommand(runtime, "/resume missing", {
-          SessionManager: { list: async () => [{ id: "s1" }] },
+          listSessions: async () => [{ id: "s1" }],
         }),
       /session not found: missing/,
     );
     assert.equal(
       (
         await helpers.runBuiltinCommand(runtime, "/resume s1", {
-          SessionManager: {
-            list: async () => [{ id: "s1", path: "/sessions/s1.jsonl" }],
-          },
+          listSessions: async () => [{ id: "s1", path: "/sessions/s1.jsonl" }],
         })
       ).text,
       "Resumed session: s1",

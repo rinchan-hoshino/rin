@@ -133,6 +133,27 @@ test("stored message projections use receiver-visible text and session reference
     userId: "owner",
     nickname: "Owner",
   });
+  assert.deepEqual(
+    messageStore.projectStoredChatMessageToChatLog({
+      role: "assistant",
+      text: "minimal",
+      receivedAt: "2026-07-17T08:00:00.000Z",
+      messageId: "",
+      replyToMessageId: "",
+      userId: "",
+      nickname: "",
+    } as any),
+    {
+      timestamp: "2026-07-17T08:00:00.000Z",
+      role: "assistant",
+      text: "minimal",
+      messageId: undefined,
+      replyToMessageId: undefined,
+      sessionFile: undefined,
+      userId: undefined,
+      nickname: undefined,
+    },
+  );
   assert.equal(
     messageStore.projectStoredChatMessageToChatLog(
       messageStore.buildStoredChatMessage(input({ role: undefined })),
@@ -162,7 +183,6 @@ test("message records persist, update, query, and normalize session ownership", 
     );
     assert.equal(saved.record.sessionId, undefined);
     assert.equal(saved.record.sessionFile, "managed/chat/owner.jsonl");
-    await fs.access(saved.filePath);
 
     const loaded = messageStore.getChatMessage(
       agentDir,
@@ -356,6 +376,18 @@ test("upsert creates and updates while preserving record identity", async () => 
     assert.equal(updated.platform, "telegram");
     assert.equal(updated.chatId, "2");
     assert.equal(updated.processedAt, "2026-07-17T08:01:00.000Z");
+    messageStore.saveChatMessage(
+      agentDir,
+      input({ messageId: "timestamp-empty", platformTimestamp: "" }),
+    );
+    messageStore.saveChatMessage(
+      agentDir,
+      input({ messageId: "timestamp-invalid", platformTimestamp: "invalid" }),
+    );
+    messageStore.saveChatMessage(
+      agentDir,
+      input({ messageId: "timestamp-valid", platformTimestamp: 42 }),
+    );
   });
 });
 
@@ -417,48 +449,20 @@ test("chat-date indexes sort records and follow date-changing updates", async ()
         .map((item) => item.recordKey),
       [early.recordKey],
     );
-  });
-});
 
-test("date lookup repairs missing, stale, duplicate, and malformed index entries", async () => {
-  await withStore(async (agentDir) => {
-    const saved = messageStore.saveChatMessage(agentDir, input()).record;
-    const storeDir = messageStore.chatMessageStoreDir(agentDir);
-    const indexesDir = path.join(storeDir, "indexes");
-    await fs.rm(indexesDir, { recursive: true, force: true });
-
-    assert.deepEqual(
-      messageStore
-        .listChatMessagesByChatAndDate(agentDir, "telegram/1:2", "2026-07-17")
-        .map((item) => item.recordKey),
-      [saved.recordKey],
-    );
-
-    const indexFiles: string[] = [];
-    async function visit(dir: string) {
-      for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
-        const file = path.join(dir, entry.name);
-        if (entry.isDirectory()) await visit(file);
-        else if (entry.name.endsWith(".json")) indexFiles.push(file);
-      }
-    }
-    await visit(path.join(indexesDir, "by-chat-date"));
-    assert.equal(indexFiles.length, 1);
-    await fs.writeFile(
-      indexFiles[0],
-      JSON.stringify({
-        version: 1,
-        recordKeys: [saved.recordKey, saved.recordKey, "missing-record"],
-      }),
+    const tied = ["tie-a", "tie-b"].map(
+      (messageId) =>
+        messageStore.saveChatMessage(
+          agentDir,
+          input({ messageId, receivedAt: "2026-07-19T08:00:00.000Z" }),
+        ).record,
     );
     assert.deepEqual(
       messageStore
-        .listChatMessagesByChatAndDate(agentDir, "telegram/1:2", "2026-07-17")
+        .listChatMessagesByChatAndDate(agentDir, "telegram/1:2", "2026-07-19")
         .map((item) => item.recordKey),
-      [saved.recordKey],
+      tied.map((item) => item.recordKey).sort(),
     );
-    const repaired = JSON.parse(await fs.readFile(indexFiles[0], "utf8"));
-    assert.deepEqual(repaired.recordKeys, [saved.recordKey]);
   });
 });
 

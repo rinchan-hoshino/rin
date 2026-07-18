@@ -4099,6 +4099,7 @@ test(
         bindExtensions: async () => {},
         subscribe: () => () => {},
         async prompt(message, options) {
+          void this.sessionId;
           calls.push(["prompt", message, options, this.isStreaming]);
           if (!options?.streamingBehavior) {
             agentState.activeRun = true;
@@ -5282,6 +5283,8 @@ test(
 
     try {
       const stateMessages = [];
+      const circularPersistedMessage: any = { role: "assistant" };
+      circularPersistedMessage.self = circularPersistedMessage;
       const session = {
         isStreaming: false,
         isCompacting: false,
@@ -5289,9 +5292,10 @@ test(
         agent: {
           waitForIdle: async () => {},
           state: { messages: stateMessages },
-          continue: async () => {
-            calls.push(["continue"]);
-          },
+        },
+        _runAgentPrompt: async (messages: any[]) => {
+          assert.deepEqual(messages, []);
+          calls.push(["continue"]);
         },
         bindExtensions: async () => {},
         subscribe: () => {},
@@ -5304,7 +5308,9 @@ test(
           appendMessage: (message) => {
             calls.push(["appendMessage", message]);
           },
-          getEntries: () => [],
+          getEntries: () => [
+            { type: "message", message: circularPersistedMessage },
+          ],
           getTree: () => [],
           getLeafId: () => null,
           getCwd: () => process.cwd(),
@@ -5388,6 +5394,33 @@ test(
       assert.equal(stateMessages.length, 2);
       assert.equal(stateMessages[1].role, "toolResult");
       assert.ok(lines.join("").includes('"command":"resume_interrupted_turn"'));
+
+      calls.length = 0;
+      const alreadyPersisted = {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "tool-2",
+            name: "read",
+            arguments: { path: "/owner" },
+          },
+        ],
+      };
+      stateMessages.splice(0, stateMessages.length, alreadyPersisted);
+      session.sessionManager.getEntries = () => [
+        { type: "custom" },
+        { type: "message", message: alreadyPersisted },
+      ];
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "3", type: "resume_interrupted_turn", requestTag: "tag-3" })}\n`,
+        ),
+      );
+      await wait(10);
+      assert.equal(calls.length, 2);
+      assert.equal(calls[0][1].role, "toolResult");
+      assert.deepEqual(calls[1], ["continue"]);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -6566,6 +6599,17 @@ test(
       harness.session.sessionManager.getTree = getTree;
       harness.session.sessionManager.getLeafId = getLeafId;
 
+      const prompt = harness.session.prompt;
+      harness.session.prompt = undefined;
+      await harness.send({
+        id: "prompt-missing-handler",
+        type: "prompt",
+        message: "owner prompt without handler",
+        requestTag: 42,
+      });
+      await wait(0);
+      harness.session.prompt = prompt;
+
       const byId = new Map(
         harness
           .payloads()
@@ -6672,6 +6716,7 @@ test(
         id: defaultRequest.id,
       });
       assert.equal(await defaulted, undefined);
+      await harness.send({ type: "extension_ui_response" });
 
       const controller = new AbortController();
       const edited = ui.editor("editor", "prefill", {
@@ -6757,6 +6802,16 @@ test(
       harness.emit({ type: "message_start", message: userMessage });
       harness.session.sessionManager.appendMessage(userMessage);
       harness.emit({ type: "compaction_end", aborted: false });
+      harness.emit({
+        type: "compaction_end",
+        aborted: false,
+        tokensBefore: 123,
+      });
+      const entries = harness.session.entries;
+      harness.session.entries = [];
+      harness.emit({ type: "compaction_end", aborted: false });
+      harness.session.entries = entries;
+      harness.emit("owner-non-event");
       harness.emit(null);
 
       const payloads = harness.payloads();
@@ -6810,7 +6865,10 @@ test(
           message: "select",
           options: [{ id: "one", label: "One" }],
         });
-        const manual = await options.onManualCodeInput();
+        const manual = await options.onManualCodeInput({
+          message: "manual",
+          placeholder: "code",
+        });
         assert.deepEqual([prompt, selected, manual], ["p", "s", "m"]);
       };
     });
@@ -6869,6 +6927,7 @@ test(
               payload.event === "complete" &&
               payload.success === true,
           ),
+        JSON.stringify(harness.payloads().slice(-20)),
       );
       await harness.send({
         id: "late-response",

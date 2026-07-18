@@ -7,6 +7,7 @@ const sources: Record<string, string> = {
     const event = (...value) => globalThis.__rinFinalizeEvents.push(value);
     export function launcherMetadataPathForUser(user, homeForUser) { return path.join(homeForUser(user), ".config/rin/launcher.json"); }
     export function currentInstalledReleaseName(dir, elevated) { event("current-release", dir, elevated); return globalThis.__rinFinalizeScenario.previousReleaseName || ""; }
+    export function discardStagedInstalledRuntime(...args) { event("discard-staged", ...args); }
     export function ensureDir(dir) { event("ensure", dir); }
     export function publishInstalledRuntime(sourceRoot, installDir, user, elevated, options) { event("publish", sourceRoot, installDir, user, elevated, options); return globalThis.__rinFinalizeScenario.publishedRuntime || { releaseRoot: path.join(installDir, "app/releases/owner-release"), currentLink: path.join(installDir, "app/current") }; }
     export function publishManagedNodeRuntime(sourceRoot, installDir, user, elevated, options) { event("managed-node", sourceRoot, installDir, user, elevated, options); return { nodeExecutable: path.join(installDir, "runtime/node/current/bin/node") }; }
@@ -18,6 +19,7 @@ const sources: Record<string, string> = {
     export function captureCommandAsUser(...args) { event("capture-user", ...args); return ""; }
     export function buildInstalledManagedFilesManifest(sourceRoot) { event("managed-files", sourceRoot); return ["dist/owner.js"]; }
     export function syncInstalledDocs(sourceRoot, installDir, user, elevated) { event("docs", sourceRoot, installDir, user, elevated); return { rin: path.join(installDir, "docs/rin"), pi: [path.join(installDir, "docs/pi")] }; }
+    export function switchInstalledCurrentRelease(...args) { event("switch-current", ...args); }
     export function writeJsonFile(...args) { event("write-json", ...args); }
     export function writeJsonFileWithPrivilege(...args) { event("write-json-elevated", ...args); }
     export function writeLaunchersForUser(user, installDir, homeForUser, options) { event("launcher", user, installDir, options); return { rinPath: path.join(homeForUser(user), ".local/bin/rin"), rinInstallPath: path.join(homeForUser(user), ".local/bin/rin-install") }; }
@@ -32,6 +34,7 @@ const sources: Record<string, string> = {
   `,
   "dist/core/rin-install/persist.js": `
     export function normalizeInstalledChatSettings(options) { globalThis.__rinFinalizeEvents.push(["normalize", options]); return { mode: "normalized", options }; }
+    export function preflightInstallUpgradeMigrations(options, deps) { globalThis.__rinFinalizeEvents.push(["preflight-migrations", options, deps]); }
     export async function persistInstallerOutputs(options, deps) {
       globalThis.__rinFinalizeEvents.push(["persist", options]);
       deps.launcherMetadataPathForUser(options.targetUser);

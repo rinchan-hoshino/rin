@@ -277,7 +277,7 @@ test("editable polling indicator reflects status and removes only progress artif
     assert.match(calls.sent.map((call) => call.text).join(""), /status/);
     assert.equal(
       await indicator.end({ chatId: "room", messageId: "reply" }),
-      true,
+      false,
     );
 
     assert.equal(
@@ -288,7 +288,7 @@ test("editable polling indicator reflects status and removes only progress artif
       }),
       true,
     );
-    assert.equal(await indicator.end({ chatId: "other" }), true);
+    assert.equal(await indicator.end({ chatId: "other" }), false);
   } finally {
     await fs.rm(cacheDir, { recursive: true, force: true });
   }

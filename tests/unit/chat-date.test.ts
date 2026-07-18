@@ -47,6 +47,17 @@ test("normalizeLocalDateOnly rejects invalid text before using date-like fallbac
   );
 });
 
+test("local date UTC bounds cover valid days and reject invalid fallbacks", () => {
+  assert.deepEqual(chatDate.localDateUtcBounds("2026-04-23"), {
+    start: new Date(2026, 3, 23).toISOString(),
+    end: new Date(2026, 3, 24).toISOString(),
+  });
+  assert.equal(chatDate.localDateUtcBounds("invalid"), null);
+  assert.equal(chatDate.normalizeLocalDateOnly(Infinity), "");
+  assert.equal(chatDate.normalizeLocalDateOnly({}, null), "");
+  assert.match(chatDate.formatLocalDateOnly(), /^\d{4}-\d{2}-\d{2}$/);
+});
+
 test("normalizeLocalDateOnly accepts Date and finite timestamp inputs", () => {
   const date = new Date(2026, 3, 25, 8, 0, 0);
   assert.equal(chatDate.normalizeLocalDateOnly(date), "2026-04-25");

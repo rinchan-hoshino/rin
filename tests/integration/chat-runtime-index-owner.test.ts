@@ -9,10 +9,13 @@ await import("../support/register-chat-runtime-index-owner-fixture.ts");
 const runtime = await import(
   pathToFileURL(path.resolve("dist/core/chat-runtime/index.js")).href
 );
+const inbox = await import(
+  pathToFileURL(path.resolve("dist/core/chat/inbox.js")).href
+);
 // Preserve the immutable runtime scenarios while this owner lane adds direct
 // provider startup, cursor, registration, and fallback contracts.
-await import("../characterization/chat-runtime-ingress.test.ts");
-await import("../characterization/chat-runtime-send.test.ts");
+await import("./chat-runtime-ingress.test.ts");
+await import("./chat-runtime-send.test.ts");
 
 const owner = (globalThis as any).__chatRuntimeIndexOwner as Record<
   string,
@@ -112,9 +115,7 @@ test("runtime app owns durable ingress, adapter ordering, builders, and provider
     app.emit("message", { platform: "owner" });
     app.emit("other", {});
     assert.equal(seen, 2);
-    const pending = await fs.readdir(
-      path.join(directory, "data", "chat", "inbox", "pending"),
-    );
+    const pending = inbox.listPendingChatInboxItems(directory);
     assert.equal(pending.length, 1);
 
     const h = runtime.createChatRuntimeH();
@@ -295,9 +296,7 @@ test("telegram adapter owns bootstrap, cursor recovery, parsing, media cache, an
       mode: "native-cursor",
     });
     assert.equal(app.listenerCount("message"), 0);
-    const pending = await fs.readdir(
-      path.join(directory, "data", "chat", "inbox", "pending"),
-    );
+    const pending = inbox.listPendingChatInboxItems(directory);
     assert.equal(pending.length, 1);
 
     assert.deepEqual(await bot.internal.getChat({ chat_id: "owner" }), {
