@@ -507,8 +507,13 @@ test("chat controller logs one received-to-backend startup timing decomposition"
 test("chat controller delivers compact collapsed notice without summary text", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
-  controller.app.bots[0].sendMessage = async (chatId, content) => {
-    deliveries.push({ chatId, content });
+  controller.app.bots[0].sendMessage = async (chatId, content, options) => {
+    deliveries.push({
+      chatId,
+      content,
+      kind: options?.deliveryKind,
+      coalesce: options?.coalesceWithWorkingMessage === true,
+    });
     return [`compact-${deliveries.length}`];
   };
 
@@ -535,6 +540,8 @@ test("chat controller delivers compact collapsed notice without summary text", a
           },
         },
       ],
+      kind: "interim",
+      coalesce: false,
     },
   ]);
 });
@@ -1290,7 +1297,7 @@ test("chat controller starts command reactions from frontend working status", as
   assert.deepEqual(deliveries, []);
 });
 
-test("chat controller sends compaction start notice and reacts on that notice", async () => {
+test("chat controller sends compaction notices as interim progress and reacts on that notice", async () => {
   const controller = await createController("telegram/1:2");
   const sessionFile = path.join(
     controller.agentDir,
@@ -1332,7 +1339,7 @@ test("chat controller sends compaction start notice and reacts on that notice", 
   assert.equal(controller.currentTurn, null);
   assert.equal(controller.compactionTurn?.incomingMessageId, "m-out-1");
   assert.deepEqual(deliveries, [
-    { text: "Compacting...", kind: "passive_notice", coalesce: true },
+    { text: "Compacting...", kind: "interim", coalesce: true },
   ]);
   assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
   assert.deepEqual(reactions, [["create", "2", "m-out-1", "🤔"]]);
@@ -1355,10 +1362,10 @@ test("chat controller sends compaction start notice and reacts on that notice", 
     ["delete", "2", "m-out-1", "🤔", "1"],
   ]);
   assert.deepEqual(deliveries, [
-    { text: "Compacting...", kind: "passive_notice", coalesce: true },
+    { text: "Compacting...", kind: "interim", coalesce: true },
     {
       text: "Compacted from 108,642 tokens",
-      kind: "passive_notice",
+      kind: "interim",
       coalesce: true,
     },
   ]);
@@ -1440,28 +1447,26 @@ test("chat controller coalesces automatic compaction completion into the active 
     {
       text: "Compacting...",
       quote: "m-owner",
-      kind: "passive_notice",
+      kind: "interim",
       coalesce: true,
     },
     {
       text: "Compacted from 108,642 tokens",
       quote: "m-owner",
-      kind: "passive_notice",
+      kind: "interim",
       coalesce: true,
     },
   ]);
 });
 
-test("chat controller lets editable compaction temporarily own the Working head", async () => {
+test("chat controller keeps editable compaction in interim content", async () => {
   const controller = await createController("telegram/1:2");
-  const contexts = [];
   const deliveries = [];
   controller.app.bots[0].getWorkingIndicators = () => [
     {
       type: "polling",
       presentation: "editable-message",
-      async tick(context) {
-        contexts.push({ ...context });
+      async tick() {
         return true;
       },
       async end() {
@@ -1472,6 +1477,7 @@ test("chat controller lets editable compaction temporarily own the Working head"
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     deliveries.push({
       text: nodes.map((node) => node?.attrs?.content || "").join(""),
+      kind: options?.deliveryKind,
       coalesce: options?.coalesceWithWorkingMessage === true,
     });
     return [`m-out-${deliveries.length}`];
@@ -1492,8 +1498,9 @@ test("chat controller lets editable compaction temporarily own the Working head"
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(contexts.at(-1)?.workingStatusText, "Compacting...");
-  assert.deepEqual(deliveries, []);
+  assert.deepEqual(deliveries, [
+    { text: "Compacting...", kind: "interim", coalesce: true },
+  ]);
 
   await controller.handleClientEvent({
     type: "ui",
@@ -1506,9 +1513,13 @@ test("chat controller lets editable compaction temporarily own the Working head"
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(contexts.at(-1)?.workingStatusText, undefined);
   assert.deepEqual(deliveries, [
-    { text: "Compacted from 108,642 tokens", coalesce: true },
+    { text: "Compacting...", kind: "interim", coalesce: true },
+    {
+      text: "Compacted from 108,642 tokens",
+      kind: "interim",
+      coalesce: true,
+    },
   ]);
 });
 

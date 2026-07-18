@@ -389,7 +389,6 @@ export class ChatController {
   pendingPassiveNotices: string[] = [];
   latestTodoNoticeText = "";
   latestAssistantSummaryText = "";
-  workingStatusText = "";
   todoNoticeTurnKey = "";
   todoNoticeOperation: {
     turnKey: string;
@@ -523,7 +522,6 @@ export class ChatController {
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
     this.externalWorkingVisible = false;
-    this.workingStatusText = "";
     this.todoNoticeTurnKey = "";
     this.todoNoticeOperation = null;
     this.todoTurnKeyByUserMessageId.clear();
@@ -556,7 +554,6 @@ export class ChatController {
   async clearProcessingState() {
     this.awaitingTurnSettle = false;
     this.externalWorkingVisible = false;
-    this.workingStatusText = "";
     this.todoNoticeTurnKey = "";
     this.todoNoticeOperation = null;
     this.todoTurnKeyByUserMessageId.clear();
@@ -910,7 +907,6 @@ export class ChatController {
       tick: this.workingIndicatorTick,
       todoNoticeText: this.latestTodoNoticeText || undefined,
       assistantSummaryText: this.latestAssistantSummaryText || undefined,
-      workingStatusText: this.workingStatusText || undefined,
       ...extra,
     };
   }
@@ -2089,8 +2085,9 @@ export class ChatController {
     );
   }
 
-  private async sendPassiveNoticeNow(
+  private async sendProgressNoticeNow(
     text: string,
+    deliveryKind: "interim" | "passive_notice",
     options: {
       postDelivery?: any;
       id?: string;
@@ -2121,12 +2118,26 @@ export class ChatController {
             : {}),
           ...this.currentConversationSessionPayload(),
         },
-        { deliveryKind: "passive_notice", ...options },
+        { deliveryKind, ...options },
       );
       return true;
     } catch {
       return false;
     }
+  }
+
+  private async sendPassiveNoticeNow(
+    text: string,
+    options: Parameters<ChatController["sendProgressNoticeNow"]>[2] = {},
+  ) {
+    return await this.sendProgressNoticeNow(text, "passive_notice", options);
+  }
+
+  private async sendCompactionInterimNow(
+    text: string,
+    options: Parameters<ChatController["sendProgressNoticeNow"]>[2] = {},
+  ) {
+    return await this.sendProgressNoticeNow(text, "interim", options);
   }
 
   private async sendErrorNoticeNow(text: string) {
@@ -2359,7 +2370,6 @@ export class ChatController {
   }
 
   private async finishCompactionNotice() {
-    this.workingStatusText = "";
     await this.clearCompactionWorkingReaction().catch(() => false);
     this.compactionTurn = null;
     await this.refreshEditableWorkingNotice().catch(() => false);
@@ -2391,7 +2401,7 @@ export class ChatController {
           sha256Hex(safeString(text).trim()),
         ])
       : "";
-    const delivered = await this.sendPassiveNoticeNow(text, {
+    const delivered = await this.sendCompactionInterimNow(text, {
       ...(shouldCoalesce
         ? {
             coalesceWithWorkingMessage: true,
@@ -2434,7 +2444,6 @@ export class ChatController {
 
     if (this.hasEditableWorkingIndicator()) {
       this.ensureVisibleCommandTurn();
-      this.workingStatusText = trimmed;
       const incomingMessageId =
         this.currentIncomingMessageId() || ackIncomingMessageId;
       const replyToMessageId =
@@ -2449,7 +2458,10 @@ export class ChatController {
         ackIncomingMessageId: ackIncomingMessageId || undefined,
         ackReplyToMessageId: ackReplyToMessageId || undefined,
       };
-      return await this.refreshEditableWorkingNotice({ force: true });
+      return await this.sendCompactionInterimNow(trimmed, {
+        replyToMessageId,
+        coalesceWithWorkingMessage: true,
+      });
     }
 
     try {
@@ -2457,14 +2469,14 @@ export class ChatController {
         {
           createdAt: nowIso(),
           chatKey: this.chatKey,
-          deliveryKind: "passive_notice",
+          deliveryKind: "interim",
           coalesceWithWorkingMessage: true,
           replyToMessageId: coalesceReplyToMessageId,
           parts: [{ type: "text", text: trimmed }],
           ...this.currentConversationSessionPayload(),
         },
         {
-          deliveryKind: "passive_notice",
+          deliveryKind: "interim",
           coalesceWithWorkingMessage: true,
           waitForDeliveryMs: 1000,
         },
@@ -2512,7 +2524,6 @@ export class ChatController {
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
     this.externalWorkingVisible = false;
-    this.workingStatusText = "";
     this.todoNoticeTurnKey = "";
     this.todoNoticeOperation = null;
     this.todoTurnKeyByUserMessageId.clear();

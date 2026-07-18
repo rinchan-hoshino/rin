@@ -550,7 +550,7 @@ test("discord lifecycle end preserves editable progress until a fresh final repl
   });
 });
 
-test("discord adapter keeps working, content, and todo editable before final text", async () => {
+test("discord adapter keeps todo unchanged while compaction replaces interim content", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "discord",
@@ -591,18 +591,31 @@ test("discord adapter keeps working, content, and todo editable before final tex
       deliveryKind: "passive_notice",
       coalesceWithWorkingMessage: true,
     });
-    const interim = await app.bots[0].sendMessage("C1", [h.text("checking")], {
-      deliveryKind: "interim",
-      coalesceWithWorkingMessage: true,
-    });
+    const compactionStart = await app.bots[0].sendMessage(
+      "C1",
+      [h.text("Compacting...")],
+      {
+        deliveryKind: "interim",
+        coalesceWithWorkingMessage: true,
+      },
+    );
+    const compactionEnd = await app.bots[0].sendMessage(
+      "C1",
+      [h.text("Compacted from 108,642 tokens")],
+      {
+        deliveryKind: "interim",
+        coalesceWithWorkingMessage: true,
+      },
+    );
     await editable.tick({ chatId: "C1", tick: 2 });
     const final = await app.bots[0].sendMessage("C1", [h.text("done")]);
 
-    assert.deepEqual(interim, ["1"]);
+    assert.deepEqual(compactionStart, ["1"]);
+    assert.deepEqual(compactionEnd, ["1"]);
     assert.deepEqual(final, ["2"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["send", "edit", "edit", "edit", "edit", "delete", "send"],
+      ["send", "edit", "edit", "edit", "edit", "edit", "delete", "send"],
     );
     assert.equal(calls[0].payload.content, "... Working...");
     assert.equal(calls[1].payload.content, "... Working");
@@ -612,14 +625,18 @@ test("discord adapter keeps working, content, and todo editable before final tex
     );
     assert.equal(
       calls[3].payload.content,
-      "... Working\n\n────────\n\nchecking\n\n────────\n\n[ ] first task",
+      "... Working\n\n────────\n\nCompacting...\n\n────────\n\n[ ] first task",
     );
     assert.equal(
       calls[4].payload.content,
-      "... Working.\n\n────────\n\nchecking\n\n────────\n\n[ ] first task",
+      "... Working\n\n────────\n\nCompacted from 108,642 tokens\n\n────────\n\n[ ] first task",
     );
-    assert.equal(calls[5].id, "1");
-    assert.equal(calls[6].payload.content, "done");
+    assert.equal(
+      calls[5].payload.content,
+      "... Working.\n\n────────\n\nCompacted from 108,642 tokens\n\n────────\n\n[ ] first task",
+    );
+    assert.equal(calls[6].id, "1");
+    assert.equal(calls[7].payload.content, "done");
   });
 });
 
