@@ -387,6 +387,7 @@ test("recoverable runtime errors stay in the TUI without stopping it", () => {
     const codingAgent = await import("@earendil-works/pi-coding-agent");
     await overrides.applyRinTuiOverrides();
     const outcome = await codingAgent.InteractiveMode.prototype.handleFatalRuntimeError.call({
+      session: { getFrontendStatusEvent() { return { phase: "ready" }; } },
       stop() { process.stderr.write("terminal-stopped\\n"); },
       showError(message) { process.stderr.write(\`shown: \${message}\\n\`); },
     }, "Failed to resume session", new Error("renderer exploded"));
@@ -408,6 +409,38 @@ test("recoverable runtime errors stay in the TUI without stopping it", () => {
   assert.match(result.stderr, /outcome: \{"cancelled":true\}/);
   assert.match(result.stderr, /tui-still-running/);
   assert.doesNotMatch(result.stderr, /terminal-stopped|Rin fatal error/);
+});
+
+test("rpc transport failures defer to Connecting without showing an error", () => {
+  const overridesUrl = pathToFileURL(
+    path.join(rootDir, "dist", "core", "pi", "tui-patches", "index.js"),
+  ).href;
+  const script = `
+    const overrides = await import(${JSON.stringify(overridesUrl)});
+    const codingAgent = await import("@earendil-works/pi-coding-agent");
+    await overrides.applyRinTuiOverrides();
+    const outcome = await codingAgent.InteractiveMode.prototype.handleFatalRuntimeError.call({
+      session: { getFrontendStatusEvent() { return { phase: "connecting" }; } },
+      stop() { process.stderr.write("terminal-stopped\\n"); },
+      showError(message) { process.stderr.write(\`shown: \${message}\\n\`); },
+    }, "Failed to resume session", new Error("rin_disconnected:get_state:req_1"));
+    process.stderr.write(\`outcome: \${JSON.stringify(outcome)}\\n\`);
+    process.stderr.write("tui-still-running\\n");
+  `;
+
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "--eval", script],
+    { cwd: rootDir, encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /outcome: \{"cancelled":true\}/);
+  assert.match(result.stderr, /tui-still-running/);
+  assert.doesNotMatch(
+    result.stderr,
+    /shown:|terminal-stopped|Rin TUI error|rin_disconnected/,
+  );
 });
 
 test("runtime error reporting failures fall back without exiting", () => {
@@ -2253,7 +2286,7 @@ test("rpc compaction start keeps the dedicated compaction status indicator", asy
   }
 });
 
-test("async TUI event failures are reported without stopping the TUI", async () => {
+test("async TUI transport failures defer to Connecting without showing an error", async () => {
   await overrides.applyRinTuiOverrides();
 
   let listener;
@@ -2264,6 +2297,9 @@ test("async TUI event failures are reported without stopping the TUI", async () 
       subscribe(callback) {
         listener = callback;
         return () => {};
+      },
+      getFrontendStatusEvent() {
+        return { phase: "connecting" };
       },
     },
     async handleEvent() {
@@ -2282,9 +2318,7 @@ test("async TUI event failures are reported without stopping the TUI", async () 
   await Promise.resolve(listenerResult).catch(() => {});
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(shownErrors, [
-    "Failed to handle session event: daemon disconnected; reconnecting",
-  ]);
+  assert.deepEqual(shownErrors, []);
   assert.equal(stops, 0);
 });
 

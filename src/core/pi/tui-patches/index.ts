@@ -102,6 +102,12 @@ function rawRinTuiErrorMessage(error: unknown) {
   }
 }
 
+function isRpcTransportStatusError(error: unknown) {
+  return /\brin_(?:tui_not_connected|disconnected|session_recovering)\b/.test(
+    rawRinTuiErrorMessage(error),
+  );
+}
+
 function formatRecoverableRinTuiError(prefix: unknown, error: unknown) {
   const rawMessage = rawRinTuiErrorMessage(error);
   const message =
@@ -131,6 +137,9 @@ function reportRecoverableRinTuiError(
   error: unknown,
   priorReportingError?: unknown,
 ) {
+  if (isRpcTransportControlled(instance) && isRpcTransportStatusError(error)) {
+    return;
+  }
   let message: string;
   try {
     message = formatRecoverableRinTuiError(prefix, error);
@@ -1473,8 +1482,8 @@ export async function applyRinTuiOverrides() {
     interactiveModeProto?.handleFatalRuntimeError;
   if (typeof originalHandleFatalRuntimeError === "function") {
     // Pi treats session-operation failures as fatal. Rin's daemon-backed TUI can
-    // recover those operations (especially transport loss), so keep the process
-    // and terminal alive and report the failure inside the existing UI instead.
+    // recover them, so keep the process and terminal alive. Transport loss is
+    // already owned by the Connecting status; only other failures need an error.
     interactiveModeProto.handleFatalRuntimeError =
       function handleRecoverableRuntimeError(prefix: unknown, error: unknown) {
         reportRecoverableRinTuiError(this, prefix, error);
