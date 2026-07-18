@@ -313,7 +313,39 @@ test("non-authoritative manual and invalid outbox archives do not re-enter deliv
   );
 });
 
-test("mismatched archived identity blocks authority cutover", async () => {
+test("delivered text-only outbox history is converted to canonical parts", async () => {
+  const agentDir = await tempDir();
+  const legacy = legacyOutbox("legacy-text-only");
+  legacy.status = "delivered";
+  legacy.payload = {
+    createdAt: "2026-07-14T01:00:02.000Z",
+    chatKey: "telegram/1:2",
+    text: "legacy delivered answer",
+  };
+  await writeJson(
+    path.join(
+      agentDir,
+      "data",
+      "chat",
+      "outbox",
+      "history",
+      "delivered",
+      "text-only.json",
+    ),
+    legacy,
+  );
+
+  const db = database.migrateChatDatabaseForInstall(agentDir);
+  const row = db
+    .prepare("SELECT state, payload_json FROM outbox WHERE outbox_id = ?")
+    .get("legacy-text-only");
+  assert.equal(row.state, "delivered");
+  assert.deepEqual(JSON.parse(row.payload_json).parts, [
+    { type: "text", text: "legacy delivered answer" },
+  ]);
+});
+
+test("mismatched archived identity is preserved without blocking authority cutover", async () => {
   const agentDir = await tempDir();
   await writeJson(
     path.join(
@@ -334,21 +366,41 @@ test("mismatched archived identity blocks authority cutover", async () => {
     },
   );
 
-  assert.throws(
-    () => database.migrateChatDatabaseForInstall(agentDir),
-    /chat_legacy_migration_invalid_message_identity/,
-  );
-  const inspect = new (await import("better-sqlite3")).default(
-    database.chatDatabasePath(agentDir),
-  );
+  const db = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
-    inspect.prepare("SELECT COUNT(*) AS value FROM messages").get().value,
+    db.prepare("SELECT COUNT(*) AS value FROM messages").get().value,
     0,
   );
-  inspect.close();
+  assert.deepEqual(
+    JSON.parse(
+      db
+        .prepare(
+          "SELECT value FROM schema_meta WHERE key = 'legacy_control_migration_preserved'",
+        )
+        .get().value,
+    ),
+    {
+      version: 1,
+      total: 1,
+      reasons: { chat_legacy_migration_invalid_message_identity: 1 },
+    },
+  );
+  assert.ok(
+    await fs.stat(
+      path.join(
+        agentDir,
+        "data",
+        "chat",
+        "legacy-migrated-v1",
+        "message-records",
+        "aa",
+        "mismatch.json",
+      ),
+    ),
+  );
 });
 
-test("archived keys with slash and later colon cannot bypass identity validation", async () => {
+test("archived keys with slash and later colon stay preserved instead of bypassing identity validation", async () => {
   const agentDir = await tempDir();
   await writeJson(
     path.join(
@@ -369,9 +421,50 @@ test("archived keys with slash and later colon cannot bypass identity validation
     },
   );
 
-  assert.throws(
-    () => database.migrateChatDatabaseForInstall(agentDir),
-    /chat_legacy_migration_invalid_message_identity/,
+  const db = database.migrateChatDatabaseForInstall(agentDir);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS value FROM messages").get().value,
+    0,
+  );
+});
+
+test("invalid per-message timestamp is preserved without blocking valid message import", async () => {
+  const agentDir = await tempDir();
+  const recordsRoot = path.join(
+    agentDir,
+    "data",
+    "chat",
+    "message-store",
+    "records",
+    "aa",
+  );
+  await writeJson(path.join(recordsRoot, "invalid-time.json"), {
+    ...legacyMessage("invalid-time"),
+    receivedAt: "not-a-time",
+  });
+  await writeJson(
+    path.join(recordsRoot, "valid-time.json"),
+    legacyMessage("valid-time"),
+  );
+
+  const db = database.migrateChatDatabaseForInstall(agentDir);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS value FROM messages").get().value,
+    1,
+  );
+  assert.deepEqual(
+    JSON.parse(
+      db
+        .prepare(
+          "SELECT value FROM schema_meta WHERE key = 'legacy_control_migration_preserved'",
+        )
+        .get().value,
+    ),
+    {
+      version: 1,
+      total: 1,
+      reasons: { chat_legacy_migration_invalid_message_timestamp: 1 },
+    },
   );
 });
 
@@ -417,25 +510,14 @@ test("active unqualified records defer without blocking SQLite cutover", async (
   );
 });
 
-test("malformed legacy JSON blocks authority cutover without partial rows", async () => {
+test("malformed legacy record JSON is preserved while valid records complete authority cutover", async () => {
   const agentDir = await tempDir();
-  const badPath = path.join(
-    agentDir,
-    "data",
-    "chat",
-    "inbox",
-    "pending",
-    "bad.json",
-  );
+  const inboxRoot = path.join(agentDir, "data", "chat", "inbox", "pending");
+  const badPath = path.join(inboxRoot, "bad.json");
   await fs.mkdir(path.dirname(badPath), { recursive: true });
   await fs.writeFile(badPath, "{bad json\n");
+  await writeJson(path.join(inboxRoot, "valid.json"), legacyInbox("valid"));
 
-  assert.throws(
-    () => database.migrateChatDatabaseForInstall(agentDir),
-    /chat_legacy_migration_invalid_json/,
-  );
-  database.closeChatDatabase(agentDir);
-  await writeJson(badPath, legacyInbox("repaired"));
   const db = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
     db.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
@@ -449,31 +531,146 @@ test("malformed legacy JSON blocks authority cutover without partial rows", asyn
       .get().value,
     "complete_v1",
   );
+  assert.deepEqual(
+    JSON.parse(
+      db
+        .prepare(
+          "SELECT value FROM schema_meta WHERE key = 'legacy_control_migration_preserved'",
+        )
+        .get().value,
+    ),
+    {
+      version: 1,
+      total: 1,
+      reasons: { chat_legacy_migration_invalid_json: 1 },
+    },
+  );
+  assert.equal(
+    await fs.readFile(
+      path.join(
+        agentDir,
+        "data",
+        "chat",
+        "legacy-migrated-v1",
+        "inbox",
+        "pending",
+        "bad.json",
+      ),
+      "utf8",
+    ),
+    "{bad json\n",
+  );
 });
 
-test("legacy outbox missing media blocks authority cutover", async () => {
+test("one invalid inbox file is reported once across message and turn conversion", async () => {
   const agentDir = await tempDir();
+  const inboxPath = path.join(
+    agentDir,
+    "data",
+    "chat",
+    "inbox",
+    "pending",
+    "missing-message-id.json",
+  );
+  await writeJson(inboxPath, {
+    ...legacyInbox("missing-message-id"),
+    messageId: "",
+  });
+
+  const db = database.migrateChatDatabaseForInstall(agentDir);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS value FROM messages").get().value,
+    0,
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
+    0,
+  );
+  const summary = JSON.parse(
+    db
+      .prepare(
+        "SELECT value FROM schema_meta WHERE key = 'legacy_control_migration_preserved'",
+      )
+      .get().value,
+  );
+  assert.equal(summary.total, 1);
+  assert.equal(
+    Object.values(summary.reasons).reduce(
+      (total, count) => total + Number(count),
+      0,
+    ),
+    1,
+  );
+  assert.deepEqual(summary.reasons, {
+    chat_legacy_migration_invalid_message_identity: 1,
+  });
+  assert.ok(
+    await fs.stat(
+      path.join(
+        agentDir,
+        "data",
+        "chat",
+        "legacy-migrated-v1",
+        "inbox",
+        "pending",
+        "missing-message-id.json",
+      ),
+    ),
+  );
+});
+
+test("undeliverable legacy outbox item is preserved without blocking valid outbox migration", async () => {
+  const agentDir = await tempDir();
+  const outboxRoot = path.join(agentDir, "data", "chat", "outbox", "items");
   const legacy = legacyOutbox("missing-media");
   legacy.payload.parts = [
     { type: "image", path: "/definitely/missing/legacy-image.png" },
   ];
+  await writeJson(path.join(outboxRoot, "missing.json"), legacy);
+  await writeJson(path.join(outboxRoot, "empty.json"), {
+    ...legacyOutbox("empty-outbox"),
+    payload: { chatKey: "telegram/1:2" },
+  });
   await writeJson(
-    path.join(agentDir, "data", "chat", "outbox", "items", "missing.json"),
-    legacy,
+    path.join(outboxRoot, "valid.json"),
+    legacyOutbox("valid-outbox"),
   );
 
-  assert.throws(
-    () => database.migrateChatDatabaseForInstall(agentDir),
-    /chat_outbox_media_missing:image/,
-  );
-  const inspect = new (await import("better-sqlite3")).default(
-    database.chatDatabasePath(agentDir),
-  );
+  const db = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
-    inspect.prepare("SELECT COUNT(*) AS value FROM outbox").get().value,
-    0,
+    db.prepare("SELECT COUNT(*) AS value FROM outbox").get().value,
+    1,
   );
-  inspect.close();
+  assert.deepEqual(
+    JSON.parse(
+      db
+        .prepare(
+          "SELECT value FROM schema_meta WHERE key = 'legacy_control_migration_preserved'",
+        )
+        .get().value,
+    ),
+    {
+      version: 1,
+      total: 2,
+      reasons: {
+        chat_legacy_migration_invalid_outbox: 1,
+        "chat_outbox_media_missing:image": 1,
+      },
+    },
+  );
+  assert.ok(
+    await fs.stat(
+      path.join(
+        agentDir,
+        "data",
+        "chat",
+        "legacy-migrated-v1",
+        "outbox",
+        "items",
+        "missing.json",
+      ),
+    ),
+  );
 });
 
 test("terminal legacy outbox history tolerates cleaned local media", async () => {

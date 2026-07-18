@@ -20,6 +20,11 @@ const installerPersist = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "persist.js"))
     .href
 );
+const installMigration = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "chat", "install-migration.js"),
+  ).href
+);
 
 async function writeJson(filePath: string, value: unknown) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -168,6 +173,58 @@ test("installer migration preflight is read-only", async () => {
   }
 });
 
+test("malformed per-chat session state is reported without blocking install migration", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-session-state-preserved-"),
+  );
+  const stateRoot = path.join(
+    installDir,
+    "data",
+    "chat",
+    "session-state",
+    "telegram",
+    "bot",
+  );
+  const invalidStatePath = path.join(stateRoot, "invalid", "state.json");
+  await fs.mkdir(path.dirname(invalidStatePath), { recursive: true });
+  await fs.writeFile(invalidStatePath, "{bad json\n");
+  await writeJson(path.join(stateRoot, "invalid-session", "state.json"), {
+    chatKey: "telegram/bot:invalid-session",
+    sessionFile: 42,
+  });
+  await writeJson(path.join(stateRoot, "without-binding", "state.json"), {
+    chatKey: "telegram/bot:without-binding",
+  });
+  await writeJson(path.join(stateRoot, "valid", "state.json"), {
+    chatKey: "telegram/bot:valid",
+    sessionFile: "managed/chat/valid.jsonl",
+  });
+
+  try {
+    const preflight =
+      installMigration.preflightChatInstallMigrations(installDir);
+    assert.deepEqual(preflight.sessionBindings, {
+      scanned: 4,
+      preserved: 2,
+      preservedReasons: { invalid_json: 1, invalid_session_file: 1 },
+      withoutBinding: 1,
+    });
+
+    const result = installMigration.runChatInstallMigrations(installDir);
+    assert.deepEqual(result.sessionBindings, {
+      scanned: 4,
+      imported: 1,
+      preserved: 2,
+      preservedReasons: { invalid_json: 1, invalid_session_file: 1 },
+      withoutBinding: 1,
+    });
+    assert.equal(await fs.readFile(invalidStatePath, "utf8"), "{bad json\n");
+  } finally {
+    database.closeChatDatabase(installDir);
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
 test("elevated installer preflight runs the staged migration as target user", async () => {
   const calls: any[] = [];
   installerPersist.preflightInstallUpgradeMigrations(
@@ -262,6 +319,28 @@ test("installer upgrade migrations own chat key and SQLite authority migration",
         )
         .get().session_file,
       "managed/chat/session.jsonl",
+    );
+  } finally {
+    database.closeChatDatabase(installDir);
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
+test("installer preflight still blocks corrupted migration control metadata", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-invalid-preserved-summary-"),
+  );
+  try {
+    const db = database.migrateChatDatabaseForInstall(installDir);
+    db.prepare(
+      `UPDATE schema_meta SET value = ?
+       WHERE key = 'legacy_control_migration_preserved'`,
+    ).run('{"version":1,"total":2,"reasons":{"invalid":1}}');
+    database.closeChatDatabase(installDir);
+
+    assert.throws(
+      () => installMigration.preflightChatInstallMigrations(installDir),
+      /chat_legacy_migration_invalid_preserved_summary/,
     );
   } finally {
     database.closeChatDatabase(installDir);

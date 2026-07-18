@@ -105,6 +105,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat migration needs the target Rin install directory.",
   chat_install_migration_invalid_session_state: (detail) =>
     withDetail("Chat migration found invalid legacy session state", detail),
+  chat_install_migration_session_state_read_failed: (detail) =>
+    withDetail("Chat migration could not read legacy session state", detail),
   chat_install_migration_invalid_settings: (detail) =>
     withDetail("Chat migration could not read the installed settings", detail),
   chat_key_migration_invalid_marker: (detail) =>
@@ -130,6 +132,13 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Legacy chat migration found an invalid inbox chat key.",
   chat_legacy_migration_invalid_json: (detail) =>
     withDetail("Legacy chat migration found invalid JSON", detail),
+  chat_legacy_migration_read_failed: (detail) =>
+    withDetail("Legacy chat migration could not read a source record", detail),
+  chat_legacy_migration_invalid_preserved_summary: (detail) =>
+    withDetail(
+      "Legacy chat migration found an invalid preserved-record summary",
+      detail,
+    ),
   chat_legacy_migration_invalid_message_identity: () =>
     "Legacy chat migration found a message with incomplete identity.",
   chat_legacy_migration_invalid_outbox: (detail) =>

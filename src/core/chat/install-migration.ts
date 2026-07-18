@@ -15,6 +15,7 @@ import {
   preflightChatDatabaseMigrationForInstall,
 } from "./database.js";
 import {
+  readLegacyControlMigrationPreservedSummary,
   retryUnresolvedLegacyChatKeyMessages,
   validateResolvedChatKeyLedger,
 } from "./legacy-migration.js";
@@ -31,31 +32,87 @@ function readInstalledSettings(settingsPath: string) {
   }
 }
 
+function readInstalledLegacySessionState(statePath: string) {
+  let text: string;
+  try {
+    text = fs.readFileSync(statePath, "utf8");
+  } catch (error: any) {
+    throw new Error(
+      `chat_install_migration_session_state_read_failed:${statePath}:${String(error?.message || error)}`,
+    );
+  }
+  try {
+    const state = JSON.parse(text);
+    if (!state || typeof state !== "object" || Array.isArray(state)) {
+      return { state: null, preservedReason: "invalid_shape" };
+    }
+    return { state, preservedReason: "" };
+  } catch {
+    return { state: null, preservedReason: "invalid_json" };
+  }
+}
+
+function summarizeInstalledLegacySessionStates(
+  stateFiles: ReturnType<typeof listChatStateFiles>,
+) {
+  const readable: Array<{
+    item: (typeof stateFiles)[number];
+    state: Record<string, unknown>;
+  }> = [];
+  const preservedReasons: Record<string, number> = {};
+  let withoutBinding = 0;
+  for (const item of stateFiles) {
+    const result = readInstalledLegacySessionState(item.statePath);
+    if (result.state) {
+      if (!Object.prototype.hasOwnProperty.call(result.state, "sessionFile")) {
+        withoutBinding += 1;
+        continue;
+      }
+      if (
+        typeof result.state.sessionFile === "string" &&
+        result.state.sessionFile.trim()
+      ) {
+        readable.push({ item, state: result.state });
+        continue;
+      }
+      preservedReasons.invalid_session_file =
+        (preservedReasons.invalid_session_file || 0) + 1;
+      continue;
+    }
+    preservedReasons[result.preservedReason] =
+      (preservedReasons[result.preservedReason] || 0) + 1;
+  }
+  const preserved = Object.values(preservedReasons).reduce(
+    (total, count) => total + count,
+    0,
+  );
+  return { readable, preserved, preservedReasons, withoutBinding };
+}
+
 function importInstalledLegacySessionBindings(agentDir: string) {
   let imported = 0;
   const stateFiles = listChatStateFiles(
     chatDataPath(agentDir, "session-state"),
   );
-  for (const item of stateFiles) {
-    let state: any;
-    try {
-      state = JSON.parse(fs.readFileSync(item.statePath, "utf8"));
-    } catch (error: any) {
-      throw new Error(
-        `chat_install_migration_invalid_session_state:${item.statePath}:${String(error?.message || error)}`,
-      );
-    }
+  const summary = summarizeInstalledLegacySessionStates(stateFiles);
+  for (const { item, state } of summary.readable) {
     if (
       importLegacyChatSessionBinding(
         agentDir,
         item.chatKey,
-        safeString(state?.sessionFile).trim(),
+        safeString(state.sessionFile).trim(),
       )
     ) {
       imported += 1;
     }
   }
-  return { scanned: stateFiles.length, imported };
+  return {
+    scanned: stateFiles.length,
+    imported,
+    preserved: summary.preserved,
+    preservedReasons: summary.preservedReasons,
+    withoutBinding: summary.withoutBinding,
+  };
 }
 
 export function preflightChatInstallMigrations(
@@ -73,19 +130,16 @@ export function preflightChatInstallMigrations(
   const stateFiles = listChatStateFiles(
     chatDataPath(agentDir, "session-state"),
   );
-  for (const item of stateFiles) {
-    try {
-      JSON.parse(fs.readFileSync(item.statePath, "utf8"));
-    } catch (error: any) {
-      throw new Error(
-        `chat_install_migration_invalid_session_state:${item.statePath}:${String(error?.message || error)}`,
-      );
-    }
-  }
+  const sessionStates = summarizeInstalledLegacySessionStates(stateFiles);
   return {
     keyMigration,
     database,
-    sessionBindings: { scanned: stateFiles.length },
+    sessionBindings: {
+      scanned: stateFiles.length,
+      preserved: sessionStates.preserved,
+      preservedReasons: sessionStates.preservedReasons,
+      withoutBinding: sessionStates.withoutBinding,
+    },
   };
 }
 
@@ -135,6 +189,7 @@ export function runChatInstallMigrations(
       database: {
         path: path.join(agentDir, "data", "chat", "chat.sqlite"),
         schemaVersion: Number(db.pragma("user_version", { simple: true })),
+        preservedRecords: readLegacyControlMigrationPreservedSummary(db),
       },
       sessionBindings,
     };

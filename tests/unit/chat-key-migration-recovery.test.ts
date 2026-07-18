@@ -745,7 +745,7 @@ test("pending marker resumes the first archive scan after a pre-cutover crash", 
   }
 });
 
-test("deferred records without message identity fail before writing the ledger", async () => {
+test("deferred records without message identity remain unresolved without blocking install", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-key-invalid-deferred-"),
   );
@@ -774,10 +774,69 @@ test("deferred records without message identity fail before writing the ledger",
     },
   );
   try {
-    assert.throws(
-      () => installMigration.runChatInstallMigrations(agentDir, settingsPath),
-      /chat_legacy_migration_invalid_message_identity/,
+    const result = installMigration.runChatInstallMigrations(
+      agentDir,
+      settingsPath,
     );
+    assert.equal(result.keyMigration.complete, false);
+    assert.equal(result.keyMigration.unresolvedRecords, 1);
+    assert.deepEqual(result.keyMigration.unresolvedRecordReasons, {
+      invalid_message_identity: 1,
+    });
+    await assert.rejects(
+      fs.access(
+        path.join(
+          agentDir,
+          "data",
+          "migrations",
+          "chat-key-v1-resolved-records.json",
+        ),
+      ),
+    );
+  } finally {
+    database.closeChatDatabase(agentDir);
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("deferred bot-qualified identity mismatch never writes a resolved ledger entry", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-key-mismatched-deferred-"),
+  );
+  const settingsPath = path.join(agentDir, "settings.json");
+  await writeJson(settingsPath, { chat: {} });
+  await writeJson(
+    path.join(
+      agentDir,
+      "data",
+      "chat",
+      "legacy-migrated-v1",
+      "message-records",
+      "aa",
+      "mismatch.json",
+    ),
+    {
+      version: 1,
+      recordKey: "mismatched-deferred",
+      chatKey: "telegram:expected-room",
+      messageId: "mismatched-deferred",
+      platform: "telegram",
+      botId: "bot",
+      chatId: "different-room",
+      role: "assistant",
+      receivedAt: "2026-07-01T00:00:00.000Z",
+    },
+  );
+  try {
+    const result = installMigration.runChatInstallMigrations(
+      agentDir,
+      settingsPath,
+    );
+    assert.equal(result.keyMigration.complete, false);
+    assert.equal(result.keyMigration.unresolvedRecords, 1);
+    assert.deepEqual(result.keyMigration.unresolvedRecordReasons, {
+      invalid_identity: 1,
+    });
     await assert.rejects(
       fs.access(
         path.join(

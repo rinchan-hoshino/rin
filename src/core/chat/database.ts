@@ -6,7 +6,10 @@ import BetterSqlite3 from "better-sqlite3";
 
 import { chatDataPath } from "../data-layout.js";
 import { safeString } from "../text-utils.js";
-import { migrateLegacyChatControlData } from "./legacy-migration.js";
+import {
+  migrateLegacyChatControlData,
+  readLegacyControlMigrationPreservedSummary,
+} from "./legacy-migration.js";
 
 const CHAT_DATABASE_SCHEMA_VERSION = 5;
 
@@ -466,6 +469,7 @@ export function preflightChatDatabaseMigrationForInstall(agentDir: string) {
       }
     } else {
       validateRecordedChatDatabaseSchema(db, currentVersion);
+      readLegacyControlMigrationPreservedSummary(db);
     }
     return {
       path: dbPath,

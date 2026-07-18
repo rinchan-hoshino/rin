@@ -21,6 +21,82 @@ const MIGRATION_KEY = "legacy_control_migration";
 const MIGRATION_SOURCE_FINGERPRINT_KEY =
   "legacy_control_migration_source_fingerprint";
 const COMPLETE = "complete_v1";
+const MIGRATION_PRESERVED_KEY = "legacy_control_migration_preserved";
+
+type PreservedLegacyRecord = {
+  kind: "message" | "inbox" | "outbox";
+  filePath: string;
+  reason: string;
+};
+
+type PreservedLegacyRecordSummary = {
+  version: 1;
+  total: number;
+  reasons: Record<string, number>;
+};
+
+function emptyPreservedLegacyRecordSummary(): PreservedLegacyRecordSummary {
+  return { version: 1, total: 0, reasons: {} };
+}
+
+function preservedLegacyRecordReason(error: unknown) {
+  const message = safeString((error as any)?.message || error).trim();
+  for (const prefix of [
+    "chat_legacy_migration_invalid_json",
+    "chat_legacy_migration_invalid_message_identity",
+    "chat_legacy_migration_invalid_message_timestamp",
+    "chat_legacy_migration_invalid_timestamp",
+    "chat_legacy_migration_invalid_inbox_chat_key",
+    "chat_legacy_migration_invalid_inbox",
+    "chat_legacy_migration_invalid_outbox",
+  ]) {
+    if (message === prefix || message.startsWith(`${prefix}:`)) return prefix;
+  }
+  if (
+    message === "chat_outbox_empty_message" ||
+    message.startsWith("chat_outbox_invalid_part:") ||
+    message.startsWith("chat_outbox_media_missing:")
+  ) {
+    return message;
+  }
+  return "";
+}
+
+function preserveLegacyRecord(
+  records: PreservedLegacyRecord[],
+  kind: PreservedLegacyRecord["kind"],
+  filePath: string,
+  error: unknown,
+) {
+  const reason = preservedLegacyRecordReason(error);
+  if (!reason) return false;
+  if (
+    !records.some(
+      (record) => record.kind === kind && record.filePath === filePath,
+    )
+  ) {
+    records.push({ kind, filePath, reason });
+  }
+  return true;
+}
+
+function summarizePreservedLegacyRecords(
+  records: PreservedLegacyRecord[],
+): PreservedLegacyRecordSummary {
+  const reasons: Record<string, number> = {};
+  for (const record of records) {
+    reasons[record.reason] = (reasons[record.reason] || 0) + 1;
+  }
+  return {
+    version: 1,
+    total: records.length,
+    reasons: Object.fromEntries(
+      Object.entries(reasons).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    ),
+  };
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -84,8 +160,16 @@ function collectJsonFiles(root: string) {
 }
 
 function readLegacyJson(filePath: string) {
+  let text: string;
   try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+    text = fs.readFileSync(filePath, "utf8");
+  } catch (error: any) {
+    throw new Error(
+      `chat_legacy_migration_read_failed:${filePath}:${safeString(error?.message || error)}`,
+    );
+  }
+  try {
+    return JSON.parse(text);
   } catch (error: any) {
     throw new Error(
       `chat_legacy_migration_invalid_json:${filePath}:${safeString(error?.message || error)}`,
@@ -408,8 +492,9 @@ function importLegacyInbox(
   db: BetterSqlite3.Database,
   inboxRoot: string,
   nextSequence: Map<string, number>,
+  preservedRecords: PreservedLegacyRecord[],
 ) {
-  for (const filePath of collectJsonFiles(inboxRoot)) {
+  const importItem = db.transaction((filePath: string) => {
     const item = readLegacyJson(filePath);
     const chatKey = safeString(item?.chatKey).trim();
     const messageId = safeString(item?.messageId).trim();
@@ -478,6 +563,16 @@ function importLegacyInbox(
         timestamp,
       timestamp,
     );
+  });
+  for (const filePath of collectJsonFiles(inboxRoot)) {
+    try {
+      importItem(filePath);
+    } catch (error) {
+      if (preserveLegacyRecord(preservedRecords, "inbox", filePath, error)) {
+        continue;
+      }
+      throw error;
+    }
   }
 }
 
@@ -493,7 +588,11 @@ const NON_AUTHORITATIVE_OUTBOX_DIRECTORIES = new Set([
   "invalid",
 ]);
 
-function importLegacyOutbox(db: BetterSqlite3.Database, outboxRoot: string) {
+function importLegacyOutbox(
+  db: BetterSqlite3.Database,
+  outboxRoot: string,
+  preservedRecords: PreservedLegacyRecord[],
+) {
   let fallbackSequence = Number(
     (
       db
@@ -506,45 +605,62 @@ function importLegacyOutbox(db: BetterSqlite3.Database, outboxRoot: string) {
       .relative(outboxRoot, filePath)
       .split(path.sep, 1)[0];
     if (NON_AUTHORITATIVE_OUTBOX_DIRECTORIES.has(topLevelDirectory)) continue;
-    const item = readLegacyJson(filePath);
-    const payload =
-      item?.payload && typeof item.payload === "object" ? item.payload : item;
-    const chatKey = safeString(payload?.chatKey).trim();
-    const outboxId = safeString(item?.id).trim();
-    if (
-      !chatKey ||
-      !outboxId ||
-      !Array.isArray(payload?.parts) ||
-      !payload.parts.length
-    ) {
-      throw new Error(`chat_legacy_migration_invalid_outbox:${filePath}`);
-    }
-    const legacyState = normalizeLegacyOutboxState(item?.status);
-    validateChatOutboxPayloadParts(payload, {
-      requireLocalFiles: legacyState === "queued" || legacyState === "sending",
-    });
-    const wasSending = legacyState === "sending";
-    const state = wasSending ? "delivered" : legacyState;
-    const deliveryUnconfirmed =
-      wasSending || item?.deliveryUnconfirmed === true;
-    const sequence = Number.isFinite(Number(item?.sequence))
-      ? Number(item.sequence)
-      : ++fallbackSequence;
-    const createdAt =
-      normalizeOptionalLegacyTimestamp(
-        item?.createdAt || payload?.createdAt,
-        "outbox.createdAt",
-      ) || nowIso();
-    const updatedAt =
-      normalizeOptionalLegacyTimestamp(item?.updatedAt, "outbox.updatedAt") ||
-      createdAt;
-    const deliveryResult = Array.isArray(item?.deliveryResult)
-      ? item.deliveryResult
-          .map((value: unknown) => safeString(value).trim())
-          .filter(Boolean)
-      : [];
-    db.prepare(
-      `INSERT INTO outbox (
+    try {
+      db.transaction(() => {
+        const item = readLegacyJson(filePath);
+        const sourcePayload =
+          item?.payload && typeof item.payload === "object"
+            ? item.payload
+            : item;
+        const legacyText = safeString(sourcePayload?.text).trim();
+        const payload =
+          (!Array.isArray(sourcePayload?.parts) ||
+            !sourcePayload.parts.length) &&
+          legacyText
+            ? {
+                ...sourcePayload,
+                parts: [{ type: "text" as const, text: legacyText }],
+              }
+            : sourcePayload;
+        const chatKey = safeString(payload?.chatKey).trim();
+        const outboxId = safeString(item?.id).trim();
+        if (
+          !chatKey ||
+          !outboxId ||
+          !Array.isArray(payload?.parts) ||
+          !payload.parts.length
+        ) {
+          throw new Error(`chat_legacy_migration_invalid_outbox:${filePath}`);
+        }
+        const legacyState = normalizeLegacyOutboxState(item?.status);
+        validateChatOutboxPayloadParts(payload, {
+          requireLocalFiles:
+            legacyState === "queued" || legacyState === "sending",
+        });
+        const wasSending = legacyState === "sending";
+        const state = wasSending ? "delivered" : legacyState;
+        const deliveryUnconfirmed =
+          wasSending || item?.deliveryUnconfirmed === true;
+        const sequence = Number.isFinite(Number(item?.sequence))
+          ? Number(item.sequence)
+          : ++fallbackSequence;
+        const createdAt =
+          normalizeOptionalLegacyTimestamp(
+            item?.createdAt || payload?.createdAt,
+            "outbox.createdAt",
+          ) || nowIso();
+        const updatedAt =
+          normalizeOptionalLegacyTimestamp(
+            item?.updatedAt,
+            "outbox.updatedAt",
+          ) || createdAt;
+        const deliveryResult = Array.isArray(item?.deliveryResult)
+          ? item.deliveryResult
+              .map((value: unknown) => safeString(value).trim())
+              .filter(Boolean)
+          : [];
+        db.prepare(
+          `INSERT INTO outbox (
         outbox_id, turn_id, idempotency_key, chat_key, delivery_kind, state,
         payload_json, post_delivery_json, adapter_id, adapter_version, plan_state,
         sequence, attempts, owner_epoch, lease_until, next_attempt_at, last_error,
@@ -553,95 +669,102 @@ function importLegacyOutbox(db: BetterSqlite3.Database, outboxRoot: string) {
       ) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, '1', 'planned', ?, ?, NULL,
                 NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(outbox_id) DO NOTHING`,
-    ).run(
-      outboxId,
-      optionalText(item?.idempotencyKey),
-      chatKey,
-      safeString(item?.deliveryKind).trim() || "generic",
-      state,
-      JSON.stringify(payload),
-      optionalJson(item?.postDelivery),
-      chatKey.split("/", 1)[0] || "unknown",
-      sequence,
-      Math.max(0, Number(item?.attempts || 0)),
-      wasSending
-        ? null
-        : normalizeOptionalLegacyTimestamp(
-            item?.nextAttemptAt,
-            "outbox.nextAttemptAt",
-          ),
-      wasSending
-        ? "chat_outbox_legacy_sending_ambiguous"
-        : optionalText(item?.lastError),
-      wasSending ? null : optionalText(item?.failureKind),
-      deliveryUnconfirmed ? 1 : 0,
-      deliveryResult.length ? JSON.stringify(deliveryResult) : null,
-      createdAt,
-      updatedAt,
-      wasSending
-        ? normalizeOptionalLegacyTimestamp(
-            item?.deliveredAt,
-            "outbox.deliveredAt",
-          ) || updatedAt
-        : normalizeOptionalLegacyTimestamp(
-            item?.deliveredAt,
-            "outbox.deliveredAt",
-          ),
-      normalizeOptionalLegacyTimestamp(item?.failedAt, "outbox.failedAt"),
-    );
-    const fragments = deliveryResult.length ? deliveryResult : [null];
-    fragments.forEach((providerMessageId, index) => {
-      const fragmentState =
-        state === "delivered"
-          ? deliveryUnconfirmed
-            ? "unconfirmed"
-            : "delivered"
-          : state === "failed"
-            ? "failed"
-            : "queued";
-      db.prepare(
-        `INSERT INTO outbox_deliveries (
+        ).run(
+          outboxId,
+          optionalText(item?.idempotencyKey),
+          chatKey,
+          safeString(item?.deliveryKind).trim() || "generic",
+          state,
+          JSON.stringify(payload),
+          optionalJson(item?.postDelivery),
+          chatKey.split("/", 1)[0] || "unknown",
+          sequence,
+          Math.max(0, Number(item?.attempts || 0)),
+          wasSending
+            ? null
+            : normalizeOptionalLegacyTimestamp(
+                item?.nextAttemptAt,
+                "outbox.nextAttemptAt",
+              ),
+          wasSending
+            ? "chat_outbox_legacy_sending_ambiguous"
+            : optionalText(item?.lastError),
+          wasSending ? null : optionalText(item?.failureKind),
+          deliveryUnconfirmed ? 1 : 0,
+          deliveryResult.length ? JSON.stringify(deliveryResult) : null,
+          createdAt,
+          updatedAt,
+          wasSending
+            ? normalizeOptionalLegacyTimestamp(
+                item?.deliveredAt,
+                "outbox.deliveredAt",
+              ) || updatedAt
+            : normalizeOptionalLegacyTimestamp(
+                item?.deliveredAt,
+                "outbox.deliveredAt",
+              ),
+          normalizeOptionalLegacyTimestamp(item?.failedAt, "outbox.failedAt"),
+        );
+        const fragments = deliveryResult.length ? deliveryResult : [null];
+        fragments.forEach((providerMessageId, index) => {
+          const fragmentState =
+            state === "delivered"
+              ? deliveryUnconfirmed
+                ? "unconfirmed"
+                : "delivered"
+              : state === "failed"
+                ? "failed"
+                : "queued";
+          db.prepare(
+            `INSERT INTO outbox_deliveries (
           delivery_id, outbox_id, destination, fragment_index, state,
           payload_json, owner_epoch, attempt, lease_until, next_attempt_at,
           last_error, provider_message_id, created_at, updated_at,
           delivered_at, failed_at
         ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(outbox_id, destination, fragment_index) DO NOTHING`,
-      ).run(
-        `${outboxId}:${index}`,
-        outboxId,
-        chatKey,
-        index,
-        fragmentState,
-        JSON.stringify(payload),
-        Math.max(0, Number(item?.attempts || 0)),
-        wasSending
-          ? null
-          : normalizeOptionalLegacyTimestamp(
-              item?.nextAttemptAt,
-              "outbox.delivery.nextAttemptAt",
+          ).run(
+            `${outboxId}:${index}`,
+            outboxId,
+            chatKey,
+            index,
+            fragmentState,
+            JSON.stringify(payload),
+            Math.max(0, Number(item?.attempts || 0)),
+            wasSending
+              ? null
+              : normalizeOptionalLegacyTimestamp(
+                  item?.nextAttemptAt,
+                  "outbox.delivery.nextAttemptAt",
+                ),
+            wasSending
+              ? "chat_outbox_legacy_sending_ambiguous"
+              : optionalText(item?.lastError),
+            providerMessageId,
+            createdAt,
+            updatedAt,
+            wasSending
+              ? normalizeOptionalLegacyTimestamp(
+                  item?.deliveredAt,
+                  "outbox.delivery.deliveredAt",
+                ) || updatedAt
+              : normalizeOptionalLegacyTimestamp(
+                  item?.deliveredAt,
+                  "outbox.delivery.deliveredAt",
+                ),
+            normalizeOptionalLegacyTimestamp(
+              item?.failedAt,
+              "outbox.delivery.failedAt",
             ),
-        wasSending
-          ? "chat_outbox_legacy_sending_ambiguous"
-          : optionalText(item?.lastError),
-        providerMessageId,
-        createdAt,
-        updatedAt,
-        wasSending
-          ? normalizeOptionalLegacyTimestamp(
-              item?.deliveredAt,
-              "outbox.delivery.deliveredAt",
-            ) || updatedAt
-          : normalizeOptionalLegacyTimestamp(
-              item?.deliveredAt,
-              "outbox.delivery.deliveredAt",
-            ),
-        normalizeOptionalLegacyTimestamp(
-          item?.failedAt,
-          "outbox.delivery.failedAt",
-        ),
-      );
-    });
+          );
+        });
+      })();
+    } catch (error) {
+      if (preserveLegacyRecord(preservedRecords, "outbox", filePath, error)) {
+        continue;
+      }
+      throw error;
+    }
   }
 }
 
@@ -718,6 +841,7 @@ function archiveLegacyControlData(agentDir: string) {
 
 function importLegacyControlData(agentDir: string, db: BetterSqlite3.Database) {
   const nextSequence = new Map<string, number>();
+  const preservedRecords: PreservedLegacyRecord[] = [];
   const groups = legacyControlArchiveGroups(agentDir);
   const inboxRoots = groups
     .filter((group) => group.key === "inbox")
@@ -732,37 +856,54 @@ function importLegacyControlData(agentDir: string, db: BetterSqlite3.Database) {
   const storedMessageKeys = new Set<string>();
   for (const recordsRoot of recordRoots) {
     for (const filePath of collectJsonFiles(recordsRoot)) {
-      const raw = readLegacyJson(filePath);
-      const legacy = parseLegacyUnqualifiedChatKeyValue(raw?.chatKey);
-      if (legacy && BOT_QUALIFIED_CHAT_PLATFORMS.has(legacy.platform)) {
-        continue;
+      try {
+        const raw = readLegacyJson(filePath);
+        const legacy = parseLegacyUnqualifiedChatKeyValue(raw?.chatKey);
+        if (legacy && BOT_QUALIFIED_CHAT_PLATFORMS.has(legacy.platform)) {
+          continue;
+        }
+        const record = normalizeLegacyMessage(raw);
+        const key = JSON.stringify([record.chatKey, record.messageId]);
+        if (storedMessageKeys.has(key)) continue;
+        storedMessageKeys.add(key);
+        messageEntries.push({ filePath, raw });
+      } catch (error) {
+        if (
+          preserveLegacyRecord(preservedRecords, "message", filePath, error)
+        ) {
+          continue;
+        }
+        throw error;
       }
-      const record = normalizeLegacyMessage(raw);
-      const key = JSON.stringify([record.chatKey, record.messageId]);
-      if (storedMessageKeys.has(key)) continue;
-      storedMessageKeys.add(key);
-      messageEntries.push({ filePath, raw });
     }
   }
   for (const inboxRoot of inboxRoots) {
     for (const filePath of collectJsonFiles(inboxRoot)) {
-      const raw = legacyInboxToMessage(readLegacyJson(filePath));
-      const record = normalizeLegacyMessage(raw);
-      const key = JSON.stringify([record.chatKey, record.messageId]);
-      if (storedMessageKeys.has(key)) continue;
-      storedMessageKeys.add(key);
-      messageEntries.push({ filePath, raw });
+      try {
+        const raw = legacyInboxToMessage(readLegacyJson(filePath));
+        const record = normalizeLegacyMessage(raw);
+        const key = JSON.stringify([record.chatKey, record.messageId]);
+        if (storedMessageKeys.has(key)) continue;
+        storedMessageKeys.add(key);
+        messageEntries.push({ filePath, raw });
+      } catch (error) {
+        if (preserveLegacyRecord(preservedRecords, "inbox", filePath, error)) {
+          continue;
+        }
+        throw error;
+      }
     }
   }
   for (const raw of sortLegacyMessagesInTimelineOrder(messageEntries)) {
     insertLegacyMessage(db, raw, nextSequence);
   }
   for (const inboxRoot of inboxRoots) {
-    importLegacyInbox(db, inboxRoot, nextSequence);
+    importLegacyInbox(db, inboxRoot, nextSequence, preservedRecords);
   }
   for (const outboxRoot of outboxRoots) {
-    importLegacyOutbox(db, outboxRoot);
+    importLegacyOutbox(db, outboxRoot, preservedRecords);
   }
+  return summarizePreservedLegacyRecords(preservedRecords);
 }
 
 const RESOLVED_CHAT_KEY_LEDGER = "chat-key-v1-resolved-records.json";
@@ -873,12 +1014,25 @@ export function retryUnresolvedLegacyChatKeyMessages(
 ) {
   const agentDir = path.resolve(agentDirInput);
   const archivedRecords: StoredChatMessage[] = [];
+  const unresolvedReasons: string[] = [];
   const seenRecords = new Set<string>();
   for (const group of legacyControlArchiveGroups(agentDir)) {
     if (!group.key.startsWith("message-records")) continue;
     for (const root of [group.source, group.archive]) {
       for (const filePath of collectJsonFiles(root)) {
-        const raw = readLegacyJson(filePath) as StoredChatMessage;
+        let raw: StoredChatMessage;
+        try {
+          raw = readLegacyJson(filePath) as StoredChatMessage;
+        } catch (error) {
+          const reason = preservedLegacyRecordReason(error);
+          if (reason) {
+            unresolvedReasons.push(
+              reason.replace(/^chat_legacy_migration_/, ""),
+            );
+            continue;
+          }
+          throw error;
+        }
         const legacy = parseLegacyUnqualifiedChatKeyValue(raw?.chatKey);
         if (!legacy || !BOT_QUALIFIED_CHAT_PLATFORMS.has(legacy.platform)) {
           continue;
@@ -896,8 +1050,8 @@ export function retryUnresolvedLegacyChatKeyMessages(
   if (!archivedRecords.length) {
     return {
       resolvedRecords: 0,
-      unresolvedRecords: 0,
-      unresolvedRecordReasons: {},
+      unresolvedRecords: unresolvedReasons.length,
+      unresolvedRecordReasons: unresolvedReasonCounts(unresolvedReasons),
     };
   }
 
@@ -923,13 +1077,13 @@ export function retryUnresolvedLegacyChatKeyMessages(
     version: 1,
     records: { ...ledger.records },
   };
-  const unresolvedReasons: string[] = [];
   let addedLedgerEntries = 0;
   archivedRecords.forEach((record, index) => {
     const legacy = parseLegacyUnqualifiedChatKeyValue(record.chatKey);
     const messageId = safeString(record.messageId).trim();
     if (!messageId) {
-      throw new Error("chat_legacy_migration_invalid_message_identity");
+      unresolvedReasons.push("invalid_message_identity");
+      return;
     }
     const recordId = resolvedChatKeyLedgerRecordId(record);
     const existing = nextLedger.records[recordId];
@@ -1020,6 +1174,45 @@ export function retryUnresolvedLegacyChatKeyMessages(
   };
 }
 
+export function readLegacyControlMigrationPreservedSummary(
+  db: BetterSqlite3.Database,
+): PreservedLegacyRecordSummary {
+  const value = safeString(
+    (
+      db
+        .prepare(`SELECT value FROM schema_meta WHERE key = ?`)
+        .get(MIGRATION_PRESERVED_KEY) as any
+    )?.value,
+  ).trim();
+  if (!value) return emptyPreservedLegacyRecordSummary();
+  try {
+    const parsed = JSON.parse(value);
+    if (
+      parsed?.version !== 1 ||
+      !Number.isInteger(parsed.total) ||
+      parsed.total < 0 ||
+      !parsed.reasons ||
+      typeof parsed.reasons !== "object" ||
+      Array.isArray(parsed.reasons) ||
+      Object.entries(parsed.reasons).some(
+        ([reason, count]) =>
+          !reason || !Number.isInteger(count) || Number(count) < 1,
+      ) ||
+      (Object.values(parsed.reasons) as unknown[]).reduce<number>(
+        (total, count) => total + Number(count),
+        0,
+      ) !== parsed.total
+    ) {
+      throw new Error("invalid preserved summary");
+    }
+    return parsed as PreservedLegacyRecordSummary;
+  } catch (error: any) {
+    throw new Error(
+      `chat_legacy_migration_invalid_preserved_summary:${safeString(error?.message || error)}`,
+    );
+  }
+}
+
 export function migrateLegacyChatControlData(
   agentDirInput: string,
   db: BetterSqlite3.Database,
@@ -1033,7 +1226,7 @@ export function migrateLegacyChatControlData(
     db.transaction(() => {
       if (readMigrationState(db)) return;
       const sourceFingerprint = legacyControlSourceFingerprint(agentDir);
-      importLegacyControlData(agentDir, db);
+      const preservedRecords = importLegacyControlData(agentDir, db);
       if (legacyControlSourceFingerprint(agentDir) !== sourceFingerprint) {
         throw new Error("chat_legacy_migration_source_changed_during_import");
       }
@@ -1042,13 +1235,15 @@ export function migrateLegacyChatControlData(
         throw new Error("chat_legacy_migration_archive_changed");
       }
       db.prepare(
-        `INSERT INTO schema_meta (key, value) VALUES (?, ?), (?, ?)
+        `INSERT INTO schema_meta (key, value) VALUES (?, ?), (?, ?), (?, ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
       ).run(
         MIGRATION_KEY,
         COMPLETE,
         MIGRATION_SOURCE_FINGERPRINT_KEY,
         sourceFingerprint,
+        MIGRATION_PRESERVED_KEY,
+        JSON.stringify(preservedRecords),
       );
     }).immediate();
     state = readMigrationState(db);
