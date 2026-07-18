@@ -2267,7 +2267,7 @@ test("async TUI event failures are reported without stopping the TUI", async () 
       },
     },
     async handleEvent() {
-      throw new Error("rin_disconnected:req_28");
+      throw new Error("rin_disconnected:get_state:req_28");
     },
     showError(message) {
       shownErrors.push(message);

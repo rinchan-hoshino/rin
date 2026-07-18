@@ -112,7 +112,12 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   requestId = 0;
   pending = new Map<
     string,
-    { resolve: Function; reject: Function; timer: NodeJS.Timeout }
+    {
+      commandType: string;
+      resolve: (response: RinRpcResponse) => void;
+      reject: (error: Error) => void;
+      timer: NodeJS.Timeout;
+    }
   >();
   listeners = new Set<(event: InteractiveFrontendEvent) => void>();
   connectPromise: Promise<void> | null = null;
@@ -498,16 +503,17 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   async send(command: RinRpcCommand): Promise<RinRpcResponse> {
     if (!this.socket || this.socket.destroyed)
       throw new Error("rin_tui_not_connected");
+    const commandType = String(command?.type || "command");
     const id =
-      command?.type === "extension_ui_response" && command?.id
+      commandType === "extension_ui_response" && command?.id
         ? String(command.id)
         : `req_${++this.requestId}`;
-    return await new Promise((resolve, reject) => {
+    return await new Promise<RinRpcResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`rin_timeout:${String(command?.type || "command")}`));
+        reject(new Error(`rin_timeout:${commandType}`));
       }, rpcTimeoutMs(command));
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { commandType, resolve, reject, timer });
       this.socket.write(`${JSON.stringify({ ...command, id })}\n`);
     });
   }
@@ -545,9 +551,9 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     this.connectPromise = null;
     for (const [id, pending] of this.pending.entries()) {
       clearTimeout(pending.timer);
-      try {
-        pending.reject(new Error(`rin_disconnected:${id}`));
-      } catch {}
+      pending.reject(
+        new Error(`rin_disconnected:${pending.commandType}:${id}`),
+      );
     }
     this.pending.clear();
     if (emitEvent) {
