@@ -14,8 +14,16 @@
 - Agent guidance now exposes the maximum supported thinking level.
 - Chat identity, command reset, archive migration, and session compatibility paths now recover legacy state without blocking control-plane actions or crashing the TUI.
 - Update and CLI/TUI error handling now preserves actionable failures through migration rollback, release pruning, detached updater ownership, and session recovery.
-- Scheduler ownership is simpler, stale recovery checkpoints are retired, and the Pi runtime is updated to 0.80.9.
+- Scheduler ownership is simpler, stale recovery checkpoints are retired, and the Pi runtime is updated to 0.80.10.
+- Legacy chat migration now preserves non-fatal records, inbound recovery is isolated per chat, and compaction progress no longer overwrites todo progress.
+- TUI transport loss now leaves pending requests with explicit disconnected errors while the Connecting state owns reconnect presentation.
 <!-- rin-changelog-coverage
+7f3a7fd fix(chat): keep compaction out of todo progress
+06cb7df perf(chat): isolate inbound recovery by chat
+2cd1153 fix(tui): let Connecting own transport loss
+e511b3c fix(tui): identify disconnected pending requests
+11ec1ea fix(chat): preserve non-fatal legacy migration records
+36ec0f0 chore(upstream): sync Pi 0.80.10 mirrors
 8994e75 fix(tui): keep recoverable errors in session
 91b9f9b fix(cli): preserve errors after release pruning
 2b0f1cf fix(chat): recover legacy bot identities during install
