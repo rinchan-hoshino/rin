@@ -11,6 +11,7 @@ import {
   InboundRecoveryGate,
   recoverInboundHeads,
 } from "./inbound-recovery.js";
+import { composeChatKeyForBot } from "../chat/support.js";
 import { getWorkingReactionFrame } from "../chat/transport.js";
 import { formatRinTodoChecklistMarkdownContent } from "../rin-lib/todo-state.js";
 import {
@@ -865,10 +866,37 @@ export class DiscordAdapter {
     return recovered;
   }
 
-  private async recoverDiscordMessages() {
+  private discordInboundChatId(message: any) {
+    return safeString(message?.channelId || message?.channel?.id).trim();
+  }
+
+  private async releaseDiscordIngress(messages: any[]) {
+    for (const message of messages) await this.handleMessage(message);
+  }
+
+  private async releaseDiscordReadyChats(chatIds: string[]) {
+    const botId = safeString(this.bot?.selfId).trim();
+    const chats = chatIds.map((chatId) => ({
+      chatId,
+      chatKey: composeChatKeyForBot(this.app, "discord", chatId, botId),
+    }));
+    for (const { chatKey } of chats) {
+      if (chatKey) this.app?.beginInboundRecoveryChat?.(chatKey);
+    }
+    for (const { chatId, chatKey } of chats) {
+      await this.finishDiscordRecovery(chatId, []);
+      if (chatKey) this.app?.completeInboundRecoveryChat?.(chatKey);
+    }
+  }
+
+  private async recoverDiscordMessages(onConfigured?: () => void) {
     const agentDir = safeString(this.app?.agentDir).trim();
     const botId = safeString(this.bot?.selfId).trim();
-    if (!agentDir || !botId) return [] as any[];
+    if (!agentDir || !botId) {
+      await this.releaseDiscordReadyChats(this.inboundGate.configure([]));
+      onConfigured?.();
+      return;
+    }
     const result = await recoverInboundHeads(
       agentDir,
       "discord",
@@ -880,31 +908,69 @@ export class DiscordAdapter {
         }
         return await this.fetchDiscordMessagesAfter(channel, head.messageId);
       },
+      {
+        concurrency: 4,
+        onHeads: async (heads) => {
+          for (const head of heads) {
+            this.app?.beginInboundRecoveryChat?.(head.chatKey);
+          }
+          this.bot.inboundRecovery = heads.length
+            ? {
+                status: "recovering",
+                pending: heads.map((head) => head.chatKey),
+              }
+            : { status: "ready" };
+          await this.releaseDiscordReadyChats(
+            this.inboundGate.configure(heads.map((head) => head.chatId)),
+          );
+          onConfigured?.();
+        },
+        onHeadSettled: async (outcome) => {
+          await this.finishDiscordRecovery(
+            outcome.head.chatId,
+            outcome.recovered,
+          );
+          this.app?.completeInboundRecoveryChat?.(outcome.head.chatKey);
+        },
+      },
     );
     applyInboundRecoveryResult(this.bot, this.logger, result);
-    return result.recovered;
   }
 
-  private async finishDiscordRecovery(recovered: any[]) {
+  private async finishDiscordRecovery(chatId: string, recovered: any[]) {
     let nextRecovered = recovered;
     for (;;) {
-      const buffered = this.inboundGate.drain();
+      const buffered = this.inboundGate.drain(chatId);
       const messages = this.mergeDiscordRecoveryMessages(
         nextRecovered,
         buffered,
       );
       nextRecovered = [];
+      const handledMessages = new Set<any>();
+      const handledMessageIds = new Set<string>();
       try {
         for (const message of messages) {
           await this.handleMessage(message);
+          handledMessages.add(message);
+          const messageId = safeString(message?.id).trim();
+          if (messageId) handledMessageIds.add(messageId);
         }
       } catch (error) {
-        this.inboundGate.prepend(buffered);
+        this.inboundGate.prepend(
+          chatId,
+          buffered.filter((message) => {
+            const messageId = safeString(message?.id).trim();
+            return (
+              !handledMessages.has(message) &&
+              (!messageId || !handledMessageIds.has(messageId))
+            );
+          }),
+        );
         throw error;
       }
-      if (!this.inboundGate.hasPending()) break;
+      if (!this.inboundGate.hasPending(chatId)) break;
     }
-    this.inboundGate.open();
+    this.inboundGate.open(chatId);
   }
 
   async start() {
@@ -947,15 +1013,19 @@ export class DiscordAdapter {
             safeString(client?.user?.username).trim() ||
             undefined,
         };
-        const recovered = await this.recoverDiscordMessages();
-        await this.finishDiscordRecovery(recovered);
-        emitBotStatus(this.app, this.bot, 1);
+        await this.recoverDiscordMessages(() => {
+          emitBotStatus(this.app, this.bot, 1);
+        });
         resolveReady();
       })().catch(rejectReady);
     });
 
     this.client.on(Discord.Events.MessageCreate, (message: any) => {
-      if (this.inboundGate.buffer(message)) return;
+      if (
+        this.inboundGate.buffer(this.discordInboundChatId(message), message)
+      ) {
+        return;
+      }
       void this.handleMessage(message).catch((error: any) => {
         this.logger?.warn?.(
           `message handling failed err=${safeString(error?.message || error)}`,
@@ -2081,9 +2151,12 @@ export class LarkAdapter {
       eventDispatcher: new Lark.EventDispatcher({}).register({
         "im.message.receive_v1": async (data: any) => {
           try {
-            if (this.inboundGate.isBuffering()) {
+            const chatId = this.larkInboundChatId(data);
+            if (this.inboundGate.isBuffering(chatId)) {
               await new Promise<void>((resolve, reject) => {
-                if (!this.inboundGate.buffer({ data, resolve, reject })) {
+                if (
+                  !this.inboundGate.buffer(chatId, { data, resolve, reject })
+                ) {
                   void this.handleMessage(data).then(resolve, reject);
                 }
               });
@@ -2099,25 +2172,31 @@ export class LarkAdapter {
         },
       }),
     });
-    try {
-      const recovered = await this.recoverLarkMessages();
-      await this.finishLarkRecovery(recovered);
-      emitBotStatus(this.app, this.bot, 1);
-    } catch (error: any) {
-      const detail =
-        safeString(error?.message || error).trim() || "catch_up_failed";
-      this.bot.inboundRecovery = {
-        status: "degraded",
-        failures: [detail],
-      };
-      for (const entry of this.inboundGate.drain()) {
-        entry.reject(error);
-      }
-      this.inboundGate.open();
+    const recoveryRetryDelaysMs = [250, 1000];
+    for (let attempt = 0; ; attempt += 1) {
       try {
-        this.wsClient?.close?.({ force: true });
-      } catch {}
-      throw error;
+        await this.recoverLarkMessages(() => {
+          emitBotStatus(this.app, this.bot, 1);
+        });
+        break;
+      } catch (error: any) {
+        const detail =
+          safeString(error?.message || error).trim() || "catch_up_failed";
+        this.bot.inboundRecovery = {
+          status: "degraded",
+          failures: [detail],
+        };
+        this.logger?.warn?.(
+          `inbound recovery handling failed attempt=${attempt + 1} err=${detail}`,
+        );
+        const retryDelayMs = recoveryRetryDelaysMs[attempt];
+        if (retryDelayMs === undefined) {
+          emitBotStatus(this.app, this.bot, 1);
+          break;
+        }
+        await sleep(retryDelayMs);
+        this.inboundGate.begin();
+      }
     }
   }
 
@@ -2209,18 +2288,62 @@ export class LarkAdapter {
     return recovered;
   }
 
-  private async recoverLarkMessages() {
+  private larkInboundChatId(data: any) {
+    return safeString(data?.message?.chat_id).trim();
+  }
+
+  private async releaseLarkReadyChats(chatIds: string[]) {
+    const botId = safeString(this.bot?.selfId).trim();
+    const chats = chatIds.map((chatId) => ({
+      chatId,
+      chatKey: composeChatKeyForBot(this.app, "lark", chatId, botId),
+    }));
+    for (const { chatKey } of chats) {
+      if (chatKey) this.app?.beginInboundRecoveryChat?.(chatKey);
+    }
+    for (const { chatId, chatKey } of chats) {
+      await this.finishLarkRecovery(chatId, []);
+      if (chatKey) this.app?.completeInboundRecoveryChat?.(chatKey);
+    }
+  }
+
+  private async recoverLarkMessages(onConfigured?: () => void) {
     const agentDir = safeString(this.app?.agentDir).trim();
     const botId = safeString(this.bot?.selfId).trim();
-    if (!agentDir || !botId) return [] as any[];
+    if (!agentDir || !botId) {
+      await this.releaseLarkReadyChats(this.inboundGate.configure([]));
+      onConfigured?.();
+      return;
+    }
     const result = await recoverInboundHeads(
       agentDir,
       "lark",
       botId,
       async (head) => await this.fetchLarkMessagesAfter(head),
+      {
+        concurrency: 4,
+        onHeads: async (heads) => {
+          for (const head of heads) {
+            this.app?.beginInboundRecoveryChat?.(head.chatKey);
+          }
+          this.bot.inboundRecovery = heads.length
+            ? {
+                status: "recovering",
+                pending: heads.map((head) => head.chatKey),
+              }
+            : { status: "ready" };
+          await this.releaseLarkReadyChats(
+            this.inboundGate.configure(heads.map((head) => head.chatId)),
+          );
+          onConfigured?.();
+        },
+        onHeadSettled: async (outcome) => {
+          await this.finishLarkRecovery(outcome.head.chatId, outcome.recovered);
+          this.app?.completeInboundRecoveryChat?.(outcome.head.chatKey);
+        },
+      },
     );
     applyInboundRecoveryResult(this.bot, this.logger, result);
-    return result.recovered;
   }
 
   private mergeLarkRecoveryMessages(
@@ -2285,27 +2408,39 @@ export class LarkAdapter {
     });
   }
 
-  private async finishLarkRecovery(recovered: any[]) {
+  private async finishLarkRecovery(chatId: string, recovered: any[]) {
     let nextRecovered = recovered;
     for (;;) {
-      const buffered = this.inboundGate.drain();
+      const buffered = this.inboundGate.drain(chatId);
       const messages = this.mergeLarkRecoveryMessages(nextRecovered, buffered);
       nextRecovered = [];
+      const handledMessageIds = new Set<string>();
       for (let index = 0; index < messages.length; index += 1) {
         const entry = messages[index];
         try {
           await this.handleMessage(entry.data);
+          const messageId = safeString(entry.data?.message?.message_id).trim();
+          if (messageId) handledMessageIds.add(messageId);
           for (const waiter of entry.waiters) waiter.resolve();
         } catch (error) {
           for (const pending of messages.slice(index)) {
             for (const waiter of pending.waiters) waiter.reject(error);
           }
+          this.inboundGate.prepend(
+            chatId,
+            buffered.filter(
+              (pending) =>
+                !handledMessageIds.has(
+                  safeString(pending.data?.message?.message_id).trim(),
+                ),
+            ),
+          );
           throw error;
         }
       }
-      if (!this.inboundGate.hasPending()) break;
+      if (!this.inboundGate.hasPending(chatId)) break;
     }
-    this.inboundGate.open();
+    this.inboundGate.open(chatId);
   }
 
   private parseMessageContent(raw: string) {

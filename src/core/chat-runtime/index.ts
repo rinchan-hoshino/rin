@@ -339,6 +339,7 @@ export class ChatRuntimeApp extends EventEmitter {
     any,
     RegisteredChatRuntimeAdapter
   >();
+  private readonly inboundRecoveryChats = new Set<string>();
   readonly agentDir?: string;
 
   constructor(agentDir?: string) {
@@ -395,6 +396,21 @@ export class ChatRuntimeApp extends EventEmitter {
         status: "registered",
       });
     }
+  }
+
+  beginInboundRecoveryChat(chatKey: string) {
+    const normalized = safeString(chatKey).trim();
+    if (normalized) this.inboundRecoveryChats.add(normalized);
+  }
+
+  completeInboundRecoveryChat(chatKey: string) {
+    const normalized = safeString(chatKey).trim();
+    if (!normalized || !this.inboundRecoveryChats.delete(normalized)) return;
+    this.emit("inbound-recovery-chat-ready", { chatKey: normalized });
+  }
+
+  isInboundRecoveryChat(chatKey: string) {
+    return this.inboundRecoveryChats.has(safeString(chatKey).trim());
   }
 
   registerAdapterFailure(
@@ -1746,9 +1762,9 @@ class OneBotAdapter {
       try {
         this.inboundGate.begin();
         await this.connect();
-        const recovered = await this.recoverOneBotMessages();
-        await this.finishOneBotRecovery(recovered);
-        emitBotStatus(this.app, this.bot, 1);
+        await this.recoverOneBotMessages(() => {
+          emitBotStatus(this.app, this.bot, 1);
+        });
         await new Promise<void>((resolve) => {
           this.ws?.once("close", () => resolve());
         });
@@ -1849,7 +1865,9 @@ class OneBotAdapter {
       this.bot.selfId = selfId;
     }
     if (safeString(payload?.post_type).trim() === "message") {
-      if (this.inboundGate.buffer(payload)) return;
+      if (this.inboundGate.buffer(this.oneBotInboundChatId(payload), payload)) {
+        return;
+      }
       const session = await this.buildSession(payload);
       if (session) this.app.emit("message", session);
     }
@@ -1905,34 +1923,91 @@ class OneBotAdapter {
     return recovered;
   }
 
-  private async recoverOneBotMessages() {
+  private oneBotInboundChatId(payload: any) {
+    const messageType = safeString(payload?.message_type).trim();
+    const userId = safeString(payload?.user_id).trim();
+    const groupId = safeString(payload?.group_id).trim();
+    return messageType === "group" ? groupId : `private:${userId}`;
+  }
+
+  private async releaseOneBotReadyChats(chatIds: string[]) {
+    const botId = safeString(this.bot?.selfId).trim();
+    const chats = chatIds.map((chatId) => ({
+      chatId,
+      chatKey: composeChatKeyForBot(this.app, "onebot", chatId, botId),
+    }));
+    for (const { chatKey } of chats) {
+      if (chatKey) this.app.beginInboundRecoveryChat(chatKey);
+    }
+    for (const { chatId, chatKey } of chats) {
+      await this.finishOneBotRecovery(chatId, []);
+      if (chatKey) this.app.completeInboundRecoveryChat(chatKey);
+    }
+  }
+
+  private async recoverOneBotMessages(onConfigured?: () => void) {
     const agentDir = safeString(this.app?.agentDir).trim();
     const botId = safeString(this.bot?.selfId).trim();
-    if (!agentDir || !botId) return [] as any[];
+    if (!agentDir || !botId) {
+      await this.releaseOneBotReadyChats(this.inboundGate.configure([]));
+      onConfigured?.();
+      return;
+    }
     const result = await recoverInboundHeads(
       agentDir,
       "onebot",
       botId,
       async (head) => await this.fetchOneBotMessagesAfter(head),
+      {
+        concurrency: 4,
+        onHeads: async (heads) => {
+          for (const head of heads) {
+            this.app.beginInboundRecoveryChat(head.chatKey);
+          }
+          this.bot.inboundRecovery = heads.length
+            ? {
+                status: "recovering",
+                pending: heads.map((head) => head.chatKey),
+              }
+            : { status: "ready" };
+          await this.releaseOneBotReadyChats(
+            this.inboundGate.configure(heads.map((head) => head.chatId)),
+          );
+          onConfigured?.();
+        },
+        onHeadSettled: async (outcome) => {
+          await this.finishOneBotRecovery(
+            outcome.head.chatId,
+            outcome.recovered,
+          );
+          this.app.completeInboundRecoveryChat(outcome.head.chatKey);
+        },
+      },
     );
     applyInboundRecoveryResult(this.bot, this.logger, result);
-    return result.recovered;
   }
 
-  private async finishOneBotRecovery(recoveredPayloads: any[]) {
+  private async finishOneBotRecovery(chatId: string, recoveredPayloads: any[]) {
     let recoveredSessions = (
       await Promise.all(
         recoveredPayloads.map((payload) => this.buildSession(payload)),
       )
     ).filter(Boolean);
     for (;;) {
-      const bufferedPayloads = this.inboundGate.drain();
+      const bufferedPayloads = this.inboundGate.drain(chatId);
+      let bufferedSessionByPayload = new Map<any, any>();
+      const handledMessageIds = new Set<string>();
       try {
-        const bufferedSessions = (
-          await Promise.all(
-            bufferedPayloads.map((payload) => this.buildSession(payload)),
-          )
-        ).filter(Boolean);
+        const resolvedBufferedSessions = await Promise.all(
+          bufferedPayloads.map((payload) => this.buildSession(payload)),
+        );
+        bufferedSessionByPayload = new Map(
+          bufferedPayloads.map((payload, index) => [
+            payload,
+            resolvedBufferedSessions[index],
+          ]),
+        );
+        const bufferedSessions = resolvedBufferedSessions.filter(Boolean);
         const sessions = mergeInboundRecoverySessions(
           recoveredSessions,
           bufferedSessions,
@@ -1940,14 +2015,24 @@ class OneBotAdapter {
         recoveredSessions = [];
         for (const session of sessions) {
           this.app.emit("message", session);
+          const messageId = safeString(session?.messageId).trim();
+          if (messageId) handledMessageIds.add(messageId);
         }
       } catch (error) {
-        this.inboundGate.prepend(bufferedPayloads);
+        this.inboundGate.prepend(
+          chatId,
+          bufferedPayloads.filter((payload) => {
+            const messageId = safeString(
+              bufferedSessionByPayload.get(payload)?.messageId,
+            ).trim();
+            return !messageId || !handledMessageIds.has(messageId);
+          }),
+        );
         throw error;
       }
-      if (!this.inboundGate.hasPending()) break;
+      if (!this.inboundGate.hasPending(chatId)) break;
     }
-    this.inboundGate.open();
+    this.inboundGate.open(chatId);
   }
 
   private callAction(action: string, params?: any) {

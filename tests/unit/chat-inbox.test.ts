@@ -470,6 +470,32 @@ test("chat inbox drain prioritizes reset commands over earlier admissible follow
   assert.equal(inbox.getChatInboxItem(agentDir, abort.itemId).state, "running");
 });
 
+test("chat inbox drain leaves a recovering chat pending while unrelated chats run", async () => {
+  const agentDir = await tempDir();
+  inbox.enqueueChatInboxItem(agentDir, input("recovering", "discord/1:a"));
+  inbox.enqueueChatInboxItem(agentDir, input("ready", "discord/1:b"));
+  const jobs = [];
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({ ownsInboundMessage: () => false }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => jobs.push(job),
+    isChatKeyBlocked: (chatKey) => chatKey === "discord/1:a",
+    hasActiveChatKeyWorker: () => false,
+  });
+
+  await drain.drainChatInboxOnce();
+
+  assert.deepEqual(
+    jobs.map((job) => job.envelope.messageId),
+    ["ready"],
+  );
+  assert.deepEqual(
+    inbox.listPendingChatInboxItems(agentDir).map((item) => item.messageId),
+    ["recovering"],
+  );
+});
+
 test("chat inbox drain claims unrelated chats concurrently and serializes each chat", async () => {
   const agentDir = await tempDir();
   inbox.enqueueChatInboxItem(agentDir, input("a1", "telegram/1:a"));

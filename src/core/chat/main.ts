@@ -1284,6 +1284,7 @@ export async function startChatBridge(
     isInboundMessageProcessed,
     enqueueClaimedInboxItem: (job) =>
       chatKeyWorkers.enqueue(job.envelope.chatKey, job),
+    isChatKeyBlocked: (chatKey) => app.isInboundRecoveryChat(chatKey),
     hasActiveChatKeyWorker: (chatKey) => chatKeyWorkers.hasWorker(chatKey),
     isPriorityDuringActiveChatKeyWorker: (envelope) => {
       const queuedSession = restoreChatInboxSession(
@@ -1339,6 +1340,10 @@ export async function startChatBridge(
     if (chatBridgeStopping) return;
     inboxDrain.requestDrainChatInbox();
   };
+
+  app.on("inbound-recovery-chat-ready", () => {
+    requestDrainChatInbox();
+  });
 
   app.on("message", (session: any) => {
     void (async () => {

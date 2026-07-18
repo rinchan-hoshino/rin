@@ -100,6 +100,7 @@ export function createChatInboxDrain(deps: {
   getController: (chatKey: string) => ChatController;
   isInboundMessageProcessed: (chatKey: string, messageId: string) => boolean;
   enqueueClaimedInboxItem: (job: ClaimedChatInboxJob) => void;
+  isChatKeyBlocked?: (chatKey: string) => boolean;
   hasActiveChatKeyWorker?: (chatKey: string) => boolean;
   canClaimDuringActiveChatKeyWorker?: (
     envelope: ChatInboxItem,
@@ -221,6 +222,7 @@ export function createChatInboxDrain(deps: {
     }
 
     for (const [pendingChatKey, pendingItems] of pendingByChatKey) {
+      if (deps.isChatKeyBlocked?.(pendingChatKey)) continue;
       const pendingController = deps.getController(pendingChatKey);
       if (activeAdmissionChatKeys.has(pendingChatKey)) continue;
       if (!deps.hasActiveChatKeyWorker?.(pendingChatKey)) {

@@ -357,15 +357,123 @@ test("onebot runtime catches up native history before buffered live messages", a
       return { messages: [duplicateLive] };
     };
     adapter.inboundGate.begin();
-    adapter.inboundGate.buffer(duplicateLive);
-    adapter.inboundGate.buffer(newestLive);
+    adapter.inboundGate.buffer("123", duplicateLive);
+    adapter.inboundGate.buffer("123", newestLive);
 
-    const recovered = await adapter.recoverOneBotMessages();
-    await adapter.finishOneBotRecovery(recovered);
+    await adapter.recoverOneBotMessages();
 
     assert.deepEqual(seen, ["id-200", "id-300", "id-400"]);
     assert.deepEqual(adapter.bot.inboundRecovery, { status: "ready" });
     assert.equal(adapter.inboundGate.isBuffering(), false);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("onebot runtime releases unrelated chats while one history fetch is still pending", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-onebot-isolated-recovery-"),
+  );
+  try {
+    const app = runtime.createChatRuntimeApp(agentDir);
+    runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+      dataDir: path.join(agentDir, "data"),
+      settings: {},
+      adapterEntries: [
+        {
+          key: "onebot",
+          name: "OneBot",
+          config: { endpoint: "ws://127.0.0.1:3001", selfId: "bot-1" },
+        },
+      ],
+    });
+    const adapter = [...app.adapters][0];
+    const seen = [];
+    app.on("message", (session) => seen.push(session.messageId));
+    messageStore.saveChatMessage(agentDir, {
+      role: "user",
+      platform: "onebot",
+      botId: "bot-1",
+      chatId: "123",
+      chatKey: "onebot/bot-1:123",
+      messageId: "id-100",
+      receivedAt: "2026-07-13T00:00:00.000Z",
+      platformTimestamp: 1000,
+      providerCursor: "100",
+    });
+    const payload = (messageId, messageSeq, groupId, time) => ({
+      post_type: "message",
+      message_type: "group",
+      self_id: "bot-1",
+      group_id: groupId,
+      user_id: "owner-1",
+      message_id: messageId,
+      message_seq: messageSeq,
+      time,
+      sender: { nickname: "Owner" },
+      raw_message: messageId,
+      message: [{ type: "text", data: { text: messageId } }],
+    });
+    const head = payload("id-100", "100", "123", 1);
+    const recovered = payload("id-200", "200", "123", 2);
+    const slowLive = payload("id-300", "300", "123", 3);
+    const fastLive = payload("id-400", "400", "999", 4);
+    const fastFollowUp = payload("id-500", "500", "999", 5);
+    let releaseHistory = () => {};
+    const historyPending = new Promise((resolve) => {
+      releaseHistory = resolve;
+    });
+    adapter.callAction = async (_action, params) => {
+      if (params.message_seq === 100) {
+        await historyPending;
+        return { messages: [head, recovered] };
+      }
+      return { messages: [recovered] };
+    };
+    let releaseHandoff = () => {};
+    let handoffStarted = () => {};
+    const handoffPending = new Promise((resolve) => {
+      releaseHandoff = resolve;
+    });
+    const handoffObserved = new Promise((resolve) => {
+      handoffStarted = resolve;
+    });
+    const originalBuildSession = adapter.buildSession.bind(adapter);
+    adapter.buildSession = async (payload) => {
+      if (payload?.message_id === "id-400") {
+        handoffStarted();
+        await handoffPending;
+      }
+      return await originalBuildSession(payload);
+    };
+    adapter.inboundGate.begin();
+    adapter.inboundGate.buffer("123", slowLive);
+    adapter.inboundGate.buffer("999", fastLive);
+
+    let configured = false;
+    const recovering = adapter.recoverOneBotMessages(() => {
+      configured = true;
+    });
+    await handoffObserved;
+    assert.equal(adapter.inboundGate.buffer("999", fastFollowUp), true);
+    releaseHandoff();
+    const deadline = Date.now() + 1000;
+    while ((!seen.includes("id-500") || !configured) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(configured, true);
+    assert.deepEqual(adapter.bot.inboundRecovery, {
+      status: "recovering",
+      pending: ["onebot/bot-1:123"],
+    });
+    assert.deepEqual(seen, ["id-400", "id-500"]);
+    assert.equal(app.isInboundRecoveryChat("onebot/bot-1:123"), true);
+    assert.equal(app.isInboundRecoveryChat("onebot/bot-1:999"), false);
+
+    releaseHistory();
+    await recovering;
+    assert.deepEqual(seen, ["id-400", "id-500", "id-200", "id-300"]);
+    assert.equal(app.isInboundRecoveryChat("onebot/bot-1:123"), false);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -389,27 +497,39 @@ test("onebot runtime requeues buffered ingress when durable emit fails", async (
       ],
     });
     const adapter = [...app.adapters][0];
-    const payload = { message_id: "buffered-1" };
+    const first = { message_id: "buffered-1" };
+    const second = { message_id: "buffered-2" };
     adapter.inboundGate.begin();
-    adapter.inboundGate.buffer(payload);
-    adapter.buildSession = async () => ({
+    adapter.inboundGate.configure(["123"]);
+    adapter.inboundGate.buffer("123", first);
+    adapter.inboundGate.buffer("123", second);
+    adapter.buildSession = async (payload) => ({
       platform: "onebot",
       selfId: "bot-1",
       channelId: "123",
-      messageId: "buffered-1",
-      timestamp: 1000,
+      messageId: payload.message_id,
+      timestamp: payload === first ? 1000 : 2000,
     });
-    app.emit = () => {
-      throw new Error("durable inbox write failed");
+    const seen = [];
+    let failSecond = true;
+    app.emit = (_event, session) => {
+      if (session.messageId === "buffered-2" && failSecond) {
+        throw new Error("durable inbox write failed");
+      }
+      seen.push(session.messageId);
+      return true;
     };
 
     await assert.rejects(
-      adapter.finishOneBotRecovery([]),
+      adapter.finishOneBotRecovery("123", []),
       /durable inbox write failed/,
     );
 
-    assert.equal(adapter.inboundGate.hasPending(), true);
-    assert.deepEqual(adapter.inboundGate.drain(), [payload]);
+    assert.deepEqual(seen, ["buffered-1"]);
+    assert.equal(adapter.inboundGate.hasPending("123"), true);
+    failSecond = false;
+    await adapter.finishOneBotRecovery("123", []);
+    assert.deepEqual(seen, ["buffered-1", "buffered-2"]);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -669,14 +789,14 @@ test("lark runtime paginates native history before releasing buffered events", a
     };
     let resolved = 0;
     (adapter as any).inboundGate.begin();
-    (adapter as any).inboundGate.buffer({
+    (adapter as any).inboundGate.buffer("chat-1", {
       data: eventData("m300", "3000", "live copy"),
       resolve: () => {
         resolved += 1;
       },
       reject: assert.fail,
     });
-    (adapter as any).inboundGate.buffer({
+    (adapter as any).inboundGate.buffer("chat-1", {
       data: eventData("m400", "3000", "newest"),
       resolve: () => {
         resolved += 1;
@@ -684,8 +804,7 @@ test("lark runtime paginates native history before releasing buffered events", a
       reject: assert.fail,
     });
 
-    const recovered = await (adapter as any).recoverLarkMessages();
-    await (adapter as any).finishLarkRecovery(recovered);
+    await (adapter as any).recoverLarkMessages();
 
     assert.equal(listCalls.length, 2);
     assert.equal(listCalls[1].params.page_token, "next-page");
@@ -693,6 +812,250 @@ test("lark runtime paginates native history before releasing buffered events", a
     assert.equal(resolved, 2);
     assert.deepEqual(bot.inboundRecovery, { status: "ready" });
   } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("lark runtime releases unrelated chats while one history fetch is still pending", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-lark-isolated-recovery-"),
+  );
+  try {
+    const seen = [];
+    let bot = null;
+    const adapter = new adapters.LarkAdapter(
+      {
+        agentDir,
+        register(_adapter, registeredBot) {
+          bot = registeredBot;
+        },
+        emit(event, session) {
+          if (event === "message") seen.push(session.messageId);
+          return true;
+        },
+      },
+      agentDir,
+      {},
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+    bot.selfId = "app-1";
+    messageStore.saveChatMessage(agentDir, {
+      role: "user",
+      platform: "lark",
+      botId: "app-1",
+      chatId: "slow",
+      chatKey: "lark/app-1:slow",
+      messageId: "m100",
+      receivedAt: "2026-07-13T00:00:00.000Z",
+      platformTimestamp: 1000,
+    });
+    const eventData = (messageId, createTime, chatId) => ({
+      message: {
+        message_id: messageId,
+        create_time: createTime,
+        chat_id: chatId,
+        chat_type: "group",
+        message_type: "text",
+        content: JSON.stringify({ text: messageId }),
+      },
+      sender: {
+        sender_type: "user",
+        sender_id: { open_id: "owner-1" },
+      },
+    });
+    const historyItem = (messageId, createTime) => ({
+      message_id: messageId,
+      create_time: createTime,
+      chat_id: "slow",
+      chat_type: "group",
+      msg_type: "text",
+      body: { content: JSON.stringify({ text: messageId }) },
+      sender: { id: "owner-1", id_type: "open_id", sender_type: "user" },
+    });
+    let releaseHistory = () => {};
+    const historyPending = new Promise((resolve) => {
+      releaseHistory = resolve;
+    });
+    adapter.client = {
+      im: {
+        message: {
+          async list() {
+            await historyPending;
+            return {
+              code: 0,
+              data: {
+                items: [
+                  historyItem("m100", "1000"),
+                  historyItem("m200", "2000"),
+                ],
+                has_more: false,
+              },
+            };
+          },
+        },
+      },
+    };
+    let releaseHandoff = () => {};
+    let handoffStarted = () => {};
+    const handoffPending = new Promise((resolve) => {
+      releaseHandoff = resolve;
+    });
+    const handoffObserved = new Promise((resolve) => {
+      handoffStarted = resolve;
+    });
+    const originalHandleMessage = adapter.handleMessage.bind(adapter);
+    adapter.handleMessage = async (data) => {
+      if (data?.message?.message_id === "m400") {
+        handoffStarted();
+        await handoffPending;
+      }
+      await originalHandleMessage(data);
+    };
+    adapter.inboundGate.begin();
+    adapter.inboundGate.buffer("slow", {
+      data: eventData("m300", "3000", "slow"),
+      resolve() {},
+      reject: assert.fail,
+    });
+    adapter.inboundGate.buffer("fast", {
+      data: eventData("m400", "4000", "fast"),
+      resolve() {},
+      reject: assert.fail,
+    });
+
+    let configured = false;
+    const recovering = adapter.recoverLarkMessages(() => {
+      configured = true;
+    });
+    await handoffObserved;
+    assert.equal(
+      adapter.inboundGate.buffer("fast", {
+        data: eventData("m500", "5000", "fast"),
+        resolve() {},
+        reject: assert.fail,
+      }),
+      true,
+    );
+    releaseHandoff();
+    const deadline = Date.now() + 1000;
+    while ((!seen.includes("m500") || !configured) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(configured, true);
+    assert.deepEqual(bot.inboundRecovery, {
+      status: "recovering",
+      pending: ["lark/app-1:slow"],
+    });
+    assert.deepEqual(seen, ["m400", "m500"]);
+
+    releaseHistory();
+    await recovering;
+    assert.deepEqual(seen, ["m400", "m500", "m200", "m300"]);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("lark recovery requeues only the unhandled buffered suffix", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-lark-requeue-"),
+  );
+  try {
+    const adapter = new adapters.LarkAdapter(
+      { register() {} },
+      agentDir,
+      {},
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+    const entry = (messageId, createTime) => ({
+      data: {
+        message: { message_id: messageId, create_time: createTime },
+      },
+      resolve() {},
+      reject() {},
+    });
+    const first = entry("m100", "1000");
+    const second = entry("m200", "2000");
+    const seen = [];
+    let failSecond = true;
+    adapter.handleMessage = async (data) => {
+      const messageId = data.message.message_id;
+      if (messageId === "m200" && failSecond) {
+        throw new Error("durable inbox write failed");
+      }
+      seen.push(messageId);
+    };
+    adapter.inboundGate.begin();
+    adapter.inboundGate.configure(["chat-1"]);
+    adapter.inboundGate.buffer("chat-1", first);
+    adapter.inboundGate.buffer("chat-1", second);
+
+    await assert.rejects(
+      adapter.finishLarkRecovery("chat-1", []),
+      /durable inbox write failed/,
+    );
+    assert.deepEqual(seen, ["m100"]);
+    assert.equal(adapter.inboundGate.hasPending("chat-1"), true);
+
+    failSecond = false;
+    await adapter.finishLarkRecovery("chat-1", []);
+    assert.deepEqual(seen, ["m100", "m200"]);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("lark startup retries local recovery handling without closing transport", async () => {
+  const Lark = nodeRequire("@larksuiteoapi/node-sdk");
+  const originalClient = Lark.Client;
+  const originalWSClient = Lark.WSClient;
+  let closed = false;
+
+  class FakeWSClient {
+    start() {}
+    close() {
+      closed = true;
+    }
+  }
+
+  Lark.Client = class FakeClient {};
+  Lark.WSClient = FakeWSClient;
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-lark-recovery-retry-"),
+  );
+  try {
+    let bot = null;
+    const adapter = new adapters.LarkAdapter(
+      {
+        agentDir,
+        register(_adapter, registeredBot) {
+          bot = registeredBot;
+        },
+        emit() {
+          return true;
+        },
+      },
+      agentDir,
+      { appId: "cli_test", appSecret: "secret" },
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+    let attempts = 0;
+    adapter.recoverLarkMessages = async (onConfigured) => {
+      attempts += 1;
+      onConfigured?.();
+      if (attempts === 1) throw new Error("durable inbox write failed");
+      bot.inboundRecovery = { status: "ready" };
+    };
+
+    await adapter.start();
+
+    assert.equal(attempts, 2);
+    assert.equal(closed, false);
+    assert.equal(bot.status, 1);
+    assert.deepEqual(bot.inboundRecovery, { status: "ready" });
+  } finally {
+    Lark.Client = originalClient;
+    Lark.WSClient = originalWSClient;
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
