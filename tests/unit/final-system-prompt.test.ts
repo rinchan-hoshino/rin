@@ -66,7 +66,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     await buildFinalAppSystemPrompt();
 
   assert.ok(baseSystemPrompt.includes("Available tools:"));
-  assert.match(baseSystemPrompt, /\nCurrent date: \d{4}-\d{2}-\d{2}$/);
+  assert.equal(baseSystemPrompt.includes("Current date:"), false);
   const webSourceRequirement =
     "Always use a search engine to find current sources; treat built-in knowledge as outdated and authoritative online sources as the source of truth.";
   assert.ok(baseSystemPrompt.includes(webSourceRequirement));
@@ -483,7 +483,7 @@ test("forked sessions restore the source persisted system prompt", async (t) => 
   await forkRuntime.runtime.dispose();
 });
 
-test("buildFinalAppSystemPrompt keeps self-improve prompts before skills", async (t) => {
+test("buildFinalAppSystemPrompt keeps Pi-native context and skills before self-improve prompts", async (t) => {
   const cwd = makeTempDir(t, "rin-final-prompt-cwd-");
   const agentDir = makeTempDir(t, "rin-final-prompt-agent-");
   fs.writeFileSync(
@@ -527,7 +527,7 @@ test("buildFinalAppSystemPrompt keeps self-improve prompts before skills", async
     agentDir,
   });
 
-  const projectContextIdx = finalSystemPrompt.indexOf("# Project Context");
+  const projectContextIdx = finalSystemPrompt.indexOf("<project_context>");
   const rolePrefaceIdx = finalSystemPrompt.indexOf(
     "Use this agent profile as the standing role, voice, and response-style contract.",
   );
@@ -558,18 +558,18 @@ test("buildFinalAppSystemPrompt keeps self-improve prompts before skills", async
     ),
     false,
   );
-  assert.ok(projectContextIdx < agentProfileIdx);
+  assert.ok(projectContextIdx < skillsIdx);
+  assert.ok(skillsIdx < agentProfileIdx);
   assert.ok(agentProfileIdx < rolePrefaceIdx);
   assert.ok(rolePrefaceIdx < promptsIdx);
   assert.ok(promptsIdx < coreDoctrineIdx);
   assert.ok(coreDoctrineIdx < methodologyPrefaceIdx);
-  assert.ok(coreDoctrineIdx < skillsIdx);
   assert.ok(!finalSystemPrompt.includes("# Self-Improve Prompts"));
   assert.ok(finalSystemPrompt.includes("<name>test-skill</name>"));
   assert.ok(
     finalSystemPrompt.includes(
-      `<path>${path.join(agentDir, "self_improve", "skills", "test-skill")}</path>`,
+      `<location>${path.join(agentDir, "self_improve", "skills", "test-skill", "SKILL.md")}</location>`,
     ),
   );
-  assert.equal(finalSystemPrompt.includes("SKILL.md</path>"), false);
+  assert.equal(finalSystemPrompt.includes("<path>"), false);
 });

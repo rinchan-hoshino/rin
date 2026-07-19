@@ -47,16 +47,17 @@ import {
   estimateProviderBoundContextTokens,
   mapMessagesToProviderBoundContext,
 } from "./provider-context.js";
+import { applyRinSystemPromptOverlay } from "./system-prompt-overlay.js";
 import {
   bindPiSessionAutoCompactor,
   bindPiSessionCompactionChecker,
   bindPiSessionSystemPromptRebuilder,
   bindPiSessionToolRegistryRefresher,
   getPiSessionCompactionRequestAuth,
-  getPiSessionPromptToolState,
   getPiSessionResourcePromptState,
   patchPiSessionManagerConversationPersistence,
   readPiSessionBaseSystemPrompt,
+  readPiSessionBaseSystemPromptOptions,
   replacePiSessionAutoCompactor,
   replacePiSessionCompactionChecker,
   replacePiSessionSystemPromptRebuilder,
@@ -64,24 +65,6 @@ import {
   runPiSessionAutoCompaction,
   writePiSessionBaseSystemPrompt,
 } from "../pi/session-host.js";
-
-const PROMPT_PREFIX = "As the assistant, you must fulfill the user's requests.";
-
-const DEFAULT_PI_GUIDELINES = [
-  "Be concise in your responses",
-  "Show file paths clearly when working with files",
-  "Do not stop after one action if the user's request obviously requires multiple concrete steps",
-  "When modifying files, prefer targeted edits and preserve existing style unless asked otherwise",
-  "When using bash, explain meaningful findings instead of pasting excessive raw output",
-];
-
-function formatCurrentDateForSystemPrompt() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 
 export function createRinCapabilityDefinitions(
   options: RinCapabilityOptions,
@@ -115,46 +98,6 @@ export function createRinCapabilityDefinitions(
       },
     },
   ];
-}
-
-function escapeXml(text: string) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-function formatSkillsForPrompt(skills: any[]) {
-  const visibleSkills = (Array.isArray(skills) ? skills : []).filter(
-    (skill) => skill && !skill.disableModelInvocation,
-  );
-  if (!visibleSkills.length) return "";
-  const lines = [
-    "Available skills provide specialized instructions for specific tasks.",
-    "",
-    "<available_skills>",
-  ];
-  for (const skill of visibleSkills) {
-    lines.push("  <skill>");
-    lines.push(`    <name>${escapeXml(String(skill.name || ""))}</name>`);
-    lines.push(
-      `    <description>${escapeXml(String(skill.description || ""))}</description>`,
-    );
-    lines.push(`    <path>${escapeXml(String(skill?.baseDir || ""))}</path>`);
-    lines.push("  </skill>");
-  }
-  lines.push("</available_skills>");
-  return lines.join("\n");
-}
-
-function buildRinRuntimeAwarenessBlock() {
-  return "You are running in the Rin runtime environment.";
-}
-
-function buildWebSourceRequirementBlock() {
-  return "Always use a search engine to find current sources; treat built-in knowledge as outdated and authoritative online sources as the source of truth.";
 }
 
 const RIN_COMPACTION_SYSTEM_PROMPT =
@@ -490,43 +433,6 @@ export async function completeRinCompactionSummaryBudgeted(options: {
   return summary;
 }
 
-function buildRinDocsBlock(agentDir: string) {
-  const rinRoot = path.join(agentDir, "docs", "rin");
-  const rinDocsRoot = path.join(rinRoot, "docs");
-  const piRoot = path.join(agentDir, "docs", "pi");
-  return [
-    "Rin and Pi documentation:",
-    `- Rin docs: ${path.join(rinRoot, "README.md")} and ${rinDocsRoot}`,
-    `- Pi base docs: ${path.join(piRoot, "README.md")} and ${path.join(piRoot, "docs")}`,
-    "- For Rin runtime, daemon, memory, scheduled task, chat, frontend, layout, update, or capability behavior, read Rin docs first; Rin overrides Pi.",
-    "- Start runtime work with Rin README.md, docs/execution-environment.md, and docs/pi-overrides.md; then read only the narrow topic doc needed for the task.",
-    "- Topic routes: browser/computer/mobile/search operation -> practices/README.md; session awareness -> docs/session-awareness.md; subagents -> docs/non-interactive-cli.md; scheduled tasks -> docs/agent-sdk.md + docs/scheduled-tasks.md; rich chat output -> docs/rich-text-output-format.md; chat bridge -> docs/chat-bridge.md; runtime layout -> docs/runtime-layout.md; capabilities/update/rollback -> docs/capabilities.md.",
-    "- Core scheduled tasks: use real scheduled/background tasks for reminders, delayed follow-ups, recurring work, polling/watch work, and work that must continue after the current turn.",
-    "- Core rich text: use Rin rich text for native mentions, replies/quotes, images, files, audio, video, stickers, and chat attachments.",
-    "- Use Pi docs only for topics not covered by Rin docs, after applying Rin overrides.",
-  ].join("\n");
-}
-
-function formatAgentsFilesForPrompt(
-  agentsFiles: Array<{ path: string; content: string }>,
-) {
-  const rows = Array.isArray(agentsFiles) ? agentsFiles : [];
-  if (!rows.length) return "";
-  const lines = [
-    "# Project Context",
-    "",
-    "Project-specific instructions and guidelines:",
-    "",
-  ];
-  for (const { path: filePath, content } of rows) {
-    lines.push(`## ${filePath}`);
-    lines.push("");
-    lines.push(String(content || "").trim());
-    lines.push("");
-  }
-  return lines.join("\n").trim();
-}
-
 export function getManagedSkillPaths(agentDir: string): string[] {
   const root =
     String(agentDir || "").trim() || resolveRuntimeProfile().agentDir;
@@ -542,96 +448,6 @@ function buildSelfImprovePromptBlock(agentDir: string) {
   } catch {
     return "";
   }
-}
-
-function buildRinSystemPrompt(session: any, toolNames: string[]) {
-  const { validToolNames, toolSnippets, promptGuidelines } =
-    getPiSessionPromptToolState(session, toolNames);
-  const resourcePromptState = getPiSessionResourcePromptState(session);
-
-  const promptAgentDir =
-    resourcePromptState.agentDir ||
-    process.env.RIN_DIR ||
-    resolveRuntimeProfile().agentDir;
-  const uniqueGuidelines: string[] = [];
-  const seen = new Set<string>();
-  const addGuideline = (value: string) => {
-    const normalized = String(value || "")
-      .trim()
-      .replace(/\.$/, "");
-    if (!normalized || seen.has(normalized)) return;
-    seen.add(normalized);
-    uniqueGuidelines.push(normalized);
-  };
-
-  const hasRead = validToolNames.includes("read");
-
-  for (const guideline of [...DEFAULT_PI_GUIDELINES, ...promptGuidelines]) {
-    addGuideline(guideline);
-  }
-
-  const toolsList =
-    validToolNames.length > 0
-      ? validToolNames
-          .filter((name) => Boolean(toolSnippets[name]))
-          .map((name) => `- ${name}: ${toolSnippets[name]}`)
-          .join("\n") || "(none)"
-      : "(none)";
-
-  const guidelines = uniqueGuidelines.map((g) => `- ${g}`).join("\n");
-  const loaderSystemPrompt = resourcePromptState.systemPrompt;
-  const appendSystemPrompt =
-    resourcePromptState.appendSystemPrompt.length > 0
-      ? resourcePromptState.appendSystemPrompt.join("\n\n")
-      : "";
-  const loadedSkills = resourcePromptState.skills;
-  const loadedContextFiles = resourcePromptState.agentsFiles;
-  const runtimeAwarenessBlock = buildRinRuntimeAwarenessBlock();
-  const webSourceRequirementBlock = buildWebSourceRequirementBlock();
-  const docsBlock = buildRinDocsBlock(promptAgentDir);
-  const configuredLanguageBlock = buildConfiguredLanguageSystemPrompt(
-    readConfiguredLanguageFromSettings(promptAgentDir),
-  );
-  const selfImprovePromptBlock = buildSelfImprovePromptBlock(promptAgentDir);
-
-  let prompt = String(loaderSystemPrompt || "").trim();
-  if (!prompt) {
-    prompt = [
-      "Available tools:",
-      toolsList,
-      "",
-      "In addition to the tools above, you may have access to other custom tools depending on the project.",
-      "",
-      "Guidelines:",
-      guidelines,
-      "",
-      docsBlock,
-      configuredLanguageBlock ? `\n${configuredLanguageBlock}` : "",
-    ].join("\n");
-  } else {
-    prompt = [prompt, docsBlock, configuredLanguageBlock]
-      .filter(Boolean)
-      .join("\n\n");
-  }
-
-  if (appendSystemPrompt) prompt += `\n\n${appendSystemPrompt}`;
-
-  const agentsBlock = formatAgentsFilesForPrompt(loadedContextFiles);
-  if (agentsBlock) {
-    prompt += `\n\n${agentsBlock}`;
-  }
-  if (selfImprovePromptBlock) {
-    prompt += `\n\n${selfImprovePromptBlock}`;
-  }
-  if (hasRead && loadedSkills.length > 0) {
-    prompt += `\n\n${formatSkillsForPrompt(loadedSkills)}`;
-  }
-  prompt = applyPersistedSystemPromptBlocks(
-    prompt,
-    readPersistedSessionSystemPromptBlocks(session),
-  );
-  prompt = `${prompt.trimEnd()}\nCurrent date: ${formatCurrentDateForSystemPrompt()}`;
-  return `${PROMPT_PREFIX}\n${runtimeAwarenessBlock}\n${webSourceRequirementBlock}\n\n${prompt}`.trimEnd();
 }
 
 const LAZY_SYSTEM_PROMPT_STATE_KEY = Symbol.for("rin.lazySystemPromptState");
@@ -823,14 +639,25 @@ function applyRinPromptBuilder(session: any) {
   if (!originalRebuild) return;
 
   const computePrompt = (toolNames: string[]) => {
-    try {
-      return buildRinSystemPrompt(
-        session,
-        Array.isArray(toolNames) ? toolNames : [],
-      );
-    } catch {
-      return originalRebuild(toolNames);
-    }
+    const activeToolNames = Array.isArray(toolNames) ? toolNames : [];
+    const piPrompt = originalRebuild(activeToolNames);
+    const piOptions = readPiSessionBaseSystemPromptOptions(session);
+    const resourcePromptState = getPiSessionResourcePromptState(session);
+    const promptAgentDir =
+      resourcePromptState.agentDir ||
+      process.env.RIN_DIR ||
+      resolveRuntimeProfile().agentDir;
+    return applyRinSystemPromptOverlay({
+      piPrompt,
+      piOptions,
+      activeToolNames,
+      agentDir: promptAgentDir,
+      configuredLanguageBlock: buildConfiguredLanguageSystemPrompt(
+        readConfiguredLanguageFromSettings(promptAgentDir),
+      ),
+      selfImprovePromptBlock: buildSelfImprovePromptBlock(promptAgentDir),
+      persistedBlocks: readPersistedSessionSystemPromptBlocks(session),
+    });
   };
 
   const state: LazySystemPromptState = {

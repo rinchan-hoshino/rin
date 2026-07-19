@@ -27,9 +27,6 @@ const PI_SESSION_PRIVATE = {
   runAgentPrompt: "_runAgentPrompt",
   rewriteFile: "_rewriteFile",
   runAutoCompaction: "_runAutoCompaction",
-  toolPromptGuidelines: "_toolPromptGuidelines",
-  toolPromptSnippets: "_toolPromptSnippets",
-  toolRegistry: "_toolRegistry",
 } as const;
 
 const RIN_SESSION_CONVERSATION_PERSIST_KEY = Symbol.for(
@@ -94,28 +91,6 @@ export function writePiSessionBaseSystemPrompt(
   if (typeof session.agent?.setSystemPrompt === "function") {
     session.agent.setSystemPrompt(next);
   }
-}
-
-export function getPiSessionPromptToolState(session: any, toolNames: string[]) {
-  const registry = session?.[PI_SESSION_PRIVATE.toolRegistry];
-  const snippets = session?.[PI_SESSION_PRIVATE.toolPromptSnippets];
-  const guidelineMap = session?.[PI_SESSION_PRIVATE.toolPromptGuidelines];
-  const validToolNames = (Array.isArray(toolNames) ? toolNames : []).filter(
-    (name) => Boolean(registry?.has?.(name)),
-  );
-  const toolSnippets: Record<string, string> = {};
-  const promptGuidelines: string[] = [];
-  for (const name of validToolNames) {
-    const snippet = snippets?.get?.(name);
-    if (snippet) toolSnippets[name] = String(snippet);
-    const guidelineSet = guidelineMap?.get?.(name);
-    if (guidelineSet) {
-      promptGuidelines.push(
-        ...Array.from(guidelineSet).map((value) => String(value || "")),
-      );
-    }
-  }
-  return { validToolNames, toolSnippets, promptGuidelines };
 }
 
 export function getPiSessionResourcePromptState(session: any) {

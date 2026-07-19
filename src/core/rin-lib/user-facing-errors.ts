@@ -362,6 +362,9 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   onebot_send_message_empty_result: () =>
     "OneBot accepted the send request but returned no delivered message. Check NapCat/OneBot.",
 
+  pi_prompt_shape_changed: () =>
+    "Rin stopped because Pi's system prompt structure changed and Rin could not apply its prompt overlay safely.",
+
   background_extension_entrypoint_missing: () =>
     "Background extension is missing a Rin extension entry point. Export a Rin extension factory or background service.",
 
