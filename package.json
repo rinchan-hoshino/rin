@@ -24,6 +24,7 @@
     "sync:pi-docs": "tsx scripts/sync-upstreams.ts pi",
     "sync:skill-creator": "tsx scripts/sync-upstreams.ts skill-creator",
     "release:manifest": "tsx scripts/release/update-release-manifest.ts",
+    "release:local": "tsx scripts/release/publish-local.ts",
     "release:changelog": "tsx scripts/release/verify-changelog.ts",
     "release:bootstrap": "tsx scripts/release/export-bootstrap-branch.ts",
     "release:bundle": "tsx scripts/release/build-platform-bundle.ts",

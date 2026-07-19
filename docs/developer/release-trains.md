@@ -65,10 +65,10 @@ That means the stable workflow publishes the beta candidate's exact pinned ref, 
 
 ## Automation
 
-- `publish-nightly.yml`: scheduled daily nightly cut from `main`
-- `publish-beta.yml`: scheduled weekly beta cut from `main`
-- `publish-stable.yml`: scheduled weekly promotion of the current beta candidate to stable npm
-- `publish-hotfix.yml`: manual patch release from an explicit ref
+- `npm run release:local -- --channel nightly`: scheduler-selected daily nightly cut from `main`
+- `npm run release:local -- --channel beta`: scheduler-selected weekly beta cut from `main`
+- `npm run release:local -- --channel stable`: scheduler-selected promotion of the current beta candidate to stable npm
+- `npm run release:local -- --channel hotfix --ref <ref> --version <x.y.z>`: manual patch release from an explicit ref
 - `npm run release:changelog -- --version <x.y.z>`: verify `docs/release/CHANGELOG.md` contains the target user-facing release heading; beta, stable, and hotfix workflows run this before publishing or updating release metadata
 - `npm run release:manifest -- --channel stable|beta|nightly ...`: local manifest maintenance helper
 - `npm run release:bootstrap -- --output <dir>`: export the `bootstrap` payload

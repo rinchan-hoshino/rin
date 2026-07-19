@@ -13,9 +13,9 @@ function makeTempDir(prefix) {
   return fs.mkdtempSync(path.join(rootDir, prefix));
 }
 
-function readWorkflow(workflow) {
+function readLocalPublisher() {
   return fs.readFileSync(
-    path.join(rootDir, ".github", "workflows", workflow),
+    path.join(rootDir, "scripts", "release", "publish-local.ts"),
     "utf8",
   );
 }
@@ -511,172 +511,62 @@ test("verify-changelog script checks release-note commit coverage", () => {
   }
 });
 
-test("release workflows retry main branch metadata pushes", () => {
-  for (const workflow of [
-    "publish-nightly.yml",
-    "publish-beta.yml",
-    "publish-stable.yml",
-    "publish-hotfix.yml",
-  ] as const) {
-    const content = readWorkflow(workflow);
-    assert.ok(
-      content.includes(
-        "if ! git push origin HEAD:main; then\n" +
-          "            git fetch origin main\n" +
-          "            git rebase origin/main\n" +
-          "            git push origin HEAD:main",
-      ),
-    );
-  }
-
-  for (const [workflow, tagRef] of [
-    ["publish-nightly.yml", "steps.plan.outputs.version"],
-    ["publish-beta.yml", "steps.plan.outputs.version"],
-    ["publish-stable.yml", "steps.plan.outputs.version"],
-    ["publish-hotfix.yml", "inputs.version"],
-  ] as const) {
-    const content = readWorkflow(workflow);
-    const tagExpression = `\${{ ${tagRef} }}`;
-    assert.match(
-      content,
-      new RegExp(
-        `tag='v${tagExpression.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}'`,
-      ),
-    );
-    assert.match(content, /git tag -a "\$tag" -m "Rin \$tag"/);
-    assert.match(content, /git push origin "refs\/tags\/\$tag"/);
-    assert.match(content, /gh release upload "\$tag"/);
-  }
+test("local release executor owns all four channels without GitHub Actions", () => {
+  const content = readLocalPublisher();
+  const workflowsDir = path.join(rootDir, ".github", "workflows");
+  assert.equal(fs.existsSync(workflowsDir), false);
+  assert.match(content, /"nightly", "beta", "stable", "hotfix"/);
+  assert.match(content, /--no-publish/);
+  assert.match(content, /process\.versions\.node !== "24\.18\.0"/);
+  assert.match(content, /git\(\["push", "origin", "HEAD:main"\]/);
+  assert.match(content, /git\(\["rebase", "origin\/main"\]/);
 });
 
-test("release workflows are manual executors without GitHub schedules", () => {
-  for (const workflow of [
-    "publish-nightly.yml",
-    "publish-beta.yml",
-    "publish-stable.yml",
-    "publish-hotfix.yml",
-  ]) {
-    const content = readWorkflow(workflow);
-    assert.match(content, /on:\n {2}workflow_dispatch:/);
-    assert.doesNotMatch(content, /\n {2}schedule:\n/);
-  }
-});
-
-test("release workflows require changelog content coverage before expensive publish gates", () => {
-  const beta = readWorkflow("publish-beta.yml");
-  assert.match(beta, /scripts\/release\/verify-changelog\.ts/);
+test("local release executor publishes tags, bundles, npm, manifest, and bootstrap", () => {
+  const content = readLocalPublisher();
+  assert.match(content, /git\(\["tag", "-a", tag/);
+  assert.match(content, /"release", "upload", tag, bundlePath/);
   assert.match(
-    beta,
-    /--version '\$\{\{ steps\.plan\.outputs\.promotion_version \}\}'/,
+    content,
+    /npm\(\["publish", "--tag", "latest", "--access", "public"\]/,
   );
-  assert.match(beta, /--from-ref "\$from_ref"/);
+  assert.match(content, /update-release-manifest\.ts/);
+  assert.match(content, /build-platform-bundle\.ts/);
+  assert.match(content, /export-bootstrap-branch\.ts/);
   assert.match(
-    beta,
-    /--to-ref '\$\{\{ steps\.plan\.outputs\.release_ref \}\}'/,
-  );
-  assert.ok(
-    beta.indexOf("Verify Rin changelog entry") <
-      beta.indexOf("npm ci --no-fund --no-audit"),
-  );
-
-  const stable = readWorkflow("publish-stable.yml");
-  assert.match(stable, /scripts\/release\/verify-changelog\.ts/);
-  assert.match(stable, /--version '\$\{\{ steps\.plan\.outputs\.version \}\}'/);
-  assert.match(stable, /--from-ref "\$from_ref"/);
-  assert.match(stable, /--to-ref '\$\{\{ steps\.plan\.outputs\.beta_ref \}\}'/);
-  assert.ok(
-    stable.indexOf("Verify Rin changelog entry") <
-      stable.indexOf("npm ci --no-fund --no-audit"),
-  );
-
-  const hotfix = readWorkflow("publish-hotfix.yml");
-  assert.match(hotfix, /scripts\/release\/verify-changelog\.ts/);
-  assert.match(hotfix, /--version '\$\{\{ inputs\.version \}\}'/);
-  assert.match(hotfix, /--from-ref "\$from_ref"/);
-  assert.match(hotfix, /--to-ref '\$\{\{ inputs\.ref \}\}'/);
-  assert.ok(
-    hotfix.indexOf("Verify Rin changelog entry") <
-      hotfix.indexOf("npm ci --no-fund --no-audit"),
-  );
-  assert.doesNotMatch(
-    readWorkflow("publish-nightly.yml"),
-    /verify-changelog|release:changelog/,
+    content,
+    /git\(\["-C", dir, "push", "origin", `HEAD:\$\{branch\}`\]/,
   );
 });
 
-test("candidate-only release workflows run main-tree release scripts without local deps", () => {
-  for (const workflow of ["publish-stable.yml", "publish-hotfix.yml"]) {
-    const content = readWorkflow(workflow);
-    assert.match(
-      content,
-      /npx --yes tsx scripts\/release\/update-release-manifest\.ts/,
-    );
-    assert.match(
-      content,
-      /npx --yes tsx scripts\/release\/export-bootstrap-branch\.ts/,
-    );
-    assert.doesNotMatch(content, /npm run release:(?:manifest|bootstrap)/);
-  }
+test("local release executor checks changelog before expensive beta and candidate gates", () => {
+  const content = readLocalPublisher();
+  const sourceStart = content.indexOf("function releaseSourceChannel");
+  const sourceEnd = content.indexOf("function releaseCandidateChannel");
+  const sourceChannel = content.slice(sourceStart, sourceEnd);
+  assert.ok(
+    sourceChannel.indexOf("verifyChangelog(") <
+      sourceChannel.indexOf("validateReleaseTree(root)"),
+  );
+
+  const candidate = content.slice(sourceEnd);
+  assert.ok(
+    candidate.indexOf("verifyChangelog(") < candidate.indexOf('npm(["ci"'),
+  );
+  assert.ok(
+    candidate.indexOf('npm(["ci"') <
+      candidate.indexOf("validateReleaseTree(candidate)"),
+  );
 });
 
-test("release workflows publish linux platform bundle metadata for every channel", () => {
-  for (const workflow of [
-    "publish-nightly.yml",
-    "publish-beta.yml",
-    "publish-stable.yml",
-    "publish-hotfix.yml",
-  ]) {
-    const content = readWorkflow(workflow);
-    assert.match(content, /Build .* linux-x64 platform bundle/);
-    assert.match(content, /npm run --silent release:bundle/);
-    assert.match(content, /--asset-platform linux-x64/);
-    assert.match(
-      content,
-      /--asset-url 'https:\/\/github\.com\/\$\{\{ github\.repository \}\}\/releases\/download\/v/,
-    );
-    assert.match(content, /--asset-sha256/);
-    assert.match(content, /--asset-node-version/);
-    assert.match(content, /gh release upload "\$tag"/);
-  }
-});
-
-test("release workflows publish the public bootstrap branch", () => {
-  for (const workflow of [
-    "publish-nightly.yml",
-    "publish-beta.yml",
-    "publish-stable.yml",
-    "publish-hotfix.yml",
-  ]) {
-    const content = readWorkflow(workflow);
-    assert.match(content, /bootstrap_branch=bootstrap/);
-    if (
-      workflow === "publish-stable.yml" ||
-      workflow === "publish-hotfix.yml"
-    ) {
-      assert.match(
-        content,
-        /npx --yes tsx scripts\/release\/export-bootstrap-branch\.ts --output "\$bootstrap_dir" --branch "\$bootstrap_branch"/,
-      );
-    } else {
-      assert.match(
-        content,
-        /npm run release:bootstrap -- --output "\$bootstrap_dir" --branch "\$bootstrap_branch"/,
-      );
-    }
-    assert.match(
-      content,
-      /git -C "\$bootstrap_dir" push origin "HEAD:\$bootstrap_branch"/,
-    );
-    assert.match(
-      content,
-      /git -C "\$bootstrap_dir" fetch origin "\$bootstrap_branch"/,
-    );
-    assert.match(
-      content,
-      /git -C "\$bootstrap_dir" rebase "origin\/\$bootstrap_branch"/,
-    );
-    assert.doesNotMatch(content, /stable-bootstrap/);
-  }
+test("local release executor validates channel arguments before execution", () => {
+  assertReleaseScriptFails(
+    "publish-local.ts",
+    ["--channel", "hotfix", "--no-publish"],
+    /hotfix_requires_ref_and_version/,
+  );
+  const help = runReleaseScript("publish-local.ts", ["--help"]);
+  assert.match(help, /--channel nightly\|beta\|stable\|hotfix/);
 });
 
 test(

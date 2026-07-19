@@ -7,17 +7,17 @@ Use this checklist before the first real stable npm promotion.
 - confirm the intended npm package name is `@hoshinorin/rin`
 - confirm the npm organization and package ownership are set correctly
 - confirm the package should be public
-- confirm the repository secret `NPM_TOKEN` is configured for GitHub Actions publishing
-- confirm the configured npm publisher identity can publish `@hoshinorin/rin`
+- confirm the managed release host is authenticated to npmjs (`npm whoami`)
+- confirm that npm publisher identity can publish `@hoshinorin/rin`
 - confirm `package.json` metadata is acceptable for the first public release
 - confirm no files that should stay private are included in the published package
 
 ## Repository readiness
 
 - confirm `main` remains the development source of truth
-- confirm `bootstrap` either already exists or may be created by the workflows
-- confirm GitHub Actions is enabled for the repository
-- confirm the repository token permissions allow pushing workflow-generated commits and tags
+- confirm `bootstrap` either already exists or may be created by the local executor
+- confirm Node `24.18.0`, `gh`, git, and npm are available on the managed release host
+- confirm the release-host GitHub identity can push metadata commits, tags, releases, and `bootstrap`
 - confirm stable/hotfix versioning follows the current policy: each regular stable release advances `minor + 1` and resets `patch` to `0`, while each hotfix advances the current stable line by `patch + 1`
 
 ## Release metadata readiness
@@ -51,20 +51,20 @@ Expected status:
 
 - confirm `docs/release/CHANGELOG.md` contains the release notes you want shipped in bootstrap docs
 - confirm `docs/developer/release-trains.md` still matches the actual channel contract and cadence
-- confirm `docs/developer/releasing.md` still matches the actual workflow behavior
+- confirm `docs/developer/releasing.md` still matches the actual local executor behavior
 - confirm root `README.md` examples for install and update flags remain accurate
 
 ## First stable publish run
 
 Before the first real stable promotion:
 
-1. configure the repository secret `NPM_TOKEN` with a token that can publish `@hoshinorin/rin`
-2. let `publish-beta` cut a beta candidate on schedule or by manual dispatch
-3. verify that `release-manifest.json -> beta` now contains the intended candidate ref and version
-4. run or wait for `publish-stable`
-5. confirm the stable workflow promotes that beta candidate ref instead of rebuilding from newer `main`
+1. verify `gh auth status` and `npm whoami` on the managed release host
+2. let the beta scheduler decision run `npm run release:local -- --channel beta`
+3. verify that `release-manifest.json -> beta` contains the intended candidate ref and version
+4. let the stable scheduler decision run `npm run release:local -- --channel stable`
+5. confirm the local executor promotes that beta candidate ref instead of rebuilding from newer `main`
 
-The stable workflow should:
+The stable executor should:
 
 1. validate the pinned beta candidate with the focused release test set
 2. set the promotion version only inside the detached candidate worktree
@@ -84,7 +84,7 @@ Also verify the user-facing channel shortcuts still behave as intended:
 - `rin update --git` resolves `main`
 - `rin update --git main` resolves `main`
 
-Verify all of the following after the workflow succeeds:
+Verify all of the following after the local executor succeeds:
 
 - npm package page for `@hoshinorin/rin` shows the new version
 - `npm view @hoshinorin/rin version` returns the published stable version
@@ -100,5 +100,5 @@ Verify all of the following after the workflow succeeds:
 - if npm publish fails, do not manually rewrite stable manifest metadata to a fake npm URL
 - if npm publish succeeds but a later step fails, treat the published package as real state and repair Git metadata to match it
 - if bootstrap export fails, fix the export path and rerun; do not hand-edit `bootstrap`
-- if the workflow-created beta candidate is bad, do not promote it; cut a new beta candidate first
-- if a hotfix is required between beta cut and stable promotion, use `publish-hotfix.yml` for the current stable line and let the next scheduled stable still promote the next minor target
+- if the beta candidate is bad, do not promote it; cut a new beta candidate first
+- if a hotfix is required between beta cut and stable promotion, use `npm run release:local -- --channel hotfix --ref <ref> --version <x.y.z>` for the current stable line and let the next scheduled stable still promote the next minor target

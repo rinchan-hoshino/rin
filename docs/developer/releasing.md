@@ -5,9 +5,9 @@ This document describes the operator workflow for Rin's fixed-cadence release tr
 ## Preconditions
 
 - keep `main` as the development source of truth
-- configure the repository secret `NPM_TOKEN` so `publish-stable.yml` and `publish-hotfix.yml` can publish `@hoshinorin/rin`
+- run the executor with Node `24.18.0`; the managed release host must have authenticated `gh` and npmjs access (`npm whoami`)
 - confirm the focused release validation set passes on `main`
-- update `docs/release/CHANGELOG.md` before beta, stable, or hotfix publishing; release workflows require a `## <stable-version>` heading, at least one user-facing bullet, and a commit coverage block for the candidate range
+- update `docs/release/CHANGELOG.md` before beta, stable, or hotfix publishing; the local executor requires a `## <stable-version>` heading, at least one user-facing bullet, and a commit coverage block for the candidate range
 - keep stable/hotfix versioning aligned with the current policy: each regular stable release advances `minor + 1` and resets `patch` to `0`, while each hotfix advances the current stable line by `patch + 1`
 
 ## Channel contract
@@ -26,15 +26,25 @@ The default cadence is:
 - stable: weekly scheduled promotion of the previous beta candidate
 - hotfix: manual patch release outside the fixed cadence
 
-The stable workflow must promote the beta candidate's exact pinned ref.
+The stable lane must promote the beta candidate's exact pinned ref.
 It must not silently replace that ref with newer `main` content.
 
-## Scheduled workflows
+Rin's scheduler decides whether a lane should publish. The repository-owned local executor performs the selected release on the managed release host:
+
+```bash
+npm run release:local -- --channel nightly
+npm run release:local -- --channel beta
+npm run release:local -- --channel stable
+npm run release:local -- --channel hotfix --ref <ref> --version <x.y.z>
+```
+
+Append `--no-publish` to run validation and bundle construction without tags, releases, npm publication, manifest commits, or bootstrap pushes.
+
+## Local release lanes
 
 ### Nightly
 
-`publish-nightly.yml` runs on a daily schedule and can also be started manually.
-It:
+The daily scheduler invokes `release:local -- --channel nightly` when a nightly is needed. It:
 
 1. resolves the nightly source ref, defaulting to `main` HEAD
 2. computes a nightly version as a prerelease of the next regular stable target
@@ -47,8 +57,7 @@ It:
 
 ### Beta
 
-`publish-beta.yml` runs on a weekly schedule and can also be started manually.
-It:
+The weekly beta decision invokes `release:local -- --channel beta` when a candidate is needed. It:
 
 1. resolves the beta source ref, defaulting to `main` HEAD
 2. computes the next regular stable target from the current stable version by advancing `minor + 1` and resetting `patch` to `0`
@@ -63,8 +72,7 @@ It:
 
 ### Stable
 
-`publish-stable.yml` runs on a weekly schedule and can also be started manually.
-It:
+The weekly stable decision invokes `release:local -- --channel stable` only for the already pinned candidate. It:
 
 1. reads the current beta candidate ref and version from `release-manifest.json`
 2. computes the stable promotion version by stripping the beta suffix
@@ -85,7 +93,7 @@ The stable release tag intentionally points at the promoted candidate ref. The l
 
 ### Hotfix
 
-`publish-hotfix.yml` is manual only.
+The hotfix lane is manual only and uses `release:local -- --channel hotfix --ref <ref> --version <version>`.
 It expects an explicit `ref` and patch `version`.
 Use it for urgent stable fixes outside the weekly train; the patch version should be the current stable line plus `patch + 1`.
 It:
@@ -149,7 +157,7 @@ Before publishing a beta, stable, or hotfix build, add the user-facing notes und
 -->
 ```
 
-Verify the target stable version against the same range the workflow will publish:
+Verify the target stable version against the same range the local executor will publish:
 
 ```bash
 npx tsx scripts/release/verify-changelog.ts \
@@ -188,13 +196,16 @@ npx tsx scripts/release/update-release-manifest.ts \
   --branch main
 ```
 
-## Validation set used by release workflows
+## Validation set used by the local executor
 
-The release workflows intentionally use the focused validation set that already covers the channel/bootstrap/install paths:
+Every lane runs the repository gate before constructing or publishing assets:
 
 ```bash
+npm run format:check
+npm run lint
 npm run build
 npm run test:release
+npm audit --audit-level=high
 ```
 
-This keeps the focused release-path gate aligned with one package script and the canonical TypeScript test buckets.
+Stable and hotfix run the same gate in the detached candidate worktree. A real publish also requires a clean, current `main`; metadata pushes retry after fetching and rebasing `origin/main`.

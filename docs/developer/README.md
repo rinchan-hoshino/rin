@@ -15,7 +15,7 @@ Use this decision table when adding or moving documentation:
 | End-user install and usage                                    | `README.md` plus `readme/README.*.md` | English is canonical; update translations in the same change when user-facing content changes.  |
 | Installed agent runtime guidance                              | `docs/agent/`                         | Installer syncs this tree to `agentDir/docs/rin/`, replacing obsolete installed Rin agent docs. |
 | Maintainer architecture, testing, GUI, and release operations | `docs/developer/`                     | Repository-only; not copied to installed agent docs.                                            |
-| Product release-note metadata                                 | `docs/release/CHANGELOG.md`           | Consumed by `/changelog` and release workflows; separate from agent guidance.                   |
+| Product release-note metadata                                 | `docs/release/CHANGELOG.md`           | Consumed by `/changelog` and the local release executor; separate from agent guidance.          |
 
 Do not add planning documents, todo files, or ad-hoc AGENTS-style instruction files to replace the groups above.
 
