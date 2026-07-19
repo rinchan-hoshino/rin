@@ -165,82 +165,21 @@ test("rin update --yes enables non-interactive updater confirmation", () => {
   assert.equal(parsed.updateAssumeYes, true);
 });
 
-test("rin update pre-installer progress uses installed language", () => {
-  const installDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-update-i18n-"));
-  try {
-    fs.writeFileSync(
-      path.join(installDir, "settings.json"),
-      `${JSON.stringify({ language: "zh_CN" })}\n`,
-      "utf8",
-    );
+test("rin update pre-installer progress uses fixed English copy", () => {
+  const i18n = shared.createUpdateI18n();
 
-    const i18n = shared.createUpdateI18n(installDir);
-
-    assert.equal(i18n.displayLanguage, "zh_CN");
-    const fetching = "\u6b63\u5728\u83b7\u53d6\u66f4\u65b0\u6e90";
-    assert.equal(i18n.fetchingUpdateSourceMessage, fetching);
-    assert.equal(
-      i18n.preparingUpdateSourceMessage,
-      "\u6b63\u5728\u51c6\u5907\u66f4\u65b0\u6e90",
-    );
-    assert.equal(
-      i18n.installingUpdateDependenciesMessage,
-      "\u6b63\u5728\u5b89\u88c5\u66f4\u65b0\u4f9d\u8d56",
-    );
-    assert.equal(
-      i18n.buildingUpdateRuntimeMessage,
-      "\u6b63\u5728\u6784\u5efa\u66f4\u65b0\u8fd0\u884c\u65f6",
-    );
-    assert.equal(
-      i18n.buildUpdateCommandFailureHeader(fetching),
-      "\u6b63\u5728\u83b7\u53d6\u66f4\u65b0\u6e90\u5931\u8d25\uff1b\u6700\u8fd1\u65e5\u5fd7\uff1a",
-    );
-    assert.equal(
-      i18n.formatUpdateSourceLabel("stable latest"),
-      "\u7a33\u5b9a\u7248\u6700\u65b0",
-    );
-  } finally {
-    fs.rmSync(installDir, { recursive: true, force: true });
-  }
-});
-
-test("rin update can read target language through the privileged cross-user path", () => {
-  const installDir = "/home/demo/.rin";
-  const language = shared.readUpdateDisplayLanguage(installDir, {
-    targetUser: "demo",
-    currentUser: "operator",
-    readJson() {
-      throw new Error("current_user_reader_must_not_be_used");
-    },
-    readPrivilegedJson(filePath: string, fallback: any) {
-      assert.equal(filePath, path.join(installDir, "settings.json"));
-      assert.deepEqual(fallback, {});
-      return { language: "zh_CN" };
-    },
-  });
-
-  assert.equal(language, "zh_CN");
-});
-
-test("rin-install update reads target language through elevated installer JSON", () => {
-  const installDir = "/home/demo/.rin";
-  const language = installerMain.readInstalledUpdateLanguage(
-    {
-      currentUser: "operator",
-      targetUser: "demo",
-      installDir,
-    },
-    {
-      readInstallerJson(filePath: string, fallback: any, elevated: boolean) {
-        assert.equal(filePath, path.join(installDir, "settings.json"));
-        assert.deepEqual(fallback, {});
-        assert.equal(elevated, true);
-        return { language: "zh_CN" };
-      },
-    },
+  assert.equal(i18n.fetchingUpdateSourceMessage, "Fetching update source");
+  assert.equal(i18n.preparingUpdateSourceMessage, "Preparing update source");
+  assert.equal(
+    i18n.installingUpdateDependenciesMessage,
+    "Installing update dependencies",
   );
-
-  assert.equal(language, "zh_CN");
+  assert.equal(i18n.buildingUpdateRuntimeMessage, "Building update runtime");
+  assert.equal(
+    i18n.buildUpdateCommandFailureHeader("Fetching update source"),
+    "Fetching update source failed; recent log:",
+  );
+  assert.equal(i18n.formatUpdateSourceLabel("stable latest"), "stable latest");
 });
 
 test("rin update is a thin wrapper around rin-install update", () => {

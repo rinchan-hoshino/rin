@@ -1,7 +1,6 @@
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
-import { DEFAULT_LANGUAGE_TAG } from "../language.js";
 import {
   defaultInstallDirForHome,
   installAuthPath,
@@ -659,7 +658,6 @@ export function buildInstallPlanText(
     modelId: string;
     thinkingLevel: string;
     authAvailable: boolean;
-    language?: string;
     setDefaultTarget?: boolean;
   },
   i18n: InstallerI18n = createInstallerI18n(),
@@ -671,7 +669,6 @@ export function buildInstallPlanText(
     modelId: options.modelId,
     thinkingLevel: options.thinkingLevel,
     authAvailable: options.authAvailable,
-    language: String(options.language || i18n.language || DEFAULT_LANGUAGE_TAG),
     setDefaultTarget: options.setDefaultTarget !== false,
   });
 }

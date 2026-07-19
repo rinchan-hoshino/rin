@@ -8,10 +8,6 @@ import {
 
 import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import todoCapability from "./todo.js";
-import {
-  buildConfiguredLanguageSystemPrompt,
-  readConfiguredLanguageFromSettings,
-} from "../language.js";
 import { loadRinAgentRuntime } from "./agent-runtime.js";
 import {
   applyRuntimeProfileEnvironment,
@@ -453,6 +449,21 @@ function buildSelfImprovePromptBlock(agentDir: string) {
 const LAZY_SYSTEM_PROMPT_STATE_KEY = Symbol.for("rin.lazySystemPromptState");
 const SESSION_SYSTEM_PROMPT_ENTRY_TYPE = "rin-system-prompt-state";
 const SESSION_SYSTEM_PROMPT_BLOCKS_ENTRY_TYPE = "rin-system-prompt-blocks";
+const LEGACY_CONFIGURED_LANGUAGE_PROMPT_PATTERN =
+  /^Configured runtime defaults:\n- Preferred language: ([^\r\n]+)\n- Unless the user explicitly asks otherwise, default to this language for replies, onboarding, and other user-facing text\.$/gm;
+const LEGACY_LANGUAGE_ONLY_DEFAULTS: Record<string, string> = {
+  ar: "ar_SA",
+  de: "de_DE",
+  en: "en_US",
+  es: "es_ES",
+  fr: "fr_FR",
+  hi: "hi_IN",
+  ja: "ja_JP",
+  ko: "ko_KR",
+  pt: "pt_BR",
+  ru: "ru_RU",
+  zh: "zh_CN",
+};
 
 type LazySystemPromptState = {
   materialized: boolean;
@@ -470,6 +481,195 @@ function getSessionActiveToolNames(session: any): string[] {
   return [];
 }
 
+function isLegacyGeneratedLanguageTag(value: string) {
+  const languageTag = String(value || "");
+  if (!/^[A-Za-z]{2,8}(?:_[A-Za-z0-9]+)*$/.test(languageTag)) return false;
+  try {
+    const canonical =
+      Intl.getCanonicalLocales(languageTag.replace(/_/g, "-"))[0] || "";
+    const localeCode = canonical.replace(/-/g, "_");
+    return (
+      (LEGACY_LANGUAGE_ONLY_DEFAULTS[canonical.toLowerCase()] || localeCode) ===
+      languageTag
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isInsideMarkdownFence(prompt: string, offset: number) {
+  let activeFence = "";
+  let activeFenceLength = 0;
+  for (const line of prompt.slice(0, offset).split("\n")) {
+    const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (!match) continue;
+    const marker = match[1] || "";
+    const markerCharacter = marker[0] || "";
+    if (!activeFence) {
+      activeFence = markerCharacter;
+      activeFenceLength = marker.length;
+      continue;
+    }
+    if (
+      markerCharacter === activeFence &&
+      marker.length >= activeFenceLength &&
+      !(match[2] || "").trim()
+    ) {
+      activeFence = "";
+      activeFenceLength = 0;
+    }
+  }
+  return Boolean(activeFence);
+}
+
+function historicalPromptLineValue(line: string | undefined, label: string) {
+  return line?.startsWith(label)
+    ? line.slice(label.length).replace(/\\/g, "/")
+    : "";
+}
+
+function historicalReadmeRoot(value: string, docsDirectory: string) {
+  const suffix = `${docsDirectory}/README.md`;
+  const directoryAt = value.length - suffix.length;
+  return value.endsWith(suffix) &&
+    (directoryAt === 0 || value[directoryAt - 1] === "/")
+    ? value.slice(0, -"/README.md".length)
+    : "";
+}
+
+function historicalJoinedRoot(value: string, docsDirectory: string) {
+  const separator = `${docsDirectory}/README.md and `;
+  let separatorAt = value.indexOf(separator);
+  while (separatorAt >= 0) {
+    const hasDirectoryBoundary =
+      separatorAt === 0 || value[separatorAt - 1] === "/";
+    const root = value.slice(0, separatorAt + docsDirectory.length);
+    if (
+      hasDirectoryBoundary &&
+      value === `${root}/README.md and ${root}/docs`
+    ) {
+      return root;
+    }
+    separatorAt = value.indexOf(separator, separatorAt + 1);
+  }
+  return "";
+}
+
+function historicalAgentRoot(docsRoot: string, docsDirectory: string) {
+  return docsRoot.endsWith(docsDirectory)
+    ? docsRoot.slice(0, -docsDirectory.length)
+    : "";
+}
+
+const HISTORICAL_DOC_PATH_LABELS = [
+  "- Main Rin documentation: ",
+  "- Additional Rin docs: ",
+  "- Main Pi documentation: ",
+  "- Additional Pi docs: ",
+  "- Rin docs: ",
+  "- Pi base docs: ",
+] as const;
+
+function hasExpectedHistoricalPathLabels(
+  lines: string[],
+  expected: readonly string[],
+) {
+  return HISTORICAL_DOC_PATH_LABELS.every(
+    (label) =>
+      lines.filter((line) => line.startsWith(label)).length ===
+      (expected.includes(label) ? 1 : 0),
+  );
+}
+
+function hasHistoricalRinDocumentationPaths(lines: string[]) {
+  const legacyLabels = HISTORICAL_DOC_PATH_LABELS.slice(0, 4);
+  const mainRin = historicalPromptLineValue(lines[1], legacyLabels[0]);
+  const additionalRin = historicalPromptLineValue(lines[2], legacyLabels[1]);
+  const mainPi = historicalPromptLineValue(lines[3], legacyLabels[2]);
+  const additionalPi = historicalPromptLineValue(lines[4], legacyLabels[3]);
+  const mainRinRoot = historicalReadmeRoot(mainRin, "docs/rin");
+  const mainPiRoot = historicalReadmeRoot(mainPi, "docs/pi");
+  const legacyPaths =
+    hasExpectedHistoricalPathLabels(lines, legacyLabels) &&
+    Boolean(mainRinRoot && mainPiRoot) &&
+    historicalAgentRoot(mainRinRoot, "docs/rin") ===
+      historicalAgentRoot(mainPiRoot, "docs/pi") &&
+    additionalRin === `${mainRinRoot}/docs` &&
+    additionalPi === `${mainPiRoot}/docs`;
+
+  const joinedLabels = HISTORICAL_DOC_PATH_LABELS.slice(4);
+  const joinedRinRoot = historicalJoinedRoot(
+    historicalPromptLineValue(lines[1], joinedLabels[0]),
+    "docs/rin",
+  );
+  const joinedPiRoot = historicalJoinedRoot(
+    historicalPromptLineValue(lines[2], joinedLabels[1]),
+    "docs/pi",
+  );
+  const joinedPaths =
+    hasExpectedHistoricalPathLabels(lines, joinedLabels) &&
+    Boolean(joinedRinRoot && joinedPiRoot) &&
+    historicalAgentRoot(joinedRinRoot, "docs/rin") ===
+      historicalAgentRoot(joinedPiRoot, "docs/pi");
+  return legacyPaths || joinedPaths;
+}
+
+function followsRinDocumentationBlock(prompt: string, offset: number) {
+  if (prompt.slice(Math.max(0, offset - 2), offset) !== "\n\n") {
+    return false;
+  }
+  const docsEnd = offset - 2;
+  const previousSeparator = prompt.lastIndexOf("\n\n", docsEnd - 1);
+  const docsStart = previousSeparator < 0 ? 0 : previousSeparator + 2;
+  const lines = prompt.slice(docsStart, docsEnd).split("\n");
+  return (
+    lines[0] === "Rin and Pi documentation:" &&
+    lines.length > 1 &&
+    lines.slice(1).every((line) => line.startsWith("- ")) &&
+    hasHistoricalRinDocumentationPaths(lines)
+  );
+}
+
+function hasLegacyPromptLayerBoundary(
+  prompt: string,
+  offset: number,
+  blockLength: number,
+) {
+  const trailing = prompt.slice(offset + blockLength);
+  return (
+    !trailing ||
+    trailing.startsWith("\n\n") ||
+    /^\nCurrent date: \d{4}-\d{2}-\d{2}(?:\n|$)/.test(trailing)
+  );
+}
+
+function stripLegacyConfiguredLanguagePrompt(prompt: string) {
+  const storedPrompt = String(prompt || "");
+  const generatedBlocks: Array<{ offset: number; length: number }> = [];
+  for (const match of storedPrompt.matchAll(
+    LEGACY_CONFIGURED_LANGUAGE_PROMPT_PATTERN,
+  )) {
+    const block = match[0] || "";
+    const languageTag = match[1] || "";
+    const offset = match.index;
+    if (
+      !isLegacyGeneratedLanguageTag(languageTag) ||
+      !followsRinDocumentationBlock(storedPrompt, offset) ||
+      !hasLegacyPromptLayerBoundary(storedPrompt, offset, block.length) ||
+      isInsideMarkdownFence(storedPrompt, offset)
+    ) {
+      continue;
+    }
+    generatedBlocks.push({ offset, length: block.length });
+  }
+  if (generatedBlocks.length !== 1) return storedPrompt;
+  const [generatedBlock] = generatedBlocks;
+  return (
+    storedPrompt.slice(0, generatedBlock.offset) +
+    storedPrompt.slice(generatedBlock.offset + generatedBlock.length)
+  );
+}
+
 function findPersistedSessionBaseSystemPrompt(entries: any[]) {
   if (!Array.isArray(entries)) return "";
   for (const entry of [...entries].reverse()) {
@@ -479,8 +679,9 @@ function findPersistedSessionBaseSystemPrompt(entries: any[]) {
     ) {
       continue;
     }
-    const prompt = String(entry?.data?.systemPrompt || "");
-    if (prompt.trim()) return prompt;
+    const storedPrompt = String(entry?.data?.systemPrompt || "");
+    if (!storedPrompt.trim()) continue;
+    return stripLegacyConfiguredLanguagePrompt(storedPrompt);
   }
   return "";
 }
@@ -510,11 +711,11 @@ function readPersistedSessionSystemPromptBlocks(session: any) {
 }
 
 function applyPersistedSystemPromptBlocks(prompt: string, blocks: string[]) {
-  let next = String(prompt || "").trimEnd();
+  let next = String(prompt || "");
   for (const block of blocks) {
     const normalized = String(block || "").trim();
     if (!normalized || next.includes(normalized)) continue;
-    next = `${next}\n\n${normalized}`.trimEnd();
+    next = `${next}\n\n${normalized}`;
   }
   return next;
 }
@@ -652,9 +853,6 @@ function applyRinPromptBuilder(session: any) {
       piOptions,
       activeToolNames,
       agentDir: promptAgentDir,
-      configuredLanguageBlock: buildConfiguredLanguageSystemPrompt(
-        readConfiguredLanguageFromSettings(promptAgentDir),
-      ),
       selfImprovePromptBlock: buildSelfImprovePromptBlock(promptAgentDir),
       persistedBlocks: readPersistedSessionSystemPromptBlocks(session),
     });

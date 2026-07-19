@@ -61,34 +61,19 @@ async function waitFor(assertion, timeoutMs = 1000) {
   if (lastError) throw lastError;
 }
 
-test("chat boot localizes command descriptions for Chinese runtimes", () => {
-  const rows = boot.getChatCommandRows("zh_CN");
+test("chat boot command descriptions use the fixed English catalog", () => {
+  const rows = boot.getChatCommandRows();
   assert.deepEqual(
     rows.map((row) => row.description),
     [
-      "\u663e\u793a\u53ef\u7528\u547d\u4ee4",
-      "\u4e2d\u6b62\u5f53\u524d\u64cd\u4f5c",
-      "\u5f00\u59cb\u65b0\u4f1a\u8bdd",
-      "\u538b\u7f29\u5f53\u524d\u4f1a\u8bdd",
-      "\u91cd\u65b0\u52a0\u8f7d\u6269\u5c55\u3001\u63d0\u793a\u8bcd\u3001\u6280\u80fd\u548c\u4e3b\u9898",
-      "\u663e\u793a\u7528\u91cf\u548c\u914d\u989d\u72b6\u6001",
+      "Show available commands",
+      "Abort current operation",
+      "Start a new session",
+      "Compact the current session",
+      "Reload extensions, prompts, skills, and themes",
+      "Show usage and quota status",
     ],
   );
-  assert.deepEqual(boot.buildTelegramCommandPayload(rows), [
-    { command: "help", description: "\u663e\u793a\u53ef\u7528\u547d\u4ee4" },
-    { command: "abort", description: "\u4e2d\u6b62\u5f53\u524d\u64cd\u4f5c" },
-    { command: "new", description: "\u5f00\u59cb\u65b0\u4f1a\u8bdd" },
-    { command: "compact", description: "\u538b\u7f29\u5f53\u524d\u4f1a\u8bdd" },
-    {
-      command: "reload",
-      description:
-        "\u91cd\u65b0\u52a0\u8f7d\u6269\u5c55\u3001\u63d0\u793a\u8bcd\u3001\u6280\u80fd\u548c\u4e3b\u9898",
-    },
-    {
-      command: "usage",
-      description: "\u663e\u793a\u7528\u91cf\u548c\u914d\u989d\u72b6\u6001",
-    },
-  ]);
 });
 
 test("chat boot builds and syncs Discord application commands", async () => {

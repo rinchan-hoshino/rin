@@ -18,7 +18,6 @@ import {
   listDetachedControllerStateFiles,
 } from "../chat/support.js";
 import { isJsonRecord } from "../json-utils.js";
-import { DEFAULT_LANGUAGE_TAG, normalizeLanguageTag } from "../language.js";
 import { stringifyJson } from "../platform/fs.js";
 import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
@@ -932,11 +931,10 @@ function normalizeInstallerRecord(value: unknown) {
   return isJsonRecord(value) ? value : {};
 }
 
-function normalizeConfiguredLanguage(language: unknown) {
-  const normalizedLanguage = String(language || "").trim();
-  return normalizedLanguage
-    ? normalizeLanguageTag(normalizedLanguage, DEFAULT_LANGUAGE_TAG)
-    : "";
+function normalizeInstalledSettings(value: unknown) {
+  const settings = normalizeStoredChatSettings(value);
+  delete settings.language;
+  return settings;
 }
 
 function applyInstalledDefaults(
@@ -945,7 +943,6 @@ function applyInstalledDefaults(
     provider?: string;
     modelId?: string;
     thinkingLevel?: string;
-    language?: string;
   },
 ) {
   if (options.provider) target.defaultProvider = options.provider;
@@ -953,8 +950,6 @@ function applyInstalledDefaults(
   if (options.thinkingLevel) {
     target.defaultThinkingLevel = options.thinkingLevel;
   }
-  const language = normalizeConfiguredLanguage(options.language);
-  if (language) target.language = language;
   if (Array.isArray(target.extensions)) {
     const extensions = stripRemovedBuiltInRinExtensionEntries(
       target.extensions,
@@ -1293,7 +1288,7 @@ export function normalizeInstalledChatSettings(
     deps,
   );
   const settingsPath = installSettingsPath(options.installDir);
-  const settingsJson = normalizeStoredChatSettings(
+  const settingsJson = normalizeInstalledSettings(
     deps.readInstallerJson<any>(settingsPath, {}, Boolean(options.elevated)),
   );
   writeInstallerJson(
@@ -1313,7 +1308,6 @@ export async function persistInstallerOutputs(
     provider: string;
     modelId: string;
     thinkingLevel: string;
-    language?: string;
     setDefaultTarget?: boolean;
     authData: any;
     release?: InstalledReleaseInfo;
@@ -1385,7 +1379,7 @@ export async function persistInstallerOutputs(
     deps,
   );
   const settingsPath = installSettingsPath(options.installDir);
-  const settingsJson = normalizeStoredChatSettings(
+  const settingsJson = normalizeInstalledSettings(
     deps.readInstallerJson<any>(settingsPath, {}, Boolean(options.elevated)),
   );
   applyInstalledDefaults(settingsJson, options);

@@ -18,7 +18,7 @@ import {
   runFinalizeInstallPlanInChild,
   type FinalizeInstallOptions,
 } from "./apply-plan.js";
-import { readInstallerJson, readJsonFile } from "./fs-utils.js";
+import { readJsonFile } from "./fs-utils.js";
 import {
   buildFinalRequirements,
   buildInstallPlanText,
@@ -32,14 +32,9 @@ import {
   promptProviderSetup,
   promptInstallTarget,
 } from "./interactive.js";
-import { createInstallerI18n, promptInstallerLanguage } from "./i18n.js";
+import { createInstallerI18n } from "./i18n.js";
 import { detectCurrentUser, repoRootFromHere, runCommand } from "./common.js";
 import { finalizeCoreUpdate, finalizeInstallPlan } from "./finalize.js";
-import {
-  DEFAULT_LANGUAGE_TAG,
-  detectLocalLanguageTag,
-  normalizeLanguageTag,
-} from "../language.js";
 import {
   releaseInfoFromFile,
   type ReleaseChannel,
@@ -52,7 +47,7 @@ import {
   shouldUseElevatedWrite,
   targetHomeForUser,
 } from "./users.js";
-import { defaultInstallDirForHome, installSettingsPath } from "./paths.js";
+import { defaultInstallDirForHome } from "./paths.js";
 import { startUpdater } from "./updater.js";
 import { runInstallerProgress } from "./progress.js";
 import { runQuickRun } from "./quick-run.js";
@@ -65,11 +60,9 @@ import {
   registerLocalUserTarget,
 } from "./deployment-targets.js";
 
-let currentInstallerLanguage = DEFAULT_LANGUAGE_TAG;
-
 function ensureNotCancelled<T>(value: T | symbol): T {
   if (isCancel(value)) {
-    const i18n = createInstallerI18n(currentInstallerLanguage);
+    const i18n = createInstallerI18n();
     cancel(i18n.installerCancelled);
     process.exit(1);
   }
@@ -144,7 +137,6 @@ function parseInstallerCliArgs(argv: string[]) {
     updatePreconfirmed: hasFlag("--preconfirmed"),
     quickRun: hasFlag("--quick-run"),
     guiDisabled,
-    language: normalizeLanguageTag(readValueArg(argv, "--language"), ""),
     releaseFile: readValueArg(argv, "--release-file"),
     updateReleaseRequest,
   };
@@ -171,26 +163,6 @@ function note(message?: string, title?: string) {
       symbol: chalk.green,
       title: chalk.reset,
     })}\n`,
-  );
-}
-
-export function readInstalledUpdateLanguage(
-  options: {
-    currentUser: string;
-    targetUser: string;
-    installDir: string;
-    ownerHome?: string;
-  },
-  deps: {
-    readInstallerJson?: typeof readInstallerJson;
-  } = {},
-) {
-  const readSettings = deps.readInstallerJson || readInstallerJson;
-  const elevated = options.targetUser !== options.currentUser;
-  return normalizeLanguageTag(
-    readSettings<any>(installSettingsPath(options.installDir), {}, elevated)
-      ?.language,
-    "",
   );
 }
 
@@ -245,17 +217,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
   if (cli.update) {
     const updateCurrentUser = detectCurrentUser();
     const updateTargetUser = cli.updateTargetUser || updateCurrentUser;
-    const updateTargetHome = targetHomeForUser(updateTargetUser);
-    const selectedLanguage = readInstalledUpdateLanguage({
-      currentUser: updateCurrentUser,
-      targetUser: updateTargetUser,
-      installDir:
-        cli.updateInstallDir || defaultInstallDirForHome(updateTargetHome),
-    });
-    const displayLanguage =
-      selectedLanguage || cli.language || detectLocalLanguageTag();
-    currentInstallerLanguage = displayLanguage;
-    const i18n = createInstallerI18n(displayLanguage);
+    const i18n = createInstallerI18n();
     const localizedConfirm: typeof confirm = (options) =>
       confirm({
         active: i18n.confirmActiveLabel,
@@ -271,7 +233,6 @@ export async function startInstaller(argv = process.argv.slice(2)) {
       select,
       confirm: localizedConfirm,
       i18n,
-      readInstalledUpdateLanguage,
       requestedInstallDir: cli.updateInstallDir,
       requestedTargetUser: cli.updateTargetUser,
       assumeYes: cli.updateAssumeYes,
@@ -280,13 +241,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     return;
   }
 
-  const selectedLanguage = await promptInstallerLanguage({
-    ensureNotCancelled,
-    select,
-    text,
-  });
-  currentInstallerLanguage = selectedLanguage;
-  const i18n = createInstallerI18n(selectedLanguage);
+  const i18n = createInstallerI18n();
 
   const { currentUser, allUsers } = await runInstallerProgress(
     i18n.preparingInstallerMessage,
@@ -434,7 +389,6 @@ export async function startInstaller(argv = process.argv.slice(2)) {
           modelId,
           thinkingLevel,
           authAvailable: Boolean(authResult.available),
-          language: selectedLanguage,
           setDefaultTarget,
         },
         i18n,
@@ -498,7 +452,6 @@ export async function startInstaller(argv = process.argv.slice(2)) {
           provider,
           modelId,
           thinkingLevel,
-          language: selectedLanguage,
           setDefaultTarget,
           authData: authResult.authData || {},
           release: releaseInfoFromFile(cli.releaseFile),

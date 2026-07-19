@@ -83,6 +83,7 @@ test("Electron desktop host is the concrete GUI framework behind the host contra
   assert.match(mainScript, /Rin desktop assistant/);
   assert.match(mainScript, /settings:get/);
   assert.match(mainScript, /settings:save/);
+  assert.doesNotMatch(mainScript, /setting-language|Preferred language/);
   assert.match(mainScript, /sessions:list/);
   assert.match(mainScript, /models:list/);
   assert.match(mainScript, /commands:list/);

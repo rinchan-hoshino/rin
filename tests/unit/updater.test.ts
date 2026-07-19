@@ -85,7 +85,6 @@ test("buildPreparedUpdaterCommand launches prepared managed node", async () => {
       currentUser: "alice",
       targetUser: "alice",
       installDir: "/home/alice/.rin",
-      language: "zh_CN",
     });
 
     assert.equal(command.command, managedNode);
@@ -111,7 +110,6 @@ test("buildPreparedUpdaterCommand requires prepared managed node", async () => {
           currentUser: "alice",
           targetUser: "alice",
           installDir: "/home/alice/.rin",
-          language: "zh_CN",
         }),
       /rin_managed_node_runtime_missing/,
     );
@@ -128,8 +126,7 @@ test("startUpdater does not write language during core updates", async () => {
       detectCurrentUser: () => "alice",
       repoRootFromHere: () => "/src/rin",
       ensureNotCancelled: (value: unknown) => value,
-      i18n: installerI18n.createInstallerI18n("en_US"),
-      readInstalledUpdateLanguage: () => "",
+      i18n: installerI18n.createInstallerI18n(),
       release: preparedRelease,
       ...requestedUpdateTarget,
       assumeYes: true,
@@ -146,7 +143,7 @@ test("startUpdater does not write language during core updates", async () => {
   });
 });
 
-test("startUpdater uses installed language for UI without rewriting settings", async () => {
+test("startUpdater uses fixed English UI without writing language", async () => {
   await withUpdaterStdout(async () => {
     let capturedOptions: any;
     let confirmMessage = "";
@@ -166,8 +163,7 @@ test("startUpdater uses installed language for UI without rewriting settings", a
         detectCurrentUser: () => "alice",
         repoRootFromHere: () => "/src/rin",
         ensureNotCancelled: (value: unknown) => value,
-        i18n: installerI18n.createInstallerI18n("en_US"),
-        readInstalledUpdateLanguage: () => "zh_CN",
+        i18n: installerI18n.createInstallerI18n(),
         release: preparedRelease,
         ...requestedUpdateTarget,
         async confirm(options: any) {
@@ -193,7 +189,7 @@ test("startUpdater uses installed language for UI without rewriting settings", a
     assert.equal(Object.hasOwn(capturedOptions, "language"), false);
     assert.equal(
       confirmMessage,
-      installerI18n.createInstallerI18n("zh_CN").publishUpdateConfirmMessage,
+      installerI18n.createInstallerI18n().publishUpdateConfirmMessage,
     );
   });
 });
@@ -207,8 +203,7 @@ test("startUpdater skips repeated plan and confirmation when preconfirmed", asyn
       detectCurrentUser: () => "alice",
       repoRootFromHere: () => "/src/rin",
       ensureNotCancelled: (value: unknown) => value,
-      i18n: installerI18n.createInstallerI18n("en_US"),
-      readInstalledUpdateLanguage: () => "",
+      i18n: installerI18n.createInstallerI18n(),
       release: preparedRelease,
       ...requestedUpdateTarget,
       preconfirmed: true,
@@ -230,7 +225,7 @@ test("startUpdater skips repeated plan and confirmation when preconfirmed", asyn
   });
 });
 
-test("startUpdater localizes zh_CN update notes beyond the confirm prompt", async () => {
+test("startUpdater renders update notes in fixed English", async () => {
   await withUpdaterStdout(async (stdout) => {
     await updater.startUpdater({
       detectCurrentUser: () => "alice",
@@ -244,8 +239,7 @@ test("startUpdater localizes zh_CN update notes beyond the confirm prompt", asyn
         ref: "main",
         sourceLabel: "git branch main",
       },
-      i18n: installerI18n.createInstallerI18n("en_US"),
-      readInstalledUpdateLanguage: () => "zh_CN",
+      i18n: installerI18n.createInstallerI18n(),
       ...requestedUpdateTarget,
       assumeYes: true,
       async runFinalizeInstallPlanInChild() {
@@ -257,16 +251,10 @@ test("startUpdater localizes zh_CN update notes beyond the confirm prompt", asyn
     });
 
     const output = stdout.join("");
-    assert.match(output, /\u53d1\u73b0\u6765\u6e90: \u542f\u52a8\u5668/);
-    assert.match(output, /\u7528\u6237\u4e3b\u76ee\u5f55: \/home\/alice/);
-    assert.match(output, /\u8bf7\u6c42\u6765\u6e90: Git \u5206\u652f main/);
-    assert.match(
-      output,
-      /\u5982\u5e73\u53f0\u652f\u6301\uff0c\u5c06\u4e3a\u6b64\u5b88\u62a4\u8fdb\u7a0b\u5b89\u88c5\u5e76\u542f\u52a8 Linux \u7528\u6237\u670d\u52a1/,
-    );
-    assert.doesNotMatch(
-      output,
-      /Owner home|Discovered from|Requested source|Service\/platform note|Linux user service will be installed/,
-    );
+    assert.match(output, /Discovered from: launcher/);
+    assert.match(output, /Owner home: \/home\/alice/);
+    assert.match(output, /Requested source: git branch main/);
+    assert.match(output, /Service\/platform note: A Linux user service/);
+    assert.doesNotMatch(output, /[\u3400-\u9fff]/u);
   });
 });

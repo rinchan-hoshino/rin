@@ -13,19 +13,13 @@ const rootDir = path.resolve(
   "..",
 );
 
-test("chat main consumes inbound localized help messages through the inbox path only once", async () => {
+test("chat main consumes inbound help messages through the inbox path only once", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
     path.join(tempRoot, "rin-chat-main-queue-"),
   );
   try {
-    await fs.writeFile(
-      path.join(agentDir, "settings.json"),
-      JSON.stringify({ language: "zh_CN" }) + "\n",
-      "utf8",
-    );
-
     const script = `
       import path from "node:path";
       import { pathToFileURL } from "node:url";
@@ -93,8 +87,8 @@ test("chat main consumes inbound localized help messages through the inbox path 
         !terminal[0].idempotency_key ||
         JSON.parse(terminal[0].post_delivery_json).markProcessed.messageId !== "m1" ||
         terminal[0].state !== "terminal" ||
-        !text.includes("/help — \u663e\u793a\u53ef\u7528\u547d\u4ee4") ||
-        !text.includes("/usage — \u663e\u793a\u7528\u91cf\u548c\u914d\u989d\u72b6\u6001") ||
+        !text.includes("/help — Show available commands") ||
+        !text.includes("/usage — Show usage and quota status") ||
         text.includes("/model —") ||
         text.includes("/session —") ||
         text.includes("/status —")

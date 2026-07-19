@@ -42,16 +42,16 @@ const NATIVE_PROMPT_BASELINE = {
     length: 4664,
   },
   languageAppend: {
-    hash: "07fde53a75705727bbdbb83d7ce4d5121891907c9f7c7034d58efd8717ff0470",
-    length: 4859,
+    hash: "650d3b3d0f84be3852e2ba745a76d85dd60023f7bfd922fe3c157a78c410fa72",
+    length: 4678,
   },
   custom: {
-    hash: "79787558edf997ff9d85fdd837c5cb9eff7f380152e3c6d83672fccddfbae773",
-    length: 1755,
+    hash: "fd8e397398a0552747485a04a5560ba067f491a0be973b0f6999b7678f3719e0",
+    length: 1574,
   },
   contextSkillSelf: {
-    hash: "b64d480a52c0d0654b18e89c7aa59ed911a7abc9c7cee87efe763042773c166e",
-    length: 5562,
+    hash: "557c753971a384afe38bb41d2fbee64c28adc3c1b026dc6942f5d67b52b68eb8",
+    length: 5381,
   },
   readTodo: {
     hash: "0b243645b4e5e5f52c5b406cd2668f746da96a42a10192efebe0814fde66f53c",
@@ -181,7 +181,6 @@ test("Rin overlay preserves Pi-owned sections and adds only Rin-owned layers", (
       promptGuidelines: ["Tool rule."],
     },
     agentDir: "/tmp/rin-agent",
-    configuredLanguageBlock: "LANGUAGE BLOCK",
     selfImprovePromptBlock: "SELF-IMPROVE BLOCK",
     persistedBlocks: ["PERSISTED BLOCK"],
   });
@@ -197,7 +196,6 @@ test("Rin overlay preserves Pi-owned sections and adds only Rin-owned layers", (
     result.indexOf("Pi documentation:\n- upstream docs") <
       result.indexOf("Rin and Pi documentation:"),
   );
-  assert.match(result, /LANGUAGE BLOCK/);
   assert.match(result, /SELF-IMPROVE BLOCK/);
   assert.match(result, /PERSISTED BLOCK/);
   assert.doesNotMatch(result, /Current date:/);
@@ -532,7 +530,6 @@ Current working directory: /tmp`;
       promptGuidelines: [],
     },
     agentDir: "/tmp/rin-agent",
-    configuredLanguageBlock: "LANGUAGE BLOCK",
     selfImprovePromptBlock: "SELF-IMPROVE BLOCK",
     persistedBlocks: ["PERSISTED BLOCK"],
   });
@@ -541,7 +538,6 @@ Current working directory: /tmp`;
     /CUSTOM BASE\n\nAPPEND BLOCK\n\n<project_context>[\s\S]*NATIVE SKILLS BLOCK/,
   );
   assert.match(result, /NATIVE SKILLS BLOCK\n\nRin and Pi documentation:/);
-  assert.match(result, /LANGUAGE BLOCK/);
   assert.match(result, /SELF-IMPROVE BLOCK/);
   assert.match(result, /PERSISTED BLOCK$/);
   assert.doesNotMatch(result, /Current working directory:/);
@@ -718,6 +714,7 @@ test("Pi-native overlay preserves native content across six prompt scenarios", a
   for (const prompt of Object.values(actual)) {
     assert.doesNotMatch(prompt, /Current working directory:/);
     assert.doesNotMatch(prompt, /Current date:/);
+    assert.doesNotMatch(prompt, /Preferred language:/);
   }
   assert.match(
     actual.default,

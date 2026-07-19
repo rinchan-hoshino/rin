@@ -1080,7 +1080,7 @@ test("persistInstallerOutputs creates elevated runtime user skill directory as t
   });
 });
 
-test("persistInstallerOutputs stores language and strips removed built-in extensions", async () => {
+test("persistInstallerOutputs removes legacy language and strips removed built-in extensions", async () => {
   await withTempDir(async (dir) => {
     const writes = [];
     const launchWrites = [];
@@ -1092,7 +1092,6 @@ test("persistInstallerOutputs stores language and strips removed built-in extens
         provider: "openai",
         modelId: "gpt",
         thinkingLevel: "medium",
-        language: "zh_CN",
         authData: {},
         elevated: false,
       },
@@ -1101,7 +1100,10 @@ test("persistInstallerOutputs stores language and strips removed built-in extens
         ensureDir: async () => {},
         readInstallerJson: (filePath, fallback) =>
           String(filePath).endsWith("settings.json")
-            ? { extensions: ["rin:browse", "/opt/custom-extension"] }
+            ? {
+                language: "zh_CN",
+                extensions: ["rin:browse", "/opt/custom-extension"],
+              }
             : fallback,
         writeJsonFileWithPrivilege: () => {},
         writeJsonFile: (filePath, value) => writes.push({ filePath, value }),
@@ -1131,7 +1133,7 @@ test("persistInstallerOutputs stores language and strips removed built-in extens
     assert.equal(settingsWrite.value.defaultProvider, "openai");
     assert.equal(settingsWrite.value.defaultModel, "gpt");
     assert.equal(settingsWrite.value.defaultThinkingLevel, "medium");
-    assert.equal(settingsWrite.value.language, "zh_CN");
+    assert.equal(Object.hasOwn(settingsWrite.value, "language"), false);
     assert.deepEqual(settingsWrite.value.extensions, ["/opt/custom-extension"]);
 
     const manifestWrites = writes.filter(
@@ -1163,6 +1165,7 @@ test("persist normalizeInstalledChatSettings drops removed adapter settings with
         findSystemUser: () => ({ name: "demo", gid: 1000 }),
         readInstallerJson: () => ({
           koishi: { telegram: { token: "x" } },
+          language: "zh_CN",
           keep: true,
         }),
         writeJsonFileWithPrivilege: () => {},

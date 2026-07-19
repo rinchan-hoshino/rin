@@ -213,6 +213,17 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(initialization, /meets a user for the first time/);
   assert.match(initialization, /Success means the user feels welcomed/);
   assert.match(initialization, /current agent role in the user's language/);
+  assert.match(
+    initialization,
+    /infer the most likely language from the available system and conversation context/i,
+  );
+  assert.match(initialization, /ask which language the user prefers/i);
+  assert.match(initialization, /provisional guess/i);
+  assert.match(initialization, /Do not read or write `settings\.language`/);
+  assert.ok(
+    initialization.indexOf("Confirm the conversation language") <
+      initialization.indexOf("Establish the agent identity"),
+  );
   assert.match(initialization, /Ask in sequence, one question at a time/);
   assert.match(initialization, /Make each question easy to answer or defer/);
   assert.match(initialization, /agent name or identity the user wants/);

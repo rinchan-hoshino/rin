@@ -5,7 +5,6 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 import { cancel, confirm, isCancel, select, text } from "@clack/prompts";
 
-import { detectLocalLanguageTag, normalizeLanguageTag } from "../language.js";
 import { readJsonFile } from "../platform/fs.js";
 import { canConnectDaemonSocket } from "../rin-daemon/client.js";
 import { defaultDaemonSocketPath } from "../rin-lib/common.js";
@@ -57,15 +56,6 @@ export function createQuickRunRuntimeEnv(
     [RIN_QUICK_RUN_ENV]: "1",
     [RIN_SKIP_VERSION_CHECK_ENV]: "1",
   };
-}
-
-function resolveQuickRunLanguage(installDir: string) {
-  return (
-    normalizeLanguageTag(
-      readJsonFile<any>(installSettingsPath(installDir), {})?.language,
-      "",
-    ) || detectLocalLanguageTag()
-  );
 }
 
 function hasStoredProviderAuth(
@@ -313,8 +303,7 @@ async function prepareQuickRunInstallPlan() {
   const currentUser = detectCurrentUser();
   const installDir = quickRunInstallDirForCurrentUser();
   fs.mkdirSync(installDir, { recursive: true });
-  const language = resolveQuickRunLanguage(installDir);
-  const i18n = createInstallerI18n(language);
+  const i18n = createInstallerI18n();
   const promptApi = {
     ensureNotCancelled,
     select,
@@ -338,7 +327,6 @@ async function prepareQuickRunInstallPlan() {
     provider,
     modelId,
     thinkingLevel,
-    language,
     authData: authResult.authData || {},
     sourceRoot: repoRootFromHere(),
   };
@@ -346,7 +334,7 @@ async function prepareQuickRunInstallPlan() {
 
 export async function runQuickRun() {
   const plan = await prepareQuickRunInstallPlan();
-  const i18n = createInstallerI18n(resolveQuickRunLanguage(plan.installDir));
+  const i18n = createInstallerI18n();
 
   await runInstallerProgress(
     i18n.preparingInstallerMessage,

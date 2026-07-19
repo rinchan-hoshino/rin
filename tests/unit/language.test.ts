@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs/promises";
-import os from "node:os";
+import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -9,120 +8,119 @@ const rootDir = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
   "../..",
 );
-const language = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "language.js")).href
+const installerI18n = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "i18n.js"))
+    .href
+);
+const chatBoot = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "boot.js")).href
 );
 
-async function withTempDir(fn: (dir: string) => Promise<void>) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-language-test-"));
-  try {
-    await fn(dir);
-  } finally {
-    await fs.rm(dir, { recursive: true, force: true });
-  }
-}
+test("installer and updater copy is English-only", () => {
+  const i18n = installerI18n.createInstallerI18n();
 
-test("language helpers canonicalize regioned tags to locale codes and reject invalid input", () => {
-  assert.equal(language.canonicalizeLanguageTag(" en "), "en_US");
-  assert.equal(language.canonicalizeLanguageTag(" en_US.UTF-8 "), "en_US");
-  assert.equal(language.canonicalizeLanguageTag(" zh_hans_cn "), "zh_Hans_CN");
-  assert.equal(language.canonicalizeLanguageTag(" zh-Hans-cn "), "zh_Hans_CN");
-  assert.equal(language.canonicalizeLanguageTag("nope nope"), "");
-  assert.equal(language.normalizeLanguageTag("", "en"), "en_US");
-});
-
-test("resolveInstallerDisplayLanguage treats all zh locales as Chinese", () => {
-  assert.equal(language.resolveInstallerDisplayLanguage("zh"), "zh_CN");
-  assert.equal(language.resolveInstallerDisplayLanguage("zh_TW"), "zh_CN");
-  assert.equal(language.resolveInstallerDisplayLanguage("zh-Hans-CN"), "zh_CN");
-  assert.equal(language.resolveInstallerDisplayLanguage("ja"), "en_US");
-  assert.equal(language.resolveInstallerDisplayLanguage("nope nope"), "en_US");
-});
-
-test("detectLocalLanguageTag uses Windows UI culture when locale env is absent", () => {
-  const calls: Array<{ command: string; args: string[] }> = [];
-  const detected = language.detectLocalLanguageTag("en", {
-    platform: "win32",
-    env: {},
-    execFileSync(command: string, args: string[]) {
-      calls.push({ command, args });
-      return "zh-CN\r\n";
-    },
-  });
-
-  assert.equal(detected, "zh_CN");
-  assert.equal(calls[0]?.command, "powershell.exe");
-  assert.ok(
-    calls[0]?.args.some((arg) => String(arg).includes("CurrentUICulture")),
+  assert.equal(i18n.introTitle, "Rin Installer");
+  assert.equal(i18n.updaterIntroTitle, "Rin Updater");
+  assert.equal(i18n.confirmActiveLabel, "Yes");
+  assert.equal(Object.hasOwn(i18n, "language"), false);
+  assert.equal(Object.hasOwn(i18n, "displayLanguage"), false);
+  assert.equal(Object.hasOwn(i18n, "isChinese"), false);
+  assert.doesNotMatch(
+    i18n.buildInstallPlanText({
+      targetUser: "alice",
+      installDir: "/home/alice/.rin",
+      provider: "openai",
+      modelId: "gpt",
+      thinkingLevel: "medium",
+      authAvailable: true,
+      setDefaultTarget: false,
+    }),
+    /Language:/,
   );
 });
 
-test("detectLocalLanguageTag falls back to Intl locale when native Windows probe fails", () => {
-  const detected = language.detectLocalLanguageTag("en", {
-    platform: "win32",
-    env: {},
-    intlLocale: "zh-Hant-TW",
-    execFileSync() {
-      throw new Error("missing powershell");
-    },
-  });
+test("installer copy factories keep instances isolated", () => {
+  const first = installerI18n.createInstallerI18n();
+  const second = installerI18n.createInstallerI18n();
 
-  assert.equal(detected, "zh_Hant_TW");
+  first.introTitle = "Changed locally";
+  first.chatCommandDescriptions.help = "Changed help";
+  first.chatRuntime.telegramWorking.prompts[0] = "Changed working frame";
+  first.installSafetyBoundaryLines[0] = "Changed boundary";
+
+  assert.equal(second.introTitle, "Rin Installer");
+  assert.equal(second.chatCommandDescriptions.help, "Show available commands");
+  assert.notEqual(
+    second.chatRuntime.telegramWorking.prompts[0],
+    "Changed working frame",
+  );
+  assert.equal(second.installSafetyBoundaryLines[0], "Rin safety boundary:");
 });
 
-test("detectLocalLanguageTag prefers LC_ALL then LC_MESSAGES then LANG", () => {
-  const originalLang = process.env.LANG;
-  const originalLcAll = process.env.LC_ALL;
-  const originalLcMessages = process.env.LC_MESSAGES;
+test("chat command descriptions use the fixed English catalog", () => {
+  const rows = chatBoot.getChatCommandRows();
+  assert.equal(
+    rows.find((row) => row.name === "new")?.description,
+    "Start a new session",
+  );
+});
 
-  try {
-    process.env.LANG = "fr_CA.UTF-8";
-    process.env.LC_MESSAGES = "zh_CN.UTF-8:zh";
-    process.env.LC_ALL = "ja_JP.UTF-8";
-    assert.equal(language.detectLocalLanguageTag("en"), "ja_JP");
+test("language configuration and CLI localization producers are removed", () => {
+  assert.equal(
+    fs.existsSync(path.join(rootDir, "src", "core", "language.ts")),
+    false,
+  );
 
-    process.env.LC_ALL = "bad tag";
-    assert.equal(language.detectLocalLanguageTag("en"), "zh_CN");
+  const sourceFiles = [
+    "src/core/chat/boot.ts",
+    "src/core/chat/main.ts",
+    "src/core/rin-lib/runtime.ts",
+    "src/core/rin-lib/system-prompt-overlay.ts",
+    "src/core/rin/shared.ts",
+    "src/core/rin-install/apply-plan.ts",
+    "src/core/rin-install/finalize.ts",
+    "src/core/rin-install/gui.ts",
+    "src/core/rin-install/i18n.ts",
+    "src/core/rin-install/interactive.ts",
+    "src/core/rin-install/main.ts",
+    "src/core/rin-install/persist.ts",
+    "src/core/rin-install/quick-run.ts",
+    "src/core/rin-install/updater.ts",
+    "src/core/rin-gui/native-desktop.ts",
+  ]
+    .map((file) => fs.readFileSync(path.join(rootDir, file), "utf8"))
+    .join("\n");
 
-    delete process.env.LC_ALL;
-    assert.equal(language.detectLocalLanguageTag("en"), "zh_CN");
-
-    delete process.env.LC_MESSAGES;
-    assert.equal(language.detectLocalLanguageTag("en"), "fr_CA");
-
-    process.env.LANG = "bad tag";
-    assert.equal(language.detectLocalLanguageTag("en"), "en_US");
-  } finally {
-    if (originalLang == null) delete process.env.LANG;
-    else process.env.LANG = originalLang;
-    if (originalLcAll == null) delete process.env.LC_ALL;
-    else process.env.LC_ALL = originalLcAll;
-    if (originalLcMessages == null) delete process.env.LC_MESSAGES;
-    else process.env.LC_MESSAGES = originalLcMessages;
+  for (const forbidden of [
+    "promptInstallerLanguage",
+    "detectLocalLanguageTag",
+    "readConfiguredLanguageFromSettings",
+    "buildConfiguredLanguageSystemPrompt",
+    "readInstalledUpdateLanguage",
+    "readUpdateDisplayLanguage",
+    '"--language"',
+    "setting-language",
+    'name="language"',
+  ]) {
+    assert.equal(sourceFiles.includes(forbidden), false, forbidden);
   }
-});
 
-test("configured language helpers read settings and build prompt text", async () => {
-  await withTempDir(async (agentDir) => {
-    await fs.writeFile(
-      path.join(agentDir, "settings.json"),
-      JSON.stringify({ language: " zh-Hans-CN " }),
-    );
-    assert.equal(
-      language.readConfiguredLanguageFromSettings(agentDir),
-      "zh_Hans_CN",
-    );
-    assert.equal(
-      language.buildConfiguredLanguageSystemPrompt(" zh-Hans-CN "),
-      [
-        "Configured runtime defaults:",
-        "- Preferred language: zh_Hans_CN",
-        "- Unless the user explicitly asks otherwise, default to this language for replies, onboarding, and other user-facing text.",
-      ].join("\n"),
-    );
+  const runtimeSource = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin-lib", "runtime.ts"),
+    "utf8",
+  );
+  assert.equal((runtimeSource.match(/Preferred language:/g) || []).length, 1);
+  assert.match(runtimeSource, /stripLegacyConfiguredLanguagePrompt/);
 
-    await fs.writeFile(path.join(agentDir, "settings.json"), "not json");
-    assert.equal(language.readConfiguredLanguageFromSettings(agentDir), "");
-    assert.equal(language.buildConfiguredLanguageSystemPrompt("nope nope"), "");
-  });
+  const installerCopy = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "i18n.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(installerCopy, /[\u3400-\u9fff]/u);
+
+  const nativeDesktopSource = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin-gui", "native-desktop.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(nativeDesktopSource, /delete next\.language/);
 });

@@ -14,7 +14,6 @@ export type FinalizeInstallOptions = {
   provider?: string;
   modelId?: string;
   thinkingLevel?: string;
-  language?: string;
   setDefaultTarget?: boolean;
   authData?: any;
   sourceRoot?: string;

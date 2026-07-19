@@ -10,7 +10,6 @@ import {
   writeChatOutboxItem,
 } from "../rin-lib/chat-outbox.js";
 import { createRinI18n } from "../i18n.js";
-import { DEFAULT_LANGUAGE_TAG } from "../language.js";
 import { RIN_NON_INTERACTIVE_COMMAND_NAMES } from "../rin-frontend-sdk/index.js";
 import { markProcessedChatMessage, safeString } from "./chat-helpers.js";
 import {
@@ -25,10 +24,8 @@ export type ChatCommandRow = {
 
 const chatOutboxDrainQueues = new Map<string, Promise<void>>();
 
-export function getChatCommandRows(
-  languageTag = DEFAULT_LANGUAGE_TAG,
-): ChatCommandRow[] {
-  const descriptions = createRinI18n(languageTag).chatCommandDescriptions;
+export function getChatCommandRows(): ChatCommandRow[] {
+  const descriptions = createRinI18n().chatCommandDescriptions;
   return RIN_NON_INTERACTIVE_COMMAND_NAMES.map((name) => ({
     name,
     description: descriptions[name],

@@ -125,7 +125,6 @@ import {
   sendTyping,
   validateChatOutboxPayloadForDispatch,
 } from "./transport.js";
-import { readConfiguredLanguageFromSettings } from "../language.js";
 import { normalizeSessionRef } from "../session/ref.js";
 import { formatRuntimeErrorForChat } from "../rin-lib/user-facing-errors.js";
 
@@ -539,8 +538,7 @@ export async function startChatBridge(
       void controller.housekeep().catch(() => {});
     }
   }, TYPING_POLL_INTERVAL_MS);
-  const chatLanguageTag = readConfiguredLanguageFromSettings(runtime.agentDir);
-  const commandRows = getChatCommandRows(chatLanguageTag);
+  const commandRows = getChatCommandRows();
   const chatCommandResponses = readChatCommandResponses(runtime.agentDir);
   const frontendClientFactory = options.frontendClientFactory;
   const getIdentity = () => loadIdentity(dataDir);

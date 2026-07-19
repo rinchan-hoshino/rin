@@ -92,7 +92,6 @@ test("installer GUI args expose no browser server switches", () => {
 
 test("installer GUI plan reuses installer plan text and escapes the HTML shell", () => {
   const plan = gui.buildGuiInstallerPlan({
-    language: "zh_CN",
     currentUser: "alice",
     targetUser: "bob",
     installDir: "/home/bob/.rin",
@@ -102,7 +101,7 @@ test("installer GUI plan reuses installer plan text and escapes the HTML shell",
     authAvailable: true,
     setDefaultTarget: false,
   });
-  assert.equal(plan.language, "zh_CN");
+  assert.equal(Object.hasOwn(plan, "language"), false);
   assert.equal(plan.targetUser, "bob");
   assert.equal(plan.provider, "github-copilot");
   assert.equal(plan.modelId, "gpt-5.1");
@@ -124,6 +123,8 @@ test("installer GUI plan reuses installer plan text and escapes the HTML shell",
   assert.match(html, /data-busy/);
   assert.match(html, /rinInstallerSpin/);
   assert.match(html, /window\.rinDesktop\.send/);
+  assert.doesNotMatch(html, /name=["']language["']/i);
+  assert.doesNotMatch(html, /\u7b80\u4f53\u4e2d\u6587/);
   assert.doesNotMatch(html, /<label>[^<]*directory/i);
   assert.doesNotMatch(html, /selected[^.]*directory/i);
   assert.doesNotMatch(html, /fetch\(|\/api\/|<script src=/);
@@ -156,7 +157,6 @@ test("installer GUI saves API key provider auth for desktop install", () => {
 test("installer GUI builds final apply options from auth-ready selections", () => {
   const finalPlan = gui.buildGuiInstallerFinalizePlan(
     {
-      language: "en_US",
       currentUser: "alice",
       targetUser: "alice",
       installDir: "/home/alice/.rin",
@@ -198,6 +198,7 @@ test("installer GUI builds final apply options from auth-ready selections", () =
   assert.equal(finalPlan.needsElevatedService, false);
   assert.equal(finalPlan.options.provider, "copilot");
   assert.equal(finalPlan.options.modelId, "gpt-5.1");
+  assert.equal(Object.hasOwn(finalPlan.options, "language"), false);
   assert.deepEqual(finalPlan.options.authData, { copilot: { type: "oauth" } });
 });
 

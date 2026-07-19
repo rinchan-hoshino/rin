@@ -14,7 +14,6 @@ import {
   type ResolvedRelease,
 } from "../rin-lib/release.js";
 
-import { DEFAULT_LANGUAGE_TAG } from "../language.js";
 import { createInstallerI18n, type InstallerI18n } from "./i18n.js";
 import { discoverInstalledTargets } from "./update-targets.js";
 import {
@@ -133,7 +132,6 @@ export function buildPreparedUpdaterCommand(options: {
   currentUser: string;
   targetUser: string;
   installDir: string;
-  language: string;
 }) {
   return {
     command: preparedRuntimeNodeExecutable(options.sourceRoot),
@@ -144,8 +142,6 @@ export function buildPreparedUpdaterCommand(options: {
       options.targetUser,
       "--install-dir",
       options.installDir,
-      "--language",
-      options.language,
       "--yes",
       "--preconfirmed",
       "--release-file",
@@ -161,7 +157,6 @@ async function runPreparedUpdater(options: {
   currentUser: string;
   targetUser: string;
   installDir: string;
-  language: string;
 }) {
   const command = buildPreparedUpdaterCommand(options);
   await runUpdateCommand(command.command, command.args, command.options);
@@ -176,12 +171,6 @@ export async function startUpdater(deps: {
   select?: typeof select;
   confirm?: typeof confirm;
   i18n?: InstallerI18n;
-  readInstalledUpdateLanguage?: (target: {
-    currentUser: string;
-    targetUser: string;
-    installDir: string;
-    ownerHome: string;
-  }) => string;
   readInstalledRelease?: (target: {
     currentUser: string;
     targetUser: string;
@@ -197,7 +186,7 @@ export async function startUpdater(deps: {
   const currentUser = deps.detectCurrentUser();
   const promptSelect = deps.select || select;
   const promptConfirm = deps.confirm || confirm;
-  const initialI18n = deps.i18n || createInstallerI18n(DEFAULT_LANGUAGE_TAG);
+  const initialI18n = deps.i18n || createInstallerI18n();
   const runFinalizeInstallPlanInChild =
     deps.runFinalizeInstallPlanInChild || runFinalizeInstallPlanInChildImpl;
 
@@ -226,18 +215,7 @@ export async function startUpdater(deps: {
 
   const installDir = target.installDir;
   const targetUser = target.targetUser;
-  const selectedLanguage = deps.readInstalledUpdateLanguage?.({
-    currentUser,
-    targetUser,
-    installDir,
-    ownerHome: target.ownerHome,
-  });
-  const displayLanguage = selectedLanguage || "";
-  // Core updates may use the installed language for UI, but they must not
-  // rewrite the user's language preference.
-  const i18n = displayLanguage
-    ? createInstallerI18n(displayLanguage)
-    : initialI18n;
+  const i18n = initialI18n;
 
   const installedRelease = (
     deps.readInstalledRelease || defaultReadInstalledRelease
@@ -325,7 +303,6 @@ export async function startUpdater(deps: {
         currentUser,
         targetUser,
         installDir,
-        language: i18n.language,
       });
     } finally {
       try {

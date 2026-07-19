@@ -91,27 +91,19 @@ test("installer interactive helpers describe dir state and plan text", () => {
   assert.ok(safety.includes("memory extraction"));
   assert.ok(safety.includes("chat-bridge-triggered agent runs"));
 
-  const zhPlan = interactive.buildInstallPlanText(
-    {
-      currentUser: "alice",
-      targetUser: "bob",
-      installDir: "/home/bob/.rin",
-      provider: "openai",
-      modelId: "gpt-5",
-      thinkingLevel: "medium",
-      authAvailable: true,
-    },
-    installerI18n.createInstallerI18n("zh_CN"),
-  );
-  assert.equal(zhPlan.includes("\u804a\u5929\u63a5\u5165"), false);
-  assert.equal(zhPlan.includes("\u804a\u5929\u6388\u6743"), false);
-  assert.ok(!zhPlan.includes("Chat bridge"));
+  const fixedPlan = interactive.buildInstallPlanText({
+    currentUser: "alice",
+    targetUser: "bob",
+    installDir: "/home/bob/.rin",
+    provider: "openai",
+    modelId: "gpt-5",
+    thinkingLevel: "medium",
+    authAvailable: true,
+  });
+  assert.doesNotMatch(fixedPlan, /Language:/);
 
-  const zhSafety = interactive.buildInstallSafetyBoundaryText(
-    installerI18n.createInstallerI18n("zh_CN"),
-  );
-  assert.ok(zhSafety.includes("\u804a\u5929\u63a5\u5165\u89e6\u53d1"));
-  assert.ok(!zhSafety.includes("chat-bridge"));
+  const fixedSafety = interactive.buildInstallSafetyBoundaryText();
+  assert.ok(fixedSafety.includes("chat-bridge-triggered"));
 
   const initExit = interactive.buildPostInstallInitExitText({
     currentUser: "alice",
@@ -265,173 +257,19 @@ test("promptDefaultTargetUser returns the installer choice", async () => {
   assert.equal(result, false);
 });
 
-test("promptInstallerLanguage supports custom locale codes", async () => {
-  const result = await installerI18n.promptInstallerLanguage({
-    ensureNotCancelled(value) {
-      return value;
-    },
-    async select() {
-      return "custom";
-    },
-    async text() {
-      return "zh-Hans-CN";
-    },
-  });
+test("createInstallerI18n exposes fixed English install and update copy", () => {
+  const i18n = installerI18n.createInstallerI18n();
 
-  assert.equal(result, "zh_Hans_CN");
-});
-
-test("promptInstallerLanguage uses English-only copy for non-Chinese locales", async () => {
-  const originalLang = process.env.LANG;
-  const originalLcAll = process.env.LC_ALL;
-  const originalLcMessages = process.env.LC_MESSAGES;
-  process.env.LANG = "en_US.UTF-8";
-  delete process.env.LC_ALL;
-  delete process.env.LC_MESSAGES;
-
-  try {
-    const seen = {};
-    const result = await installerI18n.promptInstallerLanguage({
-      ensureNotCancelled(value) {
-        return value;
-      },
-      async select(options) {
-        seen.select = options;
-        return "custom";
-      },
-      async text(options) {
-        seen.text = options;
-        return "fr-CA";
-      },
-    });
-
-    assert.equal(result, "fr_CA");
-    assert.equal(seen.select.message, "Choose installer language");
-    assert.equal(seen.select.options[0].hint, "en_US · detected");
-    assert.deepEqual(seen.select.options.at(-1), {
-      value: "custom",
-      label: "Other",
-      hint: "Enter any locale code",
-    });
-    assert.equal(seen.text.message, "Enter locale code");
-    assert.equal(seen.text.placeholder, "en_US");
-    assert.equal(seen.text.defaultValue, "en_US");
-    assert.equal(
-      seen.text.validate("nope nope"),
-      "Use a valid locale code such as en_US",
-    );
-  } finally {
-    if (originalLang == null) delete process.env.LANG;
-    else process.env.LANG = originalLang;
-    if (originalLcAll == null) delete process.env.LC_ALL;
-    else process.env.LC_ALL = originalLcAll;
-    if (originalLcMessages == null) delete process.env.LC_MESSAGES;
-    else process.env.LC_MESSAGES = originalLcMessages;
-  }
-});
-
-test("promptInstallerLanguage localizes the picker copy for Chinese locales", async () => {
-  const originalLang = process.env.LANG;
-  const originalLcAll = process.env.LC_ALL;
-  const originalLcMessages = process.env.LC_MESSAGES;
-  process.env.LANG = "zh_CN.UTF-8";
-  delete process.env.LC_ALL;
-  delete process.env.LC_MESSAGES;
-
-  try {
-    let selectOptions;
-    const result = await installerI18n.promptInstallerLanguage({
-      ensureNotCancelled(value) {
-        return value;
-      },
-      async select(options) {
-        selectOptions = options;
-        return "en_US";
-      },
-      async text() {
-        throw new Error(
-          "text prompt should not run when a preset option is chosen",
-        );
-      },
-    });
-
-    assert.equal(result, "en_US");
-    assert.equal(selectOptions.initialValue, "zh_CN");
-    assert.equal(
-      selectOptions.message,
-      "\u9009\u62e9\u5b89\u88c5\u5668\u8bed\u8a00",
-    );
-    assert.equal(
-      selectOptions.options.find((option) => option.value === "zh_CN")?.hint,
-      "zh_CN \xb7 \u5df2\u68c0\u6d4b",
-    );
-    assert.equal(selectOptions.options.at(-1)?.label, "\u5176\u4ed6");
-    assert.equal(
-      selectOptions.options.at(-1)?.hint,
-      "\u8f93\u5165\u4efb\u610f\u533a\u57df\u8bed\u8a00\u4ee3\u7801",
-    );
-  } finally {
-    if (originalLang == null) delete process.env.LANG;
-    else process.env.LANG = originalLang;
-    if (originalLcAll == null) delete process.env.LC_ALL;
-    else process.env.LC_ALL = originalLcAll;
-    if (originalLcMessages == null) delete process.env.LC_MESSAGES;
-    else process.env.LC_MESSAGES = originalLcMessages;
-  }
-});
-
-test("createInstallerI18n exposes localized post-install and update copy", () => {
-  const en = installerI18n.createInstallerI18n("en_US");
-  const zh = installerI18n.createInstallerI18n("zh_CN");
-
-  assert.equal(en.targetInstallDirLabel, "Rin home");
-  assert.equal(en.writtenPathLabel, "Written");
-  assert.equal(en.serviceLabelLabel, "label");
-  assert.equal(en.updaterIntroTitle, "Rin Updater");
-  assert.equal(en.updateAlreadyCurrentTitle, "Already up to date");
+  assert.equal(i18n.targetInstallDirLabel, "Rin home");
+  assert.equal(i18n.writtenPathLabel, "Written");
+  assert.equal(i18n.serviceLabelLabel, "label");
+  assert.equal(i18n.confirmActiveLabel, "Yes");
+  assert.equal(i18n.confirmInactiveLabel, "No");
+  assert.equal(i18n.updaterIntroTitle, "Rin Updater");
+  assert.equal(i18n.updateAlreadyCurrentTitle, "Already up to date");
   assert.equal(
-    en.fetchAndApplyUpdateConfirmMessage,
+    i18n.fetchAndApplyUpdateConfirmMessage,
     "Fetch and apply this update now?",
-  );
-  assert.ok(
-    en
-      .buildUpdatePlanText({
-        currentUser: "alice",
-        targetUser: "bob",
-        installDir: "/home/bob/.rin",
-        source: "manifest",
-        ownerHome: "/home/bob",
-        sourceLabel: "stable latest",
-      })
-      .includes("Updater policy:"),
-  );
-  assert.ok(
-    en
-      .buildUpdateAlreadyCurrentText({
-        installDir: "/home/bob/.rin",
-        sourceLabel: "stable 1.2.3",
-      })
-      .includes("No download"),
-  );
-  assert.equal(zh.targetInstallDirLabel, "Rin \u76ee\u5f55");
-  assert.equal(zh.writtenPathLabel, "\u5df2\u5199\u5165");
-  assert.equal(zh.serviceLabelLabel, "\u6807\u7b7e");
-  assert.equal(zh.confirmActiveLabel, "\u662f");
-  assert.equal(zh.confirmInactiveLabel, "\u5426");
-  assert.equal(zh.updaterIntroTitle, "Rin \u66f4\u65b0\u5668");
-  assert.equal(zh.updateAlreadyCurrentTitle, "\u5df2\u662f\u6700\u65b0");
-  assert.equal(
-    zh.fetchAndApplyUpdateConfirmMessage,
-    "\u73b0\u5728\u83b7\u53d6\u5e76\u5e94\u7528\u6b64\u66f4\u65b0\u5417\uff1f",
-  );
-  assert.ok(
-    zh
-      .buildAfterUpdateText({
-        serviceHint: "systemd",
-        daemonReady: true,
-        userSuffix: " -u bob",
-      })
-      .includes("\u5efa\u8bae\u7684\u4e0b\u4e00\u6b65\u547d\u4ee4"),
   );
 });
 
@@ -485,30 +323,13 @@ test("core update preflights before stop and activates after migrations", () => 
   assert.ok(activateIndex >= 0 && activateIndex < restartIndex);
 });
 
-test("installer i18n source keeps localized copy in one display table", () => {
-  const source = readFileSync(
-    path.join(rootDir, "src", "core", "rin-install", "i18n.ts"),
-    "utf8",
-  );
-  assert.equal(
-    (source.match(/const INSTALLER_DISPLAY_COPY =/g) || []).length,
-    1,
-  );
-  assert.equal(source.includes("const local ="), false);
-  assert.equal(source.includes("local({"), false);
-  assert.equal(source.includes("Record<InstallerDisplayLanguage, T>"), false);
-  assert.equal(source.includes("[key: string]"), false);
-  assert.equal(source.includes("zh ?"), false);
-  assert.equal(source.includes("if (zh)"), false);
-  assert.equal(
-    source.includes("buildInstallSafetyBoundaryText() {\n      return ["),
-    false,
-  );
-});
-
-test("update mode skips language prompt and reuses installer note renderer", () => {
+test("installer and updater source expose no language controls", () => {
   const mainSource = readFileSync(
     path.join(rootDir, "src", "core", "rin-install", "main.ts"),
+    "utf8",
+  );
+  const i18nSource = readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "i18n.ts"),
     "utf8",
   );
   const updaterSource = readFileSync(
@@ -516,43 +337,14 @@ test("update mode skips language prompt and reuses installer note renderer", () 
     "utf8",
   );
 
-  const updateModeStart = mainSource.indexOf("if (cli.update)");
-  const installLanguagePromptStart = mainSource.indexOf(
-    "const selectedLanguage = await promptInstallerLanguage",
-  );
-  assert.ok(updateModeStart >= 0);
-  assert.ok(installLanguagePromptStart > updateModeStart);
-  const updateModeBlock = mainSource.slice(
-    updateModeStart,
-    installLanguagePromptStart,
-  );
-  assert.doesNotMatch(updateModeBlock, /promptInstallerLanguage/);
-  assert.match(updateModeBlock, /readInstalledUpdateLanguage/);
-  assert.match(mainSource, /--preconfirmed/);
-  assert.match(mainSource, /installSettingsPath/);
-  assert.doesNotMatch(mainSource, /installerManifestPaths/);
-  assert.doesNotMatch(mainSource, /launcherMetadataCandidatesForHome/);
-  assert.match(mainSource, /currentUser: updateCurrentUser/);
+  assert.doesNotMatch(mainSource, /promptInstallerLanguage|--language/);
+  assert.doesNotMatch(i18nSource, /zh_CN|Choose installer language/);
+  assert.doesNotMatch(updaterSource, /readInstalledUpdateLanguage|--language/);
   assert.match(mainSource, /active: i18n\.confirmActiveLabel/);
   assert.match(updaterSource, /renderInstallerNote/);
   assert.match(updaterSource, /wrapInstallerNoteText/);
-  assert.match(updaterSource, /requestedTargetUser/);
-  assert.match(updaterSource, /assumeYes/);
-  assert.match(updaterSource, /preconfirmed/);
   assert.match(updaterSource, /selectUpdateTarget/);
-  assert.match(updaterSource, /readInstalledUpdateLanguage/);
-  assert.match(updaterSource, /createInstallerI18n\(displayLanguage\)/);
-  assert.match(updaterSource, /initialI18n\.noUpdateTargetsText/);
-  assert.match(updaterSource, /i18n\.buildUpdateTargetText/);
-  assert.match(updaterSource, /i18n\.buildUpdatePlanText/);
-  assert.match(updaterSource, /i18n\.buildUpdatedTargetText/);
-  assert.match(updaterSource, /i18n\.buildAfterUpdateText/);
-  assert.doesNotMatch(updaterSource, /language: displayLanguage/);
-  assert.doesNotMatch(updaterSource, /language: updateLanguage/);
-  assert.match(
-    updaterSource,
-    /const promptConfirm = deps\.confirm \|\| confirm/,
-  );
+  assert.match(updaterSource, /const i18n = initialI18n/);
   assert.match(updaterSource, /rin_update_confirmation_required/);
 });
 

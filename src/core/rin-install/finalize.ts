@@ -269,7 +269,6 @@ async function applyInstalledRuntime(
   const provider = String(options.provider || "");
   const modelId = String(options.modelId || "");
   const thinkingLevel = String(options.thinkingLevel || "");
-  const language = String(options.language || "").trim();
   const setDefaultTarget = options.setDefaultTarget !== false;
   const authData = options.authData || {};
   const publishRuntime = options.publishRuntime !== false;
@@ -439,7 +438,6 @@ async function applyInstalledRuntime(
               provider,
               modelId,
               thinkingLevel,
-              language,
               setDefaultTarget,
               authData,
               release,

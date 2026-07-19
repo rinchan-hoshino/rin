@@ -9,7 +9,6 @@ import {
   type DesktopHostLaunch,
 } from "../rin-gui/host-launch.js";
 import { escapeHtml } from "../rin-gui/web-assets.js";
-import { DEFAULT_LANGUAGE_TAG } from "../language.js";
 import {
   releaseInfoFromFile,
   type InstalledReleaseInfo,
@@ -43,7 +42,6 @@ import {
 export type GuiInstallerOptions = { releaseFile?: string };
 
 export type GuiInstallerPlanInput = {
-  language?: string;
   currentUser?: string;
   targetUser?: string;
   installDir?: string;
@@ -205,10 +203,7 @@ export function saveGuiInstallerApiKeyAuth(
 }
 
 export function buildGuiInstallerPlan(input: GuiInstallerPlanInput = {}) {
-  const language =
-    String(input.language || DEFAULT_LANGUAGE_TAG).trim() ||
-    DEFAULT_LANGUAGE_TAG;
-  const i18n = createInstallerI18n(language);
+  const i18n = createInstallerI18n();
   const currentUser = String(input.currentUser || detectCurrentUser()).trim();
   const targetUser =
     String(input.targetUser || currentUser).trim() || currentUser;
@@ -230,13 +225,11 @@ export function buildGuiInstallerPlan(input: GuiInstallerPlanInput = {}) {
       modelId,
       thinkingLevel,
       authAvailable,
-      language: i18n.language,
       setDefaultTarget,
     },
     i18n,
   );
   return {
-    language: i18n.language,
     currentUser,
     targetUser,
     installDir,
@@ -271,7 +264,7 @@ export function buildGuiInstallerFinalizePlan(
       `rin_installer_gui_provider_auth_required:${plan.provider}`,
     );
   }
-  const i18n = createInstallerI18n(plan.language);
+  const i18n = createInstallerI18n();
   const ownership = (deps.describeOwnership || describeOwnership)(
     plan.targetUser,
     plan.installDir,
@@ -292,7 +285,6 @@ export function buildGuiInstallerFinalizePlan(
       provider: plan.provider,
       modelId: plan.modelId,
       thinkingLevel: plan.thinkingLevel,
-      language: plan.language,
       setDefaultTarget: plan.setDefaultTarget,
       authData,
       release: deps.release,
@@ -351,12 +343,6 @@ export function buildGuiInstallerHtml() {
       <section class="step" data-step="0" aria-current="true">
         <h2>Step 1 of 4: choose install target</h2>
         <div class="grid">
-          <label>Language
-            <select name="language">
-              <option value="en_US">English</option>
-              <option value="zh_CN">简体中文</option>
-            </select>
-          </label>
           <label>Target user
             <input name="targetUser" value="${escapeHtml(initialPlan.targetUser)}" />
           </label>
@@ -490,7 +476,6 @@ export function buildGuiInstallerHtml() {
       const data = new FormData(form);
       const model = selectedModel();
       return {
-        language: data.get('language'),
         targetUser: data.get('targetUser'),
         installDir: data.get('installDir'),
         provider: data.get('provider'),

@@ -34,7 +34,6 @@ export type RinSystemPromptOverlayInput = {
   piOptions: RinSystemPromptOptions;
   activeToolNames: string[];
   agentDir: string;
-  configuredLanguageBlock?: string;
   selfImprovePromptBlock?: string;
   persistedBlocks?: string[];
 };
@@ -182,7 +181,6 @@ function overlayDefaultPiPrompt(
   activeToolNames: string[],
   cwdAt: number,
   docsBlock: string,
-  configuredLanguageBlock: string | undefined,
 ) {
   const toolsAnchor = "Available tools:\n";
   const guidelinesAnchor = "\n\nGuidelines:\n";
@@ -234,11 +232,7 @@ function overlayDefaultPiPrompt(
   ].join("\n");
   const nativeDocs = piPrompt.slice(docsAt, dataAt);
   const nativeDataTail = piPrompt.slice(dataAt, cwdAt);
-  let prompt = `${promptThroughGuidelines}${nativeDocs}\n\n${docsBlock}`;
-  if (configuredLanguageBlock) {
-    prompt += `\n\n${configuredLanguageBlock}`;
-  }
-  return `${prompt}${nativeDataTail}`;
+  return `${promptThroughGuidelines}${nativeDocs}\n\n${docsBlock}${nativeDataTail}`;
 }
 
 function applyPersistedBlocks(prompt: string, blocks: string[] | undefined) {
@@ -262,16 +256,13 @@ export function applyRinSystemPromptOverlay(
   const docsBlock = buildRinDocsBlock(input.agentDir);
   const customPrompt = input.piOptions.customPrompt;
   let prompt = customPrompt
-    ? [withoutCwd.prompt, docsBlock, input.configuredLanguageBlock]
-        .filter(Boolean)
-        .join("\n\n")
+    ? [withoutCwd.prompt, docsBlock].filter(Boolean).join("\n\n")
     : overlayDefaultPiPrompt(
         input.piPrompt,
         input.piOptions,
         activeToolNames,
         withoutCwd.cwdAt,
         docsBlock,
-        input.configuredLanguageBlock,
       );
 
   if (input.selfImprovePromptBlock) {

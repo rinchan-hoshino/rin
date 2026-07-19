@@ -19,7 +19,6 @@ export type NativeDesktopSettings = {
   provider?: string;
   model?: string;
   thinking?: string;
-  language?: string;
 };
 
 function runtimeDesktopHostEntry() {
@@ -89,7 +88,6 @@ function normalizeSettings(value: unknown): NativeDesktopSettings {
     provider: String(record.provider || "").trim(),
     model: String(record.model || "").trim(),
     thinking: String(record.thinking || "").trim(),
-    language: String(record.language || "").trim(),
   };
 }
 
@@ -112,7 +110,7 @@ function saveNativeSettings(
     current = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
   } catch {}
   const next = { ...current };
-  for (const key of ["provider", "model", "thinking", "language"] as const) {
+  for (const key of ["provider", "model", "thinking"] as const) {
     const value = String(patch[key] || "").trim();
     if (value) next[key] = value;
     else delete next[key];
@@ -384,7 +382,6 @@ function buildAssistantDesktopHtml() {
       <label>Provider<input id="setting-provider" placeholder="openai" /></label>
       <label>Model<input id="setting-model" placeholder="provider/model" /></label>
       <label>Thinking<select id="setting-thinking"><option value="">Default</option><option>off</option><option>minimal</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></label>
-      <label>Language<input id="setting-language" placeholder="zh_CN" /></label>
       <div class="toolbar"><button id="save-settings" type="button">Save settings</button><button id="refresh-runtime" type="button">Refresh runtime</button></div>
       <h2>Built-In Extensions</h2><div id="builtin-extensions" class="list"></div>
       <h2>Sessions</h2><div id="sessions" class="list"></div>
@@ -405,7 +402,6 @@ function buildAssistantDesktopHtml() {
     const settingProvider = document.getElementById('setting-provider');
     const settingModel = document.getElementById('setting-model');
     const settingThinking = document.getElementById('setting-thinking');
-    const settingLanguage = document.getElementById('setting-language');
     function send(command) { window.rinDesktop.send(command); }
     function show(mode) { body.className = mode || ''; window.rinDesktop.setMode(mode || 'icon'); if (mode === 'chat') promptEl.focus(); }
     function appendMessage(role, text) {
@@ -427,7 +423,6 @@ function buildAssistantDesktopHtml() {
       settingProvider.value = value.provider || '';
       settingModel.value = value.model || '';
       settingThinking.value = value.thinking || '';
-      settingLanguage.value = value.language || '';
     }
     function renderSessions(sessions) {
       const values = Array.isArray(sessions) ? sessions : [];
@@ -471,7 +466,7 @@ function buildAssistantDesktopHtml() {
     document.getElementById('close-chat').addEventListener('click', () => show(''));
     document.getElementById('close-settings').addEventListener('click', () => show('chat'));
     document.getElementById('refresh-runtime').addEventListener('click', refreshRuntime);
-    document.getElementById('save-settings').addEventListener('click', () => send({ type: 'settings:save', settings: { provider: settingProvider.value, model: settingModel.value, thinking: settingThinking.value, language: settingLanguage.value } }));
+    document.getElementById('save-settings').addEventListener('click', () => send({ type: 'settings:save', settings: { provider: settingProvider.value, model: settingModel.value, thinking: settingThinking.value } }));
     form.addEventListener('submit', (event) => { event.preventDefault(); const text = promptEl.value.trim(); if (!text) return; appendMessage('user', text); promptEl.value = ''; send({ type: 'prompt', text }); });
     document.getElementById('abort').addEventListener('click', () => send({ type: 'abort' }));
     refreshRuntime();

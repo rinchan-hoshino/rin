@@ -3,7 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 
-import { normalizeLanguageTag } from "../language.js";
 import { bridgeDaemonSocketPath } from "../rin-lib/common.js";
 import { readJsonFile } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
@@ -26,7 +25,6 @@ import { createInstallerI18n } from "../rin-install/i18n.js";
 import { readJsonFileWithPrivilege } from "../rin-install/fs-utils.js";
 import {
   defaultInstallDirForHome,
-  installSettingsPath,
   installerManifestPath,
   managedNodeExecutablePath,
   managedSystemdUnitCandidates,
@@ -113,21 +111,8 @@ export function readInstallerManifestForTarget<T = any>(
   );
 }
 
-export function readUpdateDisplayLanguage(
-  installDir: string,
-  options: TargetJsonReadOptions = {},
-) {
-  return normalizeLanguageTag(
-    readTargetJsonFile<any>(installSettingsPath(installDir), {}, options)
-      ?.language,
-    "",
-  );
-}
-
-export function createUpdateI18n(installDir: string, targetUser?: string) {
-  return createInstallerI18n(
-    readUpdateDisplayLanguage(installDir, { targetUser }),
-  );
+export function createUpdateI18n() {
+  return createInstallerI18n();
 }
 
 type TargetExecutionContextBase = ReturnType<typeof daemonControlContext>;
