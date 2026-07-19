@@ -55,31 +55,6 @@ test("rpc client ignores stale socket disconnect after reconnect", () => {
   assert.equal(seen[0]?.name, "connection_lost");
 });
 
-test("rpc client identifies an in-flight command when its transport disconnects", async () => {
-  const { clientSocket, serverSocket } = createConnectedRpcSocketPair();
-  const client = new RinDaemonFrontendClient({
-    socketPath: "inprocess://disconnect-pending",
-    connectSocket: async () => clientSocket,
-  });
-  const seen = [];
-  client.subscribe((event) => seen.push(event));
-
-  await client.connect();
-  const request = client.send({ type: "get_state" });
-  await new Promise((resolve) => setImmediate(resolve));
-  serverSocket.destroy();
-
-  await assert.rejects(request, /^Error: rin_disconnected:get_state:req_1$/);
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(client.pending.size, 0);
-  assert.equal(client.isConnected(), false);
-  assert.deepEqual(
-    seen.map((event) => [event.type, event.name]),
-    [["ui", "connection_lost"]],
-  );
-});
-
 test("rpc client retries after a socket connect attempt stalls", async () => {
   let attempts = 0;
   class StalledSocket extends EventEmitter {

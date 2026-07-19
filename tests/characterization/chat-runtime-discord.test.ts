@@ -36,19 +36,14 @@ function adminPermission(value: boolean) {
   return namedPermission(value, "Administrator", 8n);
 }
 
-function discordInboundMessage(
-  id: string,
-  timestamp: number,
-  content: string,
-  channelId = "channel-1",
-) {
+function discordInboundMessage(id: string, timestamp: number, content: string) {
   return {
     id,
     createdTimestamp: timestamp,
-    channelId,
+    channelId: "channel-1",
     guildId: "guild-1",
     guild: { name: "Guild" },
-    channel: { id: channelId, name: "chat", guild: { name: "Guild" } },
+    channel: { id: "channel-1", name: "chat", guild: { name: "Guild" } },
     author: { id: "owner-1", username: "owner", bot: false },
     member: { displayName: "Owner" },
     mentions: { users: { has: () => false } },
@@ -117,238 +112,15 @@ test("discord adapter catches up native history before buffered live messages", 
       },
     };
     (adapter as any).inboundGate.begin();
-    (adapter as any).inboundGate.buffer("channel-1", duplicateLive);
-    (adapter as any).inboundGate.buffer("channel-1", newestLive);
+    (adapter as any).inboundGate.buffer(duplicateLive);
+    (adapter as any).inboundGate.buffer(newestLive);
 
-    await (adapter as any).recoverDiscordMessages();
+    const recovered = await (adapter as any).recoverDiscordMessages();
+    await (adapter as any).finishDiscordRecovery(recovered);
 
     assert.deepEqual(seen, ["200", "300", "400"]);
     assert.deepEqual(bot.inboundRecovery, { status: "ready" });
     assert.equal((adapter as any).inboundGate.isBuffering(), false);
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("discord adapter releases unrelated chats while one history fetch is still pending", async () => {
-  const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-chat-discord-isolated-recovery-"),
-  );
-  try {
-    const seen: string[] = [];
-    let bot: any = null;
-    const app = {
-      agentDir,
-      register(_adapter: unknown, registeredBot: any) {
-        bot = registeredBot;
-      },
-      emit(event: string, session: any) {
-        if (event === "message") seen.push(session.messageId);
-        return true;
-      },
-    };
-    const adapter = new adapters.DiscordAdapter(
-      app,
-      agentDir,
-      {},
-      { warn() {}, info() {}, error() {}, debug() {} },
-    );
-    bot.selfId = "bot-discord";
-    messageStore.saveChatMessage(agentDir, {
-      role: "user",
-      platform: "discord",
-      botId: "bot-discord",
-      chatId: "slow",
-      chatKey: "discord/bot-discord:slow",
-      messageId: "100",
-      receivedAt: "2026-07-13T00:00:00.000Z",
-      platformTimestamp: 1000,
-    });
-    const recovered = discordInboundMessage("200", 2000, "missed", "slow");
-    const slowLive = discordInboundMessage("300", 3000, "slow live", "slow");
-    const fastLive = discordInboundMessage("400", 4000, "fast live", "fast");
-    const fastFollowUp = discordInboundMessage(
-      "500",
-      5000,
-      "fast follow-up",
-      "fast",
-    );
-    let releaseHistory: () => void = () => {};
-    const historyPending = new Promise<void>((resolve) => {
-      releaseHistory = resolve;
-    });
-    (adapter as any).client = {
-      channels: {
-        async fetch(channelId: string) {
-          assert.equal(channelId, "slow");
-          return {
-            messages: {
-              async fetch(options: any) {
-                if (options.after === "100") {
-                  await historyPending;
-                  return new Map([[recovered.id, recovered]]);
-                }
-                return new Map();
-              },
-            },
-          };
-        },
-      },
-    };
-    let releaseHandoff: () => void = () => {};
-    let handoffStarted: () => void = () => {};
-    const handoffPending = new Promise<void>((resolve) => {
-      releaseHandoff = resolve;
-    });
-    const handoffObserved = new Promise<void>((resolve) => {
-      handoffStarted = resolve;
-    });
-    const originalHandleMessage = (adapter as any).handleMessage.bind(adapter);
-    (adapter as any).handleMessage = async (message: any) => {
-      if (message?.id === "400") {
-        handoffStarted();
-        await handoffPending;
-      }
-      await originalHandleMessage(message);
-    };
-    (adapter as any).inboundGate.begin();
-    (adapter as any).inboundGate.buffer("slow", slowLive);
-    (adapter as any).inboundGate.buffer("fast", fastLive);
-
-    let configured = false;
-    const recovering = (adapter as any).recoverDiscordMessages(() => {
-      configured = true;
-    });
-    await handoffObserved;
-    assert.equal(
-      (adapter as any).inboundGate.buffer("fast", fastFollowUp),
-      true,
-    );
-    releaseHandoff();
-    const deadline = Date.now() + 1000;
-    while ((!seen.includes("500") || !configured) && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }
-    assert.equal(configured, true);
-    assert.deepEqual(bot.inboundRecovery, {
-      status: "recovering",
-      pending: ["discord/bot-discord:slow"],
-    });
-    assert.deepEqual(seen, ["400", "500"]);
-
-    releaseHistory();
-    await recovering;
-    assert.deepEqual(seen, ["400", "500", "200", "300"]);
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("discord adapter retries partial history without blocking buffered live ingress", async () => {
-  const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-chat-discord-partial-recovery-"),
-  );
-  try {
-    const seen: string[] = [];
-    let bot: any = null;
-    const adapter = new adapters.DiscordAdapter(
-      {
-        agentDir,
-        register(_adapter: unknown, registeredBot: any) {
-          bot = registeredBot;
-        },
-        emit(event: string, session: any) {
-          if (event === "message") seen.push(session.messageId);
-          return true;
-        },
-      },
-      agentDir,
-      {},
-      { warn() {}, info() {}, error() {}, debug() {} },
-    );
-    bot.selfId = "bot-discord";
-    messageStore.saveChatMessage(agentDir, {
-      role: "user",
-      platform: "discord",
-      botId: "bot-discord",
-      chatId: "channel-1",
-      chatKey: "discord/bot-discord:channel-1",
-      messageId: "100",
-      receivedAt: "2026-07-13T00:00:00.000Z",
-      platformTimestamp: 1000,
-    });
-    const partial = discordInboundMessage("200", 2000, "partial");
-    const buffered = discordInboundMessage("300", 3000, "live");
-    (adapter as any).client = {
-      channels: {
-        async fetch() {
-          return {
-            messages: {
-              async fetch(options: any) {
-                if (options.after === "100") {
-                  return new Map([[partial.id, partial]]);
-                }
-                throw new Error("second page failed");
-              },
-            },
-          };
-        },
-      },
-    };
-    (adapter as any).inboundGate.begin();
-    (adapter as any).inboundGate.buffer("channel-1", buffered);
-
-    await (adapter as any).recoverDiscordMessages();
-
-    assert.deepEqual(seen, ["300"]);
-    assert.equal((adapter as any).inboundGate.isBuffering(), false);
-    assert.match(bot.inboundRecovery.failures[0], /second page failed/);
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("discord recovery requeues only the unhandled buffered suffix", async () => {
-  const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-chat-discord-requeue-"),
-  );
-  try {
-    const adapter = new adapters.DiscordAdapter(
-      { register() {} },
-      agentDir,
-      {},
-      { warn() {}, info() {}, error() {}, debug() {} },
-    );
-    const recoveredFirst = discordInboundMessage("100", 1000, "history first");
-    const first = discordInboundMessage("100", 1000, "live first");
-    const duplicateFirst = discordInboundMessage(
-      "100",
-      1000,
-      "later live first",
-    );
-    const second = discordInboundMessage("200", 2000, "second");
-    const seen: string[] = [];
-    let failSecond = true;
-    (adapter as any).handleMessage = async (message: any) => {
-      if (message.id === "200" && failSecond) throw new Error("persist failed");
-      seen.push(message.id);
-    };
-    (adapter as any).inboundGate.begin();
-    (adapter as any).inboundGate.configure(["channel-1"]);
-    (adapter as any).inboundGate.buffer("channel-1", first);
-    (adapter as any).inboundGate.buffer("channel-1", duplicateFirst);
-    (adapter as any).inboundGate.buffer("channel-1", second);
-
-    await assert.rejects(
-      (adapter as any).finishDiscordRecovery("channel-1", [recoveredFirst]),
-      /persist failed/,
-    );
-    assert.deepEqual(seen, ["100"]);
-    assert.equal((adapter as any).inboundGate.hasPending("channel-1"), true);
-
-    failSecond = false;
-    await (adapter as any).finishDiscordRecovery("channel-1", []);
-    assert.deepEqual(seen, ["100", "200"]);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

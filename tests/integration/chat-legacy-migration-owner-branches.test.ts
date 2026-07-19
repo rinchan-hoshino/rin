@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -11,6 +12,11 @@ const rootDir = path.resolve(
 );
 const database = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
+);
+const legacyMigration = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "chat", "legacy-migration.js"),
+  ).href
 );
 
 const validMessage = {
@@ -41,7 +47,7 @@ const validOutbox = {
   },
 };
 
-async function expectRejectedLegacy(
+async function expectPreservedLegacy(
   relativePath: string,
   value: unknown,
   pattern: RegExp,
@@ -53,46 +59,88 @@ async function expectRejectedLegacy(
   try {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, `${JSON.stringify(value)}\n`);
-    assert.throws(
-      () => database.migrateChatDatabaseForInstall(agentDir),
-      pattern,
+    const db = database.migrateChatDatabaseForInstall(agentDir);
+    const summary = JSON.parse(
+      db
+        .prepare(
+          "SELECT value FROM schema_meta WHERE key = 'legacy_control_migration_preserved'",
+        )
+        .get().value,
     );
+    assert.equal(summary.version, 1);
+    assert.equal(summary.total, 1);
+    assert.equal(
+      Object.values(summary.reasons).reduce((a: any, b: any) => a + b, 0),
+      1,
+    );
+    assert.match(Object.keys(summary.reasons)[0], pattern);
   } finally {
     database.closeChatDatabase(agentDir);
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 }
 
-test("legacy migration rejects malformed message and inbox boundary fields", async () => {
-  await expectRejectedLegacy(
+test("legacy migration reports unreadable resolved-key ledgers", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-legacy-ledger-read-"),
+  );
+  const ledgerPath = path.join(
+    agentDir,
+    "data",
+    "migrations",
+    "chat-key-v1-resolved-records.json",
+  );
+  await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
+  await fs.writeFile(ledgerPath, "{}\n");
+  const originalReadFileSync = fsSync.readFileSync;
+  fsSync.readFileSync = ((
+    filePath: fsSync.PathOrFileDescriptor,
+    ...args: any[]
+  ) => {
+    if (filePath === ledgerPath) throw new Error("ledger unavailable");
+    return (originalReadFileSync as any)(filePath, ...args);
+  }) as typeof fsSync.readFileSync;
+  try {
+    assert.throws(
+      () => legacyMigration.validateResolvedChatKeyLedger(agentDir),
+      /chat_key_migration_invalid_resolved_ledger:ledger unavailable/,
+    );
+  } finally {
+    fsSync.readFileSync = originalReadFileSync;
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("legacy migration preserves malformed message and inbox boundary fields", async () => {
+  await expectPreservedLegacy(
     "message-store/records/aa/missing-id.json",
     { ...validMessage, messageId: "" },
     /invalid_message_identity/,
   );
-  await expectRejectedLegacy(
+  await expectPreservedLegacy(
     "message-store/records/aa/received.json",
     { ...validMessage, receivedAt: "not-a-date" },
     /invalid_message_timestamp/,
   );
-  await expectRejectedLegacy(
+  await expectPreservedLegacy(
     "message-store/records/aa/accepted.json",
     { ...validMessage, acceptedAt: "not-a-date" },
-    /invalid_timestamp:acceptedAt/,
+    /invalid_timestamp/,
   );
-  await expectRejectedLegacy(
+  await expectPreservedLegacy(
     "inbox/pending/missing-id.json",
     { ...validInbox, messageId: "" },
     /invalid_inbox:|invalid_message_identity/,
   );
-  await expectRejectedLegacy(
+  await expectPreservedLegacy(
     "inbox/pending/accepted.json",
     { ...validInbox, acceptedAt: "not-a-date" },
-    /invalid_timestamp:inbox.acceptedAt/,
+    /invalid_timestamp/,
   );
-  await expectRejectedLegacy(
+  await expectPreservedLegacy(
     "inbox/pending/created.json",
     { ...validInbox, createdAt: "not-a-date" },
-    /invalid_timestamp:inbox.createdAt|invalid_message_timestamp/,
+    /invalid_timestamp|invalid_message_timestamp/,
   );
 });
 
@@ -184,8 +232,8 @@ test("legacy migration normalizes optional message and terminal outbox variants"
   }
 });
 
-test("legacy migration rejects unsupported keys, unreadable roots, and archive collisions", async () => {
-  await expectRejectedLegacy(
+test("legacy migration preserves unsupported keys but rejects unreadable roots and archive collisions", async () => {
+  await expectPreservedLegacy(
     "message-store/records/aa/unsupported.json",
     { ...validMessage, chatKey: "custom:2", platform: "custom", botId: "" },
     /invalid_message_identity/,
@@ -226,11 +274,11 @@ test("legacy migration rejects unsupported keys, unreadable roots, and archive c
   }
 });
 
-test("legacy migration rejects malformed outbox timing and payload fields", async () => {
-  await expectRejectedLegacy(
+test("legacy migration preserves malformed outbox timing and payload fields", async () => {
+  await expectPreservedLegacy(
     "outbox/items/missing-parts.json",
     { ...validOutbox, payload: { chatKey: "telegram/1:2", parts: [] } },
-    /invalid_outbox:/,
+    /invalid_outbox/,
   );
   for (const [field, value] of [
     ["createdAt", "not-a-date"],
@@ -238,10 +286,10 @@ test("legacy migration rejects malformed outbox timing and payload fields", asyn
     ["nextAttemptAt", "not-a-date"],
     ["failedAt", "not-a-date"],
   ]) {
-    await expectRejectedLegacy(
+    await expectPreservedLegacy(
       `outbox/items/${field}.json`,
       { ...validOutbox, [field]: value },
-      new RegExp(`invalid_timestamp:outbox(?:\\.delivery)?\\.${field}`),
+      /invalid_timestamp/,
     );
   }
 });

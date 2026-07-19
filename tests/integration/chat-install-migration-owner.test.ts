@@ -60,7 +60,7 @@ test("chat install migration preflights and commits session bindings", async () 
   });
 });
 
-test("chat install migration rejects invalid settings and session state", async () => {
+test("chat install migration rejects invalid settings and preserves invalid session state", async () => {
   await withAgent(async (agentDir, statePath) => {
     const settingsPath = path.join(agentDir, "custom-settings.json");
     await fs.writeFile(settingsPath, "not json");
@@ -91,13 +91,80 @@ test("chat install migration rejects invalid settings and session state", async 
 
     await fs.mkdir(path.dirname(statePath), { recursive: true });
     await fs.writeFile(statePath, "not json");
-    assert.throws(
-      () => migration.preflightChatInstallMigrations(agentDir),
-      /chat_install_migration_invalid_session_state/,
+    assert.deepEqual(
+      migration.preflightChatInstallMigrations(agentDir).sessionBindings,
+      {
+        scanned: 1,
+        preserved: 1,
+        preservedReasons: { invalid_json: 1 },
+        withoutBinding: 0,
+      },
     );
-    assert.throws(
-      () => migration.runChatInstallMigrations(agentDir),
-      /chat_install_migration_invalid_session_state/,
+    assert.deepEqual(
+      migration.runChatInstallMigrations(agentDir).sessionBindings,
+      {
+        scanned: 1,
+        imported: 0,
+        preserved: 1,
+        preservedReasons: { invalid_json: 1 },
+        withoutBinding: 0,
+      },
     );
+  });
+});
+
+test("chat install migration classifies preserved session-state variants", async () => {
+  await withAgent(async (agentDir, statePath) => {
+    await fs.mkdir(path.dirname(statePath), { recursive: true });
+
+    await fs.writeFile(statePath, "[]\n");
+    assert.deepEqual(
+      migration.preflightChatInstallMigrations(agentDir).sessionBindings,
+      {
+        scanned: 1,
+        preserved: 1,
+        preservedReasons: { invalid_shape: 1 },
+        withoutBinding: 0,
+      },
+    );
+
+    await fs.writeFile(statePath, "{}\n");
+    assert.deepEqual(
+      migration.preflightChatInstallMigrations(agentDir).sessionBindings,
+      {
+        scanned: 1,
+        preserved: 0,
+        preservedReasons: {},
+        withoutBinding: 1,
+      },
+    );
+
+    await fs.writeFile(statePath, '{"sessionFile":""}\n');
+    assert.deepEqual(
+      migration.preflightChatInstallMigrations(agentDir).sessionBindings,
+      {
+        scanned: 1,
+        preserved: 1,
+        preservedReasons: { invalid_session_file: 1 },
+        withoutBinding: 0,
+      },
+    );
+
+    const originalReadFileSync = fsSync.readFileSync;
+    fsSync.readFileSync = ((
+      filePath: fsSync.PathOrFileDescriptor,
+      ...args: any[]
+    ) => {
+      if (filePath === statePath) throw new Error("session state unavailable");
+      return (originalReadFileSync as any)(filePath, ...args);
+    }) as typeof fsSync.readFileSync;
+    try {
+      assert.throws(
+        () => migration.preflightChatInstallMigrations(agentDir),
+        /chat_install_migration_session_state_read_failed:.*session state unavailable/,
+      );
+    } finally {
+      fsSync.readFileSync = originalReadFileSync;
+    }
   });
 });

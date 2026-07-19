@@ -1060,12 +1060,12 @@ test("runtime branch matrix keeps Telegram and OneBot fallbacks observable", asy
       /owner history failed/,
     );
     one.bot.selfId = "";
-    assert.deepEqual(await one.recoverOneBotMessages(), []);
+    assert.equal(await one.recoverOneBotMessages(), undefined);
     one.bot.selfId = "100";
     one.callAction = async () => {
       throw new Error("history unavailable");
     };
-    assert.deepEqual(await one.recoverOneBotMessages(), []);
+    assert.equal(await one.recoverOneBotMessages(), undefined);
 
     one.callAction = originalOneBotCallAction;
     one.inboundGate.begin();

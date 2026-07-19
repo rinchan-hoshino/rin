@@ -962,9 +962,12 @@ test("controller coordinates typing, visible indicators, summaries, and compacti
       type: "compaction_start_notice",
       text: "Compacting",
     });
-    await waitFor(
-      () => h.controller.workingStatusText === "Compacting",
-      "compaction start reaches visible progress",
+    await h.settle();
+    assert.equal(h.controller.workingStatusText, undefined);
+    assert.ok(
+      h.deliveries.some(
+        (delivery: any) => deliveryText(delivery.content) === "Compacting",
+      ),
     );
     await h.client.emitBackend({
       type: "passive_notice",

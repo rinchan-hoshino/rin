@@ -1120,7 +1120,7 @@ test("lark adapter preserves recovery, forward, resource, and image failure bran
       /lark_api_error:7:denied/,
     );
 
-    assert.deepEqual(await lark.recoverLarkMessages(), []);
+    assert.equal(await lark.recoverLarkMessages(), undefined);
     const merged = lark.mergeLarkRecoveryMessages(
       [
         { message: { message_id: "same", create_time: 2 } },

@@ -24,7 +24,14 @@ const failureRegister = path.resolve(
 async function runFixture(mode: "resolve" | "empty" | "error") {
   return await execFileAsync(
     process.execPath,
-    ["--import", "tsx", "--import", failureRegister, entrypoint],
+    [
+      "--disable-warning=DEP0205",
+      "--import",
+      "tsx",
+      "--import",
+      failureRegister,
+      entrypoint,
+    ],
     {
       env: {
         ...sandbox.env,
@@ -58,6 +65,7 @@ test("Rin CLI entrypoint completes its caught-error boundary after requesting ex
   const result = await execFileAsync(
     process.execPath,
     [
+      "--disable-warning=DEP0205",
       "--import",
       "tsx",
       "--import",

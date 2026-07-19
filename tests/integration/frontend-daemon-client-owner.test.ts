@@ -467,8 +467,45 @@ test("frontend daemon client rejects failed responses and disconnects pending wo
     const pending = client.send({ type: "pending" } as any);
     await new Promise((resolve) => setImmediate(resolve));
     await client.disconnect();
-    await assert.rejects(pending, /rin_disconnected:req_/);
+    await assert.rejects(pending, /rin_disconnected:pending:req_/);
     assert.equal(events.at(-1), undefined);
+  } finally {
+    await client.disconnect();
+    await server.close();
+  }
+});
+
+test("frontend daemon client identifies pending work when its transport disconnects", async () => {
+  let pendingSocket: net.Socket | undefined;
+  const server = await createRpcServer((request, socket) => {
+    if (request.type === "get_state") pendingSocket = socket;
+  });
+  const client = new daemonClient.RinDaemonFrontendClient({
+    socketPath: server.socketPath,
+    connectSocket: () => net.createConnection(server.socketPath),
+  });
+  const events: any[] = [];
+  client.subscribe((event) => events.push(event));
+
+  try {
+    await client.connect();
+    const pending = client.send({ type: "get_state" });
+    for (let attempt = 0; attempt < 20 && !pendingSocket; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.ok(pendingSocket);
+    pendingSocket.destroy();
+
+    await assert.rejects(pending, /^Error: rin_disconnected:get_state:req_1$/);
+    for (let attempt = 0; attempt < 20 && client.isConnected(); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(client.pending.size, 0);
+    assert.equal(client.isConnected(), false);
+    assert.deepEqual(
+      events.map((event) => [event.type, event.name]),
+      [["ui", "connection_lost"]],
+    );
   } finally {
     await client.disconnect();
     await server.close();

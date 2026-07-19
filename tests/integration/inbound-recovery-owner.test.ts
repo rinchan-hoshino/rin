@@ -24,23 +24,34 @@ async function withAgentDir(run: (agentDir: string) => Promise<void>) {
   }
 }
 
-test("inbound recovery gate preserves buffered ordering", () => {
+test("inbound recovery gate preserves per-chat buffered ordering", () => {
   const gate = new recovery.InboundRecoveryGate<string>();
   assert.equal(gate.isBuffering(), false);
-  assert.equal(gate.buffer("closed"), false);
+  assert.equal(gate.buffer("chat-a", "closed"), false);
   gate.begin();
-  assert.equal(gate.buffer("live"), true);
-  gate.prepend([]);
-  gate.prepend(["older-1", "older-2"]);
+  assert.equal(gate.buffer("chat-a", "live"), true);
+  assert.equal(gate.buffer("chat-ready", "handoff"), true);
+  assert.deepEqual(gate.configure(["", "chat-a"]), ["chat-ready"]);
+  assert.equal(gate.isBuffering(), true);
+  assert.deepEqual(gate.drain("chat-ready"), ["handoff"]);
+  gate.open("chat-ready");
+  gate.prepend("chat-a", []);
+  gate.prepend("chat-a", ["older-1", "older-2"]);
   assert.equal(gate.hasPending(), true);
-  assert.deepEqual(gate.drain(), ["older-1", "older-2", "live"]);
-  assert.equal(gate.hasPending(), false);
-  gate.open();
+  assert.equal(gate.hasPending("chat-a"), true);
+  assert.deepEqual(gate.drain("chat-a"), ["older-1", "older-2", "live"]);
+  assert.equal(gate.hasPending("chat-a"), false);
+  gate.open("chat-a");
+  assert.equal(gate.isBuffering("chat-a"), false);
   assert.equal(gate.isBuffering(), false);
 
   gate.begin();
-  gate.buffer("pending");
-  assert.throws(() => gate.open(), /still has buffered messages/);
+  gate.buffer("chat-b", "pending");
+  gate.configure(["chat-b"]);
+  assert.throws(
+    () => gate.open("chat-b"),
+    /still has buffered messages for chat-b/,
+  );
 });
 
 test("inbound recovery heads choose the newest durable user message", async () => {
@@ -243,6 +254,55 @@ test("inbound recovery settles successful, failed, deferred, and retired checkpo
     );
     assert.equal(deferred.scopeHealthy, true);
     assert.deepEqual(deferred.deferred, ["discord/bot-1:outage"]);
+  });
+});
+
+test("inbound recovery bounds concurrency and reports each settled chat", async () => {
+  await withAgentDir(async (agentDir) => {
+    for (let index = 1; index <= 4; index += 1) {
+      messageStore.saveChatMessage(agentDir, {
+        role: "user",
+        platform: "discord",
+        botId: "bot-1",
+        chatId: `chat-${index}`,
+        chatKey: `discord/bot-1:chat-${index}`,
+        messageId: `message-${index}`,
+        receivedAt: "2026-07-16T00:00:00.000Z",
+        platformTimestamp: index,
+      } as any);
+    }
+
+    let active = 0;
+    let peak = 0;
+    const configured: string[][] = [];
+    const settled: string[] = [];
+    const result = await recovery.recoverInboundHeads(
+      agentDir,
+      "discord",
+      "bot-1",
+      async (head) => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return [head.chatId];
+      },
+      {
+        concurrency: 2,
+        onHeads: (heads) => {
+          configured.push(heads.map((head) => head.chatId));
+        },
+        onHeadSettled: (outcome) => {
+          assert.equal(outcome.error, undefined);
+          settled.push(outcome.head.chatId);
+        },
+      },
+    );
+
+    assert.equal(peak, 2);
+    assert.deepEqual(configured, [["chat-1", "chat-2", "chat-3", "chat-4"]]);
+    assert.deepEqual(new Set(settled), new Set(configured[0]));
+    assert.deepEqual(result.recovered, configured[0]);
   });
 });
 

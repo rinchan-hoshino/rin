@@ -990,6 +990,43 @@ test("patched lifecycle wrappers preserve native fallbacks and cleanup", async (
   );
 });
 
+test("RPC transport failures defer to the Connecting status owner", async () => {
+  resetFixture();
+  await patches.applyRinTuiOverrides();
+  const proto = InteractiveMode.prototype;
+  const shown: string[] = [];
+  const instance = {
+    session: {
+      getFrontendStatusEvent: () => ({ phase: "connecting" }),
+    },
+    showError: (message: string) => shown.push(message),
+  };
+
+  for (const message of [
+    "rin_disconnected:get_state:req_1",
+    "rin_tui_not_connected",
+    "rin_session_recovering",
+  ]) {
+    assert.deepEqual(
+      proto.handleFatalRuntimeError.call(
+        instance,
+        "Failed to resume session",
+        new Error(message),
+      ),
+      { cancelled: true },
+    );
+  }
+  assert.deepEqual(shown, []);
+
+  instance.session.getFrontendStatusEvent = () => ({ phase: "ready" });
+  proto.handleFatalRuntimeError.call(
+    instance,
+    "Failed to resume session",
+    new Error("renderer exploded"),
+  );
+  assert.deepEqual(shown, ["Failed to resume session: renderer exploded"]);
+});
+
 test("remote selectors and extension fallbacks keep bounded ownership", async () => {
   resetFixture();
   await patches.applyRinTuiOverrides();
