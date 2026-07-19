@@ -84,6 +84,51 @@ test("todo tool reads current checklist when todos is omitted", async () => {
   assert.equal(read.content[0].text, "[ ] Keep this item\n[x] Done item");
 });
 
+test("todo renderer keeps the complete checklist when tools are collapsed", async () => {
+  const { tool } = await createTodoTool();
+  const todos = Array.from({ length: 6 }, (_, index) => ({
+    text: `Item ${index + 1}`,
+    done: index === 5,
+  }));
+  const theme = {
+    fg: (_kind: string, text: unknown) => String(text),
+  };
+  const renderContext = {
+    state: {},
+    lastComponent: undefined,
+    isPartial: true,
+  };
+
+  const callText = tool
+    .renderCall({ todos }, theme, renderContext)
+    .render(80)
+    .join("\n");
+  assert.match(callText, /✓ Item 6/);
+  assert.doesNotMatch(callText, /more/);
+
+  const resultText = tool
+    .renderResult(
+      {
+        content: [{ type: "text", text: "" }],
+        details: {
+          action: "write",
+          todos: todos.map((todo, index) => ({
+            id: index + 1,
+            ...todo,
+          })),
+          nextId: 7,
+        },
+      },
+      { expanded: false },
+      theme,
+      renderContext,
+    )
+    .render(80)
+    .join("\n");
+  assert.match(resultText, /✓ Item 6/);
+  assert.doesNotMatch(resultText, /more/);
+});
+
 test("todo tool clears only when todos is an empty array", async () => {
   const { tool } = await createTodoTool();
 

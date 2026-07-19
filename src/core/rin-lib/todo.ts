@@ -130,30 +130,21 @@ function formatTodoChecklistContent(todoList: Todo[]): string {
   return formatRinTodoChecklistContent(todoList);
 }
 
-function formatTodoChecklistRender(
-  todoList: Todo[],
-  expanded: boolean,
-  theme: Theme,
-): string {
+function formatTodoChecklistRender(todoList: Todo[], theme: Theme): string {
   if (todoList.length === 0) {
     return theme.fg("dim", "○ No todos");
   }
 
-  const display = expanded ? todoList : todoList.slice(0, 5);
-  const lines = display.map((todo) => {
-    const check = todo.done ? theme.fg("success", "✓") : theme.fg("dim", "○");
-    const itemText = formatRinTodoItemText(todo);
-    const text = todo.done
-      ? theme.fg("dim", itemText)
-      : theme.fg("text", itemText);
-    return `${check} ${text}`;
-  });
-
-  if (!expanded && todoList.length > 5) {
-    lines.push(theme.fg("dim", `… ${todoList.length - 5} more`));
-  }
-
-  return lines.join("\n");
+  return todoList
+    .map((todo) => {
+      const check = todo.done ? theme.fg("success", "✓") : theme.fg("dim", "○");
+      const itemText = formatRinTodoItemText(todo);
+      const text = todo.done
+        ? theme.fg("dim", itemText)
+        : theme.fg("text", itemText);
+      return `${check} ${text}`;
+    })
+    .join("\n");
 }
 
 function renderTodoText(text: string) {
@@ -271,26 +262,22 @@ export default function todoCapability(): RinCapabilityDefinition {
     renderCall(args: any, theme, context) {
       if (context?.isPartial === false) return renderTodoText("");
       if (isTodoReadParams(args)) {
-        return renderTodoText(formatTodoChecklistRender(todos, false, theme));
+        return renderTodoText(formatTodoChecklistRender(todos, theme));
       }
       const nextTodos = normalizeTodoWriteItems(args?.todos);
       return renderTodoText(
-        nextTodos ? formatTodoChecklistRender(nextTodos, false, theme) : "",
+        nextTodos ? formatTodoChecklistRender(nextTodos, theme) : "",
       );
     },
 
-    renderResult(result, { expanded }, theme, _context) {
+    renderResult(result, _options, theme, _context) {
       const details = readTodoDetails(result.details);
       if (!details) {
         const text = result.content[0];
         return renderTodoText(text?.type === "text" ? text.text : "");
       }
 
-      const checklist = formatTodoChecklistRender(
-        details.todos,
-        expanded,
-        theme,
-      );
+      const checklist = formatTodoChecklistRender(details.todos, theme);
       if (details.error) {
         return renderTodoText(
           `${theme.fg("error", `Error: ${details.error}`)}\n${checklist}`,
