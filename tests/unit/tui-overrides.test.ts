@@ -1174,26 +1174,107 @@ test("footer appends runtime mode to the model label before rendering", async ()
   }
 });
 
-test("full redraw override preserves terminal scrollback", async () => {
+test("ordinary output preserves a scrolled viewport and full redraws do not duplicate frames", async () => {
   await overrides.applyRinTuiOverrides();
 
-  let captured = "";
+  const { Terminal: HeadlessTerminal } = await import("@xterm/headless");
+  const headlessTerminal = new HeadlessTerminal({
+    cols: 30,
+    rows: 8,
+    allowProposedApi: true,
+    disableStdin: true,
+    scrollback: 1000,
+  });
+  const processTerminal = new piTuiModule.ProcessTerminal();
+  const pendingWrites: Promise<void>[] = [];
   const originalWrite = process.stdout.write;
   process.stdout.write = ((chunk, ...args) => {
-    captured += String(chunk);
+    pendingWrites.push(
+      new Promise<void>((resolve) => {
+        headlessTerminal.write(String(chunk), resolve);
+      }),
+    );
     const callback = args.find((arg) => typeof arg === "function");
     if (callback) callback();
     return true;
   }) as typeof process.stdout.write;
 
-  try {
-    const terminal = new piTuiModule.ProcessTerminal();
-    terminal.write("\u001b[?2026h\u001b[2J\u001b[H\u001b[3Jdemo");
-  } finally {
-    process.stdout.write = originalWrite;
+  let columns = 30;
+  let onResize: (() => void) | undefined;
+  const terminal = {
+    start(_onInput: (data: string) => void, handleResize: () => void) {
+      onResize = handleResize;
+    },
+    stop() {},
+    write(data: string) {
+      processTerminal.write(data);
+    },
+    get columns() {
+      return columns;
+    },
+    get rows() {
+      return 8;
+    },
+    hideCursor() {},
+    showCursor() {},
+    clearLine() {},
+    clearFromCursor() {},
+    clearScreen() {},
+    setTitle() {},
+    setProgress() {},
+  };
+  let renderedLines = [
+    "STARTUP",
+    ...Array.from({ length: 8 }, (_, index) => `MESSAGE-${index}`),
+    "INPUT",
+  ];
+  const component = {
+    render() {
+      return renderedLines;
+    },
+    invalidate() {},
+  };
+  const tui = new piTuiModule.TUI(terminal);
+  tui.addChild(component);
+
+  async function flushRender() {
+    for (let attempt = 0; pendingWrites.length === 0; attempt += 1) {
+      assert.ok(attempt < 100, "TUI render timed out");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await Promise.all(pendingWrites.splice(0));
   }
 
-  assert.equal(captured, "\u001b[?2026h\u001b[2J\u001b[Hdemo");
+  try {
+    tui.start();
+    await flushRender();
+
+    const buffer = headlessTerminal.buffer.active;
+    headlessTerminal.scrollLines(-1);
+    const scrolledViewport = buffer.viewportY;
+    renderedLines = [...renderedLines.slice(0, -1), "MESSAGE-8", "INPUT"];
+    tui.requestRender();
+    await flushRender();
+    assert.equal(buffer.viewportY, scrolledViewport);
+
+    headlessTerminal.scrollToBottom();
+    for (columns of [31, 32]) {
+      headlessTerminal.resize(columns, 8);
+      onResize?.();
+      await flushRender();
+    }
+
+    const lines = Array.from({ length: buffer.length }, (_, index) =>
+      buffer.getLine(index)?.translateToString(true),
+    );
+    assert.equal(lines.filter((line) => line === "STARTUP").length, 1);
+    assert.equal(lines.filter((line) => line === "INPUT").length, 1);
+    assert.equal(buffer.length, 11);
+  } finally {
+    tui.stop();
+    process.stdout.write = originalWrite;
+    headlessTerminal.dispose();
+  }
 });
 
 test("loader stop clears render interval", () => {
