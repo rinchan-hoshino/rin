@@ -74,7 +74,6 @@ export type RinFrontendTurnResult = {
   sessionFile?: string;
 };
 
-const TURN_RESULT_INVARIANT_ERROR = "rin_turn_result_invariant_failed";
 const TURN_RESULT_RECOVERY_TIMEOUT_ERROR = "rin_turn_result_recovery_timeout";
 
 function isRecoverableConnectionError(error: unknown) {
@@ -952,7 +951,6 @@ export class RinFrontendTurnDriver {
     completion: RinFrontendTurnResult,
   ): RinFrontendTurnResult {
     const finalText = safeString(completion?.finalText).trim();
-    if (!finalText) throw new Error(TURN_RESULT_INVARIANT_ERROR);
     this.latestAssistantText = finalText;
     this.liveTurnRecoveryContext = null;
     return {
@@ -1031,8 +1029,8 @@ export class RinFrontendTurnDriver {
           ).trim() || undefined,
       };
     }
+    if (!("finalText" in resolved) && !("result" in resolved)) return null;
     const finalText = safeString(resolved.finalText).trim();
-    if (!finalText) return null;
     this.latestAssistantText = finalText;
     this.finishResolvedSubmittedTurn();
     return {
@@ -1138,9 +1136,8 @@ export class RinFrontendTurnDriver {
         if ("completion" in replayed) {
           return this.normalizeTurnCompletion(replayed.completion);
         }
-        const error = new Error(TURN_RESULT_INVARIANT_ERROR);
-        this.failLiveTurn(error);
-        throw error;
+        liveTurn.resolve({ finalText: "" });
+        return this.normalizeTurnCompletion(await liveTurn.promise);
       }
       const raced = await Promise.race([
         liveTurn.promise.then((completion) => ({ completion })),
@@ -1476,10 +1473,6 @@ export class RinFrontendTurnDriver {
           ? firstResult.completion
           : await liveTurn.promise;
       const finalText = safeString((completion as any)?.finalText).trim();
-      if (!finalText) {
-        this.liveTurnRecoveryContext = null;
-        throw new Error(TURN_RESULT_INVARIANT_ERROR);
-      }
       this.latestAssistantText = finalText;
       this.liveTurnRecoveryContext = null;
       return {
@@ -1684,10 +1677,6 @@ export class RinFrontendTurnDriver {
         this.frontendState.isStreaming = false;
         this.updateFrontendStateFrom(event);
         const finalText = safeString(event.finalText).trim();
-        if (!finalText) {
-          this.failLiveTurn(new Error(TURN_RESULT_INVARIANT_ERROR));
-          return;
-        }
         this.latestAssistantText = finalText;
         if (!this.frontendState.workingVisible) {
           this.setFrontendPhase("idle");

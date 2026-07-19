@@ -5933,7 +5933,7 @@ test("chat controller keeps the turn active while final reply delivery is still 
   }
 });
 
-test("chat controller rejects rpc completion without finalText instead of reusing observed assistant text", async () => {
+test("chat controller settles an empty rpc completion without reusing observed assistant text", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.commitPendingDelivery = async function (clearProcessing = false) {
@@ -5966,29 +5966,25 @@ test("chat controller rejects rpc completion without finalText instead of reusin
           content: [{ type: "text", text: "observed completed text" }],
         },
       });
-      emitRpcTurnComplete(controller, options, "", {
-        messages: [{ type: "text", text: "canonical result text" }],
-      });
+      emitRpcTurnComplete(controller, options, "", { messages: [] });
     },
     switchSession: async () => {},
   };
 
-  await assert.rejects(
-    controller.runTurn({
-      text: "hello",
-      attachments: [],
-      incomingMessageId: "m-turn-observed-final",
-      replyToMessageId: "m-turn-observed-final",
-    }),
-    /rin_turn_result_invariant_failed/,
-  );
+  const result = await controller.runTurn({
+    text: "hello",
+    attachments: [],
+    incomingMessageId: "m-turn-observed-final",
+    replyToMessageId: "m-turn-observed-final",
+  });
+  assert.equal(result.finalText, "");
   assert.deepEqual(deliveries, []);
   assert.equal(controller.currentTurn, null);
   assert.equal(controller.awaitingTurnSettle, false);
   assert.equal(await controller.pollTyping(), false);
 });
 
-test("chat controller rejects rpc completion without finalText instead of scanning session messages", async () => {
+test("chat controller settles an empty rpc completion without scanning session messages", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.commitPendingDelivery = async function (clearProcessing = false) {
@@ -6022,22 +6018,18 @@ test("chat controller rejects rpc completion without finalText instead of scanni
         },
       );
       controller.handleSessionEvent({ type: "agent_start" });
-      emitRpcTurnComplete(controller, options, "", {
-        messages: [{ type: "text", text: "canonical result text" }],
-      });
+      emitRpcTurnComplete(controller, options, "", { messages: [] });
     },
     switchSession: async () => {},
   };
 
-  await assert.rejects(
-    controller.runTurn({
-      text: "hello",
-      attachments: [],
-      incomingMessageId: "m-turn-missing-final",
-      replyToMessageId: "m-turn-missing-final",
-    }),
-    /rin_turn_result_invariant_failed/,
-  );
+  const result = await controller.runTurn({
+    text: "hello",
+    attachments: [],
+    incomingMessageId: "m-turn-empty-final",
+    replyToMessageId: "m-turn-empty-final",
+  });
+  assert.equal(result.finalText, "");
   assert.deepEqual(deliveries, []);
   assert.equal(controller.currentTurn, null);
   assert.equal(controller.awaitingTurnSettle, false);

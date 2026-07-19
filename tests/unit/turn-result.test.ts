@@ -189,7 +189,7 @@ test("turn completion resolver prefers canonical result text over payload finalT
   );
 });
 
-test("turn completion resolver falls back to messages and payload text when needed", () => {
+test("turn completion resolver uses candidate presence without replacing empty structured results", () => {
   assert.deepEqual(
     turnResult.resolveTurnCompletion({
       result: { messages: [] },
@@ -202,12 +202,7 @@ test("turn completion resolver falls back to messages and payload text when need
       ],
       finalText: "payload fallback",
     }),
-    {
-      finalText: "from session messages",
-      result: {
-        messages: [{ type: "text", text: "from session messages" }],
-      },
-    },
+    { finalText: "", result: { messages: [] } },
   );
 
   assert.deepEqual(
@@ -218,13 +213,8 @@ test("turn completion resolver falls back to messages and payload text when need
       finalText: "payload fallback",
     }),
     {
-      finalText: "payload fallback",
-      result: {
-        messages: [
-          { type: "text", text: "payload fallback" },
-          { type: "file", path: "/tmp/demo.txt" },
-        ],
-      },
+      finalText: "",
+      result: { messages: [{ type: "file", path: "/tmp/demo.txt" }] },
     },
   );
 

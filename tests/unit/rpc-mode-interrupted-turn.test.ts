@@ -77,6 +77,7 @@ async function exerciseResumeInterruptedTurn(
           calls.push(["appendMessage", message]);
         },
         getEntries: () => [],
+        getBranch: () => [],
         getTree: () => [],
         getLeafId: () => null,
         getCwd: () => process.cwd(),

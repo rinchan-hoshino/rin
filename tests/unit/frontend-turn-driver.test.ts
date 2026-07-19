@@ -1374,6 +1374,42 @@ test("submitted turn resolution does not surface provider failure while the subm
   assert.deepEqual(resolved, { submitted: true });
 });
 
+test("submitted turn resolution uses the last empty or media terminal after a failed retry", () => {
+  const resolved = resolveSubmittedTurnFromMessages(
+    [
+      {
+        role: "user",
+        requestTag: "retry-tag",
+        content: "restored job",
+      },
+      {
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "retry failed",
+        content: [],
+      },
+      {
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "image", data: "ZGVtbw==", mimeType: "image/png" }],
+      },
+      {
+        role: "user",
+        requestTag: "later-tag",
+        content: "later follow-up",
+      },
+    ],
+    { text: "restored job", requestTag: "retry-tag" },
+  );
+
+  assert.deepEqual(resolved, {
+    finalText: "",
+    result: {
+      messages: [{ type: "image", data: "ZGVtbw==", mimeType: "image/png" }],
+    },
+  });
+});
+
 test("frontend SDK turn driver surfaces restored submitted provider errors", async () => {
   const originalNow = Date.now;
   let now = 1778774600000;
@@ -2266,7 +2302,7 @@ test("frontend SDK turn driver does not complete from agent_end before rpc final
   assert.equal(result.finalText, "rpc final");
 });
 
-test("frontend SDK turn driver rejects empty rpc completion as a terminal-result invariant failure", async () => {
+test("frontend SDK turn driver accepts an empty rpc completion without scanning session history", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   client.getMessages = async () => [
@@ -2278,35 +2314,8 @@ test("frontend SDK turn driver rejects empty rpc completion as a terminal-result
     await emitRpcTurnComplete(driver, options.requestTag, "");
   };
 
-  await assert.rejects(
-    () => driver.runTurn({ text: "hello" }),
-    /rin_turn_result_invariant_failed/,
-  );
-});
-
-test("frontend SDK turn driver rejects terminal-result invariant rpc errors without session-message fallback", async () => {
-  const driver = createDriver();
-  const client = (driver as any).testClient;
-  client.getMessages = async () => [
-    { role: "user", content: "hello" },
-    { role: "assistant", content: "session text must not be a fallback" },
-  ];
-  client.prompt = async (_text: string, options: any = {}) => {
-    await emitDriverEvent(driver, { type: "agent_start" });
-    await emitDriverEvent(driver, {
-      type: "rpc_turn_event",
-      event: "error",
-      requestTag: options.requestTag,
-      error: "rin_turn_result_invariant_failed",
-      sessionId: "session-driver",
-      sessionFile: "/tmp/chat-driver.jsonl",
-    });
-  };
-
-  await assert.rejects(
-    () => driver.runTurn({ text: "hello" }),
-    /rin_turn_result_invariant_failed/,
-  );
+  const result = await driver.runTurn({ text: "hello" });
+  assert.equal(result.finalText, "");
 });
 
 test("frontend SDK turn driver does not emit text-only assistant messages as interim", async () => {
@@ -2646,10 +2655,10 @@ test("frontend SDK turn driver does not reuse an older final when the current tu
     promptSource: "chat-bridge",
   });
 
-  await assert.rejects(
-    () => driver.runTurn({ text: "new prompt" }),
-    /rin_turn_result_invariant_failed/,
-  );
+  const result = await driver.runTurn({ text: "new prompt" });
+  assert.equal(result.finalText, "");
+  assert.deepEqual(result.result, { messages: [] });
+  assert.notEqual(result.finalText, oldFinal);
 });
 
 test("frontend SDK turn driver does not recover interrupted prompt errors from session state", async () => {

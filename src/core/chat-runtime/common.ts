@@ -493,7 +493,7 @@ export async function readBinaryFromNode(node: any) {
   const src = safeString(attrs.src || attrs.url || "").trim();
   const name = ensureFileName(
     safeString(attrs.name).trim() ||
-      mediaNameFromSource(src) ||
+      (!src.startsWith("data:") ? mediaNameFromSource(src) : "") ||
       `${safeString(node?.type).trim() || "file"}`,
     "file",
   );
@@ -506,6 +506,15 @@ export async function readBinaryFromNode(node: any) {
     };
   }
   if (!src) return null;
+  const inlineData = /^data:([^;,]+)?;base64,(.*)$/is.exec(src);
+  if (inlineData) {
+    const inlineMimeType = safeString(inlineData[1] || mimeType).trim();
+    return {
+      data: Buffer.from(inlineData[2] || "", "base64"),
+      name: ensureExtension(name, inlineMimeType),
+      mimeType: inlineMimeType,
+    };
+  }
   if (src.startsWith("file://")) {
     const filePath = fileURLToPath(src);
     try {

@@ -85,8 +85,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     ),
   chat_database_unsupported_schema: (detail) =>
     withDetail("The chat database schema version is unsupported", detail),
-  chat_final_assistant_text_missing: () =>
-    "Rin finished the chat turn but did not produce reply text.",
   chat_inbox_chatKey_required: () =>
     "Chat inbox write failed because the chat key is missing. Check the adapter event.",
   chat_inbox_messageId_required: () =>
@@ -215,8 +213,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
 
   cron_chat_unavailable: () =>
     "Scheduled task delivery failed because the target chat is unavailable. Check the task frontend binding.",
-  cron_final_assistant_text_missing: () =>
-    "Scheduled task finished but produced no final reply. Check the task session.",
   cron_frontend_key_required: () =>
     "Scheduled task frontend binding needs a frontend key. Add the key or remove the binding.",
   cron_frontend_tui_unbindable: () =>
@@ -262,8 +258,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   external_chat_adapter_return_requires_adapter_and_bot: () =>
     "External chat adapter must return both an adapter and a bot. Fix the adapter implementation.",
 
-  final_assistant_text_missing: () =>
-    "Rin finished the turn but did not produce final reply text.",
   frontend_model_not_found: modelNotFound,
   frontend_session_not_connected: () =>
     "Rin is not connected to a session yet. Reconnect or start a new session.",
@@ -568,14 +562,10 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rpc_turn_already_active: () =>
     "Rin already has a turn in progress for this session.",
   rpc_turn_failed: () => "Rin failed while running the remote turn.",
-  rpc_turn_final_output_missing: () =>
-    "Rin finished the turn without a final reply.",
   rin_turn_recovery_in_progress: () =>
     "Rin is still recovering the previous turn for this session.",
   rin_turn_request_tag_required: () =>
     "Rin could not start the turn because its durable request identity is missing.",
-  rin_turn_result_invariant_failed: () =>
-    "Rin's remote turn ended without a durable terminal result.",
   rin_turn_result_recovery_timeout: () =>
     "Rin could not recover the remote turn result before the timeout.",
 

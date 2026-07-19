@@ -184,6 +184,15 @@ test("chat runtime common helpers preserve binary payload naming for buffers and
   assert.equal(bufferPayload?.mimeType, "image/png");
   assert.equal(bufferPayload?.data.toString("utf8"), "demo");
 
+  const inlinePayload = await chatRuntimeCommon.readBinaryFromNode(
+    chatRuntimeCommon.normalizeNode("image", {
+      src: "data:image/png;base64,ZGVtbw==",
+    }),
+  );
+  assert.equal(inlinePayload?.name, "image.png");
+  assert.equal(inlinePayload?.mimeType, "image/png");
+  assert.equal(inlinePayload?.data.toString("utf8"), "demo");
+
   const tempDir = await fs.mkdtemp(
     path.join(rootDir, ".tmp-rin-chat-runtime-"),
   );

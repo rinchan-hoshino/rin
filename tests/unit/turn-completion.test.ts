@@ -49,5 +49,5 @@ test("Rin turn completion does not treat assistant tool-call prefaces as finals"
     ],
   });
 
-  assert.equal(resolution?.completion.finalText, "");
+  assert.equal(resolution, null);
 });

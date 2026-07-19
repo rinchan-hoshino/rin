@@ -1285,6 +1285,31 @@ export class WorkerPool {
       ) {
         this.setWorkerSessionRefs(worker, sessionSelectorFromState(data));
       }
+      if (
+        payload.command === "resume_interrupted_turn" &&
+        data.resumed === false &&
+        pendingResponse &&
+        worker.activeLifecycleOwnerCommandId === pendingResponse.id
+      ) {
+        const selector = resolveSessionSelector(
+          sessionSelectorFromState(data),
+          resolveSessionSelector(
+            pendingResponse.selector,
+            this.getWorkerSelector(worker),
+          ),
+        );
+        worker.turnRecoveryPending = false;
+        worker.rpcTurnActive = false;
+        worker.turnActive = false;
+        worker.isStreaming = false;
+        worker.activeRequestTag = undefined;
+        worker.activeTurnGeneration = undefined;
+        worker.legacyTurnActive = false;
+        this.clearLifecycleOwner(worker);
+        this.syncRunningWorkerRecordForSelector(selector, false);
+        this.maybeReleaseWorker(worker);
+        return true;
+      }
       if (payload.command === "get_state") {
         const reportedTurnActive = Boolean(data.turnActive ?? data.isStreaming);
         const hasLifecycleOwner =
@@ -1584,7 +1609,11 @@ export class WorkerPool {
           worker.pendingResponses.delete(String(payload.id));
           const keepTurnRecoveryRecord =
             payload.success === true &&
-            pending.expectsTerminalTurnEvent === true;
+            pending.expectsTerminalTurnEvent === true &&
+            !(
+              payload.command === "resume_interrupted_turn" &&
+              payload.data?.resumed === false
+            );
           if (!keepTurnRecoveryRecord) this.syncRunningWorkerRecord(worker);
           if (pending.connection) {
             this.rememberSessionSelection(

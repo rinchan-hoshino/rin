@@ -1,5 +1,6 @@
 import { isAssistantFailedMessage } from "../message-content.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
+import { isRinTerminalAssistantMessage } from "./turn-completion.js";
 import { safeString } from "../text-utils.js";
 
 export type RinSubmittedTurnResolution =
@@ -113,32 +114,38 @@ export function resolveSubmittedTurnFromMessages(
 
   const turnMessages = messages.slice(submittedIndex + 1);
   let hasLaterUserBeforeCompletion = false;
-  let completion: ReturnType<typeof resolveTurnCompletion> | null = null;
-  for (let index = 0; index < turnMessages.length; index += 1) {
-    const message = turnMessages[index];
+  let terminalMessage: any = null;
+  for (const rawMessage of turnMessages) {
+    const message = messageValue(rawMessage);
     if (messageRole(message) === "user") {
+      if (terminalMessage) break;
       hasLaterUserBeforeCompletion = true;
       continue;
     }
-    const candidate = resolveTurnCompletion({
-      messages: turnMessages.slice(0, index + 1),
-    });
-    const candidateFinalText = safeString(candidate.finalText).trim();
-    if (candidateFinalText) {
-      completion = candidate;
-      break;
+    if (isRinTerminalAssistantMessage(message)) {
+      terminalMessage = message;
     }
   }
   if (hasLaterUserBeforeCompletion) return { superseded: true };
-  const finalText = safeString(completion?.finalText).trim();
-  if (!finalText) {
+  if (!terminalMessage) {
     if (options.turnActive) return { submitted: true };
     const error = findSubmittedTurnFailure(turnMessages);
     if (error) return { error };
     return { submitted: true };
   }
+  const terminalError =
+    messageFailureError(terminalMessage) ||
+    (isAssistantFailedMessage(terminalMessage)
+      ? safeString(terminalMessage?.stopReason).trim() === "aborted"
+        ? "Agent turn was aborted."
+        : "Agent producer failed."
+      : "");
+  if (terminalError) {
+    return options.turnActive ? { submitted: true } : { error: terminalError };
+  }
+  const completion = resolveTurnCompletion({ messages: [terminalMessage] });
   return {
-    finalText,
-    result: completion?.result,
+    finalText: completion.finalText,
+    result: completion.result,
   };
 }

@@ -6,7 +6,6 @@ import {
   extractAssistantFinalText,
   extractExistingFilePaths,
   extractImageParts,
-  extractMessageText,
   isAssistantFailedMessage,
 } from "../message-content.js";
 import { safeString } from "../text-utils.js";
@@ -61,23 +60,6 @@ function normalizeTurnResult(
   return { messages: normalizeTurnMessages(result.messages) };
 }
 
-function prependTurnText(result: TurnResult, text: string): TurnResult {
-  return text
-    ? {
-        messages: [{ type: "text", text }, ...result.messages],
-      }
-    : result;
-}
-
-function resolveTextfulTurnResult(
-  result: TurnResult | null | undefined,
-): { result: TurnResult; finalText: string } | null {
-  const normalized = normalizeTurnResult(result);
-  if (!normalized) return null;
-  const finalText = extractFinalTextFromTurnResult(normalized);
-  return { result: normalized, finalText };
-}
-
 export function extractFinalTextFromTurnResult(
   result: TurnResult | null | undefined,
 ) {
@@ -90,25 +72,13 @@ export function extractFinalTextFromTurnResult(
 }
 
 export function resolveTurnResult(input: TurnCompletionInput = {}): TurnResult {
-  const existingResult = resolveTextfulTurnResult(input.result);
-  if (existingResult?.finalText) {
-    return existingResult.result;
-  }
-
   const normalizedExistingResult = normalizeTurnResult(input.result);
-  const messagesResult = Array.isArray(input.messages)
-    ? resolveTextfulTurnResult(buildTurnResultFromMessages(input.messages))
-    : null;
-  if (messagesResult?.finalText) {
-    return messagesResult.result;
-  }
+  if (normalizedExistingResult) return normalizedExistingResult;
 
-  const fallbackText = trimTurnText(input.finalText);
-  if (normalizedExistingResult) {
-    return prependTurnText(normalizedExistingResult, fallbackText);
+  if (Array.isArray(input.messages)) {
+    return buildTurnResultFromMessages(input.messages);
   }
-  if (messagesResult) return messagesResult.result;
-  return buildTextOnlyTurnResult(fallbackText);
+  return buildTextOnlyTurnResult(input.finalText);
 }
 
 export function resolveTurnCompletion(input: TurnCompletionInput = {}) {
@@ -142,8 +112,7 @@ function findLastAssistantDeliverableMessage(messages: any[]) {
     if (safeString(message?.role) !== "assistant") continue;
     if (isAssistantFailedMessage(message)) return null;
     if (countToolCalls(message?.content) > 0) continue;
-    const text = extractMessageText(message.content, { trim: true });
-    if (text || extractImageParts(message.content).length > 0) return message;
+    return message;
   }
   return null;
 }

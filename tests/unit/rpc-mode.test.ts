@@ -19,12 +19,37 @@ function wait(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function parseRpcOutput(lines: unknown[]) {
+  return lines
+    .flatMap((chunk) => String(chunk).split(/\n+/))
+    .map((line) => {
+      const starts = [line.indexOf('{"id"'), line.indexOf('{"type"')].filter(
+        (index) => index >= 0,
+      );
+      if (!starts.length) return null;
+      try {
+        return JSON.parse(line.slice(Math.min(...starts)));
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
 function testSessionManager(getMessages = () => []) {
+  const getBranch = () =>
+    getMessages().map((message, index) => ({
+      id: `test-message-${index}`,
+      parentId: index > 0 ? `test-message-${index - 1}` : null,
+      type: "message",
+      message,
+    }));
   return {
     buildSessionContext: () => ({ messages: getMessages() }),
     getEntries: () => [],
+    getBranch,
     getTree: () => [],
-    getLeafId: () => null,
+    getLeafId: () => getBranch().at(-1)?.id ?? null,
     getCwd: () => process.cwd(),
     getSessionDir: () => process.cwd(),
   };
@@ -358,6 +383,7 @@ test(
           calls.push("session.dispose");
         },
         sessionManager: {
+          ...testSessionManager(() => []),
           _rewriteFile: () => {
             calls.push("session.flush");
           },
@@ -1000,6 +1026,7 @@ test(
             calls.push(["appendCustomEntry", customType, data]);
           },
           getEntries: () => [],
+          getBranch: () => [],
           getTree: () => [],
           getLeafId: () => null,
           getCwd: () => process.cwd(),
@@ -3228,6 +3255,8 @@ test(
             content: [{ type: "text", text: "original final" }],
           };
           branch.push({
+            id: "todo-result-entry",
+            parentId: null,
             type: "message",
             message: {
               role: "toolResult",
@@ -3239,7 +3268,12 @@ test(
               },
             },
           });
-          branch.push({ type: "message", message: assistantMessage });
+          branch.push({
+            id: "assistant-final-entry",
+            parentId: "todo-result-entry",
+            type: "message",
+            message: assistantMessage,
+          });
           emit({
             type: "message_end",
             message: assistantMessage,
@@ -3254,7 +3288,7 @@ test(
           getBranch: () => branch,
           getEntries: () => branch,
           getTree: () => [],
-          getLeafId: () => null,
+          getLeafId: () => branch.at(-1)?.id ?? null,
           getCwd: () => process.cwd(),
           getSessionDir: () => process.cwd(),
         },
@@ -3335,7 +3369,7 @@ test(
 );
 
 test(
-  "rpc mode rejects nonempty branch fallback without a manager leaf api",
+  "rpc mode rejects an empty branch adapter without leaf ownership before prompting",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3343,6 +3377,7 @@ test(
     const handlers = new Map();
     const lines = [];
     let latestAssistantText = "";
+    let promptCalled = false;
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -3354,28 +3389,7 @@ test(
     };
 
     try {
-      const oldAssistant = {
-        role: "assistant",
-        timestamp: new Date(Date.now() - 60_000).toISOString(),
-        content: [{ type: "text", text: "stale previous final" }],
-      };
-      const durableEntries = [
-        {
-          id: "older-entry",
-          parentId: null,
-          type: "message",
-          message: {
-            role: "user",
-            content: [{ type: "text", text: "old prompt" }],
-          },
-        },
-        {
-          id: "actual-baseline-leaf",
-          parentId: "older-entry",
-          type: "message",
-          message: oldAssistant,
-        },
-      ];
+      const durableEntries: any[] = [];
       const session = {
         isStreaming: false,
         isCompacting: false,
@@ -3385,16 +3399,17 @@ test(
         bindExtensions: async () => {},
         subscribe: () => () => {},
         prompt: async () => {
+          promptCalled = true;
           const currentAssistant = {
             role: "assistant",
             content: [
               { type: "text", text: "must not recover from invalid baseline" },
             ],
           };
-          session.messages = [oldAssistant, currentAssistant];
+          session.messages = [currentAssistant];
           durableEntries.push({
             id: "current-final-entry",
-            parentId: "actual-baseline-leaf",
+            parentId: null,
             type: "message",
             message: currentAssistant,
           });
@@ -3459,30 +3474,20 @@ test(
       );
       await wait(20);
 
-      const events = lines
-        .join("")
-        .trim()
-        .split(/\n+/)
-        .filter(Boolean)
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean);
+      const events = parseRpcOutput(lines);
+      const promptResponse = events.find(
+        (event) => event.type === "response" && event.id === "1",
+      );
+      assert.equal(promptCalled, false);
+      assert.equal(promptResponse?.success, false, JSON.stringify(events));
       assert.equal(
-        events.some(
-          (event) =>
-            event.type === "rpc_turn_event" && event.event === "complete",
-        ),
+        promptResponse?.error,
+        "Rin session branch cursor is unavailable before the turn starts.",
+      );
+      assert.equal(
+        events.some((event) => event.type === "rpc_turn_event"),
         false,
       );
-      const error = events.find(
-        (event) => event.type === "rpc_turn_event" && event.event === "error",
-      );
-      assert.equal(error?.error, "rpc_turn_final_output_missing");
       const stateResponse = events.find(
         (event) => event.type === "response" && event.id === "2",
       );
@@ -3643,7 +3648,7 @@ test(
 );
 
 test(
-  "rpc mode compares settlement branch leaf ids as opaque strings",
+  "rpc mode reports branch ownership changes instead of inventing a missing final",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3651,18 +3656,7 @@ test(
     const handlers = new Map();
     const lines = [];
     const sessionSubscribers = new Set();
-    const durableEntries: any[] = [
-      {
-        id: " baseline-entry ",
-        parentId: null,
-        type: "message",
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "previous prompt" }],
-        },
-      },
-    ];
-    let managerLeafId = " baseline-entry ";
+    const durableEntries: any[] = [];
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -3696,16 +3690,7 @@ test(
           for (const handler of sessionSubscribers) {
             handler({ type: "message_end", message: assistantMessage });
           }
-          durableEntries.push({
-            id: " unselected-final-entry ",
-            parentId: " baseline-entry ",
-            type: "message",
-            message: {
-              role: "assistant",
-              content: [{ type: "text", text: "not on the manager leaf" }],
-            },
-          });
-          managerLeafId = "unselected-final-entry";
+          (session.sessionManager as any).getLeafId = undefined;
         },
         sendCustomMessage: async () => {},
         steer: async () => {},
@@ -3715,7 +3700,7 @@ test(
         sessionManager: {
           ...testSessionManager(() => session.messages || []),
           getBranch: () => durableEntries,
-          getLeafId: () => managerLeafId,
+          getLeafId: () => null,
         },
         messages: [],
         getSessionStats: () => ({}),
@@ -3788,7 +3773,10 @@ test(
       );
       assert.equal(completion, undefined);
       assert.equal(error?.requestTag, "tag-1");
-      assert.equal(error?.error, "rpc_turn_final_output_missing");
+      assert.equal(
+        error?.error,
+        "Rin session branch ownership changed while the turn was running.",
+      );
       const stateResponse = events.find(
         (event) => event.type === "response" && event.id === "2",
       );
@@ -3955,7 +3943,7 @@ test(
 );
 
 test(
-  "rpc mode resolves a first-turn branch final when prompt settles without message_end",
+  "rpc mode completes stored branch finals without message_end, including empty text",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3964,6 +3952,7 @@ test(
     const lines = [];
     const durableEntries: any[] = [];
     const stateMessages: any[] = [];
+    let promptCount = 0;
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -3987,15 +3976,21 @@ test(
         bindExtensions: async () => {},
         subscribe: () => () => {},
         prompt: async () => {
+          promptCount += 1;
           const assistantMessage = {
             role: "assistant",
             timestamp: Date.now(),
-            content: [{ type: "text", text: "final from stored session" }],
+            content: [
+              {
+                type: "text",
+                text: promptCount === 1 ? "final from stored session" : "",
+              },
+            ],
           };
           stateMessages.push(assistantMessage);
           durableEntries.push({
-            id: "stored-final-entry",
-            parentId: null,
+            id: `stored-final-entry-${promptCount}`,
+            parentId: durableEntries.at(-1)?.id ?? null,
             type: "message",
             message: assistantMessage,
           });
@@ -4055,33 +4050,30 @@ test(
         ),
       );
       await wait(100);
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "2", type: "prompt", message: "empty", requestTag: "tag-2" })}\n`,
+        ),
+      );
+      await wait(100);
 
-      const events = lines
-        .join("")
-        .trim()
-        .split(/\n+/)
-        .filter(Boolean)
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean);
-      const completion = events.find(
+      const events = parseRpcOutput(lines);
+      const completions = events.filter(
         (event) =>
           event.type === "rpc_turn_event" && event.event === "complete",
       );
-      const error = events.find(
+      const errors = events.filter(
         (event) => event.type === "rpc_turn_event" && event.event === "error",
       );
-      assert.equal(completion?.requestTag, "tag-1");
-      assert.equal(completion?.finalText, "final from stored session");
-      assert.deepEqual(completion?.result, {
+      assert.equal(completions[0]?.requestTag, "tag-1");
+      assert.equal(completions[0]?.finalText, "final from stored session");
+      assert.deepEqual(completions[0]?.result, {
         messages: [{ type: "text", text: "final from stored session" }],
       });
-      assert.equal(error, undefined);
+      assert.equal(completions[1]?.requestTag, "tag-2");
+      assert.equal(completions[1]?.finalText, "");
+      assert.deepEqual(completions[1]?.result, { messages: [] });
+      assert.deepEqual(errors, []);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -5513,6 +5505,7 @@ test(
             calls.push(["appendMessage", message]);
           },
           getEntries: () => [],
+          getBranch: () => [],
           getTree: () => [],
           getLeafId: () => null,
           getCwd: () => process.cwd(),
@@ -5690,28 +5683,17 @@ test(
       );
       await wait(10);
 
-      const events = lines
-        .join("")
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean);
-      const complete = events.find(
-        (event) =>
-          event.type === "rpc_turn_event" && event.event === "complete",
-      );
-      const error = events.find(
-        (event) => event.type === "rpc_turn_event" && event.event === "error",
+      const events = parseRpcOutput(lines);
+      const response = events.find(
+        (event) => event.type === "response" && event.id === "2",
       );
       assert.equal(continued, false);
-      assert.equal(complete, undefined);
-      assert.equal(error?.error, "rpc_turn_final_output_missing");
+      assert.equal(response?.success, true, JSON.stringify(events));
+      assert.equal(response?.data?.resumed, false);
+      assert.equal(
+        events.some((event) => event.type === "rpc_turn_event"),
+        false,
+      );
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -5797,33 +5779,19 @@ test(
       );
       await wait(20);
 
-      const events = lines
-        .join("")
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
-          }
-        })
-        .filter(Boolean);
-      const start = events.find(
-        (event) => event.type === "rpc_turn_event" && event.event === "start",
-      );
-      const finished = events.find(
-        (event) =>
-          event.type === "rpc_turn_event" &&
-          (event.event === "complete" || event.event === "error"),
+      const events = parseRpcOutput(lines);
+      const response = events.find(
+        (event) => event.type === "response" && event.id === "2",
       );
       const stateResponse = events.find(
         (event) => event.type === "response" && event.id === "3",
       );
-      assert.ok(start);
-      assert.equal(start.requestTag, "");
-      assert.equal(finished?.event, "error");
-      assert.equal(finished?.error, "rpc_turn_final_output_missing");
+      assert.equal(response?.success, true, JSON.stringify(events));
+      assert.equal(response?.data?.resumed, false);
+      assert.equal(
+        events.some((event) => event.type === "rpc_turn_event"),
+        false,
+      );
       assert.equal(stateResponse?.data?.turnActive, false);
     } finally {
       process.stdin.on = stdinOn;
@@ -6118,6 +6086,8 @@ test(
         sessionManager: {
           ...testSessionManager(() => []),
           getEntries: () => durableEntries,
+          getBranch: () => durableEntries,
+          getLeafId: () => durableEntries.at(-1)?.id ?? null,
         },
         messages: [],
         getSessionStats: () => ({}),
@@ -6244,6 +6214,8 @@ test(
         sessionManager: {
           ...testSessionManager(() => []),
           getEntries: () => durableEntries,
+          getBranch: () => durableEntries,
+          getLeafId: () => durableEntries.at(-1)?.id ?? null,
         },
         messages: [],
         getSessionStats: () => ({}),

@@ -991,6 +991,118 @@ export function markChatMessageAcceptedWithFence(
   return result.changes === 1;
 }
 
+export function completeChatTurnWithoutDelivery(
+  agentDir: string,
+  fence: ChatTurnFenceInput,
+  input: {
+    sessionFile?: string;
+    supersedeTurnFences?: ChatTurnFenceInput[];
+  } = {},
+) {
+  const db = openChatDatabase(agentDir);
+  return db
+    .transaction(() => {
+      const timestamp = nowIso();
+      const terminalized = db
+        .prepare(
+          `UPDATE turns
+           SET state = 'terminal', terminal_kind = 'empty_completion',
+               owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL,
+               next_attempt_at = NULL, last_error = NULL, updated_at = ?
+           WHERE turn_id = ? AND chat_key = ? AND state = 'running'
+             AND owner_epoch = ? AND attempt = ?
+             AND inbound_message_id = (
+               SELECT id FROM messages
+               WHERE chat_key = ? AND message_id = ?
+             )
+             AND generation = (
+               SELECT current_generation FROM chat_state
+               WHERE chat_key = turns.chat_key
+             )`,
+        )
+        .run(
+          timestamp,
+          requiredText(fence.turnId, "chat_turn_id_required"),
+          requiredText(fence.chatKey, "chat_turn_chat_key_required"),
+          requiredText(fence.ownerEpoch, "chat_turn_owner_epoch_required"),
+          Math.max(0, Math.floor(Number(fence.attempt || 0))),
+          requiredText(fence.chatKey, "chat_turn_chat_key_required"),
+          requiredText(fence.messageId, "chat_turn_message_id_required"),
+        );
+      if (terminalized.changes !== 1) return false;
+      const sessionFile = safeString(input.sessionFile).trim() || null;
+      db.prepare(
+        `UPDATE messages
+         SET accepted_at = COALESCE(accepted_at, ?), processed_at = ?,
+             session_file = COALESCE(?, session_file),
+             disposition = 'actionable',
+             record_json = json_set(
+               record_json,
+               '$.acceptedAt', COALESCE(json_extract(record_json, '$.acceptedAt'), ?),
+               '$.processedAt', ?,
+               '$.sessionFile', COALESCE(?, json_extract(record_json, '$.sessionFile')),
+               '$.disposition', 'actionable'
+             ),
+             updated_at = ?
+         WHERE chat_key = ? AND message_id = ?`,
+      ).run(
+        timestamp,
+        timestamp,
+        sessionFile,
+        timestamp,
+        timestamp,
+        sessionFile,
+        timestamp,
+        fence.chatKey,
+        fence.messageId,
+      );
+      for (const superseded of input.supersedeTurnFences || []) {
+        if (!superseded || superseded.turnId === fence.turnId) continue;
+        const result = db
+          .prepare(
+            `UPDATE turns
+             SET state = 'superseded', terminal_kind = 'coalesced_steer',
+                 owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL,
+                 next_attempt_at = NULL, last_error = NULL, updated_at = ?
+             WHERE turn_id = ? AND chat_key = ? AND state = 'running'
+               AND owner_epoch = ? AND attempt = ?
+               AND inbound_message_id = (
+                 SELECT id FROM messages
+                 WHERE chat_key = ? AND message_id = ?
+               )
+               AND generation = (
+                 SELECT current_generation FROM chat_state
+                 WHERE chat_key = turns.chat_key
+               )`,
+          )
+          .run(
+            timestamp,
+            requiredText(superseded.turnId, "chat_turn_id_required"),
+            requiredText(superseded.chatKey, "chat_turn_chat_key_required"),
+            requiredText(
+              superseded.ownerEpoch,
+              "chat_turn_owner_epoch_required",
+            ),
+            Math.max(0, Math.floor(Number(superseded.attempt || 0))),
+            requiredText(superseded.chatKey, "chat_turn_chat_key_required"),
+            requiredText(superseded.messageId, "chat_turn_message_id_required"),
+          );
+        if (result.changes !== 1) throw new Error("chat_turn_fence_lost");
+        db.prepare(
+          `UPDATE messages
+           SET disposition = 'superseded',
+               record_json = json_set(record_json, '$.disposition', 'superseded'),
+               updated_at = ?
+           WHERE id = (
+             SELECT inbound_message_id FROM turns WHERE turn_id = ?
+           )`,
+        ).run(timestamp, superseded.turnId);
+      }
+      return true;
+    })
+    .immediate();
+}
+
 export function supersedeChatTurnWithFence(
   agentDir: string,
   fence: ChatTurnFenceInput,

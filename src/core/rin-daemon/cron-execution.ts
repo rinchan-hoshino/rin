@@ -365,7 +365,6 @@ export async function executeCronAgentTask(
   });
   const completion = resolveTurnCompletion(result);
   const finalText = summarizeText(completion.finalText, 4000);
-  if (!finalText) throw new Error("cron_final_assistant_text_missing");
   const nextSessionFile = String(result?.sessionFile || "").trim() || undefined;
   const keepChatBoundSession = Boolean(chatKey && nextSessionFile);
   if (sessionMode === "dedicated") {

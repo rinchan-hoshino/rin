@@ -63,6 +63,7 @@ import {
 import { drainChatOutbox } from "./boot.js";
 import {
   advanceChatGeneration,
+  completeChatTurnWithoutDelivery,
   markChatMessageAcceptedWithFence,
   openChatDatabase,
   readChatSessionBinding,
@@ -1733,9 +1734,6 @@ export class ChatController {
   }): ChatAssistantDelivery {
     const text = safeString(input.text).trim();
     const parts = Array.isArray(input.parts) ? input.parts.filter(Boolean) : [];
-    if (!text && !parts.length) {
-      throw new Error("chat_final_assistant_text_missing");
-    }
     const sessionPayload =
       input.bindSession === false
         ? {}
@@ -1958,6 +1956,92 @@ export class ChatController {
       this.coalescedSteeredDeliveryTargets = [];
     }
     return outcome;
+  }
+
+  private assistantResultParts(result: any): ChatMessagePart[] {
+    if (!Array.isArray(result?.messages)) return [];
+    return result.messages.flatMap((message: any): ChatMessagePart[] => {
+      if (message?.type === "text") {
+        const text = safeString(message.text).trim();
+        return text ? [{ type: "text", text }] : [];
+      }
+      if (message?.type === "image") {
+        const data = safeString(message.data).trim();
+        const path = safeString(message.path).trim();
+        const url = safeString(message.url).trim();
+        const mimeType = safeString(message.mimeType).trim() || undefined;
+        if (path) return [{ type: "image", path, mimeType }];
+        if (url) return [{ type: "image", url, mimeType }];
+        if (data) {
+          return [
+            {
+              type: "image",
+              url: `data:${mimeType || "image/png"};base64,${data}`,
+              mimeType,
+            },
+          ];
+        }
+        return [];
+      }
+      if (message?.type === "file") {
+        const path = safeString(message.path).trim();
+        const url = safeString(message.url).trim();
+        if (!path && !url) return [];
+        return [
+          {
+            type: "file",
+            ...(path ? { path } : {}),
+            ...(url ? { url } : {}),
+            name: safeString(message.name).trim() || undefined,
+            mimeType: safeString(message.mimeType).trim() || undefined,
+          },
+        ];
+      }
+      return [];
+    });
+  }
+
+  private assistantDeliveryParts(finalText: unknown, result: any) {
+    const text = safeString(finalText).trim();
+    const resultParts = this.assistantResultParts(result);
+    if (!text) return resultParts;
+    if (!resultParts.length) return [];
+    let replacedText = false;
+    const canonicalParts = resultParts.map((part) => {
+      if (part.type !== "text" || replacedText) return part;
+      replacedText = true;
+      return { type: "text" as const, text };
+    });
+    return replacedText
+      ? canonicalParts
+      : [{ type: "text" as const, text }, ...canonicalParts];
+  }
+
+  private async settleEmptyAssistantCompletion(input: {
+    incomingMessageId?: string;
+    sessionFile?: string;
+    outboxTurnFence?: ChatOutboxTurnFence;
+    supersedeTurnFences?: ChatOutboxTurnFence[];
+  }) {
+    const incomingMessageId = safeString(input.incomingMessageId).trim();
+    const fence =
+      input.outboxTurnFence ||
+      this.turnFenceForInboundMessage(incomingMessageId);
+    if (fence) {
+      const completed = completeChatTurnWithoutDelivery(this.agentDir, fence, {
+        sessionFile: toStoredSessionFile(
+          this.agentDir,
+          input.sessionFile || this.currentSessionFile(),
+        ),
+        supersedeTurnFences: input.supersedeTurnFences,
+      });
+      if (!completed) throw new Error("chat_turn_fence_lost");
+    } else {
+      this.markProcessedMessage(incomingMessageId);
+    }
+    await this.clearWorkingReaction().catch(() => {});
+    this.currentTurn = null;
+    this.coalescedSteeredDeliveryTargets = [];
   }
 
   private async deliverAssistantReply(input: {
@@ -2910,16 +2994,30 @@ export class ChatController {
           deliveryTarget.incomingMessageId,
           input.outboxTurnFence,
         );
-        await this.deliverAssistantReply({
-          text: result.finalText,
-          replyToMessageId: deliveryTarget.replyToMessageId,
-          sessionFile: result.sessionFile,
-          incomingMessageId: deliveryTarget.incomingMessageId,
-          outboxTurnFence: deliveryTarget.outboxTurnFence,
-          idempotencyKey: input.deliveryIdempotencyKey,
-          supersedeTurnFences,
-          clearProcessing: true,
-        });
+        const resultParts = this.assistantDeliveryParts(
+          result.finalText,
+          result.result,
+        );
+        if (safeString(result.finalText).trim() || resultParts.length) {
+          await this.deliverAssistantReply({
+            text: result.finalText,
+            parts: resultParts.length ? resultParts : undefined,
+            replyToMessageId: deliveryTarget.replyToMessageId,
+            sessionFile: result.sessionFile,
+            incomingMessageId: deliveryTarget.incomingMessageId,
+            outboxTurnFence: deliveryTarget.outboxTurnFence,
+            idempotencyKey: input.deliveryIdempotencyKey,
+            supersedeTurnFences,
+            clearProcessing: true,
+          });
+        } else {
+          await this.settleEmptyAssistantCompletion({
+            incomingMessageId: deliveryTarget.incomingMessageId,
+            sessionFile: result.sessionFile,
+            outboxTurnFence: deliveryTarget.outboxTurnFence,
+            supersedeTurnFences,
+          });
+        }
         originalSuperseded = supersedeTurnFences.length > 0;
         this.awaitingTurnSettle = false;
         await new Promise((resolve) => setImmediate(resolve));
@@ -3036,16 +3134,30 @@ export class ChatController {
             deliveryTarget.incomingMessageId,
             input.outboxTurnFence,
           );
-          await this.deliverAssistantReply({
-            text: result.finalText,
-            replyToMessageId: deliveryTarget.replyToMessageId,
-            sessionFile: result.sessionFile,
-            incomingMessageId: deliveryTarget.incomingMessageId,
-            outboxTurnFence: deliveryTarget.outboxTurnFence,
-            idempotencyKey: input.deliveryIdempotencyKey,
-            supersedeTurnFences,
-            clearProcessing: true,
-          });
+          const resultParts = this.assistantDeliveryParts(
+            result.finalText,
+            result.result,
+          );
+          if (safeString(result.finalText).trim() || resultParts.length) {
+            await this.deliverAssistantReply({
+              text: result.finalText,
+              parts: resultParts.length ? resultParts : undefined,
+              replyToMessageId: deliveryTarget.replyToMessageId,
+              sessionFile: result.sessionFile,
+              incomingMessageId: deliveryTarget.incomingMessageId,
+              outboxTurnFence: deliveryTarget.outboxTurnFence,
+              idempotencyKey: input.deliveryIdempotencyKey,
+              supersedeTurnFences,
+              clearProcessing: true,
+            });
+          } else {
+            await this.settleEmptyAssistantCompletion({
+              incomingMessageId: deliveryTarget.incomingMessageId,
+              sessionFile: result.sessionFile,
+              outboxTurnFence: deliveryTarget.outboxTurnFence,
+              supersedeTurnFences,
+            });
+          }
           originalSuperseded = supersedeTurnFences.length > 0;
           this.awaitingTurnSettle = false;
           await new Promise((resolve) => setImmediate(resolve));

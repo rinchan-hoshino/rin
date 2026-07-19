@@ -84,6 +84,7 @@ test(
         modelRegistry: { getAvailable: async () => [] },
         sessionManager: {
           getEntries: () => [],
+          getBranch: () => [],
           getTree: () => [],
           getLeafId: () => null,
           getCwd: () => process.cwd(),

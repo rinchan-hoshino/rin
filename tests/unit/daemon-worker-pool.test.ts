@@ -1448,6 +1448,72 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("worker pool clears recovery ownership when resume reports no resumable turn", async () => {
+  const dir = await makeTempDir("rin-worker-pool-resume-noop-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 1000,
+  });
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "resume-noop",
+      type: "resume_interrupted_turn",
+      requestTag: "run-noop",
+    },
+    true,
+  );
+
+  assert.equal(worker.turnRecoveryPending, true);
+  assert.equal(worker.activeLifecycleRequestTag, "run-noop");
+  assert.equal(worker.pendingResponses.has("resume-noop"), true);
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: "resume-noop",
+      type: "response",
+      command: "resume_interrupted_turn",
+      success: true,
+      data: { resumed: false, sessionFile },
+    })}\n`,
+  );
+  await sleep(10);
+
+  assert.equal(worker.pendingResponses.has("resume-noop"), false);
+  assert.equal(worker.turnRecoveryPending, false);
+  assert.equal(worker.activeLifecycleRequestTag, undefined);
+  assert.equal(worker.activeRequestTag, undefined);
+  assert.equal(writes.length, 1);
+  assert.match(writes[0], /"resumed":false/);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("test lifecycle helper drops unowned terminals before forwarding or resolving", async () => {
   const dir = await makeTempDir("rin-worker-pool-active-terminal-");
   const workerPath = path.join(dir, "worker-source");
