@@ -402,27 +402,11 @@ function showRpcTransportStatus(instance: any, event: any) {
   instance[RPC_TRANSPORT_STATUS_MESSAGE_KEY] = message;
 }
 
-function syncPiWorkingStatusFromSession(instance: any) {
-  const clearedTransportStatus = stopRpcTransportStatusComponent(instance);
-  if (
-    instance?.workingVisible !== false &&
-    instance?.session?.isStreaming &&
-    typeof instance?.setWorkingVisible === "function"
-  ) {
-    instance.setWorkingVisible(true);
-  }
-  if (clearedTransportStatus) instance?.ui?.requestRender?.();
-}
-
 function syncRpcFrontendStatus(instance: any, statusOverride?: any) {
   if (!isRpcTransportControlled(instance)) return;
   const status = statusOverride ?? instance.session.getFrontendStatusEvent?.();
   const phase = String(status?.phase || "");
-  if (phase === "working") {
-    syncPiWorkingStatusFromSession(instance);
-    return;
-  }
-  if (phase === "compacting" || phase === "retrying") {
+  if (phase === "working" || phase === "compacting" || phase === "retrying") {
     const changed = stopRpcTransportStatusComponent(instance);
     if (changed) instance?.ui?.requestRender?.();
     return;

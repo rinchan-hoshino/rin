@@ -261,7 +261,7 @@ test("worker helpers expose normalized slash commands and oauth state", async ()
   });
 });
 
-test("getSessionState exposes worker-owned turn activity separately from streaming", () => {
+test("getSessionState exposes turn, streaming, and Working independently", () => {
   const state = workerHelpers.getSessionState(
     {
       model: null,
@@ -277,11 +277,12 @@ test("getSessionState exposes worker-owned turn activity separately from streami
       messages: [],
       pendingMessageCount: 0,
     },
-    { turnActive: true },
+    { turnActive: true, workingVisible: true },
   );
 
   assert.equal(state.turnActive, true);
   assert.equal(state.isStreaming, false);
+  assert.equal(state.workingVisible, true);
 });
 
 test("runBuiltinCommand lists available sessions and reports missing session ids", async () => {

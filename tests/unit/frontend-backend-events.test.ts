@@ -135,11 +135,8 @@ test("frontend backend event translator exposes Pi working and compaction events
   assert.deepEqual(translator.translate({ type: "rin_working_end" }), []);
   assert.deepEqual(translator.translate({ type: "compaction_start" }), [
     { type: "compaction_start_notice", text: "Compacting..." },
-    { type: "external_working_start" },
   ]);
-  assert.deepEqual(translator.translate({ type: "compaction_end" }), [
-    { type: "external_working_end" },
-  ]);
+  assert.deepEqual(translator.translate({ type: "compaction_end" }), []);
 });
 
 test("frontend backend event translator exposes compact collapsed notice without summary text", () => {
@@ -161,7 +158,6 @@ test("frontend backend event translator exposes compact collapsed notice without
         deferDuringTurn: false,
         noticeKind: "compaction_end",
       },
-      { type: "external_working_end" },
     ],
   );
 });
@@ -187,7 +183,6 @@ test("frontend backend event translator adds expand hint only when the caller su
         deferDuringTurn: false,
         noticeKind: "compaction_end",
       },
-      { type: "external_working_end" },
     ],
   );
 });
@@ -202,7 +197,7 @@ test("frontend backend event translator does not expose compact summary when tok
       aborted: false,
       result: { summary: "Summary of conversation must not reach chat" },
     }),
-    [{ type: "external_working_end" }],
+    [],
   );
 });
 
@@ -340,11 +335,8 @@ test("frontend backend event translator does not complete turns from interim tex
   assert.deepEqual(translator.translate({ type: "agent_end" }), []);
   assert.deepEqual(translator.translate({ type: "compaction_start" }), [
     { type: "compaction_start_notice", text: "Compacting..." },
-    { type: "external_working_start" },
   ]);
-  assert.deepEqual(translator.translate({ type: "compaction_end" }), [
-    { type: "external_working_end" },
-  ]);
+  assert.deepEqual(translator.translate({ type: "compaction_end" }), []);
   assert.deepEqual(translator.translate({ type: "agent_start" }), [
     { type: "turn_accepted" },
   ]);
@@ -588,7 +580,7 @@ test("frontend backend event translator treats overflow compaction as ordinary b
       willRetry: true,
       aborted: false,
     }),
-    [{ type: "external_working_end" }],
+    [],
   );
   assert.deepEqual(
     translator.translate({

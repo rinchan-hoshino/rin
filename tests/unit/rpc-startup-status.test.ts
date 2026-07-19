@@ -85,7 +85,7 @@ test("rpc frontend stays idle while loading resume sessions", async () => {
   assert.deepEqual(events, []);
 });
 
-test("rpc frontend status labels follow phase priority", () => {
+test("rpc frontend status labels exclude logical turn activity", () => {
   const session = new RpcInteractiveSession(createClient());
   session.startupPending = false;
 
@@ -116,12 +116,7 @@ test("rpc frontend status labels follow phase priority", () => {
   });
 
   session.retryAttempt = 0;
-  assert.deepEqual(session.getFrontendStatusEvent(), {
-    type: "rpc_frontend_status",
-    phase: "working",
-    label: "Working",
-    connected: true,
-  });
+  assert.deepEqual(session.getFrontendStatusEvent(), null);
 
   session.remoteTurnRunning = false;
   session.activeTurn = { mode: "prompt", message: "hello" };

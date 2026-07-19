@@ -105,8 +105,6 @@ export type RinFrontendBackendEvent =
       todoError?: string;
     }
   | { type: "compaction_start_notice"; text: string }
-  | { type: "external_working_start" }
-  | { type: "external_working_end" }
   | { type: "working_visible"; visible: boolean }
   | { type: "assistant_stream"; text: string; requestTag?: string }
   | { type: "assistant_summary"; text: string; requestTag?: string }
@@ -194,6 +192,7 @@ export type RinSessionState = {
   thinkingLevel?: string;
   turnActive?: boolean;
   isStreaming?: boolean;
+  workingVisible?: boolean;
   isCompacting?: boolean;
   sessionFile?: string;
   sessionId?: string;

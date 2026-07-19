@@ -156,7 +156,10 @@ export function applyRpcSessionState(
     state: any;
     activeTurn?: unknown;
     remoteTurnRunning?: boolean;
-    setRemoteTurnRunning?: (running: boolean) => void;
+    backendWorkingVisible?: boolean;
+    setTurnActive?: (active: boolean) => void;
+    setAgentStreaming?: (streaming: boolean) => void;
+    setBackendWorkingVisible?: (visible: boolean) => void;
   },
   state: any,
 ) {
@@ -167,19 +170,29 @@ export function applyRpcSessionState(
   target.steeringMode = state?.steeringMode ?? target.steeringMode;
   target.followUpMode = state?.followUpMode ?? target.followUpMode;
   target.autoCompactionEnabled = Boolean(state?.autoCompactionEnabled);
-  // The worker owns authoritative turn activity. `isStreaming` is the lower-
-  // level session flag and may drop during internal checkpoints such as
-  // compaction, while `turnActive` tracks the whole in-flight turn.
-  const nextRemoteTurnRunning = Boolean(
-    state?.turnActive ?? state?.isStreaming,
-  );
-  if (!nextRemoteTurnRunning && target.remoteTurnRunning) {
+  // The worker owns these orthogonal lifecycle fields. A logical turn can
+  // remain active while Pi is between agent runs, compacting, retrying, or
+  // waiting for terminal delivery.
+  const nextTurnActive = Boolean(state?.turnActive ?? state?.isStreaming);
+  if (!nextTurnActive && target.remoteTurnRunning) {
     target.activeTurn = null;
   }
-  if (typeof target.setRemoteTurnRunning === "function") {
-    target.setRemoteTurnRunning(nextRemoteTurnRunning);
+  if (typeof target.setTurnActive === "function") {
+    target.setTurnActive(nextTurnActive);
   } else {
-    target.isStreaming = nextRemoteTurnRunning;
+    target.remoteTurnRunning = nextTurnActive;
+  }
+  const nextWorkingVisible = Boolean(state?.workingVisible);
+  if (typeof target.setBackendWorkingVisible === "function") {
+    target.setBackendWorkingVisible(nextWorkingVisible);
+  } else {
+    target.backendWorkingVisible = nextWorkingVisible;
+  }
+  const nextAgentStreaming = Boolean(state?.isStreaming);
+  if (typeof target.setAgentStreaming === "function") {
+    target.setAgentStreaming(nextAgentStreaming);
+  } else {
+    target.isStreaming = nextAgentStreaming;
   }
   target.isCompacting = Boolean(state?.isCompacting);
   target.pendingMessageCount = normalizePendingMessageCount(

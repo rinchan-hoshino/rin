@@ -1465,7 +1465,6 @@ test("rpc transport statuses use Pi's status API as the only component owner", a
     );
     assert.deepEqual(calls, [
       { method: "clearStatusIndicator", kind: "rinRpcTransport" },
-      { method: "setWorkingVisible", visible: true },
     ]);
   } finally {
     instance.semanticIndicator?.dispose?.();
@@ -1481,7 +1480,7 @@ test("Rin status coordination does not read Pi private component fields", async 
   assert.doesNotMatch(source, /\b(?:activeStatusIndicator|loadingAnimation)\b/);
 });
 
-test("rpc transport-to-working transition stays within Pi's status API", async () => {
+test("rpc transport status cannot synthesize Pi Working", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -1557,19 +1556,63 @@ test("rpc transport-to-working transition stays within Pi's status API", async (
       },
     );
 
-    assert.equal(instance.activeStatusIndicator?.kind, "working");
+    assert.equal(instance.activeStatusIndicator, undefined);
     assert.notEqual(instance.activeStatusIndicator, initialWorkingIndicator);
-    assert.equal(
-      instance.statusContainer.child,
-      instance.activeStatusIndicator,
-    );
+    assert.equal(instance.statusContainer.child, undefined);
     assert.ok(renders >= 1);
   } finally {
     instance.activeStatusIndicator?.dispose?.();
   }
 });
 
-test("rpc retry phase preserves Pi retry status before returning to Working", async () => {
+test("rpc backend visibility keeps Pi native agent_start Working disabled", async () => {
+  await overrides.applyRinTuiOverrides();
+  themeModule.initTheme("dark", false);
+
+  const instance = {
+    isInitialized: true,
+    ui: {
+      requestRender() {},
+      terminal: { setProgress() {} },
+    },
+    settingsManager: settingsManagerWithoutTerminalProgress,
+    session: {
+      isStreaming: true,
+      getFrontendStatusEvent() {
+        return null;
+      },
+    },
+    workingVisible: true,
+    defaultWorkingMessage: "Working...",
+    statusContainer: {
+      child: undefined,
+      clear() {
+        this.child = undefined;
+      },
+      addChild(child) {
+        this.child = child;
+      },
+    },
+    footer: { invalidate() {} },
+    pendingTools: new Map(),
+    showStatusIndicator: showStatusIndicatorForTest,
+    clearStatusIndicator: clearStatusIndicatorForTest,
+    setWorkingVisible: (codingAgentModule.InteractiveMode.prototype as any)
+      .setWorkingVisible,
+    activeStatusIndicator: undefined,
+  };
+
+  instance.setWorkingVisible(false);
+  await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
+    type: "agent_start",
+  });
+
+  assert.equal(instance.workingVisible, false);
+  assert.equal(instance.activeStatusIndicator, undefined);
+  assert.equal(instance.statusContainer.child, undefined);
+});
+
+test("rpc retry completion waits for the next agent_start before Working", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -1640,7 +1683,7 @@ test("rpc retry phase preserves Pi retry status before returning to Working", as
       instance,
       { type: "auto_retry_end", success: true, attempt: 1 },
     );
-    assert.equal(instance.activeStatusIndicator?.kind, "working");
+    assert.equal(instance.activeStatusIndicator, undefined);
   } finally {
     instance.activeStatusIndicator?.dispose?.();
   }
@@ -2350,7 +2393,7 @@ test("zero-extension compaction end rebuilds history containing Rin core custom 
   assert.ok(getFooterInvalidations() >= 1);
 });
 
-test("rpc compaction end renders Pi Working from the still-active turn", async () => {
+test("rpc compaction end waits for the next agent_start before Working", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -2429,12 +2472,8 @@ test("rpc compaction end renders Pi Working from the still-active turn", async (
       { type: "compaction_end", aborted: false, willRetry: false },
     );
 
-    assert.equal(instance.activeStatusIndicator?.kind, "working");
-    assert.equal(
-      instance.statusContainer.child,
-      instance.activeStatusIndicator,
-    );
-    assert.equal(instance.activeStatusIndicator?.message, "Working...");
+    assert.equal(instance.activeStatusIndicator, undefined);
+    assert.equal(instance.statusContainer.child, undefined);
     assert.ok(renders >= 1);
   } finally {
     instance.activeStatusIndicator?.dispose?.();

@@ -26,8 +26,10 @@ test("rpc session events do not refresh whole state on every stream update", asy
     retryAttempt: 0,
     activeTurn: { mode: "prompt" },
     remoteTurnRunning: false,
-    setRemoteTurnRunning(value) {
+    setTurnActive(value) {
       this.remoteTurnRunning = value;
+    },
+    setAgentStreaming(value) {
       this.isStreaming = value;
     },
     emitFrontendStatus(force) {
@@ -76,7 +78,7 @@ test("rpc session events do not refresh whole state on every stream update", asy
       refreshMessagesAndSession += 1;
     },
   );
-  assert.equal(target.isStreaming, true);
+  assert.equal(target.isStreaming, false);
   assert.equal(target.remoteTurnRunning, true);
   assert.equal(target.activeTurn?.mode, "prompt");
 
@@ -104,7 +106,7 @@ test("rpc session events do not refresh whole state on every stream update", asy
   );
   assert.equal(target.isCompacting, false);
   assert.equal(target.remoteTurnRunning, true);
-  assert.equal(target.isStreaming, true);
+  assert.equal(target.isStreaming, false);
 
   await events.handleRpcSessionEvent(
     target,
@@ -140,7 +142,7 @@ test("rpc session events do not refresh whole state on every stream update", asy
       refreshMessagesAndSession += 1;
     },
   );
-  assert.equal(target.isStreaming, true);
+  assert.equal(target.isStreaming, false);
   assert.equal(target.remoteTurnRunning, true);
   assert.equal(target.activeTurn?.mode, "prompt");
   assert.equal(refreshMessagesAndSession, 1);
@@ -258,7 +260,7 @@ test("rpc compaction refresh redraws footer after the session snapshot lands", a
   await session.refreshLoopPromise;
 
   assert.equal(session.getContextUsage().percent, null);
-  assert.equal(statuses.at(-1)?.phase, "working");
+  assert.equal(statuses.at(-1)?.phase, "idle");
   assert.ok(statuses.length >= 2);
 });
 
@@ -271,8 +273,10 @@ test("rpc session events keep turns alive until explicit rpc completion", async 
     isCompacting: false,
     remoteTurnRunning: true,
     activeTurn: { mode: "prompt" },
-    setRemoteTurnRunning(value) {
+    setTurnActive(value) {
       this.remoteTurnRunning = value;
+    },
+    setAgentStreaming(value) {
       this.isStreaming = value;
     },
     emitFrontendStatus(force) {
@@ -312,6 +316,7 @@ test("rpc session events keep turns alive until explicit rpc completion", async 
     },
   );
   assert.equal(target.remoteTurnRunning, true);
+  assert.equal(target.isStreaming, false);
   assert.deepEqual(target.activeTurn, { mode: "prompt" });
 
   await events.handleRpcSessionEvent(
@@ -355,6 +360,7 @@ test("rpc session events keep turns alive until explicit rpc completion", async 
     },
   );
   assert.equal(target.remoteTurnRunning, true);
+  assert.equal(target.isStreaming, true);
   assert.deepEqual(target.activeTurn, { mode: "prompt" });
 
   await events.handleRpcSessionEvent(
@@ -411,8 +417,10 @@ test("rpc session events ignore Rin-private working events as frontend working t
     isStreaming: false,
     isCompacting: false,
     remoteTurnRunning: false,
-    setRemoteTurnRunning(value) {
+    setTurnActive(value) {
       this.remoteTurnRunning = value;
+    },
+    setAgentStreaming(value) {
       this.isStreaming = value;
     },
     emitFrontendStatus(force) {

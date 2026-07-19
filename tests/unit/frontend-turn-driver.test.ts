@@ -196,32 +196,49 @@ test("frontend SDK turn driver preserves the persisted user leaf", async () => {
   ]);
 });
 
-test("Pi working and compaction events drive the frontend working phase", async () => {
+test("backend working visibility is the only shared frontend Working source", async () => {
   const driver = createDriver();
   const seen: any[] = [];
   driver.subscribe((event: any) => seen.push(event));
+
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "start",
+    requestTag: "turn-1",
+  });
+  await emitDriverEvent(driver, { type: "agent_start" });
+  assert.deepEqual(
+    seen.filter((event) => event.type === "frontend_status"),
+    [],
+  );
 
   await emitDriverEvent(driver, {
     type: "extension_ui_request",
     method: "setWorkingVisible",
     visible: true,
   });
+  await emitDriverEvent(driver, { type: "compaction_start" });
+  await emitDriverEvent(driver, { type: "compaction_end" });
+  await emitDriverEvent(driver, { type: "agent_end" });
+  assert.deepEqual(
+    seen.filter((event) => event.type === "frontend_status"),
+    [{ type: "frontend_status", phase: "working" }],
+  );
+
   await emitDriverEvent(driver, {
     type: "extension_ui_request",
     method: "setWorkingVisible",
     visible: false,
   });
-  await emitDriverEvent(driver, { type: "rin_working_start" });
-  await emitDriverEvent(driver, { type: "rin_working_end" });
-  await emitDriverEvent(driver, { type: "compaction_start" });
-  await emitDriverEvent(driver, { type: "compaction_end" });
 
   assert.deepEqual(seen, [
+    { type: "turn_accepted", requestTag: "turn-1" },
+    { type: "turn_accepted" },
     { type: "frontend_status", phase: "working" },
-    { type: "frontend_status", phase: "idle" },
+    { type: "working_visible", visible: true },
     { type: "compaction_start_notice", text: "Compacting..." },
-    { type: "frontend_status", phase: "working" },
     { type: "frontend_status", phase: "idle" },
+    { type: "working_visible", visible: false },
   ]);
 });
 
@@ -1190,7 +1207,7 @@ test("frontend SDK visible chat working excludes standalone compaction and recov
     turnActive: false,
     isCompacting: true,
     sessionRecovering: true,
-    piWorkingVisible: true,
+    workingVisible: false,
   });
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,

@@ -8,7 +8,9 @@ export type RinRpcSessionEventTarget = {
   applyQueueUpdate?: (payload: any) => void;
   emitEvent?: (payload: any) => void;
   emitFrontendStatus?: (force?: boolean) => void;
-  setRemoteTurnRunning?: (running: boolean) => void;
+  setTurnActive?: (active: boolean) => void;
+  setAgentStreaming?: (streaming: boolean) => void;
+  turnActive?: boolean;
   isStreaming?: boolean;
 };
 
@@ -23,16 +25,24 @@ export async function handleRinRpcSessionEvent(
   refresh: RinRpcSessionEventRefresh,
 ) {
   if (!payload || typeof payload !== "object") return;
-  const setRemoteTurnRunning = (running: boolean) => {
-    if (typeof target.setRemoteTurnRunning === "function") {
-      target.setRemoteTurnRunning(running);
+  const setTurnActive = (active: boolean) => {
+    if (typeof target.setTurnActive === "function") {
+      target.setTurnActive(active);
     } else {
-      target.isStreaming = running;
+      target.turnActive = active;
+    }
+  };
+  const setAgentStreaming = (streaming: boolean) => {
+    if (typeof target.setAgentStreaming === "function") {
+      target.setAgentStreaming(streaming);
+    } else {
+      target.isStreaming = streaming;
     }
   };
   const finishRemoteTurn = () => {
     target.activeTurn = null;
-    setRemoteTurnRunning(false);
+    setTurnActive(false);
+    setAgentStreaming(false);
   };
   const emitFrontendStatus = () => {
     if (typeof target.emitFrontendStatus === "function") {
@@ -50,13 +60,16 @@ export async function handleRinRpcSessionEvent(
     return;
   }
   if (payload.type === "agent_start") {
-    setRemoteTurnRunning(true);
+    setAgentStreaming(true);
+  }
+  if (payload.type === "agent_end") {
+    setAgentStreaming(false);
   }
   if (
     payload.type === "rpc_turn_event" &&
     (payload.event === "start" || payload.event === "heartbeat")
   ) {
-    setRemoteTurnRunning(true);
+    setTurnActive(true);
   }
   if (payload.type === "compaction_start") {
     target.isCompacting = true;

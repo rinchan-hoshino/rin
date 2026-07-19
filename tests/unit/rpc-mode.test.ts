@@ -111,6 +111,109 @@ test("rpc mode exposes Pi-compatible session entries and tree", async () => {
 });
 
 test(
+  "rpc mode publishes Pi working visibility before agent lifecycle events",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines: string[] = [];
+    let emitSessionEvent: ((event: any) => void) | undefined;
+    let boundUiContext: any;
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        agent: { waitForIdle: async () => {} },
+        bindExtensions: async ({ uiContext }) => {
+          boundUiContext = uiContext;
+        },
+        subscribe: (handler) => {
+          emitSessionEvent = handler;
+          return () => {};
+        },
+        sessionManager: testSessionManager(),
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: { listAll: async () => [], list: async () => [] },
+      });
+      await wait(0);
+      assert.equal(typeof emitSessionEvent, "function");
+
+      session.isStreaming = true;
+      emitSessionEvent?.({ type: "agent_start" });
+      session.isStreaming = false;
+      emitSessionEvent?.({ type: "agent_end" });
+      boundUiContext.setWorkingVisible(false);
+      session.isStreaming = true;
+      emitSessionEvent?.({ type: "agent_start" });
+
+      const events = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean)
+        .filter(
+          (event) =>
+            event.type === "agent_start" ||
+            event.type === "agent_end" ||
+            (event.type === "extension_ui_request" &&
+              event.method === "setWorkingVisible"),
+        )
+        .map((event) =>
+          event.type === "extension_ui_request"
+            ? { type: event.type, method: event.method, visible: event.visible }
+            : { type: event.type },
+        );
+
+      assert.deepEqual(events, [
+        {
+          type: "extension_ui_request",
+          method: "setWorkingVisible",
+          visible: true,
+        },
+        { type: "agent_start" },
+        {
+          type: "extension_ui_request",
+          method: "setWorkingVisible",
+          visible: false,
+        },
+        { type: "agent_end" },
+        {
+          type: "extension_ui_request",
+          method: "setWorkingVisible",
+          visible: false,
+        },
+        {
+          type: "extension_ui_request",
+          method: "setWorkingVisible",
+          visible: false,
+        },
+        { type: "agent_start" },
+      ]);
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode correlates user start with its exact append result",
   { concurrency: false },
   async () => {

@@ -12,13 +12,14 @@ export function writeJsonLine(value: unknown) {
 
 export function getSessionState(
   session: any,
-  options: { turnActive?: boolean } = {},
+  options: { turnActive?: boolean; workingVisible?: boolean } = {},
 ) {
   return {
     model: session.model,
     thinkingLevel: session.thinkingLevel,
     turnActive: Boolean(options.turnActive),
     isStreaming: session.isStreaming,
+    workingVisible: Boolean(options.workingVisible),
     isCompacting: session.isCompacting,
     steeringMode: session.steeringMode,
     followUpMode: session.followUpMode,

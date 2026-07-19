@@ -1212,7 +1212,7 @@ test("chat controller can deliver image-only builtin command parts", async () =>
   ]);
 });
 
-test("chat controller starts command reactions from frontend working status", async () => {
+test("chat controller starts command reactions from backend working visibility", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
   const reactions = [];
@@ -2776,7 +2776,7 @@ test("chat controller rethrows lifecycle cancellation without delivering an erro
   assert.equal(stored?.processedAt, undefined);
 });
 
-test("chat controller /new cleans up editable Working that settles after abort", async () => {
+test("chat controller /new aborts without synthesizing pre-agent Working", async () => {
   const controller = await createController();
   const deliveries = [];
   const visibleEvents: string[] = [];
@@ -2784,32 +2784,16 @@ test("chat controller /new cleans up editable Working that settles after abort",
     deliveries.push(deliveryText(this.stagedDelivery));
     this.stagedDelivery = null;
   };
-  // Isolate generation-aware cleanup from the ordinary command-final cleanup.
-  controller.clearWorkingReaction = async () => false;
-
-  let markWorkingStarted!: () => void;
-  let releaseWorking!: () => void;
-  const workingStarted = new Promise<void>((resolve) => {
-    markWorkingStarted = resolve;
-  });
-  const workingReleased = new Promise<void>((resolve) => {
-    releaseWorking = resolve;
-  });
   controller.app.bots[0].workingIndicators = [
     {
       type: "polling",
       presentation: "editable-message",
-      async tick(context) {
-        visibleEvents.push(`tick:${context?.messageId}`);
-        markWorkingStarted();
-        await workingReleased;
-        visibleEvents.push(`sent:${context?.messageId}`);
+      async tick() {
+        visibleEvents.push("tick");
         return true;
       },
-      async end(context) {
-        visibleEvents.push(
-          `end:${context?.messageId}:${context?.replyToMessageId}`,
-        );
+      async end() {
+        visibleEvents.push("end");
         return true;
       },
     },
@@ -2849,28 +2833,20 @@ test("chat controller /new cleans up editable Working that settles after abort",
     replyToMessageId: "m-old",
     incomingMessageId: "m-old",
   });
-  await workingStarted;
+  while (!promptCalled) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
 
-  const newCommandPromise = controller.runCommand("/new", "m-new", "m-new");
-  await new Promise((resolve) => setImmediate(resolve));
-  releaseWorking();
   const [newCommand, aborted] = await Promise.all([
-    newCommandPromise,
+    controller.runCommand("/new", "m-new", "m-new"),
     firstTurn,
   ]);
-  await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(newCommand.text, "Started a new session.");
   assert.equal(abortCalled, true);
-  // Early Working lets /new cancel this turn before prompt submission.
-  assert.equal(promptCalled, false);
   assert.equal(aborted.aborted, true);
   assert.deepEqual(deliveries, ["Started a new session."]);
-  assert.deepEqual(visibleEvents, [
-    "tick:m-old",
-    "sent:m-old",
-    "end:m-old:m-old",
-  ]);
+  assert.equal(visibleEvents.includes("tick"), false);
 });
 
 test("chat controller suppresses /compact acknowledgement but keeps configured /reload response", async () => {
@@ -3114,11 +3090,23 @@ test("chat controller keeps working reaction on current message while steer is q
           requestTag: options.requestTag,
         },
       });
+      await controller.handleSessionEvent({
+        type: "extension_ui_request",
+        method: "setWorkingVisible",
+        visible: true,
+      });
+      await controller.handleSessionEvent({ type: "agent_start" });
       resolveFirstPromptStarted();
       await new Promise((resolve) => {
         releaseFirstPrompt = resolve;
       });
       controller.session.isStreaming = false;
+      await controller.handleSessionEvent({
+        type: "extension_ui_request",
+        method: "setWorkingVisible",
+        visible: false,
+      });
+      await controller.handleSessionEvent({ type: "agent_end" });
       emitRpcTurnComplete(controller, options, "done");
     },
     switchSession: async () => {},
@@ -3179,8 +3167,8 @@ test("chat controller keeps working reaction on current message while steer is q
     false,
     "restart recovery must reconstruct steering from the SQLite turn ledger",
   );
-  assert.deepEqual(actions, []);
-  assert.deepEqual(reactions, []);
+  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+  assert.deepEqual(reactions, [["create", "2", "m-first", "🤔"]]);
 
   await controller.pollTyping();
   assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
@@ -3388,7 +3376,7 @@ test("chat controller can expose external working indicators", async () => {
   assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
 });
 
-test("chat controller preserves active turn typing when external working ends", async () => {
+test("chat controller stops external typing when external working ends", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
   controller.app.bots[0].getWorkingIndicators = () => [
@@ -3405,10 +3393,10 @@ test("chat controller preserves active turn typing when external working ends", 
 
   await controller.endExternalWorking();
 
-  assert.equal(controller.currentTurn?.incomingMessageId, "m-active-external");
+  assert.equal(controller.currentTurn, null);
   assert.equal(controller.externalWorkingVisible, false);
-  assert.equal(await controller.pollTyping(), true);
-  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+  assert.equal(await controller.pollTyping(), false);
+  assert.deepEqual(actions, []);
 });
 
 test("chat controller replaces editable Working with a completed assistant summary", async () => {
@@ -3431,6 +3419,7 @@ test("chat controller replaces editable Working with a completed assistant summa
   };
   controller.awaitingTurnSettle = true;
   controller.driver.frontendState.turnActive = true;
+  controller.driver.frontendState.workingVisible = true;
   controller.driver.hasVisibleChatWorkingTurn = () => true;
 
   await controller.handleFrontendEvent({
@@ -3550,6 +3539,7 @@ test("chat controller polls typing and rotating reactions while a turn is active
   const liveTurn = controller.startLiveTurn();
   liveTurn.promise.catch(() => {});
   controller.driver.frontendState.turnActive = true;
+  controller.driver.frontendState.workingVisible = true;
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
@@ -3677,8 +3667,18 @@ test("chat controller clears typing and working reactions after canonical comple
       sessionId: "session-complete-clears-working",
     }),
     prompt: async (_text, options = {}) => {
+      await controller.handleSessionEvent({
+        type: "extension_ui_request",
+        method: "setWorkingVisible",
+        visible: true,
+      });
       await controller.handleSessionEvent({ type: "agent_start" });
-      await controller.pollTyping();
+      await controller.handleSessionEvent({
+        type: "extension_ui_request",
+        method: "setWorkingVisible",
+        visible: false,
+      });
+      await controller.handleSessionEvent({ type: "agent_end" });
       emitRpcTurnComplete(controller, options, "done");
     },
     switchSession: async () => {},
@@ -3702,7 +3702,7 @@ test("chat controller clears typing and working reactions after canonical comple
   assert.equal(await controller.pollTyping(), false);
 });
 
-test("chat controller keeps typing and working reaction until dispatched final delivery finishes", async () => {
+test("chat controller stops typing at agent end while final delivery remains in flight", async () => {
   const previousTimeout = process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS;
   process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS = "20";
   try {
@@ -3743,7 +3743,18 @@ test("chat controller keeps typing and working reaction until dispatched final d
         sessionId: "session-dispatched-final-delivery",
       }),
       prompt: async (_text, options = {}) => {
+        await controller.handleSessionEvent({
+          type: "extension_ui_request",
+          method: "setWorkingVisible",
+          visible: true,
+        });
         await controller.handleSessionEvent({ type: "agent_start" });
+        await controller.handleSessionEvent({
+          type: "extension_ui_request",
+          method: "setWorkingVisible",
+          visible: false,
+        });
+        await controller.handleSessionEvent({ type: "agent_end" });
         emitRpcTurnComplete(controller, options, "done after upload");
       },
       switchSession: async () => {},
@@ -3766,9 +3777,12 @@ test("chat controller keeps typing and working reaction until dispatched final d
       controller.currentTurn?.incomingMessageId,
       "m-dispatched-final",
     );
-    assert.equal(await controller.pollTyping(), true);
+    assert.equal(await controller.pollTyping(), false);
     assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
-    assert.deepEqual(reactions, [["create", "2", "m-dispatched-final", "🤔"]]);
+    assert.deepEqual(reactions, [
+      ["create", "2", "m-dispatched-final", "🤔"],
+      ["delete", "2", "m-dispatched-final", "🤔", "1"],
+    ]);
 
     resolveDelivery(["m-final"]);
     const result = await turn;
@@ -3818,6 +3832,7 @@ test("chat controller uses adapter reaction capability for lark working indicato
   const liveTurn = controller.startLiveTurn();
   liveTurn.promise.catch(() => {});
   controller.driver.frontendState.turnActive = true;
+  controller.driver.frontendState.workingVisible = true;
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(reactions, [["create", "chat-1", "m-lark", "🤔"]]);
@@ -3872,6 +3887,7 @@ test("chat controller uses discord typing and reaction capabilities together", a
   const liveTurn = controller.startLiveTurn();
   liveTurn.promise.catch(() => {});
   controller.driver.frontendState.turnActive = true;
+  controller.driver.frontendState.workingVisible = true;
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(actions, [["typing", "channel-1"]]);
@@ -3933,6 +3949,7 @@ test("chat controller logs failed discord typing without changing its cadence", 
     workingNoticeSent: false,
   };
   controller.driver.frontendState.turnActive = true;
+  controller.driver.frontendState.workingVisible = true;
 
   const originalNow = Date.now;
   let now = 100_000;
@@ -3996,6 +4013,7 @@ test("chat controller starts typing immediately after creating editable progress
   assert.equal(typingTicks, 0);
 
   controller.driver.frontendState.turnActive = true;
+  controller.driver.frontendState.workingVisible = true;
   assert.equal(await controller.pollTyping(), true);
   assert.equal(typingTicks, 1);
   assert.equal(editableTicks, 1);
@@ -4051,6 +4069,7 @@ test("chat controller prioritizes reaction over marker while keeping typing inde
   const liveTurn = controller.startLiveTurn();
   liveTurn.promise.catch(() => {});
   controller.driver.frontendState.turnActive = true;
+  controller.driver.frontendState.workingVisible = true;
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(calls, ["typing:tick", "reaction:tick"]);
@@ -4060,6 +4079,7 @@ test("chat controller prioritizes reaction over marker while keeping typing inde
 
 test("chat controller combines backend progress identity with the steered turn fence", async () => {
   const controller = await createController();
+  controller.driver.frontendState.workingVisible = true;
   const fence = {
     agentDir: controller.agentDir,
     turnId: "steered-turn",
@@ -4096,6 +4116,7 @@ test("chat controller combines backend progress identity with the steered turn f
 
 test("chat controller disambiguates identical steers by producer request tag", async () => {
   const controller = await createController();
+  controller.driver.frontendState.workingVisible = true;
   const firstFence = {
     agentDir: controller.agentDir,
     turnId: "first-steered-turn",
@@ -4381,7 +4402,7 @@ test("chat controller restores inbound reply identity before connect replays an 
   ]);
 });
 
-test("chat controller starts reply-scoped editable Working before a cold frontend connection resolves", async () => {
+test("chat controller waits for backend Working after a cold connection", async () => {
   const controller = await createController("discord/bot-1:channel-1");
   const calls: string[] = [];
   let releaseConnect!: () => void;
@@ -4391,10 +4412,6 @@ test("chat controller starts reply-scoped editable Working before a cold fronten
   let markConnectStarted!: () => void;
   const connectStarted = new Promise<void>((resolve) => {
     markConnectStarted = resolve;
-  });
-  let releaseWorking!: () => void;
-  const workingMayFinish = new Promise<void>((resolve) => {
-    releaseWorking = resolve;
   });
   controller.app = {
     bots: [
@@ -4406,9 +4423,7 @@ test("chat controller starts reply-scoped editable Working before a cold fronten
             type: "polling",
             presentation: "editable-message",
             async tick(context) {
-              assert.equal(context?.assistantSummaryText, undefined);
               calls.push(`working:${context?.replyToMessageId}`);
-              await workingMayFinish;
               return true;
             },
           },
@@ -4416,7 +4431,6 @@ test("chat controller starts reply-scoped editable Working before a cold fronten
       },
     ],
   };
-  controller.latestAssistantSummaryText = "stale summary";
   controller.connect = async () => {
     calls.push("connect");
     markConnectStarted();
@@ -4424,7 +4438,17 @@ test("chat controller starts reply-scoped editable Working before a cold fronten
     return true;
   };
   controller.driver.runTurn = async () => {
+    await controller.handleSessionEvent({
+      type: "extension_ui_request",
+      method: "setWorkingVisible",
+      visible: true,
+    });
     calls.push("prompt");
+    await controller.handleSessionEvent({
+      type: "extension_ui_request",
+      method: "setWorkingVisible",
+      visible: false,
+    });
     return { finalText: "ok" };
   };
   controller.commitPendingDelivery = async function (clearProcessing = false) {
@@ -4441,36 +4465,23 @@ test("chat controller starts reply-scoped editable Working before a cold fronten
   });
   await connectStarted;
   await new Promise((resolve) => setImmediate(resolve));
-  const callsBeforeConnectFinished = [...calls];
+  assert.deepEqual(calls, ["connect"]);
+
   releaseConnect();
-  while (!calls.includes("prompt")) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-  const promptStartedBeforeWorkingFinished = calls.includes("prompt");
-  releaseWorking();
   const result = await turn;
 
-  assert.deepEqual(callsBeforeConnectFinished, [
-    "working:m-cold-connect",
-    "connect",
-  ]);
-  assert.equal(promptStartedBeforeWorkingFinished, true);
   assert.equal(result.finalText, "ok");
   assert.deepEqual(calls, [
-    "working:m-cold-connect",
     "connect",
+    "working:m-cold-connect",
     "prompt",
     "final",
   ]);
 });
 
-test("chat controller invalidates early Working when a cold frontend connection fails", async () => {
+test("chat controller does not synthesize Working when a cold connection fails", async () => {
   const controller = await createController("discord/bot-1:channel-1");
   const calls: string[] = [];
-  let releaseWorking!: () => void;
-  const workingMayFinish = new Promise<void>((resolve) => {
-    releaseWorking = resolve;
-  });
   controller.app = {
     bots: [
       {
@@ -4480,13 +4491,8 @@ test("chat controller invalidates early Working when a cold frontend connection 
           {
             type: "polling",
             presentation: "editable-message",
-            async tick(context) {
-              calls.push(`working:${context?.replyToMessageId}`);
-              await workingMayFinish;
-              return true;
-            },
-            async end(context) {
-              calls.push(`end:${context?.replyToMessageId}`);
+            async tick() {
+              calls.push("working");
               return true;
             },
           },
@@ -4499,43 +4505,24 @@ test("chat controller invalidates early Working when a cold frontend connection 
     throw new Error("connect failed");
   };
 
-  const turn = controller.runTurn({
-    text: "hello",
-    attachments: [],
-    incomingMessageId: "m-connect-failed-early-working",
-    replyToMessageId: "m-connect-failed-early-working",
-  });
-  await assert.rejects(turn, /connect failed/);
-  const callsBeforeWorkingFinished = [...calls];
-  releaseWorking();
-  for (
-    let index = 0;
-    index < 20 && !calls.some((item) => item.startsWith("end:"));
-    index += 1
-  ) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
+  await assert.rejects(
+    controller.runTurn({
+      text: "hello",
+      attachments: [],
+      incomingMessageId: "m-connect-failed-no-working",
+      replyToMessageId: "m-connect-failed-no-working",
+    }),
+    /connect failed/,
+  );
 
-  assert.deepEqual(callsBeforeWorkingFinished, [
-    "working:m-connect-failed-early-working",
-    "connect",
-  ]);
-  assert.deepEqual(calls, [
-    "working:m-connect-failed-early-working",
-    "connect",
-    "end:m-connect-failed-early-working",
-  ]);
+  assert.deepEqual(calls, ["connect"]);
   assert.equal(controller.currentTurn, null);
   assert.equal(controller.awaitingTurnSettle, false);
 });
 
-test("chat controller ends settled early Working when a later cold connection fails", async () => {
+test("chat controller keeps Working absent while a cold connection later fails", async () => {
   const controller = await createController("discord/bot-1:channel-1");
   const calls: string[] = [];
-  let markWorkingSettled!: () => void;
-  const workingSettled = new Promise<void>((resolve) => {
-    markWorkingSettled = resolve;
-  });
   let releaseConnect!: () => void;
   const connectMayFail = new Promise<void>((resolve) => {
     releaseConnect = resolve;
@@ -4549,13 +4536,8 @@ test("chat controller ends settled early Working when a later cold connection fa
           {
             type: "polling",
             presentation: "editable-message",
-            async tick(context) {
-              calls.push(`working:${context?.replyToMessageId}`);
-              markWorkingSettled();
-              return true;
-            },
-            async end(context) {
-              calls.push(`end:${context?.replyToMessageId}`);
+            async tick() {
+              calls.push("working");
               return true;
             },
           },
@@ -4572,26 +4554,15 @@ test("chat controller ends settled early Working when a later cold connection fa
   const turn = controller.runTurn({
     text: "hello",
     attachments: [],
-    incomingMessageId: "m-connect-failed-after-working",
-    replyToMessageId: "m-connect-failed-after-working",
+    incomingMessageId: "m-connect-failed-later",
+    replyToMessageId: "m-connect-failed-later",
   });
-  await workingSettled;
   await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["connect"]);
   releaseConnect();
   await assert.rejects(turn, /connect failed later/);
-  for (
-    let index = 0;
-    index < 20 && !calls.some((item) => item.startsWith("end:"));
-    index += 1
-  ) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
 
-  assert.deepEqual(calls, [
-    "working:m-connect-failed-after-working",
-    "connect",
-    "end:m-connect-failed-after-working",
-  ]);
+  assert.deepEqual(calls, ["connect"]);
   assert.equal(controller.currentTurn, null);
   assert.equal(controller.awaitingTurnSettle, false);
 });
@@ -5282,11 +5253,7 @@ test("chat controller does not keep typing from stale currentTurn metadata alone
 });
 
 test("chat controller does not keep ordinary typing from standalone remote-working states", async () => {
-  for (const state of [
-    { isCompacting: true },
-    { sessionRecovering: true },
-    { piWorkingVisible: true },
-  ]) {
+  for (const state of [{ isCompacting: true }, { sessionRecovering: true }]) {
     const controller = await createController("telegram/1:2");
     const actions = [];
     controller.app = {
@@ -5313,6 +5280,63 @@ test("chat controller does not keep ordinary typing from standalone remote-worki
     assert.equal(await controller.pollTyping(), false);
     assert.deepEqual(actions, []);
   }
+});
+
+test("chat typing and reactions follow only backend working visibility", async () => {
+  const controller = await createController("telegram/1:2");
+  const actions = [];
+  const reactions = [];
+  controller.app = {
+    bots: [
+      {
+        platform: "telegram",
+        selfId: "1",
+        workingIndicators: [testPollingIndicator(actions, reactions)],
+        async createReaction(chatId, messageId, emoji) {
+          reactions.push(["create", chatId, messageId, emoji]);
+        },
+        async deleteReaction(chatId, messageId, emoji, userId) {
+          reactions.push(["delete", chatId, messageId, emoji, userId]);
+        },
+        internal: {
+          async sendChatAction(payload) {
+            actions.push(payload);
+          },
+        },
+      },
+    ],
+  };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-backend-working",
+    workingNoticeSent: false,
+  };
+  controller.awaitingTurnSettle = true;
+  controller.driver.frontendState.turnActive = true;
+  controller.driver.frontendState.isStreaming = true;
+
+  assert.equal(await controller.pollTyping(), false);
+
+  await controller.handleSessionEvent({
+    type: "extension_ui_request",
+    method: "setWorkingVisible",
+    visible: true,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(controller.externalWorkingVisible, true);
+
+  await controller.handleSessionEvent({
+    type: "extension_ui_request",
+    method: "setWorkingVisible",
+    visible: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(await controller.pollTyping(), false);
+  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+  assert.deepEqual(reactions, [
+    ["create", "2", "m-backend-working", "🤔"],
+    ["delete", "2", "m-backend-working", "🤔", "1"],
+  ]);
 });
 
 test("chat controller clears the working reaction before dropping processing state", async () => {
@@ -6646,8 +6670,18 @@ test("chat controller submits the prompt without waiting for editable Working an
     },
   ];
   controller.driver.runTurn = async () => {
+    await controller.handleSessionEvent({
+      type: "extension_ui_request",
+      method: "setWorkingVisible",
+      visible: true,
+    });
     calls.push("prompt");
     await promptMayFinish;
+    await controller.handleSessionEvent({
+      type: "extension_ui_request",
+      method: "setWorkingVisible",
+      visible: false,
+    });
     return { finalText: "ok" };
   };
   controller.commitPendingDelivery = async function (clearProcessing = false) {
@@ -6670,8 +6704,6 @@ test("chat controller submits the prompt without waiting for editable Working an
   while (controller.workingIndicatorTick < 1) {
     await new Promise((resolve) => setImmediate(resolve));
   }
-  controller.driver.frontendPhase = "working";
-  controller.driver.frontendState = { isStreaming: true, turnActive: true };
   controller.lastWorkingIndicatorAt = 0;
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(ticks, [0, 1]);
@@ -6679,7 +6711,8 @@ test("chat controller submits the prompt without waiting for editable Working an
 
   const result = await turn;
   assert.equal(result.finalText, "ok");
-  assert.deepEqual(calls, ["working:0", "prompt", "working:1", "final"]);
+  assert.deepEqual(calls.slice(0, 3), ["working:0", "prompt", "working:1"]);
+  assert.equal(calls.includes("final"), true);
 });
 
 test("chat controller does not let presentation polling block prompt submission", async () => {
@@ -6720,7 +6753,7 @@ test("chat controller does not let presentation polling block prompt submission"
   });
 
   assert.equal(result.finalText, "ok");
-  assert.deepEqual(calls, ["pollTyping", "prompt"]);
+  assert.deepEqual(calls, ["prompt"]);
 });
 
 test("chat controller does not persist transient processing state to chat state.json", async () => {

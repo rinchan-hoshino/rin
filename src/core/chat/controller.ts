@@ -683,11 +683,8 @@ export class ChatController {
       outboxTurnFence?: ChatOutboxTurnFence;
     },
     deliverFinal: boolean,
-    startVisibleBeforeConnect = false,
   ) {
     let primedTurn: ChatTurnMeta | null = null;
-    let visibleProcessingStarted = false;
-    let visibleProcessingSettled = false;
     if (deliverFinal && !this.currentTurn) {
       // Reconnecting a recovered frontend can replay progress before connect()
       // resolves. Install the inbox identity first so those updates reuse the
@@ -696,15 +693,6 @@ export class ChatController {
       this.setCurrentTurn(input);
       primedTurn = this.currentTurn;
       this.awaitingTurnSettle = true;
-      if (startVisibleBeforeConnect) {
-        visibleProcessingStarted = true;
-        const turnGeneration = this.turnAbortGeneration;
-        void this.presentVisibleProcessingTurn(input, turnGeneration)
-          .catch(() => false)
-          .finally(() => {
-            visibleProcessingSettled = true;
-          });
-      }
     }
     try {
       const frontendReady = await this.connect();
@@ -716,21 +704,9 @@ export class ChatController {
           startedAt: Date.now(),
         })),
         frontendReady,
-        visibleProcessingStarted,
       };
     } catch (error) {
       if (primedTurn && this.currentTurn === primedTurn) {
-        if (visibleProcessingStarted) {
-          this.turnAbortGeneration += 1;
-          if (visibleProcessingSettled) {
-            const indicators = this.activeWorkingIndicators.length
-              ? [...this.activeWorkingIndicators]
-              : this.getWorkingIndicators();
-            void this.endWorkingIndicatorsForTurn(indicators, input).catch(
-              () => false,
-            );
-          }
-        }
         this.awaitingTurnSettle = false;
         this.clearCurrentTurn();
       }
@@ -878,12 +854,19 @@ export class ChatController {
     const [target] = this.pendingSteeredDeliveryTargets.splice(index, 1);
     this.coalescedSteeredDeliveryTargets.push(target);
     this.saveState();
-    await this.beginVisibleProcessingTurn({
+    const nextTurn = {
       incomingMessageId: target?.incomingMessageId,
       replyToMessageId: target?.replyToMessageId,
       requestTag: requestTag || target?.requestTag,
       outboxTurnFence: target?.outboxTurnFence,
-    });
+    };
+    if (this.driver.hasVisibleChatWorkingTurn()) {
+      await this.beginVisibleProcessingTurn(nextTurn);
+    } else {
+      await this.clearWorkingReaction().catch(() => {});
+      this.setCurrentTurn(nextTurn);
+      this.awaitingTurnSettle = true;
+    }
     this.markAcceptedMessage(target?.incomingMessageId);
     return true;
   }
@@ -1371,13 +1354,10 @@ export class ChatController {
   }
 
   private shouldShowTypingIndicator() {
-    if (!this.currentTurn) return false;
-    if (this.stagedDelivery) return true;
-    if (this.externalWorkingVisible && this.awaitingTurnSettle) return true;
-    if (typeof this.driver.hasVisibleChatWorkingTurn === "function") {
-      return this.driver.hasVisibleChatWorkingTurn();
-    }
-    return this.driver.hasWorkerActiveTurn();
+    return Boolean(
+      this.currentTurn &&
+      (this.externalWorkingVisible || this.driver.hasVisibleChatWorkingTurn()),
+    );
   }
 
   private editableWorkingIndicator(indicators = this.getWorkingIndicators()) {
@@ -2917,11 +2897,13 @@ export class ChatController {
       }
       let originalSuperseded = false;
       if (deliverFinal) {
-        await this.beginVisibleProcessingTurn({
-          incomingMessageId: input.incomingMessageId,
-          replyToMessageId: input.replyToMessageId,
-          outboxTurnFence: input.outboxTurnFence,
-        });
+        if (this.driver.hasVisibleChatWorkingTurn()) {
+          await this.beginVisibleProcessingTurn({
+            incomingMessageId: input.incomingMessageId,
+            replyToMessageId: input.replyToMessageId,
+            outboxTurnFence: input.outboxTurnFence,
+          });
+        }
         const deliveryTarget = this.currentDeliveryTarget(input);
         const supersedeTurnFences = this.coalescedSupersessionFences(
           input.incomingMessageId,
@@ -2971,17 +2953,10 @@ export class ChatController {
           ? safeString(input.managedSessionLeaf).trim() ||
             this.managedSessionLeafForFreshChat()
           : undefined;
-      const { text, images, frontendReady, visibleProcessingStarted } =
-        await this.prepareTurnPrompt(input, deliverFinal, true);
-      if (deliverFinal && !visibleProcessingStarted) {
-        // Progress delivery is presentation, not admission. Editable adapters
-        // serialize their own working/final operations, so a slow platform send
-        // must not postpone prompt submission.
-        void this.beginVisibleProcessingTurn({
-          incomingMessageId: input.incomingMessageId,
-          replyToMessageId: input.replyToMessageId,
-        }).catch(() => false);
-      }
+      const { text, images, frontendReady } = await this.prepareTurnPrompt(
+        input,
+        deliverFinal,
+      );
       let originalSuperseded = false;
       try {
         if (this.turnAbortGeneration !== turnAbortGeneration) {
@@ -3206,28 +3181,18 @@ export class ChatController {
     if (!event || typeof event !== "object") return;
     switch (event.type) {
       case "frontend_status":
-        if (event.phase === "working") {
-          if (this.driver.hasExplicitWorkingVisible()) {
-            this.externalWorkingVisible = true;
-          }
-          const createdCommandTurn = this.ensureVisibleCommandTurn();
+        return;
+      case "working_visible": {
+        this.externalWorkingVisible = Boolean(event.visible);
+        if (event.visible) {
+          this.ensureVisibleCommandTurn();
           if (!this.currentTurn?.outboxTurnFence) {
             this.markAcceptedMessage(this.currentIncomingMessageId());
           }
-          if (createdCommandTurn) await this.pollTyping().catch(() => false);
         }
-        if (event.phase === "idle") {
-          this.externalWorkingVisible = false;
-        }
-        if (
-          event.phase === "idle" &&
-          !this.awaitingTurnSettle &&
-          !this.stagedDelivery
-        ) {
-          await this.clearWorkingReaction().catch(() => {});
-          this.clearCurrentTurn();
-        }
+        void this.pollTyping().catch(() => false);
         return;
+      }
       case "turn_accepted": {
         const expectedRequestTag = safeString(
           this.currentTurn?.requestTag,

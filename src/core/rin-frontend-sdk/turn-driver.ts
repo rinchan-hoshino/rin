@@ -100,6 +100,7 @@ export type RinFrontendPassiveNoticeEvent = {
 
 export type RinFrontendTurnDriverEvent =
   | { type: "frontend_status"; phase: RinFrontendTurnPhase }
+  | { type: "working_visible"; visible: boolean }
   | { type: "turn_accepted"; requestTag?: string }
   | {
       type: "user_message_start";
@@ -177,7 +178,6 @@ export class RinFrontendTurnDriver {
   latestAssistantText = "";
   assistantFinalReplyCommitted = false;
   frontendPhase: RinFrontendTurnPhase = "idle";
-  private externalWorkingDepth = 0;
   private backendTurnRequestTag = "";
   listeners = new Set<(event: RinFrontendTurnDriverEvent) => void>();
   private reconnectingTurnPromise: Promise<void> | null = null;
@@ -336,11 +336,24 @@ export class RinFrontendTurnDriver {
     });
   }
 
+  private applyFrontendStateSnapshot(state: RinSessionState | undefined) {
+    const previousWorkingVisible = Boolean(this.frontendState.workingVisible);
+    this.frontendState = { ...this.frontendState, ...(state || {}) };
+    if (typeof state?.workingVisible === "boolean") {
+      const workingVisible = state.workingVisible;
+      this.frontendState.workingVisible = workingVisible;
+      if (workingVisible !== previousWorkingVisible) {
+        this.setFrontendPhase(workingVisible ? "working" : "idle");
+        this.emit({ type: "working_visible", visible: workingVisible });
+      }
+    }
+    return this.frontendState;
+  }
+
   private async refreshFrontendState(sessionFile?: string) {
     if (!this.client) return this.frontendState;
     const state = await this.getStateForSession(sessionFile);
-    this.frontendState = { ...this.frontendState, ...(state || {}) };
-    return this.frontendState;
+    return this.applyFrontendStateSnapshot(state);
   }
 
   private updateFrontendStateFrom(value: unknown) {
@@ -447,7 +460,6 @@ export class RinFrontendTurnDriver {
         : undefined,
       abortErrorMessage: hasInterruptionSeq ? "chat_turn_aborted" : undefined,
       refresh: () => this.refreshFrontendState(sessionFile),
-      onWaiting: () => this.setFrontendPhase("working"),
     };
   }
 
@@ -456,11 +468,7 @@ export class RinFrontendTurnDriver {
   }
 
   private isVisibleChatWorkingTurn() {
-    return Boolean(
-      this.liveTurn ||
-      this.frontendState.isStreaming ||
-      this.frontendState.turnActive,
-    );
+    return Boolean(this.frontendState.workingVisible);
   }
 
   private emitPassiveNoticeAtPullCheckpoint(
@@ -525,11 +533,13 @@ export class RinFrontendTurnDriver {
   }
 
   hasExplicitWorkingVisible() {
-    return Boolean(this.frontendState.piWorkingVisible);
+    return Boolean(this.frontendState.workingVisible);
   }
 
   hasWorkerActiveTurn() {
-    return this.hasVisibleChatWorkingTurn();
+    return Boolean(
+      this.frontendState.turnActive || this.frontendState.isStreaming,
+    );
   }
 
   hasClient() {
@@ -587,7 +597,9 @@ export class RinFrontendTurnDriver {
             Boolean((state as any)?.turnActive || (state as any)?.isStreaming)
           ) {
             deadline = Date.now() + 120_000;
-            this.setFrontendPhase("working");
+            if (!this.frontendState.workingVisible) {
+              this.setFrontendPhase("idle");
+            }
             await Promise.race([this.liveTurn.promise, sleep(1000)]);
             continue;
           }
@@ -649,7 +661,7 @@ export class RinFrontendTurnDriver {
         managedSessionLeaf,
         toolOptions,
       );
-      this.frontendState = { ...this.frontendState, ...(ready || {}) };
+      this.applyFrontendStateSnapshot(ready);
       return ready;
     }
 
@@ -1049,7 +1061,9 @@ export class RinFrontendTurnDriver {
     this.liveTurnRecoveryContext = {
       sessionFile: targetSessionFile || undefined,
     };
-    this.setFrontendPhase("working");
+    if (!this.frontendState.workingVisible) {
+      this.setFrontendPhase("idle");
+    }
     await this.replayPendingTerminalTurnEvent(targetSessionFile).catch(
       () => false,
     );
@@ -1100,7 +1114,9 @@ export class RinFrontendTurnDriver {
     this.liveTurnRecoveryContext = {
       sessionFile: targetSessionFile || undefined,
     };
-    this.setFrontendPhase("working");
+    if (!this.frontendState.workingVisible) {
+      this.setFrontendPhase("idle");
+    }
     await this.replayPendingTerminalTurnEvent(targetSessionFile).catch(
       () => false,
     );
@@ -1514,10 +1530,11 @@ export class RinFrontendTurnDriver {
           set isCompacting(value: boolean) {
             frontendState.isCompacting = Boolean(value);
           },
-          setRemoteTurnRunning: (running: boolean) => {
-            this.frontendState.turnActive = running;
-            this.frontendState.isStreaming = running;
-            this.setFrontendPhase(running ? "working" : "idle");
+          setTurnActive: (active: boolean) => {
+            this.frontendState.turnActive = active;
+          },
+          setAgentStreaming: (streaming: boolean) => {
+            this.frontendState.isStreaming = streaming;
           },
           handleSessionUnavailable: () => {
             this.frontendState.sessionRecovering = true;
@@ -1528,7 +1545,9 @@ export class RinFrontendTurnDriver {
           },
           handleSessionRecovered: () => {
             this.frontendState.sessionRecovering = false;
-            if (this.liveTurn) this.setFrontendPhase("working");
+            if (!this.frontendState.workingVisible) {
+              this.setFrontendPhase("idle");
+            }
           },
           emitFrontendStatus: () => {},
           emitEvent: () => {},
@@ -1555,11 +1574,18 @@ export class RinFrontendTurnDriver {
   private async handleBackendEvent(event: RinFrontendBackendEvent) {
     switch (event.type) {
       case "status":
-        this.setFrontendPhase(
-          event.phase === "compacting" || event.phase === "retrying"
-            ? "working"
-            : event.phase,
-        );
+        if (
+          event.phase === "connecting" ||
+          event.phase === "starting" ||
+          event.phase === "sending"
+        ) {
+          this.setFrontendPhase(event.phase);
+        } else if (
+          event.phase === "idle" &&
+          !this.frontendState.workingVisible
+        ) {
+          this.setFrontendPhase("idle");
+        }
         if (typeof event.turnActive === "boolean") {
           this.frontendState.turnActive = event.turnActive;
         }
@@ -1569,7 +1595,6 @@ export class RinFrontendTurnDriver {
         return;
       case "turn_accepted": {
         this.frontendState.turnActive = true;
-        this.setFrontendPhase("working");
         const acceptedRequestTag = safeString(event.requestTag).trim();
         if (acceptedRequestTag) {
           this.backendTurnRequestTag = acceptedRequestTag;
@@ -1624,23 +1649,10 @@ export class RinFrontendTurnDriver {
       case "compaction_start_notice":
         this.emit({ type: "compaction_start_notice", text: event.text });
         return;
-      case "external_working_start":
-        this.externalWorkingDepth += 1;
-        this.setFrontendPhase("working");
-        return;
-      case "external_working_end":
-        this.externalWorkingDepth = Math.max(0, this.externalWorkingDepth - 1);
-        if (
-          this.externalWorkingDepth === 0 &&
-          !this.liveTurn &&
-          !this.isStreaming()
-        ) {
-          this.setFrontendPhase("idle");
-        }
-        return;
       case "working_visible":
-        this.frontendState.piWorkingVisible = event.visible;
+        this.frontendState.workingVisible = event.visible;
         this.setFrontendPhase(event.visible ? "working" : "idle");
+        this.emit({ type: "working_visible", visible: event.visible });
         return;
       case "assistant_stream":
         this.latestAssistantText = event.text;
@@ -1677,7 +1689,9 @@ export class RinFrontendTurnDriver {
           return;
         }
         this.latestAssistantText = finalText;
-        this.setFrontendPhase("idle");
+        if (!this.frontendState.workingVisible) {
+          this.setFrontendPhase("idle");
+        }
         this.liveTurn.resolve({
           finalText,
           result: event.result,
@@ -1694,7 +1708,9 @@ export class RinFrontendTurnDriver {
         this.frontendState.turnActive = false;
         this.frontendState.isStreaming = false;
         this.updateFrontendStateFrom(event);
-        this.setFrontendPhase("idle");
+        if (!this.frontendState.workingVisible) {
+          this.setFrontendPhase("idle");
+        }
         const error = new Error(event.error) as Error & {
           sessionId?: string;
           sessionFile?: string;

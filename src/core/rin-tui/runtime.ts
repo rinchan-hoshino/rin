@@ -379,6 +379,8 @@ export class RpcInteractiveSession {
   private activeTurn: PendingRpcOperation | null = null;
   private rpcConnected = false;
   private remoteTurnRunning = false;
+  public agentStreaming = false;
+  public backendWorkingVisible = false;
   private recoveringTurnPending = false;
   private disposed = false;
   private pendingRefreshFlags: RefreshFlags = {};
@@ -640,6 +642,8 @@ export class RpcInteractiveSession {
   async abort() {
     this.activeTurn = null;
     this.remoteTurnRunning = false;
+    this.agentStreaming = false;
+    this.isStreaming = false;
     this.isCompacting = false;
     this.isBashRunning = false;
     this.retryAttempt = 0;
@@ -1183,6 +1187,7 @@ export class RpcInteractiveSession {
       ...this.extensionBindings,
       ...bindings,
     };
+    this.setBackendWorkingVisible(this.backendWorkingVisible);
     await Promise.all([
       this.refreshDaemonCommandCatalog().catch(() => {}),
       this.refreshResourceDiagnostics().catch(() => {}),
@@ -1331,7 +1336,7 @@ export class RpcInteractiveSession {
         );
         return;
       case "setWorkingVisible":
-        ui?.setWorkingVisible?.(Boolean(payload.visible));
+        this.setBackendWorkingVisible(Boolean(payload.visible));
         return;
       case "setWorkingIndicator":
         ui?.setWorkingIndicator?.(payload.options);
@@ -1384,7 +1389,6 @@ export class RpcInteractiveSession {
     if (!this.rpcConnected || this.recoveryPending) return "connecting";
     if (this.isCompacting) return "compacting";
     if (this.retryAttempt > 0) return "retrying";
-    if (this.remoteTurnRunning) return "working";
     if (this.activeTurn) return "sending";
     return "idle";
   }
@@ -1437,25 +1441,45 @@ export class RpcInteractiveSession {
     this.rpcConnected = connected;
     if (!connected) {
       this.remoteTurnRunning = false;
+      this.agentStreaming = false;
+      this.isStreaming = false;
       this.activeTurn = null;
     }
     this.syncStreamingState();
   }
 
-  private setRemoteTurnRunning(running: boolean) {
-    this.remoteTurnRunning = running;
-    if (running || !this.recoveryPending) {
+  setTurnActive(active: boolean) {
+    this.remoteTurnRunning = active;
+    if (active || !this.recoveryPending) {
       this.recoveringTurnPending = false;
     }
     this.syncStreamingState();
   }
 
+  setAgentStreaming(streaming: boolean) {
+    this.agentStreaming = streaming;
+    if (streaming) {
+      this.extensionBindings.uiContext?.setWorkingVisible?.(
+        this.backendWorkingVisible,
+      );
+    }
+    this.syncStreamingState();
+  }
+
+  setBackendWorkingVisible(visible: boolean) {
+    this.backendWorkingVisible = visible;
+    if (!visible || this.agentStreaming) {
+      this.extensionBindings.uiContext?.setWorkingVisible?.(visible);
+    }
+  }
+
   private syncStreamingState() {
     this.isStreaming = Boolean(
-      (this.rpcConnected && (this.remoteTurnRunning || this.activeTurn)) ||
+      (this.rpcConnected &&
+        (this.agentStreaming || this.remoteTurnRunning || this.activeTurn)) ||
       (this.recoveryPending && this.recoveringTurnPending),
     );
-    if (!this.isStreaming && !this.rpcConnected) this.activeTurn = null;
+    if (!this.rpcConnected) this.activeTurn = null;
     this.emitFrontendStatus();
   }
 
@@ -1611,6 +1635,8 @@ export class RpcInteractiveSession {
     this.recoveryPending = true;
     this.activeTurn = null;
     this.remoteTurnRunning = false;
+    this.agentStreaming = false;
+    this.isStreaming = false;
     this.isCompacting = false;
     this.isBashRunning = false;
     if (options?.transportClosed) {

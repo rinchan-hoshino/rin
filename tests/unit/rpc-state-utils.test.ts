@@ -63,29 +63,41 @@ test("rpc state utils derive branch and apply state", () => {
   assert.equal(target.thinkingLevel, "low");
   assert.equal(target.isStreaming, true);
 
-  let remoteStreaming = false;
+  let remoteTurnActive = false;
+  let agentStreaming = false;
+  let workingVisible = false;
   stateUtils.applyRpcSessionState(
     {
       ...target,
-      setRemoteTurnRunning(value) {
-        remoteStreaming = value;
+      setTurnActive(value) {
+        remoteTurnActive = value;
+      },
+      setAgentStreaming(value) {
+        agentStreaming = value;
+      },
+      setBackendWorkingVisible(value) {
+        workingVisible = value;
       },
     },
     {
       sessionId: " s2 ",
       sessionFile: " /tmp/y ",
-      isStreaming: true,
+      turnActive: true,
+      isStreaming: false,
+      workingVisible: true,
     },
   );
-  assert.equal(remoteStreaming, true);
+  assert.equal(remoteTurnActive, true);
+  assert.equal(agentStreaming, false);
+  assert.equal(workingVisible, true);
 
-  remoteStreaming = false;
+  remoteTurnActive = true;
   const staleTurnTarget = {
     ...target,
     activeTurn: { mode: "prompt" },
     remoteTurnRunning: true,
-    setRemoteTurnRunning(value) {
-      remoteStreaming = value;
+    setTurnActive(value) {
+      remoteTurnActive = value;
       this.remoteTurnRunning = value;
     },
   };
@@ -96,7 +108,7 @@ test("rpc state utils derive branch and apply state", () => {
     isStreaming: false,
     isCompacting: false,
   });
-  assert.equal(remoteStreaming, false);
+  assert.equal(remoteTurnActive, false);
   assert.equal(staleTurnTarget.activeTurn, null);
 
   const entryById = new Map([
