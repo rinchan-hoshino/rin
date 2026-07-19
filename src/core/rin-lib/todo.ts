@@ -195,7 +195,7 @@ export default function todoCapability(): RinCapabilityDefinition {
       "Read the current branch checklist by omitting todos, or rewrite it by passing the complete desired todos array.",
     promptGuidelines: [
       "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist.",
-      "Omit todos to read the current checklist. Pass the complete desired checklist to replace it; omitted items are removed. Pass an empty todos array only to clear the checklist.",
+      "Omit todos to read the current checklist. After compaction, read it before continuing. Pass the complete desired checklist to replace it; omitted items are removed. Rewrite it immediately when the task objective changes. Pass an empty todos array only to clear the checklist. Clear it before starting a new unrelated task.",
     ],
     parameters: TodoParams,
 

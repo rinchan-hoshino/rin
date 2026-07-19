@@ -111,6 +111,17 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
       "Pass an empty todos array only to clear the checklist",
     ),
   );
+  assert.ok(
+    baseSystemPrompt.includes("After compaction, read it before continuing"),
+  );
+  assert.ok(
+    baseSystemPrompt.includes("Clear it before starting a new unrelated task"),
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "Rewrite it immediately when the task objective changes",
+    ),
+  );
   assert.equal(
     baseSystemPrompt.includes("Manage the current session todo checklist"),
     false,
