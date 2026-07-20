@@ -1,6 +1,6 @@
 # Network Search Practices
 
-Use this when the task needs current external facts, web discovery, source comparison, or search-engine setup. Prefer fast direct search URLs for simple discovery; install/run SearXNG only when a local/private meta-search service is explicitly useful.
+Use this when the task needs current external facts, web discovery, source comparison, or search-engine setup. Prefer fast direct search URLs for simple discovery. Install or start SearXNG only when the task explicitly authorizes installing or operating a local service; usefulness alone is not mutation authority.
 
 ## Fast Google URL
 
@@ -36,6 +36,23 @@ Use SearXNG when you need repeatable local meta-search, reduced direct Google in
 
 ## Quick SearXNG install with Docker
 
+Enter this flow only after the task explicitly authorizes installing and starting the service. Inspect the target first:
+
+```bash
+docker info
+test ! -e ~/searxng/docker-compose.yml || {
+  echo "Existing ~/searxng/docker-compose.yml requires review"
+  exit 1
+}
+docker ps -a --format '{{.Names}} {{.Ports}}' | grep -i searxng || true
+if ss -ltnH | awk '{print $4}' | grep -Eq '(^|:)8080$'; then
+  echo "Port 8080 is already in use"
+  exit 1
+fi
+```
+
+Do not overwrite an existing Compose file. When the directory and port are clear, create the isolated loopback service:
+
 ```bash
 mkdir -p ~/searxng
 cd ~/searxng
@@ -50,7 +67,10 @@ services:
     environment:
       - SEARXNG_BASE_URL=http://127.0.0.1:8080/
 YAML
+docker compose config
 docker compose up -d
+docker compose ps
+curl -fsS 'http://127.0.0.1:8080/search?q=rin' >/dev/null
 ```
 
 Open:

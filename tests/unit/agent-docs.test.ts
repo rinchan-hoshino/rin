@@ -26,6 +26,9 @@ test("agent docs expose scheduled task operation workflow", () => {
   const piOverrides = readAgentDoc("docs/pi-overrides.md");
   const runtimeLayout = readAgentDoc("docs/runtime-layout.md");
   const scheduledTasks = readAgentDoc("docs/scheduled-tasks.md");
+  const selfImproveDistillation = readAgentDoc(
+    "docs/self-improve-distillation.md",
+  );
   const agentSdk = readAgentDoc("docs/agent-sdk.md");
   const chatBridge = readAgentDoc("docs/chat-bridge.md");
   const richText = readAgentDoc("docs/rich-text-output-format.md");
@@ -34,6 +37,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   const browserUsePractice = readAgentDoc("practices/browser/README.md");
   const computerUsePractice = readAgentDoc("practices/computer/README.md");
   const mobileUsePractice = readAgentDoc("practices/mobile/README.md");
+  const androidPractice = readAgentDoc("practices/mobile/android.md");
   const searchPractice = readAgentDoc("practices/search/README.md");
 
   assert.match(readme, /docs\/agent-sdk\.md/);
@@ -78,6 +82,9 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(piOverrides, /## Report contract/);
   assert.match(piOverrides, /docs\/self-improve-distillation\.md/);
   assert.match(piOverrides, /Report the effective authority/);
+  assert.match(piOverrides, /Behavior semantics:/);
+  assert.match(piOverrides, /Current facts:/);
+  assert.doesNotMatch(piOverrides, /bundled browse/i);
   assert.match(runtimeLayout, /## Locator contract/);
   assert.match(runtimeLayout, /## Installed runtime entrypoint/);
   assert.match(runtimeLayout, /## Maintenance target contract/);
@@ -89,6 +96,13 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(runtimeLayout, /## Source checkout boundary/);
   assert.match(runtimeLayout, /## Report contract/);
   assert.match(runtimeLayout, /<targetHome>\/\.rin\/installer\.json/);
+  const locatorSection = runtimeLayout
+    .split("## Locator contract")[1]
+    .split("## Launcher and service contract")[0];
+  assert.equal(
+    locatorSection.match(/<targetHome>\/\.rin\/installer\.json/g)?.length,
+    1,
+  );
   assert.match(runtimeLayout, /agent directory/);
   assert.doesNotMatch(runtimeLayout, /<installDir>\/installer\.json/);
   assert.match(runtimeLayout, /app\/current\//);
@@ -131,8 +145,13 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.doesNotMatch(computerUsePractice, /RinWin11/);
   assert.match(mobileUsePractice, /Android/);
   assert.match(mobileUsePractice, /Evidence bundle/);
+  assert.match(androidPractice, /android-screen-before\.png/);
+  assert.match(androidPractice, /android-screen-after\.png/);
+  assert.doesNotMatch(androidPractice, /> \/tmp\/android-screen\.png/);
   assert.match(searchPractice, /Google URL/);
   assert.match(searchPractice, /SearXNG/);
+  assert.match(searchPractice, /explicitly authorizes installing/);
+  assert.match(searchPractice, /Do not overwrite an existing Compose file/);
   assert.match(searchPractice, /Evidence bundle/);
 
   for (const helper of [
@@ -189,6 +208,11 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(chatBridge, /Treat platform metadata as authoritative/);
   assert.match(chatBridge, /Chat bridge configuration is agent-owned/);
   assert.match(chatBridge, /restart the target daemon/);
+  assert.doesNotMatch(chatBridge, /runtime reload\/restart/);
+  assert.match(
+    chatBridge,
+    /confirm the target daemon restarted and loaded the active `~\/\.rin\/settings\.json`/,
+  );
   assert.doesNotMatch(chatBridge, /Use `\/chat`/);
   assert.match(chatBridge, /rin\.chat\.evalBridge/);
   assert.match(chatBridge, /helpers\.useChat\(chatKey\)/);
@@ -259,6 +283,24 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(scheduledTasks, /## Prompt brief/);
   assert.match(scheduledTasks, /## Success criteria/);
   assert.match(scheduledTasks, /Task prompt contract/);
+  assert.match(scheduledTasks, /Writable task definition/);
+  assert.match(scheduledTasks, /type WritableTaskPatch/);
+  assert.match(scheduledTasks, /disabledRinCapabilities\?: string\[\] \| null/);
+  assert.match(scheduledTasks, /trigger\?: \{/);
+  assert.match(scheduledTasks, /target\?:/);
+  assert.match(
+    scheduledTasks,
+    /Creating a task requires both `trigger` and `target`; an update with a matching `id` may omit either field/,
+  );
+  assert.match(scheduledTasks, /Read-only lifecycle state/);
+  assert.match(
+    scheduledTasks,
+    /condition\?: \{[\s\S]*code: string;[\s\S]*lastEvaluatedAt\?: string;/,
+  );
+  assert.doesNotMatch(
+    scheduledTasks,
+    /Recurring task is noisy:.*lower `thinkingLevel`/,
+  );
   assert.match(scheduledTasks, /`rin-prompt-engineering`/);
   assert.match(scheduledTasks, /target\.prompt.*target\.continuationPrompt/s);
   assert.match(scheduledTasks, /TUI frontends have no key and cannot be bound/);
@@ -269,6 +311,11 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(
     scheduledTasks,
     /Use `condition` when the schedule should wake only if agent-authored TypeScript returns true/,
+  );
+  assert.match(selfImproveDistillation, /Run a future-trigger replay/);
+  assert.match(
+    selfImproveDistillation,
+    /For correction-based or repeated-failure evidence, also verify that no active hit recommends the rejected behavior/,
   );
   assert.match(
     scheduledTasks,

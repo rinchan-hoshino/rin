@@ -12,11 +12,15 @@ adb shell pm list packages | grep -i '<app-name>'
 ```
 
 - Confirm the target serial when multiple devices are attached.
-- Use screenshots before and after UI actions:
+- Keep separate, task-scoped screenshots before and after UI actions so later evidence cannot overwrite the baseline:
 
 ```bash
-adb exec-out screencap -p > /tmp/android-screen.png
+adb exec-out screencap -p > /tmp/android-screen-before.png
+# perform the inspected UI action
+adb exec-out screencap -p > /tmp/android-screen-after.png
 ```
+
+Use a narrower task identifier in the filenames when multiple devices or jobs may run concurrently.
 
 ## UI operation
 

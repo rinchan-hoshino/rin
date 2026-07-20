@@ -116,6 +116,11 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.equal(baseSystemPrompt.includes("- save_prompts:"), false);
   assert.ok(baseSystemPrompt.includes("Guidelines:"));
+  assert.equal(baseSystemPrompt.includes("smallest cohesive change"), false);
+  assert.equal(
+    baseSystemPrompt.includes("When modifying files, prefer targeted edits"),
+    false,
+  );
   assert.ok(baseSystemPrompt.includes("Read the current branch checklist"));
   assert.ok(
     baseSystemPrompt.includes(

@@ -9,7 +9,6 @@ const PI_GENERIC_OPENING =
 
 const RIN_EXTRA_GUIDELINES = [
   "Do not stop after one action if the user's request obviously requires multiple concrete steps",
-  "When modifying files, prefer targeted edits and preserve existing style unless asked otherwise",
   "When using bash, explain meaningful findings instead of pasting excessive raw output",
 ];
 

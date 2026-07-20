@@ -33,7 +33,7 @@ Output contract:
 - operation performed or boundary inspected;
 - evidence source: SDK result, stored record, adapter result, outbox state, or status output;
 - delivery or state verification;
-- remaining boundary when source/runtime changes still need rebuild, reload, restart, or adapter action.
+- remaining boundary when source/runtime changes still need rebuild, daemon restart, or adapter action.
 
 ## Success criteria
 
@@ -50,7 +50,7 @@ A chat bridge operation is complete when:
 
 Classify the task before acting:
 
-1. **Configuration:** adapter entries, turn policy, i18n command replies, runtime reload/restart.
+1. **Configuration:** adapter entries, turn policy, i18n command replies, and target daemon restart.
 2. **Inbound message:** platform event, normalization, trust/allow state, message store, inbox, turn start.
 3. **Assistant turn:** frontend binding, controller key, active run, final delivery.
 4. **Outbound delivery:** SDK send, outbox payload, rich objects, adapter result, platform send result.
@@ -364,4 +364,4 @@ Common boundary checks:
 - **OneBot/QQ after NapCat relogin:** separate platform login from Rin bridge connectivity; check Rin runtime status, WebSocket connection, and an adapter-level login probe.
 - **Outbound text queued:** inspect the outbox quote part, platform error, and message-store accepted/processed state.
 - **Attachment missing:** verify the file exists, rich-object or structured `parts` attachment was sent, and the adapter produced a delivery result.
-- **Config change idle:** confirm the active `~/.rin/settings.json`, adapter entries, runtime reload/restart, and running app path.
+- **Config change idle:** confirm the target daemon restarted and loaded the active `~/.rin/settings.json`, then verify the adapter entries and running app path.

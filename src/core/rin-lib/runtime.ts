@@ -97,12 +97,25 @@ export function createRinCapabilityDefinitions(
 }
 
 const RIN_COMPACTION_SYSTEM_PROMPT =
-  "Write a compact, faithful continuation handoff for the next LLM. Optimize for safe resumption: actionable context only, no invented facts.";
+  "Produce a compact, factual continuation handoff for the next LLM. Include only information needed to resume safely; never invent facts.";
 
-const RIN_COMPACTION_PROMPT = `Condense the conversation above into the exact continuation handoff below.
+const RIN_COMPACTION_ACCUMULATION_SYSTEM_PROMPT =
+  "Maintain a cumulative factual record for a later final handoff. Preserve explicit state without inventing conclusions or next actions.";
+
+const RIN_COMPACTION_ACCUMULATION_PROMPT = `Merge the available history with the previous summary, if present.
+
+Preserve:
+- user intent and constraints;
+- authority boundaries and corrections;
+- completed work, current state, explicit next actions, and unresolved blockers;
+- concrete artifacts that later history may depend on.
+
+Remove speculation, repetition, and temporary narration.`;
+
+const RIN_COMPACTION_PROMPT = `Create the continuation handoff from all history processed above.
 
 Rules:
-- Preserve only task-critical facts: user intent, constraints, authority boundaries, corrections, current state, completed work, blockers, and next actions.
+- Preserve task-critical facts: user intent, constraints, authority boundaries, corrections, current state, completed work, blockers, and next actions.
 - Include exact paths, commands, function names, errors, and decisions only when the next LLM must use them.
 - Drop chronology, stale/resolved/duplicate detail, speculation, and anything not needed for the next step.
 
@@ -139,7 +152,7 @@ Summarize only prefix facts needed to understand and continue from the retained 
 ## Context for Suffix
 - [Facts needed to understand the retained suffix]
 
-Keep it concise. Include files only if the suffix or next action depends on them.`;
+Keep it concise. Include files only when the retained suffix or next action depends on them.`;
 
 function extractAssistantText(message: any) {
   return (Array.isArray(message?.content) ? message.content : [])
@@ -166,6 +179,7 @@ function createRinSummarizationOptions(
 
 type RinCompactionSummaryRequest = {
   model: any;
+  systemPrompt?: string;
   promptText: string;
   maxTokens: number;
   apiKey?: string;
@@ -183,7 +197,7 @@ async function completeRinCompactionSummary(
   options: RinCompactionSummaryRequest,
 ) {
   const context: any = {
-    systemPrompt: RIN_COMPACTION_SYSTEM_PROMPT,
+    systemPrompt: options.systemPrompt || RIN_COMPACTION_SYSTEM_PROMPT,
     messages: [
       {
         role: "user",
@@ -266,11 +280,18 @@ function truncateTextToTokenBudget(text: string, tokenBudget: number) {
   const maxChars = Math.max(0, Math.floor(tokenBudget));
   const chars = Array.from(text);
   if (chars.length <= maxChars) return text;
-  const contentBudget = Math.max(
-    0,
-    maxChars - RIN_COMPACTION_TRUNCATION_MARKER.length,
-  );
-  return `${chars.slice(0, contentBudget).join("")}${RIN_COMPACTION_TRUNCATION_MARKER}`;
+  const markerChars = Array.from(RIN_COMPACTION_TRUNCATION_MARKER);
+  if (maxChars <= markerChars.length) {
+    return markerChars.slice(0, maxChars).join("");
+  }
+  const contentBudget = maxChars - markerChars.length;
+  const headBudget = Math.max(1, Math.floor(contentBudget / 3));
+  const tailBudget = contentBudget - headBudget;
+  return [
+    chars.slice(0, headBudget).join(""),
+    RIN_COMPACTION_TRUNCATION_MARKER,
+    chars.slice(chars.length - tailBudget).join(""),
+  ].join("");
 }
 
 function fitRinCompactionPromptToBudget(options: {
@@ -355,7 +376,10 @@ function fitRinCompactionPromptToBudget(options: {
 export async function completeRinCompactionSummaryBudgeted(options: {
   model: any;
   messages: any[];
+  systemPrompt?: string;
+  intermediateSystemPrompt?: string;
   instruction: string;
+  intermediateInstruction?: string;
   previousSummary?: string;
   maxTokens: number;
   apiKey?: string;
@@ -406,15 +430,24 @@ export async function completeRinCompactionSummaryBudgeted(options: {
       break;
     }
 
+    const intermediate = index < blocks.length;
+    const instruction = intermediate
+      ? options.intermediateInstruction || RIN_COMPACTION_ACCUMULATION_PROMPT
+      : options.instruction;
+    const systemPrompt = intermediate
+      ? options.intermediateSystemPrompt ||
+        RIN_COMPACTION_ACCUMULATION_SYSTEM_PROMPT
+      : options.systemPrompt;
     const promptText = fitRinCompactionPromptToBudget({
       conversationText,
-      instruction: options.instruction,
+      instruction,
       previousSummary,
       promptBudgetTokens,
     });
     summary = (
       await completeSummary({
         model: options.model,
+        systemPrompt,
         promptText,
         maxTokens: options.maxTokens,
         apiKey: options.apiKey,
@@ -1685,10 +1718,13 @@ export async function createConfiguredAgentSession(
       const historySummary = await completeRinCompactionSummaryBudgeted({
         ...commonOptions,
         messages: messagesToSummarize,
+        systemPrompt: RIN_COMPACTION_SYSTEM_PROMPT,
+        intermediateSystemPrompt: RIN_COMPACTION_ACCUMULATION_SYSTEM_PROMPT,
         instruction: appendRinCompactionCustomInstructions(
           RIN_COMPACTION_PROMPT,
           event?.customInstructions,
         ),
+        intermediateInstruction: RIN_COMPACTION_ACCUMULATION_PROMPT,
         previousSummary: preparation.previousSummary,
       });
       let summary = historySummary || "No prior history.";
@@ -1701,7 +1737,10 @@ export async function createConfiguredAgentSession(
           ...commonOptions,
           maxTokens: Math.min(Math.floor(maxTokens * 0.5), maxTokens),
           messages: turnPrefixMessages,
+          systemPrompt: RIN_COMPACTION_SYSTEM_PROMPT,
+          intermediateSystemPrompt: RIN_COMPACTION_ACCUMULATION_SYSTEM_PROMPT,
           instruction: RIN_TURN_PREFIX_COMPACTION_PROMPT,
+          intermediateInstruction: RIN_COMPACTION_ACCUMULATION_PROMPT,
         });
         summary = `${summary}\n\n---\n\n**Turn Context (split turn):**\n\n${turnPrefixSummary}`;
       }

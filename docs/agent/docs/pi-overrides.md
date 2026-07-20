@@ -6,15 +6,12 @@ Rin docs are the installed Rin layer. Pi docs are the upstream base layer. A Rin
 
 ## Override contract
 
-For Rin behavior, choose authority in this order:
+Separate behavior authority from current-state evidence:
 
-1. current system prompt and live tool list for this turn;
-2. installed Rin docs for Rin runtime behavior;
-3. narrow Rin topic docs for the surface being changed;
-4. upstream Pi docs for base behavior outside Rin coverage;
-5. live state from the target runtime, repository, daemon, or service.
+- **Behavior semantics:** follow the current system prompt, then the narrow installed Rin topic document for the surface, then upstream Pi docs only where Rin leaves the base behavior open.
+- **Current facts:** use the live tool list for turn capabilities and the target runtime, repository, daemon, or service for observed state. Static documentation cannot override current live state.
 
-When Rin docs and Pi docs describe the same Rin surface differently, apply the Rin document and cite the Rin surface used.
+When Rin docs and Pi docs describe the same Rin surface differently, apply the Rin document. When documented state differs from the live target, report the observed state and the owning document or producer that needs repair.
 
 ## Resolution flow
 
@@ -41,7 +38,7 @@ Read `docs/memory-layering.md`, `docs/self-improve-distillation.md`, and `docs/c
 
 ### Capabilities
 
-Use the live tool list for the current turn and Rin capability docs for installed behavior. Rin agent-facing surfaces include archived recall, core todo, scheduled tasks, chat bridge configuration, and bundled browse with URL fetching.
+Use the live tool list for the current turn and Rin capability docs for installed behavior. Rin-owned agent surfaces include archived recall, core todo, scheduled tasks, and chat bridge configuration. Browser, computer, mobile, and search operations are available only when the live runtime exposes the needed tools; route those tasks through `practices/README.md`.
 
 Read `docs/builtin-extensions.md` and `docs/capabilities.md` for the current Rin layer.
 

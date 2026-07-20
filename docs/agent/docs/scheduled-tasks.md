@@ -104,10 +104,12 @@ For pause, delete, complete, or terminate-like changes, verify active run state 
 
 ## Task record reference
 
-Main fields:
+### Writable task definition
+
+Pass only desired task state to `upsert()`:
 
 ```ts
-type Task = {
+type WritableTaskPatch = {
   id?: string;
   name?: string;
   enabled?: boolean;
@@ -123,43 +125,54 @@ type Task = {
     | "high"
     | "xhigh"
     | "max";
-  trigger: {
+  disabledRinCapabilities?: string[] | null;
+  trigger?: {
     expression?: string;
     timezone?: "local";
     runAt?: string;
     startAt?: string;
   };
   termination?: { maxRuns?: number; stopAt?: string } | null;
+  condition?: { code: string; timeoutMs?: number } | null;
+  session?: { mode: "none" | "dedicated" };
+  target?:
+    | { kind: "agent_prompt"; prompt: string; continuationPrompt?: string }
+    | { kind: "shell_command"; command: string };
+};
+```
+
+Creating a task requires both `trigger` and `target`; an update with a matching `id` may omit either field to preserve its existing value. Include only the writable fields you intend to change. Use `frontend: null`, `termination: null`, `condition: null`, or `disabledRinCapabilities: null` to remove those optional fields.
+
+### Read-only lifecycle state
+
+Task reads return normalized task fields plus scheduler-owned lifecycle state. The returned `condition` combines its writable definition with the latest evaluation result. Observe these fields; use the dedicated run, pause, resume, complete, reschedule, or delete operations instead of trying to write lifecycle results through `upsert()`:
+
+```ts
+type ReadOnlyTaskLifecycleState = {
+  createdAt: string;
+  updatedAt: string;
+  nextRunAt?: string;
+  completedAt?: string;
+  completionReason?: string;
+  pausedAt?: string;
+  runCount: number;
+  running: boolean;
+  lastStartedAt?: string;
+  lastFinishedAt?: string;
+  lastResultText?: string;
+  lastError?: string;
+  dedicatedSessionFile?: string;
   condition?: {
     code: string;
     timeoutMs?: number;
     lastEvaluatedAt?: string;
     lastResult?: boolean;
     lastOutput?: string;
-  } | null;
-  session?: { mode: "none" | "dedicated" };
-  target:
-    | { kind: "agent_prompt"; prompt: string; continuationPrompt?: string }
-    | { kind: "shell_command"; command: string };
-
-  // output-only lifecycle state
-  createdAt?: string;
-  updatedAt?: string;
-  nextRunAt?: string;
-  completedAt?: string;
-  completionReason?: string;
-  pausedAt?: string;
-  runCount?: number;
-  running?: boolean;
-  lastStartedAt?: string;
-  lastFinishedAt?: string;
-  lastResultText?: string;
-  lastError?: string;
-  dedicatedSessionFile?: string;
+  };
 };
 ```
 
-`upsert()` merges with an existing task when `id` matches. Include the fields you intend to change. Use `frontend: null`, `termination: null`, or `condition: null` to remove those optional fields. The daemon loads the persisted task file at startup and when explicitly requested through `rin tasks reload` or `rin.tasks.reload()`: valid JSON edits, additions, and removals take effect without restarting the daemon only after that reload command. Invalid JSON leaves the running daemon schedule unchanged and makes the reload fail, so a partial manual edit does not silently replace the in-memory schedule.
+The daemon loads the persisted task file at startup and when explicitly requested through `rin tasks reload` or `rin.tasks.reload()`: valid JSON edits, additions, and removals take effect without restarting the daemon only after that reload command. Invalid JSON leaves the running daemon schedule unchanged and makes the reload fail, so a partial manual edit does not silently replace the in-memory schedule.
 
 For agent-backed tasks, the scheduler owns the trigger and a durable invocation receipt, while the ordinary session/turn runtime remains authoritative for execution and terminal completion. The receipt snapshots the submitted prompt, session target, frontend policy, and stable turn identity before dispatch. After a daemon restart, Rin attaches to that same turn instead of submitting the prompt again. `running` and the `last*` fields are scheduler projections of this lifecycle; the internal receipt is intentionally omitted from task APIs.
 
@@ -435,5 +448,5 @@ Report:
 
 - Task stayed idle: inspect `enabled`, `completedAt`, `pausedAt`, `nextRunAt`, `condition.lastResult`, `lastError`, and `rin status --json`.
 - Run-now finished without a recipient-visible report: inspect `running`, `lastStartedAt`, active frontend turn, `lastError`, `frontend`, and `deliverFinal`.
-- Recurring task is noisy: add `condition`, lower `thinkingLevel`, or change the prompt to report only changed evidence.
+- Recurring task is noisy: add a `condition`, persist a deduplication/change-detection key, narrow delivery, or change the prompt to report only changed evidence. Adjust `thinkingLevel` for computation cost, not notification frequency.
 - Report formatting is raw: replace direct `shell_command` delivery with an `agent_prompt` wrapper.

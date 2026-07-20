@@ -91,12 +91,11 @@ Use `app/current/...` for the active runtime. Use `app/releases/<id>/...` when a
 Find installed-runtime ownership in this order when the task depends on the active installation:
 
 1. `rin status --json` for live daemon/runtime data.
-2. `<targetHome>/.rin/installer.json` as the stable locator manifest under the target home.
-3. `<targetHome>/.rin/installer.json` as the primary install manifest.
-4. User launcher metadata:
+2. `<targetHome>/.rin/installer.json`, which is both the stable locator under the target home and the primary install manifest.
+3. User launcher metadata:
    - Linux: `~/.config/rin/install.json`
    - macOS: `~/Library/Application Support/rin/install.json`
-5. Managed service files:
+4. Managed service files:
    - Linux user service: `~/.config/systemd/user/rin-daemon*.service`
    - macOS launch agent: `~/Library/LaunchAgents/com.rin.daemon.*.plist`
 

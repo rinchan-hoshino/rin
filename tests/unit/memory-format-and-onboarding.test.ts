@@ -212,12 +212,13 @@ test("self-improve format renders stable result variants", () => {
   );
 });
 
-test("memory onboarding helper points initialization to dedicated docs", () => {
-  const prompt = onboarding.buildOnboardingPrompt("manual");
-  assert.ok(prompt.includes("The user is requesting Rin initialization."));
-  assert.ok(prompt.includes("~/.rin/docs/rin/docs/initialization.md"));
-  assert.ok(prompt.includes("as the initialization contract"));
-  assert.equal(prompt.includes("hidden initialization instructions"), false);
-  assert.equal(prompt.includes("capabilities.md"), false);
-  assert.equal(prompt.includes("one question"), false);
+test("memory onboarding helper preserves manual provenance and runtime path", () => {
+  const prompt = onboarding.buildOnboardingPrompt("manual", "/tmp/rin-agent");
+  assert.match(prompt, /The user explicitly requested Rin initialization/);
+  assert.match(prompt, /\/tmp\/rin-agent\/docs\/rin\/docs\/initialization\.md/);
+  assert.match(prompt, /as the initialization contract/);
+  assert.doesNotMatch(prompt, /~\/\.rin/);
+  assert.doesNotMatch(prompt, /hidden initialization instructions/);
+  assert.doesNotMatch(prompt, /capabilities\.md/);
+  assert.doesNotMatch(prompt, /one question/);
 });

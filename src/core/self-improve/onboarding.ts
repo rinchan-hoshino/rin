@@ -49,11 +49,23 @@ function writeInitState(
 }
 
 export function buildOnboardingPrompt(
-  _mode: "auto" | "manual" = "manual",
+  mode: "auto" | "manual" = "manual",
+  agentDir = path.join("~", ".rin"),
 ): string {
+  const initiation =
+    mode === "auto"
+      ? "Rin detected that initialization is incomplete and started this initialization flow."
+      : "The user explicitly requested Rin initialization.";
+  const manualPath = path.join(
+    agentDir,
+    "docs",
+    "rin",
+    "docs",
+    "initialization.md",
+  );
   return [
-    "The user is requesting Rin initialization.",
-    "Use `~/.rin/docs/rin/docs/initialization.md` as the initialization contract for this flow.",
+    initiation,
+    `Use ${manualPath} as the initialization contract for this flow.`,
     "The initialization completed state is false; follow the initialization document through its completion-state update step.",
   ].join("\n");
 }

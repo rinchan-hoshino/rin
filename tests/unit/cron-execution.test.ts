@@ -19,6 +19,10 @@ const cronMod = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "cron.js"))
     .href
 );
+const selfImprovePromptMod = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "self-improve", "prompt.js"))
+    .href
+);
 test("cron execution resolves only existing dedicated session files", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const dedicatedSessionFile = path.join(
@@ -2038,61 +2042,34 @@ test("cron scheduler installs built-in daily memory and self-improve distillatio
     assert.equal(sleep.target.kind, "agent_prompt");
     assert.equal(
       sleep.target.prompt,
-      `Follow the self-improve distillation contract in ${path.join(agentDir, "docs", "rin", "docs", "self-improve-distillation.md")} using the previous 24 hours of Rin session records as retrospective evidence. Review ${path.join(agentDir, "self_improve")}: prompt baselines, reusable skills, memory-index pointers, and short-term continuity records; use that retrospective to find proven additions, corrections, moves, pruning, or removals that affect future guidance. Summarize reusable lessons learned and the user's working style as compact future-triggered guidance when the evidence shows a durable pattern. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. For correction-based or repeated-failure evidence, run a conflict retrieval pass over prompt baselines, reusable skills, memory-index indexes and transactions, and matching short-term records using the owner's exact trigger wording, behavior keywords, old abstraction names, and likely synonyms; read every plausible active hit and remove or rewrite active conflicting guidance before adding anything. Before reporting unchanged or success, replay the future trigger and confirm the cleaned library routes to one owner and no active hit still recommends the rejected behavior. Merge, move, prune stale or misplaced guidance, and add or rewrite guidance only for proven behavior changes that improve future behavior, routing, decisions, execution, recall, or remove guidance that would cause future mistakes. Report changed artifacts, cleanup work, conflict-search closure, future-trigger replay, routed candidates, or one concise unchanged reason.`,
+      selfImprovePromptMod.buildSelfImproveSleepPrompt(agentDir),
     );
-    assert.doesNotMatch(sleep.target.prompt, /Trigger:/);
+    assert.match(
+      sleep.target.prompt,
+      new RegExp(
+        `Follow ${agentDir.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}/docs/rin/docs/self-improve-distillation\\.md as the complete contract`,
+      ),
+    );
+    assert.match(
+      sleep.target.prompt,
+      new RegExp(
+        `over ${agentDir.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}/self_improve`,
+      ),
+    );
+    assert.match(
+      sleep.target.prompt,
+      /Evidence scope: Rin session records from the previous 24 hours/,
+    );
+    assert.ok(
+      sleep.target.prompt.length < 350,
+      `sleep prompt is too long: ${sleep.target.prompt.length}`,
+    );
+    assert.doesNotMatch(sleep.target.prompt, /Trigger context/);
     assert.doesNotMatch(sleep.target.prompt, /conversation above/);
-    assert.doesNotMatch(sleep.target.prompt, /conversation transcript/);
-    assert.doesNotMatch(sleep.target.prompt, /Review priorities:/);
-    assert.doesNotMatch(sleep.target.prompt, /explicit owner corrections/);
-    assert.doesNotMatch(
-      sleep.target.prompt,
-      /patch the skill that was in play/,
-    );
-    assert.doesNotMatch(sleep.target.prompt, /lower-entropy/);
-    assert.match(sleep.target.prompt, /prompt baselines/);
-    assert.match(sleep.target.prompt, /reusable skills/);
-    assert.match(sleep.target.prompt, /memory-index pointers/);
-    assert.match(sleep.target.prompt, /short-term continuity records/);
-    assert.match(
-      sleep.target.prompt,
-      /previous 24 hours of Rin session records/,
-    );
-    assert.match(sleep.target.prompt, /retrospective evidence/);
-    assert.doesNotMatch(sleep.target.prompt, /Also review/);
-    assert.doesNotMatch(sleep.target.prompt, /scheduled task records/);
-    assert.doesNotMatch(sleep.target.prompt, /message-store/);
-    assert.doesNotMatch(sleep.target.prompt, /final reusable workflow/);
-    assert.match(
-      sleep.target.prompt,
-      /corrections, moves, pruning, or removals/,
-    );
-    assert.match(
-      sleep.target.prompt,
-      /reusable lessons learned and the user's working style/,
-    );
-    assert.match(sleep.target.prompt, /compact future-triggered guidance/);
-    assert.match(sleep.target.prompt, /evidence, trigger, target behavior/);
-    assert.match(sleep.target.prompt, /delete or rewrite wrong guidance/);
-    assert.match(sleep.target.prompt, /reject patch-layer fixes/);
-    assert.match(
-      sleep.target.prompt,
-      /conflict retrieval pass over prompt baselines/,
-    );
-    assert.match(sleep.target.prompt, /memory-index indexes and transactions/);
-    assert.match(sleep.target.prompt, /read every plausible active hit/);
-    assert.match(sleep.target.prompt, /owner's exact trigger wording/);
-    assert.match(sleep.target.prompt, /replay the future trigger/);
-    assert.match(
-      sleep.target.prompt,
-      /no active hit still recommends the rejected behavior/,
-    );
-    assert.match(sleep.target.prompt, /proven behavior changes/);
-    assert.match(sleep.target.prompt, /routed candidates/);
-    assert.doesNotMatch(sleep.target.prompt, /no-change result as exceptional/);
-    assert.doesNotMatch(sleep.target.prompt, /one concise no-op reason/);
-    assert.doesNotMatch(sleep.target.prompt, /read-only guidance/);
-    assert.doesNotMatch(sleep.target.prompt, /## Basic concepts/);
+    assert.doesNotMatch(sleep.target.prompt, /prompt baselines/);
+    assert.doesNotMatch(sleep.target.prompt, /reusable lessons learned/);
+    assert.doesNotMatch(sleep.target.prompt, /Replay the future trigger/);
+    assert.doesNotMatch(sleep.target.prompt, /Report changed artifacts/);
   } finally {
     scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });

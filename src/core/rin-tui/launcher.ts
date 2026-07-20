@@ -280,7 +280,7 @@ export async function applyTuiOnboardingStartupState(
 
   resourceOptions.appendSystemPrompt = [
     ...(resourceOptions.appendSystemPrompt || []),
-    buildOnboardingPrompt("auto"),
+    buildOnboardingPrompt("auto", agentDir),
   ];
   interactiveOptions.initialMessage = undefined;
   interactiveOptions.initialMessages = undefined;

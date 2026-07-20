@@ -19,6 +19,7 @@ import {
   type ScheduledTaskTargetKind,
 } from "../scheduled-task-options.js";
 import { getManagedTaskSessionFile } from "../session/managed-paths.js";
+import { buildSelfImproveSleepPrompt } from "../self-improve/prompt.js";
 import { evaluateCronTaskCondition } from "./cron-condition.js";
 import {
   appendCronTaskTerminalHistory,
@@ -388,15 +389,7 @@ function createBuiltInSelfImproveSleepConsolidationTask(
   agentDir: string,
 ): CronTaskRecord {
   const createdAt = nowIso();
-  const manualPath = path.join(
-    agentDir,
-    "docs",
-    "rin",
-    "docs",
-    "self-improve-distillation.md",
-  );
-  const libraryPath = path.join(agentDir, "self_improve");
-  const prompt = `Follow the self-improve distillation contract in ${manualPath} using the previous 24 hours of Rin session records as retrospective evidence. Review ${libraryPath}: prompt baselines, reusable skills, memory-index pointers, and short-term continuity records; use that retrospective to find proven additions, corrections, moves, pruning, or removals that affect future guidance. Summarize reusable lessons learned and the user's working style as compact future-triggered guidance when the evidence shows a durable pattern. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. For correction-based or repeated-failure evidence, run a conflict retrieval pass over prompt baselines, reusable skills, memory-index indexes and transactions, and matching short-term records using the owner's exact trigger wording, behavior keywords, old abstraction names, and likely synonyms; read every plausible active hit and remove or rewrite active conflicting guidance before adding anything. Before reporting unchanged or success, replay the future trigger and confirm the cleaned library routes to one owner and no active hit still recommends the rejected behavior. Merge, move, prune stale or misplaced guidance, and add or rewrite guidance only for proven behavior changes that improve future behavior, routing, decisions, execution, recall, or remove guidance that would cause future mistakes. Report changed artifacts, cleanup work, conflict-search closure, future-trigger replay, routed candidates, or one concise unchanged reason.`;
+  const prompt = buildSelfImproveSleepPrompt(agentDir);
   const task: CronTaskRecord = {
     id: "builtin_self_improve_sleep_consolidation_daily",
     builtIn: true,

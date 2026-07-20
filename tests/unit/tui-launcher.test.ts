@@ -315,7 +315,12 @@ test("tui startup treats missing initialization state as incomplete", async () =
     assert.equal(interactiveOptions.rinStartHiddenInitialization, true);
     assert.match(
       resourceOptions.appendSystemPrompt[0],
-      /~\/\.rin\/docs\/rin\/docs\/initialization\.md/,
+      /Rin detected that initialization is incomplete/,
+    );
+    assert.ok(
+      resourceOptions.appendSystemPrompt[0].includes(
+        path.join(dir, "docs", "rin", "docs", "initialization.md"),
+      ),
     );
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
@@ -348,7 +353,12 @@ test("tui startup enters initialization from persisted state and waits for docum
     assert.equal(interactiveOptions.initialMessages, undefined);
     assert.match(
       resourceOptions.appendSystemPrompt[0],
-      /~\/\.rin\/docs\/rin\/docs\/initialization\.md/,
+      /Rin detected that initialization is incomplete/,
+    );
+    assert.ok(
+      resourceOptions.appendSystemPrompt[0].includes(
+        path.join(dir, "docs", "rin", "docs", "initialization.md"),
+      ),
     );
 
     assert.equal(interactiveOptions.rinOnPromptComplete, undefined);

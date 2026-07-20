@@ -15,6 +15,9 @@ import { readSessionMetadata } from "../session/metadata.js";
 import { resolveAgentDir } from "./agent-dir.js";
 import { safeString } from "./core/utils.js";
 import { selfImprovePromptsDir, selfImproveSkillsDir } from "./paths.js";
+import { buildSelfImproveReviewPrompt } from "./prompt.js";
+
+export { buildSelfImproveReviewPrompt };
 
 type ExtensionCtxLike = {
   model?: Model<any> | null;
@@ -80,26 +83,6 @@ function diffManagedArtifactSnapshots(
     }
   }
   return changed;
-}
-
-function selfImproveMaintenanceManualPath(agentDir: string) {
-  return path.join(
-    agentDir,
-    "docs",
-    "rin",
-    "docs",
-    "self-improve-distillation.md",
-  );
-}
-
-export function buildSelfImproveReviewPrompt(
-  trigger: string,
-  agentDir = "<agentDir>",
-): string {
-  void trigger;
-  const manualPath = selfImproveMaintenanceManualPath(agentDir);
-  const libraryPath = path.join(agentDir, "self_improve");
-  return `Use ${manualPath} as the self-improve distillation contract. Review ${libraryPath} with the conversation above as evidence for this scoped pass. Summarize reusable lessons learned and the user's working style as compact future-triggered guidance when the evidence shows a durable pattern. Maintain the clean target state of future guidance: apply the manual's evidence, trigger, target behavior, and owning surface checks; delete or rewrite wrong guidance before considering new guidance; reject patch-layer fixes. For correction-based or repeated-failure evidence, run a conflict retrieval pass over prompt baselines, reusable skills, memory-index indexes and transactions, and matching short-term records using the owner's exact trigger wording, behavior keywords, old abstraction names, and likely synonyms; read every plausible active hit and remove or rewrite active conflicting guidance before adding anything. Before reporting unchanged or success, replay the future trigger and confirm the cleaned library routes to one owner and no active hit still recommends the rejected behavior. Merge, move, prune, rewrite, delete, or add self-improve guidance only when it improves future behavior, routing, decisions, execution, recall, or removes guidance that would cause future mistakes. Cover prompt baselines, reusable skills, memory-index pointers, and short-term continuity records in one cohesive pass. Report changed artifacts, cleanup work, conflict-search closure, future-trigger replay, routed candidates, or one concise unchanged reason.`;
 }
 
 async function createForkedSessionManager(options: {
