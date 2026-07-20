@@ -1596,11 +1596,134 @@ test("chat controller renders todo notices as markdown for markdown chats", asyn
   ]);
 });
 
-test("chat controller sends the active non-empty todo once after each new user message", async () => {
+test("chat controller clears todo from editable progress for an empty notice", async () => {
+  const controller = await createController("discord/1:2");
+  const contexts = [];
+  controller.app.bots[0].platform = "discord";
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick(context) {
+        contexts.push(context);
+        return true;
+      },
+      async end() {
+        return true;
+      },
+    },
+  ];
+  controller.driver.frontendPhase = "working";
+  controller.driver.frontendState = { isStreaming: true, turnActive: true };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-owner",
+    replyToMessageId: "m-owner",
+    workingNoticeSent: true,
+  };
+  controller.awaitingTurnSettle = true;
+  controller.latestTodoNoticeText = "⬜ Keep working";
+
+  await controller.handleFrontendEvent({
+    type: "passive_notice",
+    text: "",
+    noticeKind: "todo",
+    deferDuringTurn: false,
+    todoItems: [],
+  });
+
+  assert.equal(controller.latestTodoNoticeText, "");
+  assert.equal(contexts.length, 1);
+  assert.equal(contexts[0].todoNoticeText, undefined);
+});
+
+test("chat controller clears todo before delivering an empty-state error", async () => {
+  const controller = await createController("discord/1:2");
+  const contexts = [];
+  const deliveries = [];
+  controller.app.bots[0].platform = "discord";
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick(context) {
+        contexts.push(context);
+        return true;
+      },
+      async end() {
+        return true;
+      },
+    },
+  ];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    deliveries.push({
+      text: nodes.map((node) => node?.attrs?.content || "").join(""),
+      kind: options?.deliveryKind,
+    });
+    return [`m-out-${deliveries.length}`];
+  };
+  controller.driver.frontendPhase = "working";
+  controller.driver.frontendState = { isStreaming: true, turnActive: true };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-owner",
+    replyToMessageId: "m-owner",
+    workingNoticeSent: true,
+  };
+  controller.awaitingTurnSettle = true;
+  controller.latestTodoNoticeText = "⬜ Keep working";
+
+  await controller.handleFrontendEvent({
+    type: "passive_notice",
+    text: "Error: invalid todo list",
+    noticeKind: "todo",
+    deferDuringTurn: false,
+    todoItems: [],
+    todoError: "invalid todo list",
+  });
+
+  assert.equal(controller.latestTodoNoticeText, "");
+  assert.equal(contexts.length, 1);
+  assert.equal(contexts[0].todoNoticeText, undefined);
+  assert.deepEqual(deliveries, [
+    { text: "rin error: invalid todo list", kind: "error" },
+  ]);
+});
+
+test("chat controller does not replay todo after a new user message", async () => {
   const controller = await createController("onebot/1:2");
-  controller.app.bots[0].platform = "onebot";
-  controller.app.bots[0].selfId = "1";
-  const sessionFile = path.join(controller.agentDir, "sessions", "todo.jsonl");
+  const deliveries = [];
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-todo",
+    replyToMessageId: "m-todo",
+    workingNoticeSent: false,
+  };
+  controller.awaitingTurnSettle = true;
+  controller.app.bots[0].sendMessage = async (...args) => {
+    deliveries.push(args);
+    return ["unexpected"];
+  };
+
+  await controller.handleFrontendEvent({
+    type: "user_message_start",
+    text: "continue",
+  });
+
+  assert.equal(
+    controller.workingIndicatorContext({ event: "tick" }).todoNoticeText,
+    undefined,
+  );
+  assert.deepEqual(deliveries, []);
+});
+
+test("chat controller ignores persisted-user events instead of replaying session todo", async () => {
+  const controller = await createController("onebot/1:2");
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "todo-replay.jsonl",
+  );
   await fs.mkdir(path.dirname(sessionFile), { recursive: true });
   await fs.writeFile(
     sessionFile,
@@ -1611,7 +1734,7 @@ test("chat controller sends the active non-empty todo once after each new user m
         parentId: null,
         customType: "rin.todo",
         data: {
-          todos: [{ id: 1, text: "Keep working", done: false }],
+          todos: [{ id: 1, text: "Must not replay", done: false }],
           nextId: 2,
         },
       },
@@ -1619,224 +1742,25 @@ test("chat controller sends the active non-empty todo once after each new user m
         type: "message",
         id: "user-message",
         parentId: "todo-state",
-        message: { role: "user", content: [{ type: "text", text: "go" }] },
-      },
-    ]
-      .map((entry) => JSON.stringify(entry))
-      .join("\n")}\n`,
-    "utf8",
-  );
-  controller.driver.frontendState = {
-    sessionFile,
-    turnActive: true,
-    isStreaming: true,
-  };
-  controller.currentTurn = {
-    startedAt: Date.now(),
-    incomingMessageId: "m-todo",
-    replyToMessageId: "m-todo",
-    workingNoticeSent: false,
-  };
-  controller.awaitingTurnSettle = true;
-  const deliveries = [];
-  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
-    deliveries.push({
-      text: nodes.map((node) => node?.attrs?.content || "").join(""),
-      coalesce: options?.coalesceWithWorkingMessage === true,
-    });
-    return [`m-out-${deliveries.length}`];
-  };
-
-  await controller.handleFrontendEvent({
-    type: "user_message_start",
-    text: "go",
-    userMessageId: "user-event-1",
-  });
-  await Promise.all([
-    controller.handleFrontendEvent({
-      type: "user_message_persisted",
-      sessionLeafId: "user-message",
-      userMessageId: "user-event-1",
-    }),
-    controller.handleFrontendEvent({
-      type: "user_message_persisted",
-      sessionLeafId: "user-message",
-      userMessageId: "user-event-1",
-    }),
-  ]);
-  assert.equal(
-    controller.workingIndicatorContext({ event: "tick" }).todoNoticeText,
-    "⬜ Keep working",
-  );
-
-  await fs.appendFile(
-    sessionFile,
-    `${JSON.stringify({
-      type: "message",
-      id: "user-continue",
-      parentId: "user-message",
-      message: {
-        role: "user",
-        content: [{ type: "text", text: "continue" }],
-      },
-    })}\n`,
-    "utf8",
-  );
-  controller.setCurrentTurn({
-    incomingMessageId: "m-todo-2",
-    replyToMessageId: "m-todo-2",
-  });
-  controller.awaitingTurnSettle = true;
-  assert.equal(
-    controller.workingIndicatorContext({ event: "tick" }).todoNoticeText,
-    undefined,
-  );
-  await controller.handleFrontendEvent({
-    type: "user_message_start",
-    text: "continue",
-    userMessageId: "user-event-2",
-  });
-  await controller.handleFrontendEvent({
-    type: "user_message_persisted",
-    sessionLeafId: "user-continue",
-    userMessageId: "user-event-2",
-  });
-
-  await fs.appendFile(
-    sessionFile,
-    `${[
-      {
-        type: "custom",
-        id: "todo-empty",
-        parentId: "user-continue",
-        customType: "rin.todo",
-        data: { todos: [], nextId: 1 },
-      },
-      {
-        type: "message",
-        id: "user-after-empty",
-        parentId: "todo-empty",
-        message: { role: "user", content: [{ type: "text", text: "done" }] },
-      },
-    ]
-      .map((entry) => JSON.stringify(entry))
-      .join("\n")}\n`,
-    "utf8",
-  );
-  controller.setCurrentTurn({
-    incomingMessageId: "m-todo-empty",
-    replyToMessageId: "m-todo-empty",
-  });
-  controller.awaitingTurnSettle = true;
-  await controller.handleFrontendEvent({
-    type: "user_message_start",
-    text: "done",
-    userMessageId: "user-event-empty",
-  });
-  await controller.handleFrontendEvent({
-    type: "user_message_persisted",
-    sessionLeafId: "user-after-empty",
-    userMessageId: "user-event-empty",
-  });
-
-  const retrySessionFile = path.join(
-    controller.agentDir,
-    "sessions",
-    "todo-retry.jsonl",
-  );
-  await fs.writeFile(
-    retrySessionFile,
-    `${[
-      {
-        type: "custom",
-        id: "stale-todo",
-        parentId: null,
-        customType: "rin.todo",
-        data: {
-          todos: [{ id: 1, text: "Stale todo", done: false }],
-          nextId: 2,
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "continue" }],
         },
       },
-      {
-        type: "message",
-        id: "stale-user",
-        parentId: "stale-todo",
-        message: { role: "user", content: [{ type: "text", text: "old" }] },
-      },
     ]
       .map((entry) => JSON.stringify(entry))
       .join("\n")}\n`,
     "utf8",
   );
-  controller.driver.frontendState.sessionFile = retrySessionFile;
-  controller.setCurrentTurn({
-    incomingMessageId: "m-todo-retry",
-    replyToMessageId: "m-todo-retry",
-  });
-  controller.awaitingTurnSettle = true;
-  await controller.handleFrontendEvent({
-    type: "user_message_start",
-    text: "retry",
-    userMessageId: "user-event-retry",
-  });
-  const delayedTodoDelivery = Promise.all([
-    controller.handleFrontendEvent({
-      type: "user_message_persisted",
-      sessionLeafId: "retry-user",
-      userMessageId: "user-event-retry",
-    }),
-    controller.handleFrontendEvent({
-      type: "user_message_persisted",
-      sessionLeafId: "retry-user",
-      userMessageId: "user-event-retry",
-    }),
-  ]);
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  await fs.appendFile(
-    retrySessionFile,
-    `${JSON.stringify({
-      type: "message",
-      id: "retry-user",
-      parentId: "retry-todo",
-      message: { role: "user", content: [{ type: "text", text: "retry" }] },
-    })}\n`,
-    "utf8",
-  );
-  await new Promise((resolve) => setTimeout(resolve, 600));
-  await fs.appendFile(
-    retrySessionFile,
-    `${JSON.stringify({
-      type: "custom",
-      id: "retry-todo",
-      parentId: "stale-user",
-      customType: "rin.todo",
-      data: {
-        todos: [{ id: 1, text: "Retry todo", done: false }],
-        nextId: 2,
-      },
-    })}\n`,
-    "utf8",
-  );
-  await delayedTodoDelivery;
-
-  assert.deepEqual(deliveries, [
-    { text: "⬜ Keep working", coalesce: true },
-    { text: "⬜ Keep working", coalesce: true },
-    { text: "⬜ Retry todo", coalesce: true },
-  ]);
-});
-
-test("chat controller cancels a pending todo branch read when the turn settles", async () => {
-  const controller = await createController("onebot/1:2");
   controller.driver.frontendState = {
-    sessionFile: path.join(controller.agentDir, "sessions", "delayed.jsonl"),
+    sessionFile,
     turnActive: true,
     isStreaming: true,
   };
   controller.currentTurn = {
     startedAt: Date.now(),
-    incomingMessageId: "m-todo-cancel",
-    replyToMessageId: "m-todo-cancel",
+    incomingMessageId: "m-owner",
+    replyToMessageId: "m-owner",
     workingNoticeSent: false,
   };
   controller.awaitingTurnSettle = true;
@@ -1845,39 +1769,30 @@ test("chat controller cancels a pending todo branch read when the turn settles",
     deliveries.push(args);
     return ["unexpected"];
   };
-  let releaseRead;
-  let markReadStarted;
-  const readStarted = new Promise((resolve) => {
-    markReadStarted = resolve;
-  });
-  controller.readTodoSnapshotForNotice = async () => {
-    markReadStarted();
-    return await new Promise((resolve) => {
-      releaseRead = resolve;
-    });
-  };
-  await controller.handleFrontendEvent({
-    type: "user_message_start",
-    text: "cancel",
-    userMessageId: "user-event-cancel",
-  });
 
-  const pending = controller.handleFrontendEvent({
-    type: "user_message_persisted",
-    sessionLeafId: "user-cancel",
-    userMessageId: "user-event-cancel",
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "message_start",
+      userMessageId: "user-event",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "continue" }],
+      },
+    },
   });
-  await readStarted;
-  assert.ok(controller.todoNoticeOperation);
-  controller.awaitingTurnSettle = false;
-  releaseRead({
-    todos: [{ id: 1, text: "must not send", done: false }],
-    nextId: 2,
-    pendingCount: 1,
+  await new Promise((resolve) => setImmediate(resolve));
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "rin_user_message_persisted",
+      sessionLeafId: "user-message",
+      userMessageId: "user-event",
+    },
   });
-  await pending;
+  await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(controller.todoNoticeOperation, null);
+  assert.equal(controller.latestTodoNoticeText, "");
   assert.deepEqual(deliveries, []);
 });
 

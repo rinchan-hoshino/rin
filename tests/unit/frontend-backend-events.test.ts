@@ -15,39 +15,18 @@ const sdk = await import(
 );
 const NOTICE_CHANGED = "💡 Self-improve review updated demo.";
 
-test("frontend backend event translator preserves the persisted user leaf", () => {
+test("frontend backend event translator exposes user message start", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
   assert.deepEqual(
     translator.translate({
       type: "message_start",
-      userMessageId: "user-message-1",
       message: {
         role: "user",
         content: [{ type: "text", text: "hello" }],
       },
     }),
-    [
-      {
-        type: "user_message_start",
-        text: "hello",
-        userMessageId: "user-message-1",
-      },
-    ],
-  );
-  assert.deepEqual(
-    translator.translate({
-      type: "rin_user_message_persisted",
-      sessionLeafId: "user-entry",
-      userMessageId: "user-message-1",
-    }),
-    [
-      {
-        type: "user_message_persisted",
-        sessionLeafId: "user-entry",
-        userMessageId: "user-message-1",
-      },
-    ],
+    [{ type: "user_message_start", text: "hello" }],
   );
 });
 
@@ -391,7 +370,38 @@ test("frontend backend event translator emits todo notice for single todo execut
   );
 });
 
-test("frontend backend event translator suppresses empty todo notices", () => {
+test("frontend backend event translator displays todo reads", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "tool_execution_end",
+      toolCallId: "todo-read",
+      toolName: "todo",
+      result: {
+        details: {
+          action: "list",
+          todos: [{ id: 1, text: "Keep working", done: false }],
+          nextId: 2,
+        },
+      },
+      isError: false,
+    }),
+    [
+      { type: "turn_accepted" },
+      {
+        type: "passive_notice",
+        text: "[ ] Keep working",
+        level: "info",
+        deferDuringTurn: false,
+        noticeKind: "todo",
+        todoItems: [{ id: 1, text: "Keep working", done: false }],
+      },
+    ],
+  );
+});
+
+test("frontend backend event translator emits empty todo notices as clears", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
   assert.deepEqual(
@@ -409,7 +419,17 @@ test("frontend backend event translator suppresses empty todo notices", () => {
       },
       isError: false,
     }),
-    [{ type: "turn_accepted" }],
+    [
+      { type: "turn_accepted" },
+      {
+        type: "passive_notice",
+        text: "",
+        level: "info",
+        deferDuringTurn: false,
+        noticeKind: "todo",
+        todoItems: [],
+      },
+    ],
   );
   assert.deepEqual(
     translator.translate({
@@ -426,7 +446,18 @@ test("frontend backend event translator suppresses empty todo notices", () => {
       },
       isError: true,
     }),
-    [{ type: "turn_accepted" }],
+    [
+      { type: "turn_accepted" },
+      {
+        type: "passive_notice",
+        text: "Error: invalid todo list",
+        level: "info",
+        deferDuringTurn: false,
+        noticeKind: "todo",
+        todoItems: [],
+        todoError: "invalid todo list",
+      },
+    ],
   );
 });
 
@@ -633,7 +664,6 @@ test("frontend backend event translator preserves producer request tags on progr
     translator.translate({
       type: "message_start",
       requestTag: "producer-tag",
-      userMessageId: "user-1",
       message: {
         role: "user",
         content: [{ type: "text", text: "continue" }],
@@ -643,7 +673,6 @@ test("frontend backend event translator preserves producer request tags on progr
       {
         type: "user_message_start",
         text: "continue",
-        userMessageId: "user-1",
         requestTag: "producer-tag",
       },
     ],

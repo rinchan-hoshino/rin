@@ -23,7 +23,6 @@ import {
   formatRinTodoChecklistCharacterContent,
   formatRinTodoChecklistMarkdownContent,
   normalizeRinTodoItems,
-  readTodoSnapshotFromSessionFile,
   type RinTodoItem,
 } from "../rin-lib/todo-state.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
@@ -390,25 +389,7 @@ export class ChatController {
   pendingPassiveNotices: string[] = [];
   latestTodoNoticeText = "";
   latestAssistantSummaryText = "";
-  todoNoticeTurnKey = "";
-  todoNoticeOperation: {
-    turnKey: string;
-    abort: AbortController;
-    promise: Promise<{ completed: boolean; sent: boolean }>;
-  } | null = null;
-  todoTurnKeyByUserMessageId = new Map<string, Promise<string>>();
-  private readTodoSnapshotForNotice = readTodoSnapshotFromSessionFile;
-  private _awaitingTurnSettle = false;
-  get awaitingTurnSettle() {
-    return this._awaitingTurnSettle;
-  }
-  set awaitingTurnSettle(value: boolean) {
-    this._awaitingTurnSettle = value;
-    if (!value) {
-      this.todoNoticeOperation?.abort.abort();
-      this.todoNoticeOperation = null;
-    }
-  }
+  awaitingTurnSettle = false;
   externalWorkingVisible = false;
   turnAbortRequested = false;
   turnAbortGeneration = 0;
@@ -523,9 +504,6 @@ export class ChatController {
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
     this.externalWorkingVisible = false;
-    this.todoNoticeTurnKey = "";
-    this.todoNoticeOperation = null;
-    this.todoTurnKeyByUserMessageId.clear();
     this.turnAbortRequested = false;
     this.turnAbortGeneration += 1;
     this.intentionallyAbortedTurnGenerations.clear();
@@ -555,9 +533,6 @@ export class ChatController {
   async clearProcessingState() {
     this.awaitingTurnSettle = false;
     this.externalWorkingVisible = false;
-    this.todoNoticeTurnKey = "";
-    this.todoNoticeOperation = null;
-    this.todoTurnKeyByUserMessageId.clear();
     this.turnAbortRequested = false;
     this.turnAbortGeneration += 1;
     this.intentionallyAbortedTurnGenerations.clear();
@@ -651,8 +626,6 @@ export class ChatController {
     requestTag?: string;
     outboxTurnFence?: ChatOutboxTurnFence;
   }) {
-    this.todoNoticeOperation?.abort.abort();
-    this.todoNoticeOperation = null;
     this.latestTodoNoticeText = "";
     this.latestAssistantSummaryText = "";
     const nextIncomingMessageId =
@@ -670,7 +643,6 @@ export class ChatController {
       workingNoticeSent: false,
     };
     this.backendAcceptedIncomingMessageId = "";
-    this.todoNoticeTurnKey = "";
   }
 
   private async prepareTurnPrompt(
@@ -736,8 +708,6 @@ export class ChatController {
   }
 
   private clearCurrentTurn() {
-    this.todoNoticeOperation?.abort.abort();
-    this.todoNoticeOperation = null;
     this.currentTurn = null;
     this.backendAcceptedIncomingMessageId = "";
     this.latestAssistantSummaryText = "";
@@ -2230,126 +2200,23 @@ export class ChatController {
     }
   }
 
-  private currentTodoNoticeTurnKey() {
-    return (
-      this.currentIncomingMessageId() ||
-      (this.currentTurn
-        ? `${this.currentSessionFile() || "session"}:${this.currentTurn.startedAt}`
-        : "")
-    );
-  }
-
-  private async waitForTodoRetry(delayMs: number, signal: AbortSignal) {
-    if (signal.aborted) return;
-    await new Promise<void>((resolve) => {
-      const done = () => {
-        clearTimeout(timer);
-        signal.removeEventListener("abort", done);
-        resolve();
-      };
-      const timer = setTimeout(done, delayMs);
-      signal.addEventListener("abort", done, { once: true });
-    });
-  }
-
-  private async currentTodoNoticeOutcome(
-    turnKey: string,
-    sessionFile: string | undefined,
-    sessionLeafId: string,
-    signal: AbortSignal,
-  ) {
-    let snapshot;
-    let retryDelayMs = 10;
-    while (
-      !signal.aborted &&
-      this.currentTurn &&
-      this.awaitingTurnSettle &&
-      this.currentTodoNoticeTurnKey() === turnKey
-    ) {
-      if (this.shouldSuppressQuietDelivery("passive_notice")) {
-        return { completed: true, sent: false };
-      }
-      snapshot = await this.readTodoSnapshotForNotice(
-        sessionFile,
-        sessionLeafId,
-      );
-      if (snapshot) break;
-      await this.waitForTodoRetry(retryDelayMs, signal);
-      retryDelayMs = Math.min(250, retryDelayMs * 2);
-    }
-    if (
-      signal.aborted ||
-      !this.currentTurn ||
-      !this.awaitingTurnSettle ||
-      !snapshot ||
-      this.currentTodoNoticeTurnKey() !== turnKey
-    ) {
-      return { completed: false, sent: false };
-    }
-    if (!snapshot.todos.length) {
-      this.latestTodoNoticeText = "";
-      return { completed: true, sent: false };
-    }
-    const sent = await this.sendTodoPassiveNoticeNow({
-      todoItems: snapshot.todos,
-    });
-    return { completed: sent, sent };
-  }
-
-  private async sendCurrentTodoAfterUserMessage(
-    sessionLeafId: unknown,
-    expectedTurnKey: unknown,
-  ) {
-    const turnKey = safeString(expectedTurnKey).trim();
-    const expectedLeafId = safeString(sessionLeafId).trim();
-    if (
-      !turnKey ||
-      !expectedLeafId ||
-      this.currentTodoNoticeTurnKey() !== turnKey ||
-      this.todoNoticeTurnKey === turnKey
-    ) {
-      return false;
-    }
-
-    const existing = this.todoNoticeOperation;
-    if (existing?.turnKey === turnKey) {
-      return (await existing.promise).sent;
-    }
-
-    const abort = new AbortController();
-    const operation = {
-      turnKey,
-      abort,
-      promise: this.currentTodoNoticeOutcome(
-        turnKey,
-        this.currentSessionFile(),
-        expectedLeafId,
-        abort.signal,
-      ),
-    };
-    this.todoNoticeOperation = operation;
-    try {
-      const outcome = await operation.promise;
-      if (outcome.completed && this.currentTodoNoticeTurnKey() === turnKey) {
-        this.todoNoticeTurnKey = turnKey;
-      }
-      return outcome.sent;
-    } finally {
-      if (this.todoNoticeOperation === operation) {
-        this.todoNoticeOperation = null;
-      }
-    }
-  }
-
   private async sendTodoPassiveNoticeNow(event: any) {
     const todos = normalizeRinTodoItems(event?.todoItems);
-    if (!todos?.length) {
+    if (!todos) {
       this.latestTodoNoticeText = safeString(event?.text).trim();
       return await this.sendPassiveNoticeNow(event?.text);
     }
-    if (!this.canDeliverReplies()) return true;
 
     const error = safeString(event?.todoError).trim();
+    if (todos.length === 0) {
+      this.latestTodoNoticeText = "";
+      await this.refreshEditableWorkingNotice({ force: true }).catch(
+        () => false,
+      );
+      return error ? await this.sendErrorNoticeNow(error) : true;
+    }
+    if (!this.canDeliverReplies()) return true;
+
     const mode = todoNoticeRenderModeForChatKey(this.chatKey);
     const noticeText = formatTodoNoticeText(
       todos,
@@ -2588,9 +2455,6 @@ export class ChatController {
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
     this.externalWorkingVisible = false;
-    this.todoNoticeTurnKey = "";
-    this.todoNoticeOperation = null;
-    this.todoTurnKeyByUserMessageId.clear();
     this.turnAbortRequested = false;
     this.turnAbortGeneration = 0;
   }
@@ -3341,31 +3205,12 @@ export class ChatController {
         this.markAcceptedMessage(this.backendAcceptedIncomingMessageId);
         return;
       }
-      case "user_message_start": {
-        const userMessageId = safeString(event.userMessageId).trim();
-        const activation = this.activatePendingSteeredDeliveryTarget(
+      case "user_message_start":
+        await this.activatePendingSteeredDeliveryTarget(
           event.text,
           event.requestTag,
-        ).then(() => this.currentTodoNoticeTurnKey());
-        if (userMessageId) {
-          this.todoTurnKeyByUserMessageId.set(userMessageId, activation);
-        }
-        await activation;
-        return;
-      }
-      case "user_message_persisted": {
-        const userMessageId = safeString(event.userMessageId).trim();
-        const turnKeyPromise =
-          this.todoTurnKeyByUserMessageId.get(userMessageId);
-        if (!userMessageId || !turnKeyPromise) return;
-        const turnKey = await turnKeyPromise;
-        this.todoTurnKeyByUserMessageId.delete(userMessageId);
-        await this.sendCurrentTodoAfterUserMessage(
-          event.sessionLeafId,
-          turnKey,
         );
         return;
-      }
       case "passive_notice":
         if (event.noticeKind === "compaction_end") {
           await this.deliverCompactionEndNotice(event.text);

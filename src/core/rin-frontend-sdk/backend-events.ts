@@ -123,11 +123,12 @@ function todoNoticeFromDetails(details: unknown): TodoNotice | null {
   if (!value) return null;
   const todos = normalizeRinTodoItems(value.todos);
   if (!todos) return null;
-  if (todos.length === 0) return null;
-  const checklist = formatRinTodoChecklistContent(todos);
+  const checklist = todos.length ? formatRinTodoChecklistContent(todos) : "";
   const error = safeString(value.error).trim();
   return {
-    text: error ? `Error: ${error}\n${checklist}` : checklist,
+    text: error
+      ? `Error: ${error}${checklist ? `\n${checklist}` : ""}`
+      : checklist,
     todos,
     ...(error ? { error } : {}),
   };
@@ -365,27 +366,9 @@ export function createRinFrontendBackendEventTranslator(
                   trim: true,
                 }),
               ).trim(),
-              ...(safeString(payload.userMessageId).trim()
-                ? {
-                    userMessageId: safeString(payload.userMessageId).trim(),
-                  }
-                : {}),
               ...(requestTag ? { requestTag } : {}),
             },
           ];
-        case "rin_user_message_persisted": {
-          const sessionLeafId = safeString(payload.sessionLeafId).trim();
-          const userMessageId = safeString(payload.userMessageId).trim();
-          return sessionLeafId
-            ? [
-                {
-                  type: "user_message_persisted",
-                  sessionLeafId,
-                  ...(userMessageId ? { userMessageId } : {}),
-                },
-              ]
-            : [];
-        }
         case "agent_end":
           return [];
         case "message_update": {

@@ -1223,7 +1223,6 @@ export async function runCustomRpcMode(
 
   let unsubscribeSessionEvents: (() => void) | undefined;
   let restoreSessionAppendMessage: (() => void) | undefined;
-  let userMessageSeq = 0;
   const bindCurrentSession = async () => {
     const session = getSession();
     agentRunning = Boolean(session?.isStreaming);
@@ -1268,16 +1267,11 @@ export async function runCustomRpcMode(
 
     unsubscribeSessionEvents?.();
     restoreSessionAppendMessage?.();
-    const userMessageIds = new WeakMap<object, string>();
     const userMessageRequestTags = new WeakMap<object, string>();
     const sessionManager = session.sessionManager;
     const originalAppendMessage = sessionManager?.appendMessage;
     if (typeof originalAppendMessage === "function") {
       const wrappedAppendMessage = function (this: any, message: any) {
-        const userMessageId =
-          message?.role === "user" && typeof message === "object"
-            ? userMessageIds.get(message)
-            : undefined;
         const requestTag =
           message?.role === "user" && typeof message === "object"
             ? userMessageRequestTags.get(message)
@@ -1296,15 +1290,7 @@ export async function runCustomRpcMode(
             }
           }
           if (message && typeof message === "object") {
-            userMessageIds.delete(message);
             userMessageRequestTags.delete(message);
-          }
-          if (userMessageId) {
-            output({
-              type: "rin_user_message_persisted",
-              sessionLeafId,
-              userMessageId,
-            });
           }
         }
         return result;
@@ -1373,20 +1359,13 @@ export async function runCustomRpcMode(
         }
       }
       if (event?.type === "message_start" && event.message?.role === "user") {
-        const userMessageId = `user-message-${Date.now().toString(36)}-${++userMessageSeq}`;
-        userMessageIds.set(event.message, userMessageId);
         if (producerRequestTag) {
           if (event.message.requestTag === undefined) {
             event.message.requestTag = producerRequestTag;
           }
           userMessageRequestTags.set(event.message, producerRequestTag);
         }
-        output(
-          withCompactionEventMetadata(session, {
-            ...taggedEvent,
-            userMessageId,
-          }),
-        );
+        output(withCompactionEventMetadata(session, taggedEvent));
         return;
       }
       output(withCompactionEventMetadata(session, taggedEvent));

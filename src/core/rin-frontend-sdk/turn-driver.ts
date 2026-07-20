@@ -104,13 +104,7 @@ export type RinFrontendTurnDriverEvent =
   | {
       type: "user_message_start";
       text: string;
-      userMessageId?: string;
       requestTag?: string;
-    }
-  | {
-      type: "user_message_persisted";
-      sessionLeafId: string;
-      userMessageId?: string;
     }
   | RinFrontendPassiveNoticeEvent
   | { type: "compaction_start_notice"; text: string }
@@ -1606,20 +1600,8 @@ export class RinFrontendTurnDriver {
         this.emit({
           type: "user_message_start",
           text: event.text,
-          ...(event.userMessageId
-            ? { userMessageId: event.userMessageId }
-            : {}),
           ...(safeString(event.requestTag).trim()
             ? { requestTag: safeString(event.requestTag).trim() }
-            : {}),
-        });
-        return;
-      case "user_message_persisted":
-        this.emit({
-          type: "user_message_persisted",
-          sessionLeafId: event.sessionLeafId,
-          ...(event.userMessageId
-            ? { userMessageId: event.userMessageId }
             : {}),
         });
         return;

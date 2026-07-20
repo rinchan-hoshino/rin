@@ -87,13 +87,7 @@ export type RinFrontendBackendEvent =
   | {
       type: "user_message_start";
       text: string;
-      userMessageId?: string;
       requestTag?: string;
-    }
-  | {
-      type: "user_message_persisted";
-      sessionLeafId: string;
-      userMessageId?: string;
     }
   | {
       type: "passive_notice";

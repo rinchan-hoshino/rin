@@ -163,39 +163,6 @@ function createFrontendClient() {
   };
 }
 
-test("frontend SDK turn driver preserves the persisted user leaf", async () => {
-  const driver = createDriver();
-  const seen: any[] = [];
-  driver.subscribe((event: any) => seen.push(event));
-
-  await emitDriverEvent(driver, {
-    type: "message_start",
-    userMessageId: "user-message-1",
-    message: {
-      role: "user",
-      content: [{ type: "text", text: "hello" }],
-    },
-  });
-  await emitDriverEvent(driver, {
-    type: "rin_user_message_persisted",
-    sessionLeafId: "user-entry",
-    userMessageId: "user-message-1",
-  });
-
-  assert.deepEqual(seen, [
-    {
-      type: "user_message_start",
-      text: "hello",
-      userMessageId: "user-message-1",
-    },
-    {
-      type: "user_message_persisted",
-      sessionLeafId: "user-entry",
-      userMessageId: "user-message-1",
-    },
-  ]);
-});
-
 test("backend working visibility is the only shared frontend Working source", async () => {
   const driver = createDriver();
   const seen: any[] = [];
