@@ -19,6 +19,7 @@ export {
 
 export {
   appendTranscriptArchiveEntry,
+  flushTranscriptSearchIndexWrites,
   loadRecentTranscriptSessions,
   loadTranscriptSessionEntries,
   repairTranscriptSearchIndex,

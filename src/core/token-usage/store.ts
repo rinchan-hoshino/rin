@@ -63,7 +63,16 @@ export type TokenUsageQueryOptions = {
 
 const dbCache = new Map<string, BetterSqlite3.Database>();
 const statementCache = new WeakMap<BetterSqlite3.Database, Map<string, any>>();
+type TokenTelemetryBatch = {
+  agentDir: string;
+  rows: Array<Record<string, unknown>>;
+  timer?: NodeJS.Timeout;
+  lastWarningAt?: number;
+};
+const telemetryBatches = new Map<string, TokenTelemetryBatch>();
 
+const TELEMETRY_BATCH_SIZE = 32;
+const TELEMETRY_BATCH_FLUSH_MS = 1_000;
 const DEFAULT_AGGREGATE_LIMIT = 20;
 const DEFAULT_EVENTS_LIMIT = 40;
 const MAX_QUERY_LIMIT = 500;
@@ -471,8 +480,8 @@ function initDb(db: BetterSqlite3.Database) {
       ON telemetry_events(source, timestamp);
     CREATE INDEX IF NOT EXISTS telemetry_events_capability_idx
       ON telemetry_events(capability_key, timestamp);
-    CREATE INDEX IF NOT EXISTS telemetry_events_tokens_idx
-      ON telemetry_events(total_tokens, timestamp);
+
+    DROP INDEX IF EXISTS telemetry_events_tokens_idx;
   `);
 }
 
@@ -629,6 +638,94 @@ function toTelemetryEventDbRow(normalized: NormalizedTokenTelemetryEvent) {
   } satisfies Record<(typeof TELEMETRY_EVENT_INSERT_COLUMNS)[number], unknown>;
 }
 
+function warnTokenTelemetryFlushFailure(
+  batch: TokenTelemetryBatch,
+  error: unknown,
+) {
+  const now = Date.now();
+  if (now - Number(batch.lastWarningAt || 0) < 60_000) return;
+  batch.lastWarningAt = now;
+  process.emitWarning(
+    "Rin token telemetry flush failed; pending events will be retried.",
+    {
+      code: "RIN_TOKEN_TELEMETRY_FLUSH_FAILED",
+      detail: safeString((error as any)?.message || error).trim(),
+    },
+  );
+}
+
+function scheduleTokenTelemetryFlush(
+  dbPath: string,
+  batch: TokenTelemetryBatch,
+) {
+  if (batch.timer) return;
+  batch.timer = setTimeout(() => {
+    batch.timer = undefined;
+    try {
+      flushTokenTelemetryEvents(batch.agentDir);
+    } catch (error) {
+      warnTokenTelemetryFlushFailure(batch, error);
+      if (batch.rows.length > 0) scheduleTokenTelemetryFlush(dbPath, batch);
+    }
+  }, TELEMETRY_BATCH_FLUSH_MS);
+  batch.timer.unref?.();
+}
+
+export function flushTokenTelemetryEvents(agentDir = ""): number {
+  const resolvedAgentDir = resolveAgentDir(agentDir);
+  const dbPath = resolveTokenUsageDbPath(resolvedAgentDir);
+  const batch = telemetryBatches.get(dbPath);
+  if (!batch || batch.rows.length === 0) return 0;
+  if (batch.timer) {
+    clearTimeout(batch.timer);
+    batch.timer = undefined;
+  }
+  const rows = batch.rows.splice(0);
+  try {
+    const db = openTokenUsageDb(resolvedAgentDir);
+    const statement = prepareCached(db, TELEMETRY_EVENT_INSERT_SQL);
+    db.transaction((pendingRows: Array<Record<string, unknown>>) => {
+      for (const row of pendingRows) statement.run(row);
+    })(rows);
+    if (batch.rows.length === 0) telemetryBatches.delete(dbPath);
+    else scheduleTokenTelemetryFlush(dbPath, batch);
+    return rows.length;
+  } catch (error) {
+    batch.rows.unshift(...rows);
+    scheduleTokenTelemetryFlush(dbPath, batch);
+    throw error;
+  }
+}
+
+export function queueTokenTelemetryEvent(
+  event: TokenTelemetryEvent,
+  agentDir = "",
+): { id: string } {
+  const resolvedAgentDir = resolveAgentDir(agentDir);
+  const dbPath = resolveTokenUsageDbPath(resolvedAgentDir);
+  const normalized = normalizeTokenTelemetryEvent(event);
+  let batch = telemetryBatches.get(dbPath);
+  if (!batch) {
+    batch = { agentDir: resolvedAgentDir, rows: [] };
+    telemetryBatches.set(dbPath, batch);
+  }
+  if (batch.rows.length >= TELEMETRY_BATCH_SIZE) {
+    flushTokenTelemetryEvents(resolvedAgentDir);
+    batch = telemetryBatches.get(dbPath);
+    if (!batch) {
+      batch = { agentDir: resolvedAgentDir, rows: [] };
+      telemetryBatches.set(dbPath, batch);
+    }
+  }
+  batch.rows.push(toTelemetryEventDbRow(normalized));
+  if (batch.rows.length >= TELEMETRY_BATCH_SIZE) {
+    flushTokenTelemetryEvents(resolvedAgentDir);
+  } else {
+    scheduleTokenTelemetryFlush(dbPath, batch);
+  }
+  return { id: normalized.id };
+}
+
 export function appendTokenTelemetryEvent(
   event: TokenTelemetryEvent,
   agentDir = "",
@@ -647,6 +744,7 @@ export function getTokenUsageOverview(
     "groupBy" | "orderBy" | "direction"
   > = {},
 ) {
+  flushTokenTelemetryEvents(options.agentDir || "");
   const db = openTokenUsageDb(options.agentDir || "");
   const { whereSql, params } = buildWhereClause(options, false);
   return normalizeOverviewRow(
@@ -843,6 +941,7 @@ function buildSessionLabelsQueryParts(
 }
 
 export function queryTokenUsageAggregate(options: TokenUsageQueryOptions = {}) {
+  flushTokenTelemetryEvents(options.agentDir || "");
   const db = openTokenUsageDb(options.agentDir || "");
   const groupBy = Array.isArray(options.groupBy) ? options.groupBy : [];
   const dims = groupBy.map((key) => ({
@@ -887,6 +986,7 @@ export function queryTokenUsageAggregate(options: TokenUsageQueryOptions = {}) {
 }
 
 export function queryTokenUsageEvents(options: TokenUsageQueryOptions = {}) {
+  flushTokenTelemetryEvents(options.agentDir || "");
   const db = openTokenUsageDb(options.agentDir || "");
   const { whereSql, params } = buildWhereClause(options, false);
   const sessionQuery = buildSessionLabelsQueryParts(

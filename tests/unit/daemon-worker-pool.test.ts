@@ -4176,6 +4176,39 @@ setInterval(() => {}, 1000);
   assert.equal(pool.getStatusSnapshot().workers[0]?.turnActive, true);
   assert.equal(pool.getStatusSnapshot().workers[0]?.isStreaming, false);
 
+  const beforeHeartbeat = await fs.stat(statePath, { bigint: true });
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "heartbeat",
+      requestTag: "rpc-running",
+      sessionFile,
+      sessionId: "active",
+    })}\n`,
+  );
+  await sleep(20);
+  const afterHeartbeat = await fs.stat(statePath, { bigint: true });
+  assert.equal(afterHeartbeat.ino, beforeHeartbeat.ino);
+  assert.equal(afterHeartbeat.mtimeNs, beforeHeartbeat.mtimeNs);
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "rpc-running",
+      sessionFile,
+      sessionId: "active",
+    })}\n`,
+  );
+  await sleep(20);
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [],
+  });
+  assert.equal(pool.getStatusSnapshot().workers[0]?.turnActive, false);
+
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
 });

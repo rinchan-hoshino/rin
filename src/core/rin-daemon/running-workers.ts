@@ -27,59 +27,74 @@ function normalizeSessionFile(value: unknown) {
   return normalizeSessionRef({ sessionFile: value }).sessionFile;
 }
 
-function readState(filePath: string): RunningWorkerState {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    const rawSessionFiles = Array.isArray(parsed?.sessionFiles)
-      ? parsed.sessionFiles
-      : [];
-    const rawRequestTags =
-      parsed?.requestTags && typeof parsed.requestTags === "object"
-        ? parsed.requestTags
-        : {};
-    const hasExplicitFrontendOwners = Boolean(
-      parsed?.frontendOwners && typeof parsed.frontendOwners === "object",
-    );
-    const rawFrontendOwners = hasExplicitFrontendOwners
-      ? parsed.frontendOwners
+function normalizeState(parsed: any): RunningWorkerState {
+  const rawSessionFiles = Array.isArray(parsed?.sessionFiles)
+    ? parsed.sessionFiles
+    : [];
+  const rawRequestTags =
+    parsed?.requestTags && typeof parsed.requestTags === "object"
+      ? parsed.requestTags
       : {};
-    const seen = new Set<string>();
-    const sessionFiles: string[] = [];
-    const requestTags: Record<string, string> = {};
-    const frontendOwners: Record<string, boolean> = {};
-    for (const value of rawSessionFiles) {
-      const sessionFile = normalizeSessionFile(value);
-      if (!sessionFile || seen.has(sessionFile)) continue;
-      seen.add(sessionFile);
-      sessionFiles.push(sessionFile);
-      const requestTag = rawRequestTags[sessionFile];
-      if (typeof requestTag === "string" && requestTag.length > 0) {
-        requestTags[sessionFile] = requestTag;
-      }
-      if (hasExplicitFrontendOwners) {
-        frontendOwners[sessionFile] = rawFrontendOwners[sessionFile] === true;
-      } else if (
-        typeof requestTag === "string" &&
-        requestTag.startsWith("chat-inbox-")
-      ) {
-        frontendOwners[sessionFile] = true;
-      }
+  const hasExplicitFrontendOwners = Boolean(
+    parsed?.frontendOwners && typeof parsed.frontendOwners === "object",
+  );
+  const rawFrontendOwners = hasExplicitFrontendOwners
+    ? parsed.frontendOwners
+    : {};
+  const seen = new Set<string>();
+  const sessionFiles: string[] = [];
+  const requestTags: Record<string, string> = {};
+  const frontendOwners: Record<string, boolean> = {};
+  for (const value of rawSessionFiles) {
+    const sessionFile = normalizeSessionFile(value);
+    if (!sessionFile || seen.has(sessionFile)) continue;
+    seen.add(sessionFile);
+    sessionFiles.push(sessionFile);
+    const requestTag = rawRequestTags[sessionFile];
+    if (typeof requestTag === "string" && requestTag.length > 0) {
+      requestTags[sessionFile] = requestTag;
     }
-    return {
-      schemaVersion: 1,
-      sessionFiles,
-      ...(Object.keys(requestTags).length ? { requestTags } : {}),
-      ...(Object.keys(frontendOwners).length ? { frontendOwners } : {}),
-    };
-  } catch {
-    return { schemaVersion: 1, sessionFiles: [] };
+    if (hasExplicitFrontendOwners) {
+      frontendOwners[sessionFile] = rawFrontendOwners[sessionFile] === true;
+    } else if (
+      typeof requestTag === "string" &&
+      requestTag.startsWith("chat-inbox-")
+    ) {
+      frontendOwners[sessionFile] = true;
+    }
   }
+  return {
+    schemaVersion: 1,
+    sessionFiles,
+    ...(Object.keys(requestTags).length ? { requestTags } : {}),
+    ...(Object.keys(frontendOwners).length ? { frontendOwners } : {}),
+  };
+}
+
+function serializeState(state: RunningWorkerState) {
+  return `${JSON.stringify(state, null, 2)}\n`;
+}
+
+function readStateSnapshot(filePath: string): {
+  state: RunningWorkerState;
+  serialized?: string;
+} {
+  try {
+    const serialized = fs.readFileSync(filePath, "utf8");
+    return { state: normalizeState(JSON.parse(serialized)), serialized };
+  } catch {
+    return { state: { schemaVersion: 1, sessionFiles: [] } };
+  }
+}
+
+function readState(filePath: string): RunningWorkerState {
+  return readStateSnapshot(filePath).state;
 }
 
 function writeState(filePath: string, state: RunningWorkerState) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
   const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmpPath, `${JSON.stringify(state, null, 2)}\n`, {
+  fs.writeFileSync(tmpPath, serializeState(state), {
     encoding: "utf8",
     mode: 0o600,
   });
@@ -114,14 +129,14 @@ export function setRunningWorkerSession(
   const filePath = runningWorkersStatePath(agentDir);
   const normalized = normalizeSessionFile(sessionFile);
   if (!normalized) return;
-  const state = readState(filePath);
-  const sessionFiles = state.sessionFiles.filter(
-    (entry) => entry !== normalized,
-  );
+  const snapshot = readStateSnapshot(filePath);
+  const state = snapshot.state;
+  const sessionFiles = state.sessionFiles.includes(normalized)
+    ? [...state.sessionFiles]
+    : [...state.sessionFiles, normalized];
   const requestTags = { ...(state.requestTags || {}) };
   const frontendOwners = { ...(state.frontendOwners || {}) };
   if (running) {
-    sessionFiles.push(normalized);
     if (typeof requestTag === "string" && requestTag.length > 0) {
       requestTags[normalized] = requestTag;
     } else {
@@ -140,10 +155,14 @@ export function setRunningWorkerSession(
     delete requestTags[normalized];
     delete frontendOwners[normalized];
   }
-  writeState(filePath, {
+  const nextState: RunningWorkerState = {
     schemaVersion: 1,
-    sessionFiles,
+    sessionFiles: running
+      ? sessionFiles
+      : sessionFiles.filter((entry) => entry !== normalized),
     ...(Object.keys(requestTags).length ? { requestTags } : {}),
     ...(Object.keys(frontendOwners).length ? { frontendOwners } : {}),
-  });
+  };
+  if (serializeState(nextState) === snapshot.serialized) return;
+  writeState(filePath, nextState);
 }

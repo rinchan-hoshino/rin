@@ -1985,6 +1985,7 @@ test("persist persistInstallerOutputs forwards release metadata into currentRele
         release,
         currentReleaseName: "deadbeef",
         currentReleaseRoot: path.join(dir, "app", "releases", "deadbeef"),
+        migrationRuntimeRoot: rootDir,
         elevated: false,
       },
       {

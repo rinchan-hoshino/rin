@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -829,6 +830,54 @@ function removeInstalledBrowseRuntime(
   };
 }
 
+function runMemoryInstallMigration(
+  options: InstallMigrationOptions & { installDir: string },
+  deps: InstallMigrationCommandDeps,
+  preflight: boolean,
+) {
+  const runtimeRoot = safeString(options.migrationRuntimeRoot).trim();
+  if (!runtimeRoot) {
+    const transcriptDbPath = path.join(
+      path.resolve(options.installDir),
+      "memory",
+      "search.db",
+    );
+    if (
+      fs.existsSync(transcriptDbPath) ||
+      fs.existsSync(`${transcriptDbPath}.schema.json`)
+    ) {
+      throw new Error("memory_install_migration_runtime_required");
+    }
+    return null;
+  }
+  const runnerPath = path.join(
+    runtimeRoot,
+    "dist",
+    "app",
+    "rin-install",
+    "memory-migrations.js",
+  );
+  const args = [
+    runnerPath,
+    ...(preflight ? ["--preflight"] : []),
+    path.resolve(options.installDir),
+  ];
+  const nodePath =
+    safeString(options.targetNodePath).trim() || process.execPath;
+  if (options.elevated) {
+    runMigrationCommandAsTargetUser(options, deps, nodePath, args);
+  } else {
+    execFileSync(nodePath, args, { stdio: "pipe" });
+  }
+  return {
+    id: preflight
+      ? "transcript-search-schema-v5-preflight"
+      : "transcript-search-schema-v5",
+    skipped: false,
+    executedAs: options.targetUser,
+  };
+}
+
 function preflightInstalledChatAuthority(
   options: InstallMigrationOptions & { installDir: string },
   deps: InstallMigrationCommandDeps,
@@ -902,7 +951,10 @@ export function preflightInstallUpgradeMigrations(
   },
   deps: InstallMigrationCommandDeps,
 ) {
-  return [preflightInstalledChatAuthority(options, deps)].filter(Boolean);
+  return [
+    runMemoryInstallMigration(options, deps, true),
+    preflightInstalledChatAuthority(options, deps),
+  ].filter(Boolean);
 }
 
 export function applyInstallUpgradeMigrations(
@@ -924,6 +976,7 @@ export function applyInstallUpgradeMigrations(
     rewriteInstalledChatStateSessionFileKeys(options.installDir, fileOps),
     migrateInstalledChatSessionFilesToManaged(options.installDir, fileOps),
     migrateInstalledChatAuthority(options, deps),
+    runMemoryInstallMigration(options, deps, false),
   ].filter(Boolean);
 }
 

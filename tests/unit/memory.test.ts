@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -24,6 +25,11 @@ const transcriptArchiveModule = await import(
 const memoryExtensionModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "memory", "index.js")).href
 );
+const transcriptInstallMigration = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "memory", "install-migration.js"),
+  ).href
+);
 const BetterSqlite3 = (await import("better-sqlite3")).default;
 
 async function withTempRoot(fn) {
@@ -33,6 +39,19 @@ async function withTempRoot(fn) {
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+}
+
+async function snapshotFiles(filePaths) {
+  return Promise.all(
+    filePaths.map(async (filePath) => {
+      try {
+        return { filePath, bytes: await fs.readFile(filePath) };
+      } catch (error) {
+        if (error?.code === "ENOENT") return { filePath, bytes: null };
+        throw error;
+      }
+    }),
+  );
 }
 
 async function writeSessionFile(root, name, entries) {
@@ -151,6 +170,363 @@ test("recall returns session-level archived transcript matches and creates persi
 
     const searchDbPath = path.join(root, "memory", "search.db");
     await assert.doesNotReject(() => fs.access(searchDbPath));
+  });
+});
+
+test("transcript search uses external-content FTS without canonical entry JSON", async () => {
+  await withTempRoot(async (root) => {
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        timestamp: "2026-04-04T11:11:11.000Z",
+        sessionId: "session-schema-v5",
+        sessionFile: "/tmp/session-schema-v5.jsonl",
+        role: "assistant",
+        content: [{ type: "text", text: "external content schema marker" }],
+        provider: "provider-kept-in-archive",
+      },
+      root,
+    );
+
+    transcripts.flushTranscriptSearchIndexWrites(root);
+    assert.deepEqual(
+      JSON.parse(
+        await fs.readFile(
+          path.join(root, "memory", "search.db.schema.json"),
+          "utf8",
+        ),
+      ),
+      { schemaVersion: 5, state: "current" },
+    );
+    const db = new BetterSqlite3(path.join(root, "memory", "search.db"), {
+      readonly: true,
+    });
+    try {
+      const columns = db
+        .prepare("PRAGMA table_info('entries')")
+        .all()
+        .map((row) => row.name);
+      assert.equal(columns.includes("entry_json"), false);
+      const virtualTables = db
+        .prepare(
+          "SELECT name, sql FROM sqlite_master WHERE name IN ('entries_fts_token', 'entries_fts_trigram') ORDER BY name",
+        )
+        .all();
+      assert.equal(virtualTables.length, 2);
+      assert.ok(
+        virtualTables.every((row) => /content\s*=\s*'entries'/i.test(row.sql)),
+      );
+      const shadowContentTables = db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE name IN ('entries_fts_token_content', 'entries_fts_trigram_content')",
+        )
+        .all();
+      assert.deepEqual(shadowContentTables, []);
+      assert.equal(
+        db
+          .prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
+          .get().value,
+        "5",
+      );
+    } finally {
+      db.close();
+    }
+
+    const loaded = await transcripts.loadTranscriptSessionEntries(
+      { sessionId: "session-schema-v5" },
+      root,
+    );
+    assert.equal(loaded[0].provider, "provider-kept-in-archive");
+    assert.ok(Array.isArray(loaded[0].content));
+  });
+});
+
+test("transcript search rebuilds canonical archives when search.db is missing", async () => {
+  await withTempRoot(async (root) => {
+    const entry = {
+      id: "missing-db-1",
+      timestamp: "2026-04-04T11:11:11.000Z",
+      sessionId: "session-missing-db",
+      sessionFile: "/tmp/session-missing-db.jsonl",
+      role: "assistant",
+      text: "missing database canonical recovery marker",
+    };
+    const archivePath = transcripts.getTranscriptArchivePath(entry, root);
+    await fs.mkdir(path.dirname(archivePath), { recursive: true });
+    await fs.writeFile(archivePath, `${JSON.stringify(entry)}\n`);
+    assert.equal(
+      fsSync.existsSync(path.join(root, "memory", "search.db")),
+      false,
+    );
+
+    const results = await transcripts.searchTranscriptArchive(
+      "missing database canonical recovery marker",
+      { limit: 8 },
+      root,
+    );
+    assert.equal(results[0].sessionId, entry.sessionId);
+  });
+});
+
+test("installer replaces a schema-v4 transcript index from canonical archives", async () => {
+  await withTempRoot(async (root) => {
+    const canonical = {
+      id: "canonical-v5-rebuild",
+      timestamp: "2026-04-04T11:11:11.000Z",
+      sessionId: "session-schema-rebuild",
+      sessionFile: "/tmp/session-schema-rebuild.jsonl",
+      role: "assistant",
+      text: "schema rebuild fidelity marker",
+    };
+    const archivePath = transcripts.getTranscriptArchivePath(canonical, root);
+    await fs.mkdir(path.dirname(archivePath), { recursive: true });
+    await fs.writeFile(archivePath, `${JSON.stringify(canonical)}\n`);
+
+    const dbPath = path.join(root, "memory", "search.db");
+    await fs.mkdir(path.dirname(dbPath), { recursive: true });
+    const oldDb = new BetterSqlite3(dbPath);
+    oldDb.pragma("journal_mode = WAL");
+    oldDb.pragma("wal_autocheckpoint = 0");
+    oldDb.exec(`
+      CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
+      CREATE TABLE file_state(
+        archive_path TEXT PRIMARY KEY,
+        mtime_ms INTEGER NOT NULL,
+        size INTEGER NOT NULL
+      );
+      CREATE TABLE entries(
+        row_key TEXT PRIMARY KEY,
+        archive_path TEXT NOT NULL,
+        entry_id TEXT NOT NULL,
+        session_key TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        session_file TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        timestamp_ms INTEGER NOT NULL,
+        line_number INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        tool_name TEXT NOT NULL,
+        custom_type TEXT NOT NULL,
+        text TEXT NOT NULL,
+        preview TEXT NOT NULL,
+        entry_json TEXT NOT NULL
+      );
+      CREATE VIRTUAL TABLE entries_fts_token USING fts5(
+        row_key UNINDEXED, session_id, role, tool_name, custom_type, text
+      );
+      CREATE VIRTUAL TABLE entries_fts_trigram USING fts5(
+        row_key UNINDEXED, session_id, role, tool_name, custom_type, text,
+        tokenize = 'trigram'
+      );
+    `);
+    const ghost = JSON.stringify({
+      ...canonical,
+      id: "schema-v4-ghost",
+      text: "stale schema v4 ghost marker",
+    });
+    oldDb
+      .prepare(
+        `INSERT INTO entries VALUES(
+          'ghost-row', 'ghost-archive', 'schema-v4-ghost', 'ghost-session',
+          'ghost-session', '/tmp/ghost.jsonl', '2026-04-01T00:00:00.000Z',
+          1, 1, 'assistant', '', '', 'stale schema v4 ghost marker',
+          'stale schema v4 ghost marker', ?
+        )`,
+      )
+      .run(ghost);
+    oldDb
+      .prepare("INSERT INTO entries_fts_token VALUES (?, ?, ?, ?, ?, ?)")
+      .run(
+        "ghost-row",
+        "ghost-session",
+        "assistant",
+        "",
+        "",
+        "stale schema v4 ghost marker",
+      );
+    oldDb
+      .prepare("INSERT INTO entries_fts_trigram VALUES (?, ?, ?, ?, ?, ?)")
+      .run(
+        "ghost-row",
+        "ghost-session",
+        "assistant",
+        "",
+        "",
+        "stale schema v4 ghost marker",
+      );
+    const protectedPaths = [
+      dbPath,
+      `${dbPath}-wal`,
+      `${dbPath}-shm`,
+      `${dbPath}.schema.json`,
+    ];
+    const filesBeforeRuntimeOpen = await snapshotFiles(protectedPaths);
+    assert.ok(filesBeforeRuntimeOpen[0].bytes);
+    assert.ok(filesBeforeRuntimeOpen[1].bytes);
+    assert.ok(filesBeforeRuntimeOpen[2].bytes);
+    assert.equal(filesBeforeRuntimeOpen[3].bytes, null);
+
+    await assert.rejects(
+      transcripts.searchTranscriptArchive(
+        "schema rebuild fidelity marker",
+        { limit: 8 },
+        root,
+      ),
+      /transcript_search_install_migration_required/,
+    );
+    assert.deepEqual(
+      await snapshotFiles(protectedPaths),
+      filesBeforeRuntimeOpen,
+    );
+    const preflight =
+      transcriptInstallMigration.preflightTranscriptSearchMigration(root);
+    assert.equal(preflight.action, "rebuild");
+    assert.equal(preflight.currentVersion, null);
+    assert.equal(preflight.reason, "unmarked");
+    assert.deepEqual(
+      await snapshotFiles(protectedPaths),
+      filesBeforeRuntimeOpen,
+    );
+    const stillOldDb = new BetterSqlite3(dbPath, { readonly: true });
+    try {
+      assert.equal(
+        stillOldDb
+          .prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
+          .get().value,
+        "4",
+      );
+    } finally {
+      stillOldDb.close();
+      oldDb.close();
+    }
+
+    const migration =
+      await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+        root,
+      );
+    assert.equal(migration.action, "rebuilt");
+
+    const results = await transcripts.searchTranscriptArchive(
+      "schema rebuild fidelity marker",
+      { limit: 8 },
+      root,
+    );
+    assert.equal(results[0].sessionId, canonical.sessionId);
+    assert.deepEqual(
+      await transcripts.searchTranscriptArchive(
+        "stale schema v4 ghost marker",
+        { limit: 8, fidelity: "exact" },
+        root,
+      ),
+      [],
+    );
+    const rebuiltDb = new BetterSqlite3(dbPath, { readonly: true });
+    try {
+      assert.equal(
+        rebuiltDb
+          .prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
+          .get().value,
+        "5",
+      );
+      assert.deepEqual(
+        rebuiltDb
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE name IN ('entries_fts_token_content', 'entries_fts_trigram_content')",
+          )
+          .all(),
+        [],
+      );
+    } finally {
+      rebuiltDb.close();
+    }
+  });
+});
+
+test("installer retries an interrupted schema-v5 transcript rebuild", async () => {
+  await withTempRoot(async (root) => {
+    const dbPath = path.join(root, "memory", "search.db");
+    await fs.mkdir(path.dirname(dbPath), { recursive: true });
+    const interruptedDb = new BetterSqlite3(dbPath);
+    interruptedDb.exec(`
+      CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
+      INSERT INTO metadata(key, value) VALUES ('rebuild_required', '1');
+    `);
+    interruptedDb.close();
+    await fs.writeFile(
+      `${dbPath}.schema.json`,
+      `${JSON.stringify({
+        schemaVersion: 5,
+        state: "installer-migrating",
+      })}\n`,
+    );
+
+    const preflight =
+      transcriptInstallMigration.preflightTranscriptSearchMigration(root);
+    assert.equal(preflight.skipped, false);
+    assert.equal(preflight.reason, "incomplete");
+    const result =
+      await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+        root,
+      );
+    assert.equal(result.action, "rebuilt");
+    assert.equal(result.currentVersion, 5);
+    assert.equal(
+      transcriptInstallMigration.preflightTranscriptSearchMigration(root)
+        .reason,
+      "current",
+    );
+  });
+});
+
+test("runtime leaves a metadata-less legacy transcript index to the installer", async () => {
+  await withTempRoot(async (root) => {
+    const dbPath = path.join(root, "memory", "search.db");
+    await fs.mkdir(path.dirname(dbPath), { recursive: true });
+    const legacyDb = new BetterSqlite3(dbPath);
+    legacyDb.exec("CREATE TABLE legacy_entries(id TEXT PRIMARY KEY)");
+    legacyDb.close();
+    const beforeRuntimeOpen = await fs.readFile(dbPath);
+
+    await assert.rejects(
+      transcripts.searchTranscriptArchive("legacy", { limit: 8 }, root),
+      /transcript_search_install_migration_required/,
+    );
+    assert.deepEqual(await fs.readFile(dbPath), beforeRuntimeOpen);
+    const preflight =
+      transcriptInstallMigration.preflightTranscriptSearchMigration(root);
+    assert.equal(preflight.currentVersion, null);
+    assert.equal(preflight.reason, "unmarked");
+  });
+});
+
+test("transcript full-session loading reports a missing canonical archive", async () => {
+  await withTempRoot(async (root) => {
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        timestamp: "2026-04-04T11:11:11.000Z",
+        sessionId: "session-missing-archive",
+        sessionFile: "/tmp/session-missing-archive.jsonl",
+        role: "assistant",
+        content: [{ type: "text", text: "missing archive marker" }],
+      },
+      root,
+    );
+    const archivePath = transcripts.getTranscriptArchivePath(
+      {
+        timestamp: "2026-04-04T11:11:11.000Z",
+        sessionId: "session-missing-archive",
+      },
+      root,
+    );
+    await fs.rm(archivePath);
+    await assert.rejects(
+      transcripts.loadTranscriptSessionEntries(
+        { sessionId: "session-missing-archive", path: archivePath },
+        root,
+      ),
+      /transcript_archive_missing/,
+    );
   });
 });
 
@@ -334,6 +710,50 @@ test("memory transcripts preserve assistant tool calls and thinking for recall",
     assert.match(entries[0].text, /Need to inspect the repo/);
     assert.match(entries[0].text, /tool:read/);
     assert.match(entries[1].text, /follow-up note about retries/);
+  });
+});
+
+test("session selectors load every monthly archive even when a path hint is present", async () => {
+  await withTempRoot(async (root) => {
+    const base = {
+      sessionId: "session-spanning-months",
+      sessionFile: "/tmp/session-spanning-months.jsonl",
+      role: "assistant",
+    };
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        ...base,
+        id: "month-april",
+        timestamp: "2026-04-30T23:59:59.000Z",
+        text: "april archive entry",
+      },
+      root,
+    );
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        ...base,
+        id: "month-may",
+        timestamp: "2026-05-01T00:00:01.000Z",
+        text: "may archive entry",
+      },
+      root,
+    );
+    const aprilPath = transcripts.getTranscriptArchivePath(
+      { ...base, timestamp: "2026-04-30T23:59:59.000Z" },
+      root,
+    );
+    const entries = await transcripts.loadTranscriptSessionEntries(
+      {
+        sessionId: base.sessionId,
+        sessionFile: base.sessionFile,
+        path: aprilPath,
+      },
+      root,
+    );
+    assert.deepEqual(
+      entries.map((entry) => entry.id),
+      ["month-april", "month-may"],
+    );
   });
 });
 
@@ -577,6 +997,211 @@ test("recall handles structured identifiers beyond exact raw substrings", async 
   });
 });
 
+test("recall repairs a writer killed after canonical archive append", async () => {
+  await withTempRoot(async (root) => {
+    const transcriptsUrl = pathToFileURL(
+      path.join(rootDir, "dist", "core", "memory", "transcripts.js"),
+    ).href;
+    const child = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `const transcripts = await import(${JSON.stringify(transcriptsUrl)});\n` +
+          `await transcripts.appendTranscriptArchiveEntry(${JSON.stringify({
+            id: "dirty-kill-1",
+            timestamp: "2026-04-08T09:09:09.000Z",
+            sessionId: "session-dirty-kill",
+            sessionFile: "/tmp/session-dirty-kill.jsonl",
+            role: "assistant",
+            text: "killed writer recovery marker",
+          })}, ${JSON.stringify(root)});\n` +
+          `process.kill(process.pid, "SIGKILL");`,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(child.signal, "SIGKILL", child.stderr);
+
+    const markerDir = path.join(root, "memory", "search-writers");
+    assert.equal((await fs.readdir(markerDir)).length, 1);
+    const results = await transcripts.searchTranscriptArchive(
+      "killed writer recovery marker",
+      { limit: 8 },
+      root,
+    );
+    assert.equal(results[0].sessionId, "session-dirty-kill");
+    assert.deepEqual(await fs.readdir(markerDir), []);
+  });
+});
+
+test("transcript archive failures preserve the dirty marker for repair", async () => {
+  await withTempRoot(async (root) => {
+    await fs.mkdir(path.join(root, "memory"), { recursive: true });
+    await fs.writeFile(path.join(root, "memory", "transcripts"), "blocked");
+    const transcriptsUrl = pathToFileURL(
+      path.join(rootDir, "dist", "core", "memory", "transcripts.js"),
+    ).href;
+    const child = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `const transcripts = await import(${JSON.stringify(transcriptsUrl)});\n` +
+          `try { await transcripts.appendTranscriptArchiveEntry(${JSON.stringify(
+            {
+              id: "archive-failure-1",
+              timestamp: "2026-04-08T09:09:09.000Z",
+              sessionId: "session-archive-failure",
+              sessionFile: "/tmp/session-archive-failure.jsonl",
+              role: "assistant",
+              text: "archive failure marker",
+            },
+          )}, ${JSON.stringify(root)}); process.exit(2); } catch { process.exit(0); }`,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(child.status, 0, child.stderr);
+    const markerDir = path.join(root, "memory", "search-writers");
+    assert.equal((await fs.readdir(markerDir)).length, 1);
+
+    await fs.rm(path.join(root, "memory", "transcripts"));
+    assert.deepEqual(
+      await transcripts.searchTranscriptArchive(
+        "archive failure marker",
+        { limit: 8 },
+        root,
+      ),
+      [],
+    );
+    assert.deepEqual(await fs.readdir(markerDir), []);
+  });
+});
+
+test("transcript writers recreate an externally removed owned marker", async () => {
+  await withTempRoot(async (root) => {
+    const base = {
+      timestamp: "2026-04-08T09:09:09.000Z",
+      sessionId: "session-marker-recreate",
+      sessionFile: "/tmp/session-marker-recreate.jsonl",
+      role: "assistant",
+    };
+    await transcripts.appendTranscriptArchiveEntry(
+      { ...base, id: "marker-1", text: "first marker entry" },
+      root,
+    );
+    transcripts.flushTranscriptSearchIndexWrites(root);
+    const markerDir = path.join(root, "memory", "search-writers");
+    const firstMarkers = await fs.readdir(markerDir);
+    assert.equal(firstMarkers.length, 1);
+    await fs.rm(path.join(markerDir, firstMarkers[0]));
+
+    await transcripts.appendTranscriptArchiveEntry(
+      { ...base, id: "marker-2", text: "recreated marker entry" },
+      root,
+    );
+    assert.equal((await fs.readdir(markerDir)).length, 1);
+    const results = await transcripts.searchTranscriptArchive(
+      "recreated marker entry",
+      { limit: 8 },
+      root,
+    );
+    assert.equal(results[0].sessionId, base.sessionId);
+  });
+});
+
+test("recall repairs a failed marker even while its PID is alive", async () => {
+  await withTempRoot(async (root) => {
+    assert.deepEqual(
+      await transcripts.searchTranscriptArchive(
+        "failed marker before archive",
+        { limit: 8 },
+        root,
+      ),
+      [],
+    );
+    const entry = {
+      id: "failed-live-1",
+      timestamp: "2026-04-08T09:09:09.000Z",
+      sessionId: "session-failed-live",
+      sessionFile: "/tmp/session-failed-live.jsonl",
+      role: "assistant",
+      text: "failed live writer recovery marker",
+    };
+    const archivePath = transcripts.getTranscriptArchivePath(entry, root);
+    await fs.mkdir(path.dirname(archivePath), { recursive: true });
+    await fs.writeFile(archivePath, `${JSON.stringify(entry)}\n`);
+    const markerDir = path.join(root, "memory", "search-writers");
+    await fs.mkdir(markerDir, { recursive: true });
+    await fs.writeFile(
+      path.join(markerDir, `${process.pid}-failed-live.dirty`),
+      JSON.stringify({
+        pid: process.pid,
+        processStartIdentity: "",
+        createdAt: Date.now(),
+        failed: true,
+      }),
+    );
+
+    const results = await transcripts.searchTranscriptArchive(
+      "failed live writer recovery marker",
+      { limit: 8 },
+      root,
+    );
+    assert.equal(results[0].sessionId, entry.sessionId);
+    assert.deepEqual(await fs.readdir(markerDir), []);
+  });
+});
+
+test("recall rejects a reused PID when the writer start identity differs", async () => {
+  await withTempRoot(async (root) => {
+    const entry = {
+      id: "pid-reuse-1",
+      timestamp: "2026-04-08T09:09:09.000Z",
+      sessionId: "session-pid-reuse",
+      sessionFile: "/tmp/session-pid-reuse.jsonl",
+      role: "assistant",
+      text: "pid reuse recovery marker",
+    };
+    assert.deepEqual(
+      await transcripts.searchTranscriptArchive(
+        "pid reuse marker before archive",
+        { limit: 8 },
+        root,
+      ),
+      [],
+    );
+    const archivePath = transcripts.getTranscriptArchivePath(entry, root);
+    await fs.mkdir(path.dirname(archivePath), { recursive: true });
+    await fs.writeFile(archivePath, `${JSON.stringify(entry)}\n`);
+    assert.deepEqual(
+      await transcripts.searchTranscriptArchive(
+        "pid reuse recovery marker",
+        { limit: 8 },
+        root,
+      ),
+      [],
+    );
+    const markerDir = path.join(root, "memory", "search-writers");
+    await fs.mkdir(markerDir, { recursive: true });
+    await fs.writeFile(
+      path.join(markerDir, `${process.pid}-reused.dirty`),
+      JSON.stringify({
+        pid: process.pid,
+        processStartIdentity: "not-the-current-process",
+        createdAt: Date.now(),
+      }),
+    );
+
+    const results = await transcripts.searchTranscriptArchive(
+      "pid reuse recovery marker",
+      { limit: 8 },
+      root,
+    );
+    assert.equal(results[0].sessionId, entry.sessionId);
+    assert.deepEqual(await fs.readdir(markerDir), []);
+  });
+});
+
 test("recall requires explicit repair for transcript files written outside incremental indexing", async () => {
   await withTempRoot(async (root) => {
     const entry = {
@@ -587,6 +1212,14 @@ test("recall requires explicit repair for transcript files written outside incre
       role: "assistant",
       text: "Manual transcript write requires explicit repair.",
     };
+    assert.deepEqual(
+      await transcripts.searchTranscriptArchive(
+        "manual archive not written yet",
+        { limit: 8 },
+        root,
+      ),
+      [],
+    );
     const archivePath = transcripts.getTranscriptArchivePath(entry, root);
     await fs.mkdir(path.dirname(archivePath), { recursive: true });
     await fs.writeFile(archivePath, `${JSON.stringify(entry)}\n`);

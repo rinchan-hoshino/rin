@@ -3,7 +3,11 @@ import type {
   RinCapabilityOptions,
 } from "../rin-lib/capability-types.js";
 
-import { appendTokenTelemetryEvent, resolveAgentDir } from "./store.js";
+import {
+  flushTokenTelemetryEvents,
+  queueTokenTelemetryEvent,
+  resolveAgentDir,
+} from "./store.js";
 import { extractToolCallNames } from "../message-content.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { safeString } from "../text-utils.js";
@@ -174,7 +178,7 @@ function recordEvent(ctx: any, input: Record<string, any>) {
   const source =
     safeString(input.source).trim() || state.source || readFrontendSource(ctx);
   if (source) state.source = source;
-  appendTokenTelemetryEvent(
+  queueTokenTelemetryEvent(
     {
       id: safeString(input.id).trim() || nextEventId(eventType, ctx),
       timestamp: input.timestamp,
@@ -217,6 +221,21 @@ function recordEvent(ctx: any, input: Record<string, any>) {
     },
     resolveAgentDir(),
   );
+}
+
+function recordTerminalEvent(ctx: any, input: Record<string, any>) {
+  try {
+    recordEvent(ctx, input);
+    flushTokenTelemetryEvents(resolveAgentDir());
+  } catch (error) {
+    process.emitWarning(
+      "Rin token telemetry terminal flush failed; pending events will be retried.",
+      {
+        code: "RIN_TOKEN_TELEMETRY_TERMINAL_FLUSH_FAILED",
+        detail: safeString((error as any)?.message || error).trim(),
+      },
+    );
+  }
 }
 
 export default function tokenUsageModule(
@@ -391,7 +410,7 @@ export default function tokenUsageModule(
       ],
       agent_end: [
         async (event, ctx) => {
-          recordEvent(ctx, {
+          recordTerminalEvent(ctx, {
             eventType: "agent_end",
             phase: "agent",
             metadata: {
@@ -415,10 +434,13 @@ export default function tokenUsageModule(
       ],
       session_shutdown: [
         async (_event, ctx) => {
-          recordEvent(ctx, {
-            eventType: "session_shutdown",
-          });
-          sessionStateById.delete(sessionKey(ctx));
+          try {
+            recordTerminalEvent(ctx, {
+              eventType: "session_shutdown",
+            });
+          } finally {
+            sessionStateById.delete(sessionKey(ctx));
+          }
         },
       ],
     },

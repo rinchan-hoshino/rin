@@ -1408,9 +1408,11 @@ export class WorkerPool {
       const selector = sessionSelectorFromState(payload);
       if (hasSessionSelector(selector)) {
         this.extendLifecycleOwnerSelector(worker, selector);
-        this.setWorkerSessionRefs(worker, selector, { syncConnections: false });
+        this.setWorkerSessionRefs(worker, selector, {
+          syncConnections: false,
+          syncRunningWorkerRecord: false,
+        });
       }
-      this.syncRunningWorkerRecordForSelector(selector, true);
       worker.turnRecoveryPending = false;
       worker.rpcTurnActive = true;
       worker.turnActive = true;
@@ -1998,7 +2000,10 @@ export class WorkerPool {
   private setWorkerSessionRefs(
     worker: WorkerHandle,
     next: SessionSelector,
-    options: { syncConnections?: boolean } = {},
+    options: {
+      syncConnections?: boolean;
+      syncRunningWorkerRecord?: boolean;
+    } = {},
   ) {
     const selector = sessionSelectorFromState(next);
     if (
@@ -2017,7 +2022,9 @@ export class WorkerPool {
     }
     worker.sessionFile = selector.sessionFile;
     worker.sessionId = selector.sessionId;
-    this.syncRunningWorkerRecord(worker);
+    if (options.syncRunningWorkerRecord !== false) {
+      this.syncRunningWorkerRecord(worker);
+    }
     if (worker.sessionFile) {
       this.workersBySessionFile.set(worker.sessionFile, worker);
     }

@@ -156,6 +156,11 @@ test("installer migration preflight is read-only", async () => {
           migration.id === "chat-authority-install-migration-v1-preflight",
       ),
     );
+    assert.ok(
+      preflight.some(
+        (migration) => migration.id === "transcript-search-schema-v5-preflight",
+      ),
+    );
     assert.deepEqual(
       JSON.parse(await fs.readFile(settingsPath, "utf8")),
       settings,
@@ -167,6 +172,26 @@ test("installer migration preflight is read-only", async () => {
     );
     await assert.rejects(
       fs.access(path.join(installDir, "data", "chat", "chat.sqlite")),
+    );
+  } finally {
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
+test("installer fails closed when transcript migration needs a staged runtime", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-memory-installer-runtime-required-"),
+  );
+  await fs.mkdir(path.join(installDir, "memory"), { recursive: true });
+  await fs.writeFile(path.join(installDir, "memory", "search.db"), "legacy");
+  try {
+    assert.throws(
+      () =>
+        installerPersist.preflightInstallUpgradeMigrations(
+          { targetUser: "test-user", installDir },
+          { runPrivileged() {} },
+        ),
+      /memory_install_migration_runtime_required/,
     );
   } finally {
     await fs.rm(installDir, { recursive: true, force: true });
@@ -247,6 +272,15 @@ test("elevated installer preflight runs the staged migration as target user", as
       targetUser: "service-user",
       command: "/srv/rin/runtime/node/current/bin/node",
       args: [
+        "/srv/rin/app/releases/staged/dist/app/rin-install/memory-migrations.js",
+        "--preflight",
+        "/srv/rin",
+      ],
+    },
+    {
+      targetUser: "service-user",
+      command: "/srv/rin/runtime/node/current/bin/node",
+      args: [
         "/srv/rin/app/releases/staged/dist/app/rin-install/chat-migrations.js",
         "--preflight",
         "/srv/rin",
@@ -296,6 +330,11 @@ test("installer upgrade migrations own chat key and SQLite authority migration",
     assert.ok(
       migrations.some(
         (migration) => migration.id === "chat-authority-install-migration-v1",
+      ),
+    );
+    assert.ok(
+      migrations.some(
+        (migration) => migration.id === "transcript-search-schema-v5",
       ),
     );
     assert.deepEqual(

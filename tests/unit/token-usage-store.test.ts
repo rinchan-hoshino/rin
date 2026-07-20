@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -158,6 +159,152 @@ test("token usage store formats provider_model labels from one shared rule", () 
     "gpt-5.4-mini",
   );
   assert.equal(store.formatProviderModelLabel("", ""), "(none)");
+});
+
+test("token usage telemetry batches writes until an explicit or size flush", async () => {
+  await withTempRoot(async (root) => {
+    const db = store.openTokenUsageDb(root);
+    const countEvents = () =>
+      db.prepare("SELECT COUNT(*) AS count FROM telemetry_events").get().count;
+
+    for (let index = 0; index < 31; index += 1) {
+      store.queueTokenTelemetryEvent(
+        {
+          id: `evt-batch-${index}`,
+          timestamp: `2026-04-10T09:00:${String(index).padStart(2, "0")}.000Z`,
+          eventType: "message_end",
+        },
+        root,
+      );
+    }
+    assert.equal(countEvents(), 0);
+
+    store.queueTokenTelemetryEvent(
+      {
+        id: "evt-batch-31",
+        timestamp: "2026-04-10T09:00:31.000Z",
+        eventType: "message_end",
+      },
+      root,
+    );
+    assert.equal(countEvents(), 32);
+
+    store.queueTokenTelemetryEvent(
+      {
+        id: "evt-explicit-flush",
+        timestamp: "2026-04-10T09:01:00.000Z",
+        eventType: "agent_end",
+      },
+      root,
+    );
+    assert.equal(countEvents(), 32);
+    assert.equal(store.flushTokenTelemetryEvents(root), 1);
+    assert.equal(countEvents(), 33);
+  });
+});
+
+test("token usage telemetry flushes a partial batch within one second", async () => {
+  await withTempRoot(async (root) => {
+    const db = store.openTokenUsageDb(root);
+    store.queueTokenTelemetryEvent(
+      {
+        id: "evt-timer-flush",
+        timestamp: "2026-04-10T09:02:00.000Z",
+        eventType: "message_end",
+      },
+      root,
+    );
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM telemetry_events").get().count,
+      0,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM telemetry_events").get().count,
+      1,
+    );
+  });
+});
+
+test("token usage schema removes only the obsolete total-token index on upgrade", async () => {
+  await withTempRoot(async (root) => {
+    const db = store.openTokenUsageDb(root);
+    db.exec(`CREATE INDEX telemetry_events_tokens_idx
+      ON telemetry_events(total_tokens, timestamp)`);
+    db.close();
+
+    const storeUrl = pathToFileURL(
+      path.join(rootDir, "dist", "core", "token-usage", "store.js"),
+    ).href;
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `const store = await import(${JSON.stringify(storeUrl)});\n` +
+          `const db = store.openTokenUsageDb(${JSON.stringify(root)});\n` +
+          `console.log(JSON.stringify(db.prepare("PRAGMA index_list('telemetry_events')").all().map((row) => row.name).sort()));`,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const indexes = JSON.parse(result.stdout.trim());
+    assert.deepEqual(indexes, [
+      "sqlite_autoindex_telemetry_events_1",
+      "telemetry_events_capability_idx",
+      "telemetry_events_event_type_idx",
+      "telemetry_events_model_idx",
+      "telemetry_events_session_idx",
+      "telemetry_events_source_idx",
+      "telemetry_events_timestamp_idx",
+    ]);
+  });
+});
+
+test("token usage telemetry keeps a failed batch bounded and retryable", async () => {
+  await withTempRoot(async (root) => {
+    const db = store.openTokenUsageDb(root);
+    const originalTransaction = db.transaction;
+    for (let index = 0; index < 31; index += 1) {
+      store.queueTokenTelemetryEvent(
+        { id: `evt-failure-${index}`, eventType: "message_end" },
+        root,
+      );
+    }
+    db.transaction = () => () => {
+      throw new Error("forced telemetry flush failure");
+    };
+    try {
+      assert.throws(
+        () =>
+          store.queueTokenTelemetryEvent(
+            { id: "evt-failure-31", eventType: "message_end" },
+            root,
+          ),
+        /forced telemetry flush failure/,
+      );
+      assert.throws(
+        () =>
+          store.queueTokenTelemetryEvent(
+            { id: "evt-failure-32", eventType: "message_end" },
+            root,
+          ),
+        /forced telemetry flush failure/,
+      );
+    } finally {
+      db.transaction = originalTransaction;
+    }
+
+    store.queueTokenTelemetryEvent(
+      { id: "evt-failure-32", eventType: "message_end" },
+      root,
+    );
+    assert.equal(store.flushTokenTelemetryEvents(root), 1);
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS count FROM telemetry_events").get().count,
+      33,
+    );
+  });
 });
 
 test("token usage store ignores duplicate event ids", async () => {
@@ -506,6 +653,112 @@ test("session aggregation resolves sparse labels once per session", async () => 
       boundedAggregateSql,
       /FROM telemetry_events INDEXED BY telemetry_events_timestamp_idx/,
     );
+  });
+});
+
+test("token usage terminal hooks flush pending telemetry", async () => {
+  await withTempRoot(async (root) => {
+    const previousDir = process.env.RIN_DIR;
+    process.env.RIN_DIR = root;
+    try {
+      const module = tokenUsageModule.default({
+        cwd: "/work/demo",
+        agentDir: root,
+        getThinkingLevel: () => "medium",
+        sendMessage: () => {},
+      });
+      const ctx = {
+        sessionManager: {
+          getSessionId: () => "flush-session",
+          getSessionFile: () => "/tmp/flush-session.jsonl",
+          getCwd: () => "/work/demo",
+          isPersisted: () => true,
+        },
+      };
+      const db = store.openTokenUsageDb(root);
+      const countEvents = () =>
+        db.prepare("SELECT COUNT(*) AS count FROM telemetry_events").get()
+          .count;
+
+      await module.hooks.session_start[0]({ reason: "new" }, ctx);
+      assert.equal(countEvents(), 0);
+      await module.hooks.agent_end[0]({ messages: [] }, ctx);
+      assert.equal(countEvents(), 2);
+
+      await module.hooks.model_select[0](
+        { model: { provider: "p", id: "m" } },
+        ctx,
+      );
+      assert.equal(countEvents(), 2);
+      await module.hooks.session_shutdown[0]({}, ctx);
+      assert.equal(countEvents(), 4);
+    } finally {
+      store.flushTokenTelemetryEvents(root);
+      if (previousDir === undefined) delete process.env.RIN_DIR;
+      else process.env.RIN_DIR = previousDir;
+    }
+  });
+});
+
+test("token usage terminal hooks preserve retries and session cleanup on flush failure", async () => {
+  await withTempRoot(async (root) => {
+    const previousDir = process.env.RIN_DIR;
+    const originalEmitWarning = process.emitWarning;
+    process.env.RIN_DIR = root;
+    const warnings: string[] = [];
+    const db = store.openTokenUsageDb(root);
+    const originalTransaction = db.transaction;
+    try {
+      (process as any).emitWarning = (message: unknown) => {
+        warnings.push(String(message));
+      };
+      db.transaction = () => () => {
+        throw new Error("forced terminal telemetry failure");
+      };
+      const module = tokenUsageModule.default({
+        cwd: "/work/demo",
+        agentDir: root,
+        getThinkingLevel: () => "medium",
+        sendMessage: () => {},
+      });
+      const statefulCtx = {
+        sessionManager: {
+          getSessionId: () => "failure-session",
+          getSessionFile: () => "/tmp/failure-session.jsonl",
+          getCwd: () => "/work/demo",
+          isPersisted: () => true,
+        },
+      };
+
+      await module.hooks.session_start[0]({ reason: "new" }, statefulCtx);
+      await module.hooks.agent_end[0]({ messages: [] }, statefulCtx);
+      await module.hooks.session_shutdown[0]({}, statefulCtx);
+      assert.equal(warnings.length, 2);
+      assert.equal(
+        db.prepare("SELECT COUNT(*) AS count FROM telemetry_events").get()
+          .count,
+        0,
+      );
+
+      db.transaction = originalTransaction;
+      assert.equal(store.flushTokenTelemetryEvents(root), 3);
+      const sparseCtx = { sessionId: "failure-session" };
+      await module.hooks.message_end[0](
+        { message: { id: "after-shutdown", role: "assistant" } },
+        sparseCtx,
+      );
+      await module.hooks.agent_end[0]({ messages: [] }, sparseCtx);
+      const message = store
+        .queryTokenUsageEvents({ agentDir: root, limit: 10 })
+        .find((row) => row.event_type === "message_end");
+      assert.equal(message.session_file, null);
+    } finally {
+      db.transaction = originalTransaction;
+      (process as any).emitWarning = originalEmitWarning;
+      store.flushTokenTelemetryEvents(root);
+      if (previousDir === undefined) delete process.env.RIN_DIR;
+      else process.env.RIN_DIR = previousDir;
+    }
   });
 });
 
