@@ -44,6 +44,30 @@ test("local CI container includes install-to-TUI smoke prerequisites", () => {
   );
 });
 
+test("local CI container includes commands required by update workflow tests", () => {
+  const dockerfile = readRepoFile(".ci/local-ci/Dockerfile");
+
+  assert.match(dockerfile, /apt-get install[^\n]*\bcurl\b/);
+  assert.match(dockerfile, /apt-get install[^\n]*\btar\b/);
+});
+
+test("local CI image preloads managed npm for network-isolated update tests", () => {
+  const dockerfile = readRepoFile(".ci/local-ci/Dockerfile");
+  const updateWorkflow = readRepoFile(
+    "src/core/rin-install/update-workflow.ts",
+  );
+  const version = updateWorkflow.match(/MANAGED_NPM_VERSION = "([^"]+)"/)?.[1];
+
+  assert.ok(version, "missing managed npm version");
+  const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  assert.match(
+    dockerfile,
+    new RegExp(
+      `npm pack npm@${escapedVersion}\\b[^\\n]*--pack-destination /root/\\.cache/rin/node-toolchain\\b`,
+    ),
+  );
+});
+
 test("local CI image includes prepare hook input before npm install", () => {
   const dockerfile = readRepoFile(".ci/local-ci/Dockerfile");
 
