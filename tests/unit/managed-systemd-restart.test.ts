@@ -38,6 +38,7 @@ test("systemd update hold persistently masks the unit file until release", async
     const context = {
       currentUser: "rin",
       targetUser: "rin",
+      isTargetUser: true,
       elevated: false,
       systemctl: "/usr/bin/systemctl",
       capture(command) {
@@ -95,6 +96,51 @@ test("systemd update hold persistently masks the unit file until release", async
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("cross-user systemd hold delegates unit-file mutation to target executor", async () => {
+  const delegated = [];
+  const executed = [];
+  const captured = [];
+  const context = {
+    currentUser: "owner",
+    targetUser: "rin",
+    isTargetUser: false,
+    elevated: false,
+    systemctl: "/usr/bin/systemctl",
+    holdServiceFile(kind, filePath, hold) {
+      delegated.push({ kind, filePath, hold });
+    },
+    capture(command) {
+      captured.push(command);
+      return "";
+    },
+    exec(command) {
+      executed.push(command);
+      return "";
+    },
+  };
+  const service = {
+    kind: "systemd",
+    label: "rin-daemon-rin.service",
+    path: "/home/rin/.config/systemd/user/rin-daemon-rin.service",
+  };
+
+  await setManagedServiceStartHold(context, true, service);
+  await setManagedServiceStartHold(context, false, service);
+
+  assert.deepEqual(delegated, [
+    { kind: "systemd", filePath: service.path, hold: true },
+    { kind: "systemd", filePath: service.path, hold: false },
+  ]);
+  assert.deepEqual(
+    executed.map((item) => item[2]),
+    ["mask", "unmask"],
+  );
+  assert.deepEqual(
+    captured.map((item) => item[2]),
+    ["daemon-reload", "daemon-reload"],
+  );
 });
 
 test("systemd unit-file hold recovers a rename interrupted before masking", () => {

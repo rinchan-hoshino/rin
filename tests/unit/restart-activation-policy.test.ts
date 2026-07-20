@@ -42,6 +42,10 @@ test("rin update preflights, stops, migrates, activates, and restarts in order",
     restartBlock,
     /if \(publishRuntime && !manageDaemon\)[\s\S]*requires managed daemon control/,
   );
+  assert.match(
+    restartBlock,
+    /serviceFileHoldCommand:[\s\S]*executionContext\.targetNodePath[\s\S]*service-file-hold\.js/,
+  );
   const preflightIndex = restartBlock.indexOf(
     "preflightInstallUpgradeMigrations",
   );

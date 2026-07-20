@@ -35,6 +35,26 @@ const finalize = await import(
     path.join(rootDir, "dist", "core", "rin-install", "finalize.js"),
   ).href
 );
+const serviceFileHold = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "app", "rin-install", "service-file-hold.js"),
+  ).href
+);
+
+test("packaged service-file hold helper executes hold and release", async () => {
+  await withTempDir(async (dir) => {
+    const unitPath = path.join(dir, "rin-daemon.service");
+    await fs.writeFile(unitPath, "service", "utf8");
+    serviceFileHold.main(["systemd", "hold", unitPath]);
+    assert.equal(await fs.readlink(unitPath), "/dev/null");
+    assert.equal(
+      await fs.readFile(`${unitPath}.rin-update-hold`, "utf8"),
+      "service",
+    );
+    serviceFileHold.main(["systemd", "release", unitPath]);
+    assert.equal(await fs.readFile(unitPath, "utf8"), "service");
+  });
+});
 
 test("finalize uses a 30 second default daemon readiness timeout", () => {
   assert.equal(finalize.defaultDaemonReadyTimeoutMs(), 30_000);

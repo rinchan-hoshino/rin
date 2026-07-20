@@ -508,6 +508,12 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin found both active and update-held Windows startup entries. Remove the duplicate entry before retrying the update.",
   rin_systemd_unit_hold_ambiguous: () =>
     "Rin found an ambiguous systemd unit-file hold state. Inspect the recorded unit before retrying the update.",
+  rin_managed_service_file_hold_target_executor_required: () =>
+    "Rin cannot update the target user's service file without a target-user executor.",
+  rin_service_file_hold_arguments_invalid: () =>
+    "Rin received invalid service-file hold arguments.",
+  rin_service_file_hold_kind_invalid: () =>
+    "Rin received an unsupported service-file hold kind.",
   rin_managed_node_runtime_missing: () =>
     "Rin could not find its managed Node runtime. Repair or reinstall Rin before starting managed services or updating.",
   rin_managed_node_npm_missing: () =>

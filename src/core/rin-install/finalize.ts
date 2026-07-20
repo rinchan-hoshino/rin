@@ -545,6 +545,15 @@ async function applyInstalledRuntime(
       currentUser,
       targetUser,
       installDir,
+      serviceFileHoldCommand: publishRuntime
+        ? [
+            executionContext.targetNodePath,
+            path.join(
+              publishedRuntime.releaseRoot,
+              "dist/app/rin-install/service-file-hold.js",
+            ),
+          ]
+        : undefined,
     });
     const service =
       managedRuntimeServiceFromInstallSpec(installedService) ||

@@ -890,6 +890,31 @@ test("installer cleans partial backup deletion after durable current marker", as
   });
 });
 
+test("installer preflight reuses and catches up a completed staging index", async () => {
+  await withTempRoot(async (root) => {
+    const dbPath = path.join(root, "memory", "search.db");
+    await fs.mkdir(path.dirname(dbPath), { recursive: true });
+    const legacyDb = new BetterSqlite3(dbPath);
+    legacyDb.exec(`
+      CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
+    `);
+    legacyDb.close();
+    const first =
+      await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+        root,
+      );
+    const firstInode = (await fs.stat(first.stagingDbPath)).ino;
+
+    const second =
+      await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+        root,
+      );
+    assert.equal(second.reused, true);
+    assert.equal((await fs.stat(second.stagingDbPath)).ino, firstInode);
+  });
+});
+
 test("installer retries an interrupted schema-v5 transcript rebuild", async () => {
   await withTempRoot(async (root) => {
     const dbPath = path.join(root, "memory", "search.db");

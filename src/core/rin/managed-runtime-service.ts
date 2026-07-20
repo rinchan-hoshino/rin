@@ -49,12 +49,19 @@ export type ManagedRuntimeServiceActionContext = Pick<
   | "capture"
   | "canConnectSocket"
 > &
-  NonNullable<Parameters<typeof readInstallerManifestForTarget>[1]>;
+  NonNullable<Parameters<typeof readInstallerManifestForTarget>[1]> & {
+    holdServiceFile?: (
+      kind: ManagedRuntimeService["kind"],
+      filePath: string,
+      hold: boolean,
+    ) => void;
+  };
 
 export function createManagedRuntimeServiceActionContext(options: {
   targetUser: string;
   installDir: string;
   currentUser?: string;
+  serviceFileHoldCommand?: string[];
 }): ManagedRuntimeServiceActionContext {
   const currentUser = String(options.currentUser || os.userInfo().username);
   const targetUser = String(options.targetUser || currentUser);
@@ -105,6 +112,16 @@ export function createManagedRuntimeServiceActionContext(options: {
     systemctl,
     exec,
     capture,
+    holdServiceFile: options.serviceFileHoldCommand?.length
+      ? (kind, filePath, hold) => {
+          exec([
+            ...options.serviceFileHoldCommand!,
+            kind,
+            hold ? "hold" : "release",
+            filePath,
+          ]);
+        }
+      : undefined,
     canConnectSocket: async () => await canConnectDaemonSocket(socketPath, 500),
   };
 }
@@ -386,6 +403,30 @@ export function setWindowsStartupEntryHold(startupPath: string, hold: boolean) {
   return startupPath;
 }
 
+function setManagedServiceFileHold(
+  context: ManagedRuntimeServiceActionContext,
+  service: ManagedRuntimeService,
+  hold: boolean,
+) {
+  if (!service.path) {
+    throw new Error(`rin_managed_service_missing_path:${service.label}`);
+  }
+  if (context.holdServiceFile) {
+    context.holdServiceFile(service.kind, service.path, hold);
+    return;
+  }
+  if (!context.isTargetUser) {
+    throw new Error("rin_managed_service_file_hold_target_executor_required");
+  }
+  if (service.kind === "systemd") {
+    setSystemdUnitFileHold(service.path, hold);
+    return;
+  }
+  if (service.kind === "windows-startup") {
+    setWindowsStartupEntryHold(service.path, hold);
+  }
+}
+
 export async function setManagedServiceStartHold(
   context: ManagedRuntimeServiceActionContext,
   hold: boolean,
@@ -396,9 +437,6 @@ export async function setManagedServiceStartHold(
     if (!context.systemctl) {
       throw new Error("rin_managed_service_unsupported:systemd");
     }
-    if (!service.path) {
-      throw new Error(`rin_managed_service_missing_path:${service.label}`);
-    }
     if (hold) {
       context.exec([
         context.systemctl,
@@ -407,12 +445,12 @@ export async function setManagedServiceStartHold(
         "--runtime",
         service.label,
       ]);
-      setSystemdUnitFileHold(service.path, true);
+      setManagedServiceFileHold(context, service, true);
       context.capture([context.systemctl, "--user", "daemon-reload"], {
         stdio: "ignore",
       });
     } else {
-      setSystemdUnitFileHold(service.path, false);
+      setManagedServiceFileHold(context, service, false);
       context.capture([context.systemctl, "--user", "daemon-reload"], {
         stdio: "ignore",
       });
@@ -446,10 +484,7 @@ export async function setManagedServiceStartHold(
         `rin_windows_daemon_cross_user_unsupported:${context.targetUser}`,
       );
     }
-    if (!service.path) {
-      throw new Error(`rin_managed_service_missing_path:${service.label}`);
-    }
-    setWindowsStartupEntryHold(service.path, hold);
+    setManagedServiceFileHold(context, service, hold);
     return service.label;
   }
   throw new Error(`rin_managed_service_unsupported:${(service as any).kind}`);

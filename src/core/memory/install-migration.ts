@@ -370,6 +370,29 @@ export async function prepareTranscriptSearchMigrationForInstall(
   const dbPath = resolveTranscriptSearchDbPath(rootOverride);
   const stagingDir = transcriptSearchMigrationStagingDir(dbPath);
   const stagingDbPath = transcriptSearchMigrationStagingDbPath(dbPath);
+  const stagingEntry = pathEntry(stagingDbPath);
+  if (stagingEntry) {
+    if (
+      !stagingEntry.isFile() ||
+      pathEntry(stagingDir)?.isDirectory() !== true
+    ) {
+      throw new Error("transcript_search_install_staging_path_invalid");
+    }
+    let state: ReturnType<typeof verifyMigratedTranscriptSearchDb> | undefined;
+    try {
+      state = verifyMigratedTranscriptSearchDb(stagingDbPath);
+    } catch {
+      state = undefined;
+    }
+    if (state?.version === TRANSCRIPT_SEARCH_SCHEMA_VERSION) {
+      await synchronizeTranscriptSearchIndexAtPathForInstall(
+        stagingDbPath,
+        rootOverride,
+      );
+      assertPreparedTranscriptSearchDb(stagingDbPath);
+      return { ...preflight, prepared: true, reused: true, stagingDbPath };
+    }
+  }
   fs.rmSync(stagingDir, { recursive: true, force: true });
   fs.mkdirSync(stagingDir, { recursive: true, mode: 0o700 });
   try {
@@ -378,7 +401,12 @@ export async function prepareTranscriptSearchMigrationForInstall(
       rootOverride,
     );
     assertPreparedTranscriptSearchDb(stagingDbPath);
-    return { ...preflight, prepared: true, stagingDbPath };
+    return {
+      ...preflight,
+      prepared: true,
+      reused: false,
+      stagingDbPath,
+    };
   } catch (error) {
     fs.rmSync(stagingDir, { recursive: true, force: true });
     throw error;
