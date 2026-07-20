@@ -141,6 +141,35 @@ test("memory transcripts archive entries under memory/transcripts", async () => 
   });
 });
 
+test("transcript archive iteration streams JSONL with stable physical line numbers", async () => {
+  await withTempRoot(async (root) => {
+    const archivePath = path.join(root, "archive.jsonl");
+    await fs.writeFile(
+      archivePath,
+      [
+        JSON.stringify({ sessionId: "one", role: "user", text: "first" }),
+        "not-json",
+        "",
+        JSON.stringify({ sessionId: "two", role: "assistant", text: "last" }),
+        "",
+      ].join("\n"),
+    );
+    const entries = [];
+    for await (const entry of transcriptArchiveModule.iterateTranscriptArchiveFile(
+      archivePath,
+    )) {
+      entries.push(entry);
+    }
+    assert.deepEqual(
+      entries.map((entry) => ({ text: entry.text, line: entry.archiveLine })),
+      [
+        { text: "first", line: 1 },
+        { text: "last", line: 4 },
+      ],
+    );
+  });
+});
+
 test("recall returns session-level archived transcript matches and creates persistent index", async () => {
   await withTempRoot(async (root) => {
     await transcripts.appendTranscriptArchiveEntry(

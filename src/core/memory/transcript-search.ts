@@ -26,6 +26,7 @@ import {
   buildResultMessage,
   collectTranscriptFiles,
   isLegacySyntheticSessionSummaryEntry,
+  iterateTranscriptArchiveFile,
   loadTranscriptArchiveFile,
   presentSessionResult,
   resolveTranscriptRoot,
@@ -560,25 +561,31 @@ function insertIndexedEntry(db: Database, item: IndexedTranscriptEntry) {
   statements.insertEntry.run(...buildIndexedEntryValues(item));
 }
 
-function replaceIndexedArchiveEntries(
+async function replaceIndexedArchiveEntries(
   db: Database,
   state: TranscriptFileState,
-  entries: TranscriptArchiveEntry[],
 ) {
-  const indexedEntries = entries.map((entry, index) =>
-    toIndexedEntry(entry, state.archivePath, index),
-  );
   const statements = getTranscriptSearchWriteStatements(db);
-  const tx = db.transaction(() => {
-    removeIndexedArchiveEntries(db, state.archivePath);
-    for (const item of indexedEntries) insertIndexedEntry(db, item);
-    statements.upsertFileState.run(
-      state.archivePath,
-      state.mtimeMs,
-      state.size,
-    );
+  db.transaction(() => removeIndexedArchiveEntries(db, state.archivePath))();
+  const insertBatch = db.transaction((batch: IndexedEntryInsertValues[]) => {
+    for (const values of batch) statements.insertEntry.run(...values);
   });
-  tx();
+  let batch: IndexedEntryInsertValues[] = [];
+  let rowIndex = 0;
+  for await (const entry of iterateTranscriptArchiveFile(state.archivePath)) {
+    batch.push(
+      buildIndexedEntryValues(
+        toIndexedEntry(entry, state.archivePath, rowIndex),
+      ),
+    );
+    rowIndex += 1;
+    if (batch.length >= 128) {
+      insertBatch(batch);
+      batch = [];
+    }
+  }
+  if (batch.length) insertBatch(batch);
+  statements.upsertFileState.run(state.archivePath, state.mtimeMs, state.size);
 }
 
 function appendIndexedArchiveEntry(
@@ -643,8 +650,7 @@ async function syncTranscriptSearchIndex(db: Database, rootOverride = "") {
   });
 
   for (const state of refreshStates) {
-    const entries = await loadTranscriptArchiveFile(state.archivePath);
-    replaceIndexedArchiveEntries(db, state, entries);
+    await replaceIndexedArchiveEntries(db, state);
   }
 }
 

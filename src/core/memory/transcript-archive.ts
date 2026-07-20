@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import fssync from "node:fs";
 import path from "node:path";
+import readline from "node:readline";
 
 import { appendJsonLine } from "../platform/fs.js";
 import { nowIso } from "../time-utils.js";
@@ -225,32 +226,51 @@ export async function appendTranscriptArchiveRecord(
   };
 }
 
+function parseTranscriptArchiveLine(
+  rawLine: string,
+  lineNumber: number,
+  filePath: string,
+) {
+  try {
+    const parsed = JSON.parse(rawLine) as TranscriptArchiveEntry;
+    if (!parsed?.text) {
+      parsed.text = extractTranscriptText(parsed as Record<string, unknown>);
+    }
+    parsed.archiveLine = lineNumber;
+    parsed.archivePath = filePath;
+    return parsed.text && !isLegacySyntheticSessionSummaryEntry(parsed)
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function* iterateTranscriptArchiveFile(filePath: string) {
+  if (!fssync.existsSync(filePath)) return;
+  const input = fssync.createReadStream(filePath, { encoding: "utf8" });
+  const lines = readline.createInterface({ input, crlfDelay: Infinity });
+  let lineNumber = 0;
+  try {
+    for await (const line of lines) {
+      lineNumber += 1;
+      const rawLine = line.trim();
+      if (!rawLine) continue;
+      const parsed = parseTranscriptArchiveLine(rawLine, lineNumber, filePath);
+      if (parsed) yield parsed;
+    }
+  } finally {
+    lines.close();
+    input.destroy();
+  }
+}
+
 export async function loadTranscriptArchiveFile(filePath: string) {
-  if (!fssync.existsSync(filePath)) return [] as TranscriptArchiveEntry[];
-  const raw = await fs.readFile(filePath, "utf8");
-  return raw
-    .split(/\r?\n/g)
-    .map((line, index) => ({ rawLine: line.trim(), lineNumber: index + 1 }))
-    .filter((item) => Boolean(item.rawLine))
-    .map((item) => {
-      try {
-        const parsed = JSON.parse(item.rawLine) as TranscriptArchiveEntry;
-        if (!parsed?.text) {
-          parsed.text = extractTranscriptText(
-            parsed as Record<string, unknown>,
-          );
-        }
-        parsed.archiveLine = item.lineNumber;
-        parsed.archivePath = filePath;
-        return parsed;
-      } catch {
-        return null;
-      }
-    })
-    .filter(
-      (entry): entry is TranscriptArchiveEntry =>
-        Boolean(entry?.text) && !isLegacySyntheticSessionSummaryEntry(entry),
-    );
+  const entries: TranscriptArchiveEntry[] = [];
+  for await (const entry of iterateTranscriptArchiveFile(filePath)) {
+    entries.push(entry);
+  }
+  return entries;
 }
 
 export async function collectTranscriptFiles(dir: string): Promise<string[]> {
