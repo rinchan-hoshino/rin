@@ -131,6 +131,12 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
       if (payload.type === "chat_typing") return { sent: true };
       if (payload.type === "chat_react") return { sent: true };
       if (payload.type === "chat_terminate_turn") return { terminated: true };
+      if (payload.type === "chat_message_get") {
+        return { chatKey: payload.payload.chatKey, messageId: "m1" };
+      }
+      if (payload.type === "chat_message_list") {
+        return [{ chatKey: payload.payload.chatKey, messageId: "m2" }];
+      }
       return { ok: true };
     },
     async ({ requests, socketPath }) => {
@@ -157,6 +163,16 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
       const terminatedChat = await rin.chat.terminateTurn({
         chatKey: "telegram/1:3",
       });
+      const message = await rin.chat.messages.get({
+        chatKey: "telegram/1:2",
+        messageId: "m1",
+      });
+      const messages = await rin.chat.messages.list({
+        chatKey: "telegram/1:2",
+        before: "m4",
+        after: "m1",
+        limit: 2,
+      });
       await rin.chat.evalBridge({ code: "return 1;" });
 
       assert.deepEqual(
@@ -169,6 +185,8 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
           "chat_react",
           "chat_terminate_turn",
           "chat_terminate_turn",
+          "chat_message_get",
+          "chat_message_list",
           "chat_bridge_eval",
         ],
       );
@@ -191,6 +209,18 @@ test("agent SDK maps chat helpers to daemon chat commands", async () => {
       assert.deepEqual(requests[6].payload, {
         chatKey: "telegram/1:3",
       });
+      assert.deepEqual(requests[7].payload, {
+        chatKey: "telegram/1:2",
+        messageId: "m1",
+      });
+      assert.deepEqual(requests[8].payload, {
+        chatKey: "telegram/1:2",
+        before: "m4",
+        after: "m1",
+        limit: 2,
+      });
+      assert.equal(message.messageId, "m1");
+      assert.equal(messages[0].messageId, "m2");
       assert.equal(turn.finalText, "ok");
       assert.equal(typing.sent, true);
       assert.equal(reaction.sent, true);

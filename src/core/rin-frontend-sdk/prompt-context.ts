@@ -11,7 +11,6 @@ export type PromptContextMeta = {
   groupNickname?: string;
   identity?: string;
   requiresMentionToStartTurn?: boolean;
-  replyToMessageId?: string;
   taskId?: string;
   taskName?: string;
   taskContextKind?: "scheduled-task";
@@ -92,9 +91,7 @@ function hasChatPromptHeaderContext(
 ) {
   if (safeString(meta?.source).trim() !== "chat-bridge") return false;
   return Boolean(
-    hasSenderContext(meta) ||
-    safeString(meta?.replyToMessageId).trim() ||
-    normalizedAttachedFiles(meta).length > 0,
+    hasSenderContext(meta) || normalizedAttachedFiles(meta).length > 0,
   );
 }
 
@@ -209,12 +206,6 @@ function formatChatPromptHeader(
       `sender nickname: ${safeString(meta?.nickname).trim() || "unknown"}`,
     );
     lines.push(`sender trust: ${describeSenderTrust(meta?.identity)}`);
-  }
-
-  if (safeString(meta?.replyToMessageId).trim()) {
-    lines.push(
-      `reply to message id: ${safeString(meta?.replyToMessageId).trim()}`,
-    );
   }
 
   const attachedFiles = normalizedAttachedFiles(meta);

@@ -48,9 +48,8 @@ import {
   pickMessageId,
   pickReplyToMessageId,
   pickSenderNickname,
-  pickUnsessionedOwnQuoteText,
   pickUserId,
-  prependQuoteTextToPromptBody,
+  renderInboundMessageText,
   renderPromptTextWithSavedAttachments,
   safeString,
   hasInboundChatMessageReplyBoundary,
@@ -59,6 +58,7 @@ import {
   markProcessedChatMessage,
 } from "./chat-helpers.js";
 import { buildInboundChatLogInput } from "./inbound-normalization.js";
+import { withoutChatQuoteNodes } from "./rich-text.js";
 import { buildChatMessageRecordKey } from "./message-store.js";
 import { ChatController, loadChatSettings } from "./controller.js";
 import { readChatCommandResponses } from "./command-responses.js";
@@ -73,6 +73,7 @@ import {
   getChatInboxItem,
   reconcileChatInboxRecovery,
   releaseClaimedChatInboxItem,
+  restoreChatInboxElements,
   restoreChatInboxSession,
   restoreProcessingChatInboxItems,
   touchClaimedChatInboxItem,
@@ -116,6 +117,7 @@ import {
   cleanupChatOutboxHistory,
   enqueueChatOutboxPayload,
   hasCommittedTerminalChatOutbox,
+  withChatQuotePart,
   runWithChatOutboxTurnFence,
   type ChatOutboxPayloadInput,
   type EnqueueChatOutboxOptions,
@@ -316,6 +318,10 @@ function parseInboundCommand(
   commandRows: Array<{ name: string }>,
 ) {
   return parseInboundCommandRequest(session, text, commandRows).command;
+}
+
+function elementsToCommandText(elements: any[]) {
+  return elementsToText(withoutChatQuoteNodes(elements));
 }
 
 export type ChatBridgeTurnPayload = RinToolStartupOptions &
@@ -657,13 +663,15 @@ export async function startChatBridge(
       {
         createdAt: nowIso(),
         chatKey,
-        replyToMessageId: messageId || undefined,
-        parts: [
-          {
-            type: "text",
-            text: "Unknown command. Send /help to see available commands.",
-          },
-        ],
+        parts: withChatQuotePart(
+          [
+            {
+              type: "text",
+              text: "Unknown command. Send /help to see available commands.",
+            },
+          ],
+          messageId,
+        ),
       },
       "error",
       {
@@ -727,8 +735,10 @@ export async function startChatBridge(
         {
           createdAt: nowIso(),
           chatKey,
-          replyToMessageId: messageId || undefined,
-          parts: [{ type: "text", text: lines.join("\n") }],
+          parts: withChatQuotePart(
+            [{ type: "text", text: lines.join("\n") }],
+            messageId,
+          ),
         },
         "command_ack",
         {
@@ -778,7 +788,7 @@ export async function startChatBridge(
     receivedAt?: string,
   ) => {
     const messageId = pickMessageId(session);
-    const replyToMessageId = pickReplyToMessageId(session);
+    const replyToMessageId = pickReplyToMessageId(elements);
     const controller = getController(decision.chatKey);
     const replySession = lookupReplySession(
       runtime.agentDir,
@@ -788,21 +798,14 @@ export async function startChatBridge(
     const linkedSessionFile = safeString(
       replySession?.sessionFile || "",
     ).trim();
-    const quotedOwnMessageText = pickUnsessionedOwnQuoteText({
-      session,
-      linked: replySession?.linked,
-      linkedSessionFile,
-    });
-    const shouldOmitPromptReplyTo =
-      Boolean(quotedOwnMessageText) ||
-      isReplyToLatestAssistantMessage(
-        runtime.agentDir,
-        decision.chatKey,
-        replyToMessageId,
-      );
-    const promptReplyToMessageId = shouldOmitPromptReplyTo
-      ? ""
-      : replyToMessageId;
+    const shouldOmitPromptReplyTo = isReplyToLatestAssistantMessage(
+      runtime.agentDir,
+      decision.chatKey,
+      replyToMessageId,
+    );
+    const promptElements = shouldOmitPromptReplyTo
+      ? withoutChatQuoteNodes(elements)
+      : elements;
     const { attachments, failures } = await extractInboundAttachments(
       elements,
       chatStateDir(dataDir, decision.chatKey),
@@ -822,16 +825,12 @@ export async function startChatBridge(
       );
     }
     const inboundAttachmentNotice = buildInboundAttachmentNotice(failures);
-    const promptRichText = attachments.length
-      ? renderPromptTextWithSavedAttachments(elements, attachments)
-      : "";
-    const turnText = prependQuoteTextToPromptBody(
-      promptRichText || decision.text,
-      quotedOwnMessageText,
-    );
+    const promptText = attachments.length
+      ? renderPromptTextWithSavedAttachments(promptElements, attachments)
+      : renderInboundMessageText(session, promptElements);
     const promptBody = inboundAttachmentNotice
-      ? `${turnText}\n\n${inboundAttachmentNotice}`
-      : turnText;
+      ? `${promptText}\n\n${inboundAttachmentNotice}`
+      : promptText;
     const promptMeta = {
       source: "chat-bridge",
       selfImproveEligible: true,
@@ -856,7 +855,6 @@ export async function startChatBridge(
           : undefined,
       requiresMentionToStartTurn:
         decision.requiresMentionToStartTurn || undefined,
-      replyToMessageId: promptReplyToMessageId || undefined,
       attachedFiles: attachments
         .filter((item) => item?.kind === "file")
         .map((item) => ({ name: item.name, path: item.path })),
@@ -911,13 +909,15 @@ export async function startChatBridge(
             {
               createdAt: nowIso(),
               chatKey: decision.chatKey,
-              replyToMessageId: messageId,
-              parts: [
-                {
-                  type: "text",
-                  text: formatRuntimeErrorForChat(errorMessage),
-                },
-              ],
+              parts: withChatQuotePart(
+                [
+                  {
+                    type: "text",
+                    text: formatRuntimeErrorForChat(errorMessage),
+                  },
+                ],
+                messageId,
+              ),
               sessionFile: linkedSessionFile || undefined,
             },
             "error",
@@ -1148,9 +1148,7 @@ export async function startChatBridge(
         safeString(envelope?.session?.selfId || "").trim(),
       ),
     );
-    const queuedElements = Array.isArray(envelope.elements)
-      ? envelope.elements
-      : [];
+    const queuedElements = restoreChatInboxElements(envelope);
     const queuedChatKey =
       safeString(envelope.chatKey).trim() || sessionChatKey(queuedSession);
     if (isRecordOnlyChatKey(queuedChatKey)) {
@@ -1165,7 +1163,7 @@ export async function startChatBridge(
     const identity = getIdentity();
     const commandRequest = parseInboundCommandRequest(
       queuedSession,
-      elementsToText(queuedElements),
+      elementsToCommandText(queuedElements),
       commandRows,
     );
     if (
@@ -1294,9 +1292,7 @@ export async function startChatBridge(
       );
       const commandRequest = parseInboundCommandRequest(
         queuedSession,
-        elementsToText(
-          Array.isArray(envelope.elements) ? envelope.elements : [],
-        ),
+        elementsToCommandText(restoreChatInboxElements(envelope)),
         commandRows,
       );
       return ["abort", "new"].includes(commandRequest.command?.name || "");
@@ -1309,16 +1305,14 @@ export async function startChatBridge(
           safeString(envelope?.session?.selfId || "").trim(),
         ),
       );
-      const queuedElements = Array.isArray(envelope.elements)
-        ? envelope.elements
-        : [];
+      const queuedElements = restoreChatInboxElements(envelope);
       const queuedChatKey =
         safeString(envelope.chatKey).trim() || sessionChatKey(queuedSession);
       if (isRecordOnlyChatKey(queuedChatKey)) return false;
       const identity = getIdentity();
       const commandRequest = parseInboundCommandRequest(
         queuedSession,
-        elementsToText(queuedElements),
+        elementsToCommandText(queuedElements),
         commandRows,
       );
       if (commandRequest.command || commandRequest.commandLike) return true;

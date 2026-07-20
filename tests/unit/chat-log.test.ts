@@ -17,6 +17,10 @@ const messageStore = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
     .href
 );
+const messageQuery = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-query.js"))
+    .href
+);
 
 async function withTempRoot(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-chat-log-"));
@@ -91,6 +95,102 @@ test("chat chat log appends into unified message store and reads one day chat hi
     assert.match(filePath, /chat[\\/]message-store[\\/]chat-log-view[\\/]/);
     assert.equal(entries.length, 2);
     assert.match(chatLog.formatChatLog(entries), /assistant: Good morning!/);
+  });
+});
+
+test("chat message query returns canonical ID-only quote rich text", async () => {
+  await withTempRoot(async (root) => {
+    const chatKey = "telegram/123:456";
+    messageStore.saveChatMessage(root, {
+      messageId: "m2",
+      role: "user",
+      replyToMessageId: "m1",
+      chatKey,
+      platform: "telegram",
+      botId: "123",
+      chatId: "456",
+      chatType: "private",
+      receivedAt: "2026-04-04T12:00:02.000Z",
+      text: "continue",
+      elements: [{ type: "text", attrs: { content: "continue" } }],
+      quote: {
+        messageId: "m1",
+        userId: "owner-1",
+        nickname: "Owner",
+        content: "must not expand",
+      },
+    });
+
+    const message = messageQuery.getChatMessageRead(root, chatKey, "m2");
+    assert.equal(Object.hasOwn(message, "quote"), false);
+    assert.equal(Object.hasOwn(message, "replyToMessageId"), false);
+    assert.deepEqual(message.elements, [
+      { type: "quote", attrs: { id: "m1" }, children: [] },
+      { type: "br", attrs: {}, children: [] },
+      { type: "text", attrs: { content: "continue" } },
+    ]);
+  });
+});
+
+test("chat message store lists a bounded chat window by message-id cursors", async () => {
+  await withTempRoot(async (root) => {
+    const chatKey = "telegram/123:456";
+    for (const [index, messageId] of ["m1", "m2", "m3", "m4"].entries()) {
+      messageStore.saveChatMessage(root, {
+        messageId,
+        role: index % 2 === 0 ? "user" : "assistant",
+        chatKey,
+        platform: "telegram",
+        botId: "123",
+        chatId: "456",
+        chatType: "private",
+        receivedAt: `2026-04-04T12:00:0${index}.000Z`,
+        text: messageId,
+        elements: [{ type: "text", attrs: { content: messageId } }],
+      });
+    }
+
+    const ids = (records) => records.map((record) => record.messageId);
+    assert.deepEqual(
+      ids(
+        messageStore.listChatMessagesByChatWindow(root, {
+          chatKey,
+          limit: 2,
+        }),
+      ),
+      ["m3", "m4"],
+    );
+    assert.deepEqual(
+      ids(
+        messageStore.listChatMessagesByChatWindow(root, {
+          chatKey,
+          before: "m4",
+          limit: 2,
+        }),
+      ),
+      ["m2", "m3"],
+    );
+    assert.deepEqual(
+      ids(
+        messageStore.listChatMessagesByChatWindow(root, {
+          chatKey,
+          after: "m1",
+          limit: 2,
+        }),
+      ),
+      ["m2", "m3"],
+    );
+    assert.deepEqual(
+      ids(
+        messageStore.listChatMessagesByChatWindow(root, {
+          chatKey,
+          after: "m1",
+          before: "m4",
+          limit: 5,
+        }),
+      ),
+      ["m2", "m3"],
+    );
   });
 });
 

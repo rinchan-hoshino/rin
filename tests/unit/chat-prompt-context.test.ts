@@ -23,7 +23,6 @@ test("chat prompt context persists dynamic sender metadata in the prompt text", 
     groupNickname: "GroupCard",
     identity: "OWNER",
     requiresMentionToStartTurn: true,
-    replyToMessageId: "m1",
     runtimeMetadata: {
       "source event": "issue_comment",
     },
@@ -36,7 +35,7 @@ test("chat prompt context persists dynamic sender metadata in the prompt text", 
   assert.ok(promptText.includes("sender nickname: AccountNick"));
   assert.equal(promptText.includes("sender group nickname:"), false);
   assert.ok(promptText.includes("sender trust: owner"));
-  assert.ok(promptText.includes("reply to message id: m1"));
+  assert.equal(promptText.includes("reply to message id:"), false);
   assert.ok(promptText.endsWith("---\nupdated"));
   assert.equal(
     promptText.includes(
@@ -95,33 +94,26 @@ test("chat prompt context omits privacy reminder when the chat does not require 
   );
 });
 
-test("chat prompt context includes reply id in prompt text without quoted message payload", () => {
-  const promptText = formatPromptContext(
-    {
-      source: "chat-bridge",
-      chatKey: "onebot/100:200",
-      chatType: "group",
-      userId: "u2",
-      nickname: "other-user",
-      identity: "TRUSTED",
-      replyToMessageId: "m1",
-    },
-    "replying",
-  );
-  const systemBlock = formatPromptContextSystemPromptBlock({
+test("chat prompt context leaves quote semantics in the rich message body", () => {
+  const meta = {
     source: "chat-bridge",
     chatKey: "onebot/100:200",
     chatType: "group",
     userId: "u2",
     nickname: "other-user",
     identity: "TRUSTED",
-    replyToMessageId: "m1",
-  });
+    replyToMessageId: "legacy-metadata-must-not-render",
+  } as any;
+  const promptText = formatPromptContext(meta, "[quote:m1]\nreplying");
+  const systemBlock = formatPromptContextSystemPromptBlock(meta);
 
-  assert.ok(promptText.includes("reply to message id: m1"));
-  assert.equal(systemBlock.includes("- quoted platform message id: m1"), false);
-  assert.equal(systemBlock.includes("- replied message:"), false);
-  assert.equal(systemBlock.includes("  - content:"), false);
+  assert.equal(promptText.includes("reply to message id:"), false);
+  assert.ok(promptText.endsWith("---\n[quote:m1]\nreplying"));
+  assert.equal(systemBlock.includes("quoted platform message id"), false);
+  assert.equal(systemBlock.includes("replied message"), false);
+  assert.equal(systemBlock.includes("[quote:"), false);
+  assert.equal(systemBlock.includes("rin.chat.messages.get"), false);
+  assert.equal(systemBlock.includes("docs/chat-bridge.md"), false);
 });
 
 test("prompt context header injection is idempotent for runtime-generated headers", () => {

@@ -55,7 +55,7 @@ Classify the task before acting:
 3. **Assistant turn:** frontend binding, controller key, active run, final delivery.
 4. **Outbound delivery:** SDK send, outbox payload, rich objects, adapter result, platform send result.
 5. **Stored evidence:** message record, message-id index, chat/date index, plain log view.
-6. **Identity/trust:** platform `userId`, nickname, trust records, quote metadata.
+6. **Identity/trust:** platform `userId`, nickname, trust records, and quote rich nodes.
 7. **Adapter liveness:** login state, WebSocket/API connection, platform-specific probe.
 
 ## Built-in direct runtime adapters
@@ -131,7 +131,7 @@ Rules:
 - Telegram private/group shape is inferred from `chatId`; negative ids are groups/channels.
 - OneBot private chats commonly use `private:<userId>`; group chats use the group id.
 - Keep `messageId` separate from `chatKey`; quote/reply delivery needs the platform message id.
-- Treat platform metadata as authoritative: use platform `userId`, `nickname`, `trust`, and stored quote metadata from the inbound record or bridge runtime.
+- Treat platform metadata as authoritative for `userId`, `nickname`, and `trust`. Adapters must emit replies directly as ID-only structured quote nodes in inbound rich text; the runtime does not translate a separate session quote field.
 
 ## Agent SDK chat operations
 
@@ -308,7 +308,8 @@ Use `docs/rich-text-output-format.md` for native mention, quote, image, file, vi
 
 Delivery contract:
 
-- quote replies use the exact platform `messageId`;
+- quote replies use a structured quote part with the exact platform `messageId`; quote is not a separate payload metadata field;
+- reply ids in storage indexes and delivery routing are derived projections of that quote node, while legacy records are migrated at read boundaries;
 - native mentions use the exact platform user id;
 - files/images use local paths or recipient-accessible URLs;
 - generated image/file delivery uses rich-object syntax such as `[image: preview](local-path)` or structured SDK `parts`;
@@ -338,11 +339,12 @@ The plain text log projection remains at `data/chat/message-store/chat-log-view/
 
 Lookup contract:
 
-1. Known `chatKey` and `messageId`: query `messages` by `(chat_key, message_id)`.
-2. Known `messageId` only: query the `messages_message_id_idx` index and preserve `received_at, record_key` order.
+1. Known `chatKey` and `messageId`: use `rin.chat.messages.get({ chatKey, messageId })`; bounded chronological reads use `rin.chat.messages.list(...)` with message-id cursors.
+2. For direct read-only diagnosis with only a `messageId`, query the `messages_message_id_idx` index and preserve `received_at, record_key` order.
 3. Known `chatKey` and date: query by `chat_key` and the local date range using `messages_chat_date_idx`.
 4. Inbox, recovery, and delivery diagnosis must query `turns`, `inbound_heads`, `outbox`, or `outbox_deliveries`; do not infer control state by scanning message history.
 5. Treat direct database access as read-only diagnosis. Runtime writes must use the owning chat APIs so transactions, generations, and fencing stay intact.
+6. An inbound quote node contains only the referenced message id. Resolve it with `rin.chat.messages.get({ chatKey, messageId })` only when the current request depends on that context; inspect the retrieved message's rich elements and follow its nested quote node only as far as needed.
 
 Install and update own every Chat authority migration. Before restarting the daemon, the installer stops the old runtime, rewrites legacy chat keys, creates or upgrades `chat.sqlite`, transactionally imports legacy message/inbox/outbox authority, imports legacy `state.json` session bindings, and archives old control directories under `data/chat/legacy-migrated-v1/`. Invalid or incomplete legacy data fails the install/update instead of starting a partially migrated runtime. Runtime database opens only validate the current schema and never import legacy authority or upgrade an old schema; an unmet migration therefore degrades Chat while the core daemon remains available. Migration retries serialize through SQLite, and a crash after import reimports any pre-archive legacy writes before completing the one-way archive.
 
@@ -360,6 +362,6 @@ Common boundary checks:
 - **Record-only chat idle:** confirm the scheduled task/background producer that reads stored messages.
 - **Slash command mismatch:** command acknowledgements are config/i18n output; verify the command path switched sessions for `/new`.
 - **OneBot/QQ after NapCat relogin:** separate platform login from Rin bridge connectivity; check Rin runtime status, WebSocket connection, and an adapter-level login probe.
-- **Outbound text queued:** inspect outbox payload, `replyTo` metadata, platform error, and message-store accepted/processed state.
+- **Outbound text queued:** inspect the outbox quote part, platform error, and message-store accepted/processed state.
 - **Attachment missing:** verify the file exists, rich-object or structured `parts` attachment was sent, and the adapter produced a delivery result.
 - **Config change idle:** confirm the active `~/.rin/settings.json`, adapter entries, runtime reload/restart, and running app path.

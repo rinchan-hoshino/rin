@@ -685,6 +685,54 @@ export function listChatMessagesByChat(agentDir: string, chatKey: string) {
     .filter((item): item is StoredChatMessage => Boolean(item));
 }
 
+export type ChatMessageListWindow = {
+  chatKey: string;
+  before?: string;
+  after?: string;
+  limit?: number;
+};
+
+export function listChatMessagesByChatWindow(
+  agentDir: string,
+  window: ChatMessageListWindow,
+) {
+  const chatKey = safeString(window?.chatKey).trim();
+  if (!chatKey) return [] as StoredChatMessage[];
+  const before = safeString(window?.before).trim();
+  const after = safeString(window?.after).trim();
+  const requestedLimit = Number(window?.limit);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(100, Math.trunc(requestedLimit)))
+    : 20;
+  const conditions = ["chat_key = ?"];
+  const parameters: Array<string | number> = [chatKey];
+  if (before) {
+    conditions.push(
+      "sequence < (SELECT sequence FROM messages WHERE chat_key = ? AND message_id = ?)",
+    );
+    parameters.push(chatKey, before);
+  }
+  if (after) {
+    conditions.push(
+      "sequence > (SELECT sequence FROM messages WHERE chat_key = ? AND message_id = ?)",
+    );
+    parameters.push(chatKey, after);
+  }
+  const ascending = Boolean(after);
+  parameters.push(limit);
+  const rows = openChatDatabase(agentDir)
+    .prepare(
+      `SELECT record_json FROM messages
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY sequence ${ascending ? "ASC" : "DESC"}
+       LIMIT ?`,
+    )
+    .all(...parameters)
+    .map(rowToStoredChatMessage)
+    .filter((item): item is StoredChatMessage => Boolean(item));
+  return ascending ? rows : rows.reverse();
+}
+
 export function listChatMessagesByReplyTo(
   agentDir: string,
   chatKey: string,

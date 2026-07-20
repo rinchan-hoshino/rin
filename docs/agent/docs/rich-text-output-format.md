@@ -19,7 +19,7 @@ Goal:
 Trusted inputs:
 
 - platform user ids from chat metadata or adapter APIs;
-- platform message ids from inbound records or stored quote metadata;
+- platform message ids from inbound quote nodes or stored message records;
 - local artifact paths on the machine running Rin;
 - recipient-accessible URLs;
 - SDK/outbox delivery results.
@@ -74,8 +74,9 @@ Full log.
 Markdown contract:
 
 - Raw `@name` is visible text; native mention syntax supplies the platform id.
-- The first quote object supplies the reply target for adapters that support reply/quote delivery.
-- Quote context belongs in visible text when recipient understanding depends on it.
+- Quote is part of the ordered rich message, not separate message metadata. The first quote object supplies the reply target for adapters that support reply/quote delivery.
+- An inbound quote node is an ID-only lazy reference under the current `chatKey`. Do not inject the referenced message body into the current prompt; call `rin.chat.messages.get({ chatKey, messageId })` only when the request depends on it, and follow any nested quote node only as needed.
+- For outbound delivery, quote context belongs in visible text only when recipient understanding depends on it.
 - Local paths refer to files on the machine running Rin. Prefer absolute paths for generated artifacts.
 - URLs should be reachable by the adapter/recipient and free of credential-bearing query data.
 - Media/file labels become fallback text and sometimes attachment names.

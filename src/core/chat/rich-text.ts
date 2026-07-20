@@ -210,6 +210,31 @@ export function renderChatNodesMarkdown(
   return normalizeRenderedText(renderNodeMarkdown(nodes, options));
 }
 
+function firstQuoteNode(nodes: any[]): any | undefined {
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (safeString(node?.type).trim().toLowerCase() === "quote") return node;
+    const nested = firstQuoteNode(childrenOf(node));
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+export function extractChatQuoteMessageId(nodes: any[]) {
+  const quote = firstQuoteNode(nodes);
+  const attrs = attrsOf(quote);
+  return safeString(attrs.id || attrs.messageId).trim() || undefined;
+}
+
+export function withoutChatQuoteNodes(nodes: any[]): any[] {
+  return (Array.isArray(nodes) ? nodes : [])
+    .filter((node) => safeString(node?.type).trim().toLowerCase() !== "quote")
+    .map((node) =>
+      Array.isArray(node?.children)
+        ? { ...node, children: withoutChatQuoteNodes(node.children) }
+        : node,
+    );
+}
+
 export function renderChatNodesPlain(
   nodes: any[],
   options: RenderChatNodesOptions = {},

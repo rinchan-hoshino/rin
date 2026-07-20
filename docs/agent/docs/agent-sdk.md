@@ -155,6 +155,16 @@ await rin.chat.react({
 });
 await rin.chat.terminateTurn("agent-controller-key");
 
+const quoted = await rin.chat.messages.get({
+  chatKey: "telegram/123456:7890",
+  messageId: "message-id",
+});
+const recent = await rin.chat.messages.list({
+  chatKey: "telegram/123456:7890",
+  before: "message-id",
+  limit: 20,
+});
+
 const bridgeResult = await rin.chat.evalBridge({
   currentChatKey: "telegram/123456:7890",
   requestId: "agent-example",
@@ -169,6 +179,9 @@ Chat helper contract:
 - `typing(target)` sends a typing indicator when the adapter supports it.
 - `react(payload)` sends a platform reaction when the adapter supports it.
 - `terminateTurn(target)` stops the active turn by controller key or chat key.
+- `messages.get({ chatKey, messageId })` returns one stored rich message without expanding its quote node.
+- `messages.list({ chatKey, before?, after?, limit? })` returns a chronological window; `before` and `after` are message-id cursors within that chat, and `limit` is clamped to 1-100 with a default of 20.
+- Stored-message writes remain intent APIs such as `send(...)` and `runTurn(...)`; there is no raw message-row write API.
 - `evalBridge(payload)` evaluates code inside the chat bridge context for bridge-local inspection or repair.
 
 For native mentions, quotes/replies, files, images, or attachment syntax, read `docs/rich-text-output-format.md` before sending. For stored chat logs, identities, adapters, and bridge state, read `docs/chat-bridge.md`.

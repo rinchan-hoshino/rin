@@ -56,6 +56,8 @@ export type RinRpcCommandType =
   | "chat_typing"
   | "chat_react"
   | "chat_terminate_turn"
+  | "chat_message_get"
+  | "chat_message_list"
   | "chat_bridge_eval"
   | "list_builtin_extensions"
   | "set_builtin_extension"

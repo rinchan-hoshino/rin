@@ -5,7 +5,10 @@ import {
 } from "./message-store.js";
 import { composeChatKey } from "./support.js";
 import { normalizeMessageText } from "../message-content.js";
-import { renderChatNodesMarkdown } from "./rich-text.js";
+import {
+  extractChatQuoteMessageId,
+  renderChatNodesMarkdown,
+} from "./rich-text.js";
 import { cloneJsonIfObject } from "../json-utils.js";
 import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
@@ -44,14 +47,16 @@ export function directLike(session: any) {
 }
 
 export function ensureSessionElements(session: any) {
+  let elements: any[] = [];
   if (Array.isArray(session?.elements) && session.elements.length) {
-    return session.elements;
+    elements = session.elements;
+  } else {
+    const stripped = safeString(session?.stripped?.content || "").trim();
+    const raw = safeString(session?.content || "").trim();
+    const text = stripped || raw;
+    if (text) elements = [{ type: "text", attrs: { content: text } }];
   }
-  const stripped = safeString(session?.stripped?.content || "").trim();
-  if (stripped) return [{ type: "text", attrs: { content: stripped } }];
-  const raw = safeString(session?.content || "").trim();
-  if (raw) return [{ type: "text", attrs: { content: raw } }];
-  return [] as any[];
+  return elements.filter(Boolean);
 }
 
 function collectSelfMentionTokens(session: any) {
@@ -61,6 +66,7 @@ function collectSelfMentionTokens(session: any) {
       session?.bot?.selfId,
       session?.username,
       session?.user?.username,
+      session?.botUsername,
       session?.bot?.username,
       session?.bot?.name,
       session?.bot?.user?.name,
@@ -115,7 +121,7 @@ function isRichAttachmentElement(element: any) {
   ].includes(safeString(element?.type).trim().toLowerCase());
 }
 
-function sessionElementsToText(session: any, elements: any[]) {
+export function renderInboundMessageText(session: any, elements: any[]) {
   const normalizedElements = Array.isArray(elements) ? elements : [];
   const richAttachments = normalizedElements.filter(isRichAttachmentElement);
   const textElements = normalizedElements.filter(
@@ -193,38 +199,25 @@ export function pickMessageId(session: any) {
   return safeString(session?.messageId || "").trim();
 }
 
-export function pickReplyToMessageId(session: any) {
-  return safeString(
-    session?.quote?.messageId || session?.quote?.id || "",
-  ).trim();
+export function pickReplyToMessageId(elements: any[]) {
+  return extractChatQuoteMessageId(elements) || "";
 }
 
-export function summarizeQuote(session: any) {
-  const quote = session?.quote;
-  if (!quote || typeof quote !== "object") return undefined;
-  const messageId =
-    safeString(quote?.messageId || quote?.id || "").trim() || undefined;
-  const userId =
-    safeString(
-      quote?.userId ||
-        quote?.user?.id ||
-        quote?.author?.userId ||
-        quote?.author?.id ||
-        "",
-    ).trim() || undefined;
-  const nickname =
-    safeString(
-      quote?.nickname ||
-        quote?.user?.name ||
-        quote?.author?.name ||
-        quote?.author?.nick ||
-        "",
-    ).trim() || undefined;
-  const content =
-    safeString(quote?.content || quote?.message?.content || "").trim() ||
-    undefined;
-  if (!messageId && !userId && !nickname && !content) return undefined;
-  return { messageId, userId, nickname, content };
+function legacyQuoteMessageId(quote: any) {
+  if (!quote || typeof quote !== "object") return "";
+  return safeString(quote?.messageId || quote?.id || "").trim();
+}
+
+export function migrateLegacyQuoteToElements(quote: any, elements: any[]) {
+  const nodes = Array.isArray(elements) ? elements.filter(Boolean) : [];
+  if (extractChatQuoteMessageId(nodes)) return nodes;
+  const id = legacyQuoteMessageId(quote);
+  if (!id) return nodes;
+  return [
+    { type: "quote", attrs: { id }, children: [] },
+    ...(nodes.length ? [{ type: "br", attrs: {}, children: [] }] : []),
+    ...nodes,
+  ];
 }
 
 export function getChatId(session: any) {
@@ -269,11 +262,13 @@ export function serializeChatInboxSession(session: any) {
           }
         : undefined,
     username: safeString(session?.username).trim() || undefined,
+    botUsername:
+      safeString(session?.botUsername || session?.bot?.username).trim() ||
+      undefined,
     author: cloneJsonIfObject(session?.author),
     user: cloneJsonIfObject(session?.user),
     channel: cloneJsonIfObject(session?.channel),
     guild: cloneJsonIfObject(session?.guild),
-    quote: cloneJsonIfObject(session?.quote),
   };
 }
 
@@ -281,18 +276,21 @@ export function buildChatInboxRouting(
   session: any,
   elements: any[],
 ): ChatInboxRouting {
+  const normalizedElements = Array.isArray(elements)
+    ? elements.filter(Boolean)
+    : [];
   return {
     chatType: getChatType(session),
     isDirect: directLike(session),
     mentionLike: mentionLike(session),
-    text: sessionElementsToText(session, elements) || undefined,
+    text: renderInboundMessageText(session, normalizedElements) || undefined,
     userId: pickUserId(session) || undefined,
     nickname: pickSenderNickname(session) || undefined,
     chatName: pickChatName(session) || undefined,
     messageThreadId:
       safeString(session?.messageThreadId || session?.chatThreadId).trim() ||
       undefined,
-    replyToMessageId: pickReplyToMessageId(session) || undefined,
+    replyToMessageId: pickReplyToMessageId(normalizedElements) || undefined,
   };
 }
 
@@ -314,10 +312,13 @@ export function buildInboundStoredChatMessageInput(
   const userId = pickUserId(session);
   const receivedAt = safeString(options.receivedAt).trim() || nowIso();
   const trust = safeString(options.trust).trim() || undefined;
+  const normalizedElements = Array.isArray(elements)
+    ? elements.filter(Boolean)
+    : [];
   return {
     messageId,
     role: "user",
-    replyToMessageId: pickReplyToMessageId(session) || undefined,
+    replyToMessageId: pickReplyToMessageId(normalizedElements) || undefined,
     chatKey,
     platform,
     botId: botId || undefined,
@@ -336,12 +337,11 @@ export function buildInboundStoredChatMessageInput(
     nickname: pickSenderNickname(session) || undefined,
     chatName: pickChatName(session) || undefined,
     trust,
-    text: sessionElementsToText(session, elements) || undefined,
+    text: renderInboundMessageText(session, normalizedElements) || undefined,
     rawContent: safeString(session?.content || "").trim() || undefined,
     strippedContent:
       safeString(session?.stripped?.content || "").trim() || undefined,
-    elements: normalizeElementSummary(elements),
-    quote: summarizeQuote(session),
+    elements: normalizeElementSummary(normalizedElements),
   };
 }
 

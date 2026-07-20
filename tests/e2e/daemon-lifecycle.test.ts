@@ -6,6 +6,9 @@ import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
+import { saveChatMessage } from "../../src/core/chat/message-store.ts";
+import { requestDaemonCommand } from "../../src/core/rin-daemon/client.ts";
+
 const execFileAsync = promisify(execFile);
 const rootDir = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
@@ -95,9 +98,22 @@ async function waitForSocketState(
 
 test("isolated CLI doctor flow sees a daemon booted in a temporary agent dir", async () => {
   await withTempDir(async (tempDir) => {
-    const { agentDir, env } = await setupIsolatedCliEnv(tempDir);
+    const { agentDir, socketPath, env } = await setupIsolatedCliEnv(tempDir);
     const before = await runCli(["doctor", "--json"], env);
     assert.equal(JSON.parse(before.stdout).socketReady, false);
+
+    saveChatMessage(agentDir, {
+      messageId: "m2",
+      role: "user",
+      replyToMessageId: "m1",
+      chatKey: "telegram/1:2",
+      platform: "telegram",
+      botId: "1",
+      chatId: "2",
+      receivedAt: "2026-07-20T06:00:00.000Z",
+      text: "continue",
+      elements: [{ type: "text", attrs: { content: "continue" } }],
+    });
 
     const daemon = spawn(process.execPath, [daemonPath], {
       cwd: rootDir,
@@ -129,6 +145,33 @@ test("isolated CLI doctor flow sees a daemon booted in a temporary agent dir", a
 
       const agentData = path.join(agentDir, "data");
       await assert.doesNotReject(() => fs.access(agentData));
+
+      const message = await requestDaemonCommand(
+        {
+          type: "chat_message_get",
+          payload: { chatKey: "telegram/1:2", messageId: "m2" },
+        },
+        { socketPath },
+      );
+      assert.equal(message.messageId, "m2");
+      assert.equal(Object.hasOwn(message, "replyToMessageId"), false);
+      assert.deepEqual(message.elements[0], {
+        type: "quote",
+        attrs: { id: "m1" },
+        children: [],
+      });
+
+      const messages = await requestDaemonCommand(
+        {
+          type: "chat_message_list",
+          payload: { chatKey: "telegram/1:2", limit: 20 },
+        },
+        { socketPath },
+      );
+      assert.deepEqual(
+        messages.map((item) => item.messageId),
+        ["m2"],
+      );
     } finally {
       daemon.kill("SIGTERM");
       const result = await Promise.race([

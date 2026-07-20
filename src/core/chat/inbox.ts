@@ -11,6 +11,7 @@ import { safeString } from "../text-utils.js";
 import {
   buildChatInboxRouting,
   buildInboundStoredChatMessageInput,
+  migrateLegacyQuoteToElements,
   serializeChatInboxSession,
 } from "./inbound-normalization.js";
 import { openChatDatabase } from "./database.js";
@@ -111,6 +112,9 @@ export function buildChatInboxItem(input: {
   if (!parseChatKey(chatKey)) throw new Error(`invalid_chatKey:${chatKey}`);
   if (!messageId) throw new Error("chat_inbox_messageId_required");
   const now = nowIso();
+  const elements = Array.isArray(input.elements)
+    ? input.elements.filter(Boolean)
+    : [];
   return {
     version: 1 as const,
     itemId: hashKey(`${chatKey}\n${messageId}`),
@@ -119,9 +123,9 @@ export function buildChatInboxItem(input: {
     createdAt: now,
     updatedAt: now,
     attemptCount: 0,
-    routing: buildChatInboxRouting(input.session, input.elements),
+    routing: buildChatInboxRouting(input.session, elements),
     session: serializeChatInboxSession(input.session),
-    elements: cloneJson(asArray(input.elements)),
+    elements: cloneJson(elements),
     state: "pending" as const,
   } satisfies ChatInboxItem;
 }
@@ -234,7 +238,7 @@ export function enqueueChatInboxItem(
   const item = buildChatInboxItem(input);
   const messageInput = buildInboundStoredChatMessageInput(
     input.session,
-    input.elements,
+    item.elements,
     { chatKey: item.chatKey, receivedAt: item.createdAt },
   );
   if (!messageInput) throw new Error("chat_inbox_message_identity_required");
@@ -557,16 +561,21 @@ function storedChatMessageToInboxSession(record: StoredChatMessage) {
   };
   if (record.nickname) session.author = { name: record.nickname };
   if (record.chatName) session.channelName = record.chatName;
-  if (record.quote && typeof record.quote === "object")
-    session.quote = record.quote;
   return session;
 }
 
 function storedChatMessageToInboxElements(record: StoredChatMessage) {
-  if (Array.isArray(record.elements) && record.elements.length)
-    return cloneJson(record.elements);
-  const text = safeString(record.strippedContent || record.text).trim();
-  return text ? [{ type: "text", attrs: { content: text } }] : [];
+  const elements =
+    Array.isArray(record.elements) && record.elements.length
+      ? cloneJson(record.elements)
+      : (() => {
+          const text = safeString(record.strippedContent || record.text).trim();
+          return text ? [{ type: "text", attrs: { content: text } }] : [];
+        })();
+  return migrateLegacyQuoteToElements(
+    record.quote || { messageId: record.replyToMessageId },
+    elements,
+  );
 }
 
 function emptySkippedCounts(): ChatInboxOrphanRecoverySkippedCounts {
@@ -754,8 +763,20 @@ function mergeSessionRecord(
   session[key] = { ...asRecord(session[key]), ...next };
 }
 
-export function restoreChatInboxSession(item: ChatInboxItem, bot?: any) {
+export function restoreChatInboxElements(item: ChatInboxItem) {
   const session = asRecord(cloneJsonIfObject(item?.session) ?? {});
+  const quote = isJsonRecord(session.quote)
+    ? session.quote
+    : { messageId: item?.routing?.replyToMessageId };
+  return migrateLegacyQuoteToElements(
+    quote,
+    cloneJson(Array.isArray(item?.elements) ? item.elements : []),
+  );
+}
+
+export function restoreChatInboxSession(item: ChatInboxItem, bot?: any) {
+  const restored = asRecord(cloneJsonIfObject(item?.session) ?? {});
+  const { quote: _legacyQuote, ...session } = restored;
   const routing =
     item?.routing && typeof item.routing === "object" ? item.routing : null;
   if (bot) session.bot = bot;
@@ -768,14 +789,6 @@ export function restoreChatInboxSession(item: ChatInboxItem, bot?: any) {
         ? pickTrimmedString(session?.stripped?.content, routing.text)
         : undefined,
       appel: routing.mentionLike ? true : undefined,
-    });
-  }
-  if (routing.replyToMessageId) {
-    mergeSessionRecord(session, "quote", {
-      messageId: pickTrimmedString(
-        session?.quote?.messageId,
-        routing.replyToMessageId,
-      ),
     });
   }
   if (routing.nickname) {

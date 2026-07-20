@@ -9,6 +9,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { startChatBridge } from "../../core/chat/main.js";
+import {
+  getChatMessageRead,
+  listChatMessageReads,
+} from "../../core/chat/message-query.js";
 import { defaultDaemonSocketPath } from "../../core/rin-lib/common.js";
 import { formatRuntimeErrorForUser } from "../../core/rin-lib/user-facing-errors.js";
 import { startDaemon } from "../../core/rin-daemon/daemon.js";
@@ -193,6 +197,27 @@ async function main() {
             data: await (
               await getHostedChatBridge()
             ).terminateTurn(command?.payload || {}),
+          };
+        }
+        if (type === "chat_message_get") {
+          const payload = command?.payload || {};
+          return {
+            success: true,
+            data:
+              getChatMessageRead(
+                runtime.agentDir,
+                String(payload.chatKey || ""),
+                String(payload.messageId || ""),
+              ) || null,
+          };
+        }
+        if (type === "chat_message_list") {
+          return {
+            success: true,
+            data: listChatMessageReads(
+              runtime.agentDir,
+              command?.payload || {},
+            ),
           };
         }
         if (type === "chat_bridge_eval") {

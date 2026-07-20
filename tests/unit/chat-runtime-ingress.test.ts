@@ -148,6 +148,7 @@ test("discord runtime persists guild channel paths as chat names", async () => {
       member: { displayName: "Owner Nick" },
       mentions: { users: { has: () => false } },
       attachments: new Map(),
+      reference: { messageId: "discord-parent" },
       content: "hello",
     });
 
@@ -160,6 +161,8 @@ test("discord runtime persists guild channel paths as chat names", async () => {
       stored?.routing?.chatName,
       "Rin Dev / Projects / features / metadata-paths",
     );
+    assert.equal(stored?.routing?.replyToMessageId, "discord-parent");
+    assert.equal(stored?.elements?.[0]?.type, "quote");
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -574,6 +577,76 @@ test("telegram runtime reports ready only after native cursor catch-up", async (
   }
 });
 
+test("telegram and onebot adapters emit replies as canonical quote nodes", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-runtime-quote-"),
+  );
+  try {
+    const app = runtime.createChatRuntimeApp(agentDir);
+    runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+      dataDir: path.join(agentDir, "data"),
+      settings: {},
+      adapterEntries: [
+        { key: "telegram", name: "Telegram", config: { token: "123:abc" } },
+        {
+          key: "onebot",
+          name: "OneBot",
+          config: { endpoint: "ws://127.0.0.1:3001", selfId: "bot-1" },
+        },
+      ],
+    });
+    const telegram = [...app.adapters].find(
+      (adapter) => adapter.bot.platform === "telegram",
+    );
+    const onebot = [...app.adapters].find(
+      (adapter) => adapter.bot.platform === "onebot",
+    );
+
+    const telegramSession = await telegram.buildSession(
+      {},
+      {
+        message_id: 10,
+        date: 1713436800,
+        chat: { id: 20, type: "private" },
+        from: { id: 30, username: "owner" },
+        text: "continue",
+        reply_to_message: {
+          message_id: 9,
+          from: { id: 30, username: "owner" },
+          text: "previous",
+        },
+      },
+    );
+    const onebotSession = await onebot.buildSession({
+      post_type: "message",
+      message_type: "private",
+      self_id: "bot-1",
+      user_id: "owner-1",
+      message_id: "78",
+      time: 1713436800,
+      message: [
+        { type: "reply", data: { id: "77" } },
+        { type: "text", data: { text: "continue" } },
+      ],
+    });
+
+    assert.equal(telegramSession.quote, undefined);
+    assert.deepEqual(telegramSession.elements[0], {
+      type: "quote",
+      attrs: { id: "9" },
+      children: [],
+    });
+    assert.equal(onebotSession.quote, undefined);
+    assert.deepEqual(onebotSession.elements[0], {
+      type: "quote",
+      attrs: { id: "77" },
+      children: [],
+    });
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("telegram runtime advances the poll cursor only after the update is handled", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-runtime-"),
@@ -678,6 +751,7 @@ test("slack runtime acks only after the inbound event is emitted", async () => {
         channel: "D1",
         text: "hello",
         ts: "123.456",
+        thread_ts: "123.000",
       },
     },
   };
@@ -685,6 +759,9 @@ test("slack runtime acks only after the inbound event is emitted", async () => {
   await adapter.handleSlackEvent(envelope);
 
   assert.deepEqual(order, ["emit", "ack:1"]);
+  const stored = inbox.listPendingChatInboxItems(agentDir)[0];
+  assert.equal(stored.routing?.replyToMessageId, "123.000");
+  assert.equal(stored.elements?.[0]?.type, "quote");
 });
 
 test("lark runtime paginates native history before releasing buffered events", async () => {
@@ -1210,7 +1287,7 @@ test("lark runtime reads merged forward messages into inbound text", async () =>
   assert.doesNotMatch(stored.routing?.text, /Merged and Forwarded Message/);
 });
 
-test("lark runtime maps reply parent ids to canonical quote metadata", async () => {
+test("lark runtime maps reply parent ids to canonical quote rich text", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-runtime-"),
   );
@@ -1229,6 +1306,18 @@ test("lark runtime maps reply parent ids to canonical quote metadata", async () 
   const adapter = [...app.adapters][0];
   adapter.bot.selfId = "cli-test";
   const seen = [];
+  const emittedByAdapter = [];
+  const emit = app.emit.bind(app);
+  app.emit = (event, session) => {
+    if (event === "message") {
+      emittedByAdapter.push({
+        quote: session.quote,
+        stripped: session.stripped,
+        elements: JSON.parse(JSON.stringify(session.elements)),
+      });
+    }
+    return emit(event, session);
+  };
   app.on("message", (session) => seen.push(session));
 
   await adapter.handleMessage({
@@ -1246,7 +1335,16 @@ test("lark runtime maps reply parent ids to canonical quote metadata", async () 
   });
 
   assert.equal(seen.length, 1);
-  assert.deepEqual(seen[0].quote, { messageId: "om-parent" });
+  assert.equal(emittedByAdapter[0].quote, undefined);
+  assert.deepEqual(emittedByAdapter[0].stripped, {
+    appel: false,
+    content: "continue",
+  });
+  assert.deepEqual(emittedByAdapter[0].elements[0], {
+    type: "quote",
+    attrs: { id: "om-parent" },
+    children: [],
+  });
   const files = inbox.listPendingChatInboxItems(agentDir);
   const stored = files[0];
   assert.equal(stored.routing?.replyToMessageId, "om-parent");

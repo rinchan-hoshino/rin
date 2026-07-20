@@ -27,6 +27,7 @@ import {
   isImageMimeType,
   isImageName,
   normalizeNode,
+  prependChatQuoteNode,
   prepareOutboundNodes,
   readBinaryFromNode,
   renderMarkdownFromNodes,
@@ -1424,6 +1425,10 @@ export class DiscordAdapter {
         ),
       );
     }
+    const canonicalElements = prependChatQuoteNode(
+      elements,
+      message?.reference?.messageId,
+    );
     this.app.emit("message", {
       platform: "discord",
       selfId: safeString(this.bot?.selfId).trim() || undefined,
@@ -1472,10 +1477,7 @@ export class DiscordAdapter {
         appel: mentionSelf,
         content: strippedContent,
       },
-      elements,
-      quote: safeString(message?.reference?.messageId || "").trim()
-        ? { messageId: safeString(message.reference.messageId).trim() }
-        : undefined,
+      elements: canonicalElements,
     });
   }
 }
@@ -1974,6 +1976,7 @@ export class SlackAdapter {
         );
       } catch {}
     }
+    const canonicalElements = prependChatQuoteNode(elements, event?.thread_ts);
     const userInfo = await this.web.users
       .info({ user: event.user })
       .catch(() => null);
@@ -2029,10 +2032,7 @@ export class SlackAdapter {
         appel: mentionSelf,
         content: strippedContent,
       },
-      elements,
-      quote: safeString(event?.thread_ts || "").trim()
-        ? { messageId: safeString(event.thread_ts).trim() }
-        : undefined,
+      elements: canonicalElements,
     });
     if (typeof ack === "function") {
       await ack();
@@ -3073,6 +3073,10 @@ export class LarkAdapter {
       safeString(sender?.sender_type).trim() === "user"
         ? safeString(sender?.sender_id?.open_id || "").trim()
         : undefined;
+    const canonicalElements = prependChatQuoteNode(
+      elements,
+      message?.parent_id,
+    );
     this.app.emit("message", {
       platform: "lark",
       selfId: safeString(this.bot?.selfId).trim() || undefined,
@@ -3104,10 +3108,7 @@ export class LarkAdapter {
         appel: mentionSelf,
         content: strippedContent,
       },
-      elements,
-      quote: safeString(message?.parent_id || "").trim()
-        ? { messageId: safeString(message.parent_id).trim() }
-        : undefined,
+      elements: canonicalElements,
     });
   }
 }

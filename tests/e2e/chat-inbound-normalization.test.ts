@@ -32,7 +32,7 @@ async function withTempDir(fn) {
   }
 }
 
-test("chat inbound normalization keeps inbox, log, and store metadata aligned", () => {
+test("chat inbound normalization makes rich text the quote semantic source", () => {
   const session = {
     platform: "telegram",
     selfId: "8623230033",
@@ -45,9 +45,13 @@ test("chat inbound normalization keeps inbox, log, and store metadata aligned", 
     stripped: { content: "hello\n\nworld", appel: true },
     author: { name: "Alice" },
     channel: { name: "Demo Group" },
-    quote: { messageId: "old-1", content: "older context" },
   };
   const elements = [
+    {
+      type: "quote",
+      attrs: { id: "old-1" },
+    },
+    { type: "br" },
     { type: "at", attrs: { id: "8623230033" } },
     { type: "text", attrs: { content: " hello" } },
     { type: "br" },
@@ -68,10 +72,15 @@ test("chat inbound normalization keeps inbox, log, and store metadata aligned", 
 
   assert.equal(stored?.chatKey, "telegram/8623230033:-100123");
   assert.equal(stored?.messageId, "m-aligned");
-  assert.equal(stored?.text, "hello\nworld");
+  assert.equal(stored?.text, "[quote:old-1]\nhello\nworld");
   assert.equal(stored?.nickname, "Alice");
   assert.equal(stored?.chatName, "Demo Group");
   assert.equal(stored?.replyToMessageId, "old-1");
+  assert.equal(stored?.quote, undefined);
+  assert.deepEqual(stored?.elements?.[0], {
+    type: "quote",
+    attrs: { id: "old-1" },
+  });
   assert.equal(stored?.trust, "TRUSTED");
   assert.equal(logEntry?.chatKey, stored?.chatKey);
   assert.equal(logEntry?.messageId, stored?.messageId);
@@ -88,7 +97,7 @@ test("chat inbound normalization keeps inbox, log, and store metadata aligned", 
   assert.equal(snapshot.userId, stored?.userId);
   assert.equal(snapshot.messageId, stored?.messageId);
   assert.deepEqual(snapshot.stripped, { content: "hello\n\nworld" });
-  assert.equal(snapshot.quote?.messageId, "old-1");
+  assert.equal(snapshot.quote, undefined);
 });
 
 test("chat inbound normalization renders received rich objects as chat markdown syntax", () => {

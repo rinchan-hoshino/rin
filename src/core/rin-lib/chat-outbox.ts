@@ -40,7 +40,6 @@ export type ChatOutboxPayload = {
   runId?: string;
   chatKey: string;
   deliveryKind?: ChatDeliveryKind;
-  replyToMessageId?: string;
   coalesceWithWorkingMessage?: boolean;
   sessionId?: string;
   sessionFile?: string;
@@ -57,7 +56,6 @@ export type ChatOutboxPayloadInput =
       runId?: string;
       requestId?: string;
       deliveryKind?: ChatDeliveryKind;
-      replyToMessageId?: string;
       coalesceWithWorkingMessage?: boolean;
       sessionId?: string;
       sessionFile?: string;
@@ -198,19 +196,41 @@ function normalizeDeliveryKind(value: unknown): ChatOutboxDeliveryKind {
   return "generic";
 }
 
+export function withChatQuotePart(
+  parts: ChatMessagePart[],
+  replyToMessageId: unknown,
+) {
+  const nodes = Array.isArray(parts) ? parts.filter(Boolean) : [];
+  const id = safeString(replyToMessageId).trim();
+  if (!id || nodes.some((part) => part.type === "quote")) return nodes;
+  return [{ type: "quote" as const, id }, ...nodes];
+}
+
 export function normalizeChatOutboxPayload(
   raw: unknown,
+  options: { allowLegacyReplyMetadata?: boolean } = {},
 ): ChatOutboxPayload | null {
   if (!raw || typeof raw !== "object") return null;
   const payload = raw as Record<string, unknown>;
   const chatKey = safeString(payload.chatKey).trim();
   if (!chatKey || "type" in payload) return null;
-  const parts = Array.isArray(payload.parts)
-    ? payload.parts.filter(Boolean)
-    : [];
+  if (
+    "replyToMessageId" in payload &&
+    options.allowLegacyReplyMetadata !== true
+  ) {
+    return null;
+  }
+  const legacyReplyToMessageId = payload.replyToMessageId;
+  const { replyToMessageId: _legacyReplyToMessageId, ...rest } = payload;
+  const parts = withChatQuotePart(
+    Array.isArray(payload.parts)
+      ? (payload.parts.filter(Boolean) as ChatMessagePart[])
+      : [],
+    legacyReplyToMessageId,
+  );
   if (!parts.length) return null;
   return {
-    ...payload,
+    ...rest,
     chatKey,
     parts,
     createdAt: safeString(payload.createdAt).trim() || nowIso(),
@@ -228,7 +248,10 @@ function parseJson<T>(value: unknown, fallback: T): T {
 
 function rowToOutboxItem(row: any): ChatOutboxItem | null {
   if (!row) return null;
-  const payload = parseJson<ChatOutboxPayload | null>(row.payload_json, null);
+  const payload = normalizeChatOutboxPayload(
+    parseJson<ChatOutboxPayload | null>(row.payload_json, null),
+    { allowLegacyReplyMetadata: true },
+  );
   if (!payload) return null;
   const postDelivery = parseJson<ChatOutboxPostDelivery | null>(
     row.post_delivery_json,
@@ -525,7 +548,10 @@ export function enqueueChatOutboxPayload(
         if (safeString(row.chat_key).trim() !== normalizedPayload.chatKey) {
           throw new Error("chat_outbox_idempotency_collision");
         }
-        const existingPayload = parseJson<any>(row.payload_json, {});
+        const existingPayload: Partial<ChatOutboxPayload> =
+          normalizeChatOutboxPayload(parseJson<any>(row.payload_json, {}), {
+            allowLegacyReplyMetadata: true,
+          }) || {};
         const existingPostDelivery = parseJson<any>(
           row.post_delivery_json,
           null,
@@ -533,14 +559,8 @@ export function enqueueChatOutboxPayload(
         const desiredPostDelivery = options.postDelivery || null;
         if (
           safeString(row.delivery_kind).trim() !== deliveryKind ||
-          JSON.stringify([
-            existingPayload?.replyToMessageId || "",
-            existingPayload?.parts || [],
-          ]) !==
-            JSON.stringify([
-              normalizedPayload.replyToMessageId || "",
-              normalizedPayload.parts || [],
-            ]) ||
+          JSON.stringify(existingPayload?.parts || []) !==
+            JSON.stringify(normalizedPayload.parts || []) ||
           (existingPostDelivery &&
             JSON.stringify(existingPostDelivery) !==
               JSON.stringify(desiredPostDelivery)) ||

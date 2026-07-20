@@ -176,7 +176,7 @@ test("chat transport forwards mixed parts as a single native chat send", async (
   });
 });
 
-test("chat transport prepends payload reply quote for parts deliveries", async () => {
+test("chat transport derives native replies from quote parts", async () => {
   await withTempDir(async (dir) => {
     const sends = [];
     await transport.sendOutboxPayload(
@@ -195,8 +195,10 @@ test("chat transport prepends payload reply quote for parts deliveries", async (
       dir,
       {
         chatKey: "telegram/1:2",
-        replyToMessageId: "42",
-        parts: [{ type: "text", text: "intro" }],
+        parts: [
+          { type: "quote", id: "42" },
+          { type: "text", text: "intro" },
+        ],
       },
       Object.assign((type, attrs) => ({ type, attrs }), {
         text(content) {

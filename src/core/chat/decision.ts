@@ -314,7 +314,7 @@ export async function shouldProcessText(
   );
   const hasMedia = hasMediaElements(elements);
   const isReplyOnlyTrigger =
-    Boolean(pickReplyToMessageId(session)) &&
+    Boolean(pickReplyToMessageId(elements)) &&
     (directLike(session) || mentionLike(session));
   if (!text && !hasMedia && !isReplyOnlyTrigger)
     return {

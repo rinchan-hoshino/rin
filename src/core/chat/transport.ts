@@ -706,24 +706,13 @@ export async function messagePartToNode(part: ChatMessagePart, h: any) {
 }
 
 export async function validateChatOutboxPayloadForDispatch(
-  payload: {
-    parts?: ChatMessagePart[];
-    replyToMessageId?: string;
-  },
+  payload: { parts?: ChatMessagePart[] },
   h: any,
 ) {
   validateChatOutboxPayloadParts(payload);
-  const rawParts = Array.isArray(payload.parts)
+  const deliveryParts = Array.isArray(payload.parts)
     ? payload.parts.filter(Boolean)
     : [];
-  const replyToMessageId = safeString(payload.replyToMessageId).trim();
-  const deliveryParts =
-    replyToMessageId && !rawParts.some((part) => part.type === "quote")
-      ? ([
-          { type: "quote", id: replyToMessageId },
-          ...rawParts,
-        ] as ChatMessagePart[])
-      : rawParts;
   if (!deliveryParts.length) throw new Error("chat_outbox_empty_message");
   const nodes = (
     await Promise.all(deliveryParts.map((part) => messagePartToNode(part, h)))

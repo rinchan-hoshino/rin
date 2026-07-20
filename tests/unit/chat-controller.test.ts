@@ -66,6 +66,13 @@ function deliveryText(delivery) {
     .join("\n");
 }
 
+function deliveryQuoteId(delivery) {
+  return (
+    (delivery?.parts || []).find((part) => part?.type === "quote")?.id ||
+    undefined
+  );
+}
+
 function attachTestChatApp(controller) {
   controller.app = {
     bots: [
@@ -4182,7 +4189,7 @@ test("chat controller does not deliver text-only assistant messages as interim",
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
       text: deliveryText(this.stagedDelivery),
-      replyToMessageId: this.stagedDelivery?.replyToMessageId,
+      replyToMessageId: deliveryQuoteId(this.stagedDelivery),
     });
     this.stagedDelivery = null;
     if (clearProcessing) this.currentTurn = null;
@@ -4257,7 +4264,7 @@ test("chat controller restores inbound reply identity before connect replays an 
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
       text: deliveryText(this.stagedDelivery),
-      replyToMessageId: this.stagedDelivery?.replyToMessageId || null,
+      replyToMessageId: deliveryQuoteId(this.stagedDelivery) || null,
     });
     this.stagedDelivery = null;
     if (clearProcessing) this.currentTurn = null;
@@ -4522,7 +4529,7 @@ test("chat controller delivers leading tool-call text as the only interim source
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
       text: deliveryText(this.stagedDelivery),
-      replyToMessageId: this.stagedDelivery?.replyToMessageId,
+      replyToMessageId: deliveryQuoteId(this.stagedDelivery),
     });
     this.stagedDelivery = null;
     if (clearProcessing) this.currentTurn = null;
@@ -4712,7 +4719,7 @@ test("chat controller does not treat assistant message updates as interim when a
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
       text: deliveryText(this.stagedDelivery),
-      replyToMessageId: this.stagedDelivery?.replyToMessageId,
+      replyToMessageId: deliveryQuoteId(this.stagedDelivery),
     });
     this.stagedDelivery = null;
     if (clearProcessing) this.currentTurn = null;
@@ -4792,7 +4799,7 @@ test("chat controller does not leak a buffered preview as interim before the fin
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
       text: deliveryText(this.stagedDelivery),
-      replyToMessageId: this.stagedDelivery?.replyToMessageId,
+      replyToMessageId: deliveryQuoteId(this.stagedDelivery),
     });
     this.stagedDelivery = null;
     if (clearProcessing) this.currentTurn = null;
@@ -4868,7 +4875,7 @@ test("chat controller does not emit growing final-answer prefixes as interim rep
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
       text: deliveryText(this.stagedDelivery),
-      replyToMessageId: this.stagedDelivery?.replyToMessageId,
+      replyToMessageId: deliveryQuoteId(this.stagedDelivery),
     });
     this.stagedDelivery = null;
     if (clearProcessing) this.currentTurn = null;
@@ -5313,7 +5320,7 @@ test("chat controller treats rpc completion as the canonical final reply for pro
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
       text: deliveryText(this.stagedDelivery),
-      replyToMessageId: this.stagedDelivery?.replyToMessageId,
+      replyToMessageId: deliveryQuoteId(this.stagedDelivery),
     });
     this.stagedDelivery = null;
     if (clearProcessing) this.currentTurn = null;
@@ -5854,7 +5861,7 @@ test("chat controller settles an empty rpc completion without reusing observed a
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
       text: deliveryText(this.stagedDelivery),
-      replyToMessageId: this.stagedDelivery?.replyToMessageId,
+      replyToMessageId: deliveryQuoteId(this.stagedDelivery),
     });
     this.stagedDelivery = null;
     if (clearProcessing) this.currentTurn = null;
@@ -5905,7 +5912,7 @@ test("chat controller settles an empty rpc completion without scanning session m
   controller.commitPendingDelivery = async function (clearProcessing = false) {
     deliveries.push({
       text: deliveryText(this.stagedDelivery),
-      replyToMessageId: this.stagedDelivery?.replyToMessageId,
+      replyToMessageId: deliveryQuoteId(this.stagedDelivery),
     });
     this.stagedDelivery = null;
     if (clearProcessing) this.currentTurn = null;
@@ -6065,7 +6072,7 @@ test("chat controller lets steer bypass the owned turn queue while the current t
   ) {
     deliveries.push({
       text: deliveryText(this.stagedDelivery),
-      replyToMessageId: this.stagedDelivery?.replyToMessageId || null,
+      replyToMessageId: deliveryQuoteId(this.stagedDelivery) || null,
       markProcessedMessageId: postDelivery?.markProcessed?.messageId || null,
     });
     this.stagedDelivery = null;

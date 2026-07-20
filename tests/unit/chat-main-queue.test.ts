@@ -1450,8 +1450,11 @@ test("chat main forwards command sender identity without reply session binding",
         isDirect: true,
         content: "/new",
         stripped: { content: "/new" },
-        elements: [h.createChatRuntimeH().text("/new")],
-        quote: { messageId: "assistant-old" },
+        elements: [
+          h.createChatRuntimeH().quote("assistant-old"),
+          h.createChatRuntimeH()("br"),
+          h.createChatRuntimeH().text("/new"),
+        ],
       });
 
       const deadline = Date.now() + 5000;
@@ -2730,9 +2733,11 @@ test("chat startup honors terminal outbox ownership before orphan inbox recovery
         {
           createdAt: new Date().toISOString(),
           chatKey: "telegram/1:2",
-          replyToMessageId: "m-crash-window",
           deliveryKind: "error",
-          parts: [{ type: "text", text: "one terminal error" }],
+          parts: [
+            { type: "quote", id: "m-crash-window" },
+            { type: "text", text: "one terminal error" },
+          ],
         },
         {
           id: "error-crash-window",
@@ -2941,7 +2946,7 @@ test("chat main reports an offline-queued frontend turn without retrying", async
   }
 });
 
-test("chat main passes quoted reply session metadata through one normal prompt submission", async () => {
+test("chat main passes quoted reply rich text through one normal prompt submission", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2991,6 +2996,8 @@ test("chat main passes quoted reply session metadata through one normal prompt s
       controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
         seen.push({
           mode,
+          text: input?.text || "",
+          promptMetaReplyTo: input?.promptMeta?.replyToMessageId || null,
           sessionFile: input?.sessionFile || null,
           replyToMessageId: input?.replyToMessageId || null,
           receivedAt: input?.receivedAt || null,
@@ -3019,11 +3026,15 @@ test("chat main passes quoted reply session metadata through one normal prompt s
         isDirect: true,
         content: "continue here",
         stripped: { content: "continue here" },
-        quote: {
-          messageId: "m-linked",
-          content: "old reply",
-        },
-        elements: [h.createChatRuntimeH().text("continue here")],
+        elements: [
+          {
+            type: "quote",
+            attrs: { id: "m-linked" },
+            children: [],
+          },
+          { type: "br", attrs: {}, children: [] },
+          h.createChatRuntimeH().text("continue here"),
+        ],
       });
 
       const deadline = Date.now() + 5000;
@@ -3036,6 +3047,8 @@ test("chat main passes quoted reply session metadata through one normal prompt s
       const first = seen[0];
       if (
         first.mode !== undefined ||
+        first.text !== "[quote:m-linked]\\ncontinue here" ||
+        first.promptMetaReplyTo !== null ||
         first.sessionFile !== replySessionFile ||
         first.replyToMessageId !== "m-follow" ||
         !Number.isFinite(Date.parse(first.receivedAt || ""))
@@ -3063,7 +3076,7 @@ test("chat main passes quoted reply session metadata through one normal prompt s
   }
 });
 
-test("chat main omits reply metadata when quoting the latest assistant message", async () => {
+test("chat main omits quote rich text when quoting the latest assistant message", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -3111,6 +3124,7 @@ test("chat main omits reply metadata when quoting the latest assistant message",
       controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
         seen.push({
           mode,
+          text: input?.text || "",
           promptMetaReplyTo: input?.promptMeta?.replyToMessageId || null,
           sessionFile: input?.sessionFile || null,
           replyToMessageId: input?.replyToMessageId || null,
@@ -3139,11 +3153,15 @@ test("chat main omits reply metadata when quoting the latest assistant message",
         isDirect: true,
         content: "continue here",
         stripped: { content: "continue here" },
-        quote: {
-          messageId: "m-latest-assistant",
-          content: "latest assistant reply",
-        },
-        elements: [h.createChatRuntimeH().text("continue here")],
+        elements: [
+          {
+            type: "quote",
+            attrs: { id: "m-latest-assistant" },
+            children: [],
+          },
+          { type: "br", attrs: {}, children: [] },
+          h.createChatRuntimeH().text("continue here"),
+        ],
       });
 
       const deadline = Date.now() + 5000;
@@ -3154,6 +3172,7 @@ test("chat main omits reply metadata when quoting the latest assistant message",
       const first = seen[0];
       if (
         first.mode !== undefined ||
+        first.text !== "continue here" ||
         first.sessionFile !== replySessionFile ||
         first.replyToMessageId !== "m-follow" ||
         first.promptMetaReplyTo !== null
@@ -3181,7 +3200,7 @@ test("chat main omits reply metadata when quoting the latest assistant message",
   }
 });
 
-test("chat main prepends own unsessioned quoted message to trigger text", async () => {
+test("chat main keeps own unsessioned quoted content lazy", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -3263,12 +3282,13 @@ test("chat main prepends own unsessioned quoted message to trigger text", async 
         isDirect: false,
         content: "@rin_bot please explain this",
         stripped: { appel: true, content: "please explain this" },
-        quote: {
-          messageId: "m-rich-source",
-          userId: "owner-1",
-          content: "look at this image",
-        },
         elements: [
+          {
+            type: "quote",
+            attrs: { id: "m-rich-source" },
+            children: [],
+          },
+          { type: "br", attrs: {}, children: [] },
           node.at("1", { name: "rin_bot" }),
           node.text("please explain this"),
         ],
@@ -3285,7 +3305,7 @@ test("chat main prepends own unsessioned quoted message to trigger text", async 
         first.sessionFile !== null ||
         first.replyToMessageId !== "m-mention-quote" ||
         first.promptMetaReplyTo !== null ||
-        first.text !== "look at this image\\n\\nplease explain this"
+        first.text !== "[quote:m-rich-source]\\nplease explain this"
       ) {
         throw new Error(JSON.stringify({ seen }));
       }
@@ -3310,7 +3330,7 @@ test("chat main prepends own unsessioned quoted message to trigger text", async 
   }
 });
 
-test("chat main uses own unsessioned quoted message as mention-only trigger text", async () => {
+test("chat main keeps mention-only quoted content lazy", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -3388,12 +3408,15 @@ test("chat main uses own unsessioned quoted message as mention-only trigger text
         isDirect: false,
         content: "@rin_bot",
         stripped: { appel: true, content: "" },
-        quote: {
-          messageId: "m-rich-source",
-          userId: "owner-1",
-          content: "quoted body should only be fetched explicitly",
-        },
-        elements: [node.at("1", { name: "rin_bot" })],
+        elements: [
+          {
+            type: "quote",
+            attrs: { id: "m-rich-source" },
+            children: [],
+          },
+          { type: "br", attrs: {}, children: [] },
+          node.at("1", { name: "rin_bot" }),
+        ],
       });
 
       const deadline = Date.now() + 5000;
@@ -3407,7 +3430,7 @@ test("chat main uses own unsessioned quoted message as mention-only trigger text
         first.sessionFile !== null ||
         first.replyToMessageId !== "m-mention-quote" ||
         first.promptMetaReplyTo !== null ||
-        first.text !== "quoted body should only be fetched explicitly"
+        first.text !== "[quote:m-rich-source]"
       ) {
         throw new Error(JSON.stringify({ seen }));
       }
@@ -3506,11 +3529,15 @@ test("chat main does not downgrade a quoted reply to a plain turn when linked se
         isDirect: true,
         content: "continue here",
         stripped: { content: "continue here" },
-        quote: {
-          messageId: "m-linked",
-          content: "old reply",
-        },
-        elements: [h.createChatRuntimeH().text("continue here")],
+        elements: [
+          {
+            type: "quote",
+            attrs: { id: "m-linked" },
+            children: [],
+          },
+          { type: "br", attrs: {}, children: [] },
+          h.createChatRuntimeH().text("continue here"),
+        ],
       });
 
       await new Promise((resolve) => setTimeout(resolve, 1000));

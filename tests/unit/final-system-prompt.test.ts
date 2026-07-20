@@ -197,6 +197,10 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
       "Core rich text: use Rin rich text for native mentions, replies/quotes, images, files, audio, video, stickers, and chat attachments.",
     ),
   );
+  assert.ok(baseSystemPrompt.includes("is a lazy reference under the current"));
+  assert.ok(baseSystemPrompt.includes("rin.chat.messages.get"));
+  assert.ok(baseSystemPrompt.includes("nested quote nodes only as needed"));
+  assert.equal(baseSystemPrompt.match(/\[quote:<message-id>\]/g)?.length, 1);
   assert.equal(baseSystemPrompt.includes("condition.kind"), false);
   assert.equal(
     baseSystemPrompt.includes(

@@ -14,6 +14,8 @@ import {
   expandRichTextSyntaxNodes,
   normalizeRenderedText,
   renderChatNodesTelegramHtml,
+  extractChatQuoteMessageId,
+  withoutChatQuoteNodes,
   type RenderChatNodesOptions,
 } from "../chat/rich-text.js";
 import { rinI18nPath } from "../i18n.js";
@@ -388,6 +390,16 @@ export function normalizeNode(
   };
 }
 
+export function prependChatQuoteNode(nodes: any[], messageId: unknown) {
+  const work = Array.isArray(nodes) ? nodes : [];
+  const id = safeString(messageId).trim();
+  if (!id) return work;
+  return [
+    normalizeNode("quote", { id }),
+    ...(work.length ? [normalizeNode("br"), ...work] : []),
+  ];
+}
+
 export function flattenNodes(value: any): any[] {
   if (!Array.isArray(value)) return value ? [value] : [];
   return value.flatMap((item) => flattenNodes(item)).filter(Boolean);
@@ -418,10 +430,8 @@ export function prepareOutboundNodes(content: any) {
   assertOutboundStructuredMentions(nodes);
   return {
     nodes,
-    work: nodes.filter(
-      (node) => safeString(node?.type).toLowerCase() !== "quote",
-    ),
-    replyToMessageId: extractQuoteMessageId(nodes),
+    work: withoutChatQuoteNodes(nodes),
+    replyToMessageId: extractChatQuoteMessageId(nodes),
   };
 }
 
@@ -554,9 +564,4 @@ export async function readBinaryFromNode(node: any) {
   }
 }
 
-export function extractQuoteMessageId(nodes: any[]) {
-  const quote = nodes.find(
-    (node) => safeString(node?.type).toLowerCase() === "quote",
-  );
-  return safeString(quote?.attrs?.id || "").trim() || undefined;
-}
+export const extractQuoteMessageId = extractChatQuoteMessageId;

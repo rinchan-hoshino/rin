@@ -91,6 +91,27 @@ test("chat outbox persists only in chat.sqlite and requires structured parts", a
     assert.throws(
       () =>
         outbox.enqueueChatOutboxPayload(dir, {
+          ...payload("legacy metadata"),
+          replyToMessageId: "quoted-message",
+        }),
+      /chat_outbox_invalid_payload/,
+    );
+    assert.deepEqual(
+      outbox.normalizeChatOutboxPayload(
+        {
+          ...payload("legacy metadata"),
+          replyToMessageId: "quoted-message",
+        },
+        { allowLegacyReplyMetadata: true },
+      )?.parts,
+      [
+        { type: "quote", id: "quoted-message" },
+        { type: "text", text: "legacy metadata" },
+      ],
+    );
+    assert.throws(
+      () =>
+        outbox.enqueueChatOutboxPayload(dir, {
           ...payload("bad"),
           parts: [
             { type: "quote", id: "quoted-message" },
@@ -107,8 +128,20 @@ test("chat outbox persists only in chat.sqlite and requires structured parts", a
         }),
       /chat_outbox_media_missing:image/,
     );
-    const id = outbox.enqueueChatOutboxPayload(dir, payload());
-    assert.equal(outbox.readChatOutboxItemById(dir, id).item.status, "queued");
+    const id = outbox.enqueueChatOutboxPayload(dir, {
+      ...payload(),
+      parts: [
+        { type: "quote", id: "quoted-message" },
+        { type: "text", text: "hello" },
+      ],
+    });
+    const stored = outbox.readChatOutboxItemById(dir, id).item;
+    assert.equal(stored.status, "queued");
+    assert.equal("replyToMessageId" in stored.payload, false);
+    assert.deepEqual(stored.payload.parts[0], {
+      type: "quote",
+      id: "quoted-message",
+    });
     assert.equal(outbox.listChatOutboxItems(dir).length, 1);
     await assert.rejects(fs.stat(path.join(dir, "data", "chat", "outbox")));
   });

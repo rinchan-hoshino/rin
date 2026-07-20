@@ -55,6 +55,7 @@ import {
 import {
   enqueueChatOutboxPayload,
   getActiveChatOutboxTurnFence,
+  withChatQuotePart,
   readChatOutboxItemById,
   type ChatMessagePart,
   type ChatOutboxTurnFence,
@@ -150,7 +151,6 @@ type ChatAssistantDelivery = {
   chatKey: string;
   deliveryKind?: "final" | "interim" | "passive_notice" | "error";
   parts: ChatMessagePart[];
-  replyToMessageId?: string;
   coalesceWithWorkingMessage?: boolean;
   sessionFile?: string;
   sessionBinding?: "conversation";
@@ -1718,13 +1718,10 @@ export class ChatController {
     return {
       chatKey: this.chatKey,
       deliveryKind: input.deliveryKind || "final",
-      replyToMessageId: replyToMessageId || undefined,
-      parts: [
-        ...(replyToMessageId
-          ? [{ type: "quote" as const, id: replyToMessageId }]
-          : []),
-        ...(parts.length ? parts : [{ type: "text" as const, text }]),
-      ],
+      parts: withChatQuotePart(
+        parts.length ? parts : [{ type: "text" as const, text }],
+        replyToMessageId,
+      ),
       ...sessionPayload,
     };
   }
@@ -2090,15 +2087,17 @@ export class ChatController {
           createdAt: nowIso(),
           chatKey: this.chatKey,
           deliveryKind: "interim",
-          replyToMessageId: replyToMessageId || undefined,
-          parts: [
-            {
-              type: "text",
-              text: this.hasEditableWorkingIndicator()
-                ? trimmed
-                : `${INTERMEDIATE_PREFIX}${trimmed}`,
-            },
-          ],
+          parts: withChatQuotePart(
+            [
+              {
+                type: "text",
+                text: this.hasEditableWorkingIndicator()
+                  ? trimmed
+                  : `${INTERMEDIATE_PREFIX}${trimmed}`,
+              },
+            ],
+            replyToMessageId,
+          ),
           coalesceWithWorkingMessage: true,
           ...this.currentConversationSessionPayload(),
         },
@@ -2145,8 +2144,10 @@ export class ChatController {
         {
           createdAt: nowIso(),
           chatKey: this.chatKey,
-          replyToMessageId,
-          parts: [{ type: "text", text: trimmed }],
+          parts: withChatQuotePart(
+            [{ type: "text", text: trimmed }],
+            replyToMessageId,
+          ),
           ...(options.coalesceWithWorkingMessage
             ? { coalesceWithWorkingMessage: true }
             : {}),
@@ -2184,8 +2185,10 @@ export class ChatController {
           createdAt: nowIso(),
           chatKey: this.chatKey,
           deliveryKind: "error",
-          replyToMessageId: this.currentReplyToMessageId() || undefined,
-          parts: [{ type: "text", text: formatRuntimeErrorForChat(trimmed) }],
+          parts: withChatQuotePart(
+            [{ type: "text", text: formatRuntimeErrorForChat(trimmed) }],
+            this.currentReplyToMessageId(),
+          ),
           ...this.currentConversationSessionPayload(),
         },
         {
@@ -2250,18 +2253,20 @@ export class ChatController {
             createdAt: nowIso(),
             chatKey: this.chatKey,
             deliveryKind: "passive_notice",
-            replyToMessageId: this.currentReplyToMessageId() || undefined,
             coalesceWithWorkingMessage: true,
-            parts: [
-              {
-                type: "todo" as const,
-                title: "Todo",
-                items: todos.map((todo) => ({
-                  text: todo.text,
-                  done: todo.done,
-                })),
-              },
-            ],
+            parts: withChatQuotePart(
+              [
+                {
+                  type: "todo" as const,
+                  title: "Todo",
+                  items: todos.map((todo) => ({
+                    text: todo.text,
+                    done: todo.done,
+                  })),
+                },
+              ],
+              this.currentReplyToMessageId(),
+            ),
             ...this.currentConversationSessionPayload(),
           },
           { deliveryKind: "passive_notice", ...todoDeliveryOptions },
@@ -2402,8 +2407,10 @@ export class ChatController {
           chatKey: this.chatKey,
           deliveryKind: "interim",
           coalesceWithWorkingMessage: true,
-          replyToMessageId: coalesceReplyToMessageId,
-          parts: [{ type: "text", text: trimmed }],
+          parts: withChatQuotePart(
+            [{ type: "text", text: trimmed }],
+            coalesceReplyToMessageId,
+          ),
           ...this.currentConversationSessionPayload(),
         },
         {

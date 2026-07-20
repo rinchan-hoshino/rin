@@ -1,4 +1,5 @@
 import { requestDaemonCommand } from "../rin-daemon/client.js";
+import type { ChatMessageRead } from "../chat/message-query.js";
 import type { RinFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 
@@ -59,6 +60,18 @@ export type ChatTerminateTurnOptions =
       chatKey?: string;
     };
 
+export type ChatMessageGetOptions = {
+  chatKey: string;
+  messageId: string;
+};
+
+export type ChatMessageListOptions = {
+  chatKey: string;
+  before?: string;
+  after?: string;
+  limit?: number;
+};
+
 export type ChatBridgeEvalOptions = {
   code: string;
   currentChatKey?: string;
@@ -105,6 +118,31 @@ function normalizeChatSendOptions(payload: ChatSendOptions) {
     parts: Array.isArray(parts)
       ? parts
       : [{ type: "text", text: String(text ?? "") }],
+  };
+}
+
+function normalizeChatMessageGetOptions(payload: ChatMessageGetOptions) {
+  const chatKey = String(payload?.chatKey || "").trim();
+  const messageId = String(payload?.messageId || "").trim();
+  if (!chatKey) throw new Error("chat_message_store_chatKey_required");
+  if (!messageId) throw new Error("chat_message_store_messageId_required");
+  return { chatKey, messageId };
+}
+
+function normalizeChatMessageListOptions(payload: ChatMessageListOptions) {
+  const chatKey = String(payload?.chatKey || "").trim();
+  if (!chatKey) throw new Error("chat_message_store_chatKey_required");
+  const before = String(payload?.before || "").trim();
+  const after = String(payload?.after || "").trim();
+  const requestedLimit = Number(payload?.limit);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(100, Math.trunc(requestedLimit)))
+    : 20;
+  return {
+    chatKey,
+    ...(before ? { before } : {}),
+    ...(after ? { after } : {}),
+    limit,
   };
 }
 
@@ -294,6 +332,30 @@ export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
           },
           override,
         ),
+      messages: {
+        get: async (
+          payload: ChatMessageGetOptions,
+          override?: RinAgentSdkOptions,
+        ) =>
+          await request<ChatMessageRead | null>(
+            {
+              type: "chat_message_get",
+              payload: normalizeChatMessageGetOptions(payload),
+            },
+            override,
+          ),
+        list: async (
+          payload: ChatMessageListOptions,
+          override?: RinAgentSdkOptions,
+        ) =>
+          await request<ChatMessageRead[]>(
+            {
+              type: "chat_message_list",
+              payload: normalizeChatMessageListOptions(payload),
+            },
+            override,
+          ),
+      },
       evalBridge: async (
         payload: ChatBridgeEvalOptions,
         override?: RinAgentSdkOptions,

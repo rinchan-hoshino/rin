@@ -311,6 +311,7 @@ test("chat inbox restores accepted orphan work with an indexed ledger query", as
     role: "user",
     receivedAt: "2026-07-14T01:00:00.000Z",
     acceptedAt: "2026-07-14T01:00:01.000Z",
+    replyToMessageId: "legacy-parent",
     text: "recover me",
     elements: [{ type: "text", attrs: { content: "recover me" } }],
   });
@@ -322,10 +323,13 @@ test("chat inbox restores accepted orphan work with an indexed ledger query", as
     restored.map((item) => item.messageId),
     ["accepted-orphan"],
   );
-  assert.equal(
-    inbox.listPendingChatInboxItems(agentDir)[0].messageId,
-    "accepted-orphan",
-  );
+  const pending = inbox.listPendingChatInboxItems(agentDir)[0];
+  assert.equal(pending.messageId, "accepted-orphan");
+  assert.deepEqual(pending.elements[0], {
+    type: "quote",
+    attrs: { id: "legacy-parent" },
+    children: [],
+  });
   assert.equal(
     inbox.restoreOrphanedAcceptedChatInboxItems(agentDir, {
       nowMs: Date.parse("2026-07-14T01:01:01.000Z"),
@@ -519,22 +523,40 @@ test("chat inbox drain claims unrelated chats concurrently and serializes each c
   assert.equal(inbox.listRunningChatInboxItems(agentDir).length, 2);
 });
 
-test("chat inbox restore reconstructs routing metadata without clobbering session values", () => {
+test("chat inbox restore migrates legacy quote metadata into rich text", () => {
   const item = inbox.buildChatInboxItem(input("route"));
   item.routing.mentionLike = true;
   item.routing.replyToMessageId = "routing-reply";
   item.session = {
     ...item.session,
     stripped: { content: "session text", extra: true },
-    quote: { messageId: "session-reply", keep: true },
+    quote: {
+      messageId: "session-reply",
+      content: "legacy body must stay lazy",
+      keep: true,
+    },
   };
+  const elements = inbox.restoreChatInboxElements(item);
   const restored = inbox.restoreChatInboxSession(item, { selfId: "1" });
   assert.deepEqual(restored.stripped, {
     content: "session text",
     extra: true,
     appel: true,
   });
-  assert.deepEqual(restored.quote, { messageId: "session-reply", keep: true });
+  assert.equal(restored.quote, undefined);
+  assert.deepEqual(elements[0], {
+    type: "quote",
+    attrs: { id: "session-reply" },
+    children: [],
+  });
+  assert.deepEqual(elements[0].attrs, { id: "session-reply" });
+
+  delete item.session.quote;
+  assert.deepEqual(inbox.restoreChatInboxElements(item)[0], {
+    type: "quote",
+    attrs: { id: "routing-reply" },
+    children: [],
+  });
 });
 
 test("inbox implementation has no file queue or list-all-message recovery dependency", async () => {

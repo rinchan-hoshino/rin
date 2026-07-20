@@ -94,7 +94,7 @@ Choose the evidence surface that matches the boundary:
 - **Processes:** command lines, working directories, logs, output files, and child-agent runs.
 - **Repositories:** branches, worktrees, commits, locks, uncommitted changes, remotes, issues, and PR comments.
 - **Scheduled/background tasks:** task records, active producer state, next run time, and last result/error.
-- **Chat-bound work:** platform sender metadata, message ids, reply/quote records, chat-session binding, and stored chat paths.
+- **Chat-bound work:** platform sender metadata, message ids, quote rich nodes, chat-session binding, and stored chat paths.
 - **Installed runtime:** manifests, service files, `app/current/`, release metadata, and daemon liveness.
 
 ## Coordination contract
@@ -141,7 +141,7 @@ Treat child output as evidence owned by the parent lane. Read child session file
 
 ### Chat-bound work
 
-Use platform metadata and stored chat records for sender identity, message ids, replies, quotes, and chat-session binding. Use `docs/chat-bridge.md` for chat storage and adapter surfaces.
+Use platform metadata for sender identity, rich quote nodes for reply semantics, and stored chat records for message ids and chat-session binding. Use `docs/chat-bridge.md` for chat storage and adapter surfaces.
 
 ### Installed runtime work
 

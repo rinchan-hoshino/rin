@@ -25,6 +25,7 @@ import {
   fileUrl,
   isEditableProgressDeliveryKind,
   normalizeNode,
+  prependChatQuoteNode,
   prepareOutboundNodes,
   randomWorkingText,
   readBinaryFromNode,
@@ -142,23 +143,12 @@ function displayNameFromTelegramUser(user: any) {
   );
 }
 
-function parseTelegramReplyQuote(message: any) {
-  const reply = message?.reply_to_message;
-  if (!reply || typeof reply !== "object") return undefined;
-  const userId = safeString(reply?.from?.id || "").trim() || undefined;
-  const nickname = displayNameFromTelegramUser(reply?.from) || undefined;
-  const content =
-    safeString(reply?.text || reply?.caption || "").trim() || undefined;
-  const messageId = safeString(reply?.message_id || "").trim() || undefined;
-  if (!messageId && !userId && !nickname && !content) return undefined;
-  return { messageId, userId, nickname, content };
+function parseTelegramReplyQuoteId(message: any) {
+  return safeString(message?.reply_to_message?.message_id || "").trim();
 }
 
-function parseOneBotReplyQuote(data: Record<string, any>) {
-  const messageId =
-    safeString(data?.id || data?.message_id || "").trim() || undefined;
-  if (!messageId) return undefined;
-  return { messageId };
+function parseOneBotReplyQuoteId(data: Record<string, any>) {
+  return safeString(data?.id || data?.message_id || "").trim();
 }
 
 function pickOneBotForwardId(data: Record<string, any>) {
@@ -962,7 +952,10 @@ class TelegramAdapter {
         : [];
     const mention = this.parseMention(content, entities);
     const strippedContent = mention.content || content;
-    const elements = await this.buildElements(message, strippedContent);
+    const elements = prependChatQuoteNode(
+      await this.buildElements(message, strippedContent),
+      parseTelegramReplyQuoteId(message),
+    );
     const userId = safeString(author?.id).trim();
     const name = displayNameFromTelegramUser(author);
     const chatId = safeString(chat?.id).trim();
@@ -1007,7 +1000,6 @@ class TelegramAdapter {
         content: strippedContent,
       },
       elements,
-      quote: parseTelegramReplyQuote(message),
       telegram: update,
     };
   }
@@ -2496,7 +2488,7 @@ class OneBotAdapter {
     const elements: any[] = [];
     const textParts: string[] = [];
     let mentionSelf = false;
-    let quote: any = undefined;
+    let quoteMessageId = "";
     let hasSemanticForward = false;
     for (const segment of segments) {
       const type = safeString(segment.type).toLowerCase();
@@ -2566,7 +2558,7 @@ class OneBotAdapter {
         continue;
       }
       if (type === "reply") {
-        quote = parseOneBotReplyQuote(data);
+        quoteMessageId = parseOneBotReplyQuoteId(data);
         continue;
       }
       if (type === "forward") {
@@ -2594,6 +2586,7 @@ class OneBotAdapter {
       safeString(sender?.nick).trim() ||
       undefined;
     const displayName = groupNickname || nickname;
+    const canonicalElements = prependChatQuoteNode(elements, quoteMessageId);
     return {
       platform: "onebot",
       selfId: selfId || undefined,
@@ -2637,8 +2630,7 @@ class OneBotAdapter {
         appel: mentionSelf,
         content: strippedContent,
       },
-      elements,
-      quote,
+      elements: canonicalElements,
     };
   }
 }
