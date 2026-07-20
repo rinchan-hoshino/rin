@@ -275,3 +275,50 @@ test("chat runtime common helper utilities share adapter concerns", async () => 
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("chat runtime downloader discards failed response bodies", async () => {
+  for (const response of [
+    {
+      ok: false,
+      status: 503,
+      bodyError: "download_failed:503",
+      async arrayBuffer() {
+        throw new Error("arrayBuffer should not run");
+      },
+    },
+    {
+      ok: true,
+      status: 200,
+      bodyError: "body_read_failed",
+      async arrayBuffer() {
+        throw new Error("body_read_failed");
+      },
+    },
+  ]) {
+    let cancelled = 0;
+    const transport = {
+      async fetch() {
+        return {
+          ...response,
+          body: {
+            async cancel() {
+              cancelled += 1;
+            },
+          },
+        };
+      },
+      async close() {},
+    };
+
+    await assert.rejects(
+      chatRuntimeCommon.downloadToFile(
+        "/tmp/rin-download-should-not-exist",
+        "https://example.com/failure",
+        undefined,
+        transport,
+      ),
+      new RegExp(response.bodyError),
+    );
+    assert.equal(cancelled, 1);
+  }
+});

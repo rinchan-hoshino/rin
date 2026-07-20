@@ -2,6 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { ensureExtension, ensureFileName, fileNameFromUrl } from "./support.js";
+import {
+  createRinHttpTransport,
+  discardRinHttpResponseBody,
+  type RinHttpTransport,
+} from "../http/transport.js";
 import { ensureDir } from "../platform/fs.js";
 import {
   findChatMessageByChatAndId,
@@ -475,110 +480,122 @@ export function renderPromptTextWithSavedAttachments(
 export async function extractInboundAttachments(
   elements: any[],
   chatDir: string,
+  httpTransport?: RinHttpTransport,
 ) {
   const dir = path.join(chatDir, "inbound");
   ensureDir(dir);
   const attachments: SavedAttachment[] = [];
   const failures: InboundAttachmentFailure[] = [];
+  const requestTransport = httpTransport || createRinHttpTransport();
   let index = 0;
 
-  for (const element of elements) {
-    const type = safeString(element?.type || "").toLowerCase();
-    const attrs =
-      element?.attrs && typeof element.attrs === "object" ? element.attrs : {};
-    const kind = mediaKindFromElementType(type);
-    if (!kind) continue;
-    const src = safeString(
-      attrs.src || attrs.url || attrs.file || attrs.path || "",
-    ).trim();
-    if (!src) {
-      pushInboundAttachmentFailure(failures, {
-        type,
+  try {
+    for (const element of elements) {
+      const type = safeString(element?.type || "").toLowerCase();
+      const attrs =
+        element?.attrs && typeof element.attrs === "object"
+          ? element.attrs
+          : {};
+      const kind = mediaKindFromElementType(type);
+      if (!kind) continue;
+      const src = safeString(
+        attrs.src || attrs.url || attrs.file || attrs.path || "",
+      ).trim();
+      if (!src) {
+        pushInboundAttachmentFailure(failures, {
+          type,
+          kind,
+          reason: "unresolved_resource",
+        });
+        continue;
+      }
+
+      index += 1;
+      let arrayBuffer: ArrayBuffer;
+      let mimeType = "";
+      if (src.startsWith("file://")) {
+        try {
+          const filePath = new URL(src);
+          const buffer = await fs.promises.readFile(filePath);
+          arrayBuffer = buffer.buffer.slice(
+            buffer.byteOffset,
+            buffer.byteOffset + buffer.byteLength,
+          );
+          mimeType = safeString(attrs.mime || attrs.mimeType || "")
+            .split(";", 1)[0]
+            .trim();
+        } catch (error: any) {
+          pushInboundAttachmentFailure(failures, {
+            type,
+            kind,
+            reason: "fetch_failed",
+            resource: src,
+            detail: safeString(error?.message || error).trim() || undefined,
+          });
+          continue;
+        }
+      } else {
+        let response: any;
+        try {
+          response = await requestTransport.fetch(src);
+        } catch (error: any) {
+          pushInboundAttachmentFailure(failures, {
+            type,
+            kind,
+            reason: "fetch_failed",
+            resource: src,
+            detail: safeString(error?.message || error).trim() || undefined,
+          });
+          continue;
+        }
+        try {
+          if (!response.ok) {
+            pushInboundAttachmentFailure(failures, {
+              type,
+              kind,
+              reason: "fetch_failed",
+              resource: src,
+              detail: `http_${response.status}`,
+            });
+            continue;
+          }
+          arrayBuffer = await response.arrayBuffer();
+          mimeType = safeString(
+            response.headers.get("content-type") ||
+              attrs.mime ||
+              attrs.mimeType ||
+              "",
+          )
+            .split(";", 1)[0]
+            .trim();
+        } finally {
+          await discardRinHttpResponseBody(response);
+        }
+      }
+      const rawName =
+        safeString(
+          attrs.file ||
+            attrs.title ||
+            attrs.name ||
+            fileNameFromUrl(src, `${kind}-${index}`),
+        ).trim() || `${kind}-${index}`;
+      const fileName = ensureExtension(
+        ensureFileName(rawName, `${kind}-${index}`),
+        mimeType,
+      );
+      const filePath = path.join(dir, `${Date.now()}-${index}-${fileName}`);
+      await fs.promises.writeFile(filePath, Buffer.from(arrayBuffer));
+      attachments.push({
         kind,
-        reason: "unresolved_resource",
+        path: filePath,
+        name: fileName,
+        mimeType,
+        sourceMediaIndex: index,
       });
-      continue;
     }
 
-    index += 1;
-    let arrayBuffer: ArrayBuffer;
-    let mimeType = "";
-    if (src.startsWith("file://")) {
-      try {
-        const filePath = new URL(src);
-        const buffer = await fs.promises.readFile(filePath);
-        arrayBuffer = buffer.buffer.slice(
-          buffer.byteOffset,
-          buffer.byteOffset + buffer.byteLength,
-        );
-        mimeType = safeString(attrs.mime || attrs.mimeType || "")
-          .split(";", 1)[0]
-          .trim();
-      } catch (error: any) {
-        pushInboundAttachmentFailure(failures, {
-          type,
-          kind,
-          reason: "fetch_failed",
-          resource: src,
-          detail: safeString(error?.message || error).trim() || undefined,
-        });
-        continue;
-      }
-    } else {
-      let response: Response;
-      try {
-        response = await fetch(src);
-      } catch (error: any) {
-        pushInboundAttachmentFailure(failures, {
-          type,
-          kind,
-          reason: "fetch_failed",
-          resource: src,
-          detail: safeString(error?.message || error).trim() || undefined,
-        });
-        continue;
-      }
-      if (!response.ok) {
-        pushInboundAttachmentFailure(failures, {
-          type,
-          kind,
-          reason: "fetch_failed",
-          resource: src,
-          detail: `http_${response.status}`,
-        });
-        continue;
-      }
-      arrayBuffer = await response.arrayBuffer();
-      mimeType = safeString(
-        response.headers.get("content-type") ||
-          attrs.mime ||
-          attrs.mimeType ||
-          "",
-      )
-        .split(";", 1)[0]
-        .trim();
-    }
-    const rawName =
-      safeString(
-        attrs.file ||
-          attrs.title ||
-          attrs.name ||
-          fileNameFromUrl(src, `${kind}-${index}`),
-      ).trim() || `${kind}-${index}`;
-    const fileName = ensureExtension(
-      ensureFileName(rawName, `${kind}-${index}`),
-      mimeType,
-    );
-    const filePath = path.join(dir, `${Date.now()}-${index}-${fileName}`);
-    await fs.promises.writeFile(filePath, Buffer.from(arrayBuffer));
-    attachments.push({
-      kind,
-      path: filePath,
-      name: fileName,
-      mimeType,
-      sourceMediaIndex: index,
-    });
+    return { attachments, failures };
+  } finally {
+    if (!httpTransport) await requestTransport.close();
   }
-
-  return { attachments, failures };
 }

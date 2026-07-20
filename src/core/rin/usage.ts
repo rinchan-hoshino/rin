@@ -9,6 +9,10 @@ import {
   safeString,
 } from "./shared.js";
 import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
+import {
+  createRinHttpTransport,
+  discardRinHttpResponseBody,
+} from "../http/transport.js";
 import { nowIso } from "../time-utils.js";
 import { formatReportTime, renderReportTable } from "./report-format.js";
 import type { ChatMessagePart } from "../rin-lib/chat-outbox.js";
@@ -567,18 +571,27 @@ async function refreshProviderCredential(
 }
 
 async function readJsonResponse(url: string, init: RequestInit) {
-  const response = await fetch(url, {
-    ...init,
-    signal: init.signal || AbortSignal.timeout(4000),
-  });
-  const text = await response.text();
-  let data: any = undefined;
+  const transport = createRinHttpTransport();
   try {
-    data = text ? JSON.parse(text) : undefined;
-  } catch {
-    data = undefined;
+    const response = await transport.fetch(url, {
+      ...init,
+      signal: init.signal || AbortSignal.timeout(4000),
+    });
+    try {
+      const text = await response.text();
+      let data: any = undefined;
+      try {
+        data = text ? JSON.parse(text) : undefined;
+      } catch {
+        data = undefined;
+      }
+      return { response, data };
+    } finally {
+      await discardRinHttpResponseBody(response);
+    }
+  } finally {
+    await transport.close();
   }
-  return { response, data };
 }
 
 async function loadCodexProviderStatus(

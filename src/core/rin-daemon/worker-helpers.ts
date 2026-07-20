@@ -360,6 +360,7 @@ export async function runBuiltinCommand(
     SessionManager?: any;
     uiContext?: any;
     listSessions?: typeof listBoundSessions;
+    renderUsageReport?: typeof renderUsageReportForChat;
   },
 ) {
   const session = runtime.session;
@@ -391,7 +392,9 @@ export async function runBuiltinCommand(
       if (!agentDir) {
         throwCommandError("usage unavailable: missing Rin data directory");
       }
-      const report = await renderUsageReportForChat(agentDir);
+      const report = await (deps.renderUsageReport || renderUsageReportForChat)(
+        agentDir,
+      );
       return handledText(report.text, report.parts);
     }
     case "changelog": {

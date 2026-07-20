@@ -13,6 +13,11 @@ import {
 } from "./inbound-recovery.js";
 import { composeChatKeyForBot } from "../chat/support.js";
 import { getWorkingReactionFrame } from "../chat/transport.js";
+import {
+  createRinHttpTransport,
+  discardRinHttpResponseBody,
+  type RinHttpTransport,
+} from "../http/transport.js";
 import { formatRinTodoChecklistMarkdownContent } from "../rin-lib/todo-state.js";
 import {
   compactObject,
@@ -58,7 +63,21 @@ export const DISCORD_REST_REQUEST_TIMEOUT_MS = 60_000;
 export const DISCORD_REST_RETRIES = 1;
 const SLACK_MAX_TEXT_LENGTH = 40000;
 
-export function createDiscordClientOptions(Discord: any) {
+export function createDiscordRestRequestStrategy(
+  transport: RinHttpTransport = createRinHttpTransport({
+    reconstructFormData: true,
+  }),
+) {
+  return {
+    makeRequest: transport.fetch,
+    close: transport.close,
+  };
+}
+
+export function createDiscordClientOptions(
+  Discord: any,
+  restRequest: ReturnType<typeof createDiscordRestRequestStrategy>,
+) {
   return {
     intents: [
       Discord.GatewayIntentBits.Guilds,
@@ -70,6 +89,7 @@ export function createDiscordClientOptions(Discord: any) {
     rest: {
       timeout: DISCORD_REST_REQUEST_TIMEOUT_MS,
       retries: DISCORD_REST_RETRIES,
+      makeRequest: restRequest.makeRequest,
     },
   };
 }
@@ -598,6 +618,9 @@ export class DiscordAdapter {
   private readonly editableWorking: EditableTextMessageGroup;
   private readonly inboundGate = new InboundRecoveryGate<any>();
   private client: any = null;
+  private restRequest: ReturnType<
+    typeof createDiscordRestRequestStrategy
+  > | null = null;
   readonly bot: any;
 
   constructor(
@@ -997,7 +1020,10 @@ export class DiscordAdapter {
     const token = safeString(this.config?.token).trim();
     if (!token) throw new Error("discord_token_required");
     const Discord: any = await import("discord.js");
-    this.client = new Discord.Client(createDiscordClientOptions(Discord));
+    this.restRequest = createDiscordRestRequestStrategy();
+    this.client = new Discord.Client(
+      createDiscordClientOptions(Discord, this.restRequest),
+    );
     this.bot.internal.client = this.client;
     this.bot.internal.rest = this.client.rest;
 
@@ -1071,18 +1097,24 @@ export class DiscordAdapter {
           safeString(error?.message || error).trim() || "catch_up_failed",
         ],
       };
-      try {
-        await this.client?.destroy?.();
-      } catch {}
+      await this.closeClient();
       throw error;
     }
   }
 
-  async stop() {
+  private async closeClient() {
     try {
       await this.client?.destroy?.();
     } catch {}
+    try {
+      await this.restRequest?.close();
+    } catch {}
     this.client = null;
+    this.restRequest = null;
+  }
+
+  async stop() {
+    await this.closeClient();
     emitBotStatus(this.app, this.bot, 0);
   }
 
@@ -1286,9 +1318,9 @@ export class DiscordAdapter {
         flags: DISCORD_MESSAGE_FLAG_EPHEMERAL,
       },
     };
-    if (interactionId && interactionToken && typeof fetch === "function") {
+    if (interactionId && interactionToken && this.restRequest) {
       try {
-        const response = await fetch(
+        const response = await this.restRequest.makeRequest(
           `${DISCORD_API_BASE_URL}/interactions/${encodeURIComponent(interactionId)}/${encodeURIComponent(interactionToken)}/callback`,
           {
             method: "POST",
@@ -1296,12 +1328,16 @@ export class DiscordAdapter {
             body: JSON.stringify(responseBody),
           },
         );
-        if (response.ok) return;
-        const detail = safeString(await response.text()).trim();
-        this.logger.warn(
-          `interaction acknowledge failed status=${response.status}${detail ? ` err=${detail}` : ""}`,
-        );
-        return;
+        try {
+          if (response.ok) return;
+          const detail = safeString(await response.text()).trim();
+          this.logger.warn(
+            `interaction acknowledge failed status=${response.status}${detail ? ` err=${detail}` : ""}`,
+          );
+          return;
+        } finally {
+          await discardRinHttpResponseBody(response);
+        }
       } catch (error: any) {
         this.logger.warn(
           `interaction acknowledge direct callback failed err=${safeString(error?.message || error)}`,
@@ -1503,6 +1539,7 @@ export class SlackAdapter {
   private readonly logger: any;
   private readonly cacheDir: string;
   private readonly editableWorking: EditableTextMessageGroup;
+  private readonly httpTransport = createRinHttpTransport();
   private web: any = null;
   private socket: any = null;
   readonly bot: any;
@@ -1642,6 +1679,9 @@ export class SlackAdapter {
     try {
       await this.socket?.disconnect?.();
     } catch {}
+    try {
+      await this.httpTransport.close();
+    } catch {}
     this.socket = null;
     this.web = null;
     emitBotStatus(this.app, this.bot, 0);
@@ -1664,9 +1704,14 @@ export class SlackAdapter {
       mimeType,
     );
     const fullPath = path.join(this.cacheDir, `${Date.now()}-${name}`);
-    await downloadToFile(fullPath, url, {
-      Authorization: `Bearer ${safeString(this.config?.botToken).trim()}`,
-    });
+    await downloadToFile(
+      fullPath,
+      url,
+      {
+        Authorization: `Bearer ${safeString(this.config?.botToken).trim()}`,
+      },
+      this.httpTransport,
+    );
     return { path: fullPath, name, mimeType };
   }
 
@@ -2060,6 +2105,7 @@ export class LarkAdapter {
   private readonly config: Record<string, any>;
   private readonly logger: any;
   private readonly cacheDir: string;
+  private readonly httpTransport = createRinHttpTransport();
   private client: any = null;
   private wsClient: any = null;
   private readonly inboundGate = new InboundRecoveryGate<{
@@ -2218,6 +2264,9 @@ export class LarkAdapter {
   async stop() {
     try {
       this.wsClient?.close?.({ force: true });
+    } catch {}
+    try {
+      await this.httpTransport.close();
     } catch {}
     this.wsClient = null;
     this.client = null;
@@ -2864,8 +2913,11 @@ export class LarkAdapter {
       controller.abort();
     }, LARK_IMAGE_DOWNLOAD_TIMEOUT_MS);
     timeout.unref?.();
+    let response: any;
     try {
-      const response = await fetch(url, { signal: controller.signal });
+      response = await this.httpTransport.fetch(url, {
+        signal: controller.signal,
+      });
       if (!response.ok) {
         throw new Error(
           `Failed to download Lark image (HTTP ${response.status})`,
@@ -2912,6 +2964,7 @@ export class LarkAdapter {
       );
     } finally {
       clearTimeout(timeout);
+      await discardRinHttpResponseBody(response);
     }
   }
 

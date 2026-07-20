@@ -2,6 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { coreDataPath } from "../data-layout.js";
+import {
+  createRinHttpTransport,
+  discardRinHttpResponseBody,
+} from "../http/transport.js";
 import { installedRinDocsRoot } from "../rin-install/paths.js";
 import { stringifyJson } from "../platform/fs.js";
 import { safeString } from "../text-utils.js";
@@ -63,12 +67,16 @@ async function fetchText(fetcher: FetchLike, url: string): Promise<string> {
   const response = await fetcher(url, {
     headers: { accept: "text/plain, application/json;q=0.9, */*;q=0.1" },
   });
-  if (!response?.ok) {
-    throw new Error(
-      `agent_practices_fetch_failed:${response?.status || 0}:${url}`,
-    );
+  try {
+    if (!response?.ok) {
+      throw new Error(
+        `agent_practices_fetch_failed:${response?.status || 0}:${url}`,
+      );
+    }
+    return String(await response.text());
+  } finally {
+    await discardRinHttpResponseBody(response);
   }
-  return String(await response.text());
 }
 
 function writeSyncState(agentDir: string, value: unknown) {
@@ -114,7 +122,8 @@ export async function syncAgentPracticesDocs(
   const rawBaseUrl =
     safeString(options.rawBaseUrl).trim().replace(/\/+$/, "") ||
     AGENT_PRACTICES_RAW_BASE_URL;
-  const fetcher = options.fetch || globalThis.fetch?.bind(globalThis);
+  const ownedTransport = options.fetch ? null : createRinHttpTransport();
+  const fetcher = options.fetch || ownedTransport?.fetch;
   if (!fetcher) throw new Error("agent_practices_fetch_unavailable");
 
   const attemptedAt = nowIso();
@@ -158,5 +167,7 @@ export async function syncAgentPracticesDocs(
     });
     options.logger?.warn?.(`agent practices docs sync failed: ${message}`);
     throw error;
+  } finally {
+    await ownedTransport?.close();
   }
 }

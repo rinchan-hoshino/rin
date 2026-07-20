@@ -3,10 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { Api as GrammyApi, InputFile } from "grammy";
-import { Agent as UndiciAgent } from "undici";
 import WebSocket from "ws";
 
 import { getWorkingReactionFrame } from "../chat/transport.js";
+import {
+  createRinHttpTransport,
+  discardRinHttpResponseBody,
+  type RinHttpTransport,
+} from "../http/transport.js";
 import { enqueueChatInboxItem } from "../chat/inbox.js";
 import { getChatId, pickMessageId } from "../chat/chat-helpers.js";
 import {
@@ -507,8 +511,12 @@ class TelegramAdapter {
   private running = false;
   private pollPromise: Promise<void> | null = null;
   private nextOffset = 0;
-  private readonly pollDispatcher = new UndiciAgent({ connections: 1 });
-  private readonly apiDispatcher = new UndiciAgent({ connections: 8 });
+  private readonly pollTransport = createRinHttpTransport({
+    agentOptions: { connections: 1 },
+  });
+  private readonly apiTransport = createRinHttpTransport({
+    agentOptions: { connections: 8 },
+  });
   private readonly pollApi: GrammyApi;
   private readonly api: GrammyApi;
   private readonly workingReactions = new Map<string, string>();
@@ -539,8 +547,8 @@ class TelegramAdapter {
       "cursor.json",
     );
     ensureDir(this.cacheDir);
-    this.pollApi = this.createApi(this.pollDispatcher);
-    this.api = this.createApi(this.apiDispatcher);
+    this.pollApi = this.createApi(this.pollTransport);
+    this.api = this.createApi(this.apiTransport);
     this.editableWorking = new EditableTextMessageGroup({
       cacheDir: this.cacheDir,
       cacheScope: this.botCacheKey,
@@ -650,6 +658,12 @@ class TelegramAdapter {
       await this.pollPromise;
     } catch {}
     this.pollPromise = null;
+    try {
+      await Promise.all([
+        this.pollTransport.close(),
+        this.apiTransport.close(),
+      ]);
+    } catch {}
     emitBotStatus(this.app, this.bot, 0);
   }
 
@@ -697,15 +711,14 @@ class TelegramAdapter {
     };
   }
 
-  private createApi(dispatcher: UndiciAgent) {
+  private createApi(transport: RinHttpTransport) {
     return new GrammyApi(safeString(this.config?.token).trim(), {
       fetch: ((url: any, init?: any) =>
-        fetch(url, {
+        transport.fetch(url, {
           ...(init || {}),
           signal: translateAbortSignal(init?.signal),
-          dispatcher,
           duplex: init?.body ? "half" : undefined,
-        } as any)) as any,
+        })) as any,
     });
   }
 
@@ -831,31 +844,33 @@ class TelegramAdapter {
     const file = await this.callApi("getFile", { file_id: options.fileId });
     const filePath = safeString(file?.file_path).trim();
     if (!filePath) return null;
-    const response = await fetch(this.fileUrl(filePath), {
-      dispatcher: this.apiDispatcher,
-    } as any);
-    if (!response.ok) return null;
-    const buffer = Buffer.from(await response.arrayBuffer());
-    const originalName = ensureFileName(
-      options.name || path.basename(filePath),
-      "telegram-file",
-    );
-    const finalName = ensureExtension(
-      originalName,
-      safeString(options.mimeType).trim(),
-    );
-    const stamp = `${Date.now()}-${safeString(
-      options.uniqueId || options.fileId,
-    )
-      .replace(/[^A-Za-z0-9._-]+/g, "_")
-      .slice(0, 80)}`;
-    const fullPath = path.join(this.cacheDir, `${stamp}-${finalName}`);
-    await fs.promises.writeFile(fullPath, buffer);
-    return {
-      path: fullPath,
-      mimeType: safeString(options.mimeType).trim() || undefined,
-      name: finalName,
-    };
+    const response = await this.apiTransport.fetch(this.fileUrl(filePath));
+    try {
+      if (!response.ok) return null;
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const originalName = ensureFileName(
+        options.name || path.basename(filePath),
+        "telegram-file",
+      );
+      const finalName = ensureExtension(
+        originalName,
+        safeString(options.mimeType).trim(),
+      );
+      const stamp = `${Date.now()}-${safeString(
+        options.uniqueId || options.fileId,
+      )
+        .replace(/[^A-Za-z0-9._-]+/g, "_")
+        .slice(0, 80)}`;
+      const fullPath = path.join(this.cacheDir, `${stamp}-${finalName}`);
+      await fs.promises.writeFile(fullPath, buffer);
+      return {
+        path: fullPath,
+        mimeType: safeString(options.mimeType).trim() || undefined,
+        name: finalName,
+      };
+    } finally {
+      await discardRinHttpResponseBody(response);
+    }
   }
 
   private async buildElements(message: any, strippedContent: string) {

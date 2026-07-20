@@ -48,7 +48,7 @@ function createRuntimeApp(agentDir: string, adapterEntry: Record<string, any>) {
   return app;
 }
 
-test("telegram adapter separates long-poll and outbound API fetch dispatchers", async () => {
+test("telegram adapter separates long-poll and outbound API transports", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
@@ -56,34 +56,51 @@ test("telegram adapter separates long-poll and outbound API fetch dispatchers", 
       config: { token: "123:abc" },
     });
     const adapter = [...app.adapters][0];
-    const originalFetch = globalThis.fetch;
-    const calls: Array<{ method: string; dispatcher: unknown }> = [];
-    try {
-      (globalThis as any).fetch = async (url: string, init: any) => {
-        const method = safeTelegramMethod(url);
-        calls.push({ method, dispatcher: init?.dispatcher });
-        return new Response(
-          JSON.stringify({
-            ok: true,
-            result: method === "getUpdates" ? [] : { message_id: "1" },
-          }),
-          { headers: { "content-type": "application/json" } },
-        );
-      };
+    const pollTransport = adapter.pollTransport;
+    const apiTransport = adapter.apiTransport;
+    assert.notEqual(pollTransport, apiTransport);
+    let pollClosed = 0;
+    let apiClosed = 0;
+    const closePollTransport = pollTransport.close;
+    const closeApiTransport = apiTransport.close;
+    pollTransport.close = async () => {
+      pollClosed += 1;
+      await closePollTransport();
+    };
+    apiTransport.close = async () => {
+      apiClosed += 1;
+      await closeApiTransport();
+    };
+    const calls: Array<{ method: string; transport: string }> = [];
+    pollTransport.fetch = async (url: string) => {
+      const method = safeTelegramMethod(url);
+      calls.push({ method, transport: "poll" });
+      return new Response(JSON.stringify({ ok: true, result: [] }), {
+        headers: { "content-type": "application/json" },
+      });
+    };
+    apiTransport.fetch = async (url: string) => {
+      const method = safeTelegramMethod(url);
+      calls.push({ method, transport: "api" });
+      return new Response(
+        JSON.stringify({ ok: true, result: { message_id: "1" } }),
+        { headers: { "content-type": "application/json" } },
+      );
+    };
 
+    try {
       await adapter.callApi("getUpdates", { timeout: 25 });
       await adapter.callApi("sendMessage", { chat_id: "456", text: "hi" });
 
-      assert.deepEqual(
-        calls.map((entry) => entry.method),
-        ["getUpdates", "sendMessage"],
-      );
-      assert.ok(calls[0].dispatcher);
-      assert.ok(calls[1].dispatcher);
-      assert.notEqual(calls[0].dispatcher, calls[1].dispatcher);
+      assert.deepEqual(calls, [
+        { method: "getUpdates", transport: "poll" },
+        { method: "sendMessage", transport: "api" },
+      ]);
     } finally {
-      globalThis.fetch = originalFetch;
+      await app.stop();
     }
+    assert.equal(pollClosed, 1);
+    assert.equal(apiClosed, 1);
   });
 });
 
@@ -2541,9 +2558,8 @@ test("lark adapter downloads remote images and uses the native reply endpoint", 
     const adapter = [...app.adapters][0];
     const h = runtime.createChatRuntimeH();
     const calls: any[] = [];
-    const originalFetch = globalThis.fetch;
     try {
-      globalThis.fetch = async () =>
+      adapter.httpTransport.fetch = async () =>
         new Response(Buffer.from("remote-image"), { status: 200 });
       adapter.client = {
         im: {
@@ -2582,7 +2598,7 @@ test("lark adapter downloads remote images and uses the native reply endpoint", 
         image_key: "img_v2_remote",
       });
     } finally {
-      globalThis.fetch = originalFetch;
+      await app.stop();
     }
   });
 });
@@ -2597,9 +2613,9 @@ test("lark adapter reports image download failures and continues later text", as
     const adapter = [...app.adapters][0];
     const h = runtime.createChatRuntimeH();
     const calls: any[] = [];
-    const originalFetch = globalThis.fetch;
+    const failedResponse = new Response("missing", { status: 404 });
     try {
-      globalThis.fetch = async () => new Response("missing", { status: 404 });
+      adapter.httpTransport.fetch = async () => failedResponse;
       adapter.client = {
         im: {
           image: {
@@ -2636,8 +2652,9 @@ test("lark adapter reports image download failures and continues later text", as
         JSON.parse(calls[2].data.content).zh_cn.content[0][0].text,
         "after",
       );
+      assert.equal(failedResponse.bodyUsed, true);
     } finally {
-      globalThis.fetch = originalFetch;
+      await app.stop();
     }
   });
 });
@@ -2699,14 +2716,14 @@ test("lark adapter aborts remote images declared over the upload limit", async (
     const calls: any[] = [];
     let uploadAttempted = false;
     let fetchSignal: AbortSignal | undefined;
-    const originalFetch = globalThis.fetch;
+    const oversizedResponse = new Response("small body", {
+      status: 200,
+      headers: { "content-length": String(10 * 1024 * 1024 + 1) },
+    });
     try {
-      globalThis.fetch = async (_url, init) => {
+      adapter.httpTransport.fetch = async (_url: any, init: any) => {
         fetchSignal = init?.signal as AbortSignal | undefined;
-        return new Response("small body", {
-          status: 200,
-          headers: { "content-length": String(10 * 1024 * 1024 + 1) },
-        });
+        return oversizedResponse;
       };
       adapter.client = {
         im: {
@@ -2737,8 +2754,9 @@ test("lark adapter aborts remote images declared over the upload limit", async (
         JSON.parse(calls[0].data.content).zh_cn.content[0][0].text,
         "Lark image exceeds the 10 MB upload limit",
       );
+      assert.equal(oversizedResponse.bodyUsed, true);
     } finally {
-      globalThis.fetch = originalFetch;
+      await app.stop();
     }
   });
 });

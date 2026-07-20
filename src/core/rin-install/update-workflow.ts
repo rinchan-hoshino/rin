@@ -4,6 +4,10 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 
+import {
+  createRinHttpTransport,
+  discardRinHttpResponseBody,
+} from "../http/transport.js";
 import { safeString } from "../text-utils.js";
 import { shellQuote } from "../rin-lib/system.js";
 import {
@@ -53,12 +57,21 @@ export function requireTool(name: string, paths: string[] = []) {
 }
 
 async function downloadFile(url: string, outFile: string) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`rin_download_failed:${response.status}`);
+  const transport = createRinHttpTransport();
+  try {
+    const response = await transport.fetch(url);
+    try {
+      if (!response.ok) {
+        throw new Error(`rin_download_failed:${response.status}`);
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      fs.writeFileSync(outFile, buffer);
+    } finally {
+      await discardRinHttpResponseBody(response);
+    }
+  } finally {
+    await transport.close();
   }
-  const buffer = Buffer.from(await response.arrayBuffer());
-  fs.writeFileSync(outFile, buffer);
 }
 
 const FORWARDED_UPDATE_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;

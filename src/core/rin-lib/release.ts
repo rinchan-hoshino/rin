@@ -2,6 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  createRinHttpTransport,
+  discardRinHttpResponseBody,
+} from "../http/transport.js";
 import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
 
@@ -446,16 +450,25 @@ export async function fetchReleaseManifest(
     trimReleaseValue(manifestUrl),
     trimReleaseValue(fallbackManifestUrl),
   ].filter(Boolean);
-  for (const url of urls) {
-    try {
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!response.ok) continue;
-      return (await response.json()) as ReleaseManifest;
-    } catch {}
+  const transport = createRinHttpTransport();
+  try {
+    for (const url of urls) {
+      try {
+        const response = await transport.fetch(url, {
+          signal: AbortSignal.timeout(10_000),
+        });
+        try {
+          if (!response.ok) continue;
+          return (await response.json()) as ReleaseManifest;
+        } finally {
+          await discardRinHttpResponseBody(response);
+        }
+      } catch {}
+    }
+    return readBundledReleaseManifest();
+  } finally {
+    await transport.close();
   }
-  return readBundledReleaseManifest();
 }
 
 function getBootstrapManifestUrls(manifest?: ReleaseManifest) {

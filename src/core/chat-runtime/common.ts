@@ -18,6 +18,11 @@ import {
   withoutChatQuoteNodes,
   type RenderChatNodesOptions,
 } from "../chat/rich-text.js";
+import {
+  createRinHttpTransport,
+  discardRinHttpResponseBody,
+  type RinHttpTransport,
+} from "../http/transport.js";
 import { rinI18nPath } from "../i18n.js";
 import { ensureDir } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
@@ -370,14 +375,24 @@ export async function downloadToFile(
   filePath: string,
   url: string,
   headers?: Record<string, string>,
+  transport?: RinHttpTransport,
 ) {
-  const response = await fetch(url, { headers });
-  if (!response.ok) {
-    throw new Error(`download_failed:${response.status}`);
+  const requestTransport = transport || createRinHttpTransport();
+  try {
+    const response = await requestTransport.fetch(url, { headers });
+    try {
+      if (!response.ok) {
+        throw new Error(`download_failed:${response.status}`);
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      await fs.promises.writeFile(filePath, buffer);
+      return buffer;
+    } finally {
+      await discardRinHttpResponseBody(response);
+    }
+  } finally {
+    if (!transport) await requestTransport.close();
   }
-  const buffer = Buffer.from(await response.arrayBuffer());
-  await fs.promises.writeFile(filePath, buffer);
-  return buffer;
 }
 
 export function compactObject<T extends Record<string, any>>(value: T) {

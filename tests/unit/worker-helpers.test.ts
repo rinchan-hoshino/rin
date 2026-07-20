@@ -398,38 +398,26 @@ test("runBuiltinCommand shows compact usage status", async () => {
   }
 });
 
-test("runBuiltinCommand reports Codex usage fetch failures instead of sending partial image", async () => {
+test("runBuiltinCommand reports usage failures instead of sending a partial image", async () => {
   const agentDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "rin-chat-usage-codex-error-"),
   );
-  const originalFetch = globalThis.fetch;
   try {
-    fs.writeFileSync(
-      path.join(agentDir, "auth.json"),
-      `${JSON.stringify({
-        "openai-codex": {
-          type: "oauth",
-          access: "test-access-token",
-          accountId: "acct-test",
-        },
-      })}\n`,
-      "utf8",
-    );
-    globalThis.fetch = (async () => {
-      throw new Error("quota timeout");
-    }) as typeof fetch;
-
     await assert.rejects(
       () =>
         workerHelpers.runBuiltinCommand(
           { services: { agentDir }, session: {} },
           "/usage",
-          { SessionManager: { list: async () => [] } },
+          {
+            SessionManager: { list: async () => [] },
+            renderUsageReport: async () => {
+              throw new Error("Codex usage unavailable: quota timeout");
+            },
+          },
         ),
       /Codex usage unavailable: quota timeout/,
     );
   } finally {
-    globalThis.fetch = originalFetch;
     fs.rmSync(agentDir, { recursive: true, force: true });
   }
 });

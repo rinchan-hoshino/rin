@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -37,19 +38,175 @@ function adminPermission(value: boolean) {
 }
 
 test("discord adapter gives REST uploads a bounded retry budget", () => {
-  const options = adapters.createDiscordClientOptions({
-    GatewayIntentBits: {
-      Guilds: 1,
-      GuildMessages: 2,
-      DirectMessages: 4,
-      MessageContent: 8,
+  const options = adapters.createDiscordClientOptions(
+    {
+      GatewayIntentBits: {
+        Guilds: 1,
+        GuildMessages: 2,
+        DirectMessages: 4,
+        MessageContent: 8,
+      },
+      Partials: { Channel: "channel" },
     },
-    Partials: { Channel: "channel" },
-  });
+    { makeRequest: async () => new Response(), async close() {} },
+  );
 
-  assert.deepEqual(options.rest, { timeout: 60_000, retries: 1 });
+  assert.equal(options.rest.timeout, 60_000);
+  assert.equal(options.rest.retries, 1);
+  assert.equal(typeof options.rest.makeRequest, "function");
   assert.deepEqual(options.intents, [1, 2, 4, 8]);
   assert.deepEqual(options.partials, ["channel"]);
+});
+
+test("discord REST upload uses an isolated multipart request strategy", async () => {
+  let captured: { contentType: string; body: string } | undefined;
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on("end", () => {
+      captured = {
+        contentType: String(request.headers["content-type"] || ""),
+        body: Buffer.concat(chunks).toString("utf8"),
+      };
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"ok":true}');
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const restRequest = adapters.createDiscordRestRequestStrategy();
+
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const options = adapters.createDiscordClientOptions(
+      { GatewayIntentBits: {}, Partials: {} },
+      restRequest,
+    );
+    const form = new FormData();
+    form.append("payload_json", '{"content":"test"}');
+    form.append(
+      "files[0]",
+      new Blob([Buffer.from("png")], { type: "image/png" }),
+      " test.png ",
+    );
+
+    const response = await options.rest.makeRequest(
+      `http://127.0.0.1:${address.port}/upload`,
+      { method: "POST", body: form },
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.match(
+      captured?.contentType || "",
+      /^multipart\/form-data; boundary=/,
+    );
+    assert.match(captured?.body || "", /name="payload_json"/);
+    assert.match(captured?.body || "", /filename=" test.png "/);
+    assert.match(captured?.body || "", /Content-Type: image\/png/);
+    assert.match(captured?.body || "", /\r\n\r\npng\r\n/);
+  } finally {
+    await restRequest.close();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+test("discord REST request strategy preserves text and abort signals", async () => {
+  let jsonBody = "";
+  let jsonContentType = "";
+  const server = createServer((request, response) => {
+    if (request.url === "/slow") return;
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on("end", () => {
+      jsonBody = Buffer.concat(chunks).toString("utf8");
+      jsonContentType = String(request.headers["content-type"] || "");
+      response.writeHead(200, { "content-type": "text/plain" });
+      response.end("ok");
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const restRequest = adapters.createDiscordRestRequestStrategy();
+
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const response = await restRequest.makeRequest(`${baseUrl}/json`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"message":"hello"}',
+    });
+    assert.equal(await response.text(), "ok");
+    assert.equal(jsonContentType, "application/json");
+    assert.equal(jsonBody, '{"message":"hello"}');
+
+    const controller = new AbortController();
+    const pending = restRequest.makeRequest(`${baseUrl}/slow`, {
+      method: "GET",
+      signal: controller.signal,
+    });
+    controller.abort();
+    await assert.rejects(pending, (error: any) => error?.name === "AbortError");
+  } finally {
+    await restRequest.close();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+test("discord REST strategies and adapter cleanup own their dispatchers", async () => {
+  let firstClosed = 0;
+  let secondClosed = 0;
+  const first = adapters.createDiscordRestRequestStrategy({
+    async close() {
+      firstClosed += 1;
+    },
+  } as any);
+  const second = adapters.createDiscordRestRequestStrategy({
+    async close() {
+      secondClosed += 1;
+    },
+  } as any);
+  await first.close();
+  assert.equal(firstClosed, 1);
+  assert.equal(secondClosed, 0);
+  await second.close();
+  assert.equal(secondClosed, 1);
+
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-discord-rest-cleanup-"),
+  );
+  try {
+    const adapter = new adapters.DiscordAdapter(
+      { register() {}, emit() {} },
+      agentDir,
+      {},
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+    let destroyed = 0;
+    let closed = 0;
+    (adapter as any).client = {
+      async destroy() {
+        destroyed += 1;
+      },
+    };
+    (adapter as any).restRequest = {
+      async close() {
+        closed += 1;
+      },
+    };
+
+    await adapter.stop();
+    assert.equal(destroyed, 1);
+    assert.equal(closed, 1);
+    assert.equal((adapter as any).client, null);
+    assert.equal((adapter as any).restRequest, null);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
 });
 
 function discordInboundMessage(
@@ -72,6 +229,32 @@ function discordInboundMessage(
     content,
   };
 }
+
+test("Slack and Lark adapters close their Rin-owned HTTP transports", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-http-cleanup-"),
+  );
+  try {
+    for (const Adapter of [adapters.SlackAdapter, adapters.LarkAdapter]) {
+      const adapter = new Adapter(
+        { register() {}, emit() {} },
+        agentDir,
+        {},
+        { warn() {}, info() {}, error() {}, debug() {} },
+      );
+      let closed = 0;
+      const closeTransport = (adapter as any).httpTransport.close;
+      (adapter as any).httpTransport.close = async () => {
+        closed += 1;
+        await closeTransport();
+      };
+      await adapter.stop();
+      assert.equal(closed, 1);
+    }
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
 
 test("discord adapter catches up native history before buffered live messages", async () => {
   const agentDir = await fs.mkdtemp(
@@ -698,7 +881,6 @@ test("discord adapter acknowledges chat input interactions with callback endpoin
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-discord-"),
   );
-  const originalFetch = globalThis.fetch;
   try {
     const emitted: any[] = [];
     const warnings: string[] = [];
@@ -729,18 +911,21 @@ test("discord adapter acknowledges chat input interactions with callback endpoin
       resolveFetch = resolve;
     });
     const fetchCalls: Array<{ url: string; init: any }> = [];
-    globalThis.fetch = (async (url: any, init?: any) => {
-      events.push("fetch");
-      fetchCalls.push({ url: String(url), init });
-      await fetchGate;
-      return {
-        ok: true,
-        status: 204,
-        async text() {
-          return "";
-        },
-      } as any;
-    }) as any;
+    (adapter as any).restRequest = {
+      makeRequest: async (url: any, init?: any) => {
+        events.push("fetch");
+        fetchCalls.push({ url: String(url), init });
+        await fetchGate;
+        return {
+          ok: true,
+          status: 204,
+          async text() {
+            return "";
+          },
+        } as any;
+      },
+      async close() {},
+    };
 
     const handled = (adapter as any).handleInteraction({
       id: "interaction-1",
@@ -796,7 +981,6 @@ test("discord adapter acknowledges chat input interactions with callback endpoin
     assert.equal(emitted[0].payload.content, "/new");
     assert.deepEqual(warnings, []);
   } finally {
-    globalThis.fetch = originalFetch;
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });

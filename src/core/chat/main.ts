@@ -12,6 +12,10 @@ import {
   getRinNonInteractiveCommandInteractionPolicy,
   type RinFrontendTurnClient,
 } from "../rin-frontend-sdk/index.js";
+import {
+  createRinHttpTransport,
+  type RinHttpTransport,
+} from "../http/transport.js";
 import { nowIso } from "../time-utils.js";
 import {
   executeChatBridgeCode,
@@ -431,6 +435,11 @@ export async function startChatBridge(
 
   const h = createChatRuntimeH();
   const app = createChatRuntimeApp(runtime.agentDir);
+  let inboundHttpTransport: RinHttpTransport | null = null;
+  const getInboundHttpTransport = () => {
+    inboundHttpTransport ||= createRinHttpTransport();
+    return inboundHttpTransport;
+  };
   app.on("adapter-start-failed", (adapter: any) => {
     logger.warn(
       `chat adapter startup degraded platform=${safeString(adapter?.platform).trim() || "unknown"} selfId=${safeString(adapter?.selfId).trim()} err=${safeString(adapter?.error).trim() || "adapter_start_failed"}`,
@@ -809,6 +818,7 @@ export async function startChatBridge(
     const { attachments, failures } = await extractInboundAttachments(
       elements,
       chatStateDir(dataDir, decision.chatKey),
+      getInboundHttpTransport(),
     );
     if (failures.length) {
       let telegramDebug = "";
@@ -1699,6 +1709,9 @@ export async function startChatBridge(
       retiredDetachedControllers.clear();
       try {
         await app.stop();
+      } catch {}
+      try {
+        await inboundHttpTransport?.close();
       } catch {}
     })();
     return await stoppingPromise;
