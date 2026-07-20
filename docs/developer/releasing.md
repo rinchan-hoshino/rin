@@ -5,7 +5,8 @@ This document describes the operator workflow for Rin's fixed-cadence release tr
 ## Preconditions
 
 - keep `main` as the development source of truth
-- run the executor with Node `24.18.0`; the managed release host must have authenticated `gh` and npmjs access (`npm whoami`)
+- run the executor with Node `24.18.0` and authenticated `gh` access
+- for stable or hotfix publishing, set `NPM_CONFIG_USERCONFIG` to a dedicated mode-`0600` npmjs config outside the repository; the executor requires `npm whoami` to resolve to `hoshinorin` before candidate validation
 - confirm the focused release validation set passes on `main`
 - update `docs/release/CHANGELOG.md` before beta, stable, or hotfix publishing; the local executor requires a `## <stable-version>` heading, at least one user-facing bullet, and a commit coverage block for the candidate range
 - keep stable/hotfix versioning aligned with the current policy: each regular stable release advances `minor + 1` and resets `patch` to `0`, while each hotfix advances the current stable line by `patch + 1`
@@ -37,6 +38,8 @@ npm run release:local -- --channel beta
 npm run release:local -- --channel stable
 npm run release:local -- --channel hotfix --ref <ref> --version <x.y.z>
 ```
+
+Stable and hotfix perform the npm identity preflight because they publish to npm. Nightly and beta skip it because their current contracts publish GitHub bundles only.
 
 Append `--no-publish` to run validation and bundle construction without tags, releases, npm publication, manifest commits, or bootstrap pushes.
 

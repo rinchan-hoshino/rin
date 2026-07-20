@@ -539,6 +539,21 @@ test("local release executor publishes tags, bundles, npm, manifest, and bootstr
   );
 });
 
+test("local stable and hotfix publishing fail early without the expected npm identity", () => {
+  const content = readLocalPublisher();
+  const main = content.slice(content.indexOf("function main()"));
+  assert.match(content, /function ensureNpmPublishIdentity/);
+  assert.match(content, /npm\(\["whoami", "--registry", NPM_REGISTRY\]/);
+  assert.doesNotMatch(
+    content,
+    /npm\(\["access", "list", "packages", "--json"\]/,
+  );
+  assert.ok(
+    main.indexOf("ensureNpmPublishIdentity(") <
+      main.indexOf("releaseCandidateChannel("),
+  );
+});
+
 test("local release executor checks changelog before expensive beta and candidate gates", () => {
   const content = readLocalPublisher();
   const sourceStart = content.indexOf("function releaseSourceChannel");

@@ -5,6 +5,8 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 const CHANNELS = new Set(["nightly", "beta", "stable", "hotfix"]);
+const NPM_REGISTRY = "https://registry.npmjs.org/";
+const NPM_PUBLISHER = "hoshinorin";
 
 function trim(value) {
   return String(value || "").trim();
@@ -115,6 +117,20 @@ function ensureCleanAuthoritativeMain(root, noPublish) {
   });
   if (!noPublish && head !== remote) {
     throw new Error(`release_main_not_current:${head}:${remote}`);
+  }
+}
+
+function ensureNpmPublishIdentity(root, channel, noPublish) {
+  if (noPublish || (channel !== "stable" && channel !== "hotfix")) return;
+
+  const identity = npm(["whoami", "--registry", NPM_REGISTRY], {
+    cwd: root,
+    capture: true,
+  });
+  if (identity !== NPM_PUBLISHER) {
+    throw new Error(
+      `npm_publisher_identity_mismatch:${identity || "missing"}:expected=${NPM_PUBLISHER}`,
+    );
   }
 }
 
@@ -484,6 +500,7 @@ function main() {
   );
   try {
     ensureCleanAuthoritativeMain(root, args.noPublish);
+    ensureNpmPublishIdentity(root, args.channel, args.noPublish);
     const result =
       args.channel === "nightly" || args.channel === "beta"
         ? releaseSourceChannel(root, args.channel, args.noPublish, tempRoot)
