@@ -519,6 +519,7 @@ test("rpc interactive session applies backend visibility at Pi agent boundaries"
   const visible: boolean[] = [];
   session.rpcConnected = true;
   session.startupPending = false;
+  session.activeTurn = { mode: "prompt", message: "hello" };
   session.extensionBindings = {
     uiContext: {
       setWorkingVisible(value) {
@@ -534,10 +535,12 @@ test("rpc interactive session applies backend visibility at Pi agent boundaries"
   });
   assert.equal(session.backendWorkingVisible, true);
   assert.deepEqual(visible, []);
+  assert.equal(session.getFrontendStatusEvent()?.phase, "sending");
 
   session.handleRpcEvent({ type: "agent_start" });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(visible, [true]);
+  assert.equal(session.getFrontendStatusEvent()?.phase, "working");
 
   session.handleRpcEvent({
     type: "extension_ui_request",
@@ -547,6 +550,7 @@ test("rpc interactive session applies backend visibility at Pi agent boundaries"
   session.handleRpcEvent({ type: "agent_end" });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(visible, [true, false]);
+  assert.equal(session.getFrontendStatusEvent()?.phase, "sending");
 });
 
 test("rpc interactive session clears recovering turn state after an idle recovery snapshot", () => {
@@ -1050,7 +1054,12 @@ test("rpc interactive session exits connecting after get_state succeeds and dela
   assert.equal(session.recoveryPending, false);
   assert.equal(resyncs, 0);
   assert.equal(session.backendWorkingVisible, true);
-  assert.deepEqual(session.getFrontendStatusEvent(), null);
+  assert.deepEqual(session.getFrontendStatusEvent(), {
+    type: "rpc_frontend_status",
+    phase: "working",
+    label: "Working",
+    connected: true,
+  });
   assert.deepEqual(
     calls.map((payload) => payload.type),
     ["get_state", "replay_pending_terminal_turn_event"],

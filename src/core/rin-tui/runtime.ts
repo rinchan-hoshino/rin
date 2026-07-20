@@ -1389,6 +1389,7 @@ export class RpcInteractiveSession {
     if (!this.rpcConnected || this.recoveryPending) return "connecting";
     if (this.isCompacting) return "compacting";
     if (this.retryAttempt > 0) return "retrying";
+    if (this.backendWorkingVisible && this.agentStreaming) return "working";
     if (this.activeTurn) return "sending";
     return "idle";
   }
