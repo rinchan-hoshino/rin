@@ -258,10 +258,16 @@ export function createChatBridgeRuntime(options: {
         { warn() {} },
         { chatKey, itemId: id },
       );
-      const deliveryResult = Array.isArray(results)
-        ? results.flatMap((item: any) => item?.deliveryResult || [])
-        : [];
-      if (deliveryResult.length) return deliveryResult;
+      const own = Array.isArray(results)
+        ? results.find((item: any) => item?.id === id)
+        : null;
+      if (own?.status === "failed") {
+        throw new Error(
+          safeString(own.error).trim() || "chat_outbox_delivery_failed",
+        );
+      }
+      const deliveryResult = own?.deliveryResult || [];
+      if (own?.status === "delivered") return deliveryResult;
       return (await waitForOutboxDelivery(options.agentDir, id)) || [];
     };
 

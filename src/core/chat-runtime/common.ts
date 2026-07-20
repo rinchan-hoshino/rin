@@ -36,6 +36,20 @@ export {
   sleep,
 };
 
+export function partialChatDeliveryError(
+  error: unknown,
+  deliveredMessageIds: string[],
+) {
+  const message = safeString((error as any)?.message || error) || "send_failed";
+  const next = new Error(`chat_delivery_partial:${message}`) as Error & {
+    deliveredMessageIds: string[];
+    partialDelivery: true;
+  };
+  next.deliveredMessageIds = [...deliveredMessageIds];
+  next.partialDelivery = true;
+  return next;
+}
+
 const DEFAULT_EDITABLE_WORKING_FRAMES = [
   "Working...",
   "Working",

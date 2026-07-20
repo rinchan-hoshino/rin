@@ -102,7 +102,12 @@ export type ChatOutboxItem = {
   lastError?: string;
   nextAttemptAt?: string;
   failedAt?: string;
-  failureKind?: "retryable" | "permanent" | "attempts_exhausted" | "expired";
+  failureKind?:
+    | "retryable"
+    | "partial"
+    | "permanent"
+    | "attempts_exhausted"
+    | "expired";
   deliveredAt?: string;
   deliveryResult?: string[];
   deliveryUnconfirmed?: boolean;
@@ -353,7 +358,8 @@ export function listCommittedChatOutboxItems(agentDir: string) {
       `SELECT * FROM outbox
        WHERE post_delivery_json IS NOT NULL
          AND post_delivery_applied_at IS NULL
-         AND state IN ('queued', 'sending', 'delivered')
+         AND (state IN ('queued', 'sending', 'delivered')
+              OR (state = 'failed' AND failure_kind = 'partial'))
        ORDER BY sequence, outbox_id`,
     )
     .all()

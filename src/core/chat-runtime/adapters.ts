@@ -27,6 +27,7 @@ import {
   isImageMimeType,
   isImageName,
   normalizeNode,
+  partialChatDeliveryError,
   prependChatQuoteNode,
   prepareOutboundNodes,
   readBinaryFromNode,
@@ -53,7 +54,25 @@ const DISCORD_API_BASE_URL = "https://discord.com/api/v10";
 const DISCORD_INTERACTION_RESPONSE_CHANNEL_MESSAGE_WITH_SOURCE = 4;
 const DISCORD_MESSAGE_FLAG_EPHEMERAL = 1 << 6;
 const DISCORD_MAX_TEXT_LENGTH = 2000;
+export const DISCORD_REST_REQUEST_TIMEOUT_MS = 60_000;
+export const DISCORD_REST_RETRIES = 1;
 const SLACK_MAX_TEXT_LENGTH = 40000;
+
+export function createDiscordClientOptions(Discord: any) {
+  return {
+    intents: [
+      Discord.GatewayIntentBits.Guilds,
+      Discord.GatewayIntentBits.GuildMessages,
+      Discord.GatewayIntentBits.DirectMessages,
+      Discord.GatewayIntentBits.MessageContent,
+    ].filter(Boolean),
+    partials: [Discord.Partials.Channel].filter(Boolean),
+    rest: {
+      timeout: DISCORD_REST_REQUEST_TIMEOUT_MS,
+      retries: DISCORD_REST_RETRIES,
+    },
+  };
+}
 
 function compareDiscordMessageIds(left: unknown, right: unknown) {
   const leftId = safeString(left).trim();
@@ -978,16 +997,7 @@ export class DiscordAdapter {
     const token = safeString(this.config?.token).trim();
     if (!token) throw new Error("discord_token_required");
     const Discord: any = await import("discord.js");
-    const intents = [
-      Discord.GatewayIntentBits.Guilds,
-      Discord.GatewayIntentBits.GuildMessages,
-      Discord.GatewayIntentBits.DirectMessages,
-      Discord.GatewayIntentBits.MessageContent,
-    ].filter(Boolean);
-    this.client = new Discord.Client({
-      intents,
-      partials: [Discord.Partials.Channel].filter(Boolean),
-    });
+    this.client = new Discord.Client(createDiscordClientOptions(Discord));
     this.bot.internal.client = this.client;
     this.bot.internal.rest = this.client.rest;
 
@@ -1253,8 +1263,13 @@ export class DiscordAdapter {
     if (isFinalDelivery && !finalizedWorkingMessage) {
       await this.editableWorking.deleteProgress(chatId, replyToMessageId);
     }
+    if (failures.length) {
+      if (delivered.length) {
+        throw partialChatDeliveryError(failures[0], delivered);
+      }
+      throw failures[0];
+    }
     if (delivered.length) return delivered;
-    if (failures.length) throw failures[0];
     throw new Error("discord_send_message_empty_result");
   }
 

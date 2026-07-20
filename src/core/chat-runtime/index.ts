@@ -297,17 +297,6 @@ function createNodeBuilder() {
   return h;
 }
 
-function partialChatDeliveryError(error: unknown, delivered: string[]) {
-  const message = safeString((error as any)?.message || error) || "send_failed";
-  const next = new Error(`chat_delivery_partial:${message}`) as Error & {
-    deliveredMessageIds?: string[];
-    partialDelivery?: boolean;
-  };
-  next.deliveredMessageIds = [...delivered];
-  next.partialDelivery = true;
-  return next;
-}
-
 export type ChatRuntimeAdapterStatus = {
   platform: string;
   selfId: string;

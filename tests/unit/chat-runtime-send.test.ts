@@ -2289,7 +2289,7 @@ test("discord adapter keeps media before following text", async () => {
   });
 });
 
-test("discord adapter reports a failed rich segment and continues later segments", async () => {
+test("discord adapter reports partial delivery when a rich segment fails", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "discord",
@@ -2306,13 +2306,21 @@ test("discord adapter reports a failed rich segment and continues later segments
       },
     });
 
-    const result = await app.bots[0].sendMessage("456", [
-      h.text("leading text"),
-      h.image(path.join(agentDir, "missing.png")),
-      h.text("trailing text"),
-    ]);
+    await assert.rejects(
+      () =>
+        app.bots[0].sendMessage("456", [
+          h.text("leading text"),
+          h.image(path.join(agentDir, "missing.png")),
+          h.text("trailing text"),
+        ]),
+      (error: any) => {
+        assert.match(error.message, /^chat_delivery_partial:/);
+        assert.equal(error.partialDelivery, true);
+        assert.deepEqual(error.deliveredMessageIds, ["1", "2", "3"]);
+        return true;
+      },
+    );
 
-    assert.deepEqual(result, ["1", "2", "3"]);
     assert.equal(calls[0].content, "leading text");
     assert.match(calls[1].content, /chat_media_file_missing:/);
     assert.match(calls[1].content, /missing\.png/);
@@ -2321,6 +2329,36 @@ test("discord adapter reports a failed rich segment and continues later segments
       /\u5bcc\u6587\u672c\u7247\u6bb5\u53d1\u9001\u5931\u8d25/,
     );
     assert.equal(calls[2].content, "trailing text");
+  });
+});
+
+test("discord adapter keeps an all-failed rich delivery out of partial state", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    adapter.fetchChannel = async () => ({
+      async send() {
+        throw new Error("placeholder unavailable");
+      },
+    });
+
+    await assert.rejects(
+      () =>
+        app.bots[0].sendMessage("456", [
+          h.image(path.join(agentDir, "missing.png")),
+        ]),
+      (error: any) => {
+        assert.match(error.message, /^chat_media_file_missing:/);
+        assert.notEqual(error.partialDelivery, true);
+        assert.deepEqual(error.deliveredMessageIds, undefined);
+        return true;
+      },
+    );
   });
 });
 

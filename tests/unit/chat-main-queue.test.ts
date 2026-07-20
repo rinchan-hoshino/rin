@@ -161,6 +161,43 @@ test("chat send reports adapter dispatch as pending until delivery settles", asy
       }
       if (item?.status !== "delivered") throw new Error(JSON.stringify(item));
       bridge.app.bots[0].sendMessage = () => {
+        const error = Object.assign(new Error("chat_delivery_partial:upload"), {
+          deliveredMessageIds: ["placeholder-1"],
+          partialDelivery: true,
+        });
+        const delivery = Promise.reject(error);
+        delivery.dispatched = Promise.resolve();
+        return delivery;
+      };
+      const partialResult = await bridge.send({
+        chatKey: "telegram/1:2",
+        parts: [{ type: "text", text: "partial delivery" }],
+      });
+      if (
+        partialResult.delivered !== false ||
+        partialResult.pending !== true ||
+        !partialResult.outboxId
+      ) {
+        throw new Error(JSON.stringify(partialResult));
+      }
+      const partialDeadline = Date.now() + 3000;
+      let partialItem;
+      while (Date.now() < partialDeadline) {
+        partialItem = outboxMod.readChatOutboxItemById(
+          agentDir,
+          partialResult.outboxId,
+        )?.item;
+        if (partialItem?.status === "failed") break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      if (
+        partialItem?.status !== "failed" ||
+        partialItem.failureKind !== "partial" ||
+        partialItem.deliveryUnconfirmed
+      ) {
+        throw new Error(JSON.stringify(partialItem));
+      }
+      bridge.app.bots[0].sendMessage = () => {
         const error = new Error("temporary network failure");
         const delivery = Promise.reject(error);
         delivery.dispatched = Promise.reject(error);

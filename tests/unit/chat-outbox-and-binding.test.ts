@@ -349,15 +349,17 @@ test("chat outbox successful delivery records ordered provider fragments", async
   });
 });
 
-test("chat outbox partial delivery is terminal and preserves delivered fragments", async () => {
+test("chat outbox records known partial delivery as a terminal failure", async () => {
   await withTempDir(async (dir) => {
     const id = outbox.enqueueChatOutboxPayload(dir, payload("partial"));
+    let attempts = 0;
     const app = {
       bots: [
         {
           platform: "telegram",
           selfId: "777",
           async sendMessage() {
+            attempts += 1;
             throw Object.assign(new Error("chat_delivery_partial:network"), {
               deliveredMessageIds: ["fragment-1"],
               partialDelivery: true,
@@ -370,17 +372,20 @@ test("chat outbox partial delivery is terminal and preserves delivered fragments
     await waitFor(() => {
       assert.equal(
         outbox.readChatOutboxItemById(dir, id).item.status,
-        "delivered",
+        "failed",
       );
     });
+    await boot.drainChatOutbox(app, dir, h(), { warn() {} });
     const item = outbox.readChatOutboxItemById(dir, id).item;
-    assert.equal(item.deliveryUnconfirmed, true);
+    assert.equal(attempts, 1);
+    assert.equal(item.failureKind, "partial");
+    assert.equal(item.deliveryUnconfirmed, undefined);
     assert.deepEqual(item.deliveryResult, ["fragment-1"]);
     assert.deepEqual(
       outbox
         .listChatOutboxDeliveries(dir, id)
         .map((delivery) => delivery.state),
-      ["delivered", "unconfirmed"],
+      ["delivered", "failed"],
     );
   });
 });

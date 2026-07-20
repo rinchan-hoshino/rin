@@ -536,7 +536,7 @@ test("chat boot keeps retryable outbox delivery failures queued", async () => {
   });
 });
 
-test("chat boot gives OneBot media outbox items the extended send timeout", () => {
+test("chat boot gives platform media outbox items their bounded send timeouts", () => {
   assert.equal(
     boot.getChatOutboxSendTimeoutMs({
       payload: {
@@ -551,7 +551,17 @@ test("chat boot gives OneBot media outbox items the extended send timeout", () =
     boot.getChatOutboxSendTimeoutMs({
       payload: {
         createdAt: new Date().toISOString(),
-        chatKey: "onebot/1:2",
+        chatKey: "discord/1:2",
+        parts: [{ type: "image", path: "/tmp/preview.png" }],
+      },
+    }),
+    boot.DEFAULT_DISCORD_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS,
+  );
+  assert.equal(
+    boot.getChatOutboxSendTimeoutMs({
+      payload: {
+        createdAt: new Date().toISOString(),
+        chatKey: "discord/1:2",
         parts: [{ type: "text", text: "plain text" }],
       },
     }),

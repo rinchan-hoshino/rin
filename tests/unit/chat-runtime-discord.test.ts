@@ -36,6 +36,22 @@ function adminPermission(value: boolean) {
   return namedPermission(value, "Administrator", 8n);
 }
 
+test("discord adapter gives REST uploads a bounded retry budget", () => {
+  const options = adapters.createDiscordClientOptions({
+    GatewayIntentBits: {
+      Guilds: 1,
+      GuildMessages: 2,
+      DirectMessages: 4,
+      MessageContent: 8,
+    },
+    Partials: { Channel: "channel" },
+  });
+
+  assert.deepEqual(options.rest, { timeout: 60_000, retries: 1 });
+  assert.deepEqual(options.intents, [1, 2, 4, 8]);
+  assert.deepEqual(options.partials, ["channel"]);
+});
+
 function discordInboundMessage(
   id: string,
   timestamp: number,

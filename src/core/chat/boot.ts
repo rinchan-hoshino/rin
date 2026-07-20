@@ -205,6 +205,7 @@ export async function syncDiscordCommands(
 const CHAT_OUTBOX_MAX_ATTEMPTS = 4;
 const CHAT_OUTBOX_RETRY_DELAYS_MS = [1000, 3000, 10_000] as const;
 export const DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS = 120_000;
+export const DEFAULT_DISCORD_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS = 180_000;
 export const DEFAULT_ONEBOT_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS = 10 * 60_000;
 export const DEFAULT_CHAT_OUTBOX_DISPATCH_TIMEOUT_MS = 30_000;
 export const DEFAULT_CHAT_OUTBOX_MAX_AGE_MS = 60 * 60_000;
@@ -283,9 +284,12 @@ function chatOutboxPayloadContainsMedia(payload: ChatOutboxItem["payload"]) {
   );
 }
 
-function isOneBotMediaOutboxItem(item?: Pick<ChatOutboxItem, "payload">) {
+function isPlatformMediaOutboxItem(
+  item: Pick<ChatOutboxItem, "payload"> | undefined,
+  platform: string,
+) {
   return (
-    safeString(item?.payload?.chatKey).startsWith("onebot/") &&
+    safeString(item?.payload?.chatKey).startsWith(`${platform}/`) &&
     chatOutboxPayloadContainsMedia(item?.payload)
   );
 }
@@ -302,9 +306,13 @@ export function getChatOutboxSendTimeoutMs(
       DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS,
     );
   }
-  return isOneBotMediaOutboxItem(item)
-    ? DEFAULT_ONEBOT_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS
-    : DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS;
+  if (isPlatformMediaOutboxItem(item, "onebot")) {
+    return DEFAULT_ONEBOT_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS;
+  }
+  if (isPlatformMediaOutboxItem(item, "discord")) {
+    return DEFAULT_DISCORD_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS;
+  }
+  return DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS;
 }
 
 function retryLeaseMs(options: ChatOutboxDrainOptions = {}) {
@@ -483,6 +491,7 @@ function failedChatOutboxItem(
 ): ChatOutboxItem | null {
   const message = chatOutboxErrorMessage(error);
   const partialDelivered = partialDeliveryMessageIds(error);
+  const partial = isPartialChatDeliveryError(error);
   const permanent = isPermanentChatOutboxError(error);
   const exhausted = sending.attempts >= CHAT_OUTBOX_MAX_ATTEMPTS;
   if (!permanent && (options.preserveRetryable || !exhausted)) return null;
@@ -493,7 +502,11 @@ function failedChatOutboxItem(
     failedAt: new Date().toISOString(),
     lastError: message,
     nextAttemptAt: undefined,
-    failureKind: permanent ? "permanent" : "attempts_exhausted",
+    failureKind: partial
+      ? "partial"
+      : permanent
+        ? "permanent"
+        : "attempts_exhausted",
     deliveryResult: partialDelivered.length
       ? partialDelivered
       : sending.deliveryResult,
@@ -538,6 +551,22 @@ function settleChatOutboxFailure(
   sending: ChatOutboxItem,
   error: unknown,
 ) {
+  if (isPartialChatDeliveryError(error)) {
+    const failed = failedChatOutboxItem(sending, error);
+    if (!failed || !writeChatOutboxItem(agentDir, failed)) {
+      return {
+        status: "superseded" as const,
+        error: "chat_outbox_attempt_superseded",
+      };
+    }
+    applyPostDelivery(agentDir, failed);
+    warnChatOutboxFailure(logger, failed, error, "failed");
+    return {
+      status: "failed" as const,
+      deliveryResult: failed.deliveryResult || [],
+      error: chatOutboxErrorMessage(error),
+    };
+  }
   if (
     sending.dispatchStartedAt &&
     !(error as any)?.chatOutboxPreDispatchFailure
@@ -607,6 +636,13 @@ function settleLateChatOutboxFailure(
 ) {
   const current = readCurrentOutboxItem(agentDir, sending.id);
   if (!isSameSendingAttempt(current, sending)) return;
+  if (isPartialChatDeliveryError(error)) {
+    const failed = failedChatOutboxItem(current, error);
+    if (!failed || !writeChatOutboxItem(agentDir, failed)) return;
+    applyPostDelivery(agentDir, failed);
+    warnChatOutboxFailure(logger, failed, error, "failed");
+    return;
+  }
   if (current.dispatchStartedAt) {
     const delivered = deliveredUnconfirmedChatOutboxItem(current, error);
     if (!writeChatOutboxItem(agentDir, delivered)) return;
@@ -865,8 +901,12 @@ async function drainChatOutboxNowForChat(
       terminal?.payload.chatKey === chatKey &&
       (terminal.status === "delivered" || terminal.status === "failed")
     ) {
-      if (terminal.status === "delivered")
+      if (
+        terminal.status === "delivered" ||
+        terminal.failureKind === "partial"
+      ) {
         applyPostDelivery(agentDir, terminal);
+      }
       return [
         {
           id: terminal.id,

@@ -1751,6 +1751,9 @@ export class ChatController {
       const current = readChatOutboxItemById(this.agentDir, id)?.item;
       if (current?.status === "delivered") return current.deliveryResult || [];
       if (current?.status === "failed") {
+        if (current.failureKind === "partial") {
+          return current.deliveryResult || [];
+        }
         throw new Error(current.lastError || "chat_outbox_delivery_failed");
       }
       const lastError = safeString(current?.lastError).trim();
@@ -1840,6 +1843,12 @@ export class ChatController {
       ? results.find((item: any) => item?.id === outboxId)
       : null;
     if (own && own.status !== "delivered") {
+      if (own.status === "failed") {
+        const current = readChatOutboxItemById(this.agentDir, outboxId)?.item;
+        if (current?.failureKind === "partial") {
+          return chatDeliveryOutcome(current.deliveryResult || []);
+        }
+      }
       if (own.status === "dispatched") {
         const deliveryResult = options.waitUntilDeliverySettled
           ? await this.waitForOutboxDelivery(outboxId)
@@ -1876,6 +1885,9 @@ export class ChatController {
         return chatDeliveryOutcome(current.deliveryResult || []);
       }
       if (current?.status === "failed") {
+        if (current.failureKind === "partial") {
+          return chatDeliveryOutcome(current.deliveryResult || []);
+        }
         throw new Error(current.lastError || "chat_outbox_delivery_failed");
       }
       if (current?.status === "queued" || current?.status === "sending") {

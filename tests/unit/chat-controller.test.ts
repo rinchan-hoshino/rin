@@ -130,6 +130,55 @@ function createRecoveredController(previousController) {
   return attachTestChatApp(controller);
 }
 
+test("chat controller settles a canonical turn after known partial delivery", async () => {
+  const controller = await createController("telegram/1:2");
+  let sends = 0;
+  controller.app.bots[0].sendMessage = () => {
+    sends += 1;
+    const error = Object.assign(new Error("chat_delivery_partial:upload"), {
+      deliveredMessageIds: ["placeholder-1"],
+      partialDelivery: true,
+    });
+    const delivery = Promise.reject(error);
+    delivery.dispatched = Promise.resolve();
+    return delivery;
+  };
+
+  const outcome = await controller.enqueueAndDrainDelivery(
+    {
+      createdAt: new Date().toISOString(),
+      chatKey: "telegram/1:2",
+      deliveryKind: "final",
+      parts: [{ type: "text", text: "final" }],
+    },
+    {
+      deliveryKind: "final",
+      postDelivery: {
+        markProcessed: {
+          chatKey: "telegram/1:2",
+          messageId: "incoming-1",
+          bindSession: false,
+        },
+      },
+      requireDelivery: true,
+      waitUntilDeliverySettled: true,
+    },
+  );
+
+  assert.deepEqual(outcome, {
+    messageIds: ["placeholder-1"],
+    accepted: true,
+    settled: true,
+  });
+  assert.equal(sends, 1);
+  const failed = await readOnlyChatOutboxHistoryItem(
+    controller.agentDir,
+    "failed",
+  );
+  assert.equal(failed.failureKind, "partial");
+  assert.ok(failed.postDeliveryAppliedAt);
+});
+
 test("detached controller cannot overwrite authoritative chat session binding", async () => {
   const owner = await createController("telegram/1:2");
   const ownerSession = path.join(owner.agentDir, "sessions", "owner.jsonl");
