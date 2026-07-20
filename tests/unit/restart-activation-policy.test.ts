@@ -38,13 +38,40 @@ test("rin update preflights, stops, migrates, activates, and restarts in order",
   );
 
   assert.match(restartBlock, /tryManagedServiceAction\([\s\S]*"restart"/);
+  assert.match(
+    restartBlock,
+    /if \(publishRuntime && !manageDaemon\)[\s\S]*requires managed daemon control/,
+  );
   const preflightIndex = restartBlock.indexOf(
     "preflightInstallUpgradeMigrations",
+  );
+  const holdIndex = restartBlock.indexOf(
+    "setManagedServiceStartHold(serviceContext, true",
   );
   const stopIndex = restartBlock.indexOf('"stop"');
   const mutateIndex = restartBlock.indexOf("mutate: writeInstalledState");
   const activateIndex = restartBlock.indexOf("activate:", mutateIndex);
+  const finalizeMigrationIndex = restartBlock.indexOf(
+    "finalizeInstallUpgradeMigrations",
+    activateIndex,
+  );
+  const releaseIndex = restartBlock.indexOf(
+    "setManagedServiceStartHold(serviceContext, false",
+    activateIndex,
+  );
   const restartIndex = restartBlock.indexOf("restart:", activateIndex);
+  const daemonRestartIndex = restartBlock.indexOf(
+    'tryManagedServiceAction(serviceContext, "restart"',
+    releaseIndex,
+  );
+  assert.ok(
+    preflightIndex >= 0 && preflightIndex < holdIndex,
+    "migration preparation must finish before the daemon start hold",
+  );
+  assert.ok(
+    holdIndex >= 0 && holdIndex < stopIndex,
+    "service starts must be persistently disabled before the old daemon stops",
+  );
   assert.ok(
     preflightIndex >= 0 && preflightIndex < stopIndex,
     "read-only migration preflight must finish before daemon stop",
@@ -56,6 +83,23 @@ test("rin update preflights, stops, migrates, activates, and restarts in order",
   assert.ok(
     mutateIndex >= 0 && mutateIndex < activateIndex,
     "migrations must finish before runtime activation",
+  );
+  assert.ok(
+    activateIndex >= 0 && activateIndex < finalizeMigrationIndex,
+    "runtime activation must finish before finalizing the data migration",
+  );
+  assert.ok(
+    finalizeMigrationIndex >= 0 && finalizeMigrationIndex < releaseIndex,
+    "data migration must finalize before releasing the service start hold",
+  );
+  assert.ok(
+    activateIndex >= 0 && activateIndex < releaseIndex,
+    "runtime activation must finish before releasing the service start hold",
+  );
+  assert.match(restartBlock, /rollbackInstallUpgradeMigrations/);
+  assert.ok(
+    releaseIndex >= 0 && releaseIndex < daemonRestartIndex,
+    "service starts must be released before daemon restart",
   );
   assert.ok(
     activateIndex >= 0 && activateIndex < restartIndex,

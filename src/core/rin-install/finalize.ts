@@ -26,10 +26,12 @@ import {
 import { createInstallExecutionContext } from "./execution-context.js";
 import { defaultInstallDirForHome, installedReleaseRoot } from "./paths.js";
 import {
+  finalizeInstallUpgradeMigrations,
   normalizeInstalledChatSettings,
   persistInstallerOutputs,
   preflightInstallUpgradeMigrations,
   reconcileInstallerManifest,
+  rollbackInstallUpgradeMigrations,
 } from "./persist.js";
 import {
   collectDaemonFailureDetails,
@@ -44,6 +46,7 @@ import { preparePiManagedToolsForInstall } from "./pi-tools.js";
 import { buildGitHubRefArchiveUrl } from "../rin-lib/release.js";
 import {
   createManagedRuntimeServiceActionContext,
+  setManagedServiceStartHold,
   tryManagedServiceAction,
   type ManagedRuntimeService,
 } from "../rin/managed-runtime-service.js";
@@ -221,6 +224,11 @@ export async function runManagedRuntimeTransition<
   stop: () => unknown | Promise<unknown>;
   mutate: () => TMutation | Promise<TMutation>;
   activate: (mutation: TMutation) => TActivation | Promise<TActivation>;
+  commit?: (
+    mutation: TMutation,
+    activation: TActivation,
+  ) => unknown | Promise<unknown>;
+  recover?: (error: unknown) => unknown | Promise<unknown>;
   restart: () => unknown | Promise<unknown>;
 }) {
   let stopAttempted = false;
@@ -230,11 +238,21 @@ export async function runManagedRuntimeTransition<
     await steps.stop();
     const mutation = await steps.mutate();
     const activation = await steps.activate(mutation);
+    await steps.commit?.(mutation, activation);
     restartAttempted = true;
     await steps.restart();
     return { mutation, activation };
   } catch (error) {
     if (stopAttempted && !restartAttempted) {
+      try {
+        await steps.recover?.(error);
+      } catch (recoveryError) {
+        throw new AggregateError(
+          [error, recoveryError],
+          "rin_update_failure_recovery_failed",
+          { cause: error },
+        );
+      }
       try {
         restartAttempted = true;
         await steps.restart();
@@ -273,6 +291,9 @@ async function applyInstalledRuntime(
   const authData = options.authData || {};
   const publishRuntime = options.publishRuntime !== false;
   const manageDaemon = options.manageDaemon !== false;
+  if (publishRuntime && !manageDaemon) {
+    throw new Error("Runtime publishing requires managed daemon control.");
+  }
   const prepareManagedTools = options.prepareManagedTools !== false;
   const writeLaunchers = options.writeLaunchers !== false;
   const sourceRoot =
@@ -528,15 +549,41 @@ async function applyInstalledRuntime(
     const service =
       managedRuntimeServiceFromInstallSpec(installedService) ||
       buildInstallStageManagedRuntimeService(targetUser, installDir);
+    let serviceStartsHeld = false;
     const transition = await runManagedRuntimeTransition({
       stop: async () => {
         if (manageDaemon && publishRuntime) {
+          serviceStartsHeld = true;
+          await setManagedServiceStartHold(serviceContext, true, service);
           await tryManagedServiceAction(serviceContext, "stop", service);
         }
       },
       mutate: writeInstalledState,
       activate: async () => reconcileInstalledState(),
+      commit: async () => {
+        if (publishRuntime) {
+          finalizeInstallUpgradeMigrations(migrationOptions, migrationDeps);
+        }
+      },
+      recover: async () => {
+        if (publishRuntime) {
+          rollbackInstallUpgradeMigrations(migrationOptions, migrationDeps);
+          if (deferRuntimeActivation && previousReleaseName) {
+            switchInstalledCurrentRelease(
+              installDir,
+              previousReleaseName,
+              targetUser,
+              useElevatedWrite,
+              { findSystemUser },
+            );
+          }
+        }
+      },
       restart: async () => {
+        if (serviceStartsHeld) {
+          await setManagedServiceStartHold(serviceContext, false, service);
+          serviceStartsHeld = false;
+        }
         if (manageDaemon) {
           await tryManagedServiceAction(serviceContext, "restart", service);
         }

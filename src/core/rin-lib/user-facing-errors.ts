@@ -91,6 +91,14 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Transcript search data must be upgraded by the Rin installer before use.",
   transcript_search_install_migration_incomplete: () =>
     "The Rin installer could not finish upgrading transcript search data.",
+  transcript_search_install_staging_schema_mismatch: () =>
+    "The staged transcript search index has an incompatible schema.",
+  transcript_search_install_staging_path_invalid: () =>
+    "The staged transcript search index path is invalid.",
+  transcript_search_install_publish_guard_missing: () =>
+    "The transcript search migration lost its publish guard.",
+  transcript_search_install_backup_manifest_invalid: () =>
+    "The transcript search migration backup manifest is invalid.",
   chat_accepted_inbound_turn_not_active: () =>
     "Chat recovery could not find the active turn for the accepted message.",
   chat_bridge_at_id_required: () =>
@@ -496,6 +504,10 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin install metadata points to a missing background service file.",
   rin_managed_service_unsupported: () =>
     "This Rin install does not support that lifecycle command on this platform.",
+  rin_windows_startup_hold_ambiguous: () =>
+    "Rin found both active and update-held Windows startup entries. Remove the duplicate entry before retrying the update.",
+  rin_systemd_unit_hold_ambiguous: () =>
+    "Rin found an ambiguous systemd unit-file hold state. Inspect the recorded unit before retrying the update.",
   rin_managed_node_runtime_missing: () =>
     "Rin could not find its managed Node runtime. Repair or reinstall Rin before starting managed services or updating.",
   rin_managed_node_npm_missing: () =>

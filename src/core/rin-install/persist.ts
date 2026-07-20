@@ -833,7 +833,7 @@ function removeInstalledBrowseRuntime(
 function runMemoryInstallMigration(
   options: InstallMigrationOptions & { installDir: string },
   deps: InstallMigrationCommandDeps,
-  preflight: boolean,
+  mode: "preflight" | "apply" | "finalize" | "rollback",
 ) {
   const runtimeRoot = safeString(options.migrationRuntimeRoot).trim();
   if (!runtimeRoot) {
@@ -859,7 +859,7 @@ function runMemoryInstallMigration(
   );
   const args = [
     runnerPath,
-    ...(preflight ? ["--preflight"] : []),
+    ...(mode === "apply" ? [] : [`--${mode}`]),
     path.resolve(options.installDir),
   ];
   const nodePath =
@@ -870,9 +870,10 @@ function runMemoryInstallMigration(
     execFileSync(nodePath, args, { stdio: "pipe" });
   }
   return {
-    id: preflight
-      ? "transcript-search-schema-v5-preflight"
-      : "transcript-search-schema-v5",
+    id:
+      mode === "apply"
+        ? "transcript-search-schema-v5"
+        : `transcript-search-schema-v5-${mode}`,
     skipped: false,
     executedAs: options.targetUser,
   };
@@ -952,7 +953,7 @@ export function preflightInstallUpgradeMigrations(
   deps: InstallMigrationCommandDeps,
 ) {
   return [
-    runMemoryInstallMigration(options, deps, true),
+    runMemoryInstallMigration(options, deps, "preflight"),
     preflightInstalledChatAuthority(options, deps),
   ].filter(Boolean);
 }
@@ -976,8 +977,22 @@ export function applyInstallUpgradeMigrations(
     rewriteInstalledChatStateSessionFileKeys(options.installDir, fileOps),
     migrateInstalledChatSessionFilesToManaged(options.installDir, fileOps),
     migrateInstalledChatAuthority(options, deps),
-    runMemoryInstallMigration(options, deps, false),
+    runMemoryInstallMigration(options, deps, "apply"),
   ].filter(Boolean);
+}
+
+export function finalizeInstallUpgradeMigrations(
+  options: InstallMigrationOptions & { installDir: string },
+  deps: InstallMigrationCommandDeps,
+) {
+  return runMemoryInstallMigration(options, deps, "finalize");
+}
+
+export function rollbackInstallUpgradeMigrations(
+  options: InstallMigrationOptions & { installDir: string },
+  deps: InstallMigrationCommandDeps,
+) {
+  return runMemoryInstallMigration(options, deps, "rollback");
 }
 
 function normalizeInstallerRecord(value: unknown) {

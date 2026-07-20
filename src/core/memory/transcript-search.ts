@@ -131,17 +131,32 @@ export function writeTranscriptSearchSchemaMarker(
   const tmpPath = `${markerPath}.${process.pid}.${Math.random()
     .toString(16)
     .slice(2)}.tmp`;
-  fssync.mkdirSync(path.dirname(markerPath), { recursive: true });
+  const markerDir = path.dirname(markerPath);
+  fssync.mkdirSync(markerDir, { recursive: true });
   try {
-    fssync.writeFileSync(
-      tmpPath,
-      `${JSON.stringify({
-        schemaVersion: TRANSCRIPT_SEARCH_SCHEMA_VERSION,
-        state,
-      })}\n`,
-      { encoding: "utf8", mode: 0o600 },
-    );
+    const fd = fssync.openSync(tmpPath, "w", 0o600);
+    try {
+      fssync.writeFileSync(
+        fd,
+        `${JSON.stringify({
+          schemaVersion: TRANSCRIPT_SEARCH_SCHEMA_VERSION,
+          state,
+        })}\n`,
+        "utf8",
+      );
+      fssync.fsyncSync(fd);
+    } finally {
+      fssync.closeSync(fd);
+    }
     fssync.renameSync(tmpPath, markerPath);
+    if (process.platform !== "win32") {
+      const dirFd = fssync.openSync(markerDir, "r");
+      try {
+        fssync.fsyncSync(dirFd);
+      } finally {
+        fssync.closeSync(dirFd);
+      }
+    }
   } finally {
     try {
       fssync.unlinkSync(tmpPath);
@@ -879,6 +894,53 @@ export async function appendTranscriptArchiveEntry(
     transcriptSearchNeedsSync.add(dbPath);
     markTranscriptWriterFailed(rootOverride);
   }
+}
+
+export async function synchronizeTranscriptSearchIndexAtPathForInstall(
+  dbPath: string,
+  rootOverride = "",
+) {
+  fssync.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new BetterSqlite3(dbPath);
+  try {
+    const version = transcriptSearchSchemaVersion(db);
+    if (version !== null && version !== TRANSCRIPT_SEARCH_SCHEMA_VERSION) {
+      throw new Error("transcript_search_install_staging_schema_mismatch");
+    }
+    initializeTranscriptSearchDb(db, 60_000);
+    db.prepare(
+      "UPDATE metadata SET value = '1' WHERE key = 'rebuild_required'",
+    ).run();
+    await syncTranscriptSearchIndex(db, rootOverride);
+    db.prepare(
+      "UPDATE metadata SET value = '0' WHERE key = 'rebuild_required'",
+    ).run();
+    const fileCountRow = db
+      .prepare("SELECT COUNT(*) AS count FROM file_state")
+      .get() as { count?: number } | undefined;
+    const entryCountRow = db
+      .prepare("SELECT COUNT(*) AS count FROM entries")
+      .get() as { count?: number } | undefined;
+    db.pragma("wal_checkpoint(TRUNCATE)");
+    db.pragma("journal_mode = DELETE");
+    return {
+      dbPath,
+      fileCount: Number(fileCountRow?.count || 0),
+      entryCount: Number(entryCountRow?.count || 0),
+    };
+  } finally {
+    db.close();
+  }
+}
+
+export async function rebuildTranscriptSearchIndexAtPathForInstall(
+  dbPath: string,
+  rootOverride = "",
+) {
+  for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    fssync.rmSync(candidate, { force: true });
+  }
+  return synchronizeTranscriptSearchIndexAtPathForInstall(dbPath, rootOverride);
 }
 
 export async function repairTranscriptSearchIndex(

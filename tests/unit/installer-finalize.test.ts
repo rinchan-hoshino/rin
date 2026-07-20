@@ -105,6 +105,51 @@ test("managed runtime transition restarts after activation failure", async () =>
   assert.deepEqual(events, ["stop", "mutate", "activate", "restart"]);
 });
 
+test("managed runtime transition rolls back migration before recovery restart", async () => {
+  const events: string[] = [];
+  await assert.rejects(
+    finalize.runManagedRuntimeTransition({
+      stop: async () => events.push("stop"),
+      mutate: async () => {
+        events.push("mutate");
+        return "migrated";
+      },
+      activate: async () => {
+        events.push("activate");
+        throw new Error("activation failed");
+      },
+      recover: async () => events.push("rollback"),
+      restart: async () => events.push("restart"),
+    }),
+    /activation failed/,
+  );
+  assert.deepEqual(events, [
+    "stop",
+    "mutate",
+    "activate",
+    "rollback",
+    "restart",
+  ]);
+});
+
+test("managed runtime transition commits migration after activation", async () => {
+  const events: string[] = [];
+  await finalize.runManagedRuntimeTransition({
+    stop: async () => events.push("stop"),
+    mutate: async () => {
+      events.push("mutate");
+      return "migrated";
+    },
+    activate: async () => {
+      events.push("activate");
+      return "activated";
+    },
+    commit: async () => events.push("commit"),
+    restart: async () => events.push("restart"),
+  });
+  assert.deepEqual(events, ["stop", "mutate", "activate", "commit", "restart"]);
+});
+
 test("managed runtime transition does not loop when restart itself fails", async () => {
   const events: string[] = [];
   await assert.rejects(
