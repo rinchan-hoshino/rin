@@ -301,6 +301,16 @@ test("Rin update notice reads installed release metadata", async () => {
               archiveUrl: "",
             },
           },
+          previousRelease: {
+            release: {
+              channel: "git",
+              version: "abcdef012345",
+              branch: "main",
+              ref: "abcdef0123456789abcdef0123456789abcdef01",
+              sourceLabel: "git branch main @ abcdef012345",
+              archiveUrl: "",
+            },
+          },
         })}\n`,
         "utf8",
       );
@@ -313,6 +323,17 @@ test("Rin update notice reads installed release metadata", async () => {
         sourceLabel: "nightly 1.3.0-nightly.1",
         archiveUrl: "",
       });
+      assert.deepEqual(
+        notices.readInstalledRinReleaseState(dir).previousRelease,
+        {
+          channel: "git",
+          version: "abcdef012345",
+          branch: "main",
+          ref: "abcdef0123456789abcdef0123456789abcdef01",
+          sourceLabel: "git branch main @ abcdef012345",
+          archiveUrl: "",
+        },
+      );
       const notice = await notices.checkForRinUpdateNotice({
         runtimeDir: dir,
         manifest: {
@@ -488,4 +509,339 @@ test("Rin changelog entry comparison handles prerelease and build metadata versi
     notices.comparePackageVersions("1.1.0+abc1234", "1.1.0+def5678"),
     0,
   );
+});
+
+test("Rin semver changelog shows the current release once after a git identity", () => {
+  const entries = [
+    { heading: "1.1.0", content: "stable release" },
+    { heading: "1.0.0", content: "older release" },
+  ];
+
+  assert.deepEqual(
+    notices
+      .getRinStartupChangelogEntries(entries, "abcdef012345", "1.1.0")
+      .map((entry) => entry.content),
+    ["stable release"],
+  );
+  assert.deepEqual(
+    notices
+      .getRinStartupChangelogEntries(entries, "", "1.1.0")
+      .map((entry) => entry.content),
+    [],
+  );
+});
+
+test("Rin git changelog range migrates from the installed previous release", () => {
+  const previousRef = "1111111111111111111111111111111111111111";
+  const currentRef = "2222222222222222222222222222222222222222";
+  const currentRelease = {
+    channel: "git",
+    version: currentRef.slice(0, 12),
+    branch: "main",
+    ref: currentRef,
+    sourceLabel: `git branch main @ ${currentRef.slice(0, 12)}`,
+    archiveUrl: "",
+  };
+  const previousRelease = {
+    channel: "git",
+    version: previousRef.slice(0, 12),
+    branch: "main",
+    ref: previousRef,
+    sourceLabel: `git branch main @ ${previousRef.slice(0, 12)}`,
+    archiveUrl: "",
+  };
+
+  assert.deepEqual(
+    notices.resolveRinGitChangelogRange({
+      lastVersion: "0.80.2",
+      currentRelease,
+      previousRelease,
+    }),
+    { baseRef: previousRef, currentRef },
+  );
+  assert.deepEqual(
+    notices.resolveRinGitChangelogRange({
+      lastVersion: "0.80.2",
+      currentRelease,
+      previousRelease: {
+        ...previousRelease,
+        channel: "stable",
+        version: "0.80.2",
+      },
+    }),
+    { baseRef: previousRef, currentRef },
+  );
+  assert.deepEqual(
+    notices.resolveRinGitChangelogRange({
+      lastVersion: "",
+      currentRelease,
+      previousRelease,
+    }),
+    { currentRef },
+  );
+  assert.equal(
+    notices.resolveRinGitChangelogRange({
+      lastVersion: currentRef.slice(0, 12),
+      currentRelease,
+      previousRelease,
+    }),
+    undefined,
+  );
+});
+
+test("Rin git changelog compare returns a bounded commit list", async () => {
+  const baseRef = "1111111111111111111111111111111111111111";
+  const currentRef = "2222222222222222222222222222222222222222";
+  const requestedUrls = [];
+  const commits = Array.from({ length: 22 }, (_, index) => ({
+    sha: `${String(index + 1).padStart(40, "0")}`,
+    html_url: `https://github.com/rinchan-hoshino/rin/commit/${index + 1}`,
+    commit: { message: `fix: commit ${index + 1}\n\nbody` },
+  }));
+
+  const notice = await notices.fetchRinGitChangelogNotice({
+    baseRef,
+    currentRef,
+    repoUrl: "https://github.com/rinchan-hoshino/rin.git",
+    fetch: async (url) => {
+      requestedUrls.push(String(url));
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            status: "ahead",
+            total_commits: commits.length,
+            html_url: `https://github.com/rinchan-hoshino/rin/compare/${baseRef}...${currentRef}`,
+            commits,
+          };
+        },
+      };
+    },
+  });
+
+  assert.equal(requestedUrls.length, 1);
+  assert.match(
+    requestedUrls[0],
+    /api\.github\.com\/repos\/rinchan-hoshino\/rin\/compare\//,
+  );
+  assert.equal(notice.totalCommits, 22);
+  assert.equal(notice.commits.length, 20);
+  assert.deepEqual(notice.commits[0], {
+    sha: "0000000",
+    subject: "fix: commit 1",
+    url: "https://github.com/rinchan-hoshino/rin/commit/1",
+  });
+  assert.match(notice.compareUrl, /\/compare\/1111111.*\.\.\.2222222/);
+});
+
+test("Rin git changelog rejects malformed compare commit metadata", async () => {
+  const baseRef = "1111111111111111111111111111111111111111";
+  const currentRef = "2222222222222222222222222222222222222222";
+  const validCommit = {
+    sha: currentRef,
+    commit: { message: "fix: valid commit" },
+  };
+  const payloads = [
+    { total_commits: 1 },
+    { total_commits: null, commits: [validCommit] },
+    { total_commits: "1", commits: [validCommit] },
+    { total_commits: true, commits: [validCommit] },
+    { total_commits: 0, commits: [validCommit] },
+    {
+      total_commits: 1,
+      commits: [{ sha: "not-a-ref", commit: { message: "fix: invalid" } }],
+    },
+  ];
+
+  for (const payload of payloads) {
+    await assert.rejects(
+      notices.fetchRinGitChangelogNotice({
+        baseRef,
+        currentRef,
+        repoUrl: "https://github.com/rinchan-hoshino/rin.git",
+        fetch: async () => ({
+          ok: true,
+          status: 200,
+          async json() {
+            return payload;
+          },
+        }),
+      }),
+      /malformed commits/,
+    );
+  }
+});
+
+test("Rin git changelog marks a ref seen only after display succeeds", async () => {
+  const previousRef = "1111111111111111111111111111111111111111";
+  const currentRef = "2222222222222222222222222222222222222222";
+  const currentRelease = {
+    channel: "git",
+    version: currentRef.slice(0, 12),
+    branch: "main",
+    ref: currentRef,
+    sourceLabel: `git branch main @ ${currentRef.slice(0, 12)}`,
+    archiveUrl: "",
+  };
+  const previousRelease = {
+    channel: "git",
+    version: previousRef.slice(0, 12),
+    branch: "main",
+    ref: previousRef,
+    sourceLabel: `git branch main @ ${previousRef.slice(0, 12)}`,
+    archiveUrl: "",
+  };
+  const fetch = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return {
+        status: "ahead",
+        total_commits: 1,
+        commits: [
+          {
+            sha: currentRef,
+            commit: { message: "fix: show git changelog" },
+          },
+        ],
+      };
+    },
+  });
+  const writtenVersions = [];
+
+  await assert.rejects(
+    notices.processRinGitStartupChangelog({
+      lastVersion: "0.80.2",
+      currentRelease,
+      previousRelease,
+      repoUrl: "https://github.com/rinchan-hoshino/rin.git",
+      fetch,
+      showNotice: async () => {
+        throw new Error("render failed");
+      },
+      setLastVersion: (value) => writtenVersions.push(value),
+    }),
+    /render failed/,
+  );
+  assert.deepEqual(writtenVersions, []);
+
+  await notices.processRinGitStartupChangelog({
+    lastVersion: "0.80.2",
+    currentRelease,
+    previousRelease,
+    repoUrl: "https://github.com/rinchan-hoshino/rin.git",
+    fetch,
+    showNotice: async () => false,
+    setLastVersion: (value) => writtenVersions.push(value),
+  });
+  assert.deepEqual(writtenVersions, []);
+
+  let displayedNotice;
+  await notices.processRinGitStartupChangelog({
+    lastVersion: "0.80.2",
+    currentRelease,
+    previousRelease,
+    repoUrl: "https://github.com/rinchan-hoshino/rin.git",
+    fetch,
+    showNotice: async (notice) => {
+      displayedNotice = notice;
+      return true;
+    },
+    setLastVersion: (value) => writtenVersions.push(value),
+  });
+  assert.equal(displayedNotice.commits[0].subject, "fix: show git changelog");
+  assert.deepEqual(writtenVersions, [currentRef]);
+});
+
+test("Rin git changelog keeps an unseen ref after compare failure or offline skip", async () => {
+  const previousRef = "1111111111111111111111111111111111111111";
+  const currentRef = "2222222222222222222222222222222222222222";
+  const options = {
+    lastVersion: previousRef,
+    currentRelease: {
+      channel: "git",
+      version: currentRef.slice(0, 12),
+      branch: "main",
+      ref: currentRef,
+      sourceLabel: `git branch main @ ${currentRef.slice(0, 12)}`,
+      archiveUrl: "",
+    },
+    showNotice: async () => true,
+  };
+  const writtenVersions = [];
+
+  await assert.rejects(
+    notices.processRinGitStartupChangelog({
+      ...options,
+      fetch: async () => ({ ok: false, status: 503 }),
+      setLastVersion: (value) => writtenVersions.push(value),
+    }),
+    /HTTP 503/,
+  );
+  assert.deepEqual(writtenVersions, []);
+
+  await notices.processRinGitStartupChangelog({
+    ...options,
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return { status: "identical", total_commits: 0, commits: [] };
+      },
+    }),
+    setLastVersion: (value) => writtenVersions.push(value),
+  });
+  assert.deepEqual(writtenVersions, []);
+
+  const previousOffline = process.env.RIN_OFFLINE;
+  try {
+    process.env.RIN_OFFLINE = "1";
+    let fetched = false;
+    await notices.processRinGitStartupChangelog({
+      ...options,
+      fetch: async () => {
+        fetched = true;
+        throw new Error("unexpected fetch");
+      },
+      setLastVersion: (value) => writtenVersions.push(value),
+    });
+    assert.equal(fetched, false);
+    assert.deepEqual(writtenVersions, []);
+  } finally {
+    if (previousOffline === undefined) delete process.env.RIN_OFFLINE;
+    else process.env.RIN_OFFLINE = previousOffline;
+  }
+});
+
+test("Rin git changelog initializes fresh installs without a network request", async () => {
+  const currentRef = "2222222222222222222222222222222222222222";
+  let fetched = false;
+  let displayed = false;
+  const writtenVersions = [];
+
+  await notices.processRinGitStartupChangelog({
+    lastVersion: "",
+    currentRelease: {
+      channel: "git",
+      version: currentRef.slice(0, 12),
+      branch: "main",
+      ref: currentRef,
+      sourceLabel: `git branch main @ ${currentRef.slice(0, 12)}`,
+      archiveUrl: "",
+    },
+    fetch: async () => {
+      fetched = true;
+      throw new Error("unexpected fetch");
+    },
+    showNotice: async () => {
+      displayed = true;
+      return true;
+    },
+    setLastVersion: (value) => writtenVersions.push(value),
+  });
+
+  assert.equal(fetched, false);
+  assert.equal(displayed, false);
+  assert.deepEqual(writtenVersions, [currentRef]);
 });

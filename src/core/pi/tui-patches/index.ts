@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 import {
   DynamicBorder,
   FooterComponent,
@@ -32,11 +34,15 @@ import {
 import { sleep } from "../../platform/process.js";
 import {
   checkForRinUpdateNotice,
+  comparePackageVersions,
   getCurrentRinVersion,
-  getNewRinChangelogEntries,
   getRinChangelogUrl,
+  getRinStartupChangelogEntries,
   parsePackageVersion,
+  processRinGitStartupChangelog,
+  readInstalledRinReleaseInfo,
   readRinChangelogEntries,
+  type RinGitChangelogNotice,
   type RinUpdateNotice,
 } from "../../rin-lib/update-notices.js";
 import { formatRuntimeErrorForFrontendDisplay } from "../../rin-lib/user-facing-errors.js";
@@ -574,6 +580,98 @@ function scheduleRinUpdateNotificationWhenReady(instance: any) {
   );
 }
 
+function formatRinGitChangelogNotificationText(notice: RinGitChangelogNotice) {
+  const lines = [
+    `Updated ${notice.baseRef.slice(0, 7)} → ${notice.currentRef.slice(0, 7)} (${notice.totalCommits} commits)`,
+    ...notice.commits.map((commit) => `${commit.sha}  ${commit.subject}`),
+  ];
+  const hiddenCommitCount = Math.max(
+    0,
+    notice.totalCommits - notice.commits.length,
+  );
+  if (hiddenCommitCount > 0) {
+    lines.push(`… and ${hiddenCommitCount} more commits`);
+  }
+  lines.push(`Compare: ${notice.compareUrl}`);
+  return lines.join("\n");
+}
+
+export function showRinGitChangelogNotification(
+  instance: any,
+  notice: RinGitChangelogNotice,
+) {
+  const chatContainer = instance?.chatContainer;
+  if (
+    typeof chatContainer?.addChild !== "function" ||
+    typeof chatContainer?.removeChild !== "function" ||
+    typeof instance?.ui?.requestRender !== "function"
+  ) {
+    return false;
+  }
+  const children = [
+    new Spacer(1),
+    new DynamicBorder(),
+    new Text("What's New", 1, 0),
+    new Spacer(1),
+    new Text(formatRinGitChangelogNotificationText(notice), 1, 0),
+    new DynamicBorder(),
+  ];
+  for (const child of children) chatContainer.addChild(child);
+  const rollback = () => {
+    for (const child of [...children].reverse()) {
+      chatContainer.removeChild(child);
+    }
+  };
+  try {
+    if (instance.ui.requestRender() === false) {
+      rollback();
+      return false;
+    }
+    return true;
+  } catch (error) {
+    rollback();
+    throw error;
+  }
+}
+
+export function canShowRinGitStartupChangelog(instance: any) {
+  const sessionFile = instance?.sessionManager?.getSessionFile?.();
+  if (sessionFile && existsSync(sessionFile)) return false;
+  return (instance?.session?.state?.messages || []).length === 0;
+}
+
+function scheduleRinGitChangelogNotificationWhenReady(instance: any) {
+  void sleep(0)
+    .then(() => showRinGitChangelogNotificationWhenReady(instance))
+    .catch(() => {
+      // Git changelog checks are best-effort and must never block the TUI.
+    });
+}
+
+async function showRinGitChangelogNotificationWhenReady(instance: any) {
+  if (!canShowRinGitStartupChangelog(instance)) return;
+  const settingsManager = instance?.settingsManager;
+  await processRinGitStartupChangelog({
+    lastVersion: settingsManager?.getLastChangelogVersion?.(),
+    showNotice: async (notice) => {
+      if (!canShowRinGitStartupChangelog(instance)) return false;
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (instance?.isInitialized) break;
+        await sleep(50);
+      }
+      if (
+        !instance?.isInitialized ||
+        !canShowRinGitStartupChangelog(instance)
+      ) {
+        return false;
+      }
+      return showRinGitChangelogNotification(instance, notice);
+    },
+    setLastVersion: (version) =>
+      settingsManager?.setLastChangelogVersion?.(version),
+  });
+}
+
 async function showRinUpdateNotificationWhenReady(instance: any) {
   try {
     const notice = await checkForRinUpdateNotice();
@@ -593,17 +691,19 @@ function getRinStartupChangelogForDisplay(instance: any) {
     return undefined;
   }
 
-  const currentVersion = getCurrentRinVersion();
+  const currentRelease = readInstalledRinReleaseInfo();
+  if (currentRelease?.channel === "git") return undefined;
+  const currentVersion = getCurrentRinVersion(undefined, currentRelease);
   if (!parsePackageVersion(currentVersion)) return undefined;
 
   const settingsManager = instance?.settingsManager;
   const lastVersion = settingsManager?.getLastChangelogVersion?.();
-  if (!parsePackageVersion(lastVersion)) {
+  if (!String(lastVersion || "").trim()) {
     settingsManager?.setLastChangelogVersion?.(currentVersion);
     return undefined;
   }
 
-  const entries = getNewRinChangelogEntries(
+  const entries = getRinStartupChangelogEntries(
     readRinChangelogEntries(),
     lastVersion,
     currentVersion,
@@ -611,6 +711,12 @@ function getRinStartupChangelogForDisplay(instance: any) {
   if (entries.length > 0) {
     settingsManager?.setLastChangelogVersion?.(currentVersion);
     return entries.map((entry) => entry.content).join("\n\n");
+  }
+  if (
+    !parsePackageVersion(lastVersion) ||
+    comparePackageVersions(currentVersion, lastVersion) < 0
+  ) {
+    settingsManager?.setLastChangelogVersion?.(currentVersion);
   }
   return undefined;
 }
@@ -1323,6 +1429,7 @@ export async function applyRinTuiOverrides() {
     interactiveModeProto.run = async function runWithRinUpdateNotices() {
       await this.init();
       scheduleRinUpdateNotificationWhenReady(this);
+      scheduleRinGitChangelogNotificationWhenReady(this);
       for (const warning of this.options?.rinStartupWarnings || []) {
         if (warning) this.showWarning(warning);
       }

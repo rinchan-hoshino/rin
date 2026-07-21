@@ -705,6 +705,133 @@ function createResourceChromeInstance() {
   return instance;
 }
 
+test("Rin git changelog notice renders the compared commit range", () => {
+  themeModule.initTheme("dark", false);
+  const chatContainer = new piTuiModule.Container();
+  const renderText = () =>
+    chatContainer.render(100).join("\n").replace(/\s+$/gm, "");
+  let renderRequests = 0;
+  const instance = {
+    chatContainer,
+    ui: {
+      requestRender() {
+        renderRequests += 1;
+      },
+    },
+  };
+
+  const shown = overrides.showRinGitChangelogNotification(instance, {
+    baseRef: "1111111111111111111111111111111111111111",
+    currentRef: "2222222222222222222222222222222222222222",
+    totalCommits: 4,
+    compareUrl:
+      "https://github.com/rinchan-hoshino/rin/compare/1111111...2222222",
+    commits: [
+      { sha: "abcdef0", subject: "fix: first owner-visible change" },
+      { sha: "1234567", subject: "feat: second owner-visible change" },
+    ],
+  });
+
+  const rendered = renderText();
+  assert.equal(shown, true);
+  assert.ok(rendered.includes("What's New"));
+  assert.ok(rendered.includes("Updated 1111111 → 2222222 (4 commits)"));
+  assert.ok(rendered.includes("abcdef0  fix: first owner-visible change"));
+  assert.ok(rendered.includes("1234567  feat: second owner-visible change"));
+  assert.ok(rendered.includes("… and 2 more commits"));
+  assert.ok(rendered.includes("Compare:"));
+  assert.ok(rendered.includes("github.com/rinchan-hoshino/rin/compare"));
+  assert.equal(renderRequests, 1);
+});
+
+test("Rin git changelog notice reports render refusal", () => {
+  const notice = {
+    baseRef: "1111111111111111111111111111111111111111",
+    currentRef: "2222222222222222222222222222222222222222",
+    totalCommits: 1,
+    compareUrl:
+      "https://github.com/rinchan-hoshino/rin/compare/1111111...2222222",
+    commits: [{ sha: "2222222", subject: "fix: owner-visible change" }],
+  };
+
+  const missingRendererContainer = new piTuiModule.Container();
+  assert.equal(
+    overrides.showRinGitChangelogNotification(
+      { chatContainer: missingRendererContainer },
+      notice,
+    ),
+    false,
+  );
+  assert.equal(missingRendererContainer.children.length, 0);
+
+  const refusedContainer = new piTuiModule.Container();
+  assert.equal(
+    overrides.showRinGitChangelogNotification(
+      {
+        chatContainer: refusedContainer,
+        ui: { requestRender: () => false },
+      },
+      notice,
+    ),
+    false,
+  );
+  assert.equal(refusedContainer.children.length, 0);
+
+  const failedContainer = new piTuiModule.Container();
+  assert.throws(
+    () =>
+      overrides.showRinGitChangelogNotification(
+        {
+          chatContainer: failedContainer,
+          ui: {
+            requestRender() {
+              throw new Error("render failed");
+            },
+          },
+        },
+        notice,
+      ),
+    /render failed/,
+  );
+  assert.equal(failedContainer.children.length, 0);
+});
+
+test("Rin git startup changelog is limited to new empty sessions", async () => {
+  assert.equal(
+    overrides.canShowRinGitStartupChangelog({
+      session: { state: { messages: [] } },
+    }),
+    true,
+  );
+  assert.equal(
+    overrides.canShowRinGitStartupChangelog({
+      session: { state: { messages: [{ role: "user" }] } },
+    }),
+    false,
+  );
+
+  await withTempDir(async (dir) => {
+    const sessionFile = path.join(dir, "resumed.jsonl");
+    await fs.writeFile(sessionFile, "{}\n", "utf8");
+    assert.equal(
+      overrides.canShowRinGitStartupChangelog({
+        session: { state: { messages: [] } },
+        sessionManager: { getSessionFile: () => sessionFile },
+      }),
+      false,
+    );
+    assert.equal(
+      overrides.canShowRinGitStartupChangelog({
+        session: { state: { messages: [] } },
+        sessionManager: {
+          getSessionFile: () => path.join(dir, "fresh.jsonl"),
+        },
+      }),
+      true,
+    );
+  });
+});
+
 test("Rin update notice is transient when chat redraw clears startup chrome", () => {
   themeModule.initTheme("dark", false);
   const chatContainer = new piTuiModule.Container();
@@ -1026,9 +1153,45 @@ test("update overrides replace startup update path and keep single changelog ver
 
       assert.match(changelog, /beta fix/);
       assert.equal(writtenVersion, "1.1.0-beta.20260519+abc1234");
+
+      const currentRef = "2222222222222222222222222222222222222222";
+      await fs.writeFile(
+        path.join(dir, "installer.json"),
+        `${JSON.stringify({
+          currentRelease: {
+            release: {
+              channel: "git",
+              version: currentRef.slice(0, 12),
+              ref: currentRef,
+              branch: "main",
+            },
+          },
+        })}\n`,
+        "utf8",
+      );
+      writtenVersion = undefined;
+      const gitChangelog =
+        codingAgentModule.InteractiveMode.prototype.getChangelogForDisplay.call(
+          {
+            settingsManager: {
+              getLastChangelogVersion: () => currentRef,
+              setLastChangelogVersion: (version) => {
+                writtenVersion = version;
+              },
+            },
+            session: { state: { messages: [] } },
+          },
+        );
+      assert.equal(gitChangelog, undefined);
+      assert.equal(writtenVersion, undefined);
+
       assert.match(
         String(codingAgentModule.InteractiveMode.prototype.run),
         /scheduleRinUpdateNotificationWhenReady/,
+      );
+      assert.match(
+        String(codingAgentModule.InteractiveMode.prototype.run),
+        /scheduleRinGitChangelogNotificationWhenReady/,
       );
     } finally {
       if (previousRinDir === undefined) delete process.env.RIN_DIR;

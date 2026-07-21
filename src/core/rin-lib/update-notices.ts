@@ -3,6 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import {
+  createRinHttpTransport,
+  discardRinHttpResponseBody,
+  type RinHttpFetch,
+} from "../http/transport.js";
 import { safeString } from "../text-utils.js";
 import { getChangelogPath, parseChangelog } from "./changelog.js";
 import { resolveRuntimeProfile } from "./profile.js";
@@ -38,6 +43,41 @@ export type RinUpdateNotice = {
 export type RinChangelogEntry = {
   heading: string;
   content: string;
+};
+
+export type InstalledRinReleaseState = {
+  currentRelease?: InstalledReleaseInfo;
+  previousRelease?: InstalledReleaseInfo;
+};
+
+export type RinGitChangelogRange = {
+  currentRef: string;
+  baseRef?: string;
+};
+
+export type RinGitCommit = {
+  sha: string;
+  subject: string;
+  url?: string;
+};
+
+export type RinGitChangelogNotice = {
+  baseRef: string;
+  currentRef: string;
+  totalCommits: number;
+  commits: RinGitCommit[];
+  compareUrl: string;
+};
+
+export type RinGitChangelogProcessOptions = {
+  lastVersion?: unknown;
+  currentRelease?: InstalledReleaseInfo;
+  previousRelease?: InstalledReleaseInfo;
+  runtimeDir?: string;
+  repoUrl?: string;
+  fetch?: RinHttpFetch;
+  showNotice: (notice: RinGitChangelogNotice) => Promise<boolean> | boolean;
+  setLastVersion: (version: string) => Promise<void> | void;
 };
 
 const RIN_RELEASE_CHANNELS: readonly ReleaseChannel[] = [
@@ -156,19 +196,30 @@ function normalizeInstalledReleaseInfo(
   };
 }
 
-export function readInstalledRinReleaseInfo(
+export function readInstalledRinReleaseState(
   runtimeDir = resolveRuntimeProfile().agentDir,
-): InstalledReleaseInfo | undefined {
+): InstalledRinReleaseState {
   try {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(runtimeDir, "installer.json"), "utf8"),
     ) as Record<string, unknown>;
-    return normalizeInstalledReleaseInfo(
-      (manifest.currentRelease as any)?.release,
-    );
+    return {
+      currentRelease: normalizeInstalledReleaseInfo(
+        (manifest.currentRelease as any)?.release,
+      ),
+      previousRelease: normalizeInstalledReleaseInfo(
+        (manifest.previousRelease as any)?.release,
+      ),
+    };
   } catch {
-    return undefined;
+    return {};
   }
+}
+
+export function readInstalledRinReleaseInfo(
+  runtimeDir = resolveRuntimeProfile().agentDir,
+): InstalledReleaseInfo | undefined {
+  return readInstalledRinReleaseState(runtimeDir).currentRelease;
 }
 
 function currentReleaseInfoForOptions(
@@ -264,6 +315,203 @@ export function getNewRinChangelogEntries(
       comparePackageVersions(entryVersion, current) <= 0
     );
   });
+}
+
+export function getRinStartupChangelogEntries(
+  entries: readonly RinChangelogEntry[],
+  lastVersion: unknown,
+  currentVersion: unknown,
+) {
+  if (!trim(lastVersion) || !parsePackageVersion(currentVersion)) return [];
+  if (
+    parsePackageVersion(lastVersion) &&
+    comparePackageVersions(currentVersion, lastVersion) > 0
+  ) {
+    return getNewRinChangelogEntries(entries, lastVersion, currentVersion);
+  }
+  if (
+    parsePackageVersion(lastVersion) &&
+    comparePackageVersions(currentVersion, lastVersion) === 0
+  ) {
+    return [];
+  }
+  return entries.filter((entry) => {
+    const entryVersion = versionFromRinChangelogHeading(entry.heading);
+    return (
+      entryVersion !== undefined &&
+      comparePackageVersions(entryVersion, currentVersion) === 0
+    );
+  });
+}
+
+function concreteReleaseRef(release?: InstalledReleaseInfo) {
+  const ref = trim(release?.ref || release?.version);
+  return isGitHash(ref) ? ref : "";
+}
+
+function currentGitRef(currentRelease?: InstalledReleaseInfo) {
+  return currentRelease?.channel === "git"
+    ? concreteReleaseRef(currentRelease)
+    : "";
+}
+
+export function resolveRinGitChangelogRange(options: {
+  lastVersion?: unknown;
+  currentRelease?: InstalledReleaseInfo;
+  previousRelease?: InstalledReleaseInfo;
+}): RinGitChangelogRange | undefined {
+  const currentRef = currentGitRef(options.currentRelease);
+  if (!currentRef) return undefined;
+  const lastVersion = trim(options.lastVersion);
+  if (!lastVersion) return { currentRef };
+  if (gitRefsMatch(lastVersion, currentRef)) return undefined;
+
+  const previousRef = concreteReleaseRef(options.previousRelease);
+  const baseRef = isGitHash(lastVersion)
+    ? lastVersion
+    : previousRef && !gitRefsMatch(previousRef, currentRef)
+      ? previousRef
+      : "";
+  return baseRef ? { baseRef, currentRef } : { currentRef };
+}
+
+function githubRepoPath(repoUrl: unknown) {
+  const normalized = trim(repoUrl)
+    .replace(/\.git$/i, "")
+    .replace(/\/+$/g, "");
+  const sshMatch = /^git@github\.com:([^/]+)\/([^/]+)$/i.exec(normalized);
+  if (sshMatch?.[1] && sshMatch[2]) {
+    return [sshMatch[1], sshMatch[2]].map(encodeURIComponent).join("/");
+  }
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.hostname.toLowerCase() !== "github.com") return "";
+    const [owner, repo] = parsed.pathname.split("/").filter(Boolean);
+    if (!owner || !repo) return "";
+    return [owner, repo].map(encodeURIComponent).join("/");
+  } catch {
+    return "";
+  }
+}
+
+function commitSubject(value: unknown) {
+  return trim(value).split(/\r?\n/, 1)[0]?.replace(/\s+/g, " ") || "";
+}
+
+export async function fetchRinGitChangelogNotice(options: {
+  baseRef: string;
+  currentRef: string;
+  repoUrl?: string;
+  fetch?: RinHttpFetch;
+}): Promise<RinGitChangelogNotice> {
+  const { getReleaseRepoUrl, readBundledReleaseManifest } =
+    await import("./release.js");
+  const repoUrl = trim(
+    options.repoUrl || getReleaseRepoUrl(readBundledReleaseManifest()),
+  );
+  const repoPath = githubRepoPath(repoUrl);
+  if (!repoPath)
+    throw new Error("Rin git changelog requires a GitHub repo URL");
+
+  const baseRef = trim(options.baseRef);
+  const currentRef = trim(options.currentRef);
+  if (!isGitHash(baseRef) || !isGitHash(currentRef)) {
+    throw new Error("Rin git changelog requires concrete commit refs");
+  }
+
+  const apiUrl = `https://api.github.com/repos/${repoPath}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(currentRef)}`;
+  const compareUrl = `https://github.com/${repoPath}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(currentRef)}`;
+  const transport = options.fetch ? undefined : createRinHttpTransport();
+  const fetch = options.fetch || transport?.fetch;
+  if (!fetch) throw new Error("Rin git changelog HTTP transport unavailable");
+
+  let response: any;
+  try {
+    response = await fetch(apiUrl, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "Rin-TUI",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response?.ok) {
+      throw new Error(
+        `Rin git changelog compare failed with HTTP ${response?.status || "unknown"}`,
+      );
+    }
+    const payload = (await response.json()) as Record<string, any>;
+    if (!Array.isArray(payload.commits)) {
+      throw new Error("Rin git changelog compare returned malformed commits");
+    }
+    const rawCommits = payload.commits;
+    const parsedCommits = rawCommits.flatMap((entry: any) => {
+      const sha = trim(entry?.sha);
+      const subject = commitSubject(entry?.commit?.message);
+      if (!isGitHash(sha) || !subject) return [];
+      const url = trim(entry?.html_url);
+      return [
+        {
+          sha: sha.slice(0, 7),
+          subject,
+          ...(url ? { url } : {}),
+        },
+      ];
+    });
+    const totalCommits = payload.total_commits;
+    if (
+      parsedCommits.length !== rawCommits.length ||
+      typeof totalCommits !== "number" ||
+      !Number.isSafeInteger(totalCommits) ||
+      totalCommits < rawCommits.length
+    ) {
+      throw new Error("Rin git changelog compare returned malformed commits");
+    }
+    const commits = parsedCommits.slice(0, 20);
+    return {
+      baseRef,
+      currentRef,
+      totalCommits,
+      commits,
+      compareUrl: trim(payload.html_url) || compareUrl,
+    };
+  } finally {
+    await discardRinHttpResponseBody(response);
+    await transport?.close();
+  }
+}
+
+export async function processRinGitStartupChangelog(
+  options: RinGitChangelogProcessOptions,
+) {
+  const installedState =
+    options.currentRelease || options.previousRelease
+      ? {
+          currentRelease: options.currentRelease,
+          previousRelease: options.previousRelease,
+        }
+      : readInstalledRinReleaseState(options.runtimeDir);
+  const range = resolveRinGitChangelogRange({
+    lastVersion: options.lastVersion,
+    ...installedState,
+  });
+  if (!range) return;
+  if (!range.baseRef) {
+    await options.setLastVersion(range.currentRef);
+    return;
+  }
+  if (process.env.RIN_SKIP_VERSION_CHECK || process.env.RIN_OFFLINE) return;
+
+  const notice = await fetchRinGitChangelogNotice({
+    baseRef: range.baseRef,
+    currentRef: range.currentRef,
+    repoUrl: options.repoUrl,
+    fetch: options.fetch,
+  });
+  if (notice.commits.length === 0) return;
+  const shown = await options.showNotice(notice);
+  if (shown !== true) return;
+  await options.setLastVersion(range.currentRef);
 }
 
 async function latestGitRefForBranch(
