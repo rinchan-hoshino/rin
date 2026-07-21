@@ -498,6 +498,941 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("restart recovery restores persisted frontend working visibility during a resumed tool phase", async () => {
+  const dir = await makeTempDir("rin-worker-pool-working-recovery-");
+  const workerPath = path.join(dir, "worker-source");
+  const logPath = path.join(dir, "commands.log");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+import process from "node:process";
+const logPath = ${JSON.stringify(logPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(logPath, command.type + "\\n");
+    if (command.type === "emit_working_false") {
+      process.stdout.write(JSON.stringify({
+        type: "extension_ui_request",
+        method: "setWorkingVisible",
+        visible: false,
+      }) + "\\n");
+    }
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: command.type,
+      success: true,
+      data: command.type === "get_state" ? {
+        sessionFile,
+        sessionId: "working-recovery",
+        turnActive: false,
+        isStreaming: false,
+        workingVisible: false,
+        interruptedTurnResumable: true,
+      } : { resumed: true },
+    }) + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "chat-inbox-working",
+    frontendOwner: true,
+    workingVisible: true,
+  });
+
+  await waitForCommandLogPrefix(
+    logPath,
+    ["get_state", "resume_interrupted_turn"],
+    1000,
+  );
+  const worker = await pool.selectSession(connection, { sessionFile });
+  assert.ok(worker);
+  const state = await pool.sendInternalCommand(worker, { type: "get_state" });
+
+  assert.equal(state.data?.workingVisible, true);
+
+  await pool.sendInternalCommand(worker, { type: "emit_working_false" });
+  const clearedState = await pool.sendInternalCommand(worker, {
+    type: "get_state",
+  });
+  const persistedState = JSON.parse(await fs.readFile(statePath, "utf8"));
+
+  assert.equal(clearedState.data?.workingVisible, false);
+  assert.equal(persistedState.workingVisibilities, undefined);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("restart recovery accepts a newer authoritative hidden visibility registration", async () => {
+  const dir = await makeTempDir("rin-worker-pool-working-hidden-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    `
+import process from "node:process";
+const sessionFile = ${JSON.stringify(sessionFile)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    const response = JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: command.type,
+      success: true,
+      data: command.type === "get_state" ? {
+        sessionFile,
+        sessionId: "working-hidden",
+        turnActive: false,
+        isStreaming: false,
+        workingVisible: command.scenario === "stale",
+        interruptedTurnResumable: true,
+      } : { resumed: true },
+    }) + "\\n";
+    if (command.scenario === "stale") {
+      setTimeout(() => process.stdout.write(response), 30);
+    } else {
+      process.stdout.write(response);
+    }
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = await pool.selectSession(connection, { sessionFile });
+  assert.ok(worker);
+
+  await pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "chat-inbox-hidden",
+    frontendOwner: true,
+    workingVisible: true,
+  });
+  const visibleState = await pool.sendInternalCommand(worker, {
+    type: "get_state",
+  });
+  assert.equal(visibleState.data?.workingVisible, true);
+
+  const staleProbe = pool.sendInternalCommand(worker, {
+    type: "get_state",
+    scenario: "stale",
+  });
+  await pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "chat-inbox-hidden",
+    frontendOwner: true,
+  });
+
+  const staleState = await staleProbe;
+  const state = await pool.sendInternalCommand(worker, { type: "get_state" });
+  const persistedState = JSON.parse(
+    await fs.readFile(
+      path.join(dir, "data", "core", "workers", "running-workers.json"),
+      "utf8",
+    ),
+  );
+
+  assert.equal(staleState.data?.workingVisible, false);
+  assert.equal(state.data?.workingVisible, false);
+  assert.equal(persistedState.workingVisibilities, undefined);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("restart recovery keeps a pre-registration replacement hidden event", async () => {
+  const dir = await makeTempDir("rin-worker-pool-working-pre-hidden-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    `
+import process from "node:process";
+const sessionFile = ${JSON.stringify(sessionFile)};
+process.stdout.write(JSON.stringify({
+  type: "extension_ui_request",
+  method: "setWorkingVisible",
+  visible: false,
+}) + "\\n");
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: command.type,
+      success: true,
+      data: command.type === "get_state" ? {
+        sessionFile,
+        sessionId: "working-pre-hidden",
+        turnActive: false,
+        isStreaming: false,
+        workingVisible: false,
+        interruptedTurnResumable: true,
+      } : { resumed: true },
+    }) + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = await pool.selectSession(connection, { sessionFile });
+  assert.ok(worker);
+  await sleep(20);
+
+  await pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "chat-inbox-pre-hidden",
+    frontendOwner: true,
+    workingVisible: true,
+  });
+  const state = await pool.sendInternalCommand(worker, { type: "get_state" });
+  const persistedState = JSON.parse(await fs.readFile(statePath, "utf8"));
+
+  assert.equal(state.data?.workingVisible, false);
+  assert.equal(persistedState.workingVisibilities, undefined);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("restart recovery rejects working visibility without frontend ownership", async () => {
+  for (const active of [false, true]) {
+    const dir = await makeTempDir(
+      `rin-worker-pool-working-no-owner-${active ? "active" : "inactive"}-`,
+    );
+    const workerPath = path.join(dir, "worker-source");
+    const sessionFile = path.join(dir, "session.jsonl");
+    const statePath = path.join(
+      dir,
+      "data",
+      "core",
+      "workers",
+      "running-workers.json",
+    );
+    await fs.writeFile(
+      workerPath,
+      `
+import process from "node:process";
+const sessionFile = ${JSON.stringify(sessionFile)};
+const active = ${JSON.stringify(active)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    if (active && command.type === "get_state") {
+      process.stdout.write(JSON.stringify({
+        type: "rpc_turn_event",
+        event: "start",
+        requestTag: "chat-inbox-no-owner",
+        turnGeneration: 1,
+        sessionFile,
+        sessionId: "working-no-owner",
+      }) + "\\n");
+    }
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: command.type,
+      success: true,
+      data: command.type === "resume_interrupted_turn" ? { resumed: true } : {
+        sessionFile,
+        sessionId: "working-no-owner",
+        requestTag: "chat-inbox-no-owner",
+        turnGeneration: 1,
+        turnActive: active,
+        isStreaming: active,
+        workingVisible: true,
+        interruptedTurnResumable: true,
+      },
+    }) + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+    );
+
+    const connection = {
+      socket: { destroyed: false, write() {} },
+      clientBuffer: "",
+    };
+    const pool = new WorkerPool({
+      workerPath,
+      cwd: dir,
+      agentDir: dir,
+      gcIdleMs: 5000,
+    });
+    await pool.continueInterruptedTurnSessionWorker({
+      sessionFile,
+      source: "daemon-restart",
+      requestTag: "chat-inbox-no-owner",
+      frontendOwner: false,
+      workingVisible: true,
+    });
+
+    const worker = await pool.selectSession(connection, { sessionFile });
+    assert.ok(worker);
+    const state = await pool.sendInternalCommand(worker, { type: "get_state" });
+    const persistedState = JSON.parse(await fs.readFile(statePath, "utf8"));
+
+    assert.equal(state.data?.workingVisible, false, String(active));
+    assert.equal(persistedState.workingVisibilities, undefined, String(active));
+
+    pool.destroyAll();
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("restart recovery rejects persisted working visibility for a mismatched session", async () => {
+  const dir = await makeTempDir("rin-worker-pool-working-mismatch-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const otherSessionFile = path.join(dir, "other-session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    `
+import process from "node:process";
+const otherSessionFile = ${JSON.stringify(otherSessionFile)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: command.type,
+      success: true,
+      data: command.type === "get_state" ? {
+        sessionFile: otherSessionFile,
+        sessionId: "working-mismatch",
+        turnActive: false,
+        isStreaming: false,
+        workingVisible: false,
+        interruptedTurnResumable: true,
+      } : { resumed: true },
+    }) + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = await pool.selectSession(connection, { sessionFile });
+  assert.ok(worker);
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "chat-inbox-mismatch",
+    frontendOwner: true,
+    workingVisible: true,
+  });
+
+  await sleep(100);
+  const state = await pool.sendInternalCommand(worker, { type: "get_state" });
+
+  assert.equal(state.data?.workingVisible, false);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("restart recovery rejects working snapshots from an unowned active turn", async () => {
+  const dir = await makeTempDir("rin-worker-pool-working-unowned-active-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    `
+import process from "node:process";
+const sessionFile = ${JSON.stringify(sessionFile)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: command.type,
+      success: true,
+      data: {
+        sessionFile,
+        sessionId: "working-unowned-active",
+        requestTag: "different-owner",
+        turnGeneration: 99,
+        turnActive: true,
+        isStreaming: true,
+        workingVisible: true,
+        interruptedTurnResumable: true,
+      },
+    }) + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "chat-inbox-owned-active",
+    frontendOwner: true,
+    workingVisible: true,
+  });
+
+  await sleep(100);
+  const worker = await pool.selectSession(connection, { sessionFile });
+  assert.ok(worker);
+  const state = await pool.sendInternalCommand(worker, { type: "get_state" });
+  const persistedState = JSON.parse(await fs.readFile(statePath, "utf8"));
+
+  assert.equal(state.data?.workingVisible, false);
+  assert.equal(persistedState.workingVisibilities, undefined);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("restart recovery keeps a newer working event over a stale settled probe", async () => {
+  const dir = await makeTempDir("rin-worker-pool-working-stale-probe-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    `
+import process from "node:process";
+const sessionFile = ${JSON.stringify(sessionFile)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    process.stdout.write(JSON.stringify({
+      type: "extension_ui_request",
+      method: "setWorkingVisible",
+      visible: true,
+    }) + "\\n");
+    setTimeout(() => {
+      process.stdout.write(JSON.stringify({
+        id: command.id,
+        type: "response",
+        command: command.type,
+        success: true,
+        data: {
+          sessionFile,
+          sessionId: "working-stale-probe",
+          turnActive: false,
+          isStreaming: false,
+          workingVisible: false,
+          interruptedTurnResumable: false,
+        },
+      }) + "\\n");
+    }, 20);
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "chat-inbox-stale-probe",
+    frontendOwner: true,
+    workingVisible: true,
+  });
+
+  await sleep(100);
+  const worker = await pool.selectSession(connection, { sessionFile });
+  assert.ok(worker);
+  const state = await pool.sendInternalCommand(worker, { type: "get_state" });
+  const persistedState = JSON.parse(await fs.readFile(statePath, "utf8"));
+
+  assert.equal(state.data?.workingVisible, true);
+  assert.deepEqual(persistedState.workingVisibilities, {
+    [sessionFile]: true,
+  });
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("restart recovery does not reapply intent after a newer hidden event", async () => {
+  const dir = await makeTempDir("rin-worker-pool-working-hidden-probe-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    `
+import process from "node:process";
+const sessionFile = ${JSON.stringify(sessionFile)};
+let buffer = "";
+let commandCount = 0;
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    commandCount += 1;
+    if (commandCount === 1) {
+      process.stdout.write(JSON.stringify({
+        type: "extension_ui_request",
+        method: "setWorkingVisible",
+        visible: false,
+      }) + "\\n");
+    }
+    setTimeout(() => {
+      process.stdout.write(JSON.stringify({
+        id: command.id,
+        type: "response",
+        command: command.type,
+        success: true,
+        data: command.type === "resume_interrupted_turn" ? { resumed: true } : {
+          sessionFile,
+          sessionId: "working-hidden-probe",
+          turnActive: false,
+          isStreaming: false,
+          workingVisible: commandCount === 1,
+          interruptedTurnResumable: true,
+        },
+      }) + "\\n");
+    }, 20);
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "chat-inbox-hidden-probe",
+    frontendOwner: true,
+    workingVisible: true,
+  });
+
+  await sleep(300);
+  const worker = await pool.selectSession(connection, { sessionFile });
+  assert.ok(worker);
+  const state = await pool.sendInternalCommand(worker, { type: "get_state" });
+  const persistedState = JSON.parse(await fs.readFile(statePath, "utf8"));
+
+  assert.equal(state.data?.workingVisible, false);
+  assert.equal(persistedState.workingVisibilities, undefined);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("replacement worker working events supersede stale get_state visibility snapshots", async () => {
+  const dir = await makeTempDir("rin-worker-pool-working-epoch-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    `
+import process from "node:process";
+const sessionFile = ${JSON.stringify(sessionFile)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    const eventVisible = command.scenario === "event-visible";
+    process.stdout.write(JSON.stringify({ type: "agent_start" }) + "\\n");
+    process.stdout.write(JSON.stringify({
+      type: "extension_ui_request",
+      method: "setWorkingVisible",
+      visible: eventVisible,
+    }) + "\\n");
+    setTimeout(() => {
+      process.stdout.write(JSON.stringify({
+        id: command.id,
+        type: "response",
+        command: command.type,
+        success: true,
+        data: {
+          sessionFile,
+          sessionId: "working-epoch",
+          turnActive: true,
+          isStreaming: true,
+          workingVisible: !eventVisible,
+          interruptedTurnResumable: true,
+        },
+      }) + "\\n");
+    }, 20);
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = await pool.selectSession(connection, { sessionFile });
+  assert.ok(worker);
+  worker.activeLifecycleRequestTag = "chat-inbox-working-epoch";
+  worker.activeLifecycleSelector = { sessionFile };
+  worker.activeLifecycleFrontendOwner = true;
+
+  const visibleState = await pool.sendInternalCommand(worker, {
+    type: "get_state",
+    scenario: "event-visible",
+  });
+  const persistedVisible = JSON.parse(await fs.readFile(statePath, "utf8"));
+  assert.equal(visibleState.data?.workingVisible, true);
+  assert.deepEqual(persistedVisible.workingVisibilities, {
+    [sessionFile]: true,
+  });
+
+  const hiddenState = await pool.sendInternalCommand(worker, {
+    type: "get_state",
+    scenario: "event-hidden",
+  });
+  const persistedHidden = JSON.parse(await fs.readFile(statePath, "utf8"));
+  assert.equal(hiddenState.data?.workingVisible, false);
+  assert.equal(persistedHidden.workingVisibilities, undefined);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("unowned active snapshots cannot create working visibility", async () => {
+  const dir = await makeTempDir("rin-worker-pool-working-unowned-snapshot-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    `
+import process from "node:process";
+const sessionFile = ${JSON.stringify(sessionFile)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: command.type,
+      success: true,
+      data: {
+        sessionFile,
+        sessionId: "working-unowned-snapshot",
+        requestTag: "unowned",
+        turnGeneration: 1,
+        turnActive: true,
+        isStreaming: true,
+        workingVisible: true,
+        interruptedTurnResumable: true,
+      },
+    }) + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = await pool.selectSession(connection, { sessionFile });
+  assert.ok(worker);
+  const state = await pool.sendInternalCommand(worker, { type: "get_state" });
+  const persistedState = JSON.parse(await fs.readFile(statePath, "utf8"));
+
+  assert.equal(state.data?.workingVisible, false);
+  assert.equal(persistedState.workingVisibilities, undefined);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("restart recovery discards persisted frontend working visibility for a settled turn", async () => {
+  const dir = await makeTempDir("rin-worker-pool-working-settled-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    `
+import process from "node:process";
+const sessionFile = ${JSON.stringify(sessionFile)};
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: "response",
+      command: command.type,
+      success: true,
+      data: {
+        sessionFile,
+        sessionId: "working-settled",
+        turnActive: false,
+        isStreaming: false,
+        workingVisible: true,
+        interruptedTurnResumable: false,
+      },
+    }) + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  pool.continueInterruptedTurnSessionWorker({
+    sessionFile,
+    source: "daemon-restart",
+    requestTag: "chat-inbox-settled",
+    frontendOwner: true,
+    workingVisible: true,
+  });
+
+  await sleep(100);
+  const worker = await pool.selectSession(connection, { sessionFile });
+  assert.ok(worker);
+  const state = await pool.sendInternalCommand(worker, { type: "get_state" });
+
+  assert.equal(state.data?.workingVisible, false);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("restart recovery follows a live Pi run without issuing another resume", async () => {
   const dir = await makeTempDir("rin-worker-pool-live-pi-run-");
   const workerPath = path.join(dir, "worker-source");
@@ -3946,6 +4881,13 @@ process.stdin.on('data', (chunk) => {
     }, 80);
     setTimeout(() => {
       process.stdout.write(JSON.stringify({
+        type: 'extension_ui_request',
+        method: 'setWorkingVisible',
+        visible: true,
+      }) + '\n');
+    }, 100);
+    setTimeout(() => {
+      process.stdout.write(JSON.stringify({
         type: 'rpc_turn_event',
         event: 'complete',
         requestTag: command.requestTag,
@@ -3953,7 +4895,7 @@ process.stdin.on('data', (chunk) => {
         sessionId: 'command-running',
         finalText: 'done',
       }) + '\n');
-    }, 160);
+    }, 260);
   }
 });
 setInterval(() => {}, 1000);
@@ -3996,6 +4938,15 @@ setInterval(() => {}, 1000);
     sessionFiles: [sessionFile],
     requestTags: { [sessionFile]: "tag-1" },
     frontendOwners: { [sessionFile]: true },
+  });
+
+  await sleep(100);
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [sessionFile],
+    requestTags: { [sessionFile]: "tag-1" },
+    frontendOwners: { [sessionFile]: true },
+    workingVisibilities: { [sessionFile]: true },
   });
 
   let terminalState: any;
@@ -5172,6 +6123,342 @@ setInterval(() => {}, 1000);
   assert.equal(payloads[1].error, "rin_session_recovering");
   assert.equal(payloads[2].sessionFile, "/tmp/recovered.jsonl");
   assert.equal(pool.getStatusSnapshot().workerCount, 1);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("worker crash recovery does not overwrite a replacement working event", async () => {
+  const dir = await makeTempDir("rin-worker-pool-working-crash-");
+  const workerPath = path.join(dir, "worker-source");
+  const firstRunMarker = path.join(dir, "first-run.txt");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    String.raw`import fs from 'node:fs';
+const marker = ${JSON.stringify(firstRunMarker)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+const firstRun = !fs.existsSync(marker);
+if (firstRun) {
+  fs.writeFileSync(marker, 'done');
+} else {
+  process.stdout.write(JSON.stringify({
+    type: 'extension_ui_request',
+    method: 'setWorkingVisible',
+    visible: false,
+  }) + '\n');
+}
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    if (firstRun) process.exit(9);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: 'response',
+      command: command.type,
+      success: true,
+      data: command.type === 'get_state' ? {
+        sessionFile,
+        sessionId: 'working-crash',
+        turnActive: false,
+        isStreaming: false,
+        workingVisible: false,
+        interruptedTurnResumable: true,
+      } : { resumed: true },
+    }) + '\n');
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.setWorkerSessionRefs(worker, {
+    sessionFile,
+    sessionId: "working-crash",
+  });
+  worker.turnActive = true;
+  worker.rpcTurnActive = true;
+  worker.activeLifecycleRequestTag = "chat-inbox-working-crash";
+  worker.activeLifecycleSelector = { sessionFile };
+  worker.activeLifecycleFrontendOwner = true;
+  worker.frontendWorkingVisible = true;
+
+  pool.forwardToWorker(connection, worker, {
+    id: "crash-trigger",
+    type: "get_state",
+    sessionFile,
+  });
+
+  for (let index = 0; index < 100; index += 1) {
+    if (writes.some((value) => JSON.parse(value).type === "session_recovered"))
+      break;
+    await sleep(20);
+  }
+  const recovered = await pool.selectSession(connection, { sessionFile });
+  assert.ok(recovered);
+  const state = await pool.sendInternalCommand(recovered, {
+    type: "get_state",
+  });
+  const persistedState = JSON.parse(await fs.readFile(statePath, "utf8"));
+
+  assert.equal(state.data?.workingVisible, false);
+  assert.equal(persistedState.workingVisibilities, undefined);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("worker crash recovery preserves a newer replacement working event", async () => {
+  const dir = await makeTempDir("rin-worker-pool-working-crash-visible-");
+  const workerPath = path.join(dir, "worker-source");
+  const firstRunMarker = path.join(dir, "first-run.txt");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    String.raw`import fs from 'node:fs';
+const marker = ${JSON.stringify(firstRunMarker)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+const firstRun = !fs.existsSync(marker);
+if (firstRun) {
+  fs.writeFileSync(marker, 'done');
+} else {
+  process.stdout.write(JSON.stringify({
+    type: 'extension_ui_request',
+    method: 'setWorkingVisible',
+    visible: true,
+  }) + '\n');
+}
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    if (firstRun) process.exit(9);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: 'response',
+      command: command.type,
+      success: true,
+      data: command.type === 'get_state' ? {
+        sessionFile,
+        sessionId: 'working-crash-visible',
+        turnActive: false,
+        isStreaming: false,
+        workingVisible: false,
+        interruptedTurnResumable: true,
+      } : { resumed: true },
+    }) + '\n');
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.setWorkerSessionRefs(worker, {
+    sessionFile,
+    sessionId: "working-crash-visible",
+  });
+  worker.turnActive = true;
+  worker.rpcTurnActive = true;
+  worker.activeLifecycleRequestTag = "chat-inbox-working-crash-visible";
+  worker.activeLifecycleSelector = { sessionFile };
+  worker.activeLifecycleFrontendOwner = true;
+  worker.frontendWorkingVisible = true;
+
+  pool.forwardToWorker(connection, worker, {
+    id: "crash-trigger",
+    type: "get_state",
+    sessionFile,
+  });
+
+  for (let index = 0; index < 100; index += 1) {
+    if (writes.some((value) => JSON.parse(value).type === "session_recovered"))
+      break;
+    await sleep(20);
+  }
+  const recovered = await pool.selectSession(connection, { sessionFile });
+  assert.ok(recovered);
+  const state = await pool.sendInternalCommand(recovered, {
+    type: "get_state",
+  });
+  const persistedState = JSON.parse(await fs.readFile(statePath, "utf8"));
+
+  assert.equal(state.data?.workingVisible, true);
+  assert.deepEqual(persistedState.workingVisibilities, {
+    [sessionFile]: true,
+  });
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("worker crash recovery rejects persisted working for a settled replacement", async () => {
+  const dir = await makeTempDir("rin-worker-pool-working-crash-settled-");
+  const workerPath = path.join(dir, "worker-source");
+  const firstRunMarker = path.join(dir, "first-run.txt");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(
+    workerPath,
+    String.raw`import fs from 'node:fs';
+const marker = ${JSON.stringify(firstRunMarker)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+const firstRun = !fs.existsSync(marker);
+if (firstRun) fs.writeFileSync(marker, 'done');
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    if (firstRun) process.exit(9);
+    process.stdout.write(JSON.stringify({
+      id: command.id,
+      type: 'response',
+      command: command.type,
+      success: true,
+      data: {
+        sessionFile,
+        sessionId: 'working-crash-settled',
+        turnActive: false,
+        isStreaming: false,
+        workingVisible: true,
+        interruptedTurnResumable: false,
+      },
+    }) + '\n');
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.setWorkerSessionRefs(worker, {
+    sessionFile,
+    sessionId: "working-crash-settled",
+  });
+  worker.turnActive = true;
+  worker.rpcTurnActive = true;
+  worker.activeLifecycleRequestTag = "chat-inbox-working-crash-settled";
+  worker.activeLifecycleSelector = { sessionFile };
+  worker.activeLifecycleFrontendOwner = true;
+  worker.frontendWorkingVisible = true;
+
+  pool.forwardToWorker(connection, worker, {
+    id: "crash-trigger",
+    type: "get_state",
+    sessionFile,
+  });
+
+  for (let index = 0; index < 100; index += 1) {
+    if (writes.some((value) => JSON.parse(value).type === "session_recovered"))
+      break;
+    await sleep(20);
+  }
+  const recovered = await pool.selectSession(connection, { sessionFile });
+  assert.ok(recovered);
+  const state = await pool.sendInternalCommand(recovered, {
+    type: "get_state",
+  });
+  const persistedState = JSON.parse(await fs.readFile(statePath, "utf8"));
+
+  assert.equal(state.data?.workingVisible, false);
+  assert.equal(persistedState.workingVisibilities, undefined);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });

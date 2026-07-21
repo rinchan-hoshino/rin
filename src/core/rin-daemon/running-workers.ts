@@ -11,12 +11,14 @@ type RunningWorkerState = {
   sessionFiles: string[];
   requestTags?: Record<string, string>;
   frontendOwners?: Record<string, boolean>;
+  workingVisibilities?: Record<string, boolean>;
 };
 
 export type RunningWorkerSession = {
   sessionFile: string;
   requestTag?: string;
   frontendOwner?: true;
+  workingVisible?: true;
 };
 
 export function runningWorkersStatePath(agentDir: string) {
@@ -41,10 +43,16 @@ function normalizeState(parsed: any): RunningWorkerState {
   const rawFrontendOwners = hasExplicitFrontendOwners
     ? parsed.frontendOwners
     : {};
+  const rawWorkingVisibilities =
+    parsed?.workingVisibilities &&
+    typeof parsed.workingVisibilities === "object"
+      ? parsed.workingVisibilities
+      : {};
   const seen = new Set<string>();
   const sessionFiles: string[] = [];
   const requestTags: Record<string, string> = {};
   const frontendOwners: Record<string, boolean> = {};
+  const workingVisibilities: Record<string, boolean> = {};
   for (const value of rawSessionFiles) {
     const sessionFile = normalizeSessionFile(value);
     if (!sessionFile || seen.has(sessionFile)) continue;
@@ -62,12 +70,19 @@ function normalizeState(parsed: any): RunningWorkerState {
     ) {
       frontendOwners[sessionFile] = true;
     }
+    if (
+      rawWorkingVisibilities[sessionFile] === true &&
+      frontendOwners[sessionFile] === true
+    ) {
+      workingVisibilities[sessionFile] = true;
+    }
   }
   return {
     schemaVersion: 1,
     sessionFiles,
     ...(Object.keys(requestTags).length ? { requestTags } : {}),
     ...(Object.keys(frontendOwners).length ? { frontendOwners } : {}),
+    ...(Object.keys(workingVisibilities).length ? { workingVisibilities } : {}),
   };
 }
 
@@ -111,6 +126,9 @@ export function listRunningWorkerSessions(agentDir: string) {
     ...(state.frontendOwners?.[sessionFile]
       ? { frontendOwner: true as const }
       : {}),
+    ...(state.workingVisibilities?.[sessionFile]
+      ? { workingVisible: true as const }
+      : {}),
   }));
 }
 
@@ -124,6 +142,7 @@ export function setRunningWorkerSession(
   running: boolean,
   requestTag?: string,
   frontendOwner = false,
+  workingVisible = false,
 ) {
   if (!agentDir || !sessionFile) return;
   const filePath = runningWorkersStatePath(agentDir);
@@ -136,6 +155,7 @@ export function setRunningWorkerSession(
     : [...state.sessionFiles, normalized];
   const requestTags = { ...(state.requestTags || {}) };
   const frontendOwners = { ...(state.frontendOwners || {}) };
+  const workingVisibilities = { ...(state.workingVisibilities || {}) };
   if (running) {
     if (typeof requestTag === "string" && requestTag.length > 0) {
       requestTags[normalized] = requestTag;
@@ -151,9 +171,15 @@ export function setRunningWorkerSession(
     } else {
       delete frontendOwners[normalized];
     }
+    if (workingVisible && frontendOwner) {
+      workingVisibilities[normalized] = true;
+    } else {
+      delete workingVisibilities[normalized];
+    }
   } else {
     delete requestTags[normalized];
     delete frontendOwners[normalized];
+    delete workingVisibilities[normalized];
   }
   const nextState: RunningWorkerState = {
     schemaVersion: 1,
@@ -162,6 +188,7 @@ export function setRunningWorkerSession(
       : sessionFiles.filter((entry) => entry !== normalized),
     ...(Object.keys(requestTags).length ? { requestTags } : {}),
     ...(Object.keys(frontendOwners).length ? { frontendOwners } : {}),
+    ...(Object.keys(workingVisibilities).length ? { workingVisibilities } : {}),
   };
   if (serializeState(nextState) === snapshot.serialized) return;
   writeState(filePath, nextState);

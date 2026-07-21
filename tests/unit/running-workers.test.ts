@@ -56,6 +56,85 @@ test("identical running worker state does not rewrite the recovery record", asyn
   }
 });
 
+test("running worker records preserve active frontend working visibility", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-running-workers-working-visible-"),
+  );
+  try {
+    const sessionFile = path.join(agentDir, "sessions", "active.jsonl");
+
+    setRunningWorkerSession(
+      agentDir,
+      sessionFile,
+      true,
+      "chat-inbox-working",
+      true,
+      true,
+    );
+    assert.deepEqual(listRunningWorkerSessions(agentDir), [
+      {
+        sessionFile,
+        requestTag: "chat-inbox-working",
+        frontendOwner: true,
+        workingVisible: true,
+      },
+    ]);
+
+    setRunningWorkerSession(
+      agentDir,
+      sessionFile,
+      true,
+      "chat-inbox-working",
+      true,
+      false,
+    );
+    assert.deepEqual(listRunningWorkerSessions(agentDir), [
+      {
+        sessionFile,
+        requestTag: "chat-inbox-working",
+        frontendOwner: true,
+      },
+    ]);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("running worker records discard working visibility without frontend ownership", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-running-workers-working-orphan-"),
+  );
+  try {
+    const sessionFile = path.join(agentDir, "sessions", "orphan.jsonl");
+    const statePath = runningWorkersStatePath(agentDir);
+    await fs.mkdir(path.dirname(statePath), { recursive: true });
+    await fs.writeFile(
+      statePath,
+      `${JSON.stringify({
+        schemaVersion: 1,
+        sessionFiles: [sessionFile],
+        frontendOwners: { [sessionFile]: false },
+        workingVisibilities: { [sessionFile]: true },
+      })}\n`,
+    );
+
+    assert.deepEqual(listRunningWorkerSessions(agentDir), [{ sessionFile }]);
+
+    setRunningWorkerSession(
+      agentDir,
+      sessionFile,
+      true,
+      undefined,
+      false,
+      true,
+    );
+    const persisted = JSON.parse(await fs.readFile(statePath, "utf8"));
+    assert.equal(persisted.workingVisibilities, undefined);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("running worker updates normalize duplicate legacy session entries", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-running-workers-duplicates-"),
