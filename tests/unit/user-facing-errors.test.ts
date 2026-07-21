@@ -113,6 +113,14 @@ test("runtime error formatter maps known internal markers to actionable messages
     "Rin could not recover the remote turn result before the timeout.",
   );
   assert.equal(
+    formatRuntimeErrorForUser("rin_turn_settled_without_terminal"),
+    "Rin could not determine the completed turn result.",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser("rin_turn_terminal_conflict"),
+    "Rin found conflicting terminal results for the same turn.",
+  );
+  assert.equal(
     formatRuntimeErrorForUser("rin_managed_node_runtime_missing:/tmp/node"),
     "Rin could not find its managed Node runtime. Repair or reinstall Rin before starting managed services or updating.",
   );

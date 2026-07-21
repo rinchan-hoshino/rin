@@ -399,14 +399,16 @@ test(
             role: "assistant",
             content: [{ type: "text", text: "committed final" }],
           };
+          session.messages.push(message);
           for (const subscriber of subscribers) {
             subscriber({ type: "message_end", message });
           }
           rejectPrompt?.(new Error("Request was aborted"));
         },
         dispose: () => {},
+        messages: [],
         sessionManager: {
-          ...testSessionManager(() => []),
+          ...testSessionManager(() => session.messages),
           _rewriteFile: () => {},
         },
       };
@@ -2139,6 +2141,8 @@ test(
         sessionManager: {
           ...testSessionManager(() => []),
           getEntries: () => durableEntries,
+          getBranch: () => durableEntries,
+          getLeafId: () => durableEntries.at(-1)?.id ?? null,
         },
         messages: [],
         getSessionStats: () => ({}),
@@ -2309,6 +2313,8 @@ test(
         sessionManager: {
           ...testSessionManager(() => []),
           getEntries: () => durableEntries,
+          getBranch: () => durableEntries,
+          getLeafId: () => durableEntries.at(-1)?.id ?? null,
         },
         messages: [],
         getSessionStats: () => ({}),
@@ -3408,7 +3414,7 @@ test(
 );
 
 test(
-  "rpc mode completes prompt turns from observed current assistant message_end",
+  "rpc mode completes prompt turns from the scoped branch with matching message_end evidence",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3468,12 +3474,12 @@ test(
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
         sessionManager: {
-          buildSessionContext: () => ({ messages: [baseMessage] }),
-          getBranch: () => [
-            { id: "base-entry", type: "message", message: baseMessage },
-          ],
+          buildSessionContext: () => ({
+            messages: durableEntries.map((entry) => entry.message),
+          }),
+          getBranch: () => durableEntries,
           getEntries: () => durableEntries,
-          getLeafId: () => "base-entry",
+          getLeafId: () => durableEntries.at(-1)?.id ?? null,
           getTree: () => [],
           getCwd: () => process.cwd(),
           getSessionDir: () => process.cwd(),
@@ -3697,7 +3703,7 @@ test(
 );
 
 test(
-  "rpc mode resolves final text from current assistant message_end instead of durable entries",
+  "rpc mode resolves final text from the current scoped branch with message_end evidence",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3762,9 +3768,11 @@ test(
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
         sessionManager: {
-          buildSessionContext: () => ({ messages: [] }),
-          getBranch: () => [durableEntries[0]],
-          getLeafId: () => "base-entry",
+          buildSessionContext: () => ({
+            messages: durableEntries.map((entry) => entry.message),
+          }),
+          getBranch: () => durableEntries,
+          getLeafId: () => durableEntries.at(-1)?.id ?? null,
           getEntries: () => durableEntries,
           getTree: () => [],
           getCwd: () => process.cwd(),
@@ -4422,6 +4430,129 @@ test(
           finalText: event.finalText,
         })),
         [{ requestTag: "tag-settled", finalText: "durable settled final" }],
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
+  "rpc mode rejects an observed-only final that is absent from the settled turn scope",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    const sessionSubscribers = new Set();
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/settled-absent-session.jsonl",
+        sessionId: "settled-absent-session",
+        agent: {
+          signal: undefined,
+          state: { isStreaming: false },
+          waitForIdle: async () => {},
+        },
+        bindExtensions: async () => {},
+        subscribe: (handler) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
+        async prompt() {
+          await new Promise(() => {});
+        },
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: testSessionManager(() => session.messages),
+        messages: [],
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "turn-absent", type: "prompt", message: "finish silently", requestTag: "tag-absent" })}\n`,
+        ),
+      );
+      await wait(10);
+      const observedOnlyFinal = {
+        role: "assistant",
+        content: [{ type: "text", text: "not durably scoped" }],
+      };
+      for (const handler of sessionSubscribers) {
+        handler({ type: "message_end", message: observedOnlyFinal });
+        handler({ type: "agent_settled" });
+      }
+      await wait(20);
+
+      const terminalEvents = parseRpcOutput(lines).filter(
+        (event) =>
+          event.type === "rpc_turn_event" &&
+          (event.event === "complete" || event.event === "error"),
+      );
+      assert.deepEqual(
+        terminalEvents.map((event) => ({
+          event: event.event,
+          requestTag: event.requestTag,
+          error: event.error,
+        })),
+        [
+          {
+            event: "error",
+            requestTag: "tag-absent",
+            error: "rin_turn_settled_without_terminal",
+          },
+        ],
       );
     } finally {
       process.stdin.on = stdinOn;

@@ -634,6 +634,10 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin could not start the turn because its durable request identity is missing.",
   rin_turn_result_recovery_timeout: () =>
     "Rin could not recover the remote turn result before the timeout.",
+  rin_turn_settled_without_terminal: () =>
+    "Rin could not determine the completed turn result.",
+  rin_turn_terminal_conflict: () =>
+    "Rin found conflicting terminal results for the same turn.",
 
   run_managed_session_value_required: () =>
     "Run command needs a managed session name. Provide a leaf such as subagent.",

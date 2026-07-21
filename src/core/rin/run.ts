@@ -2,10 +2,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parseArgs as parsePiArgs } from "@earendil-works/pi-coding-agent";
 import {
-  countToolCalls,
-  extractMessageText,
-  isAssistantFailedMessage,
-} from "../message-content.js";
+  RIN_TURN_TERMINAL_ABSENT,
+  resolveRinAuthoritativeTurnTerminalOutcome,
+  resolveRinTurnFailureMessage,
+  resolveRinTurnTerminalOutcomeFromAssistantMessage,
+  resolveRinTurnTerminalOutcomeFromMessages,
+  resolveRinTurnTerminalOutcomeFromTurnResult,
+  type RinTurnTerminalOutcome,
+} from "../rin-frontend-sdk/turn-completion.js";
 import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
 import {
   getRuntimeSessionDir,
@@ -23,7 +27,7 @@ import {
   requireExistingSessionFile,
   resolveStoredSessionFile,
 } from "../session/ref.js";
-import { resolveTurnCompletion } from "../session/turn-result.js";
+import { captureTurnScope, readTurnMessages } from "../session/turn-scope.js";
 import { printRunHelp } from "./run-lite.js";
 import {
   stripRinWrapperArgs,
@@ -425,18 +429,13 @@ async function runStandaloneTurn(
     thinkingLevel: options.thinkingLevel,
   });
 
-  let latestAssistantText = "";
+  let observedOutcome: RinTurnTerminalOutcome = RIN_TURN_TERMINAL_ABSENT;
   const rawUnsubscribe = session.subscribe?.((event: any) => {
     if (event?.type !== "message_end") return;
-    if (event?.message?.role !== "assistant") return;
-    if (
-      !isAssistantFailedMessage(event.message) &&
-      countToolCalls(event.message.content) > 0
-    ) {
-      return;
-    }
-    const value = extractMessageText(event.message.content, { trim: true });
-    if (value) latestAssistantText = value;
+    const outcome = resolveRinTurnTerminalOutcomeFromAssistantMessage(
+      event.message,
+    );
+    if (outcome.kind !== "absent") observedOutcome = outcome;
   });
   const unsubscribe =
     typeof rawUnsubscribe === "function" ? rawUnsubscribe : undefined;
@@ -476,34 +475,7 @@ async function runStandaloneTurn(
   registerSignalHandlers();
 
   try {
-    const manager = session.sessionManager;
-    const branchBefore = manager?.getBranch?.();
-    if (
-      !Array.isArray(branchBefore) ||
-      typeof manager?.getLeafId !== "function"
-    ) {
-      throw new Error(
-        "Rin session branch cursor is unavailable before the turn starts.",
-      );
-    }
-    const rawBranchCursor = manager.getLeafId();
-    const branchCursor =
-      typeof rawBranchCursor === "string" && rawBranchCursor.length > 0
-        ? rawBranchCursor
-        : null;
-    const baselineLeafId = branchBefore.at(-1)?.id;
-    if (
-      (rawBranchCursor != null && branchCursor === null) ||
-      (branchBefore.length === 0 && branchCursor !== null) ||
-      (branchBefore.length > 0 &&
-        (typeof baselineLeafId !== "string" ||
-          baselineLeafId.length === 0 ||
-          baselineLeafId !== branchCursor))
-    ) {
-      throw new Error(
-        "Rin session branch cursor is unavailable before the turn starts.",
-      );
-    }
+    const turnScope = captureTurnScope(session);
     const promptResult: any = await withRunTimeout(
       (async () => {
         const result = await session.prompt(text, { source: "cli" as any });
@@ -512,61 +484,25 @@ async function runStandaloneTurn(
       })(),
       options.timeoutMs,
     );
-    if (session.sessionManager !== manager) {
-      throw new Error(
-        "Rin session branch ownership changed while the turn was running.",
-      );
+    const terminalOutcome = resolveRinAuthoritativeTurnTerminalOutcome(
+      resolveRinTurnTerminalOutcomeFromTurnResult(promptResult),
+      resolveRinTurnTerminalOutcomeFromMessages(
+        readTurnMessages(session, turnScope),
+      ),
+      observedOutcome,
+    );
+    if (terminalOutcome.kind === "absent") {
+      throw new Error("rin_turn_settled_without_terminal");
     }
-    const branch = manager.getBranch();
-    const managerLeafId = manager.getLeafId();
-    const branchLeafId = Array.isArray(branch) ? branch.at(-1)?.id : undefined;
-    if (
-      !Array.isArray(branch) ||
-      (branch.length === 0 && managerLeafId != null) ||
-      (branch.length > 0 &&
-        (typeof branchLeafId !== "string" ||
-          branchLeafId.length === 0 ||
-          branchLeafId !== managerLeafId))
-    ) {
-      throw new Error(
-        "Rin session branch ownership changed while the turn was running.",
-      );
-    }
-    const cursorIndex = branchCursor
-      ? branch.findIndex((entry: any) => entry?.id === branchCursor)
-      : -1;
-    if (branchCursor && cursorIndex < 0) {
-      throw new Error(
-        "Rin session branch ownership changed while the turn was running.",
-      );
-    }
-    const turnMessages = (branchCursor ? branch.slice(cursorIndex + 1) : branch)
-      .filter((entry: any) => entry?.type === "message")
-      .map((entry: any) => entry.message);
-    const terminalMessage = [...turnMessages]
-      .reverse()
-      .find(
-        (message: any) =>
-          message?.role === "assistant" &&
-          (isAssistantFailedMessage(message) ||
-            countToolCalls(message?.content) === 0),
-      );
-    if (terminalMessage && isAssistantFailedMessage(terminalMessage)) {
-      const producerError = safeString(
-        terminalMessage.errorMessage ||
-          terminalMessage.error ||
-          session.agent?.state?.errorMessage ||
-          "Agent prompt failed.",
-      ).trim();
+    if (terminalOutcome.kind === "error") {
+      const producerError =
+        resolveRinTurnFailureMessage(
+          session,
+          terminalOutcome.resolution.messages,
+        ) || terminalOutcome.error;
       throw new Error(producerError || "Agent prompt failed.");
     }
-    const completion = resolveTurnCompletion({
-      result: promptResult?.result ?? promptResult,
-      messages:
-        promptResult?.messages ||
-        (terminalMessage ? [terminalMessage] : undefined),
-      finalText: latestAssistantText || promptResult?.finalText,
-    });
+    const completion = terminalOutcome.resolution.completion;
     const sessionMeta = readSessionMetadata(session);
     const result = {
       finalText: completion.finalText,

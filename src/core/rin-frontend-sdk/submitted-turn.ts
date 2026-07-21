@@ -1,7 +1,9 @@
-import { isAssistantFailedMessage } from "../message-content.js";
-import { resolveTurnCompletion } from "../session/turn-result.js";
-import { isRinTerminalAssistantMessage } from "./turn-completion.js";
+import { rinTurnMessageValue } from "../session/turn-message.js";
 import { safeString } from "../text-utils.js";
+import {
+  classifyRinTurnMessage,
+  resolveRinTurnTerminalOutcomeFromAssistantMessage,
+} from "./turn-completion.js";
 
 export type RinSubmittedTurnResolution =
   | { submitted: true }
@@ -19,19 +21,12 @@ export type RinSubmittedTurnResolution =
     }
   | null;
 
-function messageValue(message: unknown) {
-  const value = message && typeof message === "object" ? (message as any) : {};
-  return value?.message && typeof value.message === "object"
-    ? value.message
-    : value;
-}
-
 function messageRole(message: unknown) {
-  return safeString(messageValue(message)?.role).trim();
+  return safeString(rinTurnMessageValue(message)?.role).trim();
 }
 
 function messageText(message: unknown) {
-  const value = messageValue(message);
+  const value = rinTurnMessageValue(message);
   const content = value?.content;
   if (typeof content === "string") return safeString(content).trim();
   if (Array.isArray(content)) {
@@ -50,31 +45,17 @@ function messageText(message: unknown) {
 function messageRequestTag(message: unknown) {
   const outer = message && typeof message === "object" ? (message as any) : {};
   return safeString(
-    messageValue(message)?.requestTag || outer?.requestTag,
+    rinTurnMessageValue(message)?.requestTag || outer?.requestTag,
   ).trim();
 }
 
 function messageTimestampMs(message: unknown) {
   const outer = message && typeof message === "object" ? (message as any) : {};
-  const raw = messageValue(message)?.timestamp ?? outer?.timestamp;
+  const raw = rinTurnMessageValue(message)?.timestamp ?? outer?.timestamp;
   const numeric = Number(raw);
   if (Number.isFinite(numeric) && numeric > 0) return numeric;
   const parsed = Date.parse(safeString(raw));
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function messageFailureError(message: unknown) {
-  const value = messageValue(message);
-  if (!isAssistantFailedMessage(value)) return "";
-  return safeString(value?.errorMessage || value?.error).trim();
-}
-
-function findSubmittedTurnFailure(messages: unknown[]) {
-  for (const message of [...messages].reverse()) {
-    const error = messageFailureError(message);
-    if (error) return error;
-  }
-  return "";
 }
 
 export function resolveSubmittedTurnFromMessages(
@@ -116,36 +97,29 @@ export function resolveSubmittedTurnFromMessages(
   let hasLaterUserBeforeCompletion = false;
   let terminalMessage: any = null;
   for (const rawMessage of turnMessages) {
-    const message = messageValue(rawMessage);
+    const message = rinTurnMessageValue(rawMessage);
     if (messageRole(message) === "user") {
       if (terminalMessage) break;
       hasLaterUserBeforeCompletion = true;
       continue;
     }
-    if (isRinTerminalAssistantMessage(message)) {
+    if (classifyRinTurnMessage(rawMessage) !== "nonterminal") {
       terminalMessage = message;
     }
   }
   if (hasLaterUserBeforeCompletion) return { superseded: true };
-  if (!terminalMessage) {
-    if (options.turnActive) return { submitted: true };
-    const error = findSubmittedTurnFailure(turnMessages);
-    if (error) return { error };
-    return { submitted: true };
+  if (!terminalMessage) return { submitted: true };
+
+  const terminalOutcome =
+    resolveRinTurnTerminalOutcomeFromAssistantMessage(terminalMessage);
+  if (terminalOutcome.kind === "error") {
+    return options.turnActive
+      ? { submitted: true }
+      : { error: terminalOutcome.error };
   }
-  const terminalError =
-    messageFailureError(terminalMessage) ||
-    (isAssistantFailedMessage(terminalMessage)
-      ? safeString(terminalMessage?.stopReason).trim() === "aborted"
-        ? "Agent turn was aborted."
-        : "Agent producer failed."
-      : "");
-  if (terminalError) {
-    return options.turnActive ? { submitted: true } : { error: terminalError };
-  }
-  const completion = resolveTurnCompletion({ messages: [terminalMessage] });
+  if (terminalOutcome.kind === "absent") return { submitted: true };
   return {
-    finalText: completion.finalText,
-    result: completion.result,
+    finalText: terminalOutcome.resolution.completion.finalText,
+    result: terminalOutcome.resolution.completion.result,
   };
 }

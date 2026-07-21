@@ -105,10 +105,19 @@ export {
 } from "./turn-driver.js";
 
 export {
+  areRinTurnTerminalOutcomesConsistent,
+  classifyRinTurnMessage,
+  isRinTerminalAssistantMessage,
+  RIN_TURN_TERMINAL_ABSENT,
+  resolveRinAuthoritativeTurnTerminalOutcome,
   resolveRinTurnCompletionFromAssistantMessage,
   resolveRinTurnCompletionFromTurnResult,
   resolveRinTurnFailureMessage,
+  resolveRinTurnTerminalOutcomeFromAssistantMessage,
+  resolveRinTurnTerminalOutcomeFromMessages,
+  resolveRinTurnTerminalOutcomeFromTurnResult,
   type RinTurnCompletionResolution,
+  type RinTurnTerminalOutcome,
 } from "./turn-completion.js";
 
 export {

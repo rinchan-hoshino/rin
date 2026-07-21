@@ -1290,6 +1290,42 @@ test("submitted turn resolution disambiguates identical steers by durable reques
   );
 });
 
+test("submitted turn resolution ignores summary markers on outer message wrappers", () => {
+  const resolved = resolveSubmittedTurnFromMessages(
+    [
+      {
+        type: "message",
+        message: {
+          role: "user",
+          requestTag: "wrapped-summary-tag",
+          content: "restored job",
+        },
+      },
+      {
+        type: "compaction",
+        summaryEntry: { id: "summary" },
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "not a final" }],
+        },
+      },
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "actual final" }],
+        },
+      },
+    ],
+    { text: "restored job", requestTag: "wrapped-summary-tag" },
+  );
+
+  assert.deepEqual(resolved, {
+    finalText: "actual final",
+    result: { messages: [{ type: "text", text: "actual final" }] },
+  });
+});
+
 test("submitted turn resolution preserves provider failure instead of final-missing", () => {
   const resolved = resolveSubmittedTurnFromMessages(
     [

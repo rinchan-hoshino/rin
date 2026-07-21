@@ -1,6 +1,5 @@
 import { getLatestCompactionEntry } from "@earendil-works/pi-coding-agent";
 
-import { isAssistantFailedMessage } from "../message-content.js";
 import {
   extractPiContinuableToolCallIds,
   extractPiContinuableToolCallParts,
@@ -13,15 +12,21 @@ import {
   listBoundSessions,
   renameBoundSession,
 } from "../session/factory.js";
+import {
+  captureTurnScope,
+  readTurnMessages,
+  type RinTurnScope,
+} from "../session/turn-scope.js";
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 import { resolveSubmittedTurnFromMessages } from "../rin-frontend-sdk/submitted-turn.js";
 import {
-  resolveRinTurnCompletionFromAssistantMessage,
-  resolveRinTerminalTurnCompletionFromMessages,
-  resolveRinTurnCompletionFromMessages,
-  resolveRinTurnCompletionFromTurnResult,
+  RIN_TURN_TERMINAL_ABSENT,
+  resolveRinAuthoritativeTurnTerminalOutcome,
   resolveRinTurnFailureMessage,
-  type RinTurnCompletionResolution,
+  resolveRinTurnTerminalOutcomeFromAssistantMessage,
+  resolveRinTurnTerminalOutcomeFromMessages,
+  resolveRinTurnTerminalOutcomeFromTurnResult,
+  type RinTurnTerminalOutcome,
 } from "../rin-frontend-sdk/turn-completion.js";
 import {
   emitPiSessionEvent,
@@ -478,110 +483,13 @@ async function resetSessionModelOptionsFromSettings(session: any) {
   };
 }
 
-type TurnBranchCursor = {
-  sessionManager: any;
-  leafId: string | null;
-};
-
-const BRANCH_CURSOR_UNAVAILABLE_ERROR =
-  "Rin session branch cursor is unavailable before the turn starts.";
-const BRANCH_CHANGED_DURING_TURN_ERROR =
-  "Rin session branch ownership changed while the turn was running.";
-
-function sessionEntryId(value: unknown) {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function captureTurnBranchCursor(session: any): TurnBranchCursor {
-  const sessionManager = session?.sessionManager;
-  if (typeof sessionManager?.getBranch !== "function") {
-    throw new Error(BRANCH_CURSOR_UNAVAILABLE_ERROR);
-  }
-  const branch = sessionManager.getBranch();
-  if (!Array.isArray(branch)) {
-    throw new Error(BRANCH_CURSOR_UNAVAILABLE_ERROR);
-  }
-  const hasManagerLeafApi = typeof sessionManager.getLeafId === "function";
-  if (!hasManagerLeafApi) {
-    throw new Error(BRANCH_CURSOR_UNAVAILABLE_ERROR);
-  }
-  const managerLeafId = sessionEntryId(sessionManager.getLeafId());
-  if (branch.length === 0) {
-    if (managerLeafId) {
-      throw new Error(BRANCH_CURSOR_UNAVAILABLE_ERROR);
-    }
-    return { sessionManager, leafId: null };
-  }
-  const branchLeafId = sessionEntryId(branch.at(-1)?.id);
-  if (!branchLeafId || managerLeafId !== branchLeafId) {
-    throw new Error(BRANCH_CURSOR_UNAVAILABLE_ERROR);
-  }
-  return { sessionManager, leafId: branchLeafId };
-}
-
-function resolveTurnCompletionSinceBranchCursor(
+function resolveTurnOutcomeSinceScope(
   session: any,
-  cursor: TurnBranchCursor,
-): RinTurnCompletionResolution | null {
-  if (session?.sessionManager !== cursor.sessionManager) {
-    throw new Error(BRANCH_CHANGED_DURING_TURN_ERROR);
-  }
-  const branch = cursor.sessionManager.getBranch?.();
-  if (
-    !Array.isArray(branch) ||
-    typeof cursor.sessionManager.getLeafId !== "function"
-  ) {
-    throw new Error(BRANCH_CHANGED_DURING_TURN_ERROR);
-  }
-  const managerLeafId = sessionEntryId(cursor.sessionManager.getLeafId());
-  if (branch.length === 0) {
-    if (managerLeafId) {
-      throw new Error(BRANCH_CHANGED_DURING_TURN_ERROR);
-    }
-  } else {
-    const branchLeafId = sessionEntryId(branch.at(-1)?.id);
-    if (
-      typeof cursor.sessionManager.getLeafId !== "function" ||
-      !branchLeafId ||
-      managerLeafId !== branchLeafId
-    ) {
-      throw new Error(BRANCH_CHANGED_DURING_TURN_ERROR);
-    }
-  }
-  let turnEntries = branch;
-  if (cursor.leafId) {
-    const cursorIndex = branch.findIndex(
-      (entry: any) => sessionEntryId(entry?.id) === cursor.leafId,
-    );
-    if (cursorIndex < 0) {
-      throw new Error(BRANCH_CHANGED_DURING_TURN_ERROR);
-    }
-    turnEntries = branch.slice(cursorIndex + 1);
-  }
-  const messages = turnEntries
-    .filter((entry: any) => entry?.type === "message")
-    .map((entry: any) => entry.message)
-    .filter(Boolean);
-  if (!messages.length) return null;
-  return resolveRinTerminalTurnCompletionFromMessages(messages);
-}
-
-function hasExplicitRinTurnResult(value: any) {
-  if (!value || typeof value !== "object") return false;
-  const result = value.result ?? value;
-  return (
-    Array.isArray(result?.messages) ||
-    typeof value.finalText === "string" ||
-    typeof result?.finalText === "string"
+  scope: RinTurnScope,
+): RinTurnTerminalOutcome {
+  return resolveRinTurnTerminalOutcomeFromMessages(
+    readTurnMessages(session, scope),
   );
-}
-
-async function runSessionTurnProducer(
-  _session: any,
-  action: () => Promise<RinTurnCompletionResolution | null | undefined>,
-  _options: { retryFailureMessage?: () => string } = {},
-): Promise<RinTurnCompletionResolution | null> {
-  return (await action()) || null;
 }
 
 function isInterruptedTurnResumable(session: any) {
@@ -598,19 +506,18 @@ function isInterruptedTurnResumable(session: any) {
 async function resumeInterruptedTurn(
   session: any,
   options: { persistInterruptionMessage?: boolean } = {},
-): Promise<RinTurnCompletionResolution | null> {
+): Promise<void> {
   const lastMessage = Array.isArray(session?.agent?.state?.messages)
     ? session.agent.state.messages[session.agent.state.messages.length - 1]
     : null;
-  if (!lastMessage) return null;
+  if (!lastMessage) return;
   if (lastMessage.role === "assistant") {
     const appendedInterruption = appendInterruptedToolResults(session, {
       persistToSession: options.persistInterruptionMessage,
     });
-    if (!appendedInterruption) return null;
+    if (!appendedInterruption) return;
   }
   await resumePiSessionTurn(session);
-  return null;
 }
 
 function isWorkerLocalSessionReplacementCommand(commandLine: string) {
@@ -983,44 +890,41 @@ export async function runCustomRpcMode(
   };
   const startTurnTask = (
     requestTag: string,
-    task: (
-      getObservedCompletion: () => RinTurnCompletionResolution | null,
-    ) => Promise<RinTurnCompletionResolution | null>,
+    task: () => Promise<unknown>,
     options: { forceTurnEvents?: boolean } = {},
   ) => {
     if (activeTurnPromise) throw new Error("rpc_turn_already_active");
     latestAutoRetryFailureMessage = "";
     const turnSession = getSession();
-    const turnBranchCursor = captureTurnBranchCursor(turnSession);
+    const turnScope = captureTurnScope(turnSession);
     const trackedTurn: ActiveTrackedTurn = {
       requestTag,
       queueAdmissions: [],
       agentSettled: false,
     };
     activeTrackedTurn = trackedTurn;
-    let observedCompletion: RinTurnCompletionResolution | null = null;
-    let resolveAgentSettledCompletion:
-      | ((completion: RinTurnCompletionResolution) => void)
+    let observedOutcome: RinTurnTerminalOutcome = RIN_TURN_TERMINAL_ABSENT;
+    let resolveAgentSettledOutcome:
+      | ((outcome: RinTurnTerminalOutcome) => void)
       | undefined;
-    const agentSettledCompletion = new Promise<RinTurnCompletionResolution>(
+    const agentSettledOutcome = new Promise<RinTurnTerminalOutcome>(
       (resolve) => {
-        resolveAgentSettledCompletion = resolve;
+        resolveAgentSettledOutcome = resolve;
       },
     );
     const rawUnsubscribeObservedCompletion = turnSession.subscribe?.(
       (event: any) => {
         if (event?.type === "message_end") {
-          const resolution = resolveRinTurnCompletionFromAssistantMessage(
+          const outcome = resolveRinTurnTerminalOutcomeFromAssistantMessage(
             event.message,
           );
-          if (resolution) observedCompletion = resolution;
+          if (outcome.kind !== "absent") observedOutcome = outcome;
           return;
         }
         if (event?.type !== "agent_settled") return;
         trackedTurn.agentSettled = true;
-        if (!observedCompletion) return;
-        resolveAgentSettledCompletion?.(observedCompletion);
-        resolveAgentSettledCompletion = undefined;
+        resolveAgentSettledOutcome?.(observedOutcome);
+        resolveAgentSettledOutcome = undefined;
       },
     );
     const unsubscribeObservedCompletion =
@@ -1056,18 +960,56 @@ export async function runCustomRpcMode(
               );
             }, TURN_HEARTBEAT_INTERVAL_MS)
           : null;
+      let committedTerminalKey = "";
+      const commitTurnTerminal = (
+        outcome:
+          | Extract<RinTurnTerminalOutcome, { kind: "complete" }>
+          | { kind: "error"; error: string },
+      ) => {
+        const event = outcome.kind === "complete" ? "complete" : "error";
+        const payload =
+          outcome.kind === "complete"
+            ? {
+                turnGeneration: currentTurnGeneration,
+                sessionFile: turnSession.sessionFile,
+                sessionId: turnSession.sessionId,
+                finalText: outcome.resolution.completion.finalText,
+                result: outcome.resolution.completion.result,
+              }
+            : {
+                turnGeneration: currentTurnGeneration,
+                sessionFile: turnSession.sessionFile,
+                sessionId: turnSession.sessionId,
+                error: outcome.error,
+              };
+        const terminalKey = JSON.stringify({ event, payload });
+        if (committedTerminalKey) {
+          if (committedTerminalKey !== terminalKey) {
+            console.error(
+              `rin_turn_terminal_conflict:${currentTurnGeneration}`,
+            );
+          }
+          return;
+        }
+        committedTerminalKey = terminalKey;
+        emitTurnEvent(event, trackedTurn.requestTag, payload, forceTurnEvents);
+      };
+      let directOutcome: RinTurnTerminalOutcome = RIN_TURN_TERMINAL_ABSENT;
       try {
         const producerOutcome = await Promise.race([
-          task(() => observedCompletion).then((completion) => ({
+          task().then((value) => ({
             source: "task" as const,
-            completion,
+            outcome: resolveRinTurnTerminalOutcomeFromTurnResult(value),
           })),
-          agentSettledCompletion.then((completion) => ({
+          agentSettledOutcome.then((outcome) => ({
             source: "agent_settled" as const,
-            completion,
+            outcome,
           })),
         ]);
-        const directCompletion = producerOutcome.completion;
+        directOutcome =
+          producerOutcome.source === "task"
+            ? producerOutcome.outcome
+            : RIN_TURN_TERMINAL_ABSENT;
         // Pi's agent_settled event is the authoritative boundary after retries,
         // compaction, and queued continuations. If the outer prompt promise is
         // wedged after that boundary, do not let bookkeeping keep the canonical
@@ -1093,99 +1035,82 @@ export async function runCustomRpcMode(
             await new Promise((resolve) => setImmediate(resolve));
           }
         }
-        const branchCompletion = resolveTurnCompletionSinceBranchCursor(
+        const branchOutcome = resolveTurnOutcomeSinceScope(
           turnSession,
-          turnBranchCursor,
+          turnScope,
         );
-        const taskCompletion =
-          directCompletion || branchCompletion || observedCompletion;
-        const settledCompletion =
-          taskCompletion || resolveRinTurnCompletionFromMessages([]);
-        const { messages, completion } = settledCompletion;
-        if (!completion.finalText) {
-          const shouldResolveFailure =
-            !taskCompletion || messages.some(isAssistantFailedMessage);
-          const failureMessage = shouldResolveFailure
-            ? resolveRinTurnFailureMessage(turnSession, messages, {
-                retryFailureMessage: latestAutoRetryFailureMessage,
-              })
-            : "";
-          if (failureMessage) throw new Error(failureMessage);
+        const terminalOutcome = resolveRinAuthoritativeTurnTerminalOutcome(
+          directOutcome,
+          branchOutcome,
+          observedOutcome,
+        );
+        if (terminalOutcome.kind === "absent") {
+          throw new Error("rin_turn_settled_without_terminal");
         }
-        emitTurnEvent(
-          "complete",
-          trackedTurn.requestTag,
-          {
-            turnGeneration: currentTurnGeneration,
-            sessionFile: turnSession.sessionFile,
-            sessionId: turnSession.sessionId,
-            finalText: completion.finalText,
-            result: completion.result,
-          },
-          forceTurnEvents,
-        );
+        if (terminalOutcome.kind === "error") {
+          const failureMessage =
+            resolveRinTurnFailureMessage(
+              turnSession,
+              terminalOutcome.resolution.messages,
+              { retryFailureMessage: latestAutoRetryFailureMessage },
+            ) || terminalOutcome.error;
+          throw new Error(failureMessage);
+        }
+        commitTurnTerminal(terminalOutcome);
       } catch (error: any) {
         if (gracefulSessionShutdown) {
-          let recoveredCompletion: RinTurnCompletionResolution | null;
+          let recoveredBranchOutcome: RinTurnTerminalOutcome =
+            RIN_TURN_TERMINAL_ABSENT;
           try {
-            recoveredCompletion =
-              resolveTurnCompletionSinceBranchCursor(
-                turnSession,
-                turnBranchCursor,
-              ) || observedCompletion;
+            recoveredBranchOutcome = resolveTurnOutcomeSinceScope(
+              turnSession,
+              turnScope,
+            );
           } catch (branchError: any) {
-            emitTurnEvent(
-              "error",
-              trackedTurn.requestTag,
-              {
-                turnGeneration: currentTurnGeneration,
-                sessionFile: turnSession.sessionFile,
-                sessionId: turnSession.sessionId,
+            if (directOutcome.kind === "absent") {
+              commitTurnTerminal({
+                kind: "error",
                 error: String(
                   branchError?.message || branchError || "rpc_turn_failed",
                 ),
-              },
-              forceTurnEvents,
+              });
+              return;
+            }
+          }
+          let recoveredOutcome: RinTurnTerminalOutcome;
+          try {
+            recoveredOutcome = resolveRinAuthoritativeTurnTerminalOutcome(
+              directOutcome,
+              recoveredBranchOutcome,
+              observedOutcome,
             );
+          } catch (authorityError: any) {
+            commitTurnTerminal({
+              kind: "error",
+              error: String(
+                authorityError?.message || authorityError || "rpc_turn_failed",
+              ),
+            });
             return;
           }
-          const recoveredMessages = recoveredCompletion?.messages || [];
-          const shouldResolveRecoveredFailure =
-            !recoveredCompletion ||
-            recoveredMessages.some(isAssistantFailedMessage);
-          const recoveredFailureMessage = shouldResolveRecoveredFailure
-            ? resolveRinTurnFailureMessage(turnSession, recoveredMessages, {
-                retryFailureMessage: latestAutoRetryFailureMessage,
-              })
-            : "";
-          if (recoveredCompletion && !recoveredFailureMessage) {
-            emitTurnEvent(
-              "complete",
-              trackedTurn.requestTag,
-              {
-                turnGeneration: currentTurnGeneration,
-                sessionFile: turnSession.sessionFile,
-                sessionId: turnSession.sessionId,
-                finalText: recoveredCompletion.completion.finalText,
-                result: recoveredCompletion.completion.result,
-              },
-              forceTurnEvents,
-            );
+          if (recoveredOutcome.kind === "complete") {
+            commitTurnTerminal(recoveredOutcome);
             return;
           }
-          emitTurnEvent(
-            "error",
-            trackedTurn.requestTag,
-            {
-              turnGeneration: currentTurnGeneration,
-              sessionFile: turnSession.sessionFile,
-              sessionId: turnSession.sessionId,
-              error:
-                recoveredFailureMessage ||
-                String(error?.message || error || "rpc_turn_failed"),
-            },
-            forceTurnEvents,
-          );
+          const recoveredFailureMessage =
+            recoveredOutcome.kind === "error"
+              ? resolveRinTurnFailureMessage(
+                  turnSession,
+                  recoveredOutcome.resolution.messages,
+                  { retryFailureMessage: latestAutoRetryFailureMessage },
+                ) || recoveredOutcome.error
+              : "";
+          commitTurnTerminal({
+            kind: "error",
+            error:
+              recoveredFailureMessage ||
+              String(error?.message || error || "rpc_turn_failed"),
+          });
           return;
         }
         const retryFailureMessage = safeString(
@@ -1194,17 +1119,7 @@ export async function runCustomRpcMode(
         const errorMessage =
           retryFailureMessage ||
           String(error?.message || error || "rpc_turn_failed");
-        emitTurnEvent(
-          "error",
-          trackedTurn.requestTag,
-          {
-            turnGeneration: currentTurnGeneration,
-            sessionFile: turnSession.sessionFile,
-            sessionId: turnSession.sessionId,
-            error: errorMessage,
-          },
-          forceTurnEvents,
-        );
+        commitTurnTerminal({ kind: "error", error: errorMessage });
         if (retryFailureMessage) throw new Error(retryFailureMessage);
         throw error;
       } finally {
@@ -1222,9 +1137,7 @@ export async function runCustomRpcMode(
   };
   const startInterruptTurnTask = (
     requestTag: string,
-    task: (
-      getObservedCompletion: () => RinTurnCompletionResolution | null,
-    ) => Promise<RinTurnCompletionResolution | null>,
+    task: () => Promise<unknown>,
   ) => {
     const admission = interruptQueue.then(async () => {
       const session = getSession();
@@ -1580,18 +1493,7 @@ export async function runCustomRpcMode(
         try {
           startTurnTask(requestTag, async () => {
             try {
-              return await runSessionTurnProducer(
-                session,
-                async () => {
-                  const result = await session.prompt(
-                    command.message,
-                    promptOptions,
-                  );
-                  const direct = resolveRinTurnCompletionFromTurnResult(result);
-                  return hasExplicitRinTurnResult(result) ? direct : null;
-                },
-                { retryFailureMessage: () => latestAutoRetryFailureMessage },
-              );
+              return await session.prompt(command.message, promptOptions);
             } finally {
               removePendingPromptRequestTag(requestTagToken);
             }
@@ -1614,16 +1516,7 @@ export async function runCustomRpcMode(
         }
         await startInterruptTurnTask(
           rpcRequestTag(command.requestTag),
-          async () => {
-            return await runSessionTurnProducer(
-              session,
-              async () => {
-                const result = await resumeInterruptedTurn(session);
-                return result || null;
-              },
-              { retryFailureMessage: () => latestAutoRetryFailureMessage },
-            );
-          },
+          async () => await resumeInterruptedTurn(session),
         );
         return done(id, "resume_interrupted_turn", { resumed: true });
       case "steer": {
@@ -1969,20 +1862,9 @@ export async function runCustomRpcMode(
         if (isTurnActive() || session.agent?.signal) {
           throw new Error("rpc_turn_already_active");
         }
-        startTurnTask(rpcRequestTag(command.requestTag), async () => {
-          return await runSessionTurnProducer(
-            session,
-            async () => {
-              const result = await session.sendUserMessage(
-                command.content,
-                command.options,
-              );
-              const direct = resolveRinTurnCompletionFromTurnResult(result);
-              return hasExplicitRinTurnResult(result) ? direct : null;
-            },
-            { retryFailureMessage: () => latestAutoRetryFailureMessage },
-          );
-        });
+        startTurnTask(rpcRequestTag(command.requestTag), async () =>
+          session.sendUserMessage(command.content, command.options),
+        );
         return done(id, type, { sent: true });
       case "get_commands":
         return done(id, type, {

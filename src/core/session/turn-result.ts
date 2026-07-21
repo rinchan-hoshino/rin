@@ -2,13 +2,15 @@ import path from "node:path";
 
 import { asArray } from "../json-utils.js";
 import {
-  countToolCalls,
   extractAssistantFinalText,
   extractExistingFilePaths,
   extractImageParts,
-  isAssistantFailedMessage,
 } from "../message-content.js";
 import { safeString } from "../text-utils.js";
+import {
+  classifyRinTurnMessage,
+  findRinTerminalMessage,
+} from "./turn-message.js";
 
 export type TurnResultMessage =
   | {
@@ -89,37 +91,11 @@ export function resolveTurnCompletion(input: TurnCompletionInput = {}) {
   };
 }
 
-function isSessionSummaryLikeMessage(message: any) {
-  const value =
-    message?.message && typeof message.message === "object"
-      ? message.message
-      : message;
-  const type = safeString(value?.type).trim();
-  const role = safeString(value?.role).trim();
-  const customType = safeString(value?.customType).trim();
-  return (
-    type === "compaction" ||
-    role === "compactionSummary" ||
-    role === "branchSummary" ||
-    customType === "session_summary" ||
-    Boolean(value?.summaryEntry)
-  );
-}
-
-function findLastAssistantDeliverableMessage(messages: any[]) {
-  for (const message of [...messages].reverse()) {
-    if (isSessionSummaryLikeMessage(message)) continue;
-    if (safeString(message?.role) !== "assistant") continue;
-    if (isAssistantFailedMessage(message)) return null;
-    if (countToolCalls(message?.content) > 0) continue;
-    return message;
-  }
-  return null;
-}
-
 export function buildTurnResultFromMessages(messages: any[]): TurnResult {
-  const assistant = findLastAssistantDeliverableMessage(asArray(messages));
-  if (!assistant) return { messages: [] };
+  const assistant = findRinTerminalMessage(asArray(messages));
+  if (!assistant || classifyRinTurnMessage(assistant) !== "complete") {
+    return { messages: [] };
+  }
 
   const text = extractAssistantFinalText(assistant);
   const images = extractImageParts(assistant.content);
