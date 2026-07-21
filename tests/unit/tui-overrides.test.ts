@@ -1400,7 +1400,7 @@ async function runScrolledHistoricalToolUpdate(handleEvent) {
       toolCallId: "tool-1",
       partialResult: { content: [{ type: "text", text: "done" }] },
     });
-    await flushRender({ requireWrite: false });
+    await flushRender({ requireWrite: true });
 
     return {
       viewportBefore,
