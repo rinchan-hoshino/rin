@@ -1741,6 +1741,69 @@ test(
 );
 
 test(
+  "rpc mode exposes available thinking levels",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        agent: { waitForIdle: async () => {} },
+        bindExtensions: async () => {},
+        subscribe: () => () => {},
+        sessionManager: testSessionManager(),
+        getAvailableThinkingLevels: () => ["off", "low", "medium", "high"],
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: { listAll: async () => [], list: async () => [] },
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "1", type: "get_available_thinking_levels" })}\n`,
+        ),
+      );
+      await wait(0);
+
+      const response = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .find((line) => line?.type === "response" && line.id === "1");
+      assert.equal(response.success, true);
+      assert.deepEqual(response.data, {
+        levels: ["off", "low", "medium", "high"],
+      });
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode executes extension slash commands on the daemon session",
   { concurrency: false },
   async () => {

@@ -1696,6 +1696,12 @@ export async function runCustomRpcMode(
             ),
           (level) => (level ? { level } : null),
         );
+      case "get_available_thinking_levels":
+        return done(id, type, {
+          levels: Array.isArray(session?.getAvailableThinkingLevels?.())
+            ? session.getAvailableThinkingLevels()
+            : [],
+        });
       case "set_steering_mode":
         return run(id, type, () =>
           runPersistedSessionMutation(session, () =>

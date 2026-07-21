@@ -20,6 +20,7 @@ export type RinRpcCommandType =
   | "set_thinking_level"
   | "reset_model_options_from_settings"
   | "cycle_thinking_level"
+  | "get_available_thinking_levels"
   | "set_steering_mode"
   | "set_follow_up_mode"
   | "compact"
