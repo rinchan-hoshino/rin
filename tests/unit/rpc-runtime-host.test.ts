@@ -98,7 +98,32 @@ test("rpc runtime host adapts RpcInteractiveSession shape for InteractiveMode", 
     ["rebind", "session-like"],
     ["beforeInvalidate"],
     ["shutdownLocalExtensions", { reason: "quit" }],
-    ["shutdownSession"],
+    ["terminateSession"],
+    ["disconnect"],
+  ]);
+});
+
+test("rpc runtime host disconnects when daemon cleanup handoff rejects", async () => {
+  const calls = [];
+  const session = {
+    async shutdownLocalExtensions(event) {
+      calls.push(["shutdownLocalExtensions", event]);
+    },
+    async terminateSession() {
+      calls.push(["terminateSession"]);
+      throw new Error("terminate_failed");
+    },
+    async disconnect() {
+      calls.push(["disconnect"]);
+    },
+  };
+  const runtimeHost = createRpcRuntimeHost(session);
+
+  await assert.rejects(runtimeHost.dispose(), /terminate_failed/);
+
+  assert.deepEqual(calls, [
+    ["shutdownLocalExtensions", { reason: "quit" }],
+    ["terminateSession"],
     ["disconnect"],
   ]);
 });

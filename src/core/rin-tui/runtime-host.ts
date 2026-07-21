@@ -80,8 +80,11 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
     async dispose() {
       beforeSessionInvalidate?.();
       await (session as any).shutdownLocalExtensions?.({ reason: "quit" });
-      await (session as any).shutdownSession();
-      await session.disconnect();
+      try {
+        await session.terminateSession();
+      } finally {
+        await session.disconnect();
+      }
     },
   };
 }
