@@ -1256,13 +1256,11 @@ export function migrateLegacyChatControlData(
           .get(MIGRATION_SOURCE_FINGERPRINT_KEY) as any
       )?.value,
     ).trim();
-    if (
-      !expectedFingerprint ||
-      legacyControlArchiveGroups(agentDir).some((group) =>
-        fs.existsSync(group.source),
-      )
-    ) {
+    if (!expectedFingerprint) {
       throw new Error("chat_legacy_migration_source_recreated");
+    }
+    if (legacyControlSourceFingerprint(agentDir) !== expectedFingerprint) {
+      throw new Error("chat_legacy_migration_source_changed");
     }
   } else {
     throw new Error(`chat_legacy_migration_unknown_state:${state}`);

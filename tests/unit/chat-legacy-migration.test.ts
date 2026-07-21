@@ -788,7 +788,32 @@ test("legacy archive resumes after a process dies between path renames", async (
   await assert.rejects(fs.stat(path.join(chatRoot, "inbox")));
 });
 
-test("legacy authority recreated after completed cutover blocks startup", async () => {
+test("empty legacy authority paths recreated after cutover do not block migration", async () => {
+  const agentDir = await tempDir();
+  const chatRoot = path.join(agentDir, "data", "chat");
+  database.migrateChatDatabaseForInstall(agentDir);
+  database.closeChatDatabase(agentDir);
+  for (const dir of [
+    path.join(chatRoot, "message-store", "records", "empty"),
+    path.join(chatRoot, "message-store", "indexes", "empty"),
+    path.join(chatRoot, "inbox", "pending"),
+    path.join(chatRoot, "outbox", "items"),
+  ]) {
+    await fs.mkdir(dir, { recursive: true });
+  }
+
+  const reopened = database.migrateChatDatabaseForInstall(agentDir);
+  assert.equal(
+    reopened
+      .prepare(
+        "SELECT value FROM schema_meta WHERE key = 'legacy_control_migration'",
+      )
+      .get().value,
+    "complete_v1",
+  );
+});
+
+test("legacy authority content changed after completed cutover blocks startup", async () => {
   const agentDir = await tempDir();
   database.migrateChatDatabaseForInstall(agentDir);
   database.closeChatDatabase(agentDir);
@@ -799,7 +824,67 @@ test("legacy authority recreated after completed cutover blocks startup", async 
 
   assert.throws(
     () => database.migrateChatDatabaseForInstall(agentDir),
-    /chat_legacy_migration_source_recreated/,
+    /chat_legacy_migration_source_changed/,
+  );
+});
+
+test("legacy archive content modified after completed cutover blocks startup", async () => {
+  const agentDir = await tempDir();
+  const archiveFile = path.join(
+    agentDir,
+    "data",
+    "chat",
+    "legacy-migrated-v1",
+    "inbox",
+    "pending",
+    "original.json",
+  );
+  await writeJson(
+    path.join(agentDir, "data", "chat", "inbox", "pending", "original.json"),
+    legacyInbox("archive-modified"),
+  );
+  database.migrateChatDatabaseForInstall(agentDir);
+  database.closeChatDatabase(agentDir);
+  await writeJson(archiveFile, {
+    ...legacyInbox("archive-modified"),
+    routing: { text: "modified after cutover" },
+  });
+
+  assert.throws(
+    () => database.migrateChatDatabaseForInstall(agentDir),
+    /chat_legacy_migration_source_changed/,
+  );
+});
+
+test("legacy archive content deleted after completed cutover blocks startup", async () => {
+  const agentDir = await tempDir();
+  const sourceFile = path.join(
+    agentDir,
+    "data",
+    "chat",
+    "message-store",
+    "records",
+    "00",
+    "original.json",
+  );
+  await writeJson(sourceFile, legacyMessage("archive-deleted"));
+  database.migrateChatDatabaseForInstall(agentDir);
+  database.closeChatDatabase(agentDir);
+  await fs.rm(
+    path.join(
+      agentDir,
+      "data",
+      "chat",
+      "legacy-migrated-v1",
+      "message-records",
+      "00",
+      "original.json",
+    ),
+  );
+
+  assert.throws(
+    () => database.migrateChatDatabaseForInstall(agentDir),
+    /chat_legacy_migration_source_changed/,
   );
 });
 
