@@ -23,7 +23,11 @@ import { stringifyJson } from "../platform/fs.js";
 import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
 import { loadFirstValidCandidate } from "./candidate-loader.js";
-import { type InstalledReleaseInfo } from "../rin-lib/release.js";
+import {
+  concreteGitReleaseRef,
+  requireConcreteGitRelease,
+  type InstalledReleaseInfo,
+} from "../rin-lib/release.js";
 import { initStatePath } from "../self-improve/paths.js";
 import { getManagedChatSessionDir } from "../session/managed-paths.js";
 import {
@@ -1120,6 +1124,17 @@ function buildInstalledReleaseRecord(options: {
   };
 }
 
+function isUsableRollbackReleaseRecord(
+  record: ReturnType<typeof buildInstalledReleaseRecord>,
+) {
+  if (!record || record.name.toLowerCase() === "unknown") return false;
+  if (!record.release) return true;
+  if (record.release.channel === "git") {
+    return Boolean(concreteGitReleaseRef(record.release));
+  }
+  return record.release.version !== "unknown";
+}
+
 function legacyManagedFilesManifestPath(installDir: string) {
   return path.join(installDir, "data", ".managed", "install-home.json");
 }
@@ -1203,6 +1218,7 @@ export function reconcileInstallerManifest(
     runPrivileged: (command: string, args: string[]) => void;
   },
 ) {
+  if (options.release) requireConcreteGitRelease(options.release);
   const { ownerUser, ownerGroup, ownerHome } = resolveInstallOwner(
     options.targetUser,
     deps.findSystemUser,
@@ -1260,11 +1276,21 @@ export function reconcileInstallerManifest(
       root: options.currentReleaseRoot,
       release: normalizedRelease,
     }) || priorCurrentRelease;
-  const previousRelease = buildInstalledReleaseRecord({
+  const previousReleaseCandidate = buildInstalledReleaseRecord({
     name: options.previousReleaseName,
     root: options.previousReleaseRoot,
     release: previousReleaseMetadata,
   });
+  const previousRelease = isUsableRollbackReleaseRecord(
+    previousReleaseCandidate,
+  )
+    ? previousReleaseCandidate
+    : undefined;
+  const fallbackPreviousRelease = isUsableRollbackReleaseRecord(
+    priorPreviousRelease,
+  )
+    ? priorPreviousRelease
+    : undefined;
   if (currentRelease) manifestJson.currentRelease = currentRelease;
   const managedFiles = mergeManagedFilesManifests(
     priorManagedFiles,
@@ -1286,10 +1312,10 @@ export function reconcileInstallerManifest(
   ) {
     manifestJson.previousRelease = previousRelease;
   } else if (
-    priorPreviousRelease &&
-    priorPreviousRelease.name !== String(currentRelease?.name || "")
+    fallbackPreviousRelease &&
+    fallbackPreviousRelease.name !== String(currentRelease?.name || "")
   ) {
-    manifestJson.previousRelease = priorPreviousRelease;
+    manifestJson.previousRelease = fallbackPreviousRelease;
   }
   manifestJson.updatedAt = nowIso();
 

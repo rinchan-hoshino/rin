@@ -823,6 +823,92 @@ test("persist reconcileInstallerManifest records current and previous release ro
   });
 });
 
+test("persist reconcileInstallerManifest preserves the last valid rollback point when current identity is unknown", async () => {
+  await withTempDir(async (dir) => {
+    const installDir = path.join(dir, "srv", "rin-demo");
+    const ownerHome = path.join(dir, "home", "demo");
+    const writes = [];
+    const validPrevious = {
+      name: "3374adcfb9c9",
+      path: path.join(installDir, "app", "releases", "3374adcfb9c9"),
+      release: {
+        channel: "git",
+        version: "3374adcfb9c9",
+        branch: "main",
+        ref: "3374adcfb9c9c65c1b39498d81818fd8ff3a16b0",
+        sourceLabel: "git branch main @ 3374adcfb9c9",
+        archiveUrl:
+          "https://example.com/rin/archive/3374adcfb9c9c65c1b39498d81818fd8ff3a16b0.tar.gz",
+      },
+    };
+    const priorManifest = {
+      currentRelease: {
+        name: "unknown",
+        path: path.join(installDir, "app", "releases", "unknown"),
+        release: {
+          channel: "git",
+          version: "unknown",
+          branch: "main",
+          ref: "",
+          sourceLabel: "git branch main",
+          archiveUrl: "https://example.com/rin/archive/main.tar.gz",
+        },
+      },
+      previousRelease: validPrevious,
+    };
+
+    persist.reconcileInstallerManifest(
+      {
+        targetUser: "demo",
+        installDir,
+        release: {
+          channel: "git",
+          version: "eae70b642bdd",
+          branch: "main",
+          ref: "eae70b642bddceff1c416a3126467b106d7065d1",
+          sourceLabel: "git ref eae70b642bddceff1c416a3126467b106d7065d1",
+          archiveUrl:
+            "https://example.com/rin/archive/eae70b642bddceff1c416a3126467b106d7065d1.tar.gz",
+        },
+        currentReleaseName: "eae70b642bdd",
+        currentReleaseRoot: path.join(
+          installDir,
+          "app",
+          "releases",
+          "eae70b642bdd",
+        ),
+        previousReleaseName: "unknown",
+        previousReleaseRoot: path.join(
+          installDir,
+          "app",
+          "releases",
+          "unknown",
+        ),
+        elevated: false,
+      },
+      {
+        findSystemUser: () => ({ name: "demo", gid: 1000, home: ownerHome }),
+        ensureDir: () => {},
+        readInstallerJson: (_filePath, fallback) =>
+          fallback === null ? priorManifest : fallback,
+        writeJsonFileWithPrivilege: () => {},
+        writeJsonFile: (filePath, value) => writes.push({ filePath, value }),
+        runPrivileged: () => {},
+      },
+    );
+
+    assert.equal(writes.length, 2);
+    for (const entry of writes) {
+      assert.equal(entry.value.currentRelease.name, "eae70b642bdd");
+      assert.equal(entry.value.previousRelease.name, validPrevious.name);
+      assert.equal(
+        entry.value.previousRelease.release.ref,
+        validPrevious.release.ref,
+      );
+    }
+  });
+});
+
 test("persist reconcileInstallerManifest reuses only currentRelease state from prior manifests", async () => {
   await withTempDir(async (dir) => {
     const installDir = path.join(dir, "srv", "rin-demo");
@@ -2043,40 +2129,38 @@ test("persist persistInstallerOutputs forwards release metadata into currentRele
   });
 });
 
-test("persist reconcileInstallerManifest does not store git branch selectors as versions", () => {
+test("persist reconcileInstallerManifest rejects git branch selectors as release identity", () => {
   const writes = [];
-  persist.reconcileInstallerManifest(
-    {
-      targetUser: "demo",
-      installDir: "/tmp/rin",
-      release: {
-        channel: "git",
-        version: "main",
-        branch: "main",
-        ref: "main",
-        sourceLabel: "git branch main",
-        archiveUrl: "https://example.invalid/main.tar.gz",
-      },
-      currentReleaseName: "main",
-      currentReleaseRoot: "/tmp/rin/app/releases/main",
-      elevated: false,
-    },
-    {
-      findSystemUser: () => ({ name: "demo", home: "/home/demo" }),
-      ensureDir: () => {},
-      readInstallerJson: (_filePath, fallback) => fallback,
-      writeJsonFileWithPrivilege: () => {},
-      writeJsonFile: (filePath, value) => writes.push({ filePath, value }),
-      runPrivileged: () => {},
-    },
+  assert.throws(
+    () =>
+      persist.reconcileInstallerManifest(
+        {
+          targetUser: "demo",
+          installDir: "/tmp/rin",
+          release: {
+            channel: "git",
+            version: "main",
+            branch: "main",
+            ref: "main",
+            sourceLabel: "git branch main",
+            archiveUrl: "https://example.invalid/main.tar.gz",
+          },
+          currentReleaseName: "main",
+          currentReleaseRoot: "/tmp/rin/app/releases/main",
+          elevated: false,
+        },
+        {
+          findSystemUser: () => ({ name: "demo", home: "/home/demo" }),
+          ensureDir: () => {},
+          readInstallerJson: (_filePath, fallback) => fallback,
+          writeJsonFileWithPrivilege: () => {},
+          writeJsonFile: (filePath, value) => writes.push({ filePath, value }),
+          runPrivileged: () => {},
+        },
+      ),
+    /rin_git_ref_not_resolved:main/,
   );
-
-  const manifest = writes.find((entry) =>
-    entry.filePath.endsWith("installer.json"),
-  )?.value;
-  assert.equal(manifest.currentRelease.release.channel, "git");
-  assert.equal(manifest.currentRelease.release.version, "unknown");
-  assert.equal(manifest.currentRelease.release.ref, "");
+  assert.equal(writes.length, 0);
 });
 
 test("persist persistInstallerOutputs can skip saving a launcher default target", async () => {

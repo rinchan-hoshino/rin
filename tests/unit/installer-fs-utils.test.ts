@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
@@ -516,6 +517,57 @@ test("installedRuntimeReleaseId names git releases from a short commit hash", as
       archiveUrl: "https://example.invalid/main.tar.gz",
     }),
     "0123456789ab",
+  );
+
+  await fs.rm(tempRoot, { recursive: true, force: true });
+});
+
+test("installedRuntimeReleaseId rejects unresolved git identity", async () => {
+  const tempRoot = await makeRuntimeSource();
+
+  assert.throws(
+    () =>
+      fsUtils.installedRuntimeReleaseId(tempRoot, {
+        channel: "git",
+        version: "unknown",
+        branch: "main",
+        ref: "",
+        sourceLabel: "git branch main",
+        archiveUrl: "https://example.invalid/main.tar.gz",
+      }),
+    /rin_git_ref_not_resolved:unknown/,
+  );
+
+  await fs.rm(tempRoot, { recursive: true, force: true });
+});
+
+test("installedRuntimeReleaseId does not replace unresolved metadata with the source checkout commit", async () => {
+  const tempRoot = await makeRuntimeSource();
+  execFileSync("git", ["-C", tempRoot, "init"], { stdio: "ignore" });
+  execFileSync("git", ["-C", tempRoot, "config", "user.name", "Rin Test"]);
+  execFileSync("git", [
+    "-C",
+    tempRoot,
+    "config",
+    "user.email",
+    "rin-test@example.invalid",
+  ]);
+  execFileSync("git", ["-C", tempRoot, "add", "package.json"]);
+  execFileSync("git", ["-C", tempRoot, "commit", "-m", "fixture"], {
+    stdio: "ignore",
+  });
+
+  assert.throws(
+    () =>
+      fsUtils.installedRuntimeReleaseId(tempRoot, {
+        channel: "git",
+        version: "unknown",
+        branch: "main",
+        ref: "",
+        sourceLabel: "git branch main",
+        archiveUrl: "https://example.invalid/main.tar.gz",
+      }),
+    /rin_git_ref_not_resolved:unknown/,
   );
 
   await fs.rm(tempRoot, { recursive: true, force: true });

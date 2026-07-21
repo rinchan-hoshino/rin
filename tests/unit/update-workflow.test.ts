@@ -45,6 +45,75 @@ function testI18n() {
   };
 }
 
+const unresolvedMainRelease = {
+  channel: "git",
+  archiveUrl: "https://example.invalid/main.tar.gz",
+  version: "main",
+  branch: "main",
+  ref: "main",
+  sourceLabel: "git branch main",
+};
+
+test("resolveGitCommitForRelease rejects an unresolved branch", () => {
+  assert.throws(
+    () =>
+      updateWorkflow.resolveGitCommitForRelease(
+        pathToFileURL(
+          path.join(os.tmpdir(), "rin-nonexistent-remote-repository"),
+        ).href,
+        unresolvedMainRelease,
+      ),
+    /rin_git_ref_not_resolved:main/,
+  );
+});
+
+test("resolveGitCommitForRelease rejects malformed ls-remote output", () => {
+  assert.throws(
+    () =>
+      updateWorkflow.resolveGitCommitForRelease(
+        pathToFileURL(rootDir).href,
+        unresolvedMainRelease,
+        {
+          readRemoteRefs: () => "0123456789abcdef0123456789abcdef01234567",
+        },
+      ),
+    /rin_git_ref_not_resolved:main/,
+  );
+});
+
+test("resolveGitCommitForRelease rejects ambiguous ls-remote output", () => {
+  assert.throws(
+    () =>
+      updateWorkflow.resolveGitCommitForRelease(
+        pathToFileURL(rootDir).href,
+        unresolvedMainRelease,
+        {
+          readRemoteRefs: () =>
+            [
+              "0123456789abcdef0123456789abcdef01234567\trefs/heads/main",
+              "89abcdef0123456789abcdef0123456789abcdef\trefs/tags/main",
+            ].join("\n"),
+        },
+      ),
+    /rin_git_ref_not_resolved:main/,
+  );
+});
+
+test("resolveGitCommitForRelease rejects an ordinary selector in another ref namespace", () => {
+  assert.throws(
+    () =>
+      updateWorkflow.resolveGitCommitForRelease(
+        pathToFileURL(rootDir).href,
+        unresolvedMainRelease,
+        {
+          readRemoteRefs: () =>
+            "0123456789abcdef0123456789abcdef01234567\trefs/pull/main",
+        },
+      ),
+    /rin_git_ref_not_resolved:main/,
+  );
+});
+
 async function writeExecutable(filePath: string, content: string) {
   await fs.writeFile(filePath, content, { mode: 0o755 });
 }

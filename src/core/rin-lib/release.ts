@@ -146,6 +146,32 @@ function isGitHash(value: unknown) {
   return /^[0-9a-f]{7,40}$/i.test(trimReleaseValue(value));
 }
 
+export function concreteGitReleaseRef(
+  release:
+    | Pick<ResolvedRelease, "channel" | "version" | "branch" | "ref">
+    | undefined,
+) {
+  if (release?.channel !== "git") return "";
+  if (isGitHash(release.ref)) return trimReleaseValue(release.ref);
+  if (isGitHash(release.version)) return trimReleaseValue(release.version);
+  return "";
+}
+
+export function requireConcreteGitRelease<T extends ResolvedRelease>(
+  release: T,
+): T {
+  if (release.channel !== "git" || concreteGitReleaseRef(release)) {
+    return release;
+  }
+  const selector = firstReleaseValue(
+    release.ref,
+    release.version,
+    release.branch,
+    "unknown",
+  );
+  throw new Error(`rin_git_ref_not_resolved:${selector}`);
+}
+
 function resolveModuleRootFromHere() {
   return path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),

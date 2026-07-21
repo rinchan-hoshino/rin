@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { type InstalledReleaseInfo } from "../rin-lib/release.js";
+import {
+  concreteGitReleaseRef,
+  requireConcreteGitRelease,
+  type InstalledReleaseInfo,
+} from "../rin-lib/release.js";
 import { type ManagedFilesManifest } from "./persist.js";
 import {
   ensureDir,
@@ -849,10 +853,9 @@ export function installedRuntimeReleaseId(
   const gitCommit = readSourceGitCommit(sourceRoot);
 
   if (release?.channel === "git") {
-    if (/^[0-9a-f]{7,40}$/i.test(releaseVersion))
-      return releaseVersion.slice(0, 12);
-    if (/^[0-9a-f]{7,40}$/i.test(releaseRef)) return releaseRef.slice(0, 12);
-    return gitCommit || releaseRef || releaseVersion || "unknown";
+    const releaseCommit = concreteGitReleaseRef(release);
+    if (releaseCommit) return releaseCommit.slice(0, 12);
+    requireConcreteGitRelease(release);
   }
 
   if (!isPlaceholderPackageVersion(releaseVersion)) return releaseVersion;

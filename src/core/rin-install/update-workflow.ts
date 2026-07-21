@@ -13,6 +13,7 @@ import { shellQuote } from "../rin-lib/system.js";
 import {
   buildGitHubRefArchiveUrl,
   platformReleaseAssetUrl,
+  requireConcreteGitRelease,
   selectPlatformReleaseAsset,
   type ResolvedRelease,
 } from "../rin-lib/release.js";
@@ -165,29 +166,61 @@ export async function runLoggedUpdateCommandSync(
 export function resolveGitCommitForRelease(
   repoUrl: string,
   release: ResolvedRelease,
+  deps: {
+    readRemoteRefs?: (repoUrl: string, selector: string) => string;
+  } = {},
 ): ResolvedRelease {
   if (release.channel !== "git") return release;
   const selector = release.ref || release.version || release.branch || "HEAD";
-  if (/^[0-9a-f]{7,40}$/i.test(selector)) return release;
+  if (/^[0-9a-f]{7,40}$/i.test(selector)) {
+    return requireConcreteGitRelease(release);
+  }
+
+  let raw = "";
   try {
-    const git = requireTool("git", ["/usr/bin/git", "/bin/git"]);
-    const raw = execFileSync(git, ["ls-remote", repoUrl, selector], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    const hash = raw.split(/\s+/)[0] || "";
-    if (/^[0-9a-f]{40}$/i.test(hash)) {
-      const shortHash = hash.slice(0, 12);
-      return {
-        ...release,
-        archiveUrl: buildGitHubRefArchiveUrl(repoUrl, hash),
-        version: shortHash,
-        ref: hash,
-        sourceLabel: `${release.sourceLabel} @ ${shortHash}`,
-      };
+    if (deps.readRemoteRefs) {
+      raw = deps.readRemoteRefs(repoUrl, selector).trim();
+    } else {
+      const git = requireTool("git", ["/usr/bin/git", "/bin/git"]);
+      raw = execFileSync(git, ["ls-remote", repoUrl, selector], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
     }
-  } catch {}
-  return release;
+  } catch (cause) {
+    throw new Error(`rin_git_ref_not_resolved:${selector}`, { cause });
+  }
+
+  const records = raw.split(/\r?\n/).map((line) => {
+    const match = /^([0-9a-f]{40})\t(\S+)$/i.exec(line);
+    return match ? { hash: match[1]!, ref: match[2]! } : null;
+  });
+  const matchingRecords = records.filter(
+    (record) =>
+      record &&
+      (selector === "HEAD"
+        ? record.ref === "HEAD"
+        : selector.startsWith("refs/")
+          ? record.ref === selector
+          : record.ref === `refs/heads/${selector}` ||
+            record.ref === `refs/tags/${selector}`),
+  );
+  if (
+    records.length !== 1 ||
+    records.some((record) => !record) ||
+    matchingRecords.length !== 1
+  ) {
+    throw new Error(`rin_git_ref_not_resolved:${selector}`);
+  }
+  const hash = matchingRecords[0]!.hash;
+  const shortHash = hash.slice(0, 12);
+  return {
+    ...release,
+    archiveUrl: buildGitHubRefArchiveUrl(repoUrl, hash),
+    version: shortHash,
+    ref: hash,
+    sourceLabel: `${release.sourceLabel} @ ${shortHash}`,
+  };
 }
 
 export function updateWorkRoot() {

@@ -7,6 +7,7 @@ import chalk from "chalk";
 import {
   getReleaseRepoUrl,
   loadReleaseManifestForNetwork,
+  requireConcreteGitRelease,
   resolveReleaseRequest,
   type InstalledReleaseInfo,
   type ReleaseChannel,
@@ -225,12 +226,13 @@ export async function startUpdater(deps: {
     installDir,
     ownerHome: target.ownerHome,
   });
-  const resolvedRelease =
+  const resolvedRelease = requireConcreteGitRelease(
     deps.release ||
-    (await resolveUpdateRelease({
-      installedRelease,
-      releaseRequest: deps.releaseRequest,
-    }));
+      (await resolveUpdateRelease({
+        installedRelease,
+        releaseRequest: deps.releaseRequest,
+      })),
+  );
 
   if (isInstalledReleaseCurrent(installedRelease, resolvedRelease)) {
     note(

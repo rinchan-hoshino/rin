@@ -225,6 +225,36 @@ test("startUpdater skips repeated plan and confirmation when preconfirmed", asyn
   });
 });
 
+test("startUpdater rejects unresolved git metadata before publishing", async () => {
+  await withUpdaterStdout(async () => {
+    let finalizeCalled = false;
+    await assert.rejects(
+      updater.startUpdater({
+        detectCurrentUser: () => "alice",
+        repoRootFromHere: () => "/src/rin",
+        ensureNotCancelled: (value: unknown) => value,
+        release: {
+          channel: "git",
+          archiveUrl: "https://example.test/rin.tar.gz",
+          version: "main",
+          branch: "main",
+          ref: "main",
+          sourceLabel: "git branch main",
+        },
+        i18n: installerI18n.createInstallerI18n(),
+        ...requestedUpdateTarget,
+        assumeYes: true,
+        async runFinalizeInstallPlanInChild() {
+          finalizeCalled = true;
+          return fakeUpdateResult();
+        },
+      }),
+      /rin_git_ref_not_resolved:main/,
+    );
+    assert.equal(finalizeCalled, false);
+  });
+});
+
 test("startUpdater renders update notes in fixed English", async () => {
   await withUpdaterStdout(async (stdout) => {
     await updater.startUpdater({
@@ -234,10 +264,10 @@ test("startUpdater renders update notes in fixed English", async () => {
       release: {
         channel: "git",
         archiveUrl: "https://example.test/rin.tar.gz",
-        version: "main",
+        version: "0123456789ab",
         branch: "main",
-        ref: "main",
-        sourceLabel: "git branch main",
+        ref: "0123456789abcdef0123456789abcdef01234567",
+        sourceLabel: "git branch main @ 0123456789ab",
       },
       i18n: installerI18n.createInstallerI18n(),
       ...requestedUpdateTarget,
