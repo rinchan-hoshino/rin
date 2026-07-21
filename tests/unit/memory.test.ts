@@ -1399,6 +1399,105 @@ test("recall merges multiple message hits from the same session", async () => {
   });
 });
 
+test("recall can rank matching sessions newest-first without changing relevance default", async () => {
+  await withTempRoot(async (root) => {
+    for (const [id, timestamp, text] of [
+      [
+        "old-1",
+        "2026-01-01T09:00:00.000Z",
+        "Project Aurora current status is draft.",
+      ],
+      [
+        "old-2",
+        "2026-01-01T09:01:00.000Z",
+        "Project Aurora current status remains draft.",
+      ],
+    ]) {
+      await transcripts.appendTranscriptArchiveEntry(
+        {
+          id,
+          timestamp,
+          sessionId: "old-session",
+          sessionFile: "/tmp/old-session.jsonl",
+          role: "assistant",
+          text,
+        },
+        root,
+      );
+    }
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        id: "new-1",
+        timestamp: "2026-07-20T09:00:00.000Z",
+        sessionId: "new-session",
+        sessionFile: "/tmp/new-session.jsonl",
+        role: "assistant",
+        text: "Project Aurora current status is released.",
+      },
+      root,
+    );
+
+    const relevanceResults = await transcripts.searchTranscriptArchive(
+      "Project Aurora current status",
+      { limit: 2 },
+      root,
+    );
+    assert.deepEqual(
+      relevanceResults.map((result) => result.sessionId),
+      ["old-session", "new-session"],
+    );
+
+    const newestResults = await transcripts.searchTranscriptArchive(
+      "Project Aurora current status",
+      { limit: 2, order: "newest" },
+      root,
+    );
+    assert.deepEqual(
+      newestResults.map((result) => result.sessionId),
+      ["new-session", "old-session"],
+    );
+  });
+});
+
+test("newest recall retrieves fresh matches before relevance candidate truncation", async () => {
+  await withTempRoot(async (root) => {
+    for (let index = 0; index < 55; index += 1) {
+      await transcripts.appendTranscriptArchiveEntry(
+        {
+          id: `old-${index}`,
+          timestamp: `2026-01-01T09:00:${String(index).padStart(2, "0")}.000Z`,
+          sessionId: "old-saturated-session",
+          sessionFile: "/tmp/old-saturated-session.jsonl",
+          role: "assistant",
+          text: `Project Aurora current status historical note ${index}.`,
+        },
+        root,
+      );
+    }
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        id: "new-final",
+        timestamp: "2026-07-20T09:00:00.000Z",
+        sessionId: "new-final-session",
+        sessionFile: "/tmp/new-final-session.jsonl",
+        role: "assistant",
+        text: "Project Aurora current status is released.",
+      },
+      root,
+    );
+
+    const newestResults = await transcripts.searchTranscriptArchive(
+      "Project Aurora current status",
+      { limit: 2, order: "newest" },
+      root,
+    );
+    assert.deepEqual(
+      newestResults.map((result) => result.sessionId),
+      ["new-final-session", "old-saturated-session"],
+    );
+  });
+});
+
 test("recall avoids full entries-table exact scans before FTS lookup", async () => {
   await withTempRoot(async (root) => {
     await transcripts.appendTranscriptArchiveEntry(
@@ -2054,8 +2153,73 @@ test("recall includes external provider results without local transcript paths",
           result.details.userText,
           /Remote memory summary from a non-local original-text store/,
         );
-        assert.match(result.details.userText, /L1 memory: remote snippet only/);
+        assert.match(
+          result.details.userText,
+          /L1 2026-05-11T06:00:00\.000Z memory: remote snippet only/,
+        );
         assert.doesNotMatch(result.details.userText, /memory\/transcripts/);
+      },
+    );
+  });
+});
+
+test("recall newest order applies across local and external memory results", async () => {
+  await withTempRoot(async (root) => {
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        timestamp: "2026-01-01T09:00:00.000Z",
+        sessionId: "old-local",
+        sessionFile: "/tmp/old-local.jsonl",
+        role: "assistant",
+        text: "Project Aurora current status is draft.",
+      },
+      root,
+    );
+
+    const requests = [];
+    await withJsonlDaemonSocket(
+      (payload) => {
+        requests.push(payload);
+        if (payload.type === "memory_search_external") {
+          return {
+            results: [
+              {
+                sourceType: "external",
+                provider: "remote-memory",
+                id: "newest-remote",
+                reference: "mem://newest-remote",
+                summary: "Project Aurora current status is released.",
+                score: 1,
+                messages: [
+                  {
+                    line: 1,
+                    role: "memory",
+                    timestamp: "2026-07-20T09:00:00.000Z",
+                    text: "Project Aurora current status is released.",
+                  },
+                ],
+              },
+            ],
+          };
+        }
+        return {};
+      },
+      async () => {
+        const result = await memoryExtensionModule.executeRecall(
+          {
+            query: "Project Aurora current status",
+            limit: 2,
+            order: "newest",
+          },
+          { agentDir: root, model: { provider: "test", id: "demo" } },
+          "medium",
+        );
+
+        assert.equal(requests.at(-1)?.payload?.order, "newest");
+        assert.ok(
+          result.content[0].text.indexOf("mem://newest-remote") <
+            result.content[0].text.indexOf("old-local.jsonl"),
+        );
       },
     );
   });
@@ -2105,6 +2269,7 @@ test("recall user formatting omits duplicate header and shows raw messages", () 
     query: "minecraft server",
     results: [
       {
+        timestamp: "2026-04-14T06:05:42.876Z",
         sessionFile: "/home/rin/.rin/sessions/demo.jsonl",
         path: "/home/rin/.rin/memory/transcripts/2026/04/demo.jsonl",
         summary:
@@ -2115,6 +2280,7 @@ test("recall user formatting omits duplicate header and shows raw messages", () 
             line: 12,
             role: "toolResult",
             toolName: "bash",
+            timestamp: "2026-04-14T06:05:40.000Z",
             text: "docker restart afbfee08-9ced-462b-9b30-8a5a09c2cb71 && grep 'Done (' logs/latest.log",
           },
         ],
@@ -2128,9 +2294,10 @@ test("recall user formatting omits duplicate header and shows raw messages", () 
     /\/home\/rin\/\.rin\/memory\/transcripts\/2026\/04\/demo\.jsonl/,
   );
   assert.match(rendered, /Investigated the Minecraft server modpack crash/);
+  assert.match(rendered, /2026-04-14T06:05:42\.876Z/);
   assert.match(
     rendered,
-    /L12 toolResult\/bash: docker restart afbfee08-9ced-462b-9b30-8a5a09c2cb71/,
+    /L12 2026-04-14T06:05:40\.000Z toolResult\/bash: docker restart afbfee08-9ced-462b-9b30-8a5a09c2cb71/,
   );
   assert.doesNotMatch(rendered, /raw preview should never leak/);
 });
@@ -2151,6 +2318,7 @@ test("recall agent formatting uses archive path and line-numbered raw messages",
           {
             line: 42,
             role: "assistant",
+            timestamp: "2026-04-14T06:04:00.000Z",
             text: "Verified the affected bridge path and confirmed outbound send recovery.",
           },
         ],
@@ -2161,10 +2329,24 @@ test("recall agent formatting uses archive path and line-numbered raw messages",
   assert.match(rendered, /^recall chat outbound \(1\)/m);
   assert.match(
     rendered,
-    /1\. \/home\/rin\/\.rin\/memory\/transcripts\/2026\/04\/64ccd205-ea35-4716-b2d4-9eff931eb59c\.jsonl/,
+    /1\. 2026-04-14T06:05:42\.876Z \/home\/rin\/\.rin\/memory\/transcripts\/2026\/04\/64ccd205-ea35-4716-b2d4-9eff931eb59c\.jsonl/,
   );
-  assert.match(rendered, /L42 assistant: Verified the affected bridge path/);
-  assert.doesNotMatch(rendered, /^1\. 2026-04-14T06:05:42\.876Z/m);
+  assert.match(
+    rendered,
+    /L42 2026-04-14T06:04:00\.000Z assistant: Verified the affected bridge path/,
+  );
+  assert.match(rendered, /^1\. 2026-04-14T06:05:42\.876Z /m);
+});
+
+test("recall tool schema exposes relevance and newest ordering", () => {
+  const definition = memoryExtensionModule.default({
+    getThinkingLevel: () => "medium",
+  });
+  const recallTool = definition.tools.find((tool) => tool.name === "recall");
+  assert.deepEqual(
+    recallTool.parameters.properties.order.anyOf.map((item) => item.const),
+    ["relevance", "newest"],
+  );
 });
 
 test("recall call formatting keeps tool name and query in the TUI tool title", () => {

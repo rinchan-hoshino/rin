@@ -4,7 +4,7 @@ Rin's builtin session-history memory module.
 
 Public tool:
 
-- `recall` — query past sessions, or leave `query` empty to browse recent sessions directly
+- `recall` — query past sessions, or leave `query` empty to browse recent sessions directly; queried recall defaults to `order: "relevance"` and supports `order: "newest"` for topic-filtered newest-first history
 
 Extension API:
 
@@ -25,6 +25,7 @@ This module owns:
 - cross-session transcript search with session-level rollup: search gathers many raw message hits, merges them by session, and returns session-scoped recall results
 - transcript recall summarization via the active model at fixed `low` thinking
 - recall summaries are steered to fuse the overall session context with why the current query matched
+- agent-visible recall output includes exact result and matched-message timestamps so the model can compare chronology
 
 It does not own distilled guidance, always-on prompts, or agent-managed skills. Those belong to the `self-improve` module.
 

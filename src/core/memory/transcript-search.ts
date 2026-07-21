@@ -1287,6 +1287,8 @@ function exactCandidateBoost(
   return boost;
 }
 
+type TranscriptSearchOrder = "relevance" | "newest";
+
 function queryFtsCandidates(
   db: Database,
   tableName: "entries_fts_token" | "entries_fts_trigram",
@@ -1294,20 +1296,34 @@ function queryFtsCandidates(
   rawHitLimit: number,
   baseScore: number,
   step: number,
+  order: TranscriptSearchOrder,
   candidates: Map<string, number>,
 ) {
   if (!query) return;
-  const rows = db
-    .prepare(
-      `
-      SELECT row_key
-      FROM ${tableName}
-      WHERE ${tableName} MATCH ?
-      ORDER BY bm25(${tableName})
-      LIMIT ?
-    `,
-    )
-    .all(query, rawHitLimit) as Array<{ row_key: string }>;
+  const statement =
+    order === "newest"
+      ? db.prepare(
+          `
+          SELECT ${tableName}.row_key
+          FROM ${tableName}
+          JOIN entries ON entries.row_key = ${tableName}.row_key
+          WHERE ${tableName} MATCH ?
+          ORDER BY entries.timestamp_ms DESC, entries.line_number DESC
+          LIMIT ?
+        `,
+        )
+      : db.prepare(
+          `
+          SELECT row_key
+          FROM ${tableName}
+          WHERE ${tableName} MATCH ?
+          ORDER BY bm25(${tableName})
+          LIMIT ?
+        `,
+        );
+  const rows = statement.all(query, rawHitLimit) as Array<{
+    row_key: string;
+  }>;
   rows.forEach((row, index) => {
     addCandidateScore(candidates, row.row_key, baseScore - index * step);
   });
@@ -1318,7 +1334,11 @@ function aggregateSearchResults(
   candidates: Map<string, number>,
   limit: number,
   rootOverride = "",
-  options: { rawQuery?: string; exactOnly?: boolean } = {},
+  options: {
+    rawQuery?: string;
+    exactOnly?: boolean;
+    order?: TranscriptSearchOrder;
+  } = {},
 ): TranscriptSessionResult[] {
   if (!candidates.size) return [];
 
@@ -1365,9 +1385,12 @@ function aggregateSearchResults(
         ),
     )
     .sort((a, b) => {
-      const diff = b.score - a.score;
-      if (diff) return diff;
-      return b.timestamp_ms - a.timestamp_ms;
+      const scoreDiff = b.score - a.score;
+      const timestampDiff = b.timestamp_ms - a.timestamp_ms;
+      if (options.order === "newest") {
+        return timestampDiff || scoreDiff;
+      }
+      return scoreDiff || timestampDiff;
     })
     .slice(0, RAW_SEARCH_LIMIT);
 
@@ -1421,9 +1444,12 @@ function aggregateSearchResults(
         Math.min(bucket.totalScore, 400) / 10,
     }))
     .sort((a, b) => {
-      const diff = b.score - a.score;
-      if (diff) return diff;
-      return b.latestHitTimestampMs - a.latestHitTimestampMs;
+      const scoreDiff = b.score - a.score;
+      const timestampDiff = b.latestHitTimestampMs - a.latestHitTimestampMs;
+      if (options.order === "newest") {
+        return timestampDiff || scoreDiff;
+      }
+      return scoreDiff || timestampDiff;
     })
     .slice(0, limit);
 
@@ -1456,6 +1482,8 @@ export async function searchTranscriptArchive(
     Number(params.limit || DEFAULT_RESULT_LIMIT) || DEFAULT_RESULT_LIMIT,
   );
   const fidelity = safeString(params.fidelity || "").trim();
+  const order: TranscriptSearchOrder =
+    params.order === "newest" ? "newest" : "relevance";
 
   return withTranscriptSearchDb(rootOverride, (db) => {
     const tokenQuery = buildTokenFtsQuery(rawQuery);
@@ -1469,6 +1497,7 @@ export async function searchTranscriptArchive(
       RAW_SEARCH_LIMIT,
       140,
       3,
+      order,
       candidates,
     );
     queryFtsCandidates(
@@ -1478,12 +1507,14 @@ export async function searchTranscriptArchive(
       RAW_SEARCH_LIMIT,
       100,
       2,
+      order,
       candidates,
     );
 
     return aggregateSearchResults(db, candidates, limit, rootOverride, {
       rawQuery,
       exactOnly: fidelity === "exact",
+      order,
     });
   });
 }

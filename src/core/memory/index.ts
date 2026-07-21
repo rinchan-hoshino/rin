@@ -28,6 +28,7 @@ import {
   writeExternalMemoryEntry,
 } from "./external.js";
 import { readSessionMetadata } from "../session/metadata.js";
+import { parseTimestampMs } from "./utils.js";
 
 type MemoryToolDetails = {
   truncation?: TruncationResult;
@@ -49,6 +50,12 @@ const recallParams = Type.Object({
     Type.String({
       description:
         "Recall query. Omit it to browse recent sessions; use distinctive keywords, OR, or quoted exact wording when useful.",
+    }),
+  ),
+  order: Type.Optional(
+    Type.Union([Type.Literal("relevance"), Type.Literal("newest")], {
+      description:
+        "Result order for queried recall. Defaults to relevance; use newest to inspect current state or read matching history from new to old.",
     }),
   ),
   limit: Type.Optional(
@@ -130,13 +137,31 @@ function resultMessages(item: any): Array<any> {
   return Array.isArray(item?.messages) ? item.messages : [];
 }
 
+function latestResultTimestamp(item: any): { text: string; ms: number } {
+  const values = [
+    String(item?.timestamp || "").trim(),
+    ...resultMessages(item).map((message: any) =>
+      String(message?.timestamp || "").trim(),
+    ),
+  ].filter(Boolean);
+  let fallback = "";
+  let latest = { text: "", ms: 0 };
+  for (const text of values) {
+    fallback ||= text;
+    const ms = parseTimestampMs(text);
+    if (ms > latest.ms) latest = { text, ms };
+  }
+  return latest.text ? latest : { text: fallback, ms: 0 };
+}
+
 function formatMessageLine(message: any): string {
   const line = Math.max(1, Number(message?.line || 0) || 1);
+  const timestamp = String(message?.timestamp || "").trim();
   const role = String(message?.role || "message").trim() || "message";
   const toolName = String(message?.toolName || "").trim();
   const label = toolName ? `${role}/${toolName}` : role;
   const text = trimSnippet(String(message?.text || "").trim(), 240);
-  return `L${line} ${label}: ${text}`;
+  return [`L${line}`, timestamp, `${label}:`, text].filter(Boolean).join(" ");
 }
 
 function searchResultHeader(response: any): string {
@@ -151,7 +176,9 @@ export function formatSearchResult(response: any): string {
   return rows
     .map((item: any) => {
       return [
-        resultLocation(item),
+        [latestResultTimestamp(item).text, resultLocation(item)]
+          .filter(Boolean)
+          .join(" "),
         resultSnippet(item),
         ...resultMessages(item).map((message: any) =>
           formatMessageLine(message),
@@ -169,8 +196,11 @@ export function formatAgentSearchResult(response: any): string {
   return [
     `${searchResultHeader(response)} (${rows.length})`,
     ...rows.map((item: any, index: number) => {
+      const location = [latestResultTimestamp(item).text, resultLocation(item)]
+        .filter(Boolean)
+        .join(" ");
       return [
-        `${index + 1}. ${resultLocation(item)}`,
+        `${index + 1}. ${location}`,
         resultSnippet(item),
         ...resultMessages(item).map((message: any) =>
           formatMessageLine(message),
@@ -238,8 +268,7 @@ function throwIfAborted(signal?: AbortSignal) {
 }
 
 function resultTimestampMs(item: any): number {
-  const parsed = Date.parse(String(item?.timestamp || "").trim());
-  return Number.isFinite(parsed) ? parsed : 0;
+  return latestResultTimestamp(item).ms;
 }
 
 function resultScore(item: any): number {
@@ -250,7 +279,7 @@ function resultScore(item: any): number {
 function mergeMemoryResults(
   localResults: any[],
   externalResults: any[],
-  options: { limit: number; mode: "search" | "recent" },
+  options: { limit: number; order: "relevance" | "newest" },
 ) {
   const rows = [
     ...(Array.isArray(localResults) ? localResults : []),
@@ -260,7 +289,7 @@ function mergeMemoryResults(
     .map((item, index) => ({ item, index }))
     .sort((a, b) => {
       const primary =
-        options.mode === "recent"
+        options.order === "newest"
           ? resultTimestampMs(b.item) - resultTimestampMs(a.item)
           : resultScore(b.item) - resultScore(a.item);
       if (primary) return primary;
@@ -289,8 +318,10 @@ export async function executeRecall(
   try {
     const query = String(params?.query || "").trim();
     const mode = (query ? "search" : "recent") as "search" | "recent";
+    const order = query && params?.order !== "newest" ? "relevance" : "newest";
     const normalizedParams = {
       ...(params || {}),
+      order,
       limit: Number.isFinite(Number(params?.limit)) ? Number(params.limit) : 8,
     };
     const rootOverride = String(ctx?.agentDir || "").trim();
@@ -311,7 +342,7 @@ export async function executeRecall(
     throwIfAborted(signal);
     const merged = mergeMemoryResults(localResults, externalResults, {
       limit: normalizedParams.limit,
-      mode,
+      order,
     });
     const results = merged.results;
 
