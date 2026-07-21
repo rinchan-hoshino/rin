@@ -55,6 +55,7 @@ import {
 import {
   enqueueChatOutboxPayload,
   getActiveChatOutboxTurnFence,
+  hashPreGovernanceChatErrorDeliveryContent,
   withChatQuotePart,
   readChatOutboxItemById,
   type ChatMessagePart,
@@ -75,7 +76,6 @@ import {
   restorePromptParts,
   validateChatOutboxPayloadForDispatch,
 } from "./transport.js";
-import { formatRuntimeErrorForChat } from "../rin-lib/user-facing-errors.js";
 import { resolveChatQuietModeEnabled } from "./settings.js";
 
 const INTERMEDIATE_PREFIX = "... ";
@@ -2050,15 +2050,21 @@ export class ChatController {
       input.replyToMessageId || input.incomingMessageId,
     ).trim();
     const deliveryKind = input.deliveryKind || "final";
+    const explicitIdempotencyKey = safeString(input.idempotencyKey).trim();
     const idempotencyKey =
-      safeString(input.idempotencyKey).trim() ||
+      explicitIdempotencyKey ||
       (incomingMessageId
         ? JSON.stringify([
             deliveryKind,
             this.chatKey,
             incomingMessageId,
             replyToMessageId,
-            sha256Hex(JSON.stringify({ text, parts: input.parts || [] })),
+            deliveryKind === "error"
+              ? hashPreGovernanceChatErrorDeliveryContent(
+                  text,
+                  input.parts || [],
+                )
+              : sha256Hex(JSON.stringify({ text, parts: input.parts || [] })),
           ])
         : "");
     const id = idempotencyKey
@@ -2205,7 +2211,7 @@ export class ChatController {
           chatKey: this.chatKey,
           deliveryKind: "error",
           parts: withChatQuotePart(
-            [{ type: "text", text: formatRuntimeErrorForChat(trimmed) }],
+            [{ type: "text", text: trimmed }],
             this.currentReplyToMessageId(),
           ),
           ...this.currentConversationSessionPayload(),
@@ -2714,7 +2720,7 @@ export class ChatController {
       const errorMessage =
         safeString(error?.message || error).trim() || "chat_command_failed";
       await this.deliverAssistantReply({
-        text: formatRuntimeErrorForChat(errorMessage),
+        text: errorMessage,
         replyToMessageId: replyToMessageId || undefined,
         incomingMessageId,
         clearProcessing: true,
@@ -3117,7 +3123,7 @@ export class ChatController {
               input.outboxTurnFence,
             );
             await this.deliverAssistantReply({
-              text: formatRuntimeErrorForChat(errorMessage),
+              text: errorMessage,
               replyToMessageId: deliveryTarget.replyToMessageId,
               incomingMessageId: deliveryTarget.incomingMessageId,
               outboxTurnFence: deliveryTarget.outboxTurnFence,

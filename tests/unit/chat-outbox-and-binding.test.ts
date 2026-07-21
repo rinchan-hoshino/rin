@@ -147,6 +147,167 @@ test("chat outbox persists only in chat.sqlite and requires structured parts", a
   });
 });
 
+test("chat outbox persists canonical Chat error text exactly once", async () => {
+  await withTempDir(async (dir) => {
+    const markerId = outbox.enqueueChatOutboxPayload(
+      dir,
+      {
+        ...payload("rin_turn_result_recovery_timeout"),
+        parts: [
+          { type: "quote", id: "owner-message" },
+          { type: "text", text: "rin_turn_result_recovery_timeout" },
+        ],
+      },
+      { deliveryKind: "error" },
+    );
+    const prefixedId = outbox.enqueueChatOutboxPayload(
+      dir,
+      payload("Rin error: rin error: request failed"),
+      { deliveryKind: "error" },
+    );
+    const multipartId = outbox.enqueueChatOutboxPayload(
+      dir,
+      {
+        ...payload("unused"),
+        parts: [
+          { type: "text", text: "request failed" },
+          {
+            type: "markdown",
+            text: "Rin error: rin_turn_result_recovery_timeout",
+          },
+        ],
+      },
+      { deliveryKind: "error" },
+    );
+    const structuredFirstId = outbox.enqueueChatOutboxPayload(
+      dir,
+      {
+        ...payload("unused"),
+        parts: [
+          { type: "image", url: "https://example.com/context.png" },
+          { type: "markdown", text: "   " },
+          { type: "quote", id: "owner-message" },
+          { type: "text", text: "rin_turn_result_recovery_timeout" },
+          { type: "at", id: "operator" },
+          { type: "markdown", text: "Rin error: follow-up failed" },
+          { type: "file", url: "https://example.com/context.txt" },
+          { type: "text", text: "final detail" },
+        ],
+      },
+      { deliveryKind: "error" },
+    );
+    const mediaOnlyId = outbox.enqueueChatOutboxPayload(
+      dir,
+      {
+        ...payload("unused"),
+        parts: [
+          { type: "quote", id: "owner-message" },
+          { type: "image", url: "https://example.com/error.png" },
+        ],
+      },
+      { deliveryKind: "error" },
+    );
+    const payloadErrorId = outbox.enqueueChatOutboxPayload(dir, {
+      ...payload("payload marked error"),
+      deliveryKind: "error",
+    });
+    const conflictingRowKindId = outbox.enqueueChatOutboxPayload(
+      dir,
+      {
+        ...payload("payload wins"),
+        deliveryKind: "error",
+      },
+      { deliveryKind: "final" },
+    );
+    const conflictingPayloadKindId = outbox.enqueueChatOutboxPayload(
+      dir,
+      {
+        ...payload("option wins"),
+        deliveryKind: "final",
+      },
+      { deliveryKind: "error" },
+    );
+    const finalId = outbox.enqueueChatOutboxPayload(
+      dir,
+      payload("rin_turn_result_recovery_timeout"),
+      { deliveryKind: "final" },
+    );
+    assert.throws(
+      () =>
+        outbox.enqueueChatOutboxPayload(
+          dir,
+          {
+            ...payload("unused"),
+            parts: [{ type: "quote", id: "owner-message" }],
+          },
+          { deliveryKind: "error" },
+        ),
+      /chat_outbox_empty_message/,
+    );
+
+    assert.equal(
+      outbox.readChatOutboxItemById(dir, markerId).item.deliveryKind,
+      "error",
+    );
+    assert.equal(
+      outbox.readChatOutboxItemById(dir, markerId).item.payload.deliveryKind,
+      "error",
+    );
+    assert.deepEqual(
+      outbox.readChatOutboxItemById(dir, markerId).item.payload.parts,
+      [
+        { type: "quote", id: "owner-message" },
+        { type: "text", text: "rin error: turn result recovery timeout" },
+      ],
+    );
+    assert.deepEqual(
+      outbox.readChatOutboxItemById(dir, prefixedId).item.payload.parts,
+      [{ type: "text", text: "rin error: request failed" }],
+    );
+    assert.deepEqual(
+      outbox.readChatOutboxItemById(dir, multipartId).item.payload.parts,
+      [
+        { type: "text", text: "rin error: request failed" },
+        { type: "markdown", text: "turn result recovery timeout" },
+      ],
+    );
+    assert.deepEqual(
+      outbox.readChatOutboxItemById(dir, structuredFirstId).item.payload.parts,
+      [
+        { type: "quote", id: "owner-message" },
+        { type: "text", text: "rin error: turn result recovery timeout" },
+        { type: "image", url: "https://example.com/context.png" },
+        { type: "at", id: "operator" },
+        { type: "markdown", text: "follow-up failed" },
+        { type: "file", url: "https://example.com/context.txt" },
+        { type: "text", text: "final detail" },
+      ],
+    );
+    assert.deepEqual(
+      outbox.readChatOutboxItemById(dir, mediaOnlyId).item.payload.parts,
+      [
+        { type: "quote", id: "owner-message" },
+        { type: "text", text: "rin error: unknown error" },
+        { type: "image", url: "https://example.com/error.png" },
+      ],
+    );
+    for (const id of [
+      payloadErrorId,
+      conflictingRowKindId,
+      conflictingPayloadKindId,
+    ]) {
+      const item = outbox.readChatOutboxItemById(dir, id).item;
+      assert.equal(item.deliveryKind, "error");
+      assert.equal(item.payload.deliveryKind, "error");
+      assert.match(item.payload.parts[0].text, /^rin error: /);
+    }
+    assert.deepEqual(
+      outbox.readChatOutboxItemById(dir, finalId).item.payload.parts,
+      [{ type: "text", text: "rin_turn_result_recovery_timeout" }],
+    );
+  });
+});
+
 test("chat outbox idempotency commits one logical message", async () => {
   await withTempDir(async (dir) => {
     const options = {
@@ -165,6 +326,58 @@ test("chat outbox idempotency commits one logical message", async () => {
     );
     assert.equal(first, second);
     assert.equal(outbox.listChatOutboxItems(dir).length, 1);
+  });
+});
+
+test("chat outbox adopts pre-governance error rows without rewriting history", async () => {
+  await withTempDir(async (dir) => {
+    const options = {
+      idempotencyKey: "pre-governance-error",
+      deliveryKind: "error",
+    };
+    const candidate = {
+      ...payload("unused"),
+      parts: [
+        { type: "image", url: "https://example.com/context.png" },
+        { type: "text", text: "request failed" },
+        { type: "at", id: "operator" },
+        { type: "markdown", text: "secondary failed" },
+        { type: "file", url: "https://example.com/context.txt" },
+        { type: "text", text: "final detail" },
+        { type: "quote", id: "owner-message" },
+      ],
+    };
+    const first = outbox.enqueueChatOutboxPayload(dir, candidate, options);
+    const stored = outbox.readChatOutboxItemById(dir, first).item;
+    const legacyPayload = {
+      ...stored.payload,
+      parts: [
+        { type: "image", url: "https://example.com/context.png" },
+        { type: "text", text: "Rin error: rin error: request failed" },
+        { type: "at", id: "operator" },
+        { type: "markdown", text: "Rin error: secondary failed" },
+        { type: "file", url: "https://example.com/context.txt" },
+        { type: "text", text: "final detail" },
+        { type: "quote", id: "owner-message" },
+      ],
+    };
+    const db = database.openChatDatabase(dir);
+    db.prepare("UPDATE outbox SET payload_json = ? WHERE outbox_id = ?").run(
+      JSON.stringify(legacyPayload),
+      first,
+    );
+    db.prepare(
+      "UPDATE outbox_deliveries SET payload_json = ? WHERE outbox_id = ?",
+    ).run(JSON.stringify(legacyPayload), first);
+
+    const second = outbox.enqueueChatOutboxPayload(dir, candidate, options);
+
+    assert.equal(second, first);
+    assert.equal(outbox.listChatOutboxItems(dir).length, 1);
+    assert.deepEqual(
+      outbox.readChatOutboxItemById(dir, first).item.payload.parts,
+      legacyPayload.parts,
+    );
   });
 });
 

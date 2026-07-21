@@ -1101,7 +1101,7 @@ test("chat main silently drops the removed private /session command", async () =
   }
 });
 
-test("chat main reports unmatched owner-only group slash commands like private chats", async () => {
+test("chat main reports unmatched owner-only group slash commands through the standard error format", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1188,7 +1188,7 @@ test("chat main reports unmatched owner-only group slash commands like private c
         seen.length !== 0 ||
         sentCount !== 1 ||
         rows.length !== 1 ||
-        rows[0]?.text !== "Unknown command. Send /help to see available commands."
+        rows[0]?.text !== "rin error: Unknown command. Send /help to see available commands."
       ) {
         throw new Error(JSON.stringify({ sentCount, runCommandCalls, seen, rows }));
       }

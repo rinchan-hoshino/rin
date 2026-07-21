@@ -4,6 +4,11 @@ import crypto from "node:crypto";
 import { openChatDatabase } from "../chat/database.js";
 import { validateChatOutboxPayloadParts } from "../chat/outbox-payload-validation.js";
 import { safeString } from "../text-utils.js";
+import {
+  formatRuntimeErrorForChat,
+  formatRuntimeErrorForChatBody,
+  preGovernanceChatErrorTextForIdempotency,
+} from "./user-facing-errors.js";
 
 export type ChatMessagePart =
   | { type: "text"; text: string }
@@ -482,23 +487,88 @@ function terminalTurnForPostDelivery(
   );
 }
 
+export function hashPreGovernanceChatErrorDeliveryContent(
+  text: unknown,
+  parts: ChatMessagePart[] = [],
+) {
+  return crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        text: preGovernanceChatErrorTextForIdempotency(text),
+        parts,
+      }),
+    )
+    .digest("hex");
+}
+
+function formatChatOutboxErrorParts(parts: ChatMessagePart[]) {
+  const quoteParts: ChatMessagePart[] = [];
+  const contentParts: ChatMessagePart[] = [];
+  let primaryTextPart: ChatMessagePart | null = null;
+
+  for (const part of parts) {
+    if (part.type === "quote") {
+      quoteParts.push(part);
+      continue;
+    }
+    if (part.type === "text" || part.type === "markdown") {
+      if (!safeString(part.text).trim()) continue;
+      if (!primaryTextPart) {
+        primaryTextPart = {
+          ...part,
+          text: formatRuntimeErrorForChat(part.text),
+        };
+      } else {
+        contentParts.push({
+          ...part,
+          text: formatRuntimeErrorForChatBody(part.text),
+        });
+      }
+      continue;
+    }
+    contentParts.push(part);
+  }
+
+  if (primaryTextPart) {
+    return [...quoteParts, primaryTextPart, ...contentParts];
+  }
+  if (!contentParts.length) return quoteParts;
+  const errorPart: ChatMessagePart = {
+    type: "text",
+    text: formatRuntimeErrorForChat(""),
+  };
+  return [...quoteParts, errorPart, ...contentParts];
+}
+
 export function enqueueChatOutboxPayload(
   agentDir: string,
   payload: ChatOutboxPayloadInput,
   options: EnqueueChatOutboxOptions = {},
 ) {
   const createdAt = safeString(payload.createdAt).trim() || nowIso();
-  const normalizedPayload = normalizeChatOutboxPayload({
+  let normalizedPayload = normalizeChatOutboxPayload({
     ...payload,
     createdAt,
   });
   if (!normalizedPayload) throw new Error("chat_outbox_invalid_payload");
+  let deliveryKind = normalizeDeliveryKind(options.deliveryKind);
+  if (
+    deliveryKind === "error" ||
+    normalizeDeliveryKind(normalizedPayload.deliveryKind) === "error"
+  ) {
+    deliveryKind = "error";
+    normalizedPayload = {
+      ...normalizedPayload,
+      deliveryKind,
+      parts: formatChatOutboxErrorParts(normalizedPayload.parts),
+    };
+  }
   validateChatOutboxPayloadParts(normalizedPayload);
   const idempotencyKey = safeString(options.idempotencyKey).trim();
   const id =
     sanitizeIdPart(options.id) ||
     (idempotencyKey ? stableOutboxIdForKey(idempotencyKey) : createOutboxId());
-  const deliveryKind = normalizeDeliveryKind(options.deliveryKind);
   const db = openChatDatabase(agentDir);
   return db
     .transaction(() => {
@@ -558,6 +628,11 @@ export function enqueueChatOutboxPayload(
           normalizeChatOutboxPayload(parseJson<any>(row.payload_json, {}), {
             allowLegacyReplyMetadata: true,
           }) || {};
+        const existingParts = existingPayload.parts || [];
+        const comparableExistingParts =
+          normalizeDeliveryKind(row.delivery_kind) === "error"
+            ? formatChatOutboxErrorParts(existingParts)
+            : existingParts;
         const existingPostDelivery = parseJson<any>(
           row.post_delivery_json,
           null,
@@ -565,7 +640,7 @@ export function enqueueChatOutboxPayload(
         const desiredPostDelivery = options.postDelivery || null;
         if (
           safeString(row.delivery_kind).trim() !== deliveryKind ||
-          JSON.stringify(existingPayload?.parts || []) !==
+          JSON.stringify(comparableExistingParts) !==
             JSON.stringify(normalizedPayload.parts || []) ||
           (existingPostDelivery &&
             JSON.stringify(existingPostDelivery) !==

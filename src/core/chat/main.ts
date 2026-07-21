@@ -132,7 +132,6 @@ import {
   validateChatOutboxPayloadForDispatch,
 } from "./transport.js";
 import { normalizeSessionRef } from "../session/ref.js";
-import { formatRuntimeErrorForChat } from "../rin-lib/user-facing-errors.js";
 
 function createLogger(name: string) {
   const prefix = `[${name}]`;
@@ -923,7 +922,7 @@ export async function startChatBridge(
                 [
                   {
                     type: "text",
-                    text: formatRuntimeErrorForChat(errorMessage),
+                    text: errorMessage,
                   },
                 ],
                 messageId,

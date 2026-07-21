@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -3269,13 +3270,19 @@ test("chat controller keeps steering open after assistant tool-call interim", as
   assert.equal((await firstTurn).finalText, "done");
 });
 
-test("chat controller delivers visible non-transient command errors", async () => {
+test("chat controller stages raw non-transient command errors for the outbox", async () => {
   const controller = await createController();
   const deliveries = [];
-  controller.commitPendingDelivery = async function () {
+  controller.commitPendingDelivery = async function (
+    _clearProcessing,
+    _postDelivery,
+    options,
+  ) {
     deliveries.push({
       text: deliveryText(this.stagedDelivery),
       kind: this.stagedDelivery?.deliveryKind,
+      id: options.id,
+      idempotencyKey: options.idempotencyKey,
     });
     this.stagedDelivery = null;
   };
@@ -3295,11 +3302,32 @@ test("chat controller delivers visible non-transient command errors", async () =
     },
   };
 
-  await assert.rejects(controller.runCommand("/reload"), /boom/);
-  assert.deepEqual(deliveries, [{ text: "rin error: boom", kind: "error" }]);
+  await assert.rejects(
+    controller.runCommand("/reload", "m-error", "m-error"),
+    /boom/,
+  );
+  const contentHash = crypto
+    .createHash("sha256")
+    .update(JSON.stringify({ text: "rin error: boom", parts: [] }))
+    .digest("hex");
+  const idempotencyKey = JSON.stringify([
+    "error",
+    controller.chatKey,
+    "m-error",
+    "m-error",
+    contentHash,
+  ]);
+  assert.deepEqual(deliveries, [
+    {
+      text: "boom",
+      kind: "error",
+      id: `error-${crypto.createHash("sha256").update(idempotencyKey).digest("hex")}`,
+      idempotencyKey,
+    },
+  ]);
 });
 
-test("chat controller reports daemon command errors without frontend retry classification", async () => {
+test("chat controller stages raw daemon command errors without retry classification", async () => {
   const controller = await createController();
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
@@ -3328,7 +3356,7 @@ test("chat controller reports daemon command errors without frontend retry class
   );
   assert.deepEqual(deliveries, [
     {
-      text: "rin error: connect ENOENT /run/user/1001/rin-daemon/daemon.sock",
+      text: "connect ENOENT /run/user/1001/rin-daemon/daemon.sock",
       kind: "error",
     },
   ]);

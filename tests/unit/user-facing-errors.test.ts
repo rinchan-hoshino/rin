@@ -9,6 +9,7 @@ import {
   formatRuntimeErrorForFrontendDisplay,
   formatRuntimeErrorForUser,
   hasUserFacingRuntimeErrorMapping,
+  preGovernanceChatErrorTextForIdempotency,
 } from "../../src/core/rin-lib/user-facing-errors.js";
 
 test("runtime error formatter keeps human messages", () => {
@@ -73,6 +74,51 @@ test("chat error formatter prefixes terse Rin errors", () => {
     formatRuntimeErrorForChat("rin error: request failed"),
     "rin error: request failed",
   );
+  assert.equal(
+    formatRuntimeErrorForChat("Rin error: rin_turn_result_recovery_timeout"),
+    "rin error: turn result recovery timeout",
+  );
+  assert.equal(
+    formatRuntimeErrorForChat("rin error: rin error: request failed"),
+    "rin error: request failed",
+  );
+  assert.equal(
+    preGovernanceChatErrorTextForIdempotency(
+      "RIN ERROR: RIN ERROR: request failed",
+    ),
+    "RIN ERROR: RIN ERROR: request failed",
+  );
+  assert.deepEqual(
+    [
+      "frontend session terminated",
+      "chat_turn_aborted",
+      "rin_turn_result_invariant_failed",
+      "provider response headers timed out after 300000ms",
+    ].map((message) => formatRuntimeErrorForChat(message)),
+    [
+      "rin error: frontend session terminated",
+      "rin error: chat turn aborted",
+      "rin error: turn result invariant failed",
+      "rin error: provider response headers timed out after 300000ms",
+    ],
+  );
+});
+
+test("Chat outbox is the only production owner of Chat error formatting", () => {
+  const repoRoot = path.resolve(import.meta.dirname, "../..");
+  for (const relative of [
+    "src/core/chat/controller.ts",
+    "src/core/chat/main.ts",
+  ]) {
+    const text = fs.readFileSync(path.join(repoRoot, relative), "utf8");
+    assert.doesNotMatch(text, /formatRuntimeErrorForChat/);
+  }
+
+  const outbox = fs.readFileSync(
+    path.join(repoRoot, "src/core/rin-lib/chat-outbox.ts"),
+    "utf8",
+  );
+  assert.match(outbox, /formatRuntimeErrorForChat\(part\.text\)/);
 });
 
 test("runtime error formatter maps known internal markers to actionable messages", () => {

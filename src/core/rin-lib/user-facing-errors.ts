@@ -10,6 +10,7 @@ const UNKNOWN_SYSTEM_ERROR_RE = /\bUnknown system error\s+(-?\d+)\b/i;
 const UNKNOWN_SYSTEM_ERROR_SYSCALL_RE =
   /\bUnknown system error\s+-?\d+(?::[^,\n]*)?,\s*([A-Za-z][A-Za-z0-9_]*)\b/i;
 const CHAT_RUNTIME_ERROR_PREFIX = "rin error:";
+const CHAT_RUNTIME_ERROR_PREFIX_RE = /^(?:rin error:\s*)+/i;
 const LEADING_RUNTIME_MARKER_RE =
   /^([a-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+)(?:(:)\s*|\s+)?(.*)$/;
 
@@ -796,9 +797,19 @@ export function formatRuntimeErrorForFrontendDisplay(error: unknown) {
   return formatRuntimeMarkerForFrontendDisplay(message);
 }
 
+export function formatRuntimeErrorForChatBody(error: unknown) {
+  const rawMessage = rawErrorMessage(error);
+  const message = rawMessage.replace(CHAT_RUNTIME_ERROR_PREFIX_RE, "").trim();
+  return formatRuntimeErrorForFrontendDisplay(message);
+}
+
 export function formatRuntimeErrorForChat(error: unknown) {
+  return `${CHAT_RUNTIME_ERROR_PREFIX} ${formatRuntimeErrorForChatBody(error)}`;
+}
+
+export function preGovernanceChatErrorTextForIdempotency(error: unknown) {
   const message = formatRuntimeErrorForFrontendDisplay(error);
-  if (/^rin error:\s*/i.test(message)) return message;
+  if (CHAT_RUNTIME_ERROR_PREFIX_RE.test(message)) return message;
   return `${CHAT_RUNTIME_ERROR_PREFIX} ${message}`;
 }
 
