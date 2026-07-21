@@ -5164,6 +5164,155 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("a started steered user message transfers the terminal lifecycle owner", async () => {
+  const dir = await makeTempDir("rin-worker-pool-steered-terminal-owner-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const statePath = path.join(
+    dir,
+    "data",
+    "core",
+    "workers",
+    "running-workers.json",
+  );
+  await fs.writeFile(workerPath, "setInterval(() => {}, 1000);\n");
+
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.requestWorker(
+    worker,
+    connection,
+    {
+      id: "original-prompt",
+      type: "prompt",
+      message: "original",
+      requestTag: "tag-original",
+      sessionFile,
+    },
+    true,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: "original-prompt",
+      type: "response",
+      command: "prompt",
+      success: true,
+      data: {},
+    })}\n`,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "start",
+      requestTag: "tag-original",
+      turnGeneration: 1,
+      sessionFile,
+      sessionId: "active",
+    })}\n`,
+  );
+  const terminalResultPromise = (pool as any).waitForTerminalTurnEvent(
+    worker,
+    { sessionFile },
+    "tag-original",
+  ).promise;
+  const lifecycleEpochBeforeSteer = worker.activeLifecycleEpoch;
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "message_start",
+      requestTag: "tag-steered",
+      message: { role: "user", content: [{ type: "text", text: "steer" }] },
+    })}\n`,
+  );
+  await sleep(0);
+
+  assert.equal(worker.activeLifecycleRequestTag, "tag-steered");
+  assert.equal(worker.activeRequestTag, "tag-steered");
+  assert.equal(worker.activeLifecycleOwnerCommandId, undefined);
+  assert.equal(worker.activeLifecycleEpoch, lifecycleEpochBeforeSteer! + 1);
+  assert.equal(worker.activeTurnGeneration, 1);
+  assert.equal(worker.turnActive, true);
+  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+    schemaVersion: 1,
+    sessionFiles: [sessionFile],
+    requestTags: { [sessionFile]: "tag-steered" },
+    frontendOwners: { [sessionFile]: true },
+  });
+
+  const writesBeforeStaleTerminal = writes.length;
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "tag-original",
+      turnGeneration: 1,
+      sessionFile,
+      sessionId: "active",
+      finalText: "stale original final",
+    })}\n`,
+  );
+  await sleep(0);
+  assert.equal(worker.turnActive, true);
+  assert.equal(writes.length, writesBeforeStaleTerminal);
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "tag-steered",
+      turnGeneration: 1,
+      sessionFile,
+      sessionId: "active",
+      finalText: "steered final",
+    })}\n`,
+  );
+  await sleep(0);
+
+  const terminalResult = await Promise.race([
+    terminalResultPromise,
+    sleep(100).then(() => {
+      throw new Error("steered terminal waiter did not settle");
+    }),
+  ]);
+  assert.equal(terminalResult.requestTag, "tag-steered");
+  assert.equal(terminalResult.finalText, "steered final");
+  assert.equal(worker.turnActive, false);
+  assert.equal(worker.rpcTurnActive, false);
+  assert.equal(
+    writes.some(
+      (value) =>
+        value.includes('"event":"complete"') &&
+        value.includes('"requestTag":"tag-steered"') &&
+        value.includes('"finalText":"steered final"'),
+    ),
+    true,
+  );
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("stale terminal events do not clear a newer tagged active turn", async () => {
   const dir = await makeTempDir("rin-worker-pool-stale-terminal-");
   const workerPath = path.join(dir, "worker-source");
