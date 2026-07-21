@@ -3414,6 +3414,15 @@ test("chat controller replaces editable Working with a completed assistant summa
   controller.currentTurn = {
     startedAt: Date.now(),
     incomingMessageId: "m-summary",
+    requestTag: "summary-tag",
+    outboxTurnFence: {
+      agentDir: controller.agentDir,
+      turnId: "summary-turn",
+      chatKey: controller.chatKey,
+      messageId: "m-summary",
+      ownerEpoch: "summary-owner",
+      attempt: 1,
+    },
     workingNoticeSent: true,
   };
   controller.awaitingTurnSettle = true;
@@ -3423,7 +3432,15 @@ test("chat controller replaces editable Working with a completed assistant summa
 
   await controller.handleFrontendEvent({
     type: "assistant_summary",
+    text: "Stale summary",
+    requestTag: "stale-tag",
+  });
+  assert.equal(contexts.length, 0);
+
+  await controller.handleFrontendEvent({
+    type: "assistant_summary",
     text: "**Planning the response**\n\n**Designing [casual](https://example.com) greeting response**",
+    requestTag: "summary-tag",
   });
 
   assert.equal(contexts.length, 1);
@@ -3439,6 +3456,7 @@ test("chat controller replaces editable Working with a completed assistant summa
   await controller.handleFrontendEvent({
     type: "assistant_summary",
     text: "**Checking the rendered result.**",
+    requestTag: "summary-tag",
   });
   assert.equal(contexts.length, 2);
   assert.equal(

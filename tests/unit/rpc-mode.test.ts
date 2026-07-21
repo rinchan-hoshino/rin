@@ -239,6 +239,114 @@ test(
 );
 
 test(
+  "rpc mode tags active assistant progress with the turn requestTag",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines: string[] = [];
+    const subscribers = new Set<(event: any) => void>();
+    const messages: any[] = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const emit = (event: any) => {
+        for (const subscriber of subscribers) subscriber(event);
+      };
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/test-session.jsonl",
+        sessionId: "session-1",
+        agent: { waitForIdle: async () => {}, state: { messages } },
+        bindExtensions: async () => {},
+        subscribe: (handler) => {
+          subscribers.add(handler);
+          return () => subscribers.delete(handler);
+        },
+        prompt: async (message: string) => {
+          session.isStreaming = true;
+          emit({ type: "agent_start" });
+          emit({
+            type: "message_start",
+            message: {
+              role: "user",
+              content: [{ type: "text", text: message }],
+            },
+          });
+          emit({
+            type: "message_update",
+            message: { role: "assistant", content: [] },
+            assistantMessageEvent: {
+              type: "thinking_end",
+              content: "Checking ownership",
+            },
+          });
+          const assistantMessage = {
+            role: "assistant",
+            content: [{ type: "text", text: "done" }],
+          };
+          messages.push(assistantMessage);
+          emit({ type: "message_end", message: assistantMessage });
+          session.isStreaming = false;
+          emit({ type: "agent_end" });
+        },
+        sessionManager: testSessionManager(() => messages),
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: { listAll: async () => [], list: async () => [] },
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "prompt", type: "prompt", message: "hello", requestTag: "turn-tag" })}\n`,
+        ),
+      );
+      await wait(20);
+      emit({
+        type: "message_update",
+        message: { role: "assistant", content: [] },
+        assistantMessageEvent: {
+          type: "thinking_end",
+          content: "Late stale progress",
+        },
+      });
+
+      const events = parseRpcOutput(lines);
+      const progress = events.filter(
+        (event) => event.type === "message_update",
+      );
+      assert.equal(progress[0]?.requestTag, "turn-tag");
+      assert.equal(progress[1]?.requestTag, undefined);
+      assert.equal(
+        events.find((event) => event.type === "agent_start")?.requestTag,
+        undefined,
+      );
+      assert.equal(
+        events.find((event) => event.type === "agent_end")?.requestTag,
+        undefined,
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode shutdown_session terminalizes an active turn without a final",
   { concurrency: false },
   async () => {
@@ -2215,7 +2323,7 @@ test(
           event.type === "message_end" && event.message?.role === "assistant",
       );
       assert.equal(userStart?.requestTag, "tag-1");
-      assert.equal(assistantEnd?.requestTag, undefined);
+      assert.equal(assistantEnd?.requestTag, "tag-1");
       assert.equal(
         durableEntries.find((entry) => entry.message?.role === "user")?.message
           ?.requestTag,

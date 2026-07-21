@@ -1347,8 +1347,16 @@ export async function runCustomRpcMode(
           }
         }
       }
+      const isAssistantProgressEvent =
+        (event?.type === "message_update" || event?.type === "message_end") &&
+        event.message?.role === "assistant";
+      // Pi emits assistant progress without request tags. A tracked RPC turn is
+      // the single producer while its prompt lifecycle remains active.
+      if (isAssistantProgressEvent) {
+        producerRequestTag = producerRequestTag || activeTurnRequestTag;
+      }
       const taggedEvent =
-        producerRequestTag && event?.requestTag === undefined
+        producerRequestTag && !safeString(event?.requestTag).trim()
           ? { ...event, requestTag: producerRequestTag }
           : event;
       if (event?.type === "auto_retry_start") {
