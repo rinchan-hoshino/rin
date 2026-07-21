@@ -105,6 +105,23 @@ function normalizeTodoWriteItems(value: unknown): Todo[] | undefined {
   return nextTodos;
 }
 
+function normalizeTodoStreamingItems(value: unknown): Todo[] {
+  if (!Array.isArray(value)) return [];
+
+  const streamedTodos: Todo[] = [];
+  for (const item of value) {
+    const record = item && typeof item === "object" ? (item as any) : null;
+    const text = typeof record?.text === "string" ? record.text.trim() : "";
+    if (!text) continue;
+    streamedTodos.push({
+      id: streamedTodos.length + 1,
+      text,
+      done: Boolean(record.done),
+    });
+  }
+  return streamedTodos;
+}
+
 function isTodoReadParams(params: unknown): boolean {
   const value = params && typeof params === "object" ? (params as any) : null;
   return !value || !Object.hasOwn(value, "todos") || value.todos == null;
@@ -261,6 +278,14 @@ export default function todoCapability(): RinCapabilityDefinition {
 
     renderCall(args: any, theme, context) {
       if (context?.isPartial === false) return renderTodoText("");
+      if (context?.argsComplete === false) {
+        const streamedTodos = normalizeTodoStreamingItems(args?.todos);
+        return renderTodoText(
+          streamedTodos.length > 0
+            ? formatTodoChecklistRender(streamedTodos, theme)
+            : theme.fg("dim", "○ …"),
+        );
+      }
       if (isTodoReadParams(args)) {
         return renderTodoText(formatTodoChecklistRender(todos, theme));
       }

@@ -11,6 +11,11 @@ const rootDir = path.resolve(
 const todoModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "todo.js")).href
 );
+const { ToolExecutionComponent } =
+  await import("@earendil-works/pi-coding-agent");
+const themeModule = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "pi", "private-api.js")).href
+);
 
 async function createTodoTool() {
   const capability = todoModule.default();
@@ -99,6 +104,19 @@ test("todo renderer keeps the complete checklist when tools are collapsed", asyn
     isPartial: true,
   };
 
+  await tool.execute(
+    "todo-renderer-state",
+    { todos },
+    undefined,
+    undefined,
+    {},
+  );
+  const readText = tool
+    .renderCall({}, theme, renderContext)
+    .render(80)
+    .join("\n");
+  assert.match(readText, /✓ Item 6/);
+
   const callText = tool
     .renderCall({ todos }, theme, renderContext)
     .render(80)
@@ -127,6 +145,97 @@ test("todo renderer keeps the complete checklist when tools are collapsed", asyn
     .join("\n");
   assert.match(resultText, /✓ Item 6/);
   assert.doesNotMatch(resultText, /more/);
+});
+
+test("todo renderer streams a replacement checklist without transient shrinking", async () => {
+  themeModule.initTheme("dark", false);
+  const { tool } = await createTodoTool();
+  await tool.execute(
+    "todo-old-checklist",
+    {
+      todos: Array.from({ length: 5 }, (_, index) => ({
+        text: `Old item ${index + 1}`,
+      })),
+    },
+    undefined,
+    undefined,
+    {},
+  );
+
+  const component = new ToolExecutionComponent(
+    "todo",
+    "todo-streaming-replacement",
+    {},
+    { showImages: false },
+    tool,
+    { requestRender() {} },
+    rootDir,
+  );
+  const frames: Array<{ rows: number; text: string }> = [];
+  const capture = () => {
+    const lines = component.render(80);
+    frames.push({ rows: lines.length, text: lines.join("\n") });
+  };
+
+  capture();
+  component.updateArgs({ todos: [] });
+  capture();
+  component.updateArgs({ todos: [{ text: "New item 1" }] });
+  capture();
+  component.updateArgs({ todos: [{ text: "New item 1" }, {}] });
+  capture();
+  component.updateArgs({
+    todos: [{ text: "New item 1" }, { text: "New item 2" }],
+  });
+  capture();
+
+  assert.match(frames[0]?.text ?? "", /○ …/);
+  assert.match(frames[1]?.text ?? "", /○ …/);
+  assert.doesNotMatch(
+    frames.map((frame) => frame.text).join("\n"),
+    /Old item|No todos/,
+  );
+  assert.match(frames[2]?.text ?? "", /New item 1/);
+  assert.doesNotMatch(frames[2]?.text ?? "", /New item 2/);
+  assert.match(frames[3]?.text ?? "", /New item 1/);
+  assert.doesNotMatch(frames[3]?.text ?? "", /New item 2/);
+  assert.match(frames[4]?.text ?? "", /New item 1/);
+  assert.match(frames[4]?.text ?? "", /New item 2/);
+  assert.ok(
+    frames.every(
+      (frame, index) => index === 0 || frame.rows >= frames[index - 1]!.rows,
+    ),
+    `expected non-shrinking stream frames, got ${frames.map((frame) => frame.rows).join(" -> ")}`,
+  );
+
+  const historicalComponent = new ToolExecutionComponent(
+    "todo",
+    "todo-settled-history",
+    { todos: [{ text: "New item 1" }, { text: "New item 2" }] },
+    { showImages: false },
+    tool,
+    { requestRender() {} },
+    rootDir,
+  );
+  historicalComponent.updateResult(
+    {
+      content: [{ type: "text", text: "[ ] New item 1\n[ ] New item 2" }],
+      details: {
+        action: "write",
+        todos: [
+          { id: 1, text: "New item 1", done: false },
+          { id: 2, text: "New item 2", done: false },
+        ],
+        nextId: 3,
+      },
+      isError: false,
+    },
+    false,
+  );
+  const historicalText = historicalComponent.render(80).join("\n");
+  assert.equal(historicalText.match(/New item 1/g)?.length, 1);
+  assert.equal(historicalText.match(/New item 2/g)?.length, 1);
+  assert.doesNotMatch(historicalText, /○ …/);
 });
 
 test("todo tool clears only when todos is an empty array", async () => {
