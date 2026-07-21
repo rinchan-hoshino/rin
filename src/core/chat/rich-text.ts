@@ -268,14 +268,17 @@ function compactAttrs(attrs: Record<string, any>) {
   return next;
 }
 
-function mediaNode(type: string, src: string, name = "") {
-  return richNode(
-    type,
-    compactAttrs({
-      src: safeString(src).trim(),
-      name: safeString(name).trim(),
-    }),
-  );
+function mediaNode(type: string, src: string, name = "", raw = "") {
+  return {
+    ...richNode(
+      type,
+      compactAttrs({
+        src: safeString(src).trim(),
+        name: safeString(name).trim(),
+      }),
+    ),
+    ...(raw ? { raw } : {}),
+  };
 }
 
 type MarkdownSourceRange = { start: number; end: number };
@@ -403,31 +406,45 @@ function parseMarkdownRichTextNodes(text: string) {
     cursor = end;
 
     if (match[1] !== undefined) {
-      nodes.push(mediaNode("image", match[2] || "", match[1] || ""));
+      nodes.push(mediaNode("image", match[2] || "", match[1] || "", matchText));
       continue;
     }
     if (match[3] !== undefined) {
       const scheme = safeString(match[4]).toLowerCase();
       if (scheme === "at" || scheme === "mention") {
-        nodes.push(
-          richNode(
+        nodes.push({
+          ...richNode(
             "at",
             compactAttrs({
               id: match[5] || "",
               name: cleanMentionName(match[3]),
             }),
           ),
-        );
+          raw: matchText,
+        });
       } else {
-        nodes.push(richNode("quote", compactAttrs({ id: match[5] || "" })));
+        nodes.push({
+          ...richNode("quote", compactAttrs({ id: match[5] || "" })),
+          raw: matchText,
+        });
       }
       continue;
     }
     if (match[6] !== undefined) {
-      nodes.push(mediaNode(match[6] || "file", match[8] || "", match[7] || ""));
+      nodes.push(
+        mediaNode(
+          match[6] || "file",
+          match[8] || "",
+          match[7] || "",
+          matchText,
+        ),
+      );
       continue;
     }
-    nodes.push(richNode("quote", compactAttrs({ id: match[9] || "" })));
+    nodes.push({
+      ...richNode("quote", compactAttrs({ id: match[9] || "" })),
+      raw: matchText,
+    });
   }
   pushTextNode(nodes, "markdown", source.slice(cursor));
   return nodes.length ? nodes : [richNode("markdown", { content: source })];

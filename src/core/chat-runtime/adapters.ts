@@ -39,7 +39,7 @@ import {
   renderMarkdownFromNodes,
   randomWorkingText,
   renderPlainTextFromNodes,
-  renderRichDeliveryErrorPlaceholder,
+  renderRichDeliveryFallback,
   resolveChatRuntimeWorkingCopy,
   safeString,
   sleep,
@@ -231,7 +231,22 @@ function createReactionWorkingIndicator(platform: string, getBot: () => any) {
 }
 
 const LARK_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-const LARK_IMAGE_DOWNLOAD_TIMEOUT_MS = 30_000;
+const LARK_MAX_FILE_BYTES = 30 * 1024 * 1024;
+const LARK_RESOURCE_DOWNLOAD_TIMEOUT_MS = 30_000;
+
+type LarkFileType = "opus" | "mp4" | "pdf" | "doc" | "xls" | "ppt" | "stream";
+
+function larkFileType(name: string, mimeType: string): LarkFileType {
+  const extension = path.extname(safeString(name).trim()).toLowerCase();
+  const mime = safeString(mimeType).trim().toLowerCase();
+  if (extension === ".opus" || mime === "audio/opus") return "opus";
+  if (extension === ".mp4" || mime === "video/mp4") return "mp4";
+  if (extension === ".pdf" || mime === "application/pdf") return "pdf";
+  if ([".doc", ".docx"].includes(extension)) return "doc";
+  if ([".xls", ".xlsx"].includes(extension)) return "xls";
+  if ([".ppt", ".pptx"].includes(extension)) return "ppt";
+  return "stream";
+}
 
 const LARK_REACTION_TYPES: Record<string, string> = {
   "🤔": "THINKING",
@@ -1206,23 +1221,31 @@ export class DiscordAdapter {
       await this.editableWorking.deleteProgress(chatId, replyToMessageId);
       finalizedWorkingMessage = true;
     };
-    const recordFailure = async (error: unknown, placeholder: string) => {
-      failures.push(error);
+    const recordFailure = async (error: unknown, nodes: any[]) => {
       this.logger.warn(
         `rich message segment failed err=${safeString((error as any)?.message || error)}`,
       );
-      if (!placeholder) return;
+      const fallback = renderRichDeliveryFallback(nodes);
+      if (!fallback) {
+        failures.push(error);
+        return;
+      }
       try {
         await ensureFinalProgressCleared();
-        const placeholderIds = await this.sendTextChunk(channel, {
-          text: placeholder,
+        const fallbackIds = await this.sendTextChunk(channel, {
+          text: fallback,
           replyToMessageId: firstReply,
         });
-        delivered.push(...placeholderIds);
-        if (placeholderIds.length) firstReply = undefined;
-      } catch (placeholderError: any) {
+        if (!fallbackIds.length) {
+          failures.push(error);
+          return;
+        }
+        delivered.push(...fallbackIds);
+        firstReply = undefined;
+      } catch (fallbackError: any) {
+        failures.push(error);
         this.logger.warn(
-          `rich failure placeholder failed err=${safeString(placeholderError?.message || placeholderError)}`,
+          `rich fallback delivery failed err=${safeString(fallbackError?.message || fallbackError)}`,
         );
       }
     };
@@ -1237,7 +1260,7 @@ export class DiscordAdapter {
             replyToMessageId: firstReply,
           });
         } catch (error) {
-          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+          await recordFailure(error, [work[cursor]]);
         }
         cursor += 1;
       } else {
@@ -1252,7 +1275,7 @@ export class DiscordAdapter {
         try {
           text = this.renderOutboundText(textNodes);
         } catch (error) {
-          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+          await recordFailure(error, textNodes);
         }
         try {
           const coalesceWithWorkingMessage = Boolean(
@@ -1286,7 +1309,7 @@ export class DiscordAdapter {
           delivered.push(...textChunkIds);
           if (textChunkIds.length) firstReply = undefined;
         } catch (error) {
-          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+          await recordFailure(error, textNodes);
         }
       }
       delivered.push(...chunkIds);
@@ -1873,20 +1896,31 @@ export class SlackAdapter {
       await this.editableWorking.deleteProgress(chatId, replyToMessageId);
       finalizedWorkingMessage = true;
     };
-    const recordFailure = async (error: unknown, placeholder: string) => {
-      failures.push(error);
+    const recordFailure = async (error: unknown, nodes: any[]) => {
       this.logger.warn(
         `rich message segment failed err=${safeString((error as any)?.message || error)}`,
       );
-      if (!placeholder) return;
+      const fallback = renderRichDeliveryFallback(nodes);
+      if (!fallback) {
+        failures.push(error);
+        return;
+      }
       try {
         await ensureFinalProgressCleared();
-        delivered.push(
-          ...(await this.postText(chatId, placeholder, replyToMessageId)),
+        const fallbackIds = await this.postText(
+          chatId,
+          fallback,
+          replyToMessageId,
         );
-      } catch (placeholderError: any) {
+        if (!fallbackIds.length) {
+          failures.push(error);
+          return;
+        }
+        delivered.push(...fallbackIds);
+      } catch (fallbackError: any) {
+        failures.push(error);
         this.logger.warn(
-          `rich failure placeholder failed err=${safeString(placeholderError?.message || placeholderError)}`,
+          `rich fallback delivery failed err=${safeString(fallbackError?.message || fallbackError)}`,
         );
       }
     };
@@ -1919,7 +1953,7 @@ export class SlackAdapter {
             );
           }
         } catch (error) {
-          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+          await recordFailure(error, [work[cursor]]);
         }
         cursor += 1;
       } else if (isOutboundMediaNodeType(type)) {
@@ -1931,7 +1965,7 @@ export class SlackAdapter {
             replyToMessageId,
           );
         } catch (error) {
-          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+          await recordFailure(error, [work[cursor]]);
         }
         cursor += 1;
       } else {
@@ -1974,7 +2008,7 @@ export class SlackAdapter {
             messageIds = await this.postText(chatId, text, replyToMessageId);
           }
         } catch (error) {
-          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+          await recordFailure(error, textNodes);
         }
       }
       delivered.push(...messageIds);
@@ -1982,8 +2016,12 @@ export class SlackAdapter {
     if (isFinalDelivery && !finalizedWorkingMessage) {
       await this.editableWorking.deleteProgress(chatId, replyToMessageId);
     }
+    if (failures.length) {
+      if (delivered.length)
+        throw partialChatDeliveryError(failures[0], delivered);
+      throw failures[0];
+    }
     if (delivered.length) return delivered;
-    if (failures.length) throw failures[0];
     throw new Error("slack_send_message_empty");
   }
 
@@ -2898,20 +2936,64 @@ export class LarkAdapter {
     );
   }
 
-  private assertLarkImageSize(image: Buffer) {
-    if (!image.length) throw new Error("Lark image content is empty");
-    if (image.length > LARK_MAX_IMAGE_BYTES) {
-      throw new Error("Lark image exceeds the 10 MB upload limit");
+  private async sendPlainText(
+    chatId: string,
+    text: string,
+    replyToMessageId?: string,
+  ) {
+    if (!text) throw new Error("lark_send_message_empty");
+    return await this.sendData(
+      chatId,
+      {
+        msg_type: "text",
+        content: JSON.stringify({ text }),
+      },
+      replyToMessageId,
+    );
+  }
+
+  private assertLarkResourceSize(
+    data: Buffer,
+    label: "Lark image" | "Lark file",
+    maxBytes: number,
+    limitText: string,
+  ) {
+    if (!data.length) throw new Error(`${label} content is empty`);
+    if (data.length > maxBytes) {
+      throw new Error(`${label} exceeds the ${limitText} upload limit`);
     }
   }
 
-  private async downloadLarkImage(url: string) {
+  private assertLarkImageSize(image: Buffer) {
+    this.assertLarkResourceSize(
+      image,
+      "Lark image",
+      LARK_MAX_IMAGE_BYTES,
+      "10 MB",
+    );
+  }
+
+  private assertLarkFileSize(file: Buffer) {
+    this.assertLarkResourceSize(
+      file,
+      "Lark file",
+      LARK_MAX_FILE_BYTES,
+      "30 MB",
+    );
+  }
+
+  private async downloadLarkResource(
+    url: string,
+    label: "Lark image" | "Lark file",
+    maxBytes: number,
+    limitText: string,
+  ) {
     const controller = new AbortController();
     let timedOut = false;
     const timeout = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, LARK_IMAGE_DOWNLOAD_TIMEOUT_MS);
+    }, LARK_RESOURCE_DOWNLOAD_TIMEOUT_MS);
     timeout.unref?.();
     let response: any;
     try {
@@ -2920,18 +3002,15 @@ export class LarkAdapter {
       });
       if (!response.ok) {
         throw new Error(
-          `Failed to download Lark image (HTTP ${response.status})`,
+          `Failed to download ${label} (HTTP ${response.status})`,
         );
       }
       const contentLength = Number(response.headers.get("content-length"));
-      if (
-        Number.isFinite(contentLength) &&
-        contentLength > LARK_MAX_IMAGE_BYTES
-      ) {
+      if (Number.isFinite(contentLength) && contentLength > maxBytes) {
         controller.abort();
-        throw new Error("Lark image exceeds the 10 MB upload limit");
+        throw new Error(`${label} exceeds the ${limitText} upload limit`);
       }
-      if (!response.body) throw new Error("Lark image content is empty");
+      if (!response.body) throw new Error(`${label} content is empty`);
       const reader = response.body.getReader();
       const chunks: Buffer[] = [];
       let size = 0;
@@ -2939,28 +3018,28 @@ export class LarkAdapter {
         const { done, value } = await reader.read();
         if (done) break;
         size += value.byteLength;
-        if (size > LARK_MAX_IMAGE_BYTES) {
+        if (size > maxBytes) {
           controller.abort();
-          throw new Error("Lark image exceeds the 10 MB upload limit");
+          throw new Error(`${label} exceeds the ${limitText} upload limit`);
         }
         chunks.push(Buffer.from(value));
       }
-      const image = Buffer.concat(chunks, size);
-      this.assertLarkImageSize(image);
-      return image;
+      const data = Buffer.concat(chunks, size);
+      this.assertLarkResourceSize(data, label, maxBytes, limitText);
+      return data;
     } catch (error: any) {
       const message = safeString(error?.message || error).trim();
       if (
-        message.startsWith("Lark image ") ||
-        message.startsWith("Failed to download Lark image")
+        message.startsWith(`${label} `) ||
+        message.startsWith(`Failed to download ${label}`)
       ) {
         throw error;
       }
       if (timedOut) {
-        throw new Error("Lark image download timed out after 30 seconds");
+        throw new Error(`${label} download timed out after 30 seconds`);
       }
       throw new Error(
-        `Failed to download Lark image: ${message || "network error"}`,
+        `Failed to download ${label}: ${message || "network error"}`,
       );
     } finally {
       clearTimeout(timeout);
@@ -2968,11 +3047,34 @@ export class LarkAdapter {
     }
   }
 
-  private async assertLarkLocalImageSourceSize(node: any) {
+  private async downloadLarkImage(url: string) {
+    return await this.downloadLarkResource(
+      url,
+      "Lark image",
+      LARK_MAX_IMAGE_BYTES,
+      "10 MB",
+    );
+  }
+
+  private async downloadLarkFile(url: string) {
+    return await this.downloadLarkResource(
+      url,
+      "Lark file",
+      LARK_MAX_FILE_BYTES,
+      "30 MB",
+    );
+  }
+
+  private async assertLarkLocalResourceSourceSize(
+    node: any,
+    label: "Lark image" | "Lark file",
+    maxBytes: number,
+    limitText: string,
+  ) {
     const attrs =
       node?.attrs && typeof node.attrs === "object" ? node.attrs : {};
     if (Buffer.isBuffer(attrs.data)) {
-      this.assertLarkImageSize(attrs.data);
+      this.assertLarkResourceSize(attrs.data, label, maxBytes, limitText);
       return;
     }
     const src = safeString(attrs.src || attrs.url || "").trim();
@@ -2982,12 +3084,30 @@ export class LarkAdapter {
       : path.resolve(src);
     try {
       const stat = await fs.promises.stat(filePath);
-      if (stat.size > LARK_MAX_IMAGE_BYTES) {
-        throw new Error("Lark image exceeds the 10 MB upload limit");
+      if (stat.size > maxBytes) {
+        throw new Error(`${label} exceeds the ${limitText} upload limit`);
       }
     } catch (error: any) {
       if (error?.code !== "ENOENT") throw error;
     }
+  }
+
+  private async assertLarkLocalImageSourceSize(node: any) {
+    await this.assertLarkLocalResourceSourceSize(
+      node,
+      "Lark image",
+      LARK_MAX_IMAGE_BYTES,
+      "10 MB",
+    );
+  }
+
+  private async assertLarkLocalFileSourceSize(node: any) {
+    await this.assertLarkLocalResourceSourceSize(
+      node,
+      "Lark file",
+      LARK_MAX_FILE_BYTES,
+      "30 MB",
+    );
   }
 
   private async sendImage(
@@ -3021,6 +3141,38 @@ export class LarkAdapter {
     );
   }
 
+  private async sendFile(chatId: string, node: any, replyToMessageId?: string) {
+    await this.assertLarkLocalFileSourceSize(node);
+    const payload = await readBinaryFromNode(node);
+    if (!payload) throw new Error("Lark file content is empty");
+    const file = payload.data
+      ? payload.data
+      : payload.url
+        ? await this.downloadLarkFile(payload.url)
+        : Buffer.alloc(0);
+    this.assertLarkFileSize(file);
+    const uploaded = await this.client.im.file.create({
+      data: {
+        file_type: larkFileType(payload.name, payload.mimeType),
+        file_name: payload.name,
+        file,
+      },
+    });
+    assertLarkApiSuccess(uploaded);
+    const fileKey = safeString(
+      uploaded?.file_key || uploaded?.data?.file_key || "",
+    ).trim();
+    if (!fileKey) throw new Error("Lark file upload returned no file key");
+    return await this.sendData(
+      chatId,
+      {
+        msg_type: "file",
+        content: JSON.stringify({ file_key: fileKey }),
+      },
+      replyToMessageId,
+    );
+  }
+
   private async sendMessage(
     chatId: string,
     content: any,
@@ -3030,22 +3182,30 @@ export class LarkAdapter {
     if (!work.length) throw new Error("lark_send_message_empty");
     const delivered: string[] = [];
     const failures: unknown[] = [];
-    const recordFailure = async (error: unknown) => {
-      failures.push(error);
+    const recordFailure = async (error: unknown, nodes: any[]) => {
       this.logger.warn(
         `rich message segment failed err=${safeString((error as any)?.message || error)}`,
       );
+      const fallback = renderRichDeliveryFallback(nodes);
+      if (!fallback) {
+        failures.push(error);
+        return;
+      }
       try {
-        delivered.push(
-          ...(await this.sendPostText(
-            chatId,
-            renderRichDeliveryErrorPlaceholder(error),
-            replyToMessageId,
-          )),
+        const fallbackIds = await this.sendPlainText(
+          chatId,
+          fallback,
+          replyToMessageId,
         );
-      } catch (placeholderError: any) {
+        if (!fallbackIds.length) {
+          failures.push(error);
+          return;
+        }
+        delivered.push(...fallbackIds);
+      } catch (fallbackError: any) {
+        failures.push(error);
         this.logger.warn(
-          `rich failure placeholder failed err=${safeString(placeholderError?.message || placeholderError)}`,
+          `rich fallback delivery failed err=${safeString(fallbackError?.message || fallbackError)}`,
         );
       }
     };
@@ -3053,37 +3213,45 @@ export class LarkAdapter {
     while (cursor < work.length) {
       const type = safeString(work[cursor]?.type).trim().toLowerCase();
       let messageIds: string[] = [];
-      if (type === "image") {
+      if (type === "image" || type === "file") {
         try {
-          messageIds = await this.sendImage(
-            chatId,
-            work[cursor],
-            replyToMessageId,
-          );
+          messageIds =
+            type === "image"
+              ? await this.sendImage(chatId, work[cursor], replyToMessageId)
+              : await this.sendFile(chatId, work[cursor], replyToMessageId);
         } catch (error) {
-          await recordFailure(error);
+          await recordFailure(error, [work[cursor]]);
         }
         cursor += 1;
       } else {
         const textNodes: any[] = [];
         while (cursor < work.length) {
           const textType = safeString(work[cursor]?.type).trim().toLowerCase();
-          if (textType === "image") break;
+          if (textType === "image" || textType === "file") break;
           textNodes.push(work[cursor]);
           cursor += 1;
         }
-        const text = this.renderOutboundText(textNodes);
-        if (!text) continue;
         try {
-          messageIds = await this.sendPostText(chatId, text, replyToMessageId);
+          const text = this.renderOutboundText(textNodes);
+          if (text) {
+            messageIds = await this.sendPostText(
+              chatId,
+              text,
+              replyToMessageId,
+            );
+          }
         } catch (error) {
-          await recordFailure(error);
+          await recordFailure(error, textNodes);
         }
       }
       delivered.push(...messageIds);
     }
+    if (failures.length) {
+      if (delivered.length)
+        throw partialChatDeliveryError(failures[0], delivered);
+      throw failures[0];
+    }
     if (delivered.length) return delivered;
-    if (failures.length) throw failures[0];
     throw new Error("lark_send_message_empty");
   }
 

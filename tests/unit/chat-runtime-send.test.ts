@@ -1725,7 +1725,7 @@ test("telegram adapter splits text and image rich parts in order", async () => {
   });
 });
 
-test("telegram adapter reports a failed rich segment and continues later segments", async () => {
+test("telegram adapter falls back to the original rich segment and continues later segments", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
@@ -1755,15 +1755,54 @@ test("telegram adapter reports a failed rich segment and continues later segment
     );
     assert.equal(calls[0].payload.reply_to_message_id, "77");
     assert.equal(calls[0].payload.text, "leading text");
-    assert.match(calls[1].payload.text, /chat_media_file_missing:/);
-    assert.match(calls[1].payload.text, /missing\.png/);
-    assert.doesNotMatch(
-      calls[1].payload.text,
-      /\u5bcc\u6587\u672c\u7247\u6bb5\u53d1\u9001\u5931\u8d25/,
-    );
+    assert.equal(calls[1].payload.text, `[image: missing](${missingPath})`);
+    assert.doesNotMatch(calls[1].payload.text, /chat_media_file_missing:/);
     assert.equal(calls[1].payload.parse_mode, undefined);
     assert.equal(calls[1].payload.reply_to_message_id, undefined);
     assert.equal(calls[2].payload.text, "trailing text");
+  });
+});
+
+test("telegram adapter reports partial delivery when original-string fallback also fails", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    let delivered = 0;
+    adapter.callApi = async (method: string, payload: any) => {
+      calls.push({ method, payload });
+      if (payload.parse_mode === undefined && /^\[image:/.test(payload.text)) {
+        throw new Error("fallback unavailable");
+      }
+      delivered += 1;
+      return { message_id: `m${delivered}` };
+    };
+    const missingPath = path.join(agentDir, "missing.png");
+
+    await assert.rejects(
+      () =>
+        app.bots[0].sendMessage("456", [
+          h.text("before"),
+          h("image", { src: missingPath, name: "missing" }),
+          h.text("after"),
+        ]),
+      (error: any) => {
+        assert.match(
+          error.message,
+          /^chat_delivery_partial:chat_media_file_missing:/,
+        );
+        assert.deepEqual(error.deliveredMessageIds, ["m1", "m2"]);
+        return true;
+      },
+    );
+
+    assert.equal(calls.length, 3);
+    assert.equal(calls[2].payload.text, "after");
   });
 });
 
@@ -2129,6 +2168,38 @@ test("onebot adapter embeds all local media as base64", async () => {
   });
 });
 
+test("onebot adapter falls back to the original rich node during serialization", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "onebot",
+      name: "OneBot",
+      config: { selfId: "1", url: "ws://127.0.0.1:9" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ action: string; params: any }> = [];
+    adapter.callAction = async (action: string, params: any) => {
+      calls.push({ action, params });
+      return { message_id: "m1" };
+    };
+    const missingPath = path.join(agentDir, "missing.pdf");
+
+    const result = await app.bots[0].sendMessage("2", [
+      h.text("before "),
+      h("file", { src: missingPath, name: "missing.pdf" }),
+      h.text(" after"),
+    ]);
+
+    assert.deepEqual(result, ["m1"]);
+    assert.equal(calls.length, 1);
+    assert.equal(
+      calls[0].params.message,
+      `before &#91;file: missing.pdf&#93;(${missingPath}) after`,
+    );
+    assert.doesNotMatch(calls[0].params.message, /chat_media_file_missing:/);
+  });
+});
+
 test("onebot adapter exposes media send dispatch before the OneBot echo", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -2306,7 +2377,7 @@ test("discord adapter keeps media before following text", async () => {
   });
 });
 
-test("discord adapter reports partial delivery when a rich segment fails", async () => {
+test("discord adapter treats a successful original-string fallback as delivered", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "discord",
@@ -2322,29 +2393,18 @@ test("discord adapter reports partial delivery when a rich segment fails", async
         return { id: String(calls.length) };
       },
     });
+    const missingPath = path.join(agentDir, "missing.png");
 
-    await assert.rejects(
-      () =>
-        app.bots[0].sendMessage("456", [
-          h.text("leading text"),
-          h.image(path.join(agentDir, "missing.png")),
-          h.text("trailing text"),
-        ]),
-      (error: any) => {
-        assert.match(error.message, /^chat_delivery_partial:/);
-        assert.equal(error.partialDelivery, true);
-        assert.deepEqual(error.deliveredMessageIds, ["1", "2", "3"]);
-        return true;
-      },
-    );
+    const result = await app.bots[0].sendMessage("456", [
+      h.text("leading text"),
+      h("image", { src: missingPath, name: "missing" }),
+      h.text("trailing text"),
+    ]);
 
+    assert.deepEqual(result, ["1", "2", "3"]);
     assert.equal(calls[0].content, "leading text");
-    assert.match(calls[1].content, /chat_media_file_missing:/);
-    assert.match(calls[1].content, /missing\.png/);
-    assert.doesNotMatch(
-      calls[1].content,
-      /\u5bcc\u6587\u672c\u7247\u6bb5\u53d1\u9001\u5931\u8d25/,
-    );
+    assert.equal(calls[1].content, `[image: missing](${missingPath})`);
+    assert.doesNotMatch(calls[1].content, /chat_media_file_missing:/);
     assert.equal(calls[2].content, "trailing text");
   });
 });
@@ -2548,6 +2608,150 @@ test("lark adapter uploads images and preserves surrounding text order", async (
   });
 });
 
+test("lark adapter uploads ordinary files and sends the returned file key", async () => {
+  await withTempDir(async (agentDir) => {
+    const filePath = path.join(agentDir, "notes.txt");
+    await fs.writeFile(filePath, Buffer.from("text-content"));
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        file: {
+          create: async (payload: any) => {
+            calls.push({ method: "uploadFile", payload });
+            return { file_key: "file_v2_spec" };
+          },
+        },
+        message: {
+          create: async (payload: any) => {
+            calls.push({ method: "createMessage", payload });
+            return { data: { message_id: `m${calls.length}` } };
+          },
+        },
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("oc_1", [
+      h.text("before"),
+      h.file(filePath, "text/plain", { name: "notes.txt" }),
+      h.text("after"),
+    ]);
+
+    assert.equal(result.length, 3);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["createMessage", "uploadFile", "createMessage", "createMessage"],
+    );
+    assert.deepEqual(calls[1].payload.data, {
+      file_type: "stream",
+      file_name: "notes.txt",
+      file: Buffer.from("text-content"),
+    });
+    assert.equal(calls[2].payload.data.msg_type, "file");
+    assert.deepEqual(JSON.parse(calls[2].payload.data.content), {
+      file_key: "file_v2_spec",
+    });
+  });
+});
+
+test("lark adapter falls back from a failed file upload without exposing the SDK error", async () => {
+  await withTempDir(async (agentDir) => {
+    const filePath = path.join(agentDir, "spec.pdf");
+    await fs.writeFile(filePath, Buffer.from("pdf-content"));
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        file: {
+          create: async () => {
+            throw new Error("Request failed with status code 400");
+          },
+        },
+        message: {
+          create: async (payload: any) => {
+            calls.push(payload);
+            return { data: { message_id: `m${calls.length}` } };
+          },
+        },
+      },
+    };
+
+    const original = `[FILE:   spec.pdf](${filePath})`;
+    const result = await app.bots[0].sendMessage("oc_1", [
+      h.text("before"),
+      h("markdown", { content: original }),
+      h.text("after"),
+    ]);
+
+    assert.deepEqual(result, ["m1", "m2", "m3"]);
+    assert.equal(calls[1].data.msg_type, "text");
+    assert.equal(JSON.parse(calls[1].data.content).text, original);
+    assert.doesNotMatch(calls[1].data.content, /status code 400/);
+  });
+});
+
+test("lark adapter reports partial delivery when the original file fallback also fails", async () => {
+  await withTempDir(async (agentDir) => {
+    const filePath = path.join(agentDir, "spec.pdf");
+    await fs.writeFile(filePath, Buffer.from("pdf-content"));
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    let delivered = 0;
+    adapter.client = {
+      im: {
+        file: {
+          create: async () => {
+            throw new Error("Request failed with status code 400");
+          },
+        },
+        message: {
+          create: async (payload: any) => {
+            if (payload.data.msg_type === "text") {
+              throw new Error("fallback unavailable");
+            }
+            delivered += 1;
+            return { data: { message_id: `m${delivered}` } };
+          },
+        },
+      },
+    };
+
+    await assert.rejects(
+      () =>
+        app.bots[0].sendMessage("oc_1", [
+          h.text("before"),
+          h.file(filePath, "application/pdf", { name: "spec.pdf" }),
+          h.text("after"),
+        ]),
+      (error: any) => {
+        assert.match(
+          error.message,
+          /^chat_delivery_partial:Request failed with status code 400/,
+        );
+        assert.deepEqual(error.deliveredMessageIds, ["m1", "m2"]);
+        return true;
+      },
+    );
+  });
+});
+
 test("lark adapter downloads remote images and uses the native reply endpoint", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -2603,7 +2807,7 @@ test("lark adapter downloads remote images and uses the native reply endpoint", 
   });
 });
 
-test("lark adapter reports image download failures and continues later text", async () => {
+test("lark adapter sends failed image markers as plain text and continues later text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -2634,7 +2838,10 @@ test("lark adapter reports image download failures and continues later text", as
 
       const result = await app.bots[0].sendMessage("oc_1", [
         h.text("before"),
-        h.image("https://example.com/missing.png"),
+        h("image", {
+          src: "https://example.com/missing.png",
+          name: "missing",
+        }),
         h.text("after"),
       ]);
 
@@ -2644,10 +2851,12 @@ test("lark adapter reports image download failures and continues later text", as
         JSON.parse(calls[0].data.content).zh_cn.content[0][0].text,
         "before",
       );
+      assert.equal(calls[1].data.msg_type, "text");
       assert.equal(
-        JSON.parse(calls[1].data.content).zh_cn.content[0][0].text,
-        "Failed to download Lark image (HTTP 404)",
+        JSON.parse(calls[1].data.content).text,
+        "[image: missing](https://example.com/missing.png)",
       );
+      assert.doesNotMatch(calls[1].data.content, /Failed to download/);
       assert.equal(
         JSON.parse(calls[2].data.content).zh_cn.content[0][0].text,
         "after",
@@ -2659,7 +2868,7 @@ test("lark adapter reports image download failures and continues later text", as
   });
 });
 
-test("lark adapter rejects oversized local image files before reading or upload", async () => {
+test("lark adapter falls back from oversized local images before upload", async () => {
   await withTempDir(async (agentDir) => {
     const imagePath = path.join(agentDir, "oversized.png");
     const imageFile = await fs.open(imagePath, "w");
@@ -2697,14 +2906,16 @@ test("lark adapter rejects oversized local image files before reading or upload"
     assert.deepEqual(result, ["limit-error"]);
     assert.equal(uploadAttempted, false);
     assert.equal(calls.length, 1);
+    assert.equal(calls[0].data.msg_type, "text");
     assert.equal(
-      JSON.parse(calls[0].data.content).zh_cn.content[0][0].text,
-      "Lark image exceeds the 10 MB upload limit",
+      JSON.parse(calls[0].data.content).text,
+      `[image: ${imagePath}](${imagePath})`,
     );
+    assert.doesNotMatch(calls[0].data.content, /upload limit/);
   });
 });
 
-test("lark adapter aborts remote images declared over the upload limit", async () => {
+test("lark adapter falls back from remote images declared over the upload limit", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -2750,10 +2961,12 @@ test("lark adapter aborts remote images declared over the upload limit", async (
       assert.equal(fetchSignal?.aborted, true);
       assert.equal(uploadAttempted, false);
       assert.equal(calls.length, 1);
+      assert.equal(calls[0].data.msg_type, "text");
       assert.equal(
-        JSON.parse(calls[0].data.content).zh_cn.content[0][0].text,
-        "Lark image exceeds the 10 MB upload limit",
+        JSON.parse(calls[0].data.content).text,
+        "[image: https://example.com/oversized.png](https://example.com/oversized.png)",
       );
+      assert.doesNotMatch(calls[0].data.content, /upload limit/);
       assert.equal(oversizedResponse.bodyUsed, true);
     } finally {
       await app.stop();
@@ -3471,7 +3684,7 @@ test("slack adapter sends todo nodes as Block Kit checkboxes", async () => {
   });
 });
 
-test("slack adapter reports a failed rich segment and continues later segments", async () => {
+test("slack adapter falls back to the original rich segment and continues later segments", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "slack",
@@ -3495,21 +3708,65 @@ test("slack adapter reports a failed rich segment and continues later segments",
       },
     };
 
+    const missingPath = path.join(agentDir, "missing.png");
     const result = await app.bots[0].sendMessage("C123", [
       h.text("leading text"),
-      h.image(path.join(agentDir, "missing.png")),
+      h("image", { src: missingPath, name: "missing" }),
       h.text("trailing text"),
     ]);
 
     assert.deepEqual(result, ["1", "2", "3"]);
     assert.equal(calls[0].text, "leading text");
-    assert.match(calls[1].text, /chat_media_file_missing:/);
-    assert.match(calls[1].text, /missing\.png/);
-    assert.doesNotMatch(
-      calls[1].text,
-      /\u5bcc\u6587\u672c\u7247\u6bb5\u53d1\u9001\u5931\u8d25/,
-    );
+    assert.equal(calls[1].text, `[image: missing](${missingPath})`);
+    assert.doesNotMatch(calls[1].text, /chat_media_file_missing:/);
     assert.equal(calls[2].text, "trailing text");
+  });
+});
+
+test("slack adapter reports partial delivery when original-string fallback also fails", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "slack",
+      name: "Slack",
+      config: { token: "xapp", botToken: "xoxb" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    let delivered = 0;
+    adapter.web = {
+      chat: {
+        postMessage: async (payload: any) => {
+          if (/^\[image:/.test(payload.text)) {
+            throw new Error("fallback unavailable");
+          }
+          delivered += 1;
+          return { ts: `m${delivered}` };
+        },
+      },
+      files: {
+        uploadV2: async () => {
+          throw new Error("unexpected_upload");
+        },
+      },
+    };
+    const missingPath = path.join(agentDir, "missing.png");
+
+    await assert.rejects(
+      () =>
+        app.bots[0].sendMessage("C123", [
+          h.text("before"),
+          h("image", { src: missingPath, name: "missing" }),
+          h.text("after"),
+        ]),
+      (error: any) => {
+        assert.match(
+          error.message,
+          /^chat_delivery_partial:chat_media_file_missing:/,
+        );
+        assert.deepEqual(error.deliveredMessageIds, ["m1", "m2"]);
+        return true;
+      },
+    );
   });
 });
 

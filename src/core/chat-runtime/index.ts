@@ -29,13 +29,14 @@ import {
   fileUrl,
   isEditableProgressDeliveryKind,
   normalizeNode,
+  partialChatDeliveryError,
   prependChatQuoteNode,
   prepareOutboundNodes,
   randomWorkingText,
   readBinaryFromNode,
   renderMarkdownFromNodes,
   renderPlainTextFromNodes,
-  renderRichDeliveryErrorPlaceholder,
+  renderRichDeliveryFallback,
   renderTelegramHtmlFromNodes,
   resolveChatRuntimeWorkingCopy,
   safeString,
@@ -1162,17 +1163,17 @@ class TelegramAdapter {
     }
   }
 
-  private async sendFailurePlaceholder(
+  private async sendRichFallback(
     chatId: string,
-    placeholder: string,
+    fallback: string,
     replyToMessageId?: string,
   ) {
-    if (!placeholder) return "";
+    if (!fallback) return "";
     try {
-      return await this.sendText(chatId, placeholder, replyToMessageId);
-    } catch (placeholderError: any) {
+      return await this.sendText(chatId, fallback, replyToMessageId);
+    } catch (fallbackError: any) {
       this.logger.warn(
-        `rich failure placeholder failed err=${safeString(placeholderError?.message || placeholderError)}`,
+        `rich fallback delivery failed err=${safeString(fallbackError?.message || fallbackError)}`,
       );
       return "";
     }
@@ -1245,20 +1246,32 @@ class TelegramAdapter {
       await this.deleteVisibleWorkingMessage(deliveryChatId, true);
       finalizedWorkingMessage = true;
     };
-    const recordFailure = async (error: unknown, placeholder: string) => {
-      failures.push(error);
+    const recordFailure = async (error: unknown, fallback: string) => {
       this.logger.warn(
         `rich message segment failed err=${safeString((error as any)?.message || error)}`,
       );
-      await ensureFinalProgressCleared();
-      const placeholderId = await this.sendFailurePlaceholder(
-        deliveryChatId,
-        placeholder,
-        firstReply,
-      );
-      if (placeholderId) {
-        delivered.push(placeholderId);
+      if (!fallback) {
+        failures.push(error);
+        return;
+      }
+      try {
+        await ensureFinalProgressCleared();
+        const fallbackId = await this.sendRichFallback(
+          deliveryChatId,
+          fallback,
+          firstReply,
+        );
+        if (!fallbackId) {
+          failures.push(error);
+          return;
+        }
+        delivered.push(fallbackId);
         firstReply = undefined;
+      } catch (fallbackError: any) {
+        failures.push(error);
+        this.logger.warn(
+          `rich fallback delivery failed err=${safeString(fallbackError?.message || fallbackError)}`,
+        );
       }
     };
 
@@ -1280,7 +1293,7 @@ class TelegramAdapter {
           if (messageId) delivered.push(messageId);
           firstReply = undefined;
         } catch (error) {
-          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+          await recordFailure(error, renderRichDeliveryFallback([node]));
         }
         cursor += 1;
         continue;
@@ -1298,7 +1311,7 @@ class TelegramAdapter {
       try {
         text = renderTelegramHtmlFromNodes(textNodes);
       } catch (error) {
-        await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+        await recordFailure(error, renderRichDeliveryFallback(textNodes));
       }
       const textChunks = this.telegramTextChunks(text);
       if (textChunks.length) {
@@ -1353,7 +1366,7 @@ class TelegramAdapter {
           }
           firstReply = undefined;
         } catch (error) {
-          await recordFailure(error, renderRichDeliveryErrorPlaceholder(error));
+          await recordFailure(error, renderRichDeliveryFallback(textNodes));
         }
       }
       cursor = nextCursor;
@@ -1361,8 +1374,12 @@ class TelegramAdapter {
     if (isFinalDelivery && !finalizedWorkingMessage) {
       await this.deleteVisibleWorkingMessage(deliveryChatId);
     }
+    if (failures.length) {
+      if (delivered.length)
+        throw partialChatDeliveryError(failures[0], delivered);
+      throw failures[0];
+    }
     if (delivered.length) return delivered;
-    if (failures.length) throw failures[0];
     throw new Error("telegram_send_message_empty");
   }
 
@@ -2086,57 +2103,57 @@ class OneBotAdapter {
     return `base64://${payload.data.toString("base64")}`;
   }
 
+  private async renderOutboundNode(node: any) {
+    const type = safeString(node?.type).toLowerCase();
+    const attrs =
+      node?.attrs && typeof node.attrs === "object" ? node.attrs : {};
+    if (type === "quote") {
+      const id = safeString(attrs.id).trim();
+      return id ? `[CQ:reply,id=${escapeOneBotText(id)}]` : "";
+    }
+    if (type === "text") {
+      return escapeOneBotText(safeString(attrs.content));
+    }
+    if (type === "markdown" || type === "md" || type === "html") {
+      return escapeOneBotText(renderPlainTextFromNodes([node]));
+    }
+    if (type === "at") {
+      const id = safeString(attrs.id).trim();
+      return id ? `[CQ:at,qq=${escapeOneBotText(id)}]` : "";
+    }
+    if (type === "br") return "\n";
+    if (type === "image") {
+      const media = await this.normalizeOutboundMedia(node, "image");
+      return media ? `[CQ:image,file=${escapeOneBotText(media)}]` : "";
+    }
+    if (type === "audio" || type === "voice" || type === "record") {
+      const media = await this.normalizeOutboundMedia(node, "file");
+      return media ? `[CQ:record,file=${escapeOneBotText(media)}]` : "";
+    }
+    if (type === "video") {
+      const media = await this.normalizeOutboundMedia(node, "file");
+      return media ? `[CQ:video,file=${escapeOneBotText(media)}]` : "";
+    }
+    if (type === "file" || type === "sticker") {
+      const media = await this.normalizeOutboundMedia(node, "file");
+      return media ? `[CQ:file,file=${escapeOneBotText(media)}]` : "";
+    }
+    const children = Array.isArray(node?.children) ? node.children : [];
+    return children.length ? await this.renderOutboundMessage(children) : "";
+  }
+
   private async renderOutboundMessage(nodes: any[]) {
     const parts: string[] = [];
     for (const node of nodes) {
-      const type = safeString(node?.type).toLowerCase();
-      const attrs =
-        node?.attrs && typeof node.attrs === "object" ? node.attrs : {};
-      if (type === "quote") {
-        const id = safeString(attrs.id).trim();
-        if (id) parts.push(`[CQ:reply,id=${escapeOneBotText(id)}]`);
-        continue;
-      }
-      if (type === "text") {
-        parts.push(escapeOneBotText(safeString(attrs.content)));
-        continue;
-      }
-      if (type === "markdown" || type === "md" || type === "html") {
-        parts.push(escapeOneBotText(renderPlainTextFromNodes([node])));
-        continue;
-      }
-      if (type === "at") {
-        const id = safeString(attrs.id).trim();
-        if (id) parts.push(`[CQ:at,qq=${escapeOneBotText(id)}]`);
-        continue;
-      }
-      if (type === "br") {
-        parts.push("\n");
-        continue;
-      }
-      if (type === "image") {
-        const media = await this.normalizeOutboundMedia(node, "image");
-        if (media) parts.push(`[CQ:image,file=${escapeOneBotText(media)}]`);
-        continue;
-      }
-      if (type === "audio" || type === "voice" || type === "record") {
-        const media = await this.normalizeOutboundMedia(node, "file");
-        if (media) parts.push(`[CQ:record,file=${escapeOneBotText(media)}]`);
-        continue;
-      }
-      if (type === "video") {
-        const media = await this.normalizeOutboundMedia(node, "file");
-        if (media) parts.push(`[CQ:video,file=${escapeOneBotText(media)}]`);
-        continue;
-      }
-      if (type === "file" || type === "sticker") {
-        const media = await this.normalizeOutboundMedia(node, "file");
-        if (media) parts.push(`[CQ:file,file=${escapeOneBotText(media)}]`);
-        continue;
-      }
-      const children = Array.isArray(node?.children) ? node.children : [];
-      if (children.length) {
-        parts.push(await this.renderOutboundMessage(children));
+      try {
+        parts.push(await this.renderOutboundNode(node));
+      } catch (error: any) {
+        this.logger.warn(
+          `rich message segment failed err=${safeString(error?.message || error)}`,
+        );
+        const fallback = renderRichDeliveryFallback([node]);
+        if (!fallback) throw error;
+        parts.push(escapeOneBotText(fallback));
       }
     }
     return parts.join("");

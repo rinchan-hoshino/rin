@@ -492,13 +492,48 @@ export function isEditableProgressDeliveryKind(value: unknown) {
   return deliveryKind === "interim" || deliveryKind === "passive_notice";
 }
 
-export function renderRichDeliveryErrorPlaceholder(error: unknown) {
-  const message = (
-    safeString((error as any)?.message || error) || "send_failed"
-  )
-    .replace(/\s+/g, " ")
-    .trim();
-  return message.length > 500 ? `${message.slice(0, 500)}…` : message;
+function richDeliverySourceText(node: any): string {
+  if (node == null) return "";
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) return node.map(richDeliverySourceText).join("");
+  if (typeof node !== "object") return "";
+  if (typeof node.raw === "string" && node.raw) return node.raw;
+  const type = safeString(node.type).trim().toLowerCase();
+  const attrs = node.attrs && typeof node.attrs === "object" ? node.attrs : {};
+  if (type === "text" || type === "markdown" || type === "md") {
+    return safeString(
+      node.text ??
+        node.content ??
+        attrs.content ??
+        attrs.text ??
+        attrs.value ??
+        "",
+    );
+  }
+  if (type === "br") return "\n";
+  if (Array.isArray(node.children) && node.children.length) {
+    return node.children.map(richDeliverySourceText).join("");
+  }
+  try {
+    return renderMarkdownFromNodes([node]);
+  } catch {
+    return "";
+  }
+}
+
+export function renderRichDeliveryFallback(nodes: any[]) {
+  try {
+    const sourceNodes = flattenNodes(nodes).filter(Boolean);
+    if (!sourceNodes.length) return "";
+    const source = sourceNodes.map(richDeliverySourceText).join("");
+    if (source.trim()) return source;
+    const plain = renderPlainTextFromNodes(sourceNodes, {
+      markdown: "preserve",
+    });
+    return plain.trim() ? plain : "";
+  } catch {
+    return "";
+  }
 }
 
 export function fileUrl(filePath: string) {

@@ -138,6 +138,40 @@ test("chat runtime renderers preserve shared whitespace semantics", () => {
   );
 });
 
+test("chat runtime renders failed rich nodes as their original marker text", () => {
+  const nodes = [
+    chatRuntimeCommon.normalizeNode("file", {
+      src: "/tmp/spec.pdf",
+      name: "spec.pdf",
+    }),
+  ];
+
+  assert.equal(
+    chatRuntimeCommon.renderRichDeliveryFallback(nodes),
+    "[file: spec.pdf](/tmp/spec.pdf)",
+  );
+
+  const original = "[FILE:   Original Label](/tmp/spec.pdf)";
+  const parsed = chatRuntimeCommon.prepareOutboundNodes([
+    chatRuntimeCommon.normalizeNode("markdown", { content: original }),
+  ]).work;
+  assert.equal(chatRuntimeCommon.renderRichDeliveryFallback(parsed), original);
+  assert.equal(
+    chatRuntimeCommon.renderRichDeliveryFallback([
+      chatRuntimeCommon.normalizeNode("markdown", { content: "  **x**  " }),
+    ]),
+    "  **x**  ",
+  );
+
+  const broken = {};
+  Object.defineProperty(broken, "raw", {
+    get() {
+      throw new Error("broken source node");
+    },
+  });
+  assert.equal(chatRuntimeCommon.renderRichDeliveryFallback([broken]), "");
+});
+
 test("chat runtime common helpers expand markdown rich object syntax", () => {
   const markdown = chatRuntimeCommon.prepareOutboundNodes([
     chatRuntimeCommon.normalizeNode("markdown", {
