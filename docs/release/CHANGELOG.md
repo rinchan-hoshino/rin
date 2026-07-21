@@ -10,6 +10,7 @@
 - Persistence and retrieval now use more efficient archive search and streaming transcript-index rebuilds, while chat quotes remain lazy rich references until their content is needed.
 - Session startup, usage dashboards, prompts, guidance, and runtime configuration are leaner, with bounded catalog work, clearer checklist guidance, native Pi prompt overlays, maximum-thinking documentation, and removal of runtime language configuration.
 - Releases now run through the local executor instead of GitHub Actions, with npm publisher preflight and local update-workflow coverage; the Pi runtime and mirrors are updated through 0.80.10.
+- HTTP transports and steered-chat terminal cleanup now keep request and turn ownership isolated across concurrent runtime paths.
 <!-- rin-changelog-coverage
  eae70b6 docs(agent): generalize prompt engineering guidance
  2bd1b86 fix(chat): show Working before frontend connect
@@ -71,6 +72,9 @@
  89e2be6 fix: run service holds as target user
  d5f7fc5 fix: report Discord media delivery failures
  4a2d93c fix(tui): prioritize backend Working over Sending
+ de0ed24 fix: isolate Rin HTTP transports
+ dc980ae fix: transfer steered chat terminal ownership before cleanup
+ af0f164 fix(release): keep dependency audit out of publishing
 -->
 
 ## 0.8.0
