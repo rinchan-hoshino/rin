@@ -1,6 +1,30 @@
 import { RpcInteractiveSession } from "./runtime.js";
 
-export function createRpcRuntimeHost(session: RpcInteractiveSession) {
+const DEFAULT_SHUTDOWN_GRACE_MS = 750;
+
+async function waitForRemoteShutdown(
+  session: RpcInteractiveSession,
+  graceMs: number,
+) {
+  const shutdown = session.shutdownSession().catch(() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    shutdown,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, graceMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+}
+
+export function createRpcRuntimeHost(
+  session: RpcInteractiveSession,
+  options: { shutdownGraceMs?: number } = {},
+) {
+  const shutdownGraceMs = Math.max(
+    0,
+    options.shutdownGraceMs ?? DEFAULT_SHUTDOWN_GRACE_MS,
+  );
   let beforeSessionInvalidate: (() => void) | undefined;
   let rebindSession:
     | ((session: RpcInteractiveSession) => Promise<void>)
@@ -80,7 +104,7 @@ export function createRpcRuntimeHost(session: RpcInteractiveSession) {
     async dispose() {
       beforeSessionInvalidate?.();
       await (session as any).shutdownLocalExtensions?.({ reason: "quit" });
-      await (session as any).shutdownSession();
+      await waitForRemoteShutdown(session, shutdownGraceMs);
       await session.disconnect();
     },
   };

@@ -102,3 +102,73 @@ test("rpc runtime host adapts RpcInteractiveSession shape for InteractiveMode", 
     ["disconnect"],
   ]);
 });
+
+test("rpc runtime host bounds remote shutdown before disconnecting", async () => {
+  const calls = [];
+  let finishShutdown;
+  const session = {
+    async shutdownLocalExtensions(event) {
+      calls.push(["shutdownLocalExtensions", event]);
+    },
+    shutdownSession() {
+      calls.push(["shutdownSession"]);
+      return new Promise((resolve) => {
+        finishShutdown = resolve;
+      });
+    },
+    async disconnect() {
+      calls.push(["disconnect"]);
+    },
+  };
+  const runtimeHost = createRpcRuntimeHost(session, { shutdownGraceMs: 20 });
+  const dispose = runtimeHost.dispose();
+  let watchdog;
+
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    assert.deepEqual(calls, [
+      ["shutdownLocalExtensions", { reason: "quit" }],
+      ["shutdownSession"],
+    ]);
+
+    await Promise.race([
+      dispose,
+      new Promise((_, reject) => {
+        watchdog = setTimeout(() => reject(new Error("dispose_timeout")), 200);
+      }),
+    ]);
+    assert.equal(
+      calls.some(([name]) => name === "disconnect"),
+      true,
+    );
+  } finally {
+    if (watchdog) clearTimeout(watchdog);
+    finishShutdown?.();
+    await dispose;
+  }
+});
+
+test("rpc runtime host disconnects when remote shutdown rejects", async () => {
+  const calls = [];
+  const session = {
+    async shutdownLocalExtensions(event) {
+      calls.push(["shutdownLocalExtensions", event]);
+    },
+    async shutdownSession() {
+      calls.push(["shutdownSession"]);
+      throw new Error("shutdown_failed");
+    },
+    async disconnect() {
+      calls.push(["disconnect"]);
+    },
+  };
+  const runtimeHost = createRpcRuntimeHost(session);
+
+  await runtimeHost.dispose();
+
+  assert.deepEqual(calls, [
+    ["shutdownLocalExtensions", { reason: "quit" }],
+    ["shutdownSession"],
+    ["disconnect"],
+  ]);
+});
