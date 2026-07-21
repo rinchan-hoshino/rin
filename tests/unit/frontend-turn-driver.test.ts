@@ -2289,6 +2289,44 @@ test("frontend SDK turn driver follows active turn across transient reconnect be
   assert.equal(getStateCount >= 3, true);
 });
 
+test("frontend SDK turn driver does not infer empty completion from inactive state before a late rpc final", async () => {
+  const client = createFrontendClient();
+  client.getState = async () => ({
+    sessionFile: "/tmp/frontend-late-final.jsonl",
+    sessionId: "frontend-late-final",
+    isStreaming: false,
+    turnActive: false,
+  });
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+
+  const resultPromise = (driver as any).followActiveTurn(
+    {
+      sessionFile: "/tmp/frontend-late-final.jsonl",
+      sessionId: "frontend-late-final",
+    },
+    "late-final-tag",
+  );
+  setTimeout(() => {
+    void emitRpcTurnComplete(
+      driver,
+      "late-final-tag",
+      "canonical late final",
+      "/tmp/frontend-late-final.jsonl",
+    );
+  }, 1_100);
+
+  const result = await withTimeout(
+    resultPromise,
+    2_000,
+    "turn resolved before receiving its canonical terminal event",
+  );
+  assert.equal(result.finalText, "canonical late final");
+});
+
 test("frontend SDK turn driver does not complete from agent_end before rpc final", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;

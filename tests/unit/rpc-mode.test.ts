@@ -239,7 +239,7 @@ test(
 );
 
 test(
-  "rpc mode sleep_session disposes without terminalizing an active turn",
+  "rpc mode shutdown_session terminalizes an active turn without a final",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -318,7 +318,9 @@ test(
       );
       while (!promptStarted) await wait(1);
       onData(
-        Buffer.from(`${JSON.stringify({ id: "1", type: "sleep_session" })}\n`),
+        Buffer.from(
+          `${JSON.stringify({ id: "1", type: "shutdown_session" })}\n`,
+        ),
       );
       await wait(20);
 
@@ -335,10 +337,12 @@ test(
             line?.type === "rpc_turn_event" &&
             (line.event === "complete" || line.event === "error"),
         );
-      assert.deepEqual(terminalEvents, []);
+      assert.equal(terminalEvents.length, 1);
+      assert.equal(terminalEvents[0]?.event, "error");
+      assert.equal(terminalEvents[0]?.error, "Request was aborted");
       assert.deepEqual(calls, [
         "session.abort",
-        "session.dispose",
+        "runtime.dispose",
         "process.exit",
       ]);
     } finally {

@@ -14,7 +14,6 @@ import {
   renameBoundSession,
 } from "../session/factory.js";
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
-import { isRinFrontendTurnCancelledError } from "../rin-frontend-sdk/lifecycle-errors.js";
 import { resolveSubmittedTurnFromMessages } from "../rin-frontend-sdk/submitted-turn.js";
 import {
   resolveRinTurnCompletionFromAssistantMessage,
@@ -1128,12 +1127,6 @@ export async function runCustomRpcMode(
                 retryFailureMessage: latestAutoRetryFailureMessage,
               })
             : "";
-          if (
-            isRinFrontendTurnCancelledError(error) &&
-            recoveredFailureMessage === "Agent turn was aborted."
-          ) {
-            return;
-          }
           if (recoveredCompletion && !recoveredFailureMessage) {
             emitTurnEvent(
               "complete",
@@ -1147,12 +1140,6 @@ export async function runCustomRpcMode(
               },
               forceTurnEvents,
             );
-            return;
-          }
-          if (
-            !recoveredFailureMessage &&
-            isRinFrontendTurnCancelledError(error)
-          ) {
             return;
           }
           emitTurnEvent(

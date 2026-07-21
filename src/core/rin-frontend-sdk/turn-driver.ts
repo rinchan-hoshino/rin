@@ -1130,8 +1130,6 @@ export class RinFrontendTurnDriver {
         if ("completion" in replayed) {
           return this.normalizeTurnCompletion(replayed.completion);
         }
-        liveTurn.resolve({ finalText: "" });
-        return this.normalizeTurnCompletion(await liveTurn.promise);
       }
       const raced = await Promise.race([
         liveTurn.promise.then((completion) => ({ completion })),
