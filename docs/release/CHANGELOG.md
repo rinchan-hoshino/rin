@@ -1,5 +1,82 @@
 # Rin Changelog
 
+## 0.9.0
+
+- Chat control-plane storage and migration now use a more resilient SQLite-backed path, with safer recovery for legacy identities, archives, failed migrations, concurrent startup, and per-chat inbound work.
+- Working progress and terminal delivery are more consistent across chat frontends, including earlier Working visibility, preserved editable progress, reliable settled-turn semantics, Discord media failure reporting, and no stale todo replay.
+- TUI recovery and rendering now restore history and native scrollback, keep todo checklists expanded, prioritize backend Working state, and separate reconnect presentation from disconnected request failures.
+- Scheduler and daemon lifecycle ownership is simpler and safer, with dedicated scheduled turns, fewer continuation seams, and retries for recovered provider failures.
+- Install and update flows now bundle npm with managed Node, run service holds as the target user, preserve release-pruning errors, and make transcript migrations update-safe.
+- Persistence and retrieval now use more efficient archive search and streaming transcript-index rebuilds, while chat quotes remain lazy rich references until their content is needed.
+- Session startup, usage dashboards, prompts, guidance, and runtime configuration are leaner, with bounded catalog work, clearer checklist guidance, native Pi prompt overlays, maximum-thinking documentation, and removal of runtime language configuration.
+- Releases now run through the local executor instead of GitHub Actions, with npm publisher preflight and local update-workflow coverage; the Pi runtime and mirrors are updated through 0.80.10.
+- HTTP transports and steered-chat terminal cleanup now keep request and turn ownership isolated across concurrent runtime paths.
+<!-- rin-changelog-coverage
+ eae70b6 docs(agent): generalize prompt engineering guidance
+ 2bd1b86 fix(chat): show Working before frontend connect
+ fa64406 refactor(cron): unify scheduled turn lifecycle ownership
+ d485c0e fix(daemon): retry recovered turn provider failures
+ 7ceb0cb fix(installer): bundle npm with managed node
+ 9ab9e6d fix(chat): keep editable progress until final
+ e6a3a2e fix(usage): bound dashboard query cost
+ 8b84a8e fix(tui): restore history after rpc resync
+ dd300e6 chore(upstream): sync Pi 0.80.7
+ bb9d4f2 docs(agent): include max thinking level
+ 4707a89 perf(session): bound catalog and trace chat startup
+ f700543 fix(session): cache excluded catalog files
+ b626136 fix(chat): migrate legacy chat keys before recovery
+ feebce0 fix(chat): scope legacy key migration to direct adapters
+ 33ca6fb fix(chat): reject unidentified active legacy records
+ 01e3776 refactor(chat): move control plane to SQLite
+ c60ef34 fix(chat): retry concurrent WAL initialization
+ e564da4 test(installer): allow bounded daemon startup
+ f4dd7cf test(installer): match container Node ABI
+ 1cb3b2c test(installer): exercise public TUI reconnect path
+ 3061324 test(installer): await TUI readiness before restart
+ 7a7e93b chore(pi): sync 0.80.9 runtime
+ 4c32c39 fix(chat): migrate retired archives without TUI crash
+ 65aca18 fix(chat): exclude retired outbox quarantine from migration
+ f53f7f8 refactor(scheduler): unbind TUI and drop continuation
+ 471b335 fix(chat): isolate migrations and adapter failures
+ 6054602 fix(update): detach daemon-owned updater jobs
+ 53179e5 fix(update): own jobs across supported platforms
+ a8521ee Fix model runtime chat session compatibility
+ a670f0c fix(chat): retire stale recovery checkpoints
+ c2c6937 fix(update): recover safely from migration failures
+ ca19f4f fix(chat): let reset commands bypass inbox chatter
+ 2b0f1cf fix(chat): recover legacy bot identities during install
+ 91b9f9b fix(cli): preserve errors after release pruning
+ 8994e75 fix(tui): keep recoverable errors in session
+ 36ec0f0 chore(upstream): sync Pi 0.80.10 mirrors
+ 11ec1ea fix(chat): preserve non-fatal legacy migration records
+ e511b3c fix(tui): identify disconnected pending requests
+ 2cd1153 fix(tui): let Connecting own transport loss
+ 06cb7df perf(chat): isolate inbound recovery by chat
+ 7f3a7fd fix(chat): keep compaction out of todo progress
+ eb69ca7 fix(frontend): unify backend working visibility
+ d35c983 fix(tui): restore native redraw scrollback
+ 8bd486d fix(tui): keep todo checklist expanded
+ 5e7ad17 feat(todo): guide checklist lifecycle
+ 8c94a2c refactor(prompt): overlay Rin layers on Pi native prompt
+ b31878a refactor(release): run publishing without GitHub Actions
+ b28b49a refactor: remove runtime language configuration
+ 40b6893 fix: preserve settled turn terminal semantics
+ ec22fae fix: stop replaying stale todos in chat
+ cf36cf4 refactor: optimize persistence and archive search
+ 3196671 refactor: make chat quotes lazy rich references
+ e646954 refactor: streamline prompt and guidance contracts
+ 5004c07 fix(release): preflight npm publisher identity
+ 6ae3cca fix: run update workflow tests in local CI
+ 98c54f8 fix: make transcript migration update-safe
+ dfccaf0 fix: stream transcript index rebuilds
+ 89e2be6 fix: run service holds as target user
+ d5f7fc5 fix: report Discord media delivery failures
+ 4a2d93c fix(tui): prioritize backend Working over Sending
+ de0ed24 fix: isolate Rin HTTP transports
+ dc980ae fix: transfer steered chat terminal ownership before cleanup
+ af0f164 fix(release): keep dependency audit out of publishing
+-->
+
 ## 0.8.0
 
 - Chat progress and final delivery now share clearer ownership and layout rules, with native Lark post paragraphs, configurable working frames, completed summaries, and quieter pending delivery state.
