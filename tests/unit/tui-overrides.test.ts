@@ -32,6 +32,12 @@ const loaderModule = await import(
 );
 const piTuiModule = await import("@earendil-works/pi-tui");
 const codingAgentModule = await import("@earendil-works/pi-coding-agent");
+const nativePiRebindCurrentSession =
+  codingAgentModule.InteractiveMode.prototype.rebindCurrentSession;
+const nativePiRenderCurrentSessionState =
+  codingAgentModule.InteractiveMode.prototype.renderCurrentSessionState;
+const nativePiHandleEvent =
+  codingAgentModule.InteractiveMode.prototype.handleEvent;
 const { RpcInteractiveSession } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "runtime.js"))
     .href
@@ -203,6 +209,7 @@ function createZeroExtensionCustomEntryRenderInstance() {
       terminal: { setProgress() {} },
       requestRender() {},
     },
+    loadedResourcesContainer: { clear() {} },
     chatContainer: {
       clear() {
         chatClears += 1;
@@ -932,8 +939,17 @@ test("direct initial-message redraw preserves loaded resources while clearing Ri
   assert.ok(rendered.includes("history line"));
 });
 
-test("session rebind does not own chat startup decoration rendering", async () => {
+test("session rebind keeps Pi's native rendering and startup decoration ownership", async () => {
   await overrides.applyRinTuiOverrides();
+
+  assert.equal(
+    codingAgentModule.InteractiveMode.prototype.rebindCurrentSession,
+    nativePiRebindCurrentSession,
+  );
+  assert.equal(
+    codingAgentModule.InteractiveMode.prototype.renderCurrentSessionState,
+    nativePiRenderCurrentSessionState,
+  );
 
   const calls: string[] = [];
   const instance = {
@@ -976,6 +992,8 @@ test("session rebind does not own chat startup decoration rendering", async () =
     "unsubscribe",
     "settings",
     "bind",
+    "resources",
+    "startup-notices",
     "subscribe",
     "providers",
     "border",
@@ -1037,63 +1055,12 @@ test("session rebind preserves render-before-bind replacement redraw", async () 
   ]);
 });
 
-test("session replacement final render owns startup decorations for empty sessions", () => {
-  const calls: string[] = [];
-  const instance = {
-    chatContainer: { clear() {} },
-    pendingMessagesContainer: { clear() {} },
-    pendingTools: new Map([["tool", true]]),
-    session: { messages: [] },
-    showLoadedResources(options: unknown) {
-      calls.push(`resources:${JSON.stringify(options)}`);
-    },
-    showStartupNoticesIfNeeded() {
-      calls.push("startup-notices");
-    },
-    renderInitialMessages() {
-      calls.push("messages");
-    },
-  };
-
-  overrides.renderRinCurrentSessionStateAfterReplacement(instance);
-
-  assert.deepEqual(calls, [
-    'resources:{"force":false,"showDiagnosticsWhenQuiet":true}',
-    "startup-notices",
-    "messages",
-  ]);
-  assert.equal(instance.pendingTools.size, 0);
-});
-
-test("session replacement final render does not inject startup decorations into history", () => {
-  const calls: string[] = [];
-  const instance = {
-    chatContainer: { clear() {} },
-    pendingMessagesContainer: { clear() {} },
-    pendingTools: new Map(),
-    session: { messages: [{ role: "user", content: "hello" }] },
-    showLoadedResources() {
-      calls.push("resources");
-    },
-    showStartupNoticesIfNeeded() {
-      calls.push("startup-notices");
-    },
-    renderInitialMessages() {
-      calls.push("messages");
-    },
-  };
-
-  overrides.renderRinCurrentSessionStateAfterReplacement(instance);
-
-  assert.deepEqual(calls, ["messages"]);
-});
-
 test("zero-extension session replacement renders history after Rin core custom entries", async () => {
   await overrides.applyRinTuiOverrides();
   const { instance, renderedItems } =
     createZeroExtensionCustomEntryRenderInstance();
 
-  overrides.renderRinCurrentSessionStateAfterReplacement(instance);
+  nativePiRenderCurrentSessionState.call(instance);
 
   assert.equal(instance.session.extensionOptions.noExtensions, true);
   assert.deepEqual(
@@ -1335,6 +1302,128 @@ test("footer appends runtime mode to the model label before rendering", async ()
   } finally {
     tuiRuntimeEnv.setRinTuiRuntimeRole(undefined);
   }
+});
+
+async function runScrolledHistoricalToolUpdate(handleEvent) {
+  const { Terminal: HeadlessTerminal } = await import("@xterm/headless");
+  const headlessTerminal = new HeadlessTerminal({
+    cols: 30,
+    rows: 8,
+    allowProposedApi: true,
+    disableStdin: true,
+    scrollback: 1000,
+  });
+  const writes: string[] = [];
+  const pendingWrites: Promise<void>[] = [];
+  const terminal = {
+    start() {},
+    stop() {},
+    write(data: string) {
+      writes.push(data);
+      pendingWrites.push(
+        new Promise<void>((resolve) => {
+          headlessTerminal.write(data, resolve);
+        }),
+      );
+    },
+    get columns() {
+      return 30;
+    },
+    get rows() {
+      return 8;
+    },
+    hideCursor() {},
+    showCursor() {},
+    clearLine() {},
+    clearFromCursor() {},
+    clearScreen() {},
+    setTitle() {},
+    setProgress() {},
+  };
+  themeModule.initTheme("dark", false);
+  const ui = new piTuiModule.TUI(terminal);
+  const chatContainer = new piTuiModule.Container();
+  const historicalTool = new codingAgentModule.ToolExecutionComponent(
+    "bash",
+    "tool-1",
+    { command: "echo hi" },
+    { showImages: false, imageWidthCells: 40 },
+    undefined,
+    ui,
+    "/tmp",
+  );
+  chatContainer.addChild(historicalTool);
+  for (let index = 0; index < 20; index += 1) {
+    chatContainer.addChild(new piTuiModule.Text(`MESSAGE-${index}`, 0, 0));
+  }
+  ui.addChild(chatContainer);
+
+  async function flushRender(options: { requireWrite: boolean }) {
+    let observedWrite = pendingWrites.length > 0;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      if (pendingWrites.length > 0) {
+        observedWrite = true;
+        await Promise.all(pendingWrites.splice(0));
+        continue;
+      }
+      if (observedWrite || !options.requireWrite) return;
+    }
+    assert.fail("TUI render timed out");
+  }
+
+  try {
+    ui.start();
+    await flushRender({ requireWrite: true });
+    const buffer = headlessTerminal.buffer.active;
+    headlessTerminal.scrollLines(-5);
+    const viewportBefore = buffer.viewportY;
+    writes.length = 0;
+
+    const instance = {
+      isInitialized: true,
+      session: {
+        getFrontendStatusEvent() {
+          return { phase: "working" };
+        },
+      },
+      settingsManager: settingsManagerWithoutTerminalProgress,
+      footer: { invalidate() {} },
+      ui,
+      pendingTools: new Map([["tool-1", historicalTool]]),
+      statusContainer: new piTuiModule.Container(),
+      activeStatusIndicator: undefined,
+      clearStatusIndicator: clearStatusIndicatorForTest,
+    };
+    await handleEvent.call(instance, {
+      type: "tool_execution_update",
+      toolCallId: "tool-1",
+      partialResult: { content: [{ type: "text", text: "done" }] },
+    });
+    await flushRender({ requireWrite: false });
+
+    return {
+      viewportBefore,
+      viewportAfter: buffer.viewportY,
+      clearScrollback: writes.some((write) => write.includes(`${ESC}[3J`)),
+      writes,
+    };
+  } finally {
+    ui.stop();
+    headlessTerminal.dispose();
+  }
+}
+
+test("Rin event handling matches Pi for offscreen tool updates", async () => {
+  const nativeResult =
+    await runScrolledHistoricalToolUpdate(nativePiHandleEvent);
+  await overrides.applyRinTuiOverrides();
+  const rinResult = await runScrolledHistoricalToolUpdate(
+    codingAgentModule.InteractiveMode.prototype.handleEvent,
+  );
+
+  assert.deepEqual(rinResult, nativeResult);
+  assert.ok(nativeResult.viewportBefore > 0);
 });
 
 test("ordinary output preserves a scrolled viewport and full redraws do not duplicate frames", async () => {

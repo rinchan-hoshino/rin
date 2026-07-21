@@ -488,47 +488,6 @@ function clearCurrentSessionRenderState(instance: RpcSessionRenderState) {
   instance.pendingTools?.clear?.();
 }
 
-function currentSessionHasRenderedHistory(instance: any) {
-  const messages =
-    instance?.session?.messages ?? instance?.session?.state?.messages;
-  if (Array.isArray(messages) && messages.length > 0) return true;
-  const entries = instance?.sessionManager?.getEntries?.();
-  return Array.isArray(entries) && entries.length > 0;
-}
-
-export function renderRinInitialSessionChrome(instance: any) {
-  instance.showLoadedResources?.({
-    force: false,
-    showDiagnosticsWhenQuiet: true,
-  });
-  instance.showStartupNoticesIfNeeded?.();
-}
-
-export function renderRinCurrentSessionStateAfterReplacement(instance: any) {
-  clearCurrentSessionRenderState(instance);
-  if (!currentSessionHasRenderedHistory(instance)) {
-    renderRinInitialSessionChrome(instance);
-  }
-  instance.renderInitialMessages?.();
-}
-
-async function withoutRebindChatDecorations(
-  instance: any,
-  operation: () => Promise<unknown>,
-) {
-  const originalShowLoadedResources = instance.showLoadedResources;
-  const originalShowStartupNoticesIfNeeded =
-    instance.showStartupNoticesIfNeeded;
-  instance.showLoadedResources = () => {};
-  instance.showStartupNoticesIfNeeded = () => {};
-  try {
-    return await operation();
-  } finally {
-    instance.showLoadedResources = originalShowLoadedResources;
-    instance.showStartupNoticesIfNeeded = originalShowStartupNoticesIfNeeded;
-  }
-}
-
 function redrawCurrentSessionHistoryAfterRpcResync(
   instance: RpcResyncHistoryRenderer,
 ) {
@@ -1046,7 +1005,6 @@ export async function initializePiInteractiveModeWithoutManagedToolEnsure(
   instance.ui.start();
   instance.isInitialized = true;
   await instance.rebindCurrentSession();
-  renderRinInitialSessionChrome(instance);
   instance.renderInitialMessages();
   onThemeChange(() => {
     instance.ui.invalidate();
@@ -1567,24 +1525,6 @@ export async function applyRinTuiOverrides() {
               `Failed to save thinking level: ${formatRuntimeErrorForFrontendDisplay(error)}`,
             );
           });
-      };
-  }
-
-  const originalRebindCurrentSession =
-    interactiveModeProto?.rebindCurrentSession;
-  if (typeof originalRebindCurrentSession === "function") {
-    interactiveModeProto.rebindCurrentSession =
-      async function rebindCurrentSessionWithoutChatDecoration(...args: any[]) {
-        return await withoutRebindChatDecorations(this, () =>
-          originalRebindCurrentSession.apply(this, args),
-        );
-      };
-  }
-
-  if (typeof interactiveModeProto?.renderCurrentSessionState === "function") {
-    interactiveModeProto.renderCurrentSessionState =
-      function renderCurrentSessionStateWithRinStartupChrome() {
-        renderRinCurrentSessionStateAfterReplacement(this);
       };
   }
 
