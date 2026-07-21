@@ -208,7 +208,6 @@ npm run format:check
 npm run lint
 npm run build
 npm run test:release
-npm audit --audit-level=high
 ```
 
-Stable and hotfix run the same gate in the detached candidate worktree. A real publish also requires a clean, current `main`; metadata pushes retry after fetching and rebasing `origin/main`.
+Dependency vulnerability review belongs to source integration and is not repeated as a release-time publication gate. Stable and hotfix run the same release gate in the detached candidate worktree. A real publish also requires a clean, current `main`; metadata pushes retry after fetching and rebasing `origin/main`.

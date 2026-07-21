@@ -149,7 +149,6 @@ function validateReleaseTree(root) {
   npm(["run", "lint"], { cwd: root });
   npm(["run", "build"], { cwd: root });
   npm(["run", "test:release"], { cwd: root });
-  npm(["audit", "--audit-level=high"], { cwd: root });
 }
 
 function verifyChangelog(root, cwd, version, fromRef, toRef) {

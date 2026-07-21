@@ -522,6 +522,11 @@ test("local release executor owns all four channels without GitHub Actions", () 
   assert.match(content, /git\(\["rebase", "origin\/main"\]/);
 });
 
+test("local release executor leaves dependency auditing to integration", () => {
+  const content = readLocalPublisher();
+  assert.doesNotMatch(content, /npm\(\["audit"/);
+});
+
 test("local release executor publishes tags, bundles, npm, manifest, and bootstrap", () => {
   const content = readLocalPublisher();
   assert.match(content, /git\(\["tag", "-a", tag/);
