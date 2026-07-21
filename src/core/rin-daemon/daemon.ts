@@ -490,7 +490,7 @@ export async function startDaemon(
       if (!target) {
         writeLine(
           connection.socket,
-          response(id, type, false, "rin_no_attached_session"),
+          response(id, type, true, { terminated: false }),
         );
         return true;
       }

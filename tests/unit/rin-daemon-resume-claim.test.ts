@@ -532,6 +532,77 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
+test("daemon terminate_session is idempotent after the session is detached", async () => {
+  const agentDir = await makeTempDir("rin-daemon-terminate-idempotent-");
+  const socketPath = path.join(agentDir, "daemon.sock");
+  const workerPath = path.join(agentDir, "fake-worker.js");
+  await fs.writeFile(
+    workerPath,
+    `
+const process = require("node:process");
+function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    if (command.type === "get_state") {
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionFile: "/tmp/terminate-idempotent.jsonl", sessionId: "terminate-idempotent", isStreaming: false, isCompacting: false } });
+      continue;
+    }
+    if (command.type === "shutdown_session") process.exit(0);
+    send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+  }
+});
+`,
+  );
+
+  const daemon = spawnDaemon(agentDir, socketPath, workerPath);
+  try {
+    await waitForSocket(socketPath);
+    await withRpcConnection(socketPath, async (client) => {
+      const created = await client.request({ id: "1", type: "new_session" });
+      const terminated = await client.request({
+        id: "2",
+        type: "terminate_session",
+      });
+      const alreadyTerminated = await client.request({
+        id: "3",
+        type: "terminate_session",
+      });
+
+      assert.equal(created.success, true);
+      assert.deepEqual(terminated, {
+        id: "2",
+        type: "response",
+        command: "terminate_session",
+        success: true,
+        data: { terminated: true },
+      });
+      assert.deepEqual(alreadyTerminated, {
+        id: "3",
+        type: "response",
+        command: "terminate_session",
+        success: true,
+        data: { terminated: false },
+      });
+    });
+  } finally {
+    try {
+      daemon.kill("SIGKILL");
+    } catch {
+      // ignore
+    }
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("daemon attaches a selected session without a frontend switch_session round-trip", async () => {
   const agentDir = await makeTempDir("rin-daemon-select-");
   const socketPath = path.join(agentDir, "daemon.sock");
