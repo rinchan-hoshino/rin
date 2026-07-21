@@ -539,20 +539,21 @@ function scheduleRinUpdateNotificationWhenReady(instance: any) {
   );
 }
 
-function formatRinGitChangelogNotificationText(notice: RinGitChangelogNotice) {
-  const lines = [
-    `Updated ${notice.baseRef.slice(0, 7)} → ${notice.currentRef.slice(0, 7)} (${notice.totalCommits} commits)`,
-    ...notice.commits.map((commit) => `${commit.sha}  ${commit.subject}`),
-  ];
-  const hiddenCommitCount = Math.max(
-    0,
-    notice.totalCommits - notice.commits.length,
-  );
-  if (hiddenCommitCount > 0) {
-    lines.push(`… and ${hiddenCommitCount} more commits`);
-  }
-  lines.push(`Compare: ${notice.compareUrl}`);
-  return lines.join("\n");
+function escapeRinGitChangelogMarkdownText(value: string) {
+  return value.replace(/([\\`*_[\]<>])/g, "\\$1");
+}
+
+function formatRinGitChangelogMarkdown(notice: RinGitChangelogNotice) {
+  const totalLabel = `${notice.totalCommits} ${notice.totalCommits === 1 ? "commit" : "commits"}`;
+  return [
+    `## \`${notice.baseRef.slice(0, 7)}\` → \`${notice.currentRef.slice(0, 7)}\``,
+    ...notice.commits.map(
+      (commit) =>
+        `- \`${commit.sha}\` ${escapeRinGitChangelogMarkdownText(commit.subject)}`,
+    ),
+    "",
+    `[${totalLabel} · Compare](${notice.compareUrl})`,
+  ].join("\n");
 }
 
 export function showRinGitChangelogNotification(
@@ -561,27 +562,29 @@ export function showRinGitChangelogNotification(
 ) {
   const chatContainer = instance?.chatContainer;
   if (
-    typeof chatContainer?.addChild !== "function" ||
+    !Array.isArray(chatContainer?.children) ||
     typeof chatContainer?.removeChild !== "function" ||
+    typeof instance?.showStartupNoticesIfNeeded !== "function" ||
     typeof instance?.ui?.requestRender !== "function"
   ) {
     return false;
   }
-  const children = [
-    new Spacer(1),
-    new DynamicBorder(),
-    new Text("What's New", 1, 0),
-    new Spacer(1),
-    new Text(formatRinGitChangelogNotificationText(notice), 1, 0),
-    new DynamicBorder(),
-  ];
-  for (const child of children) chatContainer.addChild(child);
+
+  const previousMarkdown = instance.changelogMarkdown;
+  const previousShown = instance.startupNoticesShown;
+  const initialChildCount = chatContainer.children.length;
   const rollback = () => {
-    for (const child of [...children].reverse()) {
+    const addedChildren = chatContainer.children.slice(initialChildCount);
+    for (const child of [...addedChildren].reverse()) {
       chatContainer.removeChild(child);
     }
   };
+
   try {
+    instance.changelogMarkdown = formatRinGitChangelogMarkdown(notice);
+    instance.startupNoticesShown = false;
+    instance.showStartupNoticesIfNeeded();
+    if (chatContainer.children.length === initialChildCount) return false;
     if (instance.ui.requestRender() === false) {
       rollback();
       return false;
@@ -590,6 +593,9 @@ export function showRinGitChangelogNotification(
   } catch (error) {
     rollback();
     throw error;
+  } finally {
+    instance.changelogMarkdown = previousMarkdown;
+    instance.startupNoticesShown = previousShown;
   }
 }
 

@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { stripVTControlCharacters } from "node:util";
 
 const rootDir = path.resolve(
   path.dirname(new URL(import.meta.url).pathname),
@@ -44,6 +45,21 @@ const { RpcInteractiveSession } = await import(
 );
 const themeModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "pi", "private-api.js")).href
+);
+const piThemeModule = await import(
+  pathToFileURL(
+    path.join(
+      rootDir,
+      "node_modules",
+      "@earendil-works",
+      "pi-coding-agent",
+      "dist",
+      "modes",
+      "interactive",
+      "theme",
+      "theme.js",
+    ),
+  ).href
 );
 const tuiRuntimeEnv = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "tui-runtime-env.js")).href
@@ -718,8 +734,19 @@ test("Rin git changelog notice renders the compared commit range", () => {
   const renderText = () =>
     chatContainer.render(100).join("\n").replace(/\s+$/gm, "");
   let renderRequests = 0;
+  let originalNoticeCalls = 0;
   const instance = {
     chatContainer,
+    changelogMarkdown: undefined,
+    startupNoticesShown: true,
+    settingsManager: { getCollapseChangelog: () => false },
+    getMarkdownThemeWithSettings: () => piThemeModule.getMarkdownTheme(),
+    showStartupNoticesIfNeeded() {
+      originalNoticeCalls += 1;
+      return codingAgentModule.InteractiveMode.prototype.showStartupNoticesIfNeeded.call(
+        this,
+      );
+    },
     ui: {
       requestRender() {
         renderRequests += 1;
@@ -740,14 +767,23 @@ test("Rin git changelog notice renders the compared commit range", () => {
   });
 
   const rendered = renderText();
+  const plainRendered = stripVTControlCharacters(rendered);
   assert.equal(shown, true);
-  assert.ok(rendered.includes("What's New"));
-  assert.ok(rendered.includes("Updated 1111111 → 2222222 (4 commits)"));
-  assert.ok(rendered.includes("abcdef0  fix: first owner-visible change"));
-  assert.ok(rendered.includes("1234567  feat: second owner-visible change"));
-  assert.ok(rendered.includes("… and 2 more commits"));
-  assert.ok(rendered.includes("Compare:"));
-  assert.ok(rendered.includes("github.com/rinchan-hoshino/rin/compare"));
+  assert.equal(originalNoticeCalls, 1);
+  assert.equal(instance.changelogMarkdown, undefined);
+  assert.equal(instance.startupNoticesShown, true);
+  assert.ok(plainRendered.includes("What's New"));
+  assert.ok(plainRendered.includes("1111111 → 2222222"));
+  assert.ok(plainRendered.includes("abcdef0"));
+  assert.ok(plainRendered.includes("fix: first owner-visible change"));
+  assert.ok(plainRendered.includes("1234567"));
+  assert.ok(plainRendered.includes("feat: second owner-visible change"));
+  assert.ok(plainRendered.includes("4 commits · Compare"));
+  assert.ok(plainRendered.includes("github.com/rinchan-hoshino/rin/compare"));
+  assert.ok(rendered.includes("\u001b["));
+  assert.ok(!plainRendered.includes("Updated 1111111"));
+  assert.ok(!plainRendered.includes("… and 2 more commits"));
+  assert.ok(!plainRendered.includes("Compare:"));
   assert.equal(renderRequests, 1);
 });
 
@@ -771,13 +807,24 @@ test("Rin git changelog notice reports render refusal", () => {
   );
   assert.equal(missingRendererContainer.children.length, 0);
 
+  const nativeInstance = (chatContainer, requestRender) => ({
+    chatContainer,
+    changelogMarkdown: undefined,
+    startupNoticesShown: true,
+    settingsManager: { getCollapseChangelog: () => false },
+    getMarkdownThemeWithSettings: () => piThemeModule.getMarkdownTheme(),
+    showStartupNoticesIfNeeded() {
+      return codingAgentModule.InteractiveMode.prototype.showStartupNoticesIfNeeded.call(
+        this,
+      );
+    },
+    ui: { requestRender },
+  });
+
   const refusedContainer = new piTuiModule.Container();
   assert.equal(
     overrides.showRinGitChangelogNotification(
-      {
-        chatContainer: refusedContainer,
-        ui: { requestRender: () => false },
-      },
+      nativeInstance(refusedContainer, () => false),
       notice,
     ),
     false,
@@ -788,14 +835,9 @@ test("Rin git changelog notice reports render refusal", () => {
   assert.throws(
     () =>
       overrides.showRinGitChangelogNotification(
-        {
-          chatContainer: failedContainer,
-          ui: {
-            requestRender() {
-              throw new Error("render failed");
-            },
-          },
-        },
+        nativeInstance(failedContainer, () => {
+          throw new Error("render failed");
+        }),
         notice,
       ),
     /render failed/,
