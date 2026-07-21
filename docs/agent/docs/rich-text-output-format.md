@@ -75,7 +75,7 @@ Markdown contract:
 
 - Raw `@name` is visible text; native mention syntax supplies the platform id.
 - Quote is part of the ordered rich message, not separate message metadata. The first quote object supplies the reply target for adapters that support reply/quote delivery.
-- An inbound quote node is an ID-only lazy reference under the current `chatKey`. Do not inject the referenced message body into the current prompt; call `rin.chat.messages.get({ chatKey, messageId })` only when the request depends on it, and follow any nested quote node only as needed.
+- An inbound quote node is an ID-only lazy reference under the current `chatKey`. Do not inject the referenced message body into the current prompt; call `chat_message_get` with that exact `chatKey` and message ID only when the request depends on it, and follow any nested quote node only as needed.
 - For outbound delivery, quote context belongs in visible text only when recipient understanding depends on it.
 - Local paths refer to files on the machine running Rin. Prefer absolute paths for generated artifacts.
 - URLs should be reachable by the adapter/recipient and free of credential-bearing query data.

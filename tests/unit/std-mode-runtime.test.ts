@@ -124,7 +124,7 @@ test("std configured session strips removed browse extension alias", async () =>
   }
 });
 
-test("std configured session registration does not require daemon-only tools to connect", async () => {
+test("std configured session registers bounded chat reads without restoring legacy tools", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-std-daemonless-"));
   const agentDir = path.join(root, "agent");
   await fs.mkdir(agentDir, { recursive: true });
@@ -136,6 +136,25 @@ test("std configured session registration does not require daemon-only tools to 
 
   try {
     const session = runtime.session;
+    for (const name of ["chat_message_get", "chat_message_list"]) {
+      assert.ok(session.getToolDefinition(name), `${name} should register`);
+    }
+
+    const runtimeGetTool = session.agent.state.tools.find(
+      (tool: any) => tool.name === "chat_message_get",
+    );
+    assert.ok(runtimeGetTool, "chat_message_get should be active");
+    await assert.rejects(
+      runtimeGetTool.execute(
+        "runtime-chat-get",
+        { chatKey: "telegram/bot-1:room-1", messageId: " " },
+        undefined,
+        undefined,
+      ),
+      /chat_message_id_required/,
+      "the Pi runtime tool wrapper should preserve explicit chat parameters",
+    );
+
     for (const name of [
       "task_control",
       "fetch",

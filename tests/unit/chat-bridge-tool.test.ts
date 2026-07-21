@@ -15,9 +15,12 @@ const { BUILTIN_SLASH_COMMANDS } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "rpc.js")).href
 );
 
-test("chat capability no longer exposes chat helper tools or interactive setup commands", () => {
+test("chat capability exposes only narrow message reads and no interactive setup command", () => {
   const definition = chatModule.default();
-  assert.deepEqual(definition.tools || [], []);
+  assert.deepEqual(
+    (definition.tools || []).map((tool) => tool.name),
+    ["chat_message_get", "chat_message_list"],
+  );
   assert.equal(definition.commands, undefined);
   assert.equal(
     BUILTIN_SLASH_COMMANDS.some((command) => command.name === "chat"),

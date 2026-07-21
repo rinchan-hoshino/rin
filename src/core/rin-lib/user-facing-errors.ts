@@ -209,7 +209,7 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   chat_key_required: () =>
     "Chat action failed because the target chat is missing. Choose a chat.",
   chat_message_store_chatKey_required: () =>
-    "Chat message store write failed because the chat key is missing. Check the adapter event.",
+    "Stored chat message access requires an exact chat key.",
   chat_message_store_messageId_required: () =>
     "Chat message store write failed because the message id is missing. Check the adapter event.",
   chat_outbox_delivery_missing: () =>

@@ -11,6 +11,17 @@ This document records the implemented write reductions, transcript-search schema
 - During normal database availability, usage telemetry may lose at most one pending batch (up to 32 events or one second) on a hard process kill. Flush failures keep the pending batch bounded for retry and reject new events until the batch can be committed. Normal turn completion and session shutdown attempt a best-effort flush without blocking lifecycle cleanup.
 - Persisted state is written only when its semantic value changes.
 
+## Persistence access matrix
+
+| Store                           | Authority                  | Canonical source                                              | Agent read surface                                                                                                           | Write owner                                                              |
+| ------------------------------- | -------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Chat messages and control plane | Authoritative              | `~/.rin/data/chat/chat.sqlite`                                | Explicit-`chatKey` `chat_message_get` / `chat_message_list`; Agent SDK for scripts; bounded read-only SQL only for diagnosis | Chat message, turn, and outbox APIs; installer-owned schema migration    |
+| Token usage                     | Authoritative telemetry    | `~/.rin/data/core/usage/usage.db`                             | `rin usage` backend filters and `--json`                                                                                     | Token-usage store and lifecycle flushes                                  |
+| Transcript search               | Derived, rebuildable index | Canonical transcript JSONL under `~/.rin/memory/transcripts/` | `recall`; direct canonical transcript reads when a result path is already known                                              | Transcript archiver and search indexer; installer-owned schema migration |
+| Session catalog                 | Derived, rebuildable index | Canonical session JSONL under `~/.rin/sessions/`              | `rin status --json` / session SDK for discovery and metadata; direct JSONL reads for content                                 | Session manager and catalog reconciler                                   |
+
+A persistence migration needs an agent-facing semantic read path when an existing agent workflow depended on reading the replaced files. This is not a requirement to expose every database or internal cache. Prefer a bounded domain tool, CLI, or SDK operation over generic SQL; keep writes behind the owning API.
+
 ## Implemented write reductions
 
 ### Running worker recovery state

@@ -193,8 +193,12 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.doesNotMatch(agentSdk, /"src", "core", "rin-agent-sdk", "index\.ts"/);
   assert.match(
     chatBridge,
-    /The model-level chat bridge tool surface is unavailable/,
+    /`chat_message_get` and `chat_message_list` are the only model-level Chat tools/,
   );
+  assert.match(chatBridge, /require an exact `chatKey`/);
+  assert.match(chatBridge, /do not discover or enumerate chat targets/);
+  assert.doesNotMatch(chatBridge, /plain text log projection remains/);
+  assert.doesNotMatch(chatBridge, /rin\.chat\.messages\.get/);
   assert.match(chatBridge, /## Boundary selection/);
   assert.match(chatBridge, /platform\/botId:chatId/);
   assert.match(
@@ -219,7 +223,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(chatBridge, /chat\.byChatKey/);
   assert.match(chatBridge, /record_only/);
   assert.match(chatBridge, /docs\/rich-text-output-format\.md/);
-  assert.match(chatBridge, /data\/chat\/message-store/);
+  assert.match(chatBridge, /data\/chat\/chat\.sqlite/);
   assert.match(chatBridge, /data\/chat\/eval\/<YYYY-MM-DD>\.jsonl/);
   assert.doesNotMatch(
     chatBridge,

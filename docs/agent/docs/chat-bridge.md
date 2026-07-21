@@ -2,7 +2,7 @@
 
 Use this document when a task needs platform chat configuration, chat delivery, stored chat evidence, adapter state, command replies, identity/trust state, or chat-bound assistant turns.
 
-The model-level chat bridge tool surface is unavailable. The operative surfaces are the Agent SDK, configuration files, read-only `chat.sqlite` evidence, daemon status, and platform adapter/runtime APIs reachable from scripts or shell/file tools.
+`chat_message_get` and `chat_message_list` are the only model-level Chat tools. Both require an exact `chatKey`, so they can inspect a known current or non-current chat without depending on a frontend binding. They do not discover or enumerate chat targets. General bridge execution remains available only through the Agent SDK, scripts, configuration files, daemon status, and platform adapter/runtime APIs.
 
 ## Prompt brief
 
@@ -10,6 +10,7 @@ Target surface:
 
 - built-in direct chat runtime adapters;
 - chat/frontend bindings;
+- explicitly targeted `chat_message_get` / `chat_message_list` reads;
 - Agent SDK `rin.chat.*` helpers;
 - local message store;
 - bridge-local `evalBridge` context;
@@ -54,7 +55,7 @@ Classify the task before acting:
 2. **Inbound message:** platform event, normalization, trust/allow state, message store, inbox, turn start.
 3. **Assistant turn:** frontend binding, controller key, active run, final delivery.
 4. **Outbound delivery:** SDK send, outbox payload, rich objects, adapter result, platform send result.
-5. **Stored evidence:** message record, message-id index, chat/date index, plain log view.
+5. **Stored evidence:** explicitly targeted model tools, Agent SDK reads, or bounded read-only database diagnosis.
 6. **Identity/trust:** platform `userId`, nickname, trust records, and quote rich nodes.
 7. **Adapter liveness:** login state, WebSocket/API connection, platform-specific probe.
 
@@ -206,7 +207,7 @@ EvalBridge contract:
 - Prefer `store.getMessage(messageId, chatKey?)` or `store.listLog(date, chatKey?)` for chat-local evidence.
 - Use `identity.getTrust(userId, platform?)` and `identity.setTrust(...)` for authorized trust data operations.
 - Use adapter `internal` APIs for platform-specific inspection or repair beyond the higher-level SDK.
-- Legacy globals such as `chat_bridge` model tool and `list_chat_log(...)` are absent from current Rin agent turns.
+- Legacy globals such as the `chat_bridge` evaluator and `list_chat_log(...)` are absent from current Rin agent turns. Use `chat_message_get` or `chat_message_list` with an exact `chatKey` for bounded reads.
 
 ## Incoming turn policy
 
@@ -335,16 +336,17 @@ The main tables are:
 - `outbox`: logical outgoing messages and post-delivery actions;
 - `outbox_deliveries`: ordered delivery fragments, attempts, provider message ids, and ambiguous outcomes.
 
-The plain text log projection remains at `data/chat/message-store/chat-log-view/<platform>/<botId>/<chatId>/<YYYY-MM-DD>.txt`. EvalBridge audit records remain at `data/chat/eval/<YYYY-MM-DD>.jsonl`. Neither projection owns execution or recovery state.
+EvalBridge audit records remain at `data/chat/eval/<YYYY-MM-DD>.jsonl`; they do not own execution or recovery state. Rin does not materialize a parallel plain-text chat-log tree.
 
 Lookup contract:
 
-1. Known `chatKey` and `messageId`: use `rin.chat.messages.get({ chatKey, messageId })`; bounded chronological reads use `rin.chat.messages.list(...)` with message-id cursors.
-2. For direct read-only diagnosis with only a `messageId`, query the `messages_message_id_idx` index and preserve `received_at, record_key` order.
-3. Known `chatKey` and date: query by `chat_key` and the local date range using `messages_chat_date_idx`.
-4. Inbox, recovery, and delivery diagnosis must query `turns`, `inbound_heads`, `outbox`, or `outbox_deliveries`; do not infer control state by scanning message history.
-5. Treat direct database access as read-only diagnosis. Runtime writes must use the owning chat APIs so transactions, generations, and fencing stay intact.
-6. An inbound quote node contains only the referenced message id. Resolve it with `rin.chat.messages.get({ chatKey, messageId })` only when the current request depends on that context; inspect the retrieved message's rich elements and follow its nested quote node only as far as needed.
+1. Use `chat_message_get` with an exact `chatKey` and platform message ID, or `chat_message_list` with an exact `chatKey` and bounded message-ID cursors. These tools can target any known chat key and do not depend on the current frontend binding.
+2. For scripted reads, use the Agent SDK message helpers documented in `docs/agent-sdk.md`; they accept the same explicit chat target.
+3. For direct read-only diagnosis with only a `messageId`, query the `messages_message_id_idx` index and preserve `received_at, record_key` order.
+4. Known `chatKey` and date: query by `chat_key` and the local date range using `messages_chat_date_idx`.
+5. Inbox, recovery, and delivery diagnosis must query `turns`, `inbound_heads`, `outbox`, or `outbox_deliveries`; do not infer control state by scanning message history.
+6. Treat direct database access as read-only diagnosis. Runtime writes must use the owning chat APIs so transactions, generations, and fencing stay intact.
+7. An inbound quote node contains only the referenced message id. Resolve it with `chat_message_get` and the quote's enclosing `chatKey` only when the current request depends on that context; inspect the retrieved message's rich elements and follow its nested quote node only as far as needed.
 
 Install and update own every Chat authority migration. Before restarting the daemon, the installer stops the old runtime, rewrites legacy chat keys, creates or upgrades `chat.sqlite`, transactionally imports legacy message/inbox/outbox authority, imports legacy `state.json` session bindings, and archives old control directories under `data/chat/legacy-migrated-v1/`. Invalid or incomplete legacy data fails the install/update instead of starting a partially migrated runtime. Runtime database opens only validate the current schema and never import legacy authority or upgrade an old schema; an unmet migration therefore degrades Chat while the core daemon remains available. Migration retries serialize through SQLite, and a crash after import reimports any pre-archive legacy writes before completing the one-way archive.
 

@@ -203,7 +203,11 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     ),
   );
   assert.ok(baseSystemPrompt.includes("is a lazy reference under the current"));
-  assert.ok(baseSystemPrompt.includes("rin.chat.messages.get"));
+  assert.ok(baseSystemPrompt.includes("chat_message_get"));
+  assert.ok(
+    baseSystemPrompt.includes("with that exact `chatKey` and message ID"),
+  );
+  assert.equal(baseSystemPrompt.includes("rin.chat.messages.get"), false);
   assert.ok(baseSystemPrompt.includes("nested quote nodes only as needed"));
   assert.equal(baseSystemPrompt.match(/\[quote:<message-id>\]/g)?.length, 1);
   assert.equal(baseSystemPrompt.includes("condition.kind"), false);

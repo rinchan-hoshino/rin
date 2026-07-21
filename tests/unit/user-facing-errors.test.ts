@@ -89,6 +89,10 @@ test("runtime error formatter maps known internal markers to actionable messages
     "Rin's background worker exited before the request finished.",
   );
   assert.equal(
+    formatRuntimeErrorForUser("chat_message_store_chatKey_required"),
+    "Stored chat message access requires an exact chat key.",
+  );
+  assert.equal(
     formatRuntimeErrorForUser("rin_worker_oom"),
     "Rin's background worker ran out of memory.",
   );
