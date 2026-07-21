@@ -881,6 +881,7 @@ export async function runCustomRpcMode(
   type ActiveTrackedTurn = {
     requestTag: string;
     queueAdmissions: PendingPromptRequestTag[];
+    agentSettled: boolean;
   };
   type PendingPromptRequestTag = {
     requestTag: string;
@@ -994,16 +995,32 @@ export async function runCustomRpcMode(
     const trackedTurn: ActiveTrackedTurn = {
       requestTag,
       queueAdmissions: [],
+      agentSettled: false,
     };
     activeTrackedTurn = trackedTurn;
     let observedCompletion: RinTurnCompletionResolution | null = null;
+    let resolveAgentSettledCompletion:
+      | ((completion: RinTurnCompletionResolution) => void)
+      | undefined;
+    const agentSettledCompletion = new Promise<RinTurnCompletionResolution>(
+      (resolve) => {
+        resolveAgentSettledCompletion = resolve;
+      },
+    );
     const rawUnsubscribeObservedCompletion = turnSession.subscribe?.(
       (event: any) => {
-        if (event?.type !== "message_end") return;
-        const resolution = resolveRinTurnCompletionFromAssistantMessage(
-          event.message,
-        );
-        if (resolution) observedCompletion = resolution;
+        if (event?.type === "message_end") {
+          const resolution = resolveRinTurnCompletionFromAssistantMessage(
+            event.message,
+          );
+          if (resolution) observedCompletion = resolution;
+          return;
+        }
+        if (event?.type !== "agent_settled") return;
+        trackedTurn.agentSettled = true;
+        if (!observedCompletion) return;
+        resolveAgentSettledCompletion?.(observedCompletion);
+        resolveAgentSettledCompletion = undefined;
       },
     );
     const unsubscribeObservedCompletion =
@@ -1040,27 +1057,41 @@ export async function runCustomRpcMode(
             }, TURN_HEARTBEAT_INTERVAL_MS)
           : null;
       try {
-        const directCompletion = await task(() => observedCompletion);
-        // A steer can start exactly as the old prompt promise settles. Wait for
-        // every admitted user message to start, then for Pi to finish its run,
-        // before deriving and publishing the one canonical terminal event.
-        let settledQueueAdmissionCount = 0;
-        while (
-          settledQueueAdmissionCount < trackedTurn.queueAdmissions.length
-        ) {
-          const queueAdmissions = trackedTurn.queueAdmissions.slice(
-            settledQueueAdmissionCount,
-          );
-          await Promise.all(
-            queueAdmissions.map(
-              (admission) => admission.started || Promise.resolve(),
-            ),
-          );
-          settledQueueAdmissionCount += queueAdmissions.length;
-          if (queueAdmissions.some((admission) => !admission.cancelled)) {
-            await turnSession.agent?.waitForIdle?.();
+        const producerOutcome = await Promise.race([
+          task(() => observedCompletion).then((completion) => ({
+            source: "task" as const,
+            completion,
+          })),
+          agentSettledCompletion.then((completion) => ({
+            source: "agent_settled" as const,
+            completion,
+          })),
+        ]);
+        const directCompletion = producerOutcome.completion;
+        // Pi's agent_settled event is the authoritative boundary after retries,
+        // compaction, and queued continuations. If the outer prompt promise is
+        // wedged after that boundary, do not let bookkeeping keep the canonical
+        // terminal open. Otherwise preserve the queue-admission handoff used at
+        // ordinary prompt boundaries.
+        if (producerOutcome.source === "task") {
+          let settledQueueAdmissionCount = 0;
+          while (
+            settledQueueAdmissionCount < trackedTurn.queueAdmissions.length
+          ) {
+            const queueAdmissions = trackedTurn.queueAdmissions.slice(
+              settledQueueAdmissionCount,
+            );
+            await Promise.all(
+              queueAdmissions.map(
+                (admission) => admission.started || Promise.resolve(),
+              ),
+            );
+            settledQueueAdmissionCount += queueAdmissions.length;
+            if (queueAdmissions.some((admission) => !admission.cancelled)) {
+              await turnSession.agent?.waitForIdle?.();
+            }
+            await new Promise((resolve) => setImmediate(resolve));
           }
-          await new Promise((resolve) => setImmediate(resolve));
         }
         const branchCompletion = resolveTurnCompletionSinceBranchCursor(
           turnSession,
@@ -1448,7 +1479,20 @@ export async function runCustomRpcMode(
         resolvePendingExtensionUiRequest(command);
         return done(id, type);
       case "prompt": {
-        const piActiveRun = Boolean(session.agent?.signal);
+        let piActiveRun = Boolean(session.agent?.signal);
+        // AgentSession clears isStreaming before it publishes agent_settled.
+        // Do not force a prompt into Pi's queue during that idle gap: no run
+        // remains to drain it. Let the canonical terminal close first, then
+        // admit the input as a new prompt with its own terminal owner.
+        if (
+          activeTurnPromise &&
+          activeTrackedTurn?.agentSettled &&
+          !session.isStreaming &&
+          !piActiveRun
+        ) {
+          await activeTurnPromise;
+          piActiveRun = Boolean(session.agent?.signal);
+        }
         const turnAlreadyActive = isTurnActive() || piActiveRun;
         const requestTag = rpcRequestTag(command.requestTag);
         if (

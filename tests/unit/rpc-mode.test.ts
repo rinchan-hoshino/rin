@@ -4303,6 +4303,134 @@ test(
 );
 
 test(
+  "rpc mode terminalizes from agent_settled when the outer prompt promise never returns",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    const sessionSubscribers = new Set();
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/settled-terminal-session.jsonl",
+        sessionId: "settled-terminal-session",
+        agent: {
+          signal: undefined,
+          state: { isStreaming: false },
+          waitForIdle: async () => {},
+        },
+        bindExtensions: async () => {},
+        subscribe: (handler) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
+        async prompt() {
+          await new Promise(() => {});
+        },
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: testSessionManager(() => session.messages),
+        messages: [],
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "turn-settled", type: "prompt", message: "finish durably", requestTag: "tag-settled" })}\n`,
+        ),
+      );
+      await wait(10);
+
+      const finalMessage = {
+        role: "assistant",
+        content: [{ type: "text", text: "durable settled final" }],
+        stopReason: "stop",
+      };
+      session.messages.push(finalMessage);
+      for (const handler of sessionSubscribers) {
+        handler({ type: "message_end", message: finalMessage });
+      }
+      await wait(10);
+      assert.equal(
+        parseRpcOutput(lines).some(
+          (event) =>
+            event.type === "rpc_turn_event" && event.event === "complete",
+        ),
+        false,
+      );
+      for (const handler of sessionSubscribers) {
+        handler({ type: "agent_settled" });
+      }
+      await wait(20);
+
+      const completions = parseRpcOutput(lines).filter(
+        (event) =>
+          event.type === "rpc_turn_event" && event.event === "complete",
+      );
+      assert.deepEqual(
+        completions.map((event) => ({
+          requestTag: event.requestTag,
+          finalText: event.finalText,
+        })),
+        [{ requestTag: "tag-settled", finalText: "durable settled final" }],
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode keeps a tracked terminal open for a queued steer that starts at the old turn boundary",
   { concurrency: false },
   async () => {
@@ -4460,7 +4588,7 @@ test(
 );
 
 test(
-  "rpc mode prompt admission steers during tracked-turn signal gaps",
+  "rpc mode starts a new terminal owner after a tracked turn settles during a signal gap",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -4468,6 +4596,7 @@ test(
     const handlers = new Map();
     const lines = [];
     const calls = [];
+    const sessionSubscribers = new Set();
     const activeRunSignal = new AbortController().signal;
     const agentState = { isStreaming: false, activeRun: false };
 
@@ -4496,7 +4625,10 @@ test(
           waitForIdle: async () => {},
         },
         bindExtensions: async () => {},
-        subscribe: () => () => {},
+        subscribe: (handler) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
         async prompt(message, options) {
           calls.push(["prompt", message, options, this.isStreaming]);
           if (!options?.streamingBehavior) {
@@ -4558,11 +4690,34 @@ test(
       );
       await wait(10);
       agentState.activeRun = false;
+      const firstFinal = {
+        role: "assistant",
+        content: [{ type: "text", text: "first settled final" }],
+        stopReason: "stop",
+      };
+      session.messages.push(firstFinal);
+      for (const handler of sessionSubscribers) {
+        handler({ type: "message_end", message: firstFinal });
+        handler({ type: "agent_settled" });
+      }
+      await wait(10);
       onData(
         Buffer.from(
           `${JSON.stringify({ id: "queue-1", type: "prompt", message: "plain follow-in", requestTag: "tag-2" })}\n`,
         ),
       );
+      await wait(10);
+      agentState.activeRun = false;
+      const secondFinal = {
+        role: "assistant",
+        content: [{ type: "text", text: "second settled final" }],
+        stopReason: "stop",
+      };
+      session.messages.push(secondFinal);
+      for (const handler of sessionSubscribers) {
+        handler({ type: "message_end", message: secondFinal });
+        handler({ type: "agent_settled" });
+      }
       await wait(20);
 
       assert.deepEqual(calls, [
@@ -4581,11 +4736,11 @@ test(
           "plain follow-in",
           {
             images: undefined,
-            streamingBehavior: "steer",
+            streamingBehavior: undefined,
             source: "rpc",
             requestTag: "tag-2",
           },
-          true,
+          false,
         ],
       ]);
       assert.equal(agentState.isStreaming, false);
@@ -4598,7 +4753,7 @@ test(
           }
         })
         .find((line) => line?.id === "queue-1");
-      assert.equal(response?.data?.acceptedAs, "steer");
+      assert.equal(response?.data?.acceptedAs, "prompt");
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
