@@ -834,9 +834,13 @@ export class ChatController {
     if (this.driver.hasVisibleChatWorkingTurn()) {
       await this.beginVisibleProcessingTurn(nextTurn);
     } else {
-      await this.clearWorkingReaction().catch(() => {});
+      const previousWorkingCleanup = this.clearWorkingReaction().catch(
+        () => false,
+      );
+      // Move terminal ownership before transport cleanup can yield.
       this.setCurrentTurn(nextTurn);
       this.awaitingTurnSettle = true;
+      await previousWorkingCleanup;
     }
     this.markAcceptedMessage(target?.incomingMessageId);
     return true;
@@ -1238,16 +1242,19 @@ export class ChatController {
     const nextIncomingMessageId = safeString(
       input.incomingMessageId || "",
     ).trim();
-    if (
+    const previousWorkingCleanup =
       previousIncomingMessageId &&
       nextIncomingMessageId &&
       previousIncomingMessageId !== nextIncomingMessageId
-    ) {
-      await this.clearWorkingReaction().catch(() => {});
-    }
+        ? this.clearWorkingReaction().catch(() => false)
+        : Promise.resolve(false);
+    // Move terminal ownership before transport cleanup can yield.
     this.setCurrentTurn(input);
     this.awaitingTurnSettle = true;
-    await this.presentVisibleProcessingTurn(input, turnGeneration);
+    await Promise.all([
+      previousWorkingCleanup,
+      this.presentVisibleProcessingTurn(input, turnGeneration),
+    ]);
   }
 
   private currentDeliveryTarget(input: {

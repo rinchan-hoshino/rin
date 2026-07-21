@@ -6205,6 +6205,159 @@ test("chat controller lets steer bypass the owned turn queue while the current t
   ]);
 });
 
+for (const workingVisible of [false, true]) {
+  test(`chat controller switches terminal ownership before awaiting ${
+    workingVisible ? "visible" : "stale"
+  } steered Working cleanup`, async () => {
+    const controller = await createController("telegram/1:2");
+    const deliveries = [];
+    controller.app.bots[0].sendMessage = async (_chatId, content) => {
+      deliveries.push(content);
+      return [`out-${deliveries.length}`];
+    };
+
+    const claimFor = (messageId, text) => {
+      const item = enqueueChatInboxItem(controller.agentDir, {
+        chatKey: controller.chatKey,
+        messageId,
+        session: {
+          platform: "telegram",
+          selfId: "1",
+          channelId: "2",
+          messageId,
+          content: text,
+          stripped: { content: text },
+        },
+        elements: [{ type: "text", attrs: { content: text } }],
+      }).item;
+      return claimChatInboxItem(controller.agentDir, item.itemId);
+    };
+    const firstClaim = claimFor("m-first-race", "first");
+    const steeredClaim = claimFor("m-steer-race", "steer now");
+    const fenceFor = (claim) => ({
+      agentDir: controller.agentDir,
+      turnId: claim.itemId,
+      chatKey: claim.chatKey,
+      messageId: claim.messageId,
+      ownerEpoch: claim.ownerEpoch,
+      attempt: claim.attemptCount,
+    });
+
+    let releaseFirstPrompt = () => {};
+    let resolveFirstPromptStarted = () => {};
+    const firstPromptStarted = new Promise((resolve) => {
+      resolveFirstPromptStarted = resolve;
+    });
+    controller.session = {
+      isStreaming: false,
+      messages: [],
+      sessionManager: {
+        getSessionFile: () => "/tmp/steer-race-chat.jsonl",
+        getSessionId: () => "session-steer-race",
+        getSessionName: () => controller.chatKey,
+      },
+      ensureSessionReady: async () => ({
+        sessionFile: "/tmp/steer-race-chat.jsonl",
+        sessionId: "session-steer-race",
+      }),
+      prompt: async (_text, options = {}) => {
+        if (controller.session.isStreaming) return { acceptedAs: "steer" };
+        controller.session.isStreaming = true;
+        resolveFirstPromptStarted();
+        await new Promise((resolve) => {
+          releaseFirstPrompt = resolve;
+        });
+        controller.session.isStreaming = false;
+        emitRpcTurnComplete(controller, options, "done once");
+      },
+      switchSession: async () => {},
+    };
+
+    const firstTurn = controller.runTurn({
+      text: "first",
+      attachments: [],
+      incomingMessageId: firstClaim.messageId,
+      replyToMessageId: firstClaim.messageId,
+      outboxTurnFence: fenceFor(firstClaim),
+    });
+    await firstPromptStarted;
+
+    const steerResult = await controller.runTurn(
+      {
+        text: "steer now",
+        attachments: [],
+        incomingMessageId: steeredClaim.messageId,
+        replyToMessageId: steeredClaim.messageId,
+        outboxTurnFence: fenceFor(steeredClaim),
+      },
+      "steer",
+    );
+    assert.equal(steerResult.steered, true);
+
+    let cleanupCalls = 0;
+    let resolveCleanupStarted = () => {};
+    const cleanupStarted = new Promise((resolve) => {
+      resolveCleanupStarted = resolve;
+    });
+    let releaseOldCleanup = () => {};
+    const oldCleanupMayFinish = new Promise((resolve) => {
+      releaseOldCleanup = resolve;
+    });
+    controller.clearWorkingReaction = async () => {
+      cleanupCalls += 1;
+      if (cleanupCalls === 1) {
+        resolveCleanupStarted();
+        await oldCleanupMayFinish;
+      }
+      return true;
+    };
+    controller.driver.frontendState.workingVisible = workingVisible;
+    const activation = controller.handleClientEvent({
+      type: "ui",
+      payload: {
+        type: "message_start",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "steer now" }],
+        },
+      },
+    });
+    await cleanupStarted;
+
+    releaseFirstPrompt();
+    assert.equal((await firstTurn).finalText, "done once");
+    releaseOldCleanup();
+    await activation;
+
+    assert.equal(deliveries.length, 1);
+    assert.equal(deliveries[0][0]?.attrs?.id, steeredClaim.messageId);
+    assert.deepEqual(
+      openChatDatabase(controller.agentDir)
+        .prepare(
+          `SELECT messages.message_id, turns.state, turns.terminal_kind,
+                messages.disposition
+         FROM turns JOIN messages ON messages.id = turns.inbound_message_id
+         ORDER BY messages.sequence`,
+        )
+        .all(),
+      [
+        {
+          message_id: firstClaim.messageId,
+          state: "superseded",
+          terminal_kind: "coalesced_steer",
+          disposition: "superseded",
+        },
+        {
+          message_id: steeredClaim.messageId,
+          state: "terminal",
+          terminal_kind: "outbox_final",
+          disposition: "actionable",
+        },
+      ],
+    );
+  });
+}
+
 test("chat controller fences superseded restored inbox turns without marking processed", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
