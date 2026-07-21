@@ -728,7 +728,7 @@ function createResourceChromeInstance() {
   return instance;
 }
 
-test("Rin git changelog notice renders the compared commit range", () => {
+test("Rin git changelog notice renders only the change list", () => {
   themeModule.initTheme("dark", false);
   const chatContainer = new piTuiModule.Container();
   const renderText = () =>
@@ -773,17 +773,16 @@ test("Rin git changelog notice renders the compared commit range", () => {
   assert.equal(instance.changelogMarkdown, undefined);
   assert.equal(instance.startupNoticesShown, true);
   assert.ok(plainRendered.includes("What's New"));
-  assert.ok(plainRendered.includes("1111111 → 2222222"));
-  assert.ok(plainRendered.includes("abcdef0"));
   assert.ok(plainRendered.includes("fix: first owner-visible change"));
-  assert.ok(plainRendered.includes("1234567"));
   assert.ok(plainRendered.includes("feat: second owner-visible change"));
-  assert.ok(plainRendered.includes("4 commits · Compare"));
-  assert.ok(plainRendered.includes("github.com/rinchan-hoshino/rin/compare"));
   assert.ok(rendered.includes("\u001b["));
-  assert.ok(!plainRendered.includes("Updated 1111111"));
-  assert.ok(!plainRendered.includes("… and 2 more commits"));
-  assert.ok(!plainRendered.includes("Compare:"));
+  assert.ok(!plainRendered.includes("1111111"));
+  assert.ok(!plainRendered.includes("2222222"));
+  assert.ok(!plainRendered.includes("abcdef0"));
+  assert.ok(!plainRendered.includes("1234567"));
+  assert.ok(!plainRendered.includes("4 commits"));
+  assert.ok(!plainRendered.includes("Compare"));
+  assert.ok(!plainRendered.includes("github.com/rinchan-hoshino/rin/compare"));
   assert.equal(renderRequests, 1);
 });
 

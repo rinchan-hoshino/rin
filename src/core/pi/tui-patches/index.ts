@@ -544,16 +544,9 @@ function escapeRinGitChangelogMarkdownText(value: string) {
 }
 
 function formatRinGitChangelogMarkdown(notice: RinGitChangelogNotice) {
-  const totalLabel = `${notice.totalCommits} ${notice.totalCommits === 1 ? "commit" : "commits"}`;
-  return [
-    `## \`${notice.baseRef.slice(0, 7)}\` → \`${notice.currentRef.slice(0, 7)}\``,
-    ...notice.commits.map(
-      (commit) =>
-        `- \`${commit.sha}\` ${escapeRinGitChangelogMarkdownText(commit.subject)}`,
-    ),
-    "",
-    `[${totalLabel} · Compare](${notice.compareUrl})`,
-  ].join("\n");
+  return notice.commits
+    .map((commit) => `- ${escapeRinGitChangelogMarkdownText(commit.subject)}`)
+    .join("\n");
 }
 
 export function showRinGitChangelogNotification(
