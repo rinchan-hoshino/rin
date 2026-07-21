@@ -1655,6 +1655,44 @@ test("frontend SDK turn driver keeps backend admission authoritative across stal
   assert.equal(promptCall.options.streamingBehavior, undefined);
 });
 
+test("frontend SDK turn driver transfers terminal ownership when a queued steer starts", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+  };
+
+  const turn = driver.runTurn({
+    text: "first",
+    requestTag: "tag-first",
+    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+  });
+  await waitUntil(
+    () => Boolean((driver as any).liveTurn),
+    "initial live turn did not start",
+  );
+
+  await emitDriverEvent(driver, {
+    type: "message_start",
+    requestTag: "tag-steer",
+    message: {
+      role: "user",
+      content: [{ type: "text", text: "steer now" }],
+    },
+  });
+  await emitRpcTurnComplete(driver, "tag-first", "");
+
+  let settled = false;
+  void turn.finally(() => {
+    settled = true;
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+
+  await emitRpcTurnComplete(driver, "tag-steer", "steered final");
+  assert.equal((await turn).finalText, "steered final");
+});
+
 test("frontend SDK turn driver steers while the rpc turn is active between streaming segments", async () => {
   const client = createFrontendClient();
   client.getState = async () => ({

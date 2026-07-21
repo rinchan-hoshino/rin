@@ -4299,6 +4299,163 @@ test(
 );
 
 test(
+  "rpc mode keeps a tracked terminal open for a queued steer that starts at the old turn boundary",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines = [];
+    const sessionSubscribers = new Set();
+    let releaseFirstPrompt;
+    const firstPromptGate = new Promise((resolve) => {
+      releaseFirstPrompt = resolve;
+    });
+    let releaseSteeredTurn;
+    const steeredTurnGate = new Promise((resolve) => {
+      releaseSteeredTurn = resolve;
+    });
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/steer-terminal-session.jsonl",
+        sessionId: "steer-terminal-session",
+        agent: {
+          signal: undefined,
+          state: { isStreaming: false },
+          waitForIdle: async () => {
+            await steeredTurnGate;
+          },
+        },
+        bindExtensions: async () => {},
+        subscribe: (handler) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
+        async prompt(_message, options) {
+          if (options?.streamingBehavior) return;
+          await firstPromptGate;
+        },
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: testSessionManager(() => session.messages),
+        messages: [],
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "turn-first", type: "prompt", message: "first", requestTag: "tag-first" })}\n`,
+        ),
+      );
+      await wait(10);
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "turn-steer", type: "prompt", message: "steer now", streamingBehavior: "steer", requestTag: "tag-steer" })}\n`,
+        ),
+      );
+      await wait(10);
+
+      const steeredUser = {
+        role: "user",
+        content: [{ type: "text", text: "steer now" }],
+      };
+      session.messages.push(steeredUser);
+      for (const handler of sessionSubscribers) {
+        handler({
+          type: "message_start",
+          requestTag: "tag-steer",
+          message: steeredUser,
+        });
+      }
+      releaseFirstPrompt();
+      await wait(20);
+
+      assert.equal(
+        parseRpcOutput(lines).some(
+          (event) =>
+            event.type === "rpc_turn_event" && event.event === "complete",
+        ),
+        false,
+      );
+
+      const finalMessage = {
+        role: "assistant",
+        content: [{ type: "text", text: "steered final" }],
+      };
+      session.messages.push(finalMessage);
+      for (const handler of sessionSubscribers) {
+        handler({ type: "message_end", message: finalMessage });
+      }
+      releaseSteeredTurn();
+      await wait(20);
+
+      const completions = parseRpcOutput(lines).filter(
+        (event) =>
+          event.type === "rpc_turn_event" && event.event === "complete",
+      );
+      assert.deepEqual(
+        completions.map((event) => ({
+          requestTag: event.requestTag,
+          finalText: event.finalText,
+        })),
+        [{ requestTag: "tag-steer", finalText: "steered final" }],
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode prompt admission steers during tracked-turn signal gaps",
   { concurrency: false },
   async () => {

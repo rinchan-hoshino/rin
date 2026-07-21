@@ -1592,11 +1592,17 @@ export class RinFrontendTurnDriver {
         });
         return;
       }
-      case "user_message_start":
+      case "user_message_start": {
+        const requestTag = safeString(event.requestTag).trim();
         this.backendTurnRequestTag =
-          safeString(event.requestTag).trim() ||
+          requestTag ||
           this.backendTurnRequestTag ||
           safeString(this.liveTurn?.requestTag).trim();
+        if (this.liveTurn && requestTag) {
+          // The daemon transfers its canonical terminal to a queued steer when
+          // that user message starts; mirror the same ownership locally.
+          this.liveTurn.requestTag = requestTag;
+        }
         this.emit({
           type: "user_message_start",
           text: event.text,
@@ -1605,6 +1611,7 @@ export class RinFrontendTurnDriver {
             : {}),
         });
         return;
+      }
       case "passive_notice":
         this.emitPassiveNoticeAtPullCheckpoint(
           {

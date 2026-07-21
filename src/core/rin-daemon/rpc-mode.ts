@@ -879,11 +879,20 @@ export async function runCustomRpcMode(
   };
   let activeTurnPromise: Promise<void> | null = null;
   let activeTurnRequestTag = "";
+  type ActiveTrackedTurn = {
+    requestTag: string;
+    queueAdmissions: PendingPromptRequestTag[];
+  };
   type PendingPromptRequestTag = {
     requestTag: string;
     acceptedAs: "prompt" | "steer" | "followUp";
     text: string;
+    trackedTurn?: ActiveTrackedTurn;
+    started?: Promise<void>;
+    resolveStarted?: () => void;
+    cancelled?: boolean;
   };
+  let activeTrackedTurn: ActiveTrackedTurn | null = null;
   const pendingPromptRequestTags: PendingPromptRequestTag[] = [];
   const admittedPromptRequestTags = new Map<
     string,
@@ -913,15 +922,45 @@ export async function runCustomRpcMode(
     acceptedAs: PendingPromptRequestTag["acceptedAs"],
     text: string,
   ) => {
-    const token = { requestTag, acceptedAs, text: safeString(text).trim() };
+    // Native Pi steering may outlive the prompt() promise that owns the
+    // current RPC terminal. Keep that terminal attached to admitted queue work.
+    const trackedTurn =
+      acceptedAs === "prompt" ? undefined : activeTrackedTurn || undefined;
+    let resolveStarted: (() => void) | undefined;
+    const started = trackedTurn
+      ? new Promise<void>((resolve) => {
+          resolveStarted = resolve;
+        })
+      : undefined;
+    const token: PendingPromptRequestTag = {
+      requestTag,
+      acceptedAs,
+      text: safeString(text).trim(),
+      trackedTurn,
+      started,
+      resolveStarted,
+    };
     pendingPromptRequestTags.push(token);
+    trackedTurn?.queueAdmissions.push(token);
     if (requestTag) admittedPromptRequestTags.set(requestTag, acceptedAs);
     return token;
+  };
+  const cancelPendingPromptRequestTag = (token: PendingPromptRequestTag) => {
+    token.cancelled = true;
+    token.resolveStarted?.();
+    token.resolveStarted = undefined;
   };
   const removePendingPromptRequestTag = (token: PendingPromptRequestTag) => {
     const index = pendingPromptRequestTags.indexOf(token);
     if (index >= 0) pendingPromptRequestTags.splice(index, 1);
+    cancelPendingPromptRequestTag(token);
     if (token.requestTag) admittedPromptRequestTags.delete(token.requestTag);
+  };
+  const clearPendingPromptRequestTags = () => {
+    for (const token of pendingPromptRequestTags) {
+      cancelPendingPromptRequestTag(token);
+    }
+    pendingPromptRequestTags.length = 0;
   };
   let gracefulSessionShutdown = false;
   let turnGeneration = 0;
@@ -953,6 +992,11 @@ export async function runCustomRpcMode(
     latestAutoRetryFailureMessage = "";
     const turnSession = getSession();
     const turnBranchCursor = captureTurnBranchCursor(turnSession);
+    const trackedTurn: ActiveTrackedTurn = {
+      requestTag,
+      queueAdmissions: [],
+    };
+    activeTrackedTurn = trackedTurn;
     let observedCompletion: RinTurnCompletionResolution | null = null;
     const rawUnsubscribeObservedCompletion = turnSession.subscribe?.(
       (event: any) => {
@@ -986,7 +1030,7 @@ export async function runCustomRpcMode(
           ? setInterval(() => {
               emitTurnEvent(
                 "heartbeat",
-                requestTag,
+                trackedTurn.requestTag,
                 {
                   turnGeneration: currentTurnGeneration,
                   sessionFile: turnSession.sessionFile,
@@ -998,6 +1042,27 @@ export async function runCustomRpcMode(
           : null;
       try {
         const directCompletion = await task(() => observedCompletion);
+        // A steer can start exactly as the old prompt promise settles. Wait for
+        // every admitted user message to start, then for Pi to finish its run,
+        // before deriving and publishing the one canonical terminal event.
+        let settledQueueAdmissionCount = 0;
+        while (
+          settledQueueAdmissionCount < trackedTurn.queueAdmissions.length
+        ) {
+          const queueAdmissions = trackedTurn.queueAdmissions.slice(
+            settledQueueAdmissionCount,
+          );
+          await Promise.all(
+            queueAdmissions.map(
+              (admission) => admission.started || Promise.resolve(),
+            ),
+          );
+          settledQueueAdmissionCount += queueAdmissions.length;
+          if (queueAdmissions.some((admission) => !admission.cancelled)) {
+            await turnSession.agent?.waitForIdle?.();
+          }
+          await new Promise((resolve) => setImmediate(resolve));
+        }
         const branchCompletion = resolveTurnCompletionSinceBranchCursor(
           turnSession,
           turnBranchCursor,
@@ -1019,7 +1084,7 @@ export async function runCustomRpcMode(
         }
         emitTurnEvent(
           "complete",
-          requestTag,
+          trackedTurn.requestTag,
           {
             turnGeneration: currentTurnGeneration,
             sessionFile: turnSession.sessionFile,
@@ -1041,7 +1106,7 @@ export async function runCustomRpcMode(
           } catch (branchError: any) {
             emitTurnEvent(
               "error",
-              requestTag,
+              trackedTurn.requestTag,
               {
                 turnGeneration: currentTurnGeneration,
                 sessionFile: turnSession.sessionFile,
@@ -1072,7 +1137,7 @@ export async function runCustomRpcMode(
           if (recoveredCompletion && !recoveredFailureMessage) {
             emitTurnEvent(
               "complete",
-              requestTag,
+              trackedTurn.requestTag,
               {
                 turnGeneration: currentTurnGeneration,
                 sessionFile: turnSession.sessionFile,
@@ -1092,7 +1157,7 @@ export async function runCustomRpcMode(
           }
           emitTurnEvent(
             "error",
-            requestTag,
+            trackedTurn.requestTag,
             {
               turnGeneration: currentTurnGeneration,
               sessionFile: turnSession.sessionFile,
@@ -1113,7 +1178,7 @@ export async function runCustomRpcMode(
           String(error?.message || error || "rpc_turn_failed");
         emitTurnEvent(
           "error",
-          requestTag,
+          trackedTurn.requestTag,
           {
             turnGeneration: currentTurnGeneration,
             sessionFile: turnSession.sessionFile,
@@ -1131,6 +1196,7 @@ export async function runCustomRpcMode(
           activeTurnPromise = null;
           activeTurnRequestTag = "";
         }
+        if (activeTrackedTurn === trackedTurn) activeTrackedTurn = null;
       }
     })();
     activeTurnPromise = promise;
@@ -1226,7 +1292,7 @@ export async function runCustomRpcMode(
   const bindCurrentSession = async () => {
     const session = getSession();
     agentRunning = Boolean(session?.isStreaming);
-    pendingPromptRequestTags.length = 0;
+    clearPendingPromptRequestTags();
     admittedPromptRequestTags.clear();
     recentPersistedPromptRequestTags.clear();
     await session.bindExtensions({
@@ -1337,6 +1403,18 @@ export async function runCustomRpcMode(
             ? pendingPromptRequestTags.splice(pendingIndex, 1)[0]
             : undefined;
         producerRequestTag = producerRequestTag || pending?.requestTag || "";
+        if (pending) {
+          pending.resolveStarted?.();
+          pending.resolveStarted = undefined;
+          if (
+            pending.trackedTurn &&
+            pending.trackedTurn === activeTrackedTurn &&
+            producerRequestTag
+          ) {
+            pending.trackedTurn.requestTag = producerRequestTag;
+            activeTurnRequestTag = producerRequestTag;
+          }
+        }
       }
       const taggedEvent =
         producerRequestTag && event?.requestTag === undefined
@@ -1562,15 +1640,15 @@ export async function runCustomRpcMode(
         }
       }
       case "clear_queue":
-        pendingPromptRequestTags.length = 0;
+        clearPendingPromptRequestTags();
         admittedPromptRequestTags.clear();
         return done(id, type, session.clearQueue());
       case "abort":
         return run(id, type, async () => {
           session.abortCompaction?.();
-          await session.abort();
-          pendingPromptRequestTags.length = 0;
+          clearPendingPromptRequestTags();
           admittedPromptRequestTags.clear();
+          await session.abort();
         });
       case "shutdown_session": {
         gracefulSessionShutdown = true;
@@ -1581,6 +1659,8 @@ export async function runCustomRpcMode(
         if (frontendIdentity && session.sessionManager) {
           session.sessionManager.__rinFrontend = frontendIdentity;
         }
+        clearPendingPromptRequestTags();
+        admittedPromptRequestTags.clear();
         try {
           await session.abort();
         } catch {}
@@ -1594,6 +1674,8 @@ export async function runCustomRpcMode(
       case "sleep_session": {
         gracefulSessionShutdown = true;
         const activeTurnToSettle = activeTurnPromise;
+        clearPendingPromptRequestTags();
+        admittedPromptRequestTags.clear();
         try {
           await session.abort();
         } catch {}
