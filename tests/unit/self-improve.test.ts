@@ -888,7 +888,10 @@ test("self-improve distillation manual is the concise canonical contract", async
     "utf8",
   );
 
-  assert.ok(manual.length < 15_000, `manual is too long: ${manual.length}`);
+  assert.ok(
+    Buffer.byteLength(manual, "utf8") <= 7_384,
+    `manual grew beyond its accepted baseline: ${Buffer.byteLength(manual, "utf8")}`,
+  );
   for (const heading of [
     "## Evidence and candidate contract",
     "## Workflow",
@@ -911,10 +914,25 @@ test("self-improve distillation manual is the concise canonical contract", async
   assert.match(manual, /\*\*Trigger:\*\*/);
   assert.match(manual, /\*\*Target behavior:\*\*/);
   assert.match(manual, /\*\*Owning surface:\*\*/);
+  assert.match(manual, /read the complete current conversation/);
+  assert.match(manual, /index every in-scope session record/i);
+  assert.match(manual, /without emitting full records.*model context/i);
   assert.match(
     manual,
-    /read the whole conversation or retrospective evidence scope/,
+    /expand only candidate sessions and evidence neighborhoods/i,
   );
+  assert.match(manual, /distillation-health\.json/);
+  assert.match(manual, /first run.*previous: null/i);
+  assert.match(manual, /move old `current` to `previous`/i);
+  assert.match(manual, /scope \{sessionFiles, messages\}/);
+  assert.match(manual, /priorMaintenanceUsage/);
+  assert.match(
+    manual,
+    /Index this task's prior session.*exclude it.*health file/i,
+  );
+  assert.match(manual, /generated prompt.*skill catalog.*usage/i);
+  assert.match(manual, /no-change path/i);
+  assert.match(manual, /measured drift/i);
   assert.match(
     manual,
     /exact owner wording, behavior keywords, old abstraction names, and likely synonyms/,
@@ -926,7 +944,10 @@ test("self-improve distillation manual is the concise canonical contract", async
   assert.match(manual, /user_profile.*stable facts only/);
   assert.match(manual, /memory-index does not carry executable procedure/);
   assert.match(manual, /short-term-memory\/records/);
-  assert.match(manual, /skill-creator/);
+  assert.match(
+    manual,
+    /materially creating or restructuring a skill.*skill-creator/i,
+  );
   assert.match(manual, /one concise unchanged reason/);
 });
 

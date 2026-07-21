@@ -15,6 +15,8 @@ Review the prompt as an executable behavior contract. Mark each item pass, fail,
 - Each behavior has one semantic owner.
 - Stable instructions, task input, retrieved context, tool contracts, and validation rules live in the appropriate layer.
 - Context is relevant, current, and no larger than needed.
+- For a composed system, the baseline measures the actual composed runtime surface rather than isolated source files.
+- Resident instructions, catalog metadata, triggered bodies, history, retrieval, tool payloads, and review children have aggregate ownership.
 - Large or changing context is retrieved progressively when possible.
 - Duplicated, stale, conflicting, and non-operative context is removed.
 - The durable prompt contains no compatibility patches for a named vendor, model family, version, or transient quirk.
@@ -53,6 +55,7 @@ Review the prompt as an executable behavior contract. Mark each item pass, fail,
 - Independent reads may run together; dependent actions remain sequential.
 - Evidence sufficiency and citation behavior are explicit when claims require grounding.
 - Retry and fallback limits are bounded.
+- A recurring task uses a cheap deterministic preflight when possible, and its no-change path stops before full semantic review.
 - Side effects are verified from the target surface before success is reported.
 - Missing, ambiguous, incompatible, unsafe, and unsupported input have defined behavior.
 - Search, iteration, and tool loops have stopping conditions.
@@ -75,6 +78,7 @@ Review the prompt as an executable behavior contract. Mark each item pass, fail,
 - Variable high-risk cases are repeated enough to expose instability.
 - Each material change states a hypothesis and keep-or-revert signal.
 - Comparable evidence shows improvement without invariant regressions.
+- Aggregate context and input/cache/output usage are compared when cost is part of the failure; token throughput is not mislabeled as monetary cost.
 
 ## 9. Final entropy check
 

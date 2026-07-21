@@ -16,6 +16,44 @@ function readAgentDoc(relativePath: string) {
   );
 }
 
+test("prompt engineering covers composed context and no-change cost", () => {
+  const skill = readAgentDoc("builtin-skills/rin-prompt-engineering/SKILL.md");
+  const rubric = readAgentDoc(
+    "builtin-skills/rin-prompt-engineering/references/prompt-review-rubric.md",
+  );
+  const evals = JSON.parse(
+    readAgentDoc("builtin-skills/rin-prompt-engineering/evals/evals.json"),
+  ) as {
+    evals: Array<{ id: number; prompt: string; expected_output: string }>;
+  };
+
+  assert.match(skill, /composed runtime surface/i);
+  assert.match(skill, /aggregate context and usage baseline/i);
+  assert.match(skill, /deterministic preflight/i);
+  assert.match(skill, /materially creating or restructuring a skill/i);
+  assert.ok(
+    Buffer.byteLength(skill, "utf8") <= 10_258,
+    `prompt skill grew beyond its accepted baseline: ${Buffer.byteLength(skill, "utf8")}`,
+  );
+  assert.match(rubric, /actual composed runtime surface/i);
+  assert.match(rubric, /no-change path/i);
+  assert.ok(evals.evals.length >= 10);
+  assert.ok(
+    evals.evals.some(
+      ({ id, prompt, expected_output }) =>
+        id === 9 &&
+        /system prompt/i.test(prompt) &&
+        /aggregate|composed|catalog/i.test(expected_output),
+    ),
+  );
+  assert.ok(
+    evals.evals.some(
+      ({ id, expected_output }) =>
+        id === 10 && /preflight|no-change|unchanged/i.test(expected_output),
+    ),
+  );
+});
+
 test("agent docs expose scheduled task operation workflow", () => {
   const readme = readAgentDoc("README.md");
   const capabilities = readAgentDoc("docs/capabilities.md");

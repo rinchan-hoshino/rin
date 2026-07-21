@@ -48,6 +48,18 @@
       "prompt": "代理已经会调用删除工具了，但我只想让它整理报告。帮我改一下提示词，保证它不会误删东西。",
       "expected_output": "Treats deletion safety as a runtime permission and authority boundary first, removes the destructive tool or requires enforced approval where possible, then writes the prompt's allowed-action contract and verifies no destructive side effect in evals.",
       "files": []
+    },
+    {
+      "id": 9,
+      "prompt": "我们的 system prompt、技能目录和按需技能分别看都不算太长，但实际每轮 token 越来越高。请审计整套提示词系统，不要只改某一个文件。",
+      "expected_output": "Audits the actual composed runtime surface; establishes aggregate context and usage baselines; separates resident instructions, catalog metadata, triggered bodies, history, tool payloads, and review children; assigns producer ownership; and tests total cost and routing rather than declaring success from isolated file sizes.",
+      "files": []
+    },
+    {
+      "id": 10,
+      "prompt": "这个夜间定时任务每天把全部记录和文档交给模型重新检查，通常什么都没改。请优化任务 prompt，同时保留真正发生变化时的完整审查。",
+      "expected_output": "Introduces a cheap deterministic preflight and change index, expands semantic evidence only when indicated, gives the no-change path an early stop, preserves required authority and validation on changed cases, and compares token/tool usage against the old recurring-task baseline.",
+      "files": []
     }
   ]
 }
