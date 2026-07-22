@@ -645,8 +645,15 @@ test("rpc model registry exposes all models for login provider selection", async
   await registry.sync();
 
   assert.deepEqual(registry.getAll(), allModels);
+  assert.deepEqual(registry.getModels(), allModels);
+  assert.deepEqual(registry.getModels("anthropic"), [allModels[1]]);
   assert.deepEqual(registry.getAvailable(), availableModels);
+  assert.deepEqual(registry.getAvailableSnapshot(), availableModels);
   assert.deepEqual(registry.find("anthropic", "claude-sonnet"), allModels[1]);
+  assert.deepEqual(
+    registry.getModel("anthropic", "claude-sonnet"),
+    allModels[1],
+  );
   registry.authStorage.applyState({
     credentials: { anthropic: { type: "api_key" } },
     providers: [],
@@ -661,11 +668,109 @@ test("rpc model registry exposes all models for login provider selection", async
     configured: true,
     source: "environment",
   });
+  assert.equal(await registry.getAuth("anthropic"), undefined);
+  assert.deepEqual(await registry.listCredentials(), [
+    { providerId: "anthropic", type: "api_key" },
+  ]);
   assert.deepEqual(sent, [
     "get_all_models",
     "get_available_models",
     "get_oauth_state",
   ]);
+});
+
+test("rpc model runtime checks auth against current daemon state", async () => {
+  const sent = [];
+  const registry = createModelRegistry({
+    send(payload) {
+      sent.push(payload.type);
+      if (payload.type === "get_oauth_state") {
+        return Promise.resolve({
+          success: true,
+          data: {
+            credentials: { openai: { type: "oauth" } },
+            providers: [{ id: "openai", name: "OpenAI" }],
+          },
+        });
+      }
+      return Promise.resolve({ success: true, data: { models: [] } });
+    },
+  });
+
+  assert.deepEqual(await registry.checkAuth("openai"), { type: "oauth" });
+  assert.deepEqual(sent, [
+    "get_all_models",
+    "get_available_models",
+    "get_oauth_state",
+  ]);
+
+  const unavailable = createModelRegistry({
+    send() {
+      return Promise.reject(new Error("daemon unavailable"));
+    },
+  });
+  await assert.rejects(unavailable.checkAuth("openai"), /daemon unavailable/);
+});
+
+test("rpc model runtime reports daemon refresh failures", async () => {
+  const registry = createModelRegistry({
+    send() {
+      return Promise.reject(new Error("daemon unavailable"));
+    },
+  });
+
+  const result = await registry.refresh();
+
+  assert.equal(result.aborted, false);
+  assert.equal(result.errors.get("rin-daemon")?.message, "daemon unavailable");
+  assert.equal(registry.getError(), "daemon unavailable");
+  assert.deepEqual(await registry.refresh({ signal: AbortSignal.abort() }), {
+    aborted: true,
+    errors: new Map(),
+  });
+});
+
+test("rpc model runtime aborts a pending refresh without committing its snapshot", async () => {
+  let resolveResponse;
+  const response = new Promise((resolve) => {
+    resolveResponse = resolve;
+  });
+  const registry = createModelRegistry({
+    send() {
+      return response;
+    },
+  });
+  const controller = new AbortController();
+
+  const refresh = registry.refresh({ signal: controller.signal });
+  controller.abort();
+
+  assert.deepEqual(await refresh, {
+    aborted: true,
+    errors: new Map(),
+  });
+  resolveResponse({
+    success: true,
+    data: { models: [{ provider: "openai", id: "late-model" }] },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(registry.getAll(), []);
+});
+
+test("rpc interactive session exposes the Pi model runtime read contract", () => {
+  const session = new RpcInteractiveSession({
+    send() {
+      return Promise.resolve({ success: true, data: {} });
+    },
+    subscribe() {
+      return () => {};
+    },
+  });
+
+  assert.equal(session.modelRuntime, session.modelRegistry);
+  assert.equal(typeof session.modelRuntime.getAvailableSnapshot, "function");
+  assert.equal(typeof session.modelRuntime.getModel, "function");
+  assert.equal(typeof session.modelRuntime.refresh, "function");
 });
 
 test("rpc runtime answers daemon extension UI requests through the bound UI context", async () => {

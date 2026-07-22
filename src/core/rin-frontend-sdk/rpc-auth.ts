@@ -367,45 +367,50 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
       applyState(data);
     },
     set(providerId: string, credential: any) {
+      void this.setAndWait(providerId, credential).catch(() => {});
+    },
+    async setAndWait(providerId: string, credential: any) {
       const nextProviderId = normalizeProviderId(providerId);
       const apiKey = normalizeApiKey(credential?.key);
-      if (!nextProviderId || !apiKey) return;
+      if (!nextProviderId || !apiKey) throw new Error("API key is required");
       const previous = state.credentials[nextProviderId];
       state.credentials[nextProviderId] = { type: "api_key" };
-      void client
-        .send({
+      try {
+        const response: any = await client.send({
           type: "oauth_set_api_key",
           providerId: nextProviderId,
           key: apiKey,
-        })
-        .then((response: any) => {
-          if (response?.success === true) {
-            applyState(response.data);
-            return;
-          }
-          restoreCredential(state.credentials, nextProviderId, previous);
-        })
-        .catch(() => {
-          restoreCredential(state.credentials, nextProviderId, previous);
         });
+        if (response?.success !== true) {
+          throw new Error(String(response?.error || "Failed to save API key"));
+        }
+        applyState(response.data);
+      } catch (error) {
+        restoreCredential(state.credentials, nextProviderId, previous);
+        throw error;
+      }
     },
     logout(providerId: string) {
+      void this.logoutAndWait(providerId).catch(() => {});
+    },
+    async logoutAndWait(providerId: string) {
       const nextProviderId = normalizeProviderId(providerId);
-      if (!nextProviderId) return;
+      if (!nextProviderId) throw new Error("Provider ID is required");
       const previous = state.credentials[nextProviderId];
       delete state.credentials[nextProviderId];
-      void client
-        .send({ type: "oauth_logout", providerId: nextProviderId })
-        .then((response: any) => {
-          if (response?.success === true) {
-            applyState(response.data);
-            return;
-          }
-          restoreCredential(state.credentials, nextProviderId, previous);
-        })
-        .catch(() => {
-          restoreCredential(state.credentials, nextProviderId, previous);
+      try {
+        const response: any = await client.send({
+          type: "oauth_logout",
+          providerId: nextProviderId,
         });
+        if (response?.success !== true) {
+          throw new Error(String(response?.error || "Failed to log out"));
+        }
+        applyState(response.data);
+      } catch (error) {
+        restoreCredential(state.credentials, nextProviderId, previous);
+        throw error;
+      }
     },
     async login(providerId: string, callbacks: any = {}) {
       const nextProviderId = normalizeProviderId(providerId);

@@ -518,6 +518,7 @@ test("local release executor owns all four channels without GitHub Actions", () 
   assert.match(content, /"nightly", "beta", "stable", "hotfix"/);
   assert.match(content, /--no-publish/);
   assert.match(content, /process\.versions\.node !== "24\.18\.0"/);
+  assert.match(content, /CI: "1"/);
   assert.match(content, /git\(\["push", "origin", "HEAD:main"\]/);
   assert.match(content, /git\(\["rebase", "origin\/main"\]/);
 });

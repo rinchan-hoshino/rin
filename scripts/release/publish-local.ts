@@ -148,7 +148,10 @@ function validateReleaseTree(root) {
   npm(["run", "format:check"], { cwd: root });
   npm(["run", "lint"], { cwd: root });
   npm(["run", "build"], { cwd: root });
-  npm(["run", "test:release"], { cwd: root });
+  npm(["run", "test:release"], {
+    cwd: root,
+    env: { ...process.env, CI: "1" },
+  });
 }
 
 function verifyChangelog(root, cwd, version, fromRef, toRef) {

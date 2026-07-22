@@ -328,6 +328,7 @@ export class RpcInteractiveSession {
   public agent: RemoteAgent;
   public settingsManager: any;
   public modelRegistry: any;
+  public modelRuntime: any;
   public resourceLoader: any;
   public sessionManager: any;
 
@@ -438,6 +439,7 @@ export class RpcInteractiveSession {
     this.agent = new RemoteAgent(client);
     this.settingsManager = undefined;
     this.modelRegistry = createModelRegistry(client);
+    this.modelRuntime = this.modelRegistry;
     this.resourceLoader = createRpcResourceLoader(() => this.resourceSnapshot);
     this.sessionManager = {
       getSessionFile: () => this.sessionFile,
