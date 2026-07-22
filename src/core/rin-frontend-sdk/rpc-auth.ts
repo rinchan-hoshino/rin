@@ -7,6 +7,14 @@ type OAuthProviderSummary = {
   name: string;
   usesCallbackServer?: boolean;
 };
+type ModelProviderSummary = {
+  id: string;
+  name: string;
+  auth: {
+    apiKey?: { name: string; interactive: boolean };
+    oauth?: { name: string; loginLabel?: string };
+  };
+};
 type ProviderAuthStatusSummary = {
   configured: boolean;
   source?: string;
@@ -21,6 +29,7 @@ type LoginState = {
     expiresInSeconds?: number;
   }) => void;
   onPrompt?: (prompt: {
+    type: string;
     message: string;
     placeholder?: string;
     allowEmpty?: boolean;
@@ -32,6 +41,7 @@ type LoginState = {
     signal?: AbortSignal;
   }) => Promise<string | undefined>;
   onProgress?: (message: string) => void;
+  onInfo?: (info: { message: string; links?: unknown[] }) => void;
   onManualCodeInput?: (prompt: {
     message?: string;
     placeholder?: string;
@@ -117,6 +127,34 @@ function normalizeProviders(input: any): OAuthProviderSummary[] {
   return providers;
 }
 
+function normalizeModelProviders(input: any) {
+  if (!Array.isArray(input)) return [];
+  const providers: ModelProviderSummary[] = [];
+  const seen = new Set<string>();
+  for (const item of input) {
+    const id = normalizeProviderId(item?.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const name = trimText(item?.name) || id;
+    const auth: ModelProviderSummary["auth"] = {};
+    if (item?.auth?.apiKey) {
+      auth.apiKey = {
+        name: trimText(item.auth.apiKey.name) || `${name} API key`,
+        interactive: Boolean(item.auth.apiKey.interactive),
+      };
+    }
+    if (item?.auth?.oauth) {
+      const loginLabel = trimText(item.auth.oauth.loginLabel);
+      auth.oauth = {
+        name: trimText(item.auth.oauth.name) || name,
+        ...(loginLabel ? { loginLabel } : {}),
+      };
+    }
+    providers.push({ id, name, auth });
+  }
+  return providers;
+}
+
 function normalizeStringMap(input: any) {
   const values: Record<string, string> = {};
   if (!input || typeof input !== "object") return values;
@@ -149,6 +187,7 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
   const state = {
     credentials: {} as Record<string, OAuthCredentialSummary>,
     providers: [] as OAuthProviderSummary[],
+    modelProviders: [] as ModelProviderSummary[],
     providerDisplayNames: {} as Record<string, string>,
     providerAuthStatuses: {} as Record<string, ProviderAuthStatusSummary>,
     logins: new Map<string, LoginState>(),
@@ -157,6 +196,7 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
   const applyState = (data: any) => {
     state.credentials = normalizeCredentials(data?.credentials);
     state.providers = normalizeProviders(data?.providers);
+    state.modelProviders = normalizeModelProviders(data?.modelProviders);
     state.providerDisplayNames = normalizeStringMap(data?.providerDisplayNames);
     state.providerAuthStatuses = normalizeProviderAuthStatuses(
       data?.providerAuthStatuses,
@@ -263,6 +303,13 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
       login.onProgress?.(String(payload.message || ""));
       return;
     }
+    if (payload.event === "info") {
+      login.onInfo?.({
+        message: String(payload.message || ""),
+        ...(Array.isArray(payload.links) ? { links: payload.links } : {}),
+      });
+      return;
+    }
     if (payload.event === "device_code") {
       login.onDeviceCode?.({
         userCode: String(payload.userCode || ""),
@@ -291,6 +338,7 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
         login,
         (signal) =>
           login.onPrompt?.({
+            type: trimText(payload.promptType) || "text",
             message: String(payload.message || ""),
             placeholder:
               typeof payload.placeholder === "string"
@@ -350,6 +398,16 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
       state.credentials[normalizeProviderId(providerId)],
     getOAuthProviders: () =>
       state.providers.map((provider) => ({ ...provider })),
+    getModelProviders: () =>
+      state.modelProviders.map((provider) => ({
+        ...provider,
+        auth: {
+          ...(provider.auth.apiKey
+            ? { apiKey: { ...provider.auth.apiKey } }
+            : {}),
+          ...(provider.auth.oauth ? { oauth: { ...provider.auth.oauth } } : {}),
+        },
+      })),
     getProviderDisplayName(providerId: string) {
       const id = normalizeProviderId(providerId);
       if (!id) return id;
@@ -417,9 +475,11 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
       if (!nextProviderId) {
         throw new Error("oauth_provider_id_required");
       }
+      const authType = trimText(callbacks.authType);
       const response: any = await client.send({
         type: "oauth_login_start",
         providerId: nextProviderId,
+        ...(authType ? { authType } : {}),
       });
       const loginId = normalizeLoginId(response?.data?.loginId);
       if (!response || response.success !== true || !loginId) {
@@ -432,6 +492,7 @@ export function createAuthStorageProxy(client: RpcFrontendClient) {
           onPrompt: callbacks.onPrompt,
           onSelect: callbacks.onSelect,
           onProgress: callbacks.onProgress,
+          onInfo: callbacks.onInfo,
           onManualCodeInput: callbacks.onManualCodeInput,
           resolve,
           reject,

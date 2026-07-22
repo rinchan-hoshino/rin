@@ -1,6 +1,10 @@
 import type { RpcFrontendClient } from "./frontend-surface.js";
 import { createAuthStorageProxy } from "./rpc-auth.js";
 
+function remoteLoginMarker() {
+  throw new Error("Provider login must be started through modelRuntime.login");
+}
+
 export function createModelRegistry(client: RpcFrontendClient) {
   const state = {
     allModels: [] as any[],
@@ -9,7 +13,10 @@ export function createModelRegistry(client: RpcFrontendClient) {
   };
   const authStorage = createAuthStorageProxy(client);
 
-  const providerId = (value: unknown) => String(value || "").trim();
+  const providerId = (value: unknown) =>
+    typeof value === "string"
+      ? value.trim()
+      : String((value as any)?.provider || "").trim();
   const availableModels = () => {
     const merged = new Map(
       state.availableModels.map((model) => [
@@ -24,29 +31,34 @@ export function createModelRegistry(client: RpcFrontendClient) {
     }
     return [...merged.values()];
   };
-  const oauthProviders = () => authStorage.getOAuthProviders();
-  const providers = () => {
-    const oauthById = new Map(
-      oauthProviders().map((provider) => [provider.id, provider]),
-    );
-    const ids = new Set([
-      ...state.allModels.map((model) => providerId(model?.provider)),
-      ...oauthById.keys(),
-    ]);
-    return [...ids].filter(Boolean).map((id) => {
-      const oauth = oauthById.get(id);
-      return {
-        id,
-        name: oauth?.name || authStorage.getProviderDisplayName(id) || id,
-        auth: {
-          apiKey: { login: true },
-          ...(oauth
-            ? { oauth: { loginLabel: `Sign in to ${oauth.name}` } }
-            : {}),
-        },
-      };
-    });
-  };
+  const providers = () =>
+    authStorage.getModelProviders().map((provider) => ({
+      id: provider.id,
+      name: provider.name,
+      auth: {
+        ...(provider.auth.apiKey
+          ? {
+              apiKey: {
+                name: provider.auth.apiKey.name,
+                ...(provider.auth.apiKey.interactive
+                  ? { login: remoteLoginMarker }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(provider.auth.oauth
+          ? {
+              oauth: {
+                name: provider.auth.oauth.name,
+                ...(provider.auth.oauth.loginLabel
+                  ? { loginLabel: provider.auth.oauth.loginLabel }
+                  : {}),
+                login: remoteLoginMarker,
+              },
+            }
+          : {}),
+      },
+    }));
 
   const registry = {
     authStorage,
@@ -155,20 +167,8 @@ export function createModelRegistry(client: RpcFrontendClient) {
     },
     async login(provider: string, type: string, interaction: any = {}) {
       const id = providerId(provider);
-      if (type === "api_key") {
-        const key = await interaction.prompt?.({
-          type: "prompt",
-          message: `Enter API key for ${id}`,
-          placeholder: "API key",
-          allowEmpty: false,
-          signal: interaction.signal,
-        });
-        if (!String(key || "").trim()) throw new Error("Login cancelled");
-        await authStorage.setAndWait(id, { key });
-        await registry.sync();
-        return { type: "api_key" };
-      }
       await authStorage.login(id, {
+        authType: type,
         signal: interaction.signal,
         onAuth: (info: any) =>
           interaction.notify?.({ type: "auth_url", ...info }),
@@ -176,15 +176,21 @@ export function createModelRegistry(client: RpcFrontendClient) {
           interaction.notify?.({ type: "device_code", ...info }),
         onProgress: (message: string) =>
           interaction.notify?.({ type: "progress", message }),
+        onInfo: (info: any) => interaction.notify?.({ type: "info", ...info }),
         onPrompt: (prompt: any) =>
-          interaction.prompt?.({ type: "prompt", ...prompt }),
+          interaction.prompt?.({
+            type: prompt.type || "text",
+            message: prompt.message,
+            placeholder: prompt.placeholder,
+            signal: prompt.signal,
+          }),
         onSelect: (prompt: any) =>
           interaction.prompt?.({ type: "select", ...prompt }),
         onManualCodeInput: (prompt: any) =>
           interaction.prompt?.({ type: "manual_code", ...prompt }),
       });
       await registry.sync();
-      return { type: "oauth" };
+      return { type };
     },
     async logout(provider: string) {
       await authStorage.logoutAndWait(providerId(provider));

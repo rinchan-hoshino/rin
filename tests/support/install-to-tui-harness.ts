@@ -53,7 +53,7 @@ export async function withIsolatedTempDir(fn: (dir: string) => Promise<void>) {
 
 export async function commandExists(name: string) {
   try {
-    await execFileAsync("sh", ["-lc", `command -v ${name}`]);
+    await execFileAsync("sh", ["-c", `command -v ${name}`]);
     return true;
   } catch {
     return false;
@@ -274,18 +274,10 @@ export async function runInstallToTuiSmokeInContainer(options: {
   }
 
   try {
-    const result = await execFileAsync(
-      runtime,
-      buildInstallToTuiContainerArgs({ mode: "smoke-test" }),
-      {
-        cwd: rootDir,
-        env: process.env,
-        maxBuffer: 10 * 1024 * 1024,
-      },
-    );
-    const stdout = String(result.stdout || "");
-    assert.match(stdout, /# pass 1/);
-    return { stdout };
+    await execFileAsync(runtime, ["info"], {
+      env: process.env,
+      maxBuffer: 10 * 1024 * 1024,
+    });
   } catch (error: any) {
     if (options.failOnUnavailableRuntime) throw error;
     const message = String(
@@ -297,6 +289,19 @@ export async function runInstallToTuiSmokeInContainer(options: {
       skipped: `container runtime ${runtime} is not usable for isolated install-to-TUI smoke${message ? `: ${message}` : ""}`,
     };
   }
+
+  const result = await execFileAsync(
+    runtime,
+    buildInstallToTuiContainerArgs({ mode: "smoke-test" }),
+    {
+      cwd: rootDir,
+      env: process.env,
+      maxBuffer: 10 * 1024 * 1024,
+    },
+  );
+  const stdout = String(result.stdout || "");
+  assert.match(stdout, /# pass 1/);
+  return { stdout };
 }
 
 export async function runManualHarnessContainer(options: {
@@ -621,7 +626,7 @@ export async function assertInstalledRuntimeSmoke() {
       let launcherResult: PtyCommandResult;
       try {
         await new Promise((resolve) => setTimeout(resolve, 2000));
-        assert.equal(launcher.child.exitCode, null);
+        assert.equal(launcher.child.exitCode, null, launcher.getOutput());
       } finally {
         launcherResult = await stopPtyCommand(launcher);
       }

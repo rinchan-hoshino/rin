@@ -33,6 +33,17 @@ test("rpc auth proxy normalizes oauth state snapshots", async () => {
               { id: " gemini ", name: "" },
               { id: " ", name: "ignored" },
             ],
+            modelProviders: [
+              {
+                id: " openai ",
+                name: " OpenAI ",
+                auth: {
+                  oauth: { name: " OpenAI account ", loginLabel: " Sign in " },
+                  apiKey: { name: " OpenAI API key ", interactive: 1 },
+                },
+              },
+              { id: " ", name: "ignored", auth: {} },
+            ],
             providerDisplayNames: {
               " openai ": " OpenAI ",
               gemini: "",
@@ -62,6 +73,16 @@ test("rpc auth proxy normalizes oauth state snapshots", async () => {
     { id: "openai", name: "OpenAI", usesCallbackServer: true },
     { id: "gemini", name: "gemini" },
   ]);
+  assert.deepEqual(auth.getModelProviders(), [
+    {
+      id: "openai",
+      name: "OpenAI",
+      auth: {
+        apiKey: { name: "OpenAI API key", interactive: true },
+        oauth: { name: "OpenAI account", loginLabel: "Sign in" },
+      },
+    },
+  ]);
   assert.equal(auth.getProviderDisplayName(" openai "), "OpenAI");
   assert.equal(auth.getProviderDisplayName("gemini"), "gemini");
   assert.deepEqual(auth.getProviderAuthStatus("openai"), {
@@ -79,6 +100,7 @@ test("rpc auth proxy responds to oauth login events and applies completion state
   const authEvents = [];
   const deviceCodeEvents = [];
   const progressEvents = [];
+  const infoEvents = [];
   const promptEvents = [];
   const selectPrompts = [];
   const manualCodePrompts = [];
@@ -96,11 +118,15 @@ test("rpc auth proxy responds to oauth login events and applies completion state
   });
 
   const loginPromise = auth.login(" openai ", {
+    authType: "api_key",
     onAuth(info) {
       authEvents.push(info);
     },
     onProgress(message) {
       progressEvents.push(message);
+    },
+    onInfo(info) {
+      infoEvents.push(info);
     },
     onDeviceCode(info) {
       deviceCodeEvents.push(info);
@@ -136,6 +162,13 @@ test("rpc auth proxy responds to oauth login events and applies completion state
   auth.handleEvent({
     type: "oauth_login_event",
     loginId: "login-1",
+    event: "info",
+    message: "Use a scoped key",
+    links: [{ url: "https://example.com", label: "Docs" }],
+  });
+  auth.handleEvent({
+    type: "oauth_login_event",
+    loginId: "login-1",
     event: "device_code",
     userCode: "ABCD-EFGH",
     verificationUri: "https://example.com/device",
@@ -150,6 +183,7 @@ test("rpc auth proxy responds to oauth login events and applies completion state
     message: "Enter code",
     placeholder: "optional.example.com",
     allowEmpty: true,
+    promptType: "secret",
   });
   auth.handleEvent({
     type: "oauth_login_event",
@@ -193,8 +227,15 @@ test("rpc auth proxy responds to oauth login events and applies completion state
     },
   ]);
   assert.deepEqual(progressEvents, ["Waiting"]);
+  assert.deepEqual(infoEvents, [
+    {
+      message: "Use a scoped key",
+      links: [{ url: "https://example.com", label: "Docs" }],
+    },
+  ]);
   assert.equal(promptEvents.length, 1);
   assert.equal(promptEvents[0].message, "Enter code");
+  assert.equal(promptEvents[0].type, "secret");
   assert.equal(promptEvents[0].placeholder, "optional.example.com");
   assert.equal(promptEvents[0].allowEmpty, true);
   assert.ok(promptEvents[0].signal instanceof AbortSignal);
@@ -218,7 +259,11 @@ test("rpc auth proxy responds to oauth login events and applies completion state
   assert.equal(manualCodePrompts[0].placeholder, "code");
   assert.ok(manualCodePrompts[0].signal instanceof AbortSignal);
   assert.deepEqual(sent, [
-    { type: "oauth_login_start", providerId: "openai" },
+    {
+      type: "oauth_login_start",
+      providerId: "openai",
+      authType: "api_key",
+    },
     {
       type: "oauth_login_respond",
       loginId: "login-1",
@@ -343,8 +388,7 @@ test("rpc auth proxy rolls back failed logout and cancels aborted logins", async
     credentials: { openai: { type: "oauth" } },
     providers: [{ id: "openai", name: "OpenAI" }],
   });
-  auth.logout(" openai ");
-  await new Promise((resolve) => setImmediate(resolve));
+  await assert.rejects(auth.logoutAndWait(" openai "), /logout_failed/);
   assert.deepEqual(auth.get("openai"), { type: "oauth" });
 
   const controller = new AbortController();

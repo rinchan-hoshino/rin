@@ -375,10 +375,11 @@ export async function loginSessionProvider(
   callbacks: any,
 ) {
   const runtime = sessionModelRuntime(session);
-  if (runtime.authStorage?.login) {
+  const authType = callbacks.authType === "api_key" ? "api_key" : "oauth";
+  if (authType === "oauth" && runtime.authStorage?.login) {
     return await runtime.authStorage.login(providerId, callbacks);
   }
-  return await runtime.login(providerId, "oauth", {
+  return await runtime.login(providerId, authType, {
     signal: callbacks.signal,
     prompt: async (prompt: any) => {
       const signal = combinedLoginPromptSignal(prompt.signal, callbacks.signal);
@@ -389,6 +390,7 @@ export async function loginSessionProvider(
         return await callbacks.onManualCodeInput({ ...prompt, signal });
       }
       return await callbacks.onPrompt({
+        type: prompt.type,
         message: prompt.message,
         placeholder: prompt.placeholder,
         // Current Pi AuthPrompt leaves blank-input policy to the provider.
@@ -400,7 +402,7 @@ export async function loginSessionProvider(
     notify: (event: any) => {
       if (event.type === "auth_url") return callbacks.onAuth(event);
       if (event.type === "device_code") return callbacks.onDeviceCode(event);
-      if (event.type === "info") return callbacks.onProgress(event.message);
+      if (event.type === "info") return callbacks.onInfo(event);
       if (event.type === "progress") return callbacks.onProgress(event.message);
     },
   });
@@ -1986,6 +1988,10 @@ export async function runCustomRpcMode(
       case "oauth_login_start": {
         const providerId = String(command.providerId || "").trim();
         if (!providerId) throw new Error("providerId is required");
+        const authType =
+          String(command.authType || "oauth").trim() === "api_key"
+            ? "api_key"
+            : "oauth";
         const loginId = `login_${++loginSeq}`;
         const abort = new AbortController();
         activeLogins.set(loginId, {
@@ -1998,6 +2004,7 @@ export async function runCustomRpcMode(
         deferOAuthLoginStart(async () => {
           try {
             await loginSessionProvider(session, providerId, {
+              authType,
               onAuth: (info: { url: string; instructions?: string }) =>
                 emitLoginEvent(loginId, "auth", {
                   url: info.url,
@@ -2016,6 +2023,7 @@ export async function runCustomRpcMode(
                   expiresInSeconds: info.expiresInSeconds,
                 }),
               onPrompt: (prompt: {
+                type?: string;
                 message: string;
                 placeholder?: string;
                 allowEmpty?: boolean;
@@ -2025,6 +2033,7 @@ export async function runCustomRpcMode(
                   loginId,
                   "prompt",
                   {
+                    promptType: prompt.type,
                     message: prompt.message,
                     placeholder: prompt.placeholder,
                     allowEmpty: prompt.allowEmpty,
@@ -2047,6 +2056,8 @@ export async function runCustomRpcMode(
                 ),
               onProgress: (message: string) =>
                 emitLoginEvent(loginId, "progress", { message }),
+              onInfo: (info: { message: string; links?: unknown[] }) =>
+                emitLoginEvent(loginId, "info", info),
               onManualCodeInput: (prompt: {
                 message?: string;
                 placeholder?: string;

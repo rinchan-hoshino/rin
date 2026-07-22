@@ -254,7 +254,10 @@ test("catalog helpers expose non-secret ModelRuntime auth state", async () => {
         {
           id: "openai-codex",
           name: "OpenAI Codex",
-          auth: { oauth: {} },
+          auth: {
+            oauth: { name: "OpenAI Codex", loginLabel: "Sign in" },
+            apiKey: { name: "OpenAI API key", login: async () => ({}) },
+          },
         },
       ],
       getModels: () => [{ provider: "openai-codex", id: "gpt-5.5" }],
@@ -272,6 +275,16 @@ test("catalog helpers expose non-secret ModelRuntime auth state", async () => {
         id: "openai-codex",
         name: "OpenAI Codex",
         usesCallbackServer: false,
+      },
+    ],
+    modelProviders: [
+      {
+        id: "openai-codex",
+        name: "OpenAI Codex",
+        auth: {
+          apiKey: { name: "OpenAI API key", interactive: true },
+          oauth: { name: "OpenAI Codex", loginLabel: "Sign in" },
+        },
       },
     ],
     providerDisplayNames: { "openai-codex": "OpenAI Codex" },

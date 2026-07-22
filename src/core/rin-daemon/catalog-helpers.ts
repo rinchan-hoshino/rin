@@ -30,6 +30,17 @@ type OAuthProviderSummary = {
   usesCallbackServer: boolean;
 };
 
+type ModelProviderAuthSummary = {
+  apiKey?: { name: string; interactive: boolean };
+  oauth?: { name: string; loginLabel?: string };
+};
+
+type ModelProviderSummary = {
+  id: string;
+  name: string;
+  auth: ModelProviderAuthSummary;
+};
+
 type ProviderAuthStatusSummary = {
   configured: boolean;
   source?: string;
@@ -352,6 +363,32 @@ export function getOAuthStateFromModelRegistry(modelRegistry: any) {
   };
 }
 
+function collectModelProviderSummaries(modelRuntime: any) {
+  return asArray<any>(modelRuntime.getProviders?.()).flatMap(
+    (provider): ModelProviderSummary[] => {
+      const id = normalizeProviderId(provider?.id);
+      if (!id) return [];
+      const apiKeyName = trimText(provider?.auth?.apiKey?.name);
+      const oauthName = trimText(provider?.auth?.oauth?.name);
+      const loginLabel = trimText(provider?.auth?.oauth?.loginLabel);
+      const auth: ModelProviderAuthSummary = {};
+      if (provider?.auth?.apiKey) {
+        auth.apiKey = {
+          name: apiKeyName || `${trimText(provider?.name) || id} API key`,
+          interactive: typeof provider.auth.apiKey.login === "function",
+        };
+      }
+      if (provider?.auth?.oauth) {
+        auth.oauth = {
+          name: oauthName || trimText(provider?.name) || id,
+          ...(loginLabel ? { loginLabel } : {}),
+        };
+      }
+      return [{ id, name: trimText(provider?.name) || id, auth }];
+    },
+  );
+}
+
 async function getOAuthStateFromModelRuntime(modelRuntime: any) {
   const credentialInfos = asArray<any>(await modelRuntime.listCredentials?.());
   const credentials: Record<string, OAuthCredentialSummary> = {};
@@ -368,6 +405,7 @@ async function getOAuthStateFromModelRuntime(modelRuntime: any) {
       usesCallbackServer: false,
     }))
     .filter((provider) => provider.id);
+  const modelProviders = collectModelProviderSummaries(modelRuntime);
   const providerDisplayNames = collectProviderDisplayNames(
     modelRuntime,
     undefined,
@@ -379,6 +417,7 @@ async function getOAuthStateFromModelRuntime(modelRuntime: any) {
   return {
     credentials,
     providers,
+    modelProviders,
     ...(Object.keys(providerDisplayNames).length
       ? { providerDisplayNames }
       : {}),

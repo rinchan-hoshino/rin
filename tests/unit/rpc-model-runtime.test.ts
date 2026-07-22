@@ -46,6 +46,56 @@ test("OAuth prompt request IDs are never reused after cancellation", () => {
   assert.notEqual(cancelledRequestId, replacementRequestId);
 });
 
+test("ModelRuntime login preserves the requested auth and prompt types", async () => {
+  const observed = [];
+  const result = await loginSessionProvider(
+    {
+      modelRuntime: {
+        async login(providerId, authType, interaction) {
+          observed.push({ providerId, authType });
+          interaction.notify({
+            type: "info",
+            message: "Use a scoped key",
+            links: [{ url: "https://example.com", label: "Docs" }],
+          });
+          return await interaction.prompt({
+            type: "secret",
+            message: "Enter API key",
+          });
+        },
+      },
+    },
+    "openai",
+    {
+      authType: "api_key",
+      onPrompt(prompt) {
+        observed.push(prompt);
+        return Promise.resolve("test-key");
+      },
+      onInfo(info) {
+        observed.push(info);
+      },
+    },
+  );
+
+  assert.equal(result, "test-key");
+  assert.deepEqual(observed, [
+    { providerId: "openai", authType: "api_key" },
+    {
+      type: "info",
+      message: "Use a scoped key",
+      links: [{ url: "https://example.com", label: "Docs" }],
+    },
+    {
+      type: "secret",
+      message: "Enter API key",
+      placeholder: undefined,
+      allowEmpty: true,
+      signal: undefined,
+    },
+  ]);
+});
+
 test("ModelRuntime API keys use the persistent login path", async () => {
   const calls = [];
   const credentials = [];

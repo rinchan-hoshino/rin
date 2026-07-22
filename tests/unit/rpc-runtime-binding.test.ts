@@ -630,6 +630,20 @@ test("rpc model registry exposes all models for login provider selection", async
           return Promise.resolve({
             success: true,
             data: {
+              modelProviders: [
+                {
+                  id: "openai",
+                  name: "OpenAI",
+                  auth: { oauth: { name: "OpenAI account" } },
+                },
+                {
+                  id: "anthropic",
+                  name: "Anthropic",
+                  auth: {
+                    apiKey: { name: "Anthropic API key", interactive: true },
+                  },
+                },
+              ],
               providerDisplayNames: { anthropic: "Anthropic" },
               providerAuthStatuses: {
                 openai: { configured: true, source: "environment" },
@@ -654,6 +668,8 @@ test("rpc model registry exposes all models for login provider selection", async
     registry.getModel("anthropic", "claude-sonnet"),
     allModels[1],
   );
+  assert.equal(registry.getProviders()[0].auth.oauth.name, "OpenAI account");
+  assert.equal(typeof registry.getProviders()[1].auth.apiKey.login, "function");
   registry.authStorage.applyState({
     credentials: { anthropic: { type: "api_key" } },
     providers: [],
