@@ -4,7 +4,7 @@
 
 - Chat control-plane storage and migration now use a more resilient SQLite-backed path, with safer recovery for legacy identities, archives, failed migrations, concurrent startup, and per-chat inbound work.
 - Working progress and terminal delivery are more consistent across chat frontends, including earlier Working visibility, preserved editable progress, reliable settled-turn semantics, Discord media failure reporting, and no stale todo replay.
-- TUI recovery and rendering now restore history and native scrollback, keep todo checklists expanded, prioritize backend Working state, and separate reconnect presentation from disconnected request failures.
+- TUI recovery and rendering now restore history and native scrollback, keep todo checklists expanded, prioritize backend Working state, separate reconnect presentation from disconnected request failures, and show the exact commit range after git-channel updates.
 - Scheduler and daemon lifecycle ownership is simpler and safer, with dedicated scheduled turns, fewer continuation seams, and retries for recovered provider failures.
 - Install and update flows now bundle npm with managed Node, run service holds as the target user, preserve release-pruning errors, and make transcript migrations update-safe.
 - Persistence and retrieval now use more efficient archive search and streaming transcript-index rebuilds, while chat quotes remain lazy rich references until their content is needed.
