@@ -44,6 +44,7 @@ import {
   ensureSessionElements,
   extractInboundAttachments,
   buildInboundAttachmentNotice,
+  directLike,
   getChatId,
   getChatType,
   lookupReplySession,
@@ -93,10 +94,7 @@ import {
   type PreparedChatKeyWorkerJob,
   createChatKeyWorkerPool,
 } from "./chat-key-worker.js";
-import {
-  isEffectivePrivateChatSession,
-  shouldProcessText,
-} from "./decision.js";
+import { shouldProcessText } from "./decision.js";
 import {
   createChatRuntimeApp,
   createChatRuntimeH,
@@ -661,9 +659,7 @@ export async function startChatBridge(
     if (!canRunCommand(trust, commandName)) {
       return { retry: false };
     }
-    if (!(await isEffectivePrivateChatSession(session, identity))) {
-      return { retry: false };
-    }
+    if (!directLike(session)) return { retry: false };
     const chatKey = sessionChatKey(session);
     const messageId = pickMessageId(session);
     if (!chatKey) return { retry: false };

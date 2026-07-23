@@ -82,7 +82,20 @@ test("chat decision allows trusted private messages", async () => {
   assert.equal(result.trust, "TRUSTED");
 });
 
-test("chat decision lets two-member owner groups skip mention without changing chat type", async () => {
+test("chat decision keeps Telegram groups on normal mention policy without membership inspection", async () => {
+  const bot = new Proxy(
+    { selfId: "8623230033" },
+    {
+      get(target, property, receiver) {
+        if (Reflect.has(target, property)) {
+          return Reflect.get(target, property, receiver);
+        }
+        throw new Error(
+          `unexpected bot membership inspection: ${String(property)}`,
+        );
+      },
+    },
+  );
   const result = await decision.shouldProcessText(
     {
       platform: "telegram",
@@ -90,142 +103,62 @@ test("chat decision lets two-member owner groups skip mention without changing c
       channelId: "-1001447529496",
       selfId: "8623230033",
       userId: "owner-1",
-      bot: {
-        selfId: "8623230033",
-        internal: {
-          async getChatMemberCount({ chat_id }) {
-            assert.equal(chat_id, "-1001447529496");
-            return 2;
-          },
-        },
-      },
-      stripped: { content: "private note" },
-      elements: [{ type: "text", attrs: { content: "private note" } }],
+      bot,
+      stripped: { content: "group note" },
+      elements: [{ type: "text", attrs: { content: "group note" } }],
     },
-    [{ type: "text", attrs: { content: "private note" } }],
-    identity,
-  );
-
-  assert.equal(result.allow, true);
-  assert.equal(result.chatKey, "telegram/8623230033:-1001447529496");
-  assert.equal(result.chatType, "group");
-  assert.equal(result.trust, "OWNER");
-});
-
-test("chat decision lets Feishu owner-only groups skip mention without changing chat type", async () => {
-  const calls: string[] = [];
-  const result = await decision.shouldProcessText(
-    {
-      platform: "lark",
-      guildId: "oc_owner_only",
-      channelId: "oc_owner_only",
-      selfId: "ou_bot",
-      userId: "ou_owner",
-      bot: {
-        selfId: "ou_bot",
-        async getGuildMemberCount(chatId) {
-          calls.push(chatId);
-          return 2;
-        },
-      },
-      stripped: { content: "private note" },
-      elements: [{ type: "text", attrs: { content: "private note" } }],
-    },
-    [{ type: "text", attrs: { content: "private note" } }],
-    identity,
-  );
-
-  assert.deepEqual(calls, ["oc_owner_only"]);
-  assert.equal(result.allow, true);
-  assert.equal(result.chatKey, "lark/ou_bot:oc_owner_only");
-  assert.equal(result.chatType, "group");
-  assert.equal(result.trust, "OWNER");
-});
-
-test("chat decision caches private-like group member counts by platform bot and chat", async () => {
-  const calls: string[] = [];
-  const session = {
-    platform: "lark",
-    guildId: "oc_member_cache",
-    channelId: "oc_member_cache",
-    selfId: "ou_bot_cache",
-    userId: "ou_owner",
-    bot: {
-      selfId: "ou_bot_cache",
-      async getGuildMemberCount(chatId) {
-        calls.push(chatId);
-        return 2;
-      },
-    },
-    stripped: { content: "private note" },
-    elements: [{ type: "text", attrs: { content: "private note" } }],
-  };
-  const elements = [{ type: "text", attrs: { content: "private note" } }];
-
-  const first = await decision.shouldProcessText(session, elements, identity);
-  const second = await decision.shouldProcessText(session, elements, identity);
-
-  assert.equal(first.allow, true);
-  assert.equal(second.allow, true);
-  assert.deepEqual(calls, ["oc_member_cache"]);
-});
-
-test("chat decision lets Discord owner-only channels skip mention when the adapter proves no other users", async () => {
-  const calls: Array<{ chatId: string; ownerUserIds: string[] }> = [];
-  const result = await decision.shouldProcessText(
-    {
-      platform: "discord",
-      guildId: "guild-1",
-      channelId: "channel-owner-only",
-      selfId: "bot-discord",
-      userId: "owner-discord",
-      bot: {
-        selfId: "bot-discord",
-        async hasOnlyOwnerUsers(chatId, ownerUserIds) {
-          calls.push({ chatId, ownerUserIds });
-          return true;
-        },
-      },
-      stripped: { content: "private note" },
-      elements: [{ type: "text", attrs: { content: "private note" } }],
-    },
-    [{ type: "text", attrs: { content: "private note" } }],
-    identity,
-  );
-
-  assert.deepEqual(calls, [
-    { chatId: "channel-owner-only", ownerUserIds: ["owner-discord"] },
-  ]);
-  assert.equal(result.allow, true);
-  assert.equal(result.chatKey, "discord/bot-discord:channel-owner-only");
-  assert.equal(result.chatType, "group");
-  assert.equal(result.trust, "OWNER");
-  assert.equal(result.requiresMentionToStartTurn, false);
-});
-
-test("chat decision still requires mention in Discord channels when another user is present", async () => {
-  const result = await decision.shouldProcessText(
-    {
-      platform: "discord",
-      guildId: "guild-1",
-      channelId: "channel-shared",
-      selfId: "bot-discord",
-      userId: "owner-discord",
-      bot: {
-        selfId: "bot-discord",
-        async hasOnlyOwnerUsers() {
-          return false;
-        },
-      },
-      stripped: { content: "shared note" },
-      elements: [{ type: "text", attrs: { content: "shared note" } }],
-    },
-    [{ type: "text", attrs: { content: "shared note" } }],
+    [{ type: "text", attrs: { content: "group note" } }],
     identity,
   );
 
   assert.equal(result.allow, false);
-  assert.equal(result.chatKey, "discord/bot-discord:channel-shared");
+  assert.equal(result.chatKey, "telegram/8623230033:-1001447529496");
+  assert.equal(result.chatType, "group");
+  assert.equal(result.trust, "OWNER");
+  assert.equal(result.requiresMentionToStartTurn, true);
+});
+
+test("chat decision keeps Feishu chats on normal group mention policy", async () => {
+  const result = await decision.shouldProcessText(
+    {
+      platform: "lark",
+      guildId: "oc_group",
+      channelId: "oc_group",
+      selfId: "ou_bot",
+      userId: "ou_owner",
+      bot: { selfId: "ou_bot" },
+      stripped: { content: "group note" },
+      elements: [{ type: "text", attrs: { content: "group note" } }],
+    },
+    [{ type: "text", attrs: { content: "group note" } }],
+    identity,
+  );
+
+  assert.equal(result.allow, false);
+  assert.equal(result.chatKey, "lark/ou_bot:oc_group");
+  assert.equal(result.chatType, "group");
+  assert.equal(result.trust, "OWNER");
+  assert.equal(result.requiresMentionToStartTurn, true);
+});
+
+test("chat decision keeps Discord channels on normal group mention policy", async () => {
+  const result = await decision.shouldProcessText(
+    {
+      platform: "discord",
+      guildId: "guild-1",
+      channelId: "channel-1",
+      selfId: "bot-discord",
+      userId: "owner-discord",
+      bot: { selfId: "bot-discord" },
+      stripped: { content: "group note" },
+      elements: [{ type: "text", attrs: { content: "group note" } }],
+    },
+    [{ type: "text", attrs: { content: "group note" } }],
+    identity,
+  );
+
+  assert.equal(result.allow, false);
+  assert.equal(result.chatKey, "discord/bot-discord:channel-1");
   assert.equal(result.chatType, "group");
   assert.equal(result.trust, "OWNER");
   assert.equal(result.requiresMentionToStartTurn, true);

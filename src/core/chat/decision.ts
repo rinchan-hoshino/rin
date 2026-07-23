@@ -33,141 +33,6 @@ function normalizeDecisionSessionContext(
   };
 }
 
-function ownerUserIdsForPlatform(identity: any, platform: string) {
-  const aliases = ownerAliasesForPlatform(identity, platform);
-  return Array.from(
-    new Set(
-      aliases
-        .map((alias: any) => safeString(alias?.userId).trim())
-        .filter(Boolean),
-    ),
-  );
-}
-
-async function adapterConfirmsOnlyOwnerUsers(
-  session: any,
-  identity: any,
-  context: ReturnType<typeof normalizeDecisionSessionContext>,
-) {
-  if (context.trust !== "OWNER") return false;
-  if (!context.platform || !context.chatId) return false;
-  const ownerUserIds = ownerUserIdsForPlatform(identity, context.platform);
-  const senderUserId = pickUserId(session);
-  if (senderUserId && !ownerUserIds.includes(senderUserId)) {
-    ownerUserIds.push(senderUserId);
-  }
-  if (!ownerUserIds.length) return false;
-  const checker = session?.bot?.hasOnlyOwnerUsers;
-  if (typeof checker !== "function") return false;
-  try {
-    return Boolean(
-      await checker.call(session.bot, context.chatId, ownerUserIds, {
-        platform: context.platform,
-        botId: context.botId,
-        session,
-      }),
-    );
-  } catch {}
-  return false;
-}
-
-const PRIVATE_LIKE_GROUP_MEMBER_COUNT_CACHE_TTL_MS = 10 * 60 * 1000;
-const privateLikeGroupMemberCountCache = new Map<
-  string,
-  { value: number; expiresAt: number }
->();
-
-function privateLikeGroupMemberCountCacheKey(
-  session: any,
-  platform: string,
-  chatId: string,
-) {
-  const botId = safeString(
-    session?.selfId || session?.bot?.selfId || "",
-  ).trim();
-  return [platform, botId, chatId].map((part) => safeString(part)).join("\0");
-}
-
-function hasPrivateLikeGroupMemberCountProvider(
-  session: any,
-  platform: string,
-) {
-  const internal = session?.bot?.internal;
-  return (
-    typeof session?.bot?.getGuildMemberCount === "function" ||
-    (platform === "telegram" &&
-      typeof internal?.getChatMemberCount === "function") ||
-    (platform === "onebot" && typeof internal?.getGroupInfo === "function") ||
-    (platform === "lark" && typeof internal?.getChat === "function")
-  );
-}
-
-async function fetchPrivateLikeGroupMemberCount(
-  session: any,
-  platform: string,
-  chatId: string,
-) {
-  const internal = session?.bot?.internal;
-  try {
-    if (typeof session?.bot?.getGuildMemberCount === "function") {
-      return Number(await session.bot.getGuildMemberCount(chatId));
-    }
-    if (
-      platform === "telegram" &&
-      typeof internal?.getChatMemberCount === "function"
-    ) {
-      return Number(await internal.getChatMemberCount({ chat_id: chatId }));
-    }
-    if (platform === "onebot" && typeof internal?.getGroupInfo === "function") {
-      const info = await internal.getGroupInfo(chatId, true);
-      return Number(info?.member_count ?? info?.memberCount ?? 0);
-    }
-    if (platform === "lark" && typeof internal?.getChat === "function") {
-      const response = await internal.getChat({
-        path: { chat_id: chatId },
-        params: { user_id_type: "open_id" },
-      });
-      const data =
-        response?.data && typeof response.data === "object"
-          ? response.data
-          : response && typeof response === "object"
-            ? response
-            : {};
-      const userCount = Number(data?.user_count ?? data?.userCount ?? 0);
-      const botCount = Number(data?.bot_count ?? data?.botCount ?? 1);
-      if (Number.isFinite(userCount) && userCount > 0) {
-        return userCount + (Number.isFinite(botCount) ? botCount : 1);
-      }
-    }
-  } catch {}
-  return 0;
-}
-
-async function getPrivateLikeGroupMemberCount(
-  session: any,
-  platform: string,
-  chatId: string,
-) {
-  if (!hasPrivateLikeGroupMemberCountProvider(session, platform)) return 0;
-
-  const key = privateLikeGroupMemberCountCacheKey(session, platform, chatId);
-  const now = Date.now();
-  const cached = privateLikeGroupMemberCountCache.get(key);
-  if (cached && cached.expiresAt > now) return cached.value;
-  if (cached) privateLikeGroupMemberCountCache.delete(key);
-
-  const value = Number(
-    await fetchPrivateLikeGroupMemberCount(session, platform, chatId),
-  );
-  if (Number.isFinite(value) && value > 0) {
-    privateLikeGroupMemberCountCache.set(key, {
-      value,
-      expiresAt: now + PRIVATE_LIKE_GROUP_MEMBER_COUNT_CACHE_TTL_MS,
-    });
-  }
-  return value;
-}
-
 function normalizeTrustForDecision(value: any) {
   const trust = safeString(value).trim().toUpperCase();
   return trust === "OWNER" || trust === "TRUSTED" ? trust : "OTHER";
@@ -278,31 +143,6 @@ export async function isOwnerPresentForGroup(session: any, identity: any) {
   );
 }
 
-export async function isPrivateLikeGroupSession(
-  session: any,
-  identity: any,
-  context = normalizeDecisionSessionContext(session, identity),
-) {
-  if (!session?.guildId || context.trust !== "OWNER") return false;
-  const platform = context.platform;
-  const chatId = context.chatId;
-  if (!platform || !chatId) return false;
-  if (await adapterConfirmsOnlyOwnerUsers(session, identity, context)) {
-    return true;
-  }
-  const count = await getPrivateLikeGroupMemberCount(session, platform, chatId);
-  return Number.isFinite(count) && count > 0 && count <= 2;
-}
-
-export async function isEffectivePrivateChatSession(
-  session: any,
-  identity: any,
-) {
-  if (directLike(session)) return true;
-  const context = normalizeDecisionSessionContext(session, identity);
-  return await isPrivateLikeGroupSession(session, identity, context);
-}
-
 export async function shouldProcessText(
   session: any,
   elements: any[],
@@ -338,9 +178,6 @@ export async function shouldProcessText(
       requiresMentionToStartTurn: chatType === "group",
     };
   }
-  const privateLikeGroup =
-    chatType === "group" &&
-    (await isPrivateLikeGroupSession(session, identity, context));
   const ownerPresent =
     chatType === "private" ||
     (await isOwnerPresentInGroupSession(session, identity, context));
@@ -351,7 +188,6 @@ export async function shouldProcessText(
       trust: context.trust,
       mentionLike: mentionLike(session),
       commandLike: false,
-      allowWithoutMention: privateLikeGroup,
     });
 
   return {
@@ -360,6 +196,6 @@ export async function shouldProcessText(
     chatKey: context.chatKey,
     chatType,
     trust: context.trust,
-    requiresMentionToStartTurn: chatType === "group" && !privateLikeGroup,
+    requiresMentionToStartTurn: chatType === "group",
   };
 }

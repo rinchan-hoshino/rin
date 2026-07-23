@@ -65,9 +65,8 @@ test("chat policy normalizes trust values for input access and command checks", 
       trust: " trusted ",
       mentionLike: false,
       commandLike: false,
-      allowWithoutMention: true,
     }),
-    true,
+    false,
   );
   assert.equal(
     support.canAccessAgentInput({

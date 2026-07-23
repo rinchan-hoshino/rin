@@ -513,37 +513,6 @@ function permissionSetHasViewChannel(value: any) {
   return permissionSetHasFlag(value, "ViewChannel", 1024n);
 }
 
-function permissionSetHasAdministrator(value: any) {
-  return permissionSetHasFlag(value, "Administrator", 8n);
-}
-
-function isManagedBotRole(role: any) {
-  return (
-    Boolean(role?.managed) &&
-    Boolean(safeString(role?.tags?.botId || role?.tags?.bot_id || "").trim())
-  );
-}
-
-function isOwnerHumanUserOrBot(member: any, ownerIds: Set<string>) {
-  const user = member?.user || member;
-  const userId = safeString(
-    user?.id || user?.userId || member?.id || member?.userId || "",
-  ).trim();
-  if (!userId) return false;
-  if (ownerIds.has(userId)) return true;
-  return Boolean(user?.bot || member?.bot);
-}
-
-function memberListHasOnlyOwnerHumanUsers(
-  members: any[],
-  ownerIds: Set<string>,
-) {
-  return (
-    members.length > 0 &&
-    members.every((member) => isOwnerHumanUserOrBot(member, ownerIds))
-  );
-}
-
 function discordChannelDisplayName(channel: any) {
   return safeString(channel?.name || channel?.rawName || "").trim();
 }
@@ -601,28 +570,6 @@ function formatDiscordChannelPathName(
     .filter(Boolean)
     .filter((part, index, values) => index === 0 || part !== values[index - 1]);
   return parts.join(" / ");
-}
-
-function hasUnboundedDiscordAdministratorBypass(
-  guild: any,
-  ownerIds: Set<string>,
-  selfId: string,
-  everyoneRoleId: string,
-) {
-  const guildOwnerId = safeString(
-    guild?.ownerId || guild?.ownerID || "",
-  ).trim();
-  if (!guildOwnerId) return true;
-  if (guildOwnerId !== selfId && !ownerIds.has(guildOwnerId)) return true;
-  for (const role of collectionValues(guild?.roles)) {
-    const roleId = safeString(role?.id).trim();
-    if (!permissionSetHasAdministrator(role?.permissions)) continue;
-    if (roleId && roleId !== everyoneRoleId && isManagedBotRole(role)) {
-      continue;
-    }
-    return true;
-  }
-  return false;
 }
 
 export class DiscordAdapter {
@@ -699,8 +646,6 @@ export class DiscordAdapter {
       },
       setApplicationCommands: async (payload: any) =>
         await this.setApplicationCommands(payload),
-      hasOnlyOwnerUsers: async (channelId: string, ownerUserIds: string[]) =>
-        await this.hasOnlyOwnerUsers(channelId, ownerUserIds),
     };
     this.editableWorking = new EditableTextMessageGroup({
       cacheDir: this.cacheDir,
@@ -754,8 +699,6 @@ export class DiscordAdapter {
         }
         return member;
       },
-      hasOnlyOwnerUsers: async (chatId: string, ownerUserIds: string[]) =>
-        await this.hasOnlyOwnerUsers(chatId, ownerUserIds),
     };
     this.app.register(this, this.bot);
   }
@@ -829,63 +772,6 @@ export class DiscordAdapter {
     if (!validRoutes.length) return false;
     for (const route of validRoutes) {
       await rest.put(route, { body: commands });
-    }
-    return true;
-  }
-
-  private cachedChannelMembersForOwnerOnlyCheck(channel: any) {
-    const channelMembers = collectionValues(channel?.members);
-    if (channelMembers.length) return channelMembers;
-    return collectionValues(channel?.guild?.members?.cache);
-  }
-
-  private async hasOnlyOwnerUsers(channelId: string, ownerUserIds: string[]) {
-    const channel = await this.fetchChannel(channelId);
-    const ownerIds = new Set(
-      (Array.isArray(ownerUserIds) ? ownerUserIds : [])
-        .map((id) => safeString(id).trim())
-        .filter(Boolean),
-    );
-    if (!channel || !ownerIds.size) return false;
-    const guild = channel?.guild;
-    const selfId = safeString(this.bot?.selfId).trim();
-    const everyoneRoleId = safeString(
-      guild?.roles?.everyone?.id || guild?.id || "",
-    ).trim();
-    const overwrites = collectionValues(channel?.permissionOverwrites);
-    const cachedMembers = this.cachedChannelMembersForOwnerOnlyCheck(channel);
-    if (memberListHasOnlyOwnerHumanUsers(cachedMembers, ownerIds)) return true;
-    if (!everyoneRoleId || !overwrites.length) return false;
-    if (
-      hasUnboundedDiscordAdministratorBypass(
-        guild,
-        ownerIds,
-        selfId,
-        everyoneRoleId,
-      )
-    ) {
-      return false;
-    }
-
-    const everyoneOverwrite = overwrites.find(
-      (overwrite) => safeString(overwrite?.id).trim() === everyoneRoleId,
-    );
-    if (!permissionSetHasViewChannel(everyoneOverwrite?.deny)) return false;
-
-    for (const overwrite of overwrites) {
-      if (!permissionSetHasViewChannel(overwrite?.allow)) continue;
-      const id = safeString(overwrite?.id).trim();
-      if (!id || id === everyoneRoleId) return false;
-      if (id === selfId || ownerIds.has(id)) continue;
-      const role = collectionValues(guild?.roles).find(
-        (item: any) => safeString(item?.id).trim() === id,
-      );
-      if (isManagedBotRole(role)) continue;
-      try {
-        const member = await guild?.members?.fetch?.(id);
-        if (isOwnerHumanUserOrBot(member, ownerIds)) continue;
-      } catch {}
-      return false;
     }
     return true;
   }
@@ -2198,8 +2084,6 @@ export class LarkAdapter {
       internal,
       sendMessage: async (chatId: string, content: any, options?: any) =>
         await this.sendMessage(chatId, content, options),
-      getGuildMemberCount: async (chatId: string) =>
-        await this.getGuildMemberCount(chatId),
       createReaction: async (
         chatId: string,
         messageId: string,
@@ -2820,25 +2704,6 @@ export class LarkAdapter {
       );
     }
     return resolved;
-  }
-
-  private async getGuildMemberCount(chatId: string) {
-    const nextChatId = safeString(chatId).trim();
-    if (!nextChatId) return 0;
-    const response = await this.client?.im?.chat?.get?.({
-      path: { chat_id: nextChatId },
-      params: { user_id_type: "open_id" },
-    });
-    const data =
-      response?.data && typeof response.data === "object"
-        ? response.data
-        : response && typeof response === "object"
-          ? response
-          : {};
-    const userCount = Number(data?.user_count ?? data?.userCount ?? 0);
-    const botCount = Number(data?.bot_count ?? data?.botCount ?? 1);
-    if (!Number.isFinite(userCount) || userCount <= 0) return 0;
-    return userCount + (Number.isFinite(botCount) ? botCount : 1);
   }
 
   async createReaction(_chatId: string, messageId: string, emoji: string) {
