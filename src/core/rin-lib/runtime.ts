@@ -166,11 +166,12 @@ function createRinSummarizationOptions(
   model: any,
   maxTokens: number,
   apiKey: string | undefined,
-  headers: Record<string, string> | undefined,
+  headers: Record<string, string | null | undefined> | undefined,
+  env: Record<string, string | undefined> | undefined,
   signal: AbortSignal | undefined,
   thinkingLevel: any,
 ) {
-  const options: any = { maxTokens, apiKey, headers, signal };
+  const options: any = { maxTokens, apiKey, headers, env, signal };
   if (model?.reasoning && thinkingLevel && thinkingLevel !== "off") {
     options.reasoning = thinkingLevel;
   }
@@ -183,7 +184,8 @@ type RinCompactionSummaryRequest = {
   promptText: string;
   maxTokens: number;
   apiKey?: string;
-  headers?: Record<string, string>;
+  headers?: Record<string, string | null | undefined>;
+  env?: Record<string, string | undefined>;
   signal?: AbortSignal;
   thinkingLevel?: any;
   streamFn?: any;
@@ -211,6 +213,7 @@ async function completeRinCompactionSummary(
     options.maxTokens,
     options.apiKey,
     options.headers,
+    options.env,
     options.signal,
     options.thinkingLevel,
   );
@@ -383,7 +386,8 @@ export async function completeRinCompactionSummaryBudgeted(options: {
   previousSummary?: string;
   maxTokens: number;
   apiKey?: string;
-  headers?: Record<string, string>;
+  headers?: Record<string, string | null | undefined>;
+  env?: Record<string, string | undefined>;
   signal?: AbortSignal;
   thinkingLevel?: any;
   streamFn?: any;
@@ -452,6 +456,7 @@ export async function completeRinCompactionSummaryBudgeted(options: {
         maxTokens: options.maxTokens,
         apiKey: options.apiKey,
         headers: options.headers,
+        env: options.env,
         signal: options.signal,
         thinkingLevel: options.thinkingLevel,
         streamFn: options.streamFn,
@@ -1685,7 +1690,7 @@ export async function createConfiguredAgentSession(
         return undefined;
       }
 
-      const { apiKey, headers } = await getPiSessionCompactionRequestAuth(
+      const { apiKey, headers, env } = await getPiSessionCompactionRequestAuth(
         session,
         model,
       );
@@ -1702,9 +1707,10 @@ export async function createConfiguredAgentSession(
         maxTokens,
         apiKey,
         headers,
+        env,
         signal: event?.signal,
         thinkingLevel: session.thinkingLevel,
-        streamFn: session.agent?.streamFn,
+        streamFn: session.agent?.streamFunction,
         serializeMessages,
       };
       const providerTokensBefore = estimateCurrentProviderContextTokens(

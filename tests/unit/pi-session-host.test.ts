@@ -4,6 +4,7 @@ import { AgentSession } from "@earendil-works/pi-coding-agent";
 
 import {
   getPiExtensionRunner,
+  getPiSessionCompactionRequestAuth,
   getPiSessionExtensionMode,
   getPiSessionResourcePromptState,
   resumePiSessionTurn,
@@ -41,6 +42,24 @@ test("Pi session host resumes through the session-level runner", async () => {
         _runAgentPrompt: async () => {},
       }),
     /Pi AgentSession transcript is not continuable/,
+  );
+});
+
+test("Pi session compaction auth preserves model runtime failures", async () => {
+  const model = { provider: "openai-codex", id: "test-model" };
+  await assert.rejects(
+    () =>
+      getPiSessionCompactionRequestAuth(
+        {
+          modelRuntime: {
+            async getAuth() {
+              throw new Error("oauth-refresh-failed");
+            },
+          },
+        },
+        model,
+      ),
+    /oauth-refresh-failed/,
   );
 });
 

@@ -99,6 +99,102 @@ test("compaction reason tracking annotates native before-compact hooks", async (
   assert.equal(session.__rinCurrentCompactionReason, undefined);
 });
 
+test("configured Rin compaction uses current model runtime auth and agent stream function", async () => {
+  const agentDir = await fs.mkdtemp("/tmp/rin-compaction-auth-");
+  const configured = await runtimeMod.createConfiguredAgentSession({
+    cwd: agentDir,
+    agentDir,
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+    noTools: true,
+  });
+  try {
+    const session = configured.session;
+    const model = {
+      provider: "openai-codex",
+      id: "test-model",
+      api: "openai-codex-responses",
+      reasoning: true,
+      contextWindow: 200_000,
+      maxTokens: 32_000,
+    };
+    session.agent.state.model = model;
+
+    const authCalls: any[] = [];
+    session.modelRuntime.getAuth = async (requestedModel: any) => {
+      authCalls.push(requestedModel);
+      return {
+        auth: {
+          apiKey: "oauth-access-token",
+          headers: { "x-test-auth": "resolved" },
+        },
+        env: { RIN_TEST_PROVIDER_ENV: "resolved" },
+      };
+    };
+
+    const streamCalls: any[] = [];
+    session.agent.streamFunction = (
+      requestedModel: any,
+      context: any,
+      options: any,
+    ) => {
+      streamCalls.push({ requestedModel, context, options });
+      return {
+        async result() {
+          return {
+            role: "assistant",
+            stopReason: "stop",
+            content: [{ type: "text", text: "Compacted with current auth." }],
+          };
+        },
+      };
+    };
+
+    const result = await session.extensionRunner.emit({
+      type: "session_before_compact",
+      preparation: {
+        messagesToSummarize: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "Retain this fact." }],
+            timestamp: Date.now(),
+          },
+        ],
+        turnPrefixMessages: [],
+        isSplitTurn: false,
+        firstKeptEntryId: "kept-entry",
+        tokensBefore: 1234,
+        settings: { reserveTokens: 16_384 },
+      },
+      branchEntries: [],
+      customInstructions: undefined,
+      reason: "overflow",
+      willRetry: true,
+      signal: new AbortController().signal,
+    });
+
+    assert.equal(result?.compaction?.summary, "Compacted with current auth.");
+    assert.deepEqual(authCalls, [model]);
+    assert.equal(streamCalls.length, 1);
+    assert.equal(streamCalls[0].requestedModel, model);
+    assert.equal(streamCalls[0].options.apiKey, "oauth-access-token");
+    assert.deepEqual(streamCalls[0].options.headers, {
+      "x-test-auth": "resolved",
+    });
+    assert.deepEqual(streamCalls[0].options.env, {
+      RIN_TEST_PROVIDER_ENV: "resolved",
+    });
+  } finally {
+    try {
+      await configured.runtime?.dispose?.();
+    } catch {}
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("configured Rin sessions disable completion-time threshold compaction only", async () => {
   const agentDir = await fs.mkdtemp("/tmp/rin-percent-session-");
   await fs.writeFile(

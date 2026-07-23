@@ -19,7 +19,6 @@ const PI_SESSION_PRIVATE = {
   extensionMode: "_extensionMode",
   extensionShutdownHandler: "_extensionShutdownHandler",
   extensionUIContext: "_extensionUIContext",
-  getCompactionRequestAuth: "_getCompactionRequestAuth",
   persist: "_persist",
   rebuildSystemPrompt: "_rebuildSystemPrompt",
   refreshToolRegistry: "_refreshToolRegistry",
@@ -230,13 +229,18 @@ export async function getPiSessionCompactionRequestAuth(
   session: any,
   model: any,
 ) {
-  const getAuth = bindMethod(
-    session,
-    PI_SESSION_PRIVATE.getCompactionRequestAuth,
-  );
-  return typeof getAuth === "function"
-    ? await getAuth(model)
-    : { apiKey: undefined, headers: undefined };
+  const modelRuntime = session?.modelRuntime;
+  if (typeof modelRuntime?.getAuth !== "function") {
+    throw new Error("Pi model runtime auth is unavailable");
+  }
+  const result = await modelRuntime.getAuth(model);
+  return result
+    ? {
+        apiKey: result.auth?.apiKey,
+        headers: result.auth?.headers,
+        env: result.env,
+      }
+    : { apiKey: undefined, headers: undefined, env: undefined };
 }
 
 function hasConversationMessageEntry(entries: unknown) {
