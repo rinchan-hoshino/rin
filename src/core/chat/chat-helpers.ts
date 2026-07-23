@@ -53,12 +53,6 @@ export type ChatState = {
   chatKey: string;
   sessionFile?: string;
   chatType?: "private" | "group";
-  pendingSteeredDeliveryTargets?: Array<{
-    incomingMessageId?: string;
-    replyToMessageId?: string;
-    text?: string;
-    submittedText?: string;
-  }>;
 };
 
 export const CHAT_WORKING_NOTICE_TEXT = "Working...";

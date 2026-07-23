@@ -242,7 +242,7 @@ test("chat controller treats /new as a reset barrier for an active turn", async 
   );
   assert.deepEqual(deliveries, ["Started a new session."]);
   assert.equal(controller.currentTurn, null);
-  assert.equal(controller.canSteerActiveTurn(), false);
+  assert.equal(controller.hasActiveTurn(), false);
 });
 
 test("chat controller suppresses aborted turn errors and queues later text as a fresh prompt", async () => {
@@ -317,7 +317,7 @@ test("chat controller suppresses aborted turn errors and queues later text as a 
     incomingMessageId: "m1",
   });
   await waitUntil(() => Boolean(firstRequestTag), "first turn did not start");
-  assert.equal(controller.canSteerActiveTurn(), true);
+  assert.equal(controller.hasActiveTurn(), true);
 
   blockSessionReadiness = true;
   await withTimeout(
@@ -329,7 +329,7 @@ test("chat controller suppresses aborted turn errors and queues later text as a 
   assert.equal(tuiInterruptCalled, true);
   assert.equal(sessionAbortCalled, false);
   assert.equal(ensureSessionReadyCalls, 1);
-  assert.equal(controller.canSteerActiveTurn(), false);
+  assert.equal(controller.hasActiveTurn(), false);
   assert.deepEqual(await firstTurn, {
     aborted: true,
     sessionId: "session-1",

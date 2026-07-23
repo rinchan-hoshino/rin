@@ -2048,7 +2048,7 @@ test("chat main submits same-chat follow-up plainly before backend steer admissi
   }
 });
 
-test("chat main retries an inactive steered inbox item until terminal ownership commits", async () => {
+test("chat main finalizes once after controller returns from canonical terminal settlement", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2084,29 +2084,25 @@ test("chat main retries an inactive steered inbox item until terminal ownership 
       let runTurnCalls = 0;
       controllerMod.ChatController.prototype.runTurn = async function (input) {
         runTurnCalls += 1;
-        if (runTurnCalls >= 2) {
-          outbox.enqueueChatOutboxPayload(agentDir, {
-            createdAt: new Date().toISOString(),
-            chatKey: this.chatKey,
-            parts: [{ type: "text", text: "delivered steer" }],
-          }, {
-            deliveryKind: "final",
-            postDelivery: {
-              markProcessed: {
-                chatKey: this.chatKey,
-                messageId: input.incomingMessageId,
-              },
+        outbox.enqueueChatOutboxPayload(agentDir, {
+          createdAt: new Date().toISOString(),
+          chatKey: this.chatKey,
+          parts: [{ type: "text", text: "ordinary final" }],
+        }, {
+          deliveryKind: "final",
+          postDelivery: {
+            markProcessed: {
+              chatKey: this.chatKey,
+              messageId: input.incomingMessageId,
             },
-          });
-          setTimeout(() => {
-            chatHelpersMod.markProcessedChatMessage(agentDir, this.chatKey, input.incomingMessageId, {
-              acceptedAt: new Date().toISOString(),
-              processedAt: new Date().toISOString(),
-              sessionFile: "/tmp/delivered-steer.jsonl",
-            });
-          }, 100);
-        }
-        return { steered: true, sessionFile: "/tmp/delivered-steer.jsonl" };
+          },
+        });
+        chatHelpersMod.markProcessedChatMessage(agentDir, this.chatKey, input.incomingMessageId, {
+          acceptedAt: new Date().toISOString(),
+          processedAt: new Date().toISOString(),
+          sessionFile: "/tmp/ordinary-final.jsonl",
+        });
+        return { finalText: "ordinary final", sessionFile: "/tmp/ordinary-final.jsonl" };
       };
 
       const { app } = await mainMod.startChatBridge();
@@ -2128,15 +2124,15 @@ test("chat main retries an inactive steered inbox item until terminal ownership 
         userId: "owner-1",
         messageId: "m-delivered",
         isDirect: true,
-        content: "delivered steer",
-        stripped: { content: "delivered steer" },
-        elements: [h.createChatRuntimeH().text("delivered steer")],
+        content: "ordinary input",
+        stripped: { content: "ordinary input" },
+        elements: [h.createChatRuntimeH().text("ordinary input")],
       });
 
       const deadline = Date.now() + 18000;
       while (Date.now() < deadline) {
         if (
-          runTurnCalls === 2 &&
+          runTurnCalls === 1 &&
           listInbox("pending").length === 0 &&
           listInbox("processing").length === 0 &&
           listInbox("failed").length === 0

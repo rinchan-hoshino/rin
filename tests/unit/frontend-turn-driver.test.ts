@@ -213,7 +213,8 @@ async function emitRpcTurnComplete(
   driver: any,
   requestTag: string,
   finalText: string,
-  sessionFile = "/tmp/chat-driver.jsonl",
+  sessionFile = "/tmp/frontend-chat.jsonl",
+  sessionId = "frontend-session",
 ) {
   await emitDriverEvent(driver, {
     type: "rpc_turn_event",
@@ -223,7 +224,7 @@ async function emitRpcTurnComplete(
     result: {
       messages: finalText ? [{ type: "text", text: finalText }] : [],
     },
-    sessionId: "session-driver",
+    sessionId,
     sessionFile,
   });
 }
@@ -997,10 +998,10 @@ test("frontend SDK turn driver clears active state after terminating the attache
     turnActive: true,
   };
 
-  assert.equal(driver.canSteerActiveTurn(), true);
+  assert.equal(driver.hasActiveTurn(), true);
   await (driver as any).terminateSession();
 
-  assert.equal(driver.canSteerActiveTurn(), false);
+  assert.equal(driver.hasActiveTurn(), false);
   assert.equal(driver.currentSessionFile(), "");
 });
 
@@ -1635,7 +1636,7 @@ test("frontend SDK turn driver rejoins an active already-submitted turn without 
   );
 });
 
-test("frontend SDK turn driver submits already active messages for backend admission", async () => {
+test("frontend SDK treats active-state input as an ordinary submission and waits for Pi terminal", async () => {
   const client = createFrontendClient();
   client.getState = async () => ({
     sessionFile: "/tmp/frontend-chat.jsonl",
@@ -1652,46 +1653,30 @@ test("frontend SDK turn driver submits already active messages for backend admis
     promptSource: "chat-bridge",
   });
 
-  const result = await driver.runTurn({
+  const pending = driver.runTurn({
     text: "restored job",
     promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
   });
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "prompt"),
+    "ordinary submission did not reach backend",
+  );
+  await emitRpcTurnComplete(
+    driver,
+    "backend-terminal-owner",
+    "Pi terminal",
+    "/tmp/frontend-chat.jsonl",
+    "frontend-session",
+  );
 
-  assert.equal(result.steered, true);
+  const result = await pending;
+  assert.equal(result.finalText, "Pi terminal");
   const promptCall = client.calls.find((call: any) => call.type === "prompt");
   assert.equal(promptCall.text, "restored job");
   assert.equal(promptCall.options.streamingBehavior, undefined);
 });
 
-test("frontend SDK turn driver keeps backend admission authoritative across stale active state", async () => {
-  const client = createFrontendClient();
-  client.getState = async () => ({
-    sessionFile: "/tmp/frontend-chat.jsonl",
-    sessionId: "frontend-session",
-    isStreaming: true,
-    turnActive: true,
-  });
-  client.prompt = async (text: string, options: any = {}) => {
-    client.calls.push({ type: "prompt", text, options });
-    return { acceptedAs: "steer" };
-  };
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-
-  const result = await driver.runTurn({
-    text: "follow active across worker exit",
-    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
-  });
-
-  assert.equal(result.steered, true);
-  const promptCall = client.calls.find((call: any) => call.type === "prompt");
-  assert.equal(promptCall.text, "follow active across worker exit");
-  assert.equal(promptCall.options.streamingBehavior, undefined);
-});
-
-test("frontend SDK turn driver transfers terminal ownership when a queued steer starts", async () => {
+test("frontend SDK turn driver leaves terminal ownership with the backend after a queued steer starts", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   client.prompt = async (text: string, options: any = {}) => {
@@ -1716,20 +1701,63 @@ test("frontend SDK turn driver transfers terminal ownership when a queued steer 
       content: [{ type: "text", text: "steer now" }],
     },
   });
-  await emitRpcTurnComplete(driver, "tag-first", "");
-
-  let settled = false;
-  void turn.finally(() => {
-    settled = true;
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(settled, false);
-
   await emitRpcTurnComplete(driver, "tag-steer", "steered final");
+
   assert.equal((await turn).finalText, "steered final");
 });
 
-test("frontend SDK turn driver steers while the rpc turn is active between streaming segments", async () => {
+test("frontend SDK projects a backend terminal after ordinary submission without a local waiter", async () => {
+  const client = createFrontendClient();
+  client.getState = async () => ({
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: true,
+    turnActive: true,
+  });
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    return { acceptedAs: "steer", requestTag: options.requestTag };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const completed: any[] = [];
+  driver.subscribe((event: any) => {
+    if (event.type === "turn_complete") completed.push(event);
+  });
+
+  await driver.submitTurn({
+    text: "ordinary input after reconnect",
+    requestTag: "tag-remote-input",
+    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+  });
+  await emitRpcTurnComplete(
+    driver,
+    "backend-terminal-owner",
+    "remote final",
+    "/tmp/frontend-chat.jsonl",
+    "frontend-session",
+  );
+
+  assert.equal(
+    client.calls.find((call: any) => call.type === "prompt")?.options
+      ?.streamingBehavior,
+    undefined,
+  );
+  assert.deepEqual(completed, [
+    {
+      type: "turn_complete",
+      finalText: "remote final",
+      result: { messages: [{ type: "text", text: "remote final" }] },
+      sessionId: "frontend-session",
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      requestTag: "backend-terminal-owner",
+    },
+  ]);
+});
+
+test("frontend SDK submits ordinary input unchanged during a backend tool gap", async () => {
   const client = createFrontendClient();
   client.getState = async () => ({
     sessionFile: "/tmp/frontend-chat.jsonl",
@@ -1745,22 +1773,24 @@ test("frontend SDK turn driver steers while the rpc turn is active between strea
     clientFactory: () => client,
     promptSource: "chat-bridge",
   });
-  await driver.connect();
 
-  assert.equal(driver.canSteerActiveTurn(), true);
-  const result = await driver.runTurn({
-    text: "steer between tools",
+  const pending = driver.runTurn({
+    text: "input between tools",
     promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
-    streamingBehavior: "steer",
   });
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "prompt"),
+    "ordinary tool-gap input did not reach backend",
+  );
+  await emitRpcTurnComplete(driver, "backend-terminal-owner", "tool-gap final");
 
-  assert.equal(result.steered, true);
+  assert.equal((await pending).finalText, "tool-gap final");
   const promptCall = client.calls.find((call: any) => call.type === "prompt");
-  assert.equal(promptCall.text, "steer between tools");
+  assert.equal(promptCall.text, "input between tools");
   assert.equal(promptCall.options.streamingBehavior, undefined);
 });
 
-test("frontend SDK turn driver defers steering until active compaction finishes", async () => {
+test("frontend SDK keeps ordinary input transport-pending until compaction ends", async () => {
   const client = createFrontendClient();
   let compacting = true;
   client.getState = async () => ({
@@ -1772,28 +1802,34 @@ test("frontend SDK turn driver defers steering until active compaction finishes"
   });
   client.prompt = async (text: string, options: any = {}) => {
     client.calls.push({ type: "prompt", text, options });
-    return { acceptedAs: "steer" };
+    return { acceptedAs: "prompt" };
   };
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
     promptSource: "chat-bridge",
   });
 
-  const resultPromise = driver.runTurn({
-    text: "steer after compaction",
+  const pending = driver.runTurn({
+    text: "input after compaction",
     promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
-    streamingBehavior: "steer",
   });
-  setImmediate(() => {
-    compacting = false;
-  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    client.calls.some((call: any) => call.type === "prompt"),
+    false,
+  );
+  compacting = false;
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "prompt"),
+    "transport-pending input did not submit after compaction",
+  );
+  await emitRpcTurnComplete(
+    driver,
+    "backend-terminal-owner",
+    "post-compaction final",
+  );
 
-  const result = await resultPromise;
-
-  assert.equal(result.steered, true);
-  const promptCall = client.calls.find((call: any) => call.type === "prompt");
-  assert.equal(promptCall.text, "steer after compaction");
-  assert.equal(promptCall.options.streamingBehavior, undefined);
+  assert.equal((await pending).finalText, "post-compaction final");
 });
 
 test("frontend SDK turn driver waits for standalone compaction before prompting", async () => {
@@ -1824,64 +1860,6 @@ test("frontend SDK turn driver waits for standalone compaction before prompting"
   assert.equal(result.finalText, "frontend final");
   const promptCall = client.calls.find((call: any) => call.type === "prompt");
   assert.equal(promptCall.text, "message after compaction");
-});
-
-test("frontend SDK turn driver leaves active-turn steering admission to the backend", async () => {
-  const client = createFrontendClient();
-  client.getState = async () => ({
-    sessionFile: "/tmp/frontend-chat.jsonl",
-    sessionId: "frontend-session",
-    isStreaming: true,
-  });
-  client.prompt = async (text: string, options: any = {}) => {
-    client.calls.push({ type: "prompt", text, options });
-    return { acceptedAs: "steer" };
-  };
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-
-  const result = await driver.runTurn({
-    text: "steer now",
-    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
-    streamingBehavior: "steer",
-  });
-
-  assert.equal(result.steered, true);
-  const promptCall = client.calls.find((call: any) => call.type === "prompt");
-  assert.equal(promptCall.type, "prompt");
-  assert.equal(promptCall.text, "steer now");
-  assert.equal(promptCall.options.streamingBehavior, undefined);
-  assert.equal(promptCall.options.source, "chat-bridge");
-});
-
-test("frontend SDK turn driver trusts backend prompt admission over stale local state", async () => {
-  const client = createFrontendClient();
-  client.getState = async () => ({
-    sessionFile: "/tmp/frontend-chat.jsonl",
-    sessionId: "frontend-session",
-    isStreaming: false,
-    turnActive: false,
-  });
-  client.prompt = async (text: string, options: any = {}) => {
-    client.calls.push({ type: "prompt", text, options });
-    return { acceptedAs: "steer" };
-  };
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-
-  const result = await driver.runTurn({
-    text: "backend says steer",
-    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
-  });
-
-  assert.equal(result.steered, true);
-  const promptCall = client.calls.find((call: any) => call.type === "prompt");
-  assert.equal(promptCall.text, "backend says steer");
-  assert.equal(promptCall.options.streamingBehavior, undefined);
 });
 
 test("frontend SDK turn driver does not relabel untagged progress with mutable turn state", async () => {
@@ -2127,7 +2105,13 @@ test("frontend SDK turn driver starts managed leaf sessions even after connect r
   };
   client.prompt = async (_text: string, options: any = {}) => {
     calls.push("prompt");
-    await emitRpcTurnComplete(driver, options.requestTag, "done", sessionFile);
+    await emitRpcTurnComplete(
+      driver,
+      options.requestTag,
+      "done",
+      sessionFile,
+      "session-driver",
+    );
   };
 
   const result = await driver.runTurn({
@@ -2160,7 +2144,13 @@ test("frontend SDK turn driver forwards disabled Rin capabilities to managed ses
     return { cancelled: false, sessionFile, sessionId: "session-driver" };
   };
   client.prompt = async (_text: string, options: any = {}) => {
-    await emitRpcTurnComplete(driver, options.requestTag, "done", sessionFile);
+    await emitRpcTurnComplete(
+      driver,
+      options.requestTag,
+      "done",
+      sessionFile,
+      "session-driver",
+    );
   };
 
   await driver.runTurn({
@@ -2224,7 +2214,7 @@ test("frontend SDK turn driver asks the daemon to replay pending terminal events
   assert.equal(liveTurnCreatedBeforeReplay, true);
 });
 
-test("frontend SDK turn driver lets backend rejoin a restored active inbox turn", async () => {
+test("frontend SDK waits for the native terminal after backend rejoin admission", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
@@ -2232,45 +2222,18 @@ test("frontend SDK turn driver lets backend rejoin a restored active inbox turn"
   });
   const sessionFile = "/tmp/frontend-restored-active.jsonl";
   const requestTag = "chat-inbox-stable";
-  let admittedRequestTag = "";
-  let replayCalls = 0;
-  client.request = async (command: any) => {
-    client.calls.push({ type: "request", command });
-    if (command.type === "get_state") {
-      return {
-        sessionFile,
-        sessionId: "frontend-session",
-        isStreaming: true,
-        turnActive: true,
-      };
-    }
-    if (command.type === "resolve_submitted_turn") return null;
-    if (command.type === "replay_pending_terminal_turn_event") {
-      replayCalls += 1;
-      await emitDriverEvent(driver as any, {
-        type: "rpc_turn_event",
-        event: "complete",
-        requestTag: admittedRequestTag,
-        finalText: "restored active final",
-        result: {
-          messages: [{ type: "text", text: "restored active final" }],
-        },
-        sessionId: "frontend-session",
-        sessionFile,
-      });
-      return { replayed: true };
-    }
-    if (command.type === "get_active_tools") return { tools: [] };
-    if (command.type === "set_active_tools") return { tools: [] };
-    return {};
-  };
+  client.getState = async () => ({
+    sessionFile,
+    sessionId: "frontend-session",
+    isStreaming: true,
+    turnActive: true,
+  });
   client.prompt = async (text: string, options: any = {}) => {
     client.calls.push({ type: "prompt", text, options });
-    admittedRequestTag = options.requestTag;
     return { acceptedAs: "rejoin", requestTag: options.requestTag };
   };
 
-  const result = await driver.runTurn({
+  const pending = driver.runTurn({
     text: "restored active job",
     requestTag,
     restoreSessionFile: sessionFile,
@@ -2280,16 +2243,27 @@ test("frontend SDK turn driver lets backend rejoin a restored active inbox turn"
       sentAt: 1778774580000,
     },
   });
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "prompt"),
+    "rejoin submission did not reach backend",
+  );
+  await emitRpcTurnComplete(
+    driver,
+    requestTag,
+    "restored active final",
+    sessionFile,
+    "frontend-session",
+  );
 
+  const result = await pending;
   assert.equal(result.finalText, "restored active final");
-  assert.equal(admittedRequestTag, requestTag);
-  assert.equal(replayCalls, 1);
-  assert.equal(
-    client.calls.filter((call: any) => call.type === "prompt").length,
-    1,
+  assert.deepEqual(
+    client.calls
+      .filter((call: any) => call.type === "prompt")
+      .map((call: any) => call.options.requestTag),
+    [requestTag],
   );
 });
-
 test("frontend SDK turn driver follows active turn across transient reconnect before rpc final", async () => {
   const client = createFrontendClient();
   let getStateCount = 0;
@@ -2302,6 +2276,10 @@ test("frontend SDK turn driver follows active turn across transient reconnect be
       isStreaming: true,
       turnActive: true,
     };
+  };
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    return { acceptedAs: "prompt" };
   };
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
@@ -2352,6 +2330,7 @@ test("frontend SDK turn driver does not infer empty completion from inactive sta
       "late-final-tag",
       "canonical late final",
       "/tmp/frontend-late-final.jsonl",
+      "frontend-late-final",
     );
   }, 1_100);
 
@@ -2425,7 +2404,7 @@ test("frontend SDK turn driver does not emit text-only assistant messages as int
   assert.deepEqual(interimTexts, []);
 });
 
-test("frontend SDK turn driver keeps steering open across failed assistant messages", async () => {
+test("frontend SDK keeps the ordinary terminal waiter open across failed assistant messages", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   let releasePrompt!: () => void;
@@ -2457,7 +2436,7 @@ test("frontend SDK turn driver keeps steering open across failed assistant messa
   const resultPromise = driver.runTurn({ text: "hello" });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(driver.canSteerActiveTurn(), true);
+  assert.equal(driver.hasActiveTurn(), true);
 
   await emitRpcTurnComplete(driver, requestTag, "continued after compaction");
   releasePrompt();

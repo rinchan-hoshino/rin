@@ -326,32 +326,6 @@ function sameSessionFile(agentDir: string, left: unknown, right: unknown) {
   );
 }
 
-function normalizeChatTurnTarget(input: unknown): ChatTurnTarget | null {
-  if (!input || typeof input !== "object") return null;
-  const record = input as Record<string, unknown>;
-  const incomingMessageId = safeString(record.incomingMessageId).trim();
-  const replyToMessageId =
-    safeString(record.replyToMessageId).trim() || incomingMessageId;
-  const text = safeString(record.text).trim();
-  const submittedText = safeString(record.submittedText).trim();
-  if (!incomingMessageId && !replyToMessageId && !text && !submittedText) {
-    return null;
-  }
-  return {
-    incomingMessageId: incomingMessageId || undefined,
-    replyToMessageId: replyToMessageId || undefined,
-    text: text || undefined,
-    submittedText: submittedText || undefined,
-  };
-}
-
-function normalizeChatTurnTargets(input: unknown): ChatTurnTarget[] {
-  if (!Array.isArray(input)) return [];
-  return input
-    .map((item) => normalizeChatTurnTarget(item))
-    .filter((item): item is ChatTurnTarget => Boolean(item));
-}
-
 export class ChatController {
   app: any;
   chatKey: string;
@@ -382,8 +356,8 @@ export class ChatController {
   lastCompactionTypingIndicatorAt = 0;
   compactionIndicatorTick = 0;
   activeCommandTurnInput: ChatTurnTarget | null = null;
-  pendingSteeredDeliveryTargets: ChatTurnTarget[] = [];
-  coalescedSteeredDeliveryTargets: ChatTurnTarget[] = [];
+  pendingSubmittedDeliveryTargets: ChatTurnTarget[] = [];
+  coalescedDeliveryTargets: ChatTurnTarget[] = [];
   backendAcceptedIncomingMessageId = "";
   stagedDelivery: ChatAssistantDelivery | null = null;
   pendingPassiveNotices: string[] = [];
@@ -431,10 +405,10 @@ export class ChatController {
       this.state.sessionFile =
         readChatSessionBinding(this.agentDir, chatKey) || undefined;
     }
-    // Steering ownership is reconstructed from the SQLite turn ledger. A
-    // process-local owner fence must never be revived from controller JSON.
-    this.pendingSteeredDeliveryTargets = [];
-    this.coalescedSteeredDeliveryTargets = [];
+    // Unconfirmed submissions are transport-local. Durable ownership remains
+    // in the SQLite turn ledger and is never revived from controller JSON.
+    this.pendingSubmittedDeliveryTargets = [];
+    this.coalescedDeliveryTargets = [];
     this.logger = deps.logger;
     this.h = deps.h;
     this.sleepAfterIdleMs = Math.max(0, Number(deps.sleepAfterIdleMs || 0));
@@ -459,8 +433,8 @@ export class ChatController {
       commandResponses: this.getCommandResponses(),
       frontendIdentity,
     });
-    this.driver.subscribe((event) => {
-      void this.handleFrontendEvent(event).catch(() => {});
+    this.driver.subscribe(async (event) => {
+      await this.handleFrontendEvent(event);
     });
   }
 
@@ -498,8 +472,8 @@ export class ChatController {
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
-    this.pendingSteeredDeliveryTargets = [];
-    this.coalescedSteeredDeliveryTargets = [];
+    this.pendingSubmittedDeliveryTargets = [];
+    this.coalescedDeliveryTargets = [];
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
@@ -520,12 +494,6 @@ export class ChatController {
     if (this.state.chatType === "private" || this.state.chatType === "group") {
       nextState.chatType = this.state.chatType;
     }
-    const pendingSteeredDeliveryTargets = normalizeChatTurnTargets(
-      this.pendingSteeredDeliveryTargets,
-    );
-    if (pendingSteeredDeliveryTargets.length) {
-      nextState.pendingSteeredDeliveryTargets = pendingSteeredDeliveryTargets;
-    }
     this.state = nextState;
     writeJsonFile(this.statePath, nextState);
   }
@@ -543,8 +511,8 @@ export class ChatController {
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
-    this.pendingSteeredDeliveryTargets = [];
-    this.coalescedSteeredDeliveryTargets = [];
+    this.pendingSubmittedDeliveryTargets = [];
+    this.coalescedDeliveryTargets = [];
     this.backendAcceptedIncomingMessageId = "";
     this.saveState();
   }
@@ -587,9 +555,10 @@ export class ChatController {
 
   private acceptsAssistantProgressEvent(requestTag?: string) {
     if (!this.currentTurn?.outboxTurnFence) return true;
-    const expected = safeString(this.currentTurn.requestTag).trim();
     const actual = safeString(requestTag).trim();
-    return Boolean(expected && actual && expected === actual);
+    if (!actual) return true;
+    const expected = safeString(this.currentTurn.requestTag).trim();
+    return Boolean(expected && expected === actual);
   }
 
   claimsInboundMessage(messageId?: string) {
@@ -610,13 +579,6 @@ export class ChatController {
       this.awaitingTurnSettle ||
       this.driver.hasActiveTurn()
     );
-  }
-
-  canSteerActiveTurn() {
-    if (this.turnAbortRequested) return false;
-    return typeof this.driver.canSteerActiveTurn === "function"
-      ? this.driver.canSteerActiveTurn()
-      : false;
   }
 
   private setCurrentTurn(input: {
@@ -740,19 +702,19 @@ export class ChatController {
     this.activeCommandTurnInput = null;
   }
 
-  private rememberPendingSteeredDeliveryTarget(input: ChatTurnTarget) {
+  private rememberPendingSubmittedDeliveryTarget(input: ChatTurnTarget) {
     const incomingMessageId = safeString(input.incomingMessageId || "").trim();
     const replyToMessageId =
       safeString(input.replyToMessageId || "").trim() || incomingMessageId;
     if (!incomingMessageId && !replyToMessageId) return;
-    const existingIndex = this.pendingSteeredDeliveryTargets.findIndex(
+    const existingIndex = this.pendingSubmittedDeliveryTargets.findIndex(
       (target) =>
         safeString(target.incomingMessageId).trim() === incomingMessageId,
     );
     if (existingIndex >= 0) {
-      this.pendingSteeredDeliveryTargets.splice(existingIndex, 1);
+      this.pendingSubmittedDeliveryTargets.splice(existingIndex, 1);
     }
-    this.pendingSteeredDeliveryTargets.push({
+    this.pendingSubmittedDeliveryTargets.push({
       incomingMessageId: incomingMessageId || undefined,
       replyToMessageId: replyToMessageId || undefined,
       text: safeString(input.text || "").trim() || undefined,
@@ -760,13 +722,22 @@ export class ChatController {
       requestTag: safeString(input.requestTag).trim() || undefined,
       outboxTurnFence: input.outboxTurnFence,
     });
-    this.saveState();
   }
 
-  hasPendingSteeredDeliveryTarget(messageId?: string) {
+  private removePendingSubmittedDeliveryTarget(messageId?: string) {
+    const targetMessageId = safeString(messageId).trim();
+    if (!targetMessageId) return;
+    this.pendingSubmittedDeliveryTargets =
+      this.pendingSubmittedDeliveryTargets.filter(
+        (target) =>
+          safeString(target.incomingMessageId).trim() !== targetMessageId,
+      );
+  }
+
+  hasPendingSubmittedDeliveryTarget(messageId?: string) {
     const nextMessageId = safeString(messageId || "").trim();
     if (!nextMessageId) return false;
-    return this.pendingSteeredDeliveryTargets.some(
+    return this.pendingSubmittedDeliveryTargets.some(
       (target) =>
         safeString(target.incomingMessageId || "").trim() === nextMessageId,
     );
@@ -793,24 +764,24 @@ export class ChatController {
     return (
       this.claimsInboundMessage(messageId) ||
       this.hasBackendAcceptedInboundMessage(messageId) ||
-      this.hasPendingSteeredDeliveryTarget(messageId)
+      this.hasPendingSubmittedDeliveryTarget(messageId)
     );
   }
 
-  private async activatePendingSteeredDeliveryTarget(
+  private async activatePendingSubmittedDeliveryTarget(
     startedText?: string,
     backendRequestTag?: string,
   ) {
     const text = safeString(startedText || "").trim();
-    if (!text || !this.pendingSteeredDeliveryTargets.length) return false;
+    if (!text || !this.pendingSubmittedDeliveryTargets.length) return false;
     const requestTag = safeString(backendRequestTag).trim();
     let index = -1;
     if (requestTag) {
-      index = this.pendingSteeredDeliveryTargets.findIndex(
+      index = this.pendingSubmittedDeliveryTargets.findIndex(
         (target) => safeString(target?.requestTag).trim() === requestTag,
       );
     } else {
-      const matches = this.pendingSteeredDeliveryTargets.flatMap(
+      const matches = this.pendingSubmittedDeliveryTargets.flatMap(
         (target, candidateIndex) => {
           const raw = safeString(target?.text).trim();
           const submitted = safeString(target?.submittedText).trim();
@@ -822,8 +793,19 @@ export class ChatController {
       if (matches.length === 1) index = matches[0];
     }
     if (index < 0) return false;
-    const [target] = this.pendingSteeredDeliveryTargets.splice(index, 1);
-    this.coalescedSteeredDeliveryTargets.push(target);
+    const [target] = this.pendingSubmittedDeliveryTargets.splice(index, 1);
+    const previousMessageId = this.currentIncomingMessageId();
+    if (
+      previousMessageId &&
+      previousMessageId !== safeString(target?.incomingMessageId).trim()
+    ) {
+      this.coalescedDeliveryTargets.push({
+        incomingMessageId: previousMessageId,
+        replyToMessageId: this.currentReplyToMessageId() || undefined,
+        requestTag: this.currentTurn?.requestTag,
+        outboxTurnFence: this.currentTurn?.outboxTurnFence,
+      });
+    }
     this.saveState();
     const nextTurn = {
       incomingMessageId: target?.incomingMessageId,
@@ -837,7 +819,7 @@ export class ChatController {
       const previousWorkingCleanup = this.clearWorkingReaction().catch(
         () => false,
       );
-      // Move terminal ownership before transport cleanup can yield.
+      // Move the display/outbox target before transport cleanup can yield.
       this.setCurrentTurn(nextTurn);
       this.awaitingTurnSettle = true;
       await previousWorkingCleanup;
@@ -1248,7 +1230,7 @@ export class ChatController {
       previousIncomingMessageId !== nextIncomingMessageId
         ? this.clearWorkingReaction().catch(() => false)
         : Promise.resolve(false);
-    // Move terminal ownership before transport cleanup can yield.
+    // Move the display/outbox target before transport cleanup can yield.
     this.setCurrentTurn(input);
     this.awaitingTurnSettle = true;
     await Promise.all([
@@ -1287,7 +1269,7 @@ export class ChatController {
       ...(original && original !== target
         ? [fence || this.turnFenceForInboundMessage(original)]
         : []),
-      ...this.coalescedSteeredDeliveryTargets.map(
+      ...this.coalescedDeliveryTargets.map(
         (entry) =>
           entry.outboxTurnFence ||
           this.turnFenceForInboundMessage(entry.incomingMessageId),
@@ -1321,7 +1303,6 @@ export class ChatController {
     this.awaitingTurnSettle = false;
     return {
       superseded: true,
-      steered: false,
       sessionId:
         safeString(result?.sessionId || this.currentSessionId()).trim() ||
         undefined,
@@ -1939,7 +1920,7 @@ export class ChatController {
     if (clearProcessing) {
       await this.clearWorkingReaction().catch(() => {});
       this.currentTurn = null;
-      this.coalescedSteeredDeliveryTargets = [];
+      this.coalescedDeliveryTargets = [];
     }
     return outcome;
   }
@@ -2027,7 +2008,7 @@ export class ChatController {
     }
     await this.clearWorkingReaction().catch(() => {});
     this.currentTurn = null;
-    this.coalescedSteeredDeliveryTargets = [];
+    this.coalescedDeliveryTargets = [];
   }
 
   private async deliverAssistantReply(input: {
@@ -2481,8 +2462,8 @@ export class ChatController {
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
-    this.pendingSteeredDeliveryTargets = [];
-    this.coalescedSteeredDeliveryTargets = [];
+    this.pendingSubmittedDeliveryTargets = [];
+    this.coalescedDeliveryTargets = [];
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
@@ -2623,8 +2604,8 @@ export class ChatController {
         this.turnAbortRequested = false;
         await this.clearWorkingReaction().catch(() => {});
         this.clearCurrentTurn();
-        this.pendingSteeredDeliveryTargets = [];
-        this.coalescedSteeredDeliveryTargets = [];
+        this.pendingSubmittedDeliveryTargets = [];
+        this.coalescedDeliveryTargets = [];
         this.stagedDelivery = null;
         this.saveState();
       }
@@ -2734,8 +2715,8 @@ export class ChatController {
       await this.clearWorkingReaction().catch(() => {});
       this.clearCurrentTurn();
       if (interruptingActiveTurn) {
-        this.pendingSteeredDeliveryTargets = [];
-        this.coalescedSteeredDeliveryTargets = [];
+        this.pendingSubmittedDeliveryTargets = [];
+        this.coalescedDeliveryTargets = [];
       }
       this.clearActiveCommandTurnInput();
       this.stagedDelivery = null;
@@ -2778,7 +2759,6 @@ export class ChatController {
         receivedAt?: string;
         outboxTurnFence?: ChatOutboxTurnFence;
       },
-    mode: "prompt" | "steer" = "prompt",
   ) {
     input.outboxTurnFence ||= getActiveChatOutboxTurnFence();
     input.requestTag ||=
@@ -2789,7 +2769,7 @@ export class ChatController {
     this.rememberPromptChatType(input.promptMeta);
     this.lastActivityAt = Date.now();
     const deliverFinal = input.deliverFinal !== false;
-    if (this.canSteerActiveTurn()) {
+    if (this.hasActiveTurn() && !this.turnAbortRequested) {
       const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
       const wantedSessionFile =
         this.resolveSessionFileForUse(rawWantedSessionFile);
@@ -2812,120 +2792,66 @@ export class ChatController {
         deliverFinal,
       );
       const submittedText = formatPromptForChatContext(text, input.promptMeta);
-      const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
-        text: submittedText,
-        images,
-        assumeConnected: frontendReady === true,
-        assumeSessionReady:
-          frontendReady === true &&
-          sameSessionFile(
-            this.agentDir,
-            this.driver.currentSessionFile(),
-            restoreSessionFile,
-          ),
-        sessionFile: wantedSessionFile,
-        restoreSessionFile,
-        managedSessionLeaf,
-        createSessionFileIfMissing: input.createSessionFileIfMissing,
-        sessionName: input.sessionName,
-        tools: input.tools,
-        excludeTools: input.excludeTools,
-        noTools: input.noTools,
-        disabledRinCapabilities: input.disabledRinCapabilities,
-        piStartupOptions: input.piStartupOptions,
-        resetModelOptionsFromSettings: true,
-        model: input.model,
-        thinkingLevel: input.thinkingLevel,
-        promptContext: input.promptMeta,
-        source: "chat-bridge",
-        requestTag:
-          safeString(input.requestTag).trim() ||
-          this.requestTagForInboundMessage(input.incomingMessageId),
-      });
-      this.assertRestoredTurnStayedOnSession(
-        restoreSessionFile,
-        result.sessionFile || this.driver.currentSessionFile(),
-      );
-      this.updateStoredSessionFile(
-        result.sessionFile,
-        this.driver.currentSessionFile(),
-      );
-      this.saveState();
-      if (result.superseded) {
-        return await this.finishSupersededRecoveredTurn(input, result);
+      if (deliverFinal) {
+        this.rememberPendingSubmittedDeliveryTarget({
+          incomingMessageId: input.incomingMessageId,
+          replyToMessageId: input.replyToMessageId,
+          text,
+          submittedText,
+          requestTag: input.requestTag,
+          outboxTurnFence: input.outboxTurnFence,
+        });
       }
-      if (result.steered) {
-        if (deliverFinal) {
-          this.rememberPendingSteeredDeliveryTarget({
-            incomingMessageId: input.incomingMessageId,
-            replyToMessageId: input.replyToMessageId,
-            text,
-            submittedText,
-            requestTag: input.requestTag,
-            outboxTurnFence: input.outboxTurnFence,
-          });
-        }
-        this.backendAcceptedIncomingMessageId = safeString(
-          input.incomingMessageId || "",
-        ).trim();
-        this.markAcceptedMessage(input.incomingMessageId);
+      try {
+        const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
+          text: submittedText,
+          images,
+          assumeConnected: frontendReady === true,
+          assumeSessionReady:
+            frontendReady === true &&
+            sameSessionFile(
+              this.agentDir,
+              this.driver.currentSessionFile(),
+              restoreSessionFile,
+            ),
+          sessionFile: wantedSessionFile,
+          restoreSessionFile,
+          managedSessionLeaf,
+          createSessionFileIfMissing: input.createSessionFileIfMissing,
+          sessionName: input.sessionName,
+          tools: input.tools,
+          excludeTools: input.excludeTools,
+          noTools: input.noTools,
+          disabledRinCapabilities: input.disabledRinCapabilities,
+          piStartupOptions: input.piStartupOptions,
+          resetModelOptionsFromSettings: true,
+          model: input.model,
+          thinkingLevel: input.thinkingLevel,
+          promptContext: input.promptMeta,
+          source: "chat-bridge",
+          requestTag:
+            safeString(input.requestTag).trim() ||
+            this.requestTagForInboundMessage(input.incomingMessageId),
+        });
+        this.assertRestoredTurnStayedOnSession(
+          restoreSessionFile,
+          result.sessionFile || this.driver.currentSessionFile(),
+        );
+        this.updateStoredSessionFile(
+          result.sessionFile,
+          this.driver.currentSessionFile(),
+        );
+        this.saveState();
         return {
-          steered: true,
+          finalText: result.finalText,
+          result: result.result,
           sessionId: this.currentSessionId() || undefined,
           sessionFile: this.currentSessionFile(),
         };
+      } catch (error) {
+        this.removePendingSubmittedDeliveryTarget(input.incomingMessageId);
+        throw error;
       }
-      let originalSuperseded = false;
-      if (deliverFinal) {
-        if (this.driver.hasVisibleChatWorkingTurn()) {
-          await this.beginVisibleProcessingTurn({
-            incomingMessageId: input.incomingMessageId,
-            replyToMessageId: input.replyToMessageId,
-            outboxTurnFence: input.outboxTurnFence,
-          });
-        }
-        const deliveryTarget = this.currentDeliveryTarget(input);
-        const supersedeTurnFences = this.coalescedSupersessionFences(
-          input.incomingMessageId,
-          deliveryTarget.incomingMessageId,
-          input.outboxTurnFence,
-        );
-        const resultParts = this.assistantDeliveryParts(
-          result.finalText,
-          result.result,
-        );
-        if (safeString(result.finalText).trim() || resultParts.length) {
-          await this.deliverAssistantReply({
-            text: result.finalText,
-            parts: resultParts.length ? resultParts : undefined,
-            replyToMessageId: deliveryTarget.replyToMessageId,
-            sessionFile: result.sessionFile,
-            incomingMessageId: deliveryTarget.incomingMessageId,
-            outboxTurnFence: deliveryTarget.outboxTurnFence,
-            idempotencyKey: input.deliveryIdempotencyKey,
-            supersedeTurnFences,
-            clearProcessing: true,
-          });
-        } else {
-          await this.settleEmptyAssistantCompletion({
-            incomingMessageId: deliveryTarget.incomingMessageId,
-            sessionFile: result.sessionFile,
-            outboxTurnFence: deliveryTarget.outboxTurnFence,
-            supersedeTurnFences,
-          });
-        }
-        originalSuperseded = supersedeTurnFences.length > 0;
-        this.awaitingTurnSettle = false;
-        await new Promise((resolve) => setImmediate(resolve));
-        await this.flushPendingPassiveNotices(input.quietMode);
-      }
-      return {
-        finalText: result.finalText,
-        result: result.result,
-        sessionId: this.currentSessionId() || undefined,
-        sessionFile: this.currentSessionFile(),
-        ...(originalSuperseded ? { superseded: true } : {}),
-      };
     }
 
     return await this.runExclusiveTurn(async () => {
@@ -3002,28 +2928,7 @@ export class ChatController {
         if (result.superseded) {
           return await this.finishSupersededRecoveredTurn(input, result);
         }
-        if (result.steered) {
-          if (deliverFinal) {
-            this.rememberPendingSteeredDeliveryTarget({
-              incomingMessageId: input.incomingMessageId,
-              replyToMessageId: input.replyToMessageId,
-              text,
-              submittedText,
-              requestTag: input.requestTag,
-              outboxTurnFence: input.outboxTurnFence,
-            });
-          }
-          this.backendAcceptedIncomingMessageId = safeString(
-            input.incomingMessageId || "",
-          ).trim();
-          this.markAcceptedMessage(input.incomingMessageId);
-          return {
-            steered: true,
-            sessionId: this.currentSessionId() || undefined,
-            sessionFile: this.currentSessionFile(),
-          };
-        }
-        if (deliverFinal) {
+        if (deliverFinal && this.currentTurn) {
           const deliveryTarget = this.currentDeliveryTarget(input);
           const supersedeTurnFences = this.coalescedSupersessionFences(
             input.incomingMessageId,
@@ -3083,8 +2988,8 @@ export class ChatController {
           if (ownsCurrentTurn) {
             this.awaitingTurnSettle = false;
             this.turnAbortRequested = false;
-            this.pendingSteeredDeliveryTargets = [];
-            this.coalescedSteeredDeliveryTargets = [];
+            this.pendingSubmittedDeliveryTargets = [];
+            this.coalescedDeliveryTargets = [];
             this.stagedDelivery = null;
           }
           this.saveState();
@@ -3105,6 +3010,9 @@ export class ChatController {
             sessionFile:
               abortedSession.sessionFile || this.currentSessionFile(),
           };
+        }
+        if ((error as any)?.rinTurnTerminal) {
+          throw error;
         }
         if (isRinFrontendTurnCancelledError(error)) {
           throw error;
@@ -3152,8 +3060,8 @@ export class ChatController {
         if (ownsCurrentTurn) {
           this.awaitingTurnSettle = false;
           this.turnAbortRequested = false;
-          this.pendingSteeredDeliveryTargets = [];
-          this.coalescedSteeredDeliveryTargets = [];
+          this.pendingSubmittedDeliveryTargets = [];
+          this.coalescedDeliveryTargets = [];
           this.stagedDelivery = null;
         }
         this.saveState();
@@ -3165,6 +3073,80 @@ export class ChatController {
         }
       }
     });
+  }
+
+  private async settleProjectedTurnComplete(event: {
+    finalText?: string;
+    result?: unknown;
+    sessionFile?: string;
+  }) {
+    if (!this.currentTurn) return;
+    const deliveryTarget = this.currentDeliveryTarget(this.currentTurn);
+    const supersedeTurnFences = this.coalescedSupersessionFences(
+      undefined,
+      deliveryTarget.incomingMessageId,
+      deliveryTarget.outboxTurnFence,
+    );
+    const resultParts = this.assistantDeliveryParts(
+      event.finalText,
+      event.result,
+    );
+    if (safeString(event.finalText).trim() || resultParts.length) {
+      await this.deliverAssistantReply({
+        text: event.finalText,
+        parts: resultParts.length ? resultParts : undefined,
+        replyToMessageId: deliveryTarget.replyToMessageId,
+        incomingMessageId: deliveryTarget.incomingMessageId,
+        outboxTurnFence: deliveryTarget.outboxTurnFence,
+        sessionFile: event.sessionFile || this.currentSessionFile(),
+        supersedeTurnFences,
+        clearProcessing: true,
+      });
+    } else {
+      await this.settleEmptyAssistantCompletion({
+        incomingMessageId: deliveryTarget.incomingMessageId,
+        outboxTurnFence: deliveryTarget.outboxTurnFence,
+        sessionFile: event.sessionFile || this.currentSessionFile(),
+        supersedeTurnFences,
+      });
+    }
+    this.awaitingTurnSettle = false;
+    this.clearCurrentTurn();
+    this.pendingSubmittedDeliveryTargets = [];
+    this.coalescedDeliveryTargets = [];
+    this.saveState();
+    await this.flushPendingPassiveNotices(false);
+  }
+
+  private async settleProjectedTurnError(event: {
+    error?: string;
+    sessionFile?: string;
+  }) {
+    if (!this.currentTurn) return;
+    const errorMessage = safeString(event.error).trim() || "rpc_turn_failed";
+    if (errorMessage === "chat_turn_aborted") return;
+    const deliveryTarget = this.currentDeliveryTarget(this.currentTurn);
+    const supersedeTurnFences = this.coalescedSupersessionFences(
+      undefined,
+      deliveryTarget.incomingMessageId,
+      deliveryTarget.outboxTurnFence,
+    );
+    await this.deliverAssistantReply({
+      text: errorMessage,
+      replyToMessageId: deliveryTarget.replyToMessageId,
+      incomingMessageId: deliveryTarget.incomingMessageId,
+      outboxTurnFence: deliveryTarget.outboxTurnFence,
+      sessionFile: event.sessionFile || this.currentSessionFile(),
+      supersedeTurnFences,
+      clearProcessing: true,
+      deliveryKind: "error",
+    });
+    this.awaitingTurnSettle = false;
+    this.clearCurrentTurn();
+    this.pendingSubmittedDeliveryTargets = [];
+    this.coalescedDeliveryTargets = [];
+    this.saveState();
+    await this.flushPendingPassiveNotices(false);
   }
 
   async housekeep() {
@@ -3238,7 +3220,7 @@ export class ChatController {
         return;
       }
       case "user_message_start":
-        await this.activatePendingSteeredDeliveryTarget(
+        await this.activatePendingSubmittedDeliveryTarget(
           event.text,
           event.requestTag,
         );
@@ -3270,6 +3252,12 @@ export class ChatController {
         if (this.acceptsAssistantProgressEvent(event.requestTag)) {
           await this.deliverAssistantInterim(event.text);
         }
+        return;
+      case "turn_complete":
+        await this.settleProjectedTurnComplete(event);
+        return;
+      case "turn_error":
+        await this.settleProjectedTurnError(event);
         return;
     }
   }

@@ -173,6 +173,9 @@ test("chat controller passes sender metadata through the frontend prompt context
         currentSessionId() {
           return "chat-meta-session";
         },
+        hasActiveTurn() {
+          return false;
+        },
       };
       await controller.runTurn({
         text: "my name is?",

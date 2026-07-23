@@ -147,8 +147,6 @@ const CHAT_INBOX_POLL_INTERVAL_MS = 3000;
 const CHAT_OUTBOX_POLL_INTERVAL_MS = 5000;
 const CHAT_OUTBOX_HISTORY_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const CHAT_INBOX_PROCESSING_HEARTBEAT_MS = 30 * 1000;
-const CHAT_STEERED_INBOX_WAIT_INTERVAL_MS = 1000;
-const CHAT_STEERED_INBOX_INACTIVE_GRACE_MS = 5000;
 const DETACHED_CONTROLLER_SLEEP_IDLE_MS = 60_000;
 const TELEGRAM_CHAT_THREAD_MARKER = "?thread=";
 
@@ -989,7 +987,6 @@ export async function startChatBridge(
         disposition: (turnResult as any)?.superseded
           ? ("superseded" as const)
           : ("actionable" as const),
-        ...(turnResult?.steered ? { steered: true } : {}),
       };
     } catch (error) {
       return await handleTurnFailure(error);
@@ -1016,52 +1013,6 @@ export async function startChatBridge(
       identity,
       decision,
     );
-  };
-
-  const waitForSteeredInboxCompletion = async (
-    job: ClaimedChatInboxJob,
-    result: (ChatInboxJobResult & { steered?: boolean }) | undefined,
-  ): Promise<ChatInboxJobResult | undefined> => {
-    if (!result?.steered) return result;
-    const chatKey = safeString(job.envelope.chatKey).trim();
-    const messageId = safeString(job.envelope.messageId).trim();
-    if (!chatKey || !messageId) return result;
-    const controller = getController(chatKey);
-    let inactiveSince = 0;
-    for (;;) {
-      if (
-        hasCommittedTerminalChatOutbox(runtime.agentDir, chatKey, messageId)
-      ) {
-        await controller.clearProcessingState().catch(() => {});
-        return result;
-      }
-      if (isInboundMessageProcessed(chatKey, messageId)) {
-        return {
-          retry: true,
-          errorMessage: "chat_steered_turn_missing_terminal_outbox",
-        };
-      }
-      const stillOwned = Boolean(
-        controller.ownsInboundMessage(messageId) || controller.hasActiveTurn(),
-      );
-      if (stillOwned) {
-        inactiveSince = 0;
-      } else {
-        inactiveSince ||= Date.now();
-        if (
-          Date.now() - inactiveSince >=
-          CHAT_STEERED_INBOX_INACTIVE_GRACE_MS
-        ) {
-          return {
-            retry: true,
-            errorMessage: "chat_steered_turn_unprocessed",
-          };
-        }
-      }
-      await new Promise((resolve) =>
-        setTimeout(resolve, CHAT_STEERED_INBOX_WAIT_INTERVAL_MS),
-      );
-    }
   };
 
   let chatBridgeStopping = false;
@@ -1117,9 +1068,7 @@ export async function startChatBridge(
       }
     }, CHAT_INBOX_PROCESSING_HEARTBEAT_MS);
     try {
-      const result = await runWithChatOutboxTurnFence(fence, async () =>
-        waitForSteeredInboxCompletion(job, await run()),
-      );
+      const result = await runWithChatOutboxTurnFence(fence, run);
       finishClaimedInboxJob(job, result);
     } catch (error) {
       if (

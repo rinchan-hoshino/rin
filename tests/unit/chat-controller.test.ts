@@ -515,6 +515,14 @@ function testReactionPollingIndicator(reactions = [], selfId = "1") {
   };
 }
 
+async function waitUntil(condition, message, timeoutMs = 1_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error(message);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 function emitRpcTurnComplete(controller, options, finalText, result) {
   controller.handleClientEvent({
     type: "ui",
@@ -3004,7 +3012,7 @@ test("chat controller marks /compact processed from compaction completion notice
   ]);
 });
 
-test("chat controller keeps working reaction on current message while steer is queued", async () => {
+test("chat controller keeps the current Working target until Pi confirms the next ordinary input", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
   const reactions = [];
@@ -3103,27 +3111,28 @@ test("chat controller keeps working reaction on current message while steer is q
     text: "steer now",
   });
 
-  const steerResult = await controller.runTurn(
-    {
-      text: "steer now",
-      attachments: [],
-      incomingMessageId: "m-steer",
-      replyToMessageId: "m-steer",
-    },
-    "steer",
+  const submittedTurn = controller.runTurn({
+    text: "steer now",
+    attachments: [],
+    incomingMessageId: "m-steer",
+    replyToMessageId: "m-steer",
+  });
+  await waitUntil(
+    () => controller.hasPendingSubmittedDeliveryTarget("m-steer"),
+    "ordinary input did not reach backend admission",
   );
 
-  assert.equal(steerResult.steered, true);
   assert.equal(controller.currentTurn?.incomingMessageId, "m-first");
   assert.equal(controller.currentTurn?.replyToMessageId, "m-first");
-  assert.equal(controller.hasBackendAcceptedInboundMessage("m-steer"), true);
+  assert.equal(controller.hasBackendAcceptedInboundMessage("m-steer"), false);
   assert.equal(controller.ownsInboundMessage("m-steer"), true);
   const steeredState = JSON.parse(
     await fs.readFile(controller.statePath, "utf8"),
   );
   assert.equal(
-    steeredState.pendingSteeredDeliveryTargets?.[0]?.incomingMessageId,
-    "m-steer",
+    steeredState.pendingSubmittedDeliveryTargets,
+    undefined,
+    "transport-pending input must not be persisted as steering state",
   );
   const restoredController = new ChatController(
     {},
@@ -3135,7 +3144,7 @@ test("chat controller keeps working reaction on current message while steer is q
     },
   );
   assert.equal(
-    restoredController.hasPendingSteeredDeliveryTarget("m-steer"),
+    restoredController.hasPendingSubmittedDeliveryTarget("m-steer"),
     false,
     "restart recovery must reconstruct steering from the SQLite turn ledger",
   );
@@ -3160,7 +3169,7 @@ test("chat controller keeps working reaction on current message while steer is q
   const activatedState = JSON.parse(
     await fs.readFile(controller.statePath, "utf8"),
   );
-  assert.equal(activatedState.pendingSteeredDeliveryTargets, undefined);
+  assert.equal(activatedState.pendingSubmittedDeliveryTargets, undefined);
   assert.equal(controller.currentTurn?.incomingMessageId, "m-steer");
   assert.equal(controller.currentTurn?.replyToMessageId, "m-steer");
   const steeredMessage = getChatMessage(
@@ -3170,12 +3179,12 @@ test("chat controller keeps working reaction on current message while steer is q
   );
   assert.ok(
     steeredMessage?.acceptedAt,
-    "steered inbox item should be accepted when Pi starts the user message",
+    "submitted inbox item should be accepted when Pi starts the user message",
   );
   assert.equal(
     steeredMessage?.processedAt,
     undefined,
-    "steered inbox remains running until a terminal outbox is committed",
+    "submitted inbox remains running until a terminal outbox is committed",
   );
   assert.deepEqual(actions, [
     { chat_id: "2", action: "typing" },
@@ -3188,10 +3197,130 @@ test("chat controller keeps working reaction on current message while steer is q
   ]);
 
   releaseFirstPrompt();
-  assert.equal((await firstTurn).finalText, "done");
+  const [firstResult, submittedResult] = await Promise.all([
+    firstTurn,
+    submittedTurn,
+  ]);
+  assert.equal(firstResult.finalText, "done");
+  assert.equal(submittedResult.finalText, "done");
 });
 
-test("chat controller keeps steering open after assistant tool-call interim", async () => {
+test("chat controller delivers a backend terminal after remote-active admission without a local waiter", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.commitPendingDelivery = async function (clearProcessing = false) {
+    deliveries.push(this.stagedDelivery);
+    this.stagedDelivery = null;
+    if (clearProcessing) this.currentTurn = null;
+    return { accepted: true, settled: true, results: [] };
+  };
+  controller.session = {
+    isStreaming: true,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => "/tmp/remote-active-chat.jsonl",
+      getSessionId: () => "session-remote-active",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: "/tmp/remote-active-chat.jsonl",
+      sessionId: "session-remote-active",
+    }),
+    prompt: async () => ({ acceptedAs: "steer" }),
+    switchSession: async () => {},
+  };
+
+  const submittedTurn = controller.runTurn({
+    text: "steer after reconnect",
+    attachments: [],
+    incomingMessageId: "m-remote-steer",
+    replyToMessageId: "m-remote-steer",
+  });
+  await waitUntil(
+    () => Boolean(controller.currentTurn),
+    "remote-active input did not establish its display target",
+  );
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "message_start",
+      requestTag: controller.currentTurn?.requestTag,
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "steer after reconnect" }],
+      },
+    },
+  });
+  emitRpcTurnComplete(
+    controller,
+    { requestTag: controller.currentTurn?.requestTag },
+    "remote steer final",
+  );
+  assert.equal((await submittedTurn).finalText, "remote steer final");
+
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveryText(deliveries[0]), "remote steer final");
+  assert.equal(deliveryQuoteId(deliveries[0]), "m-remote-steer");
+  assert.equal(controller.currentTurn, null);
+});
+
+test("chat controller delivers a backend error after remote-active admission without a local waiter", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.commitPendingDelivery = async function (clearProcessing = false) {
+    deliveries.push(this.stagedDelivery);
+    this.stagedDelivery = null;
+    if (clearProcessing) this.currentTurn = null;
+    return { accepted: true, settled: true, results: [] };
+  };
+  controller.session = {
+    isStreaming: true,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => "/tmp/remote-active-error.jsonl",
+      getSessionId: () => "session-remote-error",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: "/tmp/remote-active-error.jsonl",
+      sessionId: "session-remote-error",
+    }),
+    prompt: async () => ({ acceptedAs: "steer" }),
+    switchSession: async () => {},
+  };
+
+  const submittedTurn = controller.runTurn({
+    text: "steer before failure",
+    attachments: [],
+    incomingMessageId: "m-remote-error",
+    replyToMessageId: "m-remote-error",
+  });
+  await waitUntil(
+    () => Boolean(controller.currentTurn),
+    "remote-active input did not establish its error target",
+  );
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "rpc_turn_event",
+      event: "error",
+      requestTag: controller.currentTurn?.requestTag,
+      error: "remote failure",
+      sessionId: "session-remote-error",
+      sessionFile: "/tmp/remote-active-error.jsonl",
+    },
+  });
+  await assert.rejects(submittedTurn, /remote failure/);
+
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveryText(deliveries[0]), "remote failure");
+  assert.equal(deliveryQuoteId(deliveries[0]), "m-remote-error");
+  assert.equal(controller.currentTurn, null);
+});
+
+test("chat controller accepts ordinary input after an assistant tool-call interim", async () => {
   const controller = await createController("telegram/1:2");
   const promptCalls = [];
   let releaseFirstPrompt = () => {};
@@ -3250,24 +3379,29 @@ test("chat controller keeps steering open after assistant tool-call interim", as
     },
   });
 
-  assert.equal(controller.canSteerActiveTurn(), true);
-  const steerResult = await controller.runTurn(
-    {
-      text: "steer now",
-      attachments: [],
-      incomingMessageId: "m-steer-now",
-    },
-    "steer",
+  assert.equal(controller.hasActiveTurn(), true);
+  const submittedTurn = controller.runTurn({
+    text: "steer now",
+    attachments: [],
+    incomingMessageId: "m-steer-now",
+  });
+  await waitUntil(
+    () => promptCalls.length === 2,
+    "ordinary input did not reach Pi during the tool gap",
   );
 
-  assert.equal(steerResult.steered, true);
   assert.deepEqual(promptCalls, [
     { text: "first", streamingBehavior: undefined },
     { text: "steer now", streamingBehavior: undefined },
   ]);
 
   releaseFirstPrompt();
-  assert.equal((await firstTurn).finalText, "done");
+  const [firstResult, submittedResult] = await Promise.all([
+    firstTurn,
+    submittedTurn,
+  ]);
+  assert.equal(firstResult.finalText, "done");
+  assert.equal(submittedResult.finalText, "done");
 });
 
 test("chat controller stages raw non-transient command errors for the outbox", async () => {
@@ -4105,7 +4239,7 @@ test("chat controller combines backend progress identity with the steered turn f
     ownerEpoch: "steered-owner",
     attempt: 1,
   };
-  controller.rememberPendingSteeredDeliveryTarget({
+  controller.rememberPendingSubmittedDeliveryTarget({
     incomingMessageId: "steered-message",
     replyToMessageId: "steered-message",
     text: "steer me",
@@ -4150,14 +4284,14 @@ test("chat controller disambiguates identical steers by producer request tag", a
     ownerEpoch: "second-steered-owner",
     attempt: 1,
   };
-  controller.rememberPendingSteeredDeliveryTarget({
+  controller.rememberPendingSubmittedDeliveryTarget({
     incomingMessageId: "first-steered-message",
     text: "same steer",
     submittedText: "same steer",
     requestTag: "first-producer-tag",
     outboxTurnFence: firstFence,
   });
-  controller.rememberPendingSteeredDeliveryTarget({
+  controller.rememberPendingSubmittedDeliveryTarget({
     incomingMessageId: "second-steered-message",
     text: "same steer",
     submittedText: "same steer",
@@ -4177,11 +4311,11 @@ test("chat controller disambiguates identical steers by producer request tag", a
   });
   assert.equal(activated, undefined);
   assert.equal(
-    controller.hasPendingSteeredDeliveryTarget("first-steered-message"),
+    controller.hasPendingSubmittedDeliveryTarget("first-steered-message"),
     true,
   );
   assert.equal(
-    controller.hasPendingSteeredDeliveryTarget("second-steered-message"),
+    controller.hasPendingSubmittedDeliveryTarget("second-steered-message"),
     true,
   );
 
@@ -4194,11 +4328,11 @@ test("chat controller disambiguates identical steers by producer request tag", a
   assert.equal(activated.requestTag, "second-producer-tag");
   assert.equal(activated.outboxTurnFence, secondFence);
   assert.equal(
-    controller.hasPendingSteeredDeliveryTarget("first-steered-message"),
+    controller.hasPendingSubmittedDeliveryTarget("first-steered-message"),
     true,
   );
   assert.equal(
-    controller.hasPendingSteeredDeliveryTarget("second-steered-message"),
+    controller.hasPendingSubmittedDeliveryTarget("second-steered-message"),
     false,
   );
 });
@@ -4250,6 +4384,10 @@ test("chat controller rejects stale tagged assistant progress after turn replace
   });
   await controller.handleFrontendEvent({
     type: "assistant_interim",
+    text: "Pi-native untagged interim",
+  });
+  await controller.handleFrontendEvent({
+    type: "assistant_interim",
     text: "current interim",
     requestTag: "replacement-tag",
   });
@@ -4266,7 +4404,10 @@ test("chat controller rejects stale tagged assistant progress after turn replace
     type: "turn_accepted",
     requestTag: "replacement-tag",
   });
-  assert.deepEqual(delivered, ["current interim"]);
+  assert.deepEqual(delivered, [
+    "Pi-native untagged interim",
+    "current interim",
+  ]);
   assert.deepEqual(accepted, ["replacement"]);
 });
 
@@ -6112,7 +6253,7 @@ test("chat controller switches to a linked reply session before sending the prom
   assert.equal(controller.state.sessionFile, "reply-linked.jsonl");
 });
 
-test("chat controller steers an already streaming session instead of waiting for a new owned turn", async () => {
+test("chat controller submits ordinary input unchanged to an already active backend", async () => {
   const controller = await createController("telegram/1:2");
   const promptCalls = [];
 
@@ -6130,27 +6271,25 @@ test("chat controller steers an already streaming session instead of waiting for
     }),
     prompt: async (text, options = {}) => {
       promptCalls.push({ text, streamingBehavior: options.streamingBehavior });
+      emitRpcTurnComplete(controller, options, "active backend final");
       return { acceptedAs: "steer" };
     },
     switchSession: async () => {},
   };
 
-  const result = await controller.runTurn(
-    {
-      text: "follow up",
-      attachments: [],
-      incomingMessageId: "m-steer",
-    },
-    "steer",
-  );
+  const result = await controller.runTurn({
+    text: "follow up",
+    attachments: [],
+    incomingMessageId: "m-steer",
+  });
 
   assert.deepEqual(promptCalls, [
     { text: "follow up", streamingBehavior: undefined },
   ]);
-  assert.equal(result.steered, true);
+  assert.equal(result.finalText, "active backend final");
 });
 
-test("chat controller lets steer bypass the owned turn queue while the current turn is still streaming", async () => {
+test("chat controller lets ordinary input reach Pi while the current turn is still active", async () => {
   const controller = await createController("telegram/1:2");
   const promptCalls = [];
   const deliveries = [];
@@ -6209,17 +6348,17 @@ test("chat controller lets steer bypass the owned turn queue while the current t
   });
   await firstPromptStarted;
 
-  const steerResult = await controller.runTurn(
-    {
-      text: "steer now",
-      attachments: [],
-      incomingMessageId: "m-steer-now",
-      replyToMessageId: "m-steer-now",
-    },
-    "steer",
+  const submittedTurn = controller.runTurn({
+    text: "steer now",
+    attachments: [],
+    incomingMessageId: "m-steer-now",
+    replyToMessageId: "m-steer-now",
+  });
+  await waitUntil(
+    () => promptCalls.length === 2,
+    "ordinary input waited behind the active terminal",
   );
 
-  assert.equal(steerResult.steered, true);
   assert.equal(controller.currentTurn?.incomingMessageId, "m-first");
   assert.deepEqual(promptCalls, [
     { text: "first", streamingBehavior: undefined },
@@ -6240,8 +6379,12 @@ test("chat controller lets steer bypass the owned turn queue while the current t
   assert.equal(controller.currentTurn?.incomingMessageId, "m-steer-now");
 
   releaseFirstPrompt();
-  const firstResult = await firstTurn;
+  const [firstResult, submittedResult] = await Promise.all([
+    firstTurn,
+    submittedTurn,
+  ]);
   assert.equal(firstResult.finalText, "done");
+  assert.equal(submittedResult.finalText, "done");
   assert.deepEqual(deliveries, [
     {
       text: "done",
@@ -6252,9 +6395,9 @@ test("chat controller lets steer bypass the owned turn queue while the current t
 });
 
 for (const workingVisible of [false, true]) {
-  test(`chat controller switches terminal ownership before awaiting ${
+  test(`chat controller switches the display target before awaiting ${
     workingVisible ? "visible" : "stale"
-  } steered Working cleanup`, async () => {
+  } submitted-input Working cleanup`, async () => {
     const controller = await createController("telegram/1:2");
     const deliveries = [];
     controller.app.bots[0].sendMessage = async (_chatId, content) => {
@@ -6328,17 +6471,18 @@ for (const workingVisible of [false, true]) {
     });
     await firstPromptStarted;
 
-    const steerResult = await controller.runTurn(
-      {
-        text: "steer now",
-        attachments: [],
-        incomingMessageId: steeredClaim.messageId,
-        replyToMessageId: steeredClaim.messageId,
-        outboxTurnFence: fenceFor(steeredClaim),
-      },
-      "steer",
+    const submittedTurn = controller.runTurn({
+      text: "steer now",
+      attachments: [],
+      incomingMessageId: steeredClaim.messageId,
+      replyToMessageId: steeredClaim.messageId,
+      outboxTurnFence: fenceFor(steeredClaim),
+    });
+    await waitUntil(
+      () =>
+        controller.hasPendingSubmittedDeliveryTarget(steeredClaim.messageId),
+      "ordinary input did not enter the pending display projection",
     );
-    assert.equal(steerResult.steered, true);
 
     let cleanupCalls = 0;
     let resolveCleanupStarted = () => {};
@@ -6371,7 +6515,12 @@ for (const workingVisible of [false, true]) {
     await cleanupStarted;
 
     releaseFirstPrompt();
-    assert.equal((await firstTurn).finalText, "done once");
+    const [firstResult, submittedResult] = await Promise.all([
+      firstTurn,
+      submittedTurn,
+    ]);
+    assert.equal(firstResult.finalText, "done once");
+    assert.equal(submittedResult.finalText, "done once");
     releaseOldCleanup();
     await activation;
 
@@ -6467,7 +6616,7 @@ test("chat controller fences superseded restored inbox turns without marking pro
   );
 });
 
-test("chat controller queues follow-up after an assistant reply is committed", async () => {
+test("chat controller leaves input after assistant content to Pi's active-turn decision", async () => {
   const controller = await createController("onebot/1:private:2");
   const promptCalls = [];
   const deliveries = [];
@@ -6521,12 +6670,20 @@ test("chat controller queues follow-up after an assistant reply is committed", a
           releaseFirstPrompt = resolve;
         });
         controller.session.isStreaming = false;
-        emitRpcTurnComplete(controller, firstPromptOptions, "first answer");
+        emitRpcTurnComplete(controller, firstPromptOptions, "combined answer");
         return;
       }
 
       assert.equal(options.streamingBehavior, undefined);
-      emitRpcTurnComplete(controller, options, "second answer");
+      await controller.handleSessionEvent({
+        type: "message_start",
+        requestTag: options.requestTag,
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "follow up" }],
+        },
+      });
+      return { acceptedAs: "steer" };
     },
     switchSession: async () => {},
   };
@@ -6539,19 +6696,19 @@ test("chat controller queues follow-up after an assistant reply is committed", a
   });
   await firstReplyCommitted;
 
-  assert.equal(controller.canSteerActiveTurn(), false);
-  const secondTurn = controller.runTurn(
-    {
-      text: "follow up",
-      attachments: [],
-      incomingMessageId: "m-second",
-      replyToMessageId: "m-second",
-    },
-    "steer",
+  const secondTurn = controller.runTurn({
+    text: "follow up",
+    attachments: [],
+    incomingMessageId: "m-second",
+    replyToMessageId: "m-second",
+  });
+  await waitUntil(
+    () => promptCalls.length === 2,
+    "ordinary input did not reach Pi after assistant content",
   );
-  await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(promptCalls, [
     { text: "hello", streamingBehavior: undefined },
+    { text: "follow up", streamingBehavior: undefined },
   ]);
 
   releaseFirstPrompt();
@@ -6560,15 +6717,15 @@ test("chat controller queues follow-up after an assistant reply is committed", a
     secondTurn,
   ]);
 
-  assert.equal(firstResult.finalText, "first answer");
-  assert.equal(secondResult.finalText, "second answer");
+  assert.equal(firstResult.finalText, "combined answer");
+  assert.equal(secondResult.finalText, "combined answer");
   assert.deepEqual(promptCalls, [
     { text: "hello", streamingBehavior: undefined },
     { text: "follow up", streamingBehavior: undefined },
   ]);
   assert.deepEqual(
     deliveries.map((delivery) => delivery.content?.[1]?.attrs?.content),
-    ["first answer", "second answer"],
+    ["combined answer"],
   );
 });
 

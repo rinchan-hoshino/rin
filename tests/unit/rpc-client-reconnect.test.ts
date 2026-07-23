@@ -725,7 +725,7 @@ test("rpc interactive session does not self-deadlock when restore sees a disconn
   assert.equal(session.recoveryPending, true);
 });
 
-test("rpc interactive session preserves native prompt payloads through the shared frontend SDK helper", async () => {
+test("rpc interactive session routes explicit follow-up through its distinct action", async () => {
   const calls = [];
   const client = {
     isConnected: () => true,
@@ -747,11 +747,11 @@ test("rpc interactive session preserves native prompt payloads through the share
 
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0], {
-    type: "prompt",
+    type: "follow_up",
     message: "  hello  ",
     images: [{ path: "/tmp/a.png" }],
     source: "tui-test",
-    streamingBehavior: "followUp",
+    streamingBehavior: undefined,
     requestTag: calls[0]?.requestTag,
   });
   assert.match(String(calls[0]?.requestTag || ""), /^rin-tui-/);
@@ -951,7 +951,7 @@ test("rpc interactive session can shut down or terminate an attached worker with
   assert.equal(calls[1]?.type, "terminate_session");
 });
 
-test("rpc interactive session shows locally queued prompts while recovery is pending", async () => {
+test("rpc interactive session keeps recovery-pending prompts out of the Pi queue projection", async () => {
   const calls = [];
   const seen = [];
   const session = new RpcInteractiveSession({
@@ -985,11 +985,11 @@ test("rpc interactive session shows locally queued prompts while recovery is pen
     String(session.queuedOfflineOps[0]?.requestTag || ""),
     /^rin-tui-/,
   );
-  assert.deepEqual(session.getSteeringMessages(), ["hello"]);
+  assert.deepEqual(session.getSteeringMessages(), []);
   assert.equal(session.pendingMessageCount, 1);
   assert.deepEqual(
     seen.filter((event) => event.type === "queue_update"),
-    [{ type: "queue_update", steering: ["hello"], followUp: [] }],
+    [{ type: "queue_update", steering: [], followUp: [] }],
   );
   assert.deepEqual(session.getFrontendStatusEvent(), {
     type: "rpc_frontend_status",
@@ -999,7 +999,7 @@ test("rpc interactive session shows locally queued prompts while recovery is pen
   });
 
   const cleared = session.clearQueue();
-  assert.deepEqual(cleared, { steering: ["hello"], followUp: [] });
+  assert.deepEqual(cleared, { steering: [], followUp: [] });
   assert.deepEqual(session.queuedOfflineOps, []);
   assert.deepEqual(session.getSteeringMessages(), []);
   assert.equal(session.pendingMessageCount, 0);
