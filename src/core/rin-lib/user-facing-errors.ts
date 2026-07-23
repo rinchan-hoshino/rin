@@ -144,8 +144,12 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat inbox write failed because the message id is missing. Check the adapter event.",
   chat_inbox_claim_required: () =>
     "Chat inbox update failed because its processing claim is missing.",
-  chat_inbox_claim_lost_during_classification: () =>
-    "Chat inbox ownership changed while classifying the message.",
+  chat_inbox_claim_lost_during_admission: () =>
+    "Chat inbox ownership changed while committing the admission result.",
+  chat_inbox_admission_required: () =>
+    "Chat inbox recovery could not find a committed admission result.",
+  chat_inbox_admission_identity_mismatch: () =>
+    "Chat inbox admission does not match its durable turn identity.",
   chat_inbox_message_commit_failed: () =>
     "Chat inbox write failed while committing the inbound message.",
   chat_inbox_message_identity_required: () =>

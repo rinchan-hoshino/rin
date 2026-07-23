@@ -70,7 +70,7 @@ test("app daemon stays available when the hosted chat service cannot start", asy
     assert.equal(status.chat.ready, false);
     assert.match(
       status.chat.error,
-      /chat_database_schema_upgrade_required:3:5/,
+      /chat_database_schema_upgrade_required:3:6/,
     );
     assert.equal(child.exitCode, null);
   } catch (error: any) {

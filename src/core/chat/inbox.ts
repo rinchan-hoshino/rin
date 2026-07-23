@@ -20,6 +20,19 @@ import {
   type StoredChatMessage,
 } from "./message-store.js";
 import { parseChatKey } from "./support.js";
+import {
+  durableAdmissionMatchesTurn,
+  type ChatInboxAdmission,
+  type ChatInboxAdmissionState,
+  type DurableChatAdmissionCommit,
+  type DurableChatAdmissionDecision,
+  type FrozenChatTurnSubmission,
+} from "./durable-admission.js";
+
+export type {
+  ChatInboxAdmission,
+  ChatInboxAdmissionState,
+} from "./durable-admission.js";
 
 function hashKey(value: string) {
   return createHash("sha1").update(value).digest("hex");
@@ -59,6 +72,7 @@ export type ChatInboxItem = {
   routing: ChatInboxItemRouting;
   session: Record<string, unknown>;
   elements: any[];
+  admission: ChatInboxAdmission;
   state?: ChatInboxItemState;
   ownerEpoch?: string;
   leaseUntil?: string;
@@ -126,6 +140,7 @@ export function buildChatInboxItem(input: {
     routing: buildChatInboxRouting(input.session, elements),
     session: serializeChatInboxSession(input.session),
     elements: cloneJson(elements),
+    admission: { state: "unclassified" as const },
     state: "pending" as const,
   } satisfies ChatInboxItem;
 }
@@ -148,6 +163,73 @@ function parseJsonArray(value: unknown) {
   }
 }
 
+function parseOptionalJsonObject(value: unknown) {
+  const text = safeString(value).trim();
+  if (!text) return undefined;
+  try {
+    const parsed = JSON.parse(text);
+    return isJsonRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function hashDurableJson(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function admissionFromRow(row: any): ChatInboxAdmission {
+  const state = safeString(row?.admission_state) as ChatInboxAdmissionState;
+  const stateIntegrity = ["unclassified", "actionable", "record_only"].includes(
+    state,
+  )
+    ? "valid"
+    : "invalid";
+  const admissionState = ["actionable", "record_only"].includes(state)
+    ? state
+    : "unclassified";
+  const decisionText = safeString(row?.admission_json);
+  const admissionHash = safeString(row?.admission_hash);
+  const decision = parseOptionalJsonObject(decisionText) as
+    | DurableChatAdmissionDecision
+    | undefined;
+  const decisionIntegrity =
+    !decisionText && !admissionHash
+      ? "none"
+      : decisionText &&
+          admissionHash &&
+          decision &&
+          hashDurableJson(decisionText) === admissionHash
+        ? "valid"
+        : "invalid";
+  const submissionText = safeString(row?.submission_json);
+  const submissionHash = safeString(row?.submission_hash);
+  const submission = parseOptionalJsonObject(submissionText) as
+    | FrozenChatTurnSubmission
+    | undefined;
+  const submissionIntegrity =
+    !submissionText && !submissionHash
+      ? "none"
+      : submissionText &&
+          submissionHash &&
+          submission &&
+          hashDurableJson(submissionText) === submissionHash
+        ? "valid"
+        : "invalid";
+  return {
+    state: admissionState,
+    stateIntegrity,
+    decision,
+    admissionHash: admissionHash || undefined,
+    decisionIntegrity,
+    submission,
+    submissionHash: submissionHash || undefined,
+    submissionIntegrity,
+    executionSessionFile:
+      safeString(row?.execution_session_file).trim() || undefined,
+  };
+}
+
 function rowToChatInboxItem(row: any): ChatInboxItem | null {
   if (!row) return null;
   const chatKey = safeString(row.chat_key).trim();
@@ -167,6 +249,7 @@ function rowToChatInboxItem(row: any): ChatInboxItem | null {
     routing: parseJsonObject(row.routing_json) as ChatInboxItemRouting,
     session: parseJsonObject(row.session_json),
     elements: parseJsonArray(row.elements_json),
+    admission: admissionFromRow(row),
     state,
     ownerEpoch: safeString(row.owner_epoch).trim() || undefined,
     leaseUntil: safeString(row.lease_until).trim() || undefined,
@@ -193,6 +276,21 @@ export function isChatInboxItemAccepted(agentDir: string, itemId: string) {
          FROM turns
          JOIN messages ON messages.id = turns.inbound_message_id
          WHERE turns.turn_id = ? AND messages.accepted_at IS NOT NULL
+         LIMIT 1`,
+      )
+      .get(safeString(itemId).trim()),
+  );
+}
+
+export function isChatInboxItemDurablyActionable(
+  agentDir: string,
+  itemId: string,
+) {
+  return Boolean(
+    openChatDatabase(agentDir)
+      .prepare(
+        `SELECT 1 FROM turns
+         WHERE turn_id = ? AND admission_state = 'actionable'
          LIMIT 1`,
       )
       .get(safeString(itemId).trim()),
@@ -282,7 +380,8 @@ export function enqueueChatInboxItem(
         db.prepare(
           `UPDATE turns
            SET routing_json = ?, session_json = ?, elements_json = ?, updated_at = ?
-           WHERE turn_id = ? AND state = 'pending'`,
+           WHERE turn_id = ? AND state = 'pending'
+             AND admission_state = 'unclassified'`,
         ).run(
           JSON.stringify(item.routing),
           JSON.stringify(item.session),
@@ -344,28 +443,69 @@ function requireClaim(item: ChatInboxItem) {
   return { itemId, ownerEpoch, attempt };
 }
 
-export function classifyClaimedChatInboxItem(
+export function commitClaimedChatInboxAdmission(
   agentDir: string,
   item: ClaimedChatInboxItem,
-  disposition: "record_only" | "actionable" | "superseded",
-) {
+  input: DurableChatAdmissionCommit,
+): ChatInboxAdmission | null {
   const claim = requireClaim(item);
+  if (
+    !durableAdmissionMatchesTurn(input, {
+      chatKey: item.chatKey,
+      messageId: item.messageId,
+    })
+  ) {
+    throw new Error("chat_inbox_admission_identity_mismatch");
+  }
+  const decisionJson = JSON.stringify(cloneJson(input.decision));
+  const submissionJson = input.submission
+    ? JSON.stringify(cloneJson(input.submission))
+    : null;
+  const admissionHash = hashDurableJson(decisionJson);
+  const submissionHash = submissionJson
+    ? hashDurableJson(submissionJson)
+    : null;
   const db = openChatDatabase(agentDir);
   return db
     .transaction(() => {
-      const owned = db
-        .prepare(
-          `SELECT inbound_message_id FROM turns
-           WHERE turn_id = ? AND state = 'running'
-             AND owner_epoch = ? AND attempt = ?`,
-        )
-        .get(claim.itemId, claim.ownerEpoch, claim.attempt) as any;
-      if (!owned) return false;
-      return (
-        db
-          .prepare(`UPDATE messages SET disposition = ? WHERE id = ?`)
-          .run(disposition, owned.inbound_message_id).changes === 1
-      );
+      const owned = getTurnRow(db, claim.itemId);
+      if (
+        owned?.state !== "running" ||
+        safeString(owned.owner_epoch) !== claim.ownerEpoch ||
+        Number(owned.attempt) !== claim.attempt
+      ) {
+        return null;
+      }
+      if (safeString(owned.admission_state) === "unclassified") {
+        const committed = db
+          .prepare(
+            `UPDATE turns
+             SET admission_state = ?, admission_json = ?, admission_hash = ?,
+                 submission_json = ?, submission_hash = ?, updated_at = ?
+             WHERE turn_id = ? AND state = 'running'
+               AND owner_epoch = ? AND attempt = ?
+               AND admission_state = 'unclassified'`,
+          )
+          .run(
+            input.state,
+            decisionJson,
+            admissionHash,
+            submissionJson,
+            submissionHash,
+            nowIso(),
+            claim.itemId,
+            claim.ownerEpoch,
+            claim.attempt,
+          );
+        if (committed.changes === 1) {
+          db.prepare(`UPDATE messages SET disposition = ? WHERE id = ?`).run(
+            input.state,
+            owned.inbound_message_id,
+          );
+        }
+      }
+      const current = getTurnRow(db, claim.itemId);
+      return current ? admissionFromRow(current) : null;
     })
     .immediate();
 }
@@ -430,9 +570,24 @@ export function completeClaimedChatInboxItem(
         );
       if (result.changes !== 1) return false;
       db.prepare(
-        `UPDATE messages SET disposition = ?
+        `UPDATE messages
+         SET disposition = CASE
+           WHEN ? = 'superseded' THEN 'superseded'
+           WHEN (
+             SELECT admission_state FROM turns WHERE turn_id = ?
+           ) IN ('actionable', 'record_only') THEN (
+             SELECT admission_state FROM turns WHERE turn_id = ?
+           )
+           ELSE ?
+         END
          WHERE id = (SELECT inbound_message_id FROM turns WHERE turn_id = ?)`,
-      ).run(options.disposition || "actionable", claim.itemId);
+      ).run(
+        options.disposition || null,
+        claim.itemId,
+        claim.itemId,
+        options.disposition || "actionable",
+        claim.itemId,
+      );
       return true;
     })
     .immediate();
@@ -683,9 +838,10 @@ function restoreOrphanedAcceptedChatInboxItemsWithReport(
             turn_id, inbound_message_id, chat_key, generation, sequence, state,
             terminal_kind, owner_epoch, attempt, lease_until, heartbeat_at,
             next_attempt_at, last_error, routing_json, session_json,
-            elements_json, created_at, updated_at
+            elements_json, admission_state, admission_json,
+            execution_session_file, created_at, updated_at
           ) VALUES (?, ?, ?, ?, ?, 'pending', NULL, NULL, 0, NULL, NULL,
-                    NULL, NULL, ?, ?, ?, ?, ?)
+                    NULL, NULL, ?, ?, ?, 'actionable', ?, ?, ?, ?)
           ON CONFLICT(inbound_message_id) DO NOTHING`,
         )
         .run(
@@ -697,6 +853,8 @@ function restoreOrphanedAcceptedChatInboxItemsWithReport(
           JSON.stringify(item.routing),
           JSON.stringify(item.session),
           JSON.stringify(item.elements),
+          JSON.stringify({ version: 1, kind: "legacy_accepted_orphan" }),
+          safeString(record.sessionFile).trim() || null,
           item.createdAt,
           item.updatedAt,
         );

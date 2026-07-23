@@ -11,7 +11,7 @@ import {
   readLegacyControlMigrationPreservedSummary,
 } from "./legacy-migration.js";
 
-const CHAT_DATABASE_SCHEMA_VERSION = 5;
+const CHAT_DATABASE_SCHEMA_VERSION = 6;
 
 const databaseCache = new Map<string, BetterSqlite3.Database>();
 
@@ -147,6 +147,25 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
       throw new Error(`chat_database_future_schema:${currentVersion}`);
     }
     const finishSchemaUpgrade = () => {
+      const legacyAdmissions = db
+        .prepare(
+          `SELECT turn_id, admission_json
+             FROM turns
+            WHERE admission_json IS NOT NULL
+              AND admission_hash IS NULL`,
+        )
+        .all() as Array<{ turn_id: string; admission_json: string }>;
+      const writeAdmissionHash = db.prepare(
+        `UPDATE turns SET admission_hash = ?
+          WHERE turn_id = ? AND admission_json = ? AND admission_hash IS NULL`,
+      );
+      for (const row of legacyAdmissions) {
+        writeAdmissionHash.run(
+          createHash("sha256").update(row.admission_json).digest("hex"),
+          row.turn_id,
+          row.admission_json,
+        );
+      }
       db.prepare(
         `UPDATE schema_meta SET value = ? WHERE key = 'schema_version'`,
       ).run(String(CHAT_DATABASE_SCHEMA_VERSION));
@@ -167,6 +186,46 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
       CREATE INDEX inbound_heads_recovery_idx
         ON inbound_heads(platform, bot_id, recovery_next_attempt_at, chat_key);
     `;
+    const durableTurnAdmissionUpgradeSql = `
+      ALTER TABLE turns ADD COLUMN admission_state TEXT NOT NULL DEFAULT 'unclassified'
+        CHECK (admission_state IN ('unclassified', 'actionable', 'record_only'));
+      ALTER TABLE turns ADD COLUMN admission_json TEXT;
+      ALTER TABLE turns ADD COLUMN admission_hash TEXT;
+      ALTER TABLE turns ADD COLUMN submission_json TEXT;
+      ALTER TABLE turns ADD COLUMN submission_hash TEXT;
+      ALTER TABLE turns ADD COLUMN execution_session_file TEXT;
+      UPDATE turns
+         SET admission_state = CASE
+           WHEN EXISTS (
+             SELECT 1 FROM messages
+              WHERE messages.id = turns.inbound_message_id
+                AND (messages.accepted_at IS NOT NULL
+                     OR messages.disposition = 'actionable')
+           ) THEN 'actionable'
+           WHEN EXISTS (
+             SELECT 1 FROM messages
+              WHERE messages.id = turns.inbound_message_id
+                AND messages.disposition = 'record_only'
+           ) THEN 'record_only'
+           ELSE 'unclassified'
+         END,
+             admission_json = CASE
+               WHEN EXISTS (
+                 SELECT 1 FROM messages
+                  WHERE messages.id = turns.inbound_message_id
+                    AND (messages.accepted_at IS NOT NULL
+                         OR messages.disposition IN ('actionable', 'record_only'))
+               ) THEN json_object(
+                 'version', 1,
+                 'kind', 'legacy_message_projection'
+               )
+               ELSE NULL
+             END,
+             execution_session_file = (
+               SELECT messages.session_file FROM messages
+                WHERE messages.id = turns.inbound_message_id
+             );
+    `;
     if (currentVersion === 1) {
       validateRecordedSchema(1);
       db.exec(`
@@ -181,6 +240,7 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
           CHECK (legacy_session_imported IN (0, 1));
         ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
         ${inboundRecoveryLeaseUpgradeSql}
+        ${durableTurnAdmissionUpgradeSql}
       `);
       finishSchemaUpgrade();
       return;
@@ -193,6 +253,7 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
           CHECK (legacy_session_imported IN (0, 1));
         ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
         ${inboundRecoveryLeaseUpgradeSql}
+        ${durableTurnAdmissionUpgradeSql}
       `);
       finishSchemaUpgrade();
       return;
@@ -202,13 +263,22 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
       db.exec(`
         ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
         ${inboundRecoveryLeaseUpgradeSql}
+        ${durableTurnAdmissionUpgradeSql}
       `);
       finishSchemaUpgrade();
       return;
     }
     if (currentVersion === 4) {
       validateRecordedSchema(4);
-      db.exec(inboundRecoveryLeaseUpgradeSql);
+      db.exec(
+        `${inboundRecoveryLeaseUpgradeSql}\n${durableTurnAdmissionUpgradeSql}`,
+      );
+      finishSchemaUpgrade();
+      return;
+    }
+    if (currentVersion === 5) {
+      validateRecordedSchema(5);
+      db.exec(durableTurnAdmissionUpgradeSql);
       finishSchemaUpgrade();
       return;
     }
@@ -345,6 +415,13 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
       routing_json TEXT,
       session_json TEXT,
       elements_json TEXT,
+      admission_state TEXT NOT NULL DEFAULT 'unclassified'
+        CHECK (admission_state IN ('unclassified', 'actionable', 'record_only')),
+      admission_json TEXT,
+      admission_hash TEXT,
+      submission_json TEXT,
+      submission_hash TEXT,
+      execution_session_file TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -951,44 +1028,72 @@ export function markChatMessageAcceptedWithFence(
   input: { acceptedAt?: string; sessionFile?: string } = {},
 ) {
   const db = openChatDatabase(agentDir);
-  const result = db
-    .prepare(
-      `UPDATE messages
-       SET accepted_at = COALESCE(accepted_at, ?),
-           session_file = COALESCE(?, session_file),
-           record_json = json_set(
-             record_json,
-             '$.acceptedAt', COALESCE(json_extract(record_json, '$.acceptedAt'), ?),
-             '$.sessionFile', COALESCE(?, json_extract(record_json, '$.sessionFile'))
-           ),
-           updated_at = ?
-       WHERE chat_key = ? AND message_id = ?
-         AND EXISTS (
-           SELECT 1
-           FROM turns
-           JOIN chat_state ON chat_state.chat_key = turns.chat_key
-           WHERE turns.turn_id = ?
-             AND turns.inbound_message_id = messages.id
-             AND turns.chat_key = messages.chat_key
-             AND turns.state = 'running'
-             AND turns.owner_epoch = ?
-             AND turns.attempt = ?
-             AND turns.generation = chat_state.current_generation
-         )`,
-    )
-    .run(
-      safeString(input.acceptedAt).trim() || nowIso(),
-      safeString(input.sessionFile).trim() || null,
-      safeString(input.acceptedAt).trim() || nowIso(),
-      safeString(input.sessionFile).trim() || null,
-      nowIso(),
-      requiredText(fence.chatKey, "chat_turn_chat_key_required"),
-      requiredText(fence.messageId, "chat_turn_message_id_required"),
-      requiredText(fence.turnId, "chat_turn_id_required"),
-      requiredText(fence.ownerEpoch, "chat_turn_owner_epoch_required"),
-      Math.max(0, Math.floor(Number(fence.attempt || 0))),
-    );
-  return result.changes === 1;
+  return db
+    .transaction(() => {
+      const timestamp = safeString(input.acceptedAt).trim() || nowIso();
+      const updatedAt = nowIso();
+      const sessionFile = safeString(input.sessionFile).trim() || null;
+      const turn = db
+        .prepare(
+          `UPDATE turns
+           SET execution_session_file = COALESCE(execution_session_file, ?),
+               updated_at = ?
+           WHERE turn_id = ? AND chat_key = ? AND state = 'running'
+             AND owner_epoch = ? AND attempt = ?
+             AND inbound_message_id = (
+               SELECT id FROM messages
+                WHERE chat_key = ? AND message_id = ?
+             )
+             AND generation = (
+               SELECT current_generation FROM chat_state
+                WHERE chat_key = turns.chat_key
+             )
+             AND (? IS NULL OR execution_session_file IS NULL
+                  OR execution_session_file = ?)`,
+        )
+        .run(
+          sessionFile,
+          updatedAt,
+          requiredText(fence.turnId, "chat_turn_id_required"),
+          requiredText(fence.chatKey, "chat_turn_chat_key_required"),
+          requiredText(fence.ownerEpoch, "chat_turn_owner_epoch_required"),
+          Math.max(0, Math.floor(Number(fence.attempt || 0))),
+          requiredText(fence.chatKey, "chat_turn_chat_key_required"),
+          requiredText(fence.messageId, "chat_turn_message_id_required"),
+          sessionFile,
+          sessionFile,
+        );
+      if (turn.changes !== 1) return false;
+      const message = db
+        .prepare(
+          `UPDATE messages
+           SET accepted_at = COALESCE(accepted_at, ?),
+               session_file = COALESCE(?, session_file),
+               record_json = json_set(
+                 record_json,
+                 '$.acceptedAt', COALESCE(json_extract(record_json, '$.acceptedAt'), ?),
+                 '$.sessionFile', COALESCE(?, json_extract(record_json, '$.sessionFile'))
+               ),
+               updated_at = ?
+           WHERE chat_key = ? AND message_id = ?
+             AND id = (
+               SELECT inbound_message_id FROM turns WHERE turn_id = ?
+             )`,
+        )
+        .run(
+          timestamp,
+          sessionFile,
+          timestamp,
+          sessionFile,
+          updatedAt,
+          fence.chatKey,
+          fence.messageId,
+          fence.turnId,
+        );
+      if (message.changes !== 1) throw new Error("chat_turn_fence_lost");
+      return true;
+    })
+    .immediate();
 }
 
 export function completeChatTurnWithoutDelivery(
@@ -1003,12 +1108,15 @@ export function completeChatTurnWithoutDelivery(
   return db
     .transaction(() => {
       const timestamp = nowIso();
+      const sessionFile = safeString(input.sessionFile).trim() || null;
       const terminalized = db
         .prepare(
           `UPDATE turns
            SET state = 'terminal', terminal_kind = 'empty_completion',
                owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL,
-               next_attempt_at = NULL, last_error = NULL, updated_at = ?
+               next_attempt_at = NULL, last_error = NULL,
+               execution_session_file = COALESCE(execution_session_file, ?),
+               updated_at = ?
            WHERE turn_id = ? AND chat_key = ? AND state = 'running'
              AND owner_epoch = ? AND attempt = ?
              AND inbound_message_id = (
@@ -1018,9 +1126,12 @@ export function completeChatTurnWithoutDelivery(
              AND generation = (
                SELECT current_generation FROM chat_state
                WHERE chat_key = turns.chat_key
-             )`,
+             )
+             AND (? IS NULL OR execution_session_file IS NULL
+                  OR execution_session_file = ?)`,
         )
         .run(
+          sessionFile,
           timestamp,
           requiredText(fence.turnId, "chat_turn_id_required"),
           requiredText(fence.chatKey, "chat_turn_chat_key_required"),
@@ -1028,9 +1139,10 @@ export function completeChatTurnWithoutDelivery(
           Math.max(0, Math.floor(Number(fence.attempt || 0))),
           requiredText(fence.chatKey, "chat_turn_chat_key_required"),
           requiredText(fence.messageId, "chat_turn_message_id_required"),
+          sessionFile,
+          sessionFile,
         );
       if (terminalized.changes !== 1) return false;
-      const sessionFile = safeString(input.sessionFile).trim() || null;
       db.prepare(
         `UPDATE messages
          SET accepted_at = COALESCE(accepted_at, ?), processed_at = ?,

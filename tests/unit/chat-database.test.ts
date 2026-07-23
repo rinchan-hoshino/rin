@@ -44,6 +44,17 @@ async function withTempDir(fn) {
   }
 }
 
+function dropDurableAdmissionColumns(db) {
+  db.exec(`
+    ALTER TABLE turns DROP COLUMN execution_session_file;
+    ALTER TABLE turns DROP COLUMN submission_hash;
+    ALTER TABLE turns DROP COLUMN submission_json;
+    ALTER TABLE turns DROP COLUMN admission_hash;
+    ALTER TABLE turns DROP COLUMN admission_json;
+    ALTER TABLE turns DROP COLUMN admission_state;
+  `);
+}
+
 test("chat database owns message, turn, outbox, delivery, and chat generation state", async () => {
   await withTempDir(async (agentDir) => {
     const db = chatDatabase.openChatDatabase(agentDir);
@@ -74,6 +85,47 @@ test("chat database owns message, turn, outbox, delivery, and chat generation st
     );
     assert.ok(
       (await fs.stat(chatDatabase.chatDatabasePath(agentDir))).isFile(),
+    );
+  });
+});
+
+test("chat database reopens the current version 6 durable admission layout", async () => {
+  await withTempDir(async (agentDir) => {
+    const created = chatDatabase.openChatDatabase(agentDir);
+    assert.equal(created.pragma("user_version", { simple: true }), 6);
+    assert.deepEqual(
+      created
+        .prepare(`PRAGMA table_info(turns)`)
+        .all()
+        .map((column) => column.name)
+        .filter((name) =>
+          [
+            "admission_state",
+            "admission_json",
+            "admission_hash",
+            "submission_json",
+            "submission_hash",
+            "execution_session_file",
+          ].includes(name),
+        ),
+      [
+        "admission_state",
+        "admission_json",
+        "admission_hash",
+        "submission_json",
+        "submission_hash",
+        "execution_session_file",
+      ],
+    );
+    chatDatabase.closeChatDatabase(agentDir);
+
+    const reopened = chatDatabase.openChatDatabase(agentDir);
+    assert.equal(reopened.pragma("user_version", { simple: true }), 6);
+    assert.equal(
+      reopened
+        .prepare(`SELECT value FROM schema_meta WHERE key = 'schema_version'`)
+        .get().value,
+      "6",
     );
   });
 });
@@ -135,6 +187,7 @@ test("chat database rejects unknown future and partial schemas instead of relabe
 test("chat database migrates the version 1 terminal outbox index", async () => {
   await withTempDir(async (agentDir) => {
     const db = chatDatabase.openChatDatabase(agentDir);
+    dropDurableAdmissionColumns(db);
     db.exec(`
       DROP INDEX outbox_turn_terminal_idx;
       CREATE UNIQUE INDEX outbox_turn_terminal_idx
@@ -171,12 +224,12 @@ test("chat database migrates the version 1 terminal outbox index", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 5);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 6);
     assert.equal(
       migrated
         .prepare(`SELECT value FROM schema_meta WHERE key = 'schema_version'`)
         .get().value,
-      "5",
+      "6",
     );
     const indexSql = migrated
       .prepare(
@@ -195,6 +248,7 @@ test("chat database migrates the version 1 terminal outbox index", async () => {
 test("chat database migrates version 2 session binding authority", async () => {
   await withTempDir(async (agentDir) => {
     const db = chatDatabase.openChatDatabase(agentDir);
+    dropDurableAdmissionColumns(db);
     db.exec(`
       ALTER TABLE chat_state DROP COLUMN legacy_session_imported;
       ALTER TABLE chat_state DROP COLUMN session_file;
@@ -224,7 +278,7 @@ test("chat database migrates version 2 session binding authority", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 5);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 6);
     assert.ok(
       migrated
         .prepare(`PRAGMA table_info(chat_state)`)
@@ -237,6 +291,7 @@ test("chat database migrates version 2 session binding authority", async () => {
 test("chat database migrates version 3 dispatch evidence", async () => {
   await withTempDir(async (agentDir) => {
     const db = chatDatabase.openChatDatabase(agentDir);
+    dropDurableAdmissionColumns(db);
     db.exec(`
       ALTER TABLE outbox DROP COLUMN dispatch_started_at;
       DROP INDEX inbound_heads_recovery_idx;
@@ -264,7 +319,7 @@ test("chat database migrates version 3 dispatch evidence", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 5);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 6);
     assert.ok(
       migrated
         .prepare(`PRAGMA table_info(outbox)`)
@@ -277,6 +332,7 @@ test("chat database migrates version 3 dispatch evidence", async () => {
 test("chat database migrates version 4 inbound recovery lease state", async () => {
   await withTempDir(async (agentDir) => {
     const db = chatDatabase.openChatDatabase(agentDir);
+    dropDurableAdmissionColumns(db);
     db.exec(`
       DROP INDEX inbound_heads_recovery_idx;
       ALTER TABLE inbound_heads DROP COLUMN recovery_version;
@@ -303,7 +359,7 @@ test("chat database migrates version 4 inbound recovery lease state", async () =
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 5);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 6);
     const columns = new Set(
       migrated
         .prepare(`PRAGMA table_info(inbound_heads)`)
@@ -314,6 +370,149 @@ test("chat database migrates version 4 inbound recovery lease state", async () =
     assert.ok(columns.has("recovery_paused_at"));
     assert.ok(columns.has("recovery_next_attempt_at"));
     assert.ok(columns.has("recovery_version"));
+  });
+});
+
+test("chat database migrates accepted version 5 turns as actionable", async () => {
+  await withTempDir(async (agentDir) => {
+    const db = chatDatabase.openChatDatabase(agentDir);
+    db.prepare(
+      `INSERT INTO chat_state (
+         chat_key, current_generation, next_sequence, updated_at
+       ) VALUES (?, 0, 2, ?)`,
+    ).run("telegram/1:2", "2026-07-23T00:00:00.000Z");
+    db.prepare(
+      `INSERT INTO messages (
+         id, record_key, chat_key, message_id, platform, chat_id,
+         session_file, accepted_at, received_at, sequence, generation,
+         disposition, record_json
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 'record_only', '{}')`,
+    ).run(
+      "legacy-message",
+      "legacy-record",
+      "telegram/1:2",
+      "legacy-accepted",
+      "telegram",
+      "2",
+      "/tmp/legacy-accepted.jsonl",
+      "2026-07-23T00:00:01.000Z",
+      "2026-07-23T00:00:00.000Z",
+    );
+    db.prepare(
+      `INSERT INTO turns (
+         turn_id, inbound_message_id, chat_key, generation, sequence, state,
+         attempt, created_at, updated_at
+       ) VALUES (?, ?, ?, 0, 1, 'pending', 1, ?, ?)`,
+    ).run(
+      "legacy-turn",
+      "legacy-message",
+      "telegram/1:2",
+      "2026-07-23T00:00:00.000Z",
+      "2026-07-23T00:00:00.000Z",
+    );
+    dropDurableAdmissionColumns(db);
+    db.exec(`
+      UPDATE schema_meta SET value = '5' WHERE key = 'schema_version';
+      PRAGMA user_version = 5;
+    `);
+    const objects = db
+      .prepare(
+        `SELECT type, name, sql FROM sqlite_master
+         WHERE type IN ('table', 'index', 'trigger', 'view')
+           AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL
+         ORDER BY type, name`,
+      )
+      .all();
+    db.prepare(
+      `UPDATE schema_meta SET value = ? WHERE key = 'schema_fingerprint'`,
+    ).run(createHash("sha256").update(JSON.stringify(objects)).digest("hex"));
+    chatDatabase.closeChatDatabase(agentDir);
+
+    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 6);
+    assert.deepEqual(
+      migrated
+        .prepare(
+          `SELECT admission_state, execution_session_file
+           FROM turns WHERE turn_id = 'legacy-turn'`,
+        )
+        .get(),
+      {
+        admission_state: "actionable",
+        execution_session_file: "/tmp/legacy-accepted.jsonl",
+      },
+    );
+  });
+});
+
+test("chat database migrates version 5 record-only turns with verifiable admission", async () => {
+  await withTempDir(async (agentDir) => {
+    const db = chatDatabase.openChatDatabase(agentDir);
+    db.prepare(
+      `INSERT INTO chat_state (
+         chat_key, current_generation, next_sequence, updated_at
+       ) VALUES (?, 0, 2, ?)`,
+    ).run("telegram/1:2", "2026-07-23T00:00:00.000Z");
+    db.prepare(
+      `INSERT INTO messages (
+         id, record_key, chat_key, message_id, platform, chat_id,
+         received_at, sequence, generation, disposition, record_json
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 'record_only', '{}')`,
+    ).run(
+      "legacy-record-only-message",
+      "legacy-record-only-record",
+      "telegram/1:2",
+      "legacy-record-only",
+      "telegram",
+      "2",
+      "2026-07-23T00:00:00.000Z",
+    );
+    db.prepare(
+      `INSERT INTO turns (
+         turn_id, inbound_message_id, chat_key, generation, sequence, state,
+         attempt, created_at, updated_at
+       ) VALUES (?, ?, ?, 0, 1, 'pending', 1, ?, ?)`,
+    ).run(
+      "legacy-record-only-turn",
+      "legacy-record-only-message",
+      "telegram/1:2",
+      "2026-07-23T00:00:00.000Z",
+      "2026-07-23T00:00:00.000Z",
+    );
+    dropDurableAdmissionColumns(db);
+    db.exec(`
+      UPDATE schema_meta SET value = '5' WHERE key = 'schema_version';
+      PRAGMA user_version = 5;
+    `);
+    const objects = db
+      .prepare(
+        `SELECT type, name, sql FROM sqlite_master
+         WHERE type IN ('table', 'index', 'trigger', 'view')
+           AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL
+         ORDER BY type, name`,
+      )
+      .all();
+    db.prepare(
+      `UPDATE schema_meta SET value = ? WHERE key = 'schema_fingerprint'`,
+    ).run(createHash("sha256").update(JSON.stringify(objects)).digest("hex"));
+    chatDatabase.closeChatDatabase(agentDir);
+
+    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
+    const row = migrated
+      .prepare(
+        `SELECT admission_state, admission_json, admission_hash
+           FROM turns WHERE turn_id = 'legacy-record-only-turn'`,
+      )
+      .get();
+    assert.equal(row.admission_state, "record_only");
+    assert.deepEqual(JSON.parse(row.admission_json), {
+      version: 1,
+      kind: "legacy_message_projection",
+    });
+    assert.equal(
+      row.admission_hash,
+      createHash("sha256").update(row.admission_json).digest("hex"),
+    );
   });
 });
 
@@ -369,7 +568,7 @@ test("chat database serializes concurrent cold initialization", async () => {
       ),
     );
     const db = chatDatabase.openChatDatabase(agentDir);
-    assert.equal(db.pragma("user_version", { simple: true }), 5);
+    assert.equal(db.pragma("user_version", { simple: true }), 6);
     assert.deepEqual(
       db
         .prepare(`SELECT key FROM schema_meta ORDER BY key`)
@@ -566,6 +765,24 @@ test("chat database fences accepted, session binding, and superseded updates", a
         sessionFile: "accepted.jsonl",
       }),
       true,
+    );
+    assert.equal(
+      db
+        .prepare(`SELECT execution_session_file FROM turns WHERE turn_id = ?`)
+        .get("fenced-turn").execution_session_file,
+      "accepted.jsonl",
+    );
+    assert.equal(
+      chatDatabase.markChatMessageAcceptedWithFence(agentDir, currentFence, {
+        sessionFile: "different.jsonl",
+      }),
+      false,
+    );
+    assert.equal(
+      chatDatabase.completeChatTurnWithoutDelivery(agentDir, currentFence, {
+        sessionFile: "different.jsonl",
+      }),
+      false,
     );
     db.prepare(
       `INSERT INTO outbox (
