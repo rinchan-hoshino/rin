@@ -49,6 +49,29 @@ Read beyond explicit requests. Capture a reusable lesson, working-style pattern,
 
 Do not preserve a bad rule with patch-layer exceptions, bans, authorization clauses, guards, or special cases. Repair or remove the owning guidance.
 
+## Skill lifecycle and usage evidence
+
+Resident skill metadata is a budgeted context surface. A top-level skill earns that cost by providing a distinct future trigger and reusable behavior; the existence of a detailed `SKILL.md` is not itself a reason to keep it resident.
+
+Use `<agentDir>/self_improve/state/skill-usage.json` as supporting evidence rather than a mechanical retention rule. In version 2, each skill's `bySource` buckets separate:
+
+- `user`: ordinary user-directed work;
+- `scheduled-task`: real demand from continuing automation, considered separately from interactive demand;
+- `self-improve`: maintenance reading its own library, which is not evidence of external demand;
+- `other`: a producer that could not be classified safely;
+- `legacy`: pre-version-2 usage whose producer is unknown.
+
+Counts and recency inform judgment; they are not fixed expiry thresholds. Interpret them with the skill's trigger coverage, unique behavior, overlap with a canonical owner, current scheduled or production dependencies, safety value, and credible future use. A recorded `recovery` means the ledger was repaired from a damaged file and names the preserved backup; account for incomplete evidence instead of treating missing counts as proof of non-use.
+
+When a top-level skill no longer justifies resident discovery cost, finish the lifecycle change in the same pass:
+
+- if its reusable detail still has a canonical workflow owner, move that detail to an ordinary file under the owner's `references/`, update the owner to load it only when relevant, then remove the top-level skill;
+- if only chronology or provenance remains useful, preserve a compact memory-index pointer and delete the skill;
+- if its behavior is obsolete, duplicated, superseded, or no longer useful, delete the skill without leaving a resident tombstone or compatibility shim;
+- if a narrower resident description or an existing umbrella skill preserves correct routing at lower context cost, prefer that simpler owner and verify it with future-trigger replay.
+
+Do not create a human review queue or defer routine lifecycle decisions to the user. When evidence is sufficient, autonomously merge, move, or delete and validate the resulting routing. When material uncertainty would make deletion unsafe, leave the artifact unchanged until later evidence resolves the uncertainty; do not manufacture a pending-review mechanism.
+
 ## Destination order
 
 Choose the first destination that fits:
