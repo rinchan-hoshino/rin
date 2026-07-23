@@ -213,7 +213,8 @@ async function emitRpcTurnComplete(
   driver: any,
   requestTag: string,
   finalText: string,
-  sessionFile = "/tmp/chat-driver.jsonl",
+  sessionFile = "/tmp/frontend-chat.jsonl",
+  sessionId = "frontend-session",
 ) {
   await emitDriverEvent(driver, {
     type: "rpc_turn_event",
@@ -223,7 +224,7 @@ async function emitRpcTurnComplete(
     result: {
       messages: finalText ? [{ type: "text", text: finalText }] : [],
     },
-    sessionId: "session-driver",
+    sessionId,
     sessionFile,
   });
 }
@@ -907,6 +908,112 @@ test("frontend SDK ignores stale terminal events from the aborted turn after /ne
   assert.equal(result.text, "Started a new session.");
   await assert.rejects(activeTurn, /chat_turn_aborted/);
   assert.equal(driver.currentSessionFile(), newSessionFile);
+});
+
+test("frontend SDK reuses a durable request tag after local abort rejoin", async () => {
+  const client = createFrontendClient();
+  let promptCalls = 0;
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    promptCalls += 1;
+    return {
+      acceptedAs: promptCalls === 1 ? "start" : "rejoin",
+      requestTag: options.requestTag,
+    };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const first = driver.runTurn({
+    text: "durable turn",
+    requestTag: "durable-tag",
+  });
+  first.catch(() => {});
+  await waitUntil(() => promptCalls === 1, "first admission did not start");
+  driver.interruptActiveTurnLikeTui();
+  await assert.rejects(first, /chat_turn_aborted/);
+
+  const rejoined = driver.runTurn({
+    text: "durable turn",
+    requestTag: "durable-tag",
+  });
+  await waitUntil(() => promptCalls === 2, "durable admission did not rejoin");
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "durable-tag",
+    finalText: "durable final",
+    result: { messages: [{ type: "text", text: "durable final" }] },
+    sessionFile: driver.currentSessionFile(),
+    sessionId: driver.currentSessionId(),
+  });
+
+  assert.equal((await rejoined).finalText, "durable final");
+  assert.deepEqual(
+    client.calls
+      .filter((call: any) => call.type === "prompt")
+      .map((call: any) => call.options.requestTag),
+    ["durable-tag", "durable-tag"],
+  );
+});
+
+test("frontend SDK rejects stale and untagged terminals for a tagged turn", async () => {
+  const client = createFrontendClient();
+  let promptCalled = false;
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    promptCalled = true;
+    return { acceptedAs: "start", requestTag: options.requestTag };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const current = driver.runTurn({
+    text: "current turn",
+    requestTag: "current-tag",
+  });
+  await waitUntil(() => promptCalled, "current turn did not start");
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    finalText: "untagged final",
+    result: { messages: [{ type: "text", text: "untagged final" }] },
+    sessionFile: driver.currentSessionFile(),
+    sessionId: driver.currentSessionId(),
+  });
+  assert.ok(
+    (driver as any).liveTurn,
+    "untagged terminal settled the tagged current turn",
+  );
+
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "stale-tag",
+    finalText: "stale final",
+    result: { messages: [{ type: "text", text: "stale final" }] },
+    sessionFile: driver.currentSessionFile(),
+    sessionId: driver.currentSessionId(),
+  });
+  assert.ok(
+    (driver as any).liveTurn,
+    "stale terminal settled the current turn",
+  );
+
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "current-tag",
+    finalText: "current final",
+    result: { messages: [{ type: "text", text: "current final" }] },
+    sessionFile: driver.currentSessionFile(),
+    sessionId: driver.currentSessionId(),
+  });
+  assert.equal((await current).finalText, "current final");
 });
 
 test("frontend SDK keeps non-reset commands from interrupting active turns", async () => {
@@ -1663,6 +1770,54 @@ test("frontend SDK turn driver submits already active messages for backend admis
   assert.equal(promptCall.options.streamingBehavior, undefined);
 });
 
+test("frontend SDK turn driver projects backend terminal after remote-active admission without a local waiter", async () => {
+  const client = createFrontendClient();
+  client.getState = async () => ({
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: true,
+    turnActive: true,
+  });
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    return { acceptedAs: "steer", requestTag: options.requestTag };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const completed: any[] = [];
+  driver.subscribe((event: any) => {
+    if (event.type === "turn_complete") completed.push(event);
+  });
+
+  const result = await driver.runTurn({
+    text: "steer after reconnect",
+    requestTag: "tag-remote-steer",
+    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+  });
+  assert.equal(result.steered, true);
+
+  await emitRpcTurnComplete(
+    driver,
+    "tag-remote-steer",
+    "remote steer final",
+    "/tmp/frontend-chat.jsonl",
+    "frontend-session",
+  );
+
+  assert.deepEqual(completed, [
+    {
+      type: "turn_complete",
+      finalText: "remote steer final",
+      result: { messages: [{ type: "text", text: "remote steer final" }] },
+      sessionId: "frontend-session",
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      requestTag: "tag-remote-steer",
+    },
+  ]);
+});
+
 test("frontend SDK turn driver keeps backend admission authoritative across stale active state", async () => {
   const client = createFrontendClient();
   client.getState = async () => ({
@@ -1691,7 +1846,7 @@ test("frontend SDK turn driver keeps backend admission authoritative across stal
   assert.equal(promptCall.options.streamingBehavior, undefined);
 });
 
-test("frontend SDK turn driver transfers terminal ownership when a queued steer starts", async () => {
+test("frontend SDK turn driver leaves terminal ownership with the backend after a queued steer starts", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   client.prompt = async (text: string, options: any = {}) => {
@@ -1716,16 +1871,8 @@ test("frontend SDK turn driver transfers terminal ownership when a queued steer 
       content: [{ type: "text", text: "steer now" }],
     },
   });
-  await emitRpcTurnComplete(driver, "tag-first", "");
-
-  let settled = false;
-  void turn.finally(() => {
-    settled = true;
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(settled, false);
-
   await emitRpcTurnComplete(driver, "tag-steer", "steered final");
+
   assert.equal((await turn).finalText, "steered final");
 });
 
@@ -2127,7 +2274,13 @@ test("frontend SDK turn driver starts managed leaf sessions even after connect r
   };
   client.prompt = async (_text: string, options: any = {}) => {
     calls.push("prompt");
-    await emitRpcTurnComplete(driver, options.requestTag, "done", sessionFile);
+    await emitRpcTurnComplete(
+      driver,
+      options.requestTag,
+      "done",
+      sessionFile,
+      "session-driver",
+    );
   };
 
   const result = await driver.runTurn({
@@ -2160,7 +2313,13 @@ test("frontend SDK turn driver forwards disabled Rin capabilities to managed ses
     return { cancelled: false, sessionFile, sessionId: "session-driver" };
   };
   client.prompt = async (_text: string, options: any = {}) => {
-    await emitRpcTurnComplete(driver, options.requestTag, "done", sessionFile);
+    await emitRpcTurnComplete(
+      driver,
+      options.requestTag,
+      "done",
+      sessionFile,
+      "session-driver",
+    );
   };
 
   await driver.runTurn({
@@ -2352,6 +2511,7 @@ test("frontend SDK turn driver does not infer empty completion from inactive sta
       "late-final-tag",
       "canonical late final",
       "/tmp/frontend-late-final.jsonl",
+      "frontend-late-final",
     );
   }, 1_100);
 

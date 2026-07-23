@@ -239,7 +239,7 @@ test(
 );
 
 test(
-  "rpc mode tags active assistant progress with the turn requestTag",
+  "rpc mode leaves Pi assistant progress untagged",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -329,7 +329,7 @@ test(
       const progress = events.filter(
         (event) => event.type === "message_update",
       );
-      assert.equal(progress[0]?.requestTag, "turn-tag");
+      assert.equal(progress[0]?.requestTag, undefined);
       assert.equal(progress[1]?.requestTag, undefined);
       assert.equal(
         events.find((event) => event.type === "agent_start")?.requestTag,
@@ -2386,7 +2386,7 @@ test(
           event.type === "message_end" && event.message?.role === "assistant",
       );
       assert.equal(userStart?.requestTag, "tag-1");
-      assert.equal(assistantEnd?.requestTag, "tag-1");
+      assert.equal(assistantEnd?.requestTag, undefined);
       assert.equal(
         durableEntries.find((entry) => entry.message?.role === "user")?.message
           ?.requestTag,
@@ -4258,230 +4258,6 @@ test(
 );
 
 test(
-  "rpc mode prompt streamingBehavior keeps Pi prompt queue path during active-run non-streaming gaps",
-  { concurrency: false },
-  async () => {
-    const stdinOn = process.stdin.on;
-    const stdoutWrite = process.stdout.write;
-    const handlers = new Map();
-    const lines = [];
-    const calls = [];
-    const sessionSubscribers = new Set();
-    const delayedUserMessages = [];
-    const activeRunSignal = new AbortController().signal;
-    const agentState = { isStreaming: false, activeRun: false };
-    let releaseFirstPrompt;
-    const firstPromptGate = new Promise((resolve) => {
-      releaseFirstPrompt = resolve;
-    });
-
-    process.stdin.on = function (event, handler) {
-      handlers.set(event, handler);
-      return this;
-    };
-    process.stdout.write = function (chunk) {
-      lines.push(String(chunk));
-      return true;
-    };
-
-    try {
-      const session = {
-        get isStreaming() {
-          return this.agent.state.isStreaming;
-        },
-        isCompacting: false,
-        sessionFile: "/tmp/test-session.jsonl",
-        sessionId: "session-1",
-        agent: {
-          get signal() {
-            return agentState.activeRun ? activeRunSignal : undefined;
-          },
-          state: agentState,
-          waitForIdle: async () => {},
-        },
-        bindExtensions: async () => {},
-        subscribe: (handler) => {
-          sessionSubscribers.add(handler);
-          return () => sessionSubscribers.delete(handler);
-        },
-        async prompt(message, options) {
-          calls.push(["prompt", message, options, this.isStreaming]);
-          const userMessage = {
-            role: "user",
-            timestamp: Date.now(),
-            content: [{ type: "text", text: message }],
-          };
-          if (options?.streamingBehavior) {
-            delayedUserMessages.push(userMessage);
-          } else {
-            for (const handler of sessionSubscribers) {
-              handler({ type: "message_start", message: userMessage });
-            }
-            this.sessionManager.appendMessage(userMessage);
-          }
-          if (!options?.streamingBehavior) {
-            agentState.activeRun = true;
-            await firstPromptGate;
-          }
-        },
-        steer: async (message, images) => {
-          calls.push(["steer", message, images]);
-        },
-        followUp: async (message, images) => {
-          calls.push(["followUp", message, images]);
-        },
-        abort: async () => {},
-        modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          ...testSessionManager(() => session.messages || []),
-          appendMessage() {
-            return `persisted-${Date.now()}`;
-          },
-        },
-        messages: [],
-        getSessionStats: () => ({}),
-        getUserMessagesForForking: () => [],
-        getLastAssistantText: () => "",
-        setThinkingLevel: () => {},
-        cycleThinkingLevel: () => undefined,
-        setSteeringMode: () => {},
-        setFollowUpMode: () => {},
-        compact: async () => {},
-        setAutoCompactionEnabled: () => {},
-        setAutoRetryEnabled: () => {},
-        abortRetry: () => {},
-        executeBash: async () => {},
-        abortBash: async () => {},
-        fork: async () => ({ cancelled: false, selectedText: "" }),
-        navigateTree: async () => ({ cancelled: false }),
-        exportToHtml: async () => "",
-        exportToJsonl: () => "",
-        importFromJsonl: async () => true,
-        newSession: async () => true,
-        switchSession: async () => true,
-        setModel: async () => {},
-        reload: async () => {},
-        setSessionName: () => {},
-      };
-
-      void runCustomRpcMode(session, {
-        SessionManager: {
-          listAll: async () => [],
-          list: async () => [],
-          open: () => ({ appendSessionInfo() {} }),
-        },
-        builtinSlashCommands: [],
-      });
-      await wait(0);
-
-      const onData = handlers.get("data");
-      assert.equal(typeof onData, "function");
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "turn-1", type: "prompt", message: "first", requestTag: "tag-1" })}\n`,
-        ),
-      );
-      await wait(10);
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "queue-1", type: "prompt", message: "steer me", streamingBehavior: "steer", requestTag: "tag-2" })}\n`,
-        ),
-      );
-      await wait(20);
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "queue-2", type: "prompt", message: "steer me", streamingBehavior: "steer", requestTag: "tag-3" })}\n`,
-        ),
-      );
-      await wait(20);
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "queue-duplicate", type: "prompt", message: "steer me", streamingBehavior: "steer", requestTag: "tag-2" })}\n`,
-        ),
-      );
-      await wait(20);
-
-      assert.deepEqual(calls, [
-        [
-          "prompt",
-          "first",
-          {
-            images: undefined,
-            streamingBehavior: undefined,
-            source: "rpc",
-            requestTag: "tag-1",
-          },
-          false,
-        ],
-        [
-          "prompt",
-          "steer me",
-          {
-            images: undefined,
-            streamingBehavior: "steer",
-            source: "rpc",
-            requestTag: "tag-2",
-          },
-          true,
-        ],
-        [
-          "prompt",
-          "steer me",
-          {
-            images: undefined,
-            streamingBehavior: "steer",
-            source: "rpc",
-            requestTag: "tag-3",
-          },
-          true,
-        ],
-      ]);
-      assert.equal(agentState.isStreaming, false);
-      assert.ok(lines.join("").includes('"id":"queue-1"'));
-      const duplicateResponse = lines
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
-          }
-        })
-        .find((event) => event?.id === "queue-duplicate");
-      assert.equal(duplicateResponse?.data?.acceptedAs, "steer");
-      assert.equal(duplicateResponse?.data?.requestTag, "tag-2");
-      releaseFirstPrompt();
-      await wait(20);
-      for (const userMessage of delayedUserMessages) {
-        for (const handler of sessionSubscribers) {
-          handler({ type: "message_start", message: userMessage });
-        }
-        session.sessionManager.appendMessage(userMessage);
-      }
-      await wait(10);
-      const userStarts = lines
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
-          }
-        })
-        .filter(
-          (event) =>
-            event?.type === "message_start" && event.message?.role === "user",
-        );
-      assert.deepEqual(
-        userStarts.map((event) => event.requestTag),
-        ["tag-1", "tag-2", "tag-3"],
-      );
-    } finally {
-      process.stdin.on = stdinOn;
-      process.stdout.write = stdoutWrite;
-    }
-  },
-);
-
-test(
   "rpc mode terminalizes from agent_settled when the outer prompt promise never returns",
   { concurrency: false },
   async () => {
@@ -4733,7 +4509,7 @@ test(
 );
 
 test(
-  "rpc mode keeps a tracked terminal open for a queued steer that starts at the old turn boundary",
+  "rpc mode keeps Pi prompt ownership immutable across a queued steer",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -4741,10 +4517,6 @@ test(
     const handlers = new Map();
     const lines = [];
     const sessionSubscribers = new Set();
-    let releaseFirstPrompt;
-    const firstPromptGate = new Promise((resolve) => {
-      releaseFirstPrompt = resolve;
-    });
     let releaseSteeredTurn;
     const steeredTurnGate = new Promise((resolve) => {
       releaseSteeredTurn = resolve;
@@ -4768,18 +4540,18 @@ test(
         agent: {
           signal: undefined,
           state: { isStreaming: false },
-          waitForIdle: async () => {
-            await steeredTurnGate;
-          },
+          waitForIdle: async () => {},
         },
         bindExtensions: async () => {},
         subscribe: (handler) => {
           sessionSubscribers.add(handler);
           return () => sessionSubscribers.delete(handler);
         },
-        async prompt(_message, options) {
-          if (options?.streamingBehavior) return;
-          await firstPromptGate;
+        async prompt() {
+          if (this.isStreaming) return;
+          this.isStreaming = true;
+          await steeredTurnGate;
+          this.isStreaming = false;
         },
         steer: async () => {},
         followUp: async () => {},
@@ -4849,7 +4621,6 @@ test(
           message: steeredUser,
         });
       }
-      releaseFirstPrompt();
       await wait(20);
 
       assert.equal(
@@ -4880,7 +4651,7 @@ test(
           requestTag: event.requestTag,
           finalText: event.finalText,
         })),
-        [{ requestTag: "tag-steer", finalText: "steered final" }],
+        [{ requestTag: "tag-first", finalText: "steered final" }],
       );
     } finally {
       process.stdin.on = stdinOn;
@@ -4933,7 +4704,7 @@ test(
         },
         async prompt(message, options) {
           calls.push(["prompt", message, options, this.isStreaming]);
-          if (!options?.streamingBehavior) {
+          if (!this.isStreaming) {
             agentState.activeRun = true;
             await new Promise(() => {});
           }
@@ -5028,7 +4799,7 @@ test(
           "first",
           {
             images: undefined,
-            streamingBehavior: undefined,
+            streamingBehavior: "steer",
             source: "rpc",
           },
           false,
@@ -5038,7 +4809,7 @@ test(
           "plain follow-in",
           {
             images: undefined,
-            streamingBehavior: undefined,
+            streamingBehavior: "steer",
             source: "rpc",
             requestTag: "tag-2",
           },
@@ -5064,7 +4835,7 @@ test(
 );
 
 test(
-  "rpc mode prompt admission trusts the Pi active run during an untracked recovery gap",
+  "rpc mode does not override Pi state during an untracked signal gap",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -5162,12 +4933,20 @@ test(
             source: "rpc",
             requestTag: "tag-2",
           },
-          true,
+          false,
         ],
       ]);
-      const output = lines.join("");
-      assert.match(output, /"acceptedAs":"steer"/);
-      assert.doesNotMatch(output, /"event":"error"/);
+      const response = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .find((line) => line?.id === "queue-1");
+      assert.equal(response?.success, false);
+      assert.match(response?.error || "", /Agent is already processing/);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -5962,7 +5741,7 @@ test(
           "after swap",
           {
             images: undefined,
-            streamingBehavior: undefined,
+            streamingBehavior: "steer",
             source: "rpc",
             requestTag: "tag-4",
           },
@@ -6555,7 +6334,7 @@ test(
 );
 
 test(
-  "rpc mode rejoins an active turn with the same durable request tag",
+  "rpc mode rejoins an active input with the same durable request tag",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -6651,16 +6430,10 @@ test(
       assert.equal(typeof onData, "function");
       onData(
         Buffer.from(
-          `${JSON.stringify({ id: "turn-1", type: "prompt", message: "hello", requestTag: "chat-inbox-stable" })}\n`,
+          `${JSON.stringify({ id: "turn-1", type: "prompt", message: "hello", requestTag: "chat-inbox-stable" })}\n${JSON.stringify({ id: "rejoin-1", type: "prompt", message: "hello", requestTag: "chat-inbox-stable" })}\n`,
         ),
       );
-      await wait(10);
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "rejoin-1", type: "prompt", message: "hello", requestTag: "chat-inbox-stable" })}\n`,
-        ),
-      );
-      await wait(20);
+      await wait(100);
 
       const response = lines
         .map((line) => {
@@ -6674,10 +6447,9 @@ test(
       assert.equal(response?.data?.acceptedAs, "rejoin");
       assert.equal(response?.data?.requestTag, "chat-inbox-stable");
       assert.equal(calls.length, 1);
-
-      releasePrompt();
-      await wait(60);
     } finally {
+      releasePrompt?.();
+      await wait(60);
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
     }

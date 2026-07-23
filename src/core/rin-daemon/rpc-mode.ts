@@ -93,21 +93,6 @@ function stableJson(value: any) {
   }
 }
 
-async function promptWithQueueableTurnReceiver(
-  session: any,
-  message: string,
-  options: Record<string, unknown>,
-) {
-  if (typeof session?.prompt !== "function") return;
-  const receiver = new Proxy(session, {
-    get(target, property, receiver) {
-      if (property === "isStreaming") return true;
-      return Reflect.get(target, property, receiver);
-    },
-  });
-  return await session.prompt.call(receiver, message, options);
-}
-
 function rpcRequestTag(value: unknown) {
   return typeof value === "string" ? value : "";
 }
@@ -787,21 +772,11 @@ export async function runCustomRpcMode(
   };
   let activeTurnPromise: Promise<void> | null = null;
   let activeTurnRequestTag = "";
-  type ActiveTrackedTurn = {
-    requestTag: string;
-    queueAdmissions: PendingPromptRequestTag[];
-    agentSettled: boolean;
-  };
   type PendingPromptRequestTag = {
     requestTag: string;
     acceptedAs: "prompt" | "steer" | "followUp";
     text: string;
-    trackedTurn?: ActiveTrackedTurn;
-    started?: Promise<void>;
-    resolveStarted?: () => void;
-    cancelled?: boolean;
   };
-  let activeTrackedTurn: ActiveTrackedTurn | null = null;
   const pendingPromptRequestTags: PendingPromptRequestTag[] = [];
   const admittedPromptRequestTags = new Map<
     string,
@@ -831,44 +806,21 @@ export async function runCustomRpcMode(
     acceptedAs: PendingPromptRequestTag["acceptedAs"],
     text: string,
   ) => {
-    // Native Pi steering may outlive the prompt() promise that owns the
-    // current RPC terminal. Keep that terminal attached to admitted queue work.
-    const trackedTurn =
-      acceptedAs === "prompt" ? undefined : activeTrackedTurn || undefined;
-    let resolveStarted: (() => void) | undefined;
-    const started = trackedTurn
-      ? new Promise<void>((resolve) => {
-          resolveStarted = resolve;
-        })
-      : undefined;
     const token: PendingPromptRequestTag = {
       requestTag,
       acceptedAs,
       text: safeString(text).trim(),
-      trackedTurn,
-      started,
-      resolveStarted,
     };
     pendingPromptRequestTags.push(token);
-    trackedTurn?.queueAdmissions.push(token);
     if (requestTag) admittedPromptRequestTags.set(requestTag, acceptedAs);
     return token;
-  };
-  const cancelPendingPromptRequestTag = (token: PendingPromptRequestTag) => {
-    token.cancelled = true;
-    token.resolveStarted?.();
-    token.resolveStarted = undefined;
   };
   const removePendingPromptRequestTag = (token: PendingPromptRequestTag) => {
     const index = pendingPromptRequestTags.indexOf(token);
     if (index >= 0) pendingPromptRequestTags.splice(index, 1);
-    cancelPendingPromptRequestTag(token);
     if (token.requestTag) admittedPromptRequestTags.delete(token.requestTag);
   };
   const clearPendingPromptRequestTags = () => {
-    for (const token of pendingPromptRequestTags) {
-      cancelPendingPromptRequestTag(token);
-    }
     pendingPromptRequestTags.length = 0;
   };
   let gracefulSessionShutdown = false;
@@ -899,12 +851,6 @@ export async function runCustomRpcMode(
     latestAutoRetryFailureMessage = "";
     const turnSession = getSession();
     const turnScope = captureTurnScope(turnSession);
-    const trackedTurn: ActiveTrackedTurn = {
-      requestTag,
-      queueAdmissions: [],
-      agentSettled: false,
-    };
-    activeTrackedTurn = trackedTurn;
     let observedOutcome: RinTurnTerminalOutcome = RIN_TURN_TERMINAL_ABSENT;
     let resolveAgentSettledOutcome:
       | ((outcome: RinTurnTerminalOutcome) => void)
@@ -924,7 +870,6 @@ export async function runCustomRpcMode(
           return;
         }
         if (event?.type !== "agent_settled") return;
-        trackedTurn.agentSettled = true;
         resolveAgentSettledOutcome?.(observedOutcome);
         resolveAgentSettledOutcome = undefined;
       },
@@ -952,7 +897,7 @@ export async function runCustomRpcMode(
           ? setInterval(() => {
               emitTurnEvent(
                 "heartbeat",
-                trackedTurn.requestTag,
+                requestTag,
                 {
                   turnGeneration: currentTurnGeneration,
                   sessionFile: turnSession.sessionFile,
@@ -994,7 +939,7 @@ export async function runCustomRpcMode(
           return;
         }
         committedTerminalKey = terminalKey;
-        emitTurnEvent(event, trackedTurn.requestTag, payload, forceTurnEvents);
+        emitTurnEvent(event, requestTag, payload, forceTurnEvents);
       };
       let directOutcome: RinTurnTerminalOutcome = RIN_TURN_TERMINAL_ABSENT;
       try {
@@ -1014,29 +959,8 @@ export async function runCustomRpcMode(
             : RIN_TURN_TERMINAL_ABSENT;
         // Pi's agent_settled event is the authoritative boundary after retries,
         // compaction, and queued continuations. If the outer prompt promise is
-        // wedged after that boundary, do not let bookkeeping keep the canonical
-        // terminal open. Otherwise preserve the queue-admission handoff used at
-        // ordinary prompt boundaries.
-        if (producerOutcome.source === "task") {
-          let settledQueueAdmissionCount = 0;
-          while (
-            settledQueueAdmissionCount < trackedTurn.queueAdmissions.length
-          ) {
-            const queueAdmissions = trackedTurn.queueAdmissions.slice(
-              settledQueueAdmissionCount,
-            );
-            await Promise.all(
-              queueAdmissions.map(
-                (admission) => admission.started || Promise.resolve(),
-              ),
-            );
-            settledQueueAdmissionCount += queueAdmissions.length;
-            if (queueAdmissions.some((admission) => !admission.cancelled)) {
-              await turnSession.agent?.waitForIdle?.();
-            }
-            await new Promise((resolve) => setImmediate(resolve));
-          }
-        }
+        // wedged after that boundary, do not let transport bookkeeping keep the
+        // canonical terminal open.
         const branchOutcome = resolveTurnOutcomeSinceScope(
           turnSession,
           turnScope,
@@ -1131,7 +1055,6 @@ export async function runCustomRpcMode(
           activeTurnPromise = null;
           activeTurnRequestTag = "";
         }
-        if (activeTrackedTurn === trackedTurn) activeTrackedTurn = null;
       }
     })();
     activeTurnPromise = promise;
@@ -1336,26 +1259,6 @@ export async function runCustomRpcMode(
             ? pendingPromptRequestTags.splice(pendingIndex, 1)[0]
             : undefined;
         producerRequestTag = producerRequestTag || pending?.requestTag || "";
-        if (pending) {
-          pending.resolveStarted?.();
-          pending.resolveStarted = undefined;
-          if (
-            pending.trackedTurn &&
-            pending.trackedTurn === activeTrackedTurn &&
-            producerRequestTag
-          ) {
-            pending.trackedTurn.requestTag = producerRequestTag;
-            activeTurnRequestTag = producerRequestTag;
-          }
-        }
-      }
-      const isAssistantProgressEvent =
-        (event?.type === "message_update" || event?.type === "message_end") &&
-        event.message?.role === "assistant";
-      // Pi emits assistant progress without request tags. A tracked RPC turn is
-      // the single producer while its prompt lifecycle remains active.
-      if (isAssistantProgressEvent) {
-        producerRequestTag = producerRequestTag || activeTurnRequestTag;
       }
       const taggedEvent =
         producerRequestTag && !safeString(event?.requestTag).trim()
@@ -1402,21 +1305,6 @@ export async function runCustomRpcMode(
         resolvePendingExtensionUiRequest(command);
         return done(id, type);
       case "prompt": {
-        let piActiveRun = Boolean(session.agent?.signal);
-        // AgentSession clears isStreaming before it publishes agent_settled.
-        // Do not force a prompt into Pi's queue during that idle gap: no run
-        // remains to drain it. Let the canonical terminal close first, then
-        // admit the input as a new prompt with its own terminal owner.
-        if (
-          activeTurnPromise &&
-          activeTrackedTurn?.agentSettled &&
-          !session.isStreaming &&
-          !piActiveRun
-        ) {
-          await activeTurnPromise;
-          piActiveRun = Boolean(session.agent?.signal);
-        }
-        const turnAlreadyActive = isTurnActive() || piActiveRun;
         const requestTag = rpcRequestTag(command.requestTag);
         if (
           isTurnActive() &&
@@ -1431,6 +1319,16 @@ export async function runCustomRpcMode(
             }),
           );
         }
+        let piActiveRun = Boolean(session.agent?.signal);
+        // AgentSession clears isStreaming before it publishes agent_settled.
+        // Do not force a prompt into Pi's queue during that idle gap: no run
+        // remains to drain it. Let the canonical terminal close first, then
+        // admit the input as a new prompt with its own terminal owner.
+        if (activeTurnPromise && !session.isStreaming && !piActiveRun) {
+          await activeTurnPromise;
+          piActiveRun = Boolean(session.agent?.signal);
+        }
+        const turnAlreadyActive = isTurnActive() || piActiveRun;
         const admittedAs = admittedPromptRequestTag(requestTag);
         if (requestTag && admittedAs) {
           return done(
@@ -1441,13 +1339,18 @@ export async function runCustomRpcMode(
             }),
           );
         }
-        const requestedQueueBehavior = command.streamingBehavior;
+        const requestedQueueBehavior = normalizePromptQueueBehavior(
+          command.streamingBehavior,
+        );
         const acceptedQueueBehavior = turnAlreadyActive
-          ? normalizePromptQueueBehavior(requestedQueueBehavior)
+          ? requestedQueueBehavior
           : undefined;
         const promptOptions: Record<string, unknown> = {
           images: command.images,
-          streamingBehavior: acceptedQueueBehavior,
+          // Match Pi's interactive Enter path without copying its state check:
+          // AgentSession.prompt() decides atomically whether this is an idle
+          // prompt or a streaming steer from its own authoritative state.
+          streamingBehavior: requestedQueueBehavior,
           source: command.source || "rpc",
         };
         if (typeof command.requestTag === "string") {
@@ -1469,15 +1372,7 @@ export async function runCustomRpcMode(
             command.message,
           );
           try {
-            if (!session.isStreaming) {
-              await promptWithQueueableTurnReceiver(
-                session,
-                command.message,
-                promptOptions,
-              );
-            } else {
-              await session.prompt(command.message, promptOptions);
-            }
+            await session.prompt(command.message, promptOptions);
           } catch (error) {
             removePendingPromptRequestTag(requestTagToken);
             throw error;

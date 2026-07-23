@@ -1225,58 +1225,6 @@ export class WorkerPool {
     );
   }
 
-  private transferLifecycleOwnerForStartedUserMessage(
-    worker: WorkerHandle,
-    payload: any,
-  ) {
-    if (
-      payload?.type !== "message_start" ||
-      payload?.message?.role !== "user" ||
-      !worker.rpcTurnActive ||
-      !worker.versionedLifecycleSeen ||
-      worker.activeTurnGeneration === undefined
-    ) {
-      return;
-    }
-    const currentRequestTag = worker.activeLifecycleRequestTag;
-    const nextRequestTag = lifecycleRequestTag(payload.requestTag);
-    if (
-      currentRequestTag === undefined ||
-      !nextRequestTag ||
-      nextRequestTag === currentRequestTag
-    ) {
-      return;
-    }
-    const incomingSelector = sessionSelectorFromState(payload);
-    if (
-      worker.activeLifecycleSelector &&
-      hasSessionSelector(incomingSelector) &&
-      !sessionMatchesSelector(incomingSelector, worker.activeLifecycleSelector)
-    ) {
-      return;
-    }
-
-    worker.activeLifecycleRequestTag = nextRequestTag;
-    worker.activeRequestTag = nextRequestTag;
-    worker.activeLifecycleOwnerCommandId = undefined;
-    worker.activeLifecycleRecoveryProbeCommandId = undefined;
-    worker.activeLifecycleRecoveryProbeEpoch = undefined;
-    worker.lifecycleEpoch += 1;
-    worker.activeLifecycleEpoch = worker.lifecycleEpoch;
-
-    const pendingRecovery = this.getInterruptedTurnRecoveryIntent(worker);
-    if (pendingRecovery?.intent.requestTag === currentRequestTag) {
-      pendingRecovery.intent.requestTag = nextRequestTag;
-    }
-    for (const waiter of this.terminalTurnWaiters) {
-      if (waiter.worker !== worker || waiter.requestTag !== currentRequestTag) {
-        continue;
-      }
-      waiter.requestTag = nextRequestTag;
-    }
-    this.syncRunningWorkerRecord(worker);
-  }
-
   private rpcTurnEventMatchesLifecycleOwner(
     worker: WorkerHandle,
     payload: any,
@@ -1418,7 +1366,6 @@ export class WorkerPool {
   private updateWorkerMetadata(worker: WorkerHandle, payload: any) {
     if (!payload || typeof payload !== "object") return false;
     if (!this.acceptsRpcTurnEvent(worker, payload)) return false;
-    this.transferLifecycleOwnerForStartedUserMessage(worker, payload);
     worker.lastUsedAt = Date.now();
     const pendingResponse = payload.id
       ? worker.pendingResponses.get(String(payload.id))

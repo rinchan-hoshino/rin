@@ -3191,6 +3191,136 @@ test("chat controller keeps working reaction on current message while steer is q
   assert.equal((await firstTurn).finalText, "done");
 });
 
+test("chat controller delivers a backend terminal after remote-active admission without a local waiter", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.commitPendingDelivery = async function (clearProcessing = false) {
+    deliveries.push(this.stagedDelivery);
+    this.stagedDelivery = null;
+    if (clearProcessing) this.currentTurn = null;
+    return { accepted: true, settled: true, results: [] };
+  };
+  controller.session = {
+    isStreaming: true,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => "/tmp/remote-active-chat.jsonl",
+      getSessionId: () => "session-remote-active",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: "/tmp/remote-active-chat.jsonl",
+      sessionId: "session-remote-active",
+    }),
+    prompt: async () => ({ acceptedAs: "steer" }),
+    switchSession: async () => {},
+  };
+
+  const steerResult = await controller.runTurn(
+    {
+      text: "steer after reconnect",
+      attachments: [],
+      incomingMessageId: "m-remote-steer",
+      replyToMessageId: "m-remote-steer",
+    },
+    "steer",
+  );
+  assert.equal(steerResult.steered, true);
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "message_start",
+      requestTag: controller.currentTurn?.requestTag,
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "steer after reconnect" }],
+      },
+    },
+  });
+  const currentRequestTag = controller.currentTurn?.requestTag;
+  emitRpcTurnComplete(controller, {}, "untagged same-session final");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(deliveries.length, 0);
+  assert.equal(controller.currentTurn?.requestTag, currentRequestTag);
+
+  emitRpcTurnComplete(
+    controller,
+    { requestTag: "stale-same-session-tag" },
+    "stale same-session final",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(deliveries.length, 0);
+  assert.equal(controller.currentTurn?.requestTag, currentRequestTag);
+
+  emitRpcTurnComplete(
+    controller,
+    { requestTag: currentRequestTag },
+    "remote steer final",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveryText(deliveries[0]), "remote steer final");
+  assert.equal(deliveryQuoteId(deliveries[0]), "m-remote-steer");
+  assert.equal(controller.currentTurn, null);
+});
+
+test("chat controller delivers a backend error after remote-active admission without a local waiter", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.commitPendingDelivery = async function (clearProcessing = false) {
+    deliveries.push(this.stagedDelivery);
+    this.stagedDelivery = null;
+    if (clearProcessing) this.currentTurn = null;
+    return { accepted: true, settled: true, results: [] };
+  };
+  controller.session = {
+    isStreaming: true,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => "/tmp/remote-active-error.jsonl",
+      getSessionId: () => "session-remote-error",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile: "/tmp/remote-active-error.jsonl",
+      sessionId: "session-remote-error",
+    }),
+    prompt: async () => ({ acceptedAs: "steer" }),
+    switchSession: async () => {},
+  };
+
+  const result = await controller.runTurn(
+    {
+      text: "steer before failure",
+      attachments: [],
+      incomingMessageId: "m-remote-error",
+      replyToMessageId: "m-remote-error",
+    },
+    "steer",
+  );
+  assert.equal(result.steered, true);
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "rpc_turn_event",
+      event: "error",
+      requestTag: controller.currentTurn?.requestTag,
+      error: "remote failure",
+      sessionId: "session-remote-error",
+      sessionFile: "/tmp/remote-active-error.jsonl",
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveryText(deliveries[0]), "remote failure");
+  assert.equal(deliveryQuoteId(deliveries[0]), "m-remote-error");
+  assert.equal(controller.currentTurn, null);
+});
+
 test("chat controller keeps steering open after assistant tool-call interim", async () => {
   const controller = await createController("telegram/1:2");
   const promptCalls = [];
@@ -4250,6 +4380,10 @@ test("chat controller rejects stale tagged assistant progress after turn replace
   });
   await controller.handleFrontendEvent({
     type: "assistant_interim",
+    text: "Pi-native untagged interim",
+  });
+  await controller.handleFrontendEvent({
+    type: "assistant_interim",
     text: "current interim",
     requestTag: "replacement-tag",
   });
@@ -4266,7 +4400,10 @@ test("chat controller rejects stale tagged assistant progress after turn replace
     type: "turn_accepted",
     requestTag: "replacement-tag",
   });
-  assert.deepEqual(delivered, ["current interim"]);
+  assert.deepEqual(delivered, [
+    "Pi-native untagged interim",
+    "current interim",
+  ]);
   assert.deepEqual(accepted, ["replacement"]);
 });
 

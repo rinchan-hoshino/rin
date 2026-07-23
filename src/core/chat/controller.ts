@@ -587,9 +587,18 @@ export class ChatController {
 
   private acceptsAssistantProgressEvent(requestTag?: string) {
     if (!this.currentTurn?.outboxTurnFence) return true;
+    const actual = safeString(requestTag).trim();
+    if (!actual) return true;
+    const expected = safeString(this.currentTurn.requestTag).trim();
+    return Boolean(expected && expected === actual);
+  }
+
+  private acceptsTerminalTurnEvent(requestTag?: string) {
+    if (!this.currentTurn) return false;
     const expected = safeString(this.currentTurn.requestTag).trim();
     const actual = safeString(requestTag).trim();
-    return Boolean(expected && actual && expected === actual);
+    if (expected || actual) return expected === actual;
+    return !this.currentTurn.outboxTurnFence;
   }
 
   claimsInboundMessage(messageId?: string) {
@@ -3167,6 +3176,72 @@ export class ChatController {
     });
   }
 
+  private async settleProjectedTurnComplete(event: {
+    finalText?: string;
+    result?: unknown;
+    sessionFile?: string;
+  }) {
+    if (!this.currentTurn) return;
+    const deliveryTarget = this.currentDeliveryTarget(this.currentTurn);
+    const supersedeTurnFences = this.coalescedSupersessionFences(
+      undefined,
+      deliveryTarget.incomingMessageId,
+      deliveryTarget.outboxTurnFence,
+    );
+    const resultParts = this.assistantDeliveryParts(
+      event.finalText,
+      event.result,
+    );
+    if (safeString(event.finalText).trim() || resultParts.length) {
+      await this.deliverAssistantReply({
+        text: event.finalText,
+        parts: resultParts.length ? resultParts : undefined,
+        replyToMessageId: deliveryTarget.replyToMessageId,
+        incomingMessageId: deliveryTarget.incomingMessageId,
+        outboxTurnFence: deliveryTarget.outboxTurnFence,
+        sessionFile: event.sessionFile || this.currentSessionFile(),
+        supersedeTurnFences,
+        clearProcessing: true,
+      });
+    } else {
+      await this.settleEmptyAssistantCompletion({
+        incomingMessageId: deliveryTarget.incomingMessageId,
+        outboxTurnFence: deliveryTarget.outboxTurnFence,
+        sessionFile: event.sessionFile || this.currentSessionFile(),
+        supersedeTurnFences,
+      });
+    }
+    this.awaitingTurnSettle = false;
+    await this.flushPendingPassiveNotices(false);
+  }
+
+  private async settleProjectedTurnError(event: {
+    error?: string;
+    sessionFile?: string;
+  }) {
+    if (!this.currentTurn) return;
+    const errorMessage = safeString(event.error).trim() || "rpc_turn_failed";
+    if (errorMessage === "chat_turn_aborted") return;
+    const deliveryTarget = this.currentDeliveryTarget(this.currentTurn);
+    const supersedeTurnFences = this.coalescedSupersessionFences(
+      undefined,
+      deliveryTarget.incomingMessageId,
+      deliveryTarget.outboxTurnFence,
+    );
+    await this.deliverAssistantReply({
+      text: errorMessage,
+      replyToMessageId: deliveryTarget.replyToMessageId,
+      incomingMessageId: deliveryTarget.incomingMessageId,
+      outboxTurnFence: deliveryTarget.outboxTurnFence,
+      sessionFile: event.sessionFile || this.currentSessionFile(),
+      supersedeTurnFences,
+      clearProcessing: true,
+      deliveryKind: "error",
+    });
+    this.awaitingTurnSettle = false;
+    await this.flushPendingPassiveNotices(false);
+  }
+
   async housekeep() {
     await this.pollTyping().catch(() => {});
     await this.pollCompactionTyping().catch(() => {});
@@ -3269,6 +3344,16 @@ export class ChatController {
       case "assistant_interim":
         if (this.acceptsAssistantProgressEvent(event.requestTag)) {
           await this.deliverAssistantInterim(event.text);
+        }
+        return;
+      case "turn_complete":
+        if (this.acceptsTerminalTurnEvent(event.requestTag)) {
+          await this.settleProjectedTurnComplete(event);
+        }
+        return;
+      case "turn_error":
+        if (this.acceptsTerminalTurnEvent(event.requestTag)) {
+          await this.settleProjectedTurnError(event);
         }
         return;
     }

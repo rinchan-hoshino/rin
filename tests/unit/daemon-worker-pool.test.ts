@@ -5164,7 +5164,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("a started steered user message transfers the terminal lifecycle owner", async () => {
+test("a started Pi steer does not transfer transport terminal ownership", async () => {
   const dir = await makeTempDir("rin-worker-pool-steered-terminal-owner-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = path.join(dir, "session.jsonl");
@@ -5245,20 +5245,19 @@ test("a started steered user message transfers the terminal lifecycle owner", as
   );
   await sleep(0);
 
-  assert.equal(worker.activeLifecycleRequestTag, "tag-steered");
-  assert.equal(worker.activeRequestTag, "tag-steered");
-  assert.equal(worker.activeLifecycleOwnerCommandId, undefined);
-  assert.equal(worker.activeLifecycleEpoch, lifecycleEpochBeforeSteer! + 1);
+  assert.equal(worker.activeLifecycleRequestTag, "tag-original");
+  assert.equal(worker.activeRequestTag, "tag-original");
+  assert.equal(worker.activeLifecycleOwnerCommandId, "original-prompt");
+  assert.equal(worker.activeLifecycleEpoch, lifecycleEpochBeforeSteer);
   assert.equal(worker.activeTurnGeneration, 1);
   assert.equal(worker.turnActive, true);
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
     schemaVersion: 1,
     sessionFiles: [sessionFile],
-    requestTags: { [sessionFile]: "tag-steered" },
+    requestTags: { [sessionFile]: "tag-original" },
     frontendOwners: { [sessionFile]: true },
   });
 
-  const writesBeforeStaleTerminal = writes.length;
   worker.child.stdout.emit(
     "data",
     `${JSON.stringify({
@@ -5268,23 +5267,7 @@ test("a started steered user message transfers the terminal lifecycle owner", as
       turnGeneration: 1,
       sessionFile,
       sessionId: "active",
-      finalText: "stale original final",
-    })}\n`,
-  );
-  await sleep(0);
-  assert.equal(worker.turnActive, true);
-  assert.equal(writes.length, writesBeforeStaleTerminal);
-
-  worker.child.stdout.emit(
-    "data",
-    `${JSON.stringify({
-      type: "rpc_turn_event",
-      event: "complete",
-      requestTag: "tag-steered",
-      turnGeneration: 1,
-      sessionFile,
-      sessionId: "active",
-      finalText: "steered final",
+      finalText: "Pi-owned final",
     })}\n`,
   );
   await sleep(0);
@@ -5292,19 +5275,19 @@ test("a started steered user message transfers the terminal lifecycle owner", as
   const terminalResult = await Promise.race([
     terminalResultPromise,
     sleep(100).then(() => {
-      throw new Error("steered terminal waiter did not settle");
+      throw new Error("Pi terminal waiter did not settle");
     }),
   ]);
-  assert.equal(terminalResult.requestTag, "tag-steered");
-  assert.equal(terminalResult.finalText, "steered final");
+  assert.equal(terminalResult.requestTag, "tag-original");
+  assert.equal(terminalResult.finalText, "Pi-owned final");
   assert.equal(worker.turnActive, false);
   assert.equal(worker.rpcTurnActive, false);
   assert.equal(
     writes.some(
       (value) =>
         value.includes('"event":"complete"') &&
-        value.includes('"requestTag":"tag-steered"') &&
-        value.includes('"finalText":"steered final"'),
+        value.includes('"requestTag":"tag-original"') &&
+        value.includes('"finalText":"Pi-owned final"'),
     ),
     true,
   );
