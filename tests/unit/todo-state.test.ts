@@ -279,13 +279,13 @@ test("todo state formats markdown chat fallback with markdown strikethrough", ()
   assert.equal(content, "⬜ Open item\n✅ ~~Done item~~");
 });
 
-test("todo state preserves visible strikethrough in character-only chat fallback", () => {
+test("todo state keeps completed text plain in character-only chat fallback", () => {
   const content = todoState.formatRinTodoChecklistCharacterContent([
     { text: "Open item", done: false },
     { text: "Done item", done: true },
   ]);
 
-  assert.equal(content, "⬜ Open item\n✅ D̶o̶n̶e̶ i̶t̶e̶m̶");
+  assert.equal(content, "⬜ Open item\n✅ Done item");
 });
 
 test("todo state does not expose hidden final-continuation helpers", () => {

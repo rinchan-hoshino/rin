@@ -68,26 +68,13 @@ export function formatRinTodoChecklistMarkdownContent(
     .join("\n");
 }
 
-function characterStrikethrough(text: string) {
-  return Array.from(text)
-    .map((character) =>
-      /\s/u.test(character) ? character : `${character}\u0336`,
-    )
-    .join("");
-}
-
 export function formatRinTodoChecklistCharacterContent(
   todos: ReadonlyArray<Pick<RinTodoItem, "text" | "done">>,
 ): string {
   if (todos.length === 0) return "No todos";
 
   return todos
-    .map((todo) => {
-      const text = formatRinTodoLineText(todo);
-      return `${todo.done ? "✅" : "⬜"} ${
-        todo.done ? characterStrikethrough(text) : text
-      }`;
-    })
+    .map((todo) => `${todo.done ? "✅" : "⬜"} ${formatRinTodoLineText(todo)}`)
     .join("\n");
 }
 

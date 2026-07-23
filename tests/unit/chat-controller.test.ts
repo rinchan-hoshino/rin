@@ -1921,7 +1921,7 @@ test("chat controller attempts independent todo errors when progress delivery fa
   }
 });
 
-test("chat controller renders todo notices as character fallback for plain chats", async () => {
+test("chat controller keeps todo text plain for character-only chats", async () => {
   const controller = await createController("minecraft/minecraft:overworld");
   controller.app.bots[0].platform = "minecraft";
   controller.app.bots[0].selfId = "minecraft";
@@ -1952,7 +1952,7 @@ test("chat controller renders todo notices as character fallback for plain chats
     {
       type: "markdown",
       attrs: {
-        content: "⬜ Keep working\n✅ S̶h̶i̶p̶ r̶e̶n̶d̶e̶r̶e̶r̶",
+        content: "⬜ Keep working\n✅ Ship renderer",
       },
     },
   ]);
