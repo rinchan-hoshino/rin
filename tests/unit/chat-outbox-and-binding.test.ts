@@ -799,6 +799,58 @@ test("terminal outbox commit owns the inbound turn before external delivery", as
   });
 });
 
+test("terminal outbox rejects a different durable execution session", async () => {
+  await withTempDir(async (dir) => {
+    const inbound = inbox.enqueueChatInboxItem(dir, {
+      chatKey: "telegram/777:1",
+      messageId: "inbound-session-conflict",
+      session: {
+        platform: "telegram",
+        selfId: "777",
+        channelId: "1",
+        userId: "owner",
+        messageId: "inbound-session-conflict",
+        content: "question",
+      },
+      elements: [{ type: "text", attrs: { content: "question" } }],
+    }).item;
+    const claim = inbox.claimChatInboxItem(dir, inbound.itemId);
+    const turnFence = {
+      agentDir: dir,
+      turnId: claim.itemId,
+      chatKey: claim.chatKey,
+      messageId: claim.messageId,
+      ownerEpoch: claim.ownerEpoch,
+      attempt: claim.attemptCount,
+    };
+    assert.equal(
+      database.markChatMessageAcceptedWithFence(dir, turnFence, {
+        sessionFile: "execution-a.jsonl",
+      }),
+      true,
+    );
+    assert.throws(
+      () =>
+        outbox.enqueueChatOutboxPayload(
+          dir,
+          { ...payload("answer"), sessionFile: "execution-b.jsonl" },
+          {
+            deliveryKind: "final",
+            turnFence,
+            postDelivery: {
+              markProcessed: {
+                chatKey: claim.chatKey,
+                messageId: claim.messageId,
+              },
+            },
+          },
+        ),
+      /chat_turn_fence_lost/,
+    );
+    assert.equal(inbox.getChatInboxItem(dir, inbound.itemId).state, "running");
+  });
+});
+
 test("terminal outbox atomically supersedes every coalesced steer turn", async () => {
   await withTempDir(async (dir) => {
     const claims = ["steer-a", "steer-b", "steer-c"].map((messageId) => {

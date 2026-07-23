@@ -2303,6 +2303,642 @@ test("chat main reports daemon startup failure without retrying", async () => {
   }
 });
 
+test("chat main resumes a durably admitted turn after policy changes", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-durable-admission-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+    const script = `
+      import fs from "node:fs/promises";
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const databaseMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+
+      let phase = "first";
+      let runTurnCalls = 0;
+      const submittedTurns = [];
+      let releaseFirstTurn;
+      const firstTurnGate = new Promise((resolve) => { releaseFirstTurn = resolve; });
+      controllerMod.ChatController.prototype.runTurn = async function (input) {
+        runTurnCalls += 1;
+        submittedTurns.push(JSON.parse(JSON.stringify(input)));
+        if (phase === "first") {
+          await firstTurnGate;
+          throw new Error("Request was aborted");
+        }
+        return { finalText: "resumed original execution" };
+      };
+      controllerMod.ChatController.prototype.detachForDaemonShutdown = async function () {
+        releaseFirstTurn();
+      };
+
+      const createBot = () => ({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() { return ["assistant-1"]; },
+        internal: { async sendChatAction() {} },
+      });
+      const first = await mainMod.startChatBridge({ hosted: true });
+      first.app.bots.push(createBot());
+      first.app.emit("message", {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        userId: "owner-1",
+        messageId: "m-policy-change",
+        isDirect: true,
+        content: "finish this after update",
+        stripped: { content: "finish this after update" },
+        elements: [h.createChatRuntimeH().text("finish this after update")],
+      });
+
+      const admittedDeadline = Date.now() + 5000;
+      while (Date.now() < admittedDeadline && runTurnCalls < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (runTurnCalls !== 1) throw new Error("first turn was not admitted");
+      await first.stop();
+      databaseMod.closeChatDatabase(agentDir);
+
+      await fs.writeFile(
+        path.join(agentDir, "settings.json"),
+        JSON.stringify({ chat: { byChatKey: { "telegram/1:2": { turnPolicy: "record_only" } } } }) + "\\n",
+        "utf8",
+      );
+      phase = "recovery";
+      const second = await mainMod.startChatBridge({ hosted: true });
+      second.app.bots.push(createBot());
+      const terminalDeadline = Date.now() + 5000;
+      let row;
+      while (Date.now() < terminalDeadline) {
+        row = databaseMod.openChatDatabase(agentDir).prepare(
+          "SELECT turns.state, turns.admission_state, messages.disposition " +
+          "FROM turns JOIN messages ON messages.id = turns.inbound_message_id " +
+          "WHERE messages.message_id = 'm-policy-change'",
+        ).get();
+        if (row?.state === "terminal") break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await second.stop();
+      if (
+        runTurnCalls !== 2 ||
+        JSON.stringify(submittedTurns[0]) !== JSON.stringify(submittedTurns[1]) ||
+        row?.state !== "terminal" ||
+        row?.admission_state !== "actionable" ||
+        row?.disposition !== "actionable"
+      ) {
+        throw new Error(JSON.stringify({ runTurnCalls, submittedTurns, row }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: { ...process.env, RIN_REPO_ROOT: rootDir, RIN_DIR: agentDir },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("chat main resumes a frozen command after sender identity changes", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-durable-command-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const databaseMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+      let phase = "first";
+      const calls = [];
+      let releaseFirstCommand;
+      const firstCommandGate = new Promise((resolve) => { releaseFirstCommand = resolve; });
+      controllerMod.ChatController.prototype.runCommand = async function (
+        commandLine,
+        replyToMessageId,
+        incomingMessageId,
+        sessionFile,
+        promptMeta,
+      ) {
+        calls.push({ commandLine, replyToMessageId, incomingMessageId, sessionFile, promptMeta });
+        if (phase === "first") {
+          await firstCommandGate;
+          throw new Error("Request was aborted");
+        }
+      };
+      controllerMod.ChatController.prototype.detachForDaemonShutdown = async function () {
+        releaseFirstCommand();
+      };
+      const createBot = () => ({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() { return ["assistant-1"]; },
+        internal: { async sendChatAction() {} },
+      });
+      const first = await mainMod.startChatBridge({ hosted: true });
+      first.app.bots.push(createBot());
+      first.app.emit("message", {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        userId: "owner-1",
+        messageId: "m-frozen-command",
+        isDirect: true,
+        content: "/new",
+        stripped: { content: "/new" },
+        elements: [h.createChatRuntimeH().text("/new")],
+      });
+      const admittedDeadline = Date.now() + 5000;
+      while (Date.now() < admittedDeadline && calls.length < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (calls.length !== 1) throw new Error("first command was not admitted");
+      await first.stop();
+      databaseMod.closeChatDatabase(agentDir);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: {},
+        aliases: [],
+        trusted: [],
+      });
+      phase = "recovery";
+      const second = await mainMod.startChatBridge({ hosted: true });
+      second.app.bots.push(createBot());
+      const db = databaseMod.openChatDatabase(agentDir);
+      const terminalDeadline = Date.now() + 5000;
+      let row;
+      while (Date.now() < terminalDeadline) {
+        row = db.prepare(
+          "SELECT state, admission_state FROM turns WHERE inbound_message_id = " +
+          "(SELECT id FROM messages WHERE message_id = 'm-frozen-command')",
+        ).get();
+        if (row?.state === "terminal") break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await second.stop();
+      if (
+        calls.length !== 2 ||
+        calls[0].promptMeta?.identity !== "OWNER" ||
+        JSON.stringify(calls[0]) !== JSON.stringify(calls[1]) ||
+        row?.state !== "terminal" ||
+        row?.admission_state !== "actionable"
+      ) {
+        throw new Error(JSON.stringify({ calls, row }));
+      }
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: { ...process.env, RIN_REPO_ROOT: rootDir, RIN_DIR: agentDir },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("chat main recovers unmatched commands from frozen response metadata", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-durable-unmatched-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const databaseMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href);
+      const inboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
+
+      const item = inboxMod.enqueueChatInboxItem(agentDir, {
+        chatKey: "telegram/1:2",
+        messageId: "m-frozen-unmatched",
+        session: {
+          platform: "telegram",
+          selfId: "1",
+          channelId: "2",
+          userId: "owner-1",
+          messageId: "m-frozen-unmatched",
+          timestamp: Date.now(),
+          isDirect: true,
+          content: "/future-command",
+          stripped: { content: "/future-command" },
+        },
+        elements: [{ type: "text", attrs: { content: "/future-command" } }],
+      }).item;
+      const claim = inboxMod.claimChatInboxItem(agentDir, item.itemId);
+      const admission = inboxMod.commitClaimedChatInboxAdmission(agentDir, claim, {
+        state: "actionable",
+        decision: {
+          version: 1,
+          kind: "unmatched_command",
+          chatKey: item.chatKey,
+          messageId: item.messageId,
+          name: "future-command",
+          trust: "OWNER",
+          respond: true,
+        },
+      });
+      if (admission?.decisionIntegrity !== "valid") {
+        throw new Error("unmatched command admission was not durable");
+      }
+      inboxMod.requeueClaimedChatInboxItem(agentDir, claim, { delayMs: 0 });
+      const db = databaseMod.openChatDatabase(agentDir);
+      const mutatedSession = {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "group:changed",
+        guildId: "changed",
+        userId: "stranger",
+        messageId: "mutated-message",
+        isDirect: false,
+        content: "mutated content",
+        stripped: { content: "mutated content" },
+      };
+      db.prepare("UPDATE turns SET session_json = ? WHERE turn_id = ?").run(
+        JSON.stringify(mutatedSession),
+        item.itemId,
+      );
+
+      let runTurnCalls = 0;
+      let runCommandCalls = 0;
+      controllerMod.ChatController.prototype.runTurn = async function () {
+        runTurnCalls += 1;
+      };
+      controllerMod.ChatController.prototype.runCommand = async function () {
+        runCommandCalls += 1;
+      };
+      const started = await mainMod.startChatBridge({ hosted: true });
+      let sentCount = 0;
+      started.app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() { sentCount += 1; return ["sent-unmatched"]; },
+        internal: { async sendChatAction() {} },
+      });
+      const deadline = Date.now() + 5000;
+      let turn;
+      let outboxCount = 0;
+      while (Date.now() < deadline) {
+        turn = db.prepare("SELECT state, terminal_kind FROM turns WHERE turn_id = ?")
+          .get(item.itemId);
+        outboxCount = db.prepare("SELECT COUNT(*) AS count FROM outbox WHERE turn_id = ?")
+          .get(item.itemId).count;
+        if (turn?.state === "terminal" && outboxCount === 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await started.stop();
+      if (
+        runTurnCalls !== 0 ||
+        runCommandCalls !== 0 ||
+        turn?.state !== "terminal" ||
+        outboxCount !== 1 ||
+        sentCount > 1
+      ) {
+        throw new Error(JSON.stringify({
+          runTurnCalls,
+          runCommandCalls,
+          turn,
+          outboxCount,
+          sentCount,
+        }));
+      }
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: { ...process.env, RIN_REPO_ROOT: rootDir, RIN_DIR: agentDir },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("chat main fails closed for unverifiable actionable admissions", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-legacy-admission-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+    const script = `
+      import crypto from "node:crypto";
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const databaseMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href);
+      const inboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "legacy", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+      const item = inboxMod.enqueueChatInboxItem(agentDir, {
+        chatKey: "legacy/1:2",
+        messageId: "legacy-accepted-without-submission",
+        session: {
+          platform: "legacy",
+          selfId: "1",
+          channelId: "2",
+          userId: "owner-1",
+          messageId: "legacy-accepted-without-submission",
+          timestamp: Date.now(),
+          isDirect: true,
+          content: "do not submit this again",
+          stripped: { content: "do not submit this again" },
+        },
+        elements: [{ type: "text", attrs: { content: "do not submit this again" } }],
+      }).item;
+      const hashless = inboxMod.enqueueChatInboxItem(agentDir, {
+        chatKey: "legacy/1:2",
+        messageId: "actionable-without-submission-hash",
+        session: {
+          platform: "legacy",
+          selfId: "1",
+          channelId: "2",
+          userId: "owner-1",
+          messageId: "actionable-without-submission-hash",
+          timestamp: Date.now(),
+          isDirect: true,
+          content: "do not trust an unhashed submission",
+          stripped: { content: "do not trust an unhashed submission" },
+        },
+        elements: [{ type: "text", attrs: { content: "do not trust an unhashed submission" } }],
+      }).item;
+      const dirtyUnclassified = inboxMod.enqueueChatInboxItem(agentDir, {
+        chatKey: "legacy/1:2",
+        messageId: "unclassified-with-admission-residue",
+        session: {
+          platform: "legacy",
+          selfId: "1",
+          channelId: "2",
+          userId: "owner-1",
+          messageId: "unclassified-with-admission-residue",
+          timestamp: Date.now(),
+          isDirect: true,
+          content: "do not classify this corrupted turn",
+          stripped: { content: "do not classify this corrupted turn" },
+        },
+        elements: [{ type: "text", attrs: { content: "do not classify this corrupted turn" } }],
+      }).item;
+      const dirtyCommand = inboxMod.enqueueChatInboxItem(agentDir, {
+        chatKey: "legacy/1:2",
+        messageId: "command-with-submission-residue",
+        session: {
+          platform: "legacy",
+          selfId: "1",
+          channelId: "2",
+          userId: "owner-1",
+          messageId: "command-with-submission-residue",
+          timestamp: Date.now(),
+          isDirect: true,
+          content: "/new",
+          stripped: { content: "/new" },
+        },
+        elements: [{ type: "text", attrs: { content: "/new" } }],
+      }).item;
+      const db = databaseMod.openChatDatabase(agentDir);
+      db.prepare(
+        "UPDATE turns SET admission_state = 'actionable', admission_json = ?, " +
+        "submission_json = NULL, submission_hash = NULL WHERE turn_id = ?",
+      ).run(JSON.stringify({ version: 1, kind: "legacy_message_projection" }), item.itemId);
+      const hashlessSubmission = JSON.stringify({
+        version: 1,
+        chatKey: hashless.chatKey,
+        incomingMessageId: hashless.messageId,
+        text: "do not trust an unhashed submission",
+        attachments: [],
+        promptMeta: { chatKey: hashless.chatKey, identity: "OWNER" },
+      });
+      const hashlessDecision = JSON.stringify({
+        version: 1,
+        kind: "message",
+        decision: { allow: true },
+      });
+      const admissionHash = crypto
+        .createHash("sha256")
+        .update(hashlessDecision)
+        .digest("hex");
+      db.prepare(
+        "UPDATE turns SET admission_state = 'actionable', admission_json = ?, " +
+        "admission_hash = ?, submission_json = ?, submission_hash = NULL " +
+        "WHERE turn_id = ?",
+      ).run(
+        hashlessDecision,
+        admissionHash,
+        hashlessSubmission,
+        hashless.itemId,
+      );
+      db.prepare(
+        "UPDATE turns SET admission_json = ?, admission_hash = ? WHERE turn_id = ?",
+      ).run("{}", "mismatch", dirtyUnclassified.itemId);
+      const dirtyCommandDecision = JSON.stringify({
+        version: 1,
+        kind: "command",
+        chatKey: dirtyCommand.chatKey,
+        messageId: dirtyCommand.messageId,
+        command: { name: "new", argsText: "" },
+        trust: "OWNER",
+        promptMeta: { chatKey: dirtyCommand.chatKey, identity: "OWNER" },
+      });
+      db.prepare(
+        "UPDATE turns SET admission_state = 'actionable', admission_json = ?, " +
+        "admission_hash = ?, submission_json = '{}', submission_hash = 'mismatch' " +
+        "WHERE turn_id = ?",
+      ).run(
+        dirtyCommandDecision,
+        crypto.createHash("sha256").update(dirtyCommandDecision).digest("hex"),
+        dirtyCommand.itemId,
+      );
+      db.prepare(
+        "UPDATE messages SET accepted_at = ?, disposition = 'actionable' " +
+        "WHERE message_id IN (?, ?, ?, ?)",
+      ).run(
+        new Date().toISOString(),
+        item.messageId,
+        hashless.messageId,
+        dirtyUnclassified.messageId,
+        dirtyCommand.messageId,
+      );
+
+      let runTurnCalls = 0;
+      let runCommandCalls = 0;
+      controllerMod.ChatController.prototype.runTurn = async function () {
+        runTurnCalls += 1;
+        return { finalText: "duplicate execution" };
+      };
+      controllerMod.ChatController.prototype.runCommand = async function () {
+        runCommandCalls += 1;
+        return { handled: true, text: "duplicate command" };
+      };
+      const bridgeOptions = {
+        hosted: true,
+        chatAdapterProviders: [{
+          key: "legacy",
+          name: "Legacy",
+          config: {},
+          provider: () => ({
+            adapter: { async start() {}, async stop() {} },
+            bot: {
+              platform: "legacy",
+              selfId: "1",
+              status: 1,
+              async sendMessage() { return ["unknown-notice"]; },
+            },
+          }),
+        }],
+      };
+      const bridge = await mainMod.startChatBridge(bridgeOptions);
+      try {
+        const deadline = Date.now() + 5000;
+        let rows = [];
+        while (Date.now() < deadline) {
+          rows = db.prepare(
+            "SELECT turns.turn_id, turns.state, turns.terminal_kind " +
+            "FROM turns WHERE turns.turn_id IN (?, ?, ?, ?)",
+          ).all(
+            item.itemId,
+            hashless.itemId,
+            dirtyUnclassified.itemId,
+            dirtyCommand.itemId,
+          );
+          if (
+            rows.length === 4 &&
+            rows.every((row) => row.state === "terminal")
+          ) break;
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const terminals = db.prepare(
+          "SELECT delivery_kind, payload_json FROM outbox WHERE turn_id IN (?, ?, ?, ?)",
+        ).all(
+          item.itemId,
+          hashless.itemId,
+          dirtyUnclassified.itemId,
+          dirtyCommand.itemId,
+        );
+        const texts = terminals.map((terminal) =>
+          JSON.parse(terminal.payload_json).parts
+            .map((part) => part.text || "")
+            .join("\\n"),
+        );
+        if (
+          runTurnCalls !== 0 ||
+          runCommandCalls !== 0 ||
+          rows.length !== 4 ||
+          rows.some(
+            (row) =>
+              row.state !== "terminal" ||
+              row.terminal_kind !== "interrupted_unknown",
+          ) ||
+          terminals.length !== 4 ||
+          terminals.some((terminal) => terminal.delivery_kind !== "error") ||
+          texts.some((text) => !text.includes("was not submitted again"))
+        ) {
+          throw new Error(JSON.stringify({ runTurnCalls, runCommandCalls, rows, terminals, texts }));
+        }
+      } finally {
+        await bridge.stop();
+      }
+      const outboxCountBeforeRestart = db.prepare(
+        "SELECT COUNT(*) AS count FROM outbox WHERE turn_id IN (?, ?, ?, ?)",
+      ).get(
+        item.itemId,
+        hashless.itemId,
+        dirtyUnclassified.itemId,
+        dirtyCommand.itemId,
+      ).count;
+      const restarted = await mainMod.startChatBridge(bridgeOptions);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await restarted.stop();
+      const outboxCountAfterRestart = db.prepare(
+        "SELECT COUNT(*) AS count FROM outbox WHERE turn_id IN (?, ?, ?, ?)",
+      ).get(
+        item.itemId,
+        hashless.itemId,
+        dirtyUnclassified.itemId,
+        dirtyCommand.itemId,
+      ).count;
+      if (
+        runTurnCalls !== 0 ||
+        runCommandCalls !== 0 ||
+        outboxCountBeforeRestart !== 4 ||
+        outboxCountAfterRestart !== 4
+      ) {
+        throw new Error(JSON.stringify({
+          runTurnCalls,
+          runCommandCalls,
+          outboxCountBeforeRestart,
+          outboxCountAfterRestart,
+        }));
+      }
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: { ...process.env, RIN_REPO_ROOT: rootDir, RIN_DIR: agentDir },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("hosted chat bridge shutdown detaches active frontends without aborting sessions", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });

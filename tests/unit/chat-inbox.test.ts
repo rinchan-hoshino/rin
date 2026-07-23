@@ -145,29 +145,152 @@ test("chat inbox claim is unique and fenced through retry ownership", async () =
   assert.equal(inbox.getChatInboxItem(agentDir, item.itemId).state, "terminal");
 });
 
-test("chat inbox classification is fenced to the current turn owner", async () => {
+test("chat inbox admission is write-once across retry ownership", async () => {
   const agentDir = await tempDir();
   const { item } = inbox.enqueueChatInboxItem(agentDir, input());
   const claim = inbox.claimChatInboxItem(agentDir, item.itemId);
-  assert.equal(
-    inbox.classifyClaimedChatInboxItem(agentDir, claim, "actionable"),
-    true,
+  assert.throws(
+    () =>
+      inbox.commitClaimedChatInboxAdmission(agentDir, claim, {
+        state: "actionable",
+        decision: {
+          version: 1,
+          kind: "message",
+          decision: { allow: true },
+        },
+        submission: {
+          version: 1,
+          chatKey: "telegram/other:chat",
+          incomingMessageId: claim.messageId,
+          text: "wrong chat",
+          attachments: [],
+          promptMeta: { chatKey: "telegram/other:chat", sentAt: 1234 },
+        },
+      }),
+    /chat_inbox_admission_identity_mismatch/,
   );
+  const actionable = inbox.commitClaimedChatInboxAdmission(agentDir, claim, {
+    state: "actionable",
+    decision: {
+      version: 1,
+      kind: "message",
+      decision: {
+        allow: true,
+        chatKey: claim.chatKey,
+        chatType: "private",
+      },
+    },
+    submission: {
+      version: 1,
+      chatKey: claim.chatKey,
+      incomingMessageId: claim.messageId,
+      text: "frozen prompt",
+      attachments: [],
+      promptMeta: { chatKey: claim.chatKey, sentAt: 1234 },
+    },
+  });
+  assert.equal(actionable?.state, "actionable");
+  assert.equal(actionable?.submission?.text, "frozen prompt");
+
   const db = database.openChatDatabase(agentDir);
   assert.equal(
     db.prepare("SELECT disposition FROM messages WHERE message_id = 'm1'").get()
       .disposition,
     "actionable",
   );
-  inbox.requeueClaimedChatInboxItem(agentDir, claim, { delayMs: 0 });
-  const next = inbox.claimChatInboxItem(agentDir, item.itemId);
-  assert.equal(
-    inbox.classifyClaimedChatInboxItem(agentDir, claim, "record_only"),
-    false,
+  const hashes = db
+    .prepare(
+      "SELECT admission_json, admission_hash, submission_json, submission_hash " +
+        "FROM turns WHERE turn_id = ?",
+    )
+    .get(item.itemId);
+  assert.deepEqual(
+    {
+      decision: inbox.getChatInboxItem(agentDir, item.itemId).admission
+        .decisionIntegrity,
+      submission: inbox.getChatInboxItem(agentDir, item.itemId).admission
+        .submissionIntegrity,
+    },
+    { decision: "valid", submission: "valid" },
   );
+  for (const invalidHash of [null, "mismatch"]) {
+    db.prepare("UPDATE turns SET submission_hash = ? WHERE turn_id = ?").run(
+      invalidHash,
+      item.itemId,
+    );
+    assert.equal(
+      inbox.getChatInboxItem(agentDir, item.itemId).admission
+        .submissionIntegrity,
+      "invalid",
+    );
+  }
+  db.prepare("UPDATE turns SET submission_hash = ? WHERE turn_id = ?").run(
+    hashes.submission_hash,
+    item.itemId,
+  );
+  for (const invalidHash of [null, "mismatch"]) {
+    db.prepare("UPDATE turns SET admission_hash = ? WHERE turn_id = ?").run(
+      invalidHash,
+      item.itemId,
+    );
+    assert.equal(
+      inbox.getChatInboxItem(agentDir, item.itemId).admission.decisionIntegrity,
+      "invalid",
+    );
+  }
+  db.prepare("UPDATE turns SET admission_hash = ? WHERE turn_id = ?").run(
+    hashes.admission_hash,
+    item.itemId,
+  );
+  for (const column of ["admission_json", "submission_json"]) {
+    db.prepare(
+      `UPDATE turns SET ${column} = ' ' || ${column} WHERE turn_id = ?`,
+    ).run(item.itemId);
+    const integrity = inbox.getChatInboxItem(agentDir, item.itemId).admission;
+    assert.equal(
+      column === "admission_json"
+        ? integrity.decisionIntegrity
+        : integrity.submissionIntegrity,
+      "invalid",
+    );
+    db.prepare(`UPDATE turns SET ${column} = ? WHERE turn_id = ?`).run(
+      column === "admission_json"
+        ? hashes.admission_json
+        : hashes.submission_json,
+      item.itemId,
+    );
+  }
+  inbox.requeueClaimedChatInboxItem(agentDir, claim, { delayMs: 0 });
+  inbox.enqueueChatInboxItem(agentDir, {
+    ...input(),
+    session: { ...input().session, content: "changed duplicate" },
+  });
+  const next = inbox.claimChatInboxItem(agentDir, item.itemId);
+  assert.equal(next.session.content, "content m1");
   assert.equal(
-    inbox.classifyClaimedChatInboxItem(agentDir, next, "record_only"),
-    true,
+    inbox.commitClaimedChatInboxAdmission(agentDir, claim, {
+      state: "record_only",
+      decision: {
+        version: 1,
+        kind: "policy_rejected",
+        decision: { allow: false },
+      },
+    }),
+    null,
+  );
+  const preserved = inbox.commitClaimedChatInboxAdmission(agentDir, next, {
+    state: "record_only",
+    decision: {
+      version: 1,
+      kind: "policy_rejected",
+      decision: { allow: false },
+    },
+  });
+  assert.equal(preserved?.state, "actionable");
+  assert.equal(preserved?.submission?.text, "frozen prompt");
+  assert.equal(
+    inbox.getChatInboxItem(agentDir, item.itemId).admission.state,
+    "actionable",
   );
 });
 
@@ -188,20 +311,33 @@ test("chat inbox retry state and attempts are transactional", async () => {
   assert.equal(failed.lastError, "fatal");
 });
 
-test("accepted inbox work remains pending after retry limit until terminal ownership", async () => {
+test("durably admitted inbox work remains pending after retry limit", async () => {
   const agentDir = await tempDir();
   const { item } = inbox.enqueueChatInboxItem(
     agentDir,
     input("accepted-retry-limit"),
   );
   const claim = inbox.claimChatInboxItem(agentDir, item.itemId);
+  inbox.commitClaimedChatInboxAdmission(agentDir, claim, {
+    state: "actionable",
+    decision: {
+      version: 1,
+      kind: "message",
+      decision: { allow: true },
+    },
+    submission: {
+      version: 1,
+      chatKey: claim.chatKey,
+      incomingMessageId: claim.messageId,
+      text: "recover me",
+      attachments: [],
+      promptMeta: { chatKey: claim.chatKey, sentAt: 1234 },
+    },
+  });
   const db = database.openChatDatabase(agentDir);
   db.prepare(`UPDATE turns SET attempt = 5 WHERE turn_id = ?`).run(
     claim.itemId,
   );
-  db.prepare(
-    `UPDATE messages SET accepted_at = ? WHERE chat_key = ? AND message_id = ?`,
-  ).run(new Date().toISOString(), claim.chatKey, claim.messageId);
 
   const pending = inboxDrain.requeueClaimedChatInboxJob(
     agentDir,
@@ -325,6 +461,8 @@ test("chat inbox restores accepted orphan work with an indexed ledger query", as
   );
   const pending = inbox.listPendingChatInboxItems(agentDir)[0];
   assert.equal(pending.messageId, "accepted-orphan");
+  assert.equal(pending.admission.state, "actionable");
+  assert.equal(pending.admission.decision.kind, "legacy_accepted_orphan");
   assert.deepEqual(pending.elements[0], {
     type: "quote",
     attrs: { id: "legacy-parent" },

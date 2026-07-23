@@ -73,8 +73,14 @@ import {
 } from "./settings.js";
 import { appendChatLog } from "./chat-log.js";
 import {
+  type ChatInboxAdmission,
+  type DurableChatAdmissionCommit,
+  type FrozenChatTurnSubmission,
+  resolveDurableChatAdmission,
+} from "./durable-admission.js";
+import {
   type ChatInboxItem,
-  classifyClaimedChatInboxItem,
+  commitClaimedChatInboxAdmission,
   getChatInboxItem,
   reconcileChatInboxRecovery,
   releaseClaimedChatInboxItem,
@@ -467,6 +473,7 @@ export async function startChatBridge(
         id,
         idempotencyKey: options.idempotencyKey,
         deliveryKind,
+        turnTerminalKind: options.turnTerminalKind,
         postDelivery: options.postDelivery,
       },
     );
@@ -650,19 +657,12 @@ export async function startChatBridge(
   const isInboundMessageProcessed = (chatKey: string, messageId: string) =>
     hasInboundChatMessageReplyBoundary(runtime.agentDir, chatKey, messageId);
   const handleUnmatchedCommandSession = async (
-    session: any,
-    identity: any,
     commandName: string,
+    chatKey: string,
+    messageId: string,
+    respond: boolean,
   ) => {
-    const platform = safeString(session?.platform || "").trim();
-    const trust = trustOf(identity, platform, pickUserId(session));
-    if (!canRunCommand(trust, commandName)) {
-      return { retry: false };
-    }
-    if (!directLike(session)) return { retry: false };
-    const chatKey = sessionChatKey(session);
-    const messageId = pickMessageId(session);
-    if (!chatKey) return { retry: false };
+    if (!respond) return { retry: false };
     await enqueueAndDrainOutbox(
       {
         createdAt: nowIso(),
@@ -696,40 +696,35 @@ export async function startChatBridge(
     return { retry: false };
   };
 
-  const handleCommandSession = async (
+  const buildCommandPromptMeta = (
     session: any,
+    trust: string,
+  ): PromptContextMeta => ({
+    source: "chat-bridge",
+    selfImproveEligible: true,
+    sentAt: Number.isFinite(Number(session?.timestamp))
+      ? Number(session.timestamp)
+      : Date.now(),
+    chatKey: sessionChatKey(session),
+    chatName:
+      pickChatName(session) ||
+      (getChatType(session) === "private" ? pickSenderNickname(session) : ""),
+    chatType: getChatType(session),
+    userId: pickUserId(session),
+    nickname: pickSenderNickname(session),
+    identity: trust,
+    runtimeMetadata:
+      session?.runtimeMetadata && typeof session.runtimeMetadata === "object"
+        ? session.runtimeMetadata
+        : undefined,
+  });
+
+  const handleCommandSession = async (
     command: { name: string; argsText: string },
-    identity: any,
+    promptMeta: PromptContextMeta,
+    chatKey: string,
+    messageId: string,
   ) => {
-    const platform = safeString(session?.platform || "").trim();
-    const trust = trustOf(identity, platform, pickUserId(session));
-    const chatKey = sessionChatKey(session);
-    const messageId = pickMessageId(session);
-    if (!chatKey) return { retry: false };
-    const promptMeta = {
-      source: "chat-bridge",
-      selfImproveEligible: true,
-      sentAt: Number.isFinite(Number(session?.timestamp))
-        ? Number(session.timestamp)
-        : Date.now(),
-      chatKey,
-      chatName:
-        pickChatName(session) ||
-        (getChatType(session) === "private" ? pickSenderNickname(session) : ""),
-      chatType: getChatType(session),
-      userId: pickUserId(session),
-      nickname: pickSenderNickname(session),
-      identity: trust,
-      runtimeMetadata:
-        session?.runtimeMetadata && typeof session.runtimeMetadata === "object"
-          ? session.runtimeMetadata
-          : undefined,
-    };
-
-    if (!canRunCommand(trust, command.name)) {
-      return { retry: false };
-    }
-
     if (command.name === "help") {
       const lines = commandRows.map(
         (entry) =>
@@ -784,24 +779,21 @@ export async function startChatBridge(
     }
   };
 
-  const handleAllowedChatTurnSession = async (
+  const prepareAllowedChatTurnSubmission = async (
     session: any,
     elements: any[],
     identity: any,
     decision: Awaited<ReturnType<typeof shouldProcessText>>,
     receivedAt?: string,
-  ) => {
+  ): Promise<FrozenChatTurnSubmission> => {
     const messageId = pickMessageId(session);
     const replyToMessageId = pickReplyToMessageId(elements);
-    const controller = getController(decision.chatKey);
     const replySession = lookupReplySession(
       runtime.agentDir,
       decision.chatKey,
       replyToMessageId,
     );
-    const linkedSessionFile = safeString(
-      replySession?.sessionFile || "",
-    ).trim();
+    const linkedSessionFile = safeString(replySession?.sessionFile).trim();
     const shouldOmitPromptReplyTo = isReplyToLatestAssistantMessage(
       runtime.agentDir,
       decision.chatKey,
@@ -817,7 +809,7 @@ export async function startChatBridge(
     );
     if (failures.length) {
       let telegramDebug = "";
-      if (safeString(session?.platform || "").trim() === "telegram") {
+      if (safeString(session?.platform).trim() === "telegram") {
         try {
           const detail = await buildTelegramInboundMediaDebug(session);
           if (detail) telegramDebug = ` telegram=${JSON.stringify(detail)}`;
@@ -833,37 +825,57 @@ export async function startChatBridge(
     const promptText = attachments.length
       ? renderPromptTextWithSavedAttachments(promptElements, attachments)
       : renderInboundMessageText(session, promptElements);
-    const promptBody = inboundAttachmentNotice
-      ? `${promptText}\n\n${inboundAttachmentNotice}`
-      : promptText;
-    const promptMeta = {
-      source: "chat-bridge",
-      selfImproveEligible: true,
-      sentAt: Number.isFinite(Number(session?.timestamp))
-        ? Number(session.timestamp)
-        : Date.now(),
+    const modelOptions = resolveChatModelOptions(settings, decision.chatKey);
+    return {
+      version: 1,
       chatKey: decision.chatKey,
-      chatName:
-        pickChatName(session) ||
-        (decision.chatType === "private" ? pickSenderNickname(session) : ""),
-      chatType: decision.chatType,
-      userId: pickUserId(session),
-      nickname: pickSenderNickname(session),
-      identity: trustOf(
-        identity,
-        safeString(session?.platform || "").trim(),
-        pickUserId(session),
-      ),
-      runtimeMetadata:
-        session?.runtimeMetadata && typeof session.runtimeMetadata === "object"
-          ? session.runtimeMetadata
-          : undefined,
-      requiresMentionToStartTurn:
-        decision.requiresMentionToStartTurn || undefined,
-      attachedFiles: attachments
-        .filter((item) => item?.kind === "file")
-        .map((item) => ({ name: item.name, path: item.path })),
+      text: inboundAttachmentNotice
+        ? `${promptText}\n\n${inboundAttachmentNotice}`
+        : promptText,
+      attachments,
+      promptMeta: {
+        source: "chat-bridge",
+        selfImproveEligible: true,
+        sentAt: Number.isFinite(Number(session?.timestamp))
+          ? Number(session.timestamp)
+          : Date.now(),
+        chatKey: decision.chatKey,
+        chatName:
+          pickChatName(session) ||
+          (decision.chatType === "private" ? pickSenderNickname(session) : ""),
+        chatType: decision.chatType,
+        userId: pickUserId(session),
+        nickname: pickSenderNickname(session),
+        identity: trustOf(
+          identity,
+          safeString(session?.platform).trim(),
+          pickUserId(session),
+        ),
+        runtimeMetadata:
+          session?.runtimeMetadata &&
+          typeof session.runtimeMetadata === "object"
+            ? session.runtimeMetadata
+            : undefined,
+        requiresMentionToStartTurn:
+          decision.requiresMentionToStartTurn || undefined,
+        attachedFiles: attachments
+          .filter((item) => item?.kind === "file")
+          .map((item) => ({ name: item.name, path: item.path })),
+      },
+      incomingMessageId: messageId || undefined,
+      replyToMessageId: messageId || undefined,
+      sessionFile: linkedSessionFile || undefined,
+      model: modelOptions.model,
+      thinkingLevel: modelOptions.thinkingLevel,
+      receivedAt,
     };
+  };
+
+  const handlePreparedChatTurnSubmission = async (
+    submission: FrozenChatTurnSubmission,
+  ) => {
+    const messageId = safeString(submission.incomingMessageId).trim();
+    const controller = getController(submission.chatKey);
     const handleTurnFailure = async (error: any) => {
       const errorMessage =
         safeString((error as any)?.message || error).trim() ||
@@ -871,67 +883,52 @@ export async function startChatBridge(
       const messageProcessed = messageId
         ? isInboundChatMessageProcessed(
             runtime.agentDir,
-            decision.chatKey,
+            submission.chatKey,
             messageId,
           )
         : false;
       if (isRinFrontendTurnCancelledError(error)) {
         logger.info(
-          `chat turn cancelled by frontend lifecycle chatKey=${decision.chatKey} err=${errorMessage}`,
+          `chat turn cancelled by frontend lifecycle chatKey=${submission.chatKey} err=${errorMessage}`,
         );
-        if (messageId && !messageProcessed) {
-          return {
-            retry: true,
-            errorMessage,
-          };
-        }
         return {
-          retry: false,
+          retry: Boolean(messageId && !messageProcessed),
           errorMessage,
         };
       }
       if (chatBridgeStopping && messageId && !messageProcessed) {
         logger.info(
-          `chat turn interrupted by bridge shutdown chatKey=${decision.chatKey} err=${errorMessage}`,
+          `chat turn interrupted by bridge shutdown chatKey=${submission.chatKey} err=${errorMessage}`,
         );
-        return {
-          retry: true,
-          errorMessage,
-        };
+        return { retry: true, errorMessage };
       }
       logger.warn(
-        `chat turn failed chatKey=${decision.chatKey} err=${errorMessage}`,
+        `chat turn failed chatKey=${submission.chatKey} err=${errorMessage}`,
       );
       if (errorMessage && messageId && !messageProcessed) {
         let terminalErrorCommitted = false;
         try {
-          const idempotencyKey = JSON.stringify([
-            "error",
-            decision.chatKey,
-            messageId,
-          ]);
           await enqueueAndDrainOutbox(
             {
               createdAt: nowIso(),
-              chatKey: decision.chatKey,
+              chatKey: submission.chatKey,
               parts: withChatQuotePart(
-                [
-                  {
-                    type: "text",
-                    text: errorMessage,
-                  },
-                ],
+                [{ type: "text", text: errorMessage }],
                 messageId,
               ),
-              sessionFile: linkedSessionFile || undefined,
+              sessionFile: submission.sessionFile,
             },
             "error",
             {
-              id: `error-${buildChatMessageRecordKey(decision.chatKey, messageId)}`,
-              idempotencyKey,
+              id: `error-${buildChatMessageRecordKey(submission.chatKey, messageId)}`,
+              idempotencyKey: JSON.stringify([
+                "error",
+                submission.chatKey,
+                messageId,
+              ]),
               postDelivery: {
                 markProcessed: {
-                  chatKey: decision.chatKey,
+                  chatKey: submission.chatKey,
                   messageId,
                   bindSession: false,
                 },
@@ -941,12 +938,9 @@ export async function startChatBridge(
                 const timestamp = nowIso();
                 markProcessedChatMessage(
                   runtime.agentDir,
-                  decision.chatKey,
+                  submission.chatKey,
                   messageId,
-                  {
-                    acceptedAt: timestamp,
-                    processedAt: timestamp,
-                  },
+                  { acceptedAt: timestamp, processedAt: timestamp },
                 );
               },
             },
@@ -956,33 +950,28 @@ export async function startChatBridge(
             !terminalErrorCommitted &&
             !hasCommittedTerminalChatOutbox(
               runtime.agentDir,
-              decision.chatKey,
+              submission.chatKey,
               messageId,
             )
           ) {
-            return {
-              retry: true,
-              errorMessage,
-            };
+            return { retry: true, errorMessage };
           }
         }
         await controller.clearProcessingState().catch(() => {});
       }
-      return {
-        retry: false,
-        errorMessage,
-      };
+      return { retry: false, errorMessage };
     };
     try {
       const turnResult = await controller.runTurn({
-        text: promptBody,
-        attachments,
-        promptMeta,
-        replyToMessageId: messageId,
-        incomingMessageId: messageId,
-        sessionFile: linkedSessionFile || undefined,
-        ...resolveChatModelOptions(settings, decision.chatKey),
-        receivedAt,
+        text: submission.text,
+        attachments: submission.attachments,
+        promptMeta: submission.promptMeta,
+        replyToMessageId: submission.replyToMessageId,
+        incomingMessageId: submission.incomingMessageId,
+        sessionFile: submission.sessionFile,
+        model: submission.model,
+        thinkingLevel: submission.thinkingLevel,
+        receivedAt: submission.receivedAt,
       });
       return {
         retry: false,
@@ -994,28 +983,6 @@ export async function startChatBridge(
     } catch (error) {
       return await handleTurnFailure(error);
     }
-  };
-
-  const handleChatTurnSession = async (
-    session: any,
-    elements: any[],
-    identity: any,
-  ) => {
-    const decision = await shouldProcessText(session, elements, identity, {
-      chatKey: sessionChatKey(session),
-    });
-    if (!decision.allow) {
-      return { retry: false, disposition: "record_only" as const };
-    }
-    if (isRecordOnlyChatKey(decision.chatKey)) {
-      return { retry: false, disposition: "record_only" as const };
-    }
-    return await handleAllowedChatTurnSession(
-      session,
-      elements,
-      identity,
-      decision,
-    );
   };
 
   const waitForSteeredInboxCompletion = async (
@@ -1149,23 +1116,147 @@ export async function startChatBridge(
     const queuedSession = restoreChatInboxSession(
       envelope,
       findRuntimeBot(
-        safeString(envelope?.session?.platform || "").trim(),
-        safeString(envelope?.session?.selfId || "").trim(),
+        safeString(envelope?.session?.platform).trim(),
+        safeString(envelope?.session?.selfId).trim(),
       ),
     );
     const queuedElements = restoreChatInboxElements(envelope);
     const queuedChatKey =
       safeString(envelope.chatKey).trim() || sessionChatKey(queuedSession);
-    if (isRecordOnlyChatKey(queuedChatKey)) {
-      return {
-        run: () =>
-          runClaimedInboxJob(job, async () => ({
-            retry: false,
-            disposition: "record_only",
-          })),
-      };
-    }
     const identity = getIdentity();
+
+    const recordOnlyJob = (): PreparedChatKeyWorkerJob => ({
+      run: () =>
+        runClaimedInboxJob(job, async () => ({
+          retry: false,
+          disposition: "record_only",
+        })),
+    });
+    const requireCommittedAdmission = (
+      admission: ChatInboxAdmission | null,
+    ) => {
+      if (!admission) {
+        throw new Error("chat_inbox_claim_lost_during_admission");
+      }
+      return admission;
+    };
+    const interruptedUnknownJob = (
+      admission: ChatInboxAdmission,
+    ): PreparedChatKeyWorkerJob => ({
+      run: () =>
+        runClaimedInboxJob(job, async () => {
+          await enqueueAndDrainOutbox(
+            {
+              createdAt: nowIso(),
+              chatKey: queuedChatKey,
+              parts: withChatQuotePart(
+                [
+                  {
+                    type: "text",
+                    text: "The previous turn was interrupted, and Rin could not verify whether it completed. It was not submitted again.",
+                  },
+                ],
+                envelope.messageId,
+              ),
+              sessionFile: admission.executionSessionFile,
+            },
+            "error",
+            {
+              turnTerminalKind: "interrupted_unknown",
+              id: `interrupted-unknown-${buildChatMessageRecordKey(
+                queuedChatKey,
+                envelope.messageId,
+              )}`,
+              idempotencyKey: JSON.stringify([
+                "interrupted_unknown",
+                queuedChatKey,
+                envelope.messageId,
+              ]),
+              postDelivery: {
+                markProcessed: {
+                  chatKey: queuedChatKey,
+                  messageId: envelope.messageId,
+                  bindSession: false,
+                },
+              },
+            },
+          );
+          return {
+            retry: false,
+            disposition: "actionable",
+            terminalKind: "interrupted_unknown",
+          };
+        }),
+    });
+    const prepareFromAdmission = (
+      admission: ChatInboxAdmission,
+    ): PreparedChatKeyWorkerJob => {
+      const resolved = resolveDurableChatAdmission(admission, {
+        chatKey: envelope.chatKey,
+        messageId: envelope.messageId,
+      });
+      switch (resolved.kind) {
+        case "record_only":
+          return recordOnlyJob();
+        case "command":
+          return {
+            run: () =>
+              runClaimedInboxJob(job, () =>
+                handleCommandSession(
+                  resolved.command,
+                  resolved.promptMeta,
+                  resolved.chatKey,
+                  resolved.messageId,
+                ),
+              ),
+          };
+        case "unmatched_command":
+          return {
+            run: () =>
+              runClaimedInboxJob(job, () =>
+                handleUnmatchedCommandSession(
+                  resolved.name,
+                  resolved.chatKey,
+                  resolved.messageId,
+                  resolved.respond,
+                ),
+              ),
+          };
+        case "turn":
+          return {
+            run: () =>
+              runClaimedInboxJob(job, () =>
+                handlePreparedChatTurnSubmission(resolved.submission),
+              ),
+          };
+        case "interrupted_unknown":
+          return interruptedUnknownJob(admission);
+        case "unclassified":
+          throw new Error("chat_inbox_admission_required");
+      }
+    };
+
+    const commitAdmission = (input: DurableChatAdmissionCommit) =>
+      prepareFromAdmission(
+        requireCommittedAdmission(
+          commitClaimedChatInboxAdmission(runtime.agentDir, envelope, input),
+        ),
+      );
+
+    const recoveredAdmission = resolveDurableChatAdmission(envelope.admission, {
+      chatKey: envelope.chatKey,
+      messageId: envelope.messageId,
+    });
+    if (recoveredAdmission.kind !== "unclassified") {
+      return prepareFromAdmission(envelope.admission);
+    }
+
+    if (isRecordOnlyChatKey(queuedChatKey)) {
+      return commitAdmission({
+        state: "record_only",
+        decision: { version: 1, kind: "record_only_chat" },
+      });
+    }
     const commandRequest = parseInboundCommandRequest(
       queuedSession,
       elementsToCommandText(queuedElements),
@@ -1175,47 +1266,65 @@ export async function startChatBridge(
       commandRequest.commandLike &&
       REMOVED_CHAT_COMMAND_NAMES.has(commandRequest.name)
     ) {
-      return {
-        run: () =>
-          runClaimedInboxJob(job, async () => ({
-            retry: false,
-            disposition: "record_only",
-          })),
-      };
+      return commitAdmission({
+        state: "record_only",
+        decision: {
+          version: 1,
+          kind: "removed_command",
+          name: commandRequest.name,
+        },
+      });
+    }
+    const commandTrust = commandRequest.commandLike
+      ? trustOf(
+          identity,
+          safeString(queuedSession?.platform).trim(),
+          pickUserId(queuedSession),
+        )
+      : "";
+    if (
+      commandRequest.commandLike &&
+      !canRunCommand(commandTrust, commandRequest.name)
+    ) {
+      return commitAdmission({
+        state: "record_only",
+        decision: {
+          version: 1,
+          kind: "policy_rejected",
+          decision: {
+            source: "command_authorization",
+            name: commandRequest.name,
+          },
+        },
+      });
     }
     if (commandRequest.command) {
-      if (
-        !classifyClaimedChatInboxItem(runtime.agentDir, envelope, "actionable")
-      ) {
-        throw new Error("chat_inbox_claim_lost_during_classification");
-      }
-      return {
-        run: () =>
-          runClaimedInboxJob(job, () =>
-            handleCommandSession(
-              queuedSession,
-              commandRequest.command!,
-              identity,
-            ),
-          ),
-      };
+      return commitAdmission({
+        state: "actionable",
+        decision: {
+          version: 1,
+          kind: "command",
+          chatKey: queuedChatKey,
+          messageId: envelope.messageId,
+          command: commandRequest.command,
+          trust: commandTrust,
+          promptMeta: buildCommandPromptMeta(queuedSession, commandTrust),
+        },
+      });
     }
     if (commandRequest.commandLike) {
-      if (
-        !classifyClaimedChatInboxItem(runtime.agentDir, envelope, "actionable")
-      ) {
-        throw new Error("chat_inbox_claim_lost_during_classification");
-      }
-      return {
-        run: () =>
-          runClaimedInboxJob(job, () =>
-            handleUnmatchedCommandSession(
-              queuedSession,
-              identity,
-              commandRequest.name,
-            ),
-          ),
-      };
+      return commitAdmission({
+        state: "actionable",
+        decision: {
+          version: 1,
+          kind: "unmatched_command",
+          chatKey: queuedChatKey,
+          messageId: envelope.messageId,
+          name: commandRequest.name,
+          trust: commandTrust,
+          respond: directLike(queuedSession),
+        },
+      });
     }
 
     const decision = await shouldProcessText(
@@ -1224,42 +1333,28 @@ export async function startChatBridge(
       identity,
       { chatKey: queuedChatKey },
     );
-    if (!decision.allow) {
-      return {
-        run: () =>
-          runClaimedInboxJob(job, async () => ({
-            retry: false,
-            disposition: "record_only",
-          })),
-      };
+    if (!decision.allow || isRecordOnlyChatKey(decision.chatKey)) {
+      return commitAdmission({
+        state: "record_only",
+        decision: {
+          version: 1,
+          kind: decision.allow ? "record_only_chat" : "policy_rejected",
+          decision,
+        },
+      });
     }
-    if (isRecordOnlyChatKey(decision.chatKey)) {
-      return {
-        run: () =>
-          runClaimedInboxJob(job, async () => ({
-            retry: false,
-            disposition: "record_only",
-          })),
-      };
-    }
-    if (
-      !classifyClaimedChatInboxItem(runtime.agentDir, envelope, "actionable")
-    ) {
-      throw new Error("chat_inbox_claim_lost_during_classification");
-    }
-
-    return {
-      run: () =>
-        runClaimedInboxJob(job, () =>
-          handleAllowedChatTurnSession(
-            queuedSession,
-            queuedElements,
-            identity,
-            decision,
-            envelope.createdAt,
-          ),
-        ),
-    };
+    const submission = await prepareAllowedChatTurnSubmission(
+      queuedSession,
+      queuedElements,
+      identity,
+      decision,
+      envelope.createdAt,
+    );
+    return commitAdmission({
+      state: "actionable",
+      decision: { version: 1, kind: "message", decision },
+      submission,
+    });
   };
 
   let requestDrainChatInbox: () => void = () => {};
@@ -1288,6 +1383,14 @@ export async function startChatBridge(
     isChatKeyBlocked: (chatKey) => app.isInboundRecoveryChat(chatKey),
     hasActiveChatKeyWorker: (chatKey) => chatKeyWorkers.hasWorker(chatKey),
     isPriorityDuringActiveChatKeyWorker: (envelope) => {
+      const frozenCommand =
+        envelope.admission.state === "actionable" &&
+        envelope.admission.decision?.kind === "command"
+          ? (envelope.admission.decision.command as any)
+          : undefined;
+      if (frozenCommand) {
+        return ["abort", "new"].includes(safeString(frozenCommand.name).trim());
+      }
       const queuedSession = restoreChatInboxSession(
         envelope,
         findRuntimeBot(
@@ -1303,6 +1406,8 @@ export async function startChatBridge(
       return ["abort", "new"].includes(commandRequest.command?.name || "");
     },
     canClaimDuringActiveChatKeyWorker: async (envelope) => {
+      if (envelope.admission.state === "actionable") return true;
+      if (envelope.admission.state === "record_only") return false;
       const queuedSession = restoreChatInboxSession(
         envelope,
         findRuntimeBot(

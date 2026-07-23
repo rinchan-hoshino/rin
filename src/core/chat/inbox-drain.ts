@@ -6,6 +6,7 @@ import {
   completeClaimedChatInboxItem,
   failClaimedChatInboxItem,
   isChatInboxItemAccepted,
+  isChatInboxItemDurablyActionable,
   listPendingChatInboxItems,
   requeueClaimedChatInboxItem,
 } from "./inbox.js";
@@ -54,7 +55,8 @@ export function requeueClaimedChatInboxJob(
   const errorMessage = safeString(error || "chat_inbound_retry_needed");
   if (
     nextAttemptCount >= CHAT_INBOX_MAX_ATTEMPTS &&
-    !isChatInboxItemAccepted(agentDir, job.envelope.itemId)
+    !isChatInboxItemAccepted(agentDir, job.envelope.itemId) &&
+    !isChatInboxItemDurablyActionable(agentDir, job.envelope.itemId)
   ) {
     return failClaimedChatInboxItem(agentDir, job.envelope, errorMessage);
   }

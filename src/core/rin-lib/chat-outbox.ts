@@ -137,6 +137,7 @@ export type EnqueueChatOutboxOptions = {
   id?: string;
   idempotencyKey?: string;
   deliveryKind?: ChatOutboxDeliveryKind;
+  turnTerminalKind?: "interrupted_unknown";
   postDelivery?: ChatOutboxPostDelivery;
   turnFence?: ChatOutboxTurnFence;
   supersedeTurnFences?: ChatOutboxTurnFence[];
@@ -439,7 +440,8 @@ function validateChatOutboxTurnFence(
   }
   const turn = db
     .prepare(
-      `SELECT turns.turn_id, turns.inbound_message_id
+      `SELECT turns.turn_id, turns.inbound_message_id,
+              turns.owner_epoch, turns.attempt
        FROM turns
        JOIN messages ON messages.id = turns.inbound_message_id
        JOIN chat_state ON chat_state.chat_key = turns.chat_key
@@ -565,6 +567,10 @@ export function enqueueChatOutboxPayload(
     };
   }
   validateChatOutboxPayloadParts(normalizedPayload);
+  const executionSessionFile =
+    safeString(normalizedPayload.sessionFile).trim() || null;
+  const turnTerminalKind =
+    safeString(options.turnTerminalKind).trim() || `outbox_${deliveryKind}`;
   const idempotencyKey = safeString(options.idempotencyKey).trim();
   const id =
     sanitizeIdPart(options.id) ||
@@ -608,9 +614,15 @@ export function enqueueChatOutboxPayload(
                SET state = 'superseded', terminal_kind = 'coalesced_steer',
                    owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL,
                    next_attempt_at = NULL, last_error = NULL, updated_at = ?
-               WHERE turn_id = ? AND state = 'running'`,
+               WHERE turn_id = ? AND state = 'running'
+                 AND owner_epoch = ? AND attempt = ?`,
             )
-            .run(timestamp, owned.turn_id);
+            .run(
+              timestamp,
+              owned.turn_id,
+              safeString(owned.owner_epoch),
+              Number(owned.attempt),
+            );
           if (result.changes !== 1) throw new Error("chat_turn_fence_lost");
           db.prepare(
             `UPDATE messages
@@ -711,10 +723,24 @@ export function enqueueChatOutboxPayload(
               `UPDATE turns
                SET state = 'terminal', terminal_kind = ?, owner_epoch = NULL,
                    lease_until = NULL, heartbeat_at = NULL,
-                   next_attempt_at = NULL, last_error = NULL, updated_at = ?
-               WHERE turn_id = ? AND state = 'running'`,
+                   next_attempt_at = NULL, last_error = NULL,
+                   execution_session_file = COALESCE(execution_session_file, ?),
+                   updated_at = ?
+               WHERE turn_id = ? AND state = 'running'
+                 AND owner_epoch = ? AND attempt = ?
+                 AND (? IS NULL OR execution_session_file IS NULL
+                      OR execution_session_file = ?)`,
             )
-            .run(`outbox_${deliveryKind}`, timestamp, turn.turn_id);
+            .run(
+              turnTerminalKind,
+              executionSessionFile,
+              timestamp,
+              turn.turn_id,
+              safeString(turn.owner_epoch),
+              Number(turn.attempt),
+              executionSessionFile,
+              executionSessionFile,
+            );
           if (terminalized.changes !== 1) {
             throw new Error("chat_turn_fence_lost");
           }
@@ -802,10 +828,24 @@ export function enqueueChatOutboxPayload(
             `UPDATE turns
              SET state = 'terminal', terminal_kind = ?, owner_epoch = NULL,
                  lease_until = NULL, heartbeat_at = NULL, next_attempt_at = NULL,
-                 last_error = NULL, updated_at = ?
-             WHERE turn_id = ? AND state = 'running'`,
+                 last_error = NULL,
+                 execution_session_file = COALESCE(execution_session_file, ?),
+                 updated_at = ?
+             WHERE turn_id = ? AND state = 'running'
+               AND owner_epoch = ? AND attempt = ?
+               AND (? IS NULL OR execution_session_file IS NULL
+                    OR execution_session_file = ?)`,
           )
-          .run(`outbox_${deliveryKind}`, timestamp, turn.turn_id);
+          .run(
+            turnTerminalKind,
+            executionSessionFile,
+            timestamp,
+            turn.turn_id,
+            safeString(turn.owner_epoch),
+            Number(turn.attempt),
+            executionSessionFile,
+            executionSessionFile,
+          );
         if (terminalized.changes !== 1) {
           throw new Error("chat_turn_fence_lost");
         }
