@@ -3291,6 +3291,56 @@ test("lark adapter maps fire working reaction to the supported emoji type", asyn
   });
 });
 
+test("lark reaction operations reject resolved Feishu API failures", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    let mode = "create";
+    adapter.client = {
+      im: {
+        messageReaction: {
+          create: async () => ({ code: 230001, msg: "create failed" }),
+          list: async () =>
+            mode === "list"
+              ? { code: 230002, msg: "list failed" }
+              : {
+                  code: 0,
+                  data: {
+                    items: [
+                      {
+                        reaction_id: "reaction-1",
+                        reaction_type: { emoji_type: "THINKING" },
+                        operator: { operator_type: "app" },
+                      },
+                    ],
+                  },
+                },
+          delete: async () => ({ code: 230003, msg: "delete failed" }),
+        },
+      },
+    };
+
+    await assert.rejects(
+      app.bots[0].createReaction("oc_1", "om_1", "🤔"),
+      /lark_api_error:230001:create failed/,
+    );
+    mode = "list";
+    await assert.rejects(
+      app.bots[0].deleteReaction("oc_1", "om_1", "🤔"),
+      /lark_api_error:230002:list failed/,
+    );
+    mode = "delete";
+    await assert.rejects(
+      app.bots[0].deleteReaction("oc_1", "om_1", "🤔"),
+      /lark_api_error:230003:delete failed/,
+    );
+  });
+});
+
 test("lark adapter maps markdown inline styles and mentions to native elements", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {

@@ -422,6 +422,21 @@ function assertLarkApiSuccess(result: any) {
   }
 }
 
+function larkMentionTargetId(mention: any) {
+  const nestedId =
+    mention?.id && typeof mention.id === "object" ? mention.id : {};
+  return safeString(
+    nestedId.open_id ||
+      nestedId.user_id ||
+      nestedId.union_id ||
+      (typeof mention?.id === "string" ? mention.id : "") ||
+      mention?.open_id ||
+      mention?.user_id ||
+      mention?.union_id ||
+      "",
+  ).trim();
+}
+
 function toSlackReactionName(emoji: string) {
   const value = safeString(emoji).trim();
   return SLACK_REACTION_NAMES[value] || value.replace(/^:+|:+$/g, "");
@@ -2113,6 +2128,24 @@ export class LarkAdapter {
       appSecret,
       domain,
     });
+    const identityResponse = await this.client.request({
+      url: "/open-apis/bot/v3/info",
+      method: "GET",
+    });
+    assertLarkApiSuccess(identityResponse);
+    const botInfo =
+      identityResponse?.bot && typeof identityResponse.bot === "object"
+        ? identityResponse.bot
+        : identityResponse?.data?.bot &&
+            typeof identityResponse.data.bot === "object"
+          ? identityResponse.data.bot
+          : {};
+    const botOpenId = safeString(botInfo?.open_id || botInfo?.openId).trim();
+    if (!botOpenId) {
+      throw new Error("Lark bot identity response is missing open_id");
+    }
+    const botName =
+      safeString(botInfo?.app_name || botInfo?.appName).trim() || appId;
     this.wsClient = new Lark.WSClient({
       appId,
       appSecret,
@@ -2123,11 +2156,13 @@ export class LarkAdapter {
     this.bot.internal.wsClient = this.wsClient;
     this.bot.selfId = appId;
     this.bot.user = {
-      id: appId,
-      userId: appId,
-      name: appId,
-      username: appId,
-      nick: appId,
+      id: botOpenId,
+      userId: botOpenId,
+      openId: botOpenId,
+      appId,
+      name: botName,
+      username: botName,
+      nick: botName,
     };
     this.inboundGate.begin();
     await this.wsClient.start({
@@ -2458,7 +2493,7 @@ export class LarkAdapter {
             normalizeNode(
               "at",
               compactObject({
-                id: safeString(part?.user_id || part?.id).trim() || undefined,
+                id: larkMentionTargetId(part) || undefined,
                 name:
                   safeString(part?.user_name || part?.name).trim() || undefined,
               }),
@@ -2475,6 +2510,24 @@ export class LarkAdapter {
                 src: src || undefined,
                 name:
                   safeString(part?.alt || part?.image_key).trim() || undefined,
+              }),
+            ),
+          );
+          continue;
+        }
+        if (tag === "media") {
+          const src = safeString(part?.file_key || part?.src).trim();
+          nodes.push(
+            normalizeNode(
+              "video",
+              compactObject({
+                src: src || undefined,
+                name:
+                  safeString(part?.file_name || part?.name).trim() || undefined,
+                cover:
+                  safeString(part?.image_key || part?.cover).trim() ||
+                  undefined,
+                duration: part?.duration,
               }),
             ),
           );
@@ -2518,6 +2571,31 @@ export class LarkAdapter {
       const name = safeString(parsed?.file_name || parsed?.name).trim();
       return [normalizeNode("file", compactObject({ src, name }))];
     }
+    if (type === "audio") {
+      const src = safeString(parsed?.file_key || parsed?.key || raw).trim();
+      const name = safeString(parsed?.file_name || parsed?.name).trim();
+      return [
+        normalizeNode(
+          "audio",
+          compactObject({ src, name, duration: parsed?.duration }),
+        ),
+      ];
+    }
+    if (type === "media" || type === "video") {
+      const src = safeString(parsed?.file_key || parsed?.key || raw).trim();
+      const name = safeString(parsed?.file_name || parsed?.name).trim();
+      const cover = safeString(parsed?.image_key || parsed?.cover).trim();
+      return [
+        normalizeNode(
+          "video",
+          compactObject({ src, name, cover, duration: parsed?.duration }),
+        ),
+      ];
+    }
+    if (type === "sticker") {
+      const src = safeString(parsed?.file_key || parsed?.key || raw).trim();
+      return [normalizeNode("sticker", compactObject({ src }))];
+    }
     const parsedText = this.parseMessageContent(raw);
     const nodes: any[] = [];
     const mentionByKey = new Map<string, any>();
@@ -2538,8 +2616,7 @@ export class LarkAdapter {
           normalizeNode(
             "at",
             compactObject({
-              id:
-                safeString(mention?.id || mention?.open_id).trim() || undefined,
+              id: larkMentionTargetId(mention) || undefined,
               name: safeString(mention?.name).trim() || undefined,
             }),
           ),
@@ -2588,6 +2665,7 @@ export class LarkAdapter {
           path: { message_id: id },
           params: { user_id_type: "open_id" },
         });
+        assertLarkApiSuccess(response);
         items = this.pickLarkMessageItems(response);
       } catch (error: any) {
         this.logger?.warn?.(
@@ -2633,6 +2711,7 @@ export class LarkAdapter {
       path: { message_id: messageId, file_key: fileKey },
       params: { type: resourceType },
     });
+    assertLarkApiSuccess(response);
     if (!response || typeof response.writeFile !== "function") return null;
     const mimeType = safeString(
       response.headers?.["content-type"] ||
@@ -2654,7 +2733,7 @@ export class LarkAdapter {
     const resolved: any[] = [];
     for (const node of nodes) {
       const type = safeString(node?.type).trim().toLowerCase();
-      if (type !== "image" && type !== "file") {
+      if (!["image", "file", "audio", "video"].includes(type)) {
         resolved.push(node);
         continue;
       }
@@ -2709,10 +2788,11 @@ export class LarkAdapter {
   async createReaction(_chatId: string, messageId: string, emoji: string) {
     const emojiType = toLarkReactionType(emoji);
     if (!emojiType) throw new Error("lark_reaction_emoji_required");
-    await this.client.im.messageReaction.create({
+    const result = await this.client.im.messageReaction.create({
       path: { message_id: messageId },
       data: { reaction_type: { emoji_type: emojiType } },
     });
+    assertLarkApiSuccess(result);
     return true;
   }
 
@@ -2723,6 +2803,7 @@ export class LarkAdapter {
       path: { message_id: messageId },
       params: { reaction_type: emojiType, page_size: 50 },
     });
+    assertLarkApiSuccess(listed);
     const items = Array.isArray(listed?.data?.items) ? listed.data.items : [];
     const reaction =
       items.find(
@@ -2732,9 +2813,10 @@ export class LarkAdapter {
       ) || items[0];
     const reactionId = safeString(reaction?.reaction_id).trim();
     if (!reactionId) return false;
-    await this.client.im.messageReaction.delete({
+    const result = await this.client.im.messageReaction.delete({
       path: { message_id: messageId, reaction_id: reactionId },
     });
+    assertLarkApiSuccess(result);
     return true;
   }
 
@@ -2992,6 +3074,7 @@ export class LarkAdapter {
     const uploaded = await this.client.im.image.create({
       data: { image_type: "message", image },
     });
+    assertLarkApiSuccess(uploaded);
     const imageKey = safeString(
       uploaded?.image_key || uploaded?.data?.image_key || "",
     ).trim();
@@ -3142,12 +3225,13 @@ export class LarkAdapter {
     const mentions = Array.isArray(message?.mentions)
       ? message.mentions
       : parsed.mentions;
-    const mentionSelf = mentions.some((item: any) => {
-      const key = safeString(
-        item?.key || item?.id || item?.open_id || "",
-      ).trim();
-      return key && key === safeString(this.bot?.selfId).trim();
-    });
+    const botOpenId = safeString(
+      this.bot?.user?.openId || this.bot?.user?.open_id || "",
+    ).trim();
+    const mentionSelf = mentions.some(
+      (item: any) =>
+        Boolean(botOpenId) && larkMentionTargetId(item) === botOpenId,
+    );
     const isForward = msgType === "merge_forward";
     const rawElements = isForward
       ? [await this.buildLarkForwardNode(message)]

@@ -1095,7 +1095,11 @@ test("lark startup retries local recovery handling without closing transport", a
     }
   }
 
-  Lark.Client = class FakeClient {};
+  Lark.Client = class FakeClient {
+    async request() {
+      return { code: 0, bot: { open_id: "ou_bot", app_name: "Rin" } };
+    }
+  };
   Lark.WSClient = FakeWSClient;
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-lark-recovery-retry-"),
@@ -1137,6 +1141,168 @@ test("lark startup retries local recovery handling without closing transport", a
   }
 });
 
+test("lark startup resolves the bot open id without changing the stable app identity", async () => {
+  const Lark = nodeRequire("@larksuiteoapi/node-sdk");
+  const originalClient = Lark.Client;
+  const originalWSClient = Lark.WSClient;
+  const identityCalls: any[] = [];
+
+  class FakeWSClient {
+    start() {}
+    close() {}
+  }
+
+  Lark.Client = class FakeClient {
+    async request(options: any) {
+      identityCalls.push(options);
+      return {
+        code: 0,
+        bot: { open_id: "ou_bot", app_name: "Rin" },
+      };
+    }
+  };
+  Lark.WSClient = FakeWSClient;
+
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-lark-identity-"),
+  );
+  try {
+    let bot: any = null;
+    const adapter = new adapters.LarkAdapter(
+      {
+        agentDir,
+        register(_adapter: unknown, registeredBot: any) {
+          bot = registeredBot;
+        },
+        emit() {
+          return true;
+        },
+      },
+      agentDir,
+      { appId: "cli_test", appSecret: "secret" },
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+
+    await adapter.start();
+
+    assert.deepEqual(identityCalls, [
+      { url: "/open-apis/bot/v3/info", method: "GET" },
+    ]);
+    assert.equal(bot.selfId, "cli_test");
+    assert.deepEqual(bot.user, {
+      id: "ou_bot",
+      userId: "ou_bot",
+      openId: "ou_bot",
+      appId: "cli_test",
+      name: "Rin",
+      username: "Rin",
+      nick: "Rin",
+    });
+    await adapter.stop();
+  } finally {
+    Lark.Client = originalClient;
+    Lark.WSClient = originalWSClient;
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("lark startup rejects an unresolved bot identity instead of silently disabling mentions", async () => {
+  const Lark = nodeRequire("@larksuiteoapi/node-sdk");
+  const originalClient = Lark.Client;
+  const originalWSClient = Lark.WSClient;
+  let websocketStarts = 0;
+
+  Lark.Client = class FakeClient {
+    async request() {
+      return { code: 0, bot: {} };
+    }
+  };
+  Lark.WSClient = class FakeWSClient {
+    start() {
+      websocketStarts += 1;
+    }
+    close() {}
+  };
+
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-lark-missing-identity-"),
+  );
+  try {
+    const adapter = new adapters.LarkAdapter(
+      { agentDir, register() {}, emit() {} },
+      agentDir,
+      { appId: "cli_test", appSecret: "secret" },
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+
+    await assert.rejects(
+      adapter.start(),
+      /Lark bot identity response is missing open_id/,
+    );
+    assert.equal(websocketStarts, 0);
+  } finally {
+    Lark.Client = originalClient;
+    Lark.WSClient = originalWSClient;
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("lark runtime recognizes only the exact bot open id in native mentions", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-lark-mention-"),
+  );
+  try {
+    const app = runtime.createChatRuntimeApp(agentDir);
+    runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+      dataDir: path.join(agentDir, "data"),
+      settings: {},
+      adapterEntries: [
+        {
+          key: "lark",
+          name: "Feishu",
+          config: { appId: "cli_test", appSecret: "secret" },
+        },
+      ],
+    });
+    const adapter = [...app.adapters][0];
+    adapter.bot.selfId = "cli_test";
+    adapter.bot.user = { openId: "ou_bot" };
+    const seen: any[] = [];
+    app.on("message", (session: any) => seen.push(session));
+    const event = (messageId: string, openId: string) => ({
+      sender: { sender_type: "user", sender_id: { open_id: "ou_sender" } },
+      message: {
+        message_id: messageId,
+        message_type: "text",
+        chat_id: "oc_chat",
+        chat_type: "group",
+        create_time: "1713436800000",
+        content: JSON.stringify({ text: "@_user_1 ping" }),
+        mentions: [
+          {
+            key: "@_user_1",
+            id: { open_id: openId },
+            mentioned_type: "bot",
+            name: "Rin",
+          },
+        ],
+      },
+    });
+
+    await adapter.handleMessage(event("om-self-mention", "ou_bot"));
+    await adapter.handleMessage(event("om-other-bot", "ou_other_bot"));
+
+    assert.equal(seen.length, 2);
+    assert.equal(seen[0].stripped.appel, true);
+    assert.equal(seen[0].elements[0].type, "at");
+    assert.equal(seen[0].elements[0].attrs.id, "ou_bot");
+    assert.equal(seen[1].stripped.appel, false);
+    assert.equal(seen[1].elements[0].attrs.id, "ou_other_bot");
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("lark websocket events settle only after durable message handling", async () => {
   const Lark = nodeRequire("@larksuiteoapi/node-sdk");
   const originalClient = Lark.Client;
@@ -1151,7 +1317,11 @@ test("lark websocket events settle only after durable message handling", async (
     close() {}
   }
 
-  Lark.Client = class FakeClient {};
+  Lark.Client = class FakeClient {
+    async request() {
+      return { code: 0, bot: { open_id: "ou_bot", app_name: "Rin" } };
+    }
+  };
   Lark.WSClient = FakeWSClient;
 
   try {
@@ -1415,6 +1585,106 @@ test("lark runtime downloads image message resources before inbox persistence", 
   const stored = files[0];
   assert.match(stored.elements[0].attrs.src, /^file:\/\//);
   assert.equal(stored.elements[0].attrs.mimeType, "image/png");
+});
+
+test("lark runtime preserves official audio, video, sticker, and post media nodes", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-lark-media-"),
+  );
+  try {
+    const app = runtime.createChatRuntimeApp(agentDir);
+    runtime.instantiateBuiltInChatRuntimeAdapters(app, {
+      dataDir: path.join(agentDir, "data"),
+      settings: {},
+      adapterEntries: [
+        {
+          key: "lark",
+          name: "Feishu",
+          config: { appId: "cli-test", appSecret: "secret" },
+        },
+      ],
+    });
+    const adapter = [...app.adapters][0];
+    adapter.bot.selfId = "cli-test";
+    const resourceCalls: any[] = [];
+    adapter.client = {
+      im: {
+        messageResource: {
+          get: async (options: any) => {
+            resourceCalls.push(options);
+            return {
+              headers: { "content-type": "application/octet-stream" },
+              writeFile: async (filePath: string) => {
+                await fs.writeFile(filePath, Buffer.from("media"));
+                return filePath;
+              },
+            };
+          },
+        },
+      },
+    };
+    const seen: any[] = [];
+    app.on("message", (session: any) => seen.push(session));
+    const event = (messageId: string, messageType: string, content: any) => ({
+      sender: { sender_type: "user", sender_id: { open_id: "ou_sender" } },
+      message: {
+        message_id: messageId,
+        message_type: messageType,
+        chat_id: "oc_chat",
+        chat_type: "group",
+        create_time: "1713436800000",
+        content: JSON.stringify(content),
+      },
+    });
+
+    await adapter.handleMessage(
+      event("om-audio", "audio", { file_key: "audio-key", duration: 1500 }),
+    );
+    await adapter.handleMessage(
+      event("om-video", "media", {
+        file_key: "video-key",
+        file_name: "clip.mp4",
+        image_key: "cover-key",
+        duration: 30000,
+      }),
+    );
+    await adapter.handleMessage(
+      event("om-sticker", "sticker", { file_key: "sticker-key" }),
+    );
+    await adapter.handleMessage(
+      event("om-post-media", "post", {
+        zh_cn: {
+          content: [
+            [
+              {
+                tag: "media",
+                file_key: "post-video-key",
+                image_key: "post-cover-key",
+              },
+            ],
+          ],
+        },
+      }),
+    );
+
+    assert.deepEqual(
+      seen.map((session) => session.elements[0].type),
+      ["audio", "video", "sticker", "video"],
+    );
+    assert.match(seen[0].elements[0].attrs.src, /^file:\/\//);
+    assert.equal(seen[0].elements[0].attrs.duration, 1500);
+    assert.match(seen[1].elements[0].attrs.src, /^file:\/\//);
+    assert.equal(seen[1].elements[0].attrs.name, "clip.mp4");
+    assert.equal(seen[1].elements[0].attrs.cover, "cover-key");
+    assert.equal(seen[2].elements[0].attrs.src, "sticker-key");
+    assert.match(seen[3].elements[0].attrs.src, /^file:\/\//);
+    assert.deepEqual(
+      resourceCalls.map((call) => call.params.type),
+      ["file", "file", "file"],
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
 });
 
 test("onebot runtime reads merged forward messages into inbound text", async () => {
