@@ -21,7 +21,6 @@ import {
   migrateLegacyChatControlData,
   readLegacyControlMigrationPreservedSummary,
 } from "./legacy-migration.js";
-import { parseChatKey } from "./support.js";
 
 const OLD_ADMISSION_KINDS = [
   "legacy_message_projection",
@@ -212,71 +211,60 @@ function assertNoActiveOldAdmissionOwner(
   }
 }
 
-function migrationOutboxId(turnId: string) {
-  return createHash("sha256")
-    .update(`chat-install-migration-interrupted-unknown:${turnId}`)
-    .digest("hex");
-}
-
-function enqueueInterruptedUnknownForInstall(
+function terminalOutboxKindForInstall(
   db: BetterSqlite3.Database,
-  input: {
-    turnId: string;
-    chatKey: string;
-    messageId: string;
-    sessionFile?: string;
-    timestamp: string;
-  },
+  turnId: string,
 ) {
-  const existing = db
+  const row = db
     .prepare(
-      `SELECT 1 FROM outbox
+      `SELECT delivery_kind FROM outbox
         WHERE turn_id = ?
           AND (delivery_kind IN ('final', 'error', 'command_ack')
                OR post_delivery_json IS NOT NULL)
         LIMIT 1`,
     )
-    .get(input.turnId);
-  if (existing) return false;
-  const sequence = Number(
-    (
-      db
-        .prepare(`SELECT COALESCE(MAX(sequence), 0) + 1 AS value FROM outbox`)
-        .get() as any
-    )?.value || 1,
+    .get(turnId) as any;
+  const deliveryKind = safeString(row?.delivery_kind).trim();
+  if (deliveryKind === "final") return "outbox_final";
+  if (deliveryKind === "error") return "outbox_error";
+  if (deliveryKind === "command_ack") return "command_ack";
+  return row ? "outbox_terminal" : "";
+}
+
+function hasAssistantReplyForInstall(
+  db: BetterSqlite3.Database,
+  chatKey: string,
+  messageId: string,
+) {
+  return Boolean(
+    db
+      .prepare(
+        `SELECT 1 FROM messages
+          WHERE chat_key = ? AND role = 'assistant'
+            AND reply_to_message_id = ? AND processed_at IS NOT NULL
+            AND COALESCE(delivery_kind, 'final')
+                NOT IN ('interim', 'passive_notice')
+          LIMIT 1`,
+      )
+      .get(chatKey, messageId),
   );
-  const payload = {
-    createdAt: input.timestamp,
-    chatKey: input.chatKey,
-    deliveryKind: "error",
-    ...(input.sessionFile ? { sessionFile: input.sessionFile } : {}),
-    parts: [
-      { type: "quote", id: input.messageId },
-      {
-        type: "text",
-        text: "The previous turn was interrupted, and Rin could not verify whether it completed. It was not submitted again.",
-      },
-    ],
-  };
-  const result = db
-    .prepare(
-      `INSERT INTO outbox (
-         outbox_id, turn_id, idempotency_key, chat_key, delivery_kind,
-         state, payload_json, plan_state, sequence, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, 'error', 'queued', ?, 'unplanned', ?, ?, ?)
-       ON CONFLICT(idempotency_key) DO NOTHING`,
-    )
-    .run(
-      migrationOutboxId(input.turnId),
-      input.turnId,
-      JSON.stringify(["install_migration_interrupted_unknown", input.turnId]),
-      input.chatKey,
-      JSON.stringify(payload),
-      sequence,
-      input.timestamp,
-      input.timestamp,
-    );
-  return result.changes === 1;
+}
+
+function hasLaterHandledUserMessageForInstall(
+  db: BetterSqlite3.Database,
+  chatKey: string,
+  sequence: number,
+) {
+  return Boolean(
+    db
+      .prepare(
+        `SELECT 1 FROM messages
+          WHERE chat_key = ? AND role = 'user' AND sequence > ?
+            AND processed_at IS NOT NULL
+          LIMIT 1`,
+      )
+      .get(chatKey, sequence),
+  );
 }
 
 function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
@@ -285,13 +273,13 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
       const timestamp = nowIso();
       let migratedTurns = 0;
       let orphanedMessages = 0;
-      let notices = 0;
+      let interruptedUnknown = 0;
+      let historyResolved = 0;
       const rows = db
         .prepare(
           `SELECT turns.turn_id, turns.state, turns.admission_state,
-                  turns.chat_key, turns.execution_session_file,
-                  messages.id AS message_row_id, messages.message_id,
-                  messages.session_file AS message_session_file
+                  turns.chat_key, turns.sequence,
+                  messages.id AS message_row_id, messages.message_id
              FROM turns
              JOIN messages ON messages.id = turns.inbound_message_id
             WHERE json_valid(turns.admission_json)
@@ -304,44 +292,54 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
         const recordOnly = safeString(row.admission_state) === "record_only";
         if (!["terminal", "superseded"].includes(state)) {
           const chatKey = safeString(row.chat_key).trim();
-          if (!recordOnly && parseChatKey(chatKey)) {
-            notices += Number(
-              enqueueInterruptedUnknownForInstall(db, {
-                turnId: safeString(row.turn_id),
-                chatKey,
-                messageId: safeString(row.message_id),
-                sessionFile:
-                  safeString(row.execution_session_file).trim() ||
-                  safeString(row.message_session_file).trim() ||
-                  undefined,
-                timestamp,
-              }),
+          const messageId = safeString(row.message_id).trim();
+          let targetState = "terminal";
+          let terminalKind = "record_only";
+          let disposition = "record_only";
+          if (!recordOnly) {
+            disposition = "actionable";
+            const outboxKind = terminalOutboxKindForInstall(
+              db,
+              safeString(row.turn_id),
             );
+            if (outboxKind) {
+              terminalKind = outboxKind;
+              historyResolved += 1;
+            } else if (hasAssistantReplyForInstall(db, chatKey, messageId)) {
+              terminalKind = "legacy_reply_observed";
+              historyResolved += 1;
+            } else if (
+              hasLaterHandledUserMessageForInstall(
+                db,
+                chatKey,
+                Number(row.sequence),
+              )
+            ) {
+              targetState = "superseded";
+              terminalKind = "legacy_history_superseded";
+              disposition = "superseded";
+              historyResolved += 1;
+            } else {
+              terminalKind = "interrupted_unknown";
+              interruptedUnknown += 1;
+            }
           }
           db.prepare(
             `UPDATE turns
-                SET state = 'terminal', terminal_kind = ?, owner_epoch = NULL,
+                SET state = ?, terminal_kind = ?, owner_epoch = NULL,
                     lease_until = NULL, heartbeat_at = NULL,
                     next_attempt_at = NULL, last_error = NULL,
                     admission_state = 'unclassified', admission_json = NULL,
                     admission_hash = NULL, submission_json = NULL,
                     submission_hash = NULL, updated_at = ?
               WHERE turn_id = ?`,
-          ).run(
-            recordOnly ? "record_only" : "interrupted_unknown",
-            timestamp,
-            row.turn_id,
-          );
+          ).run(targetState, terminalKind, timestamp, row.turn_id);
           db.prepare(
             `UPDATE messages
                 SET processed_at = COALESCE(processed_at, ?),
                     disposition = ?
               WHERE id = ?`,
-          ).run(
-            timestamp,
-            recordOnly ? "record_only" : "actionable",
-            row.message_row_id,
-          );
+          ).run(timestamp, disposition, row.message_row_id);
         } else {
           db.prepare(
             `UPDATE turns
@@ -354,6 +352,8 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
         migratedTurns += 1;
       }
 
+      // These rows have no turn, and outbox.turn_id is a foreign key to turns,
+      // so a turn-owned terminal outbox cannot exist for an accepted orphan.
       const orphanRows = db
         .prepare(
           `SELECT messages.id, messages.chat_key, messages.message_id,
@@ -377,25 +377,16 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
         if (!chatKey || !messageId) {
           throw new Error("chat_install_migration_invalid_accepted_orphan");
         }
-        const canDeliverNotice = Boolean(parseChatKey(chatKey));
-        const replyBoundary = db
-          .prepare(
-            `SELECT 1 FROM messages
-              WHERE chat_key = ? AND role = 'assistant'
-                AND reply_to_message_id = ? AND processed_at IS NOT NULL
-                AND COALESCE(delivery_kind, 'final')
-                    NOT IN ('interim', 'passive_notice')
-              LIMIT 1`,
-          )
-          .get(chatKey, messageId);
-        const laterHandled = db
-          .prepare(
-            `SELECT 1 FROM messages
-              WHERE chat_key = ? AND role = 'user' AND sequence > ?
-                AND processed_at IS NOT NULL
-              LIMIT 1`,
-          )
-          .get(chatKey, Number(row.sequence));
+        const replyBoundary = hasAssistantReplyForInstall(
+          db,
+          chatKey,
+          messageId,
+        );
+        const laterHandled = hasLaterHandledUserMessageForInstall(
+          db,
+          chatKey,
+          Number(row.sequence),
+        );
         if (replyBoundary || laterHandled) {
           db.prepare(
             `UPDATE messages
@@ -403,6 +394,7 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
               WHERE id = ?`,
           ).run(timestamp, laterHandled ? "superseded" : "actionable", row.id);
           orphanedMessages += 1;
+          historyResolved += 1;
           continue;
         }
         db.prepare(
@@ -432,24 +424,16 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
                   disposition = 'actionable'
             WHERE id = ?`,
         ).run(timestamp, row.id);
-        if (canDeliverNotice) {
-          notices += Number(
-            enqueueInterruptedUnknownForInstall(db, {
-              turnId: safeString(row.id),
-              chatKey,
-              messageId,
-              sessionFile: safeString(row.session_file).trim() || undefined,
-              timestamp,
-            }),
-          );
-        }
+        interruptedUnknown += 1;
         orphanedMessages += 1;
       }
       const previous = readAdmissionModelInstallMigrationSummary(db);
       const summary = {
         turns: previous.turns + migratedTurns,
         orphanedMessages: previous.orphanedMessages + orphanedMessages,
-        notices: previous.notices + notices,
+        interruptedUnknown: previous.interruptedUnknown + interruptedUnknown,
+        historyResolved: previous.historyResolved + historyResolved,
+        legacyNotices: previous.legacyNotices,
       };
       db.prepare(
         `INSERT INTO schema_meta (key, value)
@@ -479,12 +463,25 @@ export function readAdmissionModelInstallMigrationSummary(
         .get() as any
     )?.value,
   ).trim();
-  if (!text) return { turns: 0, orphanedMessages: 0, notices: 0 };
+  if (!text) {
+    return {
+      turns: 0,
+      orphanedMessages: 0,
+      interruptedUnknown: 0,
+      historyResolved: 0,
+      legacyNotices: 0,
+    };
+  }
   const parsed = JSON.parse(text);
   return {
     turns: Math.max(0, Number(parsed?.turns || 0)),
     orphanedMessages: Math.max(0, Number(parsed?.orphanedMessages || 0)),
-    notices: Math.max(0, Number(parsed?.notices || 0)),
+    interruptedUnknown: Math.max(0, Number(parsed?.interruptedUnknown || 0)),
+    historyResolved: Math.max(0, Number(parsed?.historyResolved || 0)),
+    legacyNotices: Math.max(
+      0,
+      Number(parsed?.legacyNotices ?? parsed?.notices ?? 0),
+    ),
   };
 }
 

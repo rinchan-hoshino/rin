@@ -261,7 +261,9 @@ test("installer consumes ambiguous old admissions before the new runtime starts"
     assert.deepEqual(first.database.oldAdmissions, {
       turns: 1,
       orphanedMessages: 0,
-      notices: 1,
+      interruptedUnknown: 1,
+      historyResolved: 0,
+      legacyNotices: 0,
     });
     assert.deepEqual(
       second.database.oldAdmissions,
@@ -280,14 +282,12 @@ test("installer consumes ambiguous old admissions before the new runtime starts"
       admission_json: null,
       admission_hash: null,
     });
-    const terminalOutbox = db
-      .prepare(
-        `SELECT delivery_kind, payload_json FROM outbox WHERE turn_id = ?`,
-      )
-      .all(item.itemId) as any[];
-    assert.equal(terminalOutbox.length, 1);
-    assert.equal(terminalOutbox[0].delivery_kind, "error");
-    assert.match(terminalOutbox[0].payload_json, /was not submitted again/);
+    assert.equal(
+      db
+        .prepare(`SELECT COUNT(*) AS count FROM outbox WHERE turn_id = ?`)
+        .get(item.itemId).count,
+      0,
+    );
     assert.equal(
       db
         .prepare(
@@ -303,7 +303,147 @@ test("installer consumes ambiguous old admissions before the new runtime starts"
   }
 });
 
-test("installer terminalizes old turns with noncanonical chat identity without queuing an undeliverable notice", async () => {
+test("installer preserves prior migration notice counts as historical audit only", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-preserve-old-migration-summary-"),
+  );
+  try {
+    const item = seedLegacyAcceptedTurn(installDir);
+    database
+      .openChatDatabase(installDir)
+      .prepare(
+        `INSERT INTO schema_meta (key, value)
+         VALUES ('admission_model_migration_summary', ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
+      .run(JSON.stringify({ turns: 7, orphanedMessages: 2, notices: 5 }));
+    database.closeChatDatabase(installDir);
+
+    const result = installMigration.runChatInstallMigrations(installDir);
+    assert.deepEqual(result.database.oldAdmissions, {
+      turns: 8,
+      orphanedMessages: 2,
+      interruptedUnknown: 1,
+      historyResolved: 0,
+      legacyNotices: 5,
+    });
+    assert.equal(
+      database
+        .openChatDatabase(installDir)
+        .prepare(`SELECT COUNT(*) AS count FROM outbox WHERE turn_id = ?`)
+        .get(item.itemId).count,
+      0,
+    );
+  } finally {
+    database.closeChatDatabase(installDir);
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
+test("installer silently supersedes an old turn after later handled chat activity", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-supersede-old-turn-"),
+  );
+  try {
+    const item = seedLegacyAcceptedTurn(installDir);
+    messageStore.saveChatMessage(installDir, {
+      chatKey: item.chatKey,
+      platform: "legacy",
+      botId: "1",
+      chatId: "2",
+      chatType: "private",
+      messageId: "later-handled-message",
+      role: "user",
+      receivedAt: new Date(Date.now() + 1_000).toISOString(),
+      acceptedAt: new Date(Date.now() + 2_000).toISOString(),
+      processedAt: new Date(Date.now() + 3_000).toISOString(),
+      text: "the conversation already continued",
+    });
+    database.closeChatDatabase(installDir);
+
+    const result = installMigration.runChatInstallMigrations(installDir);
+    assert.deepEqual(result.database.oldAdmissions, {
+      turns: 1,
+      orphanedMessages: 0,
+      interruptedUnknown: 0,
+      historyResolved: 1,
+      legacyNotices: 0,
+    });
+    const migrated = database.openChatDatabase(installDir);
+    assert.deepEqual(
+      migrated
+        .prepare(`SELECT state, terminal_kind FROM turns WHERE turn_id = ?`)
+        .get(item.itemId),
+      {
+        state: "superseded",
+        terminal_kind: "legacy_history_superseded",
+      },
+    );
+    assert.equal(
+      migrated
+        .prepare(`SELECT COUNT(*) AS count FROM outbox WHERE turn_id = ?`)
+        .get(item.itemId).count,
+      0,
+    );
+  } finally {
+    database.closeChatDatabase(installDir);
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
+test("installer adopts an existing assistant reply without a migration error", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-adopt-old-reply-"),
+  );
+  try {
+    const item = seedLegacyAcceptedTurn(installDir);
+    messageStore.saveChatMessage(installDir, {
+      chatKey: item.chatKey,
+      platform: "legacy",
+      botId: "1",
+      chatId: "2",
+      chatType: "private",
+      messageId: "existing-assistant-reply",
+      role: "assistant",
+      replyToMessageId: item.messageId,
+      receivedAt: new Date(Date.now() + 1_000).toISOString(),
+      processedAt: new Date(Date.now() + 1_000).toISOString(),
+      deliveryKind: "final",
+      text: "already answered",
+    });
+    database.closeChatDatabase(installDir);
+
+    const result = installMigration.runChatInstallMigrations(installDir);
+    assert.deepEqual(result.database.oldAdmissions, {
+      turns: 1,
+      orphanedMessages: 0,
+      interruptedUnknown: 0,
+      historyResolved: 1,
+      legacyNotices: 0,
+    });
+    const migrated = database.openChatDatabase(installDir);
+    assert.deepEqual(
+      migrated
+        .prepare(`SELECT state, terminal_kind FROM turns WHERE turn_id = ?`)
+        .get(item.itemId),
+      {
+        state: "terminal",
+        terminal_kind: "legacy_reply_observed",
+      },
+    );
+    assert.equal(
+      migrated
+        .prepare(`SELECT COUNT(*) AS count FROM outbox WHERE turn_id = ?`)
+        .get(item.itemId).count,
+      0,
+    );
+  } finally {
+    database.closeChatDatabase(installDir);
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
+test("installer terminalizes old turns with noncanonical chat identity without chat delivery", async () => {
   const installDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-consume-unresolved-legacy-turn-"),
   );
@@ -330,7 +470,9 @@ test("installer terminalizes old turns with noncanonical chat identity without q
     assert.deepEqual(result.database.oldAdmissions, {
       turns: 1,
       orphanedMessages: 0,
-      notices: 0,
+      interruptedUnknown: 1,
+      historyResolved: 0,
+      legacyNotices: 0,
     });
     const migrated = database.openChatDatabase(installDir);
     assert.equal(
@@ -396,15 +538,23 @@ test("installer consumes accepted messages that predate atomic inbox turns", asy
             WHERE turn_id = (
               SELECT id FROM messages
                WHERE message_id = 'accepted-before-atomic-turns'
-            ) AND delivery_kind = 'error'`,
+            )`,
         )
         .get().count,
-      1,
+      0,
     );
   } finally {
     database.closeChatDatabase(installDir);
     await fs.rm(installDir, { recursive: true, force: true });
   }
+});
+
+test("install migration never emits owner-visible chat errors", async () => {
+  const source = await fs.readFile(
+    path.join(rootDir, "src/core/chat/database-install-migration.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /INSERT INTO outbox|enqueueInterruptedUnknown/);
 });
 
 test("ordinary chat execution source contains no old-admission compatibility", async () => {

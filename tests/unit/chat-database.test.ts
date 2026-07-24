@@ -467,7 +467,7 @@ test("chat install migration terminalizes ambiguous accepted version 5 turns", a
             WHERE turn_id = 'legacy-turn' AND delivery_kind = 'error'`,
         )
         .get().count,
-      1,
+      0,
     );
   });
 });

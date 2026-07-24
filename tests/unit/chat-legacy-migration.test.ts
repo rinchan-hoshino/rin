@@ -212,7 +212,7 @@ test("legacy message, inbox, and outbox authority migrates once into chat.sqlite
   );
   assert.equal(
     reopened.prepare("SELECT COUNT(*) AS value FROM outbox").get().value,
-    4,
+    2,
   );
 });
 
