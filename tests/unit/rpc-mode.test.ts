@@ -4509,6 +4509,204 @@ test(
 );
 
 test(
+  "rpc mode keeps a recovered terminal open across an admitted steer boundary",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines: string[] = [];
+    const sessionSubscribers = new Set<(event: any) => void>();
+    const stateMessages: any[] = [
+      {
+        role: "user",
+        content: [{ type: "text", text: "interrupted prompt" }],
+      },
+    ];
+    let releaseRecovery: (() => void) | undefined;
+    const recoveryGate = new Promise<void>((resolve) => {
+      releaseRecovery = resolve;
+    });
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/recovered-steer-terminal-session.jsonl",
+        sessionId: "recovered-steer-terminal-session",
+        agent: {
+          signal: undefined,
+          state: { messages: stateMessages },
+          waitForIdle: async () => {},
+        },
+        bindExtensions: async () => {},
+        subscribe: (handler: (event: any) => void) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
+        _runAgentPrompt: async () => {
+          await recoveryGate;
+        },
+        prompt: async (message: string) => {
+          if (message !== "normal prompt") return;
+          const normalFinal = {
+            role: "assistant",
+            content: [{ type: "text", text: "normal final" }],
+            stopReason: "stop",
+          };
+          stateMessages.push(normalFinal);
+          for (const handler of sessionSubscribers) {
+            handler({ type: "message_end", message: normalFinal });
+            handler({ type: "agent_settled" });
+          }
+        },
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: testSessionManager(() => stateMessages),
+        messages: stateMessages,
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "resume", type: "resume_interrupted_turn", requestTag: "tag-recovered" })}\n`,
+        ),
+      );
+      await wait(10);
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "steer", type: "prompt", message: "continue", requestTag: "tag-steer" })}\n`,
+        ),
+      );
+      await wait(10);
+
+      const steerAdmission = parseRpcOutput(lines).find(
+        (event) => event.type === "response" && event.id === "steer",
+      );
+      assert.equal(steerAdmission?.data?.acceptedAs, "prompt");
+
+      for (const handler of sessionSubscribers) {
+        handler({ type: "agent_settled" });
+      }
+      releaseRecovery?.();
+      await wait(20);
+
+      assert.equal(
+        parseRpcOutput(lines).some(
+          (event) =>
+            event.type === "rpc_turn_event" &&
+            (event.event === "complete" || event.event === "error"),
+        ),
+        false,
+      );
+
+      const steeredUser = {
+        role: "user",
+        content: [{ type: "text", text: "continue" }],
+      };
+      stateMessages.push(steeredUser);
+      for (const handler of sessionSubscribers) {
+        handler({ type: "message_start", message: steeredUser });
+      }
+      const finalMessage = {
+        role: "assistant",
+        content: [{ type: "text", text: "continued final" }],
+        stopReason: "stop",
+      };
+      stateMessages.push(finalMessage);
+      for (const handler of sessionSubscribers) {
+        handler({ type: "message_end", message: finalMessage });
+        handler({ type: "agent_settled" });
+      }
+      await wait(20);
+
+      const terminals = parseRpcOutput(lines).filter(
+        (event) =>
+          event.type === "rpc_turn_event" &&
+          (event.event === "complete" || event.event === "error"),
+      );
+      assert.deepEqual(
+        terminals.map((event) => ({
+          event: event.event,
+          requestTag: event.requestTag,
+          finalText: event.finalText,
+        })),
+        [
+          {
+            event: "complete",
+            requestTag: "tag-recovered",
+            finalText: "continued final",
+          },
+        ],
+      );
+
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "normal", type: "prompt", message: "normal prompt", requestTag: "tag-normal" })}\n`,
+        ),
+      );
+      await wait(20);
+      const normalTerminal = parseRpcOutput(lines).find(
+        (event) =>
+          event.type === "rpc_turn_event" &&
+          event.event === "complete" &&
+          event.requestTag === "tag-normal",
+      );
+      assert.equal(normalTerminal?.finalText, "normal final");
+    } finally {
+      releaseRecovery?.();
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode keeps Pi prompt ownership immutable across a queued steer",
   { concurrency: false },
   async () => {

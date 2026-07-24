@@ -767,11 +767,20 @@ export async function runCustomRpcMode(
   };
   let activeTurnPromise: Promise<void> | null = null;
   let activeTurnRequestTag = "";
+  type ActiveTrackedTurn = {
+    queueAdmissions: PendingPromptRequestTag[];
+    agentSettlementGeneration: number;
+    agentSettlementWaiters: Set<() => void>;
+  };
   type PendingPromptRequestTag = {
     requestTag: string;
     acceptedAs: "prompt" | "steer" | "followUp";
     text: string;
+    trackedTurn?: ActiveTrackedTurn;
+    started?: Promise<number | null>;
+    resolveStarted?: (generation: number | null) => void;
   };
+  let activeTrackedTurn: ActiveTrackedTurn | null = null;
   const pendingPromptRequestTags: PendingPromptRequestTag[] = [];
   const admittedPromptRequestTags = new Map<
     string,
@@ -801,21 +810,45 @@ export async function runCustomRpcMode(
     acceptedAs: PendingPromptRequestTag["acceptedAs"],
     text: string,
   ) => {
+    // An admitted Pi steer can begin after the task that currently owns the
+    // RPC terminal returns. Record that handoff without predicting Pi state or
+    // changing the terminal's immutable request tag.
+    const trackedTurn = activeTurnPromise
+      ? activeTrackedTurn || undefined
+      : undefined;
+    let resolveStarted: ((generation: number | null) => void) | undefined;
+    const started = trackedTurn
+      ? new Promise<number | null>((resolve) => {
+          resolveStarted = resolve;
+        })
+      : undefined;
     const token: PendingPromptRequestTag = {
       requestTag,
       acceptedAs,
       text: safeString(text).trim(),
+      trackedTurn,
+      started,
+      resolveStarted,
     };
     pendingPromptRequestTags.push(token);
+    trackedTurn?.queueAdmissions.push(token);
     if (requestTag) admittedPromptRequestTags.set(requestTag, acceptedAs);
     return token;
+  };
+  const cancelPendingPromptRequestTag = (token: PendingPromptRequestTag) => {
+    token.resolveStarted?.(null);
+    token.resolveStarted = undefined;
   };
   const removePendingPromptRequestTag = (token: PendingPromptRequestTag) => {
     const index = pendingPromptRequestTags.indexOf(token);
     if (index >= 0) pendingPromptRequestTags.splice(index, 1);
+    cancelPendingPromptRequestTag(token);
     if (token.requestTag) admittedPromptRequestTags.delete(token.requestTag);
   };
   const clearPendingPromptRequestTags = () => {
+    for (const token of pendingPromptRequestTags) {
+      cancelPendingPromptRequestTag(token);
+    }
     pendingPromptRequestTags.length = 0;
   };
   let gracefulSessionShutdown = false;
@@ -846,6 +879,25 @@ export async function runCustomRpcMode(
     latestAutoRetryFailureMessage = "";
     const turnSession = getSession();
     const turnScope = captureTurnScope(turnSession);
+    const trackedTurn: ActiveTrackedTurn = {
+      queueAdmissions: [],
+      agentSettlementGeneration: 0,
+      agentSettlementWaiters: new Set(),
+    };
+    activeTrackedTurn = trackedTurn;
+    const waitForAgentSettlementAfter = (generation: number) => {
+      if (trackedTurn.agentSettlementGeneration > generation) {
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => {
+        const waiter = () => {
+          if (trackedTurn.agentSettlementGeneration <= generation) return;
+          trackedTurn.agentSettlementWaiters.delete(waiter);
+          resolve();
+        };
+        trackedTurn.agentSettlementWaiters.add(waiter);
+      });
+    };
     let observedOutcome: RinTurnTerminalOutcome = RIN_TURN_TERMINAL_ABSENT;
     let resolveAgentSettledOutcome:
       | ((outcome: RinTurnTerminalOutcome) => void)
@@ -865,6 +917,8 @@ export async function runCustomRpcMode(
           return;
         }
         if (event?.type !== "agent_settled") return;
+        trackedTurn.agentSettlementGeneration += 1;
+        for (const waiter of trackedTurn.agentSettlementWaiters) waiter();
         resolveAgentSettledOutcome?.(observedOutcome);
         resolveAgentSettledOutcome = undefined;
       },
@@ -965,6 +1019,32 @@ export async function runCustomRpcMode(
           producerOutcome.source === "task"
             ? producerOutcome.outcome
             : RIN_TURN_TERMINAL_ABSENT;
+        // A recovered turn can settle in the narrow gap before an already
+        // admitted Pi steer starts. Once the queued user message actually
+        // starts, wait for Pi's next authoritative settlement before deriving
+        // the one terminal outcome. With no admission, terminalization remains
+        // immediate.
+        let settledQueueAdmissionCount = 0;
+        while (
+          settledQueueAdmissionCount < trackedTurn.queueAdmissions.length
+        ) {
+          const queueAdmissions = trackedTurn.queueAdmissions.slice(
+            settledQueueAdmissionCount,
+          );
+          const startedAtGenerations = await Promise.all(
+            queueAdmissions.map(
+              (admission) => admission.started || Promise.resolve(null),
+            ),
+          );
+          settledQueueAdmissionCount += queueAdmissions.length;
+          const startedGenerations = startedAtGenerations.filter(
+            (generation): generation is number => generation !== null,
+          );
+          if (startedGenerations.length > 0) {
+            await waitForAgentSettlementAfter(Math.max(...startedGenerations));
+          }
+          await new Promise((resolve) => setImmediate(resolve));
+        }
         // Pi's agent_settled event is the authoritative boundary after retries,
         // compaction, and queued continuations. If the outer prompt promise is
         // wedged after that boundary, do not let transport bookkeeping keep the
@@ -1063,6 +1143,7 @@ export async function runCustomRpcMode(
           activeTurnPromise = null;
           activeTurnRequestTag = "";
         }
+        if (activeTrackedTurn === trackedTurn) activeTrackedTurn = null;
       }
     })();
     activeTurnPromise = promise;
@@ -1267,6 +1348,12 @@ export async function runCustomRpcMode(
             ? pendingPromptRequestTags.splice(pendingIndex, 1)[0]
             : undefined;
         producerRequestTag = producerRequestTag || pending?.requestTag || "";
+        if (pending) {
+          pending.resolveStarted?.(
+            pending.trackedTurn?.agentSettlementGeneration ?? null,
+          );
+          pending.resolveStarted = undefined;
+        }
       }
       const taggedEvent =
         producerRequestTag && !safeString(event?.requestTag).trim()
