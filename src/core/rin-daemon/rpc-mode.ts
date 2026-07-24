@@ -1335,7 +1335,7 @@ export async function runCustomRpcMode(
           ? []
           : pendingPromptRequestTags
               .map((token, index) => ({ token, index }))
-              .filter(({ token }) => token.text && token.text === userText);
+              .filter(({ token }) => token.text === userText);
         const pendingIndex = producerRequestTag
           ? pendingPromptRequestTags.findIndex(
               (token) => token.requestTag === producerRequestTag,

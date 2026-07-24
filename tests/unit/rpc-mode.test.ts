@@ -4620,7 +4620,7 @@ test(
       await wait(10);
       onData(
         Buffer.from(
-          `${JSON.stringify({ id: "steer", type: "prompt", message: "continue", requestTag: "tag-steer" })}\n`,
+          `${JSON.stringify({ id: "steer", type: "prompt", message: "", images: ["image-only"], requestTag: "tag-steer" })}\n`,
         ),
       );
       await wait(10);
@@ -4647,7 +4647,7 @@ test(
 
       const steeredUser = {
         role: "user",
-        content: [{ type: "text", text: "continue" }],
+        content: [{ type: "image", data: "image-only", mimeType: "image/png" }],
       };
       stateMessages.push(steeredUser);
       for (const handler of sessionSubscribers) {
@@ -4700,6 +4700,15 @@ test(
       assert.equal(normalTerminal?.finalText, "normal final");
     } finally {
       releaseRecovery?.();
+      const onData = handlers.get("data");
+      if (typeof onData === "function") {
+        onData(
+          Buffer.from(
+            `${JSON.stringify({ id: "cleanup", type: "clear_queue" })}\n`,
+          ),
+        );
+        await wait(0);
+      }
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
     }
