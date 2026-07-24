@@ -261,12 +261,17 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
     promptSource: "chat-bridge",
+    frontendIdentity: { kind: "chat", key: "telegram/1:2" },
   });
 
   const result = await driver.runTurn({
     text: "hello",
     managedSessionLeaf: "telegram/1:2",
-    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+    promptContext: {
+      source: "chat-bridge",
+      selfImproveEligible: true,
+      chatKey: "telegram/1:2",
+    },
   });
 
   assert.equal(result.finalText, "frontend final");
@@ -281,11 +286,20 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
     (call: any) => call.type === "newSession",
   );
   assert.equal(newSessionCall.options.managedSessionLeaf, "telegram/1:2");
+  assert.deepEqual(newSessionCall.options.frontendIdentity, {
+    kind: "chat",
+    key: "telegram/1:2",
+  });
   const promptCall = client.calls.find((call: any) => call.type === "prompt");
   assert.equal(promptCall.text, "hello");
   assert.equal(promptCall.options.sessionFile, "/tmp/frontend-managed.jsonl");
+  assert.deepEqual(promptCall.options.frontendIdentity, {
+    kind: "chat",
+    key: "telegram/1:2",
+  });
   assert.deepEqual(promptCall.options.promptContext, {
     source: "chat-bridge",
+    selfImproveEligible: true,
     chatKey: "telegram/1:2",
   });
 });

@@ -1399,6 +1399,7 @@ export class RinFrontendTurnDriver {
           text,
           images,
           source: promptSource,
+          frontendIdentity: this.frontendIdentity,
           requestTag,
           promptContext: input.promptContext,
           sessionFile: targetSessionFile,
