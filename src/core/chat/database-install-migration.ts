@@ -427,6 +427,16 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
         interruptedUnknown += 1;
         orphanedMessages += 1;
       }
+      const releasedCurrentClaims = db
+        .prepare(
+          `UPDATE turns
+              SET state = 'pending', owner_epoch = NULL, lease_until = NULL,
+                  heartbeat_at = NULL, next_attempt_at = NULL,
+                  last_error = NULL, updated_at = ?
+            WHERE state = 'running'`,
+        )
+        .run(timestamp).changes;
+
       const previous = readAdmissionModelInstallMigrationSummary(db);
       const summary = {
         turns: previous.turns + migratedTurns,
@@ -434,6 +444,8 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
         interruptedUnknown: previous.interruptedUnknown + interruptedUnknown,
         historyResolved: previous.historyResolved + historyResolved,
         legacyNotices: previous.legacyNotices,
+        releasedCurrentClaims:
+          previous.releasedCurrentClaims + releasedCurrentClaims,
       };
       db.prepare(
         `INSERT INTO schema_meta (key, value)
@@ -470,6 +482,7 @@ export function readAdmissionModelInstallMigrationSummary(
       interruptedUnknown: 0,
       historyResolved: 0,
       legacyNotices: 0,
+      releasedCurrentClaims: 0,
     };
   }
   const parsed = JSON.parse(text);
@@ -481,6 +494,10 @@ export function readAdmissionModelInstallMigrationSummary(
     legacyNotices: Math.max(
       0,
       Number(parsed?.legacyNotices ?? parsed?.notices ?? 0),
+    ),
+    releasedCurrentClaims: Math.max(
+      0,
+      Number(parsed?.releasedCurrentClaims || 0),
     ),
   };
 }

@@ -2338,9 +2338,7 @@ test("chat main resumes a durably admitted turn after policy changes", async () 
         }
         return { finalText: "resumed original execution" };
       };
-      controllerMod.ChatController.prototype.detachForDaemonShutdown = async function () {
-        releaseFirstTurn();
-      };
+      controllerMod.ChatController.prototype.detachForDaemonShutdown = async function () {};
 
       const createBot = () => ({
         platform: "telegram",
@@ -2389,6 +2387,8 @@ test("chat main resumes a durably admitted turn after policy changes", async () 
         if (row?.state === "terminal") break;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
+      releaseFirstTurn();
+      await new Promise((resolve) => setImmediate(resolve));
       await second.stop();
       if (
         runTurnCalls !== 2 ||
@@ -2968,12 +2968,15 @@ test("hosted chat bridge shutdown detaches active frontends without aborting ses
       let detachCalls = 0;
       let shutdownCalls = 0;
       let disposeCalls = 0;
+      let releaseDetach;
+      const detachGate = new Promise((resolve) => { releaseDetach = resolve; });
       controllerMod.ChatController.prototype.runTurn = async function () {
         runTurnCalls += 1;
         await new Promise(() => {});
       };
       controllerMod.ChatController.prototype.detachForDaemonShutdown = async function () {
         detachCalls += 1;
+        await detachGate;
       };
       controllerMod.ChatController.prototype.shutdownSession = async function () {
         shutdownCalls += 1;
@@ -3006,18 +3009,43 @@ test("hosted chat bridge shutdown detaches active frontends without aborting ses
         stripped: { content: "hello shutdown" },
         elements: [h.createChatRuntimeH().text("hello shutdown")],
       });
+      bridge.app.emit("message", {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "3",
+        userId: "owner-1",
+        messageId: "m-hosted-shutdown-second-chat",
+        isDirect: true,
+        content: "hello second chat",
+        stripped: { content: "hello second chat" },
+        elements: [h.createChatRuntimeH().text("hello second chat")],
+      });
 
       const deadline = Date.now() + 8000;
-      while (Date.now() < deadline && runTurnCalls < 1) {
+      while (Date.now() < deadline && runTurnCalls < 2) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      await bridge.stop();
-      const processingFiles = inbox.listChatInboxItems(agentDir, ["pending", "running"]);
+      const stopping = bridge.stop();
+      const releaseDeadline = Date.now() + 3000;
+      let processingFiles = [];
+      while (Date.now() < releaseDeadline) {
+        processingFiles = inbox.listChatInboxItems(agentDir, ["pending", "running"]);
+        if (
+          processingFiles.length === 2 &&
+          processingFiles.every((item) => item.state === "pending")
+        ) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      releaseDetach();
+      await stopping;
       const failedFiles = inbox.listChatInboxItems(agentDir, ["failed"]);
       const assistantRows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-      if (runTurnCalls !== 1 || detachCalls !== 1 || shutdownCalls !== 0 || disposeCalls !== 0 || processingFiles.length !== 1 || failedFiles.length !== 0 || assistantRows.length !== 0) {
+      const allReleased = processingFiles.every(
+        (item) => item.state === "pending" && !item.ownerEpoch && !item.leaseUntil,
+      );
+      if (runTurnCalls !== 2 || detachCalls !== 2 || shutdownCalls !== 0 || disposeCalls !== 0 || processingFiles.length !== 2 || !allReleased || failedFiles.length !== 0 || assistantRows.length !== 0) {
         throw new Error(JSON.stringify({ runTurnCalls, detachCalls, shutdownCalls, disposeCalls, processingFiles, failedFiles, assistantRows }));
       }
       process.exit(0);

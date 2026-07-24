@@ -982,19 +982,30 @@ export async function startChatBridge(
   };
 
   let chatBridgeStopping = false;
+  const claimedInboxJobs = new Map<string, ClaimedChatInboxJob>();
+  const forgetClaimedInboxJob = (job: ClaimedChatInboxJob) => {
+    if (claimedInboxJobs.get(job.envelope.itemId) === job) {
+      claimedInboxJobs.delete(job.envelope.itemId);
+    }
+  };
+  const releaseClaimedInboxJobForShutdown = (job: ClaimedChatInboxJob) => {
+    releaseClaimedChatInboxItem(runtime.agentDir, job.envelope);
+    forgetClaimedInboxJob(job);
+  };
   const finishClaimedInboxJob = (
     job: ClaimedChatInboxJob,
     result?: ChatInboxJobResult,
   ) => {
-    if (result?.disposition === "superseded") return;
-    if (
-      chatBridgeStopping &&
-      !isInboundMessageProcessed(job.envelope.chatKey, job.envelope.messageId)
-    ) {
-      releaseClaimedChatInboxItem(runtime.agentDir, job.envelope);
-      return;
+    try {
+      if (result?.disposition === "superseded") return;
+      if (chatBridgeStopping) {
+        releaseClaimedInboxJobForShutdown(job);
+        return;
+      }
+      finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
+    } finally {
+      forgetClaimedInboxJob(job);
     }
-    finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
   };
 
   const runClaimedInboxJob = async (
@@ -1009,6 +1020,10 @@ export async function startChatBridge(
       ownerEpoch: job.envelope.ownerEpoch,
       attempt: job.envelope.attemptCount,
     };
+    if (!touchClaimedChatInboxItem(runtime.agentDir, job.envelope)) {
+      forgetClaimedInboxJob(job);
+      return;
+    }
     const heartbeat = setInterval(() => {
       try {
         if (!touchClaimedChatInboxItem(runtime.agentDir, job.envelope)) {
@@ -1037,11 +1052,8 @@ export async function startChatBridge(
       const result = await runWithChatOutboxTurnFence(fence, run);
       finishClaimedInboxJob(job, result);
     } catch (error) {
-      if (
-        chatBridgeStopping &&
-        !isInboundMessageProcessed(job.envelope.chatKey, job.envelope.messageId)
-      ) {
-        releaseClaimedChatInboxItem(runtime.agentDir, job.envelope);
+      if (chatBridgeStopping) {
+        releaseClaimedInboxJobForShutdown(job);
         return;
       }
       logger.warn(
@@ -1054,6 +1066,7 @@ export async function startChatBridge(
       );
     } finally {
       clearInterval(heartbeat);
+      forgetClaimedInboxJob(job);
     }
   };
 
@@ -1317,6 +1330,7 @@ export async function startChatBridge(
         job,
         (error as any)?.message || error,
       );
+      forgetClaimedInboxJob(job);
     },
     onIdle: () => requestDrainChatInbox(),
     logger,
@@ -1326,8 +1340,14 @@ export async function startChatBridge(
     agentDir: runtime.agentDir,
     getController,
     isInboundMessageProcessed,
-    enqueueClaimedInboxItem: (job) =>
-      chatKeyWorkers.enqueue(job.envelope.chatKey, job),
+    enqueueClaimedInboxItem: (job) => {
+      claimedInboxJobs.set(job.envelope.itemId, job);
+      if (chatBridgeStopping) {
+        releaseClaimedInboxJobForShutdown(job);
+        return;
+      }
+      chatKeyWorkers.enqueue(job.envelope.chatKey, job);
+    },
     isChatKeyBlocked: (chatKey) => app.isInboundRecoveryChat(chatKey),
     hasActiveChatKeyWorker: (chatKey) => chatKeyWorkers.hasWorker(chatKey),
     isPriorityDuringActiveChatKeyWorker: (envelope) => {
@@ -1733,6 +1753,9 @@ export async function startChatBridge(
       if (inboxPollTimer) clearInterval(inboxPollTimer);
       if (outboxPollTimer) clearInterval(outboxPollTimer);
       if (outboxHistoryCleanupTimer) clearInterval(outboxHistoryCleanupTimer);
+      for (const job of [...claimedInboxJobs.values()]) {
+        releaseClaimedInboxJobForShutdown(job);
+      }
       for (const controller of controllers.values()) {
         if (options.hosted === true) {
           await controller.detachForDaemonShutdown().catch(() => {});

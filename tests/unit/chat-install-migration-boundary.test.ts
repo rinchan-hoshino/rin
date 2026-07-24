@@ -235,12 +235,28 @@ test("installer preflight does not block current durable active turns", async ()
     assert.doesNotThrow(() =>
       database.migrateChatDatabaseForInstall(installDir),
     );
-    assert.equal(
+    assert.deepEqual(
       database
         .openChatDatabase(installDir)
-        .prepare(`SELECT state FROM turns WHERE turn_id = ?`)
-        .get(item.itemId).state,
-      "running",
+        .prepare(
+          `SELECT state, owner_epoch, lease_until,
+                  admission_json, submission_json
+             FROM turns WHERE turn_id = ?`,
+        )
+        .get(item.itemId),
+      {
+        state: "pending",
+        owner_epoch: null,
+        lease_until: null,
+        admission_json: decisionJson,
+        submission_json: submissionJson,
+      },
+    );
+    assert.equal(
+      database.readAdmissionModelInstallMigrationSummary(
+        database.openChatDatabase(installDir),
+      ).releasedCurrentClaims,
+      1,
     );
   } finally {
     database.closeChatDatabase(installDir);
@@ -264,6 +280,7 @@ test("installer consumes ambiguous old admissions before the new runtime starts"
       interruptedUnknown: 1,
       historyResolved: 0,
       legacyNotices: 0,
+      releasedCurrentClaims: 0,
     });
     assert.deepEqual(
       second.database.oldAdmissions,
@@ -326,6 +343,7 @@ test("installer preserves prior migration notice counts as historical audit only
       interruptedUnknown: 1,
       historyResolved: 0,
       legacyNotices: 5,
+      releasedCurrentClaims: 0,
     });
     assert.equal(
       database
@@ -368,6 +386,7 @@ test("installer silently supersedes an old turn after later handled chat activit
       interruptedUnknown: 0,
       historyResolved: 1,
       legacyNotices: 0,
+      releasedCurrentClaims: 0,
     });
     const migrated = database.openChatDatabase(installDir);
     assert.deepEqual(
@@ -420,6 +439,7 @@ test("installer adopts an existing assistant reply without a migration error", a
       interruptedUnknown: 0,
       historyResolved: 1,
       legacyNotices: 0,
+      releasedCurrentClaims: 0,
     });
     const migrated = database.openChatDatabase(installDir);
     assert.deepEqual(
@@ -473,6 +493,7 @@ test("installer terminalizes old turns with noncanonical chat identity without c
       interruptedUnknown: 1,
       historyResolved: 0,
       legacyNotices: 0,
+      releasedCurrentClaims: 0,
     });
     const migrated = database.openChatDatabase(installDir);
     assert.equal(
