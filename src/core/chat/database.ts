@@ -6,12 +6,8 @@ import BetterSqlite3 from "better-sqlite3";
 
 import { chatDataPath } from "../data-layout.js";
 import { safeString } from "../text-utils.js";
-import {
-  migrateLegacyChatControlData,
-  readLegacyControlMigrationPreservedSummary,
-} from "./legacy-migration.js";
-
-const CHAT_DATABASE_SCHEMA_VERSION = 6;
+export const CHAT_DATABASE_SCHEMA_VERSION = 6;
+export const CHAT_ADMISSION_MODEL_VERSION = "1";
 
 const databaseCache = new Map<string, BetterSqlite3.Database>();
 
@@ -42,7 +38,7 @@ export function chatDatabasePath(agentDir: string) {
   return chatDataPath(path.resolve(agentDir), "chat.sqlite");
 }
 
-function chatDatabaseSchemaFingerprint(db: BetterSqlite3.Database) {
+export function chatDatabaseSchemaFingerprint(db: BetterSqlite3.Database) {
   const objects = db
     .prepare(
       `SELECT type, name, sql FROM sqlite_master
@@ -78,7 +74,7 @@ function setWalJournalMode(db: BetterSqlite3.Database) {
   }
 }
 
-function configureChatDatabase(db: BetterSqlite3.Database) {
+export function configureChatDatabase(db: BetterSqlite3.Database) {
   // Configure connection behavior before journal_mode, which can itself need
   // a write lock during concurrent cold opens.
   db.pragma("busy_timeout = 120000");
@@ -87,7 +83,7 @@ function configureChatDatabase(db: BetterSqlite3.Database) {
   db.pragma("foreign_keys = ON");
 }
 
-function readChatDatabaseTables(db: BetterSqlite3.Database) {
+export function readChatDatabaseTables(db: BetterSqlite3.Database) {
   return new Set(
     (
       db
@@ -100,7 +96,7 @@ function readChatDatabaseTables(db: BetterSqlite3.Database) {
   );
 }
 
-function validateRecordedChatDatabaseSchema(
+export function validateRecordedChatDatabaseSchema(
   db: BetterSqlite3.Database,
   version: number,
 ) {
@@ -135,159 +131,41 @@ function validateRecordedChatDatabaseSchema(
   }
 }
 
-function initializeChatDatabase(db: BetterSqlite3.Database) {
+function validateCurrentChatAdmissionModel(db: BetterSqlite3.Database) {
+  const version = safeString(
+    (
+      db
+        .prepare(
+          `SELECT value FROM schema_meta WHERE key = 'admission_model_version'`,
+        )
+        .get() as any
+    )?.value,
+  ).trim();
+  if (version !== CHAT_ADMISSION_MODEL_VERSION) {
+    throw new Error("chat_database_admission_model_incomplete");
+  }
+}
+
+function initializeChatDatabase(
+  db: BetterSqlite3.Database,
+  admissionModelReady = true,
+) {
   configureChatDatabase(db);
 
   db.transaction(() => {
     const readTables = () => readChatDatabaseTables(db);
-    const validateRecordedSchema = (version: number) =>
-      validateRecordedChatDatabaseSchema(db, version);
     const currentVersion = Number(db.pragma("user_version", { simple: true }));
     if (currentVersion > CHAT_DATABASE_SCHEMA_VERSION) {
       throw new Error(`chat_database_future_schema:${currentVersion}`);
     }
-    const finishSchemaUpgrade = () => {
-      const legacyAdmissions = db
-        .prepare(
-          `SELECT turn_id, admission_json
-             FROM turns
-            WHERE admission_json IS NOT NULL
-              AND admission_hash IS NULL`,
-        )
-        .all() as Array<{ turn_id: string; admission_json: string }>;
-      const writeAdmissionHash = db.prepare(
-        `UPDATE turns SET admission_hash = ?
-          WHERE turn_id = ? AND admission_json = ? AND admission_hash IS NULL`,
-      );
-      for (const row of legacyAdmissions) {
-        writeAdmissionHash.run(
-          createHash("sha256").update(row.admission_json).digest("hex"),
-          row.turn_id,
-          row.admission_json,
-        );
-      }
-      db.prepare(
-        `UPDATE schema_meta SET value = ? WHERE key = 'schema_version'`,
-      ).run(String(CHAT_DATABASE_SCHEMA_VERSION));
-      db.prepare(
-        `UPDATE schema_meta SET value = ? WHERE key = 'schema_fingerprint'`,
-      ).run(chatDatabaseSchemaFingerprint(db));
-      db.pragma(`user_version = ${CHAT_DATABASE_SCHEMA_VERSION}`);
-    };
-    const inboundRecoveryLeaseUpgradeSql = `
-      ALTER TABLE inbound_heads ADD COLUMN recovery_failure_count INTEGER NOT NULL DEFAULT 0
-        CHECK (recovery_failure_count >= 0);
-      ALTER TABLE inbound_heads ADD COLUMN recovery_first_failed_at TEXT;
-      ALTER TABLE inbound_heads ADD COLUMN recovery_last_failed_at TEXT;
-      ALTER TABLE inbound_heads ADD COLUMN recovery_paused_at TEXT;
-      ALTER TABLE inbound_heads ADD COLUMN recovery_next_attempt_at TEXT;
-      ALTER TABLE inbound_heads ADD COLUMN recovery_version INTEGER NOT NULL DEFAULT 0
-        CHECK (recovery_version >= 0);
-      CREATE INDEX inbound_heads_recovery_idx
-        ON inbound_heads(platform, bot_id, recovery_next_attempt_at, chat_key);
-    `;
-    const durableTurnAdmissionUpgradeSql = `
-      ALTER TABLE turns ADD COLUMN admission_state TEXT NOT NULL DEFAULT 'unclassified'
-        CHECK (admission_state IN ('unclassified', 'actionable', 'record_only'));
-      ALTER TABLE turns ADD COLUMN admission_json TEXT;
-      ALTER TABLE turns ADD COLUMN admission_hash TEXT;
-      ALTER TABLE turns ADD COLUMN submission_json TEXT;
-      ALTER TABLE turns ADD COLUMN submission_hash TEXT;
-      ALTER TABLE turns ADD COLUMN execution_session_file TEXT;
-      UPDATE turns
-         SET admission_state = CASE
-           WHEN EXISTS (
-             SELECT 1 FROM messages
-              WHERE messages.id = turns.inbound_message_id
-                AND (messages.accepted_at IS NOT NULL
-                     OR messages.disposition = 'actionable')
-           ) THEN 'actionable'
-           WHEN EXISTS (
-             SELECT 1 FROM messages
-              WHERE messages.id = turns.inbound_message_id
-                AND messages.disposition = 'record_only'
-           ) THEN 'record_only'
-           ELSE 'unclassified'
-         END,
-             admission_json = CASE
-               WHEN EXISTS (
-                 SELECT 1 FROM messages
-                  WHERE messages.id = turns.inbound_message_id
-                    AND (messages.accepted_at IS NOT NULL
-                         OR messages.disposition IN ('actionable', 'record_only'))
-               ) THEN json_object(
-                 'version', 1,
-                 'kind', 'legacy_message_projection'
-               )
-               ELSE NULL
-             END,
-             execution_session_file = (
-               SELECT messages.session_file FROM messages
-                WHERE messages.id = turns.inbound_message_id
-             );
-    `;
-    if (currentVersion === 1) {
-      validateRecordedSchema(1);
-      db.exec(`
-        DROP INDEX outbox_turn_terminal_idx;
-        CREATE UNIQUE INDEX outbox_turn_terminal_idx
-          ON outbox(turn_id)
-          WHERE turn_id IS NOT NULL
-            AND (delivery_kind IN ('final', 'error', 'command_ack')
-                 OR post_delivery_json IS NOT NULL);
-        ALTER TABLE chat_state ADD COLUMN session_file TEXT;
-        ALTER TABLE chat_state ADD COLUMN legacy_session_imported INTEGER NOT NULL DEFAULT 0
-          CHECK (legacy_session_imported IN (0, 1));
-        ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
-        ${inboundRecoveryLeaseUpgradeSql}
-        ${durableTurnAdmissionUpgradeSql}
-      `);
-      finishSchemaUpgrade();
-      return;
-    }
-    if (currentVersion === 2) {
-      validateRecordedSchema(2);
-      db.exec(`
-        ALTER TABLE chat_state ADD COLUMN session_file TEXT;
-        ALTER TABLE chat_state ADD COLUMN legacy_session_imported INTEGER NOT NULL DEFAULT 0
-          CHECK (legacy_session_imported IN (0, 1));
-        ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
-        ${inboundRecoveryLeaseUpgradeSql}
-        ${durableTurnAdmissionUpgradeSql}
-      `);
-      finishSchemaUpgrade();
-      return;
-    }
-    if (currentVersion === 3) {
-      validateRecordedSchema(3);
-      db.exec(`
-        ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
-        ${inboundRecoveryLeaseUpgradeSql}
-        ${durableTurnAdmissionUpgradeSql}
-      `);
-      finishSchemaUpgrade();
-      return;
-    }
-    if (currentVersion === 4) {
-      validateRecordedSchema(4);
-      db.exec(
-        `${inboundRecoveryLeaseUpgradeSql}\n${durableTurnAdmissionUpgradeSql}`,
-      );
-      finishSchemaUpgrade();
-      return;
-    }
-    if (currentVersion === 5) {
-      validateRecordedSchema(5);
-      db.exec(durableTurnAdmissionUpgradeSql);
-      finishSchemaUpgrade();
-      return;
-    }
     if (currentVersion === CHAT_DATABASE_SCHEMA_VERSION) {
-      validateRecordedSchema(CHAT_DATABASE_SCHEMA_VERSION);
+      validateRecordedChatDatabaseSchema(db, CHAT_DATABASE_SCHEMA_VERSION);
       return;
     }
     if (currentVersion !== 0) {
-      throw new Error(`chat_database_unsupported_schema:${currentVersion}`);
+      throw new Error(
+        `chat_database_schema_upgrade_required:${currentVersion}:${CHAT_DATABASE_SCHEMA_VERSION}`,
+      );
     }
     const existingTables = readTables();
     if (existingTables.size) {
@@ -509,6 +387,12 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
 
       INSERT INTO schema_meta (key, value)
       VALUES ('schema_version', '${CHAT_DATABASE_SCHEMA_VERSION}');
+      ${
+        admissionModelReady
+          ? `INSERT INTO schema_meta (key, value)
+             VALUES ('admission_model_version', '${CHAT_ADMISSION_MODEL_VERSION}');`
+          : ""
+      }
     `);
     db.prepare(
       `INSERT INTO schema_meta (key, value)
@@ -522,74 +406,24 @@ function initializeChatDatabase(db: BetterSqlite3.Database) {
   }).immediate();
 }
 
-export function preflightChatDatabaseMigrationForInstall(agentDir: string) {
-  const dbPath = chatDatabasePath(agentDir);
-  if (!fs.existsSync(dbPath)) {
-    return {
-      path: dbPath,
-      fromVersion: 0,
-      toVersion: CHAT_DATABASE_SCHEMA_VERSION,
-    };
-  }
-  const db = new BetterSqlite3(dbPath, {
-    readonly: true,
-    fileMustExist: true,
-  });
-  try {
-    const currentVersion = Number(db.pragma("user_version", { simple: true }));
-    if (currentVersion > CHAT_DATABASE_SCHEMA_VERSION) {
-      throw new Error(`chat_database_future_schema:${currentVersion}`);
-    }
-    if (currentVersion === 0) {
-      if (readChatDatabaseTables(db).size) {
-        throw new Error("chat_database_partial_schema");
-      }
-    } else {
-      validateRecordedChatDatabaseSchema(db, currentVersion);
-      readLegacyControlMigrationPreservedSummary(db);
-    }
-    return {
-      path: dbPath,
-      fromVersion: currentVersion,
-      toVersion: CHAT_DATABASE_SCHEMA_VERSION,
-    };
-  } finally {
-    db.close();
-  }
-}
-
-export function migrateChatDatabaseForInstall(
+function openChatDatabaseWithAdmissionModel(
   agentDir: string,
+  requireCurrentAdmissionModel: boolean,
 ): BetterSqlite3.Database {
   const dbPath = chatDatabasePath(agentDir);
   const existing = databaseCache.get(dbPath);
-  const db = existing?.open
-    ? existing
-    : (() => {
-        fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-        return new BetterSqlite3(dbPath);
-      })();
-  try {
-    initializeChatDatabase(db);
-    migrateLegacyChatControlData(agentDir, db);
-    databaseCache.set(dbPath, db);
-    return db;
-  } catch (error) {
-    if (!existing?.open) db.close();
-    throw error;
+  if (existing?.open) {
+    if (requireCurrentAdmissionModel) {
+      validateCurrentChatAdmissionModel(existing);
+    }
+    return existing;
   }
-}
-
-export function openChatDatabase(agentDir: string): BetterSqlite3.Database {
-  const dbPath = chatDatabasePath(agentDir);
-  const existing = databaseCache.get(dbPath);
-  if (existing?.open) return existing;
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const databaseExists = fs.existsSync(dbPath);
   const db = new BetterSqlite3(dbPath);
   try {
     if (!databaseExists) {
-      initializeChatDatabase(db);
+      initializeChatDatabase(db, requireCurrentAdmissionModel);
     } else {
       configureChatDatabase(db);
       const currentVersion = Number(
@@ -599,7 +433,7 @@ export function openChatDatabase(agentDir: string): BetterSqlite3.Database {
         // Another process can create the SQLite file before its immediate
         // schema transaction begins. Enter the same initializer so the write
         // lock serializes fresh creation; a true partial schema still fails.
-        initializeChatDatabase(db);
+        initializeChatDatabase(db, requireCurrentAdmissionModel);
       } else if (currentVersion > CHAT_DATABASE_SCHEMA_VERSION) {
         throw new Error(`chat_database_future_schema:${currentVersion}`);
       } else if (currentVersion < CHAT_DATABASE_SCHEMA_VERSION) {
@@ -610,12 +444,25 @@ export function openChatDatabase(agentDir: string): BetterSqlite3.Database {
         validateRecordedChatDatabaseSchema(db, CHAT_DATABASE_SCHEMA_VERSION);
       }
     }
+    if (requireCurrentAdmissionModel) {
+      validateCurrentChatAdmissionModel(db);
+    }
     databaseCache.set(dbPath, db);
     return db;
   } catch (error) {
     db.close();
     throw error;
   }
+}
+
+export function openChatDatabase(agentDir: string): BetterSqlite3.Database {
+  return openChatDatabaseWithAdmissionModel(agentDir, true);
+}
+
+export function openChatDatabaseForInstall(
+  agentDir: string,
+): BetterSqlite3.Database {
+  return openChatDatabaseWithAdmissionModel(agentDir, false);
 }
 
 export function closeChatDatabase(agentDir: string) {

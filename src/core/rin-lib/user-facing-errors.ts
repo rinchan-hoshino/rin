@@ -119,6 +119,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat controller setup is missing a controller key. Recreate the chat binding.",
   chat_controller_disposed: () =>
     "Rin restarted the chat controller while handling this message.",
+  chat_database_admission_model_incomplete: () =>
+    "The chat database update migration did not complete.",
   chat_database_chatKey_required: () =>
     "Chat database access failed because the chat key is missing.",
   chat_database_future_schema: (detail) =>
@@ -156,8 +158,12 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat inbox write failed because the inbound message identity is incomplete.",
   chat_inbox_turn_commit_failed: () =>
     "Chat inbox write failed while committing the turn ledger.",
+  chat_install_migration_active_legacy_turn: () =>
+    "Rin update cannot continue while a chat turn from the current version is still active.",
   chat_install_migration_install_dir_required: () =>
     "Chat migration needs the target Rin install directory.",
+  chat_install_migration_invalid_accepted_orphan: () =>
+    "Chat migration found an accepted legacy message with incomplete identity.",
   memory_install_migration_install_dir_required: () =>
     "Memory migration needs the target Rin install directory.",
   memory_install_migration_runtime_required: () =>

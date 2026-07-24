@@ -11,9 +11,12 @@ import {
 import {
   closeChatDatabase,
   importLegacyChatSessionBinding,
+} from "./database.js";
+import {
   migrateChatDatabaseForInstall,
   preflightChatDatabaseMigrationForInstall,
-} from "./database.js";
+  readAdmissionModelInstallMigrationSummary,
+} from "./database-install-migration.js";
 import {
   readLegacyControlMigrationPreservedSummary,
   retryUnresolvedLegacyChatKeyMessages,
@@ -158,6 +161,7 @@ export function runChatInstallMigrations(
   );
   try {
     const db = migrateChatDatabaseForInstall(agentDir);
+    const oldAdmissions = readAdmissionModelInstallMigrationSummary(db);
     validateResolvedChatKeyLedger(agentDir);
     const deferredRecords = keyMigration.alreadyApplied
       ? {
@@ -190,6 +194,7 @@ export function runChatInstallMigrations(
         path: path.join(agentDir, "data", "chat", "chat.sqlite"),
         schemaVersion: Number(db.pragma("user_version", { simple: true })),
         preservedRecords: readLegacyControlMigrationPreservedSummary(db),
+        oldAdmissions,
       },
       sessionBindings,
     };

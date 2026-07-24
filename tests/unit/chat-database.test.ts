@@ -12,9 +12,23 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const chatDatabase = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
-);
+const chatDatabase = {
+  ...(await import(
+    pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js"))
+      .href
+  )),
+  ...(await import(
+    pathToFileURL(
+      path.join(
+        rootDir,
+        "dist",
+        "core",
+        "chat",
+        "database-install-migration.js",
+      ),
+    ).href
+  )),
+};
 
 function runNodeProcess(code, env) {
   return new Promise((resolve, reject) => {
@@ -373,7 +387,7 @@ test("chat database migrates version 4 inbound recovery lease state", async () =
   });
 });
 
-test("chat database migrates accepted version 5 turns as actionable", async () => {
+test("chat install migration terminalizes ambiguous accepted version 5 turns", async () => {
   await withTempDir(async (agentDir) => {
     const db = chatDatabase.openChatDatabase(agentDir);
     db.prepare(
@@ -433,19 +447,32 @@ test("chat database migrates accepted version 5 turns as actionable", async () =
     assert.deepEqual(
       migrated
         .prepare(
-          `SELECT admission_state, execution_session_file
+          `SELECT state, terminal_kind, admission_state, admission_json,
+                  execution_session_file
            FROM turns WHERE turn_id = 'legacy-turn'`,
         )
         .get(),
       {
-        admission_state: "actionable",
+        state: "terminal",
+        terminal_kind: "interrupted_unknown",
+        admission_state: "unclassified",
+        admission_json: null,
         execution_session_file: "/tmp/legacy-accepted.jsonl",
       },
+    );
+    assert.equal(
+      migrated
+        .prepare(
+          `SELECT COUNT(*) AS count FROM outbox
+            WHERE turn_id = 'legacy-turn' AND delivery_kind = 'error'`,
+        )
+        .get().count,
+      1,
     );
   });
 });
 
-test("chat database migrates version 5 record-only turns with verifiable admission", async () => {
+test("chat install migration terminalizes version 5 record-only turns without runtime admission", async () => {
   await withTempDir(async (agentDir) => {
     const db = chatDatabase.openChatDatabase(agentDir);
     db.prepare(
@@ -498,20 +525,21 @@ test("chat database migrates version 5 record-only turns with verifiable admissi
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    const row = migrated
-      .prepare(
-        `SELECT admission_state, admission_json, admission_hash
-           FROM turns WHERE turn_id = 'legacy-record-only-turn'`,
-      )
-      .get();
-    assert.equal(row.admission_state, "record_only");
-    assert.deepEqual(JSON.parse(row.admission_json), {
-      version: 1,
-      kind: "legacy_message_projection",
-    });
-    assert.equal(
-      row.admission_hash,
-      createHash("sha256").update(row.admission_json).digest("hex"),
+    assert.deepEqual(
+      migrated
+        .prepare(
+          `SELECT state, terminal_kind, admission_state, admission_json,
+                  admission_hash
+             FROM turns WHERE turn_id = 'legacy-record-only-turn'`,
+        )
+        .get(),
+      {
+        state: "terminal",
+        terminal_kind: "record_only",
+        admission_state: "unclassified",
+        admission_json: null,
+        admission_hash: null,
+      },
     );
   });
 });
@@ -574,7 +602,7 @@ test("chat database serializes concurrent cold initialization", async () => {
         .prepare(`SELECT key FROM schema_meta ORDER BY key`)
         .all()
         .map((row) => row.key),
-      ["schema_fingerprint", "schema_version"],
+      ["admission_model_version", "schema_fingerprint", "schema_version"],
     );
   } finally {
     chatDatabase.closeChatDatabase(agentDir);

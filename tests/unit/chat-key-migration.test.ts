@@ -19,9 +19,23 @@ const messageStore = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
     .href
 );
-const database = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
-);
+const database = {
+  ...(await import(
+    pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js"))
+      .href
+  )),
+  ...(await import(
+    pathToFileURL(
+      path.join(
+        rootDir,
+        "dist",
+        "core",
+        "chat",
+        "database-install-migration.js",
+      ),
+    ).href
+  )),
+};
 
 test("chat key migration infers configured bot ids without adapter-specific key shapes", () => {
   const botIds = migration.inferChatBotIdsFromSettings({

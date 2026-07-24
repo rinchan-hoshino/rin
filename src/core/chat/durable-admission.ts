@@ -41,9 +41,7 @@ export type DurableChatAdmissionDecision =
     }
   | { version: 1; kind: "removed_command"; name: string }
   | { version: 1; kind: "record_only_chat" }
-  | { version: 1; kind: "policy_rejected"; decision: unknown }
-  | { version: 1; kind: "legacy_message_projection" }
-  | { version: 1; kind: "legacy_accepted_orphan" };
+  | { version: 1; kind: "policy_rejected"; decision: unknown };
 
 export type ChatInboxAdmission = {
   state: ChatInboxAdmissionState;
@@ -167,8 +165,7 @@ export function durableAdmissionMatchesTurn(
     if (admission.submission) return false;
     if (
       admission.decision.kind === "record_only_chat" ||
-      admission.decision.kind === "policy_rejected" ||
-      admission.decision.kind === "legacy_message_projection"
+      admission.decision.kind === "policy_rejected"
     ) {
       return true;
     }
@@ -258,13 +255,8 @@ export function resolveDurableChatAdmission(
 
   const decision = admission.decision;
   if (admission.state === "record_only") {
-    const acceptedLegacyProjectionWithoutHash =
-      decision?.kind === "legacy_message_projection" &&
-      admission.decisionIntegrity === "invalid" &&
-      !admission.admissionHash;
     return admission.stateIntegrity !== "invalid" &&
-      (admission.decisionIntegrity === "valid" ||
-        acceptedLegacyProjectionWithoutHash) &&
+      admission.decisionIntegrity === "valid" &&
       (!admission.submissionIntegrity ||
         admission.submissionIntegrity === "none") &&
       !admission.submission &&
@@ -278,15 +270,6 @@ export function resolveDurableChatAdmission(
       : { kind: "interrupted_unknown", reason: "unsupported_admission" };
   }
 
-  if (
-    decision?.kind === "legacy_message_projection" ||
-    decision?.kind === "legacy_accepted_orphan"
-  ) {
-    return {
-      kind: "interrupted_unknown",
-      reason: "missing_frozen_submission",
-    };
-  }
   if (
     admission.stateIntegrity === "invalid" ||
     admission.decisionIntegrity !== "valid" ||

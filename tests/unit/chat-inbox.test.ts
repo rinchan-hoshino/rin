@@ -459,7 +459,7 @@ test("chat generation supersedes old pending and running turns while preserving 
   );
 });
 
-test("chat inbox restores accepted orphan work with an indexed ledger query", async () => {
+test("chat inbox runtime recovery never synthesizes turns for pre-atomic accepted messages", async () => {
   const agentDir = await tempDir();
   messageStore.saveChatMessage(agentDir, {
     chatKey: "discord/1:room",
@@ -471,66 +471,22 @@ test("chat inbox restores accepted orphan work with an indexed ledger query", as
     role: "user",
     receivedAt: "2026-07-14T01:00:00.000Z",
     acceptedAt: "2026-07-14T01:00:01.000Z",
-    replyToMessageId: "legacy-parent",
-    text: "recover me",
-    elements: [{ type: "text", attrs: { content: "recover me" } }],
+    text: "update-owned migration only",
   });
 
-  const restored = inbox.restoreOrphanedAcceptedChatInboxItems(agentDir, {
-    nowMs: Date.parse("2026-07-14T01:01:00.000Z"),
-  });
   assert.deepEqual(
-    restored.map((item) => item.messageId),
-    ["accepted-orphan"],
-  );
-  const pending = inbox.listPendingChatInboxItems(agentDir)[0];
-  assert.equal(pending.messageId, "accepted-orphan");
-  assert.equal(pending.admission.state, "actionable");
-  assert.equal(pending.admission.decision.kind, "legacy_accepted_orphan");
-  assert.deepEqual(pending.elements[0], {
-    type: "quote",
-    attrs: { id: "legacy-parent" },
-    children: [],
-  });
-  assert.equal(
-    inbox.restoreOrphanedAcceptedChatInboxItems(agentDir, {
-      nowMs: Date.parse("2026-07-14T01:01:01.000Z"),
-    }).length,
-    0,
-  );
-});
-
-test("chat inbox orphan recovery supersedes older work after a later terminal user turn", async () => {
-  const agentDir = await tempDir();
-  for (const [messageId, receivedAt, processedAt] of [
-    ["old", "2026-07-14T01:00:00.000Z", undefined],
-    ["later", "2026-07-14T01:00:10.000Z", "2026-07-14T01:00:20.000Z"],
-  ]) {
-    messageStore.saveChatMessage(agentDir, {
-      chatKey: "discord/1:room",
-      platform: "discord",
-      botId: "1",
-      chatId: "room",
-      messageId,
-      role: "user",
-      receivedAt,
-      acceptedAt: "2026-07-14T01:00:01.000Z",
-      processedAt,
-      text: messageId,
-    });
-  }
-  assert.equal(
-    inbox.restoreOrphanedAcceptedChatInboxItems(agentDir, {
+    inbox.restoreProcessingChatInboxItems(agentDir, {
       nowMs: Date.parse("2026-07-14T01:01:00.000Z"),
-    }).length,
-    0,
+    }),
+    [],
   );
-  const db = database.openChatDatabase(agentDir);
+  assert.deepEqual(inbox.listPendingChatInboxItems(agentDir), []);
   assert.equal(
-    db
-      .prepare("SELECT disposition FROM messages WHERE message_id = 'old'")
-      .get().disposition,
-    "superseded",
+    database
+      .openChatDatabase(agentDir)
+      .prepare("SELECT COUNT(*) AS count FROM turns")
+      .get().count,
+    0,
   );
 });
 

@@ -2749,7 +2749,7 @@ test("chat main fails closed for unverifiable actionable admissions", async () =
       db.prepare(
         "UPDATE turns SET admission_state = 'actionable', admission_json = ?, " +
         "submission_json = NULL, submission_hash = NULL WHERE turn_id = ?",
-      ).run(JSON.stringify({ version: 1, kind: "legacy_message_projection" }), item.itemId);
+      ).run(JSON.stringify({ version: 1, kind: "obsolete_projection" }), item.itemId);
       const hashlessSubmission = JSON.stringify({
         version: 1,
         chatKey: hashless.chatKey,

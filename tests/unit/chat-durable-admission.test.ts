@@ -51,7 +51,7 @@ test("durable admission resolves only integrity-verified message submissions", (
   for (const candidate of [
     {
       state: "actionable",
-      decision: { version: 1, kind: "legacy_message_projection" },
+      decision: { version: 1, kind: "obsolete_projection" },
     },
     {
       state: "actionable",
@@ -109,16 +109,16 @@ test("durable admission resolves only integrity-verified message submissions", (
   );
 });
 
-test("durable admission preserves migrated record-only projections", () => {
-  const legacyDecision = {
+test("durable admission accepts only integrity-verified current record-only decisions", () => {
+  const recordOnlyDecision = {
     version: 1,
-    kind: "legacy_message_projection",
+    kind: "record_only_chat",
   };
   assert.deepEqual(
     admission.resolveDurableChatAdmission(
       {
         state: "record_only",
-        decision: legacyDecision,
+        decision: recordOnlyDecision,
         decisionIntegrity: "valid",
       },
       turn,
@@ -129,19 +129,7 @@ test("durable admission preserves migrated record-only projections", () => {
     admission.resolveDurableChatAdmission(
       {
         state: "record_only",
-        decision: legacyDecision,
-        decisionIntegrity: "invalid",
-      },
-      turn,
-    ),
-    { kind: "record_only" },
-  );
-  assert.deepEqual(
-    admission.resolveDurableChatAdmission(
-      {
-        state: "record_only",
-        decision: legacyDecision,
-        admissionHash: "mismatched-hash",
+        decision: recordOnlyDecision,
         decisionIntegrity: "invalid",
       },
       turn,

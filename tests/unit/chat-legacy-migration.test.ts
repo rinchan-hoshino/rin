@@ -13,9 +13,23 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const database = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
-);
+const database = {
+  ...(await import(
+    pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js"))
+      .href
+  )),
+  ...(await import(
+    pathToFileURL(
+      path.join(
+        rootDir,
+        "dist",
+        "core",
+        "chat",
+        "database-install-migration.js",
+      ),
+    ).href
+  )),
+};
 const legacyMigration = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "chat", "legacy-migration.js"),
@@ -194,11 +208,11 @@ test("legacy message, inbox, and outbox authority migrates once into chat.sqlite
   );
   assert.equal(
     reopened.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
-    1,
+    3,
   );
   assert.equal(
     reopened.prepare("SELECT COUNT(*) AS value FROM outbox").get().value,
-    2,
+    4,
   );
 });
 
@@ -709,12 +723,16 @@ test("concurrent cold opens serialize one legacy import and archive", async () =
       legacyMessage(`concurrent-${index}`),
     );
   }
-  const moduleUrl = pathToFileURL(
+  const databaseUrl = pathToFileURL(
     path.join(rootDir, "dist", "core", "chat", "database.js"),
+  ).href;
+  const migrationUrl = pathToFileURL(
+    path.join(rootDir, "dist", "core", "chat", "database-install-migration.js"),
   ).href;
   const code = `
     const database = await import(process.env.CHAT_DATABASE_URL);
-    database.migrateChatDatabaseForInstall(process.env.AGENT_DIR);
+    const migration = await import(process.env.CHAT_DATABASE_MIGRATION_URL);
+    migration.migrateChatDatabaseForInstall(process.env.AGENT_DIR);
     database.closeChatDatabase(process.env.AGENT_DIR);
   `;
   await Promise.all(
@@ -723,7 +741,8 @@ test("concurrent cold opens serialize one legacy import and archive", async () =
         env: {
           ...process.env,
           AGENT_DIR: agentDir,
-          CHAT_DATABASE_URL: moduleUrl,
+          CHAT_DATABASE_URL: databaseUrl,
+          CHAT_DATABASE_MIGRATION_URL: migrationUrl,
         },
         timeout: 30_000,
       }),

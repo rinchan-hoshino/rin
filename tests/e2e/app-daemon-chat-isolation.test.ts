@@ -11,9 +11,23 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const database = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
-);
+const database = {
+  ...(await import(
+    pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js"))
+      .href
+  )),
+  ...(await import(
+    pathToFileURL(
+      path.join(
+        rootDir,
+        "dist",
+        "core",
+        "chat",
+        "database-install-migration.js",
+      ),
+    ).href
+  )),
+};
 const daemonClient = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "client.js"))
     .href

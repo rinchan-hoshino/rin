@@ -179,6 +179,18 @@ test("runtime error formatter maps known internal markers to actionable messages
     "Rin update stopped because the platform bundle checksum did not match.",
   );
   assert.equal(
+    formatRuntimeErrorForUser("chat_database_admission_model_incomplete"),
+    "The chat database update migration did not complete.",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser("chat_install_migration_active_legacy_turn"),
+    "Rin update cannot continue while a chat turn from the current version is still active.",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser("chat_install_migration_invalid_accepted_orphan"),
+    "Chat migration found an accepted legacy message with incomplete identity.",
+  );
+  assert.equal(
     formatRuntimeErrorForUser(
       "rin_daemon_unavailable: managed daemon service did not become available",
     ),

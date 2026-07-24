@@ -82,7 +82,6 @@ import {
   type ChatInboxItem,
   commitClaimedChatInboxAdmission,
   getChatInboxItem,
-  reconcileChatInboxRecovery,
   releaseClaimedChatInboxItem,
   restoreChatInboxElements,
   restoreChatInboxSession,
@@ -1696,13 +1695,10 @@ export async function startChatBridge(
   );
 
   reconcileCommittedChatOutboxProcessing(runtime.agentDir);
-  const inboxRecovery = reconcileChatInboxRecovery(runtime.agentDir);
-  if (
-    inboxRecovery.restoredProcessing.length ||
-    inboxRecovery.restoredOrphans.length
-  ) {
+  const restoredProcessing = restoreProcessingChatInboxItems(runtime.agentDir);
+  if (restoredProcessing.length) {
     logger.warn(
-      `chat inbox recovery restored processing=${inboxRecovery.restoredProcessing.length} orphanedAccepted=${inboxRecovery.restoredOrphans.length}`,
+      `chat inbox recovery restored processing=${restoredProcessing.length}`,
     );
   }
 
