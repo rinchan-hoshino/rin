@@ -123,7 +123,6 @@ function createProviderBoundPrunePlan(
     messages: changed ? pruned : input,
     changed,
     replacements,
-    droppedMessages: new Set<any>(),
   };
 }
 
@@ -132,36 +131,4 @@ export function pruneSessionContextMessages(
   options: SessionPruningOptions = {},
 ) {
   return createProviderBoundPrunePlan(messages, options).messages;
-}
-
-export function mapMessagesToPrunedSessionContext(
-  messages: any[],
-  fullContextMessages: any[],
-  options: SessionPruningOptions = {},
-) {
-  const list = Array.isArray(messages) ? messages : [];
-  const fullList = Array.isArray(fullContextMessages)
-    ? fullContextMessages
-    : [];
-  if (!list.length || !fullList.length) return list;
-
-  const plan = createProviderBoundPrunePlan(fullList, options);
-  if (!plan.changed) return list;
-
-  let changed = false;
-  const mapped: any[] = [];
-  for (const message of list) {
-    if (plan.droppedMessages.has(message)) {
-      changed = true;
-      continue;
-    }
-    if (plan.replacements.has(message)) {
-      mapped.push(plan.replacements.get(message));
-      changed = true;
-      continue;
-    }
-    mapped.push(message);
-  }
-
-  return changed ? mapped : list;
 }

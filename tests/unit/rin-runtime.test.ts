@@ -25,57 +25,42 @@ test("getManagedSkillPaths includes agent memory skills and builtin skills", () 
   ]);
 });
 
-test("Rin compaction prompts keep continuation handoff contract", async () => {
+test("Rin delegates compaction generation to native Pi without file XML", async () => {
+  const nativeResult = {
+    summary: "native summary",
+    firstKeptEntryId: "keep",
+    tokensBefore: 1234,
+    details: { readFiles: ["read.ts"], modifiedFiles: ["edit.ts"] },
+  };
+  const calls: any[] = [];
+  const definitions = runtimeMod.createRinCapabilityDefinitions({
+    cwd: "/tmp/rin-native-compaction",
+    agentDir: "/tmp/rin-native-compaction-agent",
+    getThinkingLevel: () => "medium",
+    sendMessage: () => {},
+    compactWithPiNative: async (event: any) => {
+      calls.push(event);
+      return nativeResult;
+    },
+  });
+  const definition = definitions.find(
+    (entry) => entry.name === "rin_native_compaction",
+  );
+  const hook = definition?.hooks?.session_before_compact?.[0];
+  assert.equal(typeof hook, "function");
+  const event = { type: "session_before_compact", reason: "threshold" };
+  assert.deepEqual(await hook(event), { compaction: nativeResult });
+  assert.deepEqual(calls, [event]);
+
   const runtimeText = await fs.readFile(
     path.join(rootDir, "dist", "core", "rin-lib", "runtime.js"),
     "utf8",
   );
-
-  assert.ok(
-    runtimeText.includes(
-      "Produce a compact, factual continuation handoff for the next LLM. Include only information needed to resume safely; never invent facts.",
-    ),
-  );
-  assert.ok(
-    runtimeText.includes(
-      "Create the continuation handoff from all history processed above.",
-    ),
-  );
-  assert.ok(
-    runtimeText.includes(
-      "Preserve task-critical facts: user intent, constraints, authority boundaries, corrections, current state, completed work, blockers, and next actions.",
-    ),
-  );
-  assert.ok(
-    runtimeText.includes(
-      "Include files only when the retained suffix or next action depends on them.",
-    ),
-  );
-  assert.ok(
-    runtimeText.includes(
-      "Maintain a cumulative factual record for a later final handoff. Preserve explicit state without inventing conclusions or next actions.",
-    ),
-  );
-  assert.ok(
-    runtimeText.includes(
-      "Merge the available history with the previous summary, if present.",
-    ),
-  );
-  assert.ok(
-    runtimeText.includes(
-      "completed work, current state, explicit next actions, and unresolved blockers",
-    ),
-  );
-  assert.ok(
-    runtimeText.includes(
-      "Remove speculation, repetition, and temporary narration.",
-    ),
-  );
+  assert.equal(runtimeText.includes("RIN_COMPACTION_SYSTEM_PROMPT"), false);
   assert.equal(
-    runtimeText.includes("Create a concise, faithful handoff summary"),
+    runtimeText.includes("completeRinCompactionSummaryBudgeted"),
     false,
   );
-  assert.equal(runtimeText.includes("Do not list files unless needed."), false);
 });
 
 test("compaction reason tracking annotates native before-compact hooks", async () => {
@@ -99,8 +84,8 @@ test("compaction reason tracking annotates native before-compact hooks", async (
   assert.equal(session.__rinCurrentCompactionReason, undefined);
 });
 
-test("configured Rin compaction uses current model runtime auth and agent stream function", async () => {
-  const agentDir = await fs.mkdtemp("/tmp/rin-compaction-auth-");
+test("configured Rin sessions install the native Pi compaction delegate", async () => {
+  const agentDir = await fs.mkdtemp("/tmp/rin-native-compaction-");
   const configured = await runtimeMod.createConfiguredAgentSession({
     cwd: agentDir,
     agentDir,
@@ -112,81 +97,10 @@ test("configured Rin compaction uses current model runtime auth and agent stream
     noTools: true,
   });
   try {
-    const session = configured.session;
-    const model = {
-      provider: "openai-codex",
-      id: "test-model",
-      api: "openai-codex-responses",
-      reasoning: true,
-      contextWindow: 200_000,
-      maxTokens: 32_000,
-    };
-    session.agent.state.model = model;
-
-    const authCalls: any[] = [];
-    session.modelRuntime.getAuth = async (requestedModel: any) => {
-      authCalls.push(requestedModel);
-      return {
-        auth: {
-          apiKey: "oauth-access-token",
-          headers: { "x-test-auth": "resolved" },
-        },
-        env: { RIN_TEST_PROVIDER_ENV: "resolved" },
-      };
-    };
-
-    const streamCalls: any[] = [];
-    session.agent.streamFunction = (
-      requestedModel: any,
-      context: any,
-      options: any,
-    ) => {
-      streamCalls.push({ requestedModel, context, options });
-      return {
-        async result() {
-          return {
-            role: "assistant",
-            stopReason: "stop",
-            content: [{ type: "text", text: "Compacted with current auth." }],
-          };
-        },
-      };
-    };
-
-    const result = await session.extensionRunner.emit({
-      type: "session_before_compact",
-      preparation: {
-        messagesToSummarize: [
-          {
-            role: "user",
-            content: [{ type: "text", text: "Retain this fact." }],
-            timestamp: Date.now(),
-          },
-        ],
-        turnPrefixMessages: [],
-        isSplitTurn: false,
-        firstKeptEntryId: "kept-entry",
-        tokensBefore: 1234,
-        settings: { reserveTokens: 16_384 },
-      },
-      branchEntries: [],
-      customInstructions: undefined,
-      reason: "overflow",
-      willRetry: true,
-      signal: new AbortController().signal,
-    });
-
-    assert.equal(result?.compaction?.summary, "Compacted with current auth.");
-    assert.deepEqual(authCalls, [model]);
-    assert.equal(streamCalls.length, 1);
-    assert.equal(streamCalls[0].requestedModel, model);
-    assert.equal(streamCalls[0].options.apiKey, "oauth-access-token");
-    assert.deepEqual(streamCalls[0].options.headers, {
-      "x-test-auth": "resolved",
-    });
-    assert.deepEqual(streamCalls[0].options.env, {
-      RIN_TEST_PROVIDER_ENV: "resolved",
-    });
+    assert.equal(
+      configured.session.extensionRunner.hasHandlers("session_before_compact"),
+      true,
+    );
   } finally {
     try {
       await configured.runtime?.dispose?.();
@@ -940,135 +854,6 @@ test("applyAutoReloadAfterCompaction queues one extra reload while a reload is i
 
 test("Rin runtime no longer exposes todo compaction summary injection", () => {
   assert.equal(runtimeMod.appendRinTodoSnapshotToCompactionSummary, undefined);
-});
-
-test("Rin compaction summary separates intermediate and final model contracts", async () => {
-  const requests = [];
-  const result = await runtimeMod.completeRinCompactionSummaryBudgeted({
-    model: { contextWindow: 1200, maxTokens: 200 },
-    messages: Array.from({ length: 6 }, (_, index) => ({
-      role: "user",
-      text: `message-${index} ${"x".repeat(500)}`,
-    })),
-    systemPrompt: "Write a continuation handoff for the next agent.",
-    intermediateSystemPrompt:
-      "Maintain a faithful cumulative record of available facts.",
-    instruction: "Write the final handoff. CUSTOM-FINAL-FORMAT.",
-    intermediateInstruction:
-      "Accumulate facts without inferring the final state.",
-    maxTokens: 100,
-    promptBudgetTokens: 220,
-    serializeMessages: (messages) =>
-      messages.map((message) => message.text).join("\n"),
-    completeSummary: async (request) => {
-      requests.push(request);
-      return `summary-${requests.length}`;
-    },
-  });
-
-  assert.equal(result, `summary-${requests.length}`);
-  assert.ok(requests.length > 1);
-  for (const request of requests.slice(0, -1)) {
-    assert.equal(
-      request.systemPrompt,
-      "Maintain a faithful cumulative record of available facts.",
-    );
-    assert.doesNotMatch(request.systemPrompt, /continuation handoff/i);
-    assert.match(
-      request.promptText,
-      /Accumulate facts without inferring the final state/,
-    );
-    assert.doesNotMatch(request.promptText, /Write the final handoff/);
-    assert.doesNotMatch(request.promptText, /CUSTOM-FINAL-FORMAT/);
-  }
-  const finalRequest = requests.at(-1);
-  assert.equal(
-    finalRequest.systemPrompt,
-    "Write a continuation handoff for the next agent.",
-  );
-  assert.match(finalRequest.promptText, /Write the final handoff/);
-  assert.match(finalRequest.promptText, /CUSTOM-FINAL-FORMAT/);
-  assert.doesNotMatch(
-    finalRequest.promptText,
-    /Accumulate facts without inferring the final state/,
-  );
-  for (const request of requests) {
-    assert.ok(
-      runtimeMod.estimateRinCompactionTextTokens(request.promptText) <= 220,
-      `prompt exceeded budget: ${runtimeMod.estimateRinCompactionTextTokens(request.promptText)}`,
-    );
-  }
-});
-
-test("Rin compaction summary defaults intermediate batches to the neutral contract", async () => {
-  const requests = [];
-  await runtimeMod.completeRinCompactionSummaryBudgeted({
-    model: { contextWindow: 1200, maxTokens: 200 },
-    messages: Array.from({ length: 3 }, (_, index) => ({
-      role: "user",
-      text: `message-${index} ${"x".repeat(500)}`,
-    })),
-    systemPrompt: "Write a continuation handoff.",
-    instruction: "FINAL-HANDOFF CUSTOM-FINAL-FORMAT",
-    maxTokens: 100,
-    promptBudgetTokens: 800,
-    serializeMessages: (messages) =>
-      messages.map((message) => message.text).join("\n"),
-    completeSummary: async (request) => {
-      requests.push(request);
-      return `summary-${requests.length}`;
-    },
-  });
-
-  assert.ok(requests.length > 1);
-  for (const request of requests) {
-    assert.ok(
-      runtimeMod.estimateRinCompactionTextTokens(request.promptText) <= 800,
-      `prompt exceeded budget: ${runtimeMod.estimateRinCompactionTextTokens(request.promptText)}`,
-    );
-  }
-  for (const request of requests.slice(0, -1)) {
-    assert.match(request.systemPrompt, /cumulative factual record/);
-    assert.doesNotMatch(request.systemPrompt, /continuation handoff/i);
-    assert.match(request.promptText, /Merge the available history/);
-    assert.doesNotMatch(request.promptText, /FINAL-HANDOFF/);
-    assert.doesNotMatch(request.promptText, /CUSTOM-FINAL-FORMAT/);
-  }
-  const finalRequest = requests.at(-1);
-  assert.equal(finalRequest.systemPrompt, "Write a continuation handoff.");
-  assert.match(finalRequest.promptText, /FINAL-HANDOFF/);
-  assert.match(finalRequest.promptText, /CUSTOM-FINAL-FORMAT/);
-});
-
-test("Rin compaction summary truncates a single oversized serialized message to the prompt budget", async () => {
-  const prompts = [];
-  await runtimeMod.completeRinCompactionSummaryBudgeted({
-    model: { contextWindow: 1200, maxTokens: 200 },
-    messages: [
-      {
-        role: "user",
-        text: `EARLIEST-CONTEXT ${"x".repeat(2000)} LATEST-CORRECTION`,
-      },
-    ],
-    instruction: "Summarize.",
-    maxTokens: 100,
-    promptBudgetTokens: 180,
-    serializeMessages: (messages) =>
-      messages.map((message) => message.text).join("\n"),
-    completeSummary: async ({ promptText }) => {
-      prompts.push(promptText);
-      return "summary";
-    },
-  });
-
-  assert.equal(prompts.length, 1);
-  assert.ok(
-    runtimeMod.estimateRinCompactionTextTokens(prompts[0]) <= 180,
-    `prompt exceeded budget: ${runtimeMod.estimateRinCompactionTextTokens(prompts[0])}`,
-  );
-  assert.match(prompts[0], /EARLIEST-CONTEXT/);
-  assert.match(prompts[0], /LATEST-CORRECTION/);
-  assert.match(prompts[0], /truncated to fit compaction summarization budget/);
 });
 
 test("manual compaction waits for refresh before returning", async () => {

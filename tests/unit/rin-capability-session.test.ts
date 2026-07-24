@@ -257,6 +257,48 @@ test("Rin compaction hooks are exposed through Pi's native before-compact span",
   assert.equal(session._extensionRunner.hasHandlers("session_shutdown"), false);
 });
 
+test("Pi extension compaction takes precedence over Rin's default delegate", async () => {
+  let rinCalls = 0;
+  const capabilitySet = capabilitySession.createRinCapabilitySet({
+    cwd: "/tmp/rin-capability-session-test",
+    agentDir: "/tmp/rin-capability-session-test",
+    definitions: [
+      {
+        name: "rin_native_compaction",
+        hooks: {
+          session_before_compact: [
+            async () => {
+              rinCalls += 1;
+              return { compaction: { summary: "rin" } };
+            },
+          ],
+        },
+      },
+    ],
+  });
+  const piCompaction = { summary: "pi-extension" };
+  const session = {
+    _extensionRunner: {
+      hasHandlers: () => true,
+      emit: async () => ({ compaction: piCompaction }),
+      getRegisteredCommands: () => [],
+    },
+    sessionManager: { appendCustomEntry() {} },
+    subscribe: () => () => {},
+  };
+
+  await capabilitySession.attachRinCapabilitiesToSession(session, {
+    capabilitySet,
+  });
+  const result = await session._extensionRunner.emit({
+    type: "session_before_compact",
+    reason: "manual",
+  });
+
+  assert.deepEqual(result, { compaction: piCompaction });
+  assert.equal(rinCalls, 0);
+});
+
 test("Rin capability bridge is reattached to Pi extension runner after reload", async () => {
   const calls: string[] = [];
   const capabilitySet = capabilitySession.createRinCapabilitySet({

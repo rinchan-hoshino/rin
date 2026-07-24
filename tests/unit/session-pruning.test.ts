@@ -156,39 +156,3 @@ test("session pruning preserves old skill read results", () => {
   );
   assert.equal(ordinaryReadResult.content, "old read output");
 });
-
-test("session pruning maps compaction slices through the full provider-bound context", () => {
-  const oldToolResult = { role: "toolResult", content: "huge old output" };
-  const summarizedSlice = [
-    { role: "user", content: "turn 1" },
-    oldToolResult,
-    { role: "assistant", content: "done 1" },
-  ];
-  const fullContext = [
-    summarizedSlice[0],
-    oldToolResult,
-    summarizedSlice[2],
-    { role: "user", content: "turn 2" },
-    { role: "assistant", content: "done 2" },
-    { role: "user", content: "turn 3" },
-    { role: "assistant", content: "done 3" },
-    { role: "user", content: "turn 4" },
-    { role: "assistant", content: "done 4" },
-    { role: "user", content: "turn 5" },
-    { role: "assistant", content: "done 5" },
-  ];
-
-  const directSlicePrune = pruning.pruneSessionContextMessages(summarizedSlice);
-  assert.equal(directSlicePrune, summarizedSlice);
-
-  const mapped = pruning.mapMessagesToPrunedSessionContext(
-    summarizedSlice,
-    fullContext,
-  );
-  assert.notEqual(mapped, summarizedSlice);
-  assert.equal(
-    mapped[1].content,
-    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
-  );
-  assert.equal(oldToolResult.content, "huge old output");
-});

@@ -112,7 +112,10 @@ export function attachRinCapabilityExtensionBridge(
     ) {
       return result;
     }
-    if (RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type) && result?.cancel) {
+    if (
+      RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type) &&
+      (result?.cancel || result?.compaction)
+    ) {
       return result;
     }
     const rinEvent =

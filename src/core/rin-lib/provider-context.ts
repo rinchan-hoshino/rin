@@ -1,7 +1,4 @@
-import {
-  mapMessagesToPrunedSessionContext,
-  pruneSessionContextMessages,
-} from "./session-pruning.js";
+import { pruneSessionContextMessages } from "./session-pruning.js";
 
 type ProviderBoundContextOptions = {
   protectRecentTurns?: number;
@@ -15,18 +12,6 @@ export function buildProviderBoundContextMessages(
   options: ProviderBoundContextOptions = {},
 ) {
   return pruneSessionContextMessages(messages, options);
-}
-
-export function mapMessagesToProviderBoundContext(
-  messages: any[],
-  fullContextMessages: any[],
-  options: ProviderBoundContextOptions = {},
-) {
-  return mapMessagesToPrunedSessionContext(
-    messages,
-    fullContextMessages,
-    options,
-  );
 }
 
 export function buildProviderBoundContextEvent(

@@ -1,10 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 
-import {
-  completeSimple,
-  isContextOverflow,
-} from "@earendil-works/pi-ai/compat";
+import { isContextOverflow } from "@earendil-works/pi-ai/compat";
 
 import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import todoCapability from "./todo.js";
@@ -41,7 +38,6 @@ import type { RinPiPassthroughOptions } from "./pi-passthrough.js";
 import {
   buildProviderBoundContextEvent,
   estimateProviderBoundContextTokens,
-  mapMessagesToProviderBoundContext,
 } from "./provider-context.js";
 import { applyRinSystemPromptOverlay } from "./system-prompt-overlay.js";
 import {
@@ -49,7 +45,6 @@ import {
   bindPiSessionCompactionChecker,
   bindPiSessionSystemPromptRebuilder,
   bindPiSessionToolRegistryRefresher,
-  getPiSessionCompactionRequestAuth,
   getPiSessionResourcePromptState,
   patchPiSessionManagerConversationPersistence,
   readPiSessionBaseSystemPrompt,
@@ -58,6 +53,7 @@ import {
   replacePiSessionCompactionChecker,
   replacePiSessionSystemPromptRebuilder,
   replacePiSessionToolRegistryRefresher,
+  runPiNativeCompactionWithoutFileSummary,
   runPiSessionAutoCompaction,
   writePiSessionBaseSystemPrompt,
 } from "../pi/session-host.js";
@@ -72,16 +68,20 @@ export function createRinCapabilityDefinitions(
     taskModule(),
     chatModule(),
     tokenUsageModule(options),
-    {
-      name: "rin_compaction_prompt",
-      hooks: {
-        session_before_compact: [
-          async (event: any) => {
-            return await options.compactWithRinPrompt?.(event);
+    ...(options.compactWithPiNative
+      ? [
+          {
+            name: "rin_native_compaction",
+            hooks: {
+              session_before_compact: [
+                async (event: any) => ({
+                  compaction: await options.compactWithPiNative?.(event),
+                }),
+              ],
+            },
           },
-        ],
-      },
-    },
+        ]
+      : []),
     {
       name: "rin_provider_bound_context",
       hooks: {
@@ -94,377 +94,6 @@ export function createRinCapabilityDefinitions(
       },
     },
   ];
-}
-
-const RIN_COMPACTION_SYSTEM_PROMPT =
-  "Produce a compact, factual continuation handoff for the next LLM. Include only information needed to resume safely; never invent facts.";
-
-const RIN_COMPACTION_ACCUMULATION_SYSTEM_PROMPT =
-  "Maintain a cumulative factual record for a later final handoff. Preserve explicit state without inventing conclusions or next actions.";
-
-const RIN_COMPACTION_ACCUMULATION_PROMPT = `Merge the available history with the previous summary, if present.
-
-Preserve:
-- user intent and constraints;
-- authority boundaries and corrections;
-- completed work, current state, explicit next actions, and unresolved blockers;
-- concrete artifacts that later history may depend on.
-
-Remove speculation, repetition, and temporary narration.`;
-
-const RIN_COMPACTION_PROMPT = `Create the continuation handoff from all history processed above.
-
-Rules:
-- Preserve task-critical facts: user intent, constraints, authority boundaries, corrections, current state, completed work, blockers, and next actions.
-- Include exact paths, commands, function names, errors, and decisions only when the next LLM must use them.
-- Drop chronology, stale/resolved/duplicate detail, speculation, and anything not needed for the next step.
-
-Use this exact structure:
-
-## Active Task
-[Current objective]
-
-## Constraints
-- [User requirements, preferences, authority boundaries, corrections]
-
-## Done
-- [Completed work]
-
-## Current State
-- [Branch/session/runtime state, partial work, blockers]
-
-## Next
-1. [Next concrete step]
-
-## Critical Context
-- [Only facts/artifacts needed to continue safely]`;
-
-const RIN_TURN_PREFIX_COMPACTION_PROMPT = `This is the prefix of a turn; the suffix will remain in context.
-
-Summarize only prefix facts needed to understand and continue from the retained suffix:
-
-## Original Request
-[What the user asked in this turn]
-
-## Early Progress
-- [Key prefix actions and decisions]
-
-## Context for Suffix
-- [Facts needed to understand the retained suffix]
-
-Keep it concise. Include files only when the retained suffix or next action depends on them.`;
-
-function extractAssistantText(message: any) {
-  return (Array.isArray(message?.content) ? message.content : [])
-    .filter((item: any) => item?.type === "text")
-    .map((item: any) => String(item.text || ""))
-    .join("\n")
-    .trim();
-}
-
-function createRinSummarizationOptions(
-  model: any,
-  maxTokens: number,
-  apiKey: string | undefined,
-  headers: Record<string, string | null | undefined> | undefined,
-  env: Record<string, string | undefined> | undefined,
-  signal: AbortSignal | undefined,
-  thinkingLevel: any,
-) {
-  const options: any = { maxTokens, apiKey, headers, env, signal };
-  if (model?.reasoning && thinkingLevel && thinkingLevel !== "off") {
-    options.reasoning = thinkingLevel;
-  }
-  return options;
-}
-
-type RinCompactionSummaryRequest = {
-  model: any;
-  systemPrompt?: string;
-  promptText: string;
-  maxTokens: number;
-  apiKey?: string;
-  headers?: Record<string, string | null | undefined>;
-  env?: Record<string, string | undefined>;
-  signal?: AbortSignal;
-  thinkingLevel?: any;
-  streamFn?: any;
-};
-
-type RinCompactionSummaryCompleter = (
-  options: RinCompactionSummaryRequest,
-) => Promise<string>;
-
-async function completeRinCompactionSummary(
-  options: RinCompactionSummaryRequest,
-) {
-  const context: any = {
-    systemPrompt: options.systemPrompt || RIN_COMPACTION_SYSTEM_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: [{ type: "text", text: options.promptText }],
-        timestamp: Date.now(),
-      },
-    ],
-  };
-  const completionOptions = createRinSummarizationOptions(
-    options.model,
-    options.maxTokens,
-    options.apiKey,
-    options.headers,
-    options.env,
-    options.signal,
-    options.thinkingLevel,
-  );
-  const response = options.streamFn
-    ? await (
-        await options.streamFn(options.model, context, completionOptions)
-      ).result()
-    : await completeSimple(options.model, context, completionOptions);
-  if (response?.stopReason === "error") {
-    throw new Error(
-      `Rin compaction summarization failed: ${response.errorMessage || "Unknown error"}`,
-    );
-  }
-  return extractAssistantText(response);
-}
-
-const RIN_COMPACTION_PROMPT_SAFETY_TOKENS = 4096;
-const RIN_COMPACTION_TRUNCATION_MARKER =
-  "\n\n[... truncated to fit compaction summarization budget]";
-
-export function estimateRinCompactionTextTokens(text: string) {
-  // Use character count as a conservative prompt-token upper bound. The usual
-  // chars/4 heuristic can undercount CJK-heavy chat histories and still let a
-  // compaction summary request exceed the provider context window.
-  return Array.from(String(text || "")).length;
-}
-
-function getRinCompactionPromptBudgetTokens(model: any, maxTokens: number) {
-  const contextWindow = Number(model?.contextWindow || 0);
-  if (!Number.isFinite(contextWindow) || contextWindow <= 0) {
-    return Number.POSITIVE_INFINITY;
-  }
-  const outputTokens = Number(maxTokens || 0);
-  const rawBudget =
-    contextWindow -
-    (Number.isFinite(outputTokens) && outputTokens > 0 ? outputTokens : 0) -
-    RIN_COMPACTION_PROMPT_SAFETY_TOKENS;
-  return Math.max(0, rawBudget);
-}
-
-function appendRinCompactionCustomInstructions(
-  instruction: string,
-  customInstructions?: string,
-) {
-  const custom = String(customInstructions || "").trim();
-  return custom ? `${instruction}\n\nAdditional focus: ${custom}` : instruction;
-}
-
-export function buildRinCompactionPromptText(options: {
-  conversationText: string;
-  instruction: string;
-  previousSummary?: string;
-}) {
-  return [
-    `<conversation>\n${options.conversationText || ""}\n</conversation>`,
-    options.previousSummary
-      ? `<previous-summary>\n${options.previousSummary}\n</previous-summary>`
-      : "",
-    options.instruction,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
-function truncateTextToTokenBudget(text: string, tokenBudget: number) {
-  if (!Number.isFinite(tokenBudget) || tokenBudget <= 0) return "";
-  const maxChars = Math.max(0, Math.floor(tokenBudget));
-  const chars = Array.from(text);
-  if (chars.length <= maxChars) return text;
-  const markerChars = Array.from(RIN_COMPACTION_TRUNCATION_MARKER);
-  if (maxChars <= markerChars.length) {
-    return markerChars.slice(0, maxChars).join("");
-  }
-  const contentBudget = maxChars - markerChars.length;
-  const headBudget = Math.max(1, Math.floor(contentBudget / 3));
-  const tailBudget = contentBudget - headBudget;
-  return [
-    chars.slice(0, headBudget).join(""),
-    RIN_COMPACTION_TRUNCATION_MARKER,
-    chars.slice(chars.length - tailBudget).join(""),
-  ].join("");
-}
-
-function fitRinCompactionPromptToBudget(options: {
-  conversationText: string;
-  instruction: string;
-  previousSummary?: string;
-  promptBudgetTokens: number;
-}) {
-  if (!Number.isFinite(options.promptBudgetTokens)) {
-    return buildRinCompactionPromptText(options);
-  }
-
-  let previousSummary = String(options.previousSummary || "");
-  let conversationText = String(options.conversationText || "");
-  let prompt = buildRinCompactionPromptText({
-    conversationText,
-    instruction: options.instruction,
-    previousSummary,
-  });
-  if (estimateRinCompactionTextTokens(prompt) <= options.promptBudgetTokens) {
-    return prompt;
-  }
-
-  if (previousSummary) {
-    previousSummary = truncateTextToTokenBudget(
-      previousSummary,
-      Math.floor(options.promptBudgetTokens / 3),
-    );
-  }
-
-  const promptWithoutConversation = buildRinCompactionPromptText({
-    conversationText: "",
-    instruction: options.instruction,
-    previousSummary,
-  });
-  const availableConversationTokens = Math.max(
-    0,
-    options.promptBudgetTokens -
-      estimateRinCompactionTextTokens(promptWithoutConversation),
-  );
-  conversationText = truncateTextToTokenBudget(
-    conversationText,
-    availableConversationTokens,
-  );
-  prompt = buildRinCompactionPromptText({
-    conversationText,
-    instruction: options.instruction,
-    previousSummary,
-  });
-
-  while (
-    estimateRinCompactionTextTokens(prompt) > options.promptBudgetTokens &&
-    conversationText.length > 0
-  ) {
-    conversationText = Array.from(conversationText)
-      .slice(0, Math.max(0, Array.from(conversationText).length - 256))
-      .join("");
-    prompt = buildRinCompactionPromptText({
-      conversationText,
-      instruction: options.instruction,
-      previousSummary,
-    });
-  }
-
-  while (
-    estimateRinCompactionTextTokens(prompt) > options.promptBudgetTokens &&
-    previousSummary.length > 0
-  ) {
-    previousSummary = Array.from(previousSummary)
-      .slice(0, Math.max(0, Array.from(previousSummary).length - 256))
-      .join("");
-    prompt = buildRinCompactionPromptText({
-      conversationText,
-      instruction: options.instruction,
-      previousSummary,
-    });
-  }
-
-  return prompt;
-}
-
-export async function completeRinCompactionSummaryBudgeted(options: {
-  model: any;
-  messages: any[];
-  systemPrompt?: string;
-  intermediateSystemPrompt?: string;
-  instruction: string;
-  intermediateInstruction?: string;
-  previousSummary?: string;
-  maxTokens: number;
-  apiKey?: string;
-  headers?: Record<string, string | null | undefined>;
-  env?: Record<string, string | undefined>;
-  signal?: AbortSignal;
-  thinkingLevel?: any;
-  streamFn?: any;
-  serializeMessages: (messages: any[]) => string;
-  completeSummary?: RinCompactionSummaryCompleter;
-  promptBudgetTokens?: number;
-}) {
-  const completeSummary =
-    options.completeSummary || completeRinCompactionSummary;
-  const promptBudgetTokens =
-    options.promptBudgetTokens ??
-    getRinCompactionPromptBudgetTokens(options.model, options.maxTokens);
-  const blocks = (Array.isArray(options.messages) ? options.messages : [])
-    .map((message) => options.serializeMessages([message]).trim())
-    .filter(Boolean);
-
-  let summary = String(options.previousSummary || "").trim();
-  if (!blocks.length) return summary;
-
-  let index = 0;
-  while (index < blocks.length) {
-    const previousSummary = summary || undefined;
-    let conversationText = "";
-
-    while (index < blocks.length) {
-      const candidate = conversationText
-        ? `${conversationText}\n\n${blocks[index]}`
-        : blocks[index];
-      const candidatePrompt = buildRinCompactionPromptText({
-        conversationText: candidate,
-        instruction: options.instruction,
-        previousSummary,
-      });
-      const candidateFits =
-        !Number.isFinite(promptBudgetTokens) ||
-        estimateRinCompactionTextTokens(candidatePrompt) <= promptBudgetTokens;
-
-      if (candidateFits || !conversationText) {
-        conversationText = candidate;
-        index += 1;
-        if (!candidateFits) break;
-        continue;
-      }
-      break;
-    }
-
-    const intermediate = index < blocks.length;
-    const instruction = intermediate
-      ? options.intermediateInstruction || RIN_COMPACTION_ACCUMULATION_PROMPT
-      : options.instruction;
-    const systemPrompt = intermediate
-      ? options.intermediateSystemPrompt ||
-        RIN_COMPACTION_ACCUMULATION_SYSTEM_PROMPT
-      : options.systemPrompt;
-    const promptText = fitRinCompactionPromptToBudget({
-      conversationText,
-      instruction,
-      previousSummary,
-      promptBudgetTokens,
-    });
-    summary = (
-      await completeSummary({
-        model: options.model,
-        systemPrompt,
-        promptText,
-        maxTokens: options.maxTokens,
-        apiKey: options.apiKey,
-        headers: options.headers,
-        env: options.env,
-        signal: options.signal,
-        thinkingLevel: options.thinkingLevel,
-        streamFn: options.streamFn,
-      })
-    ).trim();
-  }
-
-  return summary;
 }
 
 export function getManagedSkillPaths(agentDir: string): string[] {
@@ -1045,13 +674,6 @@ function getSessionProviderContextMessages(session: any) {
   return [];
 }
 
-function mapMessagesToCurrentProviderContext(messages: any[], session: any) {
-  return mapMessagesToProviderBoundContext(
-    messages,
-    getSessionProviderContextMessages(session),
-  );
-}
-
 function canRunOverflowPreflightFromProviderMessages(messages: any[]) {
   const last = Array.isArray(messages) ? messages[messages.length - 1] : null;
   return Boolean(last && last.role !== "assistant");
@@ -1586,13 +1208,11 @@ export async function createConfiguredAgentSession(
   const agentRuntimeModule = await loadRinAgentRuntime();
   const {
     calculateContextTokens,
-    convertToLlm,
     createAgentSessionRuntime,
     createAgentSessionServices,
     createAgentSessionFromServices,
     estimateContextTokens,
     getLatestCompactionEntry,
-    serializeConversation,
     SettingsManager,
     SessionManager,
   } = agentRuntimeModule as any;
@@ -1678,86 +1298,6 @@ export async function createConfiguredAgentSession(
     }
 
     const sessionRef: { current?: any } = {};
-    const compactWithRinPrompt = async (event: any) => {
-      const session = sessionRef.current;
-      const preparation = event?.preparation;
-      const model = session?.model;
-      if (!session || !preparation || !model) return undefined;
-      if (
-        typeof convertToLlm !== "function" ||
-        typeof serializeConversation !== "function"
-      ) {
-        return undefined;
-      }
-
-      const { apiKey, headers, env } = await getPiSessionCompactionRequestAuth(
-        session,
-        model,
-      );
-      const reserveTokens = Number(preparation?.settings?.reserveTokens || 0);
-      const maxTokens = Math.min(
-        Math.floor(0.8 * (reserveTokens || 16384)),
-        model.maxTokens > 0 ? model.maxTokens : Number.POSITIVE_INFINITY,
-      );
-      const serializeMessages = (messages: any[]) =>
-        serializeConversation(convertToLlm(messages));
-
-      const commonOptions = {
-        model,
-        maxTokens,
-        apiKey,
-        headers,
-        env,
-        signal: event?.signal,
-        thinkingLevel: session.thinkingLevel,
-        streamFn: session.agent?.streamFunction,
-        serializeMessages,
-      };
-      const providerTokensBefore = estimateCurrentProviderContextTokens(
-        getSessionProviderContextMessages(session),
-        { estimateContextTokens },
-      );
-      const messagesToSummarize = mapMessagesToCurrentProviderContext(
-        preparation.messagesToSummarize || [],
-        session,
-      );
-      const historySummary = await completeRinCompactionSummaryBudgeted({
-        ...commonOptions,
-        messages: messagesToSummarize,
-        systemPrompt: RIN_COMPACTION_SYSTEM_PROMPT,
-        intermediateSystemPrompt: RIN_COMPACTION_ACCUMULATION_SYSTEM_PROMPT,
-        instruction: appendRinCompactionCustomInstructions(
-          RIN_COMPACTION_PROMPT,
-          event?.customInstructions,
-        ),
-        intermediateInstruction: RIN_COMPACTION_ACCUMULATION_PROMPT,
-        previousSummary: preparation.previousSummary,
-      });
-      let summary = historySummary || "No prior history.";
-      if (preparation.isSplitTurn && preparation.turnPrefixMessages?.length) {
-        const turnPrefixMessages = mapMessagesToCurrentProviderContext(
-          preparation.turnPrefixMessages,
-          session,
-        );
-        const turnPrefixSummary = await completeRinCompactionSummaryBudgeted({
-          ...commonOptions,
-          maxTokens: Math.min(Math.floor(maxTokens * 0.5), maxTokens),
-          messages: turnPrefixMessages,
-          systemPrompt: RIN_COMPACTION_SYSTEM_PROMPT,
-          intermediateSystemPrompt: RIN_COMPACTION_ACCUMULATION_SYSTEM_PROMPT,
-          instruction: RIN_TURN_PREFIX_COMPACTION_PROMPT,
-          intermediateInstruction: RIN_COMPACTION_ACCUMULATION_PROMPT,
-        });
-        summary = `${summary}\n\n---\n\n**Turn Context (split turn):**\n\n${turnPrefixSummary}`;
-      }
-      return {
-        compaction: {
-          summary,
-          firstKeptEntryId: preparation.firstKeptEntryId,
-          tokensBefore: providerTokensBefore || preparation.tokensBefore,
-        },
-      };
-    };
     const rinCapabilities = createRinCapabilitySet({
       cwd: runtimeCwd,
       agentDir: runtimeAgentDir,
@@ -1779,7 +1319,8 @@ export async function createConfiguredAgentSession(
         emitEvent: (event) => {
           sessionRef.current?.__rinEmitCoreEvent?.(event);
         },
-        compactWithRinPrompt,
+        compactWithPiNative: (event) =>
+          runPiNativeCompactionWithoutFileSummary(sessionRef.current, event),
       }),
     });
 

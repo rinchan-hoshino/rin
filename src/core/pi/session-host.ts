@@ -1,5 +1,7 @@
 import fsSync from "node:fs";
 
+import { compact } from "@earendil-works/pi-coding-agent";
+
 import { updateSessionCatalogFromSessionManagerSync } from "../session/catalog.js";
 
 // This file is Rin's controlled seam for Pi AgentSession/SessionManager
@@ -26,6 +28,8 @@ const PI_SESSION_PRIVATE = {
   runAgentPrompt: "_runAgentPrompt",
   rewriteFile: "_rewriteFile",
   runAutoCompaction: "_runAutoCompaction",
+  summarizationRequestAuth: "_getSummarizationRequestAuth",
+  summarizationRetryCallbacks: "_summarizationRetryCallbacks",
 } as const;
 
 const RIN_SESSION_CONVERSATION_PERSIST_KEY = Symbol.for(
@@ -162,6 +166,61 @@ export function runPiSessionAutoCompaction(
   return session?.[PI_SESSION_PRIVATE.runAutoCompaction]?.(reason, willRetry);
 }
 
+function computePiCompactionFileDetails(fileOps: any) {
+  const read = new Set<string>(fileOps?.read || []);
+  const modified = new Set<string>([
+    ...(fileOps?.edited || []),
+    ...(fileOps?.written || []),
+  ]);
+  return {
+    readFiles: [...read].filter((file) => !modified.has(file)).sort(),
+    modifiedFiles: [...modified].sort(),
+  };
+}
+
+export async function runPiNativeCompactionWithoutFileSummary(
+  session: any,
+  event: any,
+) {
+  const model = session?.model;
+  if (!model)
+    throw new Error("Pi AgentSession compaction model is unavailable");
+  const getRequestAuth = bindMethod(
+    session,
+    PI_SESSION_PRIVATE.summarizationRequestAuth,
+  );
+  if (!getRequestAuth) {
+    throw new Error("Pi AgentSession summarization auth is unavailable");
+  }
+  const { apiKey, headers, env } = await getRequestAuth(model);
+  const details = computePiCompactionFileDetails(event?.preparation?.fileOps);
+  const retryCallbacks = bindMethod(
+    session,
+    PI_SESSION_PRIVATE.summarizationRetryCallbacks,
+  )?.({ source: "compaction", reason: event?.reason });
+  const result = await compact(
+    {
+      ...event.preparation,
+      fileOps: {
+        read: new Set<string>(),
+        written: new Set<string>(),
+        edited: new Set<string>(),
+      },
+    },
+    model,
+    apiKey,
+    headers,
+    event?.customInstructions,
+    event?.signal,
+    session?.thinkingLevel,
+    session?.agent?.streamFunction,
+    env,
+    session?.settingsManager?.getRetrySettings?.(),
+    retryCallbacks,
+  );
+  return { ...result, details };
+}
+
 export function bindPiSessionToolRegistryRefresher(session: any) {
   return bindMethod(session, PI_SESSION_PRIVATE.refreshToolRegistry);
 }
@@ -223,24 +282,6 @@ export function getPiSessionExtensionUIContext(session: any) {
 
 export function getPiSessionExtensionCommandContextActions(session: any) {
   return session?.[PI_SESSION_PRIVATE.extensionCommandContextActions];
-}
-
-export async function getPiSessionCompactionRequestAuth(
-  session: any,
-  model: any,
-) {
-  const modelRuntime = session?.modelRuntime;
-  if (typeof modelRuntime?.getAuth !== "function") {
-    throw new Error("Pi model runtime auth is unavailable");
-  }
-  const result = await modelRuntime.getAuth(model);
-  return result
-    ? {
-        apiKey: result.auth?.apiKey,
-        headers: result.auth?.headers,
-        env: result.env,
-      }
-    : { apiKey: undefined, headers: undefined, env: undefined };
 }
 
 function hasConversationMessageEntry(entries: unknown) {
