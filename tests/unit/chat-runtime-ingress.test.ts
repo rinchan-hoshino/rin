@@ -1190,10 +1190,6 @@ test("lark startup resolves the bot open id without changing the stable app iden
     ]);
     assert.equal(bot.selfId, "cli_test");
     assert.deepEqual(bot.user, {
-      id: "ou_bot",
-      userId: "ou_bot",
-      openId: "ou_bot",
-      appId: "cli_test",
       name: "Rin",
       username: "Rin",
       nick: "Rin",
@@ -1266,7 +1262,8 @@ test("lark runtime recognizes only the exact bot open id in native mentions", as
     });
     const adapter = [...app.adapters][0];
     adapter.bot.selfId = "cli_test";
-    adapter.bot.user = { openId: "ou_bot" };
+    adapter.bot.user = { openId: "ou_not_the_bot_identity" };
+    adapter.botOpenId = "ou_bot";
     const seen: any[] = [];
     app.on("message", (session: any) => seen.push(session));
     const event = (messageId: string, openId: string) => ({
@@ -1290,14 +1287,27 @@ test("lark runtime recognizes only the exact bot open id in native mentions", as
     });
 
     await adapter.handleMessage(event("om-self-mention", "ou_bot"));
+    await adapter.handleMessage(event("om-self-mention", "ou_bot"));
     await adapter.handleMessage(event("om-other-bot", "ou_other_bot"));
 
-    assert.equal(seen.length, 2);
+    assert.equal(seen.length, 3);
     assert.equal(seen[0].stripped.appel, true);
     assert.equal(seen[0].elements[0].type, "at");
     assert.equal(seen[0].elements[0].attrs.id, "ou_bot");
-    assert.equal(seen[1].stripped.appel, false);
-    assert.equal(seen[1].elements[0].attrs.id, "ou_other_bot");
+    assert.equal(seen[1].stripped.appel, true);
+    assert.equal(seen[2].stripped.appel, false);
+    assert.equal(seen[2].elements[0].attrs.id, "ou_other_bot");
+
+    const pending = inbox.listPendingChatInboxItems(agentDir);
+    assert.equal(pending.length, 2);
+    assert.equal(
+      messageStore.getChatMessage(
+        agentDir,
+        "lark/cli_test:oc_chat",
+        "om-self-mention",
+      )?.duplicateCount,
+      1,
+    );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

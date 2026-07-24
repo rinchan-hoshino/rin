@@ -2047,6 +2047,7 @@ export class LarkAdapter {
   private readonly httpTransport = createRinHttpTransport();
   private client: any = null;
   private wsClient: any = null;
+  private botOpenId = "";
   private readonly inboundGate = new InboundRecoveryGate<{
     data: any;
     resolve: () => void;
@@ -2154,12 +2155,9 @@ export class LarkAdapter {
     });
     this.bot.internal.client = this.client;
     this.bot.internal.wsClient = this.wsClient;
+    this.botOpenId = botOpenId;
     this.bot.selfId = appId;
     this.bot.user = {
-      id: botOpenId,
-      userId: botOpenId,
-      openId: botOpenId,
-      appId,
       name: botName,
       username: botName,
       nick: botName,
@@ -2227,6 +2225,7 @@ export class LarkAdapter {
     } catch {}
     this.wsClient = null;
     this.client = null;
+    this.botOpenId = "";
     emitBotStatus(this.app, this.bot, 0);
   }
 
@@ -3225,12 +3224,9 @@ export class LarkAdapter {
     const mentions = Array.isArray(message?.mentions)
       ? message.mentions
       : parsed.mentions;
-    const botOpenId = safeString(
-      this.bot?.user?.openId || this.bot?.user?.open_id || "",
-    ).trim();
     const mentionSelf = mentions.some(
       (item: any) =>
-        Boolean(botOpenId) && larkMentionTargetId(item) === botOpenId,
+        Boolean(this.botOpenId) && larkMentionTargetId(item) === this.botOpenId,
     );
     const isForward = msgType === "merge_forward";
     const rawElements = isForward

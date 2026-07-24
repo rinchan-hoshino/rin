@@ -111,6 +111,30 @@ test("chat inbox duplicate delivery cannot replace an active owner", async () =>
   assert.equal(current.attemptCount, 1);
 });
 
+test("chat inbox duplicate delivery cannot revive a terminal turn", async () => {
+  const agentDir = await tempDir();
+  const { item } = inbox.enqueueChatInboxItem(agentDir, input());
+  const claim = inbox.claimChatInboxItem(agentDir, item.itemId);
+  assert.ok(claim);
+  assert.equal(
+    inbox.completeClaimedChatInboxItem(agentDir, claim, {
+      terminalKind: "completed",
+      disposition: "actionable",
+    }),
+    true,
+  );
+
+  const duplicate = inbox.enqueueChatInboxItem(agentDir, input());
+
+  assert.equal(duplicate.item.itemId, item.itemId);
+  assert.equal(duplicate.item.state, "terminal");
+  assert.equal(inbox.listPendingChatInboxItems(agentDir).length, 0);
+  assert.equal(
+    messageStore.getChatMessage(agentDir, "telegram/1:2", "m1")?.duplicateCount,
+    1,
+  );
+});
+
 test("chat inbox claim is unique and fenced through retry ownership", async () => {
   const agentDir = await tempDir();
   const { item } = inbox.enqueueChatInboxItem(agentDir, input());
