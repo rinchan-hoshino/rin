@@ -237,6 +237,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat outbox found a duplicate delivery key. Check the outgoing payload.",
   chat_outbox_invalid_json: () =>
     "Chat outbox contains invalid JSON. Recreate the outbox item.",
+  chat_outbox_invalid_nonterminal_error: () =>
+    "Chat progress error is missing its active turn owner.",
   chat_outbox_invalid_payload: () =>
     "Chat send failed because the outgoing payload is invalid. Add text or message parts.",
   chat_outbox_invalid_part: () =>

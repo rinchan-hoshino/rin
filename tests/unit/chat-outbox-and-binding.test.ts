@@ -78,6 +78,71 @@ function h() {
   };
 }
 
+test("nonterminal error outbox requires and preserves a durable turn fence", async () => {
+  await withTempDir(async (dir) => {
+    assert.throws(
+      () =>
+        outbox.enqueueChatOutboxPayload(dir, payload("tool warning"), {
+          deliveryKind: "error",
+          nonTerminalError: true,
+        }),
+      /chat_outbox_invalid_nonterminal_error/,
+    );
+    assert.equal(
+      database
+        .openChatDatabase(dir)
+        .prepare(`SELECT COUNT(*) AS count FROM outbox`)
+        .get().count,
+      0,
+    );
+
+    const inbound = inbox.enqueueChatInboxItem(dir, {
+      chatKey: "telegram/777:1",
+      messageId: "nonterminal-error-owner",
+      session: {
+        platform: "telegram",
+        selfId: "777",
+        channelId: "1",
+        messageId: "nonterminal-error-owner",
+        content: "question",
+      },
+      elements: [{ type: "text", attrs: { content: "question" } }],
+    }).item;
+    const claim = inbox.claimChatInboxItem(dir, inbound.itemId);
+    const turnFence = {
+      agentDir: dir,
+      turnId: claim.itemId,
+      chatKey: claim.chatKey,
+      messageId: claim.messageId,
+      ownerEpoch: claim.ownerEpoch,
+      attempt: claim.attemptCount,
+    };
+
+    outbox.enqueueChatOutboxPayload(dir, payload("tool warning"), {
+      deliveryKind: "error",
+      nonTerminalError: true,
+      turnFence,
+    });
+
+    assert.deepEqual(
+      database
+        .openChatDatabase(dir)
+        .prepare(
+          `SELECT outbox.turn_id, outbox.delivery_kind, turns.state,
+                  turns.terminal_kind
+           FROM outbox JOIN turns ON turns.turn_id = outbox.turn_id`,
+        )
+        .get(),
+      {
+        turn_id: claim.itemId,
+        delivery_kind: "error",
+        state: "running",
+        terminal_kind: null,
+      },
+    );
+  });
+});
+
 test("chat outbox persists only in chat.sqlite and requires structured parts", async () => {
   await withTempDir(async (dir) => {
     assert.throws(

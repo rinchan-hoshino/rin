@@ -73,6 +73,7 @@ type TodoNotice = {
   text: string;
   todos: RinTodoItem[];
   error?: string;
+  sourceEventId?: string;
 };
 
 type ActiveToolBatch = {
@@ -204,6 +205,7 @@ function todoPassiveNotice(notice: TodoNotice) {
     noticeKind: "todo",
     todoItems: notice.todos.map((todo) => ({ ...todo })),
     ...(notice.error ? { todoError: notice.error } : {}),
+    ...(notice.sourceEventId ? { sourceEventId: notice.sourceEventId } : {}),
   } satisfies RinFrontendBackendEvent;
 }
 
@@ -435,6 +437,7 @@ export function createRinFrontendBackendEventTranslator(
           const todoNotice = toolExecutionTodoNotice(payload);
           const currentBatch = activeToolBatch;
           const id = toolCallId(payload.toolCallId);
+          if (todoNotice && id) todoNotice.sourceEventId = id;
           if (currentBatch?.pendingToolCallIds.has(id)) {
             currentBatch.pendingToolCallIds.delete(id);
             if (todoNotice) currentBatch.latestTodoNotice = todoNotice;

@@ -93,6 +93,7 @@ export type RinFrontendPassiveNoticeEvent = {
   noticeKind?: "compaction_end" | "todo";
   todoItems?: RinTodoItem[];
   todoError?: string;
+  sourceEventId?: string;
 };
 
 export type RinFrontendTurnDriverEvent =
@@ -1600,6 +1601,9 @@ export class RinFrontendTurnDriver {
             ...(event.noticeKind ? { noticeKind: event.noticeKind } : {}),
             ...(event.todoItems ? { todoItems: event.todoItems } : {}),
             ...(event.todoError ? { todoError: event.todoError } : {}),
+            ...(event.sourceEventId
+              ? { sourceEventId: event.sourceEventId }
+              : {}),
           },
           { deferDuringTurn: event.deferDuringTurn },
         );

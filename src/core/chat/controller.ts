@@ -56,6 +56,7 @@ import {
   enqueueChatOutboxPayload,
   getActiveChatOutboxTurnFence,
   hashPreGovernanceChatErrorDeliveryContent,
+  isChatOutboxTurnFenceActive,
   withChatQuotePart,
   readChatOutboxItemById,
   type ChatMessagePart,
@@ -362,6 +363,10 @@ export class ChatController {
   stagedDelivery: ChatAssistantDelivery | null = null;
   pendingPassiveNotices: string[] = [];
   latestTodoNoticeText = "";
+  todoFallbackOwner = "";
+  todoFallbackHash = "";
+  todoFallbackRevision = 0;
+  todoDeliveryQueue: Promise<void> = Promise.resolve();
   latestAssistantSummaryText = "";
   awaitingTurnSettle = false;
   externalWorkingVisible = false;
@@ -1779,6 +1784,7 @@ export class ChatController {
       waitForDeliveryMs?: number;
       waitUntilDeliverySettled?: boolean;
       turnFence?: ChatOutboxTurnFence;
+      nonTerminalError?: boolean;
       supersedeTurnFences?: ChatOutboxTurnFence[];
     } = {},
   ) {
@@ -2136,6 +2142,7 @@ export class ChatController {
       requireDelivery?: boolean;
       coalesceWithWorkingMessage?: boolean;
       replyToMessageId?: string;
+      turnFence?: ChatOutboxTurnFence;
     } = {},
   ) {
     const trimmed = safeString(text).trim();
@@ -2181,7 +2188,14 @@ export class ChatController {
     return await this.sendProgressNoticeNow(text, "interim", options);
   }
 
-  private async sendErrorNoticeNow(text: string) {
+  private async sendErrorNoticeNow(
+    text: string,
+    options: {
+      idempotencyKey?: string;
+      turnFence?: ChatOutboxTurnFence;
+      nonTerminalError?: boolean;
+    } = {},
+  ) {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
     if (!this.canDeliverReplies()) return true;
@@ -2201,6 +2215,7 @@ export class ChatController {
           deliveryKind: "error",
           waitUntilDeliverySettled: true,
           requireDelivery: true,
+          ...options,
         },
       );
       return true;
@@ -2209,86 +2224,235 @@ export class ChatController {
     }
   }
 
+  private isLatestDurableTodoEvent(
+    todoOwner: string,
+    idempotencyKeys: string[],
+  ) {
+    const db = openChatDatabase(this.agentDir);
+    const latest = db
+      .prepare(
+        `SELECT MAX(sequence) AS sequence FROM outbox
+         WHERE turn_id = ?
+           AND json_extract(idempotency_key, '$[0]')
+               IN ('todo_notice', 'todo_error')`,
+      )
+      .get(todoOwner) as { sequence?: number | null };
+    const keys = idempotencyKeys.filter(Boolean);
+    if (!keys.length || latest?.sequence == null) return false;
+    const placeholders = keys.map(() => "?").join(", ");
+    const current = db
+      .prepare(
+        `SELECT MAX(sequence) AS sequence FROM outbox
+         WHERE turn_id = ? AND idempotency_key IN (${placeholders})`,
+      )
+      .get(todoOwner, ...keys) as { sequence?: number | null };
+    return current?.sequence != null && current.sequence === latest.sequence;
+  }
+
+  private durableTodoFallbackState(todoOwner: string) {
+    const rows = openChatDatabase(this.agentDir)
+      .prepare(
+        `SELECT idempotency_key FROM outbox
+         WHERE turn_id = ? AND idempotency_key IS NOT NULL
+         ORDER BY sequence DESC`,
+      )
+      .all(todoOwner) as Array<{ idempotency_key?: string }>;
+    for (const row of rows) {
+      try {
+        const identity = JSON.parse(safeString(row.idempotency_key));
+        if (
+          Array.isArray(identity) &&
+          (identity[0] === "todo_notice" || identity[0] === "todo_error") &&
+          identity[1] === this.chatKey &&
+          identity[2] === todoOwner &&
+          identity[3] === "fallback"
+        ) {
+          return {
+            revision: Math.max(0, Number(identity[4]) || 0),
+            hash: safeString(identity[5]).trim(),
+          };
+        }
+      } catch {
+        continue;
+      }
+    }
+    return { revision: 0, hash: "" };
+  }
+
   private async sendTodoPassiveNoticeNow(event: any) {
-    const todos = normalizeRinTodoItems(event?.todoItems);
-    if (!todos) {
-      this.latestTodoNoticeText = safeString(event?.text).trim();
-      return await this.sendPassiveNoticeNow(event?.text);
-    }
-
-    const error = safeString(event?.todoError).trim();
-    if (todos.length === 0) {
-      this.latestTodoNoticeText = "";
-      await this.refreshEditableWorkingNotice({ force: true }).catch(
-        () => false,
-      );
-      return error ? await this.sendErrorNoticeNow(error) : true;
-    }
-    if (!this.canDeliverReplies()) return true;
-
-    const mode = todoNoticeRenderModeForChatKey(this.chatKey);
-    const noticeText = formatTodoNoticeText(
-      todos,
-      mode === "native" ? "characters" : mode,
+    const currentTurn = this.currentTurn;
+    const deliveryTarget = currentTurn
+      ? {
+          ...currentTurn,
+          outboxTurnFence: currentTurn.outboxTurnFence
+            ? { ...currentTurn.outboxTurnFence }
+            : undefined,
+        }
+      : null;
+    const operation = this.todoDeliveryQueue.then(() =>
+      this.sendTodoPassiveNoticeOwned(event, deliveryTarget),
     );
-    this.latestTodoNoticeText = noticeText;
+    this.todoDeliveryQueue = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await operation;
+  }
+
+  private async sendTodoPassiveNoticeOwned(
+    event: any,
+    deliveryTarget: ChatTurnMeta | null,
+  ) {
+    const turnFence = deliveryTarget?.outboxTurnFence;
+    const todoOwner = safeString(turnFence?.turnId).trim();
+    if (
+      !deliveryTarget ||
+      !turnFence ||
+      !todoOwner ||
+      safeString(this.currentTurn?.outboxTurnFence?.turnId).trim() !==
+        todoOwner ||
+      !this.ownsOutboxTurnFence(turnFence)
+    ) {
+      return true;
+    }
+    const todos = normalizeRinTodoItems(event?.todoItems);
+    const error = safeString(event?.todoError).trim();
+    const mode = todoNoticeRenderModeForChatKey(this.chatKey);
+    const noticeText = todos
+      ? todos.length > 0
+        ? formatTodoNoticeText(todos, mode === "native" ? "characters" : mode)
+        : ""
+      : safeString(event?.text).trim();
+    const todoHash = crypto
+      .createHash("sha256")
+      .update(noticeText)
+      .digest("hex");
+    const sourceEventId = safeString(event?.sourceEventId).trim();
+    let nextFallbackOwner = this.todoFallbackOwner;
+    let nextFallbackHash = this.todoFallbackHash;
+    let nextFallbackRevision = this.todoFallbackRevision;
+    let todoIdempotencyIdentity: unknown[];
+    if (sourceEventId) {
+      todoIdempotencyIdentity = ["event", sourceEventId];
+    } else {
+      if (nextFallbackOwner !== todoOwner) {
+        const durableState = this.durableTodoFallbackState(todoOwner);
+        nextFallbackOwner = todoOwner;
+        nextFallbackHash = durableState.hash;
+        nextFallbackRevision = durableState.revision;
+      }
+      if (nextFallbackHash !== todoHash) {
+        nextFallbackHash = todoHash;
+        nextFallbackRevision += 1;
+      }
+      todoIdempotencyIdentity = ["fallback", nextFallbackRevision, todoHash];
+    }
+    const commitTodoDisplayState = (idempotencyKeys: string[]) => {
+      if (
+        !this.ownsOutboxTurnFence(turnFence) ||
+        !isChatOutboxTurnFenceActive(this.agentDir, turnFence, this.chatKey) ||
+        !this.isLatestDurableTodoEvent(todoOwner, idempotencyKeys)
+      ) {
+        return false;
+      }
+      this.latestTodoNoticeText = noticeText;
+      if (!sourceEventId) {
+        this.todoFallbackOwner = nextFallbackOwner;
+        this.todoFallbackHash = nextFallbackHash;
+        this.todoFallbackRevision = nextFallbackRevision;
+      }
+      return true;
+    };
+    const todoIdempotencyKey = JSON.stringify([
+      "todo_notice",
+      this.chatKey,
+      todoOwner,
+      ...todoIdempotencyIdentity,
+    ]);
+    const errorIdempotencyKey = JSON.stringify([
+      "todo_error",
+      this.chatKey,
+      todoOwner,
+      ...todoIdempotencyIdentity,
+      ...(sourceEventId
+        ? []
+        : [crypto.createHash("sha256").update(error).digest("hex")]),
+    ]);
     const todoDeliveryOptions = {
       waitUntilDeliverySettled: true,
       requireDelivery: true,
       coalesceWithWorkingMessage: true,
+      turnFence,
+      idempotencyKey: todoIdempotencyKey,
     };
-    if (mode !== "native") {
-      const todoDelivery = this.sendPassiveNoticeNow(
-        noticeText,
-        todoDeliveryOptions,
+    const errorDeliveryOptions = {
+      turnFence,
+      nonTerminalError: true,
+      idempotencyKey: errorIdempotencyKey,
+    };
+
+    if (!this.canDeliverReplies()) return true;
+
+    if (todos?.length === 0) {
+      // An empty Todo snapshot has no durable delivery to fence. Do not let it
+      // mutate or refresh presentation state; final settlement clears Working.
+      if (!error) return true;
+      const errorDelivered = await this.sendErrorNoticeNow(
+        error,
+        errorDeliveryOptions,
       );
-      const errorDelivery = error
-        ? this.sendErrorNoticeNow(error)
-        : Promise.resolve(true);
-      const [todoDelivered, errorDelivered] = await Promise.all([
-        todoDelivery,
-        errorDelivery,
-      ]);
-      return todoDelivered && errorDelivered;
+      if (errorDelivered) commitTodoDisplayState([errorIdempotencyKey]);
+      return errorDelivered;
     }
 
-    const todoDelivery = (async () => {
-      try {
-        await this.enqueueAndDrainDelivery(
-          {
-            createdAt: nowIso(),
-            chatKey: this.chatKey,
-            deliveryKind: "passive_notice",
-            coalesceWithWorkingMessage: true,
-            parts: withChatQuotePart(
-              [
-                {
-                  type: "todo" as const,
-                  title: "Todo",
-                  items: todos.map((todo) => ({
-                    text: todo.text,
-                    done: todo.done,
-                  })),
-                },
-              ],
-              this.currentReplyToMessageId(),
-            ),
-            ...this.currentConversationSessionPayload(),
-          },
-          { deliveryKind: "passive_notice", ...todoDeliveryOptions },
-        );
-        return true;
-      } catch {
-        return false;
-      }
-    })();
+    let todoDelivery: Promise<boolean>;
+    if (!todos || mode !== "native") {
+      todoDelivery = this.sendPassiveNoticeNow(noticeText, todoDeliveryOptions);
+    } else {
+      todoDelivery = (async () => {
+        try {
+          await this.enqueueAndDrainDelivery(
+            {
+              createdAt: nowIso(),
+              chatKey: this.chatKey,
+              deliveryKind: "passive_notice",
+              coalesceWithWorkingMessage: true,
+              parts: withChatQuotePart(
+                [
+                  {
+                    type: "todo" as const,
+                    title: "Todo",
+                    items: todos.map((todo) => ({
+                      text: todo.text,
+                      done: todo.done,
+                    })),
+                  },
+                ],
+                this.currentReplyToMessageId(),
+              ),
+              ...this.currentConversationSessionPayload(),
+            },
+            { deliveryKind: "passive_notice", ...todoDeliveryOptions },
+          );
+          return true;
+        } catch {
+          return false;
+        }
+      })();
+    }
     const errorDelivery = error
-      ? this.sendErrorNoticeNow(error)
+      ? this.sendErrorNoticeNow(error, errorDeliveryOptions)
       : Promise.resolve(true);
     const [todoDelivered, errorDelivered] = await Promise.all([
       todoDelivery,
       errorDelivery,
     ]);
+    if (todoDelivered) {
+      commitTodoDisplayState([
+        todoIdempotencyKey,
+        ...(error ? [errorIdempotencyKey] : []),
+      ]);
+    }
     return todoDelivered && errorDelivered;
   }
 
@@ -2847,6 +3011,7 @@ export class ChatController {
           result: result.result,
           sessionId: this.currentSessionId() || undefined,
           sessionFile: this.currentSessionFile(),
+          ...(deliverFinal ? { superseded: true } : {}),
         };
       } catch (error) {
         this.removePendingSubmittedDeliveryTarget(input.incomingMessageId);

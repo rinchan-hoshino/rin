@@ -97,6 +97,7 @@ export type RinFrontendBackendEvent =
       noticeKind?: "compaction_end" | "todo";
       todoItems?: RinTodoItem[];
       todoError?: string;
+      sourceEventId?: string;
     }
   | { type: "compaction_start_notice"; text: string }
   | { type: "working_visible"; visible: boolean }

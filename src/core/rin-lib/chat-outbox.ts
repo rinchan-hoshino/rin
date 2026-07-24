@@ -140,6 +140,7 @@ export type EnqueueChatOutboxOptions = {
   turnTerminalKind?: "interrupted_unknown";
   postDelivery?: ChatOutboxPostDelivery;
   turnFence?: ChatOutboxTurnFence;
+  nonTerminalError?: boolean;
   supersedeTurnFences?: ChatOutboxTurnFence[];
 };
 
@@ -462,6 +463,24 @@ function validateChatOutboxTurnFence(
   return turn;
 }
 
+export function isChatOutboxTurnFenceActive(
+  agentDir: string,
+  fence: ChatOutboxTurnFence,
+  payloadChatKey = fence.chatKey,
+) {
+  try {
+    validateChatOutboxTurnFence(
+      openChatDatabase(agentDir),
+      agentDir,
+      fence,
+      payloadChatKey,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function terminalTurnForPostDelivery(
   db: ReturnType<typeof openChatDatabase>,
   agentDir: string,
@@ -587,13 +606,21 @@ export function enqueueChatOutboxPayload(
             normalizedPayload.chatKey,
           )
         : null;
-      const turn = terminalTurnForPostDelivery(
-        db,
-        agentDir,
-        deliveryKind,
-        options.postDelivery,
-        contextualFence,
-      );
+      if (
+        options.nonTerminalError &&
+        (deliveryKind !== "error" || options.postDelivery || !options.turnFence)
+      ) {
+        throw new Error("chat_outbox_invalid_nonterminal_error");
+      }
+      const turn = options.nonTerminalError
+        ? null
+        : terminalTurnForPostDelivery(
+            db,
+            agentDir,
+            deliveryKind,
+            options.postDelivery,
+            contextualFence,
+          );
       const desiredTurnId = fencedTurn?.turn_id || turn?.turn_id || "";
       const supersedeCoalescedTurns = () => {
         const seen = new Set<string>();

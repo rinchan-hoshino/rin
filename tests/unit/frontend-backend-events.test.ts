@@ -365,6 +365,7 @@ test("frontend backend event translator emits todo notice for single todo execut
           { id: 1, text: "Keep working", done: false },
           { id: 2, text: "Ship renderer", done: true },
         ],
+        sourceEventId: "todo-1",
       },
     ],
   );
@@ -396,6 +397,7 @@ test("frontend backend event translator displays todo reads", () => {
         deferDuringTurn: false,
         noticeKind: "todo",
         todoItems: [{ id: 1, text: "Keep working", done: false }],
+        sourceEventId: "todo-read",
       },
     ],
   );
@@ -428,6 +430,7 @@ test("frontend backend event translator emits empty todo notices as clears", () 
         deferDuringTurn: false,
         noticeKind: "todo",
         todoItems: [],
+        sourceEventId: "todo-1",
       },
     ],
   );
@@ -456,6 +459,7 @@ test("frontend backend event translator emits empty todo notices as clears", () 
         noticeKind: "todo",
         todoItems: [],
         todoError: "invalid todo list",
+        sourceEventId: "todo-2",
       },
     ],
   );
@@ -514,6 +518,7 @@ test("frontend backend event translator waits for the active tool batch before t
           { id: 1, text: "Keep working", done: false },
           { id: 2, text: "Ship renderer", done: true },
         ],
+        sourceEventId: "todo-1",
       },
     ],
   );
@@ -583,6 +588,7 @@ test("frontend backend event translator emits nested multi-tool todo notice when
           { id: 1, text: "Keep working", done: false },
           { id: 2, text: "Ship renderer", done: true },
         ],
+        sourceEventId: "multi-1",
       },
     ],
   );
