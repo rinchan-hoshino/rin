@@ -4523,9 +4523,22 @@ test(
         content: [{ type: "text", text: "interrupted prompt" }],
       },
     ];
-    let releaseRecovery: (() => void) | undefined;
-    const recoveryGate = new Promise<void>((resolve) => {
-      releaseRecovery = resolve;
+    let rejectRecovery: ((error: Error) => void) | undefined;
+    const recoveryGate = new Promise<void>((_resolve, reject) => {
+      rejectRecovery = reject;
+    });
+    let rejectImagePrompt: ((error: Error) => void) | undefined;
+    const imagePromptGate = new Promise<void>((_resolve, reject) => {
+      rejectImagePrompt = reject;
+    });
+    let releaseHangingPrompt: (() => void) | undefined;
+    const hangingPromptGate = new Promise<void>((resolve) => {
+      releaseHangingPrompt = resolve;
+    });
+    let holdInterruptAbort = false;
+    let releaseInterruptAbort: (() => void) | undefined;
+    const interruptAbortGate = new Promise<void>((resolve) => {
+      releaseInterruptAbort = resolve;
     });
 
     process.stdin.on = function (event, handler) {
@@ -4557,6 +4570,40 @@ test(
           await recoveryGate;
         },
         prompt: async (message: string) => {
+          if (message === "") {
+            await imagePromptGate;
+            return;
+          }
+          if (message === "settled then rejected") {
+            const settledFinal = {
+              role: "assistant",
+              content: [{ type: "text", text: "settled final" }],
+              stopReason: "stop",
+            };
+            stateMessages.push(settledFinal);
+            for (const handler of sessionSubscribers) {
+              handler({ type: "message_end", message: settledFinal });
+              handler({ type: "agent_settled" });
+            }
+            throw new Error("late outer rejection");
+          }
+          if (message === "hanging prompt") {
+            session.agent.signal = new AbortController().signal;
+            await hangingPromptGate;
+            return;
+          }
+          if (message === "rejected prompt") {
+            const rejectedFinal = {
+              role: "assistant",
+              content: [{ type: "text", text: "must not replace task error" }],
+              stopReason: "stop",
+            };
+            stateMessages.push(rejectedFinal);
+            for (const handler of sessionSubscribers) {
+              handler({ type: "message_end", message: rejectedFinal });
+            }
+            throw new Error("ordinary prompt rejected");
+          }
           if (message !== "normal prompt") return;
           const normalFinal = {
             role: "assistant",
@@ -4571,7 +4618,10 @@ test(
         },
         steer: async () => {},
         followUp: async () => {},
-        abort: async () => {},
+        abort: async () => {
+          releaseHangingPrompt?.();
+          if (holdInterruptAbort) await interruptAbortGate;
+        },
         modelRegistry: { getAvailable: async () => [] },
         sessionManager: testSessionManager(() => stateMessages),
         messages: stateMessages,
@@ -4625,17 +4675,48 @@ test(
       );
       await wait(10);
 
-      const steerAdmission = parseRpcOutput(lines).find(
-        (event) => event.type === "response" && event.id === "steer",
+      assert.equal(
+        parseRpcOutput(lines).some(
+          (event) => event.type === "response" && event.id === "steer",
+        ),
+        false,
       );
-      assert.equal(steerAdmission?.data?.acceptedAs, "prompt");
 
+      const recoveredFinal = {
+        role: "assistant",
+        content: [{ type: "text", text: "stale recovered final" }],
+        stopReason: "stop",
+      };
+      stateMessages.push(recoveredFinal);
+      for (const handler of sessionSubscribers) {
+        handler({ type: "message_end", message: recoveredFinal });
+      }
+      rejectRecovery?.(new Error("recovered runner failed at boundary"));
+      await wait(0);
       for (const handler of sessionSubscribers) {
         handler({ type: "agent_settled" });
       }
-      releaseRecovery?.();
       await wait(20);
 
+      assert.equal(
+        parseRpcOutput(lines).some(
+          (event) =>
+            event.type === "rpc_turn_event" &&
+            (event.event === "complete" || event.event === "error"),
+        ),
+        false,
+      );
+
+      const unrelatedEmptyUser = {
+        role: "user",
+        content: [],
+      };
+      stateMessages.push(unrelatedEmptyUser);
+      for (const handler of sessionSubscribers) {
+        handler({ type: "message_start", message: unrelatedEmptyUser });
+        handler({ type: "agent_settled" });
+      }
+      await wait(20);
       assert.equal(
         parseRpcOutput(lines).some(
           (event) =>
@@ -4653,14 +4734,17 @@ test(
       for (const handler of sessionSubscribers) {
         handler({ type: "message_start", message: steeredUser });
       }
-      const finalMessage = {
-        role: "assistant",
-        content: [{ type: "text", text: "continued final" }],
-        stopReason: "stop",
-      };
-      stateMessages.push(finalMessage);
+      rejectImagePrompt?.(new Error("late admitted prompt rejection"));
+      await wait(20);
+      assert.equal(
+        parseRpcOutput(lines).some(
+          (event) =>
+            event.type === "rpc_turn_event" &&
+            (event.event === "complete" || event.event === "error"),
+        ),
+        false,
+      );
       for (const handler of sessionSubscribers) {
-        handler({ type: "message_end", message: finalMessage });
         handler({ type: "agent_settled" });
       }
       await wait(20);
@@ -4674,13 +4758,13 @@ test(
         terminals.map((event) => ({
           event: event.event,
           requestTag: event.requestTag,
-          finalText: event.finalText,
+          error: event.error,
         })),
         [
           {
-            event: "complete",
+            event: "error",
             requestTag: "tag-recovered",
-            finalText: "continued final",
+            error: "recovered runner failed at boundary",
           },
         ],
       );
@@ -4698,8 +4782,128 @@ test(
           event.requestTag === "tag-normal",
       );
       assert.equal(normalTerminal?.finalText, "normal final");
+
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "settled-rejected", type: "prompt", message: "settled then rejected", requestTag: "tag-settled-rejected" })}\n`,
+        ),
+      );
+      await wait(20);
+      const settledRejectedTerminal = parseRpcOutput(lines).find(
+        (event) =>
+          event.type === "rpc_turn_event" &&
+          (event.event === "complete" || event.event === "error") &&
+          event.requestTag === "tag-settled-rejected",
+      );
+      assert.equal(settledRejectedTerminal?.event, "complete");
+      assert.equal(settledRejectedTerminal?.finalText, "settled final");
+
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "rejected", type: "prompt", message: "rejected prompt", requestTag: "tag-rejected" })}\n`,
+        ),
+      );
+      await wait(20);
+      const rejectedTerminal = parseRpcOutput(lines).find(
+        (event) =>
+          event.type === "rpc_turn_event" &&
+          (event.event === "complete" || event.event === "error") &&
+          event.requestTag === "tag-rejected",
+      );
+      assert.equal(rejectedTerminal?.event, "error");
+      assert.equal(rejectedTerminal?.error, "ordinary prompt rejected");
+
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "hanging", type: "prompt", message: "hanging prompt", requestTag: "tag-hanging" })}\n`,
+        ),
+      );
+      await wait(10);
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "queued-cancel", type: "prompt", message: "queued cancel", requestTag: "tag-queued-cancel" })}\n`,
+        ),
+      );
+      await wait(10);
+      const queuedStartedUser = {
+        role: "user",
+        content: [{ type: "text", text: "queued cancel" }],
+      };
+      stateMessages.push(queuedStartedUser);
+      for (const handler of sessionSubscribers) {
+        handler({ type: "message_start", message: queuedStartedUser });
+      }
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "queued-pending", type: "prompt", message: "queued pending", requestTag: "tag-queued-pending" })}\n`,
+        ),
+      );
+      await wait(10);
+      holdInterruptAbort = true;
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "resume-cancel", type: "resume_interrupted_turn", requestTag: "tag-resume-cancel" })}\n`,
+        ),
+      );
+      await wait(5);
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "during-interrupt", type: "prompt", message: "during interrupt", requestTag: "tag-during-interrupt" })}\n`,
+        ),
+      );
+      await wait(10);
+      const duringInterruptResponse = parseRpcOutput(lines).find(
+        (event) => event.type === "response" && event.id === "during-interrupt",
+      );
+      assert.equal(duringInterruptResponse?.success, false);
+      releaseInterruptAbort?.();
+      await wait(30);
+      assert.equal(
+        parseRpcOutput(lines).some(
+          (event) => event.type === "response" && event.id === "resume-cancel",
+        ),
+        true,
+      );
+
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "abort-hanging", type: "prompt", message: "hanging prompt", requestTag: "tag-abort-hanging" })}\n`,
+        ),
+      );
+      await wait(10);
+      onData(
+        Buffer.from(`${JSON.stringify({ id: "abort", type: "abort" })}\n`),
+      );
+      await wait(20);
+      assert.equal(
+        parseRpcOutput(lines).some(
+          (event) => event.type === "response" && event.id === "abort",
+        ),
+        true,
+      );
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "normal-after-abort", type: "prompt", message: "normal prompt", requestTag: "tag-normal-after-abort" })}\n`,
+        ),
+      );
+      await wait(20);
+      const afterAbortEvents = parseRpcOutput(lines);
+      assert.equal(
+        afterAbortEvents.some(
+          (event) =>
+            event.type === "rpc_turn_event" &&
+            event.event === "complete" &&
+            event.requestTag === "tag-normal-after-abort" &&
+            event.finalText === "normal final",
+        ),
+        true,
+        JSON.stringify(afterAbortEvents.slice(-12)),
+      );
     } finally {
-      releaseRecovery?.();
+      rejectRecovery?.(new Error("test cleanup"));
+      rejectImagePrompt?.(new Error("test cleanup"));
+      releaseHangingPrompt?.();
+      releaseInterruptAbort?.();
       const onData = handlers.get("data");
       if (typeof onData === "function") {
         onData(
