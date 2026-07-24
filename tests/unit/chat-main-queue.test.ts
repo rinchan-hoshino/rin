@@ -3785,7 +3785,7 @@ test("chat main omits quote rich text when quoting the latest assistant message"
   }
 });
 
-test("chat main keeps own unsessioned quoted content lazy", async () => {
+test("chat main inlines own unsessioned quoted content into the prompt", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -3890,7 +3890,7 @@ test("chat main keeps own unsessioned quoted content lazy", async () => {
         first.sessionFile !== null ||
         first.replyToMessageId !== "m-mention-quote" ||
         first.promptMetaReplyTo !== null ||
-        first.text !== "[quote:m-rich-source]\\nplease explain this"
+        first.text !== "look at this image\\n\\nplease explain this"
       ) {
         throw new Error(JSON.stringify({ seen }));
       }
@@ -3915,7 +3915,7 @@ test("chat main keeps own unsessioned quoted content lazy", async () => {
   }
 });
 
-test("chat main keeps mention-only quoted content lazy", async () => {
+test("chat main keeps another sender's unsessioned quoted content lazy", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -3953,7 +3953,7 @@ test("chat main keeps mention-only quoted content lazy", async () => {
         chatType: "group",
         messageId: "m-rich-source",
         role: "user",
-        userId: "owner-1",
+        userId: "other-1",
         receivedAt: new Date().toISOString(),
         text: "quoted body should only be fetched explicitly",
       });

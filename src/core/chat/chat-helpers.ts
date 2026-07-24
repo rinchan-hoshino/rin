@@ -213,6 +213,34 @@ export function lookupReplySession(
   };
 }
 
+export function pickUnsessionedOwnQuoteText(input: {
+  senderUserId: string;
+  linked?: any;
+  linkedSessionFile?: string;
+}) {
+  if (safeString(input.linkedSessionFile).trim()) return null;
+  const senderUserId = safeString(input.senderUserId).trim();
+  const linked = input.linked;
+  if (
+    !senderUserId ||
+    linked?.role !== "user" ||
+    safeString(linked?.userId).trim() !== senderUserId
+  ) {
+    return null;
+  }
+  return safeString(
+    linked?.text ?? linked?.strippedContent ?? linked?.rawContent,
+  );
+}
+
+export function prependQuoteTextToPromptBody(text: string, quoteText: string) {
+  const body = safeString(text);
+  const quoteBody = safeString(quoteText);
+  if (!quoteBody) return body;
+  if (!body) return quoteBody;
+  return `${quoteBody}\n\n${body}`;
+}
+
 function isSubstantiveAssistantChatMessage(record: any) {
   return record?.role === "assistant" && isSubstantiveAssistantDelivery(record);
 }

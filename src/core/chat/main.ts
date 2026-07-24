@@ -53,7 +53,9 @@ import {
   pickMessageId,
   pickReplyToMessageId,
   pickSenderNickname,
+  pickUnsessionedOwnQuoteText,
   pickUserId,
+  prependQuoteTextToPromptBody,
   renderInboundMessageText,
   renderPromptTextWithSavedAttachments,
   safeString,
@@ -791,11 +793,18 @@ export async function startChatBridge(
       quotedMessageId,
     );
     const linkedSessionFile = safeString(replySession?.sessionFile).trim();
-    const shouldOmitPromptReplyTo = isReplyToLatestAssistantMessage(
-      runtime.agentDir,
-      decision.chatKey,
-      quotedMessageId,
-    );
+    const quotedOwnMessageText = pickUnsessionedOwnQuoteText({
+      senderUserId: pickUserId(session),
+      linked: replySession?.linked,
+      linkedSessionFile,
+    });
+    const shouldOmitPromptReplyTo =
+      quotedOwnMessageText !== null ||
+      isReplyToLatestAssistantMessage(
+        runtime.agentDir,
+        decision.chatKey,
+        quotedMessageId,
+      );
     const promptElements = shouldOmitPromptReplyTo
       ? withoutChatQuoteNodes(elements)
       : elements;
@@ -819,9 +828,12 @@ export async function startChatBridge(
       );
     }
     const inboundAttachmentNotice = buildInboundAttachmentNotice(failures);
-    const promptText = attachments.length
-      ? renderPromptTextWithSavedAttachments(promptElements, attachments)
-      : renderInboundMessageText(session, promptElements);
+    const promptText = prependQuoteTextToPromptBody(
+      attachments.length
+        ? renderPromptTextWithSavedAttachments(promptElements, attachments)
+        : renderInboundMessageText(session, promptElements),
+      quotedOwnMessageText ?? "",
+    );
     const modelOptions = resolveChatModelOptions(settings, decision.chatKey);
     return {
       version: 1,

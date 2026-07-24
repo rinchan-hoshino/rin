@@ -83,6 +83,51 @@ test("chat chat helpers extract reply ids from canonical quote rich text", () =>
   assert.equal(helpers.pickReplyToMessageId(elements), "quoted-42");
 });
 
+test("chat chat helpers inline only an unsessioned own user quote", () => {
+  const ownUserMessage = {
+    role: "user",
+    userId: "owner-1",
+    text: "  first half  ",
+  };
+  assert.equal(
+    helpers.pickUnsessionedOwnQuoteText({
+      senderUserId: "owner-1",
+      linked: ownUserMessage,
+    }),
+    "  first half  ",
+  );
+  assert.equal(
+    helpers.pickUnsessionedOwnQuoteText({
+      senderUserId: "owner-1",
+      linked: ownUserMessage,
+      linkedSessionFile: "/sessions/linked.jsonl",
+    }),
+    null,
+  );
+  assert.equal(
+    helpers.pickUnsessionedOwnQuoteText({
+      senderUserId: "other-1",
+      linked: ownUserMessage,
+    }),
+    null,
+  );
+  assert.equal(
+    helpers.pickUnsessionedOwnQuoteText({
+      senderUserId: "owner-1",
+      linked: {
+        ...ownUserMessage,
+        text: "",
+        strippedContent: "fallback should not leak",
+      },
+    }),
+    "",
+  );
+  assert.equal(
+    helpers.prependQuoteTextToPromptBody("  second half  ", "  first half  "),
+    "  first half  \n\n  second half  ",
+  );
+});
+
 test("chat chat helpers derive incoming text from elements", () => {
   assert.equal(
     helpers.elementsToText([
