@@ -4,6 +4,8 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import lockfile from "proper-lockfile";
+
 import { maintainMemory } from "./maintainer.js";
 import { asArray } from "../json-utils.js";
 import {
@@ -237,40 +239,111 @@ async function writeWorkerLock(agentDir: string, job?: MaintenanceJob) {
   );
 }
 
-async function acquireWorkerLock(agentDir: string, job?: MaintenanceJob) {
-  await ensureStateDir(agentDir);
-  const filePath = maintenanceLockPath(agentDir);
-  try {
-    const handle = await fs.open(filePath, "wx");
-    await handle.writeFile(stringifyJson(lockPayload(job)), "utf8");
-    return handle;
-  } catch (error: any) {
-    if (error?.code !== "EEXIST") return null;
-    try {
-      const raw = await fs.readFile(filePath, "utf8");
-      const parsed = JSON.parse(raw);
-      const pid = Number(parsed?.pid || 0);
-      if (!processExists(pid) || lockIsExpired(parsed)) {
-        await fs.rm(filePath, { force: true });
-        const handle = await fs.open(filePath, "wx");
-        await handle.writeFile(stringifyJson(lockPayload(job)), "utf8");
-        return handle;
-      }
-    } catch {}
-    return null;
-  }
-}
-
-async function releaseWorkerLock(
-  agentDir: string,
+async function closeAndRemoveWorkerLock(
+  filePath: string,
   handle: fs.FileHandle | null,
 ) {
   try {
     await handle?.close();
   } catch {}
   try {
-    await fs.rm(maintenanceLockPath(agentDir), { force: true });
+    await fs.rm(filePath, { force: true });
   } catch {}
+}
+
+async function createWorkerLock(filePath: string, job?: MaintenanceJob) {
+  const handle = await fs.open(filePath, "wx");
+  try {
+    await handle.writeFile(stringifyJson(lockPayload(job)), "utf8");
+    return handle;
+  } catch (error) {
+    await closeAndRemoveWorkerLock(filePath, handle);
+    throw error;
+  }
+}
+
+type WorkerLockState = "active" | "missing" | "stale";
+
+async function inspectWorkerLock(filePath: string): Promise<WorkerLockState> {
+  let stat: Awaited<ReturnType<typeof fs.lstat>>;
+  try {
+    stat = await fs.lstat(filePath);
+  } catch (error: any) {
+    return error?.code === "ENOENT" ? "missing" : "active";
+  }
+  if (!stat.isFile()) return "active";
+
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+    const pid = Number(parsed?.pid || 0);
+    return !processExists(pid) || lockIsExpired(parsed) ? "stale" : "active";
+  } catch {
+    return Date.now() - stat.mtimeMs > WORKER_LOCK_STALE_MS
+      ? "stale"
+      : "active";
+  }
+}
+
+async function reclaimWorkerLock(filePath: string, job?: MaintenanceJob) {
+  let releaseReclaimLock: (() => Promise<void>) | undefined;
+  try {
+    releaseReclaimLock = await lockfile.lock(filePath, {
+      realpath: false,
+      lockfilePath: `${filePath}.reclaim`,
+      stale: 60_000,
+      update: 10_000,
+      retries: 0,
+    });
+  } catch {
+    return null;
+  }
+
+  let handle: fs.FileHandle | null = null;
+  try {
+    const state = await inspectWorkerLock(filePath);
+    if (state === "active") return null;
+    if (state === "stale") await fs.rm(filePath, { force: true });
+    handle = await createWorkerLock(filePath, job);
+  } catch {
+    handle = null;
+  } finally {
+    try {
+      await releaseReclaimLock();
+    } catch {
+      if (handle) await closeAndRemoveWorkerLock(filePath, handle);
+      handle = null;
+    }
+  }
+  return handle;
+}
+
+async function acquireWorkerLock(agentDir: string, job?: MaintenanceJob) {
+  await ensureStateDir(agentDir);
+  const filePath = maintenanceLockPath(agentDir);
+  try {
+    return await createWorkerLock(filePath, job);
+  } catch (error: any) {
+    if (error?.code !== "EEXIST") return null;
+  }
+
+  const state = await inspectWorkerLock(filePath);
+  if (state === "active") return null;
+  if (state === "missing") {
+    try {
+      return await createWorkerLock(filePath, job);
+    } catch {
+      return null;
+    }
+  }
+  return await reclaimWorkerLock(filePath, job);
+}
+
+async function releaseWorkerLock(
+  agentDir: string,
+  handle: fs.FileHandle | null,
+) {
+  await closeAndRemoveWorkerLock(maintenanceLockPath(agentDir), handle);
 }
 
 async function acquireWorkerLockWithWait(

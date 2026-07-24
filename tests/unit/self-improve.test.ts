@@ -1207,6 +1207,117 @@ test("queued distillation reclaims expired worker locks", async () => {
   });
 });
 
+test("queued distillation removes a partial lock when its payload write fails", async () => {
+  await withTempRoot(async (root) => {
+    const lockPath = selfImprovePaths.maintenanceLockPath(root);
+    const originalOpen = fs.open;
+    let handleClosed = false;
+    try {
+      fs.open = async (...args) => {
+        const handle = await originalOpen(...args);
+        if (path.resolve(String(args[0])) !== path.resolve(lockPath)) {
+          return handle;
+        }
+        const originalClose = handle.close.bind(handle);
+        handle.close = async () => {
+          handleClosed = true;
+          return await originalClose();
+        };
+        handle.writeFile = async () => {
+          throw new Error("simulated_lock_payload_write_failure");
+        };
+        return handle;
+      };
+
+      const result = await asyncJobs.processQueuedSelfImproveJobs(root);
+      assert.deepEqual(result, { skipped: "locked" });
+      assert.equal(handleClosed, true);
+      await assert.rejects(() => fs.readFile(lockPath, "utf8"), /ENOENT/);
+    } finally {
+      fs.open = originalOpen;
+    }
+  });
+});
+
+test("queued distillation reclaims stale malformed worker locks", async () => {
+  for (const contents of ["", "{malformed"]) {
+    await withTempRoot(async (root) => {
+      await asyncJobs.enqueueSelfImproveMaintenanceJob({
+        agentDir: root,
+        sessionFile: path.join(root, "missing-session.jsonl"),
+        trigger: "self_improve:periodic_review",
+      });
+      const lockPath = selfImprovePaths.maintenanceLockPath(root);
+      await fs.mkdir(path.dirname(lockPath), { recursive: true });
+      await fs.writeFile(lockPath, contents, "utf8");
+      const staleTime = new Date("2000-01-01T00:00:00.000Z");
+      await fs.utimes(lockPath, staleTime, staleTime);
+
+      const result = await asyncJobs.processQueuedSelfImproveJobs(root);
+      assert.equal(result.failed, 1);
+      assert.equal(result.processed, 0);
+
+      const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+      assert.equal(queue.length, 0);
+      await assert.rejects(() => fs.readFile(lockPath, "utf8"), /ENOENT/);
+    });
+  }
+});
+
+test("queued distillation serializes stale malformed lock reclamation", async () => {
+  await withTempRoot(async (root) => {
+    await asyncJobs.enqueueSelfImproveMaintenanceJob({
+      agentDir: root,
+      sessionFile: path.join(root, "missing-session.jsonl"),
+      trigger: "self_improve:periodic_review",
+    });
+    const lockPath = selfImprovePaths.maintenanceLockPath(root);
+    await fs.mkdir(path.dirname(lockPath), { recursive: true });
+    await fs.writeFile(lockPath, "", "utf8");
+    const staleTime = new Date("2000-01-01T00:00:00.000Z");
+    await fs.utimes(lockPath, staleTime, staleTime);
+
+    const results = await Promise.all([
+      asyncJobs.processQueuedSelfImproveJobs(root),
+      asyncJobs.processQueuedSelfImproveJobs(root),
+    ]);
+    assert.equal(
+      results.reduce((total, result) => total + Number(result.failed || 0), 0),
+      1,
+    );
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 0);
+    const history = (await fs.readFile(historyPath(root), "utf8"))
+      .trim()
+      .split(/\r?\n/g)
+      .filter(Boolean);
+    assert.equal(history.length, 1);
+    await assert.rejects(() => fs.readFile(lockPath, "utf8"), /ENOENT/);
+    await assert.rejects(() => fs.stat(`${lockPath}.reclaim`), /ENOENT/);
+  });
+});
+
+test("queued distillation preserves recently created malformed worker locks", async () => {
+  await withTempRoot(async (root) => {
+    await asyncJobs.enqueueSelfImproveMaintenanceJob({
+      agentDir: root,
+      sessionFile: path.join(root, "missing-session.jsonl"),
+      trigger: "self_improve:periodic_review",
+    });
+    const lockPath = selfImprovePaths.maintenanceLockPath(root);
+    await fs.mkdir(path.dirname(lockPath), { recursive: true });
+    await fs.writeFile(lockPath, "", "utf8");
+
+    const result = await asyncJobs.processQueuedSelfImproveJobs(root);
+    assert.deepEqual(result, { skipped: "locked" });
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal((await fs.stat(lockPath)).isFile(), true);
+  });
+});
+
 test("queued distillation keeps live worker locks fresh by updatedAt", async () => {
   await withTempRoot(async (root) => {
     await asyncJobs.enqueueSelfImproveMaintenanceJob({
