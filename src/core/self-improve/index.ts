@@ -8,7 +8,6 @@ import { isAssistantFinalMessage } from "../message-content.js";
 import {
   enqueueSelfImproveMaintenanceJob,
   runSelfImproveMaintenanceJobNow,
-  spawnQueuedMemoryWorker,
 } from "./async-jobs.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { recordSelfImproveSkillReadEvent } from "./skill-usage.js";
@@ -222,7 +221,8 @@ async function enqueueSelfImproveReview(
   const job = resolveReviewJob(ctx, opts);
   if (!job) return;
   await enqueueSelfImproveMaintenanceJob(job);
-  spawnQueuedMemoryWorker(job.agentDir);
+  // The daemon owns queue workers so they cannot inherit this session worker's
+  // short-lived isolation cgroup.
 }
 
 async function processSelfImproveReviewNow(

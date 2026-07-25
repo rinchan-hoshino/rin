@@ -991,7 +991,7 @@ test("session reload does not trigger self-improve shutdown distillation", async
   });
 });
 
-test("real session shutdown queues self-improve review distillation without a core notice", async () => {
+test("real session shutdown leaves self-improve review queued for the daemon without a core notice", async () => {
   await withTempRoot(async (root) => {
     const notices = [];
     const definition = selfImproveIndex.default({
@@ -1026,6 +1026,10 @@ test("real session shutdown queues self-improve review distillation without a co
     assert.equal(queue[0].kind, "self_improve_review");
     assert.equal(queue[0].trigger, "self_improve:session_shutdown_review");
     assert.deepEqual(notices, []);
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const durableQueue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(durableQueue.length, 1);
   });
 });
 
@@ -1349,6 +1353,51 @@ test("queued distillation keeps live worker locks fresh by updatedAt", async () 
 
     const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
     assert.equal(queue.length, 1);
+  });
+});
+
+test("daemon-owned supervisor retries queued distillation after an active lock clears", async () => {
+  await withTempRoot(async (root) => {
+    await asyncJobs.enqueueSelfImproveMaintenanceJob({
+      agentDir: root,
+      sessionFile: path.join(root, "missing-session.jsonl"),
+      trigger: "self_improve:session_shutdown_review",
+    });
+    const lockPath = selfImprovePaths.maintenanceLockPath(root);
+    await fs.writeFile(
+      lockPath,
+      JSON.stringify({
+        pid: process.pid,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+
+    const supervisor = asyncJobs.startQueuedMemoryWorkerSupervisor(root, {
+      intervalMs: 25,
+    });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      assert.equal(
+        JSON.parse(await fs.readFile(queuePath(root), "utf8")).length,
+        1,
+      );
+      await fs.rm(lockPath, { force: true });
+
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+        if (queue.length === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(
+        JSON.parse(await fs.readFile(queuePath(root), "utf8")).length,
+        0,
+      );
+    } finally {
+      supervisor.stop();
+    }
   });
 });
 

@@ -582,9 +582,32 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
   }
 }
 
+const queuedMemoryWorkers = new Map<string, ReturnType<typeof spawn>>();
+
+function hasQueuedSelfImproveJobs(agentDir: string) {
+  try {
+    const parsed = JSON.parse(
+      fssync.readFileSync(maintenanceQueuePath(agentDir), "utf8"),
+    );
+    return asArray<MaintenanceJob>(parsed).some(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        safeString((item as any).kind).trim() !== "session_summary",
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function spawnQueuedMemoryWorker(agentDir: string) {
   const resolvedAgentDir = resolveAgentDir(agentDir);
-  if (!resolvedAgentDir) return false;
+  if (!resolvedAgentDir || !hasQueuedSelfImproveJobs(resolvedAgentDir)) {
+    return false;
+  }
+  const existing = queuedMemoryWorkers.get(resolvedAgentDir);
+  if (existing && existing.exitCode === null && !existing.killed) return false;
+
   const workerPath = path.join(
     path.dirname(fileURLToPath(import.meta.url)),
     "worker.js",
@@ -599,6 +622,33 @@ export function spawnQueuedMemoryWorker(agentDir: string) {
       windowsHide: true,
     },
   );
+  queuedMemoryWorkers.set(resolvedAgentDir, child);
+  const forgetChild = () => {
+    if (queuedMemoryWorkers.get(resolvedAgentDir) === child) {
+      queuedMemoryWorkers.delete(resolvedAgentDir);
+    }
+  };
+  child.once("error", forgetChild);
+  child.once("exit", forgetChild);
   child.unref();
   return true;
+}
+
+export function startQueuedMemoryWorkerSupervisor(
+  agentDir: string,
+  options: { intervalMs?: number } = {},
+) {
+  const intervalMs = Math.max(10, Number(options.intervalMs) || 15_000);
+  let stopped = false;
+  const wake = () => !stopped && spawnQueuedMemoryWorker(agentDir);
+  wake();
+  const timer = setInterval(wake, intervalMs);
+  timer.unref();
+  return {
+    wake,
+    stop() {
+      stopped = true;
+      clearInterval(timer);
+    },
+  };
 }

@@ -45,6 +45,7 @@ import {
   hasSessionRef as hasSessionSelector,
   normalizeSessionRef as sessionSelectorFromCommand,
 } from "../session/ref.js";
+import { startQueuedMemoryWorkerSupervisor } from "../self-improve/async-jobs.js";
 import { RinBackgroundExtensionManager } from "./extensions.js";
 import { listRunningWorkerSessions } from "./running-workers.js";
 import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
@@ -170,6 +171,9 @@ export async function startDaemon(
     chat: options.chat,
   });
   cronScheduler.start();
+  const selfImproveMaintenanceSupervisor = startQueuedMemoryWorkerSupervisor(
+    runtime.agentDir,
+  );
 
   const backgroundExtensionManager =
     options.backgroundExtensionManager ||
@@ -759,6 +763,7 @@ export async function startDaemon(
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
+    selfImproveMaintenanceSupervisor.stop();
     cronScheduler.stop();
     workerPool.beginShutdown();
     const shutdownDeadline = Date.now() + shutdownGraceMs;
