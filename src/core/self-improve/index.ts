@@ -5,10 +5,7 @@ import type {
 import { existsSync, readFileSync } from "fs";
 import { isAssistantFinalMessage } from "../message-content.js";
 
-import {
-  enqueueSelfImproveMaintenanceJob,
-  runSelfImproveMaintenanceJobNow,
-} from "./async-jobs.js";
+import { enqueueSelfImproveMaintenanceJob } from "./async-jobs.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { recordSelfImproveSkillReadEvent } from "./skill-usage.js";
 
@@ -181,13 +178,6 @@ function isUserFrontendSelfImproveTrigger(event: unknown, ctx: any) {
   return isScheduledTaskProducer(event, ctx);
 }
 
-type SelfImproveMaintenanceJobNowRunner =
-  typeof runSelfImproveMaintenanceJobNow;
-
-type SelfImproveModuleOptions = RinCapabilityOptions & {
-  runSelfImproveMaintenanceJobNow?: SelfImproveMaintenanceJobNowRunner;
-};
-
 type SelfImproveReviewOptions = {
   sessionFile?: string;
   leafId?: string;
@@ -225,29 +215,9 @@ async function enqueueSelfImproveReview(
   // short-lived isolation cgroup.
 }
 
-async function processSelfImproveReviewNow(
-  ctx: any,
-  opts: SelfImproveReviewOptions,
-  runner: SelfImproveMaintenanceJobNowRunner,
-) {
-  const job = resolveReviewJob(ctx, opts);
-  if (!job) return;
-  try {
-    return await runner(job);
-  } catch (error: any) {
-    return {
-      status: "failed",
-      error: String(error?.message || error || "maintenance_job_failed"),
-    };
-  }
-}
-
 export default function selfImproveModule(
-  options: RinCapabilityOptions,
+  _options: RinCapabilityOptions,
 ): RinCapabilityDefinition {
-  const runSelfImproveMaintenanceNow =
-    (options as SelfImproveModuleOptions).runSelfImproveMaintenanceJobNow ||
-    runSelfImproveMaintenanceJobNow;
   return {
     name: "self_improve",
     tools: [],
@@ -278,16 +248,12 @@ export default function selfImproveModule(
           if (state.finalMessages - state.lastQueuedMessage >= interval) {
             const reviewFinalMessages = state.finalMessages;
             state.lastQueuedMessage = reviewFinalMessages;
-            await processSelfImproveReviewNow(
-              ctx,
-              {
-                sessionFile: meta.sessionFile,
-                leafId: meta.leafId,
-                trigger: "self_improve:periodic_review",
-                snapshotKey: `review:${reviewFinalMessages}`,
-              },
-              runSelfImproveMaintenanceNow,
-            );
+            await enqueueSelfImproveReview(ctx, {
+              sessionFile: meta.sessionFile,
+              leafId: meta.leafId,
+              trigger: "self_improve:periodic_review",
+              snapshotKey: `review:${reviewFinalMessages}`,
+            });
           }
         },
       ],

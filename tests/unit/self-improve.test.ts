@@ -331,7 +331,7 @@ test("processing normalizes revised full-slot content and enforces limits", asyn
   );
 });
 
-test("automatic self-improve handlers run periodic reviews synchronously", async () => {
+test("automatic self-improve handlers persist periodic reviews for the daemon", async () => {
   await withTempRoot(async (root) => {
     const calls = [];
     const definition = selfImproveIndex.default({
@@ -371,11 +371,13 @@ test("automatic self-improve handlers run periodic reviews synchronously", async
       await messageEnd({ message: assistantFinal() }, ctx);
     }
 
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].sessionFile, managedSessionFile);
-    assert.equal(calls[0].snapshotKey, "review:5");
-    assert.equal(calls[0].trigger, "self_improve:periodic_review");
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+    assert.equal(calls.length, 0);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].sessionFile, managedSessionFile);
+    assert.equal(queue[0].snapshotKey, "review:5");
+    assert.equal(queue[0].trigger, "self_improve:periodic_review");
   });
 });
 
@@ -418,9 +420,10 @@ test("automatic self-improve review interval is configurable", async () => {
       await messageEnd({ message: assistantFinal() }, ctx);
     }
 
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].snapshotKey, "review:3");
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+    assert.equal(calls.length, 0);
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].snapshotKey, "review:3");
   });
 });
 
@@ -466,9 +469,10 @@ test("automatic self-improve review counts agent final messages, not user turns"
       await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
     }
 
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].snapshotKey, "review:5");
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+    assert.equal(calls.length, 0);
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].snapshotKey, "review:5");
   });
 });
 
@@ -517,35 +521,16 @@ test("automatic self-improve review reuses chat final-message detection for tool
       await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
     }
 
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].snapshotKey, "review:5");
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+    assert.equal(calls.length, 0);
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].snapshotKey, "review:5");
   });
 });
 
-test("automatic self-improve review records its watermark before awaiting distillation", async () => {
+test("automatic self-improve review records its watermark before queue persistence", async () => {
   await withTempRoot(async (root) => {
-    const calls = [];
-    let resolveMaintenanceStarted;
-    const maintenanceStarted = new Promise((resolve) => {
-      resolveMaintenanceStarted = resolve;
-    });
-    let releaseMaintenance;
-    const releaseSignal = new Promise((resolve) => {
-      releaseMaintenance = resolve;
-    });
-    const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        resolveMaintenanceStarted();
-        await releaseSignal;
-        return { status: "completed" };
-      },
-    });
+    const definition = selfImproveIndex.default({});
     const messageEnd = definition.hooks.message_end[0];
     const sessionFile = path.join(
       root,
@@ -570,14 +555,13 @@ test("automatic self-improve review records its watermark before awaiting distil
       { message: assistantFinal("done 5") },
       ctx("assistant-5"),
     );
-    await maintenanceStarted;
     await writeSessionWithAssistantFinals(sessionFile, 6);
     await messageEnd({ message: assistantFinal("done 6") }, ctx("assistant-6"));
-
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].snapshotKey, "review:5");
-    releaseMaintenance();
     await first;
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].snapshotKey, "review:5");
   });
 });
 
@@ -632,9 +616,10 @@ test("automatic self-improve review resumes from persisted session count after r
       createContext("persisted-count-session-test-restarted", "assistant-10"),
     );
 
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].snapshotKey, "review:10");
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+    assert.equal(calls.length, 0);
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].snapshotKey, "review:10");
   });
 });
 
@@ -681,9 +666,10 @@ test("automatic self-improve review ignores the never-shipped nested interval pa
       await messageEnd({ message: assistantFinal(`done ${i + 4}`) }, ctx);
     }
 
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].snapshotKey, "review:5");
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+    assert.equal(calls.length, 0);
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].snapshotKey, "review:5");
   });
 });
 
@@ -764,11 +750,12 @@ test("automatic self-improve allows scheduled-task turns delivered through chat"
     }
     await shutdown({}, ctx);
 
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].trigger, "self_improve:periodic_review");
+    assert.equal(calls.length, 0);
     const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].trigger, "self_improve:session_shutdown_review");
+    assert.equal(queue.length, 2);
+    assert.equal(queue[0].trigger, "self_improve:periodic_review");
+    assert.equal(queue[0].snapshotKey, "review:5");
+    assert.equal(queue[1].trigger, "self_improve:session_shutdown_review");
   });
 });
 
@@ -806,9 +793,10 @@ test("automatic self-improve allows scheduled-task source with explicit eligibil
       await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
     }
 
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].trigger, "self_improve:periodic_review");
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+    assert.equal(calls.length, 0);
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].trigger, "self_improve:periodic_review");
   });
 });
 
