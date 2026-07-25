@@ -29,6 +29,7 @@ export type RinCapabilityContext = {
   sessionManager: any;
   modelRegistry: any;
   readonly model: any;
+  readonly thinkingLevel: ThinkingLevel;
   readonly frontend?: RinFrontendIdentity;
   isIdle: () => boolean;
   signal: AbortSignal | undefined;

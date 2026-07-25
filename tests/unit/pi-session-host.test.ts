@@ -45,7 +45,7 @@ test("Pi session host resumes through the session-level runner", async () => {
   );
 });
 
-test("Pi session host runs native compaction without generating file XML", async () => {
+test("isolated OAuth custom-compaction smoke preserves public auth and native routing", async () => {
   const model = {
     id: "integration-model",
     name: "Integration Model",
@@ -67,13 +67,16 @@ test("Pi session host runs native compaction without generating file XML", async
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
   };
   let prompt = "";
+  let requestOptions: any;
+  let authModel: any;
   let retrySource: any;
   const session = {
     model,
     thinkingLevel: "medium",
     agent: {
-      streamFunction: async (_model: any, context: any) => {
+      streamFunction: async (_model: any, context: any, options: any) => {
         prompt = context.messages[0].content[0].text;
+        requestOptions = options;
         return {
           result: async () => ({
             role: "assistant",
@@ -90,8 +93,20 @@ test("Pi session host runs native compaction without generating file XML", async
         };
       },
     },
-    async _getSummarizationRequestAuth() {
-      return { apiKey: undefined, headers: undefined, env: undefined };
+    modelRuntime: {
+      async getAuth(requestedModel: any) {
+        authModel = requestedModel;
+        return {
+          auth: {
+            apiKey: "oauth-access-token",
+            headers: {
+              "x-provider-route": "oauth-route",
+              "x-deleted-header": null,
+            },
+          },
+          env: { PROVIDER_REGION: "test-region" },
+        };
+      },
     },
     settingsManager: {
       getRetrySettings: () => undefined,
@@ -133,6 +148,14 @@ test("Pi session host runs native compaction without generating file XML", async
     source: "compaction",
     reason: "threshold",
   });
+  assert.equal(authModel, model);
+  assert.equal(requestOptions.apiKey, "oauth-access-token");
+  assert.deepEqual(requestOptions.headers, {
+    "x-provider-route": "oauth-route",
+  });
+  assert.deepEqual(requestOptions.env, { PROVIDER_REGION: "test-region" });
+  assert.equal(typeof requestOptions.sessionId, "string");
+  assert.equal(requestOptions.cacheRetention, "none");
   assert.match(prompt, /## Goal/);
   assert.match(prompt, /## Constraints & Preferences/);
   assert.doesNotMatch(prompt, /## Active Task/);
@@ -146,6 +169,15 @@ test("Pi session host runs native compaction without generating file XML", async
     [...fileOps.read],
     ["/workspace/read.ts", "/workspace/edit.ts"],
   );
+
+  session.modelRuntime.getAuth = async () => {
+    throw new Error("proxy stream owns authentication");
+  };
+  const proxyResult = await runPiNativeCompactionWithoutFileSummary(
+    session,
+    event,
+  );
+  assert.equal(proxyResult.summary, "## Goal\nKeep native compaction.");
 });
 
 test("Pi session host prefers public resource and extension getters", () => {

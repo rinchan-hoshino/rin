@@ -1,5 +1,6 @@
 import fsSync from "node:fs";
 
+import type { AuthResult } from "@earendil-works/pi-ai";
 import { compact } from "@earendil-works/pi-coding-agent";
 
 import { updateSessionCatalogFromSessionManagerSync } from "../session/catalog.js";
@@ -28,7 +29,6 @@ const PI_SESSION_PRIVATE = {
   runAgentPrompt: "_runAgentPrompt",
   rewriteFile: "_rewriteFile",
   runAutoCompaction: "_runAutoCompaction",
-  summarizationRequestAuth: "_getSummarizationRequestAuth",
   summarizationRetryCallbacks: "_summarizationRetryCallbacks",
 } as const;
 
@@ -185,14 +185,25 @@ export async function runPiNativeCompactionWithoutFileSummary(
   const model = session?.model;
   if (!model)
     throw new Error("Pi AgentSession compaction model is unavailable");
-  const getRequestAuth = bindMethod(
-    session,
-    PI_SESSION_PRIVATE.summarizationRequestAuth,
-  );
-  if (!getRequestAuth) {
-    throw new Error("Pi AgentSession summarization auth is unavailable");
+  const getRequestAuth = session?.modelRuntime?.getAuth;
+  if (typeof getRequestAuth !== "function") {
+    throw new Error("Pi AgentSession model runtime auth is unavailable");
   }
-  const { apiKey, headers, env } = await getRequestAuth(model);
+  let requestAuth: AuthResult | undefined;
+  try {
+    requestAuth = await getRequestAuth.call(session.modelRuntime, model);
+  } catch (error) {
+    if (typeof session?.agent?.streamFunction !== "function") throw error;
+  }
+  const headers = requestAuth?.auth?.headers
+    ? Object.fromEntries(
+        Object.entries(requestAuth.auth.headers).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      )
+    : undefined;
+  const apiKey = requestAuth?.auth?.apiKey;
+  const env = requestAuth?.env;
   const details = computePiCompactionFileDetails(event?.preparation?.fileOps);
   const retryCallbacks = bindMethod(
     session,

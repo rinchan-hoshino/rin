@@ -2,7 +2,7 @@
   "repo": "https://github.com/anthropics/skills.git",
   "sourceSubdir": "skills/skill-creator",
   "ref": "main",
-  "resolvedCommit": "1f630fdf9259cec4a14913127dfd7c3b69ef72eb",
-  "syncedAt": "2026-07-23T04:33:31.098Z",
+  "resolvedCommit": "b29e7cf65e5cb78a5ac33d582270551bc74a14eb",
+  "syncedAt": "2026-07-25T02:09:12.503Z",
   "syncMethod": "git sparse-checkout"
 }

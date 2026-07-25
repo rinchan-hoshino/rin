@@ -1933,6 +1933,7 @@ export async function runCustomRpcMode(
         return run(id, type, () =>
           session.executeBash(command.command, undefined, {
             excludeFromContext: command.excludeFromContext,
+            id,
           }),
         );
       case "abort_bash":

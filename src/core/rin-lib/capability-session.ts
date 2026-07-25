@@ -194,6 +194,9 @@ export function createRinCapabilitySet(options: {
       get model() {
         return getModel();
       },
+      get thinkingLevel() {
+        return coreActions.getThinkingLevel();
+      },
       get frontend() {
         return (options.sessionManager as any)?.__rinFrontend;
       },

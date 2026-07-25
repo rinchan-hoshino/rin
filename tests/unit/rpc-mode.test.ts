@@ -1169,7 +1169,7 @@ test(
           [{ type: "text", text: "hi" }],
           { deliverAs: "followUp" },
         ],
-        ["executeBash", "echo hidden", { excludeFromContext: true }],
+        ["executeBash", "echo hidden", { excludeFromContext: true, id: "8" }],
       ]);
     } finally {
       process.stdin.on = stdinOn;

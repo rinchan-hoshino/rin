@@ -116,6 +116,7 @@ test("Rin capability context exposes Pi extension mode and prompt options", asyn
     definitions: [],
   });
   const session = {
+    thinkingLevel: "high",
     _baseSystemPromptOptions: {
       cwd: "/tmp/rin-capability-session-test",
       tools: ["read"],
@@ -143,17 +144,17 @@ test("Rin capability context exposes Pi extension mode and prompt options", asyn
 
   const context = capabilitySet.createContext();
   assert.equal(context.mode, "rpc");
+  assert.equal(context.thinkingLevel, "high");
   assert.deepEqual(context.getSystemPromptOptions(), {
     cwd: "/tmp/rin-capability-session-test",
     tools: ["read"],
   });
-  assert.deepEqual(
-    capabilitySet.createCommandContext().getSystemPromptOptions(),
-    {
-      cwd: "/tmp/rin-capability-session-test",
-      tools: ["read"],
-    },
-  );
+  const commandContext = capabilitySet.createCommandContext();
+  assert.equal(commandContext.thinkingLevel, "high");
+  assert.deepEqual(commandContext.getSystemPromptOptions(), {
+    cwd: "/tmp/rin-capability-session-test",
+    tools: ["read"],
+  });
 });
 
 test("Rin compaction hook errors propagate instead of falling back to Pi summarization", async () => {
