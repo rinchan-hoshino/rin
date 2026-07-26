@@ -115,14 +115,14 @@
     }
   },
   "nightly": {
-    "version": "0.9.0-nightly.20260725+0e823a5",
-    "archiveUrl": "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/0e823a5bd7d08456d68d90fe6008bcbad5b48911",
-    "ref": "0e823a5bd7d08456d68d90fe6008bcbad5b48911",
+    "version": "0.9.0-nightly.20260726+a54a2a4",
+    "archiveUrl": "https://codeload.github.com/rinchan-hoshino/rin/tar.gz/a54a2a4e452b615c34962b0b6521999034e15b50",
+    "ref": "a54a2a4e452b615c34962b0b6521999034e15b50",
     "branch": "main",
     "assets": {
       "linux-x64": {
-        "bundleUrl": "https://github.com/rinchan-hoshino/rin/releases/download/v0.9.0-nightly.20260725+0e823a5/rin-0.9.0-nightly.20260725+0e823a5-linux-x64.tar.gz",
-        "sha256": "aba4e6dcb42e4fb8263fe25412f54f077de868dcc89a840a65243e9c7feb679d",
+        "bundleUrl": "https://github.com/rinchan-hoshino/rin/releases/download/v0.9.0-nightly.20260726+a54a2a4/rin-0.9.0-nightly.20260726+a54a2a4-linux-x64.tar.gz",
+        "sha256": "31cc67e47f0471ecffce7f936581681db477f0fef9480c80fb144caea43fec4b",
         "nodeVersion": "24.18.0"
       }
     }
