@@ -1101,6 +1101,125 @@ test("chat main silently drops the removed private /session command", async () =
   }
 });
 
+test("chat main reports unmatched slash commands in owner-only Lark groups", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-queue-"),
+  );
+  try {
+    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
+
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const { installChatControllerSessionClient } = await import(pathToFileURL(path.join(rootDir, "tests", "support", "chat-controller-session-client.ts")).href);
+      installChatControllerSessionClient(controllerMod.ChatController);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const seen = [];
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "lark", userId: "ou_owner", personId: "owner" }],
+        trusted: [],
+      });
+
+      let runCommandCalls = 0;
+      controllerMod.ChatController.prototype.runCommand = async function () {
+        runCommandCalls += 1;
+        return { handled: true, text: "should not run" };
+      };
+      controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
+        seen.push({ mode, text: input?.text || null });
+        return { retry: false };
+      };
+
+      const { app } = await mainMod.startChatBridge();
+      let sentCount = 0;
+      app.bots.push({
+        platform: "lark",
+        selfId: "cli_bot",
+        internal: {
+          async listChatMembers() {
+            return {
+              code: 0,
+              data: {
+                items: [{ member_id: "ou_owner" }],
+                has_more: false,
+                member_total: 1,
+              },
+            };
+          },
+          async getChat() {
+            return { code: 0, data: { user_count: 1, bot_count: 1 } };
+          },
+        },
+        async sendMessage() {
+          sentCount += 1;
+          return [String(sentCount)];
+        },
+      });
+      const node = h.createChatRuntimeH();
+      app.emit("message", {
+        platform: "lark",
+        selfId: "cli_bot",
+        channelId: "oc_owner_only",
+        guildId: "oc_owner_only",
+        userId: "ou_owner",
+        messageId: "om-owner-only-unknown",
+        isDirect: false,
+        content: "/unknown",
+        stripped: { content: "/unknown" },
+        elements: [node.text("/unknown")],
+      });
+
+      const deadline = Date.now() + 5000;
+      let rows = [];
+      while (Date.now() < deadline) {
+        rows = storeMod
+          .listChatMessages(agentDir)
+          .filter((item) => item.chatKey === "lark/cli_bot:oc_owner_only" && item.role === "assistant");
+        if (rows.length >= 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      if (
+        runCommandCalls !== 0 ||
+        seen.length !== 0 ||
+        sentCount !== 1 ||
+        rows.length !== 1 ||
+        rows[0]?.text !== "rin error: Unknown command. Send /help to see available commands."
+      ) {
+        throw new Error(JSON.stringify({ sentCount, runCommandCalls, seen, rows }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("chat main silently consumes unmatched group slash commands", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });

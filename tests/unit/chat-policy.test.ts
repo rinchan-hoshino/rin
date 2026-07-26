@@ -71,6 +71,16 @@ test("chat policy normalizes trust values for input access and command checks", 
   assert.equal(
     support.canAccessAgentInput({
       chatType: "group",
+      trust: " owner ",
+      mentionLike: false,
+      commandLike: false,
+      allowWithoutMention: true,
+    }),
+    true,
+  );
+  assert.equal(
+    support.canAccessAgentInput({
+      chatType: "group",
       trust: "trusted",
       mentionLike: true,
       commandLike: true,

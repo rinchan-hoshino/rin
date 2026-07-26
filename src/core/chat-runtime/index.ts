@@ -1662,6 +1662,10 @@ class OneBotAdapter {
               user_id: Number(userId),
               no_cache: Boolean(noCache),
             }),
+          getGroupMemberList: (groupId: string | number) =>
+            this.callAction("get_group_member_list", {
+              group_id: Number(groupId),
+            }),
           getMsg: (messageId: string | number) =>
             this.callAction("get_msg", { message_id: Number(messageId) }),
           sendGroupMsg: (
