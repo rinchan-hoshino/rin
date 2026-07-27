@@ -83,6 +83,108 @@ test("Rin agent runtime owns the composed resource loading boundary", async () =
   );
 });
 
+test("Rin AuthStorage adapts legacy OAuth callbacks to ModelRuntime interactions", async () => {
+  const rinRuntime = await loaderModule.loadRinAgentRuntime();
+  const authStorage = rinRuntime.AuthStorage.inMemory({});
+  const observed: unknown[] = [];
+
+  authStorage.bindModelRuntime({
+    async login(providerId: string, authType: string, interaction: any) {
+      observed.push({ providerId, authType });
+      const account = await interaction.prompt({
+        type: "text",
+        message: "Account",
+        placeholder: "name",
+      });
+      const organization = await interaction.prompt({
+        type: "select",
+        message: "Organization",
+        options: [{ id: "org-1", label: "Org 1" }],
+      });
+      const code = await interaction.prompt({
+        type: "manual_code",
+        message: "Authorization code",
+      });
+      interaction.notify({
+        type: "auth_url",
+        url: "https://example.com/auth",
+      });
+      interaction.notify({
+        type: "device_code",
+        userCode: "ABCD-EFGH",
+        verificationUri: "https://example.com/device",
+      });
+      interaction.notify({ type: "progress", message: "Waiting" });
+      interaction.notify({
+        type: "info",
+        message: "Use your subscription account",
+      });
+      return {
+        type: "oauth",
+        accessToken: `${account}:${organization}:${code}`,
+      };
+    },
+  });
+
+  const credential = await authStorage.login("openai-codex", {
+    onPrompt(prompt: any) {
+      observed.push(prompt);
+      return Promise.resolve("account-1");
+    },
+    onSelect(prompt: any) {
+      observed.push(prompt);
+      return Promise.resolve("org-1");
+    },
+    onManualCodeInput(prompt: any) {
+      observed.push(prompt);
+      return Promise.resolve("code-1");
+    },
+    onAuth(info: any) {
+      observed.push(info);
+    },
+    onDeviceCode(info: any) {
+      observed.push(info);
+    },
+    onProgress(message: string) {
+      observed.push(message);
+    },
+    onInfo(info: any) {
+      observed.push(info);
+    },
+  });
+
+  assert.equal(credential.accessToken, "account-1:org-1:code-1");
+  assert.deepEqual(authStorage.get("openai-codex"), credential);
+  assert.deepEqual(observed, [
+    { providerId: "openai-codex", authType: "oauth" },
+    {
+      type: "text",
+      message: "Account",
+      placeholder: "name",
+      allowEmpty: true,
+      signal: undefined,
+    },
+    {
+      type: "select",
+      message: "Organization",
+      options: [{ id: "org-1", label: "Org 1" }],
+      signal: undefined,
+    },
+    {
+      type: "manual_code",
+      message: "Authorization code",
+      signal: undefined,
+    },
+    { url: "https://example.com/auth" },
+    {
+      userCode: "ABCD-EFGH",
+      verificationUri: "https://example.com/device",
+    },
+    "Waiting",
+    { message: "Use your subscription account" },
+  ]);
+});
+
 test("Rin DefaultResourceLoader gives foreground extensions the Rin SDK surface", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-ext-loader-"));
   const extensionDir = path.join(agentDir, "extension");

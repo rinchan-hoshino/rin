@@ -20,6 +20,55 @@ function writeAuthData(authPath: string | undefined, data: any) {
   fs.writeFileSync(authPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
 }
 
+function combinedAuthPromptSignal(
+  promptSignal?: AbortSignal,
+  loginSignal?: AbortSignal,
+) {
+  const signals = [promptSignal, loginSignal].filter(Boolean) as AbortSignal[];
+  if (!signals.length) return undefined;
+  if (signals.length === 1) return signals[0];
+  return AbortSignal.any(signals);
+}
+
+function authInteractionFromLegacyCallbacks(callbacks: any = {}) {
+  if (
+    typeof callbacks.prompt === "function" &&
+    typeof callbacks.notify === "function"
+  ) {
+    return callbacks;
+  }
+  return {
+    signal: callbacks.signal,
+    async prompt(prompt: any) {
+      const signal = combinedAuthPromptSignal(prompt?.signal, callbacks.signal);
+      if (prompt?.type === "select") {
+        if (typeof callbacks.onSelect !== "function")
+          throw new Error("OAuth login cannot show a selection prompt");
+        return await callbacks.onSelect({ ...prompt, signal });
+      }
+      if (prompt?.type === "manual_code") {
+        if (typeof callbacks.onManualCodeInput !== "function")
+          throw new Error("OAuth login cannot request an authorization code");
+        return await callbacks.onManualCodeInput({ ...prompt, signal });
+      }
+      if (typeof callbacks.onPrompt !== "function")
+        throw new Error("OAuth login cannot request text input");
+      return await callbacks.onPrompt({
+        ...prompt,
+        allowEmpty: true,
+        signal,
+      });
+    },
+    notify(event: any) {
+      const { type, ...info } = event || {};
+      if (type === "auth_url") return callbacks.onAuth?.(info);
+      if (type === "device_code") return callbacks.onDeviceCode?.(info);
+      if (type === "info") return callbacks.onInfo?.(info);
+      if (type === "progress") return callbacks.onProgress?.(info.message);
+    },
+  };
+}
+
 function createAuthStorageCompat(authPath: string | undefined, initial?: any) {
   const state = {
     data: initial && typeof initial === "object" ? { ...initial } : undefined,
@@ -93,7 +142,7 @@ function createAuthStorageCompat(authPath: string | undefined, initial?: any) {
       const credential = await state.modelRuntime?.login?.(
         id,
         "oauth",
-        callbacks,
+        authInteractionFromLegacyCallbacks(callbacks),
       );
       if (credential) {
         load()[id] = credential;
