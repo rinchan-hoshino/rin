@@ -1,20 +1,36 @@
 import { extractToolCallParts } from "../message-content.js";
 import { isPiCompactSkillReadCall } from "../pi/private-api.js";
+import { estimateMessageTokens } from "./context-token-estimator.js";
 
 export const RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS = 4;
+export const RIN_SESSION_PRUNING_PROTECT_RECENT_MESSAGES = 16;
+export const RIN_SESSION_PRUNING_MINIMUM_RECLAIM_TOKENS = 4096;
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT =
   "old tool result omitted";
 type SessionPruningOptions = {
   protectRecentTurns?: number;
+  protectRecentMessages?: number;
   cwd?: string;
 };
 
+function normalizePositiveInteger(value: unknown, fallback: number) {
+  const normalized = Number(value);
+  if (!Number.isFinite(normalized) || normalized <= 0) return fallback;
+  return Math.floor(normalized);
+}
+
 export function normalizeProtectRecentTurns(value: unknown) {
-  const turns = Number(value);
-  if (!Number.isFinite(turns) || turns <= 0) {
-    return RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS;
-  }
-  return Math.floor(turns);
+  return normalizePositiveInteger(
+    value,
+    RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS,
+  );
+}
+
+export function normalizeProtectRecentMessages(value: unknown) {
+  return normalizePositiveInteger(
+    value,
+    RIN_SESSION_PRUNING_PROTECT_RECENT_MESSAGES,
+  );
 }
 
 function isUserMessage(message: any) {
@@ -88,30 +104,90 @@ function omittedContentFor(content: any) {
   return RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT;
 }
 
+function omittedToolResult(message: any) {
+  return { ...message, content: omittedContentFor(message?.content) };
+}
+
+function estimateToolResultTokens(message: any) {
+  const normalized =
+    String(message?.role || "").trim() === "tool_result"
+      ? { ...message, role: "toolResult" }
+      : message;
+  return estimateMessageTokens(normalized);
+}
+
+function collectMessageTailPruneIndexes(
+  messages: any[],
+  candidateStart: number,
+  candidateEnd: number,
+  protectedToolResultIds: Set<string>,
+) {
+  const indexes = new Set<number>();
+  let pendingIndexes: number[] = [];
+  let pendingReclaimTokens = 0;
+
+  for (let index = candidateStart; index < candidateEnd; index += 1) {
+    const message = messages[index];
+    if (!isToolResultMessage(message)) continue;
+    if (isProtectedToolResult(message, protectedToolResultIds)) continue;
+    if (isAlreadyOmitted(message?.content)) continue;
+
+    const replacement = omittedToolResult(message);
+    const reclaimTokens = Math.max(
+      0,
+      estimateToolResultTokens(message) - estimateToolResultTokens(replacement),
+    );
+    if (!reclaimTokens) continue;
+
+    pendingIndexes.push(index);
+    pendingReclaimTokens += reclaimTokens;
+    if (pendingReclaimTokens < RIN_SESSION_PRUNING_MINIMUM_RECLAIM_TOKENS) {
+      continue;
+    }
+
+    for (const pendingIndex of pendingIndexes) indexes.add(pendingIndex);
+    pendingIndexes = [];
+    pendingReclaimTokens = 0;
+  }
+
+  return indexes;
+}
+
 function createProviderBoundPrunePlan(
   messages: any[],
   options: SessionPruningOptions = {},
 ) {
   const input = Array.isArray(messages) ? messages : [];
-  const protectedStart = findProtectedContextStart(
+  const protectedTurnStart = findProtectedContextStart(
     input,
     normalizeProtectRecentTurns(options.protectRecentTurns),
+  );
+  const protectedMessageStart = Math.max(
+    0,
+    input.length -
+      normalizeProtectRecentMessages(options.protectRecentMessages),
   );
   const replacements = new Map<any, any>();
   const protectedToolResultIds = collectProtectedToolResultIds(
     input,
     String(options.cwd || process.cwd()),
   );
+  const messageTailPruneIndexes = collectMessageTailPruneIndexes(
+    input,
+    protectedTurnStart,
+    protectedMessageStart,
+    protectedToolResultIds,
+  );
   let changed = false;
   const pruned = input.map((message, index) => {
-    if (index < protectedStart && isToolResultMessage(message)) {
+    const shouldOmit =
+      index < protectedMessageStart &&
+      (index < protectedTurnStart || messageTailPruneIndexes.has(index));
+    if (shouldOmit && isToolResultMessage(message)) {
       if (isProtectedToolResult(message, protectedToolResultIds))
         return message;
       if (isAlreadyOmitted(message?.content)) return message;
-      const replacement = {
-        ...message,
-        content: omittedContentFor(message?.content),
-      };
+      const replacement = omittedToolResult(message);
       replacements.set(message, replacement);
       changed = true;
       return replacement;

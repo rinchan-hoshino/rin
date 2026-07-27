@@ -2,6 +2,7 @@ import { pruneSessionContextMessages } from "./session-pruning.js";
 
 type ProviderBoundContextOptions = {
   protectRecentTurns?: number;
+  protectRecentMessages?: number;
   cwd?: string;
 };
 

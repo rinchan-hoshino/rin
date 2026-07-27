@@ -14,6 +14,13 @@ const providerContext = await import(
   ).href
 );
 
+function tailPadding(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    role: "assistant",
+    content: `tail padding ${index + 1}`,
+  }));
+}
+
 test("provider-bound context leaves non-tool rich content unchanged", () => {
   const userContent = "see image: [image: demo.png](file:///tmp/demo.png)";
   const assistantContent = [
@@ -56,6 +63,7 @@ test("provider-bound context policy omits old tool results", () => {
     { role: "assistant", content: "done 4" },
     { role: "user", content: "turn 5" },
     { role: "assistant", content: "done 5" },
+    ...tailPadding(7),
   ];
 
   const providerMessages =
@@ -82,6 +90,7 @@ test("provider-bound context keeps recent four user turns' tool results", () => 
     { role: "assistant", content: "done 4" },
     { role: "user", content: "turn 5" },
     { role: "assistant", content: "done 5" },
+    ...tailPadding(6),
   ];
 
   const providerMessages =
@@ -166,6 +175,32 @@ test("provider-bound context keeps orphan tool results", () => {
   assert.equal(messages.includes(orphan), true);
 });
 
+test("provider-bound context forwards recent message protection options", () => {
+  const oldToolResult = {
+    role: "toolResult",
+    content: "x".repeat(25_000),
+  };
+  const messages = [
+    { role: "user", content: "one long turn" },
+    oldToolResult,
+    ...Array.from({ length: 16 }, (_, index) => ({
+      role: "assistant",
+      content: `recent ${index + 1}`,
+    })),
+  ];
+
+  assert.equal(
+    providerContext.buildProviderBoundContextMessages(messages, {
+      protectRecentMessages: 17,
+    }),
+    messages,
+  );
+  assert.equal(
+    providerContext.buildProviderBoundContextMessages(messages)[1].content,
+    "old tool result omitted",
+  );
+});
+
 test("provider-bound context policy owns token estimates", () => {
   const messages = [
     { role: "user", content: "turn 1" },
@@ -179,6 +214,7 @@ test("provider-bound context policy owns token estimates", () => {
     { role: "assistant", content: "done 4" },
     { role: "user", content: "turn 5" },
     { role: "assistant", content: "done 5" },
+    ...tailPadding(7),
   ];
 
   const tokens = providerContext.estimateProviderBoundContextTokens(
@@ -208,6 +244,7 @@ test("provider-bound context event uses the same policy surface", () => {
     { role: "assistant", content: "done 4" },
     { role: "user", content: "turn 5" },
     { role: "assistant", content: "done 5" },
+    ...tailPadding(7),
   ];
 
   const result = providerContext.buildProviderBoundContextEvent({ messages });

@@ -72,6 +72,10 @@ test("tui stats get context usage estimates the pruned provider-bound context", 
       { role: "assistant", content: "done 4" },
       { role: "user", content: "turn 5" },
       { role: "assistant", content: "done 5" },
+      ...Array.from({ length: 7 }, (_, index) => ({
+        role: "assistant",
+        content: `tail padding ${index + 1}`,
+      })),
     ],
     [],
   );

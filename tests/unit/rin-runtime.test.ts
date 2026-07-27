@@ -17,6 +17,13 @@ function waitForTimers() {
   return new Promise((resolve) => setTimeout(resolve, 30));
 }
 
+function pruningTailPadding(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    role: "assistant",
+    content: `tail padding ${index + 1}`,
+  }));
+}
+
 test("getManagedSkillPaths includes agent memory skills and builtin skills", () => {
   const paths = runtimeMod.getManagedSkillPaths("/tmp/rin-home");
   assert.deepEqual(paths, [
@@ -296,6 +303,7 @@ test("Rin percent compaction estimates error contexts from pruned provider conte
         messages: [
           { role: "user", content: "old" },
           { role: "toolResult", content: "huge old output" },
+          ...pruningTailPadding(8),
           { role: "user", content: "recent 1" },
           { role: "assistant", content: "ok" },
           { role: "user", content: "recent 2" },
@@ -358,6 +366,7 @@ test("Rin context usage reports the pruned provider-bound estimate", () => {
       { role: "assistant", content: "ok" },
       { role: "user", content: "recent 4" },
       { role: "assistant", content: "ok" },
+      ...pruningTailPadding(8),
     ],
     getContextUsage() {
       return { tokens: 900, contextWindow: 1000, percent: 90 };
