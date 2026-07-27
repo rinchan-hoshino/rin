@@ -253,6 +253,27 @@ test("provider-auth loads installer model choices through the shared model regis
   });
 });
 
+test("provider-auth exposes OpenAI Codex OAuth during installer authentication", async () => {
+  await withTempDir(async (dir) => {
+    const authStorage = await provider.createInstallerAuthStorage(
+      dir,
+      (filePath, fallback) => {
+        try {
+          return JSON.parse(String(fsSync.readFileSync(filePath, "utf8")));
+        } catch {
+          return fallback;
+        }
+      },
+    );
+
+    assert.ok(
+      authStorage
+        .getOAuthProviders()
+        .some((entry) => entry.id === "openai-codex"),
+    );
+  });
+});
+
 test("provider-auth forwards OAuth device-code callbacks during installer login", async () => {
   let deviceCodeSeen = false;
   const result = await provider.configureProviderAuth(

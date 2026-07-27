@@ -19,12 +19,9 @@ export type InstallerModelChoice = {
   available: boolean;
 };
 
-export async function loadModelChoices(
-  installDir = "",
-  readJsonFile: <T>(filePath: string, fallback: T) => T = (
-    _filePath,
-    fallback,
-  ) => fallback,
+async function createInstallerProviderState(
+  installDir: string,
+  readJsonFile: <T>(filePath: string, fallback: T) => T,
 ) {
   const agentRuntimeModule = await loadRinAgentRuntime();
   const { AuthStorage, ModelRuntime, createModelRegistry } =
@@ -40,6 +37,20 @@ export async function loadModelChoices(
     modelsPath: modelsJsonPath,
   });
   const modelRegistry = createModelRegistry(modelRuntime, authStorage);
+  return { authStorage, modelRegistry };
+}
+
+export async function loadModelChoices(
+  installDir = "",
+  readJsonFile: <T>(filePath: string, fallback: T) => T = (
+    _filePath,
+    fallback,
+  ) => fallback,
+) {
+  const { authStorage, modelRegistry } = await createInstallerProviderState(
+    installDir,
+    readJsonFile,
+  );
   const oauthProviders = Array.isArray(authStorage.getOAuthProviders?.())
     ? authStorage.getOAuthProviders()
     : [];
@@ -92,11 +103,11 @@ export async function createInstallerAuthStorage(
   installDir: string,
   readJsonFile: <T>(filePath: string, fallback: T) => T,
 ) {
-  const agentRuntimeModule = await loadRinAgentRuntime();
-  const { AuthStorage } = agentRuntimeModule as any;
-  const authPath = installAuthPath(installDir);
-  const existing = readJsonFile<any>(authPath, {});
-  return AuthStorage.inMemory(existing);
+  const { authStorage } = await createInstallerProviderState(
+    installDir,
+    readJsonFile,
+  );
+  return authStorage;
 }
 
 export async function configureProviderAuth(
