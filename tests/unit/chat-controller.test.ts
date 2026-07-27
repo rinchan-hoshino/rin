@@ -1201,6 +1201,73 @@ test("chat controller skips recovery bootstrap and uses configured copy for /new
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
+test("chat controller /new clears the old binding when the logical session has no file yet", async () => {
+  const controller = await createController();
+  const oldSessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "old-chat.jsonl",
+  );
+  await fs.mkdir(path.dirname(oldSessionFile), { recursive: true });
+  await fs.writeFile(oldSessionFile, "", "utf8");
+  controller.state.sessionFile = oldSessionFile;
+  readChatState(controller.agentDir, controller.chatKey);
+  openChatDatabase(controller.agentDir)
+    .prepare("UPDATE chat_state SET session_file = ? WHERE chat_key = ?")
+    .run(oldSessionFile, controller.chatKey);
+  controller.commitPendingDelivery = async function () {
+    this.stagedDelivery = null;
+  };
+  controller.connect = async () => true;
+  let liveSessionFile = "";
+  controller.driver.runCommand = async () => ({
+    handled: true,
+    text: "Started a new session.",
+    sessionId: "session-empty-new",
+  });
+  controller.driver.currentSessionId = () => "session-empty-new";
+  controller.driver.currentSessionFile = () => liveSessionFile;
+
+  await controller.runCommand("/new", "m-new", "m-new");
+
+  assert.equal(controller.state.sessionFile, undefined);
+  assert.equal(
+    readChatState(controller.agentDir, controller.chatKey).sessionFile,
+    undefined,
+  );
+  assert.equal(
+    readChatState(controller.agentDir, controller.chatKey).currentGeneration,
+    1,
+  );
+
+  let submittedTurn: any;
+  const promptSessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "created-on-first-prompt.jsonl",
+  );
+  controller.driver.runTurn = async (input: any) => {
+    submittedTurn = input;
+    liveSessionFile = promptSessionFile;
+    return { finalText: "fresh", sessionFile: promptSessionFile };
+  };
+
+  await controller.runTurn({
+    text: "hello",
+    attachments: [],
+    deliverFinal: false,
+  });
+
+  assert.equal(submittedTurn.restoreSessionFile, "");
+  assert.equal(submittedTurn.managedSessionLeaf, "chat");
+  assert.equal(
+    controller.state.sessionFile,
+    "managed/chat/created-on-first-prompt.jsonl",
+  );
+});
+
 test("chat controller does not send working notices before deterministic non-compact command acknowledgements", async () => {
   for (const [command, expectedText] of [
     ["/new", "Started a new session."],

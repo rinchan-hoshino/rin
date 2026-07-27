@@ -43,6 +43,18 @@ Rin should keep these layers distinct:
 
 Do not add a frontend-only session model, local mirror of daemon state, or hidden compatibility runner when the daemon/core boundary can express the behavior directly.
 
+## Session lifecycle identity
+
+Keep logical session selection separate from persistence:
+
+- `sessionId` and the daemon connection attachment identify the selected runtime session immediately;
+- `sessionFile` is only the persistence locator and may be absent until the session records real conversation content;
+- `/new` replaces the logical session reference even when the new worker has no file yet, and chat reset generation clears the old persisted binding;
+- the first later prompt with no persisted binding creates a fresh managed session with current prompt resources, then stores the resulting file;
+- the previous worker shutdown lifecycle must not depend on the replacement session already having a file.
+
+Do not use a non-empty `sessionFile` as proof that `/new` selected the new logical session, or preserve an old file when a new-session response intentionally has none.
+
 ## Documentation layout
 
 - User docs: `README.md` plus translated `readme/README.*.md` files.

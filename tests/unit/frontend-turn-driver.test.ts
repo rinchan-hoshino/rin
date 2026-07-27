@@ -536,6 +536,42 @@ test("frontend SDK turn driver uses configured built-in command responses", asyn
   );
 });
 
+test("frontend SDK /new replaces logical session identity even before a session file exists", async () => {
+  const client = createFrontendClient();
+  let selectedState: Record<string, unknown> = {
+    sessionId: "session-old",
+    sessionFile: "/tmp/old-chat.jsonl",
+    isStreaming: false,
+  };
+  client.getState = async () => selectedState;
+  client.newSession = async (options: any = {}) => {
+    client.calls.push({ type: "newSession", options });
+    selectedState = {
+      sessionId: "session-empty-new",
+      isStreaming: false,
+    };
+    return { cancelled: false, sessionId: "session-empty-new" };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  await driver.runCommand("/new", { managedSessionLeaf: "chat" });
+
+  assert.equal(driver.currentSessionId(), "session-empty-new");
+  assert.equal(driver.currentSessionFile(), "");
+  assert.equal(
+    client.calls.some(
+      (call: any) =>
+        call.type === "request" &&
+        call.command?.type === "get_state" &&
+        call.command?.sessionFile === "/tmp/old-chat.jsonl",
+    ),
+    false,
+  );
+});
+
 test("frontend SDK dispose settles an active turn with internal lifecycle cancellation", async () => {
   const client = createFrontendClient();
   let promptStarted = false;

@@ -1493,6 +1493,12 @@ export class ChatController {
     return undefined;
   }
 
+  private replaceStoredSessionFile(...candidates: unknown[]) {
+    const picked = this.pickStoredValue(...candidates);
+    this.state.sessionFile = toStoredSessionFile(this.agentDir, picked);
+    return this.state.sessionFile;
+  }
+
   private updateStoredSessionFile(...args: unknown[]) {
     const last = args.at(-1);
     const hasOptions =
@@ -2823,11 +2829,16 @@ export class ChatController {
         sessionFile: explicitSessionFile,
         managedSessionLeaf,
       });
-      const nextSessionFile = this.updateStoredSessionFile(
-        data?.sessionFile,
-        this.driver.currentSessionFile(),
-        { persist: commandName !== "new" },
-      );
+      const nextSessionFile =
+        commandName === "new"
+          ? this.replaceStoredSessionFile(
+              data?.sessionFile,
+              this.driver.currentSessionFile(),
+            )
+          : this.updateStoredSessionFile(
+              data?.sessionFile,
+              this.driver.currentSessionFile(),
+            );
       if (commandName === "new" && parseChatKey(this.chatKey)) {
         await this.advanceGenerationAfterNonterminalSends({
           preserveInboundMessageId: incomingMessageId,

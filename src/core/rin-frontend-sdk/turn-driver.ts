@@ -368,6 +368,12 @@ export class RinFrontendTurnDriver {
     }
   }
 
+  private replaceFrontendSessionRefFrom(value: unknown) {
+    const session = normalizeSessionRef(value);
+    this.frontendState.sessionId = session.sessionId || undefined;
+    this.frontendState.sessionFile = session.sessionFile || undefined;
+  }
+
   currentSessionId() {
     return safeString(this.frontendState.sessionId || "").trim();
   }
@@ -715,10 +721,8 @@ export class RinFrontendTurnDriver {
         ...(Object.keys(resourceOptions).length > 0 ? { resourceOptions } : {}),
       });
       if (value?.cancelled) throw new Error("rin_new_session_cancelled");
-      this.updateFrontendStateFrom(value);
-      await this.refreshFrontendState(this.currentSessionFile()).catch(
-        () => {},
-      );
+      this.replaceFrontendSessionRefFrom(value);
+      await this.refreshFrontendState().catch(() => {});
     } else if (wanted) {
       await this.selectSessionTarget(wanted);
     }
@@ -805,10 +809,8 @@ export class RinFrontendTurnDriver {
         ...(managedSessionLeaf ? { managedSessionLeaf } : {}),
         frontendIdentity: this.frontendIdentity,
       });
-      this.updateFrontendStateFrom(value);
-      await this.refreshFrontendState(this.currentSessionFile()).catch(
-        () => {},
-      );
+      if (!value?.cancelled) this.replaceFrontendSessionRefFrom(value);
+      await this.refreshFrontendState().catch(() => {});
       return {
         handled: true,
         cancelled: Boolean(value?.cancelled),
