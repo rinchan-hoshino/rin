@@ -11,9 +11,11 @@ const rootDir = path.resolve(
 const {
   areRinTurnTerminalOutcomesConsistent,
   classifyRinTurnMessage,
+  RinTurnSettlementProjector,
   resolveRinAuthoritativeTurnTerminalOutcome,
   resolveRinTurnCompletionFromAssistantMessage,
   resolveRinTurnCompletionFromTurnResult,
+  resolveRinSettledTurnTerminalOutcomeFromMessages,
   resolveRinTurnTerminalOutcomeFromAssistantMessage,
   resolveRinTurnTerminalOutcomeFromMessages,
   resolveRinTurnTerminalOutcomeFromTurnResult,
@@ -56,6 +58,755 @@ test("Rin turn completion does not treat assistant tool-call prefaces as finals"
   });
 
   assert.equal(resolution, null);
+});
+
+test("Rin turn settlement projector owns session observation and settled authority", () => {
+  let listener: ((event: any) => void) | undefined;
+  let unsubscribed = false;
+  const settledOutcomes: any[] = [];
+  const session = {
+    subscribe(callback: (event: any) => void) {
+      listener = callback;
+      return () => {
+        unsubscribed = true;
+      };
+    },
+  };
+  const projector = new RinTurnSettlementProjector(session, (outcome) => {
+    settledOutcomes.push(outcome);
+  });
+  const messages = [
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "durable tool preface" },
+        { type: "toolCall", name: "todo", id: "call-1" },
+      ],
+      stopReason: "toolUse",
+    },
+    {
+      role: "toolResult",
+      toolCallId: "call-1",
+      content: [],
+      isError: false,
+    },
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "" }],
+      stopReason: "stop",
+    },
+  ];
+  for (const message of messages) listener?.({ type: "message_end", message });
+
+  const beforeSettlement = projector.resolve({ kind: "absent" }, messages);
+  assert.equal(beforeSettlement.kind, "complete");
+  assert.equal(beforeSettlement.resolution.completion.finalText, "");
+
+  listener?.({ type: "agent_settled" });
+  assert.equal(settledOutcomes.length, 1);
+  assert.equal(
+    settledOutcomes[0].resolution.completion.finalText,
+    "durable tool preface",
+  );
+  assert.equal(
+    projector.resolve({ kind: "absent" }, messages).resolution.completion
+      .finalText,
+    "durable tool preface",
+  );
+  assert.equal(
+    projector.resolveUnsettled({ kind: "absent" }, messages).resolution
+      .completion.finalText,
+    "",
+  );
+
+  const unsettledContinuation = [
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "later unsettled preface" },
+        { type: "toolCall", name: "todo", id: "call-2" },
+      ],
+      stopReason: "toolUse",
+    },
+    {
+      role: "toolResult",
+      toolCallId: "call-2",
+      content: [],
+      isError: false,
+    },
+    {
+      role: "assistant",
+      content: [],
+      stopReason: "stop",
+    },
+  ];
+  for (const message of unsettledContinuation) {
+    listener?.({ type: "message_end", message });
+  }
+  const messagesAfterSettledBoundary = [...messages, ...unsettledContinuation];
+  assert.equal(
+    projector.resolve({ kind: "absent" }, messagesAfterSettledBoundary)
+      .resolution.completion.finalText,
+    "",
+  );
+  listener?.({ type: "agent_settled" });
+  assert.equal(settledOutcomes.length, 2);
+  assert.equal(
+    projector.resolve({ kind: "absent" }, messagesAfterSettledBoundary)
+      .resolution.completion.finalText,
+    "later unsettled preface",
+  );
+
+  projector.reset();
+  assert.equal(
+    projector.resolve({ kind: "absent" }, messages).resolution.completion
+      .finalText,
+    "",
+  );
+  projector.dispose();
+  assert.equal(unsubscribed, true);
+});
+
+test("Rin settled completion promotes a successful durable tool preface only when no deliverable terminal follows", () => {
+  const toolPreface = {
+    role: "assistant",
+    content: [
+      { type: "text", text: "durable tool preface" },
+      { type: "toolCall", name: "todo", id: "call-1" },
+    ],
+    stopReason: "toolUse",
+  };
+  const successfulToolResult = {
+    role: "toolResult",
+    toolCallId: "call-1",
+    content: [],
+    isError: false,
+  };
+  const emptyStop = {
+    role: "assistant",
+    content: [{ type: "text", text: "" }],
+    stopReason: "stop",
+  };
+
+  const afterEmpty = resolveRinSettledTurnTerminalOutcomeFromMessages([
+    toolPreface,
+    successfulToolResult,
+    emptyStop,
+  ]);
+  assert.equal(afterEmpty.kind, "complete");
+  assert.equal(
+    afterEmpty.resolution.completion.finalText,
+    "durable tool preface",
+  );
+  assert.deepEqual(afterEmpty.resolution.completion.result.messages, [
+    { type: "text", text: "durable tool preface" },
+  ]);
+
+  const afterSuccessfulToolOnlyContinuation =
+    resolveRinSettledTurnTerminalOutcomeFromMessages([
+      toolPreface,
+      successfulToolResult,
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", name: "read", id: "call-2" }],
+        stopReason: "toolUse",
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call-2",
+        content: [],
+        isError: false,
+      },
+      emptyStop,
+    ]);
+  assert.equal(afterSuccessfulToolOnlyContinuation.kind, "complete");
+  assert.equal(
+    afterSuccessfulToolOnlyContinuation.resolution.completion.finalText,
+    "durable tool preface",
+  );
+
+  const laterPostToolText = resolveRinSettledTurnTerminalOutcomeFromMessages([
+    toolPreface,
+    successfulToolResult,
+    {
+      role: "assistant",
+      content: [
+        { type: "toolCall", name: "read", id: "call-3" },
+        { type: "text", text: "later durable post-tool text" },
+      ],
+      stopReason: "toolUse",
+    },
+    {
+      role: "toolResult",
+      toolCallId: "call-3",
+      content: [],
+      isError: false,
+    },
+    emptyStop,
+  ]);
+  assert.equal(laterPostToolText.kind, "complete");
+  assert.equal(
+    laterPostToolText.resolution.completion.finalText,
+    "later durable post-tool text",
+  );
+
+  const toolShapedSummary = {
+    type: "compaction",
+    role: "assistant",
+    content: [
+      { type: "text", text: "summary must stay outside tool authority" },
+      { type: "toolCall", name: "read", id: "summary-call" },
+    ],
+  };
+  for (const messages of [
+    [toolPreface, successfulToolResult, toolShapedSummary, emptyStop],
+    [toolPreface, successfulToolResult, emptyStop, toolShapedSummary],
+  ]) {
+    const aroundSummary =
+      resolveRinSettledTurnTerminalOutcomeFromMessages(messages);
+    assert.equal(aroundSummary.kind, "complete");
+    assert.equal(
+      aroundSummary.resolution.completion.finalText,
+      "durable tool preface",
+    );
+  }
+
+  for (const messages of [
+    [
+      toolPreface,
+      successfulToolResult,
+      { type: "notification", role: "assistant", content: [] },
+      emptyStop,
+    ],
+    [
+      toolPreface,
+      successfulToolResult,
+      emptyStop,
+      { type: "fragment", role: "assistant", content: [] },
+    ],
+    [
+      toolPreface,
+      successfulToolResult,
+      { role: " assistant ", content: [] },
+      emptyStop,
+    ],
+  ]) {
+    const aroundUnknownRecord =
+      resolveRinSettledTurnTerminalOutcomeFromMessages(messages);
+    assert.equal(aroundUnknownRecord.kind, "complete");
+    assert.deepEqual(
+      aroundUnknownRecord.resolution.completion.result.messages,
+      [],
+    );
+  }
+
+  const canonicalFinal = resolveRinSettledTurnTerminalOutcomeFromMessages([
+    toolPreface,
+    successfulToolResult,
+    {
+      role: "assistant",
+      content: [{ type: "text", text: "later canonical final" }],
+      stopReason: "stop",
+    },
+  ]);
+  assert.equal(canonicalFinal.kind, "complete");
+  assert.equal(
+    canonicalFinal.resolution.completion.finalText,
+    "later canonical final",
+  );
+});
+
+test("Rin settled completion preserves error, media, summary, and failed-tool boundaries", () => {
+  const preface = {
+    role: "assistant",
+    content: [
+      { type: "text", text: "must not override the settled boundary" },
+      { type: "toolCall", name: "read", id: "call-boundary" },
+    ],
+    stopReason: "toolUse",
+  };
+
+  const failed = resolveRinSettledTurnTerminalOutcomeFromMessages([
+    preface,
+    {
+      role: "toolResult",
+      toolCallId: "call-boundary",
+      content: [],
+      isError: false,
+    },
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", name: "read", id: "call-later" }],
+      stopReason: "toolUse",
+    },
+    {
+      role: "toolResult",
+      toolCallId: "call-later",
+      content: [{ type: "text", text: "later read failed" }],
+      isError: true,
+    },
+    { role: "assistant", content: [], stopReason: "stop" },
+  ]);
+  assert.equal(failed.kind, "complete");
+  assert.deepEqual(failed.resolution.completion.result.messages, []);
+
+  for (const stopReason of [undefined, " stop "]) {
+    const implicitOrMalformedEmptyTerminal =
+      resolveRinSettledTurnTerminalOutcomeFromMessages([
+        preface,
+        {
+          role: "toolResult",
+          toolCallId: "call-boundary",
+          content: [],
+          isError: false,
+        },
+        {
+          role: "assistant",
+          content: [],
+          ...(stopReason === undefined ? {} : { stopReason }),
+        },
+      ]);
+    assert.equal(implicitOrMalformedEmptyTerminal.kind, "complete");
+    assert.deepEqual(
+      implicitOrMalformedEmptyTerminal.resolution.completion.result.messages,
+      [],
+    );
+  }
+
+  for (const isError of [undefined, "false"]) {
+    const implicitOrMalformedToolSuccess =
+      resolveRinSettledTurnTerminalOutcomeFromMessages([
+        preface,
+        {
+          role: "toolResult",
+          toolCallId: "call-boundary",
+          content: [],
+          ...(isError === undefined ? {} : { isError }),
+        },
+        { role: "assistant", content: [], stopReason: "stop" },
+      ]);
+    assert.equal(implicitOrMalformedToolSuccess.kind, "complete");
+    assert.deepEqual(
+      implicitOrMalformedToolSuccess.resolution.completion.result.messages,
+      [],
+    );
+  }
+
+  for (const stopReason of [undefined, "stop", " toolUse "]) {
+    const implicitOrMalformedToolUse =
+      resolveRinSettledTurnTerminalOutcomeFromMessages([
+        {
+          role: "assistant",
+          content: preface.content,
+          ...(stopReason === undefined ? {} : { stopReason }),
+        },
+        {
+          role: "toolResult",
+          toolCallId: "call-boundary",
+          content: [],
+          isError: false,
+        },
+        { role: "assistant", content: [], stopReason: "stop" },
+      ]);
+    assert.equal(implicitOrMalformedToolUse.kind, "complete");
+    assert.deepEqual(
+      implicitOrMalformedToolUse.resolution.completion.result.messages,
+      [],
+    );
+  }
+
+  const earlierEmptyTerminal = resolveRinSettledTurnTerminalOutcomeFromMessages(
+    [
+      preface,
+      {
+        role: "toolResult",
+        toolCallId: "call-boundary",
+        content: [],
+        isError: false,
+      },
+      { role: "assistant", content: [], stopReason: "stop" },
+      { role: "assistant", content: [], stopReason: "stop" },
+    ],
+  );
+  assert.equal(earlierEmptyTerminal.kind, "complete");
+  assert.deepEqual(
+    earlierEmptyTerminal.resolution.completion.result.messages,
+    [],
+  );
+
+  const emptyToolUseContinuation =
+    resolveRinSettledTurnTerminalOutcomeFromMessages([
+      preface,
+      {
+        role: "toolResult",
+        toolCallId: "call-boundary",
+        content: [],
+        isError: false,
+      },
+      { role: "assistant", content: [], stopReason: "toolUse" },
+      { role: "assistant", content: [], stopReason: "stop" },
+    ]);
+  assert.equal(emptyToolUseContinuation.kind, "complete");
+  assert.deepEqual(
+    emptyToolUseContinuation.resolution.completion.result.messages,
+    [],
+  );
+
+  const errorThenEmpty = resolveRinSettledTurnTerminalOutcomeFromMessages([
+    preface,
+    {
+      role: "toolResult",
+      toolCallId: "call-boundary",
+      content: [],
+      isError: false,
+    },
+    {
+      role: "assistant",
+      content: [],
+      stopReason: "error",
+      errorMessage: "failed attempt before empty stop",
+    },
+    { role: "assistant", content: [], stopReason: "stop" },
+  ]);
+  assert.equal(errorThenEmpty.kind, "complete");
+  assert.deepEqual(errorThenEmpty.resolution.completion.result.messages, []);
+
+  const resultAfterTerminal = resolveRinSettledTurnTerminalOutcomeFromMessages([
+    preface,
+    {
+      role: "toolResult",
+      toolCallId: "call-boundary",
+      content: [],
+      isError: false,
+    },
+    { role: "assistant", content: [], stopReason: "stop" },
+    {
+      role: "toolResult",
+      toolCallId: "unexpected-after-terminal",
+      content: [],
+      isError: false,
+    },
+  ]);
+  assert.equal(resultAfterTerminal.kind, "complete");
+  assert.deepEqual(
+    resultAfterTerminal.resolution.completion.result.messages,
+    [],
+  );
+
+  const outOfOrderToolResults =
+    resolveRinSettledTurnTerminalOutcomeFromMessages([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "must preserve tool result order" },
+          { type: "toolCall", name: "read", id: "call-order-a" },
+          { type: "toolCall", name: "read", id: "call-order-b" },
+        ],
+        stopReason: "toolUse",
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call-order-b",
+        content: [],
+        isError: false,
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call-order-a",
+        content: [],
+        isError: false,
+      },
+      { role: "assistant", content: [], stopReason: "stop" },
+    ]);
+  assert.equal(outOfOrderToolResults.kind, "complete");
+  assert.deepEqual(
+    outOfOrderToolResults.resolution.completion.result.messages,
+    [],
+  );
+
+  const overlappingToolCycles =
+    resolveRinSettledTurnTerminalOutcomeFromMessages([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "must settle each tool cycle" },
+          { type: "toolCall", name: "read", id: "call-cycle-a" },
+        ],
+        stopReason: "toolUse",
+      },
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", name: "read", id: "call-cycle-b" }],
+        stopReason: "toolUse",
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call-cycle-a",
+        content: [],
+        isError: false,
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call-cycle-b",
+        content: [],
+        isError: false,
+      },
+      { role: "assistant", content: [], stopReason: "stop" },
+    ]);
+  assert.equal(overlappingToolCycles.kind, "complete");
+  assert.deepEqual(
+    overlappingToolCycles.resolution.completion.result.messages,
+    [],
+  );
+
+  const normalizedToolIdMismatch =
+    resolveRinSettledTurnTerminalOutcomeFromMessages([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "tool IDs are opaque" },
+          { type: "toolCall", name: "read", id: " call-exact" },
+        ],
+        stopReason: "toolUse",
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call-exact",
+        content: [],
+        isError: false,
+      },
+      { role: "assistant", content: [], stopReason: "stop" },
+    ]);
+  assert.equal(normalizedToolIdMismatch.kind, "complete");
+  assert.deepEqual(
+    normalizedToolIdMismatch.resolution.completion.result.messages,
+    [],
+  );
+
+  const distinctWhitespaceToolIds =
+    resolveRinSettledTurnTerminalOutcomeFromMessages([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "distinct opaque tool IDs" },
+          { type: "toolCall", name: "read", id: "call-space" },
+          { type: "toolCall", name: "read", id: " call-space" },
+        ],
+        stopReason: "toolUse",
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call-space",
+        content: [],
+        isError: false,
+      },
+      {
+        role: "toolResult",
+        toolCallId: " call-space",
+        content: [],
+        isError: false,
+      },
+      { role: "assistant", content: [], stopReason: "stop" },
+    ]);
+  assert.equal(distinctWhitespaceToolIds.kind, "complete");
+  assert.equal(
+    distinctWhitespaceToolIds.resolution.completion.finalText,
+    "distinct opaque tool IDs",
+  );
+
+  const duplicateToolCallId = resolveRinSettledTurnTerminalOutcomeFromMessages([
+    preface,
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", name: "read", id: "call-boundary" }],
+      stopReason: "toolUse",
+    },
+    {
+      role: "toolResult",
+      toolCallId: "call-boundary",
+      content: [],
+      isError: false,
+    },
+    {
+      role: "toolResult",
+      toolCallId: "call-boundary",
+      content: [],
+      isError: false,
+    },
+    { role: "assistant", content: [], stopReason: "stop" },
+  ]);
+  assert.equal(duplicateToolCallId.kind, "complete");
+  assert.deepEqual(
+    duplicateToolCallId.resolution.completion.result.messages,
+    [],
+  );
+
+  const orphanFailedResult = resolveRinSettledTurnTerminalOutcomeFromMessages([
+    preface,
+    {
+      role: "toolResult",
+      toolCallId: "call-boundary",
+      content: [],
+      isError: false,
+    },
+    {
+      role: "toolResult",
+      toolCallId: "orphan-failure",
+      content: [{ type: "text", text: "orphan failed" }],
+      isError: true,
+    },
+    { role: "assistant", content: [], stopReason: "stop" },
+  ]);
+  assert.equal(orphanFailedResult.kind, "complete");
+  assert.deepEqual(
+    orphanFailedResult.resolution.completion.result.messages,
+    [],
+  );
+
+  const toolTerminated = resolveRinSettledTurnTerminalOutcomeFromMessages([
+    preface,
+    {
+      role: "toolResult",
+      toolCallId: "call-boundary",
+      content: [],
+      isError: false,
+    },
+  ]);
+  assert.equal(toolTerminated.kind, "absent");
+
+  const toolCallAsFinalStop = resolveRinSettledTurnTerminalOutcomeFromMessages([
+    preface,
+    {
+      role: "toolResult",
+      toolCallId: "call-boundary",
+      content: [],
+      isError: false,
+    },
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", name: "read", id: "call-final" }],
+      stopReason: "stop",
+    },
+  ]);
+  assert.equal(toolCallAsFinalStop.kind, "absent");
+
+  const toolCallWithStopReasonStop =
+    resolveRinSettledTurnTerminalOutcomeFromMessages([
+      preface,
+      {
+        role: "toolResult",
+        toolCallId: "call-boundary",
+        content: [],
+        isError: false,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", name: "read", id: "call-malformed" }],
+        stopReason: "stop",
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call-malformed",
+        content: [],
+        isError: false,
+      },
+      { role: "assistant", content: [], stopReason: "stop" },
+    ]);
+  assert.equal(toolCallWithStopReasonStop.kind, "complete");
+  assert.deepEqual(
+    toolCallWithStopReasonStop.resolution.completion.result.messages,
+    [],
+  );
+
+  const emptyToolUseWithoutCall =
+    resolveRinSettledTurnTerminalOutcomeFromMessages([
+      preface,
+      {
+        role: "toolResult",
+        toolCallId: "call-boundary",
+        content: [],
+        isError: false,
+      },
+      { role: "assistant", content: [], stopReason: "toolUse" },
+      { role: "assistant", content: [], stopReason: "stop" },
+    ]);
+  assert.equal(emptyToolUseWithoutCall.kind, "complete");
+  assert.deepEqual(
+    emptyToolUseWithoutCall.resolution.completion.result.messages,
+    [],
+  );
+
+  const unsupportedEmptyTerminalContent =
+    resolveRinSettledTurnTerminalOutcomeFromMessages([
+      preface,
+      {
+        role: "toolResult",
+        toolCallId: "call-boundary",
+        content: [],
+        isError: false,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "custom", value: "not a Pi assistant part" }],
+        stopReason: "stop",
+      },
+    ]);
+  assert.equal(unsupportedEmptyTerminalContent.kind, "complete");
+  assert.deepEqual(
+    unsupportedEmptyTerminalContent.resolution.completion.result.messages,
+    [],
+  );
+
+  const ordinaryTextThenEmpty =
+    resolveRinSettledTurnTerminalOutcomeFromMessages([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "ordinary prior final" }],
+        stopReason: "stop",
+      },
+      { role: "assistant", content: [], stopReason: "stop" },
+    ]);
+  assert.equal(ordinaryTextThenEmpty.kind, "complete");
+  assert.deepEqual(
+    ordinaryTextThenEmpty.resolution.completion.result.messages,
+    [],
+  );
+
+  const providerError = resolveRinSettledTurnTerminalOutcomeFromMessages([
+    preface,
+    {
+      role: "assistant",
+      content: [],
+      stopReason: "error",
+      errorMessage: "provider failed",
+    },
+  ]);
+  assert.equal(providerError.kind, "error");
+  assert.equal(providerError.error, "provider failed");
+
+  const media = resolveRinSettledTurnTerminalOutcomeFromMessages([
+    preface,
+    {
+      role: "assistant",
+      content: [{ type: "image", data: "abc", mimeType: "image/webp" }],
+      stopReason: "stop",
+    },
+  ]);
+  assert.equal(media.kind, "complete");
+  assert.deepEqual(media.resolution.completion.result.messages, [
+    { type: "image", data: "abc", mimeType: "image/webp" },
+  ]);
+
+  const summaryOnly = resolveRinSettledTurnTerminalOutcomeFromMessages([
+    {
+      type: "compaction",
+      role: "assistant",
+      content: [{ type: "text", text: "raw summary" }],
+    },
+    { role: "assistant", content: [], stopReason: "stop" },
+  ]);
+  assert.equal(summaryOnly.kind, "complete");
+  assert.deepEqual(summaryOnly.resolution.completion.result.messages, []);
 });
 
 test("Rin turn completion classifies structured summaries before assistant terminals", () => {

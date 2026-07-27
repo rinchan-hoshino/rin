@@ -2,13 +2,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parseArgs as parsePiArgs } from "@earendil-works/pi-coding-agent";
 import {
-  RIN_TURN_TERMINAL_ABSENT,
-  resolveRinAuthoritativeTurnTerminalOutcome,
+  RinTurnSettlementProjector,
   resolveRinTurnFailureMessage,
-  resolveRinTurnTerminalOutcomeFromAssistantMessage,
-  resolveRinTurnTerminalOutcomeFromMessages,
   resolveRinTurnTerminalOutcomeFromTurnResult,
-  type RinTurnTerminalOutcome,
 } from "../rin-frontend-sdk/turn-completion.js";
 import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
 import {
@@ -429,24 +425,13 @@ async function runStandaloneTurn(
     thinkingLevel: options.thinkingLevel,
   });
 
-  let observedOutcome: RinTurnTerminalOutcome = RIN_TURN_TERMINAL_ABSENT;
-  const rawUnsubscribe = session.subscribe?.((event: any) => {
-    if (event?.type !== "message_end") return;
-    const outcome = resolveRinTurnTerminalOutcomeFromAssistantMessage(
-      event.message,
-    );
-    if (outcome.kind !== "absent") observedOutcome = outcome;
-  });
-  const unsubscribe =
-    typeof rawUnsubscribe === "function" ? rawUnsubscribe : undefined;
+  const turnSettlement = new RinTurnSettlementProjector(session);
 
   let disposed = false;
   const disposeAfterAbort = async () => {
     if (disposed) return;
     disposed = true;
-    try {
-      unsubscribe?.();
-    } catch {}
+    turnSettlement.dispose();
     try {
       await session.abort?.();
     } catch {}
@@ -484,12 +469,9 @@ async function runStandaloneTurn(
       })(),
       options.timeoutMs,
     );
-    const terminalOutcome = resolveRinAuthoritativeTurnTerminalOutcome(
+    const terminalOutcome = turnSettlement.resolve(
       resolveRinTurnTerminalOutcomeFromTurnResult(promptResult),
-      resolveRinTurnTerminalOutcomeFromMessages(
-        readTurnMessages(session, turnScope),
-      ),
-      observedOutcome,
+      readTurnMessages(session, turnScope),
     );
     if (terminalOutcome.kind === "absent") {
       throw new Error("rin_turn_settled_without_terminal");

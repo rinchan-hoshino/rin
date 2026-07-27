@@ -5,6 +5,8 @@ import {
   extractAssistantFinalText,
   extractExistingFilePaths,
   extractImageParts,
+  extractMessageText,
+  isAssistantFailedMessage,
 } from "../message-content.js";
 import { safeString } from "../text-utils.js";
 import {
@@ -91,13 +93,25 @@ export function resolveTurnCompletion(input: TurnCompletionInput = {}) {
   };
 }
 
-export function buildTurnResultFromMessages(messages: any[]): TurnResult {
-  const assistant = findRinTerminalMessage(asArray(messages));
-  if (!assistant || classifyRinTurnMessage(assistant) !== "complete") {
+export function buildTurnResultFromAssistantMessage(
+  assistant: any,
+  options: { allowToolCalls?: boolean } = {},
+): TurnResult {
+  if (
+    safeString(assistant?.role).trim() !== "assistant" ||
+    isAssistantFailedMessage(assistant)
+  ) {
     return { messages: [] };
   }
 
-  const text = extractAssistantFinalText(assistant);
+  const text = options.allowToolCalls
+    ? safeString(
+        extractMessageText(assistant.content, {
+          includeThinking: false,
+          trim: true,
+        }),
+      ).trim()
+    : extractAssistantFinalText(assistant);
   const images = extractImageParts(assistant.content);
   const files = extractExistingFilePaths(text);
   const result: TurnResultMessage[] = [];
@@ -115,4 +129,12 @@ export function buildTurnResultFromMessages(messages: any[]): TurnResult {
   }
 
   return { messages: result };
+}
+
+export function buildTurnResultFromMessages(messages: any[]): TurnResult {
+  const assistant = findRinTerminalMessage(asArray(messages));
+  if (!assistant || classifyRinTurnMessage(assistant) !== "complete") {
+    return { messages: [] };
+  }
+  return buildTurnResultFromAssistantMessage(assistant);
 }

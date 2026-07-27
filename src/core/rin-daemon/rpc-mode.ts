@@ -21,10 +21,8 @@ import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity
 import { resolveSubmittedTurnFromMessages } from "../rin-frontend-sdk/submitted-turn.js";
 import {
   RIN_TURN_TERMINAL_ABSENT,
-  resolveRinAuthoritativeTurnTerminalOutcome,
+  RinTurnSettlementProjector,
   resolveRinTurnFailureMessage,
-  resolveRinTurnTerminalOutcomeFromAssistantMessage,
-  resolveRinTurnTerminalOutcomeFromMessages,
   resolveRinTurnTerminalOutcomeFromTurnResult,
   type RinTurnTerminalOutcome,
 } from "../rin-frontend-sdk/turn-completion.js";
@@ -517,15 +515,6 @@ function captureTurnScopeBeforeUserMessage(
   };
 }
 
-function resolveTurnOutcomeSinceScope(
-  session: any,
-  scope: RinTurnScope,
-): RinTurnTerminalOutcome {
-  return resolveRinTurnTerminalOutcomeFromMessages(
-    readTurnMessages(session, scope),
-  );
-}
-
 function isInterruptedTurnResumable(session: any) {
   if (session?.agent?.signal) return true;
   const messages = Array.isArray(session?.agent?.state?.messages)
@@ -846,7 +835,6 @@ export async function runCustomRpcMode(
     latestAutoRetryFailureMessage = "";
     const turnSession = getSession();
     let terminalScope = captureTurnScope(turnSession);
-    let observedOutcome: RinTurnTerminalOutcome = RIN_TURN_TERMINAL_ABSENT;
     const trackedTurn = turnCoordinator.openTurn(
       requestTag,
       (message) => {
@@ -855,28 +843,15 @@ export async function runCustomRpcMode(
           message,
           terminalScope,
         );
-        observedOutcome = RIN_TURN_TERMINAL_ABSENT;
+        turnSettlement.reset();
       },
       options.interrupt,
     );
-    const agentSettledOutcome = trackedTurn.firstSettlement;
-    const rawUnsubscribeObservedCompletion = turnSession.subscribe?.(
-      (event: any) => {
-        if (event?.type === "message_end") {
-          const outcome = resolveRinTurnTerminalOutcomeFromAssistantMessage(
-            event.message,
-          );
-          if (outcome.kind !== "absent") observedOutcome = outcome;
-          return;
-        }
-        if (event?.type !== "agent_settled") return;
-        trackedTurn.observeAgentSettlement(observedOutcome);
-      },
+    const turnSettlement = new RinTurnSettlementProjector(
+      turnSession,
+      (outcome) => trackedTurn.observeAgentSettlement(outcome),
     );
-    const unsubscribeObservedCompletion =
-      typeof rawUnsubscribeObservedCompletion === "function"
-        ? rawUnsubscribeObservedCompletion
-        : undefined;
+    const agentSettledOutcome = trackedTurn.firstSettlement;
     const currentTurnGeneration = trackedTurn.turnGeneration;
     const promise = (async () => {
       const forceTurnEvents = options.forceTurnEvents === true;
@@ -1006,14 +981,9 @@ export async function runCustomRpcMode(
         // compaction, and queued continuations. If the outer prompt promise is
         // wedged after that boundary, do not let transport bookkeeping keep the
         // canonical terminal open.
-        const branchOutcome = resolveTurnOutcomeSinceScope(
-          turnSession,
-          terminalScope,
-        );
-        const terminalOutcome = resolveRinAuthoritativeTurnTerminalOutcome(
+        const terminalOutcome = turnSettlement.resolve(
           directOutcome,
-          branchOutcome,
-          observedOutcome,
+          readTurnMessages(turnSession, terminalScope),
         );
         if (terminalOutcome.kind === "absent") {
           if (producerOutcome.source === "turn_cancelled") {
@@ -1043,13 +1013,9 @@ export async function runCustomRpcMode(
         commitTurnTerminal(terminalOutcome);
       } catch (error: any) {
         if (gracefulSessionShutdown) {
-          let recoveredBranchOutcome: RinTurnTerminalOutcome =
-            RIN_TURN_TERMINAL_ABSENT;
+          let recoveredMessages: any[] = [];
           try {
-            recoveredBranchOutcome = resolveTurnOutcomeSinceScope(
-              turnSession,
-              terminalScope,
-            );
+            recoveredMessages = readTurnMessages(turnSession, terminalScope);
           } catch (branchError: any) {
             if (directOutcome.kind === "absent") {
               commitTurnTerminal({
@@ -1063,10 +1029,9 @@ export async function runCustomRpcMode(
           }
           let recoveredOutcome: RinTurnTerminalOutcome;
           try {
-            recoveredOutcome = resolveRinAuthoritativeTurnTerminalOutcome(
+            recoveredOutcome = turnSettlement.resolveUnsettled(
               directOutcome,
-              recoveredBranchOutcome,
-              observedOutcome,
+              recoveredMessages,
             );
           } catch (authorityError: any) {
             commitTurnTerminal({
@@ -1107,7 +1072,7 @@ export async function runCustomRpcMode(
         if (retryFailureMessage) throw new Error(retryFailureMessage);
         throw error;
       } finally {
-        unsubscribeObservedCompletion?.();
+        turnSettlement.dispose();
         if (heartbeatTimer) clearInterval(heartbeatTimer);
         turnCoordinator.closeTurn(trackedTurn);
       }

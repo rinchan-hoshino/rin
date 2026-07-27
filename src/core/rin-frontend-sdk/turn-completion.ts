@@ -1,4 +1,7 @@
-import { isAssistantFailedMessage } from "../message-content.js";
+import {
+  extractToolCallParts,
+  isAssistantFailedMessage,
+} from "../message-content.js";
 import {
   classifyRinTurnMessage,
   findRinTerminalMessage,
@@ -6,7 +9,10 @@ import {
   isRinTerminalAssistantMessage,
   rinTurnMessageValue,
 } from "../session/turn-message.js";
-import { resolveTurnCompletion } from "../session/turn-result.js";
+import {
+  buildTurnResultFromAssistantMessage,
+  resolveTurnCompletion,
+} from "../session/turn-result.js";
 import { safeString } from "../text-utils.js";
 
 export {
@@ -158,6 +164,237 @@ export function resolveRinTurnTerminalOutcomeFromMessages(
   return terminalMessage
     ? resolveRinTurnTerminalOutcomeFromAssistantMessage(terminalMessage)
     : RIN_TURN_TERMINAL_ABSENT;
+}
+
+function lastRinTerminalMessageIndex(messages: any[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (isRinSessionSummaryMessage(messages[index])) continue;
+    if (classifyRinTurnMessage(messages[index]) !== "nonterminal") return index;
+  }
+  return -1;
+}
+
+function rinConversationRole(rawMessage: any) {
+  const role = rinTurnMessageValue(rawMessage)?.role;
+  return typeof role === "string" ? role : "";
+}
+
+function isRinConversationRecord(rawMessage: any) {
+  if (isRinSessionSummaryMessage(rawMessage)) return true;
+  const outer = rawMessage && typeof rawMessage === "object" ? rawMessage : {};
+  const value = rinTurnMessageValue(outer);
+  const outerType = safeString(outer?.type);
+  if (value === outer) {
+    if (outerType) return false;
+  } else if (outerType && outerType !== "message") {
+    return false;
+  }
+  if (
+    safeString(outer?.customType) ||
+    (value !== outer && safeString(value?.type)) ||
+    safeString(value?.customType)
+  ) {
+    return false;
+  }
+  const role = rinConversationRole(rawMessage);
+  return role === "user" || role === "assistant" || role === "toolResult";
+}
+
+function lastPiConversationMessageIndex(messages: any[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const rawMessage = messages[index];
+    if (isRinSessionSummaryMessage(rawMessage)) continue;
+    const role = rinConversationRole(rawMessage);
+    if (role === "user" || role === "assistant" || role === "toolResult") {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function settledTurnMessagesUseOnlyConversationRoles(messages: any[]) {
+  return messages.every((rawMessage) => isRinConversationRecord(rawMessage));
+}
+
+function settledTurnToolResultsSucceeded(
+  messages: any[],
+  terminalIndex: number,
+) {
+  const seenToolCallIds = new Set<string>();
+  let pendingToolCallIds: string[] = [];
+  for (let index = 0; index < terminalIndex; index += 1) {
+    const rawMessage = messages[index];
+    if (isRinSessionSummaryMessage(rawMessage)) continue;
+    const message = rinTurnMessageValue(rawMessage);
+    const role = rinConversationRole(rawMessage);
+    if (role === "assistant") {
+      if (pendingToolCallIds.length > 0) return false;
+      const toolCalls = extractToolCallParts(message?.content);
+      if (toolCalls.length === 0) continue;
+      if (message?.stopReason !== "toolUse") return false;
+      pendingToolCallIds = toolCalls.map((toolCall) =>
+        safeString(toolCall?.id || toolCall?.toolCallId),
+      );
+      for (const toolCallId of pendingToolCallIds) {
+        if (!toolCallId.trim() || seenToolCallIds.has(toolCallId)) return false;
+        seenToolCallIds.add(toolCallId);
+      }
+      continue;
+    }
+    if (role !== "toolResult") {
+      if (pendingToolCallIds.length > 0) return false;
+      continue;
+    }
+    const toolCallId = safeString(message?.toolCallId);
+    if (
+      !toolCallId.trim() ||
+      message?.isError !== false ||
+      pendingToolCallIds[0] !== toolCallId
+    ) {
+      return false;
+    }
+    pendingToolCallIds.shift();
+  }
+  return pendingToolCallIds.length === 0;
+}
+
+function settledTerminalAssistantContentIsExplicitlyEmpty(message: any) {
+  if (!Array.isArray(message?.content)) return false;
+  return message.content.every((part: any) => {
+    if (!part || typeof part !== "object" || Array.isArray(part)) return false;
+    if (part.type === "thinking") return typeof part.thinking === "string";
+    return (
+      part.type === "text" &&
+      typeof part.text === "string" &&
+      part.text.trim().length === 0
+    );
+  });
+}
+
+export function resolveRinSettledTurnTerminalOutcomeFromMessages(
+  messages: any[],
+): RinTurnTerminalOutcome {
+  const terminalOutcome = resolveRinTurnTerminalOutcomeFromMessages(messages);
+  const terminalIndex = lastRinTerminalMessageIndex(messages);
+  const terminalMessage =
+    terminalIndex < 0 ? null : rinTurnMessageValue(messages[terminalIndex]);
+  if (
+    terminalOutcome.kind !== "complete" ||
+    terminalOutcome.resolution.completion.result.messages.length > 0 ||
+    !terminalMessage ||
+    terminalMessage.stopReason !== "stop" ||
+    !settledTerminalAssistantContentIsExplicitlyEmpty(terminalMessage) ||
+    extractToolCallParts(terminalMessage.content).length > 0 ||
+    !settledTurnMessagesUseOnlyConversationRoles(messages) ||
+    terminalIndex !== lastPiConversationMessageIndex(messages) ||
+    !settledTurnToolResultsSucceeded(messages, terminalIndex)
+  ) {
+    return terminalOutcome;
+  }
+
+  for (let index = terminalIndex - 1; index >= 0; index -= 1) {
+    const rawMessage = messages[index];
+    if (isRinSessionSummaryMessage(rawMessage)) continue;
+    const message = rinTurnMessageValue(rawMessage);
+    const role = rinConversationRole(rawMessage);
+    if (
+      role === "user" ||
+      classifyRinTurnMessage(rawMessage) !== "nonterminal"
+    ) {
+      return terminalOutcome;
+    }
+    if (role !== "assistant") continue;
+    const result = buildTurnResultFromAssistantMessage(message, {
+      allowToolCalls: true,
+    });
+    if (!result.messages.length) continue;
+    if (
+      message?.stopReason !== "toolUse" ||
+      !extractToolCallParts(message?.content).length
+    ) {
+      return terminalOutcome;
+    }
+    return {
+      kind: "complete",
+      resolution: {
+        messages: [message],
+        completion: resolveTurnCompletion({ result }),
+      },
+      comparison: "structured",
+    };
+  }
+
+  return terminalOutcome;
+}
+
+export class RinTurnSettlementProjector {
+  private readonly observedMessages: any[] = [];
+  private readonly unsubscribe?: () => void;
+  private agentSettled = false;
+
+  constructor(
+    session: any,
+    onAgentSettled?: (outcome: RinTurnTerminalOutcome) => void,
+  ) {
+    const rawUnsubscribe = session?.subscribe?.((event: any) => {
+      if (event?.type === "message_end") {
+        this.observedMessages.push(event.message);
+        this.agentSettled = false;
+        return;
+      }
+      if (event?.type !== "agent_settled") return;
+      this.agentSettled = true;
+      onAgentSettled?.(
+        resolveRinSettledTurnTerminalOutcomeFromMessages(this.observedMessages),
+      );
+    });
+    this.unsubscribe =
+      typeof rawUnsubscribe === "function" ? rawUnsubscribe : undefined;
+  }
+
+  reset() {
+    this.observedMessages.length = 0;
+    this.agentSettled = false;
+  }
+
+  resolve(
+    direct: RinTurnTerminalOutcome,
+    durableMessages: any[],
+  ): RinTurnTerminalOutcome {
+    return this.resolveWithSettlement(
+      direct,
+      durableMessages,
+      this.agentSettled,
+    );
+  }
+
+  resolveUnsettled(
+    direct: RinTurnTerminalOutcome,
+    durableMessages: any[],
+  ): RinTurnTerminalOutcome {
+    return this.resolveWithSettlement(direct, durableMessages, false);
+  }
+
+  dispose() {
+    try {
+      this.unsubscribe?.();
+    } catch {}
+  }
+
+  private resolveWithSettlement(
+    direct: RinTurnTerminalOutcome,
+    durableMessages: any[],
+    settled: boolean,
+  ) {
+    const resolveMessages = settled
+      ? resolveRinSettledTurnTerminalOutcomeFromMessages
+      : resolveRinTurnTerminalOutcomeFromMessages;
+    return resolveRinAuthoritativeTurnTerminalOutcome(
+      direct,
+      resolveMessages(durableMessages),
+      resolveMessages(this.observedMessages),
+    );
+  }
 }
 
 export function resolveRinTurnCompletionFromAssistantMessage(

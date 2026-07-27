@@ -1,11 +1,7 @@
 import {
-  RIN_TURN_TERMINAL_ABSENT,
-  resolveRinAuthoritativeTurnTerminalOutcome,
+  RinTurnSettlementProjector,
   resolveRinTurnFailureMessage,
-  resolveRinTurnTerminalOutcomeFromAssistantMessage,
-  resolveRinTurnTerminalOutcomeFromMessages,
   resolveRinTurnTerminalOutcomeFromTurnResult,
-  type RinTurnTerminalOutcome,
 } from "../rin-frontend-sdk/turn-completion.js";
 
 import { openBoundSession } from "./factory.js";
@@ -20,16 +16,7 @@ export async function runSessionPrompt(options: {
   sessionFile?: string;
 }) {
   const { session, runtime } = await openBoundSession(options);
-  let observedOutcome: RinTurnTerminalOutcome = RIN_TURN_TERMINAL_ABSENT;
-  const rawUnsubscribe = session.subscribe?.((event: any) => {
-    if (event?.type !== "message_end") return;
-    const outcome = resolveRinTurnTerminalOutcomeFromAssistantMessage(
-      event.message,
-    );
-    if (outcome.kind !== "absent") observedOutcome = outcome;
-  });
-  const unsubscribe =
-    typeof rawUnsubscribe === "function" ? rawUnsubscribe : undefined;
+  const turnSettlement = new RinTurnSettlementProjector(session);
   try {
     const turnScope = captureTurnScope(session);
     const promptResult: any = await session.prompt(options.prompt, {
@@ -37,12 +24,9 @@ export async function runSessionPrompt(options: {
       source: "rpc" as any,
     });
     await session.agent.waitForIdle();
-    const terminalOutcome = resolveRinAuthoritativeTurnTerminalOutcome(
+    const terminalOutcome = turnSettlement.resolve(
       resolveRinTurnTerminalOutcomeFromTurnResult(promptResult),
-      resolveRinTurnTerminalOutcomeFromMessages(
-        readTurnMessages(session, turnScope),
-      ),
-      observedOutcome,
+      readTurnMessages(session, turnScope),
     );
     if (terminalOutcome.kind === "absent") {
       throw new Error("rin_turn_settled_without_terminal");
@@ -66,9 +50,7 @@ export async function runSessionPrompt(options: {
       finalText: completion.finalText,
     };
   } finally {
-    try {
-      unsubscribe?.();
-    } catch {}
+    turnSettlement.dispose();
     try {
       await session.abort();
     } catch {}

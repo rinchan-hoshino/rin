@@ -4030,7 +4030,7 @@ test(
 );
 
 test(
-  "rpc mode completes stored branch finals without message_end, including empty text",
+  "rpc mode completes stored branch finals without treating task return as agent settlement",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -4064,23 +4064,58 @@ test(
         subscribe: () => () => {},
         prompt: async () => {
           promptCount += 1;
-          const assistantMessage = {
-            role: "assistant",
-            timestamp: Date.now(),
-            content: [
-              {
-                type: "text",
-                text: promptCount === 1 ? "final from stored session" : "",
-              },
-            ],
-          };
-          stateMessages.push(assistantMessage);
-          durableEntries.push({
-            id: `stored-final-entry-${promptCount}`,
-            parentId: durableEntries.at(-1)?.id ?? null,
-            type: "message",
-            message: assistantMessage,
-          });
+          const promptMessages =
+            promptCount < 3
+              ? [
+                  {
+                    role: "assistant",
+                    timestamp: Date.now(),
+                    content: [
+                      {
+                        type: "text",
+                        text:
+                          promptCount === 1 ? "final from stored session" : "",
+                      },
+                    ],
+                  },
+                ]
+              : [
+                  {
+                    role: "assistant",
+                    content: [
+                      {
+                        type: "text",
+                        text: "must stay interim before agent settlement",
+                      },
+                      {
+                        type: "toolCall",
+                        name: "todo",
+                        id: "task-return-tool",
+                      },
+                    ],
+                    stopReason: "toolUse",
+                  },
+                  {
+                    role: "toolResult",
+                    toolCallId: "task-return-tool",
+                    content: [],
+                    isError: false,
+                  },
+                  {
+                    role: "assistant",
+                    content: [],
+                    stopReason: "stop",
+                  },
+                ];
+          for (const [index, message] of promptMessages.entries()) {
+            stateMessages.push(message);
+            durableEntries.push({
+              id: `stored-final-entry-${promptCount}-${index}`,
+              parentId: durableEntries.at(-1)?.id ?? null,
+              type: "message",
+              message,
+            });
+          }
         },
         sendCustomMessage: async () => {},
         steer: async () => {},
@@ -4143,6 +4178,12 @@ test(
         ),
       );
       await wait(100);
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "3", type: "prompt", message: "task before settled", requestTag: "tag-3" })}\n`,
+        ),
+      );
+      await wait(100);
 
       const events = parseRpcOutput(lines);
       const completions = events.filter(
@@ -4160,6 +4201,9 @@ test(
       assert.equal(completions[1]?.requestTag, "tag-2");
       assert.equal(completions[1]?.finalText, "");
       assert.deepEqual(completions[1]?.result, { messages: [] });
+      assert.equal(completions[2]?.requestTag, "tag-3");
+      assert.equal(completions[2]?.finalText, "");
+      assert.deepEqual(completions[2]?.result, { messages: [] });
       assert.deepEqual(errors, []);
     } finally {
       process.stdin.on = stdinOn;
@@ -4377,6 +4421,167 @@ test(
           finalText: event.finalText,
         })),
         [{ requestTag: "tag-settled", finalText: "durable settled final" }],
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
+  "rpc mode settles the current durable tool preface when Pi stops with an empty assistant message",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines: string[] = [];
+    const sessionSubscribers = new Set<(event: any) => void>();
+    const messages: any[] = [
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "stale previous final" }],
+        stopReason: "stop",
+      },
+    ];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/settled-tool-preface-session.jsonl",
+        sessionId: "settled-tool-preface-session",
+        agent: {
+          signal: undefined,
+          state: { isStreaming: false, messages },
+          waitForIdle: async () => {},
+        },
+        bindExtensions: async () => {},
+        subscribe: (handler: (event: any) => void) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
+        async prompt() {
+          await new Promise(() => {});
+        },
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: testSessionManager(() => messages),
+        messages,
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "turn-tool-preface", type: "prompt", message: "prepare the change", requestTag: "tag-tool-preface" })}\n`,
+        ),
+      );
+      await wait(10);
+
+      const toolPreface = {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Complete owner-facing response" },
+          {
+            type: "toolCall",
+            name: "todo",
+            id: "call-todo",
+            arguments: { todos: [] },
+          },
+        ],
+        stopReason: "toolUse",
+      };
+      const toolResult = {
+        role: "toolResult",
+        toolCallId: "call-todo",
+        toolName: "todo",
+        content: [{ type: "text", text: "[]" }],
+        isError: false,
+      };
+      const emptyStop = {
+        role: "assistant",
+        content: [{ type: "text", text: "" }],
+        stopReason: "stop",
+      };
+      messages.push(toolPreface, toolResult, emptyStop);
+      for (const handler of sessionSubscribers) {
+        handler({ type: "message_end", message: toolPreface });
+        handler({ type: "message_end", message: toolResult });
+        handler({ type: "message_end", message: emptyStop });
+        handler({ type: "agent_settled" });
+      }
+      await wait(20);
+
+      const terminals = parseRpcOutput(lines).filter(
+        (event) =>
+          event.type === "rpc_turn_event" &&
+          (event.event === "complete" || event.event === "error"),
+      );
+      assert.deepEqual(
+        terminals.map((event) => ({
+          event: event.event,
+          requestTag: event.requestTag,
+          finalText: event.finalText,
+          result: event.result,
+        })),
+        [
+          {
+            event: "complete",
+            requestTag: "tag-tool-preface",
+            finalText: "Complete owner-facing response",
+            result: {
+              messages: [
+                { type: "text", text: "Complete owner-facing response" },
+              ],
+            },
+          },
+        ],
       );
     } finally {
       process.stdin.on = stdinOn;
