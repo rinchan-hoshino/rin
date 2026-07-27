@@ -734,6 +734,48 @@ export default function extension(rin) {
   }
 });
 
+test("stage B background scanner resolves import-only Pi SDK dependencies", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-background-import-only-"),
+  );
+  const packageDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-background-import-only-pkg-"),
+  );
+  try {
+    await writeProviderPackage(
+      packageDir,
+      "rin-background-import-only-test",
+      `throw new Error("package main should not be imported");\n`,
+      { pi: { extensions: ["index.ts"] } },
+    );
+    await fs.writeFile(
+      path.join(packageDir, "index.ts"),
+      `import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+export default function extension(rin) {
+  rin.registerTool({ name: "ignored_foreground_tool", description: CONFIG_DIR_NAME });
+}\n`,
+      "utf8",
+    );
+    await writeJson(path.join(agentDir, "settings.json"), {
+      packages: [packageDir],
+    });
+
+    const warnings: string[] = [];
+    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+      cwd: agentDir,
+      agentDir,
+      logger: { warn: (message: string) => warnings.push(String(message)) },
+    });
+
+    assert.deepEqual(await manager.start(), []);
+    assert.deepEqual(manager.getChatAdapterProviders(), []);
+    assert.deepEqual(warnings, []);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+    await fs.rm(packageDir, { recursive: true, force: true });
+  }
+});
+
 test("stage B background extension manager ignores direct extensions without background parts", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-background-ignore-"),

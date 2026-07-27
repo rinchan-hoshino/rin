@@ -13,6 +13,7 @@ import {
   type RinBackgroundExtensionConfig,
 } from "../rin-extension-settings.js";
 import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
+import { resolveRuntimePackageAliases } from "../rin-lib/jiti-aliases.js";
 import type {
   ChatRuntimeExternalAdapterEntry,
   ChatRuntimeExternalAdapterProvider,
@@ -264,31 +265,6 @@ function resolveJitiStaticPath() {
   }
 }
 
-function resolveJitiAliases() {
-  const pkg = readJson(
-    path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "..",
-      "..",
-      "package.json",
-    ),
-  );
-  const names = Object.keys({
-    ...(pkg?.dependencies || {}),
-    ...(pkg?.devDependencies || {}),
-  });
-  return Object.fromEntries(
-    names.flatMap((name) => {
-      try {
-        return [[name, requireFromHere.resolve(name)]];
-      } catch {
-        return [];
-      }
-    }),
-  );
-}
-
 async function importBackgroundExtensionPath(modulePath: string) {
   if (modulePath.endsWith(".ts")) {
     const { createJiti } = await import(
@@ -296,7 +272,7 @@ async function importBackgroundExtensionPath(modulePath: string) {
     );
     const jiti = createJiti(import.meta.url, {
       moduleCache: false,
-      alias: resolveJitiAliases(),
+      alias: resolveRuntimePackageAliases({ includeDevDependencies: true }),
     });
     return await jiti.import(modulePath, { default: true });
   }

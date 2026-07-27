@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { extensionDataPath } from "../data-layout.js";
+import { resolveRuntimePackageAliases } from "./jiti-aliases.js";
 
 function text(value: unknown) {
   return typeof value === "string" ? value : value == null ? "" : String(value);
@@ -60,31 +61,6 @@ function resolveJitiStaticPath() {
   }
 }
 
-function resolveJitiAliases() {
-  const pkg = readJson(
-    path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "..",
-      "..",
-      "package.json",
-    ),
-  );
-  const names = Object.keys({
-    ...(pkg?.dependencies || {}),
-    ...(pkg?.devDependencies || {}),
-  });
-  return Object.fromEntries(
-    names.flatMap((name) => {
-      try {
-        return [[name, requireFromHere.resolve(name)]];
-      } catch {
-        return [];
-      }
-    }),
-  );
-}
-
 async function importExtensionModule(extensionPath: string) {
   if (extensionPath.endsWith(".ts")) {
     const { createJiti } = await import(
@@ -92,7 +68,7 @@ async function importExtensionModule(extensionPath: string) {
     );
     const jiti = createJiti(import.meta.url, {
       moduleCache: false,
-      alias: resolveJitiAliases(),
+      alias: resolveRuntimePackageAliases({ includeDevDependencies: true }),
     });
     return await jiti.import(extensionPath, { default: true });
   }
@@ -144,37 +120,13 @@ function resolveExtensionEntries(inputPath: string): string[] {
   });
 }
 
-function createSourceInfo(extensionPath: string) {
-  return {
-    path: extensionPath,
-    source: "local",
-    baseDir: path.dirname(extensionPath),
-  };
-}
-
-function createExtension(extensionPath: string) {
-  return {
-    path: extensionPath,
-    resolvedPath: extensionPath,
-    sourceInfo: createSourceInfo(extensionPath),
-    handlers: new Map(),
-    tools: new Map(),
-    messageRenderers: new Map(),
-    commands: new Map(),
-    flags: new Map(),
-    shortcuts: new Map(),
-  };
-}
-
-function createExtensionApi(
-  extension: any,
+function addRinExtensionApi(
+  piApi: any,
   options: { cwd: string; agentDir: string },
 ) {
-  const dataDir = path.join(options.agentDir, "data");
-  return {
-    cwd: options.cwd,
+  return Object.assign(piApi, {
     agentDir: options.agentDir,
-    dataDir,
+    dataDir: path.join(options.agentDir, "data"),
     runtimeRoot: extensionDataPath(options.agentDir, "runtime"),
     config: {},
     logger: { info: noop, warn: noop, error: noop },
@@ -183,82 +135,14 @@ function createExtensionApi(
     registerBackgroundService: noop,
     registerChatAdapter: noop,
     registerMemoryProvider: noop,
-    on(event: string, handler: unknown) {
-      const key = text(event).trim();
-      if (!key || typeof handler !== "function") return;
-      const handlers = extension.handlers.get(key) ?? [];
-      handlers.push(handler);
-      extension.handlers.set(key, handlers);
-    },
-    registerTool(tool: any) {
-      const name = text(tool?.name).trim();
-      if (!name) return;
-      extension.tools.set(name, {
-        definition: tool,
-        sourceInfo: extension.sourceInfo,
-      });
-    },
-    registerCommand(name: string, command: any) {
-      const key = text(name).trim();
-      if (!key) return;
-      extension.commands.set(key, {
-        name: key,
-        sourceInfo: extension.sourceInfo,
-        ...(command || {}),
-      });
-    },
-    registerShortcut(shortcut: string, shortcutOptions: any) {
-      const key = text(shortcut).trim();
-      if (!key) return;
-      extension.shortcuts.set(key, {
-        shortcut: key,
-        extensionPath: extension.path,
-        ...(shortcutOptions || {}),
-      });
-    },
-    registerFlag(name: string, flag: any) {
-      const key = text(name).trim();
-      if (!key) return;
-      extension.flags.set(key, {
-        name: key,
-        extensionPath: extension.path,
-        ...(flag || {}),
-      });
-      if (flag?.default !== undefined) {
-        extension.defaultFlagValues ??= new Map();
-        extension.defaultFlagValues.set(key, flag.default);
-      }
-    },
-    registerMessageRenderer(customType: string, renderer: unknown) {
-      const key = text(customType).trim();
-      if (!key || typeof renderer !== "function") return;
-      extension.messageRenderers.set(key, renderer);
-    },
-    registerProvider: noop,
-    unregisterProvider: noop,
-    getFlag: (name: string) =>
-      extension.defaultFlagValues?.get(text(name).trim()),
-    sendMessage: noop,
-    sendUserMessage: noop,
-    appendEntry: noop,
-    setSessionName: noop,
-    getSessionName: () => undefined,
-    setLabel: noop,
-    exec: async () => ({ stdout: "", stderr: "", exitCode: 1 }),
-    getActiveTools: () => [],
-    getAllTools: () => [],
-    setActiveTools: noop,
-    getCommands: () => [],
-    setModel: async () => false,
-    getThinkingLevel: () => "medium",
-    setThinkingLevel: noop,
-    events: { on: noop, off: noop, emit: noop },
-  };
+  });
 }
 
 async function loadRinExtension(
   extensionPath: string,
   options: { cwd: string; agentDir: string },
+  eventBus: any,
+  runtime: any,
 ) {
   const moduleValue = await importExtensionModule(extensionPath);
   const factory =
@@ -268,9 +152,14 @@ async function loadRinExtension(
         ? moduleValue.default
         : undefined;
   if (typeof factory !== "function") return undefined;
-  const extension = createExtension(extensionPath);
-  await factory(createExtensionApi(extension, options));
-  return extension;
+  const { loadPiExtensionFromFactory } = await import("../pi/private-api.js");
+  return await loadPiExtensionFromFactory(
+    (piApi: any) => factory(addRinExtensionApi(piApi, options)),
+    options.cwd,
+    eventBus,
+    runtime,
+    extensionPath,
+  );
 }
 
 function unique(values: string[]) {
@@ -325,10 +214,15 @@ export function createRinDefaultResourceLoader(PiAgentRuntime: any) {
         resolveExtensionEntries(resolvePath(entry, this.cwd)),
       )) {
         try {
-          const extension = await loadRinExtension(extensionPath, {
-            cwd: this.cwd,
-            agentDir: this.agentDir,
-          });
+          const extension = await loadRinExtension(
+            extensionPath,
+            {
+              cwd: this.cwd,
+              agentDir: this.agentDir,
+            },
+            this.eventBus,
+            this.extensionsResult.runtime,
+          );
           if (extension) loaded.push(extension);
         } catch (error: any) {
           errors.push({

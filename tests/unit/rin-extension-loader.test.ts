@@ -26,6 +26,25 @@ async function writeJson(filePath: string, value: unknown) {
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+async function writeImportOnlySdkExtensionPackage(dir: string) {
+  await fs.mkdir(dir, { recursive: true });
+  await writeJson(path.join(dir, "package.json"), {
+    name: "rin-import-only-sdk-extension-test",
+    version: "0.0.0",
+    type: "module",
+    pi: { extensions: ["index.ts"] },
+  });
+  await fs.writeFile(
+    path.join(dir, "index.ts"),
+    `import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+export default function extension(ctx) {
+  ctx.registerEntryRenderer("rin_import_only_entry", () => undefined);
+  ctx.registerTool({ name: "rin_import_only_sdk_tool", description: CONFIG_DIR_NAME, parameters: { type: "object", properties: {} }, execute() { return { content: [] }; } });
+}\n`,
+    "utf8",
+  );
+}
+
 async function writeExtensionPackage(dir: string) {
   await fs.mkdir(dir, { recursive: true });
   await writeJson(path.join(dir, "package.json"), {
@@ -216,6 +235,41 @@ test("Rin DefaultResourceLoader gives foreground extensions the Rin SDK surface"
     );
     assert.ok(tool);
     assert.equal(tool.description, path.join(agentDir, "data"));
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("Rin DefaultResourceLoader resolves import-only Pi SDK dependencies", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-ext-import-only-"),
+  );
+  const extensionDir = path.join(agentDir, "extension");
+  try {
+    await writeImportOnlySdkExtensionPackage(extensionDir);
+    await writeJson(path.join(agentDir, "settings.json"), {
+      extensions: [extensionDir],
+    });
+
+    const PiAgentRuntime = await loaderModule.loadRinAgentRuntime();
+    const settingsManager = PiAgentRuntime.SettingsManager.create(
+      agentDir,
+      agentDir,
+    );
+    const resourceLoader = new PiAgentRuntime.DefaultResourceLoader({
+      cwd: agentDir,
+      agentDir,
+      settingsManager,
+    });
+
+    await resourceLoader.reload();
+    const result = resourceLoader.getExtensions();
+    assert.deepEqual(result.errors, []);
+    const extension = result.extensions.find((entry: any) =>
+      entry.tools.has("rin_import_only_sdk_tool"),
+    );
+    assert.ok(extension);
+    assert.ok(extension.entryRenderers.has("rin_import_only_entry"));
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
