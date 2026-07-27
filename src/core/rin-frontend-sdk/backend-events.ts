@@ -228,6 +228,7 @@ export function createRinFrontendBackendEventTranslator(
   let latestAssistantFinalText = "";
   let activeToolBatch: ActiveToolBatch | null = null;
   let latestDeliveredAssistantSummary = "";
+  let compactionActive = false;
   const deliveredAssistantInterimTexts = new Set<string>();
 
   const resetAssistantSegments = () => {
@@ -351,6 +352,7 @@ export function createRinFrontendBackendEventTranslator(
       switch (payload.type) {
         case "agent_start":
           resetAssistantSegments();
+          compactionActive = false;
           return [
             {
               type: "turn_accepted",
@@ -452,13 +454,38 @@ export function createRinFrontendBackendEventTranslator(
           return events;
         }
         case "compaction_start":
+          compactionActive = true;
           return [
             {
               type: "compaction_start_notice",
               text: commandResponses.compactionStart,
             },
           ];
+        case "summarization_retry_scheduled": {
+          if (!compactionActive) return [];
+          const errorMessage = safeString(payload.errorMessage).trim();
+          if (!errorMessage) return [];
+          const attempt = Number(payload.attempt);
+          const maxAttempts = Number(payload.maxAttempts);
+          const delayMs = Number(payload.delayMs);
+          const retryProgress =
+            Number.isFinite(attempt) && Number.isFinite(maxAttempts)
+              ? ` (${attempt}/${maxAttempts})`
+              : "";
+          const retryDelay = Number.isFinite(delayMs)
+            ? ` in ${delayMs / 1_000}s`
+            : "";
+          return [
+            {
+              type: "passive_notice",
+              text: `[compaction]\n\nCompaction failed: ${errorMessage}\n\nRetrying${retryProgress}${retryDelay}...`,
+              level: "error",
+              deferDuringTurn: false,
+            },
+          ];
+        }
         case "compaction_end": {
+          compactionActive = false;
           const events: RinFrontendBackendEvent[] = [];
           const notice = formatCompactionSummaryCollapsedText(
             payload.tokensBefore ?? payload.result?.tokensBefore,

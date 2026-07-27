@@ -1727,6 +1727,46 @@ test("chat controller delivers non-deferred passive notices during active turns"
   ]);
 });
 
+test("chat controller delivers immediate passive errors as non-terminal errors", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  const claim = setDurableCurrentTurn(controller);
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    const text = nodes
+      .map((node) => node?.attrs?.content || "")
+      .filter(Boolean)
+      .join(" ");
+    deliveries.push({ text, kind: options?.deliveryKind });
+    return [`m-out-${deliveries.length}`];
+  };
+  controller.driver.frontendPhase = "working";
+  controller.driver.frontendState = { isStreaming: true, turnActive: true };
+
+  await controller.handleClientEvent({
+    type: "backend_event",
+    payload: {
+      type: "passive_notice",
+      text: "Compaction failed: summary backend unavailable",
+      level: "error",
+      deferDuringTurn: false,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(deliveries, [
+    {
+      text: "rin error: Compaction failed: summary backend unavailable",
+      kind: "error",
+    },
+  ]);
+  assert.deepEqual(
+    openChatDatabase(controller.agentDir)
+      .prepare(`SELECT state, terminal_kind FROM turns WHERE turn_id = ?`)
+      .get(claim.itemId),
+    { state: "running", terminal_kind: null },
+  );
+});
+
 test("chat controller renders todo notices as markdown for markdown chats", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];

@@ -3431,6 +3431,10 @@ export class ChatController {
           await this.sendTodoPassiveNoticeNow(event);
           return;
         }
+        if (event.level === "error" && event.deferDuringTurn === false) {
+          await this.sendErrorNoticeNow(event.text, { nonTerminalError: true });
+          return;
+        }
         if (event.deferDuringTurn === false) {
           await this.sendPassiveNoticeNow(event.text);
           return;

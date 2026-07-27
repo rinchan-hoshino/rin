@@ -209,6 +209,34 @@ test("backend working visibility is the only shared frontend Working source", as
   ]);
 });
 
+test("compaction retry errors bypass active-turn passive-notice deferral", async () => {
+  const driver = createDriver();
+  const seen: any[] = [];
+  driver.subscribe((event: any) => seen.push(event));
+  (driver as any).liveTurn = { requestTag: "turn-1" };
+  (driver as any).frontendState.isStreaming = true;
+  (driver as any).frontendState.turnActive = true;
+
+  await emitDriverEvent(driver, { type: "compaction_start" });
+  await emitDriverEvent(driver, {
+    type: "summarization_retry_scheduled",
+    attempt: 1,
+    maxAttempts: 3,
+    delayMs: 2_000,
+    errorMessage: "summary backend unavailable",
+  });
+
+  assert.deepEqual(seen, [
+    { type: "compaction_start_notice", text: "Compacting..." },
+    {
+      type: "passive_notice",
+      text: "[compaction]\n\nCompaction failed: summary backend unavailable\n\nRetrying (1/3) in 2s...",
+      level: "error",
+      deferDuringTurn: false,
+    },
+  ]);
+});
+
 async function emitRpcTurnComplete(
   driver: any,
   requestTag: string,
