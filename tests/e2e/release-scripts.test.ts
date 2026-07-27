@@ -523,6 +523,31 @@ test("local release executor owns all four channels without GitHub Actions", () 
   assert.match(content, /git\(\["rebase", "origin\/main"\]/);
 });
 
+test("local candidate releases keep pinned sources independent of moving main", () => {
+  const content = readLocalPublisher();
+  const preflightStart = content.indexOf("function ensureCleanReleaseRoot");
+  const preflightEnd = content.indexOf("function ensureNpmPublishIdentity");
+  const preflight = content.slice(preflightStart, preflightEnd);
+  const main = content.slice(content.indexOf("function main()"));
+
+  assert.match(
+    preflight,
+    /function ensureCleanReleaseRoot\(root, channel, noPublish\)/,
+  );
+  assert.match(
+    preflight,
+    /const sourceFollowsMain = channel === "nightly" \|\| channel === "beta"/,
+  );
+  assert.match(
+    preflight,
+    /if \(!noPublish && sourceFollowsMain && head !== remote\)/,
+  );
+  assert.match(
+    main,
+    /ensureCleanReleaseRoot\(root, args\.channel, args\.noPublish\)/,
+  );
+});
+
 test("local release executor leaves dependency auditing to integration", () => {
   const content = readLocalPublisher();
   assert.doesNotMatch(content, /npm\(\["audit"/);

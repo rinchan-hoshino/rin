@@ -99,7 +99,7 @@ function repoRoot() {
   });
 }
 
-function ensureCleanAuthoritativeMain(root, noPublish) {
+function ensureCleanReleaseRoot(root, channel, noPublish) {
   const branch = git(["branch", "--show-current"], {
     cwd: root,
     capture: true,
@@ -110,12 +110,13 @@ function ensureCleanAuthoritativeMain(root, noPublish) {
     throw new Error(`release_requires_main_branch:${branch || "detached"}`);
   }
   git(["fetch", "origin", "main"], { cwd: root });
+  const sourceFollowsMain = channel === "nightly" || channel === "beta";
   const head = git(["rev-parse", "HEAD"], { cwd: root, capture: true });
   const remote = git(["rev-parse", "origin/main"], {
     cwd: root,
     capture: true,
   });
-  if (!noPublish && head !== remote) {
+  if (!noPublish && sourceFollowsMain && head !== remote) {
     throw new Error(`release_main_not_current:${head}:${remote}`);
   }
 }
@@ -501,7 +502,7 @@ function main() {
     path.join(os.tmpdir(), `rin-release-${args.channel}-`),
   );
   try {
-    ensureCleanAuthoritativeMain(root, args.noPublish);
+    ensureCleanReleaseRoot(root, args.channel, args.noPublish);
     ensureNpmPublishIdentity(root, args.channel, args.noPublish);
     const result =
       args.channel === "nightly" || args.channel === "beta"
