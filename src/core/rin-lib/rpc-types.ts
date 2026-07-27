@@ -27,6 +27,7 @@ export type RinRpcCommandType =
   | "set_auto_compaction"
   | "set_auto_retry"
   | "abort_retry"
+  | "abort_compaction"
   | "bash"
   | "abort_bash"
   | "get_session_stats"

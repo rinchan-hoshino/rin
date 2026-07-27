@@ -25,6 +25,7 @@ import {
   resolveRinFrontendCommandResponses,
 } from "../rin-frontend-sdk/command-responses.js";
 import { classifyRinFrontendCommand } from "../rin-frontend-sdk/command-dispatcher.js";
+import { executeRinFrontendInterruptIntent } from "../rin-frontend-sdk/frontend-lifecycle.js";
 import { waitForFrontendInputSubmissionReady } from "../rin-frontend-sdk/input-submission.js";
 import type { RpcFrontendClient } from "../rin-frontend-sdk/frontend-surface.js";
 import { createModelRegistry } from "../rin-frontend-sdk/model-registry.js";
@@ -268,7 +269,9 @@ class RemoteAgent {
   constructor(private client: RpcFrontendClient) {}
 
   abort() {
-    void this.client.abort().catch(() => {});
+    void executeRinFrontendInterruptIntent(this.client, "stop_turn").catch(
+      () => {},
+    );
   }
 
   waitForIdle(timeout = 60000) {
@@ -657,7 +660,9 @@ export class RpcInteractiveSession {
     this.isBashRunning = false;
     this.retryAttempt = 0;
     this.syncStreamingState();
-    void this.client.abort().catch(() => {});
+    void executeRinFrontendInterruptIntent(this.client, "stop_turn").catch(
+      () => {},
+    );
   }
 
   async newSession(options?: {
@@ -820,7 +825,10 @@ export class RpcInteractiveSession {
   }
 
   abortCompaction() {
-    void this.client.abort().catch(() => {});
+    void executeRinFrontendInterruptIntent(
+      this.client,
+      "cancel_compaction",
+    ).catch(() => {});
   }
   abortBranchSummary() {}
 
@@ -990,7 +998,9 @@ export class RpcInteractiveSession {
   }
 
   abortRetry() {
-    void this.call("abort_retry").catch(() => {});
+    void executeRinFrontendInterruptIntent(this.client, "cancel_retry").catch(
+      () => {},
+    );
   }
   get isRetrying() {
     return this.retryAttempt > 0;

@@ -67,6 +67,25 @@ export {
 } from "./entrypoint.js";
 
 export {
+  applyRinFrontendLifecycleEvent,
+  createRinFrontendLifecycleState,
+  executeRinFrontendInterruptIntent,
+  isRinFrontendLifecyclePresentationEvent,
+  projectRinFrontendLifecycleEvent,
+  reduceRinFrontendLifecycleState,
+  RinFrontendLifecycleTerminalGate,
+  renderRinFrontendLifecycleEvent,
+  shouldRefreshRinFrontendLifecycleStatus,
+  type RinFrontendInterruptClient,
+  type RinFrontendInterruptIntent,
+  type RinFrontendLifecycleEvent,
+  type RinFrontendLifecyclePhase,
+  type RinFrontendLifecycleRenderOptions,
+  type RinFrontendLifecycleState,
+  type RinFrontendLifecycleStateTarget,
+} from "./frontend-lifecycle.js";
+
+export {
   TUI_FRONTEND_IDENTITY,
   chatFrontendIdentity,
   normalizeFrontendIdentity,

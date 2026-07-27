@@ -89,6 +89,7 @@ const SESSION_SCOPED_COMMAND_NAMES = [
   "set_auto_compaction",
   "set_auto_retry",
   "abort_retry",
+  "abort_compaction",
   "bash",
   "abort_bash",
   "get_session_stats",

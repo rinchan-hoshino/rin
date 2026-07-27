@@ -106,6 +106,8 @@ export interface InteractiveFrontendSurface {
 }
 
 export interface RpcFrontendClient extends InteractiveFrontendSurface {
+  abortRetry(): Promise<void>;
+  abortCompaction(): Promise<void>;
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   isConnected(): boolean;

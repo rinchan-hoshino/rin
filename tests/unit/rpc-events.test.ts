@@ -178,6 +178,94 @@ test("rpc session events do not refresh whole state on every stream update", asy
   ]);
 });
 
+test("rpc session events reduce summarization retry state through the canonical lifecycle policy", async () => {
+  const seen = [];
+  const target = {
+    remoteTurnRunning: true,
+    isStreaming: false,
+    isCompacting: true,
+    compactionReason: "threshold",
+    retryAttempt: 0,
+    maxRetryAttempts: 0,
+    retryDelayMs: 0,
+    retryError: "",
+    setTurnActive(value) {
+      this.remoteTurnRunning = value;
+    },
+    setAgentStreaming(value) {
+      this.isStreaming = value;
+    },
+    emitEvent(event) {
+      seen.push(event);
+    },
+    emitFrontendStatus(force) {
+      seen.push({
+        type: "frontend_status_refresh",
+        force,
+        retryAttempt: this.retryAttempt,
+        compacting: this.isCompacting,
+      });
+    },
+  };
+
+  await events.handleRpcSessionEvent(
+    target,
+    {
+      type: "summarization_retry_scheduled",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2000,
+      errorMessage: "Compaction failed: overloaded",
+    },
+    async () => {},
+    async () => {},
+  );
+  assert.equal(target.retryAttempt, 1);
+  assert.equal(target.maxRetryAttempts, 3);
+  assert.equal(target.retryDelayMs, 2000);
+  assert.equal(target.retryError, "Compaction failed: overloaded");
+  assert.equal(target.isCompacting, true);
+
+  await events.handleRpcSessionEvent(
+    target,
+    {
+      type: "summarization_retry_attempt_start",
+      source: "compaction",
+      reason: "threshold",
+    },
+    async () => {},
+    async () => {},
+  );
+  assert.equal(target.retryAttempt, 0);
+  assert.equal(target.isCompacting, true);
+  assert.deepEqual(seen, [
+    {
+      type: "summarization_retry_scheduled",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2000,
+      errorMessage: "Compaction failed: overloaded",
+    },
+    {
+      type: "frontend_status_refresh",
+      force: true,
+      retryAttempt: 1,
+      compacting: true,
+    },
+    {
+      type: "summarization_retry_attempt_start",
+      source: "compaction",
+      reason: "threshold",
+    },
+    {
+      type: "frontend_status_refresh",
+      force: true,
+      retryAttempt: 0,
+      compacting: true,
+    },
+  ]);
+});
+
 test("rpc compaction refresh redraws footer after the session snapshot lands", async () => {
   const statuses: any[] = [];
   let snapshotCompacted = false;
@@ -266,6 +354,7 @@ test("rpc compaction refresh redraws footer after the session snapshot lands", a
 
 test("rpc session events keep turns alive until explicit rpc completion", async () => {
   const seen = [];
+  const statusSnapshots = [];
   let refreshMessages = 0;
   let refreshMessagesAndSession = 0;
   const target = {
@@ -280,6 +369,11 @@ test("rpc session events keep turns alive until explicit rpc completion", async 
       this.isStreaming = value;
     },
     emitFrontendStatus(force) {
+      statusSnapshots.push({
+        force,
+        turnActive: this.remoteTurnRunning,
+        streaming: this.isStreaming,
+      });
       seen.push({ type: "frontend_status_refresh", force });
     },
     emitEvent: (event) => seen.push(event),
@@ -318,6 +412,23 @@ test("rpc session events keep turns alive until explicit rpc completion", async 
   assert.equal(target.remoteTurnRunning, true);
   assert.equal(target.isStreaming, false);
   assert.deepEqual(target.activeTurn, { mode: "prompt" });
+
+  await events.handleRpcSessionEvent(
+    target,
+    { type: "agent_settled" },
+    async () => {
+      refreshMessages += 1;
+    },
+    async () => {
+      refreshMessagesAndSession += 1;
+    },
+  );
+  assert.equal(target.remoteTurnRunning, true);
+  assert.deepEqual(target.activeTurn, { mode: "prompt" });
+  assert.deepEqual(statusSnapshots.slice(0, 2), [
+    { force: true, turnActive: true, streaming: false },
+    { force: true, turnActive: true, streaming: false },
+  ]);
 
   await events.handleRpcSessionEvent(
     target,
@@ -392,6 +503,9 @@ test("rpc session events keep turns alive until explicit rpc completion", async 
       },
     },
     { type: "agent_end" },
+    { type: "frontend_status_refresh", force: true },
+    { type: "agent_settled" },
+    { type: "frontend_status_refresh", force: true },
     { type: "compaction_start", reason: "overflow" },
     { type: "frontend_status_refresh", force: true },
     {

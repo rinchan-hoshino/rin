@@ -209,32 +209,94 @@ test("backend working visibility is the only shared frontend Working source", as
   ]);
 });
 
-test("compaction retry errors bypass active-turn passive-notice deferral", async () => {
+test("turn driver carries canonical retry and compaction failures to chat without early settlement", async () => {
   const driver = createDriver();
   const seen: any[] = [];
   driver.subscribe((event: any) => seen.push(event));
-  (driver as any).liveTurn = { requestTag: "turn-1" };
-  (driver as any).frontendState.isStreaming = true;
-  (driver as any).frontendState.turnActive = true;
 
-  await emitDriverEvent(driver, { type: "compaction_start" });
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "start",
+    requestTag: "retry-turn",
+  });
+  await emitDriverEvent(driver, {
+    type: "compaction_start",
+    reason: "threshold",
+    requestTag: "retry-turn",
+  });
   await emitDriverEvent(driver, {
     type: "summarization_retry_scheduled",
     attempt: 1,
     maxAttempts: 3,
-    delayMs: 2_000,
-    errorMessage: "summary backend unavailable",
+    delayMs: 2000,
+    errorMessage: "Compaction failed: overloaded",
+    requestTag: "retry-turn",
+  });
+  assert.equal(driver.frontendState.turnActive, true);
+
+  await emitDriverEvent(driver, {
+    type: "summarization_retry_attempt_start",
+    source: "compaction",
+    reason: "threshold",
+    requestTag: "retry-turn",
+  });
+  await emitDriverEvent(driver, {
+    type: "compaction_end",
+    reason: "threshold",
+    aborted: false,
+    willRetry: false,
+    errorMessage: "Compaction failed after retries",
+    requestTag: "retry-turn",
+  });
+  assert.equal(driver.frontendState.turnActive, true);
+
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "error",
+    error: "Compaction failed after retries",
+    requestTag: "retry-turn",
   });
 
-  assert.deepEqual(seen, [
-    { type: "compaction_start_notice", text: "Compacting..." },
-    {
-      type: "passive_notice",
-      text: "[compaction]\n\nCompaction failed: summary backend unavailable\n\nRetrying (1/3) in 2s...",
-      level: "error",
-      deferDuringTurn: false,
-    },
-  ]);
+  assert.deepEqual(
+    seen.filter((event) => event.type !== "frontend_status"),
+    [
+      { type: "turn_accepted", requestTag: "retry-turn" },
+      { type: "compaction_start_notice", text: "Compacting..." },
+      {
+        type: "passive_notice",
+        text: "Compaction failed: overloaded",
+        level: "error",
+        deferDuringTurn: false,
+        noticeKind: "lifecycle_error",
+        requestTag: "retry-turn",
+      },
+      {
+        type: "assistant_summary",
+        text: "Retrying (1/3) in 2s... (/abort to stop)",
+        requestTag: "retry-turn",
+      },
+      {
+        type: "assistant_summary",
+        text: "Compacting context...",
+        requestTag: "retry-turn",
+      },
+      {
+        type: "passive_notice",
+        text: "Compaction failed after retries",
+        level: "error",
+        deferDuringTurn: false,
+        noticeKind: "lifecycle_error",
+        requestTag: "retry-turn",
+      },
+      {
+        type: "turn_error",
+        error: "Compaction failed after retries",
+        sessionId: undefined,
+        sessionFile: undefined,
+        requestTag: "retry-turn",
+      },
+    ],
+  );
 });
 
 async function emitRpcTurnComplete(

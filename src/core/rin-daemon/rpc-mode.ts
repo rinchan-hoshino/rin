@@ -1656,6 +1656,8 @@ export async function runCustomRpcMode(
         );
       case "abort_retry":
         return run(id, type, () => session.abortRetry());
+      case "abort_compaction":
+        return run(id, type, () => session.abortCompaction());
       case "bash":
         return run(id, type, () =>
           session.executeBash(command.command, undefined, {

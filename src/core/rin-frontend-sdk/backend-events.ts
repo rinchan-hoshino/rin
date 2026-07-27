@@ -16,7 +16,12 @@ import {
   resolveRinFrontendCommandResponses,
   type RinFrontendCommandResponses,
 } from "./command-responses.js";
-import { formatCompactionSummaryCollapsedText } from "./compaction-summary-format.js";
+import {
+  isRinFrontendLifecyclePresentationEvent,
+  RinFrontendLifecycleTerminalGate,
+  projectRinFrontendLifecycleEvent,
+  renderRinFrontendLifecycleEvent,
+} from "./frontend-lifecycle.js";
 import type {
   RinFrontendBackendEvent,
   RinFrontendStatusPhase,
@@ -227,8 +232,8 @@ export function createRinFrontendBackendEventTranslator(
   let latestAssistantText = "";
   let latestAssistantFinalText = "";
   let activeToolBatch: ActiveToolBatch | null = null;
+  const lifecycleTerminalGate = new RinFrontendLifecycleTerminalGate();
   let latestDeliveredAssistantSummary = "";
-  let compactionActive = false;
   const deliveredAssistantInterimTexts = new Set<string>();
 
   const resetAssistantSegments = () => {
@@ -267,6 +272,26 @@ export function createRinFrontendBackendEventTranslator(
       const payload = eventPayload(event);
       if (!payload || typeof payload !== "object") return [];
       const requestTag = safeString(payload.requestTag).trim();
+      const normalizedLifecyclePayload =
+        payload.type === "rpc_turn_event"
+          ? { ...payload, ...normalizeSessionRef(payload) }
+          : payload;
+      const lifecycleEvent = projectRinFrontendLifecycleEvent(
+        normalizedLifecyclePayload,
+      );
+      if (lifecycleEvent && !lifecycleTerminalGate.accept(lifecycleEvent)) {
+        return [];
+      }
+      const renderLifecycle = () =>
+        lifecycleEvent
+          ? renderRinFrontendLifecycleEvent(lifecycleEvent, {
+              compactionStartText: commandResponses.compactionStart,
+              expandHintText: options.compactionExpandHintText,
+              expandKeyText: options.compactionExpandKeyText,
+              lineTemplate: commandResponses.compactionSummaryLine,
+              textTemplate: commandResponses.compactionSummaryText,
+            })
+          : [];
 
       if (payload.type === "rpc_frontend_status") {
         const phase = statusPhase(payload.phase);
@@ -300,6 +325,13 @@ export function createRinFrontendBackendEventTranslator(
         return [];
       }
 
+      if (
+        lifecycleEvent &&
+        isRinFrontendLifecyclePresentationEvent(lifecycleEvent)
+      ) {
+        return renderLifecycle();
+      }
+
       if (payload.type === "rpc_turn_event") {
         if (payload.event === "start" || payload.event === "heartbeat") {
           return [
@@ -310,49 +342,19 @@ export function createRinFrontendBackendEventTranslator(
           ];
         }
         if (payload.event === "complete") {
-          const session = normalizeSessionRef(payload);
           const finalText = safeString(payload.finalText).trim();
-          const events: RinFrontendBackendEvent[] = [];
           if (finalText) {
             latestAssistantText = finalText;
             latestAssistantFinalText = finalText;
-            events.push({
-              type: "assistant_final",
-              text: finalText,
-              result: payload.result,
-              sessionId: session.sessionId,
-              sessionFile: session.sessionFile,
-              requestTag: safeString(payload.requestTag).trim() || undefined,
-            });
           }
-          events.push({
-            type: "turn_complete",
-            finalText,
-            result: payload.result,
-            sessionId: session.sessionId,
-            sessionFile: session.sessionFile,
-            requestTag: safeString(payload.requestTag).trim() || undefined,
-          });
-          return events;
+          return renderLifecycle();
         }
-        if (payload.event === "error") {
-          const session = normalizeSessionRef(payload);
-          return [
-            {
-              type: "turn_error",
-              error: safeString(payload.error).trim() || "rpc_turn_failed",
-              sessionId: session.sessionId,
-              sessionFile: session.sessionFile,
-              requestTag: safeString(payload.requestTag).trim() || undefined,
-            },
-          ];
-        }
+        if (payload.event === "error") return renderLifecycle();
       }
 
       switch (payload.type) {
         case "agent_start":
           resetAssistantSegments();
-          compactionActive = false;
           return [
             {
               type: "turn_accepted",
@@ -374,6 +376,7 @@ export function createRinFrontendBackendEventTranslator(
             },
           ];
         case "agent_end":
+        case "agent_settled":
           return [];
         case "message_update": {
           if (payload?.message?.role !== "assistant") return [];
@@ -451,60 +454,6 @@ export function createRinFrontendBackendEventTranslator(
             return events;
           }
           if (todoNotice) events.push(todoPassiveNotice(todoNotice));
-          return events;
-        }
-        case "compaction_start":
-          compactionActive = true;
-          return [
-            {
-              type: "compaction_start_notice",
-              text: commandResponses.compactionStart,
-            },
-          ];
-        case "summarization_retry_scheduled": {
-          if (!compactionActive) return [];
-          const errorMessage = safeString(payload.errorMessage).trim();
-          if (!errorMessage) return [];
-          const attempt = Number(payload.attempt);
-          const maxAttempts = Number(payload.maxAttempts);
-          const delayMs = Number(payload.delayMs);
-          const retryProgress =
-            Number.isFinite(attempt) && Number.isFinite(maxAttempts)
-              ? ` (${attempt}/${maxAttempts})`
-              : "";
-          const retryDelay = Number.isFinite(delayMs)
-            ? ` in ${delayMs / 1_000}s`
-            : "";
-          return [
-            {
-              type: "passive_notice",
-              text: `[compaction]\n\nCompaction failed: ${errorMessage}\n\nRetrying${retryProgress}${retryDelay}...`,
-              level: "error",
-              deferDuringTurn: false,
-            },
-          ];
-        }
-        case "compaction_end": {
-          compactionActive = false;
-          const events: RinFrontendBackendEvent[] = [];
-          const notice = formatCompactionSummaryCollapsedText(
-            payload.tokensBefore ?? payload.result?.tokensBefore,
-            {
-              expandHintText: options.compactionExpandHintText,
-              expandKeyText: options.compactionExpandKeyText,
-              lineTemplate: commandResponses.compactionSummaryLine,
-              textTemplate: commandResponses.compactionSummaryText,
-            },
-          );
-          if (notice) {
-            events.push({
-              type: "passive_notice",
-              text: notice,
-              level: "info",
-              deferDuringTurn: false,
-              noticeKind: "compaction_end",
-            });
-          }
           return events;
         }
         default:

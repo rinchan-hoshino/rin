@@ -118,32 +118,6 @@ test("frontend backend event translator exposes Pi working and compaction events
   assert.deepEqual(translator.translate({ type: "compaction_end" }), []);
 });
 
-test("frontend backend event translator exposes compaction retry errors without ending the turn", () => {
-  const translator = sdk.createRinFrontendBackendEventTranslator();
-  const retryEvent = {
-    type: "summarization_retry_scheduled",
-    attempt: 1,
-    maxAttempts: 3,
-    delayMs: 2_000,
-    errorMessage: "summary backend unavailable",
-  };
-
-  assert.deepEqual(translator.translate(retryEvent), []);
-  translator.translate({ type: "compaction_start" });
-
-  assert.deepEqual(translator.translate(retryEvent), [
-    {
-      type: "passive_notice",
-      text: "[compaction]\n\nCompaction failed: summary backend unavailable\n\nRetrying (1/3) in 2s...",
-      level: "error",
-      deferDuringTurn: false,
-    },
-  ]);
-
-  translator.translate({ type: "compaction_end" });
-  assert.deepEqual(translator.translate(retryEvent), []);
-});
-
 test("frontend backend event translator exposes compact collapsed notice without summary text", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
@@ -749,6 +723,73 @@ test("frontend backend event translator preserves producer request tags on progr
   );
 });
 
+test("frontend backend event translator exposes retry lifecycle without terminalizing the turn", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "auto_retry_start",
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 1000,
+      errorMessage: "Provider unavailable",
+      requestTag: "retry-turn",
+    }),
+    [
+      {
+        type: "assistant_summary",
+        text: "Retrying (2/3) in 1s... (/abort to stop)",
+        requestTag: "retry-turn",
+      },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "summarization_retry_scheduled",
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2000,
+      errorMessage: "Compaction failed: overloaded",
+      requestTag: "retry-turn",
+    }),
+    [
+      {
+        type: "passive_notice",
+        text: "Compaction failed: overloaded",
+        level: "error",
+        deferDuringTurn: false,
+        noticeKind: "lifecycle_error",
+        requestTag: "retry-turn",
+      },
+      {
+        type: "assistant_summary",
+        text: "Retrying (1/3) in 2s... (/abort to stop)",
+        requestTag: "retry-turn",
+      },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      willRetry: false,
+      errorMessage: "Compaction failed after retries",
+      requestTag: "retry-turn",
+    }),
+    [
+      {
+        type: "passive_notice",
+        text: "Compaction failed after retries",
+        level: "error",
+        deferDuringTurn: false,
+        noticeKind: "lifecycle_error",
+        requestTag: "retry-turn",
+      },
+    ],
+  );
+});
+
 test("frontend backend event translator returns final typed turn events after completion", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
@@ -780,5 +821,16 @@ test("frontend backend event translator returns final typed turn events after co
         requestTag: "tag-1",
       },
     ],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "rpc_turn_event",
+      event: "error",
+      requestTag: "tag-1",
+      error: "late duplicate terminal",
+      sessionId: "session-1",
+      sessionFile: "/tmp/session.jsonl",
+    }),
+    [],
   );
 });

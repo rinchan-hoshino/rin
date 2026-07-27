@@ -247,6 +247,14 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     await this.request({ type: "abort" });
   }
 
+  async abortRetry() {
+    await this.request({ type: "abort_retry" });
+  }
+
+  async abortCompaction() {
+    await this.request({ type: "abort_compaction" });
+  }
+
   async getAutocompleteItems(
     input: string,
   ): Promise<FrontendAutocompleteItem[]> {

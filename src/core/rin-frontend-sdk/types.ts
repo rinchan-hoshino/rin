@@ -94,10 +94,11 @@ export type RinFrontendBackendEvent =
       text: string;
       level?: "info" | "warning" | "error";
       deferDuringTurn?: boolean;
-      noticeKind?: "compaction_end" | "todo";
+      noticeKind?: "compaction_end" | "lifecycle_error" | "todo";
       todoItems?: RinTodoItem[];
       todoError?: string;
       sourceEventId?: string;
+      requestTag?: string;
     }
   | { type: "compaction_start_notice"; text: string }
   | { type: "working_visible"; visible: boolean }

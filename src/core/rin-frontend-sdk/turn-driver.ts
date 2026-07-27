@@ -22,7 +22,6 @@ import {
   type RinToolStartupOptions,
 } from "../rin-lib/tool-options.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
-import type { RinTodoItem } from "../rin-lib/todo-state.js";
 import { createRinFrontendBackendEventTranslator } from "./backend-events.js";
 import {
   normalizeFrontendIdentity,
@@ -33,6 +32,11 @@ import {
   createRinFrontendTurnCancelledError,
   isRinFrontendTurnCancelledError,
 } from "./lifecycle-errors.js";
+import {
+  applyRinFrontendLifecycleEvent,
+  executeRinFrontendInterruptIntent,
+  projectRinFrontendLifecycleEvent,
+} from "./frontend-lifecycle.js";
 import { replayPendingTerminalTurnEvent } from "./pending-terminal-turn.js";
 import { injectPromptContextHeader } from "./prompt-context.js";
 import {
@@ -85,16 +89,10 @@ function isRecoverableConnectionError(error: unknown) {
   );
 }
 
-export type RinFrontendPassiveNoticeEvent = {
-  type: "passive_notice";
-  text: string;
-  level?: "info" | "warning" | "error";
-  deferDuringTurn?: boolean;
-  noticeKind?: "compaction_end" | "todo";
-  todoItems?: RinTodoItem[];
-  todoError?: string;
-  sourceEventId?: string;
-};
+export type RinFrontendPassiveNoticeEvent = Extract<
+  RinFrontendBackendEvent,
+  { type: "passive_notice" }
+> & { requestTag?: string };
 
 export type RinFrontendTurnDriverEvent =
   | { type: "frontend_status"; phase: RinFrontendTurnPhase }
@@ -444,9 +442,17 @@ export class RinFrontendTurnDriver {
         this.ignoredTerminalRequestTags.delete(oldest);
       }
     }
+    const session = this.abortedTurnSessionRef();
+    const lifecycleEvent = projectRinFrontendLifecycleEvent({
+      type: "frontend_turn_aborted",
+      error: "chat_turn_aborted",
+      requestTag,
+      ...session,
+    });
+    if (lifecycleEvent) {
+      applyRinFrontendLifecycleEvent(this.frontendState, lifecycleEvent);
+    }
     this.clearAssistantInterimState();
-    this.frontendState.turnActive = false;
-    this.frontendState.isStreaming = false;
     this.setFrontendPhase("idle");
     this.failLiveTurn(new Error("chat_turn_aborted"));
   }
@@ -519,7 +525,9 @@ export class RinFrontendTurnDriver {
     this.turnInterruptionSeq += 1;
     this.rejectLiveTurnAsAborted();
     try {
-      void this.client?.abort?.().catch(() => {});
+      void executeRinFrontendInterruptIntent(this.client, "stop_turn").catch(
+        () => {},
+      );
     } catch {}
     return result;
   }
@@ -1479,27 +1487,67 @@ export class RinFrontendTurnDriver {
       const payload: any = event.payload;
       if (!this.terminalRpcTurnPayloadMatchesCurrentSession(payload)) return;
       if (
-        payload?.type === "agent_start" ||
-        payload?.type === "agent_end" ||
+        projectRinFrontendLifecycleEvent(payload) ||
         payload?.type === "worker_exit" ||
         payload?.type === "session_recovering" ||
         payload?.type === "session_recovered" ||
-        payload?.type === "queue_update" ||
-        payload?.type === "compaction_start" ||
-        payload?.type === "compaction_end" ||
-        (payload?.type === "rpc_turn_event" &&
-          (payload.event === "start" ||
-            payload.event === "heartbeat" ||
-            payload.event === "complete" ||
-            payload.event === "error"))
+        payload?.type === "queue_update"
       ) {
         const frontendState = this.frontendState;
         const eventTarget: RinRpcSessionEventTarget = {
+          get turnActive() {
+            return Boolean(frontendState.turnActive);
+          },
+          set turnActive(value: boolean) {
+            frontendState.turnActive = Boolean(value);
+          },
+          get isStreaming() {
+            return Boolean(frontendState.isStreaming);
+          },
+          set isStreaming(value: boolean) {
+            frontendState.isStreaming = Boolean(value);
+          },
+          get workingVisible() {
+            return Boolean(frontendState.workingVisible);
+          },
+          set workingVisible(value: boolean) {
+            frontendState.workingVisible = Boolean(value);
+          },
           get isCompacting() {
             return Boolean(frontendState.isCompacting);
           },
           set isCompacting(value: boolean) {
             frontendState.isCompacting = Boolean(value);
+          },
+          get compactionReason() {
+            return safeString(frontendState.compactionReason);
+          },
+          set compactionReason(value: string) {
+            frontendState.compactionReason = safeString(value);
+          },
+          get retryAttempt() {
+            return Number(frontendState.retryAttempt || 0);
+          },
+          set retryAttempt(value: number) {
+            frontendState.retryAttempt = Number(value || 0);
+          },
+          get maxRetryAttempts() {
+            return Number(frontendState.maxRetryAttempts || 0);
+          },
+          set maxRetryAttempts(value: number) {
+            frontendState.maxRetryAttempts = Number(value || 0);
+          },
+          get retryDelayMs() {
+            return Number(frontendState.retryDelayMs || 0);
+          },
+          set retryDelayMs(value: number) {
+            frontendState.retryDelayMs = Number(value || 0);
+          },
+          get retryError() {
+            return safeString(frontendState.retryError);
+          },
+          set retryError(value: string) {
+            frontendState.retryError = safeString(value);
           },
           setTurnActive: (active: boolean) => {
             this.frontendState.turnActive = active;
@@ -1605,6 +1653,9 @@ export class RinFrontendTurnDriver {
             ...(event.todoError ? { todoError: event.todoError } : {}),
             ...(event.sourceEventId
               ? { sourceEventId: event.sourceEventId }
+              : {}),
+            ...(safeString(event.requestTag).trim()
+              ? { requestTag: safeString(event.requestTag).trim() }
               : {}),
           },
           { deferDuringTurn: event.deferDuringTurn },

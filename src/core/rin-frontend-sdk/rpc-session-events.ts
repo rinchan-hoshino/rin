@@ -1,8 +1,19 @@
+import {
+  applyRinFrontendLifecycleEvent,
+  projectRinFrontendLifecycleEvent,
+  shouldRefreshRinFrontendLifecycleStatus,
+  type RinFrontendLifecycleEvent,
+} from "./frontend-lifecycle.js";
+
 export type RinRpcSessionEventTarget = {
   activeTurn?: unknown;
   isCompacting?: boolean;
   compactionReason?: string;
   retryAttempt?: number;
+  maxRetryAttempts?: number;
+  retryDelayMs?: number;
+  retryError?: string;
+  workingVisible?: boolean;
   handleSessionUnavailable?: () => void;
   handleSessionRecovered?: () => void;
   applyQueueUpdate?: (payload: any) => void;
@@ -11,6 +22,7 @@ export type RinRpcSessionEventTarget = {
   setTurnActive?: (active: boolean) => void;
   setAgentStreaming?: (streaming: boolean) => void;
   turnActive?: boolean;
+  remoteTurnRunning?: boolean;
   isStreaming?: boolean;
 };
 
@@ -19,36 +31,47 @@ export type RinRpcSessionEventRefresh = {
   refreshMessagesAndSession: () => Promise<any> | any;
 };
 
+function setTargetTurnActive(
+  target: RinRpcSessionEventTarget,
+  active: boolean,
+) {
+  target.turnActive = active;
+  if (typeof target.setTurnActive === "function") {
+    target.setTurnActive(active);
+  }
+}
+
+function setTargetAgentStreaming(
+  target: RinRpcSessionEventTarget,
+  streaming: boolean,
+) {
+  target.isStreaming = streaming;
+  if (typeof target.setAgentStreaming === "function") {
+    target.setAgentStreaming(streaming);
+  }
+}
+
+function applyLifecycleState(
+  target: RinRpcSessionEventTarget,
+  payload: any,
+): RinFrontendLifecycleEvent | null {
+  const event = projectRinFrontendLifecycleEvent(payload);
+  if (!event) return null;
+  if (target.turnActive !== true && target.remoteTurnRunning === true) {
+    target.turnActive = true;
+  }
+  const state = applyRinFrontendLifecycleEvent(target, event);
+  setTargetTurnActive(target, state.turnActive);
+  setTargetAgentStreaming(target, state.isStreaming);
+  return event;
+}
+
 export async function handleRinRpcSessionEvent(
   target: RinRpcSessionEventTarget,
   payload: any,
   refresh: RinRpcSessionEventRefresh,
 ) {
   if (!payload || typeof payload !== "object") return;
-  const setTurnActive = (active: boolean) => {
-    if (typeof target.setTurnActive === "function") {
-      target.setTurnActive(active);
-    } else {
-      target.turnActive = active;
-    }
-  };
-  const setAgentStreaming = (streaming: boolean) => {
-    if (typeof target.setAgentStreaming === "function") {
-      target.setAgentStreaming(streaming);
-    } else {
-      target.isStreaming = streaming;
-    }
-  };
-  const finishRemoteTurn = () => {
-    target.activeTurn = null;
-    setTurnActive(false);
-    setAgentStreaming(false);
-  };
-  const emitFrontendStatus = () => {
-    if (typeof target.emitFrontendStatus === "function") {
-      target.emitFrontendStatus(true);
-    }
-  };
   if (payload.type === "session_recovering") {
     target.handleSessionUnavailable?.();
     target.emitEvent?.(payload);
@@ -59,40 +82,21 @@ export async function handleRinRpcSessionEvent(
     target.emitEvent?.(payload);
     return;
   }
-  if (payload.type === "agent_start") {
-    setAgentStreaming(true);
+
+  const lifecycleEvent = applyLifecycleState(target, payload);
+  if (
+    payload.type === "rpc_turn_event" &&
+    (payload.event === "error" || payload.event === "complete")
+  ) {
+    target.activeTurn = null;
   }
-  if (payload.type === "agent_end") {
-    setAgentStreaming(false);
+  if (payload.type === "compaction_end" || payload.type === "agent_end") {
+    void refresh.refreshMessagesAndSession();
   }
   if (
     payload.type === "rpc_turn_event" &&
-    (payload.event === "start" || payload.event === "heartbeat")
+    (payload.event === "error" || payload.event === "complete")
   ) {
-    setTurnActive(true);
-  }
-  if (payload.type === "compaction_start") {
-    target.isCompacting = true;
-    target.compactionReason = String(payload.reason || "").trim();
-  }
-  if (payload.type === "compaction_end") {
-    target.isCompacting = false;
-    target.compactionReason = "";
-    void refresh.refreshMessagesAndSession();
-  }
-  if (payload.type === "auto_retry_start") {
-    target.retryAttempt = Number(payload.attempt || 1);
-  }
-  if (payload.type === "auto_retry_end") target.retryAttempt = 0;
-  if (payload.type === "agent_end") {
-    void refresh.refreshMessagesAndSession();
-  }
-  if (payload.type === "rpc_turn_event" && payload.event === "error") {
-    finishRemoteTurn();
-    void refresh.refreshMessagesAndSession();
-  }
-  if (payload.type === "rpc_turn_event" && payload.event === "complete") {
-    finishRemoteTurn();
     void refresh.refreshMessagesAndSession();
   }
   if (payload.type === "worker_exit") {
@@ -110,11 +114,9 @@ export async function handleRinRpcSessionEvent(
   }
   target.emitEvent?.(payload);
   if (
-    payload.type === "compaction_start" ||
-    payload.type === "compaction_end" ||
-    payload.type === "auto_retry_start" ||
-    payload.type === "auto_retry_end"
+    lifecycleEvent &&
+    shouldRefreshRinFrontendLifecycleStatus(lifecycleEvent)
   ) {
-    emitFrontendStatus();
+    target.emitFrontendStatus?.(true);
   }
 }
