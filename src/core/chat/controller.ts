@@ -625,11 +625,17 @@ export class ChatController {
     deliverFinal: boolean,
   ) {
     let primedTurn: ChatTurnMeta | null = null;
-    if (deliverFinal && !this.currentTurn) {
+    const shouldRestoreDurableTurn = Boolean(
+      deliverFinal &&
+      input.outboxTurnFence &&
+      !this.currentTurn?.outboxTurnFence,
+    );
+    if (deliverFinal && (!this.currentTurn || shouldRestoreDurableTurn)) {
       // Reconnecting a recovered frontend can replay progress before connect()
       // resolves. Install the inbox identity first so those updates reuse the
       // original reply-scoped editable working message instead of creating an
-      // unscoped channel-level message.
+      // unscoped channel-level message. A display-only external Working event
+      // may have arrived first; durable ownership supersedes that presentation.
       this.setCurrentTurn(input);
       primedTurn = this.currentTurn;
       this.awaitingTurnSettle = true;
@@ -2901,14 +2907,29 @@ export class ChatController {
 
   async beginExternalWorking() {
     this.externalWorkingVisible = true;
+    if (this.currentTurn?.outboxTurnFence) {
+      // Backend Working is presentation state. A recovered inbox claim already
+      // owns this controller, so do not replace its durable reply identity with
+      // an anonymous display-only turn.
+      await this.presentVisibleProcessingTurn(
+        this.currentTurn,
+        this.turnAbortGeneration,
+      );
+      return;
+    }
     await this.beginVisibleProcessingTurn({});
   }
 
   async endExternalWorking() {
     this.externalWorkingVisible = false;
     if (this.driver.hasVisibleChatWorkingTurn()) return;
-    this.awaitingTurnSettle = false;
     await this.clearWorkingReaction().catch(() => {});
+    if (this.currentTurn?.outboxTurnFence) {
+      // Ending backend Working must not release a claimed inbox turn. Its
+      // matching terminal, supersede, abort, or claim-loss path owns cleanup.
+      return;
+    }
+    this.awaitingTurnSettle = false;
     this.clearCurrentTurn();
   }
 

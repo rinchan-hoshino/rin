@@ -5120,6 +5120,116 @@ test("chat controller restores inbound reply identity before connect replays an 
   ]);
 });
 
+test("chat controller restores durable ownership over an earlier display-only Working turn", async () => {
+  const controller = await createController("discord/bot-1:channel-1");
+  const deliveries = [];
+  controller.deliverAssistantInterim = async function (text) {
+    deliveries.push({
+      text: `… ${text}`,
+      replyToMessageId: this.currentReplyToMessageId() || null,
+    });
+    return true;
+  };
+  controller.driver.hasActiveTurn = () => true;
+  await controller.beginExternalWorking();
+  assert.equal(controller.currentTurn?.outboxTurnFence, undefined);
+  controller.connect = async () => {
+    await controller.handleFrontendEvent({
+      type: "assistant_interim",
+      text: "Recovered after early Working",
+    });
+    return true;
+  };
+  controller.driver.runTurn = async () => ({
+    finalText: "Steered into the recovered turn",
+  });
+
+  const result = await controller.runTurn({
+    text: "resume durable turn with early Working",
+    attachments: [],
+    incomingMessageId: "m-early-working",
+    replyToMessageId: "m-early-working",
+    outboxTurnFence: {
+      agentDir: controller.agentDir,
+      turnId: "turn-early-working",
+      chatKey: controller.chatKey,
+      messageId: "m-early-working",
+      ownerEpoch: "owner-early-working",
+      attempt: 2,
+    },
+  });
+
+  assert.equal(result.superseded, true);
+  assert.deepEqual(deliveries, [
+    {
+      text: "… Recovered after early Working",
+      replyToMessageId: "m-early-working",
+    },
+  ]);
+  assert.equal(
+    controller.currentTurn?.outboxTurnFence?.turnId,
+    "turn-early-working",
+  );
+  await controller.clearProcessingState();
+});
+
+test("chat controller keeps recovered durable turn ownership when backend Working ends during connect", async () => {
+  const controller = await createController("discord/bot-1:channel-1");
+  const deliveries = [];
+  controller.deliverAssistantInterim = async function (text) {
+    deliveries.push({
+      text: `… ${text}`,
+      replyToMessageId: this.currentReplyToMessageId() || null,
+    });
+    return true;
+  };
+  controller.commitPendingDelivery = async function (clearProcessing = false) {
+    deliveries.push({
+      text: deliveryText(this.stagedDelivery),
+      replyToMessageId: deliveryQuoteId(this.stagedDelivery) || null,
+    });
+    this.stagedDelivery = null;
+    if (clearProcessing) this.currentTurn = null;
+  };
+  controller.connect = async () => {
+    await controller.beginExternalWorking();
+    await controller.endExternalWorking();
+    await controller.handleFrontendEvent({
+      type: "assistant_interim",
+      text: "Recovered progress after Working ended",
+    });
+    return true;
+  };
+  controller.driver.runTurn = async () => ({
+    finalText: "Recovered final",
+  });
+
+  const result = await controller.runTurn({
+    text: "resume durable turn after daemon restart",
+    attachments: [],
+    incomingMessageId: "m-durable-restart",
+    replyToMessageId: "m-durable-restart",
+    outboxTurnFence: {
+      agentDir: controller.agentDir,
+      turnId: "turn-durable-restart",
+      chatKey: controller.chatKey,
+      messageId: "m-durable-restart",
+      ownerEpoch: "owner-durable-restart",
+      attempt: 2,
+    },
+  });
+
+  assert.equal(result.finalText, "Recovered final");
+  assert.deepEqual(deliveries, [
+    {
+      text: "… Recovered progress after Working ended",
+      replyToMessageId: "m-durable-restart",
+    },
+    { text: "Recovered final", replyToMessageId: "m-durable-restart" },
+  ]);
+  assert.equal(controller.currentTurn, null);
+});
+
 test("chat controller waits for backend Working after a cold connection", async () => {
   const controller = await createController("discord/bot-1:channel-1");
   const calls: string[] = [];
