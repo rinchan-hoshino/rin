@@ -8,9 +8,9 @@
     "nightlyBranch": "main"
   },
   "stable": {
-    "version": "0.8.0",
-    "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.8.0.tgz",
-    "ref": "92f3457491fa7906388cc64802cdec5cef5d76f2",
+    "version": "0.9.0",
+    "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.9.0.tgz",
+    "ref": "1cb913d569b35b045e425cf7cf3275ceb200a256",
     "versions": {
       "0.0.0": {
         "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.0.0.tgz",
@@ -90,13 +90,25 @@
             "nodeVersion": "24.18.0"
           }
         }
+      },
+      "0.9.0": {
+        "archiveUrl": "https://registry.npmjs.org/%40hoshinorin%2Frin/-/rin-0.9.0.tgz",
+        "ref": "1cb913d569b35b045e425cf7cf3275ceb200a256",
+        "promotedFromBetaVersion": "0.9.0-beta.20260721",
+        "assets": {
+          "linux-x64": {
+            "bundleUrl": "https://github.com/rinchan-hoshino/rin/releases/download/v0.9.0/rin-0.9.0-linux-x64.tar.gz",
+            "sha256": "73e39e6a5957f2ddce4d09e24fe498e0585e504f6bb9f608f0637db3de76f83a",
+            "nodeVersion": "24.18.0"
+          }
+        }
       }
     },
-    "promotedFromBetaVersion": "0.8.0-beta.20260714",
+    "promotedFromBetaVersion": "0.9.0-beta.20260721",
     "assets": {
       "linux-x64": {
-        "bundleUrl": "https://github.com/rinchan-hoshino/rin/releases/download/v0.8.0/rin-0.8.0-linux-x64.tar.gz",
-        "sha256": "83691b5c5864fb4798e0d1a86ca74eb306f906fa0ee4d6a9fc33d587107adaf9",
+        "bundleUrl": "https://github.com/rinchan-hoshino/rin/releases/download/v0.9.0/rin-0.9.0-linux-x64.tar.gz",
+        "sha256": "73e39e6a5957f2ddce4d09e24fe498e0585e504f6bb9f608f0637db3de76f83a",
         "nodeVersion": "24.18.0"
       }
     }
