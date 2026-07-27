@@ -94,6 +94,116 @@ test("session pruning protects the latest sixteen messages across old turns", ()
   assert.equal(messages[1], oldToolResult);
 });
 
+test("session pruning protects the final sixteen messages of each recent turn", () => {
+  const toolResults = Array.from({ length: 4 }, (_, index) => ({
+    role: "toolResult",
+    content: String(index + 1).repeat(25_000),
+  }));
+  const messages = toolResults.flatMap((toolResult, index) => [
+    { role: "user", content: `turn ${index + 1}` },
+    toolResult,
+    ...tailPadding(14),
+  ]);
+
+  assert.equal(pruning.pruneSessionContextMessages(messages), messages);
+  for (const toolResult of toolResults) {
+    assert.equal(toolResult.content.length, 25_000);
+  }
+});
+
+test("session pruning batches results before each recent turn's protected tail", () => {
+  const toolResults = Array.from({ length: 4 }, (_, index) => ({
+    role: "toolResult",
+    content: String(index + 1).repeat(25_000),
+  }));
+  const messages = toolResults.flatMap((toolResult, index) => [
+    { role: "user", content: `turn ${index + 1}` },
+    toolResult,
+    ...tailPadding(16),
+  ]);
+
+  const result = pruning.pruneSessionContextMessages(messages);
+
+  for (const toolResult of toolResults) {
+    const index = messages.indexOf(toolResult);
+    assert.equal(
+      result[index].content,
+      pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
+    );
+  }
+});
+
+test("session pruning does not combine sub-threshold batches across turns", () => {
+  const first = { role: "toolResult", content: "a".repeat(10_000) };
+  const second = { role: "toolResult", content: "b".repeat(10_000) };
+  const messages = [
+    { role: "user", content: "turn 1" },
+    first,
+    ...tailPadding(16),
+    { role: "user", content: "turn 2" },
+    second,
+    ...tailPadding(16),
+    { role: "user", content: "turn 3" },
+    { role: "assistant", content: "done 3" },
+    { role: "user", content: "turn 4" },
+    ...tailPadding(16),
+  ];
+
+  assert.equal(pruning.pruneSessionContextMessages(messages), messages);
+  assert.equal(first.content.length, 10_000);
+  assert.equal(second.content.length, 10_000);
+});
+
+test("session pruning treats compaction summaries as synthetic turn boundaries", () => {
+  const compactedToolResult = {
+    role: "toolResult",
+    content: "compacted".repeat(3_000),
+  };
+  const messages = [
+    { role: "compactionSummary", summary: "earlier context" },
+    compactedToolResult,
+    ...tailPadding(14),
+    ...Array.from({ length: 3 }, (_, index) => [
+      { role: "user", content: `turn ${index + 2}` },
+      { role: "toolResult", content: String(index + 2).repeat(25_000) },
+      ...tailPadding(14),
+    ]).flat(),
+  ];
+
+  assert.equal(pruning.pruneSessionContextMessages(messages), messages);
+  assert.equal(compactedToolResult.content.length, 27_000);
+});
+
+test("per-turn protection never newly prunes a residual from the current policy", () => {
+  const first = { role: "toolResult", content: "a".repeat(10_000) };
+  const locallyProtected = {
+    role: "toolResult",
+    content: "b".repeat(10_000),
+  };
+  const currentResidual = {
+    role: "toolResult",
+    content: "c".repeat(10_000),
+  };
+  const messages = [
+    { role: "user", content: "turn 1" },
+    first,
+    locallyProtected,
+    ...tailPadding(15),
+    { role: "user", content: "turn 2" },
+    currentResidual,
+    ...tailPadding(16),
+    { role: "user", content: "turn 3" },
+    { role: "assistant", content: "done 3" },
+    { role: "user", content: "turn 4" },
+    ...tailPadding(16),
+  ];
+
+  assert.equal(pruning.pruneSessionContextMessages(messages), messages);
+  assert.equal(first.content.length, 10_000);
+  assert.equal(locallyProtected.content.length, 10_000);
+  assert.equal(currentResidual.content.length, 10_000);
+});
+
 test("session pruning protects the latest sixteen messages inside one user turn", () => {
   const oldToolResult = {
     role: "toolResult",

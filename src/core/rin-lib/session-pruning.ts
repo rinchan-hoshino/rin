@@ -116,17 +116,44 @@ function estimateToolResultTokens(message: any) {
   return estimateMessageTokens(normalized);
 }
 
+function isTurnBoundaryMessage(message: any) {
+  const role = String(message?.role || "").trim();
+  return role === "user" || role === "compactionSummary";
+}
+
+type TurnRange = { start: number; end: number };
+
+function collectTurnRanges(messages: any[]) {
+  const starts: number[] = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    if (isTurnBoundaryMessage(messages[index])) starts.push(index);
+  }
+  if (messages.length > 0 && starts[0] !== 0) starts.unshift(0);
+  return starts.map<TurnRange>((start, index) => ({
+    start,
+    end: starts[index + 1] ?? messages.length,
+  }));
+}
+
+function indexesBetween(start: number, end: number) {
+  return Array.from(
+    { length: Math.max(0, end - start) },
+    (_, offset) => start + offset,
+  );
+}
+
 function collectMessageTailPruneIndexes(
   messages: any[],
-  candidateStart: number,
-  candidateEnd: number,
+  candidateIndexes: Iterable<number>,
   protectedToolResultIds: Set<string>,
+  allowedIndexes?: Set<number>,
 ) {
   const indexes = new Set<number>();
   let pendingIndexes: number[] = [];
   let pendingReclaimTokens = 0;
 
-  for (let index = candidateStart; index < candidateEnd; index += 1) {
+  for (const index of candidateIndexes) {
+    if (allowedIndexes && !allowedIndexes.has(index)) continue;
     const message = messages[index];
     if (!isToolResultMessage(message)) continue;
     if (isProtectedToolResult(message, protectedToolResultIds)) continue;
@@ -153,37 +180,105 @@ function collectMessageTailPruneIndexes(
   return indexes;
 }
 
+function collectCurrentPruneIndexes(
+  messages: any[],
+  protectedTurnStart: number,
+  protectedMessageStart: number,
+  protectedToolResultIds: Set<string>,
+) {
+  const messageTailIndexes = collectMessageTailPruneIndexes(
+    messages,
+    indexesBetween(protectedTurnStart, protectedMessageStart),
+    protectedToolResultIds,
+  );
+  const indexes = new Set<number>();
+  for (let index = 0; index < protectedMessageStart; index += 1) {
+    const message = messages[index];
+    if (!isToolResultMessage(message)) continue;
+    if (isProtectedToolResult(message, protectedToolResultIds)) continue;
+    if (isAlreadyOmitted(message?.content)) continue;
+    if (index < protectedTurnStart || messageTailIndexes.has(index)) {
+      indexes.add(index);
+    }
+  }
+  return indexes;
+}
+
+function collectPerTurnPruneIndexes(
+  messages: any[],
+  currentPruneIndexes: Set<number>,
+  protectRecentTurns: number,
+  protectRecentMessages: number,
+  protectedToolResultIds: Set<string>,
+) {
+  const ranges = collectTurnRanges(messages);
+  const recentRanges = ranges.slice(-protectRecentTurns);
+  const oldBoundary =
+    ranges.length > protectRecentTurns ? recentRanges[0]?.start || 0 : 0;
+  const indexes = new Set<number>();
+
+  for (const index of currentPruneIndexes) {
+    if (index < oldBoundary) indexes.add(index);
+  }
+
+  for (const range of recentRanges) {
+    const candidateIndexes = indexesBetween(
+      range.start,
+      Math.max(range.start, range.end - protectRecentMessages),
+    );
+    for (const index of collectMessageTailPruneIndexes(
+      messages,
+      candidateIndexes,
+      protectedToolResultIds,
+      currentPruneIndexes,
+    )) {
+      indexes.add(index);
+    }
+  }
+  return indexes;
+}
+
 function createProviderBoundPrunePlan(
   messages: any[],
   options: SessionPruningOptions = {},
 ) {
   const input = Array.isArray(messages) ? messages : [];
+  const protectRecentTurns = normalizeProtectRecentTurns(
+    options.protectRecentTurns,
+  );
+  const protectRecentMessages = normalizeProtectRecentMessages(
+    options.protectRecentMessages,
+  );
   const protectedTurnStart = findProtectedContextStart(
     input,
-    normalizeProtectRecentTurns(options.protectRecentTurns),
+    protectRecentTurns,
   );
   const protectedMessageStart = Math.max(
     0,
-    input.length -
-      normalizeProtectRecentMessages(options.protectRecentMessages),
+    input.length - protectRecentMessages,
   );
   const replacements = new Map<any, any>();
   const protectedToolResultIds = collectProtectedToolResultIds(
     input,
     String(options.cwd || process.cwd()),
   );
-  const messageTailPruneIndexes = collectMessageTailPruneIndexes(
+  // The per-turn policy may restore current omissions, but must never add one.
+  const currentPruneIndexes = collectCurrentPruneIndexes(
     input,
     protectedTurnStart,
     protectedMessageStart,
     protectedToolResultIds,
   );
+  const perTurnPruneIndexes = collectPerTurnPruneIndexes(
+    input,
+    currentPruneIndexes,
+    protectRecentTurns,
+    protectRecentMessages,
+    protectedToolResultIds,
+  );
   let changed = false;
   const pruned = input.map((message, index) => {
-    const shouldOmit =
-      index < protectedMessageStart &&
-      (index < protectedTurnStart || messageTailPruneIndexes.has(index));
-    if (shouldOmit && isToolResultMessage(message)) {
+    if (perTurnPruneIndexes.has(index) && isToolResultMessage(message)) {
       if (isProtectedToolResult(message, protectedToolResultIds))
         return message;
       if (isAlreadyOmitted(message?.content)) return message;
