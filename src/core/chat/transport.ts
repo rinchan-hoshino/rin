@@ -292,6 +292,15 @@ function formatNoBotError(parsed: { platform: string; botId: string }) {
   return `no_bot_for_platform:${parsed.platform}${parsed.botId ? `/${parsed.botId}` : ""}`;
 }
 
+export function getChatTransportReadiness(
+  app: any,
+  chatKey: string,
+): "invalid" | "unavailable" | "ready" {
+  const parsed = parseChatKey(chatKey);
+  if (!parsed) return "invalid";
+  return findBot(app, parsed.platform, parsed.botId) ? "ready" : "unavailable";
+}
+
 function tryResolveChatTarget(app: any, chatKey: string) {
   const parsed = parseChatKey(chatKey);
   if (!parsed) return null;

@@ -104,36 +104,62 @@ export function attachRinCapabilityExtensionBridge(
   }
 
   runner.emit = async (event: any) => {
-    const result = await state.originalEmit(event);
     const type = String(event?.type || "").trim();
-    if (
-      !RIN_EXTENSION_RUNNER_EVENTS.has(type) ||
-      !state.capabilitySet.hasHandlers(type)
-    ) {
-      return result;
-    }
-    if (
-      RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type) &&
-      (result?.cancel || result?.compaction)
-    ) {
-      return result;
-    }
-    const rinEvent =
-      type === "context" && Array.isArray(result?.messages)
-        ? { ...event, messages: result.messages }
-        : event;
-    const rinResult = await state.capabilitySet.emit(
-      withRinEventMetadata(rinEvent, state.session),
-    );
-    if (!RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type)) {
+    const emitAndBridge = async () => {
+      const result = await state.originalEmit(event);
+      if (
+        !RIN_EXTENSION_RUNNER_EVENTS.has(type) ||
+        !state.capabilitySet.hasHandlers(type)
+      ) {
+        return result;
+      }
+      if (
+        RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type) &&
+        (result?.cancel || result?.compaction)
+      ) {
+        return result;
+      }
+      const rinEvent =
+        type === "context" && Array.isArray(result?.messages)
+          ? { ...event, messages: result.messages }
+          : event;
+      const rinResult = await state.capabilitySet.emit(
+        withRinEventMetadata(rinEvent, state.session),
+      );
+      if (!RIN_EXTENSION_RUNNER_BEFORE_EVENTS.has(type)) {
+        return result || rinResult;
+      }
+      if (type === "context" && result && rinResult) {
+        return { ...result, ...rinResult };
+      }
+      if (rinResult?.cancel || rinResult?.compaction) {
+        return rinResult;
+      }
       return result || rinResult;
+    };
+    if (type === "agent_settled") {
+      const startObserver = (
+        owner: "extension" | "capability",
+        observer: () => unknown,
+      ) => {
+        let observation: Promise<unknown>;
+        try {
+          observation = Promise.resolve(observer());
+        } catch (error) {
+          observation = Promise.reject(error);
+        }
+        void observation.catch((error) => {
+          console.error(`[rin] agent_settled ${owner} observer failed`, error);
+        });
+      };
+      startObserver("extension", () => state.originalEmit(event));
+      if (state.capabilitySet.hasHandlers(type)) {
+        startObserver("capability", () =>
+          state.capabilitySet.emit(withRinEventMetadata(event, state.session)),
+        );
+      }
+      return undefined;
     }
-    if (type === "context" && result && rinResult) {
-      return { ...result, ...rinResult };
-    }
-    if (rinResult?.cancel || rinResult?.compaction) {
-      return rinResult;
-    }
-    return result || rinResult;
+    return emitAndBridge();
   };
 }

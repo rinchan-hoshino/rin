@@ -6698,15 +6698,12 @@ test("chat controller durably commits a final when the adapter disappears", asyn
     switchSession: async () => {},
   };
 
-  await assert.rejects(
-    controller.runTurn({
-      text: "hello",
-      attachments: [],
-      incomingMessageId: "m-bot-disappeared",
-      replyToMessageId: "m-bot-disappeared",
-    }),
-    /no_bot_for_platform|chat_outbox_bot_not_found|chat_outbox_delivery_pending/,
-  );
+  await controller.runTurn({
+    text: "hello",
+    attachments: [],
+    incomingMessageId: "m-bot-disappeared",
+    replyToMessageId: "m-bot-disappeared",
+  });
 
   const stored = getChatMessage(
     controller.agentDir,
@@ -6718,6 +6715,9 @@ test("chat controller durably commits a final when the adapter disappears", asyn
     ({ item }) => item.deliveryKind === "final",
   )?.item;
   assert.ok(queued);
+  assert.equal(queued.status, "queued");
+  assert.equal(queued.attempts, 0);
+  assert.equal(queued.lastError, undefined);
   assert.equal(
     queued.postDelivery.markProcessed.messageId,
     "m-bot-disappeared",

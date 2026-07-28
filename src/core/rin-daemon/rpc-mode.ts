@@ -978,9 +978,8 @@ export async function runCustomRpcMode(
             : new Error(String(producerOutcome.error || "rpc_turn_failed"));
         }
         // Pi's agent_settled event is the authoritative boundary after retries,
-        // compaction, and queued continuations. If the outer prompt promise is
-        // wedged after that boundary, do not let transport bookkeeping keep the
-        // canonical terminal open.
+        // compaction, and queued continuations. Rin detaches post-settlement
+        // extension observers so they cannot keep this producer event open.
         const terminalOutcome = turnSettlement.resolve(
           directOutcome,
           readTurnMessages(turnSession, terminalScope),

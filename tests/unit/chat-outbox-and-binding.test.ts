@@ -1289,7 +1289,7 @@ test("expired pre-dispatch outbox work is retried instead of falsely delivered",
   });
 });
 
-test("committed terminal outbox survives expiry and retry exhaustion while its adapter is unavailable", async () => {
+test("committed terminal outbox remains unclaimed while its adapter is unavailable", async () => {
   await withTempDir(async (dir) => {
     const inbound = inbox.enqueueChatInboxItem(dir, {
       chatKey: "telegram/777:1",
@@ -1339,6 +1339,7 @@ test("committed terminal outbox survives expiry and retry exhaustion while its a
       { deliveryKind: "final" },
     );
 
+    const app: any = { bots: [] };
     for (const durableId of [finalId, unlinkedFinalId]) {
       for (let attempt = 0; attempt < 6; attempt += 1) {
         database
@@ -1346,7 +1347,7 @@ test("committed terminal outbox survives expiry and retry exhaustion while its a
           .prepare(`UPDATE outbox SET next_attempt_at = ? WHERE outbox_id = ?`)
           .run(new Date(0).toISOString(), durableId);
         await boot.drainChatOutbox(
-          { bots: [] },
+          app,
           dir,
           h(),
           { warn() {} },
@@ -1356,10 +1357,44 @@ test("committed terminal outbox survives expiry and retry exhaustion while its a
 
       const durable = outbox.readChatOutboxItemById(dir, durableId).item;
       assert.equal(durable.status, "queued");
-      assert.equal(durable.failureKind, "retryable");
-      assert.ok(durable.attempts >= 6);
-      assert.match(durable.lastError, /no_bot_for_platform/);
+      assert.equal(durable.failureKind, "");
+      assert.equal(durable.attempts, 0);
+      assert.equal(durable.lastError, undefined);
     }
+
+    let sends = 0;
+    app.bots.push({
+      platform: "telegram",
+      selfId: "777",
+      async sendMessage() {
+        sends += 1;
+        return [`provider-final-${sends}`];
+      },
+    });
+    for (const durableId of [finalId, unlinkedFinalId]) {
+      await boot.drainChatOutbox(
+        app,
+        dir,
+        h(),
+        { warn() {} },
+        {
+          itemId: durableId,
+        },
+      );
+      await boot.drainChatOutbox(
+        app,
+        dir,
+        h(),
+        { warn() {} },
+        {
+          itemId: durableId,
+        },
+      );
+      const delivered = outbox.readChatOutboxItemById(dir, durableId).item;
+      assert.equal(delivered.status, "delivered");
+      assert.equal(delivered.attempts, 1);
+    }
+    assert.equal(sends, 2);
   });
 });
 

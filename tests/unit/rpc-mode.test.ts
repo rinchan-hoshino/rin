@@ -14,6 +14,11 @@ const { runCustomRpcMode } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "rpc-mode.js"))
     .href
 );
+const { attachRinCapabilityExtensionBridge } = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "pi", "internal-extension-bridge.js"),
+  ).href
+);
 
 function wait(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -4482,6 +4487,157 @@ test(
           finalText: event.finalText,
         })),
         [{ requestTag: "tag-settled", finalText: "durable settled final" }],
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
+  "rpc mode does not let a settled extension observer block the public settled event",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines: string[] = [];
+    const sessionSubscribers = new Set<(event: any) => void>();
+    let extensionObserverStarted = false;
+    let capabilityObserverStarted = false;
+    const extensionRunner = {
+      hasHandlers: () => false,
+      async emit() {
+        extensionObserverStarted = true;
+        await new Promise(() => {});
+      },
+    };
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/agent-end-terminal-session.jsonl",
+        sessionId: "agent-end-terminal-session",
+        agent: {
+          signal: undefined,
+          state: { isStreaming: false },
+          hasQueuedMessages: () => false,
+          waitForIdle: async () => {},
+        },
+        _extensionRunner: extensionRunner,
+        bindExtensions: async () => {},
+        subscribe: (handler: (event: any) => void) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
+        async prompt() {
+          await new Promise(() => {});
+        },
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: testSessionManager(() => session.messages),
+        messages: [] as any[],
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      attachRinCapabilityExtensionBridge(session, {
+        hasHandlers: (type: string) => type === "agent_settled",
+        async emit() {
+          capabilityObserverStarted = true;
+          await new Promise(() => {});
+        },
+      });
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "turn-agent-end", type: "prompt", message: "finish before a wedged settle hook", requestTag: "tag-agent-end" })}\n`,
+        ),
+      );
+      await wait(10);
+
+      const finalMessage = {
+        role: "assistant",
+        content: [{ type: "text", text: "durable agent end final" }],
+        stopReason: "stop",
+      };
+      session.messages.push(finalMessage);
+      for (const handler of sessionSubscribers) {
+        handler({ type: "message_end", message: finalMessage });
+        handler({ type: "agent_end", messages: [finalMessage] });
+      }
+      await wait(10);
+      assert.equal(
+        parseRpcOutput(lines).filter(
+          (event) =>
+            event.type === "rpc_turn_event" && event.event === "complete",
+        ).length,
+        0,
+      );
+
+      await extensionRunner.emit({ type: "agent_settled" });
+      assert.equal(extensionObserverStarted, true);
+      assert.equal(capabilityObserverStarted, true);
+      for (const handler of sessionSubscribers) {
+        handler({ type: "agent_settled" });
+      }
+      await wait(20);
+
+      const completions = parseRpcOutput(lines).filter(
+        (event) =>
+          event.type === "rpc_turn_event" && event.event === "complete",
+      );
+      assert.deepEqual(
+        completions.map((event) => ({
+          requestTag: event.requestTag,
+          finalText: event.finalText,
+        })),
+        [{ requestTag: "tag-agent-end", finalText: "durable agent end final" }],
       );
     } finally {
       process.stdin.on = stdinOn;

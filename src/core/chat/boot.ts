@@ -14,6 +14,7 @@ import { RIN_NON_INTERACTIVE_COMMAND_NAMES } from "../rin-frontend-sdk/index.js"
 import { markProcessedChatMessage, safeString } from "./chat-helpers.js";
 import {
   getChatOutboxDispatchPromise,
+  getChatTransportReadiness,
   sendOutboxPayload,
 } from "./transport.js";
 
@@ -675,6 +676,9 @@ async function drainChatOutboxItem(
     return { status: item.status };
   }
   if (!isOutboxItemDrainable(item, Date.now(), options)) {
+    return null;
+  }
+  if (getChatTransportReadiness(app, item.payload.chatKey) === "unavailable") {
     return null;
   }
   const timeoutMs = getChatOutboxSendTimeoutMs(item, options);
