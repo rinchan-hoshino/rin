@@ -116,6 +116,7 @@ export {
 export {
   RinFrontendTurnDriver,
   submitNativeFrontendPromptTurn,
+  type RinFrontendEventHandlingFailure,
   type RinFrontendPromptTurnInput,
   type RinFrontendTurnClient,
   type RinFrontendTurnDriverEvent,

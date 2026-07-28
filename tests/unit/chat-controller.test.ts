@@ -165,6 +165,66 @@ function createRecoveredController(previousController) {
   return attachTestChatApp(controller);
 }
 
+test("chat frontend event failures are visible without terminating the active turn", async () => {
+  const warnings = [];
+  let connected = false;
+  let frontendSubscriber = null;
+  const frontendClient = {
+    isConnected: () => connected,
+    async connect() {
+      connected = true;
+    },
+    subscribe(listener) {
+      frontendSubscriber = listener;
+      return () => {
+        if (frontendSubscriber === listener) frontendSubscriber = null;
+      };
+    },
+    async getState() {
+      return {};
+    },
+  };
+  const controller = await createController("telegram/1:2", {
+    logger: {
+      info() {},
+      warn(message) {
+        warnings.push(String(message));
+      },
+    },
+    frontendClientFactory: () => frontendClient,
+  });
+  setDurableCurrentTurn(controller, "observable-turn-message");
+  controller.currentTurn.requestTag = "observable-turn";
+  const activeTurn = controller.currentTurn;
+  let sends = 0;
+  controller.app.bots[0].sendMessage = async () => {
+    sends += 1;
+    return [`event-error-${sends}`];
+  };
+
+  await controller.driver.connect();
+  controller.driver.handleClientEvent = async () => {
+    throw new Error("projection exploded");
+  };
+  for (let occurrence = 0; occurrence < 2; occurrence += 1) {
+    await frontendSubscriber({
+      type: "ui",
+      payload: { type: "working_visible", visible: true },
+    });
+  }
+  for (let attempt = 0; attempt < 20 && warnings.length < 2; attempt += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  for (let attempt = 0; attempt < 50 && sends < 1; attempt += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  assert.equal(controller.currentTurn, activeTurn);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /stage=client_event event=ui/);
+  assert.equal(sends, 1);
+});
+
 test("chat controller settles a canonical turn after known partial delivery", async () => {
   const controller = await createController("telegram/1:2");
   let sends = 0;

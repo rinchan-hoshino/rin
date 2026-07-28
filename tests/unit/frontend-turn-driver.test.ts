@@ -56,6 +56,9 @@ function createFrontendClient() {
         if (listener === nextListener) listener = null;
       };
     },
+    async emit(event: any) {
+      await listener?.(event);
+    },
     async getState() {
       return { sessionFile, sessionId: "frontend-session", isStreaming: false };
     },
@@ -162,6 +165,145 @@ function createFrontendClient() {
     async respondExtensionUi() {},
   };
 }
+
+test("frontend client event handler failures are reported without becoming turn errors", async () => {
+  const client = createFrontendClient();
+  const failures: any[] = [];
+  const seen: any[] = [];
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+    onEventHandlingError: (failure: any) => failures.push(failure),
+  });
+  driver.subscribe((event: any) => {
+    seen.push(event);
+  });
+  driver.subscribe((event: any) => {
+    if (event.type === "passive_notice") {
+      throw new Error("chat delivery projection failed");
+    }
+  });
+  await driver.connect();
+
+  await client.emit({
+    type: "ui",
+    payload: {
+      type: "compaction_end",
+      errorMessage: "backend remains active",
+      willRetry: true,
+      requestTag: "observable-turn",
+    },
+  });
+  await waitUntil(
+    () => failures.length === 1,
+    "frontend event handler failure was not reported",
+  );
+
+  assert.equal(failures[0].stage, "frontend_listener");
+  assert.match(String(failures[0].error?.message), /projection failed/);
+  assert.equal(
+    seen.some((event) => event.type === "turn_error"),
+    false,
+  );
+  assert.equal(driver.liveTurn, null);
+});
+
+test("frontend event reporter failures preserve the original failure context", async () => {
+  const client = createFrontendClient();
+  const logged: any[][] = [];
+  const originalConsoleError = console.error;
+  console.error = (...args: any[]) => logged.push(args);
+  try {
+    const driver = new RinFrontendTurnDriver({
+      clientFactory: () => client,
+      promptSource: "chat-bridge",
+      onEventHandlingError: async () => {
+        throw new Error("reporter unavailable");
+      },
+    });
+    driver.subscribe((event: any) => {
+      if (event.type === "passive_notice") {
+        throw new Error("original projection failure");
+      }
+    });
+    await driver.connect();
+    await client.emit({
+      type: "ui",
+      payload: {
+        type: "compaction_end",
+        errorMessage: "still active",
+        willRetry: true,
+      },
+    });
+    await waitUntil(
+      () => logged.length === 2,
+      "original and reporter failures were not both logged",
+    );
+    assert.match(String(logged[0][0]), /stage=frontend_listener/);
+    assert.match(String(logged[0][1]?.message), /original projection failure/);
+    assert.match(String(logged[1][0]), /event error reporter failed/);
+    assert.match(String(logged[1][1]?.message), /reporter unavailable/);
+  } finally {
+    console.error = originalConsoleError;
+  }
+});
+
+test("unexpected client event failures are reported without inventing turn errors", async () => {
+  const client = createFrontendClient();
+  const failures: any[] = [];
+  const seen: any[] = [];
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+    onEventHandlingError: (failure: any) => failures.push(failure),
+  });
+  driver.subscribe((event: any) => seen.push(event));
+  await driver.connect();
+  (driver as any).handleClientEvent = async () => {
+    throw new Error("backend event translation exploded");
+  };
+
+  await client.emit({
+    type: "ui",
+    payload: { type: "working_visible", visible: true },
+  });
+  await waitUntil(
+    () => failures.length === 1,
+    "unexpected client event failure was not reported",
+  );
+
+  assert.equal(failures[0].stage, "client_event");
+  assert.equal(failures[0].clientEvent.type, "ui");
+  assert.match(String(failures[0].error?.message), /translation exploded/);
+  assert.equal(
+    seen.some((event) => event.type === "turn_error"),
+    false,
+  );
+  assert.equal(driver.liveTurn, null);
+});
+
+test("terminal listener failures remain terminal while becoming observable", async () => {
+  const client = createFrontendClient();
+  const failures: any[] = [];
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+    onEventHandlingError: (failure: any) => failures.push(failure),
+  });
+  driver.subscribe((event: any) => {
+    if (event.type === "turn_complete") {
+      throw new Error("terminal projection failed");
+    }
+  });
+
+  await assert.rejects(
+    driver.runTurn({ text: "finish this turn" }),
+    /terminal projection failed/,
+  );
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].stage, "terminal_listener");
+  assert.equal(failures[0].frontendEvent.type, "turn_complete");
+});
 
 test("backend working visibility is the only shared frontend Working source", async () => {
   const driver = createDriver();

@@ -94,6 +94,13 @@ export type RinFrontendPassiveNoticeEvent = Extract<
   { type: "passive_notice" }
 > & { requestTag?: string };
 
+export type RinFrontendEventHandlingFailure = {
+  stage: "client_event" | "frontend_listener" | "terminal_listener";
+  error: unknown;
+  clientEvent?: RinFrontendEvent;
+  frontendEvent?: RinFrontendTurnDriverEvent;
+};
+
 export type RinFrontendTurnDriverEvent =
   | { type: "frontend_status"; phase: RinFrontendTurnPhase }
   | { type: "working_visible"; visible: boolean }
@@ -160,6 +167,9 @@ export class RinFrontendTurnDriver {
   private readonly promptSource: string;
   private readonly commandResponses: RinFrontendCommandResponses;
   private readonly frontendIdentity: RinFrontendIdentity;
+  private readonly onEventHandlingError?: (
+    failure: RinFrontendEventHandlingFailure,
+  ) => void | Promise<void>;
   client: RinFrontendTurnClient | null = null;
   private frontendState: Record<string, any> = {};
   liveTurn: {
@@ -189,6 +199,9 @@ export class RinFrontendTurnDriver {
     promptSource?: string;
     commandResponses?: Partial<RinFrontendCommandResponses>;
     frontendIdentity?: RinFrontendIdentity;
+    onEventHandlingError?: (
+      failure: RinFrontendEventHandlingFailure,
+    ) => void | Promise<void>;
   }) {
     this.clientFactory = options.clientFactory;
     this.promptSource = safeString(options.promptSource).trim() || "frontend";
@@ -198,6 +211,7 @@ export class RinFrontendTurnDriver {
     this.frontendIdentity =
       normalizeFrontendIdentity(options.frontendIdentity) ||
       sourceFrontendIdentity(this.promptSource);
+    this.onEventHandlingError = options.onEventHandlingError;
     this.backendEventTranslator = createRinFrontendBackendEventTranslator({
       commandResponses: this.commandResponses,
     });
@@ -210,11 +224,54 @@ export class RinFrontendTurnDriver {
     return () => this.listeners.delete(listener);
   }
 
+  private logEventHandlingError(
+    failure: RinFrontendEventHandlingFailure,
+    reportError?: unknown,
+  ) {
+    const eventType =
+      failure.frontendEvent?.type || failure.clientEvent?.type || "unknown";
+    console.error(
+      `[rin frontend] event handling failed stage=${failure.stage} event=${eventType}`,
+      failure.error,
+    );
+    if (reportError !== undefined) {
+      console.error("[rin frontend] event error reporter failed", reportError);
+    }
+  }
+
+  private reportEventHandlingError(failure: RinFrontendEventHandlingFailure) {
+    if (!this.onEventHandlingError) {
+      this.logEventHandlingError(failure);
+      return;
+    }
+    try {
+      void Promise.resolve(this.onEventHandlingError(failure)).catch(
+        (reportError) => {
+          this.logEventHandlingError(failure, reportError);
+        },
+      );
+    } catch (reportError) {
+      this.logEventHandlingError(failure, reportError);
+    }
+  }
+
   private emit(event: RinFrontendTurnDriverEvent) {
     for (const listener of this.listeners) {
       try {
-        void Promise.resolve(listener(event)).catch(() => {});
-      } catch {}
+        void Promise.resolve(listener(event)).catch((error) => {
+          this.reportEventHandlingError({
+            stage: "frontend_listener",
+            error,
+            frontendEvent: event,
+          });
+        });
+      } catch (error) {
+        this.reportEventHandlingError({
+          stage: "frontend_listener",
+          error,
+          frontendEvent: event,
+        });
+      }
     }
   }
 
@@ -241,7 +298,13 @@ export class RinFrontendTurnDriver {
       }
       if (await this.disconnectSupersededClient(client)) return false;
       client.subscribe((event: RinFrontendEvent) => {
-        void this.handleClientEvent(event).catch(() => {});
+        void this.handleClientEvent(event).catch((error) => {
+          this.reportEventHandlingError({
+            stage: "client_event",
+            error,
+            clientEvent: event,
+          });
+        });
       });
     }
 
@@ -1708,6 +1771,18 @@ export class RinFrontendTurnDriver {
             requestTag: safeString(event.requestTag).trim() || undefined,
           });
         } catch (error) {
+          this.reportEventHandlingError({
+            stage: "terminal_listener",
+            error,
+            frontendEvent: {
+              type: "turn_complete",
+              finalText,
+              result: event.result,
+              sessionId: event.sessionId,
+              sessionFile: event.sessionFile,
+              requestTag: safeString(event.requestTag).trim() || undefined,
+            },
+          });
           const terminalError = (
             error instanceof Error ? error : new Error(String(error))
           ) as Error & { rinTurnTerminal?: boolean };
@@ -1739,6 +1814,17 @@ export class RinFrontendTurnDriver {
             requestTag: safeString(event.requestTag).trim() || undefined,
           });
         } catch (error) {
+          this.reportEventHandlingError({
+            stage: "terminal_listener",
+            error,
+            frontendEvent: {
+              type: "turn_error",
+              error: event.error,
+              sessionId: event.sessionId,
+              sessionFile: event.sessionFile,
+              requestTag: safeString(event.requestTag).trim() || undefined,
+            },
+          });
           const terminalError = (
             error instanceof Error ? error : new Error(String(error))
           ) as Error & { rinTurnTerminal?: boolean };

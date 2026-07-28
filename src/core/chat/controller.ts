@@ -8,6 +8,7 @@ import {
   chatFrontendIdentity,
   frontendCommandNameFromLine,
   getRinNonInteractiveCommandInteractionPolicy,
+  type RinFrontendEventHandlingFailure,
   type RinFrontendIdentity,
   type RinFrontendTurnClient,
 } from "../rin-frontend-sdk/index.js";
@@ -437,6 +438,8 @@ export class ChatController {
       promptSource: "chat-bridge",
       commandResponses: this.getCommandResponses(),
       frontendIdentity,
+      onEventHandlingError: (failure) =>
+        this.reportFrontendEventHandlingFailure(failure),
     });
     this.driver.subscribe(async (event) => {
       await this.handleFrontendEvent(event);
@@ -2198,6 +2201,36 @@ export class ChatController {
     options: Parameters<ChatController["sendProgressNoticeNow"]>[2] = {},
   ) {
     return await this.sendProgressNoticeNow(text, "interim", options);
+  }
+
+  private async reportFrontendEventHandlingFailure(
+    failure: RinFrontendEventHandlingFailure,
+  ) {
+    const errorText =
+      safeString((failure.error as any)?.message || failure.error).trim() ||
+      "unknown frontend event error";
+    const eventType =
+      failure.frontendEvent?.type || failure.clientEvent?.type || "unknown";
+    this.logger?.warn?.(
+      `frontend event handling failed stage=${failure.stage} event=${eventType}: ${errorText}`,
+    );
+    if (failure.stage === "terminal_listener") return;
+    const idempotencyKey = `frontend-event-error:${crypto
+      .createHash("sha256")
+      .update(
+        JSON.stringify([
+          this.chatKey,
+          this.currentTurn?.requestTag || "",
+          failure.stage,
+          eventType,
+          errorText,
+        ]),
+      )
+      .digest("hex")}`;
+    await this.sendErrorNoticeNow(
+      `rin error: frontend event handling failed (${failure.stage}/${eventType}): ${errorText}`,
+      { idempotencyKey, nonTerminalError: true },
+    );
   }
 
   private async sendErrorNoticeNow(
