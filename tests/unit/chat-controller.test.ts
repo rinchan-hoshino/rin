@@ -4161,6 +4161,33 @@ test("chat controller can expose external working indicators", async () => {
   assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
 });
 
+test("chat controller keeps inbox typing through backend Working gaps", async () => {
+  const actions = [];
+  const controller = await createController("telegram/1:2");
+  controller.app.bots[0].getWorkingIndicators = () => [
+    testPollingIndicator(actions),
+  ];
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-inbox-working-gap",
+    requestTag: "request-inbox-working-gap",
+    outboxTurnFence: {
+      agentDir: controller.agentDir,
+      turnId: "turn-inbox-working-gap",
+      chatKey: controller.chatKey,
+      messageId: "m-inbox-working-gap",
+      ownerEpoch: "owner-inbox-working-gap",
+      attempt: 1,
+    },
+  };
+  controller.awaitingTurnSettle = true;
+  controller.externalWorkingVisible = false;
+  controller.driver.hasVisibleChatWorkingTurn = () => false;
+
+  assert.equal(await controller.pollTyping(), true);
+  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
+});
+
 test("chat controller stops external typing when external working ends", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];

@@ -1324,9 +1324,12 @@ export class ChatController {
   }
 
   private shouldShowTypingIndicator() {
+    if (!this.currentTurn) return false;
+    if (this.currentTurn.outboxTurnFence && this.awaitingTurnSettle) {
+      return true;
+    }
     return Boolean(
-      this.currentTurn &&
-      (this.externalWorkingVisible || this.driver.hasVisibleChatWorkingTurn()),
+      this.externalWorkingVisible || this.driver.hasVisibleChatWorkingTurn(),
     );
   }
 
