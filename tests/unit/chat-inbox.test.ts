@@ -509,38 +509,6 @@ test("chat inbox drain requeues a reclaimed lease while the old controller still
   assert.ok(Date.parse(current.nextAttemptAt) > Date.now());
 });
 
-test("chat inbox drain does not claim a turn whose durable session conflicts with the active session", async () => {
-  const agentDir = await tempDir();
-  const item = inbox.enqueueChatInboxItem(
-    agentDir,
-    input("session-conflict"),
-  ).item;
-  database
-    .openChatDatabase(agentDir)
-    .prepare("UPDATE turns SET execution_session_file = ? WHERE turn_id = ?")
-    .run("managed/chat/owned-session.jsonl", item.itemId);
-  const jobs = [];
-  const drain = inboxDrain.createChatInboxDrain({
-    agentDir,
-    getController: () => ({
-      conflictsWithActiveSession: () => true,
-      ownsInboundMessage: () => false,
-    }),
-    isInboundMessageProcessed: () => false,
-    enqueueClaimedInboxItem: (job) => jobs.push(job),
-    hasActiveChatKeyWorker: () => false,
-  });
-
-  await drain.drainChatInboxOnce();
-
-  assert.deepEqual(jobs, []);
-  const current = database
-    .openChatDatabase(agentDir)
-    .prepare("SELECT state, attempt FROM turns WHERE turn_id = ?")
-    .get(item.itemId);
-  assert.deepEqual(current, { state: "pending", attempt: 0 });
-});
-
 test("chat inbox drain skips rejected active-turn chatter and claims a later command", async () => {
   const agentDir = await tempDir();
   const chatter = inbox.enqueueChatInboxItem(

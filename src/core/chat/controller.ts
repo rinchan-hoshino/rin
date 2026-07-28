@@ -586,17 +586,6 @@ export class ChatController {
     );
   }
 
-  conflictsWithActiveSession(sessionFile?: string) {
-    if (!this.hasActiveTurn()) return false;
-    const wantedSessionFile = this.resolveSessionFileForUse(sessionFile);
-    const activeSessionFile = this.driver.currentSessionFile();
-    return Boolean(
-      wantedSessionFile &&
-      activeSessionFile &&
-      !sameSessionFile(this.agentDir, activeSessionFile, wantedSessionFile),
-    );
-  }
-
   private setCurrentTurn(input: {
     incomingMessageId?: string;
     replyToMessageId?: string;
@@ -2980,9 +2969,6 @@ export class ChatController {
       const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
       const wantedSessionFile =
         this.resolveSessionFileForUse(rawWantedSessionFile);
-      if (this.conflictsWithActiveSession(wantedSessionFile)) {
-        throw new Error("rin_session_recovering");
-      }
       if (
         wantedSessionFile &&
         !input.createSessionFileIfMissing &&
