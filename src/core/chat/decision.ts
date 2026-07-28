@@ -69,6 +69,14 @@ function uniqueMemberIds(values: unknown[]) {
   return Array.from(new Set(ids));
 }
 
+function canonicalDecimalCount(value: unknown) {
+  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
 async function listLarkChatMembers(
   internal: any,
   chatId: string,
@@ -119,14 +127,9 @@ async function listLarkChatMembers(
         path: { chat_id: chatId },
       });
       if (chatResponse?.code !== 0) return { complete: false };
-      const userCount = chatResponse?.data?.user_count;
-      const botCount = chatResponse?.data?.bot_count;
-      if (
-        !Number.isSafeInteger(userCount) ||
-        !Number.isSafeInteger(botCount) ||
-        userCount !== uniqueNonAgentUserIds.length ||
-        botCount !== 1
-      ) {
+      const userCount = canonicalDecimalCount(chatResponse?.data?.user_count);
+      const botCount = canonicalDecimalCount(chatResponse?.data?.bot_count);
+      if (userCount !== uniqueNonAgentUserIds.length || botCount !== 1) {
         return { complete: false };
       }
       return {

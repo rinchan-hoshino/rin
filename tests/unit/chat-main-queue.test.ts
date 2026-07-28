@@ -1158,7 +1158,7 @@ test("chat main reports unmatched slash commands in owner-only Lark groups", asy
             };
           },
           async getChat() {
-            return { code: 0, data: { user_count: 1, bot_count: 1 } };
+            return { code: 0, data: { user_count: "1", bot_count: "1" } };
           },
         },
         async sendMessage() {

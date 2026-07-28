@@ -311,7 +311,7 @@ test("chat decision rejects noncanonical platform member-id fields", async () =>
             };
           },
           async getChat() {
-            return { code: 0, data: { user_count: 1, bot_count: 1 } };
+            return { code: 0, data: { user_count: "1", bot_count: "1" } };
           },
         },
       },
@@ -394,7 +394,7 @@ test("chat decision keeps Feishu chats on normal group mention policy", async ()
   assert.equal(result.requiresMentionToStartTurn, true);
 });
 
-test("chat decision lets complete owner-only Lark member lists skip mention", async () => {
+test("chat decision lets owner-only Lark chats with API string counts skip mention", async () => {
   const calls: any[] = [];
   const result = await decision.shouldProcessText(
     {
@@ -419,7 +419,10 @@ test("chat decision lets complete owner-only Lark member lists skip mention", as
           },
           async getChat(options) {
             assert.deepEqual(options, { path: { chat_id: "oc_owner_only" } });
-            return { code: 0, data: { user_count: 1, bot_count: 1 } };
+            return {
+              code: 0,
+              data: { user_count: "1", bot_count: "1" },
+            };
           },
         },
       },
@@ -444,6 +447,43 @@ test("chat decision lets complete owner-only Lark member lists skip mention", as
   ]);
 });
 
+test("chat decision fails closed when Lark chat counts are numeric", async () => {
+  const result = await decision.shouldProcessText(
+    {
+      platform: "lark",
+      guildId: "oc_numeric_counts",
+      channelId: "oc_numeric_counts",
+      selfId: "cli_bot_numeric_counts",
+      userId: "ou_owner",
+      bot: {
+        selfId: "cli_bot_numeric_counts",
+        internal: {
+          async listChatMembers() {
+            return {
+              code: 0,
+              data: {
+                items: [{ member_id: "ou_owner" }],
+                has_more: false,
+                member_total: 1,
+              },
+            };
+          },
+          async getChat() {
+            return { code: 0, data: { user_count: 1, bot_count: 1 } };
+          },
+        },
+      },
+      stripped: { content: "private note" },
+      elements: [{ type: "text", attrs: { content: "private note" } }],
+    },
+    [{ type: "text", attrs: { content: "private note" } }],
+    identity,
+  );
+
+  assert.equal(result.allow, false);
+  assert.equal(result.requiresMentionToStartTurn, true);
+});
+
 test("chat decision rejects Lark chats containing a third bot", async () => {
   const result = await decision.shouldProcessText(
     {
@@ -466,7 +506,7 @@ test("chat decision rejects Lark chats containing a third bot", async () => {
             };
           },
           async getChat() {
-            return { code: 0, data: { user_count: 1, bot_count: 2 } };
+            return { code: 0, data: { user_count: "1", bot_count: "2" } };
           },
         },
       },
@@ -509,7 +549,7 @@ test("chat decision rechecks owner-only lists so a newly joined member revokes b
         async getChat() {
           return {
             code: 0,
-            data: { user_count: calls === 1 ? 1 : 2, bot_count: 1 },
+            data: { user_count: calls === 1 ? "1" : "2", bot_count: "1" },
           };
         },
       },
@@ -760,7 +800,7 @@ test("chat decision fails closed when member-list pagination is incomplete", asy
             };
           },
           async getChat() {
-            return { code: 0, data: { user_count: 1, bot_count: 1 } };
+            return { code: 0, data: { user_count: "1", bot_count: "1" } };
           },
         },
       },
@@ -797,7 +837,7 @@ test("chat decision fails closed when Lark member_total contradicts the complete
             };
           },
           async getChat() {
-            return { code: 0, data: { user_count: 1, bot_count: 1 } };
+            return { code: 0, data: { user_count: "1", bot_count: "1" } };
           },
         },
       },
@@ -849,7 +889,7 @@ test("chat decision fails closed when Lark omits success or total proof", async 
               return response;
             },
             async getChat() {
-              return { code: 0, data: { user_count: 1, bot_count: 1 } };
+              return { code: 0, data: { user_count: "1", bot_count: "1" } };
             },
           },
         },
@@ -886,7 +926,7 @@ test("chat decision fails closed when Lark omits pagination completeness", async
             };
           },
           async getChat() {
-            return { code: 0, data: { user_count: 1, bot_count: 1 } };
+            return { code: 0, data: { user_count: "1", bot_count: "1" } };
           },
         },
       },
