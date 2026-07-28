@@ -25,6 +25,15 @@ const transcriptArchiveModule = await import(
 const memoryExtensionModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "memory", "index.js")).href
 );
+const memoryProviderClient = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "memory", "provider-client.js"),
+  ).href
+);
+const memoryCoordinator = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "memory", "coordinator.js"))
+    .href
+);
 const transcriptInstallMigration = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "memory", "install-migration.js"),
@@ -2238,7 +2247,7 @@ test("recall includes external provider results without local transcript paths",
     await withJsonlDaemonSocket(
       (payload) => {
         requests.push(payload);
-        if (payload.type === "memory_search_external") {
+        if (payload.type === "memory_search_providers") {
           return {
             results: [
               {
@@ -2270,7 +2279,7 @@ test("recall includes external provider results without local transcript paths",
           "medium",
         );
 
-        assert.equal(requests.at(-1)?.type, "memory_search_external");
+        assert.equal(requests.at(-1)?.type, "memory_search_providers");
         assert.equal(requests.at(-1)?.payload?.query, "remote only marker");
         assert.match(result.content[0].text, /mem:\/\/remote-hit-1/);
         assert.match(
@@ -2283,6 +2292,64 @@ test("recall includes external provider results without local transcript paths",
         );
         assert.doesNotMatch(result.details.userText, /memory\/transcripts/);
       },
+    );
+  });
+});
+
+test("submitted provider timeouts do not retry the native local backend", async () => {
+  await withTempRoot(async (root) => {
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        id: "existing-local",
+        timestamp: "2026-05-10T06:00:00.000Z",
+        sessionId: "existing-session",
+        sessionFile: path.join(root, "sessions", "existing.jsonl"),
+        role: "user",
+        text: "existing native timeout sentinel",
+      },
+      root,
+    );
+    const requests = [];
+    await withJsonlDaemonSocket(
+      (payload) => {
+        requests.push(payload);
+        return new Promise(() => {});
+      },
+      async (socketPath) => {
+        assert.deepEqual(
+          await memoryProviderClient.searchMemoryProviders(
+            { query: "existing native timeout sentinel", limit: 4 },
+            root,
+            { commandTimeoutMs: 25, socketPath },
+          ),
+          { results: [], totalResults: 0 },
+        );
+        await memoryProviderClient.writeMemoryEntry(
+          {
+            id: "must-not-retry",
+            timestamp: "2026-05-10T06:01:00.000Z",
+            sessionId: "timeout-session",
+            sessionFile: path.join(root, "sessions", "timeout.jsonl"),
+            role: "user",
+            text: "must not duplicate after provider timeout",
+          },
+          root,
+          { commandTimeoutMs: 25, socketPath },
+        );
+      },
+    );
+
+    assert.deepEqual(
+      requests.map((request) => request.type),
+      ["memory_search_providers", "memory_write_providers"],
+    );
+    const recent = await transcripts.loadRecentTranscriptSessions(
+      { limit: 8 },
+      root,
+    );
+    assert.equal(
+      recent.some((result) => result.sessionId === "timeout-session"),
+      false,
     );
   });
 });
@@ -2300,13 +2367,19 @@ test("recall newest order applies across local and external memory results", asy
       root,
     );
 
+    const localResults = await transcripts.searchTranscriptArchive(
+      "Project Aurora current status",
+      { limit: 2, order: "newest" },
+      root,
+    );
     const requests = [];
     await withJsonlDaemonSocket(
       (payload) => {
         requests.push(payload);
-        if (payload.type === "memory_search_external") {
-          return {
-            results: [
+        if (payload.type === "memory_search_providers") {
+          return memoryCoordinator.mergeMemoryProviderResults(
+            localResults,
+            [
               {
                 sourceType: "external",
                 provider: "remote-memory",
@@ -2324,7 +2397,8 @@ test("recall newest order applies across local and external memory results", asy
                 ],
               },
             ],
-          };
+            { limit: 2, order: "newest" },
+          );
         }
         return {};
       },
@@ -2378,7 +2452,7 @@ test("memory message hook publishes transcript archive writes to external memory
         );
 
         const writeRequest = requests.find(
-          (payload) => payload.type === "memory_write_external",
+          (payload) => payload.type === "memory_write_providers",
         );
         assert.ok(writeRequest);
         assert.equal(writeRequest.payload.role, "assistant");

@@ -17,16 +17,8 @@ import {
   renderTextToolResult,
 } from "../pi/render-utils.js";
 
-import {
-  appendTranscriptArchiveEntry,
-  extractTranscriptText,
-  loadRecentTranscriptSessions,
-  searchTranscriptArchive,
-} from "./transcripts.js";
-import {
-  searchExternalMemoryProviders,
-  writeExternalMemoryEntry,
-} from "./external.js";
+import { extractTranscriptText } from "./transcripts.js";
+import { searchMemoryProviders, writeMemoryEntry } from "./provider-client.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { parseTimestampMs } from "./utils.js";
 
@@ -100,10 +92,7 @@ function buildMemoryTranscriptInput(message: any, ctx: any) {
 async function archiveMessageTranscript(message: any, ctx: any) {
   const input = buildMemoryTranscriptInput(message, ctx);
   if (!input) return;
-  await Promise.allSettled([
-    appendTranscriptArchiveEntry(input, String(ctx?.agentDir || "").trim()),
-    writeExternalMemoryEntry(input),
-  ]);
+  await writeMemoryEntry(input, String(ctx?.agentDir || "").trim());
 }
 
 function trimSnippet(value: string, max = 220): string {
@@ -267,44 +256,6 @@ function throwIfAborted(signal?: AbortSignal) {
   throw new Error("recall_aborted");
 }
 
-function resultTimestampMs(item: any): number {
-  return latestResultTimestamp(item).ms;
-}
-
-function resultScore(item: any): number {
-  const score = Number(item?.score);
-  return Number.isFinite(score) ? score : 0;
-}
-
-function mergeMemoryResults(
-  localResults: any[],
-  externalResults: any[],
-  options: { limit: number; order: "relevance" | "newest" },
-) {
-  const rows = [
-    ...(Array.isArray(localResults) ? localResults : []),
-    ...(Array.isArray(externalResults) ? externalResults : []),
-  ];
-  const ordered = rows
-    .map((item, index) => ({ item, index }))
-    .sort((a, b) => {
-      const primary =
-        options.order === "newest"
-          ? resultTimestampMs(b.item) - resultTimestampMs(a.item)
-          : resultScore(b.item) - resultScore(a.item);
-      if (primary) return primary;
-      const timestampDiff =
-        resultTimestampMs(b.item) - resultTimestampMs(a.item);
-      if (timestampDiff) return timestampDiff;
-      return a.index - b.index;
-    });
-  const limit = Math.max(1, Number(options.limit || 8) || 8);
-  return {
-    results: ordered.slice(0, limit).map((row) => row.item),
-    totalResults: rows.length,
-  };
-}
-
 export async function executeRecall(
   params: any,
   ctx: any,
@@ -331,20 +282,12 @@ export async function executeRecall(
     });
 
     throwIfAborted(signal);
-    const localResults = query
-      ? await searchTranscriptArchive(query, normalizedParams, rootOverride)
-      : await loadRecentTranscriptSessions(normalizedParams, rootOverride);
-    throwIfAborted(signal);
-    const externalResults = await searchExternalMemoryProviders(
-      query,
+    const coordinated = await searchMemoryProviders(
       normalizedParams,
+      rootOverride,
     );
     throwIfAborted(signal);
-    const merged = mergeMemoryResults(localResults, externalResults, {
-      limit: normalizedParams.limit,
-      order,
-    });
-    const results = merged.results;
+    const results = coordinated.results;
 
     const response = {
       mode,
@@ -359,8 +302,8 @@ export async function executeRecall(
       ? response.results
       : [];
     const details: MemoryToolDetails = {
-      hiddenCount: Math.max(0, merged.totalResults - visibleRows.length),
-      totalResults: merged.totalResults,
+      hiddenCount: Math.max(0, coordinated.totalResults - visibleRows.length),
+      totalResults: coordinated.totalResults,
       userText,
     };
 

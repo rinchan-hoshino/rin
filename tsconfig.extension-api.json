@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src/core/rin-extension-api",
+    "outDir": "dist/core/rin-extension-api",
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "sourceMap": false
+  },
+  "include": ["src/core/rin-extension-api/**/*.ts"],
+  "exclude": []
+}

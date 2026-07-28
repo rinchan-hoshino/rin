@@ -63,6 +63,8 @@ export type RinRpcCommandType =
   | "chat_bridge_eval"
   | "list_builtin_extensions"
   | "set_builtin_extension"
+  | "memory_search_providers"
+  | "memory_write_providers"
   | "memory_search_external"
   | "memory_write_external"
   | "cron_list_tasks"

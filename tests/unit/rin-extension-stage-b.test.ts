@@ -734,6 +734,553 @@ export default function extension(rin) {
   }
 });
 
+test("memory provider mode describes capability-scoped replacement without registering local memory", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-memory-provider-mode-"),
+  );
+  const packageDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-memory-provider-mode-pkg-"),
+  );
+  try {
+    await writeProviderPackage(
+      packageDir,
+      "rin-memory-provider-mode-test",
+      `export default function extension(rin) {
+  rin.registerMemoryProvider({
+    search() { return []; },
+  }, { apiVersion: 1, mode: "replace", key: "replacement-search" });
+}
+`,
+    );
+    await writeJson(path.join(agentDir, "settings.json"), {
+      rinExtensions: {
+        backgroundServices: [
+          {
+            name: "replacement-search",
+            packageName: "rin-memory-provider-mode-test",
+            version: `file:${packageDir}`,
+          },
+        ],
+      },
+    });
+    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+      cwd: agentDir,
+      agentDir,
+      logger: { warn: () => {} },
+    });
+    await manager.start();
+
+    assert.equal(manager.replacesMemoryCapability("search"), true);
+    assert.equal(manager.replacesMemoryCapability("recent"), false);
+    assert.equal(manager.replacesMemoryCapability("write"), false);
+    assert.deepEqual(manager.getMemoryProviderMetadata(), [
+      {
+        key: "replacement-search",
+        name: "replacement-search",
+        packageName: "rin-memory-provider-mode-test",
+        mode: "replace",
+      },
+    ]);
+    await manager.stop();
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+    await fs.rm(packageDir, { recursive: true, force: true });
+  }
+});
+
+test("official memory provider v1 exposes a versioned, path-safe contract", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-memory-provider-v1-"),
+  );
+  const packageDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-memory-provider-v1-pkg-"),
+  );
+  const markerPath = path.join(agentDir, "memory-provider-v1.jsonl");
+  try {
+    await writeProviderPackage(
+      packageDir,
+      "rin-memory-provider-v1-test",
+      `import fs from "node:fs";
+function append(markerPath, value) {
+  fs.appendFileSync(markerPath, JSON.stringify(value) + "\\n");
+}
+export default function extension(rin) {
+  rin.registerMemoryProvider({
+    async search(request, ctx) {
+      append(ctx.config.markerPath, {
+        kind: "search",
+        request,
+        contextKeys: Object.keys(ctx).sort(),
+        signalAborted: ctx.signal.aborted,
+      });
+      if (request.query === "wait for shutdown") {
+        return await new Promise((resolve) => {
+          ctx.signal.addEventListener("abort", () => {
+            append(ctx.config.markerPath, { kind: "aborted" });
+            resolve([]);
+          }, { once: true });
+        });
+      }
+      return [{ id: "v1-hit", name: "V1 hit", score: 12 }];
+    },
+    async listRecent(request, ctx) {
+      append(ctx.config.markerPath, { kind: "recent", request });
+      return [];
+    },
+    async write(record, ctx) {
+      append(ctx.config.markerPath, {
+        kind: "write",
+        record,
+        contextKeys: Object.keys(ctx).sort(),
+      });
+    },
+  }, { apiVersion: 1, mode: "append", key: "v1-memory", name: "V1 Memory" });
+}
+`,
+    );
+    await writeJson(path.join(agentDir, "settings.json"), {
+      rinExtensions: {
+        backgroundServices: [
+          {
+            name: "memory-provider-v1",
+            packageName: "rin-memory-provider-v1-test",
+            version: `file:${packageDir}`,
+            config: { markerPath },
+          },
+        ],
+      },
+    });
+
+    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+      cwd: agentDir,
+      agentDir,
+      logger: { warn: () => {} },
+    });
+    await manager.start();
+
+    assert.deepEqual(
+      await manager.recallProviders({
+        query: "official contract",
+        limit: 4,
+        order: "newest",
+        internalOnly: "must not leak",
+      }),
+      [
+        {
+          sourceType: "external",
+          provider: "v1-memory",
+          id: "v1-hit",
+          name: "V1 hit",
+          score: 12,
+          messages: undefined,
+        },
+      ],
+    );
+    assert.deepEqual(
+      await manager.writeMemoryProviders({
+        id: "entry-v1",
+        timestamp: "2026-07-28T07:00:00.000Z",
+        sessionId: "session-v1",
+        sessionFile: "/private/internal/session-v1.jsonl",
+        role: "user",
+        text: "public memory text",
+        content: [{ type: "text", text: "must not expose internal content" }],
+        model: "model-v1",
+      }),
+      { written: 1, providerCount: 1 },
+    );
+
+    const pendingRecall = manager.recallProviders({
+      query: "wait for shutdown",
+      limit: 1,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await manager.stop();
+    assert.deepEqual(await pendingRecall, []);
+
+    const events = (await fs.readFile(markerPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(events, [
+      {
+        kind: "search",
+        request: {
+          apiVersion: 1,
+          mode: "search",
+          query: "official contract",
+          limit: 4,
+          order: "newest",
+        },
+        contextKeys: [
+          "apiVersion",
+          "config",
+          "key",
+          "logger",
+          "name",
+          "packageName",
+          "signal",
+        ],
+        signalAborted: false,
+      },
+      {
+        kind: "write",
+        record: {
+          apiVersion: 1,
+          id: "entry-v1",
+          timestamp: "2026-07-28T07:00:00.000Z",
+          scope: { sessionId: "session-v1" },
+          role: "user",
+          text: "public memory text",
+          metadata: { model: "model-v1" },
+        },
+        contextKeys: [
+          "apiVersion",
+          "config",
+          "key",
+          "logger",
+          "name",
+          "packageName",
+          "signal",
+        ],
+      },
+      {
+        kind: "search",
+        request: {
+          apiVersion: 1,
+          mode: "search",
+          query: "wait for shutdown",
+          limit: 1,
+          order: "relevance",
+        },
+        contextKeys: [
+          "apiVersion",
+          "config",
+          "key",
+          "logger",
+          "name",
+          "packageName",
+          "signal",
+        ],
+        signalAborted: false,
+      },
+      { kind: "aborted" },
+    ]);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+    await fs.rm(packageDir, { recursive: true, force: true });
+  }
+});
+
+test("official memory provider deadlines abort and isolate uncooperative callbacks", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-memory-provider-timeout-"),
+  );
+  const packageDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-memory-provider-timeout-pkg-"),
+  );
+  const markerPath = path.join(agentDir, "memory-provider-timeout.jsonl");
+  try {
+    await writeProviderPackage(
+      packageDir,
+      "rin-memory-provider-timeout-test",
+      `import fs from "node:fs";
+function waitPastDeadline(kind, ctx) {
+  ctx.signal.addEventListener("abort", () => {
+    fs.appendFileSync(ctx.config.markerPath, JSON.stringify({
+      kind,
+      aborted: ctx.signal.aborted,
+      reason: ctx.signal.reason?.message,
+    }) + "\\n");
+  }, { once: true });
+  return new Promise(() => {});
+}
+export default function extension(rin) {
+  rin.registerMemoryProvider({
+    search(_request, ctx) { return waitPastDeadline("search", ctx); },
+    write(_record, ctx) { return waitPastDeadline("write", ctx); },
+  }, { apiVersion: 1, mode: "replace", key: "timeout-memory" });
+}
+`,
+    );
+    await writeJson(path.join(agentDir, "settings.json"), {
+      rinExtensions: {
+        backgroundServices: [
+          {
+            name: "memory-provider-timeout",
+            packageName: "rin-memory-provider-timeout-test",
+            version: `file:${packageDir}`,
+            config: { markerPath },
+          },
+        ],
+      },
+    });
+    const warnings: string[] = [];
+    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+      cwd: agentDir,
+      agentDir,
+      logger: { warn: (message: string) => warnings.push(String(message)) },
+      memoryProviderTimeouts: { searchMs: 25, writeMs: 25 },
+    });
+    await manager.start();
+
+    const startedAt = Date.now();
+    assert.deepEqual(
+      await manager.recallProviders({ query: "deadline", limit: 1 }),
+      [],
+    );
+    assert.deepEqual(
+      await manager.writeMemoryProviders({
+        id: "timeout-entry",
+        timestamp: "2026-07-28T07:30:00.000Z",
+        sessionId: "timeout-session",
+        role: "user",
+        text: "deadline",
+      }),
+      { written: 0, providerCount: 1 },
+    );
+    assert.ok(Date.now() - startedAt < 1_000);
+    await manager.stop();
+
+    const events = (await fs.readFile(markerPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(events, [
+      {
+        kind: "search",
+        aborted: true,
+        reason: "Memory provider operation timed out after 25ms.",
+      },
+      {
+        kind: "write",
+        aborted: true,
+        reason: "Memory provider operation timed out after 25ms.",
+      },
+    ]);
+    assert.match(
+      warnings.join("\n"),
+      /memory provider search failed.*timed out after 25ms/i,
+    );
+    assert.match(
+      warnings.join("\n"),
+      /memory provider write failed.*timed out after 25ms/i,
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+    await fs.rm(packageDir, { recursive: true, force: true });
+  }
+});
+
+test("official memory provider API rejects unsupported contract versions", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-memory-provider-version-"),
+  );
+  const packageDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-memory-provider-version-pkg-"),
+  );
+  try {
+    await writeProviderPackage(
+      packageDir,
+      "rin-memory-provider-version-test",
+      `export default function extension(rin) {
+  rin.registerMemoryProvider({ search() { return []; } }, { apiVersion: 2, key: "future" });
+  rin.registerMemoryProvider({ search() { return []; } }, { apiVersion: 1, mode: "invalid", key: "invalid-mode" });
+}
+`,
+    );
+    await writeJson(path.join(agentDir, "settings.json"), {
+      rinExtensions: {
+        backgroundServices: [
+          {
+            name: "memory-provider-version",
+            packageName: "rin-memory-provider-version-test",
+            version: `file:${packageDir}`,
+          },
+        ],
+      },
+    });
+    const warnings: string[] = [];
+    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+      cwd: agentDir,
+      agentDir,
+      logger: { warn: (message: string) => warnings.push(String(message)) },
+    });
+
+    assert.deepEqual(await manager.start(), []);
+    assert.deepEqual(manager.getMemoryProviderMetadata(), []);
+    assert.match(
+      warnings.join("\n"),
+      /unsupported memory provider API version.*2/i,
+    );
+    assert.match(
+      warnings.join("\n"),
+      /unsupported memory provider mode=invalid/i,
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+    await fs.rm(packageDir, { recursive: true, force: true });
+  }
+});
+
+test("official memory provider API ships runtime metadata and declarations", async () => {
+  const apiPath = path.join(
+    rootDir,
+    "dist",
+    "core",
+    "rin-extension-api",
+    "index.js",
+  );
+  const declarationDir = path.join(
+    rootDir,
+    "dist",
+    "core",
+    "rin-extension-api",
+  );
+  const api = await import(pathToFileURL(apiPath).href);
+  const guide = await fs.readFile(
+    path.join(rootDir, "docs", "agent", "docs", "memory-provider-api.md"),
+    "utf8",
+  );
+  const indexDeclaration = await fs.readFile(
+    path.join(declarationDir, "index.d.ts"),
+    "utf8",
+  );
+  const contractDeclaration = await fs.readFile(
+    path.join(declarationDir, "memory-provider-v1.d.ts"),
+    "utf8",
+  );
+
+  assert.equal(api.RIN_MEMORY_PROVIDER_API_VERSION, 1);
+  assert.deepEqual(api.RIN_MEMORY_PROVIDER_TIMEOUTS_V1, {
+    searchMs: 30_000,
+    writeMs: 5_000,
+  });
+  assert.match(indexDeclaration, /memory-provider-v1\.js/);
+  assert.match(contractDeclaration, /interface RinMemoryProviderV1/);
+  assert.match(
+    contractDeclaration,
+    /interface RinMemoryProviderExtensionApiV1/,
+  );
+  assert.match(contractDeclaration, /apiVersion: 1/);
+  assert.doesNotMatch(contractDeclaration, /sessionFile|agentDir|runtimeRoot/);
+  assert.match(guide, /apiVersion: 1/);
+});
+
+test("official memory provider declarations compile for public and legacy registration", async () => {
+  const typecheckDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-memory-provider-types-"),
+  );
+  try {
+    const typesDir = path.join(typecheckDir, "types");
+    await fs.mkdir(typesDir, { recursive: true });
+    await fs.copyFile(
+      path.join(
+        rootDir,
+        "dist",
+        "core",
+        "rin-extension-api",
+        "memory-provider-v1.d.ts",
+      ),
+      path.join(typesDir, "memory-provider-v1.d.ts"),
+    );
+    const internalModulePath = path
+      .relative(
+        typecheckDir,
+        path.join(rootDir, "src", "core", "rin-daemon", "extensions.js"),
+      )
+      .split(path.sep)
+      .join("/");
+    const internalSpecifier = internalModulePath.startsWith(".")
+      ? internalModulePath
+      : `./${internalModulePath}`;
+    await writeJson(path.join(typecheckDir, "package.json"), {
+      type: "module",
+    });
+    await writeJson(path.join(typecheckDir, "tsconfig.json"), {
+      compilerOptions: {
+        strict: false,
+        strictFunctionTypes: true,
+        target: "ES2022",
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        noEmit: true,
+        skipLibCheck: true,
+        typeRoots: [path.join(rootDir, "node_modules", "@types")],
+      },
+      include: ["provider.ts"],
+    });
+    await fs.writeFile(
+      path.join(typecheckDir, "provider.ts"),
+      `import type {
+  RinMemoryProviderExtensionApiV1,
+  RinMemoryProviderV1,
+} from "./types/memory-provider-v1.js";
+import type {
+  RinBackgroundExtensionContext,
+  RinDaemonLegacyMemoryProvider,
+  RinDaemonMemoryProvider,
+  RinDaemonMemoryProviderContext,
+} from ${JSON.stringify(internalSpecifier)};
+
+const provider: RinMemoryProviderV1 = {
+  search(request, context) {
+    if (context.signal.aborted) return [];
+    return [{ id: request.query, summary: context.name }];
+  },
+};
+const legacyProvider: RinDaemonLegacyMemoryProvider = {
+  search(request, context) {
+    void request.params;
+    void context.cwd;
+    return [];
+  },
+};
+const legacyProviderAlias: RinDaemonMemoryProvider = legacyProvider;
+const readLegacyContext = (context: RinDaemonMemoryProviderContext) => context.cwd;
+void legacyProviderAlias;
+void readLegacyContext;
+declare const publicApi: RinMemoryProviderExtensionApiV1;
+declare const internalApi: RinBackgroundExtensionContext;
+
+publicApi.registerMemoryProvider(provider, { apiVersion: 1, mode: "append", key: "public" });
+internalApi.registerMemoryProvider(provider, { apiVersion: 1, mode: "replace", key: "public" });
+internalApi.registerMemoryProvider(legacyProvider, { mode: "append", key: "legacy" });
+
+// @ts-expect-error Unsupported public contract version.
+publicApi.registerMemoryProvider(provider, { apiVersion: 2 });
+// @ts-expect-error The public contract always requires an explicit apiVersion.
+publicApi.registerMemoryProvider(provider, { key: "missing-version" });
+// @ts-expect-error Provider mode must be append or replace.
+publicApi.registerMemoryProvider(provider, { apiVersion: 1, mode: "invalid" });
+// @ts-expect-error A legacy provider cannot opt into the v1 callback contract.
+internalApi.registerMemoryProvider(legacyProvider, { apiVersion: 1 });
+`,
+      "utf8",
+    );
+
+    const { spawnSync } = await import("node:child_process");
+    const result = spawnSync(
+      process.execPath,
+      [
+        path.join(rootDir, "node_modules", "typescript", "bin", "tsc"),
+        "-p",
+        path.join(typecheckDir, "tsconfig.json"),
+        "--pretty",
+        "false",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(
+      result.status,
+      0,
+      `typecheck failed:\n${result.stdout}\n${result.stderr}`,
+    );
+  } finally {
+    await fs.rm(typecheckDir, { recursive: true, force: true });
+  }
+});
+
 test("stage B background scanner resolves import-only Pi SDK dependencies", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-background-import-only-"),

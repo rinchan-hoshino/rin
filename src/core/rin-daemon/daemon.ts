@@ -46,6 +46,7 @@ import {
   normalizeSessionRef as sessionSelectorFromCommand,
 } from "../session/ref.js";
 import { startQueuedMemoryWorkerSupervisor } from "../self-improve/async-jobs.js";
+import { createMemoryCoordinator } from "../memory/coordinator.js";
 import { RinBackgroundExtensionManager } from "./extensions.js";
 import { listRunningWorkerSessions } from "./running-workers.js";
 import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
@@ -186,6 +187,15 @@ export async function startDaemon(
   if (!options.backgroundExtensionManager && !options.daemonExtensionManager) {
     await backgroundExtensionManager.start();
   }
+  const memoryCoordinator = createMemoryCoordinator({
+    agentDir: runtime.agentDir,
+    extensions: {
+      replaces: (capability) =>
+        backgroundExtensionManager.replacesMemoryCapability(capability),
+      recall: (params) => backgroundExtensionManager.recallProviders(params),
+      write: (entry) => backgroundExtensionManager.writeMemoryProviders(entry),
+    },
+  });
 
   for (const candidate of [socketPath, bridgeSocketPath]) {
     if (isWindowsNamedPipePath(candidate)) continue;
@@ -269,6 +279,12 @@ export async function startDaemon(
     }),
     get_oauth_state: async () => ({
       data: await getCatalogOAuthState(catalogOptions),
+    }),
+    memory_search_providers: async (command) => ({
+      data: await memoryCoordinator.recall(command.payload || {}),
+    }),
+    memory_write_providers: async (command) => ({
+      data: await memoryCoordinator.write(command.payload || {}),
     }),
     memory_search_external: async (command) => ({
       data: {

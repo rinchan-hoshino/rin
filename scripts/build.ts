@@ -25,6 +25,12 @@ runNodeScript(path.join(rootDir, "node_modules", "typescript", "bin", "tsc"), [
   "--pretty",
   "false",
 ]);
+runNodeScript(path.join(rootDir, "node_modules", "typescript", "bin", "tsc"), [
+  "-p",
+  "tsconfig.extension-api.json",
+  "--pretty",
+  "false",
+]);
 
 if (!coreOnly && process.platform !== "win32") {
   for (const relativePath of [

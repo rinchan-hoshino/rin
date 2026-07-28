@@ -26,6 +26,17 @@ import type {
   ExternalMemoryResult,
   TranscriptArchiveEntry,
 } from "../memory/transcript-types.js";
+import {
+  RIN_MEMORY_PROVIDER_API_VERSION,
+  RIN_MEMORY_PROVIDER_TIMEOUTS_V1,
+  type RinMemoryProviderContextV1,
+  type RinMemoryProviderModeV1,
+  type RinMemoryProviderRegistrationOptionsV1,
+  type RinMemoryProviderV1,
+  type RinMemoryReadRequestV1,
+  type RinMemoryWriteMetadataV1,
+  type RinMemoryWriteRecordV1,
+} from "../rin-extension-api/index.js";
 import { ensureDir, stringifyJson } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
@@ -43,7 +54,7 @@ export type RinDaemonMemorySearchRequest = {
   readonly params: Record<string, any>;
 };
 
-export type RinDaemonMemoryProviderContext = {
+export type RinDaemonLegacyMemoryProviderContext = {
   readonly cwd: string;
   readonly agentDir: string;
   readonly dataDir: string;
@@ -55,25 +66,50 @@ export type RinDaemonMemoryProviderContext = {
   readonly logger: RinBackgroundExtensionLogger;
 };
 
-export type RinDaemonMemoryProvider = {
+export type RinDaemonLegacyMemoryProvider = {
   search?: (
     request: RinDaemonMemorySearchRequest,
-    context: RinDaemonMemoryProviderContext,
+    context: RinDaemonLegacyMemoryProviderContext,
   ) =>
     | Promise<ExternalMemoryResult[] | { results?: ExternalMemoryResult[] }>
     | ExternalMemoryResult[]
     | { results?: ExternalMemoryResult[] };
   listRecent?: (
     request: RinDaemonMemorySearchRequest,
-    context: RinDaemonMemoryProviderContext,
+    context: RinDaemonLegacyMemoryProviderContext,
   ) =>
     | Promise<ExternalMemoryResult[] | { results?: ExternalMemoryResult[] }>
     | ExternalMemoryResult[]
     | { results?: ExternalMemoryResult[] };
   write?: (
     entry: TranscriptArchiveEntry,
-    context: RinDaemonMemoryProviderContext,
+    context: RinDaemonLegacyMemoryProviderContext,
   ) => Promise<void> | void;
+};
+
+/** @deprecated Use the versioned public Memory Provider API for new extensions. */
+export type RinDaemonMemoryProviderContext =
+  RinDaemonLegacyMemoryProviderContext;
+/** @deprecated Use RinMemoryProviderV1 for new extensions. */
+export type RinDaemonMemoryProvider = RinDaemonLegacyMemoryProvider;
+
+export type RinDaemonLegacyMemoryProviderRegistrationOptions = {
+  apiVersion?: never;
+  mode?: RinMemoryProviderModeV1;
+  key?: string;
+  name?: string;
+  config?: Record<string, any>;
+};
+
+export type RinRegisterMemoryProvider = {
+  (
+    provider: RinMemoryProviderV1,
+    options: RinMemoryProviderRegistrationOptionsV1,
+  ): void;
+  (
+    provider: RinDaemonLegacyMemoryProvider,
+    options?: RinDaemonLegacyMemoryProviderRegistrationOptions,
+  ): void;
 };
 
 export type RinBackgroundExtensionContext = {
@@ -95,14 +131,7 @@ export type RinBackgroundExtensionContext = {
       config?: Record<string, any>;
     },
   ) => void;
-  registerMemoryProvider: (
-    provider: RinDaemonMemoryProvider,
-    options?: {
-      key?: string;
-      name?: string;
-      config?: Record<string, any>;
-    },
-  ) => void;
+  registerMemoryProvider: RinRegisterMemoryProvider;
 };
 
 type BackgroundServiceStop = { stop?: () => Promise<void> | void };
@@ -138,8 +167,11 @@ type RinDaemonMemoryProviderEntry = {
   key: string;
   name: string;
   packageName: string;
+  mode: RinMemoryProviderModeV1;
+  apiVersion: 1 | "legacy";
   config: Record<string, any>;
-  provider: RinDaemonMemoryProvider;
+  signal: AbortSignal;
+  provider: RinDaemonLegacyMemoryProvider | RinMemoryProviderV1;
   logger: RinBackgroundExtensionLogger;
 };
 
@@ -506,6 +538,10 @@ export class RinBackgroundExtensionManager {
       cwd: string;
       agentDir: string;
       logger?: RinBackgroundExtensionLogger;
+      memoryProviderTimeouts?: {
+        searchMs?: number;
+        writeMs?: number;
+      };
     },
   ) {}
 
@@ -603,7 +639,12 @@ export class RinBackgroundExtensionManager {
               provider,
             });
           },
-          registerMemoryProvider: (provider, options = {}) => {
+          registerMemoryProvider: ((
+            provider: RinDaemonLegacyMemoryProvider | RinMemoryProviderV1,
+            options:
+              | RinDaemonLegacyMemoryProviderRegistrationOptions
+              | RinMemoryProviderRegistrationOptionsV1 = {},
+          ) => {
             if (
               !provider ||
               (typeof provider.search !== "function" &&
@@ -612,17 +653,47 @@ export class RinBackgroundExtensionManager {
             ) {
               return;
             }
+            const requestedApiVersion = (options as { apiVersion?: unknown })
+              .apiVersion;
+            if (
+              requestedApiVersion !== undefined &&
+              requestedApiVersion !== RIN_MEMORY_PROVIDER_API_VERSION
+            ) {
+              logger.warn?.(
+                `unsupported memory provider API version=${safeString(
+                  requestedApiVersion,
+                )}; supported=${RIN_MEMORY_PROVIDER_API_VERSION}`,
+              );
+              return;
+            }
+            const requestedMode = safeString(options.mode).trim();
+            if (
+              requestedMode &&
+              requestedMode !== "append" &&
+              requestedMode !== "replace"
+            ) {
+              logger.warn?.(
+                `unsupported memory provider mode=${requestedMode}; supported=append,replace`,
+              );
+              return;
+            }
             const key = safeString(options.key).trim() || entry.name;
             const name = safeString(options.name).trim() || key;
             this.memoryProviders.push({
               key,
               name,
               packageName: entry.packageName,
-              config: options.config || entry.config,
+              mode: requestedMode === "replace" ? "replace" : "append",
+              apiVersion:
+                requestedApiVersion === RIN_MEMORY_PROVIDER_API_VERSION
+                  ? RIN_MEMORY_PROVIDER_API_VERSION
+                  : "legacy",
+              config: { ...(options.config || entry.config) },
+              signal: controller.signal,
               provider,
               logger,
             });
-          },
+          }) as RinRegisterMemoryProvider,
         };
         const beforeChatAdapterCount = this.chatAdapters.length;
         const beforeMemoryProviderCount = this.memoryProviders.length;
@@ -674,12 +745,22 @@ export class RinBackgroundExtensionManager {
       key: entry.key,
       name: entry.name,
       packageName: entry.packageName,
+      mode: entry.mode,
     }));
   }
 
-  private createMemoryProviderContext(
+  replacesMemoryCapability(capability: "search" | "recent" | "write") {
+    const method = capability === "recent" ? "listRecent" : capability;
+    return this.memoryProviders.some(
+      (entry) =>
+        entry.mode === "replace" &&
+        typeof entry.provider[method] === "function",
+    );
+  }
+
+  private createLegacyMemoryProviderContext(
     entry: RinDaemonMemoryProviderEntry,
-  ): RinDaemonMemoryProviderContext {
+  ): RinDaemonLegacyMemoryProviderContext {
     return {
       cwd: this.options.cwd,
       agentDir: this.options.agentDir,
@@ -693,27 +774,189 @@ export class RinBackgroundExtensionManager {
     };
   }
 
+  private createMemoryProviderContextV1(
+    entry: RinDaemonMemoryProviderEntry,
+    signal: AbortSignal,
+  ): RinMemoryProviderContextV1 {
+    return Object.freeze({
+      apiVersion: RIN_MEMORY_PROVIDER_API_VERSION,
+      key: entry.key,
+      name: entry.name,
+      packageName: entry.packageName,
+      config: Object.freeze({ ...entry.config }),
+      signal,
+      logger: entry.logger,
+    });
+  }
+
+  private memoryProviderTimeoutMs(kind: "search" | "write") {
+    const configured =
+      kind === "search"
+        ? this.options.memoryProviderTimeouts?.searchMs
+        : this.options.memoryProviderTimeouts?.writeMs;
+    if (Number.isFinite(configured) && Number(configured) > 0)
+      return Number(configured);
+    return kind === "search"
+      ? RIN_MEMORY_PROVIDER_TIMEOUTS_V1.searchMs
+      : RIN_MEMORY_PROVIDER_TIMEOUTS_V1.writeMs;
+  }
+
+  private async runMemoryProviderOperation<T>(
+    entry: RinDaemonMemoryProviderEntry,
+    timeoutMs: number,
+    work: (signal: AbortSignal) => Promise<T> | T,
+  ): Promise<T> {
+    const controller = new AbortController();
+    const abortFromExtension = () => controller.abort(entry.signal.reason);
+    if (entry.signal.aborted) abortFromExtension();
+    else
+      entry.signal.addEventListener("abort", abortFromExtension, {
+        once: true,
+      });
+    const timer = setTimeout(() => {
+      controller.abort(
+        new Error(`Memory provider operation timed out after ${timeoutMs}ms.`),
+      );
+    }, timeoutMs);
+    timer.unref?.();
+    const abortPromise = new Promise<never>((_resolve, reject) => {
+      const rejectAborted = () =>
+        reject(
+          controller.signal.reason instanceof Error
+            ? controller.signal.reason
+            : new Error("Memory provider operation was aborted."),
+        );
+      if (controller.signal.aborted) rejectAborted();
+      else
+        controller.signal.addEventListener("abort", rejectAborted, {
+          once: true,
+        });
+    });
+    try {
+      return await Promise.race([
+        Promise.resolve().then(() => work(controller.signal)),
+        abortPromise,
+      ]);
+    } finally {
+      clearTimeout(timer);
+      entry.signal.removeEventListener("abort", abortFromExtension);
+    }
+  }
+
+  private createMemoryReadRequestV1(
+    mode: "search" | "recent",
+    query: string,
+    limit: number,
+    params: Record<string, any>,
+  ): RinMemoryReadRequestV1 {
+    if (mode === "recent") {
+      return Object.freeze({
+        apiVersion: RIN_MEMORY_PROVIDER_API_VERSION,
+        mode,
+        query: "",
+        limit,
+        order: "newest",
+      });
+    }
+    return Object.freeze({
+      apiVersion: RIN_MEMORY_PROVIDER_API_VERSION,
+      mode,
+      query,
+      limit,
+      order: params.order === "newest" ? "newest" : "relevance",
+    });
+  }
+
+  private createMemoryWriteRecordV1(
+    entry: Record<string, any>,
+  ): RinMemoryWriteRecordV1 | undefined {
+    const id = safeString(entry.id).trim();
+    const timestamp = safeString(entry.timestamp).trim();
+    const sessionId = safeString(entry.sessionId).trim();
+    const role = safeString(entry.role).trim();
+    const text = safeString(entry.text).trim();
+    if (!id || !timestamp || !sessionId || !role || !text) return undefined;
+    const metadata: RinMemoryWriteMetadataV1 = {};
+    for (const key of [
+      "toolName",
+      "toolCallId",
+      "customType",
+      "provider",
+      "model",
+    ] as const) {
+      const value = safeString(entry[key]).trim();
+      if (value) (metadata as Record<string, string>)[key] = value;
+    }
+    const record: RinMemoryWriteRecordV1 = {
+      apiVersion: RIN_MEMORY_PROVIDER_API_VERSION,
+      id,
+      timestamp,
+      scope: Object.freeze({ sessionId }),
+      role,
+      text,
+      ...(Object.keys(metadata).length
+        ? { metadata: Object.freeze(metadata) }
+        : {}),
+    };
+    return Object.freeze(record);
+  }
+
   async recallProviders(params: Record<string, any> = {}) {
     const query = safeString(params.query || "").trim();
     const limit = normalizeExternalMemoryLimit(params.limit, 8);
     const mode = query ? "search" : "recent";
-    const request: RinDaemonMemorySearchRequest = {
+    const legacyRequest: RinDaemonMemorySearchRequest = {
       mode,
       query,
       limit,
       params: { ...(params || {}), query, limit },
     };
+    const publicRequest = this.createMemoryReadRequestV1(
+      mode,
+      query,
+      limit,
+      params,
+    );
     const groups = await Promise.all(
       this.memoryProviders.map(async (entry) => {
-        const search =
-          mode === "recent" ? entry.provider.listRecent : entry.provider.search;
-        if (typeof search !== "function") return [];
         try {
-          const result = await search.call(
-            entry.provider,
-            request,
-            this.createMemoryProviderContext(entry),
-          );
+          let result: unknown;
+          if (entry.apiVersion === RIN_MEMORY_PROVIDER_API_VERSION) {
+            const provider = entry.provider as RinMemoryProviderV1;
+            const search =
+              mode === "recent" ? provider.listRecent : provider.search;
+            if (typeof search !== "function") return [];
+            result = await this.runMemoryProviderOperation(
+              entry,
+              this.memoryProviderTimeoutMs("search"),
+              (signal) =>
+                (
+                  search as (
+                    request: RinMemoryReadRequestV1,
+                    context: RinMemoryProviderContextV1,
+                  ) => unknown
+                ).call(
+                  provider,
+                  publicRequest,
+                  this.createMemoryProviderContextV1(entry, signal),
+                ),
+            );
+          } else {
+            const provider = entry.provider as RinDaemonLegacyMemoryProvider;
+            const search =
+              mode === "recent" ? provider.listRecent : provider.search;
+            if (typeof search !== "function") return [];
+            result = await this.runMemoryProviderOperation(
+              entry,
+              this.memoryProviderTimeoutMs("search"),
+              () =>
+                search.call(
+                  provider,
+                  legacyRequest,
+                  this.createLegacyMemoryProviderContext(entry),
+                ),
+            );
+          }
           return normalizeExternalMemoryResults(result, {
             provider: entry.key,
             providerName: entry.name,
@@ -736,6 +979,7 @@ export class RinBackgroundExtensionManager {
     const text = safeString(entry?.text || "").trim();
     const role = safeString(entry?.role || "").trim();
     if (!text || !role) return { written: 0, providerCount: 0 };
+    const publicRecord = this.createMemoryWriteRecordV1(entry);
     const writableProviders = this.memoryProviders.filter(
       (providerEntry) => typeof providerEntry.provider.write === "function",
     );
@@ -743,10 +987,34 @@ export class RinBackgroundExtensionManager {
     await Promise.all(
       writableProviders.map(async (providerEntry) => {
         try {
-          await providerEntry.provider.write?.(
-            entry as TranscriptArchiveEntry,
-            this.createMemoryProviderContext(providerEntry),
-          );
+          if (providerEntry.apiVersion === RIN_MEMORY_PROVIDER_API_VERSION) {
+            if (!publicRecord)
+              throw new Error(
+                "Memory provider v1 write record is missing required fields.",
+              );
+            const provider = providerEntry.provider as RinMemoryProviderV1;
+            await this.runMemoryProviderOperation(
+              providerEntry,
+              this.memoryProviderTimeoutMs("write"),
+              (signal) =>
+                provider.write?.(
+                  publicRecord,
+                  this.createMemoryProviderContextV1(providerEntry, signal),
+                ),
+            );
+          } else {
+            const provider =
+              providerEntry.provider as RinDaemonLegacyMemoryProvider;
+            await this.runMemoryProviderOperation(
+              providerEntry,
+              this.memoryProviderTimeoutMs("write"),
+              () =>
+                provider.write?.(
+                  entry as TranscriptArchiveEntry,
+                  this.createLegacyMemoryProviderContext(providerEntry),
+                ),
+            );
+          }
           written += 1;
         } catch (error: any) {
           providerEntry.logger.warn?.(

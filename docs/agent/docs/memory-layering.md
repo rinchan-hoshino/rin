@@ -41,6 +41,8 @@ Use one evolving memory-index transaction for repeated same-topic evidence. Upda
 
 When a correction proves an operational rule, pair any memory-index pointer with the matching prompt baseline, workflow skill, scheduled-task prompt, or product manual that future work will use, or record why that surface already contains the exact behavior.
 
+Extension memory backends participate through the stable adapter contract in `docs/memory-provider-api.md`. They may append to or explicitly replace selected native memory capabilities; either mode changes original-evidence retrieval/storage, not self-improve guidance.
+
 ## Self-improve surfaces
 
 Self-improve stores distilled guidance the agent should use later.

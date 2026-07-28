@@ -14,7 +14,7 @@ Use this page as Rin's capability index. It tells agents what runtime surfaces e
 | Chat bridge                              | Agent-owned chat adapter setup, outbound chat operations, stored chat inspection, identity/trust data, or detached chat turns | `settings.json -> chat`, Rin Agent SDK, chat message store  | `docs/chat-bridge.md`, `docs/rich-text-output-format.md`       |
 | Todo                                     | Current-branch execution checklist during multi-step work                                                                     | `todo` tool, `/todos`                                       | live tool schema                                               |
 | Browser/computer/mobile/search operation | Web, desktop, mobile, or search work that needs the owner's current practice workflow                                         | live tool list, practice docs                               | `practices/README.md`                                          |
-| Background extensions                    | Trusted long-running async extensions or external event/memory providers                                                      | `settings.json -> rinExtensions.backgroundServices`         | `docs/builtin-extensions.md`                                   |
+| Background extensions                    | Trusted long-running async extensions or external event/memory providers                                                      | `settings.json -> rinExtensions.backgroundServices`         | `docs/builtin-extensions.md`, `docs/memory-provider-api.md`    |
 | Initialization                           | Owner asks to initialize, reset, or establish preferences                                                                     | initialization prompt flow                                  | `docs/initialization.md`                                       |
 
 ## Launcher, update, and rollback
@@ -64,7 +64,7 @@ Use `docs/rich-text-output-format.md` for native mentions, quotes/replies, attac
 
 Background extensions are trusted Node.js packages loaded by Rin's background runtime for long-running async work. They are configured through `settings.json -> rinExtensions.backgroundServices` or discovered from trusted Rin/Pi extension entries that expose background capabilities.
 
-Use them for intentionally configured background event bridges, chat adapters, or memory providers. Restart or reload Rin after changing background extension settings.
+Use them for intentionally configured background event bridges, chat adapters, or memory providers. Memory providers use the provider-neutral v1 contract in `docs/memory-provider-api.md`. Restart or reload Rin after changing background extension settings.
 
 ## Browser, computer, mobile, and search operation
 

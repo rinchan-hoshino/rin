@@ -11,10 +11,10 @@ import type {
   ExternalMemoryResult,
   TranscriptArchiveEntry,
 } from "./transcript-types.js";
+import { RIN_MEMORY_PROVIDER_TIMEOUTS_V1 } from "../rin-extension-api/index.js";
 
 const EXTERNAL_MEMORY_CONNECT_TIMEOUT_MS = 200;
-const EXTERNAL_MEMORY_SEARCH_TIMEOUT_MS = 30_000;
-const EXTERNAL_MEMORY_WRITE_TIMEOUT_MS = 5_000;
+const EXTERNAL_MEMORY_COMMAND_GRACE_MS = 500;
 
 async function daemonMemoryCommand(
   command: Record<string, any>,
@@ -46,7 +46,8 @@ export async function searchExternalMemoryProviders(
           limit,
         },
       },
-      EXTERNAL_MEMORY_SEARCH_TIMEOUT_MS,
+      RIN_MEMORY_PROVIDER_TIMEOUTS_V1.searchMs +
+        EXTERNAL_MEMORY_COMMAND_GRACE_MS,
     );
     return normalizeExternalMemoryResults(response, { startScore: limit });
   } catch {
@@ -63,7 +64,8 @@ export async function writeExternalMemoryEntry(
         type: "memory_write_external",
         payload: entry,
       },
-      EXTERNAL_MEMORY_WRITE_TIMEOUT_MS,
+      RIN_MEMORY_PROVIDER_TIMEOUTS_V1.writeMs +
+        EXTERNAL_MEMORY_COMMAND_GRACE_MS,
     );
   } catch {}
 }

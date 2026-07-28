@@ -79,6 +79,6 @@ Background extensions can register:
 - chat adapters with `ctx.registerChatAdapter(...)`;
 - external memory providers with `ctx.registerMemoryProvider(...)`.
 
-Memory providers may implement `search`, `listRecent`, and `write`, and may return remote `reference` or `url` values instead of local transcript paths.
+Memory providers may implement `search`, `listRecent`, and `write`, select `append` or capability-scoped `replace`, and return remote `reference` or `url` values. Native local memory remains a core implementation; the internal coordinator composes it with extension adapters. Use `apiVersion: 1` and read `docs/memory-provider-api.md` for the complete contract.
 
 Keep normal built-in chat adapter configuration under `settings.json -> chat`. Use background services for intentionally configured background event bridges, custom chat adapters, or trusted external memory backends.
