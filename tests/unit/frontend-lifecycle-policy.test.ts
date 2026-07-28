@@ -260,12 +260,28 @@ test("canonical lifecycle represents aborted terminals and normalizes fallback e
       error: "rpc_turn_failed",
       sessionId: undefined,
       sessionFile: undefined,
-      requestTag: undefined,
+    },
+  ]);
+
+  const whitespaceTag = projectRinFrontendLifecycleEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "   ",
+  });
+  assert.ok(whitespaceTag);
+  assert.deepEqual(renderRinFrontendLifecycleEvent(whitespaceTag), [
+    {
+      type: "turn_complete",
+      finalText: "",
+      result: undefined,
+      sessionId: undefined,
+      sessionFile: undefined,
+      requestTag: "   ",
     },
   ]);
 });
 
-test("canonical terminal gate admits exactly one terminal outcome per request", () => {
+test("canonical terminal gate uses terminal event identity before request identity", () => {
   const gate = new RinFrontendLifecycleTerminalGate();
   const start = projectRinFrontendLifecycleEvent({
     type: "rpc_turn_event",
@@ -277,6 +293,7 @@ test("canonical terminal gate admits exactly one terminal outcome per request", 
   const complete = projectRinFrontendLifecycleEvent({
     type: "rpc_turn_event",
     event: "complete",
+    terminalEventId: "terminal-1",
     requestTag: "turn-once",
     turnGeneration: 9,
     sessionId: "session-1",
@@ -285,6 +302,7 @@ test("canonical terminal gate admits exactly one terminal outcome per request", 
     type: "rpc_turn_event",
     event: "error",
     error: "late",
+    terminalEventId: "terminal-1",
     requestTag: "turn-once",
     turnGeneration: 9,
     sessionId: "session-1",
@@ -298,8 +316,9 @@ test("canonical terminal gate admits exactly one terminal outcome per request", 
   const nextComplete = projectRinFrontendLifecycleEvent({
     type: "rpc_turn_event",
     event: "complete",
+    terminalEventId: "terminal-2",
     requestTag: "turn-once",
-    turnGeneration: 10,
+    turnGeneration: 9,
     sessionId: "session-1",
   });
   assert.ok(nextComplete);

@@ -29,10 +29,14 @@ import type {
 } from "./frontend-surface.js";
 
 const DEFAULT_RPC_TIMEOUT_MS = 120_000;
+const TERMINAL_ACK_RPC_TIMEOUT_MS = 5_000;
 const LONG_RUNNING_RPC_TIMEOUT_MS = 5 * 60 * 1000;
 
 function rpcTimeoutMs(command: RinRpcCommand) {
   const type = String(command?.type || "").trim();
+  if (type === "ack_pending_terminal_turn_event") {
+    return TERMINAL_ACK_RPC_TIMEOUT_MS;
+  }
   if (type === "compact") return LONG_RUNNING_RPC_TIMEOUT_MS;
   if (
     type === "run_command" &&

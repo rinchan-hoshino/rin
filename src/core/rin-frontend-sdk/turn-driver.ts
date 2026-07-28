@@ -37,7 +37,10 @@ import {
   executeRinFrontendInterruptIntent,
   projectRinFrontendLifecycleEvent,
 } from "./frontend-lifecycle.js";
-import { replayPendingTerminalTurnEvent } from "./pending-terminal-turn.js";
+import {
+  acknowledgePendingTerminalTurnEvent,
+  replayPendingTerminalTurnEvent,
+} from "./pending-terminal-turn.js";
 import { injectPromptContextHeader } from "./prompt-context.js";
 import {
   submitNativeFrontendPromptTurn,
@@ -77,6 +80,22 @@ export type RinFrontendTurnResult = {
 };
 
 const TURN_RESULT_RECOVERY_TIMEOUT_ERROR = "rin_turn_result_recovery_timeout";
+const MAX_PENDING_TERMINAL_ACKS = 4_096;
+const MAX_RECENT_APPLIED_TERMINAL_EVENT_IDS = 4_096;
+
+function requestTagField(owner: any) {
+  return Object.prototype.hasOwnProperty.call(owner || {}, "requestTag") &&
+    owner.requestTag != null
+    ? { requestTag: safeString(owner.requestTag) }
+    : {};
+}
+
+function isTerminalRpcTurnEvent(payload: any) {
+  return (
+    payload?.type === "rpc_turn_event" &&
+    (payload?.event === "complete" || payload?.event === "error")
+  );
+}
 
 function isRecoverableConnectionError(error: unknown) {
   const message = safeString((error as any)?.message || error).trim();
@@ -181,7 +200,7 @@ export class RinFrontendTurnDriver {
   private readonly backendEventTranslator;
   latestAssistantText = "";
   frontendPhase: RinFrontendTurnPhase = "idle";
-  private backendTurnRequestTag = "";
+  private backendTurnRequestTag: string | null | undefined;
   listeners = new Set<
     (event: RinFrontendTurnDriverEvent) => void | Promise<void>
   >();
@@ -191,6 +210,20 @@ export class RinFrontendTurnDriver {
   } | null = null;
   private turnInterruptionSeq = 0;
   private ignoredTerminalRequestTags = new Set<string>();
+  private pendingTerminalAcks = new Map<
+    string,
+    {
+      sessionFile?: string;
+      terminalEventId: string;
+      requestTag?: string;
+      attempts: number;
+    }
+  >();
+  private pendingTerminalAckFlush: Promise<void> | null = null;
+  private pendingTerminalAckRetryTimer: ReturnType<typeof setTimeout> | null =
+    null;
+  private readonly appliedTerminalEventIds = new Set<string>();
+  private disposed = false;
   private pendingTurnCount = 0;
   private daemonShutdownDetached = false;
 
@@ -304,9 +337,15 @@ export class RinFrontendTurnDriver {
             error,
             clientEvent: event,
           });
+          const payload = event.type === "ui" ? event.payload : null;
+          if (!isTerminalRpcTurnEvent(payload)) return;
+          this.failLiveTurn(
+            error instanceof Error ? error : new Error(String(error)),
+          );
         });
       });
     }
+    void this.flushPendingTerminalAcks();
 
     const wantedSessionFile = safeString(
       options.restoreSessionFile || "",
@@ -322,12 +361,18 @@ export class RinFrontendTurnDriver {
   }
 
   dispose() {
+    this.disposed = true;
     this.failLiveTurn(createRinFrontendTurnCancelledError());
     this.resetAssistantSegmentTracking();
     this.frontendPhase = "idle";
     const client = this.client;
     this.client = null;
     this.frontendState = {};
+    if (this.pendingTerminalAckRetryTimer) {
+      clearTimeout(this.pendingTerminalAckRetryTimer);
+      this.pendingTerminalAckRetryTimer = null;
+    }
+    this.pendingTerminalAcks.clear();
     if (client?.disconnect) {
       void client.disconnect().catch(() => {});
     }
@@ -404,6 +449,9 @@ export class RinFrontendTurnDriver {
   private applyFrontendStateSnapshot(state: RinSessionState | undefined) {
     const previousWorkingVisible = Boolean(this.frontendState.workingVisible);
     this.frontendState = { ...this.frontendState, ...(state || {}) };
+    if (state && !Object.prototype.hasOwnProperty.call(state, "requestTag")) {
+      delete this.frontendState.requestTag;
+    }
     if (typeof state?.workingVisible === "boolean") {
       const workingVisible = state.workingVisible;
       this.frontendState.workingVisible = workingVisible;
@@ -459,6 +507,14 @@ export class RinFrontendTurnDriver {
 
   private startLiveTurn(requestTag?: string) {
     if (this.liveTurn) throw new Error("frontend_turn_already_running");
+    const backendAlreadyActive = Boolean(
+      this.frontendState.turnActive || this.frontendState.isStreaming,
+    );
+    const activeBackendRequestTag =
+      Object.prototype.hasOwnProperty.call(this.frontendState, "requestTag") &&
+      this.frontendState.requestTag != null
+        ? safeString(this.frontendState.requestTag)
+        : null;
     let resolve!: (value: any) => void;
     let reject!: (error: Error) => void;
     const liveTurn = {
@@ -478,8 +534,19 @@ export class RinFrontendTurnDriver {
     };
     liveTurn.promise.catch(() => {});
     this.liveTurn = liveTurn;
-    this.backendTurnRequestTag = safeString(requestTag).trim();
+    this.backendTurnRequestTag = backendAlreadyActive
+      ? activeBackendRequestTag
+      : requestTag;
     return liveTurn;
+  }
+
+  private adoptBackendTurnState(state: any) {
+    if (!Boolean(state?.turnActive || state?.isStreaming)) return;
+    this.backendTurnRequestTag =
+      Object.prototype.hasOwnProperty.call(state || {}, "requestTag") &&
+      state.requestTag != null
+        ? safeString(state.requestTag)
+        : null;
   }
 
   private failLiveTurn(error: Error) {
@@ -496,13 +563,13 @@ export class RinFrontendTurnDriver {
   }
 
   private rejectLiveTurnAsAborted() {
-    const requestTag = safeString(this.liveTurn?.requestTag).trim();
-    if (requestTag) {
+    const requestTag = this.liveTurn?.requestTag;
+    if (requestTag !== undefined) {
       this.ignoredTerminalRequestTags.add(requestTag);
       while (this.ignoredTerminalRequestTags.size > 1024) {
-        const oldest = this.ignoredTerminalRequestTags.values().next().value;
-        if (!oldest) break;
-        this.ignoredTerminalRequestTags.delete(oldest);
+        const oldest = this.ignoredTerminalRequestTags.values().next();
+        if (oldest.done) break;
+        this.ignoredTerminalRequestTags.delete(oldest.value);
       }
     }
     const session = this.abortedTurnSessionRef();
@@ -640,10 +707,33 @@ export class RinFrontendTurnDriver {
     if (payload.event !== "complete" && payload.event !== "error") {
       return true;
     }
-    const incomingRequestTag = safeString(payload.requestTag).trim();
+    const incomingRequestTag =
+      Object.prototype.hasOwnProperty.call(payload, "requestTag") &&
+      payload.requestTag != null
+        ? safeString(payload.requestTag)
+        : null;
     if (
-      incomingRequestTag &&
+      incomingRequestTag !== null &&
       this.ignoredTerminalRequestTags.delete(incomingRequestTag)
+    ) {
+      void this.acknowledgePendingTerminalTurnEvent({
+        sessionFile: safeString(payload.sessionFile) || undefined,
+        terminalEventId: safeString(payload.terminalEventId) || undefined,
+        ...(requestTagField(payload) as { requestTag?: string }),
+      });
+      return false;
+    }
+    const activeRequestTag = this.liveTurn
+      ? Object.prototype.hasOwnProperty.call(this.liveTurn, "requestTag") &&
+        this.liveTurn.requestTag != null
+        ? safeString(this.liveTurn.requestTag)
+        : null
+      : undefined;
+    if (
+      activeRequestTag !== undefined &&
+      incomingRequestTag !== activeRequestTag &&
+      (this.backendTurnRequestTag === undefined ||
+        incomingRequestTag !== this.backendTurnRequestTag)
     ) {
       return false;
     }
@@ -690,14 +780,14 @@ export class RinFrontendTurnDriver {
             restoreSessionFile: context?.sessionFile,
           });
           if (!connected || this.daemonShutdownDetached) break;
+          const state = await this.refreshFrontendState(
+            context?.sessionFile,
+          ).catch(() => ({}));
+          this.adoptBackendTurnState(state);
           await this.replayPendingTerminalTurnEvent(context?.sessionFile).catch(
             () => false,
           );
           if (!this.liveTurn || this.daemonShutdownDetached) break;
-          const state = await this.refreshFrontendState(
-            context?.sessionFile,
-          ).catch(() => ({}));
-          if (this.daemonShutdownDetached) break;
           if (
             Boolean((state as any)?.turnActive || (state as any)?.isStreaming)
           ) {
@@ -1080,6 +1170,127 @@ export class RinFrontendTurnDriver {
     return await replayPendingTerminalTurnEvent(
       (command) => this.client!.request(command),
       { sessionFile: sessionFile || this.currentSessionFile() },
+      this.backendTurnRequestTag,
+    );
+  }
+
+  private async flushPendingTerminalAcks() {
+    const existingFlush = this.pendingTerminalAckFlush;
+    if (existingFlush) {
+      await existingFlush;
+      if (!this.pendingTerminalAcks.size) return;
+      if (this.pendingTerminalAckFlush) {
+        return this.pendingTerminalAckFlush;
+      }
+    }
+    const flush = (async () => {
+      if (!this.client) return;
+      for (const [ackKey, pending] of this.pendingTerminalAcks) {
+        if (pending.attempts >= 2) continue;
+        pending.attempts += 1;
+        const acknowledged = await acknowledgePendingTerminalTurnEvent(
+          (command) => this.client!.request(command),
+          { sessionFile: pending.sessionFile || this.currentSessionFile() },
+          pending.terminalEventId,
+          pending.requestTag,
+        );
+        if (acknowledged) {
+          this.pendingTerminalAcks.delete(ackKey);
+          this.pruneAppliedTerminalEventIds();
+        }
+      }
+    })();
+    this.pendingTerminalAckFlush = flush.finally(() => {
+      this.pendingTerminalAckFlush = null;
+      if (this.disposed) return;
+      if (this.pendingTerminalAcks.size === 0) {
+        if (this.pendingTerminalAckRetryTimer) {
+          clearTimeout(this.pendingTerminalAckRetryTimer);
+          this.pendingTerminalAckRetryTimer = null;
+        }
+        return;
+      }
+      this.schedulePendingTerminalAckRetry();
+    });
+    return this.pendingTerminalAckFlush;
+  }
+
+  private schedulePendingTerminalAckRetry() {
+    if (
+      this.disposed ||
+      ![...this.pendingTerminalAcks.values()].some(
+        (pending) => pending.attempts < 2,
+      ) ||
+      this.pendingTerminalAckRetryTimer
+    ) {
+      return;
+    }
+    this.pendingTerminalAckRetryTimer = setTimeout(() => {
+      this.pendingTerminalAckRetryTimer = null;
+      void this.flushPendingTerminalAcks();
+    }, 1_000);
+    this.pendingTerminalAckRetryTimer.unref?.();
+  }
+
+  private acknowledgePendingTerminalTurnEvent(input: {
+    sessionFile?: string;
+    terminalEventId?: string;
+    requestTag?: string;
+  }) {
+    if (this.disposed) return;
+    const terminalEventId = safeString(input.terminalEventId).trim();
+    if (!terminalEventId) return;
+    const sessionFile = safeString(
+      input.sessionFile || this.currentSessionFile(),
+    ).trim();
+    const ackKey = JSON.stringify([
+      sessionFile,
+      terminalEventId,
+      input.requestTag === undefined ? null : input.requestTag,
+    ]);
+    if (
+      !this.pendingTerminalAcks.has(ackKey) &&
+      this.pendingTerminalAcks.size >= MAX_PENDING_TERMINAL_ACKS
+    ) {
+      throw new Error("Too many pending terminal acknowledgements");
+    }
+    this.pendingTerminalAcks.set(ackKey, {
+      sessionFile,
+      terminalEventId,
+      requestTag: input.requestTag,
+      attempts: 0,
+    });
+    void this.flushPendingTerminalAcks();
+  }
+
+  private pruneAppliedTerminalEventIds() {
+    const pendingTerminalEventIds = new Set(
+      [...this.pendingTerminalAcks.values()].map(
+        (pending) => pending.terminalEventId,
+      ),
+    );
+    const maximumAppliedIds =
+      MAX_RECENT_APPLIED_TERMINAL_EVENT_IDS + pendingTerminalEventIds.size;
+    if (this.appliedTerminalEventIds.size <= maximumAppliedIds) return;
+    for (const terminalEventId of this.appliedTerminalEventIds) {
+      if (pendingTerminalEventIds.has(terminalEventId)) continue;
+      this.appliedTerminalEventIds.delete(terminalEventId);
+      if (this.appliedTerminalEventIds.size <= maximumAppliedIds) return;
+    }
+  }
+
+  private rememberAppliedTerminalEventId(event: { terminalEventId?: string }) {
+    const terminalEventId = safeString(event.terminalEventId).trim();
+    if (!terminalEventId) return;
+    this.appliedTerminalEventIds.delete(terminalEventId);
+    this.appliedTerminalEventIds.add(terminalEventId);
+    this.pruneAppliedTerminalEventIds();
+  }
+
+  private alreadyAppliedTerminalEvent(event: { terminalEventId?: string }) {
+    const terminalEventId = safeString(event.terminalEventId).trim();
+    return Boolean(
+      terminalEventId && this.appliedTerminalEventIds.has(terminalEventId),
     );
   }
 
@@ -1089,8 +1300,13 @@ export class RinFrontendTurnDriver {
   ): Promise<RinSubmittedTurnResolution> {
     if (!this.client) return null;
     const sentAt = Number(input.sentAt || 0);
-    const requestTag = safeString(input.requestTag).trim();
-    if ((!Number.isFinite(sentAt) || sentAt <= 0) && !requestTag) return null;
+    const requestTagPresent =
+      Object.prototype.hasOwnProperty.call(input, "requestTag") &&
+      input.requestTag != null;
+    const requestTag = requestTagPresent ? safeString(input.requestTag) : "";
+    if ((!Number.isFinite(sentAt) || sentAt <= 0) && !requestTagPresent) {
+      return null;
+    }
     const text = safeString(input.text).trim();
     if (!text) return null;
     const wanted = safeString(sessionFile || "").trim();
@@ -1099,7 +1315,7 @@ export class RinFrontendTurnDriver {
         type: "resolve_submitted_turn",
         text,
         sentAt,
-        ...(requestTag ? { requestTag } : {}),
+        ...(requestTagPresent ? { requestTag } : {}),
         ...(wanted ? { sessionFile: wanted } : {}),
       })
       .catch(() => null);
@@ -1154,16 +1370,21 @@ export class RinFrontendTurnDriver {
     if (!this.client) throw new Error("frontend_session_not_connected");
     this.resetAssistantSegmentTracking();
     this.latestAssistantText = "";
-    const requestTag = safeString(input.requestTag).trim();
+    const requestTag = safeString(input.requestTag);
+    const targetSessionFile = this.sessionFileFromReady(ready);
+    await this.refreshFrontendState(targetSessionFile).catch(() => ({}));
     const liveTurn = this.liveTurn || this.startLiveTurn(requestTag);
     liveTurn.requestTag = requestTag;
-    const targetSessionFile = this.sessionFileFromReady(ready);
     this.liveTurnRecoveryContext = {
       sessionFile: targetSessionFile || undefined,
     };
     if (!this.frontendState.workingVisible) {
       this.setFrontendPhase("idle");
     }
+    const initialState = await this.refreshFrontendState(
+      targetSessionFile,
+    ).catch(() => ({}));
+    this.adoptBackendTurnState(initialState);
     await this.replayPendingTerminalTurnEvent(targetSessionFile).catch(
       () => false,
     );
@@ -1180,6 +1401,7 @@ export class RinFrontendTurnDriver {
       const state = await this.refreshFrontendState(targetSessionFile).catch(
         () => ({}),
       );
+      this.adoptBackendTurnState(state);
       if (
         Boolean(
           (state as any)?.turnActive ||
@@ -1318,7 +1540,10 @@ export class RinFrontendTurnDriver {
     );
     const inputGate = this.inputSubmissionGate(targetSessionFile);
     const requestTag =
-      safeString(input.requestTag).trim() || this.createTurnRequestTag();
+      Object.prototype.hasOwnProperty.call(input, "requestTag") &&
+      input.requestTag != null
+        ? safeString(input.requestTag)
+        : this.createTurnRequestTag();
     const text = injectPromptContextHeader(input.promptContext, input.text);
     await submitNativeFrontendPromptTurn(this.client, {
       text,
@@ -1454,7 +1679,10 @@ export class RinFrontendTurnDriver {
 
       this.throwIfTurnInterrupted(turnInterruptionSeq);
       const requestTag =
-        safeString(input.requestTag).trim() || this.createTurnRequestTag();
+        Object.prototype.hasOwnProperty.call(input, "requestTag") &&
+        input.requestTag != null
+          ? safeString(input.requestTag)
+          : this.createTurnRequestTag();
       const existingLiveTurn = this.liveTurn;
       if (!existingLiveTurn) {
         this.resetAssistantSegmentTracking();
@@ -1548,9 +1776,17 @@ export class RinFrontendTurnDriver {
     }
     if (event.type === "ui") {
       const payload: any = event.payload;
+      const projectedLifecycle = projectRinFrontendLifecycleEvent(payload);
+      if (
+        projectedLifecycle?.kind === "turn_terminal" &&
+        this.alreadyAppliedTerminalEvent(payload)
+      ) {
+        this.acknowledgePendingTerminalTurnEvent(payload);
+        return;
+      }
       if (!this.terminalRpcTurnPayloadMatchesCurrentSession(payload)) return;
       if (
-        projectRinFrontendLifecycleEvent(payload) ||
+        projectedLifecycle ||
         payload?.type === "worker_exit" ||
         payload?.type === "session_recovering" ||
         payload?.type === "session_recovered" ||
@@ -1677,28 +1913,31 @@ export class RinFrontendTurnDriver {
         return;
       case "turn_accepted": {
         this.frontendState.turnActive = true;
-        const acceptedRequestTag = safeString(event.requestTag).trim();
-        if (acceptedRequestTag) {
-          this.backendTurnRequestTag = acceptedRequestTag;
+        const acceptedRequestTagPresent =
+          Object.prototype.hasOwnProperty.call(event, "requestTag") &&
+          event.requestTag != null;
+        if (acceptedRequestTagPresent) {
+          this.backendTurnRequestTag = safeString(event.requestTag);
         }
         this.emit({
           type: "turn_accepted",
-          ...(acceptedRequestTag ? { requestTag: acceptedRequestTag } : {}),
+          ...requestTagField(event),
         });
         return;
       }
       case "user_message_start": {
-        const requestTag = safeString(event.requestTag).trim();
-        this.backendTurnRequestTag =
-          requestTag ||
-          this.backendTurnRequestTag ||
-          safeString(this.liveTurn?.requestTag).trim();
+        const requestTagPresent =
+          Object.prototype.hasOwnProperty.call(event, "requestTag") &&
+          event.requestTag != null;
+        this.backendTurnRequestTag = requestTagPresent
+          ? safeString(event.requestTag)
+          : this.backendTurnRequestTag === undefined
+            ? null
+            : this.backendTurnRequestTag;
         this.emit({
           type: "user_message_start",
           text: event.text,
-          ...(safeString(event.requestTag).trim()
-            ? { requestTag: safeString(event.requestTag).trim() }
-            : {}),
+          ...requestTagField(event),
         });
         return;
       }
@@ -1717,9 +1956,7 @@ export class RinFrontendTurnDriver {
             ...(event.sourceEventId
               ? { sourceEventId: event.sourceEventId }
               : {}),
-            ...(safeString(event.requestTag).trim()
-              ? { requestTag: safeString(event.requestTag).trim() }
-              : {}),
+            ...requestTagField(event),
           },
           { deferDuringTurn: event.deferDuringTurn },
         );
@@ -1739,20 +1976,25 @@ export class RinFrontendTurnDriver {
         this.emit({
           type: "assistant_summary",
           text: event.text,
-          requestTag: safeString(event.requestTag).trim() || undefined,
+          ...requestTagField(event),
         });
         return;
       case "assistant_interim":
         this.emit({
           type: "assistant_interim",
           text: event.text,
-          requestTag: safeString(event.requestTag).trim() || undefined,
+          ...requestTagField(event),
         });
         return;
       case "assistant_final":
         this.latestAssistantText = event.text;
         return;
       case "turn_complete": {
+        if (this.alreadyAppliedTerminalEvent(event)) {
+          this.acknowledgePendingTerminalTurnEvent(event);
+          return;
+        }
+        const terminalOwner = this.liveTurn;
         this.frontendState.turnActive = false;
         this.frontendState.isStreaming = false;
         this.updateFrontendStateFrom(event);
@@ -1768,7 +2010,7 @@ export class RinFrontendTurnDriver {
             result: event.result,
             sessionId: event.sessionId,
             sessionFile: event.sessionFile,
-            requestTag: safeString(event.requestTag).trim() || undefined,
+            ...requestTagField(event),
           });
         } catch (error) {
           this.reportEventHandlingError({
@@ -1787,10 +2029,12 @@ export class RinFrontendTurnDriver {
             error instanceof Error ? error : new Error(String(error))
           ) as Error & { rinTurnTerminal?: boolean };
           terminalError.rinTurnTerminal = true;
-          this.failLiveTurn(terminalError);
+          terminalOwner?.reject(terminalError);
           return;
         }
-        this.liveTurn?.resolve({
+        this.rememberAppliedTerminalEventId(event);
+        this.acknowledgePendingTerminalTurnEvent(event);
+        terminalOwner?.resolve({
           finalText,
           result: event.result,
           sessionId: event.sessionId,
@@ -1799,6 +2043,11 @@ export class RinFrontendTurnDriver {
         return;
       }
       case "turn_error": {
+        if (this.alreadyAppliedTerminalEvent(event)) {
+          this.acknowledgePendingTerminalTurnEvent(event);
+          return;
+        }
+        const terminalOwner = this.liveTurn;
         this.frontendState.turnActive = false;
         this.frontendState.isStreaming = false;
         this.updateFrontendStateFrom(event);
@@ -1811,7 +2060,7 @@ export class RinFrontendTurnDriver {
             error: event.error,
             sessionId: event.sessionId,
             sessionFile: event.sessionFile,
-            requestTag: safeString(event.requestTag).trim() || undefined,
+            ...requestTagField(event),
           });
         } catch (error) {
           this.reportEventHandlingError({
@@ -1829,10 +2078,12 @@ export class RinFrontendTurnDriver {
             error instanceof Error ? error : new Error(String(error))
           ) as Error & { rinTurnTerminal?: boolean };
           terminalError.rinTurnTerminal = true;
-          this.failLiveTurn(terminalError);
+          terminalOwner?.reject(terminalError);
           return;
         }
-        if (!this.liveTurn) return;
+        this.rememberAppliedTerminalEventId(event);
+        this.acknowledgePendingTerminalTurnEvent(event);
+        if (!terminalOwner) return;
         const error = new Error(event.error) as Error & {
           sessionId?: string;
           sessionFile?: string;
@@ -1841,7 +2092,7 @@ export class RinFrontendTurnDriver {
         error.sessionId = event.sessionId;
         error.sessionFile = event.sessionFile;
         error.rinTurnTerminal = true;
-        this.failLiveTurn(error);
+        terminalOwner.reject(error);
         return;
       }
     }

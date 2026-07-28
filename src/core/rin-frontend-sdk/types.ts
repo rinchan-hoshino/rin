@@ -111,6 +111,7 @@ export type RinFrontendBackendEvent =
       result?: unknown;
       sessionId?: string;
       sessionFile?: string;
+      terminalEventId?: string;
       requestTag?: string;
     }
   | {
@@ -119,6 +120,7 @@ export type RinFrontendBackendEvent =
       result?: unknown;
       sessionId?: string;
       sessionFile?: string;
+      terminalEventId?: string;
       requestTag?: string;
     }
   | {
@@ -126,6 +128,7 @@ export type RinFrontendBackendEvent =
       error: string;
       sessionId?: string;
       sessionFile?: string;
+      terminalEventId?: string;
       requestTag?: string;
     };
 
@@ -193,6 +196,7 @@ export type RinSessionState = {
   sessionFile?: string;
   sessionId?: string;
   sessionName?: string;
+  requestTag?: string;
   [key: string]: unknown;
 };
 
