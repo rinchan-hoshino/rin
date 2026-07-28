@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
-import fs from "node:fs/promises";
-import fssync from "node:fs";
+import crypto from "node:crypto";
+import fs, { type FileHandle } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -14,76 +13,19 @@ import { forkSessionManagerCompat } from "../session/fork.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { resolveAgentDir } from "./agent-dir.js";
 import { safeString } from "./core/utils.js";
-import { selfImprovePromptsDir, selfImproveSkillsDir } from "./paths.js";
+import { maintenanceLockPath } from "./paths.js";
 import { buildSelfImproveReviewPrompt } from "./prompt.js";
+import {
+  beginSelfImproveRunAudit,
+  completeSelfImproveRunAudit,
+  markSelfImproveRunAuditExecutionStarted,
+} from "./run-audit.js";
 
 export { buildSelfImproveReviewPrompt };
 
 type ExtensionCtxLike = {
   model?: Model<any> | null;
 };
-
-type MaintenanceChangedFile = {
-  path: string;
-  change: "created" | "updated" | "deleted";
-};
-
-async function collectManagedFiles(dir: string): Promise<string[]> {
-  if (!fssync.existsSync(dir)) return [];
-  const entries = await fs.readdir(dir, { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await collectManagedFiles(fullPath)));
-      continue;
-    }
-    files.push(fullPath);
-  }
-  return files;
-}
-
-async function captureManagedArtifactSnapshot(agentDir: string) {
-  const root = path.resolve(agentDir);
-  const paths = [
-    ...(await collectManagedFiles(selfImprovePromptsDir(root))),
-    ...(await collectManagedFiles(selfImproveSkillsDir(root))),
-  ].sort();
-  const snapshot = new Map<string, string>();
-  for (const filePath of paths) {
-    const relativePath = path.relative(root, filePath) || filePath;
-    const buffer = await fs.readFile(filePath);
-    snapshot.set(
-      filePath,
-      `${relativePath}:${createHash("sha1").update(buffer).digest("hex")}`,
-    );
-  }
-  return snapshot;
-}
-
-function diffManagedArtifactSnapshots(
-  before: Map<string, string>,
-  after: Map<string, string>,
-): MaintenanceChangedFile[] {
-  const changed: MaintenanceChangedFile[] = [];
-  const allPaths = new Set([...before.keys(), ...after.keys()]);
-  for (const filePath of [...allPaths].sort()) {
-    const beforeHash = before.get(filePath);
-    const afterHash = after.get(filePath);
-    if (!beforeHash && afterHash) {
-      changed.push({ path: filePath, change: "created" });
-      continue;
-    }
-    if (beforeHash && !afterHash) {
-      changed.push({ path: filePath, change: "deleted" });
-      continue;
-    }
-    if (beforeHash !== afterHash) {
-      changed.push({ path: filePath, change: "updated" });
-    }
-  }
-  return changed;
-}
 
 async function createForkedSessionManager(options: {
   sessionFile: string;
@@ -163,35 +105,208 @@ async function runForkedSessionPrompt(options: {
   }
 }
 
+async function assertUsableSessionFile(sessionFile: string) {
+  try {
+    const stat = await fs.stat(sessionFile);
+    if (!stat.isFile() || stat.size <= 0) {
+      throw new Error(`maintenance_job_invalid_session_file:${sessionFile}`);
+    }
+  } catch (error: any) {
+    if (error?.message?.startsWith("maintenance_job_invalid_session_file:")) {
+      throw error;
+    }
+    throw new Error(`maintenance_job_missing_session_file:${sessionFile}`);
+  }
+}
+
+async function completeAuditOrPersistenceFailure(
+  input: Parameters<typeof completeSelfImproveRunAudit>[0],
+) {
+  try {
+    return await completeSelfImproveRunAudit(input);
+  } catch (error) {
+    if (error && typeof error === "object") {
+      Object.assign(error, { selfImproveAuditPersistence: true });
+    }
+    throw error;
+  }
+}
+
 async function runForkedSessionSelfImproveReview(options: {
   agentDir: string;
+  runId: string;
+  startedAt: string;
   sessionFile: string;
   leafId?: string;
+  snapshotKey?: string;
   trigger?: string;
   additionalExtensionPaths?: string[];
 }) {
-  const before = await captureManagedArtifactSnapshot(options.agentDir);
-  const finalText = await runForkedSessionPrompt({
-    agentDir: options.agentDir,
-    sessionFile: options.sessionFile,
-    leafId: options.leafId,
-    prompt: buildSelfImproveReviewPrompt(
-      safeString(options.trigger).trim(),
-      options.agentDir,
-    ),
-    additionalExtensionPaths: options.additionalExtensionPaths,
-  });
-  const after = await captureManagedArtifactSnapshot(options.agentDir);
+  let auditHandle;
+  try {
+    auditHandle = await beginSelfImproveRunAudit({
+      agentDir: options.agentDir,
+      runId: options.runId,
+      kind: "self_improve_review",
+      startedAt: options.startedAt,
+      source: {
+        sessionFile: options.sessionFile,
+        leafId: options.leafId,
+        snapshotKey: options.snapshotKey,
+        trigger: options.trigger,
+      },
+    });
+  } catch (error) {
+    if (error && typeof error === "object") {
+      Object.assign(error, { selfImproveAuditPersistence: true });
+    }
+    throw error;
+  }
+  if (auditHandle.completedPath) {
+    const audit = await completeAuditOrPersistenceFailure({
+      agentDir: options.agentDir,
+      handle: auditHandle,
+      status: "completed",
+      finishedAt: new Date().toISOString(),
+    });
+    const exactEvidence = audit.evidenceRetained !== false && audit.complete;
+    if (audit.status === "failed") {
+      const error = new Error(
+        exactEvidence
+          ? audit.error || "self_improve_audit_recovered_failure"
+          : "self_improve_audit_recovered_incomplete_failure",
+      );
+      Object.assign(error, {
+        selfImproveAudit: audit,
+        selfImproveAuditHandle: auditHandle,
+      });
+      throw error;
+    }
+    return {
+      skipped: exactEvidence
+        ? "audit-already-completed"
+        : "audit-already-completed-incomplete",
+      forked: true,
+      saved: true,
+      recoveryIncomplete: !exactEvidence,
+      output: exactEvidence
+        ? audit.output || ""
+        : "Self-improve run already completed; exact terminal output evidence was redacted or truncated.",
+      changedFiles: audit.changedFiles,
+      audit,
+      auditHandle,
+    };
+  }
+
+  if (auditHandle.executionInterrupted) {
+    const error = new Error("self_improve_audit_interrupted_execution");
+    const audit = await completeAuditOrPersistenceFailure({
+      agentDir: options.agentDir,
+      handle: auditHandle,
+      status: "failed",
+      finishedAt: new Date().toISOString(),
+      error: error.message,
+    });
+    Object.assign(error, {
+      selfImproveAudit: audit,
+      selfImproveAuditHandle: auditHandle,
+    });
+    throw error;
+  }
+  try {
+    await markSelfImproveRunAuditExecutionStarted({
+      agentDir: options.agentDir,
+      handle: auditHandle,
+    });
+  } catch (error) {
+    if (error && typeof error === "object") {
+      Object.assign(error, { selfImproveAuditPersistence: true });
+    }
+    throw error;
+  }
+
+  let finalText: string;
+  try {
+    await assertUsableSessionFile(options.sessionFile);
+    finalText = await runForkedSessionPrompt({
+      agentDir: options.agentDir,
+      sessionFile: options.sessionFile,
+      leafId: options.leafId,
+      prompt: buildSelfImproveReviewPrompt(
+        safeString(options.trigger).trim(),
+        options.agentDir,
+      ),
+      additionalExtensionPaths: options.additionalExtensionPaths,
+    });
+  } catch (error) {
+    let audit;
+    try {
+      audit = await completeAuditOrPersistenceFailure({
+        agentDir: options.agentDir,
+        handle: auditHandle,
+        status: "failed",
+        finishedAt: new Date().toISOString(),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } catch (auditError) {
+      if (auditError && typeof auditError === "object") {
+        Object.assign(auditError, { selfImproveAuditPersistence: true });
+      }
+      throw auditError;
+    }
+    if (error && typeof error === "object") {
+      Object.assign(error, {
+        selfImproveAudit: audit,
+        selfImproveAuditHandle: auditHandle,
+      });
+      throw error;
+    }
+    const wrapped = new Error(String(error));
+    Object.assign(wrapped, {
+      selfImproveAudit: audit,
+      selfImproveAuditHandle: auditHandle,
+    });
+    throw wrapped;
+  }
+
+  let audit;
+  try {
+    audit = await completeAuditOrPersistenceFailure({
+      agentDir: options.agentDir,
+      handle: auditHandle,
+      status: "completed",
+      finishedAt: new Date().toISOString(),
+      output: finalText,
+    });
+  } catch (error) {
+    if (error && typeof error === "object") {
+      Object.assign(error, { selfImproveAuditPersistence: true });
+    }
+    throw error;
+  }
   return {
     skipped: "",
     forked: true,
     saved: true,
     output: finalText,
-    changedFiles: diffManagedArtifactSnapshots(before, after),
+    changedFiles: audit.changedFiles,
+    audit,
+    auditHandle,
   };
 }
 
-export async function maintainMemory(
+async function assertMaintenanceLockHeld(agentDir: string, handle: FileHandle) {
+  const [pathStat, handleStat] = await Promise.all([
+    fs.stat(maintenanceLockPath(agentDir)),
+    handle.stat(),
+  ]);
+  if (pathStat.dev !== handleStat.dev || pathStat.ino !== handleStat.ino) {
+    throw new Error("self_improve_maintenance_lock_required");
+  }
+}
+
+/** Internal mutation boundary; callers must keep the supplied lock held through history acknowledgment. */
+export async function runMaintainerUnderMaintenanceLock(
   _ctx: ExtensionCtxLike & { sessionManager?: any },
   opts: {
     agentDir?: string;
@@ -199,17 +314,28 @@ export async function maintainMemory(
     leafId?: string;
     trigger?: string;
     additionalExtensionPaths?: string[];
-  } = {},
+    runId?: string;
+    startedAt?: string;
+    snapshotKey?: string;
+    maintenanceLockHandle: FileHandle;
+  },
 ) {
   const session = readSessionMetadata(opts);
   const sessionFile = session.sessionFile;
   if (!sessionFile) return { skipped: "no-session-file" };
   const trigger = safeString(opts.trigger || "self_improve:review").trim();
   const leafId = session.leafId || undefined;
+  const agentDir = resolveAgentDir(opts.agentDir);
+  await assertMaintenanceLockHeld(agentDir, opts.maintenanceLockHandle);
   const extracted = await runForkedSessionSelfImproveReview({
-    agentDir: resolveAgentDir(opts.agentDir),
+    agentDir,
+    runId:
+      safeString(opts.runId).trim() ||
+      `self_improve_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
+    startedAt: safeString(opts.startedAt).trim() || new Date().toISOString(),
     sessionFile,
     leafId,
+    snapshotKey: safeString(opts.snapshotKey).trim() || undefined,
     trigger,
     additionalExtensionPaths: opts.additionalExtensionPaths,
   });

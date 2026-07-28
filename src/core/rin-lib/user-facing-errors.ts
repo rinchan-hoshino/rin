@@ -390,6 +390,30 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Minecraft chat adapter needs a server URL before it can start. Add the URL.",
   invalid_self_improve_interval: () =>
     "Self-improve live view needs a positive refresh interval.",
+  self_improve_audit_invalid_policy: () =>
+    "Self-improve audit settings are invalid.",
+  self_improve_audit_invalid_timestamp: () =>
+    "Self-improve audit received an invalid run timestamp.",
+  self_improve_audit_recovered_failure: () =>
+    "A recovered self-improve run had already failed.",
+  self_improve_audit_recovered_incomplete_failure: () =>
+    "A recovered self-improve run had already failed, but its terminal evidence was redacted or truncated.",
+  self_improve_audit_interrupted_execution: () =>
+    "A prior self-improve execution was interrupted after mutation became possible; it was not rerun.",
+  self_improve_audit_symlink_path: () =>
+    "Self-improve audit rejected a symbolic-link path outside its trusted storage boundary.",
+  self_improve_audit_pending_mismatch: () =>
+    "Self-improve audit recovery found incompatible pending evidence.",
+  self_improve_audit_pending_capacity: () =>
+    "Self-improve audit is waiting for earlier runs to link their evidence.",
+  self_improve_audit_history_corrupt: () =>
+    "Self-improve audit history is incomplete or corrupt; refusing to append evidence.",
+  self_improve_audit_pending_path_outside_agent_dir: () =>
+    "Self-improve audit recovery rejected an unsafe evidence path.",
+  self_improve_maintenance_lock_timeout: () =>
+    "Self-improve maintenance stayed busy and this run could not start safely.",
+  self_improve_maintenance_lock_required: () =>
+    "Self-improve mutation requires the shared maintenance lock.",
   invalid_status_interval: () =>
     "Status live view needs a positive refresh interval.",
   invalid_status_limit: () =>

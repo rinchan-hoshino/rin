@@ -1111,6 +1111,8 @@ export class CronScheduler {
         status: "completed",
         text: result.text,
         sessionFile: result.sessionFile || invocation.sessionFile,
+        audit: result.audit,
+        historyCommitted: result.auditHistoryCommitted,
       };
     } catch (error: any) {
       if (error?.rinTurnTerminal !== true) {
@@ -1128,6 +1130,8 @@ export class CronScheduler {
       terminal = {
         status: "failed",
         error: safeString(error?.message || error || "cron_task_failed").trim(),
+        audit: error?.selfImproveAudit,
+        historyCommitted: error?.selfImproveAuditHistoryCommitted === true,
       };
     }
 
@@ -1142,14 +1146,22 @@ export class CronScheduler {
       ) {
         current.nextRunAt = computeNextRunAt(current, Date.now());
       }
+      if (terminal.audit && !terminal.historyCommitted) {
+        await appendCronTaskTerminalHistory(current, terminal, {
+          agentDir: this.options.agentDir,
+          startedAt: invocation.startedAt,
+        });
+      }
       applyCronTaskTerminalProjection(current, terminal);
       delete current.activeInvocation;
       if (current.completedAt) this.terminateTaskSession(current);
       this.save();
-      await appendCronTaskTerminalHistory(current, terminal, {
-        agentDir: this.options.agentDir,
-        startedAt: invocation.startedAt,
-      });
+      if (!terminal.audit && !terminal.historyCommitted) {
+        await appendCronTaskTerminalHistory(current, terminal, {
+          agentDir: this.options.agentDir,
+          startedAt: invocation.startedAt,
+        });
+      }
     } finally {
       this.activeExecutions.delete(taskId);
     }

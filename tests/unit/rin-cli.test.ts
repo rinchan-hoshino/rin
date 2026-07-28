@@ -779,6 +779,14 @@ test("self-improve report renders recent distillation history", () => {
         changedFiles: [
           { path: "self_improve/skills/demo/SKILL.md", change: "updated" },
         ],
+        audit: {
+          version: 1,
+          path: `self_improve/state/run-audits/2026-05/run-${index + 1}.json`,
+          sha256: "a".repeat(64),
+          complete: true,
+          redacted: false,
+          truncated: false,
+        },
       }))
         .map((row) => JSON.stringify(row))
         .join("\n") + "\n",
@@ -795,7 +803,20 @@ test("self-improve report renders recent distillation history", () => {
 
     assert.match(report, /Rin self-improve history/);
     assert.match(report, /self_improve:periodic_review/);
+    assert.match(report, /25 linked run artifacts/);
     assert.match(report, /updated:self_improve\/skills\/demo\/SKILL.md/);
+
+    const detail = selfImprove.renderSelfImproveReport(agentDir, {
+      from: "2026-01-01T00:00:00.000Z",
+      limit: 10,
+      explicitLimit: true,
+      id: "run-25",
+      json: false,
+      help: false,
+    });
+    assert.match(detail, /audit evidence:/);
+    assert.match(detail, /run-25\.json/);
+    assert.match(detail, /complete: yes/);
 
     const tui = selfImprove.renderSelfImproveTui(
       agentDir,
@@ -827,6 +848,7 @@ test("self-improve report renders recent distillation history", () => {
       }),
     );
     assert.equal(backend.stats.totalRuns, 25);
+    assert.equal(backend.stats.auditedRuns, 25);
     assert.equal(backend.records.length, 25);
   } finally {
     fs.rmSync(agentDir, { recursive: true, force: true });

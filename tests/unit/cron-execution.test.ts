@@ -1800,14 +1800,26 @@ test("built-in self-improve cron task disables nested self-improve and writes di
     lastStartedAt: "2026-05-08T09:33:09.353Z",
   };
   const calls = [];
+  const managedFile = path.join(
+    agentDir,
+    "self_improve",
+    "skills",
+    "demo",
+    "SKILL.md",
+  );
+  const secret = "sk-test-cronabcdefghijklmnopqrstuvwxyz";
+  const fullFinal = `distillation done\napi_key: ${secret}\n${"evidence ".repeat(700)}`;
   try {
+    await fs.mkdir(path.dirname(managedFile), { recursive: true });
+    await fs.writeFile(managedFile, "before\n", "utf8");
     await execMod.executeCronTask(task, {
       agentDir,
       chat: {
         runTurn: async (payload) => {
           calls.push(payload);
+          await fs.writeFile(managedFile, "after\n", "utf8");
           return {
-            finalText: "distillation done",
+            finalText: fullFinal,
             sessionFile: path.join(
               agentDir,
               "sessions",
@@ -1825,7 +1837,9 @@ test("built-in self-improve cron task disables nested self-improve and writes di
       "state",
       "maintenance-history.jsonl",
     );
-    const rows = (await fs.readFile(historyPath, "utf8"))
+    const historyRaw = await fs.readFile(historyPath, "utf8");
+    assert.equal(historyRaw.includes(secret), false);
+    const rows = historyRaw
       .trim()
       .split(/\r?\n/)
       .map((line) => JSON.parse(line));
@@ -1836,8 +1850,20 @@ test("built-in self-improve cron task disables nested self-improve and writes di
       rows[0].trigger,
       "cron:builtin_self_improve_sleep_consolidation_daily",
     );
-    assert.equal(rows[0].outputPreview, "distillation done");
+    assert.match(rows[0].outputPreview, /^distillation done/);
+    assert.ok(rows[0].outputPreview.length < fullFinal.length);
     assert.equal(rows[0].sessionFile, undefined);
+    assert.equal(rows[0].audit.version, 1);
+    assert.equal(rows[0].audit.complete, false);
+    assert.equal(rows[0].audit.redacted, true);
+    assert.equal(rows[0].historyRedacted, true);
+    const audit = JSON.parse(
+      await fs.readFile(path.join(agentDir, rows[0].audit.path), "utf8"),
+    );
+    assert.equal(audit.output.text.includes(secret), false);
+    assert.match(audit.output.text, /\[REDACTED\]/);
+    assert.match(audit.changes[0].patch, /-before/);
+    assert.match(audit.changes[0].patch, /\+after/);
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0].disabledRinCapabilities, disabledRinCapabilities);
     assert.equal(calls[0].shutdownAfterTurn, true);
@@ -1845,6 +1871,152 @@ test("built-in self-improve cron task disables nested self-improve and writes di
       kind: "scheduled-task",
       key: "builtin_self_improve_sleep_consolidation_daily",
     });
+
+    let recoveredRunCalls = 0;
+    const recoveredTask = {
+      ...task,
+      runCount: 4,
+      lastStartedAt: "2026-05-08T09:33:09.353Z",
+    };
+    await execMod.executeCronTask(recoveredTask, {
+      agentDir,
+      chat: {
+        runTurn: async () => {
+          recoveredRunCalls += 1;
+          throw new Error("completed audit must short-circuit execution");
+        },
+      },
+    });
+    assert.equal(recoveredRunCalls, 0);
+    assert.match(
+      recoveredTask.lastResultText,
+      /exact terminal output evidence/,
+    );
+    assert.equal(recoveredTask.lastResultText.includes(secret), false);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("audited cron terminal fails closed when its history reference cannot persist", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-cron-audit-history-failure-"),
+  );
+  const historyPath = path.join(
+    agentDir,
+    "self_improve",
+    "state",
+    "maintenance-history.jsonl",
+  );
+  const task = {
+    id: "builtin_self_improve_sleep_consolidation_daily",
+    name: "Self-improve consolidation",
+    enabled: true,
+    createdAt: "2026-04-01T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z",
+    lastStartedAt: "2026-04-02T00:00:00.000Z",
+    runCount: 1,
+    trigger: { expression: "0 4 * * *" },
+    session: { mode: "none" },
+    target: { kind: "agent_prompt", prompt: "self improve" },
+  };
+  try {
+    await fs.mkdir(historyPath, { recursive: true });
+    await assert.rejects(
+      () =>
+        execMod.projectCronTaskTerminal(
+          task,
+          {
+            status: "completed",
+            text: "done",
+            audit: {
+              version: 1,
+              path: "self_improve/state/run-audits/run.json",
+              sha256: "a".repeat(64),
+              complete: true,
+              redacted: false,
+              truncated: false,
+            },
+          },
+          { agentDir, startedAt: task.lastStartedAt },
+        ),
+      /EISDIR|illegal operation on a directory/i,
+    );
+    assert.equal((task as any).lastFinishedAt, undefined);
+    assert.equal(task.runCount, 1);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("audited cron history preserves distinct immutable identities for the same display run id", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-cron-audit-history-collision-"),
+  );
+  const makeTask = () => ({
+    id: "builtin_self_improve_sleep_consolidation_daily",
+    name: "Self-improve consolidation",
+    enabled: true,
+    createdAt: "2026-04-01T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z",
+    lastStartedAt: "2026-04-02T00:00:00.000Z",
+    runCount: 1,
+    trigger: { expression: "0 4 * * *" },
+    session: { mode: "none" },
+    target: { kind: "agent_prompt", prompt: "self improve" },
+  });
+  const audit = (value: string) => ({
+    version: 1,
+    auditId: value.repeat(64),
+    path: `self_improve/state/run-audits/${value}.json`,
+    sha256: value.repeat(64),
+    complete: true,
+    redacted: false,
+    truncated: false,
+  });
+  try {
+    await execMod.projectCronTaskTerminal(
+      makeTask(),
+      { status: "completed", text: "one", audit: audit("a") },
+      { agentDir, startedAt: "2026-04-02T00:00:00.000Z" },
+    );
+    await execMod.projectCronTaskTerminal(
+      makeTask(),
+      { status: "completed", text: "two", audit: audit("b") },
+      { agentDir, startedAt: "2026-04-02T01:00:00.000Z" },
+    );
+    await execMod.projectCronTaskTerminal(
+      makeTask(),
+      { status: "completed", text: "two retry", audit: audit("b") },
+      { agentDir, startedAt: "2026-04-02T01:00:00.000Z" },
+    );
+    const rows = (
+      await fs.readFile(
+        path.join(
+          agentDir,
+          "self_improve",
+          "state",
+          "maintenance-history.jsonl",
+        ),
+        "utf8",
+      )
+    )
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line));
+    assert.equal(rows.length, 2);
+    assert.equal(
+      rows[0].id,
+      "builtin_self_improve_sleep_consolidation_daily:1",
+    );
+    assert.match(
+      rows[1].id,
+      /^builtin_self_improve_sleep_consolidation_daily:1@b{12}$/,
+    );
+    assert.equal(
+      rows[1].runId,
+      "builtin_self_improve_sleep_consolidation_daily:1",
+    );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

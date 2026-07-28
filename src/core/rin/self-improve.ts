@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -9,6 +10,7 @@ import {
   safeString,
 } from "./shared.js";
 import { maintenanceHistoryPath } from "../self-improve/paths.js";
+import type { SelfImproveRunAuditReference } from "../self-improve/run-audit.js";
 import { nowIso } from "../time-utils.js";
 import { formatReportTime, renderReportTable } from "./report-format.js";
 import { runInteractiveList } from "./interactive-list.js";
@@ -30,6 +32,7 @@ export type SelfImproveCliOptions = {
 
 type MaintenanceHistoryRecord = {
   id?: string;
+  runId?: string;
   kind?: string;
   status?: string;
   trigger?: string;
@@ -43,6 +46,10 @@ type MaintenanceHistoryRecord = {
   error?: string;
   outputPreview?: string;
   changedFiles?: Array<{ path?: string; change?: string }>;
+  audit?: SelfImproveRunAuditReference;
+  auditIntegrity?: { ok: boolean; error?: string };
+  historyRedacted?: boolean;
+  historyTruncated?: boolean;
 };
 
 type SelfImproveItem = {
@@ -293,9 +300,14 @@ function summarize(records: MaintenanceHistoryRecord[]) {
       (Array.isArray(record.changedFiles) ? record.changedFiles.length : 0),
     0,
   );
+  const auditedRuns = records.filter((record) => record.audit?.path).length;
+  const invalidAudits = records.filter(
+    (record) => record.auditIntegrity?.ok === false,
+  ).length;
   return [
     "overview",
     `  runs      ${records.length} total · ${completed} completed · ${failed} failed`,
+    `  audits    ${auditedRuns} linked run artifacts · ${invalidAudits} integrity failures`,
     `  changes   ${changedFiles} changed file records`,
     records.length
       ? `  range     ${recordTime(records.at(-1) || {}) || "-"} .. ${recordTime(records[0] || {}) || "-"}`
@@ -312,6 +324,11 @@ function renderRecentRuns(records: MaintenanceHistoryRecord[]) {
       session: sessionLabel(record.sessionFile),
       attempts: String(record.attempts || 1),
       changed: changedFileSummary(record),
+      audit: record.auditIntegrity
+        ? record.auditIntegrity.ok
+          ? "verified"
+          : "INVALID"
+        : "legacy",
       error: record.error || record.skipped || "",
     })),
     [
@@ -321,6 +338,7 @@ function renderRecentRuns(records: MaintenanceHistoryRecord[]) {
       "session",
       "attempts",
       "changed",
+      "audit",
       "error",
     ],
     { emptyText: "no self-improve distillation runs found" },
@@ -331,12 +349,77 @@ function frontendFromIso() {
   return new Date(Date.now() - 24 * 3_600_000).toISOString();
 }
 
+function verifyAuditIntegritySync(
+  agentDir: string,
+  audit: SelfImproveRunAuditReference | undefined,
+): MaintenanceHistoryRecord["auditIntegrity"] {
+  if (!audit?.path) return undefined;
+  try {
+    const root = fs.realpathSync(path.resolve(agentDir));
+    const lexicalPath = path.resolve(root, audit.path);
+    if (!lexicalPath.startsWith(`${root}${path.sep}`)) {
+      return { ok: false, error: "path_outside_agent_dir" };
+    }
+    let current = root;
+    for (const component of path
+      .relative(root, lexicalPath)
+      .split(path.sep)
+      .filter(Boolean)) {
+      current = path.join(current, component);
+      if (fs.lstatSync(current).isSymbolicLink()) {
+        return { ok: false, error: "symlink_path" };
+      }
+    }
+    const filePath = lexicalPath;
+    const stat = fs.lstatSync(filePath);
+    if (!stat.isFile()) return { ok: false, error: "not_regular_file" };
+    if ((stat.mode & 0o777) !== 0o600) {
+      return { ok: false, error: "insecure_file_mode" };
+    }
+    const buffer = fs.readFileSync(filePath);
+    if (
+      crypto.createHash("sha256").update(buffer).digest("hex") !== audit.sha256
+    ) {
+      return { ok: false, error: "sha256_mismatch" };
+    }
+    const artifactText = buffer.toString("utf8");
+    const artifact = JSON.parse(artifactText);
+    const { integritySha256, ...unsigned } = artifact;
+    if (
+      artifactText !== `${JSON.stringify(artifact, null, 2)}\n` ||
+      !integritySha256 ||
+      crypto
+        .createHash("sha256")
+        .update(JSON.stringify(unsigned))
+        .digest("hex") !== integritySha256
+    ) {
+      return { ok: false, error: "artifact_integrity_mismatch" };
+    }
+    if (
+      artifact.version !== audit.version ||
+      (audit.auditId && artifact.auditId !== audit.auditId) ||
+      artifact.complete !== audit.complete ||
+      artifact.redacted !== audit.redacted ||
+      artifact.truncated !== audit.truncated
+    ) {
+      return { ok: false, error: "reference_metadata_mismatch" };
+    }
+    return { ok: true };
+  } catch (error: any) {
+    return { ok: false, error: error?.code || "unreadable_audit" };
+  }
+}
+
 function querySelfImproveRecords(
   agentDir: string,
   options: SelfImproveCliOptions,
 ) {
   return readHistory(agentDir)
     .filter((record) => inRange(record, options))
+    .map((record) => ({
+      ...record,
+      auditIntegrity: verifyAuditIntegritySync(agentDir, record.audit),
+    }))
     .sort((a, b) => recordTimestamp(b) - recordTimestamp(a));
 }
 
@@ -350,7 +433,7 @@ function renderSelfImproveList(records: MaintenanceHistoryRecord[]) {
       return [
         `${String(index + 1).padStart(2, " ")}. ${formatReportTime(record.finishedAt || record.startedAt)}  ${record.status || "-"}  ${record.trigger || "-"}`,
         `    id ${id} · session ${sessionLabel(record.sessionFile)} · attempts ${String(record.attempts || 1)}`,
-        `    changed ${changed}`,
+        `    changed ${changed} · audit ${record.auditIntegrity ? (record.auditIntegrity.ok ? "verified" : "INVALID") : "legacy"}`,
         error ? `    note ${error}` : undefined,
       ]
         .filter(Boolean)
@@ -366,6 +449,9 @@ function renderSelfImproveDetail(record: MaintenanceHistoryRecord | undefined) {
     : [];
   const lines = [
     `Rin self-improve detail: ${safeString(record.id).trim() || "(no id)"}`,
+    ...(record.runId && record.runId !== record.id
+      ? [`run identity: ${record.runId}`]
+      : []),
     `status: ${record.status || "-"}`,
     `trigger: ${record.trigger || "-"}`,
     `session: ${sessionLabel(record.sessionFile)}`,
@@ -386,6 +472,26 @@ function renderSelfImproveDetail(record: MaintenanceHistoryRecord | undefined) {
         )
       : ["  (none)"]),
   );
+  if (record.historyRedacted || record.historyTruncated) {
+    lines.push(
+      "",
+      "history evidence:",
+      `  redacted: ${record.historyRedacted === true ? "yes" : "no"}`,
+      `  truncated: ${record.historyTruncated === true ? "yes" : "no"}`,
+    );
+  }
+  if (record.audit?.path) {
+    lines.push(
+      "",
+      "audit evidence:",
+      `  path: ${record.audit.path}`,
+      `  sha256: ${record.audit.sha256}`,
+      `  complete: ${record.audit.complete === true ? "yes" : "no"}`,
+      `  redacted: ${record.audit.redacted === true ? "yes" : "no"}`,
+      `  truncated: ${record.audit.truncated === true ? "yes" : "no"}`,
+      `  integrity: ${record.auditIntegrity?.ok ? "verified" : `INVALID (${record.auditIntegrity?.error || "unknown"})`}`,
+    );
+  }
   if (record.outputPreview) {
     lines.push("", "output preview:", record.outputPreview);
   }
@@ -425,6 +531,7 @@ export function buildSelfImproveBackendReport(
       completed,
       failed,
       changedFiles,
+      auditedRuns: records.filter((record) => record.audit?.path).length,
       first: recordTime(records.at(-1) || {}) || undefined,
       last: recordTime(records[0] || {}) || undefined,
     },

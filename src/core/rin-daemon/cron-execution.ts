@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -14,7 +15,21 @@ import {
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { cronTaskRunId, nowIso, summarizeText } from "./cron-utils.js";
 import { normalizeScheduledTaskSessionMode } from "../scheduled-task-options.js";
+import {
+  acquireSelfImproveMaintenanceLock,
+  releaseSelfImproveMaintenanceLock,
+} from "../self-improve/async-jobs.js";
 import { maintenanceHistoryPath } from "../self-improve/paths.js";
+import {
+  acknowledgeSelfImproveRunAudit,
+  beginSelfImproveRunAudit,
+  completeSelfImproveRunAudit,
+  markSelfImproveRunAuditExecutionStarted,
+  resolveSafeSelfImprovePath,
+  sanitizeSelfImproveHistoryText,
+  type SelfImproveRunAuditHandle,
+  type SelfImproveRunAuditReference,
+} from "../self-improve/run-audit.js";
 import type {
   CronSessionInvocation,
   CronTaskFrontendBinding,
@@ -231,6 +246,45 @@ function shouldShutdownTaskSessionAfterRun(sessionMode: string) {
   return sessionMode === "none";
 }
 
+function recoverCronHistoryText(existing: string) {
+  if (!existing || existing.endsWith("\n")) return existing;
+  const lastNewline = existing.lastIndexOf("\n");
+  const prefix = lastNewline >= 0 ? existing.slice(0, lastNewline + 1) : "";
+  const tail = existing.slice(lastNewline + 1);
+  try {
+    JSON.parse(tail);
+    return `${existing}\n`;
+  } catch {
+    return prefix;
+  }
+}
+
+async function writePrivateCronHistoryAtomic(
+  filePath: string,
+  content: string,
+) {
+  const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    const handle = await open(tempPath, "wx", 0o600);
+    try {
+      await handle.writeFile(content, "utf8");
+      await handle.chmod(0o600);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await rename(tempPath, filePath);
+    const directoryHandle = await open(path.dirname(filePath), "r");
+    try {
+      await directoryHandle.sync();
+    } finally {
+      await directoryHandle.close();
+    }
+  } finally {
+    await rm(tempPath, { force: true });
+  }
+}
+
 async function appendCronMaintenanceHistoryRecord(
   agentDir: string,
   task: CronTaskRecord,
@@ -241,44 +295,144 @@ async function appendCronMaintenanceHistoryRecord(
     outputPreview?: string;
     error?: string;
     sessionFile?: string;
+    audit?: SelfImproveRunAuditReference;
+    historyRedacted?: boolean;
+    historyTruncated?: boolean;
   },
 ) {
   if (!isSelfImproveDistillationTask(task)) return;
-  const filePath = maintenanceHistoryPath(agentDir);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  const recordId = `${task.id}:${task.runCount}`;
-  const existing = await readFile(filePath, "utf8").catch(() => "");
-  if (
-    existing
-      .split("\n")
+  let filePath = await resolveSafeSelfImprovePath(
+    agentDir,
+    maintenanceHistoryPath(agentDir),
+  );
+  await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  filePath = await resolveSafeSelfImprovePath(agentDir, filePath);
+  const baseRecordId = `${task.id}:${task.runCount}`;
+  let historyRedacted = record.audit?.redacted === true;
+  let historyTruncated = record.audit?.truncated === true;
+  const historyText = (value: string | undefined, maxBytes: number) => {
+    if (!value) return undefined;
+    const sanitized = sanitizeSelfImproveHistoryText(value, maxBytes);
+    historyRedacted ||= sanitized.redacted;
+    historyTruncated ||= sanitized.truncated;
+    return sanitized.text || undefined;
+  };
+  const outputEvidence = historyText(record.outputPreview, 256 * 1024);
+  const outputPreview = outputEvidence
+    ? summarizeText(outputEvidence, 800)
+    : undefined;
+  const error = historyText(record.error, 64 * 1024);
+  const sessionFile = historyText(record.sessionFile, 4 * 1024);
+  const trigger = historyText(`cron:${task.id}`, 4 * 1024);
+  const audit = record.audit
+    ? {
+        version: 1 as const,
+        auditId: record.audit.auditId,
+        path: record.audit.path,
+        sha256: record.audit.sha256,
+        complete: record.audit.complete,
+        redacted: record.audit.redacted,
+        truncated: record.audit.truncated,
+      }
+    : undefined;
+  const rawExisting = await readFile(filePath, "utf8").catch((error: any) => {
+    if (error?.code === "ENOENT") return "";
+    throw error;
+  });
+  const existing = recoverCronHistoryText(rawExisting);
+  if (existing !== rawExisting) {
+    await writePrivateCronHistoryAtomic(filePath, existing);
+  }
+  let existingRecords: any[];
+  try {
+    existingRecords = existing
+      .split(/\r?\n/)
       .filter(Boolean)
-      .some((line) => {
-        try {
-          return JSON.parse(line)?.id === recordId;
-        } catch {
-          return false;
-        }
-      })
+      .map((line) => JSON.parse(line));
+  } catch {
+    throw new Error("self_improve_audit_history_corrupt");
+  }
+  const identity =
+    audit?.sha256 ||
+    audit?.auditId ||
+    createHash("sha256")
+      .update(
+        JSON.stringify({
+          id: baseRecordId,
+          startedAt: record.startedAt,
+          sessionFile,
+        }),
+      )
+      .digest("hex");
+  const sameRun = (entry: any) =>
+    entry?.id === baseRecordId || entry?.runId === baseRecordId;
+  if (
+    audit?.auditId &&
+    existingRecords.some(
+      (entry) =>
+        entry?.audit?.auditId === audit.auditId &&
+        (!sameRun(entry) ||
+          entry?.kind !== "self_improve_review" ||
+          entry?.status !== record.status ||
+          entry?.audit?.version !== audit.version ||
+          entry?.audit?.path !== audit.path ||
+          entry?.audit?.sha256 !== audit.sha256 ||
+          entry?.audit?.complete !== audit.complete ||
+          entry?.audit?.redacted !== audit.redacted ||
+          entry?.audit?.truncated !== audit.truncated),
+    )
   ) {
+    throw new Error("self_improve_audit_history_corrupt");
+  }
+  if (
+    existingRecords.some(
+      (entry) =>
+        sameRun(entry) &&
+        (audit
+          ? audit.auditId
+            ? entry?.audit?.auditId === audit.auditId
+            : entry?.audit?.sha256 === audit.sha256 &&
+              entry?.audit?.path === audit.path &&
+              entry?.status === record.status
+          : !entry?.audit && entry?.startedAt === record.startedAt),
+    )
+  ) {
+    await chmod(filePath, 0o600);
+    const historyHandle = await open(filePath, "r+");
+    try {
+      await historyHandle.sync();
+    } finally {
+      await historyHandle.close();
+    }
+    const directoryHandle = await open(path.dirname(filePath), "r");
+    try {
+      await directoryHandle.sync();
+    } finally {
+      await directoryHandle.close();
+    }
     return;
   }
-  await appendFile(
+  const recordId = existingRecords.some(sameRun)
+    ? `${baseRecordId}@${identity.slice(0, 12)}`
+    : baseRecordId;
+  await writePrivateCronHistoryAtomic(
     filePath,
-    `${JSON.stringify({
+    `${existing}${JSON.stringify({
       id: recordId,
+      runId: baseRecordId,
       kind: "self_improve_review",
       status: record.status,
-      trigger: `cron:${task.id}`,
-      sessionFile: record.sessionFile,
+      trigger,
+      sessionFile,
       startedAt: record.startedAt,
       finishedAt: record.finishedAt,
       attempts: 1,
-      outputPreview: record.outputPreview
-        ? summarizeText(record.outputPreview, 800)
-        : undefined,
-      error: record.error,
+      outputPreview,
+      error,
+      audit,
+      historyRedacted: historyRedacted || undefined,
+      historyTruncated: historyTruncated || undefined,
     })}\n`,
-    "utf8",
   );
 }
 
@@ -364,7 +518,10 @@ export async function executeCronAgentTask(
     promptMeta: options.promptMeta || buildCronTaskPromptContext(task),
   });
   const completion = resolveTurnCompletion(result);
-  const finalText = summarizeText(completion.finalText, 4000);
+  const terminalEvidence = isSelfImproveDistillationTask(task)
+    ? sanitizeSelfImproveHistoryText(completion.finalText, 256 * 1024).text
+    : completion.finalText;
+  const finalText = summarizeText(terminalEvidence, 4000);
   const nextSessionFile = String(result?.sessionFile || "").trim() || undefined;
   const keepChatBoundSession = Boolean(chatKey && nextSessionFile);
   if (sessionMode === "dedicated") {
@@ -378,6 +535,7 @@ export async function executeCronAgentTask(
   }
   return {
     text: finalText,
+    auditOutput: completion.finalText,
     sessionId: String(result?.sessionId || "").trim() || undefined,
     sessionFile:
       sessionMode === "none"
@@ -393,6 +551,8 @@ export type CronTaskTerminal = {
   text?: string;
   error?: string;
   sessionFile?: string;
+  audit?: SelfImproveRunAuditReference;
+  historyCommitted?: boolean;
 };
 
 export function createCronSessionInvocation(
@@ -479,14 +639,156 @@ export async function executeCronSessionInvocation(
   },
 ) {
   const task = taskFromSessionInvocation(invocation);
-  return await executeCronAgentTask(task, {
-    ...options,
-    runId: invocation.requestTag,
-    sessionFile: invocation.sessionFile,
-    promptMeta: invocation.promptMeta,
-    deliveryIdempotencyKey: `scheduled-final:${invocation.id}`,
-    continuing: invocation.continuing,
-  });
+  const audited = isSelfImproveDistillationTask(task);
+  const maintenanceLock = audited
+    ? await acquireSelfImproveMaintenanceLock(options.agentDir)
+    : null;
+  if (audited && !maintenanceLock) {
+    throw new Error("self_improve_maintenance_lock_timeout");
+  }
+  try {
+    const auditHandle = audited
+      ? await beginSelfImproveRunAudit({
+          agentDir: options.agentDir,
+          runId: `${task.id}:${task.runCount}`,
+          kind: "cron",
+          startedAt: invocation.startedAt,
+          source: { trigger: `cron:${task.id}` },
+        })
+      : undefined;
+    try {
+      if (auditHandle?.completedPath) {
+        const audit = await completeSelfImproveRunAudit({
+          agentDir: options.agentDir,
+          handle: auditHandle,
+          status: "completed",
+          finishedAt: nowIso(),
+        });
+        const exactEvidence =
+          audit.evidenceRetained !== false && audit.complete;
+        if (audit.status === "failed") {
+          const error = new Error(
+            exactEvidence
+              ? audit.error || "self_improve_audit_recovered_failure"
+              : "self_improve_audit_recovered_incomplete_failure",
+          );
+          Object.assign(error, {
+            rinTurnTerminal: true,
+            selfImproveAudit: audit,
+          });
+          throw error;
+        }
+        const recoveredOutput = exactEvidence
+          ? audit.output || ""
+          : "Self-improve run already completed; exact terminal output evidence was redacted or truncated.";
+        const restored = {
+          text: summarizeText(recoveredOutput, 4_000),
+          auditOutput: recoveredOutput,
+          sessionFile: undefined,
+          audit,
+          auditHistoryCommitted: true,
+        };
+        await appendCronTaskTerminalHistory(
+          task,
+          { status: "completed", text: restored.text, audit },
+          { agentDir: options.agentDir, startedAt: invocation.startedAt },
+        );
+        await acknowledgeSelfImproveRunAudit({
+          agentDir: options.agentDir,
+          handle: auditHandle,
+          reference: audit,
+        });
+        return restored;
+      }
+      if (auditHandle?.executionInterrupted) {
+        const error = new Error("self_improve_audit_interrupted_execution");
+        Object.assign(error, { rinTurnTerminal: true });
+        throw error;
+      }
+      if (auditHandle) {
+        await markSelfImproveRunAuditExecutionStarted({
+          agentDir: options.agentDir,
+          handle: auditHandle,
+        });
+      }
+      const result = await executeCronAgentTask(task, {
+        ...options,
+        runId: invocation.requestTag,
+        sessionFile: invocation.sessionFile,
+        promptMeta: invocation.promptMeta,
+        deliveryIdempotencyKey: `scheduled-final:${invocation.id}`,
+        continuing: invocation.continuing,
+      });
+      const audit = auditHandle
+        ? await completeSelfImproveRunAudit({
+            agentDir: options.agentDir,
+            handle: auditHandle,
+            status: "completed",
+            finishedAt: nowIso(),
+            output: result.auditOutput,
+          })
+        : undefined;
+      if (audit) {
+        await appendCronTaskTerminalHistory(
+          task,
+          {
+            status: "completed",
+            text: result.text,
+            sessionFile: result.sessionFile,
+            audit,
+          },
+          { agentDir: options.agentDir, startedAt: invocation.startedAt },
+        );
+        await acknowledgeSelfImproveRunAudit({
+          agentDir: options.agentDir,
+          handle: auditHandle!,
+          reference: audit,
+        });
+      }
+      return { ...result, audit, auditHistoryCommitted: Boolean(audit) };
+    } catch (error) {
+      if (auditHandle && (error as any)?.rinTurnTerminal === true) {
+        const audit = await completeSelfImproveRunAudit({
+          agentDir: options.agentDir,
+          handle: auditHandle,
+          status: "failed",
+          finishedAt: nowIso(),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        if (error && typeof error === "object") {
+          Object.assign(error, { selfImproveAudit: audit });
+        }
+      }
+      const terminalAudit = (error as any)?.selfImproveAudit;
+      if (terminalAudit) {
+        await appendCronTaskTerminalHistory(
+          task,
+          {
+            status: "failed",
+            error: error instanceof Error ? error.message : String(error),
+            audit: terminalAudit,
+          },
+          { agentDir: options.agentDir, startedAt: invocation.startedAt },
+        );
+        await acknowledgeSelfImproveRunAudit({
+          agentDir: options.agentDir,
+          handle: auditHandle!,
+          reference: terminalAudit,
+        });
+        if (error && typeof error === "object") {
+          Object.assign(error, { selfImproveAuditHistoryCommitted: true });
+        }
+      }
+      throw error;
+    }
+  } finally {
+    if (maintenanceLock) {
+      await releaseSelfImproveMaintenanceLock(
+        options.agentDir,
+        maintenanceLock,
+      );
+    }
+  }
 }
 
 export function applyCronTaskTerminalProjection(
@@ -538,14 +840,17 @@ export async function appendCronTaskTerminalHistory(
   terminal: CronTaskTerminal,
   options: { agentDir: string; startedAt?: string },
 ) {
-  await appendCronMaintenanceHistoryRecord(options.agentDir, task, {
+  const write = appendCronMaintenanceHistoryRecord(options.agentDir, task, {
     status: terminal.status,
     outputPreview: terminal.text,
     error: terminal.error,
     sessionFile: terminal.sessionFile,
+    audit: terminal.audit,
     startedAt: options.startedAt,
-    finishedAt: task.lastFinishedAt || nowIso(),
-  }).catch(() => {});
+    finishedAt: nowIso(),
+  });
+  if (terminal.audit) await write;
+  else await write.catch(() => {});
 }
 
 export async function projectCronTaskTerminal(
@@ -553,8 +858,13 @@ export async function projectCronTaskTerminal(
   terminal: CronTaskTerminal,
   options: { agentDir: string; startedAt?: string },
 ) {
+  if (terminal.audit && !terminal.historyCommitted) {
+    await appendCronTaskTerminalHistory(task, terminal, options);
+  }
   applyCronTaskTerminalProjection(task, terminal);
-  await appendCronTaskTerminalHistory(task, terminal, options);
+  if (!terminal.audit && !terminal.historyCommitted) {
+    await appendCronTaskTerminalHistory(task, terminal, options);
+  }
 }
 
 export async function executeCronTask(
@@ -568,48 +878,154 @@ export async function executeCronTask(
   const startedAt = task.lastStartedAt || nowIso();
   const runId = cronTaskRunId(task, startedAt);
   const showExternalWorking = task.target.kind === "shell_command";
-  let terminal: CronTaskTerminal;
+  const audited = isSelfImproveDistillationTask(task);
+  const maintenanceLock = audited
+    ? await acquireSelfImproveMaintenanceLock(options.agentDir)
+    : null;
+  if (audited && !maintenanceLock) {
+    throw new Error("self_improve_maintenance_lock_timeout");
+  }
+  let terminal: CronTaskTerminal | undefined;
+  let executionCompleted = false;
+  let auditCompleted = false;
+  let auditHandle: SelfImproveRunAuditHandle | undefined;
   try {
-    if (showExternalWorking) {
-      await setCronTaskFrontendWorking(task, options, true);
-    }
-    if (task.target.kind === "shell_command") {
-      const text = await executeCronShellTask(task, {
+    auditHandle = audited
+      ? await beginSelfImproveRunAudit({
+          agentDir: options.agentDir,
+          runId: `${task.id}:${task.runCount}`,
+          kind: "cron",
+          startedAt,
+          source: { trigger: `cron:${task.id}` },
+        })
+      : undefined;
+    if (auditHandle?.completedPath) {
+      executionCompleted = true;
+      const audit = await completeSelfImproveRunAudit({
         agentDir: options.agentDir,
+        handle: auditHandle,
+        status: "completed",
+        finishedAt: nowIso(),
       });
-      terminal = { status: "completed", text };
-      const frontend = resolveCronTaskFrontend(task);
-      const chatKey = shouldDeliverCronTaskFinal(task, frontend)
-        ? frontend?.key
-        : undefined;
-      if (chatKey && text) {
-        await sendChatText(options, {
-          chatKey,
-          taskId: task.id,
-          runId,
-          text,
-        }).catch(() => {});
+      auditCompleted = true;
+      const exactEvidence = audit.evidenceRetained !== false && audit.complete;
+      if (audit.status === "failed") {
+        const error = new Error(
+          exactEvidence
+            ? audit.error || "self_improve_audit_recovered_failure"
+            : "self_improve_audit_recovered_incomplete_failure",
+        );
+        Object.assign(error, { selfImproveAudit: audit });
+        throw error;
       }
-    } else {
-      const result = await executeCronAgentTask(task, { ...options, runId });
       terminal = {
         status: "completed",
-        text: result.text,
-        sessionFile: result.sessionFile,
+        text: summarizeText(
+          exactEvidence
+            ? audit.output || ""
+            : "Self-improve run already completed; exact terminal output evidence was redacted or truncated.",
+          4_000,
+        ),
+        audit,
       };
+    } else {
+      if (auditHandle?.executionInterrupted) {
+        throw new Error("self_improve_audit_interrupted_execution");
+      }
+      if (auditHandle) {
+        await markSelfImproveRunAuditExecutionStarted({
+          agentDir: options.agentDir,
+          handle: auditHandle,
+        });
+      }
+      if (showExternalWorking) {
+        await setCronTaskFrontendWorking(task, options, true);
+      }
+      if (task.target.kind === "shell_command") {
+        const text = await executeCronShellTask(task, {
+          agentDir: options.agentDir,
+        });
+        terminal = { status: "completed", text };
+        const frontend = resolveCronTaskFrontend(task);
+        const chatKey = shouldDeliverCronTaskFinal(task, frontend)
+          ? frontend?.key
+          : undefined;
+        if (chatKey && text) {
+          await sendChatText(options, {
+            chatKey,
+            taskId: task.id,
+            runId,
+            text,
+          }).catch(() => {});
+        }
+      } else {
+        const result = await executeCronAgentTask(task, { ...options, runId });
+        executionCompleted = true;
+        const audit = auditHandle
+          ? await completeSelfImproveRunAudit({
+              agentDir: options.agentDir,
+              handle: auditHandle,
+              status: "completed",
+              finishedAt: nowIso(),
+              output: result.auditOutput,
+            })
+          : undefined;
+        auditCompleted = Boolean(audit);
+        terminal = {
+          status: "completed",
+          text: result.text,
+          sessionFile: result.sessionFile,
+          audit,
+        };
+      }
     }
   } catch (error: any) {
+    if (audited && !auditHandle) throw error;
+    if (audited && executionCompleted && !auditCompleted) throw error;
+    const errorText = String(
+      error?.message || error || "cron_task_failed",
+    ).trim();
+    const audit =
+      error?.selfImproveAudit ||
+      (auditHandle && !auditCompleted
+        ? await completeSelfImproveRunAudit({
+            agentDir: options.agentDir,
+            handle: auditHandle,
+            status: "failed",
+            finishedAt: nowIso(),
+            error: errorText,
+          })
+        : undefined);
     terminal = {
       status: "failed",
-      error: String(error?.message || error || "cron_task_failed").trim(),
+      error: errorText,
+      audit,
     };
   } finally {
-    if (showExternalWorking) {
-      await setCronTaskFrontendWorking(task, options, false);
+    try {
+      if (showExternalWorking) {
+        await setCronTaskFrontendWorking(task, options, false);
+      }
+      if (terminal) {
+        await projectCronTaskTerminal(task, terminal, {
+          agentDir: options.agentDir,
+          startedAt,
+        });
+        if (terminal.audit && auditHandle) {
+          await acknowledgeSelfImproveRunAudit({
+            agentDir: options.agentDir,
+            handle: auditHandle,
+            reference: terminal.audit,
+          });
+        }
+      }
+    } finally {
+      if (maintenanceLock) {
+        await releaseSelfImproveMaintenanceLock(
+          options.agentDir,
+          maintenanceLock,
+        );
+      }
     }
   }
-  await projectCronTaskTerminal(task, terminal!, {
-    agentDir: options.agentDir,
-    startedAt,
-  });
 }

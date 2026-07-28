@@ -73,6 +73,26 @@ Choose the first destination that fits:
 - Keep `short-term-memory/SKILL.md` as a light router and inspect only the matching active records.
 - Fixed identity destinations are `people-and-relationships` for people and `object-relationships` for non-person entities.
 
+## Run audit evidence
+
+Every self-improve review run must leave a verifiable evidence reference in its maintenance-history record. The reference points to a mode-`0600` JSON artifact under:
+
+```text
+<agentDir>/self_improve/state/run-audits/YYYY-MM-DD/
+```
+
+The artifact records the run/source identity, status and timestamps, before/after root hashes, per-file create/update/delete hashes, bounded unified patches for text artifacts, and the complete bounded distillation result. The history row keeps the artifact path, SHA-256, and `complete` / `redacted` / `truncated` flags. `rin self-improve --json` returns this reference, while `rin self-improve --id <runId>` renders it for operators.
+
+Audit capture is fail-closed for a completed self-improve mutation: validate and canonicalize run timestamps, start from the pre-run snapshot, serialize self-improve writers through the shared maintenance lock, persist an immutable run/source/start identity without overwriting an earlier artifact, finalize the artifact and history link before recording success, and retain the original pending snapshot until the history link is durably acknowledged. Exact retries reuse the completed audit instead of running the distillation again. Pending evidence is age-bounded, and its count is bounded by refusing to start another mutation until earlier evidence is linked. After acknowledgment, a compact private identity marker remains so an exact logical retry can never rerun the mutation or reuse an expired artifact path; retained artifacts themselves still follow the configured count/age policy. Existing history rows without an audit reference remain readable.
+
+Privacy and storage are part of the evidence contract:
+
+- do not copy the source session into the audit artifact;
+- redact and bound recognized credentials in run/source metadata, paths, patches, output, errors, and maintenance-history previews while retaining hashes of original content;
+- mark evidence incomplete when metadata, error, text, patch, or output exceeds its bound or cannot be represented as text;
+- retain at most 500 run artifacts and 30 days by default;
+- do not treat a redacted or truncated artifact as exact recovery evidence for the hidden content.
+
 ## Validation and output
 
 Before success, verify:
