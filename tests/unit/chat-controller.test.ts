@@ -574,6 +574,58 @@ function emitRpcTurnComplete(controller, options, finalText, result) {
   });
 }
 
+test("chat controller fences terminal projections by inbox request tag", async () => {
+  const controller = await createController("telegram/1:2");
+  controller.currentTurn = {
+    incomingMessageId: "m-current",
+    replyToMessageId: "m-current",
+    requestTag: "request-current",
+    outboxTurnFence: {
+      agentDir: controller.agentDir,
+      turnId: "turn-current",
+      chatKey: controller.chatKey,
+      messageId: "m-current",
+      ownerEpoch: "owner-current",
+      attempt: 1,
+    },
+  };
+
+  const completed = [];
+  const failed = [];
+  controller.settleProjectedTurnComplete = async (event) => {
+    completed.push(event.requestTag);
+  };
+  controller.settleProjectedTurnError = async (event) => {
+    failed.push(event.requestTag);
+  };
+
+  await controller.handleFrontendEvent({
+    type: "turn_complete",
+    requestTag: "request-newer",
+    latestAssistantText: "newer final",
+  });
+  await controller.handleFrontendEvent({
+    type: "turn_error",
+    requestTag: "request-newer",
+    message: "newer error",
+  });
+  assert.deepEqual(completed, []);
+  assert.deepEqual(failed, []);
+
+  await controller.handleFrontendEvent({
+    type: "turn_complete",
+    requestTag: "request-current",
+    latestAssistantText: "current final",
+  });
+  await controller.handleFrontendEvent({
+    type: "turn_error",
+    requestTag: "request-current",
+    message: "current error",
+  });
+  assert.deepEqual(completed, ["request-current"]);
+  assert.deepEqual(failed, ["request-current"]);
+});
+
 test("chat controller logs one received-to-backend startup timing decomposition", async () => {
   const logs = [];
   const controller = await createController("telegram/1:2", {

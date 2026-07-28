@@ -558,7 +558,7 @@ export class ChatController {
     )}`;
   }
 
-  private acceptsAssistantProgressEvent(requestTag?: string) {
+  private acceptsScopedTurnEvent(requestTag?: string) {
     if (!this.currentTurn?.outboxTurnFence) return true;
     const actual = safeString(requestTag).trim();
     if (!actual) return true;
@@ -3445,20 +3445,24 @@ export class ChatController {
         await this.deliverCompactionStartNotice(event.text);
         return;
       case "assistant_summary":
-        if (this.acceptsAssistantProgressEvent(event.requestTag)) {
+        if (this.acceptsScopedTurnEvent(event.requestTag)) {
           await this.showAssistantSummary(event.text);
         }
         return;
       case "assistant_interim":
-        if (this.acceptsAssistantProgressEvent(event.requestTag)) {
+        if (this.acceptsScopedTurnEvent(event.requestTag)) {
           await this.deliverAssistantInterim(event.text);
         }
         return;
       case "turn_complete":
-        await this.settleProjectedTurnComplete(event);
+        if (this.acceptsScopedTurnEvent(event.requestTag)) {
+          await this.settleProjectedTurnComplete(event);
+        }
         return;
       case "turn_error":
-        await this.settleProjectedTurnError(event);
+        if (this.acceptsScopedTurnEvent(event.requestTag)) {
+          await this.settleProjectedTurnError(event);
+        }
         return;
     }
   }
