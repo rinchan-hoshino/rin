@@ -266,8 +266,8 @@ test("telegram topic commands use the thread-scoped chat key", async () => {
         trusted: [],
       });
 
-      controllerMod.ChatController.prototype.runCommand = async function (commandLine, replyToMessageId, incomingMessageId, sessionFile, promptMeta) {
-        seen.push({ commandLine, chatKey: this.chatKey, promptMeta });
+      controllerMod.ChatController.prototype.runCommand = async function (commandLine, replyToMessageId, incomingMessageId, sessionFile, promptMeta, outboxTurnFence) {
+        seen.push({ commandLine, chatKey: this.chatKey, promptMeta, outboxTurnFence });
         return { handled: true, text: "ok" };
       };
 
@@ -332,6 +332,12 @@ test("telegram topic commands use the thread-scoped chat key", async () => {
       result.seen[0].promptMeta?.chatKey,
       "telegram/1:-100123?thread=193",
     );
+    assert.equal(
+      result.seen[0].outboxTurnFence?.chatKey,
+      "telegram/1:-100123?thread=193",
+    );
+    assert.equal(result.seen[0].outboxTurnFence?.messageId, "m-topic-command");
+    assert.ok(result.seen[0].outboxTurnFence?.turnId);
     assert.equal(result.rows?.[0]?.chatKey, "telegram/1:-100123?thread=193");
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });

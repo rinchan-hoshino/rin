@@ -224,7 +224,13 @@ export async function runPiNativeCompactionWithoutFileSummary(
     event?.customInstructions,
     event?.signal,
     session?.thinkingLevel,
-    session?.agent?.streamFunction,
+    session?.agent?.streamFunction
+      ? (streamModel: any, streamContext: any, streamOptions: any) =>
+          session.agent.streamFunction(streamModel, streamContext, {
+            ...streamOptions,
+            transport: "sse",
+          })
+      : undefined,
     env,
     session?.settingsManager?.getRetrySettings?.(),
     retryCallbacks,

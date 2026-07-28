@@ -1515,6 +1515,59 @@ test("chat controller starts command reactions from backend working visibility",
   assert.deepEqual(deliveries, []);
 });
 
+test("chat controller command failure atomically terminalizes its durable inbox turn", async () => {
+  const controller = await createController("telegram/1:2");
+  const item = enqueueChatInboxItem(controller.agentDir, {
+    chatKey: controller.chatKey,
+    messageId: "m-command-failure-terminal",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "2",
+      messageId: "m-command-failure-terminal",
+      content: "/compact",
+      stripped: { content: "/compact" },
+    },
+    elements: [{ type: "text", attrs: { content: "/compact" } }],
+  }).item;
+  const claim = claimChatInboxItem(controller.agentDir, item.itemId);
+  assert.ok(claim);
+  const fence = {
+    agentDir: controller.agentDir,
+    turnId: claim.itemId,
+    chatKey: claim.chatKey,
+    messageId: claim.messageId,
+    ownerEpoch: claim.ownerEpoch,
+    attempt: claim.attemptCount,
+  };
+  controller.driver.runCommand = async () => {
+    throw new Error("compaction exploded");
+  };
+
+  await assert.rejects(
+    controller.runCommand(
+      "/compact",
+      claim.messageId,
+      claim.messageId,
+      "",
+      undefined,
+      fence,
+    ),
+    /compaction exploded/,
+  );
+
+  const turn = openChatDatabase(controller.agentDir)
+    .prepare("SELECT state, terminal_kind FROM turns WHERE turn_id = ?")
+    .get(claim.itemId);
+  assert.deepEqual(turn, {
+    state: "terminal",
+    terminal_kind: "outbox_error",
+  });
+  const outbox = listChatOutboxHistoryItems(controller.agentDir, "delivered");
+  assert.equal(outbox.length, 1);
+  assert.equal(outbox[0].deliveryKind, "error");
+});
+
 test("chat controller sends compaction notices as interim progress and reacts on that notice", async () => {
   const controller = await createController("telegram/1:2");
   const sessionFile = path.join(

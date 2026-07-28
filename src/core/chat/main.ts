@@ -131,6 +131,7 @@ import {
   withChatQuotePart,
   runWithChatOutboxTurnFence,
   type ChatOutboxPayloadInput,
+  type ChatOutboxTurnFence,
   type EnqueueChatOutboxOptions,
 } from "../rin-lib/chat-outbox.js";
 import {
@@ -725,6 +726,7 @@ export async function startChatBridge(
     promptMeta: PromptContextMeta,
     chatKey: string,
     messageId: string,
+    outboxTurnFence: ChatOutboxTurnFence,
   ) => {
     if (command.name === "help") {
       const lines = commandRows.map(
@@ -763,7 +765,14 @@ export async function startChatBridge(
 
     const text = `/${command.name}${command.argsText ? ` ${command.argsText}` : ""}`;
     try {
-      await controller.runCommand(text, messageId, messageId, "", promptMeta);
+      await controller.runCommand(
+        text,
+        messageId,
+        messageId,
+        "",
+        promptMeta,
+        outboxTurnFence,
+      );
       return { retry: false, disposition: "actionable" as const };
     } catch (error) {
       logger.warn(
@@ -1022,18 +1031,22 @@ export async function startChatBridge(
     }
   };
 
+  const outboxTurnFenceForClaimedJob = (
+    job: ClaimedChatInboxJob,
+  ): ChatOutboxTurnFence => ({
+    agentDir: runtime.agentDir,
+    turnId: job.envelope.itemId,
+    chatKey: job.envelope.chatKey,
+    messageId: job.envelope.messageId,
+    ownerEpoch: job.envelope.ownerEpoch,
+    attempt: job.envelope.attemptCount,
+  });
+
   const runClaimedInboxJob = async (
     job: ClaimedChatInboxJob,
     run: () => Promise<ChatInboxJobResult | undefined>,
   ) => {
-    const fence = {
-      agentDir: runtime.agentDir,
-      turnId: job.envelope.itemId,
-      chatKey: job.envelope.chatKey,
-      messageId: job.envelope.messageId,
-      ownerEpoch: job.envelope.ownerEpoch,
-      attempt: job.envelope.attemptCount,
-    };
+    const fence = outboxTurnFenceForClaimedJob(job);
     if (!touchClaimedChatInboxItem(runtime.agentDir, job.envelope)) {
       forgetClaimedInboxJob(job);
       return;
@@ -1182,6 +1195,7 @@ export async function startChatBridge(
                   resolved.promptMeta,
                   resolved.chatKey,
                   resolved.messageId,
+                  outboxTurnFenceForClaimedJob(job),
                 ),
               ),
           };

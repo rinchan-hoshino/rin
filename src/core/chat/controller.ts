@@ -2733,6 +2733,7 @@ export class ChatController {
     incomingMessageId = "",
     _sessionFile = "",
     promptMeta?: PromptContextMeta,
+    outboxTurnFence?: ChatOutboxTurnFence,
   ) {
     this.rememberPromptChatType(promptMeta);
     const commandName = frontendCommandNameFromLine(commandLine);
@@ -2807,7 +2808,7 @@ export class ChatController {
     this.setActiveCommandTurnInput({
       incomingMessageId,
       replyToMessageId,
-      outboxTurnFence: getActiveChatOutboxTurnFence(),
+      outboxTurnFence: outboxTurnFence || getActiveChatOutboxTurnFence(),
     });
     try {
       if (interruptingActiveTurn) {

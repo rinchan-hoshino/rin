@@ -156,6 +156,7 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
   assert.deepEqual(requestOptions.env, { PROVIDER_REGION: "test-region" });
   assert.equal(typeof requestOptions.sessionId, "string");
   assert.equal(requestOptions.cacheRetention, "none");
+  assert.equal(requestOptions.transport, "sse");
   assert.match(prompt, /## Goal/);
   assert.match(prompt, /## Constraints & Preferences/);
   assert.doesNotMatch(prompt, /## Active Task/);
