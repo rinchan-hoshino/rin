@@ -659,7 +659,10 @@ export function enqueueChatOutboxPayload(
           ).run(owned.inbound_message_id);
         }
       };
-      const adoptExisting = (row: any) => {
+      const adoptExisting = (
+        row: any,
+        adoptOptions: { acceptLegacyTerminalPayload?: boolean } = {},
+      ) => {
         if (safeString(row.chat_key).trim() !== normalizedPayload.chatKey) {
           throw new Error("chat_outbox_idempotency_collision");
         }
@@ -679,8 +682,9 @@ export function enqueueChatOutboxPayload(
         const desiredPostDelivery = options.postDelivery || null;
         if (
           safeString(row.delivery_kind).trim() !== deliveryKind ||
-          JSON.stringify(comparableExistingParts) !==
-            JSON.stringify(normalizedPayload.parts || []) ||
+          (!adoptOptions.acceptLegacyTerminalPayload &&
+            JSON.stringify(comparableExistingParts) !==
+              JSON.stringify(normalizedPayload.parts || [])) ||
           (existingPostDelivery &&
             JSON.stringify(existingPostDelivery) !==
               JSON.stringify(desiredPostDelivery)) ||
@@ -799,6 +803,22 @@ export function enqueueChatOutboxPayload(
           .prepare(`SELECT * FROM outbox WHERE idempotency_key = ?`)
           .get(idempotencyKey) as any;
         if (sameKey) return adoptExisting(sameKey);
+      }
+      if (turn && desiredTurnId && deliveryKind !== "interim") {
+        const legacyTerminal = db
+          .prepare(
+            `SELECT * FROM outbox
+             WHERE turn_id = ? AND delivery_kind = ?
+               AND post_delivery_json IS NULL
+             ORDER BY sequence ASC
+             LIMIT 1`,
+          )
+          .get(desiredTurnId, deliveryKind) as any;
+        if (legacyTerminal) {
+          return adoptExisting(legacyTerminal, {
+            acceptLegacyTerminalPayload: true,
+          });
+        }
       }
       const sequence = Number(
         (

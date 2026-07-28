@@ -1628,6 +1628,88 @@ test("chat controller command failure atomically terminalizes its durable inbox 
   assert.equal(outbox[0].deliveryKind, "error");
 });
 
+test("chat command retry adopts its already delivered legacy error outbox", async () => {
+  const controller = await createController("telegram/1:2");
+  const claim = setDurableCurrentTurn(
+    controller,
+    "legacy-command-failure-message",
+  );
+  const turnFence = controller.currentTurn.outboxTurnFence;
+  const legacyOutboxId = enqueueChatOutboxPayload(
+    controller.agentDir,
+    {
+      createdAt: new Date().toISOString(),
+      chatKey: controller.chatKey,
+      parts: [
+        { type: "quote", id: claim.messageId },
+        { type: "text", text: "legacy compact failure" },
+      ],
+    },
+    {
+      idempotencyKey: "legacy-command-error",
+      deliveryKind: "interim",
+      turnFence,
+    },
+  );
+  const legacyOutbox = readChatOutboxItemById(
+    controller.agentDir,
+    legacyOutboxId,
+  ).item;
+  writeChatOutboxItem(controller.agentDir, {
+    ...legacyOutbox,
+    status: "delivered",
+    deliveryResult: ["legacy-error-message"],
+    deliveredAt: new Date().toISOString(),
+  });
+  openChatDatabase(controller.agentDir)
+    .prepare("UPDATE outbox SET delivery_kind = 'error' WHERE outbox_id = ?")
+    .run(legacyOutboxId);
+  let sends = 0;
+  controller.app.bots[0].sendMessage = async () => {
+    sends += 1;
+    return [`unexpected-${sends}`];
+  };
+  controller.driver.runCommand = async () => {
+    throw new Error("compact retry exploded");
+  };
+
+  await assert.rejects(
+    controller.runCommand(
+      "/compact",
+      claim.messageId,
+      claim.messageId,
+      "",
+      undefined,
+      turnFence,
+    ),
+    /compact retry exploded/,
+  );
+
+  const turn = openChatDatabase(controller.agentDir)
+    .prepare("SELECT state, terminal_kind FROM turns WHERE turn_id = ?")
+    .get(claim.itemId);
+  assert.deepEqual(turn, {
+    state: "terminal",
+    terminal_kind: "outbox_error",
+  });
+  const terminalOutboxes = openChatDatabase(controller.agentDir)
+    .prepare(
+      `SELECT outbox_id, delivery_kind, payload_json, post_delivery_applied_at
+       FROM outbox
+       WHERE turn_id = ? AND delivery_kind != 'interim'`,
+    )
+    .all(claim.itemId);
+  assert.equal(terminalOutboxes.length, 1);
+  assert.equal(terminalOutboxes[0].outbox_id, legacyOutboxId);
+  assert.equal(terminalOutboxes[0].delivery_kind, "error");
+  assert.equal(
+    JSON.parse(terminalOutboxes[0].payload_json).parts[1].text,
+    "legacy compact failure",
+  );
+  assert.ok(terminalOutboxes[0].post_delivery_applied_at);
+  assert.equal(sends, 0);
+});
+
 test("chat controller sends compaction notices as interim progress and reacts on that notice", async () => {
   const controller = await createController("telegram/1:2");
   const sessionFile = path.join(
