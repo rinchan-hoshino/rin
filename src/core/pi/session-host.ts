@@ -1,8 +1,5 @@
 import fsSync from "node:fs";
 
-import type { AuthResult } from "@earendil-works/pi-ai";
-import { compact } from "@earendil-works/pi-coding-agent";
-
 import { updateSessionCatalogFromSessionManagerSync } from "../session/catalog.js";
 
 // This file is Rin's controlled seam for Pi AgentSession/SessionManager
@@ -29,7 +26,6 @@ const PI_SESSION_PRIVATE = {
   runAgentPrompt: "_runAgentPrompt",
   rewriteFile: "_rewriteFile",
   runAutoCompaction: "_runAutoCompaction",
-  summarizationRetryCallbacks: "_summarizationRetryCallbacks",
 } as const;
 
 const RIN_SESSION_CONVERSATION_PERSIST_KEY = Symbol.for(
@@ -164,78 +160,6 @@ export function runPiSessionAutoCompaction(
   willRetry: boolean,
 ) {
   return session?.[PI_SESSION_PRIVATE.runAutoCompaction]?.(reason, willRetry);
-}
-
-function computePiCompactionFileDetails(fileOps: any) {
-  const read = new Set<string>(fileOps?.read || []);
-  const modified = new Set<string>([
-    ...(fileOps?.edited || []),
-    ...(fileOps?.written || []),
-  ]);
-  return {
-    readFiles: [...read].filter((file) => !modified.has(file)).sort(),
-    modifiedFiles: [...modified].sort(),
-  };
-}
-
-export async function runPiNativeCompactionWithoutFileSummary(
-  session: any,
-  event: any,
-) {
-  const model = session?.model;
-  if (!model)
-    throw new Error("Pi AgentSession compaction model is unavailable");
-  const getRequestAuth = session?.modelRuntime?.getAuth;
-  if (typeof getRequestAuth !== "function") {
-    throw new Error("Pi AgentSession model runtime auth is unavailable");
-  }
-  let requestAuth: AuthResult | undefined;
-  try {
-    requestAuth = await getRequestAuth.call(session.modelRuntime, model);
-  } catch (error) {
-    if (typeof session?.agent?.streamFunction !== "function") throw error;
-  }
-  const headers = requestAuth?.auth?.headers
-    ? Object.fromEntries(
-        Object.entries(requestAuth.auth.headers).filter(
-          (entry): entry is [string, string] => typeof entry[1] === "string",
-        ),
-      )
-    : undefined;
-  const apiKey = requestAuth?.auth?.apiKey;
-  const env = requestAuth?.env;
-  const details = computePiCompactionFileDetails(event?.preparation?.fileOps);
-  const retryCallbacks = bindMethod(
-    session,
-    PI_SESSION_PRIVATE.summarizationRetryCallbacks,
-  )?.({ source: "compaction", reason: event?.reason });
-  const result = await compact(
-    {
-      ...event.preparation,
-      fileOps: {
-        read: new Set<string>(),
-        written: new Set<string>(),
-        edited: new Set<string>(),
-      },
-    },
-    model,
-    apiKey,
-    headers,
-    event?.customInstructions,
-    event?.signal,
-    session?.thinkingLevel,
-    session?.agent?.streamFunction
-      ? (streamModel: any, streamContext: any, streamOptions: any) =>
-          session.agent.streamFunction(streamModel, streamContext, {
-            ...streamOptions,
-            transport: "sse",
-          })
-      : undefined,
-    env,
-    session?.settingsManager?.getRetrySettings?.(),
-    retryCallbacks,
-  );
-  return { ...result, details };
 }
 
 export function bindPiSessionToolRegistryRefresher(session: any) {

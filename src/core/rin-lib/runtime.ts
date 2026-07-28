@@ -53,7 +53,6 @@ import {
   replacePiSessionCompactionChecker,
   replacePiSessionSystemPromptRebuilder,
   replacePiSessionToolRegistryRefresher,
-  runPiNativeCompactionWithoutFileSummary,
   runPiSessionAutoCompaction,
   writePiSessionBaseSystemPrompt,
 } from "../pi/session-host.js";
@@ -68,20 +67,6 @@ export function createRinCapabilityDefinitions(
     taskModule(),
     chatModule(),
     tokenUsageModule(options),
-    ...(options.compactWithPiNative
-      ? [
-          {
-            name: "rin_native_compaction",
-            hooks: {
-              session_before_compact: [
-                async (event: any) => ({
-                  compaction: await options.compactWithPiNative?.(event),
-                }),
-              ],
-            },
-          },
-        ]
-      : []),
     {
       name: "rin_provider_bound_context",
       hooks: {
@@ -1319,8 +1304,6 @@ export async function createConfiguredAgentSession(
         emitEvent: (event) => {
           sessionRef.current?.__rinEmitCoreEvent?.(event);
         },
-        compactWithPiNative: (event) =>
-          runPiNativeCompactionWithoutFileSummary(sessionRef.current, event),
       }),
     });
 

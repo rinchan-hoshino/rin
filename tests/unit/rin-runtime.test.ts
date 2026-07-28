@@ -32,42 +32,26 @@ test("getManagedSkillPaths includes agent memory skills and builtin skills", () 
   ]);
 });
 
-test("Rin delegates compaction generation to native Pi without file XML", async () => {
-  const nativeResult = {
-    summary: "native summary",
-    firstKeptEntryId: "keep",
-    tokensBefore: 1234,
-    details: { readFiles: ["read.ts"], modifiedFiles: ["edit.ts"] },
-  };
-  const calls: any[] = [];
+test("Rin leaves compaction generation entirely to native Pi", async () => {
   const definitions = runtimeMod.createRinCapabilityDefinitions({
     cwd: "/tmp/rin-native-compaction",
     agentDir: "/tmp/rin-native-compaction-agent",
     getThinkingLevel: () => "medium",
     sendMessage: () => {},
-    compactWithPiNative: async (event: any) => {
-      calls.push(event);
-      return nativeResult;
-    },
   });
-  const definition = definitions.find(
-    (entry) => entry.name === "rin_native_compaction",
+  assert.equal(
+    definitions.some(
+      (definition) => definition.hooks?.session_before_compact?.length > 0,
+    ),
+    false,
   );
-  const hook = definition?.hooks?.session_before_compact?.[0];
-  assert.equal(typeof hook, "function");
-  const event = { type: "session_before_compact", reason: "threshold" };
-  assert.deepEqual(await hook(event), { compaction: nativeResult });
-  assert.deepEqual(calls, [event]);
 
   const runtimeText = await fs.readFile(
     path.join(rootDir, "dist", "core", "rin-lib", "runtime.js"),
     "utf8",
   );
-  assert.equal(runtimeText.includes("RIN_COMPACTION_SYSTEM_PROMPT"), false);
-  assert.equal(
-    runtimeText.includes("completeRinCompactionSummaryBudgeted"),
-    false,
-  );
+  assert.equal(runtimeText.includes("rin_native_compaction"), false);
+  assert.equal(runtimeText.includes("compactWithPiNative"), false);
 });
 
 test("compaction reason tracking annotates native before-compact hooks", async () => {
@@ -91,7 +75,7 @@ test("compaction reason tracking annotates native before-compact hooks", async (
   assert.equal(session.__rinCurrentCompactionReason, undefined);
 });
 
-test("configured Rin sessions install the native Pi compaction delegate", async () => {
+test("configured Rin sessions leave before-compaction ownership to Pi", async () => {
   const agentDir = await fs.mkdtemp("/tmp/rin-native-compaction-");
   const configured = await runtimeMod.createConfiguredAgentSession({
     cwd: agentDir,
@@ -106,7 +90,7 @@ test("configured Rin sessions install the native Pi compaction delegate", async 
   try {
     assert.equal(
       configured.session.extensionRunner.hasHandlers("session_before_compact"),
-      true,
+      false,
     );
   } finally {
     try {
