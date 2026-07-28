@@ -4,21 +4,24 @@ import path from "node:path";
 
 import { type FinalizeInstallOptions } from "./apply-plan.js";
 import {
-  launcherMetadataPathForUser,
+  activateInstalledRuntimeReplacement,
+  buildInstalledManagedFilesManifest,
+  captureCommandAsUser,
+  commitInstalledRuntimeReplacement,
   currentInstalledReleaseName,
   discardStagedInstalledRuntime,
   ensureDir,
+  launcherMetadataPathForUser,
+  pruneInstalledReleases,
   publishInstalledRuntime,
   publishManagedNodeRuntime,
-  pruneInstalledReleases,
   readInstallerJson,
   readJsonFile,
+  rollbackInstalledRuntimeReplacement,
   runCommandAsUser,
   runPrivileged,
-  captureCommandAsUser,
-  buildInstalledManagedFilesManifest,
-  syncInstalledDocs,
   switchInstalledCurrentRelease,
+  syncInstalledDocs,
   writeJsonFile,
   writeJsonFileWithPrivilege,
   writeLaunchersForUser,
@@ -268,6 +271,55 @@ export async function runManagedRuntimeTransition<
   }
 }
 
+export function createInstalledRuntimeReplacementLifecycle(
+  options: {
+    releaseRoot: string;
+    stagedReleaseRoot?: string;
+    elevated?: boolean;
+    migrationOptions: { migrationRuntimeRoot: string };
+  },
+  deps: {
+    activate: typeof activateInstalledRuntimeReplacement;
+    commit: typeof commitInstalledRuntimeReplacement;
+    rollback: typeof rollbackInstalledRuntimeReplacement;
+  } = {
+    activate: activateInstalledRuntimeReplacement,
+    commit: commitInstalledRuntimeReplacement,
+    rollback: rollbackInstalledRuntimeReplacement,
+  },
+) {
+  let replacement: { backupReleaseRoot: string } | null = null;
+  return {
+    isActive() {
+      return replacement !== null;
+    },
+    activate() {
+      if (!options.stagedReleaseRoot) return false;
+      replacement = deps.activate(
+        options.releaseRoot,
+        options.stagedReleaseRoot,
+        Boolean(options.elevated),
+      );
+      options.migrationOptions.migrationRuntimeRoot = options.releaseRoot;
+      return true;
+    },
+    commit() {
+      if (!replacement) return;
+      deps.commit(replacement.backupReleaseRoot, Boolean(options.elevated));
+      replacement = null;
+    },
+    rollback() {
+      if (!replacement) return;
+      deps.rollback(
+        options.releaseRoot,
+        replacement.backupReleaseRoot,
+        Boolean(options.elevated),
+      );
+      replacement = null;
+    },
+  };
+}
+
 async function applyInstalledRuntime(
   options: FinalizeInstallOptions & {
     persistInstallerState?: boolean;
@@ -335,9 +387,10 @@ async function applyInstalledRuntime(
           findSystemUser,
           release,
           activate: !deferRuntimeActivation,
+          replaceExisting: Boolean(options.reinstallCurrentRelease),
         },
       )
-    : { releaseRoot: "", currentLink: "" };
+    : { releaseRoot: "", currentLink: "", stagedReleaseRoot: undefined };
   let stagedRuntimeNeedsCleanup = deferRuntimeActivation;
   try {
     const currentReleaseName = publishedRuntime.releaseRoot
@@ -427,7 +480,10 @@ async function applyInstalledRuntime(
     const daemonReadyTimeoutMs = Number.isFinite(options.daemonReadyTimeoutMs)
       ? Math.max(0, Number(options.daemonReadyTimeoutMs))
       : defaultDaemonReadyTimeoutMs();
-    const migrationRuntimeRoot = publishedRuntime.releaseRoot || sourceRoot;
+    let migrationRuntimeRoot =
+      publishedRuntime.stagedReleaseRoot ||
+      publishedRuntime.releaseRoot ||
+      sourceRoot;
     const migrationOptions = {
       targetUser,
       installDir,
@@ -497,8 +553,17 @@ async function applyInstalledRuntime(
           )
         : normalizeInstalledChatSettings(migrationOptions, migrationDeps);
 
+    const runtimeReplacement = createInstalledRuntimeReplacementLifecycle({
+      releaseRoot: publishedRuntime.releaseRoot,
+      stagedReleaseRoot: publishedRuntime.stagedReleaseRoot,
+      elevated: useElevatedWrite,
+      migrationOptions,
+    });
     const reconcileInstalledState = () => {
-      if (deferRuntimeActivation) {
+      if (runtimeReplacement.activate()) {
+        migrationRuntimeRoot = publishedRuntime.releaseRoot;
+        stagedRuntimeNeedsCleanup = false;
+      } else if (deferRuntimeActivation) {
         switchInstalledCurrentRelease(
           installDir,
           currentReleaseName,
@@ -572,12 +637,15 @@ async function applyInstalledRuntime(
       commit: async () => {
         if (publishRuntime) {
           finalizeInstallUpgradeMigrations(migrationOptions, migrationDeps);
+          runtimeReplacement.commit();
         }
       },
       recover: async () => {
         if (publishRuntime) {
           rollbackInstallUpgradeMigrations(migrationOptions, migrationDeps);
-          if (deferRuntimeActivation && previousReleaseName) {
+          if (runtimeReplacement.isActive()) {
+            runtimeReplacement.rollback();
+          } else if (deferRuntimeActivation && previousReleaseName) {
             switchInstalledCurrentRelease(
               installDir,
               previousReleaseName,
@@ -660,7 +728,7 @@ async function applyInstalledRuntime(
       try {
         discardStagedInstalledRuntime(
           installDir,
-          publishedRuntime.releaseRoot,
+          publishedRuntime.stagedReleaseRoot || publishedRuntime.releaseRoot,
           useElevatedWrite,
         );
       } catch (cleanupError) {

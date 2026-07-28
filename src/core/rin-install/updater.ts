@@ -234,16 +234,18 @@ export async function startUpdater(deps: {
       })),
   );
 
-  if (isInstalledReleaseCurrent(installedRelease, resolvedRelease)) {
+  const reinstallCurrentRelease = isInstalledReleaseCurrent(
+    installedRelease,
+    resolvedRelease,
+  );
+  if (reinstallCurrentRelease) {
     note(
-      i18n.buildUpdateAlreadyCurrentText({
+      i18n.buildUpdateReinstallCurrentText({
         installDir,
         sourceLabel: resolvedRelease.sourceLabel,
       }),
-      i18n.updateAlreadyCurrentTitle,
+      i18n.updateReinstallCurrentTitle,
     );
-    outro(i18n.updaterNothingUpdated);
-    return;
   }
 
   if (!deps.preconfirmed) {
@@ -325,6 +327,7 @@ export async function startUpdater(deps: {
           sourceRoot: deps.repoRootFromHere(),
           daemonReadyTimeoutMs: 30_000,
           coreUpdate: true,
+          reinstallCurrentRelease,
           release: resolvedRelease,
         } satisfies FinalizeInstallOptions,
         i18n.refreshingInstalledTargetMessage,

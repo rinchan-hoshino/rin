@@ -266,7 +266,10 @@ test("createInstallerI18n exposes fixed English install and update copy", () => 
   assert.equal(i18n.confirmActiveLabel, "Yes");
   assert.equal(i18n.confirmInactiveLabel, "No");
   assert.equal(i18n.updaterIntroTitle, "Rin Updater");
-  assert.equal(i18n.updateAlreadyCurrentTitle, "Already up to date");
+  assert.equal(
+    i18n.updateReinstallCurrentTitle,
+    "Reinstalling current version",
+  );
   assert.equal(
     i18n.fetchAndApplyUpdateConfirmMessage,
     "Fetch and apply this update now?",

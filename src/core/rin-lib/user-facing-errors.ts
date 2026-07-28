@@ -473,8 +473,24 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     ),
   rin_install_temp_dir_unavailable: () =>
     "Rin installer could not create a temporary directory. Check disk permissions.",
+  rin_current_release_missing: (detail) =>
+    withDetail("Rin update could not find the current release", detail, "."),
+  rin_current_release_replacement_requires_staging: () =>
+    "Rin update cannot safely replace the running release before staging it.",
   rin_elevated_install_unsupported_on_windows: () =>
     "Rin cannot install for another Windows user from this installer session.",
+  rin_invalid_runtime_replacement_paths: () =>
+    "Rin update prepared invalid runtime replacement paths.",
+  rin_replaced_release_backup_missing: (detail) =>
+    withDetail("Rin update could not find its release backup", detail, "."),
+  rin_runtime_replacement_path_unavailable: (detail) =>
+    withDetail(
+      "Rin update could not reserve a runtime replacement path",
+      detail,
+      ".",
+    ),
+  rin_staged_release_missing: (detail) =>
+    withDetail("Rin update could not find its staged release", detail, "."),
   rin_installed_daemon_entry_missing: () =>
     "Rin install is missing the daemon entrypoint. Reinstall or update Rin.",
   rin_installer_apply_result_missing: () =>

@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -12,6 +14,15 @@ const finalize = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-install", "finalize.js"),
   ).href
+);
+const fsUtils = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-install", "fs-utils.js"),
+  ).href
+);
+const persist = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "persist.js"))
+    .href
 );
 
 type LauncherCall = {
@@ -148,6 +159,153 @@ test("managed runtime transition commits migration after activation", async () =
     restart: async () => events.push("restart"),
   });
   assert.deepEqual(events, ["stop", "mutate", "activate", "commit", "restart"]);
+});
+
+test("current-release replacement recovers runtime, rollback state, and user data after commit failure", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-finalize-reinstall-"),
+  );
+  const releasesRoot = path.join(installDir, "app", "releases");
+  const releaseRoot = path.join(releasesRoot, "1.0.0");
+  const previousReleaseRoot = path.join(releasesRoot, "0.9.0");
+  const stagedReleaseRoot = path.join(releasesRoot, ".1.0.0.reinstall-test");
+  const managedRelativePath = path.join("dist", "app", "rin", "main.js");
+  const settingsPath = path.join(installDir, "agent", "settings.json");
+  await fs.mkdir(path.dirname(path.join(releaseRoot, managedRelativePath)), {
+    recursive: true,
+  });
+  await fs.mkdir(
+    path.dirname(path.join(previousReleaseRoot, managedRelativePath)),
+    { recursive: true },
+  );
+  await fs.mkdir(
+    path.dirname(path.join(stagedReleaseRoot, managedRelativePath)),
+    { recursive: true },
+  );
+  await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+  await fs.writeFile(
+    path.join(releaseRoot, managedRelativePath),
+    "corrupted current runtime\n",
+  );
+  await fs.writeFile(
+    path.join(previousReleaseRoot, managedRelativePath),
+    "previous runtime\n",
+  );
+  await fs.writeFile(
+    path.join(stagedReleaseRoot, managedRelativePath),
+    "restored current runtime\n",
+  );
+  await fs.writeFile(settingsPath, '{"owner":"unchanged"}\n');
+  await fs.symlink(releaseRoot, path.join(installDir, "app", "current"));
+
+  const currentRelease = {
+    channel: "stable",
+    version: "1.0.0",
+    branch: "stable",
+    ref: "v1.0.0",
+    sourceLabel: "stable 1.0.0",
+    archiveUrl: "https://example.invalid/rin-1.0.0.tgz",
+    installedAt: "2026-07-01T00:00:00.000Z",
+  };
+  const previousRelease = {
+    channel: "stable",
+    version: "0.9.0",
+    branch: "stable",
+    ref: "v0.9.0",
+    sourceLabel: "stable 0.9.0",
+    archiveUrl: "https://example.invalid/rin-0.9.0.tgz",
+    installedAt: "2026-06-01T00:00:00.000Z",
+  };
+  let manifest: any = {
+    currentRelease: {
+      name: "1.0.0",
+      path: releaseRoot,
+      release: currentRelease,
+    },
+    previousRelease: {
+      name: "0.9.0",
+      path: previousReleaseRoot,
+      release: previousRelease,
+    },
+  };
+  const migrationOptions = { migrationRuntimeRoot: stagedReleaseRoot };
+  const replacement = finalize.createInstalledRuntimeReplacementLifecycle({
+    releaseRoot,
+    stagedReleaseRoot,
+    migrationOptions,
+  });
+
+  await assert.rejects(
+    finalize.runManagedRuntimeTransition({
+      stop: async () => {},
+      mutate: async () => {},
+      activate: async () => {
+        assert.equal(replacement.activate(), true);
+        persist.reconcileInstallerManifest(
+          {
+            targetUser: "rin",
+            installDir,
+            release: currentRelease,
+            currentReleaseName: "1.0.0",
+            currentReleaseRoot: releaseRoot,
+            previousReleaseName: "1.0.0",
+            previousReleaseRoot: releaseRoot,
+          },
+          {
+            findSystemUser: () => ({ name: "rin", gid: 1000 }),
+            ensureDir: () => {},
+            readInstallerJson: () => manifest,
+            writeJsonFileWithPrivilege: (file: string, value: any) => {
+              if (file === path.join(installDir, "installer.json")) {
+                manifest = value;
+              }
+            },
+            writeJsonFile: (file: string, value: any) => {
+              if (file === path.join(installDir, "installer.json")) {
+                manifest = value;
+              }
+            },
+            runPrivileged: () => {
+              throw new Error("unexpected privileged write");
+            },
+          },
+        );
+      },
+      commit: async () => {
+        throw new Error("injected migration commit failure");
+      },
+      recover: async () => replacement.rollback(),
+      restart: async () => {},
+    }),
+    /injected migration commit failure/,
+  );
+
+  assert.equal(migrationOptions.migrationRuntimeRoot, releaseRoot);
+  assert.equal(
+    await fs.readFile(path.join(releaseRoot, managedRelativePath), "utf8"),
+    "corrupted current runtime\n",
+  );
+  assert.equal(
+    await fs.readFile(settingsPath, "utf8"),
+    '{"owner":"unchanged"}\n',
+  );
+  assert.equal(manifest.currentRelease.name, "1.0.0");
+  assert.equal(manifest.previousRelease.name, "0.9.0");
+  assert.deepEqual((await fs.readdir(releasesRoot)).sort(), ["0.9.0", "1.0.0"]);
+
+  fsUtils.switchInstalledCurrentRelease(
+    installDir,
+    manifest.previousRelease.name,
+    "rin",
+    false,
+    { findSystemUser: () => null },
+  );
+  assert.equal(
+    await fs.realpath(path.join(installDir, "app", "current")),
+    previousReleaseRoot,
+  );
+
+  await fs.rm(installDir, { recursive: true, force: true });
 });
 
 test("managed runtime transition does not loop when restart itself fails", async () => {

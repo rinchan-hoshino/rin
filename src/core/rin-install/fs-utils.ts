@@ -927,6 +927,51 @@ export function publishManagedNodeRuntime(
   };
 }
 
+function installedRuntimePathExists(targetPath: string, elevated: boolean) {
+  if (!elevated) return fs.existsSync(targetPath);
+  try {
+    runPrivileged("test", ["-e", targetPath]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function uniqueInstalledRuntimeSibling(
+  releaseRoot: string,
+  label: "backup" | "failed" | "reinstall",
+  elevated: boolean,
+) {
+  const parent = path.dirname(releaseRoot);
+  const name = path.basename(releaseRoot);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const suffix = `${process.pid}-${Date.now()}${attempt ? `-${attempt}` : ""}`;
+    const candidate = path.join(parent, `.${name}.${label}-${suffix}`);
+    if (!installedRuntimePathExists(candidate, elevated)) return candidate;
+  }
+  throw new Error(`rin_runtime_replacement_path_unavailable:${name}`);
+}
+
+function moveInstalledRuntimePath(
+  sourcePath: string,
+  targetPath: string,
+  elevated: boolean,
+) {
+  if (elevated) {
+    runPrivileged("mv", [sourcePath, targetPath]);
+    return;
+  }
+  fs.renameSync(sourcePath, targetPath);
+}
+
+function removeInstalledRuntimePath(targetPath: string, elevated: boolean) {
+  if (elevated) {
+    runPrivileged("rm", ["-rf", targetPath]);
+    return;
+  }
+  fs.rmSync(targetPath, { recursive: true, force: true });
+}
+
 export function publishInstalledRuntime(
   sourceRoot: string,
   installDir: string,
@@ -936,12 +981,22 @@ export function publishInstalledRuntime(
     findSystemUser: (user: string) => any;
     release?: InstalledReleaseInfo;
     activate?: boolean;
+    replaceExisting?: boolean;
   },
 ) {
   const releaseRoot = installedReleaseRoot(
     installDir,
     installedRuntimeReleaseId(sourceRoot, deps.release),
   );
+  const releaseExists = installedRuntimePathExists(releaseRoot, elevated);
+  if (releaseExists && deps.replaceExisting && deps.activate !== false) {
+    throw new Error("rin_current_release_replacement_requires_staging");
+  }
+  const stagedReleaseRoot =
+    releaseExists && deps.replaceExisting
+      ? uniqueInstalledRuntimeSibling(releaseRoot, "reinstall", elevated)
+      : undefined;
+  const publishRoot = stagedReleaseRoot || releaseRoot;
   const currentLink = currentRuntimeRoot(installDir);
   const currentTmpLink = `${currentLink}.tmp`;
   let stagedReleaseOwned = false;
@@ -954,19 +1009,19 @@ export function publishInstalledRuntime(
         const target = deps.findSystemUser(targetUser) as any;
         const targetGroup = target?.name ? String(target?.gid ?? "") : "";
         ensurePrivilegedOwnedDir(
-          path.dirname(path.dirname(releaseRoot)),
+          path.dirname(path.dirname(publishRoot)),
           target?.name,
           targetGroup,
         );
         ensurePrivilegedOwnedDir(
-          path.dirname(releaseRoot),
+          path.dirname(publishRoot),
           target?.name,
           targetGroup,
         );
-        runPrivileged("mkdir", [releaseRoot]);
+        runPrivileged("mkdir", [publishRoot]);
       } else {
-        ensureDir(path.dirname(releaseRoot));
-        fs.mkdirSync(releaseRoot);
+        ensureDir(path.dirname(publishRoot));
+        fs.mkdirSync(publishRoot);
       }
       stagedReleaseOwned = true;
     }
@@ -975,30 +1030,30 @@ export function publishInstalledRuntime(
       const targetGroup = target?.name ? String(target?.gid ?? "") : "";
       const owner = ownerSpec(target?.name, targetGroup);
       ensurePrivilegedOwnedDir(
-        path.dirname(path.dirname(releaseRoot)),
+        path.dirname(path.dirname(publishRoot)),
         target?.name,
         targetGroup,
       );
       ensurePrivilegedOwnedDir(
-        path.dirname(releaseRoot),
+        path.dirname(publishRoot),
         target?.name,
         targetGroup,
       );
       if (deps.activate !== false) {
-        ensurePrivilegedOwnedDir(releaseRoot, target?.name, targetGroup);
+        ensurePrivilegedOwnedDir(publishRoot, target?.name, targetGroup);
       }
       for (const name of RUNTIME_COPY_ENTRY_NAMES) {
         const sourcePath = path.join(sourceRoot, name);
         if (!fs.existsSync(sourcePath)) continue;
-        runPrivileged("rm", ["-rf", path.join(releaseRoot, name)]);
-        runPrivileged("cp", ["-a", sourcePath, path.join(releaseRoot, name)]);
+        runPrivileged("rm", ["-rf", path.join(publishRoot, name)]);
+        runPrivileged("cp", ["-a", sourcePath, path.join(publishRoot, name)]);
       }
       runPrivileged(process.execPath, [
         "-e",
         `import(${JSON.stringify(new URL("./runtime-dependency-prune.js", import.meta.url).href)}).then((mod)=>mod.pruneDuplicatePiCodingAgentDependencies(process.argv[1]))`,
-        releaseRoot,
+        publishRoot,
       ]);
-      runPrivileged("touch", [releaseRoot]);
+      runPrivileged("touch", [publishRoot]);
       if (deps.activate !== false) {
         try {
           runPrivileged("rm", ["-rf", currentTmpLink]);
@@ -1010,37 +1065,37 @@ export function publishInstalledRuntime(
         runPrivileged("mv", [currentTmpLink, currentLink]);
       }
       if (owner) {
-        runPrivileged("chown", ["-R", owner, releaseRoot]);
+        runPrivileged("chown", ["-R", owner, publishRoot]);
         if (deps.activate !== false) {
           try {
             runPrivileged("chown", ["-h", owner, currentLink]);
           } catch {}
         }
       }
-      return { releaseRoot, currentLink };
+      return { releaseRoot, currentLink, stagedReleaseRoot };
     }
-    ensureDir(path.dirname(releaseRoot));
+    ensureDir(path.dirname(publishRoot));
     for (const name of RUNTIME_COPY_ENTRY_NAMES) {
       const sourcePath = path.join(sourceRoot, name);
       if (fs.existsSync(sourcePath)) {
-        syncTree(sourcePath, path.join(releaseRoot, name));
+        syncTree(sourcePath, path.join(publishRoot, name));
       }
     }
-    pruneDuplicatePiCodingAgentDependencies(releaseRoot);
+    pruneDuplicatePiCodingAgentDependencies(publishRoot);
     try {
-      fs.utimesSync(releaseRoot, new Date(), new Date());
+      fs.utimesSync(publishRoot, new Date(), new Date());
     } catch {}
     if (deps.activate !== false) {
       replaceCurrentRuntimeLink(currentLink, releaseRoot);
     }
-    return { releaseRoot, currentLink };
+    return { releaseRoot, currentLink, stagedReleaseRoot };
   };
   try {
     return publish();
   } catch (error) {
     if (deps.activate === false && stagedReleaseOwned) {
       try {
-        discardStagedInstalledRuntime(installDir, releaseRoot, elevated);
+        discardStagedInstalledRuntime(installDir, publishRoot, elevated);
       } catch (cleanupError) {
         throw new AggregateError(
           [error, cleanupError],
@@ -1053,16 +1108,87 @@ export function publishInstalledRuntime(
       deps.activate === false &&
       !stagedReleaseOwned &&
       listInstalledReleaseNames(installDir, elevated).includes(
-        path.basename(releaseRoot),
+        path.basename(publishRoot),
       )
     ) {
       throw new Error(
-        `rin_staged_release_already_exists:${path.basename(releaseRoot)}`,
+        `rin_staged_release_already_exists:${path.basename(publishRoot)}`,
         { cause: error },
       );
     }
     throw error;
   }
+}
+
+function assertInstalledRuntimeReplacementPaths(
+  releaseRoot: string,
+  siblingRoot: string,
+) {
+  if (
+    path.resolve(releaseRoot) === path.resolve(siblingRoot) ||
+    path.dirname(path.resolve(releaseRoot)) !==
+      path.dirname(path.resolve(siblingRoot))
+  ) {
+    throw new Error("rin_invalid_runtime_replacement_paths");
+  }
+}
+
+export function activateInstalledRuntimeReplacement(
+  releaseRoot: string,
+  stagedReleaseRoot: string,
+  elevated = false,
+) {
+  assertInstalledRuntimeReplacementPaths(releaseRoot, stagedReleaseRoot);
+  if (!installedRuntimePathExists(releaseRoot, elevated)) {
+    throw new Error(`rin_current_release_missing:${releaseRoot}`);
+  }
+  if (!installedRuntimePathExists(stagedReleaseRoot, elevated)) {
+    throw new Error(`rin_staged_release_missing:${stagedReleaseRoot}`);
+  }
+  const backupReleaseRoot = uniqueInstalledRuntimeSibling(
+    releaseRoot,
+    "backup",
+    elevated,
+  );
+  moveInstalledRuntimePath(releaseRoot, backupReleaseRoot, elevated);
+  try {
+    moveInstalledRuntimePath(stagedReleaseRoot, releaseRoot, elevated);
+  } catch (error) {
+    moveInstalledRuntimePath(backupReleaseRoot, releaseRoot, elevated);
+    throw error;
+  }
+  return { backupReleaseRoot };
+}
+
+export function commitInstalledRuntimeReplacement(
+  backupReleaseRoot: string,
+  elevated = false,
+) {
+  removeInstalledRuntimePath(backupReleaseRoot, elevated);
+}
+
+export function rollbackInstalledRuntimeReplacement(
+  releaseRoot: string,
+  backupReleaseRoot: string,
+  elevated = false,
+) {
+  assertInstalledRuntimeReplacementPaths(releaseRoot, backupReleaseRoot);
+  if (!installedRuntimePathExists(backupReleaseRoot, elevated)) {
+    throw new Error(`rin_replaced_release_backup_missing:${backupReleaseRoot}`);
+  }
+  const failedReleaseRoot = uniqueInstalledRuntimeSibling(
+    releaseRoot,
+    "failed",
+    elevated,
+  );
+  moveInstalledRuntimePath(releaseRoot, failedReleaseRoot, elevated);
+  try {
+    moveInstalledRuntimePath(backupReleaseRoot, releaseRoot, elevated);
+  } catch (error) {
+    moveInstalledRuntimePath(failedReleaseRoot, releaseRoot, elevated);
+    throw error;
+  }
+  removeInstalledRuntimePath(failedReleaseRoot, elevated);
 }
 
 export type InstalledReleaseEntry = {
@@ -1080,7 +1206,7 @@ export function listInstalledReleaseEntries(
     try {
       return fs
         .readdirSync(releasesDir, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
+        .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
         .map((entry) => {
           const releasePath = path.join(releasesDir, entry.name);
           let mtimeMs = 0;
@@ -1100,7 +1226,7 @@ export function listInstalledReleaseEntries(
       [
         process.execPath,
         "-e",
-        `const fs=require('node:fs');const path=require('node:path');const dir=process.argv[1];try{const entries=fs.readdirSync(dir,{withFileTypes:true}).filter((entry)=>entry.isDirectory()).map((entry)=>{const releasePath=path.join(dir,entry.name);let mtimeMs=0;try{mtimeMs=fs.statSync(releasePath).mtimeMs}catch{}return {name:entry.name,path:releasePath,mtimeMs};});process.stdout.write(JSON.stringify(entries));}catch{process.stdout.write('[]')}`,
+        `const fs=require('node:fs');const path=require('node:path');const dir=process.argv[1];try{const entries=fs.readdirSync(dir,{withFileTypes:true}).filter((entry)=>entry.isDirectory()&&!entry.name.startsWith('.')).map((entry)=>{const releasePath=path.join(dir,entry.name);let mtimeMs=0;try{mtimeMs=fs.statSync(releasePath).mtimeMs}catch{}return {name:entry.name,path:releasePath,mtimeMs};});process.stdout.write(JSON.stringify(entries));}catch{process.stdout.write('[]')}`,
         releasesDir,
       ],
       { encoding: "utf8" },

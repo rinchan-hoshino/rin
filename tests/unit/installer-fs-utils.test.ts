@@ -241,7 +241,7 @@ test("elevated install writes create target-owned parent directories", () => {
   );
   assert.match(
     source,
-    /ensurePrivilegedOwnedDir\(\s*path\.dirname\(releaseRoot\),\s*target\?\.name,\s*targetGroup,?\s*\)/,
+    /ensurePrivilegedOwnedDir\(\s*path\.dirname\(publishRoot\),\s*target\?\.name,\s*targetGroup,?\s*\)/,
   );
   assert.doesNotMatch(
     source,
@@ -673,6 +673,113 @@ test("publishInstalledRuntime can stage a release without activating it", async 
     findSystemUser: () => null,
   });
   assert.equal(fsUtils.currentInstalledReleaseName(installDir, false), "2.0.0");
+});
+
+test("publishInstalledRuntime can transactionally replace the current release", async () => {
+  const tempRoot = await makeRuntimeSource();
+  const installDir = await fs.mkdtemp(
+    path.join(tempBaseDir, "rin-install-reinstall-"),
+  );
+  const release = {
+    channel: "stable",
+    version: "1.0.0",
+    branch: "stable",
+    ref: "v1.0.0",
+    sourceLabel: "stable 1.0.0",
+    archiveUrl: "https://example.invalid/rin-1.0.0.tgz",
+  };
+  const original = fsUtils.publishInstalledRuntime(
+    tempRoot,
+    installDir,
+    "rin",
+    false,
+    { findSystemUser: () => null, release },
+  );
+  const managedFile = path.join(
+    original.releaseRoot,
+    "dist",
+    "app",
+    "rin",
+    "main.js",
+  );
+  await fs.writeFile(managedFile, "corrupted\n", "utf8");
+  await fs.writeFile(
+    path.join(tempRoot, "dist", "app", "rin", "main.js"),
+    "restored\n",
+    "utf8",
+  );
+
+  const staged = fsUtils.publishInstalledRuntime(
+    tempRoot,
+    installDir,
+    "rin",
+    false,
+    {
+      findSystemUser: () => null,
+      release,
+      activate: false,
+      replaceExisting: true,
+    },
+  );
+  assert.equal(await fs.readFile(managedFile, "utf8"), "corrupted\n");
+  assert.ok(staged.stagedReleaseRoot);
+  assert.deepEqual(fsUtils.listInstalledReleaseNames(installDir), ["1.0.0"]);
+  assert.equal(
+    await fs.readFile(
+      path.join(staged.stagedReleaseRoot, "dist", "app", "rin", "main.js"),
+      "utf8",
+    ),
+    "restored\n",
+  );
+
+  const activated = fsUtils.activateInstalledRuntimeReplacement(
+    staged.releaseRoot,
+    staged.stagedReleaseRoot,
+    false,
+  );
+  assert.equal(await fs.readFile(managedFile, "utf8"), "restored\n");
+  assert.equal(
+    await fs.readFile(
+      path.join(activated.backupReleaseRoot, "dist", "app", "rin", "main.js"),
+      "utf8",
+    ),
+    "corrupted\n",
+  );
+
+  fsUtils.rollbackInstalledRuntimeReplacement(
+    staged.releaseRoot,
+    activated.backupReleaseRoot,
+    false,
+  );
+  assert.equal(await fs.readFile(managedFile, "utf8"), "corrupted\n");
+
+  const restaged = fsUtils.publishInstalledRuntime(
+    tempRoot,
+    installDir,
+    "rin",
+    false,
+    {
+      findSystemUser: () => null,
+      release,
+      activate: false,
+      replaceExisting: true,
+    },
+  );
+  assert.ok(restaged.stagedReleaseRoot);
+  const reactivated = fsUtils.activateInstalledRuntimeReplacement(
+    restaged.releaseRoot,
+    restaged.stagedReleaseRoot,
+    false,
+  );
+  fsUtils.commitInstalledRuntimeReplacement(
+    reactivated.backupReleaseRoot,
+    false,
+  );
+  assert.equal(await fs.readFile(managedFile, "utf8"), "restored\n");
+  await assert.rejects(fs.access(reactivated.backupReleaseRoot));
+
+  await fs.rm(tempRoot, { recursive: true, force: true });
+  await fs.rm(installDir, { recursive: true, force: true });
 });
 
 test("publishManagedNodeRuntime provisions current node for source installs", async () => {

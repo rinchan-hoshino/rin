@@ -143,6 +143,32 @@ test("startUpdater does not write language during core updates", async () => {
   });
 });
 
+test("startUpdater reinstalls an already-current release", async () => {
+  await withUpdaterStdout(async (stdout) => {
+    let capturedOptions: any;
+
+    await updater.startUpdater({
+      detectCurrentUser: () => "alice",
+      repoRootFromHere: () => "/src/rin",
+      ensureNotCancelled: (value: unknown) => value,
+      i18n: installerI18n.createInstallerI18n(),
+      release: preparedRelease,
+      ...requestedUpdateTarget,
+      assumeYes: true,
+      readInstalledRelease: () => preparedRelease,
+      async runFinalizeInstallPlanInChild(options: any) {
+        capturedOptions = options;
+        return fakeUpdateResult();
+      },
+    });
+
+    assert.equal(capturedOptions.reinstallCurrentRelease, true);
+    assert.equal(capturedOptions.coreUpdate, true);
+    assert.match(stdout.join(""), /Reinstalling current version/);
+    assert.match(stdout.join(""), /restore managed runtime files/);
+  });
+});
+
 test("startUpdater uses fixed English UI without writing language", async () => {
   await withUpdaterStdout(async () => {
     let capturedOptions: any;

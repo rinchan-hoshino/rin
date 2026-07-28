@@ -116,7 +116,7 @@ type InstallerDisplayCopy = {
   noUpdateTargetsText: string;
   updaterNothingUpdated: string;
   updaterFinishedWithoutWritingChanges: string;
-  updateAlreadyCurrentTitle: string;
+  updateReinstallCurrentTitle: string;
   fetchAndApplyUpdateConfirmMessage: string;
   publishUpdateConfirmMessage: string;
   publishingUpdateMessage: string;
@@ -144,7 +144,7 @@ type InstallerDisplayCopy = {
     ownerHome: string;
     sourceLabel: string;
   }) => string;
-  buildUpdateAlreadyCurrentText: (options: {
+  buildUpdateReinstallCurrentText: (options: {
     installDir: string;
     sourceLabel: string;
   }) => string;
@@ -398,7 +398,7 @@ const INSTALLER_DISPLAY_COPY: InstallerDisplayCopy = {
   updaterNothingUpdated: "Nothing updated.",
   updaterFinishedWithoutWritingChanges:
     "Updater finished without writing changes.",
-  updateAlreadyCurrentTitle: "Already up to date",
+  updateReinstallCurrentTitle: "Reinstalling current version",
   fetchAndApplyUpdateConfirmMessage: "Fetch and apply this update now?",
   publishUpdateConfirmMessage:
     "Publish the prepared runtime to this installed target now?",
@@ -440,11 +440,11 @@ const INSTALLER_DISPLAY_COPY: InstallerDisplayCopy = {
       "- preserve existing provider/auth/settings except fields removed by the current runtime",
     ].join("\n");
   },
-  buildUpdateAlreadyCurrentText(options) {
+  buildUpdateReinstallCurrentText(options) {
     return [
       `${this.targetInstallDirLabel}: ${options.installDir}`,
       `Current source: ${this.formatUpdateSourceLabel(options.sourceLabel)}`,
-      "No download or runtime changes are needed.",
+      "The current version will be reinstalled to restore managed runtime files.",
     ].join("\n");
   },
   buildUpdatedTargetText(options) {
