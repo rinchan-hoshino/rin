@@ -574,6 +574,45 @@ function emitRpcTurnComplete(controller, options, finalText, result) {
   });
 }
 
+test("chat controller does not steer an active turn onto another durable session", async () => {
+  const controller = await createController("telegram/1:2");
+  controller.session = {
+    isStreaming: true,
+    messages: [],
+    sessionManager: {
+      getSessionFile: () => "/tmp/active-chat-session.jsonl",
+      getSessionId: () => "active-chat-session",
+      getSessionName: () => controller.chatKey,
+    },
+  };
+  controller.driver.currentSessionFile = () => "/tmp/active-chat-session.jsonl";
+  controller.currentTurn = {
+    incomingMessageId: "m-active-session",
+    replyToMessageId: "m-active-session",
+    requestTag: "request-active-session",
+    outboxTurnFence: {
+      agentDir: controller.agentDir,
+      turnId: "turn-active-session",
+      chatKey: controller.chatKey,
+      messageId: "m-active-session",
+      ownerEpoch: "owner-active-session",
+      attempt: 1,
+    },
+  };
+  controller.awaitingTurnSettle = true;
+
+  await assert.rejects(
+    controller.runTurn({
+      text: "must wait for its own session",
+      attachments: [],
+      incomingMessageId: "m-other-session",
+      sessionFile: "/tmp/other-chat-session.jsonl",
+      createSessionFileIfMissing: true,
+    }),
+    /rin_session_recovering/,
+  );
+});
+
 test("chat controller fences terminal projections by inbox request tag", async () => {
   const controller = await createController("telegram/1:2");
   controller.currentTurn = {

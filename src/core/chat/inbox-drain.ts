@@ -123,6 +123,14 @@ export function createChatInboxDrain(deps: {
       pendingController: ChatController,
       pendingChatKey: string,
     ): ClaimPendingItemResult => {
+      if (
+        pending.admission.executionSessionFile &&
+        pendingController?.conflictsWithActiveSession?.(
+          pending.admission.executionSessionFile,
+        )
+      ) {
+        return "retryLater";
+      }
       const envelope = claimChatInboxItem(deps.agentDir, pending.itemId);
       if (!envelope) {
         const dueAt = Date.parse(safeString(pending.nextAttemptAt).trim());
@@ -134,6 +142,18 @@ export function createChatInboxDrain(deps: {
         envelope.chatKey === pendingChatKey
           ? pendingController
           : deps.getController(envelope.chatKey);
+      if (
+        envelope.admission.executionSessionFile &&
+        controller?.conflictsWithActiveSession?.(
+          envelope.admission.executionSessionFile,
+        )
+      ) {
+        requeueClaimedChatInboxItem(deps.agentDir, envelope, {
+          delayMs: CHAT_INBOX_RETRY_MIN_MS,
+          error: "chat_inbound_session_conflict",
+        });
+        return "retryLater";
+      }
       if (controller?.ownsInboundMessage?.(envelope.messageId)) {
         requeueClaimedChatInboxItem(deps.agentDir, envelope, {
           delayMs: CHAT_INBOX_RETRY_MIN_MS,
