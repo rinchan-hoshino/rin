@@ -1,5 +1,79 @@
 # Rin Changelog
 
+## 0.10.0
+
+- Chat and daemon turns now keep one durable terminal owner across queued steering, recovery, restarts, RPC failures, Working updates, successful tool prefaces, and final delivery, while session identity is cleanly separated from persistence.
+- Prompt admission and frontend lifecycle handling are more consistent across Pi steering, image-only queued turns, migrated legacy content, private-like group membership, silent updater migrations, and own unsessioned replies.
+- TUI rendering now delegates session presentation to Pi while preserving streamed todo updates, native git changelogs, exact update commit notes, model-runtime RPC compatibility, and orderly worker shutdown.
+- Lark and general chat delivery now preserve identity, private mentions, inbound media, file and rich fallbacks, fenced working summaries, readable plain todo output, and centralized error formatting.
+- OAuth installation and runtime paths now restore provider discovery, updated login interactions, and compaction authentication; git-channel installs also validate release identity more strictly.
+- Long-turn context pruning now protects each turn's message tail, removes older tool results in bounded batches, keeps file context out of summaries, preserves native ESM extension loading, and surfaces compaction retry failures.
+- Self-improvement and memory maintenance now supervise queued reviews in the daemon, recover malformed worker locks, schedule periodic reviews reliably, and support newest-first recall.
+- Rin now uses the Pi 0.82.1 runtime line with centralized RPC turn coordination, refreshed skill provenance, and release execution that pins candidate source independently from later main metadata updates.
+<!-- rin-changelog-coverage
+ 48fea71 fix: keep queued steer terminal ownership
+ 9214810 fix(chat): validate migrated legacy content
+ 813bc5e fix(installer): validate git release identity
+ ba2d5b3 fix(chat): preserve canonical turn terminal ownership
+ 3c87086 fix(tui): show git update commit changelog
+ e7da650 fix(chat): terminalize settled RPC turns
+ 7761c11 refactor(tui): defer session rendering to Pi
+ 7219705 fix(tui): stream todo updates without frame shrink
+ 4010bbd test(tui): wait for deferred tool update render
+ 38c3de1 fix(chat): preserve rich fallback and send Lark files
+ 17110ae fix(tui): reuse native git changelog renderer
+ 777457a fix(runtime): unify scoped turn terminal authority
+ 537e439 fix(tui): remove git changelog diff metadata
+ c375c36 fix(tui): delegate worker shutdown on exit
+ 05f659b fix(chat): centralize error formatting in outbox
+ 4a69032 fix(chat): preserve fenced working summaries
+ 5319318 fix(daemon): restore frontend working visibility after restart
+ 0b8a6a2 fix(memory): support newest-first recall
+ e3e32e0 fix(daemon): transfer terminal owner on steer
+ 57c5780 fix(daemon): make session termination idempotent
+ 5ff9d20 chore(upstream): sync Pi 0.81.1
+ 89d9345 fix(tui): adapt RPC runtime to Pi model API
+ 82ddabd fix(tui): restore Pi model runtime RPC facade
+ eb3613d chore(upstream): refresh skill-creator provenance
+ c95e2c9 fix(chat): keep plain todo fallback readable
+ 21943b8 refactor(chat): remove private-like group inference
+ 4d46170 fix(runtime): restore OAuth compaction auth
+ 59a19a6 refactor(chat): make turn admission durable across recovery
+ ae0bebc fix(chat): delegate prompt steering authority to Pi
+ bc5344b refactor(chat): make turn admission durable across recovery
+ eaacd72 fix(chat): preserve frontend identity for prompt turns
+ 41ce8c2 fix(chat): repair Lark identity and inbound media
+ c7c2577 fix(chat): keep Lark mention identity private
+ e82b071 fix(chat): move legacy admission migration into updater
+ dec8ba6 fix(chat): keep install migration silent
+ 5a25cf0 fix(chat): hand off claims on daemon restart
+ 3e7ac5e fix(chat): preserve terminal ownership across queued steer
+ 780f60e fix(chat): match image-only queued steer admission
+ f41a337 fix(chat): inline own unsessioned replies
+ 1002048 fix: keep compaction file context out of summaries
+ e594e9e fix(chat): preserve canonical delivery ownership
+ 8732f10 fix(rpc): preserve terminal ownership across runner failures
+ cc6811b fix(self-improve): recover malformed worker locks
+ 0e07a8b chore(pi): upgrade to 0.82.0
+ 63b4343 fix(self-improve): supervise queued reviews in daemon
+ 2849872 refactor(rpc): centralize turn coordination
+ 0e823a5 fix(self-improve): queue periodic reviews in daemon
+ 6ad17d0 chore(pi): upgrade to 0.82.1
+ a54a2a4 fix(chat): prove private-like group membership
+ 6ef0414 fix(installer): restore OAuth provider discovery
+ 83c2f66 test(installer): clean update workspace fixture
+ 7e14cce fix(chat): decouple session identity from persistence
+ 95b46b3 fix(installer): adapt OAuth login interactions
+ 13a7cc3 fix(chat): settle successful tool preface output
+ d8ddb87 fix(release): decouple candidate source from main
+ 0fa7970 fix(chat): preserve durable turn ownership across Working
+ 7c27e01 fix(context): prune long-turn tool results in batches
+ 9f71673 fix(context): protect message tails per turn
+ f47dfbd fix(extensions): preserve native ESM loading
+ b88601e fix(chat): surface compaction retry errors
+ 7a488ce refactor(frontend): unify lifecycle policy
+-->
+
 ## 0.9.0
 
 - Chat control-plane storage and migration now use a more resilient SQLite-backed path, with safer recovery for legacy identities, archives, failed migrations, concurrent startup, and per-chat inbound work.
