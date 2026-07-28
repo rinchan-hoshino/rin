@@ -7,6 +7,7 @@ import {
   getPiSessionExtensionMode,
   getPiSessionResourcePromptState,
   resumePiSessionTurn,
+  runPiNativeCompactionWithoutFileSummary,
 } from "../../src/core/pi/session-host.js";
 
 test("Pi session host resumes through the session-level runner", async () => {
@@ -42,6 +43,141 @@ test("Pi session host resumes through the session-level runner", async () => {
       }),
     /Pi AgentSession transcript is not continuable/,
   );
+});
+
+test("isolated OAuth custom-compaction smoke preserves public auth and native routing", async () => {
+  const model = {
+    id: "integration-model",
+    name: "Integration Model",
+    api: "anthropic-messages",
+    provider: "anthropic",
+    baseUrl: "https://example.invalid",
+    reasoning: false,
+    input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 200_000,
+    maxTokens: 8192,
+  };
+  const usage = {
+    input: 1,
+    output: 1,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 2,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  let prompt = "";
+  let requestOptions: any;
+  let authModel: any;
+  let retrySource: any;
+  const session = {
+    model,
+    thinkingLevel: "medium",
+    agent: {
+      streamFunction: async (_model: any, context: any, options: any) => {
+        prompt = context.messages[0].content[0].text;
+        requestOptions = options;
+        return {
+          result: async () => ({
+            role: "assistant",
+            content: [
+              { type: "text", text: "## Goal\nKeep native compaction." },
+            ],
+            api: "anthropic-messages",
+            provider: "anthropic",
+            model: "integration-model",
+            usage,
+            stopReason: "stop",
+            timestamp: Date.now(),
+          }),
+        };
+      },
+    },
+    modelRuntime: {
+      async getAuth(requestedModel: any) {
+        authModel = requestedModel;
+        return {
+          auth: {
+            apiKey: "oauth-access-token",
+            headers: {
+              "x-provider-route": "oauth-route",
+              "x-deleted-header": null,
+            },
+          },
+          env: { PROVIDER_REGION: "test-region" },
+        };
+      },
+    },
+    settingsManager: {
+      getRetrySettings: () => undefined,
+    },
+    _summarizationRetryCallbacks: (source: any) => {
+      retrySource = source;
+      return undefined;
+    },
+  };
+  const fileOps = {
+    read: new Set(["/workspace/read.ts", "/workspace/edit.ts"]),
+    written: new Set(["/workspace/new.ts"]),
+    edited: new Set(["/workspace/edit.ts"]),
+  };
+  const event = {
+    reason: "threshold",
+    customInstructions: undefined,
+    signal: new AbortController().signal,
+    preparation: {
+      firstKeptEntryId: "keep",
+      messagesToSummarize: [
+        { role: "user", content: "Continue the work.", timestamp: Date.now() },
+      ],
+      turnPrefixMessages: [],
+      isSplitTurn: false,
+      tokensBefore: 12_000,
+      fileOps,
+      settings: {
+        enabled: true,
+        reserveTokens: 2000,
+        keepRecentTokens: 20_000,
+      },
+    },
+  };
+
+  const result = await runPiNativeCompactionWithoutFileSummary(session, event);
+
+  assert.deepEqual(retrySource, {
+    source: "compaction",
+    reason: "threshold",
+  });
+  assert.equal(authModel, model);
+  assert.equal(requestOptions.apiKey, "oauth-access-token");
+  assert.deepEqual(requestOptions.headers, {
+    "x-provider-route": "oauth-route",
+  });
+  assert.deepEqual(requestOptions.env, { PROVIDER_REGION: "test-region" });
+  assert.equal(typeof requestOptions.sessionId, "string");
+  assert.equal(requestOptions.cacheRetention, "none");
+  assert.match(prompt, /## Goal/);
+  assert.match(prompt, /## Constraints & Preferences/);
+  assert.doesNotMatch(prompt, /## Active Task/);
+  assert.equal(result.summary, "## Goal\nKeep native compaction.");
+  assert.doesNotMatch(result.summary, /<read-files>|<modified-files>/);
+  assert.deepEqual(result.details, {
+    readFiles: ["/workspace/read.ts"],
+    modifiedFiles: ["/workspace/edit.ts", "/workspace/new.ts"],
+  });
+  assert.deepEqual(
+    [...fileOps.read],
+    ["/workspace/read.ts", "/workspace/edit.ts"],
+  );
+
+  session.modelRuntime.getAuth = async () => {
+    throw new Error("proxy stream owns authentication");
+  };
+  const proxyResult = await runPiNativeCompactionWithoutFileSummary(
+    session,
+    event,
+  );
+  assert.equal(proxyResult.summary, "## Goal\nKeep native compaction.");
 });
 
 test("Pi session host prefers public resource and extension getters", () => {
