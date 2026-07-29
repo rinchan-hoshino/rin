@@ -4376,6 +4376,12 @@ test(
     const handlers = new Map();
     const lines = [];
     const sessionSubscribers = new Set();
+    const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-wal-"));
+    const chatRunContext = {
+      runId: "chat-run-settled",
+      ownerEpoch: "run-owner",
+      producerIncarnation: "worker-incarnation",
+    };
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -4436,21 +4442,24 @@ test(
         setSessionName: () => {},
       };
 
-      void runCustomRpcMode(session, {
-        SessionManager: {
-          listAll: async () => [],
-          list: async () => [],
-          open: () => ({ appendSessionInfo() {} }),
+      void runCustomRpcMode(
+        { session, services: { agentDir } },
+        {
+          SessionManager: {
+            listAll: async () => [],
+            list: async () => [],
+            open: () => ({ appendSessionInfo() {} }),
+          },
+          builtinSlashCommands: [],
         },
-        builtinSlashCommands: [],
-      });
+      );
       await wait(0);
 
       const onData = handlers.get("data");
       assert.equal(typeof onData, "function");
       onData(
         Buffer.from(
-          `${JSON.stringify({ id: "turn-settled", type: "prompt", message: "finish durably", requestTag: "tag-settled" })}\n`,
+          `${JSON.stringify({ id: "turn-settled", type: "prompt", message: "finish durably", requestTag: "tag-settled", chatRunContext })}\n`,
         ),
       );
       await wait(10);
@@ -4481,16 +4490,44 @@ test(
         (event) =>
           event.type === "rpc_turn_event" && event.event === "complete",
       );
+      assert.equal(
+        completions.length,
+        1,
+        JSON.stringify(parseRpcOutput(lines)),
+      );
       assert.deepEqual(
         completions.map((event) => ({
           requestTag: event.requestTag,
           finalText: event.finalText,
+          chatRunContext: event.chatRunContext,
+          payloadHash: event.terminalWal?.payloadHash,
         })),
-        [{ requestTag: "tag-settled", finalText: "durable settled final" }],
+        [
+          {
+            requestTag: "tag-settled",
+            finalText: "durable settled final",
+            chatRunContext,
+            payloadHash: completions[0].terminalWal.payloadHash,
+          },
+        ],
       );
+      assert.match(completions[0].terminalWal.payloadHash, /^[0-9a-f]{64}$/);
+      const walFiles = await fs.readdir(
+        path.join(agentDir, "data", "chat", "terminal-wal"),
+      );
+      assert.equal(walFiles.length, 1);
+      const walRecord = JSON.parse(
+        await fs.readFile(
+          path.join(agentDir, "data", "chat", "terminal-wal", walFiles[0]),
+          "utf8",
+        ),
+      );
+      assert.equal(walRecord.state, "staged");
+      assert.equal(walRecord.runId, chatRunContext.runId);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
+      await fs.rm(agentDir, { recursive: true, force: true });
     }
   },
 );

@@ -47,6 +47,7 @@ import {
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
 import { preparePiManagedToolsForInstall } from "./pi-tools.js";
 import { buildGitHubRefArchiveUrl } from "../rin-lib/release.js";
+import { acquireDaemonInstanceLock } from "../rin-daemon/lock.js";
 import {
   createManagedRuntimeServiceActionContext,
   setManagedServiceStartHold,
@@ -491,6 +492,8 @@ async function applyInstalledRuntime(
       currentReleaseRoot: publishedRuntime.releaseRoot,
       migrationRuntimeRoot,
       targetNodePath: executionContext.targetNodePath,
+      chatRuntimeWillBeQuiesced: Boolean(manageDaemon && publishRuntime),
+      chatRuntimeQuiesced: false,
     };
     const migrationDeps = {
       findSystemUser,
@@ -522,6 +525,9 @@ async function applyInstalledRuntime(
               currentReleaseRoot: publishedRuntime.releaseRoot,
               migrationRuntimeRoot,
               targetNodePath: executionContext.targetNodePath,
+              chatRuntimeWillBeQuiesced:
+                migrationOptions.chatRuntimeWillBeQuiesced,
+              chatRuntimeQuiesced: migrationOptions.chatRuntimeQuiesced,
               managedFiles: buildInstalledManagedFilesManifest(sourceRoot),
               previousReleaseName,
               previousReleaseRoot: previousReleaseName
@@ -624,12 +630,24 @@ async function applyInstalledRuntime(
       managedRuntimeServiceFromInstallSpec(installedService) ||
       buildInstallStageManagedRuntimeService(targetUser, installDir);
     let serviceStartsHeld = false;
+    let chatMigrationFence: Awaited<
+      ReturnType<typeof acquireDaemonInstanceLock>
+    > | null = null;
+    const releaseChatMigrationFence = () => {
+      chatMigrationFence?.release();
+      chatMigrationFence = null;
+    };
     const transition = await runManagedRuntimeTransition({
       stop: async () => {
         if (manageDaemon && publishRuntime) {
           serviceStartsHeld = true;
           await setManagedServiceStartHold(serviceContext, true, service);
           await tryManagedServiceAction(serviceContext, "stop", service);
+          chatMigrationFence = await acquireDaemonInstanceLock(
+            serviceContext.agentDir,
+            { socketPath: daemonSocketPathForUser(targetUser, serviceDeps) },
+          );
+          migrationOptions.chatRuntimeQuiesced = true;
         }
       },
       mutate: writeInstalledState,
@@ -639,24 +657,30 @@ async function applyInstalledRuntime(
           finalizeInstallUpgradeMigrations(migrationOptions, migrationDeps);
           runtimeReplacement.commit();
         }
+        releaseChatMigrationFence();
       },
       recover: async () => {
-        if (publishRuntime) {
-          rollbackInstallUpgradeMigrations(migrationOptions, migrationDeps);
-          if (runtimeReplacement.isActive()) {
-            runtimeReplacement.rollback();
-          } else if (deferRuntimeActivation && previousReleaseName) {
-            switchInstalledCurrentRelease(
-              installDir,
-              previousReleaseName,
-              targetUser,
-              useElevatedWrite,
-              { findSystemUser },
-            );
+        try {
+          if (publishRuntime) {
+            rollbackInstallUpgradeMigrations(migrationOptions, migrationDeps);
+            if (runtimeReplacement.isActive()) {
+              runtimeReplacement.rollback();
+            } else if (deferRuntimeActivation && previousReleaseName) {
+              switchInstalledCurrentRelease(
+                installDir,
+                previousReleaseName,
+                targetUser,
+                useElevatedWrite,
+                { findSystemUser },
+              );
+            }
           }
+        } finally {
+          releaseChatMigrationFence();
         }
       },
       restart: async () => {
+        releaseChatMigrationFence();
         if (serviceStartsHeld) {
           await setManagedServiceStartHold(serviceContext, false, service);
           serviceStartsHeld = false;

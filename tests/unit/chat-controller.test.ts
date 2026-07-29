@@ -35,6 +35,11 @@ const {
 } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
 );
+const { stageChatTerminalWal } = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-daemon", "chat-terminal-wal.js"),
+  ).href
+);
 const {
   enqueueChatOutboxPayload,
   listChatOutboxHistoryItems,
@@ -117,7 +122,7 @@ async function createController(chatKey = "telegram/1:2", deps = {}) {
   return attachTestChatApp(controller);
 }
 
-function setDurableCurrentTurn(controller, messageId = "m-todo-owner") {
+function claimDurableTurnFence(controller, messageId = "m-todo-owner") {
   const [platform, address = ""] = controller.chatKey.split("/", 2);
   const separator = address.indexOf(":");
   const selfId = separator >= 0 ? address.slice(0, separator) : "1";
@@ -137,9 +142,9 @@ function setDurableCurrentTurn(controller, messageId = "m-todo-owner") {
   }).item;
   const claim = claimChatInboxItem(controller.agentDir, item.itemId);
   assert.ok(claim);
-  controller.currentTurn = {
-    startedAt: Date.now(),
-    outboxTurnFence: {
+  return {
+    claim,
+    fence: {
       agentDir: controller.agentDir,
       turnId: claim.itemId,
       chatKey: claim.chatKey,
@@ -148,7 +153,15 @@ function setDurableCurrentTurn(controller, messageId = "m-todo-owner") {
       attempt: claim.attemptCount,
     },
   };
-  return claim;
+}
+
+function setDurableCurrentTurn(controller, messageId = "m-todo-owner") {
+  const durable = claimDurableTurnFence(controller, messageId);
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    outboxTurnFence: durable.fence,
+  };
+  return durable.claim;
 }
 
 function createRecoveredController(previousController) {
@@ -506,19 +519,17 @@ test("chat controller keeps the logical inbox request tag stable across owner re
     seen.push(input.requestTag);
     return { finalText: "done" };
   };
+  const durable = claimDurableTurnFence(controller, "message-retry");
   for (const [ownerEpoch, attempt] of [
-    ["owner-1", 1],
-    ["owner-2", 2],
+    [durable.fence.ownerEpoch, durable.fence.attempt],
+    ["owner-2", durable.fence.attempt + 1],
   ]) {
     await controller.runTurn({
       text: "same logical inbox turn",
       attachments: [],
       incomingMessageId: "message-retry",
       outboxTurnFence: {
-        agentDir: controller.agentDir,
-        turnId: "turn-retry",
-        chatKey: controller.chatKey,
-        messageId: "message-retry",
+        ...durable.fence,
         ownerEpoch,
         attempt,
       },
@@ -618,18 +629,34 @@ async function waitUntil(condition, message, timeoutMs = 1_000) {
 }
 
 function emitRpcTurnComplete(controller, options, finalText, result) {
+  const terminalPayload = {
+    event: "complete",
+    requestTag: options?.requestTag,
+    finalText,
+    result: result || {
+      messages: [{ type: "text", text: finalText }],
+    },
+    sessionId: controller.session?.sessionManager?.getSessionId?.(),
+    sessionFile: controller.session?.sessionManager?.getSessionFile?.(),
+  };
+  const canonicalTerminal = options?.chatRunContext
+    ? {
+        chatRunContext: options.chatRunContext,
+        terminalWal: {
+          payloadHash: stageChatTerminalWal(controller.agentDir, {
+            ...options.chatRunContext,
+            terminalKind: "complete",
+            terminalPayload,
+          }).payloadHash,
+        },
+      }
+    : {};
   controller.handleClientEvent({
     type: "ui",
     payload: {
       type: "rpc_turn_event",
-      event: "complete",
-      requestTag: options?.requestTag,
-      finalText,
-      result: result || {
-        messages: [{ type: "text", text: finalText }],
-      },
-      sessionId: controller.session?.sessionManager?.getSessionId?.(),
-      sessionFile: controller.session?.sessionManager?.getSessionFile?.(),
+      ...terminalPayload,
+      ...canonicalTerminal,
     },
   });
 }
@@ -684,6 +711,55 @@ test("chat controller fences terminal projections by inbox request tag", async (
   });
   assert.deepEqual(completed, ["request-current"]);
   assert.deepEqual(failed, ["request-current"]);
+});
+
+test("chat controller owns canonical terminal by run fence instead of request tag", async () => {
+  const controller = await createController("telegram/1:2");
+  controller.currentTurn = {
+    incomingMessageId: "m-current",
+    replyToMessageId: "m-current",
+    requestTag: "request-current",
+  };
+  controller.activeCanonicalRun = {
+    runId: "run-current",
+    chatKey: controller.chatKey,
+    generation: 0,
+    ownerEpoch: "run-owner",
+    producerIncarnation: "worker-current",
+    deliveryTurnId: "turn-current",
+  };
+  const completed = [];
+  controller.settleProjectedTurnComplete = async (event) => {
+    completed.push(event.chatRunContext.runId);
+  };
+
+  await controller.handleFrontendEvent({
+    type: "turn_complete",
+    requestTag: "stale-request-tag",
+    latestAssistantText: "canonical final",
+    chatRunContext: {
+      runId: "run-current",
+      ownerEpoch: "run-owner",
+      producerIncarnation: "worker-current",
+    },
+    terminalWal: { payloadHash: "a".repeat(64) },
+  });
+  assert.deepEqual(completed, ["run-current"]);
+
+  await assert.rejects(
+    controller.handleFrontendEvent({
+      type: "turn_complete",
+      requestTag: "request-current",
+      latestAssistantText: "stale worker final",
+      chatRunContext: {
+        runId: "run-current",
+        ownerEpoch: "run-owner",
+        producerIncarnation: "worker-stale",
+      },
+      terminalWal: { payloadHash: "b".repeat(64) },
+    }),
+    /chat_run_terminal_fence_mismatch/,
+  );
 });
 
 test("chat controller logs one received-to-backend startup timing decomposition", async () => {
@@ -5430,20 +5506,14 @@ test("chat controller restores durable ownership over an earlier display-only Wo
   controller.driver.runTurn = async () => ({
     finalText: "Steered into the recovered turn",
   });
+  const durable = claimDurableTurnFence(controller, "m-early-working");
 
   const result = await controller.runTurn({
     text: "resume durable turn with early Working",
     attachments: [],
     incomingMessageId: "m-early-working",
     replyToMessageId: "m-early-working",
-    outboxTurnFence: {
-      agentDir: controller.agentDir,
-      turnId: "turn-early-working",
-      chatKey: controller.chatKey,
-      messageId: "m-early-working",
-      ownerEpoch: "owner-early-working",
-      attempt: 2,
-    },
+    outboxTurnFence: durable.fence,
   });
 
   assert.equal(result.superseded, true);
@@ -5455,7 +5525,7 @@ test("chat controller restores durable ownership over an earlier display-only Wo
   ]);
   assert.equal(
     controller.currentTurn?.outboxTurnFence?.turnId,
-    "turn-early-working",
+    durable.claim.itemId,
   );
   await controller.clearProcessingState();
 });
@@ -5490,20 +5560,14 @@ test("chat controller keeps recovered durable turn ownership when backend Workin
   controller.driver.runTurn = async () => ({
     finalText: "Recovered final",
   });
+  const durable = claimDurableTurnFence(controller, "m-durable-restart");
 
   const result = await controller.runTurn({
     text: "resume durable turn after daemon restart",
     attachments: [],
     incomingMessageId: "m-durable-restart",
     replyToMessageId: "m-durable-restart",
-    outboxTurnFence: {
-      agentDir: controller.agentDir,
-      turnId: "turn-durable-restart",
-      chatKey: controller.chatKey,
-      messageId: "m-durable-restart",
-      ownerEpoch: "owner-durable-restart",
-      attempt: 2,
-    },
+    outboxTurnFence: durable.fence,
   });
 
   assert.equal(result.finalText, "Recovered final");

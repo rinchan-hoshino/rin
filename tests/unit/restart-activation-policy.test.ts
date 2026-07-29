@@ -53,11 +53,21 @@ test("rin update preflights, stops, migrates, activates, and restarts in order",
     "setManagedServiceStartHold(serviceContext, true",
   );
   const stopIndex = restartBlock.indexOf('"stop"');
+  const migrationFenceAcquireIndex = restartBlock.indexOf(
+    "chatMigrationFence = await acquireDaemonInstanceLock",
+  );
+  const quiescedIndex = restartBlock.indexOf(
+    "migrationOptions.chatRuntimeQuiesced = true",
+  );
   const mutateIndex = restartBlock.indexOf("mutate: writeInstalledState");
   const activateIndex = restartBlock.indexOf("activate:", mutateIndex);
   const finalizeMigrationIndex = restartBlock.indexOf(
     "finalizeInstallUpgradeMigrations",
     activateIndex,
+  );
+  const migrationFenceReleaseIndex = restartBlock.indexOf(
+    "releaseChatMigrationFence()",
+    finalizeMigrationIndex,
   );
   const releaseIndex = restartBlock.indexOf(
     "setManagedServiceStartHold(serviceContext, false",
@@ -81,8 +91,17 @@ test("rin update preflights, stops, migrates, activates, and restarts in order",
     "read-only migration preflight must finish before daemon stop",
   );
   assert.ok(
-    stopIndex >= 0 && stopIndex < mutateIndex,
-    "the old daemon must stop before installer-owned migrations",
+    stopIndex >= 0 && stopIndex < quiescedIndex,
+    "the installer must not authorize turn interruption before daemon stop",
+  );
+  assert.ok(
+    migrationFenceAcquireIndex >= 0 &&
+      migrationFenceAcquireIndex < quiescedIndex,
+    "the installer must acquire the daemon lock before authorizing interruption",
+  );
+  assert.ok(
+    quiescedIndex >= 0 && quiescedIndex < mutateIndex,
+    "runtime quiescence must be recorded before installer-owned migrations",
   );
   assert.ok(
     mutateIndex >= 0 && mutateIndex < activateIndex,
@@ -91,6 +110,16 @@ test("rin update preflights, stops, migrates, activates, and restarts in order",
   assert.ok(
     activateIndex >= 0 && activateIndex < finalizeMigrationIndex,
     "runtime activation must finish before finalizing the data migration",
+  );
+  assert.ok(
+    finalizeMigrationIndex >= 0 &&
+      finalizeMigrationIndex < migrationFenceReleaseIndex,
+    "the daemon lock must remain held until data migration finalization",
+  );
+  assert.ok(
+    migrationFenceReleaseIndex >= 0 &&
+      migrationFenceReleaseIndex < releaseIndex,
+    "the daemon lock must release before the managed service start hold",
   );
   assert.ok(
     finalizeMigrationIndex >= 0 && finalizeMigrationIndex < releaseIndex,

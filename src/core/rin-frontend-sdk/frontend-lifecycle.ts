@@ -2,7 +2,7 @@ import {
   formatCompactionSummaryCollapsedText,
   type CompactionSummaryCollapsedTextOptions,
 } from "./compaction-summary-format.js";
-import type { RinFrontendBackendEvent } from "./types.js";
+import type { RinChatRunContext, RinFrontendBackendEvent } from "./types.js";
 
 export type RinFrontendLifecyclePhase =
   | "idle"
@@ -42,6 +42,8 @@ export interface RinFrontendLifecycleState {
 
 interface LifecycleEventBase {
   requestTag?: string;
+  chatRunContext?: RinChatRunContext;
+  terminalWal?: { payloadHash: string };
   turnGeneration?: number;
   sessionId?: string;
   sessionFile?: string;
@@ -128,6 +130,23 @@ function safeString(value: unknown): string {
 function safeNumber(value: unknown): number {
   const parsed = Number(value || 0);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function optionalChatRunContext(value: unknown): RinChatRunContext | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const runId = safeString((value as any).runId).trim();
+  const ownerEpoch = safeString((value as any).ownerEpoch).trim();
+  const producerIncarnation = safeString(
+    (value as any).producerIncarnation,
+  ).trim();
+  if (!runId || !ownerEpoch || !producerIncarnation) return;
+  return { runId, ownerEpoch, producerIncarnation };
+}
+
+function optionalTerminalWal(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const payloadHash = safeString((value as any).payloadHash).trim();
+  return /^[0-9a-f]{64}$/.test(payloadHash) ? { payloadHash } : undefined;
 }
 
 function optionalText(value: unknown): string | undefined {
@@ -289,6 +308,8 @@ export function projectRinFrontendLifecycleEvent(
           result: payload.result,
           sessionId: optionalText(payload.sessionId),
           sessionFile: optionalText(payload.sessionFile),
+          chatRunContext: optionalChatRunContext(payload.chatRunContext),
+          terminalWal: optionalTerminalWal(payload.terminalWal),
           ...requestTag,
         };
       }
@@ -299,6 +320,8 @@ export function projectRinFrontendLifecycleEvent(
           error: safeString(payload.error).trim() || "rpc_turn_failed",
           sessionId: optionalText(payload.sessionId),
           sessionFile: optionalText(payload.sessionFile),
+          chatRunContext: optionalChatRunContext(payload.chatRunContext),
+          terminalWal: optionalTerminalWal(payload.terminalWal),
           ...requestTag,
         };
       }
@@ -572,6 +595,10 @@ export function renderRinFrontendLifecycleEvent(
           sessionId: event.sessionId,
           sessionFile: event.sessionFile,
           requestTag: event.requestTag,
+          ...(event.chatRunContext
+            ? { chatRunContext: event.chatRunContext }
+            : {}),
+          ...(event.terminalWal ? { terminalWal: event.terminalWal } : {}),
         };
         return event.finalText
           ? [
@@ -582,6 +609,12 @@ export function renderRinFrontendLifecycleEvent(
                 sessionId: event.sessionId,
                 sessionFile: event.sessionFile,
                 requestTag: event.requestTag,
+                ...(event.chatRunContext
+                  ? { chatRunContext: event.chatRunContext }
+                  : {}),
+                ...(event.terminalWal
+                  ? { terminalWal: event.terminalWal }
+                  : {}),
               },
               terminal,
             ]
@@ -594,6 +627,10 @@ export function renderRinFrontendLifecycleEvent(
           sessionId: event.sessionId,
           sessionFile: event.sessionFile,
           requestTag: event.requestTag,
+          ...(event.chatRunContext
+            ? { chatRunContext: event.chatRunContext }
+            : {}),
+          ...(event.terminalWal ? { terminalWal: event.terminalWal } : {}),
         },
       ];
   }

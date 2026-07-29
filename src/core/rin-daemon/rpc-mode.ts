@@ -33,6 +33,7 @@ import {
 } from "../pi/session-host.js";
 import { safeString } from "../text-utils.js";
 import { rawErrorMessage } from "../rin-lib/user-facing-errors.js";
+import { stageChatTerminalWal } from "./chat-terminal-wal.js";
 import {
   RpcTurnCoordinator,
   type RpcTurnInterrupt,
@@ -97,6 +98,22 @@ function stableJson(value: any) {
 
 function rpcRequestTag(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function normalizeRpcChatRunContext(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("rpc_invalid_chat_run_context");
+  }
+  const runId = safeString((value as any).runId).trim();
+  const ownerEpoch = safeString((value as any).ownerEpoch).trim();
+  const producerIncarnation = safeString(
+    (value as any).producerIncarnation,
+  ).trim();
+  if (!runId || !ownerEpoch || !producerIncarnation) {
+    throw new Error("rpc_invalid_chat_run_context");
+  }
+  return { runId, ownerEpoch, producerIncarnation };
 }
 
 function promptAdmission(
@@ -829,6 +846,11 @@ export async function runCustomRpcMode(
     options: {
       forceTurnEvents?: boolean;
       interrupt?: RpcTurnInterrupt;
+      chatRunContext?: {
+        runId: string;
+        ownerEpoch: string;
+        producerIncarnation: string;
+      };
     } = {},
   ) => {
     if (turnCoordinator.isActive) throw new Error("rpc_turn_already_active");
@@ -901,6 +923,34 @@ export async function runCustomRpcMode(
                 sessionId: turnSession.sessionId,
                 error: outcome.error,
               };
+        if (options.chatRunContext) {
+          try {
+            const agentDir = safeString(runtime.services?.agentDir).trim();
+            if (!agentDir) throw new Error("rpc_chat_run_agent_dir_missing");
+            const staged = stageChatTerminalWal(agentDir, {
+              ...options.chatRunContext,
+              terminalKind: outcome.kind,
+              terminalPayload: {
+                event,
+                requestTag,
+                ...payload,
+              },
+            });
+            Object.assign(payload, {
+              chatRunContext: options.chatRunContext,
+              terminalWal: { payloadHash: staged.payloadHash },
+            });
+          } catch (error: any) {
+            output({
+              type: "rpc_protocol_error",
+              error: `rpc_chat_terminal_wal_stage_failed:${String(
+                error?.message || error,
+              )}`,
+              requestTag,
+            });
+            throw error;
+          }
+        }
         const terminalKey = JSON.stringify({ event, payload });
         const committed = trackedTurn.commitTerminal(terminalKey, () => {
           emitTurnEvent(event, requestTag, payload, forceTurnEvents);
@@ -1391,14 +1441,22 @@ export async function runCustomRpcMode(
           if (turnCoordinator.isActive) {
             await session.prompt(command.message, promptOptions);
           } else {
-            startTurnTask(requestTag, async () => {
-              try {
-                return await session.prompt(command.message, promptOptions);
-              } catch (error) {
-                turnCoordinator.removeAdmission(requestTagToken);
-                throw error;
-              }
-            });
+            startTurnTask(
+              requestTag,
+              async () => {
+                try {
+                  return await session.prompt(command.message, promptOptions);
+                } catch (error) {
+                  turnCoordinator.removeAdmission(requestTagToken);
+                  throw error;
+                }
+              },
+              {
+                chatRunContext: normalizeRpcChatRunContext(
+                  command.chatRunContext,
+                ),
+              },
+            );
           }
         } catch (error) {
           turnCoordinator.removeAdmission(requestTagToken);

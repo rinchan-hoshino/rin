@@ -6,6 +6,7 @@ import path from "node:path";
 
 import { sleep } from "../platform/process.js";
 import type { RpcSocketLike } from "../platform/rpc-socket.js";
+import { listStagedChatTerminalWal } from "./chat-terminal-wal.js";
 import {
   clearPendingTerminalTurnEvent,
   rememberPendingTerminalTurnEvent,
@@ -1842,7 +1843,11 @@ export class WorkerPool {
         }
         if (isTerminalRpcTurnEvent(payload)) {
           this.resolveTerminalTurnWaiters(worker, payload);
-          if (forwarded === 0) {
+          if (payload.chatRunContext) {
+            // Canonical Chat terminal ownership lives in the producer WAL until
+            // the Chat DB commits terminal + outbox. Socket forwarding is only
+            // a wake-up signal and must not clear or duplicate that evidence.
+          } else if (forwarded === 0) {
             rememberPendingTerminalTurnEvent(this.options.agentDir, payload);
           } else {
             clearPendingTerminalTurnEvent(this.options.agentDir, payload);
@@ -1990,6 +1995,23 @@ export class WorkerPool {
       ? selector
       : this.getConnectionSelector(connection);
     if (!hasSessionSelector(effectiveSelector)) return false;
+    const stagedChatTerminals = listStagedChatTerminalWal(
+      String(this.options.agentDir || "").trim(),
+      effectiveSelector,
+    );
+    for (const record of stagedChatTerminals) {
+      writeLine(connection.socket, {
+        type: "rpc_turn_event",
+        ...record.terminalPayload,
+        chatRunContext: {
+          runId: record.runId,
+          ownerEpoch: record.ownerEpoch,
+          producerIncarnation: record.producerIncarnation,
+        },
+        terminalWal: { payloadHash: record.payloadHash },
+      });
+    }
+    if (stagedChatTerminals.length > 0) return true;
     const pendingTerminalEvent = takePendingTerminalTurnEvent(
       this.options.agentDir,
       effectiveSelector,

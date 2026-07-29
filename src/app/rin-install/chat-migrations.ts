@@ -9,13 +9,19 @@ import {
 
 export function main(args = process.argv.slice(2)) {
   const preflight = args[0] === "--preflight";
-  const positional = preflight ? args.slice(1) : args;
+  const runtimeWillBeQuiesced = args.includes("--runtime-will-be-quiesced");
+  const runtimeQuiesced = args.includes("--runtime-quiesced");
+  const positional = args.filter((value) => !value.startsWith("--"));
   const installDir = String(positional[0] || "").trim();
   if (!installDir)
     throw new Error("chat_install_migration_install_dir_required");
   return preflight
-    ? preflightChatInstallMigrations(installDir, positional[1])
-    : runChatInstallMigrations(installDir, positional[1]);
+    ? preflightChatInstallMigrations(installDir, positional[1], {
+        runtimeWillBeQuiesced,
+      })
+    : runChatInstallMigrations(installDir, positional[1], {
+        runtimeQuiesced,
+      });
 }
 
 const isDirectEntry =

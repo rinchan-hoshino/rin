@@ -140,6 +140,73 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     ),
   chat_database_unsupported_schema: (detail) =>
     withDetail("The chat database schema version is unsupported", detail),
+  chat_database_canonical_run_drain_required: (detail) =>
+    withDetail("Rin update is waiting for active chat runs to finish", detail),
+  chat_database_canonical_run_upgrade_failed: (detail) =>
+    withDetail("Rin could not upgrade canonical chat run storage", detail),
+  chat_run_chat_mismatch: () =>
+    "The terminal result belongs to a different chat run.",
+  chat_run_delivery_turn_missing: () =>
+    "Rin could not find the terminal delivery owner for this chat run.",
+  chat_run_identity_conflict: () =>
+    "Rin found conflicting canonical chat run identity.",
+  chat_run_invalid_terminal_delivery_kind: () =>
+    "Rin rejected an invalid terminal chat delivery kind.",
+  chat_run_invalid_terminal_payload: () =>
+    "Rin rejected an invalid terminal chat payload.",
+  chat_run_missing: () => "Rin could not find the canonical chat run.",
+  chat_run_missing_id: () => "Rin could not create a chat run without an id.",
+  chat_run_missing_producer_incarnation: () =>
+    "Rin could not identify the chat run producer.",
+  chat_run_not_recoverable: () =>
+    "The canonical chat run is not in a recoverable state.",
+  chat_run_not_terminalizable: () =>
+    "The canonical chat run cannot accept a terminal result in its current state.",
+  chat_run_stale_producer: () =>
+    "Rin rejected a terminal result from a stale chat producer.",
+  chat_run_stale_turn: () =>
+    "Rin rejected a stale chat turn while creating its canonical run.",
+  chat_run_terminal_conflict: () =>
+    "Rin found conflicting terminal results for one chat run.",
+  chat_run_terminal_fence_lost: () =>
+    "Rin lost the canonical chat terminal ownership fence before commit.",
+  chat_run_terminal_fence_mismatch: () =>
+    "Rin rejected a terminal event owned by another chat producer.",
+  chat_run_terminal_outbox_missing: () =>
+    "Rin found a committed chat terminal without its durable outbox record.",
+  chat_run_turn_already_attached: () =>
+    "The chat turn is already attached to another canonical run.",
+  chat_terminal_wal_commit_conflict: () =>
+    "Rin found conflicting terminal journal commit evidence.",
+  chat_terminal_wal_conflict: () =>
+    "Rin found conflicting staged terminal journal evidence.",
+  chat_terminal_wal_hash_mismatch: () =>
+    "The terminal journal payload integrity check failed.",
+  chat_terminal_wal_identity_mismatch: () =>
+    "The terminal journal identity does not match its storage key.",
+  chat_terminal_wal_invalid: () => "The terminal journal record is invalid.",
+  chat_terminal_wal_invalid_kind: () =>
+    "The terminal journal result kind is invalid.",
+  chat_terminal_wal_invalid_payload: () =>
+    "The terminal journal payload is invalid.",
+  chat_terminal_wal_missing: () =>
+    "Rin could not find the staged terminal journal record.",
+  chat_terminal_wal_missing_outbox_id: () =>
+    "Rin cannot commit a terminal journal without an outbox record.",
+  chat_terminal_wal_missing_owner_epoch: () =>
+    "Rin cannot stage a terminal journal without an ownership epoch.",
+  chat_terminal_wal_missing_producer_incarnation: () =>
+    "Rin cannot stage a terminal journal without a producer identity.",
+  chat_terminal_wal_missing_run_id: () =>
+    "Rin cannot stage a terminal journal without a run id.",
+  chat_terminal_wal_stale_producer: () =>
+    "Rin rejected a terminal journal commit from a stale producer.",
+  rpc_chat_run_agent_dir_missing: () =>
+    "Rin cannot persist the terminal journal because its agent directory is missing.",
+  rpc_chat_terminal_wal_stage_failed: (detail) =>
+    withDetail("Rin could not persist the terminal journal", detail),
+  rpc_invalid_chat_run_context: () =>
+    "Rin rejected an invalid canonical chat run context.",
   chat_inbox_chatKey_required: () =>
     "Chat inbox write failed because the chat key is missing. Check the adapter event.",
   chat_inbox_messageId_required: () =>

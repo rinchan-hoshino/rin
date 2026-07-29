@@ -48,6 +48,7 @@ import {
   type RinRpcSessionEventTarget,
 } from "./rpc-session-events.js";
 import type {
+  RinChatRunContext,
   RinFrontendBackendEvent,
   RinFrontendClient,
   RinFrontendEvent,
@@ -121,6 +122,8 @@ export type RinFrontendTurnDriverEvent =
       sessionId?: string;
       sessionFile?: string;
       requestTag?: string;
+      chatRunContext?: RinChatRunContext;
+      terminalWal?: { payloadHash: string };
     }
   | {
       type: "turn_error";
@@ -128,6 +131,8 @@ export type RinFrontendTurnDriverEvent =
       sessionId?: string;
       sessionFile?: string;
       requestTag?: string;
+      chatRunContext?: RinChatRunContext;
+      terminalWal?: { payloadHash: string };
     };
 
 export type RinFrontendTurnClient = RinFrontendClient & {
@@ -174,6 +179,7 @@ export class RinFrontendTurnDriver {
   private frontendState: Record<string, any> = {};
   liveTurn: {
     requestTag?: string;
+    chatRunContext?: RinChatRunContext;
     promise: Promise<any>;
     resolve: (value: any) => void;
     reject: (error: Error) => void;
@@ -463,7 +469,10 @@ export class RinFrontendTurnDriver {
     return `frontend_turn_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  private startLiveTurn(requestTag?: string) {
+  private startLiveTurn(
+    requestTag?: string,
+    chatRunContext?: RinChatRunContext,
+  ) {
     if (this.liveTurn) throw new Error("frontend_turn_already_running");
     const backendAlreadyActive = Boolean(
       this.frontendState.turnActive || this.frontendState.isStreaming,
@@ -475,6 +484,7 @@ export class RinFrontendTurnDriver {
     let reject!: (error: Error) => void;
     const liveTurn = {
       requestTag,
+      chatRunContext,
       promise: new Promise<any>((nextResolve, nextReject) => {
         resolve = nextResolve;
         reject = nextReject;
@@ -661,15 +671,23 @@ export class RinFrontendTurnDriver {
     ) {
       return false;
     }
-    const activeRequestTag = safeString(this.liveTurn?.requestTag).trim();
-    if (
-      incomingRequestTag &&
-      activeRequestTag &&
-      incomingRequestTag !== activeRequestTag &&
-      this.backendTurnRequestTag &&
-      incomingRequestTag !== this.backendTurnRequestTag
-    ) {
-      return false;
+    const incomingRunId = safeString(payload.chatRunContext?.runId).trim();
+    const activeRunId = safeString(this.liveTurn?.chatRunContext?.runId).trim();
+    if (incomingRunId || activeRunId) {
+      if (!incomingRunId || (activeRunId && incomingRunId !== activeRunId)) {
+        return false;
+      }
+    } else {
+      const activeRequestTag = safeString(this.liveTurn?.requestTag).trim();
+      if (
+        incomingRequestTag &&
+        activeRequestTag &&
+        incomingRequestTag !== activeRequestTag &&
+        this.backendTurnRequestTag &&
+        incomingRequestTag !== this.backendTurnRequestTag
+      ) {
+        return false;
+      }
     }
     const currentSessionFile = safeString(
       this.frontendState.sessionFile,
@@ -1381,6 +1399,7 @@ export class RinFrontendTurnDriver {
       promptContext?: RinPromptContext;
       source?: string;
       requestTag?: string;
+      chatRunContext?: RinChatRunContext;
       assumeConnected?: boolean;
       assumeSessionReady?: boolean;
       piStartupOptions?: RinPiPassthroughOptions["piStartupOptions"];
@@ -1484,7 +1503,9 @@ export class RinFrontendTurnDriver {
         this.resetAssistantSegmentTracking();
         this.latestAssistantText = "";
       }
-      const liveTurn = existingLiveTurn || this.startLiveTurn(requestTag);
+      const liveTurn =
+        existingLiveTurn ||
+        this.startLiveTurn(requestTag, input.chatRunContext);
       this.setFrontendPhase("sending");
       this.liveTurnRecoveryContext = {
         sessionFile:
@@ -1499,6 +1520,7 @@ export class RinFrontendTurnDriver {
           source: promptSource,
           frontendIdentity: this.frontendIdentity,
           requestTag,
+          chatRunContext: input.chatRunContext,
           promptContext: input.promptContext,
           sessionFile: targetSessionFile,
           gate: inputGate,
@@ -1793,6 +1815,10 @@ export class RinFrontendTurnDriver {
             sessionId: event.sessionId,
             sessionFile: event.sessionFile,
             requestTag: safeString(event.requestTag).trim() || undefined,
+            ...(event.chatRunContext
+              ? { chatRunContext: event.chatRunContext }
+              : {}),
+            ...(event.terminalWal ? { terminalWal: event.terminalWal } : {}),
           });
         } catch (error) {
           this.reportEventHandlingError({
@@ -1805,6 +1831,8 @@ export class RinFrontendTurnDriver {
               sessionId: event.sessionId,
               sessionFile: event.sessionFile,
               requestTag: safeString(event.requestTag).trim() || undefined,
+              chatRunContext: event.chatRunContext,
+              terminalWal: event.terminalWal,
             },
           });
           const terminalError = (
@@ -1836,6 +1864,10 @@ export class RinFrontendTurnDriver {
             sessionId: event.sessionId,
             sessionFile: event.sessionFile,
             requestTag: safeString(event.requestTag).trim() || undefined,
+            ...(event.chatRunContext
+              ? { chatRunContext: event.chatRunContext }
+              : {}),
+            ...(event.terminalWal ? { terminalWal: event.terminalWal } : {}),
           });
         } catch (error) {
           this.reportEventHandlingError({
@@ -1847,6 +1879,8 @@ export class RinFrontendTurnDriver {
               sessionId: event.sessionId,
               sessionFile: event.sessionFile,
               requestTag: safeString(event.requestTag).trim() || undefined,
+              chatRunContext: event.chatRunContext,
+              terminalWal: event.terminalWal,
             },
           });
           const terminalError = (

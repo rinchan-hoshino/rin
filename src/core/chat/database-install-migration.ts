@@ -65,7 +65,111 @@ function finishSchemaUpgrade(db: BetterSqlite3.Database) {
   db.pragma(`user_version = ${CHAT_DATABASE_SCHEMA_VERSION}`);
 }
 
-function upgradeRecordedChatDatabase(db: BetterSqlite3.Database) {
+function interruptRunningTurnsForCanonicalUpgrade(db: BetterSqlite3.Database) {
+  const turns = db
+    .prepare(
+      `SELECT t.turn_id AS turnId,
+              t.chat_key AS chatKey,
+              m.message_id AS messageId
+         FROM turns t
+         JOIN messages m ON m.id = t.inbound_message_id
+        WHERE t.state = 'running' AND t.run_id IS NULL
+        ORDER BY t.sequence ASC, t.turn_id ASC`,
+    )
+    .all() as Array<{ turnId: string; chatKey: string; messageId: string }>;
+  if (!turns.length) return;
+
+  const timestamp = nowIso();
+  const text =
+    "Rin was updated while this turn was running, so it was stopped safely. Please send your request again.";
+  const insertOutbox = db.prepare(
+    `INSERT INTO outbox (
+       outbox_id, turn_id, idempotency_key, chat_key, delivery_kind, state,
+       payload_json, post_delivery_json, post_delivery_applied_at,
+       adapter_id, adapter_version, plan_state, sequence, attempts,
+       owner_epoch, lease_until, next_attempt_at, last_error, failure_kind,
+       delivery_unconfirmed, delivery_result_json, created_at, updated_at,
+       delivered_at, failed_at
+     ) VALUES (?, ?, ?, ?, 'error', 'queued', ?, NULL, NULL,
+               ?, '1', 'planned', ?, 0,
+               NULL, NULL, NULL, NULL, NULL,
+               0, NULL, ?, ?, NULL, NULL)`,
+  );
+  const insertDelivery = db.prepare(
+    `INSERT INTO outbox_deliveries (
+       delivery_id, outbox_id, destination, fragment_index, state,
+       payload_json, owner_epoch, attempt, lease_until, next_attempt_at,
+       last_error, provider_message_id, created_at, updated_at,
+       delivered_at, failed_at
+     ) VALUES (?, ?, ?, 0, 'queued', ?, NULL, 0, NULL, NULL,
+               NULL, NULL, ?, ?, NULL, NULL)`,
+  );
+  const terminalizeTurn = db.prepare(
+    `UPDATE turns
+        SET state = 'terminal',
+            terminal_kind = 'install_upgrade_interrupted',
+            owner_epoch = NULL,
+            lease_until = NULL,
+            heartbeat_at = NULL,
+            next_attempt_at = NULL,
+            last_error = NULL,
+            updated_at = ?
+      WHERE turn_id = ? AND state = 'running'`,
+  );
+  for (const turn of turns) {
+    const idempotencyKey = `install-upgrade-interrupted:${turn.turnId}`;
+    const outboxId = `dedupe-${createHash("sha256")
+      .update(idempotencyKey)
+      .digest("hex")}`;
+    const payloadJson = JSON.stringify({
+      chatKey: turn.chatKey,
+      parts: [
+        ...(safeString(turn.messageId).trim()
+          ? [{ type: "quote", id: safeString(turn.messageId).trim() }]
+          : []),
+        { type: "text", text },
+      ],
+      deliveryKind: "error",
+      createdAt: timestamp,
+    });
+    const sequence = Number(
+      (
+        db
+          .prepare(`SELECT COALESCE(MAX(sequence), 0) + 1 AS value FROM outbox`)
+          .get() as { value?: number }
+      )?.value || 1,
+    );
+    insertOutbox.run(
+      outboxId,
+      turn.turnId,
+      idempotencyKey,
+      turn.chatKey,
+      payloadJson,
+      turn.chatKey.split("/", 1)[0] || "unknown",
+      sequence,
+      timestamp,
+      timestamp,
+    );
+    insertDelivery.run(
+      `${outboxId}:0`,
+      outboxId,
+      turn.chatKey,
+      payloadJson,
+      timestamp,
+      timestamp,
+    );
+    terminalizeTurn.run(timestamp, turn.turnId);
+    db.prepare(
+      `UPDATE messages SET disposition = 'actionable'
+        WHERE id = (SELECT inbound_message_id FROM turns WHERE turn_id = ?)`,
+    ).run(turn.turnId);
+  }
+}
+
+function upgradeRecordedChatDatabase(
+  db: BetterSqlite3.Database,
+  options: { runtimeQuiesced?: boolean } = {},
+) {
   const currentVersion = Number(db.pragma("user_version", { simple: true }));
   if (currentVersion > CHAT_DATABASE_SCHEMA_VERSION) {
     throw new Error(`chat_database_future_schema:${currentVersion}`);
@@ -93,6 +197,43 @@ function upgradeRecordedChatDatabase(db: BetterSqlite3.Database) {
       CHECK (recovery_version >= 0);
     CREATE INDEX inbound_heads_recovery_idx
       ON inbound_heads(platform, bot_id, recovery_next_attempt_at, chat_key);
+  `;
+  const canonicalRunUpgradeSql = `
+    CREATE INDEX IF NOT EXISTS turns_run_idx
+      ON turns(run_id, state, sequence)
+      WHERE run_id IS NOT NULL;
+    CREATE TABLE IF NOT EXISTS chat_runs (
+      run_id TEXT PRIMARY KEY,
+      chat_key TEXT NOT NULL,
+      generation INTEGER NOT NULL CHECK (generation >= 0),
+      state TEXT NOT NULL
+        CHECK (state IN ('running', 'draining', 'terminal', 'manual_review')),
+      owner_epoch TEXT NOT NULL,
+      producer_incarnation TEXT NOT NULL,
+      delivery_turn_id TEXT NOT NULL REFERENCES turns(turn_id) ON DELETE RESTRICT,
+      terminal_delivery_turn_id TEXT REFERENCES turns(turn_id) ON DELETE RESTRICT,
+      terminal_kind TEXT,
+      terminal_payload_json TEXT,
+      terminal_payload_hash TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      terminal_at TEXT,
+      CHECK (
+        (state IN ('running', 'draining')
+          AND terminal_delivery_turn_id IS NULL
+          AND terminal_kind IS NULL
+          AND terminal_payload_json IS NULL
+          AND terminal_payload_hash IS NULL
+          AND terminal_at IS NULL)
+        OR
+        (state IN ('terminal', 'manual_review')
+          AND terminal_delivery_turn_id IS NOT NULL
+          AND terminal_kind IS NOT NULL
+          AND terminal_at IS NOT NULL)
+      )
+    );
+    CREATE INDEX IF NOT EXISTS chat_runs_state_idx
+      ON chat_runs(state, updated_at, chat_key);
   `;
   const durableTurnAdmissionUpgradeSql = `
     ALTER TABLE turns ADD COLUMN admission_state TEXT NOT NULL DEFAULT 'unclassified'
@@ -171,8 +312,32 @@ function upgradeRecordedChatDatabase(db: BetterSqlite3.Database) {
     );
   } else if (currentVersion === 5) {
     db.exec(durableTurnAdmissionUpgradeSql);
-  } else {
+  } else if (currentVersion !== 6) {
     throw new Error(`chat_database_unsupported_schema:${currentVersion}`);
+  }
+  try {
+    const activeRuns = Number(
+      (
+        db
+          .prepare(
+            `SELECT COUNT(*) AS count FROM turns WHERE state = 'running'`,
+          )
+          .get() as { count?: number }
+      )?.count || 0,
+    );
+    if (activeRuns > 0 && options.runtimeQuiesced !== true) {
+      throw new Error(
+        `chat_database_canonical_run_drain_required:${activeRuns}`,
+      );
+    }
+    if (!tableHasColumn(db, "turns", "run_id")) {
+      db.exec(`ALTER TABLE turns ADD COLUMN run_id TEXT;`);
+    }
+    db.exec(canonicalRunUpgradeSql);
+  } catch (error: any) {
+    throw new Error(
+      `chat_database_canonical_run_upgrade_failed:${String(error?.message || error)}`,
+    );
   }
   finishSchemaUpgrade(db);
 }
@@ -184,12 +349,14 @@ function assertNoActiveOldAdmissionOwner(
   if (!currentVersion || !tableHasColumn(db, "turns", "lease_until")) return;
   const timestamp = nowIso();
   const hasDurableAdmission = tableHasColumn(db, "turns", "admission_json");
+  const hasRunId = tableHasColumn(db, "turns", "run_id");
   const active = hasDurableAdmission
     ? db
         .prepare(
           `SELECT turns.turn_id
              FROM turns
             WHERE turns.state = 'running' AND turns.lease_until > ?
+              ${hasRunId ? "AND turns.run_id IS NULL" : ""}
               AND json_valid(turns.admission_json)
               AND json_extract(turns.admission_json, '$.kind') IN (?, ?)
             LIMIT 1`,
@@ -201,6 +368,7 @@ function assertNoActiveOldAdmissionOwner(
              FROM turns
              JOIN messages ON messages.id = turns.inbound_message_id
             WHERE turns.state = 'running' AND turns.lease_until > ?
+              ${hasRunId ? "AND turns.run_id IS NULL" : ""}
               AND (messages.accepted_at IS NOT NULL
                    OR messages.disposition = 'actionable')
             LIMIT 1`,
@@ -208,6 +376,27 @@ function assertNoActiveOldAdmissionOwner(
         .get(timestamp);
   if (active) {
     throw new Error("chat_install_migration_active_legacy_turn");
+  }
+}
+
+function assertNoUnfencedRunningTurns(
+  db: BetterSqlite3.Database,
+  currentVersion: number,
+) {
+  if (currentVersion <= 0 || !readChatDatabaseTables(db).has("turns")) return;
+  const hasRunId = tableHasColumn(db, "turns", "run_id");
+  const activeRuns = Number(
+    (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM turns
+            WHERE state = 'running'${hasRunId ? " AND run_id IS NULL" : ""}`,
+        )
+        .get() as { count?: number }
+    )?.count || 0,
+  );
+  if (activeRuns > 0) {
+    throw new Error(`chat_database_canonical_run_drain_required:${activeRuns}`);
   }
 }
 
@@ -278,7 +467,7 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
       const rows = db
         .prepare(
           `SELECT turns.turn_id, turns.state, turns.admission_state,
-                  turns.chat_key, turns.sequence,
+                  turns.chat_key, turns.sequence, turns.run_id,
                   messages.id AS message_row_id, messages.message_id
              FROM turns
              JOIN messages ON messages.id = turns.inbound_message_id
@@ -290,7 +479,15 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
       for (const row of rows) {
         const state = safeString(row.state);
         const recordOnly = safeString(row.admission_state) === "record_only";
-        if (!["terminal", "superseded"].includes(state)) {
+        if (safeString(row.run_id).trim()) {
+          db.prepare(
+            `UPDATE turns
+                SET admission_state = 'unclassified', admission_json = NULL,
+                    admission_hash = NULL, submission_json = NULL,
+                    submission_hash = NULL, updated_at = ?
+              WHERE turn_id = ?`,
+          ).run(timestamp, row.turn_id);
+        } else if (!["terminal", "superseded"].includes(state)) {
           const chatKey = safeString(row.chat_key).trim();
           const messageId = safeString(row.message_id).trim();
           let targetState = "terminal";
@@ -433,7 +630,7 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
               SET state = 'pending', owner_epoch = NULL, lease_until = NULL,
                   heartbeat_at = NULL, next_attempt_at = NULL,
                   last_error = NULL, updated_at = ?
-            WHERE state = 'running'`,
+            WHERE state = 'running' AND run_id IS NULL`,
         )
         .run(timestamp).changes;
 
@@ -502,7 +699,10 @@ export function readAdmissionModelInstallMigrationSummary(
   };
 }
 
-export function preflightChatDatabaseMigrationForInstall(agentDir: string) {
+export function preflightChatDatabaseMigrationForInstall(
+  agentDir: string,
+  options: { runtimeWillBeQuiesced?: boolean } = {},
+) {
   const dbPath = chatDatabasePath(agentDir);
   if (!fs.existsSync(dbPath)) {
     return {
@@ -527,7 +727,10 @@ export function preflightChatDatabaseMigrationForInstall(agentDir: string) {
     } else {
       validateRecordedChatDatabaseSchema(db, currentVersion);
       readLegacyControlMigrationPreservedSummary(db);
-      assertNoActiveOldAdmissionOwner(db, currentVersion);
+      if (options.runtimeWillBeQuiesced !== true) {
+        assertNoActiveOldAdmissionOwner(db, currentVersion);
+        assertNoUnfencedRunningTurns(db, currentVersion);
+      }
     }
     return {
       path: dbPath,
@@ -539,7 +742,10 @@ export function preflightChatDatabaseMigrationForInstall(agentDir: string) {
   }
 }
 
-export function migrateChatDatabaseForInstall(agentDir: string) {
+export function migrateChatDatabaseForInstall(
+  agentDir: string,
+  options: { runtimeQuiesced?: boolean } = {},
+) {
   closeChatDatabase(agentDir);
   const dbPath = chatDatabasePath(agentDir);
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -568,8 +774,14 @@ export function migrateChatDatabaseForInstall(agentDir: string) {
         const currentVersion = Number(
           migrationDb.pragma("user_version", { simple: true }),
         );
-        assertNoActiveOldAdmissionOwner(migrationDb, currentVersion);
-        upgradeRecordedChatDatabase(migrationDb);
+        if (options.runtimeQuiesced !== true) {
+          assertNoActiveOldAdmissionOwner(migrationDb, currentVersion);
+          assertNoUnfencedRunningTurns(migrationDb, currentVersion);
+        }
+        upgradeRecordedChatDatabase(migrationDb, options);
+        if (options.runtimeQuiesced === true) {
+          interruptRunningTurnsForCanonicalUpgrade(migrationDb);
+        }
         migrationDb
           .prepare(
             `DELETE FROM schema_meta WHERE key = 'admission_model_version'`,

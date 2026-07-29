@@ -43,6 +43,9 @@ const installMigration = await import(
 const inbox = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
 );
+const runStore = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "run-store.js")).href
+);
 const messageStore = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
     .href
@@ -174,6 +177,41 @@ test("installer preflight refuses activation while an old accepted turn still ha
       () => database.migrateChatDatabaseForInstall(installDir),
       /chat_install_migration_active_legacy_turn/,
     );
+    assert.doesNotThrow(() =>
+      installMigration.preflightChatInstallMigrations(installDir, undefined, {
+        runtimeWillBeQuiesced: true,
+      }),
+    );
+    database.migrateChatDatabaseForInstall(installDir, {
+      runtimeQuiesced: true,
+    });
+    assert.deepEqual(
+      database
+        .openChatDatabase(installDir)
+        .prepare(
+          `SELECT state, terminal_kind AS terminalKind,
+                  owner_epoch AS ownerEpoch, lease_until AS leaseUntil
+             FROM turns`,
+        )
+        .get(),
+      {
+        state: "terminal",
+        terminalKind: "install_upgrade_interrupted",
+        ownerEpoch: null,
+        leaseUntil: null,
+      },
+    );
+    assert.equal(
+      database
+        .openChatDatabase(installDir)
+        .prepare(
+          `SELECT COUNT(*) AS count FROM outbox
+            WHERE delivery_kind = 'error'
+              AND idempotency_key LIKE 'install-upgrade-interrupted:%'`,
+        )
+        .get().count,
+      1,
+    );
     assert.equal(
       database
         .openChatDatabase(installDir)
@@ -190,7 +228,7 @@ test("installer preflight refuses activation while an old accepted turn still ha
   }
 });
 
-test("installer preflight does not block current durable active turns", async () => {
+test("installer only interrupts current unfenced durable turns after runtime quiescence", async () => {
   const installDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-current-active-turn-"),
   );
@@ -229,11 +267,19 @@ test("installer preflight does not block current durable active turns", async ()
       );
     database.closeChatDatabase(installDir);
 
-    assert.doesNotThrow(() =>
-      installMigration.preflightChatInstallMigrations(installDir),
+    assert.throws(
+      () => database.migrateChatDatabaseForInstall(installDir),
+      /chat_database_canonical_run_drain_required:1/,
     );
     assert.doesNotThrow(() =>
-      database.migrateChatDatabaseForInstall(installDir),
+      installMigration.preflightChatInstallMigrations(installDir, undefined, {
+        runtimeWillBeQuiesced: true,
+      }),
+    );
+    assert.doesNotThrow(() =>
+      database.migrateChatDatabaseForInstall(installDir, {
+        runtimeQuiesced: true,
+      }),
     );
     assert.deepEqual(
       database
@@ -245,7 +291,7 @@ test("installer preflight does not block current durable active turns", async ()
         )
         .get(item.itemId),
       {
-        state: "pending",
+        state: "terminal",
         owner_epoch: null,
         lease_until: null,
         admission_json: decisionJson,
@@ -256,7 +302,87 @@ test("installer preflight does not block current durable active turns", async ()
       database.readAdmissionModelInstallMigrationSummary(
         database.openChatDatabase(installDir),
       ).releasedCurrentClaims,
-      1,
+      0,
+    );
+  } finally {
+    database.closeChatDatabase(installDir);
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
+test("installer preserves a fenced canonical run for WAL recovery", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-canonical-install-preserve-"),
+  );
+  try {
+    database.migrateChatDatabaseForInstall(installDir);
+    const item = inbox.enqueueChatInboxItem(installDir, {
+      chatKey: "discord/1:2",
+      messageId: "canonical-running-message",
+      session: {
+        platform: "discord",
+        selfId: "1",
+        channelId: "2",
+        messageId: "canonical-running-message",
+        content: "keep canonical",
+        stripped: { content: "keep canonical" },
+      },
+      elements: [{ type: "text", attrs: { content: "keep canonical" } }],
+    }).item;
+    const claim = inbox.claimChatInboxItem(installDir, item.itemId);
+    assert.ok(claim);
+    runStore.createCanonicalChatRun(installDir, {
+      producerIncarnation: "producer-before-install",
+      turnFence: {
+        agentDir: installDir,
+        turnId: claim.itemId,
+        chatKey: claim.chatKey,
+        messageId: claim.messageId,
+        ownerEpoch: claim.ownerEpoch,
+        attempt: claim.attemptCount,
+      },
+    });
+    const legacyAdmission = JSON.stringify({
+      version: 1,
+      kind: "legacy_message_projection",
+    });
+    database
+      .openChatDatabase(installDir)
+      .prepare(
+        `UPDATE turns
+            SET admission_state = 'actionable', admission_json = ?,
+                admission_hash = ?
+          WHERE turn_id = ?`,
+      )
+      .run(
+        legacyAdmission,
+        createHash("sha256").update(legacyAdmission).digest("hex"),
+        claim.itemId,
+      );
+    database.closeChatDatabase(installDir);
+
+    assert.doesNotThrow(() =>
+      installMigration.preflightChatInstallMigrations(installDir),
+    );
+    database.migrateChatDatabaseForInstall(installDir);
+    const db = database.openChatDatabase(installDir);
+    assert.deepEqual(
+      db
+        .prepare(`SELECT state, run_id AS runId FROM turns WHERE turn_id = ?`)
+        .get(claim.itemId),
+      { state: "running", runId: claim.itemId },
+    );
+    assert.equal(
+      db
+        .prepare(`SELECT admission_json FROM turns WHERE turn_id = ?`)
+        .get(claim.itemId).admission_json,
+      null,
+    );
+    assert.equal(
+      db
+        .prepare(`SELECT state FROM chat_runs WHERE run_id = ?`)
+        .get(claim.itemId).state,
+      "running",
     );
   } finally {
     database.closeChatDatabase(installDir);
@@ -570,12 +696,13 @@ test("installer consumes accepted messages that predate atomic inbox turns", asy
   }
 });
 
-test("install migration never emits owner-visible chat errors", async () => {
+test("install migration only emits the explicit quiesced-runtime interruption notice", async () => {
   const source = await fs.readFile(
     path.join(rootDir, "src/core/chat/database-install-migration.ts"),
     "utf8",
   );
-  assert.doesNotMatch(source, /INSERT INTO outbox|enqueueInterruptedUnknown/);
+  assert.match(source, /install-upgrade-interrupted:/);
+  assert.doesNotMatch(source, /enqueueInterruptedUnknown/);
 });
 
 test("ordinary chat execution source contains no old-admission compatibility", async () => {
@@ -771,6 +898,7 @@ test("elevated installer preflight runs the staged migration as target user", as
       elevated: true,
       migrationRuntimeRoot: "/srv/rin/app/releases/staged",
       targetNodePath: "/srv/rin/runtime/node/current/bin/node",
+      chatRuntimeWillBeQuiesced: true,
     },
     {
       runPrivileged() {},
@@ -795,6 +923,7 @@ test("elevated installer preflight runs the staged migration as target user", as
       args: [
         "/srv/rin/app/releases/staged/dist/app/rin-install/chat-migrations.js",
         "--preflight",
+        "--runtime-will-be-quiesced",
         "/srv/rin",
       ],
     },
@@ -854,7 +983,7 @@ test("installer upgrade migrations own chat key and SQLite authority migration",
       { "lark/cli_bot:oc_same": { quietMode: true } },
     );
     const db = database.openChatDatabase(installDir);
-    assert.equal(Number(db.pragma("user_version", { simple: true })), 6);
+    assert.equal(Number(db.pragma("user_version", { simple: true })), 7);
     assert.equal(
       db
         .prepare(
@@ -962,7 +1091,7 @@ test("runtime database open rejects an old schema instead of upgrading it", asyn
 
     assert.throws(
       () => database.openChatDatabase(agentDir),
-      /chat_database_schema_upgrade_required:3:6/,
+      /chat_database_schema_upgrade_required:3:7/,
     );
   } finally {
     database.closeChatDatabase(agentDir);

@@ -121,6 +121,7 @@ function importInstalledLegacySessionBindings(agentDir: string) {
 export function preflightChatInstallMigrations(
   agentDirInput: string,
   settingsPathInput?: string,
+  options: { runtimeWillBeQuiesced?: boolean } = {},
 ) {
   const agentDir = path.resolve(agentDirInput);
   const settingsPath = settingsPathInput
@@ -129,7 +130,7 @@ export function preflightChatInstallMigrations(
   const settings = readInstalledSettings(settingsPath);
   const keyMigration = preflightLegacyChatKeys(agentDir, settings);
   validateResolvedChatKeyLedger(agentDir);
-  const database = preflightChatDatabaseMigrationForInstall(agentDir);
+  const database = preflightChatDatabaseMigrationForInstall(agentDir, options);
   const stateFiles = listChatStateFiles(
     chatDataPath(agentDir, "session-state"),
   );
@@ -149,6 +150,7 @@ export function preflightChatInstallMigrations(
 export function runChatInstallMigrations(
   agentDirInput: string,
   settingsPathInput?: string,
+  options: { runtimeQuiesced?: boolean } = {},
 ) {
   const agentDir = path.resolve(agentDirInput);
   const settingsPath = settingsPathInput
@@ -160,7 +162,7 @@ export function runChatInstallMigrations(
     readInstalledSettings(settingsPath),
   );
   try {
-    const db = migrateChatDatabaseForInstall(agentDir);
+    const db = migrateChatDatabaseForInstall(agentDir, options);
     const oldAdmissions = readAdmissionModelInstallMigrationSummary(db);
     validateResolvedChatKeyLedger(agentDir);
     const deferredRecords = keyMigration.alreadyApplied

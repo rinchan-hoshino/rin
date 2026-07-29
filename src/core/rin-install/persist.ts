@@ -149,6 +149,8 @@ type InstallMigrationOptions = {
   installDir?: string;
   migrationRuntimeRoot?: string;
   targetNodePath?: string;
+  chatRuntimeWillBeQuiesced?: boolean;
+  chatRuntimeQuiesced?: boolean;
 };
 
 type InstallMigrationFileOps = {
@@ -901,10 +903,19 @@ function preflightInstalledChatAuthority(
       options,
       deps,
       safeString(options.targetNodePath).trim() || process.execPath,
-      [runnerPath, "--preflight", path.resolve(options.installDir)],
+      [
+        runnerPath,
+        "--preflight",
+        ...(options.chatRuntimeWillBeQuiesced
+          ? ["--runtime-will-be-quiesced"]
+          : []),
+        path.resolve(options.installDir),
+      ],
     );
   } else {
-    preflightChatInstallMigrations(options.installDir);
+    preflightChatInstallMigrations(options.installDir, undefined, {
+      runtimeWillBeQuiesced: options.chatRuntimeWillBeQuiesced,
+    });
   }
   return {
     id: "chat-authority-install-migration-v1-preflight",
@@ -931,7 +942,11 @@ function migrateInstalledChatAuthority(
       options,
       deps,
       safeString(options.targetNodePath).trim() || process.execPath,
-      [runnerPath, path.resolve(options.installDir)],
+      [
+        runnerPath,
+        ...(options.chatRuntimeQuiesced ? ["--runtime-quiesced"] : []),
+        path.resolve(options.installDir),
+      ],
     );
     return {
       id: "chat-authority-install-migration-v1",
@@ -942,7 +957,9 @@ function migrateInstalledChatAuthority(
   return {
     id: "chat-authority-install-migration-v1",
     skipped: false,
-    ...runChatInstallMigrations(options.installDir),
+    ...runChatInstallMigrations(options.installDir, undefined, {
+      runtimeQuiesced: options.chatRuntimeQuiesced,
+    }),
   };
 }
 
@@ -953,6 +970,7 @@ export function preflightInstallUpgradeMigrations(
     elevated?: boolean;
     migrationRuntimeRoot?: string;
     targetNodePath?: string;
+    chatRuntimeWillBeQuiesced?: boolean;
   },
   deps: InstallMigrationCommandDeps,
 ) {
@@ -969,6 +987,7 @@ export function applyInstallUpgradeMigrations(
     elevated?: boolean;
     migrationRuntimeRoot?: string;
     targetNodePath?: string;
+    chatRuntimeQuiesced?: boolean;
   },
   deps: InstallMigrationCommandDeps,
 ) {
@@ -1341,6 +1360,8 @@ export function normalizeInstalledChatSettings(
     currentReleaseRoot?: string;
     migrationRuntimeRoot?: string;
     targetNodePath?: string;
+    chatRuntimeWillBeQuiesced?: boolean;
+    chatRuntimeQuiesced?: boolean;
   },
   deps: {
     findSystemUser: (targetUser: string) => any;
@@ -1409,6 +1430,8 @@ export async function persistInstallerOutputs(
     currentReleaseRoot?: string;
     migrationRuntimeRoot?: string;
     targetNodePath?: string;
+    chatRuntimeWillBeQuiesced?: boolean;
+    chatRuntimeQuiesced?: boolean;
     managedFiles?: ManagedFilesManifest;
     previousReleaseName?: string;
     previousReleaseRoot?: string;

@@ -73,6 +73,12 @@ function createFrontendClient() {
           finalText: "frontend final",
           sessionId: "frontend-session",
           sessionFile,
+          ...(options.chatRunContext
+            ? {
+                chatRunContext: options.chatRunContext,
+                terminalWal: { payloadHash: "a".repeat(64) },
+              }
+            : {}),
         },
       });
     },
@@ -303,6 +309,25 @@ test("terminal listener failures remain terminal while becoming observable", asy
   assert.equal(failures.length, 1);
   assert.equal(failures[0].stage, "terminal_listener");
   assert.equal(failures[0].frontendEvent.type, "turn_complete");
+});
+
+test("frontend turn driver propagates canonical run identity through terminal projection", async () => {
+  const driver = createDriver() as any;
+  const chatRunContext = {
+    runId: "run-protocol",
+    ownerEpoch: "owner-protocol",
+    producerIncarnation: "worker-protocol",
+  };
+  const result = await driver.runTurn({
+    text: "canonical prompt",
+    requestTag: "request-protocol",
+    chatRunContext,
+  });
+  const promptCall = driver.testClient.calls.find(
+    (call) => call.type === "prompt",
+  );
+  assert.deepEqual(promptCall.options.chatRunContext, chatRunContext);
+  assert.equal(result.finalText, "frontend final");
 });
 
 test("backend working visibility is the only shared frontend Working source", async () => {

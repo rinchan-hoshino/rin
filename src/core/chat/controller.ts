@@ -65,6 +65,18 @@ import {
 } from "../rin-lib/chat-outbox.js";
 import { drainChatOutbox } from "./boot.js";
 import {
+  attachChatTurnToRun,
+  commitCanonicalChatRunTerminal,
+  createCanonicalChatRun,
+  loadCanonicalChatRunForRecovery,
+  type CanonicalChatRun,
+  type CanonicalChatRunFence,
+} from "./run-store.js";
+import {
+  commitChatTerminalWal,
+  verifyChatTerminalWal,
+} from "../rin-daemon/chat-terminal-wal.js";
+import {
   advanceChatGeneration,
   completeChatTurnWithoutDelivery,
   markChatMessageAcceptedWithFence,
@@ -350,6 +362,7 @@ export class ChatController {
   activeWorkingIndicators: WorkingIndicator[] = [];
   workingIndicatorTick = 0;
   currentTurn: ChatTurnMeta | null = null;
+  activeCanonicalRun: CanonicalChatRun | null = null;
   compactionTurn: ChatTurnMeta | null = null;
   compactionWorkingIndicators: WorkingIndicator[] = [];
   compactionReactionTick = 0;
@@ -477,6 +490,7 @@ export class ChatController {
     void this.clearWorkingReaction().catch(() => {});
     void this.clearCompactionWorkingReaction().catch(() => {});
     this.currentTurn = null;
+    this.activeCanonicalRun = null;
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
@@ -516,6 +530,7 @@ export class ChatController {
     await this.clearWorkingReaction().catch(() => {});
     await this.clearCompactionWorkingReaction().catch(() => {});
     this.currentTurn = null;
+    this.activeCanonicalRun = null;
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
@@ -559,6 +574,44 @@ export class ChatController {
     return `chat-inbox-${sha256Hex(
       JSON.stringify([this.chatKey, normalizedMessageId, fence?.turnId || ""]),
     )}`;
+  }
+
+  private ensureCanonicalRun(turnFence?: ChatOutboxTurnFence) {
+    if (this.activeCanonicalRun) return this.activeCanonicalRun;
+    if (!turnFence) return undefined;
+    this.activeCanonicalRun = createCanonicalChatRun(this.agentDir, {
+      turnFence,
+      producerIncarnation: crypto.randomUUID(),
+    });
+    return this.activeCanonicalRun;
+  }
+
+  private recoverCanonicalRunEvent(
+    chatRunContext?: CanonicalChatRunFence,
+    requestTag?: string,
+  ) {
+    if (!chatRunContext || this.activeCanonicalRun) return;
+    const recovered = loadCanonicalChatRunForRecovery(
+      this.agentDir,
+      chatRunContext,
+    );
+    if (!recovered || recovered.run.chatKey !== this.chatKey) return;
+    this.activeCanonicalRun = recovered.run;
+    this.setCurrentTurn({
+      ...recovered.turn,
+      requestTag: safeString(requestTag).trim() || undefined,
+    });
+  }
+
+  private acceptsCanonicalRunEvent(chatRunContext?: CanonicalChatRunFence) {
+    if (!chatRunContext) return !this.activeCanonicalRun;
+    const active = this.activeCanonicalRun;
+    return Boolean(
+      active &&
+      active.runId === chatRunContext.runId &&
+      active.ownerEpoch === chatRunContext.ownerEpoch &&
+      active.producerIncarnation === chatRunContext.producerIncarnation,
+    );
   }
 
   private acceptsScopedTurnEvent(requestTag?: string) {
@@ -819,6 +872,18 @@ export class ChatController {
         requestTag: this.currentTurn?.requestTag,
         outboxTurnFence: this.currentTurn?.outboxTurnFence,
       });
+    }
+    if (this.activeCanonicalRun && target?.outboxTurnFence) {
+      attachChatTurnToRun(this.agentDir, {
+        runId: this.activeCanonicalRun.runId,
+        ownerEpoch: this.activeCanonicalRun.ownerEpoch,
+        producerIncarnation: this.activeCanonicalRun.producerIncarnation,
+        turnFence: target.outboxTurnFence,
+      });
+      this.activeCanonicalRun = {
+        ...this.activeCanonicalRun,
+        deliveryTurnId: target.outboxTurnFence.turnId,
+      };
     }
     this.saveState();
     const nextTurn = {
@@ -1801,6 +1866,8 @@ export class ChatController {
       turnFence?: ChatOutboxTurnFence;
       nonTerminalError?: boolean;
       supersedeTurnFences?: ChatOutboxTurnFence[];
+      canonicalRunFence?: CanonicalChatRunFence;
+      terminalWalPayloadHash?: string;
     } = {},
   ) {
     const idempotencyKey = safeString(options.idempotencyKey).trim();
@@ -1825,10 +1892,42 @@ export class ChatController {
       return chatDeliveryOutcome([], { accepted: false });
     }
     await validateChatOutboxPayloadForDispatch(normalizedPayload, this.h);
-    const outboxId = enqueueChatOutboxPayload(
-      this.agentDir,
-      normalizedPayload,
-      {
+    let outboxId: string;
+    if (options.canonicalRunFence) {
+      if (deliveryKind !== "final" && deliveryKind !== "error") {
+        throw new Error("chat_run_invalid_terminal_delivery_kind");
+      }
+      const terminalWalPayloadHash = safeString(
+        options.terminalWalPayloadHash,
+      ).trim();
+      if (!terminalWalPayloadHash) {
+        throw new Error("chat_terminal_wal_missing");
+      }
+      verifyChatTerminalWal(this.agentDir, {
+        ...options.canonicalRunFence,
+        payloadHash: terminalWalPayloadHash,
+      });
+      outboxId = commitCanonicalChatRunTerminal(
+        this.agentDir,
+        options.canonicalRunFence,
+        normalizedPayload,
+        {
+          deliveryKind,
+          enqueueOptions: {
+            id,
+            postDelivery: options.postDelivery,
+            nonTerminalError: options.nonTerminalError,
+            supersedeTurnFences: options.supersedeTurnFences,
+          },
+        },
+      ).outboxId;
+      commitChatTerminalWal(this.agentDir, {
+        ...options.canonicalRunFence,
+        payloadHash: terminalWalPayloadHash,
+        outboxId,
+      });
+    } else {
+      outboxId = enqueueChatOutboxPayload(this.agentDir, normalizedPayload, {
         ...options,
         turnFence:
           options.turnFence ||
@@ -1836,8 +1935,8 @@ export class ChatController {
           this.currentTurn?.outboxTurnFence ||
           this.activeCommandTurnInput?.outboxTurnFence,
         id,
-      },
-    );
+      });
+    }
     const results = await drainChatOutbox(
       this.app,
       this.agentDir,
@@ -1914,6 +2013,8 @@ export class ChatController {
       idempotencyKey?: string;
       turnFence?: ChatOutboxTurnFence;
       supersedeTurnFences?: ChatOutboxTurnFence[];
+      canonicalRunFence?: CanonicalChatRunFence;
+      terminalWalPayloadHash?: string;
     } = {},
   ) {
     const pending = this.stagedDelivery;
@@ -1941,6 +2042,7 @@ export class ChatController {
     if (clearProcessing) {
       await this.clearWorkingReaction().catch(() => {});
       this.currentTurn = null;
+      this.activeCanonicalRun = null;
       this.coalescedDeliveryTargets = [];
     }
     return outcome;
@@ -2044,6 +2146,8 @@ export class ChatController {
     idempotencyKey?: string;
     outboxTurnFence?: ChatOutboxTurnFence;
     supersedeTurnFences?: ChatOutboxTurnFence[];
+    canonicalRunFence?: CanonicalChatRunFence;
+    terminalWalPayloadHash?: string;
   }) {
     const bindSession = input.bindSession !== false && this.affectChatBinding;
     const text = this.stageAssistantDelivery({ ...input, bindSession });
@@ -2094,6 +2198,8 @@ export class ChatController {
         idempotencyKey,
         turnFence: input.outboxTurnFence || activeCommandFence,
         supersedeTurnFences: input.supersedeTurnFences,
+        canonicalRunFence: input.canonicalRunFence,
+        terminalWalPayloadHash: input.terminalWalPayloadHash,
       },
     );
     if (delivery?.accepted !== false && delivery?.settled !== false) {
@@ -3033,8 +3139,12 @@ export class ChatController {
         });
       }
       try {
+        const canonicalRun = this.ensureCanonicalRun(
+          this.currentTurn?.outboxTurnFence,
+        );
         const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
           text: submittedText,
+          chatRunContext: canonicalRun,
           images,
           assumeConnected: frontendReady === true,
           assumeSessionReady:
@@ -3117,8 +3227,10 @@ export class ChatController {
           text,
           input.promptMeta,
         );
+        const canonicalRun = this.ensureCanonicalRun(input.outboxTurnFence);
         const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
           text: submittedText,
+          chatRunContext: canonicalRun,
           images,
           assumeConnected: frontendReady === true,
           assumeSessionReady:
@@ -3310,6 +3422,8 @@ export class ChatController {
     finalText?: string;
     result?: unknown;
     sessionFile?: string;
+    chatRunContext?: CanonicalChatRunFence;
+    terminalWal?: { payloadHash: string };
   }) {
     if (!this.currentTurn) return;
     const deliveryTarget = this.currentDeliveryTarget(this.currentTurn);
@@ -3331,7 +3445,22 @@ export class ChatController {
         outboxTurnFence: deliveryTarget.outboxTurnFence,
         sessionFile: event.sessionFile || this.currentSessionFile(),
         supersedeTurnFences,
+        canonicalRunFence: event.chatRunContext,
+        terminalWalPayloadHash: event.terminalWal?.payloadHash,
         clearProcessing: true,
+      });
+    } else if (event.chatRunContext) {
+      await this.deliverAssistantReply({
+        text: "rin error: empty assistant completion",
+        replyToMessageId: deliveryTarget.replyToMessageId,
+        incomingMessageId: deliveryTarget.incomingMessageId,
+        outboxTurnFence: deliveryTarget.outboxTurnFence,
+        sessionFile: event.sessionFile || this.currentSessionFile(),
+        supersedeTurnFences,
+        canonicalRunFence: event.chatRunContext,
+        terminalWalPayloadHash: event.terminalWal?.payloadHash,
+        clearProcessing: true,
+        deliveryKind: "error",
       });
     } else {
       await this.settleEmptyAssistantCompletion({
@@ -3342,6 +3471,7 @@ export class ChatController {
       });
     }
     this.awaitingTurnSettle = false;
+    if (event.chatRunContext) this.activeCanonicalRun = null;
     this.clearCurrentTurn();
     this.pendingSubmittedDeliveryTargets = [];
     this.coalescedDeliveryTargets = [];
@@ -3352,6 +3482,8 @@ export class ChatController {
   private async settleProjectedTurnError(event: {
     error?: string;
     sessionFile?: string;
+    chatRunContext?: CanonicalChatRunFence;
+    terminalWal?: { payloadHash: string };
   }) {
     if (!this.currentTurn) return;
     const errorMessage = safeString(event.error).trim() || "rpc_turn_failed";
@@ -3369,10 +3501,13 @@ export class ChatController {
       outboxTurnFence: deliveryTarget.outboxTurnFence,
       sessionFile: event.sessionFile || this.currentSessionFile(),
       supersedeTurnFences,
+      canonicalRunFence: event.chatRunContext,
+      terminalWalPayloadHash: event.terminalWal?.payloadHash,
       clearProcessing: true,
       deliveryKind: "error",
     });
     this.awaitingTurnSettle = false;
+    if (event.chatRunContext) this.activeCanonicalRun = null;
     this.clearCurrentTurn();
     this.pendingSubmittedDeliveryTargets = [];
     this.coalescedDeliveryTargets = [];
@@ -3489,12 +3624,24 @@ export class ChatController {
         }
         return;
       case "turn_complete":
-        if (this.acceptsScopedTurnEvent(event.requestTag)) {
+        if (event.chatRunContext) {
+          this.recoverCanonicalRunEvent(event.chatRunContext, event.requestTag);
+          if (!this.acceptsCanonicalRunEvent(event.chatRunContext)) {
+            throw new Error("chat_run_terminal_fence_mismatch");
+          }
+          await this.settleProjectedTurnComplete(event);
+        } else if (this.acceptsScopedTurnEvent(event.requestTag)) {
           await this.settleProjectedTurnComplete(event);
         }
         return;
       case "turn_error":
-        if (this.acceptsScopedTurnEvent(event.requestTag)) {
+        if (event.chatRunContext) {
+          this.recoverCanonicalRunEvent(event.chatRunContext, event.requestTag);
+          if (!this.acceptsCanonicalRunEvent(event.chatRunContext)) {
+            throw new Error("chat_run_terminal_fence_mismatch");
+          }
+          await this.settleProjectedTurnError(event);
+        } else if (this.acceptsScopedTurnEvent(event.requestTag)) {
           await this.settleProjectedTurnError(event);
         }
         return;

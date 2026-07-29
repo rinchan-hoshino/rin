@@ -6,7 +6,7 @@ import BetterSqlite3 from "better-sqlite3";
 
 import { chatDataPath } from "../data-layout.js";
 import { safeString } from "../text-utils.js";
-export const CHAT_DATABASE_SCHEMA_VERSION = 6;
+export const CHAT_DATABASE_SCHEMA_VERSION = 7;
 export const CHAT_ADMISSION_MODEL_VERSION = "1";
 
 const databaseCache = new Map<string, BetterSqlite3.Database>();
@@ -52,6 +52,7 @@ export function chatDatabaseSchemaFingerprint(db: BetterSqlite3.Database) {
 }
 
 const CHAT_DATABASE_TABLES = [
+  "chat_runs",
   "chat_state",
   "inbound_heads",
   "messages",
@@ -101,7 +102,11 @@ export function validateRecordedChatDatabaseSchema(
   version: number,
 ) {
   const currentTables = readChatDatabaseTables(db);
-  if (CHAT_DATABASE_TABLES.some((table) => !currentTables.has(table))) {
+  const expectedTables =
+    version >= 7
+      ? CHAT_DATABASE_TABLES
+      : CHAT_DATABASE_TABLES.filter((table) => table !== "chat_runs");
+  if (expectedTables.some((table) => !currentTables.has(table))) {
     throw new Error("chat_database_incomplete_schema");
   }
   const storedVersion = Number(
@@ -300,6 +305,7 @@ function initializeChatDatabase(
       submission_json TEXT,
       submission_hash TEXT,
       execution_session_file TEXT,
+      run_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -308,6 +314,43 @@ function initializeChatDatabase(
       ON turns(state, next_attempt_at, lease_until, chat_key, sequence);
     CREATE INDEX IF NOT EXISTS turns_chat_generation_idx
       ON turns(chat_key, generation, state, sequence);
+    CREATE INDEX IF NOT EXISTS turns_run_idx
+      ON turns(run_id, state, sequence)
+      WHERE run_id IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS chat_runs (
+      run_id TEXT PRIMARY KEY,
+      chat_key TEXT NOT NULL,
+      generation INTEGER NOT NULL CHECK (generation >= 0),
+      state TEXT NOT NULL
+        CHECK (state IN ('running', 'draining', 'terminal', 'manual_review')),
+      owner_epoch TEXT NOT NULL,
+      producer_incarnation TEXT NOT NULL,
+      delivery_turn_id TEXT NOT NULL REFERENCES turns(turn_id) ON DELETE RESTRICT,
+      terminal_delivery_turn_id TEXT REFERENCES turns(turn_id) ON DELETE RESTRICT,
+      terminal_kind TEXT,
+      terminal_payload_json TEXT,
+      terminal_payload_hash TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      terminal_at TEXT,
+      CHECK (
+        (state IN ('running', 'draining')
+          AND terminal_delivery_turn_id IS NULL
+          AND terminal_kind IS NULL
+          AND terminal_payload_json IS NULL
+          AND terminal_payload_hash IS NULL
+          AND terminal_at IS NULL)
+        OR
+        (state IN ('terminal', 'manual_review')
+          AND terminal_delivery_turn_id IS NOT NULL
+          AND terminal_kind IS NOT NULL
+          AND terminal_at IS NOT NULL)
+      )
+    );
+
+    CREATE INDEX IF NOT EXISTS chat_runs_state_idx
+      ON chat_runs(state, updated_at, chat_key);
 
     CREATE TABLE IF NOT EXISTS outbox (
       outbox_id TEXT PRIMARY KEY,

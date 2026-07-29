@@ -16,6 +16,11 @@ const { WorkerPool } = await import(
     path.join(rootDir, "dist", "core", "rin-daemon", "worker-pool.js"),
   ).href
 );
+const { listStagedChatTerminalWal, stageChatTerminalWal } = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-daemon", "chat-terminal-wal.js"),
+  ).href
+);
 const { takePendingTerminalTurnEvent } = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-daemon", "pending-turn-events.js"),
@@ -4756,6 +4761,56 @@ setInterval(() => {}, 1000);
 
   const pendingAfter = JSON.parse(await fs.readFile(pendingEventsPath, "utf8"));
   assert.equal(pendingAfter.eventsBySessionFile?.[sessionFile], undefined);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("worker pool replays staged canonical terminal WAL without consuming it", async () => {
+  const dir = await makeTempDir("rin-worker-pool-canonical-wal-");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const staged = stageChatTerminalWal(dir, {
+    runId: "canonical-run-replay",
+    ownerEpoch: "run-owner",
+    producerIncarnation: "worker-incarnation",
+    terminalKind: "complete",
+    terminalPayload: {
+      event: "complete",
+      requestTag: "run-request",
+      sessionFile,
+      sessionId: "run-session",
+      finalText: "canonical replay final",
+    },
+  });
+  const pool = new WorkerPool({
+    workerPath: path.join(dir, "unused-worker"),
+    cwd: dir,
+    agentDir: dir,
+  });
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        writes.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+
+  assert.equal(
+    pool.replayPendingTerminalTurnEvent(connection, { sessionFile }),
+    true,
+  );
+  const replayed = writes.map((value) => JSON.parse(value)).at(-1);
+  assert.deepEqual(replayed.chatRunContext, {
+    runId: staged.runId,
+    ownerEpoch: staged.ownerEpoch,
+    producerIncarnation: staged.producerIncarnation,
+  });
+  assert.equal(replayed.terminalWal.payloadHash, staged.payloadHash);
+  assert.equal(replayed.finalText, "canonical replay final");
+  assert.equal(listStagedChatTerminalWal(dir).length, 1);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });

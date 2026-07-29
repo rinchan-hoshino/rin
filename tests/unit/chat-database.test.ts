@@ -29,6 +29,10 @@ const chatDatabase = {
     ).href
   )),
 };
+const chatOutbox = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
+    .href
+);
 
 function runNodeProcess(code, env) {
   return new Promise((resolve, reject) => {
@@ -82,6 +86,7 @@ test("chat database owns message, turn, outbox, delivery, and chat generation st
     assert.deepEqual(
       tables.filter((name) => !name.startsWith("sqlite_")),
       [
+        "chat_runs",
         "chat_state",
         "inbound_heads",
         "messages",
@@ -103,10 +108,10 @@ test("chat database owns message, turn, outbox, delivery, and chat generation st
   });
 });
 
-test("chat database reopens the current version 6 durable admission layout", async () => {
+test("chat database reopens the current version 7 canonical run layout", async () => {
   await withTempDir(async (agentDir) => {
     const created = chatDatabase.openChatDatabase(agentDir);
-    assert.equal(created.pragma("user_version", { simple: true }), 6);
+    assert.equal(created.pragma("user_version", { simple: true }), 7);
     assert.deepEqual(
       created
         .prepare(`PRAGMA table_info(turns)`)
@@ -120,6 +125,7 @@ test("chat database reopens the current version 6 durable admission layout", asy
             "submission_json",
             "submission_hash",
             "execution_session_file",
+            "run_id",
           ].includes(name),
         ),
       [
@@ -129,17 +135,237 @@ test("chat database reopens the current version 6 durable admission layout", asy
         "submission_json",
         "submission_hash",
         "execution_session_file",
+        "run_id",
       ],
     );
     chatDatabase.closeChatDatabase(agentDir);
 
     const reopened = chatDatabase.openChatDatabase(agentDir);
-    assert.equal(reopened.pragma("user_version", { simple: true }), 6);
+    assert.equal(reopened.pragma("user_version", { simple: true }), 7);
     assert.equal(
       reopened
         .prepare(`SELECT value FROM schema_meta WHERE key = 'schema_version'`)
         .get().value,
-      "6",
+      "7",
+    );
+    assert.deepEqual(
+      reopened
+        .prepare(`PRAGMA table_info(chat_runs)`)
+        .all()
+        .map((column) => column.name),
+      [
+        "run_id",
+        "chat_key",
+        "generation",
+        "state",
+        "owner_epoch",
+        "producer_incarnation",
+        "delivery_turn_id",
+        "terminal_delivery_turn_id",
+        "terminal_kind",
+        "terminal_payload_json",
+        "terminal_payload_hash",
+        "created_at",
+        "updated_at",
+        "terminal_at",
+      ],
+    );
+  });
+});
+
+test("chat install migration preserves pending turns and interrupts running version 6 turns only after runtime quiescence", async () => {
+  await withTempDir(async (agentDir) => {
+    const db = chatDatabase.openChatDatabase(agentDir);
+    db.prepare(
+      `INSERT INTO chat_state (
+         chat_key, current_generation, next_sequence, updated_at
+       ) VALUES ('discord/1:2', 0, 2, '2026-07-29T00:00:00.000Z')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO messages (
+         id, record_key, chat_key, message_id, platform, chat_id,
+         received_at, sequence, generation, disposition, record_json
+       ) VALUES (
+         'legacy-message', 'legacy-record', 'discord/1:2', 'legacy',
+         'discord', '2', '2026-07-29T00:00:00.000Z', 1, 0,
+         'actionable', '{}'
+       )`,
+    ).run();
+    db.prepare(
+      `INSERT INTO turns (
+         turn_id, inbound_message_id, chat_key, generation, sequence, state,
+         terminal_kind, attempt, created_at, updated_at
+       ) VALUES (
+         'legacy-turn', 'legacy-message', 'discord/1:2', 0, 1,
+         'terminal', 'outbox_final', 1,
+         '2026-07-29T00:00:00.000Z', '2026-07-29T00:00:00.000Z'
+       )`,
+    ).run();
+    for (let sequence = 2; sequence <= 5; sequence += 1) {
+      db.prepare(
+        `INSERT INTO messages (
+           id, record_key, chat_key, message_id, platform, chat_id,
+           received_at, sequence, generation, disposition, record_json
+         ) VALUES (?, ?, 'discord/1:2', ?, 'discord', '2',
+                   '2026-07-29T00:00:00.000Z', ?, 0, 'actionable', '{}')`,
+      ).run(
+        `active-message-${sequence}`,
+        `active-record-${sequence}`,
+        `active-${sequence}`,
+        sequence,
+      );
+      db.prepare(
+        `INSERT INTO turns (
+           turn_id, inbound_message_id, chat_key, generation, sequence, state,
+           owner_epoch, attempt, created_at, updated_at
+         ) VALUES (?, ?, 'discord/1:2', 0, ?, 'running', ?, 1,
+                   '2026-07-29T00:00:00.000Z', '2026-07-29T00:00:00.000Z')`,
+      ).run(
+        `active-turn-${sequence}`,
+        `active-message-${sequence}`,
+        sequence,
+        `owner-${sequence}`,
+      );
+    }
+    db.prepare(
+      `INSERT INTO messages (
+         id, record_key, chat_key, message_id, platform, chat_id,
+         received_at, sequence, generation, disposition, record_json
+       ) VALUES (
+         'pending-message', 'pending-record', 'discord/1:2', 'pending',
+         'discord', '2', '2026-07-29T00:00:00.000Z', 6, 0,
+         'actionable', '{}'
+       )`,
+    ).run();
+    db.prepare(
+      `INSERT INTO turns (
+         turn_id, inbound_message_id, chat_key, generation, sequence, state,
+         attempt, created_at, updated_at
+       ) VALUES (
+         'pending-turn', 'pending-message', 'discord/1:2', 0, 6,
+         'pending', 0, '2026-07-29T00:00:00.000Z',
+         '2026-07-29T00:00:00.000Z'
+       )`,
+    ).run();
+    db.exec(`
+      DROP INDEX turns_run_idx;
+      DROP INDEX chat_runs_state_idx;
+      DROP TABLE chat_runs;
+      ALTER TABLE turns DROP COLUMN run_id;
+      UPDATE schema_meta SET value = '6' WHERE key = 'schema_version';
+      PRAGMA user_version = 6;
+    `);
+    const objects = db
+      .prepare(
+        `SELECT type, name, sql FROM sqlite_master
+         WHERE type IN ('table', 'index', 'trigger', 'view')
+           AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL
+         ORDER BY type, name`,
+      )
+      .all();
+    db.prepare(
+      `UPDATE schema_meta SET value = ? WHERE key = 'schema_fingerprint'`,
+    ).run(createHash("sha256").update(JSON.stringify(objects)).digest("hex"));
+    chatDatabase.closeChatDatabase(agentDir);
+
+    assert.throws(
+      () => chatDatabase.migrateChatDatabaseForInstall(agentDir),
+      /chat_database_canonical_run_drain_required:4/,
+    );
+    const BetterSqlite3 = (await import("better-sqlite3")).default;
+    const blocked = new BetterSqlite3(chatDatabase.chatDatabasePath(agentDir));
+    assert.equal(blocked.pragma("user_version", { simple: true }), 6);
+    assert.equal(
+      blocked
+        .prepare(
+          `SELECT COUNT(*) AS count FROM sqlite_master
+            WHERE type = 'table' AND name = 'chat_runs'`,
+        )
+        .get().count,
+      0,
+    );
+    blocked.close();
+
+    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir, {
+      runtimeQuiesced: true,
+    });
+    assert.equal(migrated.pragma("user_version", { simple: true }), 7);
+    assert.equal(
+      migrated
+        .prepare(`SELECT run_id FROM turns WHERE turn_id = 'legacy-turn'`)
+        .get().run_id,
+      null,
+    );
+    assert.deepEqual(
+      migrated
+        .prepare(
+          `SELECT state, terminal_kind AS terminalKind,
+                  owner_epoch AS ownerEpoch, lease_until AS leaseUntil,
+                  heartbeat_at AS heartbeatAt, run_id AS runId
+             FROM turns
+            WHERE turn_id LIKE 'active-turn-%'
+            ORDER BY turn_id`,
+        )
+        .all(),
+      Array.from({ length: 4 }, () => ({
+        state: "terminal",
+        terminalKind: "install_upgrade_interrupted",
+        ownerEpoch: null,
+        leaseUntil: null,
+        heartbeatAt: null,
+        runId: null,
+      })),
+    );
+    assert.deepEqual(
+      migrated
+        .prepare(
+          `SELECT state, run_id AS runId
+             FROM turns WHERE turn_id = 'pending-turn'`,
+        )
+        .get(),
+      { state: "pending", runId: null },
+    );
+    const migrationOutbox = migrated
+      .prepare(
+        `SELECT turn_id AS turnId, delivery_kind AS deliveryKind,
+                idempotency_key AS idempotencyKey, payload_json AS payloadJson
+           FROM outbox
+          WHERE idempotency_key LIKE 'install-upgrade-interrupted:%'
+          ORDER BY turn_id`,
+      )
+      .all();
+    assert.equal(migrationOutbox.length, 4);
+    for (const row of migrationOutbox) {
+      assert.equal(row.deliveryKind, "error");
+      assert.equal(
+        row.idempotencyKey,
+        `install-upgrade-interrupted:${row.turnId}`,
+      );
+      assert.match(row.payloadJson, /updated while this turn was running/i);
+      assert.match(row.payloadJson, /send your request again/i);
+    }
+    const parsedOutbox = chatOutbox.listChatOutboxItems(agentDir);
+    assert.equal(parsedOutbox.length, 4);
+    assert.deepEqual(
+      parsedOutbox.map(({ item }) => item.deliveryKind),
+      ["error", "error", "error", "error"],
+    );
+    assert.equal(
+      migrated
+        .prepare(
+          `SELECT COUNT(*) AS count
+             FROM outbox_deliveries
+            WHERE outbox_id IN (
+              SELECT outbox_id FROM outbox
+               WHERE idempotency_key LIKE 'install-upgrade-interrupted:%'
+            )`,
+        )
+        .get().count,
+      4,
+    );
+    assert.equal(
+      migrated.prepare(`SELECT COUNT(*) AS count FROM chat_runs`).get().count,
+      0,
     );
   });
 });
@@ -238,12 +464,12 @@ test("chat database migrates the version 1 terminal outbox index", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 6);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 7);
     assert.equal(
       migrated
         .prepare(`SELECT value FROM schema_meta WHERE key = 'schema_version'`)
         .get().value,
-      "6",
+      "7",
     );
     const indexSql = migrated
       .prepare(
@@ -292,7 +518,7 @@ test("chat database migrates version 2 session binding authority", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 6);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 7);
     assert.ok(
       migrated
         .prepare(`PRAGMA table_info(chat_state)`)
@@ -333,7 +559,7 @@ test("chat database migrates version 3 dispatch evidence", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 6);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 7);
     assert.ok(
       migrated
         .prepare(`PRAGMA table_info(outbox)`)
@@ -373,7 +599,7 @@ test("chat database migrates version 4 inbound recovery lease state", async () =
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 6);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 7);
     const columns = new Set(
       migrated
         .prepare(`PRAGMA table_info(inbound_heads)`)
@@ -443,7 +669,7 @@ test("chat install migration terminalizes ambiguous accepted version 5 turns", a
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 6);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 7);
     assert.deepEqual(
       migrated
         .prepare(
@@ -596,7 +822,7 @@ test("chat database serializes concurrent cold initialization", async () => {
       ),
     );
     const db = chatDatabase.openChatDatabase(agentDir);
-    assert.equal(db.pragma("user_version", { simple: true }), 6);
+    assert.equal(db.pragma("user_version", { simple: true }), 7);
     assert.deepEqual(
       db
         .prepare(`SELECT key FROM schema_meta ORDER BY key`)

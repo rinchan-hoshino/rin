@@ -30,6 +30,9 @@ const database = await import(
 const inbox = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
 );
+const runStore = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "run-store.js")).href
+);
 
 async function withTempDir(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-outbox-sqlite-"));
@@ -77,6 +80,178 @@ function h() {
     },
   };
 }
+
+test("canonical run terminal atomically freezes the latest steer owner and settles every linked turn", async () => {
+  await withTempDir(async (dir) => {
+    const root = inbox.enqueueChatInboxItem(dir, {
+      chatKey: "telegram/777:1",
+      messageId: "run-root",
+      session: {
+        platform: "telegram",
+        selfId: "777",
+        channelId: "1",
+        messageId: "run-root",
+        content: "start",
+      },
+      elements: [{ type: "text", attrs: { content: "start" } }],
+    }).item;
+    const rootClaim = inbox.claimChatInboxItem(dir, root.itemId);
+    const rootFence = {
+      agentDir: dir,
+      turnId: rootClaim.itemId,
+      chatKey: rootClaim.chatKey,
+      messageId: rootClaim.messageId,
+      ownerEpoch: rootClaim.ownerEpoch,
+      attempt: rootClaim.attemptCount,
+    };
+    const run = runStore.createCanonicalChatRun(dir, {
+      turnFence: rootFence,
+      producerIncarnation: "worker-incarnation-a",
+    });
+
+    const steer = inbox.enqueueChatInboxItem(dir, {
+      chatKey: "telegram/777:1",
+      messageId: "run-steer",
+      session: {
+        platform: "telegram",
+        selfId: "777",
+        channelId: "1",
+        messageId: "run-steer",
+        content: "steer",
+      },
+      elements: [{ type: "text", attrs: { content: "steer" } }],
+    }).item;
+    const steerClaim = inbox.claimChatInboxItem(dir, steer.itemId);
+    runStore.attachChatTurnToRun(dir, {
+      runId: run.runId,
+      ownerEpoch: run.ownerEpoch,
+      producerIncarnation: run.producerIncarnation,
+      turnFence: {
+        agentDir: dir,
+        turnId: steerClaim.itemId,
+        chatKey: steerClaim.chatKey,
+        messageId: steerClaim.messageId,
+        ownerEpoch: steerClaim.ownerEpoch,
+        attempt: steerClaim.attemptCount,
+      },
+    });
+
+    const committed = runStore.commitCanonicalChatRunTerminal(
+      dir,
+      {
+        runId: run.runId,
+        ownerEpoch: run.ownerEpoch,
+        producerIncarnation: run.producerIncarnation,
+      },
+      payload("finished after steer"),
+      { deliveryKind: "final" },
+    );
+    const db = database.openChatDatabase(dir);
+    assert.equal(committed.status, "committed");
+    assert.deepEqual(
+      db
+        .prepare(
+          `SELECT state, delivery_turn_id, terminal_delivery_turn_id,
+                  terminal_kind
+             FROM chat_runs WHERE run_id = ?`,
+        )
+        .get(run.runId),
+      {
+        state: "terminal",
+        delivery_turn_id: steerClaim.itemId,
+        terminal_delivery_turn_id: steerClaim.itemId,
+        terminal_kind: "final",
+      },
+    );
+    assert.deepEqual(
+      db
+        .prepare(
+          `SELECT turn_id, state, terminal_kind
+             FROM turns WHERE run_id = ? ORDER BY sequence`,
+        )
+        .all(run.runId),
+      [
+        {
+          turn_id: rootClaim.itemId,
+          state: "superseded",
+          terminal_kind: "run_superseded",
+        },
+        {
+          turn_id: steerClaim.itemId,
+          state: "terminal",
+          terminal_kind: "outbox_final",
+        },
+      ],
+    );
+    assert.deepEqual(
+      db
+        .prepare(
+          `SELECT turn_id, delivery_kind, idempotency_key
+             FROM outbox WHERE idempotency_key = ?`,
+        )
+        .get(`terminal:${run.runId}`),
+      {
+        turn_id: steerClaim.itemId,
+        delivery_kind: "final",
+        idempotency_key: `terminal:${run.runId}`,
+      },
+    );
+  });
+});
+
+test("canonical run terminal rejects a stale producer without writing outbox", async () => {
+  await withTempDir(async (dir) => {
+    const inbound = inbox.enqueueChatInboxItem(dir, {
+      chatKey: "telegram/777:1",
+      messageId: "stale-producer",
+      session: {
+        platform: "telegram",
+        selfId: "777",
+        channelId: "1",
+        messageId: "stale-producer",
+        content: "question",
+      },
+      elements: [{ type: "text", attrs: { content: "question" } }],
+    }).item;
+    const claim = inbox.claimChatInboxItem(dir, inbound.itemId);
+    const run = runStore.createCanonicalChatRun(dir, {
+      turnFence: {
+        agentDir: dir,
+        turnId: claim.itemId,
+        chatKey: claim.chatKey,
+        messageId: claim.messageId,
+        ownerEpoch: claim.ownerEpoch,
+        attempt: claim.attemptCount,
+      },
+      producerIncarnation: "worker-incarnation-current",
+    });
+
+    assert.throws(
+      () =>
+        runStore.commitCanonicalChatRunTerminal(
+          dir,
+          {
+            runId: run.runId,
+            ownerEpoch: run.ownerEpoch,
+            producerIncarnation: "worker-incarnation-stale",
+          },
+          payload("stale final"),
+          { deliveryKind: "final" },
+        ),
+      /chat_run_stale_producer/,
+    );
+    const db = database.openChatDatabase(dir);
+    assert.equal(
+      db.prepare(`SELECT COUNT(*) AS count FROM outbox`).get().count,
+      0,
+    );
+    assert.equal(
+      db.prepare(`SELECT state FROM chat_runs WHERE run_id = ?`).get(run.runId)
+        .state,
+      "running",
+    );
+  });
+});
 
 test("nonterminal error outbox requires and preserves a durable turn fence", async () => {
   await withTempDir(async (dir) => {

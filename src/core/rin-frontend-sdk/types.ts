@@ -74,6 +74,12 @@ export type RinFrontendStatusPhase =
   | "compacting"
   | "retrying";
 
+export type RinChatRunContext = {
+  runId: string;
+  ownerEpoch: string;
+  producerIncarnation: string;
+};
+
 export type RinFrontendBackendEvent =
   | {
       type: "status";
@@ -112,6 +118,8 @@ export type RinFrontendBackendEvent =
       sessionId?: string;
       sessionFile?: string;
       requestTag?: string;
+      chatRunContext?: RinChatRunContext;
+      terminalWal?: { payloadHash: string };
     }
   | {
       type: "turn_complete";
@@ -120,6 +128,8 @@ export type RinFrontendBackendEvent =
       sessionId?: string;
       sessionFile?: string;
       requestTag?: string;
+      chatRunContext?: RinChatRunContext;
+      terminalWal?: { payloadHash: string };
     }
   | {
       type: "turn_error";
@@ -127,6 +137,8 @@ export type RinFrontendBackendEvent =
       sessionId?: string;
       sessionFile?: string;
       requestTag?: string;
+      chatRunContext?: RinChatRunContext;
+      terminalWal?: { payloadHash: string };
     };
 
 export type RinFrontendEvent =
@@ -224,6 +236,7 @@ export type RinPromptOptions = {
   source?: string;
   frontendIdentity?: RinFrontendIdentity;
   requestTag?: string;
+  chatRunContext?: RinChatRunContext;
   promptContext?: RinPromptContext;
   sessionFile?: string;
   sessionId?: string;

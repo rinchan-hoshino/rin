@@ -1675,17 +1675,28 @@ test("chat main does not retry a queued prompt while the controller is already h
           },
           prompt: async (_message, options = {}) => {
             promptCalls += 1;
-            setTimeout(() => {
+            setTimeout(async () => {
+              const walMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "chat-terminal-wal.js")).href);
+              const terminalPayload = {
+                event: "complete",
+                requestTag: options.requestTag,
+                finalText: "slow reply",
+                result: { messages: [{ type: "text", text: "slow reply" }] },
+                sessionId: "slow-session",
+                sessionFile: "/tmp/slow-chat.jsonl",
+              };
+              const staged = walMod.stageChatTerminalWal(agentDir, {
+                ...options.chatRunContext,
+                terminalKind: "complete",
+                terminalPayload,
+              });
               controller.handleClientEvent({
                 type: "ui",
                 payload: {
                   type: "rpc_turn_event",
-                  event: "complete",
-                  requestTag: options.requestTag,
-                  finalText: "slow reply",
-                  result: { messages: [{ type: "text", text: "slow reply" }] },
-                  sessionId: "slow-session",
-                  sessionFile: "/tmp/slow-chat.jsonl",
+                  ...terminalPayload,
+                  chatRunContext: options.chatRunContext,
+                  terminalWal: { payloadHash: staged.payloadHash },
                 },
               });
             }, 10);
