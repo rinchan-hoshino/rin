@@ -6,7 +6,7 @@ import BetterSqlite3 from "better-sqlite3";
 
 import { chatDataPath } from "../data-layout.js";
 import { safeString } from "../text-utils.js";
-export const CHAT_DATABASE_SCHEMA_VERSION = 7;
+export const CHAT_DATABASE_SCHEMA_VERSION = 8;
 export const CHAT_ADMISSION_MODEL_VERSION = "1";
 
 const databaseCache = new Map<string, BetterSqlite3.Database>();

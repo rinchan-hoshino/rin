@@ -13,9 +13,11 @@ import {
   importLegacyChatSessionBinding,
 } from "./database.js";
 import {
+  completeCanonicalReconciliationInstallState,
   migrateChatDatabaseForInstall,
   preflightChatDatabaseMigrationForInstall,
   readAdmissionModelInstallMigrationSummary,
+  readCanonicalReconciliationInstallState,
 } from "./database-install-migration.js";
 import {
   readLegacyControlMigrationPreservedSummary,
@@ -90,6 +92,57 @@ function summarizeInstalledLegacySessionStates(
     0,
   );
   return { readable, preserved, preservedReasons, withoutBinding };
+}
+
+function fsyncDirectory(directory: string) {
+  const descriptor = fs.openSync(directory, fs.constants.O_RDONLY);
+  try {
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function retireCanonicalReconciliationSessionBindings(
+  agentDir: string,
+  db: ReturnType<typeof migrateChatDatabaseForInstall>,
+) {
+  const reconciliation = readCanonicalReconciliationInstallState(db);
+  if (!reconciliation || reconciliation.state === "complete") return 0;
+  const targets = new Set(reconciliation.chatKeys);
+  const stateFiles = listChatStateFiles(
+    chatDataPath(agentDir, "session-state"),
+  );
+  let retired = 0;
+  for (const item of stateFiles) {
+    if (!targets.has(item.chatKey)) continue;
+    const backupPath = `${item.statePath}.canonical-v8-retired`;
+    if (fs.existsSync(backupPath)) {
+      throw new Error(
+        `chat_install_migration_canonical_reconciliation_backup_exists:${backupPath}`,
+      );
+    }
+    fs.renameSync(item.statePath, backupPath);
+    fsyncDirectory(path.dirname(item.statePath));
+    retired += 1;
+    targets.delete(item.chatKey);
+  }
+  if (targets.size) {
+    for (const chatKey of targets) {
+      const stillBound = db
+        .prepare(`SELECT session_file FROM chat_state WHERE chat_key = ?`)
+        .get(chatKey) as { session_file?: string | null } | undefined;
+      if (safeString(stillBound?.session_file).trim()) {
+        throw new Error(
+          `chat_install_migration_canonical_reconciliation_binding_remains:${chatKey}`,
+        );
+      }
+    }
+  }
+  db.transaction(() => {
+    completeCanonicalReconciliationInstallState(db);
+  })();
+  return retired;
 }
 
 function importInstalledLegacySessionBindings(agentDir: string) {
@@ -177,7 +230,12 @@ export function runChatInstallMigrations(
       unresolvedRecords: deferredRecords.unresolvedRecords,
       unresolvedRecordReasons: deferredRecords.unresolvedRecordReasons,
     });
-    const sessionBindings = importInstalledLegacySessionBindings(agentDir);
+    const retiredCanonicalReconciliation =
+      retireCanonicalReconciliationSessionBindings(agentDir, db);
+    const sessionBindings = {
+      ...importInstalledLegacySessionBindings(agentDir),
+      retiredCanonicalReconciliation,
+    };
     return {
       keyMigration: {
         id: keyMigration.id,

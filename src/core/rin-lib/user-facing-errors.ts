@@ -144,6 +144,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     withDetail("Rin update is waiting for active chat runs to finish", detail),
   chat_database_canonical_run_upgrade_failed: (detail) =>
     withDetail("Rin could not upgrade canonical chat run storage", detail),
+  chat_database_invalid_canonical_reconciliation_state: () =>
+    "Rin found invalid canonical chat reconciliation state.",
   chat_run_chat_mismatch: () =>
     "The terminal result belongs to a different chat run.",
   chat_run_delivery_turn_missing: () =>
@@ -227,6 +229,13 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat inbox write failed while committing the turn ledger.",
   chat_install_migration_active_legacy_turn: () =>
     "Rin update cannot continue while a chat turn from the current version is still active.",
+  chat_install_migration_canonical_reconciliation_backup_exists: (detail) =>
+    withDetail("Rin found an existing canonical reconciliation backup", detail),
+  chat_install_migration_canonical_reconciliation_binding_remains: (detail) =>
+    withDetail(
+      "Rin could not retire a stale canonical chat session binding",
+      detail,
+    ),
   chat_install_migration_install_dir_required: () =>
     "Chat migration needs the target Rin install directory.",
   chat_install_migration_invalid_accepted_orphan: () =>

@@ -65,7 +65,9 @@ function finishSchemaUpgrade(db: BetterSqlite3.Database) {
   db.pragma(`user_version = ${CHAT_DATABASE_SCHEMA_VERSION}`);
 }
 
-function interruptRunningTurnsForCanonicalUpgrade(db: BetterSqlite3.Database) {
+function interruptUnfencedLegacyTurnsForCanonicalUpgrade(
+  db: BetterSqlite3.Database,
+) {
   const turns = db
     .prepare(
       `SELECT t.turn_id AS turnId,
@@ -73,11 +75,23 @@ function interruptRunningTurnsForCanonicalUpgrade(db: BetterSqlite3.Database) {
               m.message_id AS messageId
          FROM turns t
          JOIN messages m ON m.id = t.inbound_message_id
-        WHERE t.state = 'running' AND t.run_id IS NULL
+        WHERE t.run_id IS NULL
+          AND (
+            t.state = 'running'
+            OR (
+              t.state = 'pending' AND t.attempt > 0
+              AND json_valid(t.admission_json)
+              AND json_extract(t.admission_json, '$.kind') = 'message'
+            )
+          )
         ORDER BY t.sequence ASC, t.turn_id ASC`,
     )
-    .all() as Array<{ turnId: string; chatKey: string; messageId: string }>;
-  if (!turns.length) return;
+    .all() as Array<{
+    turnId: string;
+    chatKey: string;
+    messageId: string;
+  }>;
+  if (!turns.length) return [];
 
   const timestamp = nowIso();
   const text =
@@ -114,7 +128,9 @@ function interruptRunningTurnsForCanonicalUpgrade(db: BetterSqlite3.Database) {
             next_attempt_at = NULL,
             last_error = NULL,
             updated_at = ?
-      WHERE turn_id = ? AND state = 'running'`,
+      WHERE turn_id = ?
+        AND run_id IS NULL
+        AND (state = 'running' OR (state = 'pending' AND attempt > 0))`,
   );
   for (const turn of turns) {
     const idempotencyKey = `install-upgrade-interrupted:${turn.turnId}`;
@@ -164,6 +180,152 @@ function interruptRunningTurnsForCanonicalUpgrade(db: BetterSqlite3.Database) {
         WHERE id = (SELECT inbound_message_id FROM turns WHERE turn_id = ?)`,
     ).run(turn.turnId);
   }
+  return turns.map((turn) => ({
+    chatKey: turn.chatKey,
+    turnId: turn.turnId,
+  }));
+}
+
+function reconcileOrphanedTransitionalCanonicalRuns(
+  db: BetterSqlite3.Database,
+) {
+  const runIds = (
+    db
+      .prepare(
+        `SELECT r.run_id AS runId
+           FROM chat_runs r
+          WHERE r.state = 'running'
+            AND NOT EXISTS (
+              SELECT 1 FROM turns t
+               WHERE t.run_id = r.run_id
+                 AND t.state IN ('pending', 'running')
+            )
+          ORDER BY r.created_at ASC, r.run_id ASC`,
+      )
+      .all() as Array<{ runId: string }>
+  ).map((row) => safeString(row.runId).trim());
+  if (!runIds.length) return [];
+  const terminalPayload = JSON.stringify({
+    reason: "install_upgrade_reconciled_transitional_run",
+  });
+  const terminalPayloadHash = createHash("sha256")
+    .update(terminalPayload)
+    .digest("hex");
+  const retireRun = db.prepare(
+    `UPDATE chat_runs
+        SET state = 'manual_review',
+            terminal_delivery_turn_id = delivery_turn_id,
+            terminal_kind = 'install_upgrade_reconciled',
+            terminal_payload_json = ?, terminal_payload_hash = ?,
+            updated_at = ?, terminal_at = ?
+      WHERE run_id = ? AND state = 'running'`,
+  );
+  for (const runId of runIds) {
+    const timestamp = nowIso();
+    retireRun.run(
+      terminalPayload,
+      terminalPayloadHash,
+      timestamp,
+      timestamp,
+      runId,
+    );
+  }
+  return runIds;
+}
+
+const CANONICAL_RECONCILIATION_SCHEMA_META_KEY =
+  "canonical_run_reconciliation_v8";
+
+function recordCanonicalReconciliation(
+  db: BetterSqlite3.Database,
+  input: {
+    interruptedTurns: Array<{ chatKey: string; turnId: string }>;
+    retiredRunIds: string[];
+  },
+) {
+  const chatKeys = [
+    ...new Set(
+      input.interruptedTurns
+        .map((entry) => safeString(entry.chatKey).trim())
+        .filter(Boolean),
+    ),
+  ].sort();
+  const value = JSON.stringify({
+    version: 1,
+    state: chatKeys.length ? "pending_session_retirement" : "complete",
+    chatKeys,
+    interruptedTurnIds: input.interruptedTurns.map((entry) => entry.turnId),
+    retiredRunIds: input.retiredRunIds,
+    createdAt: nowIso(),
+    completedAt: chatKeys.length ? null : nowIso(),
+  });
+  db.prepare(
+    `INSERT INTO schema_meta (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  ).run(CANONICAL_RECONCILIATION_SCHEMA_META_KEY, value);
+}
+
+export function readCanonicalReconciliationInstallState(
+  db: BetterSqlite3.Database,
+) {
+  const row = db
+    .prepare(`SELECT value FROM schema_meta WHERE key = ?`)
+    .get(CANONICAL_RECONCILIATION_SCHEMA_META_KEY) as
+    | { value?: string }
+    | undefined;
+  if (!row?.value) return null;
+  const parsed = JSON.parse(row.value) as {
+    version?: number;
+    state?: string;
+    chatKeys?: unknown;
+    interruptedTurnIds?: unknown;
+    retiredRunIds?: unknown;
+    createdAt?: string;
+    completedAt?: string | null;
+  };
+  if (
+    parsed.version !== 1 ||
+    !["pending_session_retirement", "complete"].includes(
+      safeString(parsed.state),
+    ) ||
+    !Array.isArray(parsed.chatKeys) ||
+    !Array.isArray(parsed.interruptedTurnIds) ||
+    !Array.isArray(parsed.retiredRunIds)
+  ) {
+    throw new Error("chat_database_invalid_canonical_reconciliation_state");
+  }
+  return {
+    version: 1 as const,
+    state: parsed.state as "pending_session_retirement" | "complete",
+    chatKeys: parsed.chatKeys
+      .map((value) => safeString(value).trim())
+      .filter(Boolean),
+    interruptedTurnIds: parsed.interruptedTurnIds
+      .map((value) => safeString(value).trim())
+      .filter(Boolean),
+    retiredRunIds: parsed.retiredRunIds
+      .map((value) => safeString(value).trim())
+      .filter(Boolean),
+    createdAt: safeString(parsed.createdAt),
+    completedAt: safeString(parsed.completedAt).trim() || null,
+  };
+}
+
+export function completeCanonicalReconciliationInstallState(
+  db: BetterSqlite3.Database,
+) {
+  const state = readCanonicalReconciliationInstallState(db);
+  if (!state || state.state === "complete") return state;
+  const completed = {
+    ...state,
+    state: "complete" as const,
+    completedAt: nowIso(),
+  };
+  db.prepare(`UPDATE schema_meta SET value = ? WHERE key = ?`).run(
+    JSON.stringify(completed),
+    CANONICAL_RECONCILIATION_SCHEMA_META_KEY,
+  );
+  return completed;
 }
 
 function upgradeRecordedChatDatabase(
@@ -276,68 +438,142 @@ function upgradeRecordedChatDatabase(
            );
   `;
 
-  if (currentVersion === 1) {
-    db.exec(`
-      DROP INDEX outbox_turn_terminal_idx;
-      CREATE UNIQUE INDEX outbox_turn_terminal_idx
-        ON outbox(turn_id)
-        WHERE turn_id IS NOT NULL
-          AND (delivery_kind IN ('final', 'error', 'command_ack')
-               OR post_delivery_json IS NOT NULL);
-      ALTER TABLE chat_state ADD COLUMN session_file TEXT;
-      ALTER TABLE chat_state ADD COLUMN legacy_session_imported INTEGER NOT NULL DEFAULT 0
-        CHECK (legacy_session_imported IN (0, 1));
-      ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
-      ${inboundRecoveryLeaseUpgradeSql}
-      ${durableTurnAdmissionUpgradeSql}
-    `);
-  } else if (currentVersion === 2) {
-    db.exec(`
-      ALTER TABLE chat_state ADD COLUMN session_file TEXT;
-      ALTER TABLE chat_state ADD COLUMN legacy_session_imported INTEGER NOT NULL DEFAULT 0
-        CHECK (legacy_session_imported IN (0, 1));
-      ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
-      ${inboundRecoveryLeaseUpgradeSql}
-      ${durableTurnAdmissionUpgradeSql}
-    `);
-  } else if (currentVersion === 3) {
-    db.exec(`
-      ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
-      ${inboundRecoveryLeaseUpgradeSql}
-      ${durableTurnAdmissionUpgradeSql}
-    `);
-  } else if (currentVersion === 4) {
-    db.exec(
-      `${inboundRecoveryLeaseUpgradeSql}\n${durableTurnAdmissionUpgradeSql}`,
-    );
-  } else if (currentVersion === 5) {
-    db.exec(durableTurnAdmissionUpgradeSql);
-  } else if (currentVersion !== 6) {
-    throw new Error(`chat_database_unsupported_schema:${currentVersion}`);
-  }
-  try {
-    const activeRuns = Number(
-      (
-        db
-          .prepare(
-            `SELECT COUNT(*) AS count FROM turns WHERE state = 'running'`,
-          )
-          .get() as { count?: number }
-      )?.count || 0,
-    );
-    if (activeRuns > 0 && options.runtimeQuiesced !== true) {
+  if (currentVersion <= 6) {
+    if (currentVersion === 1) {
+      db.exec(`
+        DROP INDEX outbox_turn_terminal_idx;
+        CREATE UNIQUE INDEX outbox_turn_terminal_idx
+          ON outbox(turn_id)
+          WHERE turn_id IS NOT NULL
+            AND (delivery_kind IN ('final', 'error', 'command_ack')
+                 OR post_delivery_json IS NOT NULL);
+        ALTER TABLE chat_state ADD COLUMN session_file TEXT;
+        ALTER TABLE chat_state ADD COLUMN legacy_session_imported INTEGER NOT NULL DEFAULT 0
+          CHECK (legacy_session_imported IN (0, 1));
+        ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
+        ${inboundRecoveryLeaseUpgradeSql}
+        ${durableTurnAdmissionUpgradeSql}
+      `);
+    } else if (currentVersion === 2) {
+      db.exec(`
+        ALTER TABLE chat_state ADD COLUMN session_file TEXT;
+        ALTER TABLE chat_state ADD COLUMN legacy_session_imported INTEGER NOT NULL DEFAULT 0
+          CHECK (legacy_session_imported IN (0, 1));
+        ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
+        ${inboundRecoveryLeaseUpgradeSql}
+        ${durableTurnAdmissionUpgradeSql}
+      `);
+    } else if (currentVersion === 3) {
+      db.exec(`
+        ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
+        ${inboundRecoveryLeaseUpgradeSql}
+        ${durableTurnAdmissionUpgradeSql}
+      `);
+    } else if (currentVersion === 4) {
+      db.exec(
+        `${inboundRecoveryLeaseUpgradeSql}\n${durableTurnAdmissionUpgradeSql}`,
+      );
+    } else if (currentVersion === 5) {
+      db.exec(durableTurnAdmissionUpgradeSql);
+    } else if (currentVersion !== 6) {
+      throw new Error(`chat_database_unsupported_schema:${currentVersion}`);
+    }
+    try {
+      const activeRuns = Number(
+        (
+          db
+            .prepare(
+              `SELECT COUNT(*) AS count FROM turns WHERE state = 'running'`,
+            )
+            .get() as { count?: number }
+        )?.count || 0,
+      );
+      if (activeRuns > 0 && options.runtimeQuiesced !== true) {
+        throw new Error(
+          `chat_database_canonical_run_drain_required:${activeRuns}`,
+        );
+      }
+      if (!tableHasColumn(db, "turns", "run_id")) {
+        db.exec(`ALTER TABLE turns ADD COLUMN run_id TEXT;`);
+      }
+      db.exec(canonicalRunUpgradeSql);
+    } catch (error: any) {
       throw new Error(
-        `chat_database_canonical_run_drain_required:${activeRuns}`,
+        `chat_database_canonical_run_upgrade_failed:${String(error?.message || error)}`,
       );
     }
-    if (!tableHasColumn(db, "turns", "run_id")) {
-      db.exec(`ALTER TABLE turns ADD COLUMN run_id TEXT;`);
-    }
-    db.exec(canonicalRunUpgradeSql);
-  } catch (error: any) {
+  } else if (currentVersion !== 7) {
+    throw new Error(`chat_database_unsupported_schema:${currentVersion}`);
+  }
+
+  const supportsCanonicalReconciliation = currentVersion >= 6;
+  const legacyTurns = supportsCanonicalReconciliation
+    ? Number(
+        (
+          db
+            .prepare(
+              `SELECT COUNT(*) AS count FROM turns
+                WHERE run_id IS NULL
+                  AND (
+                    state = 'running'
+                    OR (
+                      state = 'pending' AND attempt > 0
+                      AND json_valid(admission_json)
+                      AND json_extract(admission_json, '$.kind') = 'message'
+                    )
+                  )`,
+            )
+            .get() as { count?: number }
+        )?.count || 0,
+      )
+    : 0;
+  const orphanedRuns =
+    currentVersion >= 7
+      ? Number(
+          (
+            db
+              .prepare(
+                `SELECT COUNT(*) AS count
+                   FROM chat_runs r
+                  WHERE r.state = 'running'
+                    AND NOT EXISTS (
+                      SELECT 1 FROM turns t
+                       WHERE t.run_id = r.run_id
+                         AND t.state IN ('pending', 'running')
+                    )`,
+              )
+              .get() as { count?: number }
+          )?.count || 0,
+        )
+      : 0;
+  if (
+    (legacyTurns > 0 || orphanedRuns > 0) &&
+    options.runtimeQuiesced !== true
+  ) {
     throw new Error(
-      `chat_database_canonical_run_upgrade_failed:${String(error?.message || error)}`,
+      `chat_database_canonical_run_drain_required:${legacyTurns + orphanedRuns}`,
     );
+  }
+  const interruptedTurns =
+    options.runtimeQuiesced && supportsCanonicalReconciliation
+      ? interruptUnfencedLegacyTurnsForCanonicalUpgrade(db)
+      : [];
+  const retiredRunIds =
+    options.runtimeQuiesced && currentVersion >= 7
+      ? reconcileOrphanedTransitionalCanonicalRuns(db)
+      : [];
+  for (const { chatKey } of interruptedTurns) {
+    db.prepare(
+      `UPDATE chat_state
+          SET session_file = NULL, legacy_session_imported = 0, updated_at = ?
+        WHERE chat_key = ?`,
+    ).run(nowIso(), chatKey);
+  }
+  if (supportsCanonicalReconciliation) {
+    recordCanonicalReconciliation(db, {
+      interruptedTurns,
+      retiredRunIds,
+    });
   }
   finishSchemaUpgrade(db);
 }
@@ -390,7 +626,11 @@ function assertNoUnfencedRunningTurns(
       db
         .prepare(
           `SELECT COUNT(*) AS count FROM turns
-            WHERE state = 'running'${hasRunId ? " AND run_id IS NULL" : ""}`,
+            WHERE ${hasRunId ? "run_id IS NULL AND " : ""}
+              (
+                state = 'running'
+                ${currentVersion >= 6 && currentVersion < 8 ? "OR (state = 'pending' AND attempt > 0 AND json_valid(admission_json) AND json_extract(admission_json, '$.kind') = 'message')" : ""}
+              )`,
         )
         .get() as { count?: number }
     )?.count || 0,
@@ -779,9 +1019,6 @@ export function migrateChatDatabaseForInstall(
           assertNoUnfencedRunningTurns(migrationDb, currentVersion);
         }
         upgradeRecordedChatDatabase(migrationDb, options);
-        if (options.runtimeQuiesced === true) {
-          interruptRunningTurnsForCanonicalUpgrade(migrationDb);
-        }
         migrationDb
           .prepare(
             `DELETE FROM schema_meta WHERE key = 'admission_model_version'`,

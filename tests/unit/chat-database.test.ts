@@ -108,10 +108,10 @@ test("chat database owns message, turn, outbox, delivery, and chat generation st
   });
 });
 
-test("chat database reopens the current version 7 canonical run layout", async () => {
+test("chat database reopens the current version 8 canonical run layout", async () => {
   await withTempDir(async (agentDir) => {
     const created = chatDatabase.openChatDatabase(agentDir);
-    assert.equal(created.pragma("user_version", { simple: true }), 7);
+    assert.equal(created.pragma("user_version", { simple: true }), 8);
     assert.deepEqual(
       created
         .prepare(`PRAGMA table_info(turns)`)
@@ -141,12 +141,12 @@ test("chat database reopens the current version 7 canonical run layout", async (
     chatDatabase.closeChatDatabase(agentDir);
 
     const reopened = chatDatabase.openChatDatabase(agentDir);
-    assert.equal(reopened.pragma("user_version", { simple: true }), 7);
+    assert.equal(reopened.pragma("user_version", { simple: true }), 8);
     assert.equal(
       reopened
         .prepare(`SELECT value FROM schema_meta WHERE key = 'schema_version'`)
         .get().value,
-      "7",
+      "8",
     );
     assert.deepEqual(
       reopened
@@ -289,7 +289,7 @@ test("chat install migration preserves pending turns and interrupts running vers
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir, {
       runtimeQuiesced: true,
     });
-    assert.equal(migrated.pragma("user_version", { simple: true }), 7);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 8);
     assert.equal(
       migrated
         .prepare(`SELECT run_id FROM turns WHERE turn_id = 'legacy-turn'`)
@@ -464,12 +464,12 @@ test("chat database migrates the version 1 terminal outbox index", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 7);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 8);
     assert.equal(
       migrated
         .prepare(`SELECT value FROM schema_meta WHERE key = 'schema_version'`)
         .get().value,
-      "7",
+      "8",
     );
     const indexSql = migrated
       .prepare(
@@ -518,7 +518,7 @@ test("chat database migrates version 2 session binding authority", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 7);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 8);
     assert.ok(
       migrated
         .prepare(`PRAGMA table_info(chat_state)`)
@@ -559,7 +559,7 @@ test("chat database migrates version 3 dispatch evidence", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 7);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 8);
     assert.ok(
       migrated
         .prepare(`PRAGMA table_info(outbox)`)
@@ -599,7 +599,7 @@ test("chat database migrates version 4 inbound recovery lease state", async () =
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 7);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 8);
     const columns = new Set(
       migrated
         .prepare(`PRAGMA table_info(inbound_heads)`)
@@ -669,7 +669,7 @@ test("chat install migration terminalizes ambiguous accepted version 5 turns", a
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 7);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 8);
     assert.deepEqual(
       migrated
         .prepare(
@@ -822,7 +822,7 @@ test("chat database serializes concurrent cold initialization", async () => {
       ),
     );
     const db = chatDatabase.openChatDatabase(agentDir);
-    assert.equal(db.pragma("user_version", { simple: true }), 7);
+    assert.equal(db.pragma("user_version", { simple: true }), 8);
     assert.deepEqual(
       db
         .prepare(`SELECT key FROM schema_meta ORDER BY key`)

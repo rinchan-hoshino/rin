@@ -196,7 +196,7 @@ test("installer preflight refuses activation while an old accepted turn still ha
         .get(),
       {
         state: "terminal",
-        terminalKind: "install_upgrade_interrupted",
+        terminalKind: "interrupted_unknown",
         ownerEpoch: null,
         leaseUntil: null,
       },
@@ -210,7 +210,7 @@ test("installer preflight refuses activation while an old accepted turn still ha
               AND idempotency_key LIKE 'install-upgrade-interrupted:%'`,
         )
         .get().count,
-      1,
+      0,
     );
     assert.equal(
       database
@@ -265,6 +265,13 @@ test("installer only interrupts current unfenced durable turns after runtime qui
         createHash("sha256").update(submissionJson).digest("hex"),
         item.itemId,
       );
+    const versionDb = database.openChatDatabase(installDir);
+    versionDb.pragma("user_version = 7");
+    versionDb
+      .prepare(
+        `UPDATE schema_meta SET value = '7' WHERE key = 'schema_version'`,
+      )
+      .run();
     database.closeChatDatabase(installDir);
 
     assert.throws(
@@ -359,6 +366,7 @@ test("installer preserves a fenced canonical run for WAL recovery", async () => 
         createHash("sha256").update(legacyAdmission).digest("hex"),
         claim.itemId,
       );
+    inbox.releaseClaimedChatInboxItem(installDir, claim);
     database.closeChatDatabase(installDir);
 
     assert.doesNotThrow(() =>
@@ -370,7 +378,7 @@ test("installer preserves a fenced canonical run for WAL recovery", async () => 
       db
         .prepare(`SELECT state, run_id AS runId FROM turns WHERE turn_id = ?`)
         .get(claim.itemId),
-      { state: "running", runId: claim.itemId },
+      { state: "pending", runId: claim.itemId },
     );
     assert.equal(
       db
@@ -384,6 +392,260 @@ test("installer preserves a fenced canonical run for WAL recovery", async () => 
         .get(claim.itemId).state,
       "running",
     );
+  } finally {
+    database.closeChatDatabase(installDir);
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+});
+
+test("installer retires shutdown-requeued legacy turns and their stale session binding", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-v8-reconciliation-"),
+  );
+  const chatKey = "discord/1:2";
+  const statePath = path.join(
+    installDir,
+    "data",
+    "chat",
+    "session-state",
+    "discord",
+    "1",
+    "2",
+    "state.json",
+  );
+  try {
+    database.migrateChatDatabaseForInstall(installDir);
+    const stale = inbox.enqueueChatInboxItem(installDir, {
+      chatKey,
+      messageId: "legacy-running-before-stop",
+      session: {
+        platform: "discord",
+        selfId: "1",
+        channelId: "2",
+        messageId: "legacy-running-before-stop",
+        content: "old execution",
+        stripped: { content: "old execution" },
+      },
+      elements: [{ type: "text", attrs: { content: "old execution" } }],
+    }).item;
+    const staleClaim = inbox.claimChatInboxItem(installDir, stale.itemId);
+    assert.ok(staleClaim);
+    inbox.releaseClaimedChatInboxItem(installDir, staleClaim);
+    const fresh = inbox.enqueueChatInboxItem(installDir, {
+      chatKey,
+      messageId: "fresh-never-started",
+      session: {
+        platform: "discord",
+        selfId: "1",
+        channelId: "2",
+        messageId: "fresh-never-started",
+        content: "new request",
+        stripped: { content: "new request" },
+      },
+      elements: [{ type: "text", attrs: { content: "new request" } }],
+    }).item;
+    const nonCurrentAdmissions: Array<{
+      item: { itemId: string };
+      admissionJson: string | null;
+    }> = [];
+    for (const [messageId, admissionJson] of [
+      [
+        "legacy-unknown-admission",
+        JSON.stringify({ version: 1, kind: "mystery" }),
+      ],
+      ["legacy-malformed-admission", "{bad-json"],
+      ["legacy-null-admission", null],
+    ] as const) {
+      const item = inbox.enqueueChatInboxItem(installDir, {
+        chatKey: "discord/1:4",
+        messageId,
+        session: {
+          platform: "discord",
+          selfId: "1",
+          channelId: "4",
+          messageId,
+          content: messageId,
+          stripped: { content: messageId },
+        },
+        elements: [{ type: "text", attrs: { content: messageId } }],
+      }).item;
+      const claim = inbox.claimChatInboxItem(installDir, item.itemId);
+      assert.ok(claim);
+      inbox.releaseClaimedChatInboxItem(installDir, claim);
+      nonCurrentAdmissions.push({ item, admissionJson });
+    }
+    const orphan = inbox.enqueueChatInboxItem(installDir, {
+      chatKey: "discord/1:3",
+      messageId: "legacy-terminal-with-running-run",
+      session: {
+        platform: "discord",
+        selfId: "1",
+        channelId: "3",
+        messageId: "legacy-terminal-with-running-run",
+        content: "already delivered by legacy path",
+        stripped: { content: "already delivered by legacy path" },
+      },
+      elements: [
+        {
+          type: "text",
+          attrs: { content: "already delivered by legacy path" },
+        },
+      ],
+    }).item;
+    const orphanClaim = inbox.claimChatInboxItem(installDir, orphan.itemId);
+    assert.ok(orphanClaim);
+    runStore.createCanonicalChatRun(installDir, {
+      producerIncarnation: "legacy-transition-producer",
+      turnFence: {
+        agentDir: installDir,
+        turnId: orphanClaim.itemId,
+        chatKey: orphanClaim.chatKey,
+        messageId: orphanClaim.messageId,
+        ownerEpoch: orphanClaim.ownerEpoch,
+        attempt: orphanClaim.attemptCount,
+      },
+    });
+    const db = database.openChatDatabase(installDir);
+    for (const { item, admissionJson } of nonCurrentAdmissions) {
+      db.prepare(
+        `UPDATE turns SET admission_json = ?, admission_hash = NULL
+          WHERE turn_id = ?`,
+      ).run(admissionJson, item.itemId);
+    }
+    const currentAdmission = JSON.stringify({
+      version: 1,
+      kind: "message",
+      decision: { allow: true },
+    });
+    db.prepare(
+      `UPDATE turns SET admission_json = ?, admission_hash = ?
+        WHERE turn_id = ?`,
+    ).run(
+      currentAdmission,
+      createHash("sha256").update(currentAdmission).digest("hex"),
+      stale.itemId,
+    );
+    db.prepare(
+      `UPDATE turns
+          SET state = 'terminal', terminal_kind = 'outbox_final',
+              owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL
+        WHERE turn_id = ?`,
+    ).run(orphan.itemId);
+    db.pragma("user_version = 7");
+    db.prepare(
+      `UPDATE schema_meta SET value = '7' WHERE key = 'schema_version'`,
+    ).run();
+    database.closeChatDatabase(installDir);
+    await fs.mkdir(path.dirname(statePath), { recursive: true });
+    await fs.writeFile(
+      statePath,
+      `${JSON.stringify({
+        chatKey,
+        sessionFile: "managed/chat/stale-working.jsonl",
+        chatType: "group",
+      })}\n`,
+    );
+
+    assert.throws(
+      () => database.migrateChatDatabaseForInstall(installDir),
+      /chat_database_canonical_run_drain_required:1/,
+    );
+    const committed = database.migrateChatDatabaseForInstall(installDir, {
+      runtimeQuiesced: true,
+    });
+    assert.equal(committed.pragma("user_version", { simple: true }), 8);
+    const pendingState =
+      database.readCanonicalReconciliationInstallState(committed);
+    assert.equal(pendingState.state, "pending_session_retirement");
+    assert.deepEqual(pendingState.chatKeys, [stale.chatKey]);
+    assert.deepEqual(pendingState.interruptedTurnIds, [stale.itemId]);
+    assert.deepEqual(pendingState.retiredRunIds, [orphan.itemId]);
+    database.closeChatDatabase(installDir);
+    assert.match(await fs.readFile(statePath, "utf8"), /stale-working\.jsonl/);
+
+    const result = installMigration.runChatInstallMigrations(
+      installDir,
+      undefined,
+      { runtimeQuiesced: true },
+    );
+    assert.equal(result.database.schemaVersion, 8);
+    const migrated = database.openChatDatabase(installDir);
+    assert.deepEqual(
+      migrated
+        .prepare(
+          `SELECT state, terminal_kind AS terminalKind, run_id AS runId
+             FROM turns WHERE turn_id = ?`,
+        )
+        .get(stale.itemId),
+      {
+        state: "terminal",
+        terminalKind: "install_upgrade_interrupted",
+        runId: null,
+      },
+    );
+    assert.deepEqual(
+      migrated
+        .prepare(`SELECT state, attempt FROM turns WHERE turn_id = ?`)
+        .get(fresh.itemId),
+      { state: "pending", attempt: 0 },
+    );
+    assert.deepEqual(
+      nonCurrentAdmissions.map(({ item }) =>
+        migrated
+          .prepare(`SELECT state, attempt FROM turns WHERE turn_id = ?`)
+          .get(item.itemId),
+      ),
+      [
+        { state: "pending", attempt: 1 },
+        { state: "pending", attempt: 1 },
+        { state: "pending", attempt: 1 },
+      ],
+    );
+    assert.equal(
+      migrated
+        .prepare(
+          `SELECT COUNT(*) AS count FROM outbox
+            WHERE idempotency_key = ? AND delivery_kind = 'error'`,
+        )
+        .get(`install-upgrade-interrupted:${stale.itemId}`).count,
+      1,
+    );
+    assert.deepEqual(
+      migrated
+        .prepare(`SELECT run_id AS runId FROM turns WHERE turn_id = ?`)
+        .get(orphan.itemId),
+      { runId: orphan.itemId },
+    );
+    assert.deepEqual(
+      migrated
+        .prepare(
+          `SELECT state, terminal_kind AS terminalKind
+             FROM chat_runs WHERE run_id = ?`,
+        )
+        .get(orphan.itemId),
+      {
+        state: "manual_review",
+        terminalKind: "install_upgrade_reconciled",
+      },
+    );
+    assert.equal(
+      await fs.stat(statePath).then(
+        () => true,
+        () => false,
+      ),
+      false,
+    );
+    assert.match(
+      await fs.readFile(`${statePath}.canonical-v8-retired`, "utf8"),
+      /stale-working\.jsonl/,
+    );
+    assert.equal(result.sessionBindings.retiredCanonicalReconciliation, 1);
+    const rerun = installMigration.runChatInstallMigrations(
+      installDir,
+      undefined,
+      { runtimeQuiesced: true },
+    );
+    assert.equal(rerun.sessionBindings.retiredCanonicalReconciliation, 0);
   } finally {
     database.closeChatDatabase(installDir);
     await fs.rm(installDir, { recursive: true, force: true });
@@ -881,6 +1143,7 @@ test("malformed per-chat session state is reported without blocking install migr
       preserved: 2,
       preservedReasons: { invalid_json: 1, invalid_session_file: 1 },
       withoutBinding: 1,
+      retiredCanonicalReconciliation: 0,
     });
     assert.equal(await fs.readFile(invalidStatePath, "utf8"), "{bad json\n");
   } finally {
@@ -983,7 +1246,7 @@ test("installer upgrade migrations own chat key and SQLite authority migration",
       { "lark/cli_bot:oc_same": { quietMode: true } },
     );
     const db = database.openChatDatabase(installDir);
-    assert.equal(Number(db.pragma("user_version", { simple: true })), 7);
+    assert.equal(Number(db.pragma("user_version", { simple: true })), 8);
     assert.equal(
       db
         .prepare(
@@ -1091,7 +1354,7 @@ test("runtime database open rejects an old schema instead of upgrading it", asyn
 
     assert.throws(
       () => database.openChatDatabase(agentDir),
-      /chat_database_schema_upgrade_required:3:7/,
+      /chat_database_schema_upgrade_required:3:8/,
     );
   } finally {
     database.closeChatDatabase(agentDir);
