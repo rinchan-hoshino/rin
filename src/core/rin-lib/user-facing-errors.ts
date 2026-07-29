@@ -178,6 +178,18 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin found a committed chat terminal without its durable outbox record.",
   chat_run_turn_already_attached: () =>
     "The chat turn is already attached to another canonical run.",
+  chat_terminal_recovery_invalid_event: () =>
+    "Rin quarantined a completed chat turn with an invalid event.",
+  chat_terminal_recovery_invalid_payload: () =>
+    "Rin quarantined a completed chat turn with an invalid payload.",
+  chat_terminal_recovery_invalid_session_file: () =>
+    "Rin quarantined a completed chat turn with an invalid session path.",
+  chat_terminal_recovery_target_missing: () =>
+    "Rin quarantined a completed chat turn whose delivery target is missing.",
+  chat_terminal_recovery_text_missing: () =>
+    "Rin quarantined a completed chat turn whose result text is missing.",
+  chat_terminal_recovery_unresolved: () =>
+    "Rin quarantined a completed chat turn that could not be recovered safely.",
   chat_terminal_wal_commit_conflict: () =>
     "Rin found conflicting terminal journal commit evidence.",
   chat_terminal_wal_conflict: () =>

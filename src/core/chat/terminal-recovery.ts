@@ -1,8 +1,10 @@
 import {
   commitChatTerminalWal,
   listStagedChatTerminalWal,
+  quarantineChatTerminalWal,
 } from "../rin-daemon/chat-terminal-wal.js";
 import { withChatQuotePart } from "../rin-lib/chat-outbox.js";
+import { toStoredSessionFile } from "../session/ref.js";
 import { safeString } from "../text-utils.js";
 import {
   commitCanonicalChatRunTerminal,
@@ -31,7 +33,21 @@ function terminalDelivery(
 
 export function reconcileStagedCanonicalChatTerminals(agentDir: string) {
   let committed = 0;
+  let quarantined = 0;
   const stagedRecords = listStagedChatTerminalWal(agentDir);
+  const quarantine = (
+    record: (typeof stagedRecords)[number],
+    reason: string,
+  ) => {
+    quarantineChatTerminalWal(agentDir, {
+      runId: record.runId,
+      ownerEpoch: record.ownerEpoch,
+      producerIncarnation: record.producerIncarnation,
+      payloadHash: record.payloadHash,
+      reason,
+    });
+    quarantined += 1;
+  };
   for (const record of stagedRecords) {
     const recovered = loadCanonicalChatRunForRecovery(
       agentDir,
@@ -43,13 +59,46 @@ export function reconcileStagedCanonicalChatTerminals(agentDir: string) {
       { terminalStagedAt: record.stagedAt },
     );
     if (!recovered) {
-      throw new Error(`chat_terminal_recovery_target_missing:${record.runId}`);
+      quarantine(record, "chat_terminal_recovery_target_missing");
+      continue;
     }
-    const delivery = terminalDelivery(record);
+    let delivery: ReturnType<typeof terminalDelivery>;
+    try {
+      delivery = terminalDelivery(record);
+    } catch (error: any) {
+      quarantine(
+        record,
+        safeString(error?.message).trim() ||
+          "chat_terminal_recovery_invalid_payload",
+      );
+      continue;
+    }
     if (!delivery.text) {
-      throw new Error(`chat_terminal_recovery_text_missing:${record.runId}`);
+      quarantine(record, "chat_terminal_recovery_text_missing");
+      continue;
     }
-    const sessionFile = safeString(record.terminalPayload.sessionFile).trim();
+    let sessionFile: string;
+    try {
+      sessionFile = safeString(recovered.turn.executionSessionFile).trim();
+      if (!sessionFile) {
+        if (
+          typeof record.terminalPayload.sessionFile !== "string" ||
+          !record.terminalPayload.sessionFile.trim()
+        ) {
+          throw new Error("chat_terminal_recovery_invalid_session_file");
+        }
+        sessionFile = toStoredSessionFile(
+          agentDir,
+          record.terminalPayload.sessionFile,
+        );
+        if (!sessionFile) {
+          throw new Error("chat_terminal_recovery_invalid_session_file");
+        }
+      }
+    } catch {
+      quarantine(record, "chat_terminal_recovery_invalid_session_file");
+      continue;
+    }
     const outcome = commitCanonicalChatRunTerminal(
       agentDir,
       {
@@ -91,5 +140,5 @@ export function reconcileStagedCanonicalChatTerminals(agentDir: string) {
     });
     committed += 1;
   }
-  return { committed, skipped: 0 };
+  return { committed, quarantined };
 }

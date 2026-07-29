@@ -1748,9 +1748,9 @@ export async function startChatBridge(
   const terminalRecovery = reconcileStagedCanonicalChatTerminals(
     runtime.agentDir,
   );
-  if (terminalRecovery.committed > 0) {
+  if (terminalRecovery.committed > 0 || terminalRecovery.quarantined > 0) {
     logger.warn(
-      `chat terminal recovery committed=${terminalRecovery.committed}`,
+      `chat terminal recovery committed=${terminalRecovery.committed} quarantined=${terminalRecovery.quarantined}`,
     );
   }
 

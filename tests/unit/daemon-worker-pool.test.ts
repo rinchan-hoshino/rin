@@ -5143,8 +5143,13 @@ setInterval(() => {}, 1000);
     frontendOwners: { [sessionFile]: true },
   });
 
-  await sleep(100);
-  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")), {
+  let workingState: any;
+  for (let index = 0; index < 100; index += 1) {
+    workingState = JSON.parse(await fs.readFile(statePath, "utf8"));
+    if (workingState.workingVisibilities?.[sessionFile]) break;
+    await sleep(10);
+  }
+  assert.deepEqual(workingState, {
     schemaVersion: 1,
     sessionFiles: [sessionFile],
     requestTags: { [sessionFile]: "tag-1" },

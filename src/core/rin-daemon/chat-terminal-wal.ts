@@ -6,7 +6,7 @@ import { safeString } from "../text-utils.js";
 
 export type ChatTerminalWalRecord = {
   version: 1;
-  state: "staged" | "committed";
+  state: "staged" | "committed" | "quarantined";
   runId: string;
   ownerEpoch: string;
   producerIncarnation: string;
@@ -16,6 +16,8 @@ export type ChatTerminalWalRecord = {
   stagedAt: string;
   committedAt?: string;
   outboxId?: string;
+  quarantinedAt?: string;
+  quarantineReason?: string;
 };
 
 export type StageChatTerminalWalInput = {
@@ -118,7 +120,7 @@ function parseRecord(raw: string): ChatTerminalWalRecord {
   const parsed = JSON.parse(raw) as ChatTerminalWalRecord;
   if (
     parsed?.version !== 1 ||
-    !["staged", "committed"].includes(parsed.state) ||
+    !["staged", "committed", "quarantined"].includes(parsed.state) ||
     !safeString(parsed.runId).trim() ||
     !safeString(parsed.ownerEpoch).trim() ||
     !safeString(parsed.producerIncarnation).trim() ||
@@ -254,6 +256,31 @@ export function verifyChatTerminalWal(
     throw new Error("chat_terminal_wal_hash_mismatch");
   }
   return record;
+}
+
+export function quarantineChatTerminalWal(
+  agentDir: string,
+  input: {
+    runId: string;
+    ownerEpoch: string;
+    producerIncarnation: string;
+    payloadHash: string;
+    reason: string;
+  },
+) {
+  const record = verifyChatTerminalWal(agentDir, input);
+  if (record.state === "committed" || record.state === "quarantined") {
+    return record;
+  }
+  const quarantined: ChatTerminalWalRecord = {
+    ...record,
+    state: "quarantined",
+    quarantinedAt: new Date().toISOString(),
+    quarantineReason:
+      safeString(input.reason).trim() || "chat_terminal_recovery_unresolved",
+  };
+  writeRecord(agentDir, quarantined);
+  return quarantined;
 }
 
 export function commitChatTerminalWal(

@@ -157,6 +157,7 @@ export function loadCanonicalChatRunForRecovery(
       turn: {
         incomingMessageId: string;
         replyToMessageId: string;
+        executionSessionFile?: string;
         outboxTurnFence: ChatOutboxTurnFence;
       };
     }
@@ -170,7 +171,8 @@ export function loadCanonicalChatRunForRecovery(
                   runs.owner_epoch, runs.producer_incarnation,
                   turns.turn_id AS delivery_turn_id,
                   turns.owner_epoch AS turn_owner_epoch,
-                  turns.attempt, messages.message_id
+                  turns.attempt, turns.execution_session_file,
+                  messages.message_id
              FROM chat_runs AS runs
              JOIN turns ON turns.run_id = runs.run_id
              JOIN messages ON messages.id = turns.inbound_message_id
@@ -181,7 +183,8 @@ export function loadCanonicalChatRunForRecovery(
         : `SELECT runs.run_id, runs.chat_key, runs.generation, runs.state,
                   runs.owner_epoch, runs.producer_incarnation,
                   runs.delivery_turn_id, turns.owner_epoch AS turn_owner_epoch,
-                  turns.attempt, messages.message_id
+                  turns.attempt, turns.execution_session_file,
+                  messages.message_id
              FROM chat_runs AS runs
              JOIN turns ON turns.turn_id = runs.delivery_turn_id
              JOIN messages ON messages.id = turns.inbound_message_id
@@ -200,6 +203,7 @@ export function loadCanonicalChatRunForRecovery(
         delivery_turn_id: string;
         turn_owner_epoch: string;
         attempt: number;
+        execution_session_file?: string | null;
         message_id: string;
       }
     | undefined;
@@ -225,6 +229,8 @@ export function loadCanonicalChatRunForRecovery(
     turn: {
       incomingMessageId: row.message_id,
       replyToMessageId: row.message_id,
+      executionSessionFile:
+        safeString(row.execution_session_file).trim() || undefined,
       outboxTurnFence: {
         agentDir,
         turnId: row.delivery_turn_id,

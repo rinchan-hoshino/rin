@@ -409,7 +409,7 @@ test("startup recovery commits staged canonical terminal before late turns run",
 
     assert.deepEqual(
       terminalRecovery.reconcileStagedCanonicalChatTerminals(dir),
-      { committed: 1, skipped: 0 },
+      { committed: 1, quarantined: 0 },
     );
     assert.deepEqual(
       db
@@ -453,6 +453,88 @@ test("startup recovery commits staged canonical terminal before late turns run",
         .listStagedChatTerminalWal(dir)
         .some((record) => record.payloadHash === staged.payloadHash),
       false,
+    );
+
+    const invalidSessionItem = inbox.enqueueChatInboxItem(dir, {
+      chatKey: "telegram/777:2",
+      messageId: "startup-invalid-session",
+      session: {
+        platform: "telegram",
+        selfId: "777",
+        channelId: "2",
+        messageId: "startup-invalid-session",
+        content: "invalid session",
+      },
+      elements: [{ type: "text", attrs: { content: "invalid session" } }],
+    }).item;
+    const invalidSessionClaim = inbox.claimChatInboxItem(
+      dir,
+      invalidSessionItem.itemId,
+    );
+    const invalidSessionRun = runStore.createCanonicalChatRun(dir, {
+      turnFence: {
+        agentDir: dir,
+        turnId: invalidSessionClaim.itemId,
+        chatKey: invalidSessionClaim.chatKey,
+        messageId: invalidSessionClaim.messageId,
+        ownerEpoch: invalidSessionClaim.ownerEpoch,
+        attempt: invalidSessionClaim.attemptCount,
+      },
+      producerIncarnation: "invalid-session-worker",
+    });
+    const invalidSessionWal = terminalWal.stageChatTerminalWal(dir, {
+      runId: invalidSessionRun.runId,
+      ownerEpoch: invalidSessionRun.ownerEpoch,
+      producerIncarnation: invalidSessionRun.producerIncarnation,
+      terminalKind: "complete",
+      terminalPayload: {
+        event: "complete",
+        sessionFile: { invalid: true },
+        finalText: "must remain quarantined",
+      },
+    });
+    assert.deepEqual(
+      terminalRecovery.reconcileStagedCanonicalChatTerminals(dir),
+      { committed: 0, quarantined: 1 },
+    );
+    assert.deepEqual(
+      {
+        state: terminalWal.readChatTerminalWal(dir, invalidSessionWal.runId)
+          .state,
+        reason: terminalWal.readChatTerminalWal(dir, invalidSessionWal.runId)
+          .quarantineReason,
+      },
+      {
+        state: "quarantined",
+        reason: "chat_terminal_recovery_invalid_session_file",
+      },
+    );
+
+    const unresolved = terminalWal.stageChatTerminalWal(dir, {
+      runId: "missing-startup-run",
+      ownerEpoch: "missing-owner",
+      producerIncarnation: "missing-worker",
+      terminalKind: "complete",
+      terminalPayload: {
+        event: "complete",
+        sessionFile: "/tmp/missing-session.jsonl",
+        finalText: "must not leak into another run",
+      },
+    });
+    assert.deepEqual(
+      terminalRecovery.reconcileStagedCanonicalChatTerminals(dir),
+      { committed: 0, quarantined: 1 },
+    );
+    assert.deepEqual(
+      {
+        state: terminalWal.readChatTerminalWal(dir, unresolved.runId).state,
+        reason: terminalWal.readChatTerminalWal(dir, unresolved.runId)
+          .quarantineReason,
+      },
+      {
+        state: "quarantined",
+        reason: "chat_terminal_recovery_target_missing",
+      },
     );
   });
 });
