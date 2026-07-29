@@ -33,6 +33,16 @@ const inbox = await import(
 const runStore = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "run-store.js")).href
 );
+const terminalRecovery = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "chat", "terminal-recovery.js"),
+  ).href
+);
+const terminalWal = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-daemon", "chat-terminal-wal.js"),
+  ).href
+);
 
 async function withTempDir(fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-outbox-sqlite-"));
@@ -318,6 +328,131 @@ test("canonical terminal interrupts turns received after its durable stage bound
         .prepare(`SELECT turn_id FROM outbox WHERE idempotency_key = ?`)
         .get(`terminal:${run.runId}`).turn_id,
       rootClaim.itemId,
+    );
+  });
+});
+
+test("startup recovery commits staged canonical terminal before late turns run", async () => {
+  await withTempDir(async (dir) => {
+    const root = inbox.enqueueChatInboxItem(dir, {
+      chatKey: "telegram/777:1",
+      messageId: "startup-root",
+      session: {
+        platform: "telegram",
+        selfId: "777",
+        channelId: "1",
+        messageId: "startup-root",
+        content: "start",
+      },
+      elements: [{ type: "text", attrs: { content: "start" } }],
+    }).item;
+    const rootClaim = inbox.claimChatInboxItem(dir, root.itemId);
+    const run = runStore.createCanonicalChatRun(dir, {
+      turnFence: {
+        agentDir: dir,
+        turnId: rootClaim.itemId,
+        chatKey: rootClaim.chatKey,
+        messageId: rootClaim.messageId,
+        ownerEpoch: rootClaim.ownerEpoch,
+        attempt: rootClaim.attemptCount,
+      },
+      producerIncarnation: "startup-worker",
+    });
+    const late = inbox.enqueueChatInboxItem(dir, {
+      chatKey: "telegram/777:1",
+      messageId: "startup-late",
+      session: {
+        platform: "telegram",
+        selfId: "777",
+        channelId: "1",
+        messageId: "startup-late",
+        content: "after completion",
+      },
+      elements: [{ type: "text", attrs: { content: "after completion" } }],
+    }).item;
+    const lateClaim = inbox.claimChatInboxItem(dir, late.itemId);
+    runStore.attachChatTurnToRun(dir, {
+      runId: run.runId,
+      ownerEpoch: run.ownerEpoch,
+      producerIncarnation: run.producerIncarnation,
+      turnFence: {
+        agentDir: dir,
+        turnId: lateClaim.itemId,
+        chatKey: lateClaim.chatKey,
+        messageId: lateClaim.messageId,
+        ownerEpoch: lateClaim.ownerEpoch,
+        attempt: lateClaim.attemptCount,
+      },
+    });
+    const db = database.openChatDatabase(dir);
+    db.prepare(`UPDATE turns SET created_at = ? WHERE turn_id = ?`).run(
+      "2020-01-01T00:00:00.000Z",
+      rootClaim.itemId,
+    );
+    db.prepare(`UPDATE turns SET created_at = ? WHERE turn_id = ?`).run(
+      "2099-01-01T00:00:00.000Z",
+      lateClaim.itemId,
+    );
+    const staged = terminalWal.stageChatTerminalWal(dir, {
+      runId: run.runId,
+      ownerEpoch: run.ownerEpoch,
+      producerIncarnation: run.producerIncarnation,
+      terminalKind: "complete",
+      terminalPayload: {
+        event: "complete",
+        requestTag: "startup-root",
+        sessionFile: "/tmp/startup-session.jsonl",
+        sessionId: "startup-session",
+        finalText: "startup durable final",
+      },
+    });
+
+    assert.deepEqual(
+      terminalRecovery.reconcileStagedCanonicalChatTerminals(dir),
+      { committed: 1, skipped: 0 },
+    );
+    assert.deepEqual(
+      db
+        .prepare(
+          `SELECT state, delivery_turn_id, terminal_delivery_turn_id
+             FROM chat_runs WHERE run_id = ?`,
+        )
+        .get(run.runId),
+      {
+        state: "terminal",
+        delivery_turn_id: rootClaim.itemId,
+        terminal_delivery_turn_id: rootClaim.itemId,
+      },
+    );
+    assert.deepEqual(
+      db
+        .prepare(`SELECT state, terminal_kind FROM turns WHERE turn_id = ?`)
+        .get(lateClaim.itemId),
+      {
+        state: "failed",
+        terminal_kind: "run_terminal_precedes_turn",
+      },
+    );
+    const outboxRow = db
+      .prepare(
+        `SELECT turn_id, payload_json, post_delivery_json
+           FROM outbox WHERE idempotency_key = ?`,
+      )
+      .get(`terminal:${run.runId}`);
+    assert.equal(outboxRow.turn_id, rootClaim.itemId);
+    assert.equal(
+      JSON.parse(outboxRow.payload_json).parts.at(-1).text,
+      "startup durable final",
+    );
+    assert.equal(
+      JSON.parse(outboxRow.post_delivery_json).markProcessed.messageId,
+      rootClaim.messageId,
+    );
+    assert.equal(
+      terminalWal
+        .listStagedChatTerminalWal(dir)
+        .some((record) => record.payloadHash === staged.payloadHash),
+      false,
     );
   });
 });

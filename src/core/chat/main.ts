@@ -67,6 +67,7 @@ import { buildInboundChatLogInput } from "./inbound-normalization.js";
 import { withoutChatQuoteNodes } from "./rich-text.js";
 import { buildChatMessageRecordKey } from "./message-store.js";
 import { ChatController, loadChatSettings } from "./controller.js";
+import { reconcileStagedCanonicalChatTerminals } from "./terminal-recovery.js";
 import { readChatCommandResponses } from "./command-responses.js";
 import {
   resolveChatModelOptions,
@@ -1743,6 +1744,15 @@ export async function startChatBridge(
       );
     }
   };
+
+  const terminalRecovery = reconcileStagedCanonicalChatTerminals(
+    runtime.agentDir,
+  );
+  if (terminalRecovery.committed > 0) {
+    logger.warn(
+      `chat terminal recovery committed=${terminalRecovery.committed}`,
+    );
+  }
 
   await app.start();
   await syncTelegramCommands(app, logger, commandRows);
