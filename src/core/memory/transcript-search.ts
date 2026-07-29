@@ -204,6 +204,11 @@ function escapeFtsPhrase(value: string): string {
   return safeString(value).replace(/"/g, '""');
 }
 
+function parseExplicitSessionId(value: string): string {
+  const match = /^session\s*:\s*(\S+)\s*$/i.exec(safeString(value).trim());
+  return safeString(match?.[1]).trim();
+}
+
 function buildTokenFtsQuery(value: string): string {
   const raw = safeString(value).trim();
   if (!raw) return "";
@@ -1289,6 +1294,30 @@ function exactCandidateBoost(
 
 type TranscriptSearchOrder = "relevance" | "newest";
 
+function querySessionIdCandidates(
+  db: Database,
+  sessionId: string,
+  rawHitLimit: number,
+  candidates: Map<string, number>,
+): boolean {
+  if (!sessionId) return false;
+  const rows = db
+    .prepare(
+      `
+      SELECT row_key
+      FROM entries
+      WHERE session_id = ?
+      ORDER BY timestamp_ms DESC, line_number DESC
+      LIMIT ?
+    `,
+    )
+    .all(sessionId, rawHitLimit) as Array<{ row_key: string }>;
+  rows.forEach((row, index) => {
+    addCandidateScore(candidates, row.row_key, 200 - index);
+  });
+  return rows.length > 0;
+}
+
 function queryFtsCandidates(
   db: Database,
   tableName: "entries_fts_token" | "entries_fts_trigram",
@@ -1317,7 +1346,7 @@ function queryFtsCandidates(
           SELECT row_key
           FROM ${tableName}
           WHERE ${tableName} MATCH ?
-          ORDER BY bm25(${tableName})
+          ORDER BY rank
           LIMIT ?
         `,
         );
@@ -1486,10 +1515,25 @@ export async function searchTranscriptArchive(
     params.order === "newest" ? "newest" : "relevance";
 
   return withTranscriptSearchDb(rootOverride, (db) => {
+    const candidates = new Map<string, number>();
+    const explicitSessionId = parseExplicitSessionId(rawQuery);
+    if (
+      querySessionIdCandidates(
+        db,
+        explicitSessionId,
+        RAW_SEARCH_LIMIT,
+        candidates,
+      )
+    ) {
+      return aggregateSearchResults(db, candidates, limit, rootOverride, {
+        rawQuery: explicitSessionId,
+        exactOnly: fidelity === "exact",
+        order,
+      });
+    }
+
     const tokenQuery = buildTokenFtsQuery(rawQuery);
     const trigramQuery = buildTrigramFtsQuery(rawQuery);
-    const candidates = new Map<string, number>();
-
     queryFtsCandidates(
       db,
       "entries_fts_token",

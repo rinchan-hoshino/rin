@@ -1459,6 +1459,130 @@ test("recall can rank matching sessions newest-first without changing relevance 
   });
 });
 
+test("recall resolves an explicit session selector without FTS", async () => {
+  await withTempRoot(async (root) => {
+    for (const [id, timestamp, text] of [
+      ["target-old", "2026-07-20T09:00:00.000Z", "Older target context."],
+      ["target-new", "2026-07-20T10:00:00.000Z", "Newest target context."],
+    ]) {
+      await transcripts.appendTranscriptArchiveEntry(
+        {
+          id,
+          timestamp,
+          sessionId: "target-session",
+          sessionFile: "/tmp/target-session.jsonl",
+          role: "assistant",
+          text,
+        },
+        root,
+      );
+    }
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        id: "other",
+        timestamp: "2026-07-20T11:00:00.000Z",
+        sessionId: "other-session",
+        sessionFile: "/tmp/other-session.jsonl",
+        role: "assistant",
+        text: "A message that mentions session:target-session.",
+      },
+      root,
+    );
+
+    const originalPrepare = BetterSqlite3.prototype.prepare;
+    const preparedSql = [];
+    BetterSqlite3.prototype.prepare = function patchedPrepare(sql, ...args) {
+      preparedSql.push(String(sql || ""));
+      return originalPrepare.call(this, sql, ...args);
+    };
+
+    try {
+      const results = await transcripts.searchTranscriptArchive(
+        "session:target-session",
+        { limit: 2, order: "newest", fidelity: "exact" },
+        root,
+      );
+      assert.equal(results.length, 1);
+      assert.equal(results[0].sessionId, "target-session");
+      assert.equal(results[0].messages[0].id, "target-new");
+      assert.ok(
+        preparedSql.some((sql) => /WHERE session_id = \?/i.test(sql)),
+        "expected a direct session_id lookup",
+      );
+      assert.ok(
+        preparedSql.every((sql) => !/\bMATCH\b/i.test(sql)),
+        "explicit session lookup must not prepare FTS MATCH statements",
+      );
+    } finally {
+      BetterSqlite3.prototype.prepare = originalPrepare;
+    }
+  });
+});
+
+test("recall falls back to FTS when an explicit session selector has no exact session", async () => {
+  await withTempRoot(async (root) => {
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        id: "fallback-message",
+        timestamp: "2026-07-20T09:00:00.000Z",
+        sessionId: "fallback-session",
+        sessionFile: "/tmp/fallback-session.jsonl",
+        role: "assistant",
+        text: "The migration note references session:missing-session.",
+      },
+      root,
+    );
+
+    const results = await transcripts.searchTranscriptArchive(
+      "session:missing-session",
+      { limit: 2 },
+      root,
+    );
+    assert.equal(results.length, 1);
+    assert.equal(results[0].sessionId, "fallback-session");
+  });
+});
+
+test("relevance recall orders FTS matches by rank", async () => {
+  await withTempRoot(async (root) => {
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        timestamp: "2026-07-20T09:00:00.000Z",
+        sessionId: "rank-session",
+        sessionFile: "/tmp/rank-session.jsonl",
+        role: "assistant",
+        text: "Project Aurora rank optimization evidence.",
+      },
+      root,
+    );
+
+    const originalPrepare = BetterSqlite3.prototype.prepare;
+    const ftsQueries = [];
+    BetterSqlite3.prototype.prepare = function patchedPrepare(sql, ...args) {
+      const text = String(sql || "");
+      if (/\bMATCH\b/i.test(text)) ftsQueries.push(text);
+      return originalPrepare.call(this, sql, ...args);
+    };
+
+    try {
+      const results = await transcripts.searchTranscriptArchive(
+        "Project Aurora rank optimization",
+        { limit: 2 },
+        root,
+      );
+      assert.equal(results[0].sessionId, "rank-session");
+      assert.equal(ftsQueries.length, 2);
+      assert.ok(
+        ftsQueries.every((sql) => /ORDER BY rank\b/i.test(sql)),
+        "relevance FTS queries must use the optimized rank ordering",
+      );
+      assert.ok(ftsQueries.every((sql) => !/\bbm25\s*\(/i.test(sql)));
+    } finally {
+      BetterSqlite3.prototype.prepare = originalPrepare;
+    }
+  });
+});
+
 test("newest recall retrieves fresh matches before relevance candidate truncation", async () => {
   await withTempRoot(async (root) => {
     for (let index = 0; index < 55; index += 1) {
