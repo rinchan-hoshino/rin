@@ -1918,6 +1918,32 @@ test("frontend SDK turn driver rejoins an active already-submitted turn without 
   );
 });
 
+test("frontend SDK ignores a stale terminal request tag while the current turn is live", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    return { acceptedAs: "prompt", requestTag: options.requestTag };
+  };
+
+  const pending = driver.runTurn({
+    text: "current turn",
+    requestTag: "current-request-tag",
+  });
+  await waitUntil(
+    () => Boolean((driver as any).liveTurn),
+    "current live turn did not start",
+  );
+  await emitRpcTurnComplete(driver, "stale-request-tag", "stale final");
+  assert.ok(
+    (driver as any).liveTurn,
+    "stale terminal settled the current turn",
+  );
+
+  await emitRpcTurnComplete(driver, "current-request-tag", "current final");
+  assert.equal((await pending).finalText, "current final");
+});
+
 test("frontend SDK treats active-state input as an ordinary submission and waits for Pi terminal", async () => {
   const client = createFrontendClient();
   client.getState = async () => ({
@@ -1925,6 +1951,7 @@ test("frontend SDK treats active-state input as an ordinary submission and waits
     sessionId: "frontend-session",
     isStreaming: true,
     turnActive: true,
+    requestTag: "backend-terminal-owner",
   });
   client.prompt = async (text: string, options: any = {}) => {
     client.calls.push({ type: "prompt", text, options });
@@ -1951,7 +1978,11 @@ test("frontend SDK treats active-state input as an ordinary submission and waits
     "frontend-session",
   );
 
-  const result = await pending;
+  const result = await withTimeout(
+    pending,
+    250,
+    "backend-owned terminal did not settle the active frontend turn",
+  );
   assert.equal(result.finalText, "Pi terminal");
   const promptCall = client.calls.find((call: any) => call.type === "prompt");
   assert.equal(promptCall.text, "restored job");

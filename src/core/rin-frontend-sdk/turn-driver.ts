@@ -404,6 +404,12 @@ export class RinFrontendTurnDriver {
   private applyFrontendStateSnapshot(state: RinSessionState | undefined) {
     const previousWorkingVisible = Boolean(this.frontendState.workingVisible);
     this.frontendState = { ...this.frontendState, ...(state || {}) };
+    if (state && !Object.prototype.hasOwnProperty.call(state, "requestTag")) {
+      delete this.frontendState.requestTag;
+    }
+    if (Boolean(state?.turnActive || state?.isStreaming)) {
+      this.backendTurnRequestTag = safeString(state?.requestTag).trim();
+    }
     if (typeof state?.workingVisible === "boolean") {
       const workingVisible = state.workingVisible;
       this.frontendState.workingVisible = workingVisible;
@@ -459,6 +465,12 @@ export class RinFrontendTurnDriver {
 
   private startLiveTurn(requestTag?: string) {
     if (this.liveTurn) throw new Error("frontend_turn_already_running");
+    const backendAlreadyActive = Boolean(
+      this.frontendState.turnActive || this.frontendState.isStreaming,
+    );
+    const activeBackendRequestTag = safeString(
+      this.frontendState.requestTag,
+    ).trim();
     let resolve!: (value: any) => void;
     let reject!: (error: Error) => void;
     const liveTurn = {
@@ -478,7 +490,9 @@ export class RinFrontendTurnDriver {
     };
     liveTurn.promise.catch(() => {});
     this.liveTurn = liveTurn;
-    this.backendTurnRequestTag = safeString(requestTag).trim();
+    this.backendTurnRequestTag = backendAlreadyActive
+      ? activeBackendRequestTag
+      : safeString(requestTag).trim();
     return liveTurn;
   }
 
@@ -644,6 +658,16 @@ export class RinFrontendTurnDriver {
     if (
       incomingRequestTag &&
       this.ignoredTerminalRequestTags.delete(incomingRequestTag)
+    ) {
+      return false;
+    }
+    const activeRequestTag = safeString(this.liveTurn?.requestTag).trim();
+    if (
+      incomingRequestTag &&
+      activeRequestTag &&
+      incomingRequestTag !== activeRequestTag &&
+      this.backendTurnRequestTag &&
+      incomingRequestTag !== this.backendTurnRequestTag
     ) {
       return false;
     }
