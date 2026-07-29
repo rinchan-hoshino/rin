@@ -119,7 +119,7 @@ export type RinFrontendBackendEvent =
       sessionFile?: string;
       requestTag?: string;
       chatRunContext?: RinChatRunContext;
-      terminalWal?: { payloadHash: string };
+      terminalWal?: { payloadHash: string; stagedAt?: string };
     }
   | {
       type: "turn_complete";
@@ -129,7 +129,7 @@ export type RinFrontendBackendEvent =
       sessionFile?: string;
       requestTag?: string;
       chatRunContext?: RinChatRunContext;
-      terminalWal?: { payloadHash: string };
+      terminalWal?: { payloadHash: string; stagedAt?: string };
     }
   | {
       type: "turn_error";
@@ -138,7 +138,7 @@ export type RinFrontendBackendEvent =
       sessionFile?: string;
       requestTag?: string;
       chatRunContext?: RinChatRunContext;
-      terminalWal?: { payloadHash: string };
+      terminalWal?: { payloadHash: string; stagedAt?: string };
     };
 
 export type RinFrontendEvent =

@@ -938,7 +938,10 @@ export async function runCustomRpcMode(
             });
             Object.assign(payload, {
               chatRunContext: options.chatRunContext,
-              terminalWal: { payloadHash: staged.payloadHash },
+              terminalWal: {
+                payloadHash: staged.payloadHash,
+                stagedAt: staged.stagedAt,
+              },
             });
           } catch (error: any) {
             output({

@@ -199,6 +199,129 @@ test("canonical run terminal atomically freezes the latest steer owner and settl
   });
 });
 
+test("canonical terminal interrupts turns received after its durable stage boundary", async () => {
+  await withTempDir(async (dir) => {
+    const root = inbox.enqueueChatInboxItem(dir, {
+      chatKey: "telegram/777:1",
+      messageId: "stage-root",
+      session: {
+        platform: "telegram",
+        selfId: "777",
+        channelId: "1",
+        messageId: "stage-root",
+        content: "start",
+      },
+      elements: [{ type: "text", attrs: { content: "start" } }],
+    }).item;
+    const rootClaim = inbox.claimChatInboxItem(dir, root.itemId);
+    const run = runStore.createCanonicalChatRun(dir, {
+      turnFence: {
+        agentDir: dir,
+        turnId: rootClaim.itemId,
+        chatKey: rootClaim.chatKey,
+        messageId: rootClaim.messageId,
+        ownerEpoch: rootClaim.ownerEpoch,
+        attempt: rootClaim.attemptCount,
+      },
+      producerIncarnation: "worker-incarnation-stage",
+    });
+    const late = inbox.enqueueChatInboxItem(dir, {
+      chatKey: "telegram/777:1",
+      messageId: "stage-late",
+      session: {
+        platform: "telegram",
+        selfId: "777",
+        channelId: "1",
+        messageId: "stage-late",
+        content: "after completion",
+      },
+      elements: [{ type: "text", attrs: { content: "after completion" } }],
+    }).item;
+    const lateClaim = inbox.claimChatInboxItem(dir, late.itemId);
+    runStore.attachChatTurnToRun(dir, {
+      runId: run.runId,
+      ownerEpoch: run.ownerEpoch,
+      producerIncarnation: run.producerIncarnation,
+      turnFence: {
+        agentDir: dir,
+        turnId: lateClaim.itemId,
+        chatKey: lateClaim.chatKey,
+        messageId: lateClaim.messageId,
+        ownerEpoch: lateClaim.ownerEpoch,
+        attempt: lateClaim.attemptCount,
+      },
+    });
+    const db = database.openChatDatabase(dir);
+    db.prepare(`UPDATE turns SET created_at = ? WHERE turn_id = ?`).run(
+      "2026-07-29T12:00:00.000Z",
+      rootClaim.itemId,
+    );
+    db.prepare(`UPDATE turns SET created_at = ? WHERE turn_id = ?`).run(
+      "2026-07-29T12:02:00.000Z",
+      lateClaim.itemId,
+    );
+
+    const recovered = runStore.loadCanonicalChatRunForRecovery(
+      dir,
+      {
+        runId: run.runId,
+        ownerEpoch: run.ownerEpoch,
+        producerIncarnation: run.producerIncarnation,
+      },
+      { terminalStagedAt: "2026-07-29T12:01:00.000Z" },
+    );
+    assert.equal(recovered.turn.outboxTurnFence.turnId, rootClaim.itemId);
+    assert.equal(recovered.turn.incomingMessageId, rootClaim.messageId);
+
+    runStore.commitCanonicalChatRunTerminal(
+      dir,
+      {
+        runId: run.runId,
+        ownerEpoch: run.ownerEpoch,
+        producerIncarnation: run.producerIncarnation,
+      },
+      payload("root final"),
+      {
+        deliveryKind: "final",
+        terminalStagedAt: "2026-07-29T12:01:00.000Z",
+      },
+    );
+
+    assert.deepEqual(
+      db
+        .prepare(
+          `SELECT delivery_turn_id, terminal_delivery_turn_id
+             FROM chat_runs WHERE run_id = ?`,
+        )
+        .get(run.runId),
+      {
+        delivery_turn_id: rootClaim.itemId,
+        terminal_delivery_turn_id: rootClaim.itemId,
+      },
+    );
+    assert.deepEqual(
+      db
+        .prepare(
+          `SELECT state, run_id, owner_epoch, terminal_kind
+             FROM turns WHERE turn_id = ?`,
+        )
+        .get(lateClaim.itemId),
+      {
+        state: "failed",
+        run_id: run.runId,
+        owner_epoch: null,
+        terminal_kind: "run_terminal_precedes_turn",
+      },
+    );
+    assert.equal(
+      db
+        .prepare(`SELECT turn_id FROM outbox WHERE idempotency_key = ?`)
+        .get(`terminal:${run.runId}`).turn_id,
+      rootClaim.itemId,
+    );
+  });
+});
+
 test("canonical run terminal rejects a stale producer without writing outbox", async () => {
   await withTempDir(async (dir) => {
     const inbound = inbox.enqueueChatInboxItem(dir, {

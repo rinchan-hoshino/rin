@@ -43,7 +43,7 @@ export interface RinFrontendLifecycleState {
 interface LifecycleEventBase {
   requestTag?: string;
   chatRunContext?: RinChatRunContext;
-  terminalWal?: { payloadHash: string };
+  terminalWal?: { payloadHash: string; stagedAt?: string };
   turnGeneration?: number;
   sessionId?: string;
   sessionFile?: string;
@@ -146,7 +146,12 @@ function optionalChatRunContext(value: unknown): RinChatRunContext | undefined {
 function optionalTerminalWal(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
   const payloadHash = safeString((value as any).payloadHash).trim();
-  return /^[0-9a-f]{64}$/.test(payloadHash) ? { payloadHash } : undefined;
+  if (!/^[0-9a-f]{64}$/.test(payloadHash)) return;
+  const stagedAt = safeString((value as any).stagedAt).trim();
+  return {
+    payloadHash,
+    ...(stagedAt ? { stagedAt } : {}),
+  };
 }
 
 function optionalText(value: unknown): string | undefined {

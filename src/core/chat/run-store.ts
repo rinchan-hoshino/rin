@@ -150,6 +150,7 @@ export function createCanonicalChatRun(
 export function loadCanonicalChatRunForRecovery(
   agentDir: string,
   fence: CanonicalChatRunFence,
+  options: { terminalStagedAt?: string } = {},
 ):
   | {
       run: CanonicalChatRun;
@@ -161,18 +162,34 @@ export function loadCanonicalChatRunForRecovery(
     }
   | undefined {
   const db = openChatDatabase(agentDir);
+  const terminalStagedAt = String(options.terminalStagedAt || "").trim();
   const row = db
     .prepare(
-      `SELECT runs.run_id, runs.chat_key, runs.generation, runs.state,
-              runs.owner_epoch, runs.producer_incarnation,
-              runs.delivery_turn_id, turns.owner_epoch AS turn_owner_epoch,
-              turns.attempt, messages.message_id
-         FROM chat_runs AS runs
-         JOIN turns ON turns.turn_id = runs.delivery_turn_id
-         JOIN messages ON messages.id = turns.inbound_message_id
-        WHERE runs.run_id = ?`,
+      terminalStagedAt
+        ? `SELECT runs.run_id, runs.chat_key, runs.generation, runs.state,
+                  runs.owner_epoch, runs.producer_incarnation,
+                  turns.turn_id AS delivery_turn_id,
+                  turns.owner_epoch AS turn_owner_epoch,
+                  turns.attempt, messages.message_id
+             FROM chat_runs AS runs
+             JOIN turns ON turns.run_id = runs.run_id
+             JOIN messages ON messages.id = turns.inbound_message_id
+            WHERE runs.run_id = ? AND turns.state = 'running'
+              AND turns.created_at <= ?
+            ORDER BY turns.sequence DESC
+            LIMIT 1`
+        : `SELECT runs.run_id, runs.chat_key, runs.generation, runs.state,
+                  runs.owner_epoch, runs.producer_incarnation,
+                  runs.delivery_turn_id, turns.owner_epoch AS turn_owner_epoch,
+                  turns.attempt, messages.message_id
+             FROM chat_runs AS runs
+             JOIN turns ON turns.turn_id = runs.delivery_turn_id
+             JOIN messages ON messages.id = turns.inbound_message_id
+            WHERE runs.run_id = ?`,
     )
-    .get(fence.runId) as
+    .get(
+      ...(terminalStagedAt ? [fence.runId, terminalStagedAt] : [fence.runId]),
+    ) as
     | {
         run_id: string;
         chat_key: string;
@@ -284,6 +301,7 @@ export function commitCanonicalChatRunTerminal(
   payload: ChatOutboxPayload,
   options: {
     deliveryKind: Extract<ChatOutboxDeliveryKind, "final" | "error">;
+    terminalStagedAt?: string;
     enqueueOptions?: Omit<
       EnqueueChatOutboxOptions,
       "deliveryKind" | "idempotencyKey" | "turnFence"
@@ -337,6 +355,22 @@ export function commitCanonicalChatRunTerminal(
       if (run.state !== "running" && run.state !== "draining") {
         throw new Error("chat_run_not_terminalizable");
       }
+      const terminalStagedAt = String(options.terminalStagedAt || "").trim();
+      const eligibleDeliveryTurnId = terminalStagedAt
+        ? (
+            db
+              .prepare(
+                `SELECT turn_id
+                   FROM turns
+                  WHERE run_id = ? AND state = 'running' AND created_at <= ?
+                  ORDER BY sequence DESC
+                  LIMIT 1`,
+              )
+              .get(fence.runId, terminalStagedAt) as
+              | { turn_id?: string }
+              | undefined
+          )?.turn_id
+        : run.delivery_turn_id;
       const deliveryTurn = db
         .prepare(
           `SELECT turns.turn_id, turns.chat_key, turns.owner_epoch, turns.attempt,
@@ -346,7 +380,7 @@ export function commitCanonicalChatRunTerminal(
           WHERE turns.turn_id = ? AND turns.run_id = ?
             AND turns.state = 'running'`,
         )
-        .get(run.delivery_turn_id, fence.runId) as
+        .get(eligibleDeliveryTurnId, fence.runId) as
         | {
             turn_id: string;
             chat_key: string;
@@ -370,6 +404,18 @@ export function commitCanonicalChatRunTerminal(
           attempt: deliveryTurn.attempt,
         },
       });
+      if (terminalStagedAt) {
+        db.prepare(
+          `UPDATE turns
+              SET state = 'failed', owner_epoch = NULL,
+                  lease_until = NULL, heartbeat_at = NULL,
+                  next_attempt_at = NULL,
+                  last_error = 'chat_run_terminal_precedes_turn',
+                  terminal_kind = 'run_terminal_precedes_turn',
+                  updated_at = ?
+            WHERE run_id = ? AND state = 'running' AND created_at > ?`,
+        ).run(timestamp, fence.runId, terminalStagedAt);
+      }
       db.prepare(
         `UPDATE turns
           SET state = 'superseded', terminal_kind = 'run_superseded',
@@ -382,13 +428,15 @@ export function commitCanonicalChatRunTerminal(
         .prepare(
           `UPDATE chat_runs
             SET state = 'terminal',
-                terminal_delivery_turn_id = delivery_turn_id,
+                delivery_turn_id = ?, terminal_delivery_turn_id = ?,
                 terminal_kind = ?, terminal_payload_json = ?,
                 terminal_payload_hash = ?, terminal_at = ?, updated_at = ?
           WHERE run_id = ? AND state IN ('running', 'draining')
             AND owner_epoch = ? AND producer_incarnation = ?`,
         )
         .run(
+          deliveryTurn.turn_id,
+          deliveryTurn.turn_id,
           options.deliveryKind,
           terminalJson,
           terminalHash,

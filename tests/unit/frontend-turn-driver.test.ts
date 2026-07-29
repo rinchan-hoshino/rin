@@ -76,7 +76,10 @@ function createFrontendClient() {
           ...(options.chatRunContext
             ? {
                 chatRunContext: options.chatRunContext,
-                terminalWal: { payloadHash: "a".repeat(64) },
+                terminalWal: {
+                  payloadHash: "a".repeat(64),
+                  stagedAt: "2026-07-29T12:57:18.000Z",
+                },
               }
             : {}),
         },
@@ -171,6 +174,32 @@ function createFrontendClient() {
     async respondExtensionUi() {},
   };
 }
+
+test("pending durable terminal settles the live turn before accepting more input", async () => {
+  const driver: any = createDriver();
+  const client: any = driver.testClient;
+  await driver.connect();
+  const liveTurn = driver.startLiveTurn("pending-terminal");
+  client.send = async (command: any) => {
+    assert.equal(command.type, "replay_pending_terminal_turn_event");
+    await client.emit({
+      type: "ui",
+      payload: {
+        type: "rpc_turn_event",
+        event: "complete",
+        requestTag: "pending-terminal",
+        finalText: "durable final",
+        sessionId: "frontend-session",
+        sessionFile: "/tmp/frontend-chat.jsonl",
+      },
+    });
+    return { replayed: true };
+  };
+
+  assert.equal(await driver.settlePendingTerminalTurn(), true);
+  assert.equal((await liveTurn.promise).finalText, "durable final");
+  assert.equal(driver.liveTurn, null);
+});
 
 test("frontend client event handler failures are reported without becoming turn errors", async () => {
   const client = createFrontendClient();
@@ -313,6 +342,8 @@ test("terminal listener failures remain terminal while becoming observable", asy
 
 test("frontend turn driver propagates canonical run identity through terminal projection", async () => {
   const driver = createDriver() as any;
+  const seen: any[] = [];
+  driver.subscribe((event: any) => seen.push(event));
   const chatRunContext = {
     runId: "run-protocol",
     ownerEpoch: "owner-protocol",
@@ -328,6 +359,10 @@ test("frontend turn driver propagates canonical run identity through terminal pr
   );
   assert.deepEqual(promptCall.options.chatRunContext, chatRunContext);
   assert.equal(result.finalText, "frontend final");
+  assert.equal(
+    seen.find((event) => event.type === "turn_complete")?.terminalWal?.stagedAt,
+    "2026-07-29T12:57:18.000Z",
+  );
 });
 
 test("backend working visibility is the only shared frontend Working source", async () => {

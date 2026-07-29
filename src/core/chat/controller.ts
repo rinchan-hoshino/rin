@@ -593,11 +593,15 @@ export class ChatController {
   private recoverCanonicalRunEvent(
     chatRunContext?: CanonicalChatRunFence,
     requestTag?: string,
+    terminalStagedAt?: string,
   ) {
-    if (!chatRunContext || this.activeCanonicalRun) return;
+    if (!chatRunContext) return;
+    const stagedAt = safeString(terminalStagedAt).trim();
+    if (this.activeCanonicalRun && !stagedAt) return;
     const recovered = loadCanonicalChatRunForRecovery(
       this.agentDir,
       chatRunContext,
+      { terminalStagedAt: stagedAt || undefined },
     );
     if (!recovered || recovered.run.chatKey !== this.chatKey) return;
     this.activeCanonicalRun = recovered.run;
@@ -1874,6 +1878,7 @@ export class ChatController {
       supersedeTurnFences?: ChatOutboxTurnFence[];
       canonicalRunFence?: CanonicalChatRunFence;
       terminalWalPayloadHash?: string;
+      terminalWalStagedAt?: string;
     } = {},
   ) {
     const idempotencyKey = safeString(options.idempotencyKey).trim();
@@ -1919,11 +1924,14 @@ export class ChatController {
         normalizedPayload,
         {
           deliveryKind,
+          terminalStagedAt: options.terminalWalStagedAt,
           enqueueOptions: {
             id,
             postDelivery: options.postDelivery,
             nonTerminalError: options.nonTerminalError,
-            supersedeTurnFences: options.supersedeTurnFences,
+            supersedeTurnFences: options.terminalWalStagedAt
+              ? undefined
+              : options.supersedeTurnFences,
           },
         },
       ).outboxId;
@@ -2021,6 +2029,7 @@ export class ChatController {
       supersedeTurnFences?: ChatOutboxTurnFence[];
       canonicalRunFence?: CanonicalChatRunFence;
       terminalWalPayloadHash?: string;
+      terminalWalStagedAt?: string;
     } = {},
   ) {
     const pending = this.stagedDelivery;
@@ -2154,6 +2163,7 @@ export class ChatController {
     supersedeTurnFences?: ChatOutboxTurnFence[];
     canonicalRunFence?: CanonicalChatRunFence;
     terminalWalPayloadHash?: string;
+    terminalWalStagedAt?: string;
   }) {
     const linkSession =
       input.bindSession !== false && this.linkDeliveriesToSession;
@@ -2211,6 +2221,7 @@ export class ChatController {
         supersedeTurnFences: input.supersedeTurnFences,
         canonicalRunFence: input.canonicalRunFence,
         terminalWalPayloadHash: input.terminalWalPayloadHash,
+        terminalWalStagedAt: input.terminalWalStagedAt,
       },
     );
     if (delivery?.accepted !== false && delivery?.settled !== false) {
@@ -3113,6 +3124,9 @@ export class ChatController {
         input.incomingMessageId,
         input.outboxTurnFence,
       ) || undefined;
+    if (await this.driver.settlePendingTerminalTurn()) {
+      return { superseded: true, interrupted: true };
+    }
     this.rememberPromptChatType(input.promptMeta);
     this.lastActivityAt = Date.now();
     const deliverFinal = input.deliverFinal !== false;
@@ -3434,7 +3448,7 @@ export class ChatController {
     result?: unknown;
     sessionFile?: string;
     chatRunContext?: CanonicalChatRunFence;
-    terminalWal?: { payloadHash: string };
+    terminalWal?: { payloadHash: string; stagedAt?: string };
   }) {
     if (!this.currentTurn) return;
     const deliveryTarget = this.currentDeliveryTarget(this.currentTurn);
@@ -3458,6 +3472,7 @@ export class ChatController {
         supersedeTurnFences,
         canonicalRunFence: event.chatRunContext,
         terminalWalPayloadHash: event.terminalWal?.payloadHash,
+        terminalWalStagedAt: event.terminalWal?.stagedAt,
         clearProcessing: true,
       });
     } else if (event.chatRunContext) {
@@ -3470,6 +3485,7 @@ export class ChatController {
         supersedeTurnFences,
         canonicalRunFence: event.chatRunContext,
         terminalWalPayloadHash: event.terminalWal?.payloadHash,
+        terminalWalStagedAt: event.terminalWal?.stagedAt,
         clearProcessing: true,
         deliveryKind: "error",
       });
@@ -3494,7 +3510,7 @@ export class ChatController {
     error?: string;
     sessionFile?: string;
     chatRunContext?: CanonicalChatRunFence;
-    terminalWal?: { payloadHash: string };
+    terminalWal?: { payloadHash: string; stagedAt?: string };
   }) {
     if (!this.currentTurn) return;
     const errorMessage = safeString(event.error).trim() || "rpc_turn_failed";
@@ -3514,6 +3530,7 @@ export class ChatController {
       supersedeTurnFences,
       canonicalRunFence: event.chatRunContext,
       terminalWalPayloadHash: event.terminalWal?.payloadHash,
+      terminalWalStagedAt: event.terminalWal?.stagedAt,
       clearProcessing: true,
       deliveryKind: "error",
     });
@@ -3636,7 +3653,11 @@ export class ChatController {
         return;
       case "turn_complete":
         if (event.chatRunContext) {
-          this.recoverCanonicalRunEvent(event.chatRunContext, event.requestTag);
+          this.recoverCanonicalRunEvent(
+            event.chatRunContext,
+            event.requestTag,
+            event.terminalWal?.stagedAt,
+          );
           if (!this.acceptsCanonicalRunEvent(event.chatRunContext)) {
             throw new Error("chat_run_terminal_fence_mismatch");
           }
@@ -3647,7 +3668,11 @@ export class ChatController {
         return;
       case "turn_error":
         if (event.chatRunContext) {
-          this.recoverCanonicalRunEvent(event.chatRunContext, event.requestTag);
+          this.recoverCanonicalRunEvent(
+            event.chatRunContext,
+            event.requestTag,
+            event.terminalWal?.stagedAt,
+          );
           if (!this.acceptsCanonicalRunEvent(event.chatRunContext)) {
             throw new Error("chat_run_terminal_fence_mismatch");
           }
