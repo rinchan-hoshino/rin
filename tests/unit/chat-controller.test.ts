@@ -349,6 +349,56 @@ test("detached controller cannot overwrite authoritative chat session binding", 
   );
 });
 
+test("detached delivery links its session without changing chat binding", async () => {
+  const owner = await createController();
+  const ownerSession = path.join(owner.agentDir, "sessions", "owner.jsonl");
+  const taskSession = path.join(owner.agentDir, "sessions", "task.jsonl");
+  await fs.mkdir(path.dirname(ownerSession), { recursive: true });
+  await fs.writeFile(ownerSession, "session", "utf8");
+  await fs.writeFile(taskSession, "session", "utf8");
+  owner.updateStoredSessionFile(ownerSession);
+
+  const detached = attachTestChatApp(
+    new ChatController({}, owner.dataDir, owner.chatKey, {
+      logger: { info() {}, warn() {} },
+      h: owner.h,
+      affectChatBinding: false,
+      linkDeliveriesToSession: true,
+    }),
+  );
+  let deliveryIndex = 0;
+  detached.app.bots[0].sendMessage = async () => [`m${++deliveryIndex}`];
+  assert.equal(
+    detached.buildAssistantDelivery({
+      text: "early scheduled error",
+      bindSession: true,
+    }).sessionBinding,
+    undefined,
+  );
+  await detached.deliverAssistantReply({ text: "early scheduled error" });
+  assert.equal(
+    lookupReplySession(owner.agentDir, owner.chatKey, "m1")?.sessionFile,
+    undefined,
+  );
+
+  detached.updateStoredSessionFile(taskSession);
+  await detached.deliverAssistantReply({
+    text: "scheduled result",
+    sessionFile: taskSession,
+  });
+
+  assert.match(
+    openChatDatabase(owner.agentDir)
+      .prepare(`SELECT session_file FROM chat_state WHERE chat_key = ?`)
+      .get(owner.chatKey).session_file,
+    /owner\.jsonl$/,
+  );
+  assert.equal(
+    lookupReplySession(owner.agentDir, owner.chatKey, "m2").sessionFile,
+    taskSession,
+  );
+});
+
 test("chat controller tells the frontend driver not to reconnect for an idle command", async () => {
   const controller = await createController();
   const sessionFile = path.join(

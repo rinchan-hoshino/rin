@@ -27,6 +27,7 @@ export type ChatRunTurnOptions = RinToolStartupOptions & {
   thinkingLevel?: string;
   controllerKey?: string;
   affectChatBinding?: boolean;
+  linkDeliveriesToSession?: boolean;
   disposeAfterTurn?: boolean;
   shutdownAfterTurn?: boolean;
   deliverFinal?: boolean;

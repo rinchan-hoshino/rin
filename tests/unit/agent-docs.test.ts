@@ -303,7 +303,18 @@ test("agent docs expose scheduled task operation workflow", () => {
   );
   assert.match(scheduledTasks, /`rin-prompt-engineering`/);
   assert.match(scheduledTasks, /target\.prompt.*target\.continuationPrompt/s);
-  assert.match(scheduledTasks, /TUI frontends have no key and cannot be bound/);
+  assert.match(
+    scheduledTasks,
+    /TUI frontends have no key and cannot be addressed/,
+  );
+  assert.match(
+    scheduledTasks,
+    /without reading or changing the chat's current session binding/,
+  );
+  assert.match(
+    scheduledTasks,
+    /Quoting a delivered task message selects its linked session/,
+  );
   assert.doesNotMatch(
     scheduledTasks,
     /session_continue|current-session continuation/i,

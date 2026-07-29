@@ -933,6 +933,7 @@ test("cron dedicated agent task creates and then preserves its bound session", a
         chatKey: item.chatKey,
         controllerKey: item.controllerKey,
         affectChatBinding: item.affectChatBinding,
+        linkDeliveriesToSession: item.linkDeliveriesToSession,
         deliverFinal: item.deliverFinal,
         disposeAfterTurn: item.disposeAfterTurn,
         text: item.text,
@@ -943,7 +944,8 @@ test("cron dedicated agent task creates and then preserves its bound session", a
         {
           chatKey: "telegram/demo:1",
           controllerKey: "cron_dedicated",
-          affectChatBinding: true,
+          affectChatBinding: false,
+          linkDeliveriesToSession: true,
           deliverFinal: true,
           disposeAfterTurn: false,
           text: "hello",
@@ -953,7 +955,8 @@ test("cron dedicated agent task creates and then preserves its bound session", a
         {
           chatKey: "telegram/demo:1",
           controllerKey: "cron_dedicated",
-          affectChatBinding: true,
+          affectChatBinding: false,
+          linkDeliveriesToSession: true,
           deliverFinal: true,
           disposeAfterTurn: false,
           text: "hello again",
@@ -1021,6 +1024,7 @@ test("cron dedicated agent task resumes an existing canonical session", async ()
         chatKey: calls[0].chatKey,
         controllerKey: calls[0].controllerKey,
         affectChatBinding: calls[0].affectChatBinding,
+        linkDeliveriesToSession: calls[0].linkDeliveriesToSession,
         deliverFinal: calls[0].deliverFinal,
         disposeAfterTurn: calls[0].disposeAfterTurn,
         text: calls[0].text,
@@ -1029,7 +1033,8 @@ test("cron dedicated agent task resumes an existing canonical session", async ()
       {
         chatKey: "telegram/demo:1",
         controllerKey: "cron_seeded",
-        affectChatBinding: true,
+        affectChatBinding: false,
+        linkDeliveriesToSession: true,
         deliverFinal: true,
         disposeAfterTurn: false,
         text: "hello again",
@@ -1407,7 +1412,8 @@ test("cron chat-bound no-session agent task preserves session file for quote res
       "temporary session",
     );
     assert.equal(calls[0].chatKey, "telegram/demo:1");
-    assert.equal(calls[0].affectChatBinding, true);
+    assert.equal(calls[0].affectChatBinding, false);
+    assert.equal(calls[0].linkDeliveriesToSession, true);
     assert.equal(calls[0].deliverFinal, true);
     assert.equal(calls[0].promptMeta?.source, "scheduled-task");
     assert.equal(calls[0].promptMeta?.taskId, "cron_chat_bound");
@@ -1669,7 +1675,7 @@ test("cron dedicated agent task uses separate initial and continuation prompts",
   }
 });
 
-test("cron chat-bound agent task uses chat turn delivery", async () => {
+test("cron chat-bound agent task links its delivery without changing chat binding", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const sessionFile = path.join(
     agentDir,
@@ -1704,14 +1710,15 @@ test("cron chat-bound agent task uses chat turn delivery", async () => {
     assert.equal(sent.length, 0);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].chatKey, "telegram/demo:1");
-    assert.equal(calls[0].affectChatBinding, true);
+    assert.equal(calls[0].affectChatBinding, false);
+    assert.equal(calls[0].linkDeliveriesToSession, true);
     assert.equal(calls[0].deliverFinal, true);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
 
-test("cron chat-bound task can bind frontend without final delivery", async () => {
+test("cron chat-bound task can suppress final delivery without changing chat binding", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const calls = [];
   const sent = [];
@@ -1740,7 +1747,8 @@ test("cron chat-bound task can bind frontend without final delivery", async () =
     assert.equal(task.lastResultText, "hidden final");
     assert.equal(sent.length, 0);
     assert.equal(calls[0].chatKey, "telegram/demo:1");
-    assert.equal(calls[0].affectChatBinding, true);
+    assert.equal(calls[0].affectChatBinding, false);
+    assert.equal(calls[0].linkDeliveriesToSession, true);
     assert.equal(calls[0].deliverFinal, false);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });

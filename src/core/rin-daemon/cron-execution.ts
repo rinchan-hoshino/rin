@@ -484,7 +484,8 @@ export async function executeCronAgentTask(
     ...(chatKey
       ? {
           chatKey,
-          affectChatBinding: true,
+          affectChatBinding: false,
+          linkDeliveriesToSession: true,
           deliverFinal: task.deliverFinal !== false,
           quietMode: task.quiet !== false,
         }

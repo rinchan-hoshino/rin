@@ -353,6 +353,7 @@ export class ChatController {
   logger: any;
   h: any;
   affectChatBinding: boolean;
+  linkDeliveriesToSession: boolean;
   workingReactionEmoji = "";
   workingReactionTick = 0;
   lastWorkingReactionAt = 0;
@@ -400,6 +401,7 @@ export class ChatController {
       logger: any;
       h: any;
       affectChatBinding?: boolean;
+      linkDeliveriesToSession?: boolean;
       statePath?: string;
       frontendClientFactory?: () => RinFrontendTurnClient;
       sleepAfterIdleMs?: number;
@@ -413,6 +415,8 @@ export class ChatController {
     this.dataDir = dataDir;
     this.agentDir = path.resolve(dataDir, "..");
     this.affectChatBinding = deps.affectChatBinding !== false;
+    this.linkDeliveriesToSession =
+      deps.linkDeliveriesToSession ?? this.affectChatBinding;
     this.statePath =
       deps.statePath || statePathForControllerKey(dataDir, chatKey);
     this.state = readJsonFile<ChatState>(this.statePath, { chatKey });
@@ -1759,10 +1763,11 @@ export class ChatController {
   }
 
   private currentConversationSessionPayload() {
-    if (!this.affectChatBinding) return {};
+    if (!this.linkDeliveriesToSession) return {};
     const sessionFile = this.currentSessionFile();
+    if (!sessionFile) return {};
     return {
-      ...(sessionFile ? { sessionFile } : {}),
+      sessionFile,
       sessionBinding: "conversation" as const,
     };
   }
@@ -1777,14 +1782,15 @@ export class ChatController {
   }): ChatAssistantDelivery {
     const text = safeString(input.text).trim();
     const parts = Array.isArray(input.parts) ? input.parts.filter(Boolean) : [];
+    const sessionFile = toStoredSessionFile(
+      this.agentDir,
+      input.sessionFile || this.currentSessionFile(),
+    );
     const sessionPayload =
-      input.bindSession === false
+      input.bindSession === false || !sessionFile
         ? {}
         : {
-            sessionFile: toStoredSessionFile(
-              this.agentDir,
-              input.sessionFile || this.currentSessionFile(),
-            ),
+            sessionFile,
             sessionBinding: "conversation" as const,
           };
     const replyToMessageId = safeString(input.replyToMessageId || "").trim();
@@ -2149,8 +2155,13 @@ export class ChatController {
     canonicalRunFence?: CanonicalChatRunFence;
     terminalWalPayloadHash?: string;
   }) {
-    const bindSession = input.bindSession !== false && this.affectChatBinding;
-    const text = this.stageAssistantDelivery({ ...input, bindSession });
+    const linkSession =
+      input.bindSession !== false && this.linkDeliveriesToSession;
+    const bindSession = linkSession && this.affectChatBinding;
+    const text = this.stageAssistantDelivery({
+      ...input,
+      bindSession: linkSession,
+    });
     const incomingMessageId = safeString(input.incomingMessageId).trim();
     const replyToMessageId = safeString(
       input.replyToMessageId || input.incomingMessageId,

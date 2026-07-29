@@ -285,10 +285,10 @@ Behavior:
 
 - Agent tasks run in a managed task session for that run.
 - Rin disposes or shuts down the no-session turn after completion, except special self-improve distillation tasks.
-- If an addressable `frontend` is set, Rin binds the scheduled turn to that frontend/controller identity.
-- TUI frontends have no key and cannot be bound. Tasks created from a TUI omit `frontend` and run independently.
-- If `frontend.kind` is `"chat"`, the final task result is sent to that chat and may preserve a chat-bound session file for quote/resume context.
-- Root `deliverFinal: false` binds the turn while suppressing automatic final delivery; the agent may explicitly send through the SDK when useful.
+- If an addressable `frontend` is set, Rin routes the scheduled turn through that frontend and a task-owned controller identity.
+- TUI frontends have no key and cannot be addressed. Tasks created from a TUI omit `frontend` and run independently.
+- If `frontend.kind` is `"chat"`, the final task result is sent to that chat and linked to the task execution session for quote/resume context without reading or changing the chat's current session binding.
+- Root `deliverFinal: false` suppresses automatic final delivery; the agent may explicitly send through the SDK when useful. It does not change chat session binding.
 
 ### `session.mode: "dedicated"`
 
@@ -304,7 +304,7 @@ Behavior:
 
 - First run uses `target.prompt`.
 - Later runs use `target.continuationPrompt` when provided; otherwise they reuse `target.prompt`.
-- The dedicated session persists across runs.
+- The dedicated session persists across runs but never becomes a chat's current session merely because the task runs or delivers there. Quoting a delivered task message selects its linked session through the ordinary user-driven quote path.
 
 Choose `dedicated` when the persistent conversation is part of the intended context, such as an intentionally guided recurring thread.
 
@@ -314,10 +314,10 @@ Choose `dedicated` when the persistent conversation is part of the intended cont
 
 Runs an agent turn. Use this for owner-facing reports, summaries, checks that need reasoning, and tasks that should produce polished chat text.
 
-- An addressable `frontend` binds execution to a frontend/controller identity.
-- `frontend: { kind: "chat", key: "..." }` binds delivery to a chat bridge target.
+- An addressable `frontend` routes execution through a frontend and task-owned controller identity without changing that frontend's current chat session.
+- `frontend: { kind: "chat", key: "..." }` routes delivery to a chat bridge target and links delivered task messages to the task execution session so a later user quote can select it.
 - TUI frontends are unaddressed and cannot be specified as task frontend bindings.
-- Root `deliverFinal: false` binds the turn while suppressing automatic final delivery.
+- Root `deliverFinal: false` suppresses automatic final delivery without changing chat session binding.
 - Root `quiet` defaults to `true`. For chat-bound agent turns it has the same meaning as chat quiet mode: interim and passive-notice deliveries are suppressed, while independent errors remain visible and final delivery itself remains controlled by `deliverFinal`.
 - `model` and `thinkingLevel` override the run when present.
 - Rin stores a summarized final result in `lastResultText`.

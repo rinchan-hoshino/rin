@@ -338,6 +338,7 @@ export type ChatBridgeTurnPayload = RinToolStartupOptions &
     chatKey?: string;
     controllerKey?: string;
     affectChatBinding?: boolean;
+    linkDeliveriesToSession?: boolean;
     disposeAfterTurn?: boolean;
     shutdownAfterTurn?: boolean;
     deliverFinal?: boolean;
@@ -581,15 +582,19 @@ export async function startChatBridge(
     detachedOptions?: {
       chatKey?: string;
       affectChatBinding?: boolean;
+      linkDeliveriesToSession?: boolean;
       frontendIdentity?: RinFrontendIdentity;
     },
   ) => {
     const controllerChatKey =
       safeString(detachedOptions?.chatKey).trim() || `cron:${controllerKey}`;
     const affectChatBinding = detachedOptions?.affectChatBinding !== false;
+    const linkDeliveriesToSession =
+      detachedOptions?.linkDeliveriesToSession ?? affectChatBinding;
     const signature = JSON.stringify({
       controllerChatKey,
       affectChatBinding,
+      linkDeliveriesToSession,
       frontendIdentity: detachedOptions?.frontendIdentity || null,
       useChatFrontendIdentity: Boolean(detachedOptions?.chatKey),
     });
@@ -626,6 +631,7 @@ export async function startChatBridge(
         logger,
         h,
         affectChatBinding,
+        linkDeliveriesToSession,
         statePath,
         frontendClientFactory,
         sleepAfterIdleMs: DETACHED_CONTROLLER_SLEEP_IDLE_MS,
@@ -1526,6 +1532,8 @@ export async function startChatBridge(
     const controllerKey =
       safeString(payload?.controllerKey).trim() || "default";
     const affectChatBinding = payload?.affectChatBinding !== false;
+    const linkDeliveriesToSession =
+      payload?.linkDeliveriesToSession ?? affectChatBinding;
     const disposeAfterTurn = payload?.disposeAfterTurn === true;
     const shutdownAfterTurn = payload?.shutdownAfterTurn === true;
     if (!text) throw new Error("chat_text_required");
@@ -1537,6 +1545,7 @@ export async function startChatBridge(
       : getDetachedController(controllerKey, {
           chatKey,
           affectChatBinding,
+          linkDeliveriesToSession,
           frontendIdentity: normalizeFrontendIdentity(payload?.frontend),
         });
     if (!useBoundController) {
