@@ -1141,7 +1141,7 @@ export async function startChatBridge(
                 [
                   {
                     type: "text",
-                    text: "This turn was interrupted after execution may have started. Rin did not resume it automatically. Send the request again only if you still want it to run.",
+                    text: "The previous turn was interrupted, and Rin could not verify whether it completed. It was not submitted again.",
                   },
                 ],
                 envelope.messageId,
@@ -1236,12 +1236,6 @@ export async function startChatBridge(
       chatKey: envelope.chatKey,
       messageId: envelope.messageId,
     });
-    // A prior claim may already have caused model, tool, or command side effects.
-    // Reclaiming the row must not silently renew that execution authority.
-    if (envelope.attemptCount > 1) {
-      if (recoveredAdmission.kind === "record_only") return recordOnlyJob();
-      return interruptedUnknownJob(envelope.admission);
-    }
     if (recoveredAdmission.kind !== "unclassified") {
       return prepareFromAdmission(envelope.admission);
     }

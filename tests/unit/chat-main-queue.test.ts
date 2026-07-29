@@ -2424,7 +2424,7 @@ test("chat main reports daemon startup failure without retrying", async () => {
   }
 });
 
-test("chat main never resumes a previously claimed turn after restart", async () => {
+test("chat main resumes a durably admitted turn after policy changes", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-durable-admission-"),
   );
@@ -2465,14 +2465,10 @@ test("chat main never resumes a previously claimed turn after restart", async ()
       };
       controllerMod.ChatController.prototype.detachForDaemonShutdown = async function () {};
 
-      const sentParts = [];
       const createBot = () => ({
         platform: "telegram",
         selfId: "1",
-        async sendMessage(_session, parts) {
-          sentParts.push(parts);
-          return ["assistant-1"];
-        },
+        async sendMessage() { return ["assistant-1"]; },
         internal: { async sendChatAction() {} },
       });
       const first = await mainMod.startChatBridge({ hosted: true });
@@ -2509,7 +2505,7 @@ test("chat main never resumes a previously claimed turn after restart", async ()
       let row;
       while (Date.now() < terminalDeadline) {
         row = databaseMod.openChatDatabase(agentDir).prepare(
-          "SELECT turns.state, turns.terminal_kind, turns.admission_state, messages.disposition " +
+          "SELECT turns.state, turns.admission_state, messages.disposition " +
           "FROM turns JOIN messages ON messages.id = turns.inbound_message_id " +
           "WHERE messages.message_id = 'm-policy-change'",
         ).get();
@@ -2520,17 +2516,13 @@ test("chat main never resumes a previously claimed turn after restart", async ()
       await new Promise((resolve) => setImmediate(resolve));
       await second.stop();
       if (
-        runTurnCalls !== 1 ||
-        submittedTurns.length !== 1 ||
+        runTurnCalls !== 2 ||
+        JSON.stringify(submittedTurns[0]) !== JSON.stringify(submittedTurns[1]) ||
         row?.state !== "terminal" ||
-        row?.terminal_kind !== "interrupted_unknown" ||
         row?.admission_state !== "actionable" ||
-        row?.disposition !== "actionable" ||
-        !JSON.stringify(sentParts).includes("did not resume it automatically")
+        row?.disposition !== "actionable"
       ) {
-        throw new Error(
-          JSON.stringify({ runTurnCalls, submittedTurns, row, sentParts }),
-        );
+        throw new Error(JSON.stringify({ runTurnCalls, submittedTurns, row }));
       }
       process.exit(0);
     `;
@@ -2549,7 +2541,7 @@ test("chat main never resumes a previously claimed turn after restart", async ()
   }
 });
 
-test("chat main never resumes a previously claimed command after restart", async () => {
+test("chat main resumes a frozen command after sender identity changes", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-durable-command-"),
   );
@@ -2592,14 +2584,10 @@ test("chat main never resumes a previously claimed command after restart", async
       controllerMod.ChatController.prototype.detachForDaemonShutdown = async function () {
         releaseFirstCommand();
       };
-      const sentParts = [];
       const createBot = () => ({
         platform: "telegram",
         selfId: "1",
-        async sendMessage(_session, parts) {
-          sentParts.push(parts);
-          return ["assistant-1"];
-        },
+        async sendMessage() { return ["assistant-1"]; },
         internal: { async sendChatAction() {} },
       });
       const first = await mainMod.startChatBridge({ hosted: true });
@@ -2636,7 +2624,7 @@ test("chat main never resumes a previously claimed command after restart", async
       let row;
       while (Date.now() < terminalDeadline) {
         row = db.prepare(
-          "SELECT state, terminal_kind, admission_state FROM turns WHERE inbound_message_id = " +
+          "SELECT state, admission_state FROM turns WHERE inbound_message_id = " +
           "(SELECT id FROM messages WHERE message_id = 'm-frozen-command')",
         ).get();
         if (row?.state === "terminal") break;
@@ -2644,14 +2632,13 @@ test("chat main never resumes a previously claimed command after restart", async
       }
       await second.stop();
       if (
-        calls.length !== 1 ||
+        calls.length !== 2 ||
         calls[0].promptMeta?.identity !== "OWNER" ||
+        JSON.stringify(calls[0]) !== JSON.stringify(calls[1]) ||
         row?.state !== "terminal" ||
-        row?.terminal_kind !== "interrupted_unknown" ||
-        row?.admission_state !== "actionable" ||
-        !JSON.stringify(sentParts).includes("did not resume it automatically")
+        row?.admission_state !== "actionable"
       ) {
-        throw new Error(JSON.stringify({ calls, row, sentParts }));
+        throw new Error(JSON.stringify({ calls, row }));
       }
     `;
 
@@ -3018,7 +3005,7 @@ test("chat main fails closed for unverifiable actionable admissions", async () =
           ) ||
           terminals.length !== 4 ||
           terminals.some((terminal) => terminal.delivery_kind !== "error") ||
-          texts.some((text) => !text.includes("did not resume it automatically"))
+          texts.some((text) => !text.includes("was not submitted again"))
         ) {
           throw new Error(JSON.stringify({ runTurnCalls, runCommandCalls, rows, terminals, texts }));
         }
