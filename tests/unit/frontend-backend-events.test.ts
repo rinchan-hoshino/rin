@@ -649,6 +649,7 @@ test("frontend backend event translator treats overflow compaction as ordinary b
         result: undefined,
         sessionId: undefined,
         sessionFile: undefined,
+        requestTag: undefined,
       },
       {
         type: "turn_complete",
@@ -656,6 +657,7 @@ test("frontend backend event translator treats overflow compaction as ordinary b
         result: undefined,
         sessionId: undefined,
         sessionFile: undefined,
+        requestTag: undefined,
       },
     ],
   );

@@ -41,7 +41,6 @@ export interface RinFrontendLifecycleState {
 }
 
 interface LifecycleEventBase {
-  terminalEventId?: string;
   requestTag?: string;
   turnGeneration?: number;
   sessionId?: string;
@@ -137,19 +136,12 @@ function optionalText(value: unknown): string | undefined {
 }
 
 function requestTagOf(payload: any): LifecycleEventBase {
-  const terminalEventId = optionalText(payload?.terminalEventId);
-  const requestTagPresent =
-    Object.prototype.hasOwnProperty.call(payload || {}, "requestTag") &&
-    payload.requestTag != null;
-  const requestTag = requestTagPresent
-    ? safeString(payload.requestTag)
-    : undefined;
+  const requestTag = optionalText(payload?.requestTag);
   const turnGeneration = safeNumber(payload?.turnGeneration);
   const sessionId = optionalText(payload?.sessionId);
   const sessionFile = optionalText(payload?.sessionFile);
   return {
-    ...(terminalEventId ? { terminalEventId } : {}),
-    ...(requestTagPresent ? { requestTag } : {}),
+    ...(requestTag ? { requestTag } : {}),
     ...(turnGeneration > 0 ? { turnGeneration } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(sessionFile ? { sessionFile } : {}),
@@ -414,9 +406,7 @@ function withRequestTag<T extends Record<string, unknown>>(
   event: RinFrontendLifecycleEvent,
   value: T,
 ): T & { requestTag?: string } {
-  return Object.prototype.hasOwnProperty.call(event, "requestTag")
-    ? { ...value, requestTag: event.requestTag }
-    : value;
+  return event.requestTag ? { ...value, requestTag: event.requestTag } : value;
 }
 
 function retryStatusText(
@@ -426,16 +416,11 @@ function retryStatusText(
   return `Retrying (${event.attempt}/${event.maxAttempts}) in ${seconds}s... (/abort to stop)`;
 }
 
-const MAX_FRONTEND_TERMINAL_IDENTITIES = 4_096;
-
 export class RinFrontendLifecycleTerminalGate {
   private readonly terminalIdentities = new Set<string>();
 
   private terminalIdentity(event: RinFrontendLifecycleEvent): string {
     const session = event.sessionId || event.sessionFile || "session";
-    if (event.terminalEventId) {
-      return `${session}:terminal:${event.terminalEventId}`;
-    }
     if (event.turnGeneration && event.turnGeneration > 0) {
       return `${session}:generation:${event.turnGeneration}`;
     }
@@ -448,11 +433,6 @@ export class RinFrontendLifecycleTerminalGate {
     const identity = this.terminalIdentity(event);
     if (this.terminalIdentities.has(identity)) return false;
     this.terminalIdentities.add(identity);
-    while (this.terminalIdentities.size > MAX_FRONTEND_TERMINAL_IDENTITIES) {
-      const oldestIdentity = this.terminalIdentities.values().next().value;
-      if (!oldestIdentity) break;
-      this.terminalIdentities.delete(oldestIdentity);
-    }
     return true;
   }
 }
@@ -583,10 +563,7 @@ export function renderRinFrontendLifecycleEvent(
     case "summarization_retry_finished":
     case "retry_finished":
       return [];
-    case "turn_terminal": {
-      const terminalEventIdentity = event.terminalEventId
-        ? { terminalEventId: event.terminalEventId }
-        : {};
+    case "turn_terminal":
       if (event.outcome === "complete") {
         const terminal: RinFrontendBackendEvent = {
           type: "turn_complete",
@@ -594,10 +571,7 @@ export function renderRinFrontendLifecycleEvent(
           result: event.result,
           sessionId: event.sessionId,
           sessionFile: event.sessionFile,
-          ...terminalEventIdentity,
-          ...(Object.prototype.hasOwnProperty.call(event, "requestTag")
-            ? { requestTag: event.requestTag }
-            : {}),
+          requestTag: event.requestTag,
         };
         return event.finalText
           ? [
@@ -607,10 +581,7 @@ export function renderRinFrontendLifecycleEvent(
                 result: event.result,
                 sessionId: event.sessionId,
                 sessionFile: event.sessionFile,
-                ...terminalEventIdentity,
-                ...(Object.prototype.hasOwnProperty.call(event, "requestTag")
-                  ? { requestTag: event.requestTag }
-                  : {}),
+                requestTag: event.requestTag,
               },
               terminal,
             ]
@@ -622,13 +593,9 @@ export function renderRinFrontendLifecycleEvent(
           error: event.error,
           sessionId: event.sessionId,
           sessionFile: event.sessionFile,
-          ...terminalEventIdentity,
-          ...(Object.prototype.hasOwnProperty.call(event, "requestTag")
-            ? { requestTag: event.requestTag }
-            : {}),
+          requestTag: event.requestTag,
         },
       ];
-    }
   }
 }
 

@@ -7,10 +7,9 @@ import path from "node:path";
 import { sleep } from "../platform/process.js";
 import type { RpcSocketLike } from "../platform/rpc-socket.js";
 import {
-  acknowledgePendingTerminalTurnEvent,
-  getPendingTerminalTurnEvent,
-  pendingTerminalTurnEventCapacityReached,
+  clearPendingTerminalTurnEvent,
   rememberPendingTerminalTurnEvent,
+  takePendingTerminalTurnEvent,
 } from "./pending-turn-events.js";
 import { setRunningWorkerSession } from "./running-workers.js";
 import {
@@ -442,14 +441,6 @@ export class WorkerPool {
     );
     let lifecycleAdmissionError = "";
     if (
-      commandType === "prompt" &&
-      pendingTerminalTurnEventCapacityReached(
-        this.options.agentDir,
-        recoverySelector,
-      )
-    ) {
-      lifecycleAdmissionError = "rin_pending_terminal_ack_required";
-    } else if (
       terminalLifecycleCommand &&
       (commandRequestTag === undefined ||
         (commandType !== "resume_interrupted_turn" &&
@@ -1812,30 +1803,6 @@ export class WorkerPool {
           return;
         }
 
-        if (
-          isTerminalRpcTurnEvent(payload) &&
-          !String(payload.terminalEventId || "").trim()
-        ) {
-          payload = {
-            ...payload,
-            terminalEventId: crypto
-              .createHash("sha256")
-              .update(
-                JSON.stringify([
-                  worker.id,
-                  worker.lifecycleEpoch,
-                  worker.activeLifecycleEpoch ?? null,
-                  worker.sessionFile || payload.sessionFile || "",
-                  Object.prototype.hasOwnProperty.call(payload, "requestTag")
-                    ? ["present", payload.requestTag]
-                    : ["absent"],
-                  payload.event,
-                ]),
-              )
-              .digest("hex"),
-          };
-        }
-
         if (!this.updateWorkerMetadata(worker, payload)) return;
 
         if (
@@ -1866,71 +1833,20 @@ export class WorkerPool {
           return;
         }
 
-        const terminalEvent = isTerminalRpcTurnEvent(payload);
-        let terminalPersistenceFailed = false;
-        let rememberedTerminal: ReturnType<
-          typeof rememberPendingTerminalTurnEvent
-        > = null;
-        if (terminalEvent) {
-          try {
-            rememberedTerminal = rememberPendingTerminalTurnEvent(
-              this.options.agentDir,
-              payload,
-            );
-          } catch {
-            terminalPersistenceFailed = true;
-          }
-        }
-        if (terminalEvent && rememberedTerminal === false) {
-          this.maybeReleaseWorker(worker);
-          return;
-        }
-        if (
-          terminalEvent &&
-          (terminalPersistenceFailed || rememberedTerminal === null)
-        ) {
-          const persistenceError = "rin_pending_terminal_persistence_failed";
-          const failurePayload = {
-            type: "rpc_turn_event",
-            event: "error",
-            error: persistenceError,
-            ...(payload?.sessionFile
-              ? { sessionFile: String(payload.sessionFile) }
-              : worker.sessionFile
-                ? { sessionFile: worker.sessionFile }
-                : {}),
-            ...(payload?.sessionId
-              ? { sessionId: String(payload.sessionId) }
-              : worker.sessionId
-                ? { sessionId: worker.sessionId }
-                : {}),
-            ...(Object.prototype.hasOwnProperty.call(
-              payload || {},
-              "requestTag",
-            )
-              ? { requestTag: payload.requestTag }
-              : {}),
-          };
-          for (const connection of worker.connections) {
-            if (this.shouldForwardWorkerPayload(connection, worker, payload)) {
-              writeLine(connection.socket, failurePayload);
-            }
-          }
-          this.rejectTerminalTurnWaiters(worker, new Error(persistenceError));
-          this.maybeReleaseWorker(worker);
-          return;
-        }
-        const terminalPayload = terminalEvent
-          ? rememberedTerminal || payload
-          : null;
-        const forwardedPayload = terminalPayload || payload;
+        let forwarded = 0;
         for (const connection of worker.connections) {
           if (this.shouldForwardWorkerPayload(connection, worker, payload)) {
-            writeLine(connection.socket, forwardedPayload);
+            writeLine(connection.socket, payload);
+            forwarded += 1;
           }
         }
-        if (terminalPayload) {
-          this.resolveTerminalTurnWaiters(worker, terminalPayload);
+        if (isTerminalRpcTurnEvent(payload)) {
+          this.resolveTerminalTurnWaiters(worker, payload);
+          if (forwarded === 0) {
+            rememberPendingTerminalTurnEvent(this.options.agentDir, payload);
+          } else {
+            clearPendingTerminalTurnEvent(this.options.agentDir, payload);
+          }
         }
       });
     });
@@ -2067,57 +1983,20 @@ export class WorkerPool {
 
   replayPendingTerminalTurnEvent(
     connection: ConnectionState,
-    selector: SessionSelector & {
-      requestTag?: string;
-      requestTagAbsent?: true;
-    } = {},
+    selector: SessionSelector = {},
   ) {
     if (connection.socket.destroyed) return false;
     const effectiveSelector = hasSessionSelector(selector)
       ? selector
       : this.getConnectionSelector(connection);
     if (!hasSessionSelector(effectiveSelector)) return false;
-    const pendingTerminalEvent = getPendingTerminalTurnEvent(
+    const pendingTerminalEvent = takePendingTerminalTurnEvent(
       this.options.agentDir,
       effectiveSelector,
-      selector.requestTagAbsent
-        ? { requestTagAbsent: true as const }
-        : Object.prototype.hasOwnProperty.call(selector, "requestTag")
-          ? { requestTag: selector.requestTag }
-          : {},
     );
     if (!pendingTerminalEvent) return false;
     writeLine(connection.socket, pendingTerminalEvent);
     return true;
-  }
-
-  acknowledgePendingTerminalTurnEvent(
-    connection: ConnectionState,
-    input: {
-      sessionId?: string;
-      sessionFile?: string;
-      terminalEventId: string;
-      requestTag?: string;
-      requestTagAbsent?: true;
-    },
-  ) {
-    if (!this.options.agentDir) return false;
-    const selector = hasSessionSelector(input)
-      ? input
-      : this.getConnectionSelector(connection);
-    if (!hasSessionSelector(selector)) return false;
-    return acknowledgePendingTerminalTurnEvent(
-      this.options.agentDir,
-      selector,
-      {
-        terminalEventId: input.terminalEventId,
-        ...(input.requestTagAbsent
-          ? { requestTagAbsent: true as const }
-          : Object.prototype.hasOwnProperty.call(input, "requestTag")
-            ? { requestTag: input.requestTag }
-            : {}),
-      },
-    );
   }
 
   private maybeReleaseWorker(worker: WorkerHandle) {

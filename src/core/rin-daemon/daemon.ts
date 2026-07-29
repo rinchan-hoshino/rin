@@ -549,31 +549,11 @@ export async function startDaemon(
       return true;
     }
     if (type === "replay_pending_terminal_turn_event") {
-      const replayed = workerPool.replayPendingTerminalTurnEvent(connection, {
-        ...getSessionSelector(command),
-        ...(command.requestTagAbsent === true || command.requestTag === null
-          ? { requestTagAbsent: true as const }
-          : command.requestTag === undefined
-            ? {}
-            : { requestTag: String(command.requestTag) }),
-      });
-      writeLine(connection.socket, response(id, type, true, { replayed }));
-      return true;
-    }
-    if (type === "ack_pending_terminal_turn_event") {
-      const acknowledged = workerPool.acknowledgePendingTerminalTurnEvent(
+      const replayed = workerPool.replayPendingTerminalTurnEvent(
         connection,
-        {
-          ...getSessionSelector(command),
-          terminalEventId: String(command.terminalEventId || "").trim(),
-          ...(command.requestTagAbsent === true || command.requestTag === null
-            ? { requestTagAbsent: true as const }
-            : command.requestTag === undefined
-              ? {}
-              : { requestTag: String(command.requestTag) }),
-        },
+        getSessionSelector(command),
       );
-      writeLine(connection.socket, response(id, type, true, { acknowledged }));
+      writeLine(connection.socket, response(id, type, true, { replayed }));
       return true;
     }
     if (type === "rename_session") {
