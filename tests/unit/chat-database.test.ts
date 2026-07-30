@@ -152,6 +152,24 @@ test("chat database cutover migrates v8 run ownership to interrupted delivery-on
       },
       elements: [{ type: "text", attrs: { content: "preserved" } }],
     }).item;
+    const pending = chatInbox.enqueueChatInboxItem(agentDir, {
+      chatKey: "discord/1:2",
+      messageId: "platform-v8-pending",
+      session: {
+        platform: "discord",
+        selfId: "1",
+        channelId: "2",
+        messageId: "platform-v8-pending",
+        content: "must not replay after cutover",
+        stripped: { content: "must not replay after cutover" },
+      },
+      elements: [
+        {
+          type: "text",
+          attrs: { content: "must not replay after cutover" },
+        },
+      ],
+    }).item;
     const claimed = chatInbox.claimChatInboxItem(agentDir, queued.itemId);
     assert.ok(claimed);
     db.exec(`ALTER TABLE inbox_jobs RENAME TO turns;`);
@@ -216,7 +234,19 @@ test("chat database cutover migrates v8 run ownership to interrupted delivery-on
       {
         state: "failed",
         terminal_kind: "interrupted",
-        last_error: "chat_turn_interrupted",
+        last_error: "install_upgrade_interrupted",
+      },
+    );
+    assert.deepEqual(
+      migrated
+        .prepare(
+          `SELECT state, terminal_kind, last_error FROM inbox_jobs WHERE turn_id = ?`,
+        )
+        .get(pending.itemId),
+      {
+        state: "failed",
+        terminal_kind: "interrupted",
+        last_error: "install_upgrade_interrupted",
       },
     );
     assert.equal(

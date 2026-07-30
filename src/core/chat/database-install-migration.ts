@@ -359,19 +359,22 @@ function rebuildChatDeliveryTablesV9(db: BetterSqlite3.Database) {
         FROM messages;
     CREATE TEMP TABLE cutover_inbox_jobs_v9 AS
       SELECT turn_id, inbound_message_id, chat_key, generation, sequence,
-             CASE WHEN state = 'superseded' THEN 'failed' ELSE state END AS state,
-             CASE WHEN state = 'superseded' THEN 'interrupted'
-                  ELSE terminal_kind END AS terminal_kind,
-             CASE WHEN state IN ('running', 'superseded') THEN NULL
+             CASE WHEN state IN ('pending', 'running', 'superseded')
+                  THEN 'failed' ELSE state END AS state,
+             CASE WHEN state IN ('pending', 'running', 'superseded')
+                  THEN 'interrupted' ELSE terminal_kind END AS terminal_kind,
+             CASE WHEN state IN ('pending', 'running', 'superseded') THEN NULL
                   ELSE owner_epoch END AS owner_epoch,
              attempt,
-             CASE WHEN state IN ('running', 'superseded') THEN NULL
+             CASE WHEN state IN ('pending', 'running', 'superseded') THEN NULL
                   ELSE lease_until END AS lease_until,
-             CASE WHEN state IN ('running', 'superseded') THEN NULL
+             CASE WHEN state IN ('pending', 'running', 'superseded') THEN NULL
                   ELSE heartbeat_at END AS heartbeat_at,
-             CASE WHEN state IN ('running', 'superseded') THEN NULL
+             CASE WHEN state IN ('pending', 'running', 'superseded') THEN NULL
                   ELSE next_attempt_at END AS next_attempt_at,
-             CASE WHEN state = 'superseded' THEN 'chat_turn_interrupted'
+             CASE WHEN state IN ('pending', 'running')
+                    THEN 'install_upgrade_interrupted'
+                  WHEN state = 'superseded' THEN 'chat_turn_interrupted'
                   ELSE last_error END AS last_error,
              routing_json, session_json, elements_json, admission_state,
              admission_json, admission_hash, submission_json, submission_hash,
