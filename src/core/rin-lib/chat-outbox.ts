@@ -141,6 +141,7 @@ export type EnqueueChatOutboxOptions = {
   postDelivery?: ChatOutboxPostDelivery;
   turnFence?: ChatOutboxTurnFence;
   terminalTurn?: ChatTerminalTurn;
+  terminalRecordId?: string;
   nonTerminalError?: boolean;
 };
 
@@ -635,6 +636,15 @@ export function enqueueChatOutboxPayload(
   const id =
     sanitizeIdPart(options.id) ||
     (idempotencyKey ? stableOutboxIdForKey(idempotencyKey) : createOutboxId());
+  const terminalRecordId = safeString(options.terminalRecordId).trim();
+  if (
+    options.terminalTurn &&
+    (!terminalRecordId ||
+      id !== `chat-${terminalRecordId}` ||
+      idempotencyKey !== id)
+  ) {
+    throw new Error("chat_terminal_record_missing");
+  }
   const db = openChatDatabase(agentDir);
   return db
     .transaction(() => {
@@ -671,11 +681,49 @@ export function enqueueChatOutboxPayload(
               contextualFence,
             );
       const desiredTurnId = fencedTurn?.turn_id || turn?.turn_id || "";
+      const authoritativeTerminalProjection = Boolean(
+        options.terminalTurn && terminalRecordId,
+      );
+      const replaceLocalTerminalError = Boolean(
+        authoritativeTerminalProjection &&
+        turn?.state === "terminal" &&
+        turn?.terminal_kind === "outbox_error" &&
+        db
+          .prepare(
+            `SELECT 1 FROM outbox
+               WHERE turn_id = ? AND delivery_kind = 'error'
+                 AND outbox_id NOT LIKE 'chat-terminal-%'
+               LIMIT 1`,
+          )
+          .get(turn.turn_id),
+      );
+      const existingAuthoritativeTerminal = desiredTurnId
+        ? (db
+            .prepare(
+              `SELECT outbox_id FROM outbox
+               WHERE turn_id = ? AND outbox_id LIKE 'chat-terminal-%'
+               LIMIT 1`,
+            )
+            .get(desiredTurnId) as { outbox_id?: string } | undefined)
+        : undefined;
+      if (
+        safeString(existingAuthoritativeTerminal?.outbox_id) &&
+        safeString(existingAuthoritativeTerminal?.outbox_id) !== id
+      ) {
+        throw new Error("chat_terminal_turn_mismatch");
+      }
+      if (replaceLocalTerminalError) {
+        db.prepare(
+          `UPDATE outbox SET turn_id = NULL
+           WHERE turn_id = ? AND delivery_kind = 'error'
+             AND outbox_id NOT LIKE 'chat-terminal-%'`,
+        ).run(turn.turn_id);
+      }
       const adoptExisting = (
         row: any,
         adoptOptions: { acceptLegacyTerminalPayload?: boolean } = {},
       ) => {
-        if (turn?.state === "terminal") {
+        if (turn?.state === "terminal" && !replaceLocalTerminalError) {
           if (
             safeString(row.turn_id) !== safeString(turn.turn_id) ||
             safeString(row.delivery_kind) !== safeString(deliveryKind) ||
@@ -786,6 +834,9 @@ export function enqueueChatOutboxPayload(
                          OR execution_session_file = ?))
                    OR
                    (state = 'failed' AND terminal_kind = 'interrupted')
+                   OR
+                   (? = 1 AND state = 'terminal'
+                    AND terminal_kind = 'outbox_error')
                  )`,
             )
             .run(
@@ -797,6 +848,7 @@ export function enqueueChatOutboxPayload(
               Number(turn.attempt),
               executionSessionFile,
               executionSessionFile,
+              replaceLocalTerminalError ? 1 : 0,
             );
           if (terminalized.changes !== 1) {
             throw new Error("chat_turn_fence_lost");
@@ -829,7 +881,12 @@ export function enqueueChatOutboxPayload(
           .get(idempotencyKey) as any;
         if (sameKey) return adoptExisting(sameKey);
       }
-      if (turn && desiredTurnId && deliveryKind !== "interim") {
+      if (
+        turn &&
+        !replaceLocalTerminalError &&
+        desiredTurnId &&
+        deliveryKind !== "interim"
+      ) {
         const legacyTerminal = db
           .prepare(
             `SELECT * FROM outbox
@@ -845,7 +902,7 @@ export function enqueueChatOutboxPayload(
           });
         }
       }
-      if (turn?.state === "terminal") {
+      if (turn?.state === "terminal" && !replaceLocalTerminalError) {
         throw new Error("chat_terminal_turn_mismatch");
       }
       const sequence = Number(
@@ -913,6 +970,9 @@ export function enqueueChatOutboxPayload(
                        OR execution_session_file = ?))
                  OR
                  (state = 'failed' AND terminal_kind = 'interrupted')
+                 OR
+                 (? = 1 AND state = 'terminal'
+                  AND terminal_kind = 'outbox_error')
                )`,
           )
           .run(
@@ -924,6 +984,7 @@ export function enqueueChatOutboxPayload(
             Number(turn.attempt),
             executionSessionFile,
             executionSessionFile,
+            replaceLocalTerminalError ? 1 : 0,
           );
         if (terminalized.changes !== 1) {
           throw new Error("chat_turn_fence_lost");

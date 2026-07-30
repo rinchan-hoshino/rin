@@ -6986,6 +6986,7 @@ test("authoritative terminal replay adopts one outbox after the transport job se
     idempotencyKey: "chat-terminal-replay-id",
     deliveryKind: "final",
     terminalTurnKind: "final",
+    terminalRecordId: "terminal-replay-id",
     terminalTurn: {
       turnId: claim.itemId,
       chatKey: claim.chatKey,
@@ -7009,6 +7010,20 @@ test("authoritative terminal replay adopts one outbox after the transport job se
   assert.equal(
     enqueueChatOutboxPayload(controller.agentDir, payload, options),
     "chat-terminal-replay-id",
+  );
+  assert.throws(
+    () =>
+      enqueueChatOutboxPayload(
+        controller.agentDir,
+        { ...payload, parts: [{ type: "text", text: "conflicting final" }] },
+        {
+          ...options,
+          id: "chat-terminal-conflicting-id",
+          idempotencyKey: "chat-terminal-conflicting-id",
+          terminalRecordId: "terminal-conflicting-id",
+        },
+      ),
+    /chat_outbox_idempotency_collision|chat_terminal_turn_mismatch/,
   );
   const db = openChatDatabase(controller.agentDir);
   assert.equal(
@@ -7073,6 +7088,7 @@ test("authoritative daemon terminal replaces a local interrupted transport failu
       idempotencyKey: "chat-terminal-after-interrupt-id",
       deliveryKind: "final",
       terminalTurnKind: "final",
+      terminalRecordId: "terminal-after-interrupt-id",
       terminalTurn: {
         turnId: claim.itemId,
         chatKey: claim.chatKey,
@@ -7098,6 +7114,139 @@ test("authoritative daemon terminal replaces a local interrupted transport failu
       )
       .get(claim.itemId),
     { state: "terminal", terminal_kind: "outbox_final", last_error: null },
+  );
+});
+
+test("authoritative daemon terminal replaces a local terminal error outbox", async () => {
+  const controller = await createController("telegram/1:2");
+  const inbound = enqueueChatInboxItem(controller.agentDir, {
+    chatKey: controller.chatKey,
+    messageId: "terminal-after-local-error",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "2",
+      messageId: "terminal-after-local-error",
+      content: "run",
+      stripped: { content: "run" },
+    },
+    elements: [{ type: "text", attrs: { content: "run" } }],
+  }).item;
+  const claim = claimChatInboxItem(controller.agentDir, inbound.itemId);
+  const db = openChatDatabase(controller.agentDir);
+  const localErrorId = enqueueChatOutboxPayload(
+    controller.agentDir,
+    {
+      createdAt: new Date().toISOString(),
+      chatKey: controller.chatKey,
+      parts: [{ type: "text", text: "local transport error" }],
+    },
+    {
+      id: `error-${claim.itemId}`,
+      idempotencyKey: `error-${claim.itemId}`,
+      deliveryKind: "error",
+    },
+  );
+  db.prepare(`UPDATE outbox SET turn_id = ? WHERE outbox_id = ?`).run(
+    claim.itemId,
+    localErrorId,
+  );
+  db.prepare(
+    `UPDATE inbox_jobs
+     SET state = 'terminal', terminal_kind = 'outbox_error',
+         owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL
+     WHERE turn_id = ?`,
+  ).run(claim.itemId);
+
+  assert.throws(
+    () =>
+      enqueueChatOutboxPayload(
+        controller.agentDir,
+        {
+          createdAt: new Date().toISOString(),
+          chatKey: controller.chatKey,
+          parts: [{ type: "text", text: "non-authoritative replacement" }],
+        },
+        {
+          id: "ordinary-terminal-replacement",
+          idempotencyKey: "ordinary-terminal-replacement",
+          deliveryKind: "final",
+          terminalTurnKind: "final",
+          terminalRecordId: "terminal-record-not-matching-id",
+          terminalTurn: {
+            turnId: claim.itemId,
+            chatKey: claim.chatKey,
+            messageId: claim.messageId,
+            executionSessionFile: "terminal-after-local-error.jsonl",
+          },
+          turnFence: {
+            agentDir: controller.agentDir,
+            turnId: claim.itemId,
+            chatKey: claim.chatKey,
+            messageId: claim.messageId,
+            ownerEpoch: claim.ownerEpoch,
+            attempt: claim.attemptCount,
+          },
+        },
+      ),
+    /chat_terminal_record_missing/,
+  );
+  assert.equal(
+    db
+      .prepare(`SELECT turn_id FROM outbox WHERE outbox_id = ?`)
+      .get(localErrorId).turn_id,
+    claim.itemId,
+  );
+
+  enqueueChatOutboxPayload(
+    controller.agentDir,
+    {
+      createdAt: new Date().toISOString(),
+      chatKey: controller.chatKey,
+      parts: [{ type: "text", text: "authoritative recovered final" }],
+    },
+    {
+      id: "chat-terminal-authoritative-after-local-error",
+      idempotencyKey: "chat-terminal-authoritative-after-local-error",
+      deliveryKind: "final",
+      terminalTurnKind: "final",
+      terminalRecordId: "terminal-authoritative-after-local-error",
+      terminalTurn: {
+        turnId: claim.itemId,
+        chatKey: claim.chatKey,
+        messageId: claim.messageId,
+        executionSessionFile: "terminal-after-local-error.jsonl",
+      },
+      turnFence: {
+        agentDir: controller.agentDir,
+        turnId: claim.itemId,
+        chatKey: claim.chatKey,
+        messageId: claim.messageId,
+        ownerEpoch: claim.ownerEpoch,
+        attempt: claim.attemptCount,
+      },
+    },
+  );
+
+  assert.deepEqual(
+    db
+      .prepare(
+        `SELECT state, terminal_kind, last_error FROM inbox_jobs WHERE turn_id = ?`,
+      )
+      .get(claim.itemId),
+    { state: "terminal", terminal_kind: "outbox_final", last_error: null },
+  );
+  assert.equal(
+    db
+      .prepare(`SELECT COUNT(*) AS count FROM outbox WHERE turn_id = ?`)
+      .get(claim.itemId).count,
+    1,
+  );
+  assert.equal(
+    db
+      .prepare(`SELECT turn_id FROM outbox WHERE outbox_id = ?`)
+      .get(localErrorId).turn_id,
+    null,
   );
 });
 

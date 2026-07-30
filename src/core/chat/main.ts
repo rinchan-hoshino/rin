@@ -1727,6 +1727,10 @@ export async function startChatBridge(
     }
   };
 
+  reconcileCommittedChatOutboxProcessing(runtime.agentDir);
+  const startupRecoverableProcessing = listRunningChatInboxItems(
+    runtime.agentDir,
+  );
   await app.start();
   await syncTelegramCommands(app, logger, commandRows);
   await syncDiscordCommands(app, logger, commandRows);
@@ -1734,14 +1738,12 @@ export async function startChatBridge(
     `chat bridge started bots=${JSON.stringify(app.bots.map((bot: any) => ({ platform: bot.platform, selfId: bot.selfId, status: bot.status })))}`,
   );
 
-  reconcileCommittedChatOutboxProcessing(runtime.agentDir);
-  const recoverableProcessing = listRunningChatInboxItems(runtime.agentDir);
-  for (const envelope of recoverableProcessing) {
+  for (const envelope of startupRecoverableProcessing) {
     enqueueClaimedInboxItem({ envelope });
   }
-  if (recoverableProcessing.length) {
+  if (startupRecoverableProcessing.length) {
     logger.info(
-      `chat inbox startup recovering processing=${recoverableProcessing.length}`,
+      `chat inbox startup recovering processing=${startupRecoverableProcessing.length}`,
     );
   }
 

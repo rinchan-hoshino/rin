@@ -1786,6 +1786,7 @@ export class ChatController {
         deliveryKind: deliveryKind as any,
         postDelivery: options.postDelivery,
         terminalTurn: options.terminalTurn,
+        terminalRecordId,
       });
       try {
         await this.driver.acknowledgeTerminal(

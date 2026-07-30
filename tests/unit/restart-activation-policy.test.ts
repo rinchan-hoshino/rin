@@ -164,6 +164,27 @@ test("hosted chat bridge has no restart-specific quiescing state", () => {
   assert.doesNotMatch(shared, /prepareDaemonRestart|cancelDaemonRestart/);
 });
 
+test("chat snapshots inherited running jobs before adapters can claim new work", () => {
+  const chatMain = source("src/core/chat/main.ts");
+  const reconcile = chatMain.indexOf(
+    "reconcileCommittedChatOutboxProcessing(runtime.agentDir)",
+  );
+  const snapshot = chatMain.indexOf(
+    "const startupRecoverableProcessing = listRunningChatInboxItems",
+    reconcile,
+  );
+  const adaptersStart = chatMain.indexOf("await app.start()", snapshot);
+  const recoveryEnqueue = chatMain.indexOf(
+    "for (const envelope of startupRecoverableProcessing)",
+    adaptersStart,
+  );
+
+  assert.ok(reconcile >= 0);
+  assert.ok(snapshot > reconcile);
+  assert.ok(adaptersStart > snapshot);
+  assert.ok(recoveryEnqueue > adaptersStart);
+});
+
 test("daemon restart preserves and resumes active durable turns", () => {
   const daemon = source("src/core/rin-daemon/daemon.ts");
   const workerPool = source("src/core/rin-daemon/worker-pool.ts");
