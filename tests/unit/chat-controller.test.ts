@@ -164,29 +164,6 @@ function setDurableCurrentTurn(controller, messageId = "m-todo-owner") {
   return durable.claim;
 }
 
-test("pending terminal settlement stops late input before driver submission", async () => {
-  const controller = await createController();
-  let submitted = 0;
-  controller.driver = {
-    async settlePendingTerminalTurn() {
-      return true;
-    },
-    async runTurn() {
-      submitted += 1;
-      return { finalText: "must not run" };
-    },
-  };
-
-  const result = await controller.runTurn({
-    text: "late input",
-    attachments: [],
-    incomingMessageId: "late-message",
-  });
-
-  assert.deepEqual(result, { superseded: true, interrupted: true });
-  assert.equal(submitted, 0);
-});
-
 function createRecoveredController(previousController) {
   const controller = new ChatController(
     {},

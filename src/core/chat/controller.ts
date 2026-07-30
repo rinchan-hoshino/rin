@@ -3124,9 +3124,6 @@ export class ChatController {
         input.incomingMessageId,
         input.outboxTurnFence,
       ) || undefined;
-    if (await this.driver.settlePendingTerminalTurn()) {
-      return { superseded: true, interrupted: true };
-    }
     this.rememberPromptChatType(input.promptMeta);
     this.lastActivityAt = Date.now();
     const deliverFinal = input.deliverFinal !== false;

@@ -175,32 +175,6 @@ function createFrontendClient() {
   };
 }
 
-test("pending durable terminal settles the live turn before accepting more input", async () => {
-  const driver: any = createDriver();
-  const client: any = driver.testClient;
-  await driver.connect();
-  const liveTurn = driver.startLiveTurn("pending-terminal");
-  client.send = async (command: any) => {
-    assert.equal(command.type, "replay_pending_terminal_turn_event");
-    await client.emit({
-      type: "ui",
-      payload: {
-        type: "rpc_turn_event",
-        event: "complete",
-        requestTag: "pending-terminal",
-        finalText: "durable final",
-        sessionId: "frontend-session",
-        sessionFile: "/tmp/frontend-chat.jsonl",
-      },
-    });
-    return { replayed: true };
-  };
-
-  assert.equal(await driver.settlePendingTerminalTurn(), true);
-  assert.equal((await liveTurn.promise).finalText, "durable final");
-  assert.equal(driver.liveTurn, null);
-});
-
 test("frontend client event handler failures are reported without becoming turn errors", async () => {
   const client = createFrontendClient();
   const failures: any[] = [];

@@ -163,9 +163,6 @@ test("chat controller passes sender metadata through the frontend prompt context
       );
       controller.connect = async () => {};
       controller.driver = {
-        async settlePendingTerminalTurn() {
-          return false;
-        },
         async runTurn(input) {
           seen.push(input);
           return { finalText: "ok", result: {}, sessionFile: "/tmp/chat-meta.jsonl" };

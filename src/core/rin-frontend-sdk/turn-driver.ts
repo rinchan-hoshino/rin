@@ -455,22 +455,6 @@ export class RinFrontendTurnDriver {
     return safeString(this.frontendState.sessionFile || "").trim();
   }
 
-  async settlePendingTerminalTurn() {
-    const liveTurn = this.liveTurn;
-    const client = this.client;
-    if (!liveTurn || !client) return false;
-    const replayed = await replayPendingTerminalTurnEvent(
-      (command) => client.send(command),
-      {
-        sessionFile: this.currentSessionFile(),
-        sessionId: this.currentSessionId(),
-      },
-    );
-    if (!replayed) return false;
-    await liveTurn.promise;
-    return true;
-  }
-
   private async applySessionName(sessionName?: string) {
     const name = safeString(sessionName || "").trim();
     if (!name || !this.client) return;
