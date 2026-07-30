@@ -548,6 +548,15 @@ export async function startDaemon(
       );
       return true;
     }
+    if (type === "await_turn_terminal") {
+      const terminal = await workerPool.awaitTerminalTurnEvent(
+        connection,
+        getSessionSelector(command),
+        typeof command.requestTag === "string" ? command.requestTag : undefined,
+      );
+      writeLine(connection.socket, response(id, type, true, terminal));
+      return true;
+    }
     if (type === "replay_pending_terminal_turn_event") {
       const replayed = workerPool.replayPendingTerminalTurnEvent(
         connection,

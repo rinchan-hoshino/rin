@@ -1526,6 +1526,35 @@ export class RinFrontendTurnDriver {
           gate: inputGate,
         });
         this.throwIfQueuedOffline(requestTag);
+        const terminalWait = this.client!.request<any>({
+          type: "await_turn_terminal",
+          sessionFile: targetSessionFile || undefined,
+          requestTag,
+        });
+        void terminalWait.then(
+          async (response) => {
+            if (this.liveTurn !== liveTurn || response == null) return;
+            if (response.ok === false) {
+              this.failLiveTurn(
+                new Error(safeString(response.error) || "terminal_wait_failed"),
+              );
+              return;
+            }
+            if (response.data != null) {
+              await this.handleClientEvent(response.data);
+            }
+          },
+          async (error) => {
+            if (this.liveTurn !== liveTurn) return;
+            if (isRecoverableConnectionError(error)) {
+              await this.recoverLiveTurnAfterDisconnect();
+              return;
+            }
+            this.failLiveTurn(
+              error instanceof Error ? error : new Error(String(error)),
+            );
+          },
+        );
         return admission;
       })();
       promptSubmission.catch(() => {});

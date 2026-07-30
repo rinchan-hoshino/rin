@@ -116,7 +116,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
       commandType: string;
       resolve: (response: RinRpcResponse) => void;
       reject: (error: Error) => void;
-      timer: NodeJS.Timeout;
+      timer?: NodeJS.Timeout;
     }
   >();
   listeners = new Set<(event: InteractiveFrontendEvent) => void>();
@@ -517,10 +517,13 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
         ? String(command.id)
         : `req_${++this.requestId}`;
     return await new Promise<RinRpcResponse>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`rin_timeout:${commandType}`));
-      }, rpcTimeoutMs(command));
+      const timer =
+        commandType === "await_turn_terminal"
+          ? undefined
+          : setTimeout(() => {
+              this.pending.delete(id);
+              reject(new Error(`rin_timeout:${commandType}`));
+            }, rpcTimeoutMs(command));
       this.pending.set(id, { commandType, resolve, reject, timer });
       this.socket.write(`${JSON.stringify({ ...command, id })}\n`);
     });
@@ -542,7 +545,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     if (data?.type === "response" && data.id && this.pending.has(data.id)) {
       const pending = this.pending.get(data.id)!;
       this.pending.delete(data.id);
-      clearTimeout(pending.timer);
+      if (pending.timer) clearTimeout(pending.timer);
       pending.resolve(data);
       return;
     }
@@ -558,7 +561,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     this.socket = null;
     this.connectPromise = null;
     for (const [id, pending] of this.pending.entries()) {
-      clearTimeout(pending.timer);
+      if (pending.timer) clearTimeout(pending.timer);
       pending.reject(
         new Error(`rin_disconnected:${pending.commandType}:${id}`),
       );

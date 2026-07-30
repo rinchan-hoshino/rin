@@ -55,6 +55,7 @@ type PendingResponse = {
 
 type TerminalTurnWaiter = {
   worker: WorkerHandle;
+  connection?: ConnectionState;
   selector: SessionSelector;
   requestTag?: string;
   resolve: (payload: any) => void;
@@ -254,6 +255,11 @@ export class WorkerPool {
 
   unregisterConnection(connection: ConnectionState) {
     this.frontendConnections.delete(connection);
+    for (const waiter of Array.from(this.terminalTurnWaiters)) {
+      if (waiter.connection !== connection) continue;
+      this.terminalTurnWaiters.delete(waiter);
+      waiter.reject(new Error("Frontend connection closed"));
+    }
   }
 
   detachWorker(
@@ -2137,11 +2143,13 @@ export class WorkerPool {
     worker: WorkerHandle,
     selector: SessionSelector,
     requestTag?: string,
+    connection?: ConnectionState,
   ) {
     let waiter!: TerminalTurnWaiter;
     const promise = new Promise<any>((resolve, reject) => {
       waiter = {
         worker,
+        connection,
         selector,
         requestTag,
         resolve,
@@ -2150,6 +2158,65 @@ export class WorkerPool {
       this.terminalTurnWaiters.add(waiter);
     });
     return { promise, waiter };
+  }
+
+  async awaitTerminalTurnEvent(
+    connection: ConnectionState,
+    selector: SessionSelector,
+    requestTag?: string,
+  ) {
+    const selected = hasSessionSelector(selector)
+      ? selector
+      : this.getConnectionSelector(connection);
+    const normalizedRequestTag = String(requestTag || "").trim();
+    if (!normalizedRequestTag) {
+      throw new Error("await_turn_terminal requires requestTag");
+    }
+    for (const record of listStagedChatTerminalWal(
+      String(this.options.agentDir || "").trim(),
+      selected,
+    )) {
+      if (
+        normalizedRequestTag !== undefined &&
+        String(record.terminalPayload?.requestTag) !== normalizedRequestTag
+      ) {
+        continue;
+      }
+      return {
+        type: "rpc_turn_event",
+        ...record.terminalPayload,
+        chatRunContext: {
+          runId: record.runId,
+          ownerEpoch: record.ownerEpoch,
+          producerIncarnation: record.producerIncarnation,
+        },
+        terminalWal: {
+          payloadHash: record.payloadHash,
+          stagedAt: record.stagedAt,
+        },
+      };
+    }
+    const pendingTerminal = takePendingTerminalTurnEvent(
+      this.options.agentDir,
+      selected,
+      { requestTag: normalizedRequestTag },
+    );
+    if (pendingTerminal) return pendingTerminal;
+
+    const worker = this.resolveWorkerForCommand(connection, selected);
+    if (!worker) throw new Error("No matching session worker");
+
+    const { promise, waiter } = this.waitForTerminalTurnEvent(
+      worker,
+      selected,
+      normalizedRequestTag,
+      connection,
+    );
+    try {
+      return await promise;
+    } finally {
+      this.terminalTurnWaiters.delete(waiter);
+    }
   }
 
   private resolveTerminalTurnWaiters(worker: WorkerHandle, payload: any) {

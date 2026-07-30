@@ -4902,6 +4902,96 @@ test("session-selected frontend receives terminal after command worker detaches"
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("terminal wait resolves independently of pushed frontend event delivery", async () => {
+  const dir = await makeTempDir("rin-worker-pool-terminal-wait-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  pool.registerConnection(connection);
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.attachWorkerToConnection(connection, worker);
+  pool.forwardToWorker(connection, worker, {
+    id: "wait-prompt",
+    type: "prompt",
+    message: "run",
+    requestTag: "wait-request",
+    sessionFile,
+  });
+  const terminal = pool.awaitTerminalTurnEvent(
+    connection,
+    { sessionFile },
+    "wait-request",
+  );
+  pool.detachWorker(connection, { release: false });
+
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "wait-request",
+      sessionFile,
+      sessionId: "wait-session",
+      finalText: "wait final",
+    })}\n`,
+  );
+  const result = await Promise.race([
+    terminal,
+    sleep(1000).then(() => {
+      throw new Error("terminal wait did not resolve");
+    }),
+  ]);
+  assert.equal(result.finalText, "wait final");
+  assert.equal(pool.terminalTurnWaiters.size, 0);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("disconnect rejects and removes terminal waits", async () => {
+  const dir = await makeTempDir("rin-worker-pool-terminal-disconnect-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  pool.registerConnection(connection);
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.attachWorkerToConnection(connection, worker);
+  await assert.rejects(
+    pool.awaitTerminalTurnEvent(connection, { sessionFile }),
+    /await_turn_terminal requires requestTag/,
+  );
+  const terminal = pool.awaitTerminalTurnEvent(
+    connection,
+    { sessionFile },
+    "disconnect-request",
+  );
+  pool.unregisterConnection(connection);
+
+  await assert.rejects(terminal, /Frontend connection closed/);
+  assert.equal(pool.terminalTurnWaiters.size, 0);
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("worker exit reaches selected and transient command audiences", async () => {
   const dir = await makeTempDir("rin-worker-pool-exit-audience-");
   const workerPath = path.join(dir, "worker-source");

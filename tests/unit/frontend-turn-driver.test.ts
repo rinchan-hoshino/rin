@@ -522,6 +522,56 @@ async function withTimeout<T>(
   }
 }
 
+test("frontend SDK turn driver settles from daemon terminal wait when the pushed terminal is missed", async () => {
+  const client = createFrontendClient();
+  const originalRequest = client.request.bind(client);
+  let resolveTerminalWait: ((value: any) => void) | undefined;
+  let terminalRequestTag = "";
+  client.request = async (command: any) => {
+    if (command.type !== "await_turn_terminal") {
+      return await originalRequest(command);
+    }
+    terminalRequestTag = String(command.requestTag || "");
+    return await new Promise((resolve) => {
+      resolveTerminalWait = resolve;
+    });
+  };
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const turn = driver.runTurn({
+    text: "wait durably",
+    managedSessionLeaf: "telegram/1:2",
+  });
+  await waitUntil(
+    () => Boolean(resolveTerminalWait && terminalRequestTag),
+    "terminal wait was not registered before completion",
+  );
+  resolveTerminalWait!({
+    ok: true,
+    data: {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: terminalRequestTag,
+      finalText: "waited final",
+      sessionId: "frontend-session",
+      sessionFile: "/tmp/frontend-managed.jsonl",
+    },
+  });
+
+  const result = await withTimeout(
+    turn,
+    1000,
+    "daemon terminal wait did not settle the turn",
+  );
+  assert.equal(result.finalText, "waited final");
+});
+
 test("frontend SDK turn driver runs turns through a frontend client", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({
