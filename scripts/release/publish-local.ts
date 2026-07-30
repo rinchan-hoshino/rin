@@ -498,8 +498,16 @@ function main() {
   }
   const root = repoRoot();
   const releaseLock = acquireLock();
+  const releaseWorkRoot = path.join(
+    os.homedir(),
+    ".cache",
+    "rin-release",
+    "work",
+  );
+  fs.mkdirSync(releaseWorkRoot, { recursive: true, mode: 0o700 });
+  fs.chmodSync(releaseWorkRoot, 0o700);
   const tempRoot = fs.mkdtempSync(
-    path.join(os.tmpdir(), `rin-release-${args.channel}-`),
+    path.join(releaseWorkRoot, `rin-release-${args.channel}-`),
   );
   try {
     ensureCleanReleaseRoot(root, args.channel, args.noPublish);

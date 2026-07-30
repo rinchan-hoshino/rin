@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -270,7 +269,8 @@ const packageJson = JSON.parse(
 const version = String(args.version || packageJson.version || "0.0.0");
 packageJson.version = version;
 const bundleName = `rin-${version}-${args.platform}`;
-const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-platform-bundle-"));
+fs.mkdirSync(outputDir, { recursive: true });
+const workDir = fs.mkdtempSync(path.join(outputDir, ".rin-platform-bundle-"));
 try {
   const bundleRoot = path.join(workDir, bundleName);
   fs.mkdirSync(bundleRoot, { recursive: true });
@@ -297,7 +297,6 @@ try {
   });
   validateBundleLayout(bundleRoot, args.platform);
 
-  fs.mkdirSync(outputDir, { recursive: true });
   const extension = args.format === "zip" ? "zip" : "tar.gz";
   const bundlePath = path.join(outputDir, `${bundleName}.${extension}`);
   fs.rmSync(bundlePath, { force: true });

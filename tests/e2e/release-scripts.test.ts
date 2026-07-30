@@ -553,6 +553,16 @@ test("local release executor leaves dependency auditing to integration", () => {
   assert.doesNotMatch(content, /npm\(\["audit"/);
 });
 
+test("local release executor stages release work under its persistent cache", () => {
+  const content = readLocalPublisher();
+  const main = content.slice(content.indexOf("function main()"));
+  assert.match(
+    main,
+    /path\.join\(\s*os\.homedir\(\),\s*"\.cache",\s*"rin-release",\s*"work",?\s*\)/,
+  );
+  assert.doesNotMatch(main, /os\.tmpdir\(\)/);
+});
+
 test("local release executor publishes tags, bundles, npm, manifest, and bootstrap", () => {
   const content = readLocalPublisher();
   assert.match(content, /git\(\["tag", "-a", tag/);
@@ -626,6 +636,8 @@ test(
       const nodeRuntime = path.join(tempDir, "node-runtime");
       const hostileBin = path.join(tempDir, "hostile-bin");
       const invocationLog = path.join(tempDir, "managed-node.log");
+      const hostileTmp = path.join(tempDir, "hostile-tmp");
+      fs.writeFileSync(hostileTmp, "not a directory\n");
       fs.mkdirSync(path.join(fakeRepo, "dist", "app", "rin-install"), {
         recursive: true,
       });
@@ -712,6 +724,7 @@ exit 0
             ...process.env,
             PATH: `${hostileBin}${path.delimiter}${process.env.PATH}`,
             RIN_RELEASE_TEST_LOG: invocationLog,
+            TMPDIR: hostileTmp,
           },
         },
       );
