@@ -2881,6 +2881,58 @@ export class ChatController {
     this.clearCurrentTurn();
   }
 
+  async resumeTurn(input: {
+    incomingMessageId?: string;
+    replyToMessageId?: string;
+    receivedAt?: string;
+    requestTag?: string;
+    sessionFile?: string;
+    outboxTurnFence?: ChatOutboxTurnFence;
+  }) {
+    input.outboxTurnFence ||= getActiveChatOutboxTurnFence();
+    input.requestTag ||=
+      this.requestTagForInboundMessage(
+        input.incomingMessageId,
+        input.outboxTurnFence,
+      ) || undefined;
+    if (this.hasActiveTurn()) throw new Error("chat_turn_busy");
+
+    return await this.runExclusiveTurn(async () => {
+      const requestTag = safeString(input.requestTag).trim();
+      const sessionFile = this.resolveSessionFileForUse(input.sessionFile);
+      const messageId = safeString(input.incomingMessageId).trim();
+      if (!requestTag) throw new Error("chat_turn_request_tag_missing");
+      if (!sessionFile || !sessionFileExists(sessionFile)) {
+        throw missingSessionFileError(sessionFile);
+      }
+      this.setCurrentTurn({ ...input, requestTag });
+      const recoveredTurn = this.currentTurn;
+      this.awaitingTurnSettle = true;
+      try {
+        await this.connect();
+        if (this.currentTurn) this.currentTurn.frontendReadyAt = Date.now();
+        return await this.driver.resumeTurn({
+          requestTag,
+          sessionFile,
+          chatDeliveryContext:
+            input.outboxTurnFence && messageId
+              ? {
+                  turnId: input.outboxTurnFence.turnId,
+                  chatKey: this.chatKey,
+                  messageId,
+                }
+              : undefined,
+        });
+      } catch (error) {
+        if (recoveredTurn && this.currentTurn === recoveredTurn) {
+          this.awaitingTurnSettle = false;
+          this.clearCurrentTurn();
+        }
+        throw error;
+      }
+    });
+  }
+
   async runTurn(
     input: RinToolStartupOptions &
       Pick<RinPiPassthroughOptions, "piStartupOptions"> & {

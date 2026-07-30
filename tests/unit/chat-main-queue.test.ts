@@ -2295,7 +2295,7 @@ test("chat main fails closed for unverifiable actionable admissions", async () =
   }
 });
 
-test("hosted chat bridge shutdown interrupts active transport inbox_jobs without reviving sessions", async () => {
+test("hosted chat bridge shutdown preserves active inbox_jobs for daemon recovery", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2386,23 +2386,17 @@ test("hosted chat bridge shutdown interrupts active transport inbox_jobs without
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       const stopping = bridge.stop();
-      const releaseDeadline = Date.now() + 3000;
-      let failedFiles = [];
-      while (Date.now() < releaseDeadline) {
-        failedFiles = inbox.listChatInboxItems(agentDir, ["failed"]);
-        if (failedFiles.length === 2) break;
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
       releaseDetach();
       await stopping;
+      const runningFiles = inbox.listChatInboxItems(agentDir, ["running"]);
       const assistantRows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-      const allInterrupted = failedFiles.every(
-        (item) => item.lastError === "chat_turn_interrupted" && !item.ownerEpoch && !item.leaseUntil,
+      const allPreserved = runningFiles.every(
+        (item) => item.ownerEpoch && item.leaseUntil && !item.lastError,
       );
-      if (runTurnCalls !== 2 || detachCalls !== 2 || shutdownCalls !== 0 || disposeCalls !== 0 || failedFiles.length !== 2 || !allInterrupted || assistantRows.length !== 0) {
-        throw new Error(JSON.stringify({ runTurnCalls, detachCalls, shutdownCalls, disposeCalls, failedFiles, assistantRows }));
+      if (runTurnCalls !== 2 || detachCalls !== 2 || shutdownCalls !== 0 || disposeCalls !== 0 || runningFiles.length !== 2 || !allPreserved || assistantRows.length !== 0) {
+        throw new Error(JSON.stringify({ runTurnCalls, detachCalls, shutdownCalls, disposeCalls, runningFiles, assistantRows }));
       }
       process.exit(0);
     `;

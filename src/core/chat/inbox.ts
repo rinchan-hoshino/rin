@@ -295,7 +295,7 @@ export function listPendingChatInboxItems(agentDir: string) {
 }
 
 export function listRunningChatInboxItems(agentDir: string) {
-  return listChatInboxItems(agentDir, ["running"]);
+  return listChatInboxItems(agentDir, ["running"]) as ClaimedChatInboxItem[];
 }
 
 export function enqueueChatInboxItem(

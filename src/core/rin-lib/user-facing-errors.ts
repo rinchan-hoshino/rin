@@ -296,6 +296,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   chat_turn_busy: () => "This chat is still processing another turn.",
   frontend_turn_busy: () => "This session is still processing another turn.",
   frontend_turn_interrupted: () => "The active turn was interrupted.",
+  frontend_turn_request_tag_missing: () =>
+    "The frontend turn is missing its durable request identity.",
   rin_frontend_disconnected: () =>
     "Rin is disconnected. Reconnect before submitting another turn.",
   chat_terminal_record_missing: () =>
@@ -306,6 +308,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat turn update failed because the turn id is missing.",
   chat_turn_owner_epoch_required: () =>
     "Chat turn update failed because the owner fence is missing.",
+  chat_turn_request_tag_missing: () =>
+    "Chat turn recovery failed because its durable request identity is missing.",
 
   agent_practices_fetch_failed: () =>
     "Agent practice document refresh failed because a remote file could not be downloaded.",
@@ -749,6 +753,12 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin already has another accepted turn in progress for this session.",
   rin_turn_request_tag_required: () =>
     "Rin could not start the turn because its durable request identity is missing.",
+  rin_turn_not_resumable: () =>
+    "Rin could not continue the interrupted Pi session state.",
+  rin_turn_recovery_session_busy: () =>
+    "Rin found another active turn owning the recovery session.",
+  rin_turn_recovery_session_missing: () =>
+    "Rin could not restore the active turn because its session file is missing.",
   rin_turn_settled_without_terminal: () =>
     "Rin could not determine the completed turn result.",
   rin_turn_terminal_conflict: () =>

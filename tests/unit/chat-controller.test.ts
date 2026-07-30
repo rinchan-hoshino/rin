@@ -7101,6 +7101,121 @@ test("authoritative daemon terminal replaces a local interrupted transport failu
   );
 });
 
+test("resumeTurn attaches to the durable request without submitting the prompt again", async () => {
+  const controller = await createController("telegram/1:2");
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "resumed-session.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(sessionFile, "");
+  const inbound = enqueueChatInboxItem(controller.agentDir, {
+    chatKey: controller.chatKey,
+    messageId: "resumed-message",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "2",
+      messageId: "resumed-message",
+      content: "resume",
+      stripped: { content: "resume" },
+    },
+    elements: [{ type: "text", attrs: { content: "resume" } }],
+  }).item;
+  const claim = claimChatInboxItem(controller.agentDir, inbound.itemId);
+  openChatDatabase(controller.agentDir)
+    .prepare(
+      `UPDATE inbox_jobs SET execution_session_file = ? WHERE turn_id = ?`,
+    )
+    .run("resumed-session.jsonl", claim.itemId);
+  const requestTag = `chat-inbox-${crypto
+    .createHash("sha256")
+    .update(JSON.stringify([claim.chatKey, claim.messageId, claim.itemId]))
+    .digest("hex")}`;
+  beginDaemonTurn(controller.agentDir, {
+    requestTag,
+    sessionFile,
+    chatDeliveryContext: {
+      turnId: claim.itemId,
+      chatKey: claim.chatKey,
+      messageId: claim.messageId,
+    },
+  });
+  const terminalEvent = daemonTurnTerminalEvent(
+    recordDaemonTurnTerminal(controller.agentDir, {
+      requestTag,
+      terminalKind: "complete",
+      terminalEvent: {
+        type: "rpc_turn_event",
+        event: "complete",
+        requestTag,
+        finalText: "resumed final",
+        sessionFile,
+        sessionId: "resumed-session",
+      },
+    }),
+  );
+  let promptSubmissions = 0;
+  controller.driver.runTurn = async () => {
+    promptSubmissions += 1;
+    throw new Error("prompt must not be submitted during recovery");
+  };
+  controller.driver.resumeTurn = async (input) => {
+    assert.equal(input.requestTag, requestTag);
+    assert.equal(input.sessionFile, sessionFile);
+    await controller.handleFrontendEvent({
+      type: "turn_complete",
+      finalText: terminalEvent.finalText,
+      requestTag: terminalEvent.requestTag,
+      sessionFile: terminalEvent.sessionFile,
+      sessionId: terminalEvent.sessionId,
+      chatDeliveryContext: terminalEvent.chatDeliveryContext,
+      terminalRecord: terminalEvent.terminalRecord,
+    });
+    return {
+      finalText: terminalEvent.finalText,
+      sessionFile,
+      sessionId: "resumed-session",
+    };
+  };
+
+  assert.deepEqual(
+    openChatDatabase(controller.agentDir)
+      .prepare(
+        `SELECT state, owner_epoch, attempt, execution_session_file FROM inbox_jobs WHERE turn_id = ?`,
+      )
+      .get(claim.itemId),
+    {
+      state: "running",
+      owner_epoch: claim.ownerEpoch,
+      attempt: claim.attemptCount,
+      execution_session_file: "resumed-session.jsonl",
+    },
+  );
+  await controller.resumeTurn({
+    incomingMessageId: claim.messageId,
+    sessionFile,
+    outboxTurnFence: {
+      turnId: claim.itemId,
+      chatKey: claim.chatKey,
+      messageId: claim.messageId,
+      ownerEpoch: claim.ownerEpoch,
+      attempt: claim.attemptCount,
+    },
+  });
+
+  assert.equal(promptSubmissions, 0);
+  assert.deepEqual(
+    openChatDatabase(controller.agentDir)
+      .prepare(
+        `SELECT state, terminal_kind, last_error FROM inbox_jobs WHERE turn_id = ?`,
+      )
+      .get(claim.itemId),
+    { state: "terminal", terminal_kind: "outbox_final", last_error: null },
+  );
+});
+
 test("connect drains an older terminal before restoring the new primed turn", async () => {
   const controller = await createController("telegram/1:2");
   const oldInbound = enqueueChatInboxItem(controller.agentDir, {

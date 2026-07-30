@@ -10,6 +10,7 @@ import {
   beginDaemonTurn,
   daemonTurnTerminalEvent,
   interruptDaemonTurn,
+  listActiveDaemonTurns,
   readDaemonTurn,
   recordDaemonTurnTerminal,
 } from "./turn-ledger.js";
@@ -168,6 +169,8 @@ export class WorkerPool {
     Promise<WorkerHandle | undefined>
   >();
   private terminalTurnWaiters = new Set<TerminalTurnWaiter>();
+  private activeTurnRecoveryTimers = new Map<string, NodeJS.Timeout>();
+  private activeTurnRecoveryAttempts = new Map<string, number>();
   private workerSeq = 0;
   private internalRequestSeq = 0;
   private shuttingDown = false;
@@ -735,6 +738,11 @@ export class WorkerPool {
 
   beginShutdown() {
     this.shuttingDown = true;
+    for (const timer of this.activeTurnRecoveryTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.activeTurnRecoveryTimers.clear();
+    this.activeTurnRecoveryAttempts.clear();
     for (const worker of Array.from(this.workers)) {
       for (const connection of Array.from(worker.connections)) {
         if (connection.attachedWorker === worker) {
@@ -773,6 +781,90 @@ export class WorkerPool {
     const selector = sessionSelectorFromState(item);
     if (!selector.sessionFile) return;
     return this.restoreWorkerForSession(selector);
+  }
+
+  async recoverActiveDaemonTurns() {
+    const records = listActiveDaemonTurns(this.daemonLedgerAgentDir());
+    const results = [];
+    for (const record of records) {
+      results.push(await this.recoverActiveDaemonTurn(record.requestTag));
+    }
+    return results;
+  }
+
+  private scheduleActiveDaemonTurnRecovery(requestTag: string) {
+    if (this.shuttingDown || this.activeTurnRecoveryTimers.has(requestTag)) {
+      return;
+    }
+    const attempt = (this.activeTurnRecoveryAttempts.get(requestTag) || 0) + 1;
+    this.activeTurnRecoveryAttempts.set(requestTag, attempt);
+    const delayMs = Math.min(30_000, 500 * 2 ** Math.min(attempt - 1, 6));
+    const timer = setTimeout(() => {
+      this.activeTurnRecoveryTimers.delete(requestTag);
+      void this.recoverActiveDaemonTurn(requestTag);
+    }, delayMs);
+    timer.unref?.();
+    this.activeTurnRecoveryTimers.set(requestTag, timer);
+  }
+
+  private async recoverActiveDaemonTurn(requestTag: string) {
+    if (this.shuttingDown) return false;
+    const record = readDaemonTurn(this.daemonLedgerAgentDir(), requestTag);
+    if (!record || record.state !== "active") return false;
+    const selector = sessionSelectorFromState(record);
+    if (!selector.sessionFile) {
+      this.interruptDaemonTurnByRequestTag(
+        requestTag,
+        "rin_turn_recovery_session_missing",
+      );
+      return false;
+    }
+    let worker: WorkerHandle | undefined;
+    try {
+      worker = await this.ensureWorkerForSession(selector);
+      if (
+        worker.activeLifecycleRequestTag &&
+        worker.activeLifecycleRequestTag !== requestTag
+      ) {
+        throw new Error("rin_turn_recovery_session_busy");
+      }
+      this.setLifecycleOwner(worker, requestTag, selector, undefined, false);
+      worker.activeRequestTag = requestTag;
+      const response = await this.sendInternalCommand(worker, {
+        type: "resume_interrupted_turn",
+        requestTag,
+      });
+      if (response?.data?.resumed !== true) {
+        this.clearLifecycleOwner(worker);
+        this.interruptDaemonTurnByRequestTag(
+          requestTag,
+          "rin_turn_not_resumable",
+        );
+        return false;
+      }
+      return true;
+    } catch (error) {
+      if (
+        readDaemonTurn(this.daemonLedgerAgentDir(), requestTag)?.state !==
+        "active"
+      ) {
+        this.activeTurnRecoveryAttempts.delete(requestTag);
+        return true;
+      }
+      console.error(
+        `[rin-daemon] recovery retry for turn ${requestTag}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      if (
+        worker?.activeLifecycleRequestTag === requestTag &&
+        worker.child.exitCode === null
+      ) {
+        this.destroyWorker(worker, { signal: "SIGKILL" });
+      }
+      this.scheduleActiveDaemonTurnRecovery(requestTag);
+      return false;
+    }
   }
 
   private restoreWorkerForSession(selector: SessionSelector) {
@@ -867,15 +959,6 @@ export class WorkerPool {
     if (
       incomingRequestTag === undefined ||
       incomingRequestTag !== worker.activeLifecycleRequestTag
-    ) {
-      return false;
-    }
-    if (
-      worker.activeLifecycleSelector &&
-      !sessionMatchesSelector(
-        sessionSelectorFromState(payload),
-        worker.activeLifecycleSelector,
-      )
     ) {
       return false;
     }
@@ -1189,6 +1272,7 @@ export class WorkerPool {
           terminalEvent: payload,
         },
       );
+      this.activeTurnRecoveryAttempts.delete(requestTag);
       Object.assign(payload, daemonTurnTerminalEvent(terminalRecord));
       this.syncRunningWorkerRecordForSelector(
         sessionSelectorFromState(payload),
@@ -1403,7 +1487,7 @@ export class WorkerPool {
         }
 
         if (isTerminalRpcTurnEvent(payload)) {
-          this.resolveTerminalTurnWaiters(worker, payload);
+          this.resolveTerminalTurnWaiters(payload);
           return;
         }
         for (const connection of this.getWorkerEventConnections(worker)) {
@@ -1429,6 +1513,17 @@ export class WorkerPool {
     });
 
     child.on("exit", async (code, signal) => {
+      const activeRequestTag = lifecycleRequestTag(
+        worker.activeLifecycleRequestTag || worker.activeRequestTag,
+      );
+      const activeRecord = activeRequestTag
+        ? readDaemonTurn(this.daemonLedgerAgentDir(), activeRequestTag)
+        : undefined;
+      const preserveActiveTurn = activeRecord?.state === "active";
+      const recoverActiveTurn =
+        preserveActiveTurn &&
+        !this.shuttingDown &&
+        !worker.gracefulShutdownRequested;
       const liveConnections = new Set<ConnectionState>(worker.connections);
       for (const pending of worker.pendingResponses.values()) {
         pending.finalize?.();
@@ -1460,9 +1555,14 @@ export class WorkerPool {
         : oomKilled
           ? "rin_worker_oom"
           : "rin_worker_exit";
-      this.interruptWorkerLifecycle(worker, exitError);
-      this.rejectTerminalTurnWaiters(worker, new Error(exitError));
-      if (oomKilled) {
+      if (
+        !preserveActiveTurn ||
+        (worker.gracefulShutdownRequested && !this.shuttingDown)
+      ) {
+        this.interruptWorkerLifecycle(worker, exitError);
+        this.rejectTerminalTurnWaiters(worker, new Error(exitError));
+      }
+      if (oomKilled && !recoverActiveTurn) {
         for (const connection of liveConnections) {
           writeLine(connection.socket, {
             type: "worker_oom",
@@ -1471,7 +1571,7 @@ export class WorkerPool {
           });
         }
       }
-      if (!oomKilled) {
+      if (!oomKilled && !recoverActiveTurn && !this.shuttingDown) {
         for (const connection of liveConnections) {
           writeLine(connection.socket, {
             type: "worker_exit",
@@ -1491,6 +1591,9 @@ export class WorkerPool {
             responseError(entry.id, entry.commandType, exitError),
           );
         }
+      }
+      if (recoverActiveTurn && activeRequestTag) {
+        this.scheduleActiveDaemonTurnRecovery(activeRequestTag);
       }
     });
 
@@ -1683,29 +1786,20 @@ export class WorkerPool {
     }
   }
 
-  private resolveTerminalTurnWaiters(worker: WorkerHandle, payload: any) {
+  private resolveTerminalTurnWaiters(payload: any) {
+    const requestTag = lifecycleRequestTag(payload?.requestTag);
     for (const waiter of Array.from(this.terminalTurnWaiters)) {
-      if (waiter.worker !== worker) continue;
-      if (
-        waiter.requestTag !== undefined &&
-        lifecycleRequestTag(payload?.requestTag) !== waiter.requestTag
-      ) {
-        continue;
-      }
-      const payloadSelector = sessionSelectorFromState(payload);
-      if (
-        hasSessionSelector(payloadSelector) &&
-        !sessionMatchesSelector(payloadSelector, waiter.selector)
-      ) {
-        continue;
-      }
+      if (!requestTag || waiter.requestTag !== requestTag) continue;
       this.terminalTurnWaiters.delete(waiter);
       waiter.resolve(payload);
     }
   }
 
-  private interruptWorkerLifecycle(worker: WorkerHandle, reason: string) {
-    const requestTag = worker.activeLifecycleRequestTag;
+  private interruptDaemonTurnByRequestTag(
+    requestTagValue: string,
+    reason: string,
+  ) {
+    const requestTag = lifecycleRequestTag(requestTagValue);
     if (!requestTag) return;
     try {
       const terminal = interruptDaemonTurn(
@@ -1714,14 +1808,22 @@ export class WorkerPool {
         reason,
       );
       if (terminal.state === "active") return;
-      this.resolveTerminalTurnWaiters(
-        worker,
-        daemonTurnTerminalEvent(terminal),
-      );
+      const timer = this.activeTurnRecoveryTimers.get(requestTag);
+      if (timer) clearTimeout(timer);
+      this.activeTurnRecoveryTimers.delete(requestTag);
+      this.activeTurnRecoveryAttempts.delete(requestTag);
+      this.resolveTerminalTurnWaiters(daemonTurnTerminalEvent(terminal));
     } catch {
       // A missing or unavailable ledger cannot be replaced with inferred
       // lifecycle truth. Remaining waiters are rejected by the caller.
     }
+  }
+
+  private interruptWorkerLifecycle(worker: WorkerHandle, reason: string) {
+    this.interruptDaemonTurnByRequestTag(
+      worker.activeLifecycleRequestTag,
+      reason,
+    );
   }
 
   private rejectTerminalTurnWaiters(worker: WorkerHandle, error: Error) {

@@ -48,13 +48,15 @@ Do not add a frontend-only session model, local mirror of daemon state, or hidde
 There is one lifecycle owner and one durable handoff:
 
 - The daemon admits each request into `data/core/daemon/turn-ledger.sqlite` before writing the command to a worker. SQLite's native WAL mode provides transaction durability; Rin does not maintain an application-level terminal WAL.
-- A Pi worker is the only producer of `complete` or `error` truth. The daemon may terminalize an admitted active request as `interrupted` only from direct supervisor evidence such as worker exit, unavailable worker, stdin failure, or daemon restart.
-- A terminal record is immutable and identified by one `requestTag` and one `terminalId`. Live push, exact await, and reconnect replay are at-least-once views of that same record, never independent lifecycle decisions.
-- Chat owns `inbox_jobs`, messages, and platform outbox delivery only. It does not revive, requeue, supersede, infer, or mirror Pi lifecycle state.
-- Chat atomically settles the matching inbox job and inserts a deterministic terminal outbox row before acknowledging the daemon record. A crash before acknowledgement causes replay; the outbox identity makes replay idempotent. External platform delivery remains at-least-once.
-- On install, schema v9 rebuilds the Chat delivery tables and retires old `chat_runs`, `run_id`, and application terminal-WAL artifacts after the installer backup. Unverifiable in-flight legacy work becomes `failed/interrupted` and is never resumed.
+- A Pi worker is the only producer of `complete` or `error` truth. A daemon or worker restart does not terminalize an admitted request: the daemon preserves the active ledger row, opens the same Pi session in one replacement worker, and resumes the same `requestTag`.
+- Worker recovery never resubmits the user prompt. It continues a persisted user or tool-result leaf with Pi's native continuation runner. If a tool call was interrupted, the worker first appends Pi's canonical error tool result (`reason: daemon_exit`); if Pi had already persisted a completed assistant message, the replacement worker re-emits that result as the original turn's producer.
+- A terminal record is immutable and identified by one `requestTag` and one `terminalId`. Exact await and reconnect replay are level-triggered views of that same record, never independent lifecycle decisions. `requestTag` is lifecycle identity; relative or absolute spellings of the same session path are routing details and cannot strand a terminal waiter.
+- Chat owns `inbox_jobs`, messages, and platform outbox delivery only. On restart it preserves running transport jobs, attaches them to the existing daemon request without submitting the prompt again, and keeps later messages queued behind that turn. It does not revive, supersede, infer, or mirror Pi lifecycle state.
+- Chat atomically settles the matching inbox job and inserts a deterministic terminal outbox row before acknowledging the daemon record. A crash before acknowledgement causes replay; the outbox identity makes replay idempotent. Settlement ends the in-memory controller turn and resumes the per-chat drain. External platform delivery remains at-least-once.
+- Daemon shutdown stops frontend admission and gives active workers a bounded graceful drain. Work that outlives the process remains active in the ledger and follows the same startup recovery path instead of becoming `worker exit`.
+- On install, schema v9 rebuilds the Chat delivery tables and retires old `chat_runs`, `run_id`, and application terminal-WAL artifacts after the installer backup. Unverifiable in-flight work from pre-ledger schemas becomes `failed/interrupted`; current ledger-owned turns use the recovery contract above.
 
-Do not add fallback terminal replay files, Chat-owned canonical runs, submitted-turn inference, or a second terminal identifier. Crash recovery must consume authoritative daemon records or report interruption.
+Do not add fallback terminal replay files, Chat-owned canonical runs, submitted-turn inference, user-prompt replay, or a second terminal identifier. Crash recovery must consume the authoritative ledger and Pi session state through the single daemon/worker path.
 
 ## Session lifecycle identity
 

@@ -53,7 +53,6 @@ import {
   acknowledgeDaemonTurnTerminal,
   closeDaemonTurnLedger,
   daemonTurnTerminalEvent,
-  interruptActiveDaemonTurns,
   listUnacknowledgedChatTerminals,
 } from "./turn-ledger.js";
 import {
@@ -153,7 +152,6 @@ export async function startDaemon(
     sessionManagerModulePromise ??= loadRinSessionManagerModule();
     return sessionManagerModulePromise;
   };
-  interruptActiveDaemonTurns(runtime.agentDir, "rin_daemon_restarted");
   const workerPool = new WorkerPool({
     workerPath,
     cwd: runtime.cwd,
@@ -171,6 +169,7 @@ export async function startDaemon(
         });
     },
   });
+  await workerPool.recoverActiveDaemonTurns();
 
   const cronScheduler = new CronScheduler({
     agentDir: runtime.agentDir,
@@ -781,7 +780,10 @@ export async function startDaemon(
   console.log(`rin daemon bridge listening on ${bridgeSocketPath}`);
 
   let shuttingDown = false;
-  const shutdownGraceMs = Math.max(0, Number(options.shutdownGraceMs ?? 3_000));
+  const shutdownGraceMs = Math.max(
+    0,
+    Number(options.shutdownGraceMs ?? 85_000),
+  );
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;

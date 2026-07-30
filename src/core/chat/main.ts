@@ -87,6 +87,7 @@ import {
   restoreChatInboxElements,
   restoreChatInboxSession,
   interruptProcessingChatInboxItems,
+  listRunningChatInboxItems,
   touchClaimedChatInboxItem,
 } from "./inbox.js";
 import {
@@ -893,6 +894,7 @@ export async function startChatBridge(
 
   const handlePreparedChatTurnSubmission = async (
     submission: FrozenChatTurnSubmission,
+    options: { resume?: boolean } = {},
   ) => {
     const messageId = safeString(submission.incomingMessageId).trim();
     const controller = getController(submission.chatKey);
@@ -993,17 +995,24 @@ export async function startChatBridge(
       return { errorMessage };
     };
     try {
-      const turnResult = await controller.runTurn({
-        text: submission.text,
-        attachments: submission.attachments,
-        promptMeta: submission.promptMeta,
-        replyToMessageId: submission.replyToMessageId,
-        incomingMessageId: submission.incomingMessageId,
-        sessionFile: submission.sessionFile,
-        model: submission.model,
-        thinkingLevel: submission.thinkingLevel,
-        receivedAt: submission.receivedAt,
-      });
+      const turnResult = options.resume
+        ? await controller.resumeTurn({
+            replyToMessageId: submission.replyToMessageId,
+            incomingMessageId: submission.incomingMessageId,
+            sessionFile: submission.sessionFile,
+            receivedAt: submission.receivedAt,
+          })
+        : await controller.runTurn({
+            text: submission.text,
+            attachments: submission.attachments,
+            promptMeta: submission.promptMeta,
+            replyToMessageId: submission.replyToMessageId,
+            incomingMessageId: submission.incomingMessageId,
+            sessionFile: submission.sessionFile,
+            model: submission.model,
+            thinkingLevel: submission.thinkingLevel,
+            receivedAt: submission.receivedAt,
+          });
       return { disposition: "actionable" as const };
     } catch (error) {
       return await handleTurnFailure(error);
@@ -1017,12 +1026,7 @@ export async function startChatBridge(
       claimedInboxJobs.delete(job.envelope.itemId);
     }
   };
-  const interruptClaimedInboxJobForShutdown = (job: ClaimedChatInboxJob) => {
-    failClaimedChatInboxItem(
-      runtime.agentDir,
-      job.envelope,
-      "chat_turn_interrupted",
-    );
+  const preserveClaimedInboxJobForRestart = (job: ClaimedChatInboxJob) => {
     forgetClaimedInboxJob(job);
   };
   const finishClaimedInboxJob = (
@@ -1031,7 +1035,7 @@ export async function startChatBridge(
   ) => {
     try {
       if (chatBridgeStopping) {
-        interruptClaimedInboxJobForShutdown(job);
+        preserveClaimedInboxJobForRestart(job);
         return;
       }
       finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
@@ -1089,7 +1093,7 @@ export async function startChatBridge(
       finishClaimedInboxJob(job, result);
     } catch (error) {
       if (chatBridgeStopping) {
-        interruptClaimedInboxJobForShutdown(job);
+        preserveClaimedInboxJobForRestart(job);
         return;
       }
       logger.warn(
@@ -1185,6 +1189,7 @@ export async function startChatBridge(
     });
     const prepareFromAdmission = (
       admission: ChatInboxAdmission,
+      recoverCommittedWork = false,
     ): PreparedChatKeyWorkerJob => {
       const resolved = resolveDurableChatAdmission(admission, {
         chatKey: envelope.chatKey,
@@ -1194,6 +1199,7 @@ export async function startChatBridge(
         case "record_only":
           return recordOnlyJob();
         case "command":
+          if (recoverCommittedWork) return interruptedUnknownJob(admission);
           return {
             run: () =>
               runClaimedInboxJob(job, () =>
@@ -1207,6 +1213,7 @@ export async function startChatBridge(
               ),
           };
         case "unmatched_command":
+          if (recoverCommittedWork) return interruptedUnknownJob(admission);
           return {
             run: () =>
               runClaimedInboxJob(job, () =>
@@ -1222,7 +1229,9 @@ export async function startChatBridge(
           return {
             run: () =>
               runClaimedInboxJob(job, () =>
-                handlePreparedChatTurnSubmission(resolved.submission),
+                handlePreparedChatTurnSubmission(resolved.submission, {
+                  resume: recoverCommittedWork,
+                }),
               ),
           };
         case "interrupted_unknown":
@@ -1244,7 +1253,7 @@ export async function startChatBridge(
       messageId: envelope.messageId,
     });
     if (recoveredAdmission.kind !== "unclassified") {
-      return prepareFromAdmission(envelope.admission);
+      return prepareFromAdmission(envelope.admission, true);
     }
 
     if (isRecordOnlyChatKey(queuedChatKey)) {
@@ -1371,18 +1380,20 @@ export async function startChatBridge(
     logger,
   });
 
+  const enqueueClaimedInboxItem = (job: ClaimedChatInboxJob) => {
+    claimedInboxJobs.set(job.envelope.itemId, job);
+    if (chatBridgeStopping) {
+      preserveClaimedInboxJobForRestart(job);
+      return;
+    }
+    chatKeyWorkers.enqueue(job.envelope.chatKey, job);
+  };
+
   const inboxDrain = createChatInboxDrain({
     agentDir: runtime.agentDir,
     getController,
     isInboundMessageProcessed,
-    enqueueClaimedInboxItem: (job) => {
-      claimedInboxJobs.set(job.envelope.itemId, job);
-      if (chatBridgeStopping) {
-        interruptClaimedInboxJobForShutdown(job);
-        return;
-      }
-      chatKeyWorkers.enqueue(job.envelope.chatKey, job);
-    },
+    enqueueClaimedInboxItem,
     isChatKeyBlocked: (chatKey) => app.isInboundRecoveryChat(chatKey),
     hasActiveChatKeyWorker: (chatKey) => chatKeyWorkers.hasWorker(chatKey),
     isPriorityDuringActiveChatKeyWorker: (envelope) => {
@@ -1724,12 +1735,13 @@ export async function startChatBridge(
   );
 
   reconcileCommittedChatOutboxProcessing(runtime.agentDir);
-  const interruptedProcessing = interruptProcessingChatInboxItems(
-    runtime.agentDir,
-  );
-  if (interruptedProcessing.length) {
-    logger.warn(
-      `chat inbox startup interrupted processing=${interruptedProcessing.length}`,
+  const recoverableProcessing = listRunningChatInboxItems(runtime.agentDir);
+  for (const envelope of recoverableProcessing) {
+    enqueueClaimedInboxItem({ envelope });
+  }
+  if (recoverableProcessing.length) {
+    logger.info(
+      `chat inbox startup recovering processing=${recoverableProcessing.length}`,
     );
   }
 
@@ -1765,7 +1777,7 @@ export async function startChatBridge(
       if (outboxPollTimer) clearInterval(outboxPollTimer);
       if (outboxHistoryCleanupTimer) clearInterval(outboxHistoryCleanupTimer);
       for (const job of [...claimedInboxJobs.values()]) {
-        interruptClaimedInboxJobForShutdown(job);
+        preserveClaimedInboxJobForRestart(job);
       }
       for (const controller of controllers.values()) {
         if (options.hosted === true) {

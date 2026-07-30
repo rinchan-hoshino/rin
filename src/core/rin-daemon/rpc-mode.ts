@@ -141,20 +141,15 @@ function getSessionTree(session: any) {
   return Array.isArray(tree) ? tree : [];
 }
 
-function lastPersistedMessage(session: any) {
-  const entries = getSessionEntries(session);
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (entry?.type === "message") return entry.message;
-  }
-  return undefined;
-}
-
 function ensureInterruptedAssistantPersisted(session: any, message: any) {
   const manager = session?.sessionManager;
   if (typeof manager?.appendMessage !== "function") return;
-  if (stableJson(lastPersistedMessage(session)) === stableJson(message)) return;
-  manager.appendMessage(message);
+  const serialized = stableJson(message);
+  const persisted = getSessionEntries(session).some(
+    (entry: any) =>
+      entry?.type === "message" && stableJson(entry.message) === serialized,
+  );
+  if (!persisted) manager.appendMessage(message);
 }
 
 function appendInterruptedToolResults(
@@ -164,23 +159,65 @@ function appendInterruptedToolResults(
   const messages = Array.isArray(session?.agent?.state?.messages)
     ? session.agent.state.messages
     : [];
-  const lastMessage = messages[messages.length - 1];
-  if (!lastMessage || lastMessage.role !== "assistant") return false;
-  const toolCalls = extractPiContinuableToolCallParts(lastMessage);
+  let assistantIndex = messages.length - 1;
+  while (
+    assistantIndex >= 0 &&
+    messages[assistantIndex]?.role === "toolResult"
+  ) {
+    assistantIndex -= 1;
+  }
+  if (assistantIndex < 0) return false;
+  const toolCalls = extractPiContinuableToolCallParts(messages[assistantIndex]);
   if (!toolCalls.length) return false;
+  const completedToolCallIds = new Set(
+    messages
+      .slice(assistantIndex + 1)
+      .filter((message: any) => message?.role === "toolResult")
+      .map((message: any) => safeString(message?.toolCallId).trim())
+      .filter(Boolean),
+  );
+  const interruptedToolCalls = toolCalls.filter(
+    (toolCall) => !completedToolCallIds.has(safeString(toolCall?.id).trim()),
+  );
+  if (!interruptedToolCalls.length) return false;
 
   const persistToSession = options.persistToSession !== false;
-  if (persistToSession)
-    ensureInterruptedAssistantPersisted(session, lastMessage);
+  if (persistToSession) {
+    ensureInterruptedAssistantPersisted(session, messages[assistantIndex]);
+  }
 
-  for (const toolCall of toolCalls) {
+  for (const toolCall of interruptedToolCalls) {
     const message = createInterruptedToolResultMessage(toolCall);
     session.agent.state.messages.push(message);
-    if (persistToSession) {
-      session.sessionManager.appendMessage(message);
-    }
+    if (persistToSession) session.sessionManager.appendMessage(message);
   }
   return true;
+}
+
+function isInterruptedTurnResumable(session: any) {
+  if (session?.agent?.signal) return true;
+  const messages = Array.isArray(session?.agent?.state?.messages)
+    ? session.agent.state.messages
+    : [];
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage) return false;
+  return true;
+}
+
+async function resumeInterruptedTurn(session: any) {
+  const messages = Array.isArray(session?.agent?.state?.messages)
+    ? session.agent.state.messages
+    : [];
+  if (!messages.length) return;
+  const appendedInterruption = appendInterruptedToolResults(session);
+  const lastMessage = session.agent.state.messages.at(-1);
+  if (!appendedInterruption && lastMessage?.role === "assistant") {
+    return {
+      finalText: safeString(session.getLastAssistantText?.()),
+      result: { messages: [lastMessage] },
+    };
+  }
+  await resumePiSessionTurn(session);
 }
 
 function clampSessionThinkingLevel(session: any, level: string) {
@@ -1386,6 +1423,17 @@ export async function runCustomRpcMode(
             turnActive: true,
           }),
         );
+      }
+      case "resume_interrupted_turn": {
+        const requestTag = rpcRequestTag(command.requestTag);
+        if (!isInterruptedTurnResumable(session)) {
+          return done(id, type, { resumed: false });
+        }
+        startInterruptTurnTask(
+          requestTag,
+          async () => await resumeInterruptedTurn(session),
+        );
+        return done(id, type, { resumed: true, requestTag });
       }
       case "steer": {
         const requestTag = safeString(command.requestTag).trim();

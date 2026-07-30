@@ -164,13 +164,18 @@ test("hosted chat bridge has no restart-specific quiescing state", () => {
   assert.doesNotMatch(shared, /prepareDaemonRestart|cancelDaemonRestart/);
 });
 
-test("daemon shutdown remains the owner of interrupting active workers", () => {
+test("daemon restart preserves and resumes active durable turns", () => {
+  const daemon = source("src/core/rin-daemon/daemon.ts");
   const workerPool = source("src/core/rin-daemon/worker-pool.ts");
   const shutdownBlock = workerPool.slice(
     workerPool.indexOf("async shutdown(graceMs: number)"),
     workerPool.indexOf("private updateWorkerMetadata"),
   );
 
+  assert.doesNotMatch(daemon, /interruptActiveDaemonTurns/);
+  assert.match(daemon, /await workerPool\.recoverActiveDaemonTurns\(\)/);
   assert.match(shutdownBlock, /this\.beginShutdown\(\)/);
   assert.match(shutdownBlock, /this\.destroyAll\(\)/);
+  assert.match(workerPool, /preserveActiveTurn/);
+  assert.match(workerPool, /resume_interrupted_turn/);
 });

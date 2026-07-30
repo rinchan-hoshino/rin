@@ -99,7 +99,7 @@ test("daemon turn ledger owns one immutable lifecycle record per request", async
   });
 });
 
-test("daemon interruption is terminal truth and startup never revives active work", async () => {
+test("direct supervisor interruption is terminal while restart recovery keeps active work", async () => {
   await withAgentDir(async (agentDir) => {
     begin(agentDir);
     begin(agentDir, {
@@ -120,17 +120,10 @@ test("daemon interruption is terminal truth and startup never revives active wor
     assert.equal(interrupted.terminalEvent.event, "error");
     assert.equal(interrupted.terminalEvent.error, "rin_worker_exit");
 
-    assert.equal(
-      ledger.interruptActiveDaemonTurns(agentDir, "rin_daemon_restarted"),
-      1,
-    );
-    assert.equal(
-      ledger.readDaemonTurn(agentDir, "request-2").state,
-      "interrupted",
-    );
-    assert.equal(
-      ledger.interruptActiveDaemonTurns(agentDir, "rin_daemon_restarted"),
-      0,
+    assert.equal(ledger.readDaemonTurn(agentDir, "request-2").state, "active");
+    assert.deepEqual(
+      ledger.listActiveDaemonTurns(agentDir).map((record) => record.requestTag),
+      ["request-2"],
     );
   });
 });

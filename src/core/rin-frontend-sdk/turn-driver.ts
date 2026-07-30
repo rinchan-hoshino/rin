@@ -784,7 +784,7 @@ export class RinFrontendTurnDriver {
               ? { sessionFile: recovery.sessionFile }
               : {}),
           });
-          await this.handleClientEvent({ type: "ui", payload } as any);
+          await this.handleClientEvent(payload);
           return;
         } catch (error) {
           if (!isRecoverableConnectionError(error)) {
@@ -1441,6 +1441,69 @@ export class RinFrontendTurnDriver {
           ).trim() || undefined,
       };
     } finally {
+      this.pendingTurnCount = Math.max(0, this.pendingTurnCount - 1);
+    }
+  }
+
+  async resumeTurn(input: {
+    requestTag: string;
+    sessionFile?: string;
+    chatDeliveryContext?: RinChatDeliveryContext;
+  }) {
+    const requestTag = safeString(input.requestTag).trim();
+    if (!requestTag) throw new Error("frontend_turn_request_tag_missing");
+    this.pendingTurnCount += 1;
+    try {
+      if (!this.client?.isConnected()) {
+        await this.connect({ restoreSessionFile: input.sessionFile });
+      }
+      if (!this.client) throw new Error("frontend_session_not_connected");
+      if (this.liveTurn) throw new Error("frontend_turn_busy");
+      this.resetAssistantSegmentTracking();
+      this.latestAssistantText = "";
+      const liveTurn = this.startLiveTurn(
+        requestTag,
+        input.chatDeliveryContext,
+      );
+      this.liveTurnRecoveryContext = {
+        sessionFile: safeString(input.sessionFile).trim() || undefined,
+      };
+      try {
+        const event = await this.client.request<any>({
+          type: "await_turn_terminal",
+          sessionFile: safeString(input.sessionFile).trim() || undefined,
+          requestTag,
+        });
+        if (this.liveTurn === liveTurn && event != null) {
+          await this.handleClientEvent(event);
+        }
+      } catch (error) {
+        if (isRecoverableConnectionError(error)) {
+          await this.interruptLiveTurnAfterDisconnect();
+        } else {
+          this.failLiveTurn(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
+      }
+      const completion = await liveTurn.promise;
+      const finalText = safeString(completion?.finalText).trim();
+      this.latestAssistantText = finalText;
+      return {
+        finalText,
+        result: completion?.result,
+        sessionId:
+          safeString(completion?.sessionId || this.currentSessionId()).trim() ||
+          undefined,
+        sessionFile:
+          safeString(
+            completion?.sessionFile ||
+              input.sessionFile ||
+              this.currentSessionFile(),
+          ).trim() || undefined,
+      };
+    } finally {
+      this.liveTurnRecoveryContext = null;
       this.pendingTurnCount = Math.max(0, this.pendingTurnCount - 1);
     }
   }

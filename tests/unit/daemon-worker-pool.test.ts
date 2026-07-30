@@ -16,6 +16,11 @@ const { WorkerPool } = await import(
     path.join(rootDir, "dist", "core", "rin-daemon", "worker-pool.js"),
   ).href
 );
+const { beginDaemonTurn, readDaemonTurn } = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-daemon", "turn-ledger.js"),
+  ).href
+);
 const activeDirs = new Set<string>();
 const activePools = new Set<any>();
 const activeChildren = new Set<any>();
@@ -695,6 +700,202 @@ test("exact terminal wait survives detach without leaking a raw terminal event",
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("daemon startup keeps an active turn durable and retries transient recovery failure", async () => {
+  const dir = await makeTempDir("rin-worker-pool-startup-recovery-");
+  const workerPath = path.join(dir, "worker.cjs");
+  const sessionFile = path.join(dir, "session.jsonl");
+  const recoveryMarker = path.join(dir, "recovery-attempted");
+  await fs.writeFile(sessionFile, "");
+  await fs.writeFile(
+    workerPath,
+    `const fs = require("node:fs");
+const readline = require("node:readline");
+const sessionFile = ${JSON.stringify(sessionFile)};
+const recoveryMarker = ${JSON.stringify(recoveryMarker)};
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const command = JSON.parse(line);
+  if (command.type === "get_state") {
+    process.stdout.write(JSON.stringify({ id: command.id, success: true, command: command.type, data: { sessionFile, sessionId: "startup-session", turnActive: false } }) + "\\n");
+    return;
+  }
+  if (command.type === "shutdown_session") {
+    process.stdout.write(JSON.stringify({ id: command.id, success: true, command: command.type, data: { shutdown: true } }) + "\\n");
+    setImmediate(() => process.exit(0));
+    return;
+  }
+  if (command.type === "resume_interrupted_turn") {
+    if (!fs.existsSync(recoveryMarker)) {
+      fs.writeFileSync(recoveryMarker, "failed once");
+      process.exit(1);
+    }
+    process.stdout.write(JSON.stringify({ type: "rpc_turn_event", event: "start", requestTag: command.requestTag, turnGeneration: 1, sessionFile, sessionId: "startup-session" }) + "\\n");
+    process.stdout.write(JSON.stringify({ id: command.id, success: true, command: command.type, data: { resumed: true, requestTag: command.requestTag } }) + "\\n");
+    setTimeout(() => process.stdout.write(JSON.stringify({ type: "rpc_turn_event", event: "complete", requestTag: command.requestTag, turnGeneration: 1, sessionFile, sessionId: "startup-session", finalText: "startup recovered final" }) + "\\n"), 10);
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+  beginDaemonTurn(dir, {
+    requestTag: "startup-request",
+    sessionFile,
+  });
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+
+  assert.deepEqual(await pool.recoverActiveDaemonTurns(), [false]);
+  assert.equal(readDaemonTurn(dir, "startup-request")?.state, "active");
+  const deadline = Date.now() + 2_000;
+  while (
+    readDaemonTurn(dir, "startup-request")?.state === "active" &&
+    Date.now() < deadline
+  ) {
+    await sleep(10);
+  }
+  const record = readDaemonTurn(dir, "startup-request");
+  assert.equal(record?.state, "complete");
+  assert.equal(record?.terminalEvent?.finalText, "startup recovered final");
+  pool.destroyAll();
+});
+
+test("an unexpected worker exit resumes the same durable turn in a replacement worker", async () => {
+  const dir = await makeTempDir("rin-worker-pool-resume-active-");
+  const workerPath = path.join(dir, "worker.cjs");
+  const commandLog = path.join(dir, "commands.jsonl");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(sessionFile, "");
+  await fs.writeFile(
+    workerPath,
+    `const fs = require("node:fs");
+const readline = require("node:readline");
+const sessionFile = ${JSON.stringify(sessionFile)};
+const log = ${JSON.stringify(commandLog)};
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const command = JSON.parse(line);
+  fs.appendFileSync(log, JSON.stringify({ pid: process.pid, type: command.type, requestTag: command.requestTag }) + "\\n");
+  if (command.type === "get_state") {
+    process.stdout.write(JSON.stringify({ id: command.id, success: true, command: command.type, data: { sessionFile, sessionId: "resume-session", turnActive: false } }) + "\\n");
+    return;
+  }
+  if (command.type === "prompt") {
+    process.stdout.write(JSON.stringify({ id: command.id, success: true, command: command.type, data: { accepted: true, requestTag: command.requestTag, sessionFile, sessionId: "resume-session" } }) + "\\n");
+    return;
+  }
+  if (command.type === "resume_interrupted_turn") {
+    process.stdout.write(JSON.stringify({ type: "rpc_turn_event", event: "start", requestTag: command.requestTag, turnGeneration: 1, sessionFile, sessionId: "resume-session" }) + "\\n");
+    process.stdout.write(JSON.stringify({ id: command.id, success: true, command: command.type, data: { resumed: true, requestTag: command.requestTag } }) + "\\n");
+    setTimeout(() => process.stdout.write(JSON.stringify({ type: "rpc_turn_event", event: "complete", requestTag: command.requestTag, turnGeneration: 1, sessionFile, sessionId: "resume-session", finalText: "resumed final" }) + "\\n"), 10);
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+  const writes: string[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(line: string) {
+        writes.push(line);
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  pool.registerConnection(connection);
+  const firstWorker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(firstWorker);
+  pool.attachWorkerToConnection(connection, firstWorker);
+  pool.forwardToWorker(connection, firstWorker, {
+    id: "resume-prompt",
+    type: "prompt",
+    message: "continue me",
+    requestTag: "resume-request",
+    sessionFile,
+  });
+  const terminal = pool.awaitTerminalTurnEvent(
+    connection,
+    { sessionFile },
+    "resume-request",
+  );
+  await sleep(50);
+  firstWorker.child.kill("SIGKILL");
+
+  const event = await Promise.race([
+    terminal,
+    sleep(1_500).then(async () => {
+      throw new Error(
+        `replacement worker did not finish the durable turn: ${JSON.stringify({ writes, commands: await readCommandLog(commandLog) })}`,
+      );
+    }),
+  ]);
+  assert.equal(event.event, "complete");
+  assert.equal(event.finalText, "resumed final");
+  const commands = (await fs.readFile(commandLog, "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(commands.filter((entry) => entry.type === "prompt").length, 1);
+  assert.equal(
+    commands.filter((entry) => entry.type === "resume_interrupted_turn").length,
+    1,
+  );
+});
+
+test("terminal wait uses request identity across stored and absolute session paths", async () => {
+  const dir = await makeTempDir("rin-worker-pool-terminal-session-path-");
+  const workerPath = path.join(dir, "worker-source");
+  const storedSessionFile = "sessions/chat.jsonl";
+  const absoluteSessionFile = path.join(dir, storedSessionFile);
+  await fs.mkdir(path.dirname(absoluteSessionFile), { recursive: true });
+  await fs.writeFile(absoluteSessionFile, "");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  pool.registerConnection(connection);
+  const worker = pool.restoreSessionWorker({ sessionFile: storedSessionFile });
+  assert.ok(worker);
+  pool.attachWorkerToConnection(connection, worker);
+  pool.forwardToWorker(connection, worker, {
+    id: "path-prompt",
+    type: "prompt",
+    message: "run",
+    requestTag: "path-request",
+    sessionFile: storedSessionFile,
+  });
+  const terminal = pool.awaitTerminalTurnEvent(
+    connection,
+    { sessionFile: storedSessionFile },
+    "path-request",
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "path-request",
+      turnGeneration: 1,
+      sessionFile: absoluteSessionFile,
+      sessionId: "path-session",
+      finalText: "path-safe final",
+    })}\n`,
+  );
+
+  const outcome = await Promise.race([
+    terminal.then(
+      (event) => ({ kind: "terminal", event }),
+      (error) => ({ kind: "error", error }),
+    ),
+    sleep(100).then(() => ({ kind: "timeout" })),
+  ]);
+  assert.equal(outcome.kind, "terminal");
+  assert.equal(outcome.event?.finalText, "path-safe final");
+});
+
 test("terminal wait resolves independently of pushed frontend event delivery", async () => {
   const dir = await makeTempDir("rin-worker-pool-terminal-wait-");
   const workerPath = path.join(dir, "worker-source");
@@ -800,54 +1001,6 @@ test("disconnect rejects and removes terminal waits", async () => {
   await assert.rejects(terminal, /Frontend connection closed/);
   assert.equal(pool.terminalTurnWaiters.size, 0);
 
-  pool.destroyAll();
-  await fs.rm(dir, { recursive: true, force: true });
-});
-
-test("worker exit durably interrupts the exact turn before resolving its waiter", async () => {
-  const dir = await makeTempDir("rin-worker-pool-interrupted-exit-");
-  const workerPath = path.join(dir, "worker-source");
-  const sessionFile = path.join(dir, "session.jsonl");
-  await fs.writeFile(
-    workerPath,
-    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
-  );
-  const connection = {
-    socket: { destroyed: false, write() {} },
-    clientBuffer: "",
-  };
-  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
-  pool.registerConnection(connection);
-  const worker = pool.restoreSessionWorker({ sessionFile });
-  assert.ok(worker);
-  pool.attachWorkerToConnection(connection, worker);
-  pool.forwardToWorker(connection, worker, {
-    id: "interrupted-prompt",
-    type: "prompt",
-    message: "run",
-    requestTag: "interrupted-request",
-    sessionFile,
-    chatDeliveryContext: {
-      turnId: "interrupted-turn",
-      chatKey: "discord/1:2",
-      messageId: "interrupted-message",
-    },
-  });
-  const terminal = pool.awaitTerminalTurnEvent(
-    connection,
-    { sessionFile },
-    "interrupted-request",
-  );
-  worker.child.kill("SIGKILL");
-  const result = await Promise.race([
-    terminal,
-    sleep(1000).then(() => {
-      throw new Error("interrupted terminal did not resolve");
-    }),
-  ]);
-  assert.equal(result.event, "error");
-  assert.equal(result.terminalRecord.state, "interrupted");
-  assert.match(result.error, /worker[ _]exit|signal/i);
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
 });
@@ -1370,7 +1523,7 @@ test("stale terminal events do not clear a newer tagged active turn", async () =
   (pool as any).updateWorkerMetadata(worker, {
     type: "rpc_turn_event",
     event: "complete",
-    requestTag: "tag-current",
+    requestTag: "tag-other",
     turnGeneration: 2,
     sessionFile,
     sessionId: "different-session-id",

@@ -397,24 +397,6 @@ export function interruptDaemonTurn(
   });
 }
 
-export function interruptActiveDaemonTurns(agentDir: string, reason: string) {
-  const requiredReason = requireText(
-    reason,
-    "rin_turn_ledger_interrupt_reason_required",
-  );
-  const db = open(agentDir);
-  const tags = db
-    .prepare(`SELECT request_tag FROM turn_records WHERE state = 'active'`)
-    .all() as Array<{ request_tag: string }>;
-  const transaction = db.transaction(() => {
-    for (const row of tags) {
-      interruptDaemonTurn(agentDir, row.request_tag, requiredReason);
-    }
-  });
-  transaction();
-  return tags.length;
-}
-
 export function daemonTurnTerminalEvent(record: DaemonTurnRecord) {
   if (
     record.state === "active" ||
@@ -434,6 +416,17 @@ export function daemonTurnTerminalEvent(record: DaemonTurnRecord) {
       terminalAt: record.terminalAt,
     },
   };
+}
+
+export function listActiveDaemonTurns(agentDir: string) {
+  const rows = open(agentDir)
+    .prepare(
+      `SELECT * FROM turn_records
+       WHERE state = 'active'
+       ORDER BY created_at, request_tag`,
+    )
+    .all() as TurnRow[];
+  return rows.map(rowToRecord);
 }
 
 export function listUnacknowledgedChatTerminals(
