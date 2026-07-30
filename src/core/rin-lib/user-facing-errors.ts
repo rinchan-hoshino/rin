@@ -129,6 +129,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "The chat database schema is incomplete.",
   chat_database_partial_schema: () =>
     "The chat database contains a partial schema.",
+  chat_database_foreign_key_mismatch: () =>
+    "The chat database has invalid record relationships.",
   chat_database_schema_fingerprint_mismatch: () =>
     "The chat database schema integrity check failed.",
   chat_database_schema_version_mismatch: () =>
@@ -146,81 +148,16 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     withDetail("Rin could not upgrade canonical chat run storage", detail),
   chat_database_invalid_canonical_reconciliation_state: () =>
     "Rin found invalid canonical chat reconciliation state.",
-  chat_run_chat_mismatch: () =>
-    "The terminal result belongs to a different chat run.",
-  chat_run_delivery_turn_missing: () =>
-    "Rin could not find the terminal delivery owner for this chat run.",
-  chat_run_identity_conflict: () =>
-    "Rin found conflicting canonical chat run identity.",
-  chat_run_invalid_terminal_delivery_kind: () =>
-    "Rin rejected an invalid terminal chat delivery kind.",
-  chat_run_invalid_terminal_payload: () =>
-    "Rin rejected an invalid terminal chat payload.",
-  chat_run_missing: () => "Rin could not find the canonical chat run.",
-  chat_run_missing_id: () => "Rin could not create a chat run without an id.",
-  chat_run_missing_producer_incarnation: () =>
-    "Rin could not identify the chat run producer.",
-  chat_run_not_recoverable: () =>
-    "The canonical chat run is not in a recoverable state.",
-  chat_run_not_terminalizable: () =>
-    "The canonical chat run cannot accept a terminal result in its current state.",
-  chat_run_stale_producer: () =>
-    "Rin rejected a terminal result from a stale chat producer.",
-  chat_run_stale_turn: () =>
-    "Rin rejected a stale chat turn while creating its canonical run.",
-  chat_run_terminal_conflict: () =>
-    "Rin found conflicting terminal results for one chat run.",
-  chat_run_terminal_fence_lost: () =>
-    "Rin lost the canonical chat terminal ownership fence before commit.",
-  chat_run_terminal_fence_mismatch: () =>
-    "Rin rejected a terminal event owned by another chat producer.",
-  chat_run_terminal_outbox_missing: () =>
-    "Rin found a committed chat terminal without its durable outbox record.",
-  chat_run_turn_already_attached: () =>
-    "The chat turn is already attached to another canonical run.",
   chat_terminal_recovery_invalid_event: () =>
     "Rin quarantined a completed chat turn with an invalid event.",
   chat_terminal_recovery_invalid_payload: () =>
     "Rin quarantined a completed chat turn with an invalid payload.",
-  chat_terminal_recovery_invalid_session_file: () =>
-    "Rin quarantined a completed chat turn with an invalid session path.",
-  chat_terminal_recovery_target_missing: () =>
-    "Rin quarantined a completed chat turn whose delivery target is missing.",
-  chat_terminal_recovery_text_missing: () =>
-    "Rin quarantined a completed chat turn whose result text is missing.",
-  chat_terminal_recovery_unresolved: () =>
-    "Rin quarantined a completed chat turn that could not be recovered safely.",
-  chat_terminal_wal_commit_conflict: () =>
-    "Rin found conflicting terminal journal commit evidence.",
-  chat_terminal_wal_conflict: () =>
-    "Rin found conflicting staged terminal journal evidence.",
-  chat_terminal_wal_hash_mismatch: () =>
-    "The terminal journal payload integrity check failed.",
-  chat_terminal_wal_identity_mismatch: () =>
-    "The terminal journal identity does not match its storage key.",
-  chat_terminal_wal_invalid: () => "The terminal journal record is invalid.",
-  chat_terminal_wal_invalid_kind: () =>
-    "The terminal journal result kind is invalid.",
-  chat_terminal_wal_invalid_payload: () =>
-    "The terminal journal payload is invalid.",
-  chat_terminal_wal_missing: () =>
-    "Rin could not find the staged terminal journal record.",
-  chat_terminal_wal_missing_outbox_id: () =>
-    "Rin cannot commit a terminal journal without an outbox record.",
-  chat_terminal_wal_missing_owner_epoch: () =>
-    "Rin cannot stage a terminal journal without an ownership epoch.",
-  chat_terminal_wal_missing_producer_incarnation: () =>
-    "Rin cannot stage a terminal journal without a producer identity.",
-  chat_terminal_wal_missing_run_id: () =>
-    "Rin cannot stage a terminal journal without a run id.",
-  chat_terminal_wal_stale_producer: () =>
-    "Rin rejected a terminal journal commit from a stale producer.",
-  rpc_chat_run_agent_dir_missing: () =>
-    "Rin cannot persist the terminal journal because its agent directory is missing.",
-  rpc_chat_terminal_wal_stage_failed: (detail) =>
-    withDetail("Rin could not persist the terminal journal", detail),
-  rpc_invalid_chat_run_context: () =>
-    "Rin rejected an invalid canonical chat run context.",
+  chat_terminal_turn_mismatch: () =>
+    "The terminal journal does not match its transport turn.",
+  chat_terminal_invalid_delivery_kind: () =>
+    "Rin rejected an invalid terminal delivery kind.",
+  chat_terminal_delivery_mismatch: () =>
+    "The terminal record does not match the current transport turn.",
   chat_inbox_chatKey_required: () =>
     "Chat inbox write failed because the chat key is missing. Check the adapter event.",
   chat_inbox_messageId_required: () =>
@@ -356,6 +293,13 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   chat_text_required: () =>
     "Chat handling failed because the incoming text is empty. Send a non-empty message.",
   chat_turn_aborted: () => "The chat turn was aborted.",
+  chat_turn_busy: () => "This chat is still processing another turn.",
+  frontend_turn_busy: () => "This session is still processing another turn.",
+  frontend_turn_interrupted: () => "The active turn was interrupted.",
+  rin_frontend_disconnected: () =>
+    "Rin is disconnected. Reconnect before submitting another turn.",
+  chat_terminal_record_missing: () =>
+    "Rin did not receive an authoritative terminal record for this turn.",
   chat_turn_fence_lost: () =>
     "The chat turn expired before its reply could be committed. Rin will use the current turn owner.",
   chat_turn_id_required: () =>
@@ -761,6 +705,38 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rin_worker_oom: () => "Rin's background worker ran out of memory.",
   rin_worker_failed: () =>
     "Rin's background worker failed before the request finished.",
+  rin_turn_ledger_agent_dir_required: () =>
+    "Rin could not open its turn lifecycle ledger.",
+  rin_turn_ledger_begin_conflict: () =>
+    "Rin rejected conflicting lifecycle ownership for this turn.",
+  rin_turn_ledger_chat_key_required: () =>
+    "Rin cannot route this turn because its chat target is missing.",
+  rin_turn_ledger_interrupt_reason_required: () =>
+    "Rin could not record why this turn was interrupted.",
+  rin_turn_ledger_message_id_required: () =>
+    "Rin cannot route this turn because its message identity is missing.",
+  rin_turn_ledger_newer_schema: () =>
+    "This Rin installation cannot read the newer turn lifecycle ledger.",
+  rin_turn_ledger_record_missing: () =>
+    "Rin could not find the authoritative lifecycle record for this turn.",
+  rin_turn_ledger_request_tag_required: () =>
+    "Rin cannot identify this turn request.",
+  rin_turn_ledger_terminal_conflict: () =>
+    "Rin rejected conflicting terminal outcomes for this turn.",
+  rin_turn_ledger_terminal_id_mismatch: () =>
+    "Rin rejected an acknowledgement for a different terminal outcome.",
+  rin_turn_ledger_terminal_id_required: () =>
+    "Rin cannot acknowledge a terminal outcome without its identity.",
+  rin_turn_ledger_terminal_kind_mismatch: () =>
+    "Rin rejected an invalid terminal outcome kind.",
+  rin_turn_ledger_terminal_missing: () =>
+    "Rin could not find a durable terminal outcome for this turn.",
+  rin_turn_ledger_terminal_request_mismatch: () =>
+    "Rin rejected a terminal outcome for a different request.",
+  rin_turn_ledger_terminal_request_tag_required: () =>
+    "Rin rejected a terminal outcome without a request identity.",
+  rin_turn_ledger_turn_id_required: () =>
+    "Rin cannot route this turn because its transport identity is missing.",
   rin_windows_daemon_cross_user_unsupported: () =>
     "Rin cannot control another Windows user's daemon from this session.",
   rin_windows_daemon_pid_missing: () =>
@@ -769,12 +745,10 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rpc_turn_already_active: () =>
     "Rin already has a turn in progress for this session.",
   rpc_turn_failed: () => "Rin failed while running the remote turn.",
-  rin_turn_recovery_in_progress: () =>
-    "Rin is still recovering the previous turn for this session.",
+  rin_turn_in_progress: () =>
+    "Rin already has another accepted turn in progress for this session.",
   rin_turn_request_tag_required: () =>
     "Rin could not start the turn because its durable request identity is missing.",
-  rin_turn_result_recovery_timeout: () =>
-    "Rin could not recover the remote turn result before the timeout.",
   rin_turn_settled_without_terminal: () =>
     "Rin could not determine the completed turn result.",
   rin_turn_terminal_conflict: () =>

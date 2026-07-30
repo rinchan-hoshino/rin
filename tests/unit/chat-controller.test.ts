@@ -28,18 +28,16 @@ const { lookupReplySession } = await import(
 const { openChatDatabase, readChatState } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
 );
-const {
-  claimChatInboxItem,
-  enqueueChatInboxItem,
-  requeueClaimedChatInboxItem,
-} = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
-);
-const { stageChatTerminalWal } = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-daemon", "chat-terminal-wal.js"),
-  ).href
-);
+const { claimChatInboxItem, enqueueChatInboxItem, failClaimedChatInboxItem } =
+  await import(
+    pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
+  );
+const { beginDaemonTurn, daemonTurnTerminalEvent, recordDaemonTurnTerminal } =
+  await import(
+    pathToFileURL(
+      path.join(rootDir, "dist", "core", "rin-daemon", "turn-ledger.js"),
+    ).href
+  );
 const {
   enqueueChatOutboxPayload,
   listChatOutboxHistoryItems,
@@ -680,6 +678,7 @@ async function waitUntil(condition, message, timeoutMs = 1_000) {
 
 function emitRpcTurnComplete(controller, options, finalText, result) {
   const terminalPayload = {
+    type: "rpc_turn_event",
     event: "complete",
     requestTag: options?.requestTag,
     finalText,
@@ -689,29 +688,32 @@ function emitRpcTurnComplete(controller, options, finalText, result) {
     sessionId: controller.session?.sessionManager?.getSessionId?.(),
     sessionFile: controller.session?.sessionManager?.getSessionFile?.(),
   };
-  const canonicalTerminal = options?.chatRunContext
-    ? {
-        chatRunContext: options.chatRunContext,
-        terminalWal: {
-          payloadHash: stageChatTerminalWal(controller.agentDir, {
-            ...options.chatRunContext,
-            terminalKind: "complete",
-            terminalPayload,
-          }).payloadHash,
-        },
-      }
-    : {};
+  let canonicalTerminal = {};
+  if (options?.chatDeliveryContext) {
+    beginDaemonTurn(controller.agentDir, {
+      requestTag: options.requestTag,
+      sessionFile: terminalPayload.sessionFile,
+      sessionId: terminalPayload.sessionId,
+      chatDeliveryContext: options.chatDeliveryContext,
+    });
+    canonicalTerminal = daemonTurnTerminalEvent(
+      recordDaemonTurnTerminal(controller.agentDir, {
+        requestTag: options.requestTag,
+        terminalKind: "complete",
+        terminalEvent: terminalPayload,
+      }),
+    );
+  }
   controller.handleClientEvent({
     type: "ui",
     payload: {
-      type: "rpc_turn_event",
       ...terminalPayload,
       ...canonicalTerminal,
     },
   });
 }
 
-test("chat controller fences terminal projections by inbox request tag", async () => {
+test("chat controller fences terminal projections by request tag and authoritative WAL", async () => {
   const controller = await createController("telegram/1:2");
   controller.currentTurn = {
     incomingMessageId: "m-current",
@@ -749,67 +751,24 @@ test("chat controller fences terminal projections by inbox request tag", async (
   assert.deepEqual(completed, []);
   assert.deepEqual(failed, []);
 
-  await controller.handleFrontendEvent({
-    type: "turn_complete",
-    requestTag: "request-current",
-    latestAssistantText: "current final",
-  });
-  await controller.handleFrontendEvent({
-    type: "turn_error",
-    requestTag: "request-current",
-    message: "current error",
-  });
-  assert.deepEqual(completed, ["request-current"]);
-  assert.deepEqual(failed, ["request-current"]);
-});
-
-test("chat controller owns canonical terminal by run fence instead of request tag", async () => {
-  const controller = await createController("telegram/1:2");
-  controller.currentTurn = {
-    incomingMessageId: "m-current",
-    replyToMessageId: "m-current",
-    requestTag: "request-current",
-  };
-  controller.activeCanonicalRun = {
-    runId: "run-current",
-    chatKey: controller.chatKey,
-    generation: 0,
-    ownerEpoch: "run-owner",
-    producerIncarnation: "worker-current",
-    deliveryTurnId: "turn-current",
-  };
-  const completed = [];
-  controller.settleProjectedTurnComplete = async (event) => {
-    completed.push(event.chatRunContext.runId);
-  };
-
-  await controller.handleFrontendEvent({
-    type: "turn_complete",
-    requestTag: "stale-request-tag",
-    latestAssistantText: "canonical final",
-    chatRunContext: {
-      runId: "run-current",
-      ownerEpoch: "run-owner",
-      producerIncarnation: "worker-current",
-    },
-    terminalWal: { payloadHash: "a".repeat(64) },
-  });
-  assert.deepEqual(completed, ["run-current"]);
-
   await assert.rejects(
     controller.handleFrontendEvent({
       type: "turn_complete",
       requestTag: "request-current",
-      latestAssistantText: "stale worker final",
-      chatRunContext: {
-        runId: "run-current",
-        ownerEpoch: "run-owner",
-        producerIncarnation: "worker-stale",
-      },
-      terminalWal: { payloadHash: "b".repeat(64) },
+      latestAssistantText: "current final",
     }),
-    /chat_run_terminal_fence_mismatch/,
+    /chat_terminal_record_missing/,
   );
+  await assert.rejects(
+    controller.handleFrontendEvent({
+      type: "turn_error",
+      requestTag: "request-current",
+      message: "current error",
+    }),
+    /chat_terminal_record_missing/,
+  );
+  assert.deepEqual(completed, []);
+  assert.deepEqual(failed, []);
 });
 
 test("chat controller logs one received-to-backend startup timing decomposition", async () => {
@@ -1743,7 +1702,7 @@ test("chat controller command failure atomically terminalizes its durable inbox 
   );
 
   const turn = openChatDatabase(controller.agentDir)
-    .prepare("SELECT state, terminal_kind FROM turns WHERE turn_id = ?")
+    .prepare("SELECT state, terminal_kind FROM inbox_jobs WHERE turn_id = ?")
     .get(claim.itemId);
   assert.deepEqual(turn, {
     state: "terminal",
@@ -1812,7 +1771,7 @@ test("chat command retry adopts its already delivered legacy error outbox", asyn
   );
 
   const turn = openChatDatabase(controller.agentDir)
-    .prepare("SELECT state, terminal_kind FROM turns WHERE turn_id = ?")
+    .prepare("SELECT state, terminal_kind FROM inbox_jobs WHERE turn_id = ?")
     .get(claim.itemId);
   assert.deepEqual(turn, {
     state: "terminal",
@@ -2062,7 +2021,7 @@ test("chat controller keeps editable compaction in interim content", async () =>
   ]);
 });
 
-test("chat controller delivers non-deferred passive notices during active turns", async () => {
+test("chat controller delivers non-deferred passive notices during active inbox_jobs", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
@@ -2134,7 +2093,7 @@ test("chat controller delivers immediate passive errors as non-terminal errors",
   ]);
   assert.deepEqual(
     openChatDatabase(controller.agentDir)
-      .prepare(`SELECT state, terminal_kind FROM turns WHERE turn_id = ?`)
+      .prepare(`SELECT state, terminal_kind FROM inbox_jobs WHERE turn_id = ?`)
       .get(claim.itemId),
     { state: "running", terminal_kind: null },
   );
@@ -2210,61 +2169,6 @@ test("chat controller ignores todo replay without a durable active delivery targ
   assert.equal(controller.todoFallbackOwner, "current-owner");
   assert.equal(controller.todoFallbackHash, "current-hash");
   assert.equal(controller.todoFallbackRevision, 4);
-  assert.equal(
-    openChatDatabase(controller.agentDir)
-      .prepare(`SELECT COUNT(*) AS count FROM outbox`)
-      .get().count,
-    0,
-  );
-});
-
-test("chat controller rejects todo after its durable turn is superseded", async () => {
-  const controller = await createController("telegram/1:2");
-  const deliveries = [];
-  const claim = setDurableCurrentTurn(controller, "m-stale-todo");
-  controller.latestTodoNoticeText = "⬜ Current durable state";
-  controller.todoFallbackOwner = "current-owner";
-  controller.todoFallbackHash = "current-hash";
-  controller.todoFallbackRevision = 7;
-  controller.app.bots[0].sendMessage = async (...args) => {
-    deliveries.push(args);
-    return ["unexpected"];
-  };
-  openChatDatabase(controller.agentDir)
-    .prepare(
-      `UPDATE turns SET state = 'superseded', terminal_kind = 'coalesced_steer',
-         owner_epoch = NULL, lease_until = NULL WHERE turn_id = ?`,
-    )
-    .run(claim.itemId);
-
-  await controller.handleClientEvent({
-    type: "backend_event",
-    payload: {
-      type: "passive_notice",
-      text: "Error: stale todo\n[ ] Must not replay",
-      noticeKind: "todo",
-      deferDuringTurn: false,
-      todoItems: [{ id: 1, text: "Must not replay", done: false }],
-      todoError: "stale todo",
-    },
-  });
-  await controller.handleClientEvent({
-    type: "backend_event",
-    payload: {
-      type: "passive_notice",
-      text: "",
-      noticeKind: "todo",
-      deferDuringTurn: false,
-      todoItems: [],
-    },
-  });
-  await controller.todoDeliveryQueue;
-
-  assert.deepEqual(deliveries, []);
-  assert.equal(controller.latestTodoNoticeText, "⬜ Current durable state");
-  assert.equal(controller.todoFallbackOwner, "current-owner");
-  assert.equal(controller.todoFallbackHash, "current-hash");
-  assert.equal(controller.todoFallbackRevision, 7);
   assert.equal(
     openChatDatabase(controller.agentDir)
       .prepare(`SELECT COUNT(*) AS count FROM outbox`)
@@ -2866,7 +2770,7 @@ test("chat controller keeps todo errors outside editable progress", async () => 
   );
   assert.deepEqual(
     openChatDatabase(controller.agentDir)
-      .prepare(`SELECT state, terminal_kind FROM turns WHERE turn_id = ?`)
+      .prepare(`SELECT state, terminal_kind FROM inbox_jobs WHERE turn_id = ?`)
       .get(claim.itemId),
     { state: "running", terminal_kind: null },
   );
@@ -3288,7 +3192,7 @@ test("chat controller drops deferred passive notices at the final boundary", asy
   assert.deepEqual(controller.pendingPassiveNotices, []);
 });
 
-test("chat controller does not create processing turns for slash commands", async () => {
+test("chat controller does not create processing inbox_jobs for slash commands", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
   const reactions = [];
@@ -3501,177 +3405,6 @@ test("chat controller uses configured command response overrides", async () => {
   assert.deepEqual(deliveries, ["\u5df2\u5f00\u59cb\u65b0\u4f1a\u8bdd\u3002"]);
 });
 
-test("chat controller starts /new immediately through the TUI new-session path", async () => {
-  const controller = await createController();
-  const calls = [];
-  const deliveries = [];
-  let backendAbortCalled = false;
-  controller.commitPendingDelivery = async function () {
-    deliveries.push(deliveryText(this.stagedDelivery));
-    this.stagedDelivery = null;
-  };
-
-  let sessionFile = path.join(
-    controller.agentDir,
-    "sessions",
-    "old-chat.jsonl",
-  );
-  let sessionId = "session-old";
-  let firstRequestTag = "";
-  const session = {
-    isStreaming: false,
-    sessionManager: {
-      getSessionFile: () => sessionFile,
-      getSessionId: () => sessionId,
-      getSessionName: () => controller.chatKey,
-    },
-    ensureSessionReady: async () => ({ sessionFile, sessionId }),
-    agent: {
-      abort: () => {
-        backendAbortCalled = true;
-      },
-    },
-    prompt: async (_text, options = {}) => {
-      firstRequestTag = options.requestTag || "";
-      await controller.handleClientEvent({
-        type: "ui",
-        payload: { type: "rpc_frontend_status", phase: "working" },
-      });
-    },
-    newSession: async (options = {}) => {
-      calls.push(`newSession:${options.managedSessionLeaf}`);
-      await controller.handleClientEvent({
-        type: "rpc_turn_event",
-        event: "error",
-        requestTag: firstRequestTag,
-        error: "chat_turn_aborted",
-        sessionFile,
-        sessionId,
-      });
-      sessionFile = path.join(
-        controller.agentDir,
-        "sessions",
-        "new-chat.jsonl",
-      );
-      sessionId = "session-new";
-      return true;
-    },
-  };
-  controller.session = session;
-  controller.connect = async () => {
-    if (!controller.session) controller.session = session;
-  };
-
-  const firstTurn = controller.runTurn({
-    text: "first",
-    attachments: [],
-    replyToMessageId: "m1",
-    incomingMessageId: "m1",
-  });
-  while (!firstRequestTag) {
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
-
-  const newCommand = await Promise.race([
-    controller.runCommand("/new", "m-new", "m-new"),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("new command queued")), 50),
-    ),
-  ]);
-  assert.equal(newCommand.text, "Started a new session.");
-  assert.equal(backendAbortCalled, true);
-  assert.deepEqual(await firstTurn, {
-    aborted: true,
-    sessionId: "session-new",
-    sessionFile: path.join(controller.agentDir, "sessions", "new-chat.jsonl"),
-  });
-
-  await emitRpcTurnComplete(
-    controller,
-    { requestTag: firstRequestTag },
-    "first done",
-  );
-
-  assert.deepEqual(calls, ["newSession:chat", "newSession:chat"]);
-  assert.deepEqual(deliveries, ["Started a new session."]);
-  assert.equal(controller.state.sessionFile, "new-chat.jsonl");
-  assert.equal(
-    readChatState(controller.agentDir, controller.chatKey).currentGeneration,
-    1,
-  );
-});
-
-test("chat controller leaves externally aborted inbound unprocessed for retry", async () => {
-  const controller = await createController();
-  const sessionFile = path.join(
-    controller.agentDir,
-    "sessions",
-    "restart-chat.jsonl",
-  );
-  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-  saveChatMessage(controller.agentDir, {
-    chatKey: controller.chatKey,
-    platform: "telegram",
-    botId: "1",
-    chatId: "2",
-    messageId: "m-restart",
-    role: "user",
-    receivedAt: new Date().toISOString(),
-    text: "restart interrupted prompt",
-  });
-
-  let requestTag = "";
-  const session = {
-    isStreaming: false,
-    sessionManager: {
-      getSessionFile: () => sessionFile,
-      getSessionId: () => "session-restart",
-      getSessionName: () => controller.chatKey,
-    },
-    ensureSessionReady: async () => ({
-      sessionFile,
-      sessionId: "session-restart",
-    }),
-    prompt: async (_text, options = {}) => {
-      requestTag = options.requestTag || "";
-      await controller.handleClientEvent({
-        type: "ui",
-        payload: {
-          type: "rpc_turn_event",
-          event: "error",
-          requestTag,
-          error: "chat_turn_aborted",
-          sessionFile,
-          sessionId: "session-restart",
-        },
-      });
-    },
-  };
-  controller.session = session;
-  controller.connect = async () => {
-    if (!controller.session) controller.session = session;
-  };
-
-  await assert.rejects(
-    () =>
-      controller.runTurn({
-        text: "restart interrupted prompt",
-        attachments: [],
-        replyToMessageId: "m-restart",
-        incomingMessageId: "m-restart",
-      }),
-    /chat_turn_aborted/,
-  );
-
-  const stored = getChatMessage(
-    controller.agentDir,
-    controller.chatKey,
-    "m-restart",
-  );
-  assert.equal(stored?.processedAt, undefined);
-  assert.equal(controller.currentTurn, null);
-});
-
 test("chat controller rethrows lifecycle cancellation without delivering an error final", async () => {
   const controller = await createController();
   const deliveries = [];
@@ -3722,79 +3455,6 @@ test("chat controller rethrows lifecycle cancellation without delivering an erro
     "m-request-aborted",
   );
   assert.equal(stored?.processedAt, undefined);
-});
-
-test("chat controller /new aborts without synthesizing pre-agent Working", async () => {
-  const controller = await createController();
-  const deliveries = [];
-  const visibleEvents: string[] = [];
-  controller.commitPendingDelivery = async function () {
-    deliveries.push(deliveryText(this.stagedDelivery));
-    this.stagedDelivery = null;
-  };
-  controller.app.bots[0].workingIndicators = [
-    {
-      type: "polling",
-      presentation: "editable-message",
-      async tick() {
-        visibleEvents.push("tick");
-        return true;
-      },
-      async end() {
-        visibleEvents.push("end");
-        return true;
-      },
-    },
-  ];
-
-  let promptCalled = false;
-  let abortCalled = false;
-  let releasePrompt!: () => void;
-  const promptReleased = new Promise<void>((resolve) => {
-    releasePrompt = resolve;
-  });
-  controller.driver.runTurn = async () => {
-    promptCalled = true;
-    await promptReleased;
-    throw new Error("chat_turn_aborted");
-  };
-  controller.driver.interruptActiveTurnLikeTui = () => {
-    abortCalled = true;
-    releasePrompt();
-    return { sessionFile: "/tmp/old-chat.jsonl" };
-  };
-  controller.driver.runCommand = async (commandLine: string) => {
-    assert.equal(commandLine, "/new");
-    return {
-      handled: true,
-      text: "Started a new session.",
-      sessionFile: "/tmp/new-chat.jsonl",
-      sessionId: "session-new",
-    };
-  };
-  controller.driver.currentSessionFile = () => "/tmp/new-chat.jsonl";
-  controller.driver.currentSessionId = () => "session-new";
-
-  const firstTurn = controller.runTurn({
-    text: "/ne",
-    attachments: [],
-    replyToMessageId: "m-old",
-    incomingMessageId: "m-old",
-  });
-  while (!promptCalled) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-
-  const [newCommand, aborted] = await Promise.all([
-    controller.runCommand("/new", "m-new", "m-new"),
-    firstTurn,
-  ]);
-
-  assert.equal(newCommand.text, "Started a new session.");
-  assert.equal(abortCalled, true);
-  assert.equal(aborted.aborted, true);
-  assert.deepEqual(deliveries, ["Started a new session."]);
-  assert.equal(visibleEvents.includes("tick"), false);
 });
 
 test("chat controller suppresses /compact acknowledgement but keeps configured /reload response", async () => {
@@ -3980,204 +3640,6 @@ test("chat controller marks /compact processed from compaction completion notice
   ]);
 });
 
-test("chat controller keeps the current Working target until Pi confirms the next ordinary input", async () => {
-  const controller = await createController("telegram/1:2");
-  const actions = [];
-  const reactions = [];
-  let releaseFirstPrompt = () => {};
-  let resolveFirstPromptStarted = () => {};
-  const firstPromptStarted = new Promise((resolve) => {
-    resolveFirstPromptStarted = resolve;
-  });
-
-  controller.app = {
-    bots: [
-      {
-        platform: "telegram",
-        selfId: "1",
-        workingIndicators: [testPollingIndicator(actions, reactions)],
-        async createReaction(chatId, messageId, emoji) {
-          reactions.push(["create", chatId, messageId, emoji]);
-        },
-        async deleteReaction(chatId, messageId, emoji, userId) {
-          reactions.push(["delete", chatId, messageId, emoji, userId]);
-        },
-        internal: {
-          async sendChatAction(payload) {
-            actions.push(payload);
-          },
-        },
-      },
-    ],
-  };
-  controller.commitPendingDelivery = async function (clearProcessing = false) {
-    this.stagedDelivery = null;
-    if (clearProcessing) this.currentTurn = null;
-  };
-
-  controller.session = {
-    isStreaming: false,
-    messages: [],
-    sessionManager: {
-      getSessionFile: () => "/tmp/live-chat.jsonl",
-      getSessionId: () => "session-live",
-      getSessionName: () => controller.chatKey,
-    },
-    ensureSessionReady: async () => ({
-      sessionFile: "/tmp/live-chat.jsonl",
-      sessionId: "session-live",
-    }),
-    prompt: async (_text, options = {}) => {
-      if (controller.session.isStreaming) return { acceptedAs: "steer" };
-      controller.session.isStreaming = true;
-      await controller.handleClientEvent({
-        type: "ui",
-        payload: {
-          type: "rpc_turn_event",
-          event: "start",
-          requestTag: options.requestTag,
-        },
-      });
-      await controller.handleSessionEvent({
-        type: "extension_ui_request",
-        method: "setWorkingVisible",
-        visible: true,
-      });
-      await controller.handleSessionEvent({ type: "agent_start" });
-      resolveFirstPromptStarted();
-      await new Promise((resolve) => {
-        releaseFirstPrompt = resolve;
-      });
-      controller.session.isStreaming = false;
-      await controller.handleSessionEvent({
-        type: "extension_ui_request",
-        method: "setWorkingVisible",
-        visible: false,
-      });
-      await controller.handleSessionEvent({ type: "agent_end" });
-      emitRpcTurnComplete(controller, options, "done");
-    },
-    switchSession: async () => {},
-  };
-
-  const firstTurn = controller.runTurn({
-    text: "first",
-    attachments: [],
-    incomingMessageId: "m-first",
-    replyToMessageId: "m-first",
-  });
-  await firstPromptStarted;
-
-  saveChatMessage(controller.agentDir, {
-    messageId: "m-steer",
-    chatKey: controller.chatKey,
-    platform: "telegram",
-    chatId: "2",
-    chatType: "private",
-    role: "user",
-    receivedAt: new Date().toISOString(),
-    text: "steer now",
-  });
-
-  const submittedTurn = controller.runTurn({
-    text: "steer now",
-    attachments: [],
-    incomingMessageId: "m-steer",
-    replyToMessageId: "m-steer",
-  });
-  await waitUntil(
-    () => controller.hasPendingSubmittedDeliveryTarget("m-steer"),
-    "ordinary input did not reach backend admission",
-  );
-
-  assert.equal(controller.currentTurn?.incomingMessageId, "m-first");
-  assert.equal(controller.currentTurn?.replyToMessageId, "m-first");
-  assert.equal(controller.hasBackendAcceptedInboundMessage("m-steer"), false);
-  assert.equal(controller.ownsInboundMessage("m-steer"), true);
-  const steeredState = JSON.parse(
-    await fs.readFile(controller.statePath, "utf8"),
-  );
-  assert.equal(
-    steeredState.pendingSubmittedDeliveryTargets,
-    undefined,
-    "transport-pending input must not be persisted as steering state",
-  );
-  const restoredController = new ChatController(
-    {},
-    controller.dataDir,
-    controller.chatKey,
-    {
-      logger: { info() {}, warn() {} },
-      h: controller.h,
-    },
-  );
-  assert.equal(
-    restoredController.hasPendingSubmittedDeliveryTarget("m-steer"),
-    false,
-    "restart recovery must reconstruct steering from the SQLite turn ledger",
-  );
-  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
-  assert.deepEqual(reactions, [["create", "2", "m-first", "🤔"]]);
-
-  await controller.pollTyping();
-  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
-  assert.deepEqual(reactions, [["create", "2", "m-first", "🤔"]]);
-
-  await controller.handleClientEvent({
-    type: "ui",
-    payload: {
-      type: "message_start",
-      message: {
-        role: "user",
-        content: [{ type: "text", text: "steer now" }],
-      },
-    },
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-  const activatedState = JSON.parse(
-    await fs.readFile(controller.statePath, "utf8"),
-  );
-  assert.equal(activatedState.pendingSubmittedDeliveryTargets, undefined);
-  assert.equal(controller.currentTurn?.incomingMessageId, "m-steer");
-  assert.equal(controller.currentTurn?.replyToMessageId, "m-steer");
-  const steeredMessage = getChatMessage(
-    controller.agentDir,
-    controller.chatKey,
-    "m-steer",
-  );
-  assert.ok(
-    steeredMessage?.acceptedAt,
-    "submitted inbox item should be accepted when Pi starts the user message",
-  );
-  assert.equal(
-    steeredMessage?.processedAt,
-    undefined,
-    "submitted inbox remains running until a terminal outbox is committed",
-  );
-  assert.deepEqual(actions, [
-    { chat_id: "2", action: "typing" },
-    { chat_id: "2", action: "typing" },
-  ]);
-  assert.deepEqual(reactions, [
-    ["create", "2", "m-first", "🤔"],
-    ["delete", "2", "m-first", "🤔", "1"],
-    ["create", "2", "m-steer", "🤔"],
-  ]);
-
-  releaseFirstPrompt();
-  const [firstResult, submittedResult] = await Promise.all([
-    firstTurn,
-    submittedTurn,
-  ]);
-  assert.equal(firstResult.finalText, "done");
-  assert.equal(submittedResult.finalText, "done");
-  assert.equal(
-    submittedResult.superseded,
-    true,
-    "a shared live-turn waiter must leave durable terminal ownership to the canonical final",
-  );
-});
-
 test("chat controller delivers a backend terminal after remote-active admission without a local waiter", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
@@ -4291,90 +3753,6 @@ test("chat controller delivers a backend error after remote-active admission wit
   assert.equal(deliveryText(deliveries[0]), "remote failure");
   assert.equal(deliveryQuoteId(deliveries[0]), "m-remote-error");
   assert.equal(controller.currentTurn, null);
-});
-
-test("chat controller accepts ordinary input after an assistant tool-call interim", async () => {
-  const controller = await createController("telegram/1:2");
-  const promptCalls = [];
-  let releaseFirstPrompt = () => {};
-  let firstRequestTag = "";
-  let resolveFirstPromptStarted = () => {};
-  const firstPromptStarted = new Promise((resolve) => {
-    resolveFirstPromptStarted = resolve;
-  });
-
-  controller.commitPendingDelivery = async function (clearProcessing = false) {
-    this.stagedDelivery = null;
-    if (clearProcessing) this.currentTurn = null;
-  };
-
-  controller.session = {
-    isStreaming: false,
-    messages: [],
-    sessionManager: {
-      getSessionFile: () => "/tmp/live-chat.jsonl",
-      getSessionId: () => "session-live",
-      getSessionName: () => controller.chatKey,
-    },
-    ensureSessionReady: async () => ({
-      sessionFile: "/tmp/live-chat.jsonl",
-      sessionId: "session-live",
-    }),
-    prompt: async (text, options = {}) => {
-      promptCalls.push({ text, streamingBehavior: options.streamingBehavior });
-      if (controller.session.isStreaming) return { acceptedAs: "steer" };
-      firstRequestTag = String(options.requestTag || "");
-      controller.session.isStreaming = true;
-      resolveFirstPromptStarted();
-      await new Promise((resolve) => {
-        releaseFirstPrompt = resolve;
-      });
-      controller.session.isStreaming = false;
-      emitRpcTurnComplete(controller, { requestTag: firstRequestTag }, "done");
-    },
-    switchSession: async () => {},
-  };
-
-  const firstTurn = controller.runTurn({
-    text: "first",
-    attachments: [],
-    incomingMessageId: "m-first",
-  });
-  await firstPromptStarted;
-  await controller.handleSessionEvent({
-    type: "message_end",
-    message: {
-      role: "assistant",
-      content: [
-        { type: "text", text: "checking" },
-        { type: "toolCall", name: "read", id: "call-1" },
-      ],
-    },
-  });
-
-  assert.equal(controller.hasActiveTurn(), true);
-  const submittedTurn = controller.runTurn({
-    text: "steer now",
-    attachments: [],
-    incomingMessageId: "m-steer-now",
-  });
-  await waitUntil(
-    () => promptCalls.length === 2,
-    "ordinary input did not reach Pi during the tool gap",
-  );
-
-  assert.deepEqual(promptCalls, [
-    { text: "first", streamingBehavior: undefined },
-    { text: "steer now", streamingBehavior: undefined },
-  ]);
-
-  releaseFirstPrompt();
-  const [firstResult, submittedResult] = await Promise.all([
-    firstTurn,
-    submittedTurn,
-  ]);
-  assert.equal(firstResult.finalText, "done");
-  assert.equal(submittedResult.finalText, "done");
 });
 
 test("chat controller stages raw non-transient command errors for the outbox", async () => {
@@ -5201,115 +4579,6 @@ test("chat controller prioritizes reaction over marker while keeping typing inde
   assert.deepEqual(calls, ["typing:tick", "reaction:tick", "reaction:end"]);
 });
 
-test("chat controller combines backend progress identity with the steered turn fence", async () => {
-  const controller = await createController();
-  controller.driver.frontendState.workingVisible = true;
-  const fence = {
-    agentDir: controller.agentDir,
-    turnId: "steered-turn",
-    chatKey: controller.chatKey,
-    messageId: "steered-message",
-    ownerEpoch: "steered-owner",
-    attempt: 1,
-  };
-  controller.rememberPendingSubmittedDeliveryTarget({
-    incomingMessageId: "steered-message",
-    replyToMessageId: "steered-message",
-    text: "steer me",
-    submittedText: "steer me",
-    requestTag: "backend-active-tag",
-    outboxTurnFence: fence,
-  });
-  let activated;
-  controller.beginVisibleProcessingTurn = async (input) => {
-    activated = input;
-    controller.currentTurn = { ...input, startedAt: Date.now() };
-    return true;
-  };
-
-  await controller.handleFrontendEvent({
-    type: "user_message_start",
-    text: "steer me",
-    requestTag: "backend-active-tag",
-  });
-
-  assert.equal(activated.requestTag, "backend-active-tag");
-  assert.equal(activated.outboxTurnFence, fence);
-  assert.equal(controller.currentTurn.incomingMessageId, "steered-message");
-});
-
-test("chat controller disambiguates identical steers by producer request tag", async () => {
-  const controller = await createController();
-  controller.driver.frontendState.workingVisible = true;
-  const firstFence = {
-    agentDir: controller.agentDir,
-    turnId: "first-steered-turn",
-    chatKey: controller.chatKey,
-    messageId: "first-steered-message",
-    ownerEpoch: "first-steered-owner",
-    attempt: 1,
-  };
-  const secondFence = {
-    agentDir: controller.agentDir,
-    turnId: "second-steered-turn",
-    chatKey: controller.chatKey,
-    messageId: "second-steered-message",
-    ownerEpoch: "second-steered-owner",
-    attempt: 1,
-  };
-  controller.rememberPendingSubmittedDeliveryTarget({
-    incomingMessageId: "first-steered-message",
-    text: "same steer",
-    submittedText: "same steer",
-    requestTag: "first-producer-tag",
-    outboxTurnFence: firstFence,
-  });
-  controller.rememberPendingSubmittedDeliveryTarget({
-    incomingMessageId: "second-steered-message",
-    text: "same steer",
-    submittedText: "same steer",
-    requestTag: "second-producer-tag",
-    outboxTurnFence: secondFence,
-  });
-  let activated;
-  controller.beginVisibleProcessingTurn = async (input) => {
-    activated = input;
-    controller.currentTurn = { ...input, startedAt: Date.now() };
-    return true;
-  };
-
-  await controller.handleFrontendEvent({
-    type: "user_message_start",
-    text: "same steer",
-  });
-  assert.equal(activated, undefined);
-  assert.equal(
-    controller.hasPendingSubmittedDeliveryTarget("first-steered-message"),
-    true,
-  );
-  assert.equal(
-    controller.hasPendingSubmittedDeliveryTarget("second-steered-message"),
-    true,
-  );
-
-  await controller.handleFrontendEvent({
-    type: "user_message_start",
-    text: "same steer",
-    requestTag: "second-producer-tag",
-  });
-
-  assert.equal(activated.requestTag, "second-producer-tag");
-  assert.equal(activated.outboxTurnFence, secondFence);
-  assert.equal(
-    controller.hasPendingSubmittedDeliveryTarget("first-steered-message"),
-    true,
-  );
-  assert.equal(
-    controller.hasPendingSubmittedDeliveryTarget("second-steered-message"),
-    false,
-  );
-});
-
 test("chat controller rejects stale tagged assistant progress after turn replacement", async () => {
   const controller = await createController();
   const delivered = [];
@@ -5531,104 +4800,6 @@ test("chat controller restores inbound reply identity before connect replays an 
     { text: "… Recovered progress", replyToMessageId: "m-restarted-turn" },
     { text: "Final answer", replyToMessageId: "m-restarted-turn" },
   ]);
-});
-
-test("chat controller restores durable ownership over an earlier display-only Working turn", async () => {
-  const controller = await createController("discord/bot-1:channel-1");
-  const deliveries = [];
-  controller.deliverAssistantInterim = async function (text) {
-    deliveries.push({
-      text: `… ${text}`,
-      replyToMessageId: this.currentReplyToMessageId() || null,
-    });
-    return true;
-  };
-  controller.driver.hasActiveTurn = () => true;
-  await controller.beginExternalWorking();
-  assert.equal(controller.currentTurn?.outboxTurnFence, undefined);
-  controller.connect = async () => {
-    await controller.handleFrontendEvent({
-      type: "assistant_interim",
-      text: "Recovered after early Working",
-    });
-    return true;
-  };
-  controller.driver.runTurn = async () => ({
-    finalText: "Steered into the recovered turn",
-  });
-  const durable = claimDurableTurnFence(controller, "m-early-working");
-
-  const result = await controller.runTurn({
-    text: "resume durable turn with early Working",
-    attachments: [],
-    incomingMessageId: "m-early-working",
-    replyToMessageId: "m-early-working",
-    outboxTurnFence: durable.fence,
-  });
-
-  assert.equal(result.superseded, true);
-  assert.deepEqual(deliveries, [
-    {
-      text: "… Recovered after early Working",
-      replyToMessageId: "m-early-working",
-    },
-  ]);
-  assert.equal(
-    controller.currentTurn?.outboxTurnFence?.turnId,
-    durable.claim.itemId,
-  );
-  await controller.clearProcessingState();
-});
-
-test("chat controller keeps recovered durable turn ownership when backend Working ends during connect", async () => {
-  const controller = await createController("discord/bot-1:channel-1");
-  const deliveries = [];
-  controller.deliverAssistantInterim = async function (text) {
-    deliveries.push({
-      text: `… ${text}`,
-      replyToMessageId: this.currentReplyToMessageId() || null,
-    });
-    return true;
-  };
-  controller.commitPendingDelivery = async function (clearProcessing = false) {
-    deliveries.push({
-      text: deliveryText(this.stagedDelivery),
-      replyToMessageId: deliveryQuoteId(this.stagedDelivery) || null,
-    });
-    this.stagedDelivery = null;
-    if (clearProcessing) this.currentTurn = null;
-  };
-  controller.connect = async () => {
-    await controller.beginExternalWorking();
-    await controller.endExternalWorking();
-    await controller.handleFrontendEvent({
-      type: "assistant_interim",
-      text: "Recovered progress after Working ended",
-    });
-    return true;
-  };
-  controller.driver.runTurn = async () => ({
-    finalText: "Recovered final",
-  });
-  const durable = claimDurableTurnFence(controller, "m-durable-restart");
-
-  const result = await controller.runTurn({
-    text: "resume durable turn after daemon restart",
-    attachments: [],
-    incomingMessageId: "m-durable-restart",
-    replyToMessageId: "m-durable-restart",
-    outboxTurnFence: durable.fence,
-  });
-
-  assert.equal(result.finalText, "Recovered final");
-  assert.deepEqual(deliveries, [
-    {
-      text: "… Recovered progress after Working ended",
-      replyToMessageId: "m-durable-restart",
-    },
-    { text: "Recovered final", replyToMessageId: "m-durable-restart" },
-  ]);
-  assert.equal(controller.currentTurn, null);
 });
 
 test("chat controller waits for backend Working after a cold connection", async () => {
@@ -6280,64 +5451,6 @@ test("chat controller uses no implicit Working notice for onebot private chats",
   assert.deepEqual(deliveries, []);
 });
 
-test("chat controller treats a stale working frontend phase as a new onebot private prompt", async () => {
-  const controller = await createController("onebot/1:private:2");
-  const deliveries = [];
-  const promptCalls = [];
-  controller.app = {
-    bots: [
-      {
-        platform: "onebot",
-        selfId: "1",
-        async sendMessage(chatId, content) {
-          deliveries.push({ chatId, content });
-          return [`out-${deliveries.length}`];
-        },
-      },
-    ],
-  };
-  controller.driver.frontendPhase = "working";
-
-  controller.session = {
-    isStreaming: false,
-    messages: [],
-    sessionManager: {
-      getSessionFile: () => "/tmp/stale-working-chat.jsonl",
-      getSessionId: () => "session-stale-working",
-      getSessionName: () => controller.chatKey,
-    },
-    ensureSessionReady: async () => ({
-      sessionFile: "/tmp/stale-working-chat.jsonl",
-      sessionId: "session-stale-working",
-    }),
-    prompt: async (_text, options = {}) => {
-      promptCalls.push({ streamingBehavior: options.streamingBehavior });
-      await new Promise((resolve) => setImmediate(resolve));
-      emitRpcTurnComplete(controller, options, "ok");
-    },
-    switchSession: async () => {},
-  };
-
-  const result = await controller.runTurn(
-    {
-      text: "new prompt",
-      attachments: [],
-      incomingMessageId: "m-new-onebot",
-      replyToMessageId: "m-new-onebot",
-    },
-    "steer",
-  );
-
-  assert.equal(result.finalText, "ok");
-  assert.deepEqual(promptCalls, [{ streamingBehavior: undefined }]);
-  assert.equal(deliveries.length, 1);
-  assert.equal(deliveries[0].chatId, "private:2");
-  assert.deepEqual(deliveries[0].content, [
-    { type: "quote", attrs: { id: "m-new-onebot" } },
-    { type: "markdown", attrs: { content: "ok" } },
-  ]);
-});
-
 test("chat controller sends no onebot Working notice when polls overlap", async () => {
   const controller = await createController("onebot/1:private:2");
   const deliveries = [];
@@ -6620,7 +5733,7 @@ test("chat controller clears the working reaction before dropping processing sta
   assert.equal(controller.stagedDelivery, null);
 });
 
-test("chat controller treats rpc completion as the canonical final reply for prompt turns", async () => {
+test("chat controller treats rpc completion as the canonical final reply for prompt inbox_jobs", async () => {
   const controller = await createController("telegram/1:2");
   const chatKey = "telegram/1:2";
   const deliveries = [];
@@ -6949,7 +6062,7 @@ test("chat controller validates missing media before terminal outbox commit", as
   );
   assert.equal(
     openChatDatabase(controller.agentDir)
-      .prepare(`SELECT state FROM turns WHERE turn_id = ?`)
+      .prepare(`SELECT state FROM inbox_jobs WHERE turn_id = ?`)
       .get(claim.itemId).state,
     "running",
   );
@@ -6964,7 +6077,7 @@ test("chat controller validates missing media before terminal outbox commit", as
   });
   assert.equal(
     openChatDatabase(controller.agentDir)
-      .prepare(`SELECT state FROM turns WHERE turn_id = ?`)
+      .prepare(`SELECT state FROM inbox_jobs WHERE turn_id = ?`)
       .get(claim.itemId).state,
     "terminal",
   );
@@ -7324,492 +6437,11 @@ test("chat controller switches to a linked reply session before sending the prom
   assert.equal(controller.state.sessionFile, "reply-linked.jsonl");
 });
 
-test("chat controller submits ordinary input unchanged to an already active backend", async () => {
-  const controller = await createController("telegram/1:2");
-  const promptCalls = [];
-
-  controller.driver.frontendState = { isStreaming: true };
-  controller.session = {
-    isStreaming: true,
-    sessionManager: {
-      getSessionFile: () => "/tmp/live-chat.jsonl",
-      getSessionId: () => "session-live",
-      getSessionName: () => controller.chatKey,
-    },
-    ensureSessionReady: async () => ({
-      sessionFile: "/tmp/live-chat.jsonl",
-      sessionId: "session-live",
-    }),
-    prompt: async (text, options = {}) => {
-      promptCalls.push({ text, streamingBehavior: options.streamingBehavior });
-      emitRpcTurnComplete(controller, options, "active backend final");
-      return { acceptedAs: "steer" };
-    },
-    switchSession: async () => {},
-  };
-
-  const result = await controller.runTurn({
-    text: "follow up",
-    attachments: [],
-    incomingMessageId: "m-steer",
-  });
-
-  assert.deepEqual(promptCalls, [
-    { text: "follow up", streamingBehavior: undefined },
-  ]);
-  assert.equal(result.finalText, "active backend final");
-});
-
-test("chat controller lets ordinary input reach Pi while the current turn is still active", async () => {
-  const controller = await createController("telegram/1:2");
-  const promptCalls = [];
-  const deliveries = [];
-  let releaseFirstPrompt = () => {};
-  let firstRequestTag = "";
-  let resolveFirstPromptStarted = () => {};
-  const firstPromptStarted = new Promise((resolve) => {
-    resolveFirstPromptStarted = resolve;
-  });
-
-  controller.commitPendingDelivery = async function (
-    clearProcessing = false,
-    postDelivery = undefined,
-  ) {
-    deliveries.push({
-      text: deliveryText(this.stagedDelivery),
-      replyToMessageId: deliveryQuoteId(this.stagedDelivery) || null,
-      markProcessedMessageId: postDelivery?.markProcessed?.messageId || null,
-    });
-    this.stagedDelivery = null;
-    if (clearProcessing) this.currentTurn = null;
-  };
-
-  controller.session = {
-    isStreaming: false,
-    messages: [],
-    sessionManager: {
-      getSessionFile: () => "/tmp/live-chat.jsonl",
-      getSessionId: () => "session-live",
-      getSessionName: () => controller.chatKey,
-    },
-    ensureSessionReady: async () => ({
-      sessionFile: "/tmp/live-chat.jsonl",
-      sessionId: "session-live",
-    }),
-    prompt: async (text, options = {}) => {
-      promptCalls.push({ text, streamingBehavior: options.streamingBehavior });
-      if (controller.session.isStreaming) return { acceptedAs: "steer" };
-      firstRequestTag = String(options.requestTag || "");
-      controller.session.isStreaming = true;
-      resolveFirstPromptStarted();
-      await new Promise((resolve) => {
-        releaseFirstPrompt = resolve;
-      });
-      controller.session.isStreaming = false;
-      emitRpcTurnComplete(controller, { requestTag: firstRequestTag }, "done");
-    },
-    switchSession: async () => {},
-  };
-
-  const firstTurn = controller.runTurn({
-    text: "first",
-    attachments: [],
-    incomingMessageId: "m-first",
-    replyToMessageId: "m-first",
-  });
-  await firstPromptStarted;
-
-  const submittedTurn = controller.runTurn({
-    text: "steer now",
-    attachments: [],
-    incomingMessageId: "m-steer-now",
-    replyToMessageId: "m-steer-now",
-  });
-  await waitUntil(
-    () => promptCalls.length === 2,
-    "ordinary input waited behind the active terminal",
-  );
-
-  assert.equal(controller.currentTurn?.incomingMessageId, "m-first");
-  assert.deepEqual(promptCalls, [
-    { text: "first", streamingBehavior: undefined },
-    { text: "steer now", streamingBehavior: undefined },
-  ]);
-
-  await controller.handleClientEvent({
-    type: "ui",
-    payload: {
-      type: "message_start",
-      message: {
-        role: "user",
-        content: [{ type: "text", text: "steer now" }],
-      },
-    },
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(controller.currentTurn?.incomingMessageId, "m-steer-now");
-
-  releaseFirstPrompt();
-  const [firstResult, submittedResult] = await Promise.all([
-    firstTurn,
-    submittedTurn,
-  ]);
-  assert.equal(firstResult.finalText, "done");
-  assert.equal(submittedResult.finalText, "done");
-  assert.equal(submittedResult.superseded, true);
-  assert.deepEqual(deliveries, [
-    {
-      text: "done",
-      replyToMessageId: "m-steer-now",
-      markProcessedMessageId: "m-steer-now",
-    },
-  ]);
-});
-
-for (const workingVisible of [false, true]) {
-  test(`chat controller switches the display target before awaiting ${
-    workingVisible ? "visible" : "stale"
-  } submitted-input Working cleanup`, async () => {
-    const controller = await createController("telegram/1:2");
-    const deliveries = [];
-    controller.app.bots[0].sendMessage = async (_chatId, content) => {
-      deliveries.push(content);
-      return [`out-${deliveries.length}`];
-    };
-
-    const claimFor = (messageId, text) => {
-      const item = enqueueChatInboxItem(controller.agentDir, {
-        chatKey: controller.chatKey,
-        messageId,
-        session: {
-          platform: "telegram",
-          selfId: "1",
-          channelId: "2",
-          messageId,
-          content: text,
-          stripped: { content: text },
-        },
-        elements: [{ type: "text", attrs: { content: text } }],
-      }).item;
-      return claimChatInboxItem(controller.agentDir, item.itemId);
-    };
-    const firstClaim = claimFor("m-first-race", "first");
-    const steeredClaim = claimFor("m-steer-race", "steer now");
-    const fenceFor = (claim) => ({
-      agentDir: controller.agentDir,
-      turnId: claim.itemId,
-      chatKey: claim.chatKey,
-      messageId: claim.messageId,
-      ownerEpoch: claim.ownerEpoch,
-      attempt: claim.attemptCount,
-    });
-
-    let releaseFirstPrompt = () => {};
-    let resolveFirstPromptStarted = () => {};
-    const firstPromptStarted = new Promise((resolve) => {
-      resolveFirstPromptStarted = resolve;
-    });
-    controller.session = {
-      isStreaming: false,
-      messages: [],
-      sessionManager: {
-        getSessionFile: () => "/tmp/steer-race-chat.jsonl",
-        getSessionId: () => "session-steer-race",
-        getSessionName: () => controller.chatKey,
-      },
-      ensureSessionReady: async () => ({
-        sessionFile: "/tmp/steer-race-chat.jsonl",
-        sessionId: "session-steer-race",
-      }),
-      prompt: async (_text, options = {}) => {
-        if (controller.session.isStreaming) return { acceptedAs: "steer" };
-        controller.session.isStreaming = true;
-        resolveFirstPromptStarted();
-        await new Promise((resolve) => {
-          releaseFirstPrompt = resolve;
-        });
-        controller.session.isStreaming = false;
-        emitRpcTurnComplete(controller, options, "done once");
-      },
-      switchSession: async () => {},
-    };
-
-    const firstTurn = controller.runTurn({
-      text: "first",
-      attachments: [],
-      incomingMessageId: firstClaim.messageId,
-      replyToMessageId: firstClaim.messageId,
-      outboxTurnFence: fenceFor(firstClaim),
-    });
-    await firstPromptStarted;
-
-    const submittedTurn = controller.runTurn({
-      text: "steer now",
-      attachments: [],
-      incomingMessageId: steeredClaim.messageId,
-      replyToMessageId: steeredClaim.messageId,
-      outboxTurnFence: fenceFor(steeredClaim),
-    });
-    await waitUntil(
-      () =>
-        controller.hasPendingSubmittedDeliveryTarget(steeredClaim.messageId),
-      "ordinary input did not enter the pending display projection",
-    );
-
-    let cleanupCalls = 0;
-    let resolveCleanupStarted = () => {};
-    const cleanupStarted = new Promise((resolve) => {
-      resolveCleanupStarted = resolve;
-    });
-    let releaseOldCleanup = () => {};
-    const oldCleanupMayFinish = new Promise((resolve) => {
-      releaseOldCleanup = resolve;
-    });
-    controller.clearWorkingReaction = async () => {
-      cleanupCalls += 1;
-      if (cleanupCalls === 1) {
-        resolveCleanupStarted();
-        await oldCleanupMayFinish;
-      }
-      return true;
-    };
-    controller.driver.frontendState.workingVisible = workingVisible;
-    const activation = controller.handleClientEvent({
-      type: "ui",
-      payload: {
-        type: "message_start",
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "steer now" }],
-        },
-      },
-    });
-    await cleanupStarted;
-
-    releaseFirstPrompt();
-    const [firstResult, submittedResult] = await Promise.all([
-      firstTurn,
-      submittedTurn,
-    ]);
-    assert.equal(firstResult.finalText, "done once");
-    assert.equal(submittedResult.finalText, "done once");
-    assert.equal(submittedResult.superseded, true);
-    releaseOldCleanup();
-    await activation;
-
-    assert.equal(deliveries.length, 1);
-    assert.equal(deliveries[0][0]?.attrs?.id, steeredClaim.messageId);
-    assert.deepEqual(
-      openChatDatabase(controller.agentDir)
-        .prepare(
-          `SELECT messages.message_id, turns.state, turns.terminal_kind,
-                messages.disposition
-         FROM turns JOIN messages ON messages.id = turns.inbound_message_id
-         ORDER BY messages.sequence`,
-        )
-        .all(),
-      [
-        {
-          message_id: firstClaim.messageId,
-          state: "superseded",
-          terminal_kind: "coalesced_steer",
-          disposition: "superseded",
-        },
-        {
-          message_id: steeredClaim.messageId,
-          state: "terminal",
-          terminal_kind: "outbox_final",
-          disposition: "actionable",
-        },
-      ],
-    );
-  });
-}
-
-test("chat controller fences superseded restored inbox turns without marking processed", async () => {
-  const controller = await createController("telegram/1:2");
-  const deliveries = [];
-  controller.commitPendingDelivery = async function () {
-    deliveries.push(deliveryText(this.stagedDelivery));
-    this.stagedDelivery = null;
-  };
-  controller.driver.runTurn = async () => ({
-    superseded: true,
-    sessionFile: "/tmp/restored-chat.jsonl",
-    sessionId: "session-restored",
-  });
-  const inbound = enqueueChatInboxItem(controller.agentDir, {
-    chatKey: controller.chatKey,
-    messageId: "m-old",
-    session: {
-      platform: "telegram",
-      selfId: "1",
-      channelId: "2",
-      messageId: "m-old",
-      content: "older restored input",
-      stripped: { content: "older restored input" },
-    },
-    elements: [{ type: "text", attrs: { content: "older restored input" } }],
-  }).item;
-  const claim = claimChatInboxItem(controller.agentDir, inbound.itemId);
-  const fence = {
-    agentDir: controller.agentDir,
-    turnId: claim.itemId,
-    chatKey: claim.chatKey,
-    messageId: claim.messageId,
-    ownerEpoch: claim.ownerEpoch,
-    attempt: claim.attemptCount,
-  };
-
-  const result = await controller.runTurn({
-    text: "older restored input",
-    attachments: [],
-    incomingMessageId: "m-old",
-    replyToMessageId: "m-old",
-    outboxTurnFence: fence,
-  });
-
-  assert.deepEqual(deliveries, []);
-  assert.equal(result.superseded, true);
-  const stored = getChatMessage(
-    controller.agentDir,
-    controller.chatKey,
-    "m-old",
-  );
-  assert.equal(Boolean(stored?.processedAt), false);
-  assert.deepEqual(
-    openChatDatabase(controller.agentDir)
-      .prepare(
-        `SELECT turns.state, messages.disposition
-         FROM turns JOIN messages ON messages.id = turns.inbound_message_id
-         WHERE turns.turn_id = ?`,
-      )
-      .get(claim.itemId),
-    { state: "superseded", disposition: "superseded" },
-  );
-});
-
-test("chat controller leaves input after assistant content to Pi's active-turn decision", async () => {
-  const controller = await createController("onebot/1:private:2");
-  const promptCalls = [];
-  const deliveries = [];
-  let firstPromptOptions;
-  let releaseFirstPrompt = () => {};
-  let resolveFirstReplyCommitted = () => {};
-  const firstReplyCommitted = new Promise((resolve) => {
-    resolveFirstReplyCommitted = resolve;
-  });
-
-  controller.app = {
-    bots: [
-      {
-        platform: "onebot",
-        selfId: "1",
-        async sendMessage(chatId, content) {
-          deliveries.push({ chatId, content });
-          return [`out-${deliveries.length}`];
-        },
-      },
-    ],
-  };
-
-  controller.session = {
-    isStreaming: false,
-    messages: [],
-    sessionManager: {
-      getSessionFile: () => "/tmp/steer-final-chat.jsonl",
-      getSessionId: () => "session-steer-final",
-      getSessionName: () => controller.chatKey,
-    },
-    ensureSessionReady: async () => ({
-      sessionFile: "/tmp/steer-final-chat.jsonl",
-      sessionId: "session-steer-final",
-    }),
-    prompt: async (text, options = {}) => {
-      promptCalls.push({ text, streamingBehavior: options.streamingBehavior });
-      if (promptCalls.length === 1) {
-        firstPromptOptions = options;
-        controller.session.isStreaming = true;
-        await controller.handleSessionEvent({ type: "agent_start" });
-        await controller.handleSessionEvent({
-          type: "message_end",
-          message: {
-            role: "assistant",
-            content: [{ type: "text", text: "first answer" }],
-          },
-        });
-        resolveFirstReplyCommitted();
-        await new Promise((resolve) => {
-          releaseFirstPrompt = resolve;
-        });
-        controller.session.isStreaming = false;
-        emitRpcTurnComplete(controller, firstPromptOptions, "combined answer");
-        return;
-      }
-
-      assert.equal(options.streamingBehavior, undefined);
-      await controller.handleSessionEvent({
-        type: "message_start",
-        requestTag: options.requestTag,
-        message: {
-          role: "user",
-          content: [{ type: "text", text: "follow up" }],
-        },
-      });
-      return { acceptedAs: "steer" };
-    },
-    switchSession: async () => {},
-  };
-
-  const firstTurn = controller.runTurn({
-    text: "hello",
-    attachments: [],
-    incomingMessageId: "m-first",
-    replyToMessageId: "m-first",
-  });
-  await firstReplyCommitted;
-
-  const secondTurn = controller.runTurn({
-    text: "follow up",
-    attachments: [],
-    incomingMessageId: "m-second",
-    replyToMessageId: "m-second",
-  });
-  await waitUntil(
-    () => promptCalls.length === 2,
-    "ordinary input did not reach Pi after assistant content",
-  );
-  assert.deepEqual(promptCalls, [
-    { text: "hello", streamingBehavior: undefined },
-    { text: "follow up", streamingBehavior: undefined },
-  ]);
-
-  releaseFirstPrompt();
-  const [firstResult, secondResult] = await Promise.all([
-    firstTurn,
-    secondTurn,
-  ]);
-
-  assert.equal(firstResult.finalText, "combined answer");
-  assert.equal(secondResult.finalText, "combined answer");
-  assert.deepEqual(promptCalls, [
-    { text: "hello", streamingBehavior: undefined },
-    { text: "follow up", streamingBehavior: undefined },
-  ]);
-  assert.deepEqual(
-    deliveries.map((delivery) => delivery.content?.[1]?.attrs?.content),
-    ["combined answer"],
-  );
-});
-
-test("chat controller fails fast when prompt submission is queued offline instead of hanging forever", async () => {
+test("chat controller fails fast when prompt submission is rejected while disconnected instead of hanging forever", async () => {
   const controller = await createController("telegram/1:2");
   controller.session = {
     isStreaming: false,
     messages: [],
-    queuedOfflineOps: [],
-    syncPendingCount() {},
-    emitFrontendStatus() {},
     sessionManager: {
       getSessionFile: () => "/tmp/offline-chat.jsonl",
       getSessionId: () => "session-offline",
@@ -7819,10 +6451,8 @@ test("chat controller fails fast when prompt submission is queued offline instea
       sessionFile: "/tmp/offline-chat.jsonl",
       sessionId: "session-offline",
     }),
-    prompt: async (_text, options = {}) => {
-      controller.session.queuedOfflineOps.push({
-        requestTag: options.requestTag,
-      });
+    prompt: async () => {
+      throw new Error("rin_frontend_disconnected");
     },
     switchSession: async () => {},
   };
@@ -7833,7 +6463,7 @@ test("chat controller fails fast when prompt submission is queued offline instea
       attachments: [],
       incomingMessageId: "m-offline",
     }),
-    /rin_disconnected:rpc_turn_queued_offline/,
+    /rin_frontend_disconnected/,
   );
 });
 
@@ -7856,9 +6486,6 @@ test("chat controller reports prompt timeout without transient retry classificat
   controller.session = {
     isStreaming: false,
     messages: [],
-    queuedOfflineOps: [],
-    syncPendingCount() {},
-    emitFrontendStatus() {},
     sessionManager: {
       getSessionFile: () =>
         path.join(controller.agentDir, "sessions", "stale-chat.jsonl"),
@@ -7914,68 +6541,6 @@ test("chat controller clears a stale bound session so ordinary chat can start fr
   );
   assert.equal(persistedState.sessionFile, undefined);
   assert.deepEqual(attempts, [""]);
-});
-
-test("chat controller cannot clear a replacement owner's session binding", async () => {
-  const controller = await createController("telegram/1:2");
-  const inbound = enqueueChatInboxItem(controller.agentDir, {
-    chatKey: controller.chatKey,
-    messageId: "stale-session-owner",
-    session: {
-      platform: "telegram",
-      selfId: "1",
-      channelId: "2",
-      messageId: "stale-session-owner",
-      content: "question",
-      stripped: { content: "question" },
-    },
-    elements: [{ type: "text", attrs: { content: "question" } }],
-  }).item;
-  const stale = claimChatInboxItem(controller.agentDir, inbound.itemId);
-  assert.equal(
-    requeueClaimedChatInboxItem(controller.agentDir, stale, { delayMs: 0 })
-      ?.state,
-    "pending",
-  );
-  const replacement = claimChatInboxItem(controller.agentDir, inbound.itemId, {
-    leaseMs: 60_000,
-  });
-  assert.notEqual(replacement.ownerEpoch, stale.ownerEpoch);
-  const replacementSession = path.join(
-    controller.agentDir,
-    "sessions",
-    "replacement-owner.jsonl",
-  );
-  await fs.mkdir(path.dirname(replacementSession), { recursive: true });
-  await fs.writeFile(replacementSession, "{}\n");
-  openChatDatabase(controller.agentDir)
-    .prepare(`UPDATE chat_state SET session_file = ? WHERE chat_key = ?`)
-    .run(replacementSession, controller.chatKey);
-  controller.state.sessionFile = path.join(
-    controller.agentDir,
-    "sessions",
-    "missing-stale-owner.jsonl",
-  );
-  controller.currentTurn = {
-    incomingMessageId: stale.messageId,
-    outboxTurnFence: {
-      agentDir: controller.agentDir,
-      turnId: stale.itemId,
-      chatKey: stale.chatKey,
-      messageId: stale.messageId,
-      ownerEpoch: stale.ownerEpoch,
-      attempt: stale.attemptCount,
-    },
-    startedAt: Date.now(),
-  };
-
-  assert.equal(controller.getRecoverableSessionFile(), replacementSession);
-  assert.equal(
-    openChatDatabase(controller.agentDir)
-      .prepare(`SELECT session_file FROM chat_state WHERE chat_key = ?`)
-      .get(controller.chatKey).session_file,
-    replacementSession,
-  );
 });
 
 test("chat controller reports an explicit missing resume target", async () => {
@@ -8389,4 +6954,145 @@ test("chat controller does not mark a confirmed permanent adapter rejection proc
   assert.equal(items.length, 0);
   assert.equal(failed.status, "failed");
   assert.equal(message.processedAt, undefined);
+});
+
+test("authoritative terminal replay adopts one outbox after the transport job settled", async () => {
+  const controller = await createController("telegram/1:2");
+  const inbound = enqueueChatInboxItem(controller.agentDir, {
+    chatKey: controller.chatKey,
+    messageId: "terminal-replay-inbound",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "2",
+      messageId: "terminal-replay-inbound",
+      content: "run",
+      stripped: { content: "run" },
+    },
+    elements: [{ type: "text", attrs: { content: "run" } }],
+  }).item;
+  const claim = claimChatInboxItem(controller.agentDir, inbound.itemId);
+  const payload = {
+    createdAt: new Date().toISOString(),
+    chatKey: controller.chatKey,
+    parts: [{ type: "text", text: "one durable final" }],
+  };
+  const options = {
+    id: "chat-terminal-replay-id",
+    idempotencyKey: "chat-terminal-replay-id",
+    deliveryKind: "final",
+    terminalTurnKind: "final",
+    terminalTurn: {
+      turnId: claim.itemId,
+      chatKey: claim.chatKey,
+      messageId: claim.messageId,
+      executionSessionFile: "terminal-replay.jsonl",
+    },
+    turnFence: {
+      agentDir: controller.agentDir,
+      turnId: claim.itemId,
+      chatKey: claim.chatKey,
+      messageId: claim.messageId,
+      ownerEpoch: claim.ownerEpoch,
+      attempt: claim.attemptCount,
+    },
+  };
+
+  assert.equal(
+    enqueueChatOutboxPayload(controller.agentDir, payload, options),
+    "chat-terminal-replay-id",
+  );
+  assert.equal(
+    enqueueChatOutboxPayload(controller.agentDir, payload, options),
+    "chat-terminal-replay-id",
+  );
+  const db = openChatDatabase(controller.agentDir);
+  assert.equal(
+    db
+      .prepare(`SELECT state FROM inbox_jobs WHERE turn_id = ?`)
+      .get(claim.itemId).state,
+    "terminal",
+  );
+  assert.equal(
+    db
+      .prepare(`SELECT COUNT(*) AS count FROM outbox WHERE turn_id = ?`)
+      .get(claim.itemId).count,
+    1,
+  );
+});
+
+test("authoritative daemon terminal replaces a local interrupted transport failure", async () => {
+  const controller = await createController("telegram/1:2");
+  const inbound = enqueueChatInboxItem(controller.agentDir, {
+    chatKey: controller.chatKey,
+    messageId: "terminal-after-interrupt",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "2",
+      messageId: "terminal-after-interrupt",
+      content: "run",
+      stripped: { content: "run" },
+    },
+    elements: [{ type: "text", attrs: { content: "run" } }],
+  }).item;
+  const claim = claimChatInboxItem(controller.agentDir, inbound.itemId);
+  const db = openChatDatabase(controller.agentDir);
+  failClaimedChatInboxItem(
+    controller.agentDir,
+    claim,
+    "frontend_turn_interrupted",
+  );
+  assert.deepEqual(
+    db
+      .prepare(
+        `SELECT state, terminal_kind, owner_epoch, attempt FROM inbox_jobs WHERE turn_id = ?`,
+      )
+      .get(claim.itemId),
+    {
+      state: "failed",
+      terminal_kind: "interrupted",
+      owner_epoch: null,
+      attempt: claim.attemptCount,
+    },
+  );
+
+  enqueueChatOutboxPayload(
+    controller.agentDir,
+    {
+      createdAt: new Date().toISOString(),
+      chatKey: controller.chatKey,
+      parts: [{ type: "text", text: "authoritative late final" }],
+    },
+    {
+      id: "chat-terminal-after-interrupt-id",
+      idempotencyKey: "chat-terminal-after-interrupt-id",
+      deliveryKind: "final",
+      terminalTurnKind: "final",
+      terminalTurn: {
+        turnId: claim.itemId,
+        chatKey: claim.chatKey,
+        messageId: claim.messageId,
+        executionSessionFile: "terminal-after-interrupt.jsonl",
+      },
+      turnFence: {
+        agentDir: controller.agentDir,
+        turnId: claim.itemId,
+        chatKey: claim.chatKey,
+        messageId: claim.messageId,
+        ownerEpoch: claim.ownerEpoch,
+        attempt: claim.attemptCount,
+      },
+    },
+  );
+
+  assert.deepEqual(
+    db
+      .prepare(
+        `SELECT state, terminal_kind, last_error
+           FROM inbox_jobs WHERE turn_id = ?`,
+      )
+      .get(claim.itemId),
+    { state: "terminal", terminal_kind: "outbox_final", last_error: null },
+  );
 });

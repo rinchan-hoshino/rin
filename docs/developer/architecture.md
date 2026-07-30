@@ -37,11 +37,24 @@ Keep changes aligned with that shape. Prefer one clear runtime path over compati
 Rin should keep these layers distinct:
 
 1. **Product entrypoints** parse commands, select frontend mode, and assemble the runtime.
-2. **Daemon and worker runtime** owns session attachment, resumable turn state, worker lifecycle, and background execution.
+2. **Pi workers and the daemon** own turn execution: the worker produces complete/error truth, while the daemon supervises workers, persists the authoritative lifecycle ledger, and routes events.
 3. **Capability domains** register concrete tools and prompt support through their owning modules.
 4. **Adapters and frontends** translate terminal, chat, scheduled, and future GUI input into the same runtime semantics.
 
 Do not add a frontend-only session model, local mirror of daemon state, or hidden compatibility runner when the daemon/core boundary can express the behavior directly.
+
+## Turn lifecycle and terminal delivery
+
+There is one lifecycle owner and one durable handoff:
+
+- The daemon admits each request into `data/core/daemon/turn-ledger.sqlite` before writing the command to a worker. SQLite's native WAL mode provides transaction durability; Rin does not maintain an application-level terminal WAL.
+- A Pi worker is the only producer of `complete` or `error` truth. The daemon may terminalize an admitted active request as `interrupted` only from direct supervisor evidence such as worker exit, unavailable worker, stdin failure, or daemon restart.
+- A terminal record is immutable and identified by one `requestTag` and one `terminalId`. Live push, exact await, and reconnect replay are at-least-once views of that same record, never independent lifecycle decisions.
+- Chat owns `inbox_jobs`, messages, and platform outbox delivery only. It does not revive, requeue, supersede, infer, or mirror Pi lifecycle state.
+- Chat atomically settles the matching inbox job and inserts a deterministic terminal outbox row before acknowledging the daemon record. A crash before acknowledgement causes replay; the outbox identity makes replay idempotent. External platform delivery remains at-least-once.
+- On install, schema v9 rebuilds the Chat delivery tables and retires old `chat_runs`, `run_id`, and application terminal-WAL artifacts after the installer backup. Unverifiable in-flight legacy work becomes `failed/interrupted` and is never resumed.
+
+Do not add fallback terminal replay files, Chat-owned canonical runs, submitted-turn inference, or a second terminal identifier. Crash recovery must consume authoritative daemon records or report interruption.
 
 ## Session lifecycle identity
 

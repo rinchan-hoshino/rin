@@ -207,7 +207,7 @@ test("legacy message, inbox, and outbox authority migrates once into chat.sqlite
     3,
   );
   assert.equal(
-    reopened.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
+    reopened.prepare("SELECT COUNT(*) AS value FROM inbox_jobs").get().value,
     3,
   );
   assert.equal(
@@ -534,7 +534,7 @@ test("malformed legacy record JSON is preserved while valid records complete aut
 
   const db = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
-    db.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
+    db.prepare("SELECT COUNT(*) AS value FROM inbox_jobs").get().value,
     1,
   );
   assert.equal(
@@ -597,7 +597,7 @@ test("one invalid inbox file is reported once across message and turn conversion
     0,
   );
   assert.equal(
-    db.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
+    db.prepare("SELECT COUNT(*) AS value FROM inbox_jobs").get().value,
     0,
   );
   const summary = JSON.parse(
@@ -907,7 +907,7 @@ test("legacy archive content deleted after completed cutover blocks startup", as
   );
 });
 
-test("legacy timeline sequence prevents replaying older pending work after newer handled history", async () => {
+test("legacy timeline sequence interrupts older pending work after newer handled history", async () => {
   const agentDir = await tempDir();
   const chatRoot = path.join(agentDir, "data", "chat");
   const newer = {
@@ -933,7 +933,10 @@ test("legacy timeline sequence prevents replaying older pending work after newer
     rows.map((row) => row.message_id),
     ["older-pending", "newer-handled"],
   );
-  assert.equal(db.prepare("SELECT state FROM turns").get().state, "superseded");
+  assert.equal(
+    db.prepare("SELECT state FROM inbox_jobs").get().state,
+    "failed",
+  );
   assert.deepEqual(inbox.listPendingChatInboxItems(agentDir), []);
 });
 
@@ -959,7 +962,7 @@ test("atomic cutover retry imports legacy writes after marker rollback", async (
 
   const reopened = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
-    reopened.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
+    reopened.prepare("SELECT COUNT(*) AS value FROM inbox_jobs").get().value,
     1,
   );
   assert.equal(

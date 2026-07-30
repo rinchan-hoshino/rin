@@ -2,7 +2,10 @@ import {
   formatCompactionSummaryCollapsedText,
   type CompactionSummaryCollapsedTextOptions,
 } from "./compaction-summary-format.js";
-import type { RinChatRunContext, RinFrontendBackendEvent } from "./types.js";
+import type {
+  RinChatDeliveryContext,
+  RinFrontendBackendEvent,
+} from "./types.js";
 
 export type RinFrontendLifecyclePhase =
   | "idle"
@@ -42,8 +45,12 @@ export interface RinFrontendLifecycleState {
 
 interface LifecycleEventBase {
   requestTag?: string;
-  chatRunContext?: RinChatRunContext;
-  terminalWal?: { payloadHash: string; stagedAt?: string };
+  chatDeliveryContext?: RinChatDeliveryContext;
+  terminalRecord?: {
+    terminalId: string;
+    state: "complete" | "error" | "interrupted";
+    terminalAt?: string;
+  };
   turnGeneration?: number;
   sessionId?: string;
   sessionFile?: string;
@@ -132,25 +139,35 @@ function safeNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function optionalChatRunContext(value: unknown): RinChatRunContext | undefined {
+function optionalChatDeliveryContext(
+  value: unknown,
+): RinChatDeliveryContext | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
-  const runId = safeString((value as any).runId).trim();
-  const ownerEpoch = safeString((value as any).ownerEpoch).trim();
-  const producerIncarnation = safeString(
-    (value as any).producerIncarnation,
-  ).trim();
-  if (!runId || !ownerEpoch || !producerIncarnation) return;
-  return { runId, ownerEpoch, producerIncarnation };
+  const turnId = safeString((value as any).turnId).trim();
+  const chatKey = safeString((value as any).chatKey).trim();
+  const messageId = safeString((value as any).messageId).trim();
+  if (!turnId || !chatKey || !messageId) return;
+  return { turnId, chatKey, messageId };
 }
 
-function optionalTerminalWal(value: unknown) {
+function optionalTerminalRecord(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
-  const payloadHash = safeString((value as any).payloadHash).trim();
-  if (!/^[0-9a-f]{64}$/.test(payloadHash)) return;
-  const stagedAt = safeString((value as any).stagedAt).trim();
+  const terminalId = safeString((value as any).terminalId).trim();
+  const state = safeString((value as any).state).trim() as
+    | "complete"
+    | "error"
+    | "interrupted";
+  if (
+    !terminalId ||
+    (state !== "complete" && state !== "error" && state !== "interrupted")
+  ) {
+    return;
+  }
+  const terminalAt = safeString((value as any).terminalAt).trim();
   return {
-    payloadHash,
-    ...(stagedAt ? { stagedAt } : {}),
+    terminalId,
+    state,
+    ...(terminalAt ? { terminalAt } : {}),
   };
 }
 
@@ -313,8 +330,10 @@ export function projectRinFrontendLifecycleEvent(
           result: payload.result,
           sessionId: optionalText(payload.sessionId),
           sessionFile: optionalText(payload.sessionFile),
-          chatRunContext: optionalChatRunContext(payload.chatRunContext),
-          terminalWal: optionalTerminalWal(payload.terminalWal),
+          chatDeliveryContext: optionalChatDeliveryContext(
+            payload.chatDeliveryContext,
+          ),
+          terminalRecord: optionalTerminalRecord(payload.terminalRecord),
           ...requestTag,
         };
       }
@@ -325,8 +344,10 @@ export function projectRinFrontendLifecycleEvent(
           error: safeString(payload.error).trim() || "rpc_turn_failed",
           sessionId: optionalText(payload.sessionId),
           sessionFile: optionalText(payload.sessionFile),
-          chatRunContext: optionalChatRunContext(payload.chatRunContext),
-          terminalWal: optionalTerminalWal(payload.terminalWal),
+          chatDeliveryContext: optionalChatDeliveryContext(
+            payload.chatDeliveryContext,
+          ),
+          terminalRecord: optionalTerminalRecord(payload.terminalRecord),
           ...requestTag,
         };
       }
@@ -600,10 +621,12 @@ export function renderRinFrontendLifecycleEvent(
           sessionId: event.sessionId,
           sessionFile: event.sessionFile,
           requestTag: event.requestTag,
-          ...(event.chatRunContext
-            ? { chatRunContext: event.chatRunContext }
+          ...(event.chatDeliveryContext
+            ? { chatDeliveryContext: event.chatDeliveryContext }
             : {}),
-          ...(event.terminalWal ? { terminalWal: event.terminalWal } : {}),
+          ...(event.terminalRecord
+            ? { terminalRecord: event.terminalRecord }
+            : {}),
         };
         return event.finalText
           ? [
@@ -614,11 +637,11 @@ export function renderRinFrontendLifecycleEvent(
                 sessionId: event.sessionId,
                 sessionFile: event.sessionFile,
                 requestTag: event.requestTag,
-                ...(event.chatRunContext
-                  ? { chatRunContext: event.chatRunContext }
+                ...(event.chatDeliveryContext
+                  ? { chatDeliveryContext: event.chatDeliveryContext }
                   : {}),
-                ...(event.terminalWal
-                  ? { terminalWal: event.terminalWal }
+                ...(event.terminalRecord
+                  ? { terminalRecord: event.terminalRecord }
                   : {}),
               },
               terminal,
@@ -632,10 +655,12 @@ export function renderRinFrontendLifecycleEvent(
           sessionId: event.sessionId,
           sessionFile: event.sessionFile,
           requestTag: event.requestTag,
-          ...(event.chatRunContext
-            ? { chatRunContext: event.chatRunContext }
+          ...(event.chatDeliveryContext
+            ? { chatDeliveryContext: event.chatDeliveryContext }
             : {}),
-          ...(event.terminalWal ? { terminalWal: event.terminalWal } : {}),
+          ...(event.terminalRecord
+            ? { terminalRecord: event.terminalRecord }
+            : {}),
         },
       ];
   }

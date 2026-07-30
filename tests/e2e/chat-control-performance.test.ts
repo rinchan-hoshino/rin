@@ -164,9 +164,9 @@ test("180k archived messages do not enter inbox or recovery control paths", asyn
       db
         .prepare(
           `EXPLAIN QUERY PLAN
-         SELECT turns.* FROM turns
-         WHERE turns.state = 'pending'
-         ORDER BY turns.chat_key, turns.sequence`,
+         SELECT inbox_jobs.* FROM inbox_jobs
+         WHERE inbox_jobs.state = 'pending'
+         ORDER BY inbox_jobs.chat_key, inbox_jobs.sequence`,
         )
         .all(),
     );

@@ -6,7 +6,7 @@ import BetterSqlite3 from "better-sqlite3";
 
 import { chatDataPath } from "../data-layout.js";
 import { safeString } from "../text-utils.js";
-export const CHAT_DATABASE_SCHEMA_VERSION = 8;
+export const CHAT_DATABASE_SCHEMA_VERSION = 9;
 export const CHAT_ADMISSION_MODEL_VERSION = "1";
 
 const databaseCache = new Map<string, BetterSqlite3.Database>();
@@ -17,12 +17,7 @@ export type ChatDatabaseState = {
   nextSequence: number;
 };
 
-export type ChatTurnState =
-  | "pending"
-  | "running"
-  | "terminal"
-  | "failed"
-  | "superseded";
+export type ChatTurnState = "pending" | "running" | "terminal" | "failed";
 
 function nowIso() {
   return new Date().toISOString();
@@ -51,8 +46,7 @@ export function chatDatabaseSchemaFingerprint(db: BetterSqlite3.Database) {
   return createHash("sha256").update(JSON.stringify(objects)).digest("hex");
 }
 
-const CHAT_DATABASE_TABLES = [
-  "chat_runs",
+const LEGACY_CHAT_DATABASE_TABLES = [
   "chat_state",
   "inbound_heads",
   "messages",
@@ -60,6 +54,16 @@ const CHAT_DATABASE_TABLES = [
   "outbox_deliveries",
   "schema_meta",
   "turns",
+] as const;
+
+const CHAT_DATABASE_TABLES = [
+  "chat_state",
+  "inbound_heads",
+  "messages",
+  "outbox",
+  "outbox_deliveries",
+  "schema_meta",
+  "inbox_jobs",
 ] as const;
 
 function setWalJournalMode(db: BetterSqlite3.Database) {
@@ -103,9 +107,11 @@ export function validateRecordedChatDatabaseSchema(
 ) {
   const currentTables = readChatDatabaseTables(db);
   const expectedTables =
-    version >= 7
-      ? CHAT_DATABASE_TABLES
-      : CHAT_DATABASE_TABLES.filter((table) => table !== "chat_runs");
+    version >= 7 && version <= 8
+      ? (["chat_runs", ...LEGACY_CHAT_DATABASE_TABLES] as const)
+      : version <= 8
+        ? LEGACY_CHAT_DATABASE_TABLES
+        : CHAT_DATABASE_TABLES;
   if (expectedTables.some((table) => !currentTables.has(table))) {
     throw new Error("chat_database_incomplete_schema");
   }
@@ -228,7 +234,7 @@ function initializeChatDatabase(
       sequence INTEGER NOT NULL CHECK (sequence >= 1),
       generation INTEGER NOT NULL CHECK (generation >= 0),
       disposition TEXT NOT NULL DEFAULT 'unclassified'
-        CHECK (disposition IN ('unclassified', 'record_only', 'actionable', 'superseded')),
+        CHECK (disposition IN ('unclassified', 'record_only', 'actionable')),
       record_json TEXT NOT NULL,
       UNIQUE (chat_key, message_id),
       UNIQUE (chat_key, sequence)
@@ -280,14 +286,14 @@ function initializeChatDatabase(
     CREATE INDEX IF NOT EXISTS inbound_heads_recovery_idx
       ON inbound_heads(platform, bot_id, recovery_next_attempt_at, chat_key);
 
-    CREATE TABLE IF NOT EXISTS turns (
+    CREATE TABLE IF NOT EXISTS inbox_jobs (
       turn_id TEXT PRIMARY KEY,
       inbound_message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE RESTRICT,
       chat_key TEXT NOT NULL,
       generation INTEGER NOT NULL CHECK (generation >= 0),
       sequence INTEGER NOT NULL CHECK (sequence >= 1),
       state TEXT NOT NULL
-        CHECK (state IN ('pending', 'running', 'terminal', 'failed', 'superseded')),
+        CHECK (state IN ('pending', 'running', 'terminal', 'failed')),
       terminal_kind TEXT,
       owner_epoch TEXT,
       attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
@@ -305,56 +311,17 @@ function initializeChatDatabase(
       submission_json TEXT,
       submission_hash TEXT,
       execution_session_file TEXT,
-      run_id TEXT,
-      created_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS turns_claim_idx
-      ON turns(state, next_attempt_at, lease_until, chat_key, sequence);
-    CREATE INDEX IF NOT EXISTS turns_chat_generation_idx
-      ON turns(chat_key, generation, state, sequence);
-    CREATE INDEX IF NOT EXISTS turns_run_idx
-      ON turns(run_id, state, sequence)
-      WHERE run_id IS NOT NULL;
-
-    CREATE TABLE IF NOT EXISTS chat_runs (
-      run_id TEXT PRIMARY KEY,
-      chat_key TEXT NOT NULL,
-      generation INTEGER NOT NULL CHECK (generation >= 0),
-      state TEXT NOT NULL
-        CHECK (state IN ('running', 'draining', 'terminal', 'manual_review')),
-      owner_epoch TEXT NOT NULL,
-      producer_incarnation TEXT NOT NULL,
-      delivery_turn_id TEXT NOT NULL REFERENCES turns(turn_id) ON DELETE RESTRICT,
-      terminal_delivery_turn_id TEXT REFERENCES turns(turn_id) ON DELETE RESTRICT,
-      terminal_kind TEXT,
-      terminal_payload_json TEXT,
-      terminal_payload_hash TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      terminal_at TEXT,
-      CHECK (
-        (state IN ('running', 'draining')
-          AND terminal_delivery_turn_id IS NULL
-          AND terminal_kind IS NULL
-          AND terminal_payload_json IS NULL
-          AND terminal_payload_hash IS NULL
-          AND terminal_at IS NULL)
-        OR
-        (state IN ('terminal', 'manual_review')
-          AND terminal_delivery_turn_id IS NOT NULL
-          AND terminal_kind IS NOT NULL
-          AND terminal_at IS NOT NULL)
-      )
-    );
-
-    CREATE INDEX IF NOT EXISTS chat_runs_state_idx
-      ON chat_runs(state, updated_at, chat_key);
-
+    CREATE INDEX IF NOT EXISTS inbox_jobs_claim_idx
+      ON inbox_jobs(state, next_attempt_at, lease_until, chat_key, sequence);
+    CREATE INDEX IF NOT EXISTS inbox_jobs_chat_generation_idx
+      ON inbox_jobs(chat_key, generation, state, sequence);
     CREATE TABLE IF NOT EXISTS outbox (
       outbox_id TEXT PRIMARY KEY,
-      turn_id TEXT REFERENCES turns(turn_id) ON DELETE RESTRICT,
+      turn_id TEXT REFERENCES inbox_jobs(turn_id) ON DELETE RESTRICT,
       idempotency_key TEXT UNIQUE,
       chat_key TEXT NOT NULL,
       delivery_kind TEXT NOT NULL,
@@ -610,7 +577,7 @@ export function writeChatSessionBindingWithFence(
        SET session_file = ?, updated_at = ?
        WHERE chat_key = ?
          AND current_generation = (
-           SELECT generation FROM turns
+           SELECT generation FROM inbox_jobs
            WHERE turn_id = ? AND chat_key = ? AND state = 'running'
              AND owner_epoch = ? AND attempt = ?
              AND inbound_message_id = (
@@ -710,13 +677,13 @@ export function advanceChatGeneration(
         const owned = db
           .prepare(
             `SELECT 1
-             FROM turns
-             JOIN messages ON messages.id = turns.inbound_message_id
-             JOIN chat_state ON chat_state.chat_key = turns.chat_key
-             WHERE turns.turn_id = ? AND turns.chat_key = ?
-               AND messages.message_id = ? AND turns.state = 'running'
-               AND turns.owner_epoch = ? AND turns.attempt = ?
-               AND turns.generation = chat_state.current_generation`,
+             FROM inbox_jobs
+             JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+             JOIN chat_state ON chat_state.chat_key = inbox_jobs.chat_key
+             WHERE inbox_jobs.turn_id = ? AND inbox_jobs.chat_key = ?
+               AND messages.message_id = ? AND inbox_jobs.state = 'running'
+               AND inbox_jobs.owner_epoch = ? AND inbox_jobs.attempt = ?
+               AND inbox_jobs.generation = chat_state.current_generation`,
           )
           .get(
             requiredText(fence.turnId, "chat_turn_id_required"),
@@ -746,7 +713,7 @@ export function advanceChatGeneration(
                    WHERE outbox.outbox_id = outbox_deliveries.outbox_id
                      AND outbox.dispatch_started_at IS NOT NULL
                  ) THEN 'chat_outbox_reset_ambiguous'
-                 ELSE 'chat_outbox_turn_superseded' END,
+                 ELSE 'chat_outbox_turn_interrupted' END,
                failed_at = CASE
                  WHEN EXISTS (
                    SELECT 1 FROM outbox
@@ -769,7 +736,7 @@ export function advanceChatGeneration(
                owner_epoch = NULL, lease_until = NULL, next_attempt_at = NULL,
                last_error = CASE WHEN dispatch_started_at IS NOT NULL
                               THEN 'chat_outbox_reset_ambiguous'
-                              ELSE 'chat_outbox_turn_superseded' END,
+                              ELSE 'chat_outbox_turn_interrupted' END,
                failure_kind = CASE WHEN dispatch_started_at IS NULL
                                 THEN 'permanent' ELSE NULL END,
                delivery_unconfirmed = CASE WHEN dispatch_started_at IS NOT NULL
@@ -830,17 +797,17 @@ export function advanceChatGeneration(
       const preservedTurn = preserveMessageId
         ? (db
             .prepare(
-              `SELECT turns.turn_id, turns.inbound_message_id, turns.sequence
-               FROM turns
-               JOIN messages ON messages.id = turns.inbound_message_id
-               WHERE turns.chat_key = ? AND messages.message_id = ?`,
+              `SELECT inbox_jobs.turn_id, inbox_jobs.inbound_message_id, inbox_jobs.sequence
+               FROM inbox_jobs
+               JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+               WHERE inbox_jobs.chat_key = ? AND messages.message_id = ?`,
             )
             .get(chatKey, preserveMessageId) as any)
         : null;
       if (preservedTurn) {
         const resetSequence = Math.max(1, Number(preservedTurn.sequence || 0));
         db.prepare(
-          `UPDATE turns SET generation = ?, updated_at = ?
+          `UPDATE inbox_jobs SET generation = ?, updated_at = ?
            WHERE chat_key = ? AND sequence >= ? AND generation = ?`,
         ).run(
           currentGeneration,
@@ -855,36 +822,37 @@ export function advanceChatGeneration(
         ).run(currentGeneration, chatKey, resetSequence, previousGeneration);
       }
       db.prepare(
-        `UPDATE turns
-       SET state = 'superseded', owner_epoch = NULL, lease_until = NULL,
-           heartbeat_at = NULL, updated_at = ?
+        `UPDATE inbox_jobs
+       SET state = 'failed', terminal_kind = 'interrupted',
+           last_error = 'chat_turn_interrupted_by_generation_reset',
+           owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL, updated_at = ?
        WHERE chat_key = ? AND generation < ?
          AND state IN ('pending', 'running')`,
       ).run(timestamp, chatKey, currentGeneration);
       db.prepare(
         `UPDATE messages
-         SET disposition = 'superseded'
+         SET disposition = 'record_only'
          WHERE chat_key = ? AND generation < ?
            AND disposition IN ('unclassified', 'actionable')
            AND EXISTS (
-             SELECT 1 FROM turns
-             WHERE turns.inbound_message_id = messages.id
-               AND turns.state = 'superseded'
+             SELECT 1 FROM inbox_jobs
+             WHERE inbox_jobs.inbound_message_id = messages.id
+               AND inbox_jobs.state = 'failed' AND inbox_jobs.terminal_kind = 'interrupted'
            )`,
       ).run(chatKey, currentGeneration);
       db.prepare(
         `UPDATE outbox_deliveries
          SET state = CASE WHEN state = 'sending' THEN 'unconfirmed' ELSE 'failed' END,
              owner_epoch = NULL, lease_until = NULL, next_attempt_at = NULL,
-             last_error = 'chat_outbox_turn_superseded', updated_at = ?,
+             last_error = 'chat_outbox_turn_interrupted', updated_at = ?,
              failed_at = CASE WHEN state = 'queued' THEN ? ELSE failed_at END
          WHERE state IN ('queued', 'sending')
            AND outbox_id IN (
              SELECT outbox.outbox_id
              FROM outbox
-             JOIN turns ON turns.turn_id = outbox.turn_id
+             JOIN inbox_jobs ON inbox_jobs.turn_id = outbox.turn_id
              WHERE outbox.state IN ('queued', 'sending')
-               AND turns.state = 'superseded'
+               AND inbox_jobs.state = 'failed' AND inbox_jobs.terminal_kind = 'interrupted'
            )`,
       ).run(timestamp, timestamp);
       db.prepare(
@@ -892,11 +860,11 @@ export function advanceChatGeneration(
          SET delivery_unconfirmed = CASE
                WHEN state = 'sending' THEN 1 ELSE delivery_unconfirmed END,
              state = 'failed', owner_epoch = NULL, lease_until = NULL,
-             next_attempt_at = NULL, last_error = 'chat_outbox_turn_superseded',
+             next_attempt_at = NULL, last_error = 'chat_outbox_turn_interrupted',
              failure_kind = 'permanent', updated_at = ?, failed_at = ?
          WHERE state IN ('queued', 'sending')
            AND turn_id IN (
-             SELECT turn_id FROM turns WHERE state = 'superseded'
+             SELECT turn_id FROM inbox_jobs WHERE state = 'failed' AND terminal_kind = 'interrupted'
            )`,
       ).run(timestamp, timestamp);
       return { previousGeneration, currentGeneration };
@@ -925,7 +893,7 @@ export function markChatMessageAcceptedWithFence(
       const sessionFile = safeString(input.sessionFile).trim() || null;
       const turn = db
         .prepare(
-          `UPDATE turns
+          `UPDATE inbox_jobs
            SET execution_session_file = COALESCE(execution_session_file, ?),
                updated_at = ?
            WHERE turn_id = ? AND chat_key = ? AND state = 'running'
@@ -936,7 +904,7 @@ export function markChatMessageAcceptedWithFence(
              )
              AND generation = (
                SELECT current_generation FROM chat_state
-                WHERE chat_key = turns.chat_key
+                WHERE chat_key = inbox_jobs.chat_key
              )
              AND (? IS NULL OR execution_session_file IS NULL
                   OR execution_session_file = ?)`,
@@ -967,7 +935,7 @@ export function markChatMessageAcceptedWithFence(
                updated_at = ?
            WHERE chat_key = ? AND message_id = ?
              AND id = (
-               SELECT inbound_message_id FROM turns WHERE turn_id = ?
+               SELECT inbound_message_id FROM inbox_jobs WHERE turn_id = ?
              )`,
         )
         .run(
@@ -991,7 +959,6 @@ export function completeChatTurnWithoutDelivery(
   fence: ChatTurnFenceInput,
   input: {
     sessionFile?: string;
-    supersedeTurnFences?: ChatTurnFenceInput[];
   } = {},
 ) {
   const db = openChatDatabase(agentDir);
@@ -1001,7 +968,7 @@ export function completeChatTurnWithoutDelivery(
       const sessionFile = safeString(input.sessionFile).trim() || null;
       const terminalized = db
         .prepare(
-          `UPDATE turns
+          `UPDATE inbox_jobs
            SET state = 'terminal', terminal_kind = 'empty_completion',
                owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL,
                next_attempt_at = NULL, last_error = NULL,
@@ -1015,7 +982,7 @@ export function completeChatTurnWithoutDelivery(
              )
              AND generation = (
                SELECT current_generation FROM chat_state
-               WHERE chat_key = turns.chat_key
+               WHERE chat_key = inbox_jobs.chat_key
              )
              AND (? IS NULL OR execution_session_file IS NULL
                   OR execution_session_file = ?)`,
@@ -1058,115 +1025,6 @@ export function completeChatTurnWithoutDelivery(
         fence.chatKey,
         fence.messageId,
       );
-      for (const superseded of input.supersedeTurnFences || []) {
-        if (!superseded || superseded.turnId === fence.turnId) continue;
-        const result = db
-          .prepare(
-            `UPDATE turns
-             SET state = 'superseded', terminal_kind = 'coalesced_steer',
-                 owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL,
-                 next_attempt_at = NULL, last_error = NULL, updated_at = ?
-             WHERE turn_id = ? AND chat_key = ? AND state = 'running'
-               AND owner_epoch = ? AND attempt = ?
-               AND inbound_message_id = (
-                 SELECT id FROM messages
-                 WHERE chat_key = ? AND message_id = ?
-               )
-               AND generation = (
-                 SELECT current_generation FROM chat_state
-                 WHERE chat_key = turns.chat_key
-               )`,
-          )
-          .run(
-            timestamp,
-            requiredText(superseded.turnId, "chat_turn_id_required"),
-            requiredText(superseded.chatKey, "chat_turn_chat_key_required"),
-            requiredText(
-              superseded.ownerEpoch,
-              "chat_turn_owner_epoch_required",
-            ),
-            Math.max(0, Math.floor(Number(superseded.attempt || 0))),
-            requiredText(superseded.chatKey, "chat_turn_chat_key_required"),
-            requiredText(superseded.messageId, "chat_turn_message_id_required"),
-          );
-        if (result.changes !== 1) throw new Error("chat_turn_fence_lost");
-        db.prepare(
-          `UPDATE messages
-           SET disposition = 'superseded',
-               record_json = json_set(record_json, '$.disposition', 'superseded'),
-               updated_at = ?
-           WHERE id = (
-             SELECT inbound_message_id FROM turns WHERE turn_id = ?
-           )`,
-        ).run(timestamp, superseded.turnId);
-      }
-      return true;
-    })
-    .immediate();
-}
-
-export function supersedeChatTurnWithFence(
-  agentDir: string,
-  fence: ChatTurnFenceInput,
-) {
-  const db = openChatDatabase(agentDir);
-  return db
-    .transaction(() => {
-      const timestamp = nowIso();
-      const result = db
-        .prepare(
-          `UPDATE turns
-           SET state = 'superseded', owner_epoch = NULL, lease_until = NULL,
-               heartbeat_at = NULL, updated_at = ?
-           WHERE turn_id = ? AND chat_key = ? AND state = 'running'
-             AND owner_epoch = ? AND attempt = ?
-             AND inbound_message_id = (
-               SELECT id FROM messages
-               WHERE chat_key = ? AND message_id = ?
-             )
-             AND generation = (
-               SELECT current_generation FROM chat_state
-               WHERE chat_key = turns.chat_key
-             )`,
-        )
-        .run(
-          timestamp,
-          requiredText(fence.turnId, "chat_turn_id_required"),
-          requiredText(fence.chatKey, "chat_turn_chat_key_required"),
-          requiredText(fence.ownerEpoch, "chat_turn_owner_epoch_required"),
-          Math.max(0, Math.floor(Number(fence.attempt || 0))),
-          requiredText(fence.chatKey, "chat_turn_chat_key_required"),
-          requiredText(fence.messageId, "chat_turn_message_id_required"),
-        );
-      if (result.changes !== 1) return false;
-      db.prepare(
-        `UPDATE messages
-         SET disposition = 'superseded',
-             record_json = json_set(record_json, '$.disposition', 'superseded'),
-             updated_at = ?
-         WHERE chat_key = ? AND message_id = ?`,
-      ).run(timestamp, fence.chatKey, fence.messageId);
-      db.prepare(
-        `UPDATE outbox_deliveries
-         SET state = CASE WHEN state = 'sending' THEN 'unconfirmed' ELSE 'failed' END,
-             owner_epoch = NULL, lease_until = NULL, next_attempt_at = NULL,
-             last_error = 'chat_outbox_turn_superseded', updated_at = ?,
-             failed_at = CASE WHEN state = 'queued' THEN ? ELSE failed_at END
-         WHERE state IN ('queued', 'sending')
-           AND outbox_id IN (
-             SELECT outbox_id FROM outbox
-             WHERE turn_id = ? AND state IN ('queued', 'sending')
-           )`,
-      ).run(timestamp, timestamp, fence.turnId);
-      db.prepare(
-        `UPDATE outbox
-         SET delivery_unconfirmed = CASE
-               WHEN state = 'sending' THEN 1 ELSE delivery_unconfirmed END,
-             state = 'failed', owner_epoch = NULL, lease_until = NULL,
-             next_attempt_at = NULL, last_error = 'chat_outbox_turn_superseded',
-             failure_kind = 'permanent', updated_at = ?, failed_at = ?
-         WHERE turn_id = ? AND state IN ('queued', 'sending')`,
-      ).run(timestamp, timestamp, fence.turnId);
       return true;
     })
     .immediate();
@@ -1184,7 +1042,7 @@ export function updateTurnWithFence(
   const db = openChatDatabase(agentDir);
   const result = db
     .prepare(
-      `UPDATE turns
+      `UPDATE inbox_jobs
        SET state = @state, updated_at = @updatedAt
        WHERE turn_id = @turnId
          AND state = 'running'

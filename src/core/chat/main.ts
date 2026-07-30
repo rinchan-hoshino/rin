@@ -67,7 +67,6 @@ import { buildInboundChatLogInput } from "./inbound-normalization.js";
 import { withoutChatQuoteNodes } from "./rich-text.js";
 import { buildChatMessageRecordKey } from "./message-store.js";
 import { ChatController, loadChatSettings } from "./controller.js";
-import { reconcileStagedCanonicalChatTerminals } from "./terminal-recovery.js";
 import { readChatCommandResponses } from "./command-responses.js";
 import {
   resolveChatModelOptions,
@@ -83,11 +82,11 @@ import {
 import {
   type ChatInboxItem,
   commitClaimedChatInboxAdmission,
+  failClaimedChatInboxItem,
   getChatInboxItem,
-  releaseClaimedChatInboxItem,
   restoreChatInboxElements,
   restoreChatInboxSession,
-  restoreProcessingChatInboxItems,
+  interruptProcessingChatInboxItems,
   touchClaimedChatInboxItem,
 } from "./inbox.js";
 import {
@@ -95,7 +94,6 @@ import {
   type ChatInboxJobResult,
   createChatInboxDrain,
   finalizeClaimedChatInboxJob,
-  requeueClaimedChatInboxJob,
 } from "./inbox-drain.js";
 import {
   type PreparedChatKeyWorkerJob,
@@ -671,7 +669,7 @@ export async function startChatBridge(
     messageId: string,
     respond: boolean,
   ) => {
-    if (!respond) return { retry: false };
+    if (!respond) return {};
     await enqueueAndDrainOutbox(
       {
         createdAt: nowIso(),
@@ -702,7 +700,7 @@ export async function startChatBridge(
           : undefined,
       },
     );
-    return { retry: false };
+    return {};
   };
 
   const buildCommandPromptMeta = (
@@ -765,7 +763,7 @@ export async function startChatBridge(
             : undefined,
         },
       );
-      return { retry: false };
+      return {};
     }
 
     const controller = getController(chatKey);
@@ -780,17 +778,12 @@ export async function startChatBridge(
         promptMeta,
         outboxTurnFence,
       );
-      return { retry: false, disposition: "actionable" as const };
+      return { disposition: "actionable" as const };
     } catch (error) {
       logger.warn(
         `chat command failed chatKey=${chatKey} command=${command.name} err=${safeString((error as any)?.message || error)}`,
       );
       return {
-        retry: !hasCommittedTerminalChatOutbox(
-          runtime.agentDir,
-          chatKey,
-          messageId,
-        ),
         errorMessage: safeString((error as any)?.message || error),
       };
     }
@@ -918,16 +911,27 @@ export async function startChatBridge(
         logger.info(
           `chat turn cancelled by frontend lifecycle chatKey=${submission.chatKey} err=${errorMessage}`,
         );
-        return {
-          retry: Boolean(messageId && !messageProcessed),
-          errorMessage,
-        };
+        return { errorMessage };
+      }
+      if (
+        [
+          "frontend_turn_interrupted",
+          "rin_worker_exit",
+          "rin_worker_oom",
+          "chat_terminal_record_missing",
+          "rin_disconnected",
+        ].some((marker) => errorMessage.includes(marker))
+      ) {
+        logger.info(
+          `chat turn interrupted without authoritative terminal chatKey=${submission.chatKey} err=${errorMessage}`,
+        );
+        return { errorMessage };
       }
       if (chatBridgeStopping && messageId && !messageProcessed) {
         logger.info(
           `chat turn interrupted by bridge shutdown chatKey=${submission.chatKey} err=${errorMessage}`,
         );
-        return { retry: true, errorMessage };
+        return { errorMessage };
       }
       logger.warn(
         `chat turn failed chatKey=${submission.chatKey} err=${errorMessage}`,
@@ -981,12 +985,12 @@ export async function startChatBridge(
               messageId,
             )
           ) {
-            return { retry: true, errorMessage };
+            return { errorMessage };
           }
         }
         await controller.clearProcessingState().catch(() => {});
       }
-      return { retry: false, errorMessage };
+      return { errorMessage };
     };
     try {
       const turnResult = await controller.runTurn({
@@ -1000,12 +1004,7 @@ export async function startChatBridge(
         thinkingLevel: submission.thinkingLevel,
         receivedAt: submission.receivedAt,
       });
-      return {
-        retry: false,
-        disposition: (turnResult as any)?.superseded
-          ? ("superseded" as const)
-          : ("actionable" as const),
-      };
+      return { disposition: "actionable" as const };
     } catch (error) {
       return await handleTurnFailure(error);
     }
@@ -1018,8 +1017,12 @@ export async function startChatBridge(
       claimedInboxJobs.delete(job.envelope.itemId);
     }
   };
-  const releaseClaimedInboxJobForShutdown = (job: ClaimedChatInboxJob) => {
-    releaseClaimedChatInboxItem(runtime.agentDir, job.envelope);
+  const interruptClaimedInboxJobForShutdown = (job: ClaimedChatInboxJob) => {
+    failClaimedChatInboxItem(
+      runtime.agentDir,
+      job.envelope,
+      "chat_turn_interrupted",
+    );
     forgetClaimedInboxJob(job);
   };
   const finishClaimedInboxJob = (
@@ -1027,9 +1030,8 @@ export async function startChatBridge(
     result?: ChatInboxJobResult,
   ) => {
     try {
-      if (result?.disposition === "superseded") return;
       if (chatBridgeStopping) {
-        releaseClaimedInboxJobForShutdown(job);
+        interruptClaimedInboxJobForShutdown(job);
         return;
       }
       finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
@@ -1087,15 +1089,15 @@ export async function startChatBridge(
       finishClaimedInboxJob(job, result);
     } catch (error) {
       if (chatBridgeStopping) {
-        releaseClaimedInboxJobForShutdown(job);
+        interruptClaimedInboxJobForShutdown(job);
         return;
       }
       logger.warn(
         `chat inbox worker failed chatKey=${job.envelope.chatKey} turn=${job.envelope.itemId} err=${safeString((error as any)?.message || error)}`,
       );
-      requeueClaimedChatInboxJob(
+      failClaimedChatInboxItem(
         runtime.agentDir,
-        job,
+        job.envelope,
         (error as any)?.message || error,
       );
     } finally {
@@ -1123,7 +1125,6 @@ export async function startChatBridge(
     const recordOnlyJob = (): PreparedChatKeyWorkerJob => ({
       run: () =>
         runClaimedInboxJob(job, async () => ({
-          retry: false,
           disposition: "record_only",
         })),
     });
@@ -1177,7 +1178,6 @@ export async function startChatBridge(
             },
           );
           return {
-            retry: false,
             disposition: "actionable",
             terminalKind: "interrupted_unknown",
           };
@@ -1360,9 +1360,9 @@ export async function startChatBridge(
       logger.warn(
         `chat inbox prepare failed chatKey=${chatKey} turn=${job.envelope.itemId} err=${safeString((error as any)?.message || error)}`,
       );
-      requeueClaimedChatInboxJob(
+      failClaimedChatInboxItem(
         runtime.agentDir,
-        job,
+        job.envelope,
         (error as any)?.message || error,
       );
       forgetClaimedInboxJob(job);
@@ -1378,7 +1378,7 @@ export async function startChatBridge(
     enqueueClaimedInboxItem: (job) => {
       claimedInboxJobs.set(job.envelope.itemId, job);
       if (chatBridgeStopping) {
-        releaseClaimedInboxJobForShutdown(job);
+        interruptClaimedInboxJobForShutdown(job);
         return;
       }
       chatKeyWorkers.enqueue(job.envelope.chatKey, job);
@@ -1408,36 +1408,7 @@ export async function startChatBridge(
       );
       return ["abort", "new"].includes(commandRequest.command?.name || "");
     },
-    canClaimDuringActiveChatKeyWorker: async (envelope) => {
-      if (envelope.admission.state === "actionable") return true;
-      if (envelope.admission.state === "record_only") return false;
-      const queuedSession = restoreChatInboxSession(
-        envelope,
-        findRuntimeBot(
-          safeString(envelope?.session?.platform || "").trim(),
-          safeString(envelope?.session?.selfId || "").trim(),
-        ),
-      );
-      const queuedElements = restoreChatInboxElements(envelope);
-      const queuedChatKey =
-        safeString(envelope.chatKey).trim() || sessionChatKey(queuedSession);
-      if (isRecordOnlyChatKey(queuedChatKey)) return false;
-      const identity = getIdentity();
-      const commandRequest = parseInboundCommandRequest(
-        queuedSession,
-        elementsToCommandText(queuedElements),
-        commandRows,
-      );
-      if (commandRequest.command || commandRequest.commandLike) return true;
-      const decision = await shouldProcessText(
-        queuedSession,
-        queuedElements,
-        identity,
-        { chatKey: queuedChatKey },
-      );
-      if (!decision.allow) return false;
-      return !isRecordOnlyChatKey(decision.chatKey);
-    },
+    canClaimDuringActiveChatKeyWorker: () => false,
     logger,
   });
 
@@ -1479,7 +1450,7 @@ export async function startChatBridge(
 
       if (chatBridgeStopping) {
         logger.info(
-          "chat inbound accepted while bridge stopping; leaving pending for recovery",
+          "chat inbound accepted while bridge stopping; leaving pending for next startup",
         );
         return;
       }
@@ -1745,15 +1716,6 @@ export async function startChatBridge(
     }
   };
 
-  const terminalRecovery = reconcileStagedCanonicalChatTerminals(
-    runtime.agentDir,
-  );
-  if (terminalRecovery.committed > 0 || terminalRecovery.quarantined > 0) {
-    logger.warn(
-      `chat terminal recovery committed=${terminalRecovery.committed} quarantined=${terminalRecovery.quarantined}`,
-    );
-  }
-
   await app.start();
   await syncTelegramCommands(app, logger, commandRows);
   await syncDiscordCommands(app, logger, commandRows);
@@ -1762,20 +1724,22 @@ export async function startChatBridge(
   );
 
   reconcileCommittedChatOutboxProcessing(runtime.agentDir);
-  const restoredProcessing = restoreProcessingChatInboxItems(runtime.agentDir);
-  if (restoredProcessing.length) {
+  const interruptedProcessing = interruptProcessingChatInboxItems(
+    runtime.agentDir,
+  );
+  if (interruptedProcessing.length) {
     logger.warn(
-      `chat inbox recovery restored processing=${restoredProcessing.length}`,
+      `chat inbox startup interrupted processing=${interruptedProcessing.length}`,
     );
   }
 
   requestDrainChatInbox();
   inboxPollTimer = setInterval(() => {
     try {
-      restoreProcessingChatInboxItems(runtime.agentDir);
+      interruptProcessingChatInboxItems(runtime.agentDir);
     } catch (error) {
       logger.warn(
-        `chat inbox lease recovery failed err=${safeString((error as any)?.message || error)}`,
+        `chat inbox lease sweep failed err=${safeString((error as any)?.message || error)}`,
       );
     }
     requestDrainChatInbox();
@@ -1801,7 +1765,7 @@ export async function startChatBridge(
       if (outboxPollTimer) clearInterval(outboxPollTimer);
       if (outboxHistoryCleanupTimer) clearInterval(outboxHistoryCleanupTimer);
       for (const job of [...claimedInboxJobs.values()]) {
-        releaseClaimedInboxJobForShutdown(job);
+        interruptClaimedInboxJobForShutdown(job);
       }
       for (const controller of controllers.values()) {
         if (options.hosted === true) {

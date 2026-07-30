@@ -18,7 +18,6 @@ import {
   type RinTurnScope,
 } from "../session/turn-scope.js";
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
-import { resolveSubmittedTurnFromMessages } from "../rin-frontend-sdk/submitted-turn.js";
 import {
   RIN_TURN_TERMINAL_ABSENT,
   RinTurnSettlementProjector,
@@ -33,7 +32,6 @@ import {
 } from "../pi/session-host.js";
 import { safeString } from "../text-utils.js";
 import { rawErrorMessage } from "../rin-lib/user-facing-errors.js";
-import { stageChatTerminalWal } from "./chat-terminal-wal.js";
 import {
   RpcTurnCoordinator,
   type RpcTurnInterrupt,
@@ -98,22 +96,6 @@ function stableJson(value: any) {
 
 function rpcRequestTag(value: unknown) {
   return typeof value === "string" ? value : "";
-}
-
-function normalizeRpcChatRunContext(value: unknown) {
-  if (value === undefined || value === null) return undefined;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("rpc_invalid_chat_run_context");
-  }
-  const runId = safeString((value as any).runId).trim();
-  const ownerEpoch = safeString((value as any).ownerEpoch).trim();
-  const producerIncarnation = safeString(
-    (value as any).producerIncarnation,
-  ).trim();
-  if (!runId || !ownerEpoch || !producerIncarnation) {
-    throw new Error("rpc_invalid_chat_run_context");
-  }
-  return { runId, ownerEpoch, producerIncarnation };
 }
 
 function promptAdmission(
@@ -532,34 +514,6 @@ function captureTurnScopeBeforeUserMessage(
   };
 }
 
-function isInterruptedTurnResumable(session: any) {
-  if (session?.agent?.signal) return true;
-  const messages = Array.isArray(session?.agent?.state?.messages)
-    ? session.agent.state.messages
-    : [];
-  const lastMessage = messages[messages.length - 1];
-  if (!lastMessage) return false;
-  if (lastMessage.role !== "assistant") return true;
-  return extractPiContinuableToolCallParts(lastMessage).length > 0;
-}
-
-async function resumeInterruptedTurn(
-  session: any,
-  options: { persistInterruptionMessage?: boolean } = {},
-): Promise<void> {
-  const lastMessage = Array.isArray(session?.agent?.state?.messages)
-    ? session.agent.state.messages[session.agent.state.messages.length - 1]
-    : null;
-  if (!lastMessage) return;
-  if (lastMessage.role === "assistant") {
-    const appendedInterruption = appendInterruptedToolResults(session, {
-      persistToSession: options.persistInterruptionMessage,
-    });
-    if (!appendedInterruption) return;
-  }
-  await resumePiSessionTurn(session);
-}
-
 function isWorkerLocalSessionReplacementCommand(commandLine: string) {
   const trimmed = safeString(commandLine).trim();
   if (trimmed === "/new") return true;
@@ -846,11 +800,6 @@ export async function runCustomRpcMode(
     options: {
       forceTurnEvents?: boolean;
       interrupt?: RpcTurnInterrupt;
-      chatRunContext?: {
-        runId: string;
-        ownerEpoch: string;
-        producerIncarnation: string;
-      };
     } = {},
   ) => {
     if (turnCoordinator.isActive) throw new Error("rpc_turn_already_active");
@@ -923,37 +872,6 @@ export async function runCustomRpcMode(
                 sessionId: turnSession.sessionId,
                 error: outcome.error,
               };
-        if (options.chatRunContext) {
-          try {
-            const agentDir = safeString(runtime.services?.agentDir).trim();
-            if (!agentDir) throw new Error("rpc_chat_run_agent_dir_missing");
-            const staged = stageChatTerminalWal(agentDir, {
-              ...options.chatRunContext,
-              terminalKind: outcome.kind,
-              terminalPayload: {
-                event,
-                requestTag,
-                ...payload,
-              },
-            });
-            Object.assign(payload, {
-              chatRunContext: options.chatRunContext,
-              terminalWal: {
-                payloadHash: staged.payloadHash,
-                stagedAt: staged.stagedAt,
-              },
-            });
-          } catch (error: any) {
-            output({
-              type: "rpc_protocol_error",
-              error: `rpc_chat_terminal_wal_stage_failed:${String(
-                error?.message || error,
-              )}`,
-              requestTag,
-            });
-            throw error;
-          }
-        }
         const terminalKey = JSON.stringify({ event, payload });
         const committed = trackedTurn.commitTerminal(terminalKey, () => {
           emitTurnEvent(event, requestTag, payload, forceTurnEvents);
@@ -1454,11 +1372,7 @@ export async function runCustomRpcMode(
                   throw error;
                 }
               },
-              {
-                chatRunContext: normalizeRpcChatRunContext(
-                  command.chatRunContext,
-                ),
-              },
+              {},
             );
           }
         } catch (error) {
@@ -1473,15 +1387,6 @@ export async function runCustomRpcMode(
           }),
         );
       }
-      case "resume_interrupted_turn":
-        if (!isInterruptedTurnResumable(session)) {
-          return done(id, "resume_interrupted_turn", { resumed: false });
-        }
-        await startInterruptTurnTask(
-          rpcRequestTag(command.requestTag),
-          async () => await resumeInterruptedTurn(session),
-        );
-        return done(id, "resume_interrupted_turn", { resumed: true });
       case "steer": {
         const requestTag = safeString(command.requestTag).trim();
         const admitted = requestTag
@@ -1615,7 +1520,6 @@ export async function runCustomRpcMode(
             workingVisible: workingVisibleEnabled && agentRunning,
           }),
           piActiveRun: Boolean(session.agent?.signal),
-          interruptedTurnResumable: isInterruptedTurnResumable(session),
           ...(trackedTurnActive
             ? {
                 requestTag: turnCoordinator.activeRequestTag,
@@ -1793,33 +1697,6 @@ export async function runCustomRpcMode(
         return done(id, type, { text: session.getLastAssistantText() });
       case "get_messages":
         return done(id, type, { messages: session.messages });
-      case "resolve_submitted_turn": {
-        const resolved = resolveSubmittedTurnFromMessages(
-          session.messages,
-          {
-            text: safeString(command.text).trim(),
-            sentAt: Number(command.sentAt || 0),
-            requestTag: rpcRequestTag(command.requestTag),
-          },
-          {
-            turnActive: Boolean(
-              turnCoordinator.isActive ||
-              session.isStreaming ||
-              session.isCompacting ||
-              session.isRetrying ||
-              session.retryAttempt > 0,
-            ),
-          },
-        );
-        if (resolved && !("submitted" in resolved)) {
-          return done(id, type, {
-            ...resolved,
-            sessionId: session.sessionId,
-            sessionFile: session.sessionFile,
-          });
-        }
-        return done(id, type, resolved);
-      }
       case "get_active_tools":
         return done(id, type, {
           tools: session.getActiveToolNames?.() || [],

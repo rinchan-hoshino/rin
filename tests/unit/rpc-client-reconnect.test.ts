@@ -777,144 +777,6 @@ test("rpc interactive session attaches a request tag to prompt turns by default"
   assert.match(String(calls[0]?.requestTag || ""), /^rin-tui-/);
 });
 
-test("rpc interactive session recovers prompt submission timeout without surfacing an editor exception", async () => {
-  const calls = [];
-  let promptCalls = 0;
-  const client = {
-    isConnected: () => true,
-    send: async (payload) => {
-      calls.push(payload);
-      if (payload.type === "prompt") {
-        promptCalls += 1;
-        if (promptCalls === 1) throw new Error("rin_timeout:prompt");
-        return { success: true, data: {} };
-      }
-      if (payload.type === "get_state") {
-        return {
-          success: true,
-          data: {
-            sessionId: "s1",
-            sessionFile: "/tmp/s1.jsonl",
-            thinkingLevel: "medium",
-            steeringMode: "all",
-            followUpMode: "one-at-a-time",
-            autoCompactionEnabled: false,
-            turnActive: false,
-            isStreaming: false,
-            isCompacting: false,
-            pendingMessageCount: 0,
-          },
-        };
-      }
-      return { success: true, data: {} };
-    },
-  };
-  const session = new RpcInteractiveSession(client);
-  session.ensureRemoteSession = async () => {};
-  session.refreshState = async () => {};
-  session.ensureReconnectLoop = () => Promise.resolve();
-  session.rpcConnected = true;
-  session.startupPending = false;
-
-  await session.prompt("hello", { expandPromptTemplates: false });
-
-  assert.equal(promptCalls, 1);
-  assert.equal(session.recoveryPending, true);
-  assert.deepEqual(session.getFrontendStatusEvent(), {
-    type: "rpc_frontend_status",
-    phase: "connecting",
-    label: "Connecting",
-    connected: true,
-  });
-
-  session.handleSessionRecovered();
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(promptCalls, 2);
-  assert.deepEqual(
-    calls
-      .filter((payload) => payload.type === "prompt")
-      .map((payload) => payload.message),
-    ["hello", "hello"],
-  );
-  assert.equal(session.recoveryPending, false);
-});
-
-test("rpc interactive session recovers steer prompt timeout without surfacing an editor exception", async () => {
-  const calls = [];
-  let promptCalls = 0;
-  const client = {
-    isConnected: () => true,
-    send: async (payload) => {
-      calls.push(payload);
-      if (payload.type === "prompt") {
-        promptCalls += 1;
-        throw new Error("rin_timeout:prompt");
-      }
-      if (payload.type === "get_state") {
-        return {
-          success: true,
-          data: {
-            sessionId: "s1",
-            sessionFile: "/tmp/s1.jsonl",
-            thinkingLevel: "medium",
-            steeringMode: "all",
-            followUpMode: "one-at-a-time",
-            autoCompactionEnabled: false,
-            turnActive: true,
-            isStreaming: true,
-            isCompacting: false,
-            pendingMessageCount: 0,
-          },
-        };
-      }
-      return { success: true, data: {} };
-    },
-  };
-  const session = new RpcInteractiveSession(client);
-  session.ensureRemoteSession = async () => {};
-  session.refreshState = async () => {};
-  session.ensureReconnectLoop = () => Promise.resolve();
-  session.rpcConnected = true;
-  session.startupPending = false;
-  session.remoteTurnRunning = true;
-  session.syncStreamingState();
-
-  await session.prompt("steer", {
-    expandPromptTemplates: false,
-    streamingBehavior: "steer",
-  });
-
-  assert.equal(promptCalls, 1);
-  assert.equal(session.recoveryPending, true);
-  assert.deepEqual(session.getFrontendStatusEvent(), {
-    type: "rpc_frontend_status",
-    phase: "connecting",
-    label: "Connecting",
-    connected: true,
-  });
-
-  session.handleSessionRecovered();
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(promptCalls, 1);
-  assert.deepEqual(
-    calls.filter((payload) => payload.type === "prompt"),
-    [
-      {
-        type: "prompt",
-        message: "steer",
-        images: undefined,
-        streamingBehavior: undefined,
-        source: undefined,
-        requestTag: calls[0]?.requestTag,
-      },
-    ],
-  );
-  assert.equal(session.recoveryPending, false);
-  assert.equal(session.remoteTurnRunning, true);
-});
-
 test("rpc interactive session preserves raw runtime error markers inside session logic", async () => {
   const session = new RpcInteractiveSession({
     isConnected: () => true,
@@ -949,60 +811,6 @@ test("rpc interactive session can shut down or terminate an attached worker with
   assert.equal(calls.length, 2);
   assert.equal(calls[0]?.type, "shutdown_session");
   assert.equal(calls[1]?.type, "terminate_session");
-});
-
-test("rpc interactive session keeps recovery-pending prompts out of the Pi queue projection", async () => {
-  const calls = [];
-  const seen = [];
-  const session = new RpcInteractiveSession({
-    isConnected: () => true,
-    send: async (payload) => {
-      calls.push(payload);
-      return { success: true, data: {} };
-    },
-  });
-  session.ensureReconnectLoop = () => Promise.resolve();
-  session.startupPending = false;
-  session.recoveryPending = true;
-  session.rpcConnected = true;
-  session.subscribe((event) => seen.push(event));
-  seen.length = 0;
-
-  await session.prompt("hello", { expandPromptTemplates: false });
-
-  assert.equal(calls.length, 0);
-  assert.deepEqual(session.queuedOfflineOps, [
-    {
-      mode: "prompt",
-      message: "hello",
-      images: undefined,
-      streamingBehavior: undefined,
-      source: undefined,
-      requestTag: session.queuedOfflineOps[0]?.requestTag,
-    },
-  ]);
-  assert.match(
-    String(session.queuedOfflineOps[0]?.requestTag || ""),
-    /^rin-tui-/,
-  );
-  assert.deepEqual(session.getSteeringMessages(), []);
-  assert.equal(session.pendingMessageCount, 1);
-  assert.deepEqual(
-    seen.filter((event) => event.type === "queue_update"),
-    [{ type: "queue_update", steering: [], followUp: [] }],
-  );
-  assert.deepEqual(session.getFrontendStatusEvent(), {
-    type: "rpc_frontend_status",
-    phase: "connecting",
-    label: "Connecting",
-    connected: true,
-  });
-
-  const cleared = session.clearQueue();
-  assert.deepEqual(cleared, { steering: [], followUp: [] });
-  assert.deepEqual(session.queuedOfflineOps, []);
-  assert.deepEqual(session.getSteeringMessages(), []);
-  assert.equal(session.pendingMessageCount, 0);
 });
 
 test("rpc interactive session exits connecting after get_state succeeds and delays resync until history refresh finishes", async () => {
@@ -1062,7 +870,7 @@ test("rpc interactive session exits connecting after get_state succeeds and dela
   });
   assert.deepEqual(
     calls.map((payload) => payload.type),
-    ["get_state", "replay_pending_terminal_turn_event"],
+    ["get_state"],
   );
   assert.deepEqual(refreshes, [{ messages: true, session: true }]);
 
@@ -1071,7 +879,7 @@ test("rpc interactive session exits connecting after get_state succeeds and dela
   assert.equal(resyncs, 1);
 });
 
-test("rpc interactive session finishes daemon-side session recovery without dropping transport", async () => {
+test("rpc interactive session reconnects without replaying queued turns", async () => {
   const calls = [];
   const refreshes = [];
   let releaseRefresh;
@@ -1114,23 +922,14 @@ test("rpc interactive session finishes daemon-side session recovery without drop
   session.rpcConnected = true;
   session.startupPending = false;
   session.recoveryPending = true;
-  session.queuedOfflineOps = [
-    {
-      mode: "prompt",
-      message: "hello",
-      requestTag: "tag-1",
-    },
-  ];
-
   session.handleSessionRecovered();
   await new Promise((resolve) => setTimeout(resolve, 10));
 
   assert.equal(session.recoveryPending, false);
   assert.equal(resyncs, 0);
-  assert.equal(session.queuedOfflineOps.length, 0);
   assert.deepEqual(
     calls.map((payload) => payload.type),
-    ["get_state", "replay_pending_terminal_turn_event", "prompt"],
+    ["get_state"],
   );
   assert.deepEqual(refreshes, [{ messages: true, session: true }]);
 

@@ -68,7 +68,6 @@ export function isGenericPromptRunCommandBuiltinSlashCommand(name: unknown) {
 
 const SESSION_SCOPED_COMMAND_NAMES = [
   "prompt",
-  "resume_interrupted_turn",
   "steer",
   "follow_up",
   "clear_queue",
@@ -104,8 +103,6 @@ const SESSION_SCOPED_COMMAND_NAMES = [
   "get_fork_messages",
   "get_last_assistant_text",
   "get_messages",
-  "resolve_submitted_turn",
-  "replay_pending_terminal_turn_event",
   "get_active_tools",
   "get_all_tools",
   "set_active_tools",

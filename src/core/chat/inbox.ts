@@ -47,12 +47,7 @@ export type ChatInboxItemRouting = {
   replyToMessageId?: string;
 };
 
-export type ChatInboxItemState =
-  | "pending"
-  | "running"
-  | "terminal"
-  | "failed"
-  | "superseded";
+export type ChatInboxItemState = "pending" | "running" | "terminal" | "failed";
 
 export type ChatInboxItem = {
   version: 1;
@@ -231,14 +226,14 @@ function rowToChatInboxItem(row: any): ChatInboxItem | null {
 }
 
 const INBOX_SELECT = `
-  SELECT turns.*, messages.message_id
-  FROM turns
-  JOIN messages ON messages.id = turns.inbound_message_id
+  SELECT inbox_jobs.*, messages.message_id
+  FROM inbox_jobs
+  JOIN messages ON messages.id = inbox_jobs.inbound_message_id
 `;
 
 function getTurnRow(db: ReturnType<typeof openChatDatabase>, itemId: string) {
   return db
-    .prepare(`${INBOX_SELECT} WHERE turns.turn_id = ?`)
+    .prepare(`${INBOX_SELECT} WHERE inbox_jobs.turn_id = ?`)
     .get(safeString(itemId).trim()) as any;
 }
 
@@ -247,9 +242,9 @@ export function isChatInboxItemAccepted(agentDir: string, itemId: string) {
     openChatDatabase(agentDir)
       .prepare(
         `SELECT 1
-         FROM turns
-         JOIN messages ON messages.id = turns.inbound_message_id
-         WHERE turns.turn_id = ? AND messages.accepted_at IS NOT NULL
+         FROM inbox_jobs
+         JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+         WHERE inbox_jobs.turn_id = ? AND messages.accepted_at IS NOT NULL
          LIMIT 1`,
       )
       .get(safeString(itemId).trim()),
@@ -263,7 +258,7 @@ export function isChatInboxItemDurablyActionable(
   return Boolean(
     openChatDatabase(agentDir)
       .prepare(
-        `SELECT 1 FROM turns
+        `SELECT 1 FROM inbox_jobs
          WHERE turn_id = ? AND admission_state = 'actionable'
          LIMIT 1`,
       )
@@ -280,15 +275,15 @@ export function listChatInboxItems(
   states: ChatInboxItemState[] = ["pending"],
 ) {
   const normalized = states.filter((state) =>
-    ["pending", "running", "terminal", "failed", "superseded"].includes(state),
+    ["pending", "running", "terminal", "failed"].includes(state),
   );
   if (!normalized.length) return [];
   const placeholders = normalized.map(() => "?").join(", ");
   return openChatDatabase(agentDir)
     .prepare(
       `${INBOX_SELECT}
-       WHERE turns.state IN (${placeholders})
-       ORDER BY turns.chat_key, turns.sequence, turns.turn_id`,
+       WHERE inbox_jobs.state IN (${placeholders})
+       ORDER BY inbox_jobs.chat_key, inbox_jobs.sequence, inbox_jobs.turn_id`,
     )
     .all(...normalized)
     .map(rowToChatInboxItem)
@@ -331,7 +326,7 @@ export function enqueueChatInboxItem(
       const existing = getTurnRow(db, item.itemId);
       if (!existing) {
         db.prepare(
-          `INSERT INTO turns (
+          `INSERT INTO inbox_jobs (
             turn_id, inbound_message_id, chat_key, generation, sequence, state,
             terminal_kind, owner_epoch, attempt, lease_until, heartbeat_at,
             next_attempt_at, last_error, routing_json, session_json,
@@ -352,7 +347,7 @@ export function enqueueChatInboxItem(
         );
       } else if (existing.state === "pending") {
         db.prepare(
-          `UPDATE turns
+          `UPDATE inbox_jobs
            SET routing_json = ?, session_json = ?, elements_json = ?, updated_at = ?
            WHERE turn_id = ? AND state = 'pending'
              AND admission_state = 'unclassified'`,
@@ -394,7 +389,7 @@ export function claimChatInboxItem(
     .transaction(() => {
       const result = db
         .prepare(
-          `UPDATE turns
+          `UPDATE inbox_jobs
          SET state = 'running', owner_epoch = ?, attempt = attempt + 1,
              lease_until = ?, heartbeat_at = ?, updated_at = ?
          WHERE turn_id = ? AND state = 'pending'
@@ -453,7 +448,7 @@ export function commitClaimedChatInboxAdmission(
       if (safeString(owned.admission_state) === "unclassified") {
         const committed = db
           .prepare(
-            `UPDATE turns
+            `UPDATE inbox_jobs
              SET admission_state = ?, admission_json = ?, admission_hash = ?,
                  submission_json = ?, submission_hash = ?, updated_at = ?
              WHERE turn_id = ? AND state = 'running'
@@ -497,7 +492,7 @@ export function touchClaimedChatInboxItem(
   ).toISOString();
   const result = openChatDatabase(agentDir)
     .prepare(
-      `UPDATE turns
+      `UPDATE inbox_jobs
      SET lease_until = ?, heartbeat_at = ?, updated_at = ?
      WHERE turn_id = ? AND state = 'running' AND owner_epoch = ? AND attempt = ?`,
     )
@@ -517,7 +512,7 @@ export function completeClaimedChatInboxItem(
   item: ClaimedChatInboxItem,
   options: {
     terminalKind?: string;
-    disposition?: "record_only" | "actionable" | "superseded";
+    disposition?: "record_only" | "actionable";
   } = {},
 ) {
   const claim = requireClaim(item);
@@ -529,7 +524,7 @@ export function completeClaimedChatInboxItem(
       const timestamp = nowIso();
       const result = db
         .prepare(
-          `UPDATE turns
+          `UPDATE inbox_jobs
          SET state = 'terminal', terminal_kind = ?, owner_epoch = NULL,
              lease_until = NULL, heartbeat_at = NULL, next_attempt_at = NULL,
              last_error = NULL, updated_at = ?
@@ -546,17 +541,15 @@ export function completeClaimedChatInboxItem(
       db.prepare(
         `UPDATE messages
          SET disposition = CASE
-           WHEN ? = 'superseded' THEN 'superseded'
            WHEN (
-             SELECT admission_state FROM turns WHERE turn_id = ?
+             SELECT admission_state FROM inbox_jobs WHERE turn_id = ?
            ) IN ('actionable', 'record_only') THEN (
-             SELECT admission_state FROM turns WHERE turn_id = ?
+             SELECT admission_state FROM inbox_jobs WHERE turn_id = ?
            )
            ELSE ?
          END
-         WHERE id = (SELECT inbound_message_id FROM turns WHERE turn_id = ?)`,
+         WHERE id = (SELECT inbound_message_id FROM inbox_jobs WHERE turn_id = ?)`,
       ).run(
-        options.disposition || null,
         claim.itemId,
         claim.itemId,
         options.disposition || "actionable",
@@ -565,34 +558,6 @@ export function completeClaimedChatInboxItem(
       return true;
     })
     .immediate();
-}
-
-export function requeueClaimedChatInboxItem(
-  agentDir: string,
-  item: ClaimedChatInboxItem,
-  options: { delayMs: number; error?: string },
-) {
-  const claim = requireClaim(item);
-  const timestamp = nowIso();
-  const nextAttemptAt = new Date(
-    Date.now() + Math.max(0, Number(options.delayMs || 0)),
-  ).toISOString();
-  const result = openChatDatabase(agentDir)
-    .prepare(
-      `UPDATE turns
-     SET state = 'pending', owner_epoch = NULL, lease_until = NULL,
-         heartbeat_at = NULL, next_attempt_at = ?, last_error = ?, updated_at = ?
-     WHERE turn_id = ? AND state = 'running' AND owner_epoch = ? AND attempt = ?`,
-    )
-    .run(
-      nextAttemptAt,
-      safeString(options.error).trim() || null,
-      timestamp,
-      claim.itemId,
-      claim.ownerEpoch,
-      claim.attempt,
-    );
-  return result.changes === 1 ? getChatInboxItem(agentDir, claim.itemId) : null;
 }
 
 export function failClaimedChatInboxItem(
@@ -604,8 +569,8 @@ export function failClaimedChatInboxItem(
   const timestamp = nowIso();
   const result = openChatDatabase(agentDir)
     .prepare(
-      `UPDATE turns
-     SET state = 'failed', terminal_kind = 'attempts_exhausted',
+      `UPDATE inbox_jobs
+     SET state = 'failed', terminal_kind = 'interrupted',
          owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL,
          next_attempt_at = NULL, last_error = ?, updated_at = ?
      WHERE turn_id = ? AND state = 'running' AND owner_epoch = ? AND attempt = ?`,
@@ -620,14 +585,7 @@ export function failClaimedChatInboxItem(
   return result.changes === 1 ? getChatInboxItem(agentDir, claim.itemId) : null;
 }
 
-export function releaseClaimedChatInboxItem(
-  agentDir: string,
-  item: ClaimedChatInboxItem,
-) {
-  return requeueClaimedChatInboxItem(agentDir, item, { delayMs: 0 });
-}
-
-export function restoreProcessingChatInboxItems(
+export function interruptProcessingChatInboxItems(
   agentDir: string,
   options: { nowMs?: number; limit?: number } = {},
 ) {
@@ -639,9 +597,9 @@ export function restoreProcessingChatInboxItems(
       const rows = db
         .prepare(
           `${INBOX_SELECT}
-         WHERE turns.state = 'running'
-           AND (turns.lease_until IS NULL OR turns.lease_until <= ?)
-         ORDER BY turns.sequence, turns.turn_id
+         WHERE inbox_jobs.state = 'running'
+           AND (inbox_jobs.lease_until IS NULL OR inbox_jobs.lease_until <= ?)
+         ORDER BY inbox_jobs.sequence, inbox_jobs.turn_id
          ${limit ? `LIMIT ${limit}` : ""}`,
         )
         .all(timestamp) as any[];
@@ -649,9 +607,11 @@ export function restoreProcessingChatInboxItems(
       for (const row of rows) {
         const result = db
           .prepare(
-            `UPDATE turns
-           SET state = 'pending', owner_epoch = NULL, lease_until = NULL,
-               heartbeat_at = NULL, updated_at = ?
+            `UPDATE inbox_jobs
+           SET state = 'failed', terminal_kind = 'interrupted',
+               owner_epoch = NULL, lease_until = NULL,
+               heartbeat_at = NULL, next_attempt_at = NULL,
+               last_error = 'chat_turn_interrupted', updated_at = ?
            WHERE turn_id = ? AND state = 'running'
              AND (lease_until IS NULL OR lease_until <= ?)`,
           )

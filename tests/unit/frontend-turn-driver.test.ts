@@ -13,12 +13,6 @@ const { RinFrontendTurnDriver } = await import(
     path.join(rootDir, "dist", "core", "rin-frontend-sdk", "turn-driver.js"),
   ).href
 );
-const { resolveSubmittedTurnFromMessages } = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-frontend-sdk", "submitted-turn.js"),
-  ).href
-);
-
 function createDriver() {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({
@@ -73,12 +67,13 @@ function createFrontendClient() {
           finalText: "frontend final",
           sessionId: "frontend-session",
           sessionFile,
-          ...(options.chatRunContext
+          ...(options.chatDeliveryContext
             ? {
-                chatRunContext: options.chatRunContext,
-                terminalWal: {
-                  payloadHash: "a".repeat(64),
-                  stagedAt: "2026-07-29T12:57:18.000Z",
+                chatDeliveryContext: options.chatDeliveryContext,
+                terminalRecord: {
+                  terminalId: `terminal-${"a".repeat(64)}`,
+                  state: "complete",
+                  terminalAt: "2026-07-29T12:57:18.000Z",
                 },
               }
             : {}),
@@ -122,13 +117,6 @@ function createFrontendClient() {
       if (command.type === "get_state") return await this.getState();
       if (command.type === "get_messages") {
         return { messages: await this.getMessages() };
-      }
-      if (command.type === "resolve_submitted_turn") {
-        return resolveSubmittedTurnFromMessages(await this.getMessages(), {
-          text: String(command.text || ""),
-          sentAt: Number(command.sentAt || 0),
-          requestTag: String(command.requestTag || ""),
-        });
       }
       if (command.type === "run_command") {
         return await this.runCommand(String(command.commandLine || ""));
@@ -318,23 +306,24 @@ test("frontend turn driver propagates canonical run identity through terminal pr
   const driver = createDriver() as any;
   const seen: any[] = [];
   driver.subscribe((event: any) => seen.push(event));
-  const chatRunContext = {
-    runId: "run-protocol",
-    ownerEpoch: "owner-protocol",
-    producerIncarnation: "worker-protocol",
+  const chatDeliveryContext = {
+    turnId: "turn-protocol",
+    chatKey: "discord/1:2",
+    messageId: "message-protocol",
   };
   const result = await driver.runTurn({
     text: "canonical prompt",
     requestTag: "request-protocol",
-    chatRunContext,
+    chatDeliveryContext,
   });
   const promptCall = driver.testClient.calls.find(
     (call) => call.type === "prompt",
   );
-  assert.deepEqual(promptCall.options.chatRunContext, chatRunContext);
+  assert.deepEqual(promptCall.options.chatDeliveryContext, chatDeliveryContext);
   assert.equal(result.finalText, "frontend final");
   assert.equal(
-    seen.find((event) => event.type === "turn_complete")?.terminalWal?.stagedAt,
+    seen.find((event) => event.type === "turn_complete")?.terminalRecord
+      ?.terminalAt,
     "2026-07-29T12:57:18.000Z",
   );
 });
@@ -618,38 +607,6 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
     selfImproveEligible: true,
     chatKey: "telegram/1:2",
   });
-});
-
-test("frontend SDK turn driver persists sender prompt context in submitted prompt text", async () => {
-  const client = createFrontendClient();
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-
-  await driver.runTurn({
-    text: "who am I?",
-    managedSessionLeaf: "telegram/1:2",
-    promptContext: {
-      source: "chat-bridge",
-      sentAt: 1710000000000,
-      chatKey: "telegram/1:2",
-      chatType: "group",
-      userId: "guest-1",
-      nickname: "Guest",
-      identity: "OTHER",
-    },
-  });
-
-  const promptCall = client.calls.find((call: any) => call.type === "prompt");
-  assert.ok(promptCall.text.startsWith("time: "));
-  assert.ok(
-    promptCall.text.includes("runtime metadata: rin prompt context v1"),
-  );
-  assert.ok(promptCall.text.includes("sender user id: guest-1"));
-  assert.ok(promptCall.text.includes("sender nickname: Guest"));
-  assert.ok(promptCall.text.includes("sender trust: other chat user"));
-  assert.ok(promptCall.text.endsWith("---\nwho am I?"));
 });
 
 test("frontend SDK turn driver applies startup session names before prompt submission", async () => {
@@ -955,61 +912,6 @@ test("frontend SDK daemon shutdown detach leaves an active turn recoverable with
   assert.equal(settled, false);
 });
 
-test("frontend SDK daemon shutdown detach stops an in-flight recovery reconnect", async () => {
-  const client = createFrontendClient();
-  const originalConnect = client.connect;
-  const originalDisconnect = client.disconnect;
-  let connectCount = 0;
-  let recoveryConnectStarted = false;
-  let releaseRecoveryConnect;
-  let replayRequests = 0;
-  client.connect = async () => {
-    connectCount += 1;
-    if (connectCount > 1) {
-      recoveryConnectStarted = true;
-      await new Promise((resolve) => {
-        releaseRecoveryConnect = resolve;
-      });
-    }
-    await originalConnect.call(client);
-  };
-  client.prompt = async () => {
-    await originalDisconnect.call(client);
-    throw new Error("rin_disconnected:daemon_restart");
-  };
-  const originalRequest = client.request;
-  client.request = async (command) => {
-    if (command.type === "replay_pending_terminal_turn_event") {
-      replayRequests += 1;
-    }
-    return await originalRequest.call(client, command);
-  };
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-
-  let settled = false;
-  const activeTurn = driver.runTurn({ text: "still running" }).finally(() => {
-    settled = true;
-  });
-  activeTurn.catch(() => {});
-  await waitUntil(
-    () => recoveryConnectStarted,
-    "recovery reconnect did not start",
-  );
-
-  await driver.detachForDaemonShutdown();
-  releaseRecoveryConnect();
-  await new Promise((resolve) => setTimeout(resolve, 50));
-
-  assert.equal((driver as any).reconnectingTurnPromise, null);
-  assert.equal(client.isConnected(), false);
-  assert.equal(connectCount, 2);
-  assert.equal(replayRequests, 0);
-  assert.equal(settled, false);
-});
-
 test("frontend SDK daemon shutdown detach closes a connection that finishes late", async () => {
   const client = createFrontendClient();
   const originalConnect = client.connect;
@@ -1195,50 +1097,6 @@ test("frontend SDK /new does not wait for backend abort before creating the new 
 
   resolveAbort();
   await new Promise((resolve) => setImmediate(resolve));
-});
-
-test("frontend SDK /new aborts a turn that has not submitted its prompt yet", async () => {
-  const client = createFrontendClient();
-  const originalRequest = client.request.bind(client);
-  let releaseToolRefresh!: () => void;
-  const toolRefreshReleased = new Promise<void>((resolve) => {
-    releaseToolRefresh = resolve;
-  });
-  let toolRefreshStarted = false;
-  let promptCalled = false;
-  client.request = async (command: any) => {
-    client.calls.push({ type: "request", command });
-    if (command?.type === "get_active_tools" && !toolRefreshStarted) {
-      toolRefreshStarted = true;
-      await toolRefreshReleased;
-      return { tools: [] };
-    }
-    return await originalRequest(command);
-  };
-  client.prompt = async (text: string, options: any = {}) => {
-    client.calls.push({ type: "prompt", text, options });
-    promptCalled = true;
-  };
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-
-  const activeTurn = driver.runTurn({ text: "old turn", excludeTools: [] });
-  activeTurn.catch(() => {});
-  await waitUntil(
-    () => toolRefreshStarted,
-    "turn did not reach pre-submit wait",
-  );
-
-  const result = await driver.runCommand("/new", {
-    managedSessionLeaf: "chat",
-  });
-  releaseToolRefresh();
-
-  assert.equal(result.text, "Started a new session.");
-  await assert.rejects(activeTurn, /chat_turn_aborted/);
-  assert.equal(promptCalled, false);
 });
 
 test("frontend SDK ignores stale terminal events from the aborted turn after /new", async () => {
@@ -1442,96 +1300,6 @@ test("frontend SDK turn driver applies turn-scoped thinking without persisting d
   });
 });
 
-test("frontend SDK turn driver resolves an already submitted restored turn without resubmitting", async () => {
-  const client = createFrontendClient();
-  client.getMessages = async () => [
-    {
-      role: "user",
-      timestamp: 1778774583000,
-      content: "restored job",
-    },
-    {
-      role: "assistant",
-      timestamp: 1778774590000,
-      content: "already finished",
-    },
-  ];
-  client.prompt = async () => {
-    throw new Error("prompt_should_not_be_resubmitted");
-  };
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-
-  const result = await driver.runTurn({
-    text: "restored job",
-    restoreSessionFile: "/tmp/frontend-chat.jsonl",
-    promptContext: {
-      source: "chat-bridge",
-      chatKey: "telegram/1:2",
-      sentAt: 1778774580000,
-    },
-  });
-
-  assert.equal(result.finalText, "already finished");
-  assert.equal(
-    client.calls.some((call: any) => call.type === "prompt"),
-    false,
-  );
-});
-
-test("frontend SDK turn driver clears active state when recovered submitted turn has final text", async () => {
-  const client = createFrontendClient();
-  let resolveCount = 0;
-  client.request = async (command: any) => {
-    client.calls.push({ type: "request", command });
-    if (command.type === "get_state") {
-      const active = resolveCount > 1;
-      return {
-        sessionFile: "/tmp/frontend-chat.jsonl",
-        sessionId: "frontend-session",
-        isStreaming: active,
-        turnActive: active,
-      };
-    }
-    if (command.type === "resolve_submitted_turn") {
-      resolveCount += 1;
-      if (resolveCount < 3) return { submitted: true };
-      return {
-        finalText: "already finished while worker still active",
-        sessionId: "frontend-session",
-        sessionFile: "/tmp/frontend-chat.jsonl",
-      };
-    }
-    return {};
-  };
-  client.prompt = async () => {
-    throw new Error("prompt_should_not_be_resubmitted");
-  };
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-
-  const result = await driver.runTurn({
-    text: "restored job",
-    restoreSessionFile: "/tmp/frontend-chat.jsonl",
-    promptContext: {
-      source: "chat-bridge",
-      chatKey: "telegram/1:2",
-      sentAt: 1778774580000,
-    },
-  });
-
-  assert.equal(result.finalText, "already finished while worker still active");
-  assert.equal(driver.hasWorkerActiveTurn(), false);
-  assert.equal(
-    client.calls.some((call: any) => call.type === "prompt"),
-    false,
-  );
-});
-
 test("frontend SDK visible chat working excludes standalone compaction and recovery state", async () => {
   const client = createFrontendClient();
   client.getState = async () => ({
@@ -1552,296 +1320,6 @@ test("frontend SDK visible chat working excludes standalone compaction and recov
 
   assert.equal(driver.hasActiveTurn(), false);
   assert.equal(driver.hasVisibleChatWorkingTurn(), false);
-});
-
-test("submitted turn resolution treats earlier steered inputs as superseded by the latest pre-final user input", () => {
-  const messages = [
-    {
-      role: "user",
-      timestamp: 1778774581000,
-      content: "first restored input",
-    },
-    {
-      role: "user",
-      timestamp: 1778774582000,
-      content: "latest restored input",
-    },
-    {
-      role: "assistant",
-      timestamp: 1778774590000,
-      content: [{ type: "text", text: "one recovered final" }],
-    },
-  ];
-
-  assert.deepEqual(
-    resolveSubmittedTurnFromMessages(messages, {
-      text: "first restored input",
-      sentAt: 1778774580000,
-    }),
-    { superseded: true },
-  );
-  assert.deepEqual(
-    resolveSubmittedTurnFromMessages(messages, {
-      text: "latest restored input",
-      sentAt: 1778774580000,
-    }),
-    {
-      finalText: "one recovered final",
-      result: { messages: [{ type: "text", text: "one recovered final" }] },
-    },
-  );
-});
-
-test("submitted turn resolution disambiguates identical steers by durable request tag", () => {
-  const messages = [
-    {
-      role: "user",
-      timestamp: 1778774581000,
-      requestTag: "first-identical-tag",
-      content: "same restored input",
-    },
-    {
-      role: "user",
-      timestamp: 1778774581000,
-      requestTag: "second-identical-tag",
-      content: "same restored input",
-    },
-    {
-      role: "assistant",
-      timestamp: 1778774590000,
-      content: [{ type: "text", text: "latest identical final" }],
-    },
-  ];
-
-  assert.deepEqual(
-    resolveSubmittedTurnFromMessages(messages, {
-      text: "same restored input",
-      requestTag: "first-identical-tag",
-    }),
-    { superseded: true },
-  );
-  assert.deepEqual(
-    resolveSubmittedTurnFromMessages(messages, {
-      text: "same restored input",
-      requestTag: "second-identical-tag",
-    }),
-    {
-      finalText: "latest identical final",
-      result: { messages: [{ type: "text", text: "latest identical final" }] },
-    },
-  );
-  assert.equal(
-    resolveSubmittedTurnFromMessages(messages, {
-      text: "same restored input",
-      sentAt: 1778774580000,
-      requestTag: "missing-tag",
-    }),
-    null,
-  );
-  assert.deepEqual(
-    resolveSubmittedTurnFromMessages(
-      [
-        {
-          role: "user",
-          timestamp: 1778774581000,
-          content: "legacy identical input",
-        },
-      ],
-      {
-        text: "legacy identical input",
-        sentAt: 1778774580000,
-        requestTag: "modern-request-tag",
-      },
-    ),
-    { submitted: true },
-  );
-});
-
-test("submitted turn resolution ignores summary markers on outer message wrappers", () => {
-  const resolved = resolveSubmittedTurnFromMessages(
-    [
-      {
-        type: "message",
-        message: {
-          role: "user",
-          requestTag: "wrapped-summary-tag",
-          content: "restored job",
-        },
-      },
-      {
-        type: "compaction",
-        summaryEntry: { id: "summary" },
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "not a final" }],
-        },
-      },
-      {
-        type: "message",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "actual final" }],
-        },
-      },
-    ],
-    { text: "restored job", requestTag: "wrapped-summary-tag" },
-  );
-
-  assert.deepEqual(resolved, {
-    finalText: "actual final",
-    result: { messages: [{ type: "text", text: "actual final" }] },
-  });
-});
-
-test("submitted turn resolution preserves provider failure instead of final-missing", () => {
-  const resolved = resolveSubmittedTurnFromMessages(
-    [
-      {
-        role: "user",
-        timestamp: 1778774583000,
-        content: "restored job",
-      },
-      {
-        role: "assistant",
-        timestamp: 1778774590000,
-        stopReason: "error",
-        errorMessage: "WebSocket error",
-        content: [
-          { type: "thinking", thinking: "working" },
-          { type: "toolCall", name: "write", arguments: {} },
-        ],
-      },
-    ],
-    { text: "restored job", sentAt: 1778774580000 },
-  );
-
-  assert.deepEqual(resolved, { error: "WebSocket error" });
-});
-
-test("submitted turn resolution does not surface provider failure while the submitted turn is active", () => {
-  const resolved = (resolveSubmittedTurnFromMessages as any)(
-    [
-      {
-        role: "user",
-        timestamp: 1778774583000,
-        content: "restored job",
-      },
-      {
-        role: "assistant",
-        timestamp: 1778774590000,
-        stopReason: "error",
-        errorMessage: "Codex SSE response headers timed out after 20000ms",
-        content: [
-          { type: "thinking", thinking: "working" },
-          { type: "toolCall", name: "write", arguments: {} },
-        ],
-      },
-    ],
-    { text: "restored job", sentAt: 1778774580000 },
-    { turnActive: true },
-  );
-
-  assert.deepEqual(resolved, { submitted: true });
-});
-
-test("submitted turn resolution uses the last empty or media terminal after a failed retry", () => {
-  const resolved = resolveSubmittedTurnFromMessages(
-    [
-      {
-        role: "user",
-        requestTag: "retry-tag",
-        content: "restored job",
-      },
-      {
-        role: "assistant",
-        stopReason: "error",
-        errorMessage: "retry failed",
-        content: [],
-      },
-      {
-        role: "assistant",
-        stopReason: "stop",
-        content: [{ type: "image", data: "ZGVtbw==", mimeType: "image/png" }],
-      },
-      {
-        role: "user",
-        requestTag: "later-tag",
-        content: "later follow-up",
-      },
-    ],
-    { text: "restored job", requestTag: "retry-tag" },
-  );
-
-  assert.deepEqual(resolved, {
-    finalText: "",
-    result: {
-      messages: [{ type: "image", data: "ZGVtbw==", mimeType: "image/png" }],
-    },
-  });
-});
-
-test("frontend SDK turn driver surfaces restored submitted provider errors", async () => {
-  const originalNow = Date.now;
-  let now = 1778774600000;
-  (Date as any).now = () => now;
-
-  try {
-    const client = createFrontendClient();
-    client.getState = async () => {
-      now += 121_000;
-      return {
-        sessionFile: "/tmp/frontend-chat.jsonl",
-        sessionId: "frontend-session",
-        isStreaming: false,
-        turnActive: false,
-      };
-    };
-    client.getMessages = async () => [
-      {
-        role: "user",
-        timestamp: 1778774583000,
-        content: "restored job",
-      },
-      {
-        role: "assistant",
-        timestamp: 1778774590000,
-        stopReason: "error",
-        errorMessage: "WebSocket error",
-        content: [
-          { type: "thinking", thinking: "working" },
-          { type: "toolCall", name: "write", arguments: {} },
-        ],
-      },
-    ];
-    client.prompt = async () => {
-      throw new Error("prompt_should_not_be_resubmitted");
-    };
-    const driver = new RinFrontendTurnDriver({
-      clientFactory: () => client,
-      promptSource: "chat-bridge",
-    });
-
-    await assert.rejects(
-      () =>
-        driver.runTurn({
-          text: "restored job",
-          restoreSessionFile: "/tmp/frontend-chat.jsonl",
-          promptContext: {
-            source: "chat-bridge",
-            chatKey: "telegram/1:2",
-            sentAt: 1778774580000,
-          },
-        }),
-      (error: any) =>
-        error?.message === "WebSocket error" && error?.rinTurnTerminal === true,
-    );
-    assert.equal(
-      client.calls.some((call: any) => call.type === "prompt"),
-      false,
-    );
-  } finally {
-    (Date as any).now = originalNow;
-  }
 });
 
 test("frontend SDK turn driver reselects a restored session even when cached state matches", async () => {
@@ -1869,40 +1347,6 @@ test("frontend SDK turn driver reselects a restored session even when cached sta
   );
 });
 
-test("frontend SDK turn driver carries sessionFile on restored turn RPCs", async () => {
-  const client = createFrontendClient();
-  const sessionFile = "/tmp/frontend-chat.jsonl";
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-
-  await driver.runTurn({
-    text: "hello",
-    restoreSessionFile: sessionFile,
-  });
-
-  const scopedCommands = client.calls
-    .filter((call: any) => call.type === "request")
-    .map((call: any) => call.command)
-    .filter((command: any) =>
-      ["get_state", "resolve_submitted_turn"].includes(command.type),
-    );
-  assert.ok(scopedCommands.length >= 2);
-  assert.ok(
-    scopedCommands.every((command: any) => command.sessionFile === sessionFile),
-  );
-  assert.equal(
-    client.calls.some(
-      (call: any) =>
-        call.type === "request" && call.command.type === "get_messages",
-    ),
-    false,
-  );
-  const promptCall = client.calls.find((call: any) => call.type === "prompt");
-  assert.equal(promptCall.options.sessionFile, sessionFile);
-});
-
 test("frontend SDK turn driver carries sessionFile on restored commands", async () => {
   const client = createFrontendClient();
   const sessionFile = "/tmp/frontend-chat.jsonl";
@@ -1920,85 +1364,6 @@ test("frontend SDK turn driver carries sessionFile on restored commands", async 
       customInstructions: undefined,
       options: { sessionFile },
     },
-  );
-});
-
-test("frontend SDK turn driver rejoins an active already-submitted turn without resubmitting", async () => {
-  const client = createFrontendClient();
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-  const sessionFile = "/tmp/frontend-active-submitted.jsonl";
-  let resolveCalls = 0;
-  client.getState = async () => ({
-    sessionFile,
-    sessionId: "frontend-session",
-    isStreaming: true,
-    turnActive: true,
-  });
-  client.request = async (command: any) => {
-    client.calls.push({ type: "request", command });
-    if (command.type === "get_state") return await client.getState();
-    if (command.type === "resolve_submitted_turn") {
-      resolveCalls += 1;
-      if (resolveCalls === 1) {
-        setImmediate(() => {
-          void emitDriverEvent(driver as any, {
-            type: "rpc_turn_event",
-            event: "complete",
-            requestTag: "persisted-active-tag",
-            finalText: "recovered active final",
-            result: {
-              messages: [{ type: "text", text: "recovered active final" }],
-            },
-            sessionId: "frontend-session",
-            sessionFile,
-          });
-        });
-        return { submitted: true };
-      }
-      return {
-        finalText: "recovered active final",
-        sessionId: "frontend-session",
-        sessionFile,
-      };
-    }
-    if (command.type === "replay_pending_terminal_turn_event") {
-      return { replayed: false };
-    }
-    if (command.type === "get_active_tools") return { tools: [] };
-    if (command.type === "set_active_tools") return { tools: [] };
-    return {};
-  };
-  client.prompt = async () => {
-    throw new Error("prompt_should_not_be_resubmitted");
-  };
-
-  const result = await driver.runTurn({
-    text: "restored active job",
-    requestTag: "persisted-active-tag",
-    restoreSessionFile: sessionFile,
-    promptContext: {
-      source: "chat-bridge",
-      chatKey: "telegram/1:2",
-      sentAt: 1778774580000,
-    },
-  });
-
-  assert.equal(result.finalText, "recovered active final");
-  assert.ok(
-    client.calls
-      .filter(
-        (call: any) =>
-          call.type === "request" &&
-          call.command.type === "resolve_submitted_turn",
-      )
-      .every((call: any) => call.command.requestTag === "persisted-active-tag"),
-  );
-  assert.equal(
-    client.calls.some((call: any) => call.type === "prompt"),
-    false,
   );
 });
 
@@ -2561,56 +1926,6 @@ test("frontend SDK turn driver forwards disabled Rin capabilities to managed ses
   });
 });
 
-test("frontend SDK turn driver asks the daemon to replay pending terminal events after joining a submitted turn", async () => {
-  const client = createFrontendClient();
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-  let replayCalls = 0;
-  let liveTurnCreatedBeforeReplay = false;
-  client.request = async (command: any) => {
-    client.calls.push({ type: "request", command });
-    if (command.type === "get_state") {
-      return {
-        sessionFile: "/tmp/frontend-chat.jsonl",
-        sessionId: "frontend-session",
-        isStreaming: true,
-        turnActive: true,
-      };
-    }
-    if (command.type === "resolve_submitted_turn") return { submitted: true };
-    if (command.type === "replay_pending_terminal_turn_event") {
-      replayCalls += 1;
-      liveTurnCreatedBeforeReplay = Boolean((driver as any).liveTurn);
-      await emitDriverEvent(driver as any, {
-        type: "rpc_turn_event",
-        event: "complete",
-        finalText: "replayed pending final",
-        result: {
-          messages: [{ type: "text", text: "replayed pending final" }],
-        },
-        sessionId: "frontend-session",
-        sessionFile: "/tmp/frontend-chat.jsonl",
-      });
-      return { replayed: true };
-    }
-    return {};
-  };
-  client.prompt = async () => {
-    throw new Error("prompt should not be resubmitted");
-  };
-
-  const result = await driver.runTurn({
-    text: "hello",
-    promptContext: { sentAt: Date.now() },
-  });
-
-  assert.equal(result.finalText, "replayed pending final");
-  assert.equal(replayCalls, 1);
-  assert.equal(liveTurnCreatedBeforeReplay, true);
-});
-
 test("frontend SDK waits for the native terminal after backend rejoin admission", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({
@@ -2698,45 +2013,6 @@ test("frontend SDK turn driver follows active turn across transient reconnect be
   const result = await resultPromise;
   assert.equal(result.finalText, "final after reconnect");
   assert.equal(getStateCount >= 3, true);
-});
-
-test("frontend SDK turn driver does not infer empty completion from inactive state before a late rpc final", async () => {
-  const client = createFrontendClient();
-  client.getState = async () => ({
-    sessionFile: "/tmp/frontend-late-final.jsonl",
-    sessionId: "frontend-late-final",
-    isStreaming: false,
-    turnActive: false,
-  });
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-  await driver.connect();
-
-  const resultPromise = (driver as any).followActiveTurn(
-    {
-      sessionFile: "/tmp/frontend-late-final.jsonl",
-      sessionId: "frontend-late-final",
-    },
-    "late-final-tag",
-  );
-  setTimeout(() => {
-    void emitRpcTurnComplete(
-      driver,
-      "late-final-tag",
-      "canonical late final",
-      "/tmp/frontend-late-final.jsonl",
-      "frontend-late-final",
-    );
-  }, 1_100);
-
-  const result = await withTimeout(
-    resultPromise,
-    2_000,
-    "turn resolved before receiving its canonical terminal event",
-  );
-  assert.equal(result.finalText, "canonical late final");
 });
 
 test("frontend SDK turn driver does not complete from agent_end before rpc final", async () => {
@@ -2896,175 +2172,6 @@ test("frontend SDK turn driver completes Pi-native overflow recovery", async () 
   assert.equal(result.finalText, "continued after compaction");
 });
 
-test("frontend SDK turn driver waits for an already submitted restored prompt instead of resubmitting", async () => {
-  const client = createFrontendClient();
-  let getMessagesCount = 0;
-  client.getMessages = async () => {
-    getMessagesCount += 1;
-    const messages = [{ role: "user", timestamp: 1001, content: "hello" }];
-    if (getMessagesCount >= 2) {
-      messages.push({
-        role: "assistant",
-        timestamp: 1002,
-        content: "restored final",
-      });
-    }
-    return messages;
-  };
-  client.prompt = async () => {
-    throw new Error("prompt_should_not_be_resubmitted");
-  };
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-
-  const result = await driver.runTurn({
-    text: "hello",
-    promptContext: { sentAt: 1000 },
-  });
-
-  assert.equal(result.finalText, "restored final");
-  assert.equal(result.sessionFile, "/tmp/frontend-chat.jsonl");
-  assert.equal(
-    client.calls.some((call: any) => call.type === "prompt"),
-    false,
-  );
-  assert.equal(getMessagesCount, 2);
-});
-
-test(
-  "frontend SDK turn driver keeps waiting for restored prompts while the session is active",
-  { concurrency: false },
-  async () => {
-    const originalNow = Date.now;
-    let now = 0;
-    (Date as any).now = () => now;
-
-    try {
-      const client = createFrontendClient();
-      let getMessagesCount = 0;
-      client.getState = async () => ({
-        sessionFile: "/tmp/frontend-chat.jsonl",
-        sessionId: "frontend-session",
-        isStreaming: getMessagesCount >= 2 && getMessagesCount < 3,
-        turnActive: getMessagesCount >= 2 && getMessagesCount < 3,
-      });
-      client.getMessages = async () => {
-        getMessagesCount += 1;
-        now += 121_000;
-        const messages = [
-          { role: "user", timestamp: 1001, content: "long restored job" },
-        ];
-        if (getMessagesCount >= 3) {
-          messages.push({
-            role: "assistant",
-            timestamp: now,
-            content: "long restored final",
-          });
-        }
-        return messages;
-      };
-      client.prompt = async () => {
-        throw new Error("prompt_should_not_be_resubmitted");
-      };
-      const driver = new RinFrontendTurnDriver({
-        clientFactory: () => client,
-        promptSource: "chat-bridge",
-      });
-
-      const result = await driver.runTurn({
-        text: "long restored job",
-        promptContext: { sentAt: 1000 },
-      });
-
-      assert.equal(result.finalText, "long restored final");
-      assert.equal(
-        client.calls.some((call: any) => call.type === "prompt"),
-        false,
-      );
-      assert.equal(getMessagesCount, 3);
-    } finally {
-      (Date as any).now = originalNow;
-    }
-  },
-);
-
-test(
-  "frontend SDK turn driver recovers disconnected prompt errors through daemon terminal replay",
-  { concurrency: false },
-  async () => {
-    const client = createFrontendClient();
-    const originalConnect = client.connect;
-    let connectCount = 0;
-    client.connect = async () => {
-      connectCount += 1;
-      await originalConnect.call(client);
-    };
-    client.getState = async () => ({
-      sessionFile: "/tmp/frontend-chat.jsonl",
-      sessionId: "frontend-session",
-      isStreaming: false,
-      turnActive: false,
-    });
-    let submittedRequestTag = "";
-    client.prompt = async (text: string, options: any = {}) => {
-      client.calls.push({ type: "prompt", text, options });
-      submittedRequestTag = options.requestTag;
-      await client.disconnect();
-      throw new Error("rin_disconnected:req_1");
-    };
-    const driver = new RinFrontendTurnDriver({
-      clientFactory: () => client,
-      promptSource: "chat-bridge",
-    });
-    client.request = async (command: any) => {
-      client.calls.push({ type: "request", command });
-      if (command.type === "get_state") return await client.getState();
-      if (command.type === "replay_pending_terminal_turn_event") {
-        await emitDriverEvent(driver as any, {
-          type: "rpc_turn_event",
-          event: "complete",
-          requestTag: submittedRequestTag,
-          finalText: "recovered by daemon replay",
-          result: {
-            messages: [{ type: "text", text: "recovered by daemon replay" }],
-          },
-          sessionId: "frontend-session",
-          sessionFile: "/tmp/frontend-chat.jsonl",
-        });
-        return { replayed: true };
-      }
-      return {};
-    };
-
-    const result = await driver.runTurn({ text: "hello" });
-
-    assert.equal(result.finalText, "recovered by daemon replay");
-    assert.equal(connectCount, 2);
-    assert.equal(
-      client.calls.filter((call: any) => call.type === "prompt").length,
-      1,
-    );
-    assert.equal(
-      client.calls.some(
-        (call: any) =>
-          call.type === "request" &&
-          call.command.type === "replay_pending_terminal_turn_event",
-      ),
-      true,
-    );
-    assert.equal(
-      client.calls.some(
-        (call: any) =>
-          call.type === "request" &&
-          call.command.type === "resolve_submitted_turn",
-      ),
-      false,
-    );
-  },
-);
-
 test("frontend SDK turn driver does not reuse an older final when the current turn has no final yet", async () => {
   const client = createFrontendClient();
   const oldFinal = "previous turn final";
@@ -3116,66 +2223,75 @@ test("frontend SDK turn driver does not reuse an older final when the current tu
   assert.notEqual(result.finalText, oldFinal);
 });
 
-test("frontend SDK turn driver does not recover interrupted prompt errors from session state", async () => {
-  const originalNow = Date.now;
-  let now = 0;
-  (Date as any).now = () => now;
-
-  try {
-    const client = createFrontendClient();
-    const originalConnect = client.connect;
-    let connectCount = 0;
-    client.connect = async () => {
-      connectCount += 1;
-      await originalConnect.call(client);
-    };
-    let promptAttempted = false;
-    client.getState = async () => {
-      if (promptAttempted) now += 121_000;
+test("frontend replays one durable terminal record and acknowledges it explicitly", async () => {
+  const driver: any = createDriver();
+  const seen: any[] = [];
+  driver.subscribe((event: any) => seen.push(event));
+  await driver.connect();
+  const client = driver.testClient;
+  const originalRequest = client.request.bind(client);
+  client.request = async (command: any) => {
+    if (command.type === "list_unacknowledged_chat_terminals") {
       return {
-        sessionFile: "/tmp/frontend-chat.jsonl",
-        sessionId: "frontend-session",
-        isStreaming: false,
+        terminals: [
+          {
+            type: "rpc_turn_event",
+            event: "complete",
+            requestTag: "replayed-request",
+            sessionFile: "/tmp/frontend-chat.jsonl",
+            sessionId: "frontend-session",
+            finalText: "replayed final",
+            chatDeliveryContext: {
+              turnId: "transport-turn-replayed",
+              chatKey: "discord/1:2",
+              messageId: "message-replayed",
+            },
+            terminalRecord: {
+              terminalId: `terminal-${"b".repeat(64)}`,
+              state: "complete",
+              terminalAt: "2026-07-30T09:00:00.000Z",
+            },
+          },
+        ],
       };
-    };
-    client.getMessages = async () =>
-      promptAttempted
-        ? [
-            { role: "user", content: "hello" },
-            { role: "assistant", content: "recovered final" },
-          ]
-        : [{ role: "user", content: "hello" }];
-    client.prompt = async (text: string, options: any = {}) => {
-      client.calls.push({ type: "prompt", text, options });
-      promptAttempted = true;
-      await client.disconnect();
-      throw new Error("rin_disconnected:req_1");
-    };
-    const driver = new RinFrontendTurnDriver({
-      clientFactory: () => client,
-      promptSource: "chat-bridge",
-    });
+    }
+    return await originalRequest(command);
+  };
 
-    await assert.rejects(
-      () => driver.runTurn({ text: "hello" }),
-      /frontend_turn_recovery_failed/,
-    );
-    assert.equal(connectCount, 2);
-    assert.equal(
-      client.calls.filter((call: any) => call.type === "prompt").length,
-      1,
-    );
-    assert.ok(
-      client.calls
-        .filter((call: any) => call.type === "request")
-        .every(
-          (call: any) =>
-            !["get_state", "get_messages", "resolve_submitted_turn"].includes(
-              call.command.type,
-            ) || call.command.sessionFile === "/tmp/frontend-chat.jsonl",
-        ),
-    );
-  } finally {
-    (Date as any).now = originalNow;
-  }
+  assert.equal(
+    await driver.recoverUnacknowledgedChatTerminals("discord/1:2"),
+    1,
+  );
+  const terminal = seen.find((event) => event.type === "turn_complete");
+  assert.equal(terminal?.finalText, "replayed final");
+  assert.equal(terminal?.terminalRecord?.state, "complete");
+
+  await driver.acknowledgeTerminal(
+    "replayed-request",
+    `terminal-${"b".repeat(64)}`,
+  );
+  assert.equal(
+    client.calls.some(
+      (call: any) =>
+        call.type === "request" &&
+        call.command.type === "ack_turn_terminal" &&
+        call.command.requestTag === "replayed-request",
+    ),
+    true,
+  );
+});
+
+test("terminal reconnect stops on permanent ledger failure instead of retrying forever", async () => {
+  const driver: any = createDriver();
+  await driver.connect();
+  const liveTurn = driver.startLiveTurn("missing-ledger-request");
+  driver.liveTurnRecoveryContext = { sessionFile: "/tmp/missing-ledger.jsonl" };
+  driver.testClient.request = async () => {
+    throw new Error("rin_turn_ledger_record_missing");
+  };
+
+  await driver.interruptLiveTurnAfterDisconnect();
+  await assert.rejects(liveTurn.promise, /frontend_turn_interrupted/);
+  assert.equal(driver.liveTurn, null);
+  assert.equal(driver.disconnectedTurnRecovery, null);
 });

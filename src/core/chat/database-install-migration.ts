@@ -22,6 +22,16 @@ import {
   readLegacyControlMigrationPreservedSummary,
 } from "./legacy-migration.js";
 
+function retireLegacyTerminalWal(agentDir: string) {
+  const source = path.join(agentDir, "data", "chat", "terminal-wal");
+  if (!fs.existsSync(source)) return;
+  const stamp = nowIso().replace(/[:.]/g, "-");
+  fs.renameSync(
+    source,
+    path.join(path.dirname(source), `terminal-wal-retired-${stamp}`),
+  );
+}
+
 const OLD_ADMISSION_KINDS = [
   "legacy_message_projection",
   "legacy_accepted_orphan",
@@ -37,16 +47,19 @@ function tableHasColumn(
   );
 }
 
-function finishSchemaUpgrade(db: BetterSqlite3.Database) {
+function finishSchemaUpgrade(
+  db: BetterSqlite3.Database,
+  tableName: "turns" | "inbox_jobs" = "turns",
+) {
   const admissionsWithoutHash = db
     .prepare(
       `SELECT turn_id, admission_json
-         FROM turns
+         FROM ${tableName}
         WHERE admission_json IS NOT NULL AND admission_hash IS NULL`,
     )
     .all() as Array<{ turn_id: string; admission_json: string }>;
   const writeAdmissionHash = db.prepare(
-    `UPDATE turns SET admission_hash = ?
+    `UPDATE ${tableName} SET admission_hash = ?
       WHERE turn_id = ? AND admission_json = ? AND admission_hash IS NULL`,
   );
   for (const row of admissionsWithoutHash) {
@@ -328,6 +341,209 @@ export function completeCanonicalReconciliationInstallState(
   return completed;
 }
 
+function rebuildChatDeliveryTablesV9(db: BetterSqlite3.Database) {
+  db.exec(`
+    CREATE TEMP TABLE cutover_outbox_deliveries_v9 AS SELECT * FROM outbox_deliveries;
+    CREATE TEMP TABLE cutover_outbox_v9 AS SELECT * FROM outbox;
+    CREATE TEMP TABLE cutover_messages_v9 AS
+      SELECT id, record_key, chat_key, message_id, platform, bot_id, chat_id,
+             role, reply_to_message_id, session_file, accepted_at, processed_at,
+             delivery_kind, last_received_at, duplicate_count, updated_at,
+             chat_thread_id, message_thread_id, chat_type, received_at,
+             platform_timestamp, provider_cursor, user_id, nickname, chat_name,
+             trust, text, raw_content, stripped_content, elements_json,
+             quote_json, sequence, generation,
+             CASE WHEN disposition = 'superseded' THEN 'record_only'
+                  ELSE disposition END AS disposition,
+             record_json
+        FROM messages;
+    CREATE TEMP TABLE cutover_inbox_jobs_v9 AS
+      SELECT turn_id, inbound_message_id, chat_key, generation, sequence,
+             CASE WHEN state = 'superseded' THEN 'failed' ELSE state END AS state,
+             CASE WHEN state = 'superseded' THEN 'interrupted'
+                  ELSE terminal_kind END AS terminal_kind,
+             CASE WHEN state IN ('running', 'superseded') THEN NULL
+                  ELSE owner_epoch END AS owner_epoch,
+             attempt,
+             CASE WHEN state IN ('running', 'superseded') THEN NULL
+                  ELSE lease_until END AS lease_until,
+             CASE WHEN state IN ('running', 'superseded') THEN NULL
+                  ELSE heartbeat_at END AS heartbeat_at,
+             CASE WHEN state IN ('running', 'superseded') THEN NULL
+                  ELSE next_attempt_at END AS next_attempt_at,
+             CASE WHEN state = 'superseded' THEN 'chat_turn_interrupted'
+                  ELSE last_error END AS last_error,
+             routing_json, session_json, elements_json, admission_state,
+             admission_json, admission_hash, submission_json, submission_hash,
+             execution_session_file, created_at, updated_at
+        FROM turns;
+    DROP TABLE IF EXISTS chat_runs;
+    DROP TABLE outbox_deliveries;
+    DROP TABLE outbox;
+    DROP TABLE turns;
+    DROP TABLE messages;
+    CREATE TABLE messages (
+      id TEXT PRIMARY KEY,
+      record_key TEXT NOT NULL UNIQUE,
+      chat_key TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      bot_id TEXT,
+      chat_id TEXT NOT NULL,
+      role TEXT CHECK (role IN ('user', 'assistant') OR role IS NULL),
+      reply_to_message_id TEXT,
+      session_file TEXT,
+      accepted_at TEXT,
+      processed_at TEXT,
+      delivery_kind TEXT,
+      last_received_at TEXT,
+      duplicate_count INTEGER NOT NULL DEFAULT 0 CHECK (duplicate_count >= 0),
+      updated_at TEXT,
+      chat_thread_id TEXT,
+      message_thread_id TEXT,
+      chat_type TEXT CHECK (chat_type IN ('private', 'group') OR chat_type IS NULL),
+      received_at TEXT NOT NULL,
+      platform_timestamp INTEGER,
+      provider_cursor TEXT,
+      user_id TEXT,
+      nickname TEXT,
+      chat_name TEXT,
+      trust TEXT,
+      text TEXT,
+      raw_content TEXT,
+      stripped_content TEXT,
+      elements_json TEXT,
+      quote_json TEXT,
+      sequence INTEGER NOT NULL CHECK (sequence >= 1),
+      generation INTEGER NOT NULL CHECK (generation >= 0),
+      disposition TEXT NOT NULL DEFAULT 'unclassified'
+        CHECK (disposition IN ('unclassified', 'record_only', 'actionable')),
+      record_json TEXT NOT NULL,
+      UNIQUE (chat_key, message_id),
+      UNIQUE (chat_key, sequence)
+    );
+    CREATE TABLE inbox_jobs (
+      turn_id TEXT PRIMARY KEY,
+      inbound_message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE RESTRICT,
+      chat_key TEXT NOT NULL,
+      generation INTEGER NOT NULL CHECK (generation >= 0),
+      sequence INTEGER NOT NULL CHECK (sequence >= 1),
+      state TEXT NOT NULL CHECK (state IN ('pending', 'running', 'terminal', 'failed')),
+      terminal_kind TEXT,
+      owner_epoch TEXT,
+      attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+      lease_until TEXT,
+      heartbeat_at TEXT,
+      next_attempt_at TEXT,
+      last_error TEXT,
+      routing_json TEXT,
+      session_json TEXT,
+      elements_json TEXT,
+      admission_state TEXT NOT NULL DEFAULT 'unclassified'
+        CHECK (admission_state IN ('unclassified', 'actionable', 'record_only')),
+      admission_json TEXT,
+      admission_hash TEXT,
+      submission_json TEXT,
+      submission_hash TEXT,
+      execution_session_file TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE outbox (
+      outbox_id TEXT PRIMARY KEY,
+      turn_id TEXT REFERENCES inbox_jobs(turn_id) ON DELETE RESTRICT,
+      idempotency_key TEXT UNIQUE,
+      chat_key TEXT NOT NULL,
+      delivery_kind TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('queued', 'planned', 'sending', 'delivered', 'failed')),
+      payload_json TEXT NOT NULL,
+      post_delivery_json TEXT,
+      post_delivery_applied_at TEXT,
+      adapter_id TEXT,
+      adapter_version TEXT,
+      plan_state TEXT NOT NULL DEFAULT 'unplanned' CHECK (plan_state IN ('unplanned', 'planned')),
+      sequence INTEGER NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+      owner_epoch TEXT,
+      lease_until TEXT,
+      next_attempt_at TEXT,
+      last_error TEXT,
+      failure_kind TEXT,
+      delivery_unconfirmed INTEGER NOT NULL DEFAULT 0 CHECK (delivery_unconfirmed IN (0, 1)),
+      delivery_result_json TEXT,
+      dispatch_started_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      delivered_at TEXT,
+      failed_at TEXT
+    );
+    CREATE TABLE outbox_deliveries (
+      delivery_id TEXT PRIMARY KEY,
+      outbox_id TEXT NOT NULL REFERENCES outbox(outbox_id) ON DELETE CASCADE,
+      destination TEXT NOT NULL,
+      fragment_index INTEGER NOT NULL CHECK (fragment_index >= 0),
+      state TEXT NOT NULL CHECK (state IN ('queued', 'sending', 'delivered', 'failed', 'unconfirmed')),
+      payload_json TEXT NOT NULL,
+      owner_epoch TEXT,
+      attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+      lease_until TEXT,
+      next_attempt_at TEXT,
+      last_error TEXT,
+      provider_message_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      delivered_at TEXT,
+      failed_at TEXT,
+      UNIQUE (outbox_id, destination, fragment_index)
+    );
+    INSERT INTO messages SELECT * FROM cutover_messages_v9;
+    INSERT INTO inbox_jobs SELECT * FROM cutover_inbox_jobs_v9;
+    INSERT INTO outbox SELECT * FROM cutover_outbox_v9;
+    INSERT INTO outbox_deliveries SELECT * FROM cutover_outbox_deliveries_v9;
+    DROP TABLE cutover_outbox_deliveries_v9;
+    DROP TABLE cutover_outbox_v9;
+    DROP TABLE cutover_inbox_jobs_v9;
+    DROP TABLE cutover_messages_v9;
+    CREATE INDEX messages_message_id_idx ON messages(message_id);
+    CREATE INDEX messages_chat_order_idx ON messages(chat_key, sequence);
+    CREATE INDEX messages_chat_date_idx ON messages(chat_key, received_at, record_key);
+    CREATE INDEX messages_chat_processed_date_idx
+      ON messages(chat_key, processed_at, record_key) WHERE received_at = '';
+    CREATE INDEX messages_reply_idx
+      ON messages(chat_key, reply_to_message_id, processed_at)
+      WHERE reply_to_message_id IS NOT NULL;
+    CREATE INDEX messages_recovery_head_idx
+      ON messages(platform, bot_id, chat_key, platform_timestamp, sequence)
+      WHERE role = 'user';
+    CREATE INDEX messages_disposition_idx ON messages(disposition, chat_key, sequence);
+    CREATE INDEX messages_orphan_recovery_idx
+      ON messages(disposition, role, accepted_at, chat_key, sequence)
+      WHERE role = 'user';
+    CREATE INDEX inbox_jobs_claim_idx
+      ON inbox_jobs(state, next_attempt_at, lease_until, chat_key, sequence);
+    CREATE INDEX inbox_jobs_chat_generation_idx
+      ON inbox_jobs(chat_key, generation, state, sequence);
+    CREATE UNIQUE INDEX outbox_turn_terminal_idx
+      ON outbox(turn_id)
+      WHERE turn_id IS NOT NULL
+        AND (delivery_kind IN ('final', 'error', 'command_ack')
+             OR post_delivery_json IS NOT NULL);
+    CREATE INDEX outbox_sequence_idx ON outbox(sequence);
+    CREATE INDEX outbox_drain_idx ON outbox(state, next_attempt_at, sequence);
+    CREATE INDEX outbox_delivered_cleanup_idx
+      ON outbox(delivered_at) WHERE state = 'delivered';
+    CREATE INDEX outbox_failed_cleanup_idx
+      ON outbox(failed_at) WHERE state = 'failed';
+    CREATE INDEX outbox_post_delivery_pending_idx
+      ON outbox(post_delivery_applied_at, sequence)
+      WHERE post_delivery_json IS NOT NULL
+        AND post_delivery_applied_at IS NULL
+        AND state IN ('queued', 'sending', 'delivered');
+    CREATE INDEX outbox_deliveries_claim_idx
+      ON outbox_deliveries(state, next_attempt_at, lease_until, outbox_id, destination, fragment_index);
+  `);
+}
+
 function upgradeRecordedChatDatabase(
   db: BetterSqlite3.Database,
   options: { runtimeQuiesced?: boolean } = {},
@@ -502,7 +718,7 @@ function upgradeRecordedChatDatabase(
         `chat_database_canonical_run_upgrade_failed:${String(error?.message || error)}`,
       );
     }
-  } else if (currentVersion !== 7) {
+  } else if (currentVersion !== 7 && currentVersion !== 8) {
     throw new Error(`chat_database_unsupported_schema:${currentVersion}`);
   }
 
@@ -574,8 +790,19 @@ function upgradeRecordedChatDatabase(
       interruptedTurns,
       retiredRunIds,
     });
+    for (const runId of retiredRunIds) {
+      db.prepare(
+        `UPDATE turns
+         SET state = 'failed', terminal_kind = 'interrupted',
+             last_error = 'chat_turn_interrupted', owner_epoch = NULL,
+             lease_until = NULL, heartbeat_at = NULL, next_attempt_at = NULL,
+             updated_at = ?
+         WHERE run_id = ?`,
+      ).run(new Date().toISOString(), runId);
+    }
   }
-  finishSchemaUpgrade(db);
+  rebuildChatDeliveryTablesV9(db);
+  finishSchemaUpgrade(db, "inbox_jobs");
 }
 
 function assertNoActiveOldAdmissionOwner(
@@ -704,16 +931,18 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
       let orphanedMessages = 0;
       let interruptedUnknown = 0;
       let historyResolved = 0;
+      const hasRunId = tableHasColumn(db, "inbox_jobs", "run_id");
       const rows = db
         .prepare(
-          `SELECT turns.turn_id, turns.state, turns.admission_state,
-                  turns.chat_key, turns.sequence, turns.run_id,
+          `SELECT inbox_jobs.turn_id, inbox_jobs.state, inbox_jobs.admission_state,
+                  inbox_jobs.chat_key, inbox_jobs.sequence,
+                  ${hasRunId ? "inbox_jobs.run_id" : "NULL AS run_id"},
                   messages.id AS message_row_id, messages.message_id
-             FROM turns
-             JOIN messages ON messages.id = turns.inbound_message_id
-            WHERE json_valid(turns.admission_json)
-              AND json_extract(turns.admission_json, '$.kind') IN (?, ?)
-            ORDER BY turns.chat_key, turns.sequence`,
+             FROM inbox_jobs
+             JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+            WHERE json_valid(inbox_jobs.admission_json)
+              AND json_extract(inbox_jobs.admission_json, '$.kind') IN (?, ?)
+            ORDER BY inbox_jobs.chat_key, inbox_jobs.sequence`,
         )
         .all(...OLD_ADMISSION_KINDS) as any[];
       for (const row of rows) {
@@ -721,13 +950,25 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
         const recordOnly = safeString(row.admission_state) === "record_only";
         if (safeString(row.run_id).trim()) {
           db.prepare(
-            `UPDATE turns
+            `UPDATE inbox_jobs
                 SET admission_state = 'unclassified', admission_json = NULL,
                     admission_hash = NULL, submission_json = NULL,
                     submission_hash = NULL, updated_at = ?
               WHERE turn_id = ?`,
           ).run(timestamp, row.turn_id);
-        } else if (!["terminal", "superseded"].includes(state)) {
+        } else if (state === "superseded") {
+          db.prepare(
+            `UPDATE inbox_jobs
+                SET state = 'failed', terminal_kind = 'interrupted',
+                    owner_epoch = NULL, lease_until = NULL,
+                    heartbeat_at = NULL, updated_at = ?
+              WHERE turn_id = ?`,
+          ).run(timestamp, row.turn_id);
+          db.prepare(
+            `UPDATE messages SET disposition = 'record_only', updated_at = ?
+              WHERE id = ?`,
+          ).run(timestamp, row.message_row_id);
+        } else if (state !== "terminal") {
           const chatKey = safeString(row.chat_key).trim();
           const messageId = safeString(row.message_id).trim();
           let targetState = "terminal";
@@ -752,9 +993,9 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
                 Number(row.sequence),
               )
             ) {
-              targetState = "superseded";
-              terminalKind = "legacy_history_superseded";
-              disposition = "superseded";
+              targetState = "failed";
+              terminalKind = "interrupted";
+              disposition = "record_only";
               historyResolved += 1;
             } else {
               terminalKind = "interrupted_unknown";
@@ -762,7 +1003,7 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
             }
           }
           db.prepare(
-            `UPDATE turns
+            `UPDATE inbox_jobs
                 SET state = ?, terminal_kind = ?, owner_epoch = NULL,
                     lease_until = NULL, heartbeat_at = NULL,
                     next_attempt_at = NULL, last_error = NULL,
@@ -779,7 +1020,7 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
           ).run(timestamp, disposition, row.message_row_id);
         } else {
           db.prepare(
-            `UPDATE turns
+            `UPDATE inbox_jobs
                 SET admission_state = 'unclassified', admission_json = NULL,
                     admission_hash = NULL, submission_json = NULL,
                     submission_hash = NULL, updated_at = ?
@@ -789,7 +1030,7 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
         migratedTurns += 1;
       }
 
-      // These rows have no turn, and outbox.turn_id is a foreign key to turns,
+      // These rows have no turn, and outbox.turn_id is a foreign key to inbox_jobs,
       // so a turn-owned terminal outbox cannot exist for an accepted orphan.
       const orphanRows = db
         .prepare(
@@ -802,8 +1043,8 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
               AND messages.processed_at IS NULL
               AND messages.disposition IN ('unclassified', 'actionable')
               AND NOT EXISTS (
-                SELECT 1 FROM turns
-                 WHERE turns.inbound_message_id = messages.id
+                SELECT 1 FROM inbox_jobs
+                 WHERE inbox_jobs.inbound_message_id = messages.id
               )
             ORDER BY messages.chat_key, messages.sequence`,
         )
@@ -829,13 +1070,13 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
             `UPDATE messages
                 SET processed_at = COALESCE(processed_at, ?), disposition = ?
               WHERE id = ?`,
-          ).run(timestamp, laterHandled ? "superseded" : "actionable", row.id);
+          ).run(timestamp, laterHandled ? "record_only" : "actionable", row.id);
           orphanedMessages += 1;
           historyResolved += 1;
           continue;
         }
         db.prepare(
-          `INSERT INTO turns (
+          `INSERT INTO inbox_jobs (
              turn_id, inbound_message_id, chat_key, generation, sequence,
              state, terminal_kind, owner_epoch, attempt, lease_until,
              heartbeat_at, next_attempt_at, last_error, routing_json,
@@ -866,11 +1107,12 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
       }
       const releasedCurrentClaims = db
         .prepare(
-          `UPDATE turns
-              SET state = 'pending', owner_epoch = NULL, lease_until = NULL,
+          `UPDATE inbox_jobs
+              SET state = 'failed', terminal_kind = 'interrupted',
+                  owner_epoch = NULL, lease_until = NULL,
                   heartbeat_at = NULL, next_attempt_at = NULL,
-                  last_error = NULL, updated_at = ?
-            WHERE state = 'running' AND run_id IS NULL`,
+                  last_error = 'chat_turn_interrupted', updated_at = ?
+            WHERE state = 'running' ${hasRunId ? "AND run_id IS NULL" : ""}`,
         )
         .run(timestamp).changes;
 
@@ -1009,11 +1251,14 @@ export function migrateChatDatabaseForInstall(
   const migrationDb = new BetterSqlite3(dbPath);
   try {
     configureChatDatabase(migrationDb);
+    const currentVersion = Number(
+      migrationDb.pragma("user_version", { simple: true }),
+    );
+    if (currentVersion < CHAT_DATABASE_SCHEMA_VERSION) {
+      migrationDb.pragma("foreign_keys = OFF");
+    }
     migrationDb
       .transaction(() => {
-        const currentVersion = Number(
-          migrationDb.pragma("user_version", { simple: true }),
-        );
         if (options.runtimeQuiesced !== true) {
           assertNoActiveOldAdmissionOwner(migrationDb, currentVersion);
           assertNoUnfencedRunningTurns(migrationDb, currentVersion);
@@ -1028,8 +1273,16 @@ export function migrateChatDatabaseForInstall(
         consumeOldAdmissionRowsForInstall(migrationDb);
       })
       .exclusive();
+    const foreignKeyViolations = migrationDb.pragma(
+      "foreign_key_check",
+    ) as any[];
+    if (foreignKeyViolations.length > 0) {
+      throw new Error("chat_database_foreign_key_mismatch");
+    }
+    migrationDb.pragma("foreign_keys = ON");
   } finally {
     migrationDb.close();
   }
+  retireLegacyTerminalWal(agentDir);
   return openChatDatabaseForInstall(agentDir);
 }

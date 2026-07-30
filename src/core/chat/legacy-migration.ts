@@ -525,13 +525,13 @@ function importLegacyInbox(
         )
         .get(chatKey, Number(message.sequence))
     ) {
-      state = "superseded";
+      state = "failed";
       db.prepare(
-        `UPDATE messages SET disposition = 'superseded' WHERE id = ?`,
+        `UPDATE messages SET disposition = 'record_only' WHERE id = ?`,
       ).run(message.id);
     }
     db.prepare(
-      `INSERT INTO turns (
+      `INSERT INTO inbox_jobs (
         turn_id, inbound_message_id, chat_key, generation, sequence, state,
         terminal_kind, owner_epoch, attempt, lease_until, heartbeat_at,
         next_attempt_at, last_error, routing_json, session_json, elements_json,
@@ -545,11 +545,7 @@ function importLegacyInbox(
       Number(message.generation || 0),
       Number(message.sequence),
       state,
-      state === "failed"
-        ? "legacy_failed"
-        : state === "superseded"
-          ? "legacy_later_handled"
-          : null,
+      state === "failed" ? "interrupted" : null,
       Math.max(0, Number(item?.attemptCount || 0)),
       normalizeOptionalLegacyTimestamp(
         item?.nextAttemptAt,

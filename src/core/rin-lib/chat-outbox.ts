@@ -140,8 +140,14 @@ export type EnqueueChatOutboxOptions = {
   turnTerminalKind?: "interrupted_unknown";
   postDelivery?: ChatOutboxPostDelivery;
   turnFence?: ChatOutboxTurnFence;
+  terminalTurn?: ChatTerminalTurn;
   nonTerminalError?: boolean;
-  supersedeTurnFences?: ChatOutboxTurnFence[];
+};
+
+export type ChatTerminalTurn = {
+  turnId: string;
+  chatKey: string;
+  messageId: string;
 };
 
 export type ChatOutboxTurnFence = {
@@ -308,11 +314,11 @@ export function hasCommittedTerminalChatOutbox(
     openChatDatabase(agentDir)
       .prepare(
         `SELECT 1
-         FROM turns
-         JOIN messages ON messages.id = turns.inbound_message_id
-         JOIN outbox ON outbox.turn_id = turns.turn_id
-         WHERE turns.chat_key = ? AND messages.message_id = ?
-           AND turns.state = 'terminal'
+         FROM inbox_jobs
+         JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+         JOIN outbox ON outbox.turn_id = inbox_jobs.turn_id
+         WHERE inbox_jobs.chat_key = ? AND messages.message_id = ?
+           AND inbox_jobs.state = 'terminal'
          LIMIT 1`,
       )
       .get(safeString(chatKey).trim(), safeString(messageId).trim()),
@@ -441,16 +447,16 @@ function validateChatOutboxTurnFence(
   }
   const turn = db
     .prepare(
-      `SELECT turns.turn_id, turns.inbound_message_id,
-              turns.owner_epoch, turns.attempt
-       FROM turns
-       JOIN messages ON messages.id = turns.inbound_message_id
-       JOIN chat_state ON chat_state.chat_key = turns.chat_key
-       WHERE turns.turn_id = ? AND turns.chat_key = ?
+      `SELECT inbox_jobs.turn_id, inbox_jobs.inbound_message_id,
+              inbox_jobs.owner_epoch, inbox_jobs.attempt
+       FROM inbox_jobs
+       JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+       JOIN chat_state ON chat_state.chat_key = inbox_jobs.chat_key
+       WHERE inbox_jobs.turn_id = ? AND inbox_jobs.chat_key = ?
          AND messages.message_id = ?
-         AND turns.state = 'running' AND turns.owner_epoch = ?
-         AND turns.attempt = ?
-         AND turns.generation = chat_state.current_generation`,
+         AND inbox_jobs.state = 'running' AND inbox_jobs.owner_epoch = ?
+         AND inbox_jobs.attempt = ?
+         AND inbox_jobs.generation = chat_state.current_generation`,
     )
     .get(
       safeString(fence.turnId).trim(),
@@ -479,6 +485,41 @@ export function isChatOutboxTurnFenceActive(
   } catch {
     return false;
   }
+}
+
+function validateAuthoritativeTerminalTurn(
+  db: ReturnType<typeof openChatDatabase>,
+  terminalTurn: ChatTerminalTurn,
+  payloadChatKey: string,
+) {
+  if (
+    safeString(terminalTurn.chatKey).trim() !==
+    safeString(payloadChatKey).trim()
+  ) {
+    throw new Error("chat_terminal_turn_mismatch");
+  }
+  const turn = db
+    .prepare(
+      `SELECT inbox_jobs.turn_id, inbox_jobs.inbound_message_id,
+              inbox_jobs.owner_epoch, inbox_jobs.attempt, inbox_jobs.state,
+              inbox_jobs.terminal_kind
+       FROM inbox_jobs
+       JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+       WHERE inbox_jobs.turn_id = ? AND inbox_jobs.chat_key = ?
+         AND messages.message_id = ?
+         AND (
+           inbox_jobs.state IN ('running', 'terminal')
+           OR (inbox_jobs.state = 'failed'
+               AND inbox_jobs.terminal_kind = 'interrupted')
+         )`,
+    )
+    .get(
+      safeString(terminalTurn.turnId).trim(),
+      safeString(terminalTurn.chatKey).trim(),
+      safeString(terminalTurn.messageId).trim(),
+    ) as any;
+  if (!turn) throw new Error("chat_terminal_turn_mismatch");
+  return turn;
 }
 
 function terminalTurnForPostDelivery(
@@ -597,7 +638,9 @@ export function enqueueChatOutboxPayload(
   const db = openChatDatabase(agentDir);
   return db
     .transaction(() => {
-      const contextualFence = options.turnFence || activeTurnFence.getStore();
+      const contextualFence = options.terminalTurn
+        ? undefined
+        : options.turnFence || activeTurnFence.getStore();
       const fencedTurn = contextualFence
         ? validateChatOutboxTurnFence(
             db,
@@ -614,55 +657,34 @@ export function enqueueChatOutboxPayload(
       }
       const turn = options.nonTerminalError
         ? null
-        : terminalTurnForPostDelivery(
-            db,
-            agentDir,
-            deliveryKind,
-            options.postDelivery,
-            contextualFence,
-          );
-      const desiredTurnId = fencedTurn?.turn_id || turn?.turn_id || "";
-      const supersedeCoalescedTurns = () => {
-        const seen = new Set<string>();
-        for (const fence of options.supersedeTurnFences || []) {
-          const turnId = safeString(fence?.turnId).trim();
-          if (!turnId || turnId === desiredTurnId || seen.has(turnId)) continue;
-          seen.add(turnId);
-          const owned = validateChatOutboxTurnFence(
-            db,
-            agentDir,
-            fence,
-            normalizedPayload.chatKey,
-          );
-          const timestamp = nowIso();
-          const result = db
-            .prepare(
-              `UPDATE turns
-               SET state = 'superseded', terminal_kind = 'coalesced_steer',
-                   owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL,
-                   next_attempt_at = NULL, last_error = NULL, updated_at = ?
-               WHERE turn_id = ? AND state = 'running'
-                 AND owner_epoch = ? AND attempt = ?`,
+        : options.terminalTurn
+          ? validateAuthoritativeTerminalTurn(
+              db,
+              options.terminalTurn,
+              normalizedPayload.chatKey,
             )
-            .run(
-              timestamp,
-              owned.turn_id,
-              safeString(owned.owner_epoch),
-              Number(owned.attempt),
+          : terminalTurnForPostDelivery(
+              db,
+              agentDir,
+              deliveryKind,
+              options.postDelivery,
+              contextualFence,
             );
-          if (result.changes !== 1) throw new Error("chat_turn_fence_lost");
-          db.prepare(
-            `UPDATE messages
-             SET disposition = 'superseded',
-                 record_json = json_set(record_json, '$.disposition', 'superseded')
-             WHERE id = ?`,
-          ).run(owned.inbound_message_id);
-        }
-      };
+      const desiredTurnId = fencedTurn?.turn_id || turn?.turn_id || "";
       const adoptExisting = (
         row: any,
         adoptOptions: { acceptLegacyTerminalPayload?: boolean } = {},
       ) => {
+        if (turn?.state === "terminal") {
+          if (
+            safeString(row.turn_id) !== safeString(turn.turn_id) ||
+            safeString(row.delivery_kind) !== safeString(deliveryKind) ||
+            safeString(turn.terminal_kind) !== safeString(turnTerminalKind)
+          ) {
+            throw new Error("chat_terminal_turn_mismatch");
+          }
+          return safeString(row.outbox_id);
+        }
         if (safeString(row.chat_key).trim() !== normalizedPayload.chatKey) {
           throw new Error("chat_outbox_idempotency_collision");
         }
@@ -751,16 +773,20 @@ export function enqueueChatOutboxPayload(
           const timestamp = nowIso();
           const terminalized = db
             .prepare(
-              `UPDATE turns
+              `UPDATE inbox_jobs
                SET state = 'terminal', terminal_kind = ?, owner_epoch = NULL,
                    lease_until = NULL, heartbeat_at = NULL,
                    next_attempt_at = NULL, last_error = NULL,
                    execution_session_file = COALESCE(execution_session_file, ?),
                    updated_at = ?
-               WHERE turn_id = ? AND state = 'running'
-                 AND owner_epoch = ? AND attempt = ?
-                 AND (? IS NULL OR execution_session_file IS NULL
-                      OR execution_session_file = ?)`,
+               WHERE turn_id = ?
+                 AND (
+                   (state = 'running' AND owner_epoch = ? AND attempt = ?
+                    AND (? IS NULL OR execution_session_file IS NULL
+                         OR execution_session_file = ?))
+                   OR
+                   (state = 'failed' AND terminal_kind = 'interrupted')
+                 )`,
             )
             .run(
               turnTerminalKind,
@@ -782,7 +808,6 @@ export function enqueueChatOutboxPayload(
              WHERE id = ?`,
           ).run(turn.inbound_message_id);
         }
-        supersedeCoalescedTurns();
         return safeString(row.outbox_id);
       };
       const existing = db
@@ -819,6 +844,9 @@ export function enqueueChatOutboxPayload(
             acceptLegacyTerminalPayload: true,
           });
         }
+      }
+      if (turn?.state === "terminal") {
+        throw new Error("chat_terminal_turn_mismatch");
       }
       const sequence = Number(
         (
@@ -872,16 +900,20 @@ export function enqueueChatOutboxPayload(
         const timestamp = nowIso();
         const terminalized = db
           .prepare(
-            `UPDATE turns
+            `UPDATE inbox_jobs
              SET state = 'terminal', terminal_kind = ?, owner_epoch = NULL,
                  lease_until = NULL, heartbeat_at = NULL, next_attempt_at = NULL,
                  last_error = NULL,
                  execution_session_file = COALESCE(execution_session_file, ?),
                  updated_at = ?
-             WHERE turn_id = ? AND state = 'running'
-               AND owner_epoch = ? AND attempt = ?
-               AND (? IS NULL OR execution_session_file IS NULL
-                    OR execution_session_file = ?)`,
+             WHERE turn_id = ?
+               AND (
+                 (state = 'running' AND owner_epoch = ? AND attempt = ?
+                  AND (? IS NULL OR execution_session_file IS NULL
+                       OR execution_session_file = ?))
+                 OR
+                 (state = 'failed' AND terminal_kind = 'interrupted')
+               )`,
           )
           .run(
             turnTerminalKind,
@@ -900,7 +932,6 @@ export function enqueueChatOutboxPayload(
           `UPDATE messages SET disposition = 'actionable' WHERE id = ?`,
         ).run(turn.inbound_message_id);
       }
-      supersedeCoalescedTurns();
       return id;
     })
     .immediate();

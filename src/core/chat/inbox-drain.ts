@@ -5,35 +5,19 @@ import {
   claimChatInboxItem,
   completeClaimedChatInboxItem,
   failClaimedChatInboxItem,
-  isChatInboxItemAccepted,
-  isChatInboxItemDurablyActionable,
   listPendingChatInboxItems,
-  requeueClaimedChatInboxItem,
 } from "./inbox.js";
 import { safeString } from "../text-utils.js";
-
-const CHAT_INBOX_RETRY_MIN_MS = 2000;
-const CHAT_INBOX_RETRY_MAX_MS = 60_000;
-const CHAT_INBOX_MAX_ATTEMPTS = 5;
 
 export type ClaimedChatInboxJob = {
   envelope: ClaimedChatInboxItem;
 };
 
 export type ChatInboxJobResult = {
-  retry?: boolean;
   errorMessage?: string;
-  disposition?: "record_only" | "actionable" | "superseded";
+  disposition?: "record_only" | "actionable";
   terminalKind?: string;
 };
-
-export function computeChatInboxRetryDelay(attemptCount: number) {
-  const attempt = Math.max(0, Number(attemptCount || 0));
-  return Math.min(
-    CHAT_INBOX_RETRY_MAX_MS,
-    CHAT_INBOX_RETRY_MIN_MS * 2 ** attempt,
-  );
-}
 
 export function completeClaimedChatInboxJob(
   agentDir: string,
@@ -46,37 +30,13 @@ export function completeClaimedChatInboxJob(
   });
 }
 
-export function requeueClaimedChatInboxJob(
-  agentDir: string,
-  job: ClaimedChatInboxJob,
-  error?: unknown,
-) {
-  const nextAttemptCount = Number(job.envelope.attemptCount || 0);
-  const errorMessage = safeString(error || "chat_inbound_retry_needed");
-  if (
-    nextAttemptCount >= CHAT_INBOX_MAX_ATTEMPTS &&
-    !isChatInboxItemAccepted(agentDir, job.envelope.itemId) &&
-    !isChatInboxItemDurablyActionable(agentDir, job.envelope.itemId)
-  ) {
-    return failClaimedChatInboxItem(agentDir, job.envelope, errorMessage);
-  }
-  return requeueClaimedChatInboxItem(agentDir, job.envelope, {
-    delayMs: computeChatInboxRetryDelay(nextAttemptCount),
-    error: errorMessage,
-  });
-}
-
 export function finalizeClaimedChatInboxJob(
   agentDir: string,
   job: ClaimedChatInboxJob,
   result: ChatInboxJobResult | undefined,
 ) {
-  if (result?.retry) {
-    return requeueClaimedChatInboxJob(
-      agentDir,
-      job,
-      result.errorMessage || "chat_inbound_retry_needed",
-    );
+  if (safeString(result?.errorMessage).trim()) {
+    throw new Error(safeString(result?.errorMessage));
   }
   return completeClaimedChatInboxJob(agentDir, job, result);
 }
@@ -88,13 +48,13 @@ function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
 type ClaimPendingItemResult =
   | "claimed"
   | "consumed"
-  | "retryLater"
+  | "waitForChat"
   | "unavailable";
 
 function shouldRedrainAfterAsyncAdmissionResult(
   result: ClaimPendingItemResult,
 ) {
-  return result !== "retryLater";
+  return result !== "waitForChat";
 }
 
 export function createChatInboxDrain(deps: {
@@ -127,7 +87,7 @@ export function createChatInboxDrain(deps: {
       if (!envelope) {
         const dueAt = Date.parse(safeString(pending.nextAttemptAt).trim());
         return Number.isFinite(dueAt) && dueAt > Date.now()
-          ? "retryLater"
+          ? "waitForChat"
           : "unavailable";
       }
       const controller =
@@ -135,11 +95,12 @@ export function createChatInboxDrain(deps: {
           ? pendingController
           : deps.getController(envelope.chatKey);
       if (controller?.ownsInboundMessage?.(envelope.messageId)) {
-        requeueClaimedChatInboxItem(deps.agentDir, envelope, {
-          delayMs: CHAT_INBOX_RETRY_MIN_MS,
-          error: "chat_inbound_still_owned",
-        });
-        return "retryLater";
+        failClaimedChatInboxItem(
+          deps.agentDir,
+          envelope,
+          "chat_inbound_still_owned",
+        );
+        return "unavailable";
       }
       if (
         deps.isInboundMessageProcessed(envelope.chatKey, envelope.messageId)

@@ -47,9 +47,15 @@ import {
 } from "../session/ref.js";
 import { startQueuedMemoryWorkerSupervisor } from "../self-improve/async-jobs.js";
 import { RinBackgroundExtensionManager } from "./extensions.js";
-import { listRunningWorkerSessions } from "./running-workers.js";
 import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
 import { ConnectionState, WorkerPool } from "./worker-pool.js";
+import {
+  acknowledgeDaemonTurnTerminal,
+  closeDaemonTurnLedger,
+  daemonTurnTerminalEvent,
+  interruptActiveDaemonTurns,
+  listUnacknowledgedChatTerminals,
+} from "./turn-ledger.js";
 import {
   createWorkerCgroupIsolation,
   type WorkerCgroupIsolation,
@@ -147,6 +153,7 @@ export async function startDaemon(
     sessionManagerModulePromise ??= loadRinSessionManagerModule();
     return sessionManagerModulePromise;
   };
+  interruptActiveDaemonTurns(runtime.agentDir, "rin_daemon_restarted");
   const workerPool = new WorkerPool({
     workerPath,
     cwd: runtime.cwd,
@@ -245,7 +252,6 @@ export async function startDaemon(
     Record<RinRpcCommandType, DaemonCommandHandler>
   > = {
     get_messages: () => ({ data: { messages: [] } }),
-    resolve_submitted_turn: () => ({ data: null }),
     get_session_snapshot: () => ({
       data: { entries: [], leafId: null },
     }),
@@ -557,12 +563,25 @@ export async function startDaemon(
       writeLine(connection.socket, response(id, type, true, terminal));
       return true;
     }
-    if (type === "replay_pending_terminal_turn_event") {
-      const replayed = workerPool.replayPendingTerminalTurnEvent(
-        connection,
-        getSessionSelector(command),
+    if (type === "ack_turn_terminal") {
+      const terminal = acknowledgeDaemonTurnTerminal(runtime.agentDir, {
+        requestTag: safeString(command.requestTag).trim(),
+        terminalId: safeString(command.terminalId).trim(),
+      });
+      writeLine(connection.socket, response(id, type, true, terminal));
+      return true;
+    }
+    if (type === "list_unacknowledged_chat_terminals") {
+      const records = listUnacknowledgedChatTerminals(
+        runtime.agentDir,
+        safeString(command.chatKey).trim() || undefined,
       );
-      writeLine(connection.socket, response(id, type, true, { replayed }));
+      writeLine(
+        connection.socket,
+        response(id, type, true, {
+          terminals: records.map(daemonTurnTerminalEvent),
+        }),
+      );
       return true;
     }
     if (type === "rename_session") {
@@ -629,14 +648,6 @@ export async function startDaemon(
   };
 
   clearLegacyRestartState(runtime.agentDir);
-  for (const runningSession of listRunningWorkerSessions(runtime.agentDir)) {
-    try {
-      workerPool.continueInterruptedTurnSessionWorker({
-        ...runningSession,
-        source: "daemon-restart",
-      });
-    } catch {}
-  }
 
   const activeSockets = new Set<RpcSocketLike>();
 
@@ -793,6 +804,7 @@ export async function startDaemon(
     await settleBeforeShutdownDeadline(() => options.onShutdown?.());
     await settleBeforeShutdownDeadline(() => backgroundExtensionManager.stop());
     await workerPool.shutdown(Math.max(0, shutdownDeadline - Date.now()));
+    closeDaemonTurnLedger(runtime.agentDir);
     for (const socket of Array.from(activeSockets)) {
       try {
         socket.destroy();

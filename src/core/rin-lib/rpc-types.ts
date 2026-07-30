@@ -1,6 +1,5 @@
 export type RinRpcCommandType =
   | "prompt"
-  | "resume_interrupted_turn"
   | "steer"
   | "follow_up"
   | "clear_queue"
@@ -8,9 +7,9 @@ export type RinRpcCommandType =
   | "get_state"
   | "cycle_model"
   | "get_messages"
-  | "resolve_submitted_turn"
   | "await_turn_terminal"
-  | "replay_pending_terminal_turn_event"
+  | "ack_turn_terminal"
+  | "list_unacknowledged_chat_terminals"
   | "get_session_snapshot"
   | "get_commands"
   | "get_all_models"

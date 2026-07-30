@@ -4,6 +4,7 @@ export type {
   RinExtensionUiResponse,
   RinFrontendAutocompleteItem,
   RinFrontendClient,
+  RinChatDeliveryContext,
   RinFrontendCommandItem,
   RinFrontendEvent,
   RinFrontendBackendEvent,
@@ -100,12 +101,6 @@ export {
   injectPromptContextHeader,
   type PromptContextMeta,
 } from "./prompt-context.js";
-
-export {
-  replayPendingTerminalTurnEvent,
-  type RinPendingTerminalTurnEventCommand,
-  type RinPendingTerminalTurnEventRequester,
-} from "./pending-terminal-turn.js";
 
 export {
   handleRinRpcSessionEvent,

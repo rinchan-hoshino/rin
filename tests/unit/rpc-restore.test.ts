@@ -42,7 +42,6 @@ test("rpc restore reattaches once and avoids duplicate restore work", async () =
       refreshes.push(flags);
       await refreshGate;
     },
-    queuedOfflineOps: [],
     sendOrQueue: async () => {
       throw new Error("should_not_send_queued_ops");
     },
@@ -69,9 +68,8 @@ test("rpc restore reattaches once and avoids duplicate restore work", async () =
   assert.deepEqual(events, []);
 });
 
-test("rpc restore flushes queued offline ops after reattach", async () => {
+test("rpc restore reconnects without replaying turns after reattach", async () => {
   const calls = [];
-  const sent = [];
   const target = {
     disposed: false,
     restorePromise: null,
@@ -89,13 +87,6 @@ test("rpc restore flushes queued offline ops after reattach", async () => {
     },
     queueRefreshState: () => Promise.resolve(),
     refreshState: async () => {},
-    queuedOfflineOps: [
-      { mode: "prompt", message: "queued-1", streamingBehavior: "steer" },
-      { mode: "follow_up", message: "queued-2" },
-    ],
-    sendOrQueue: async (operation) => {
-      sent.push(operation);
-    },
     isStreaming: false,
     isCompacting: false,
   };
@@ -106,9 +97,4 @@ test("rpc restore flushes queued offline ops after reattach", async () => {
     calls.filter((item) => item.type === "select_session").length,
     1,
   );
-  assert.deepEqual(sent, [
-    { mode: "prompt", message: "queued-1", streamingBehavior: "steer" },
-    { mode: "follow_up", message: "queued-2" },
-  ]);
-  assert.deepEqual(target.queuedOfflineOps, []);
 });

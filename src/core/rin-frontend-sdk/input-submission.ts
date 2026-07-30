@@ -6,7 +6,7 @@ import {
 } from "./frontend-identity.js";
 import { injectPromptContextHeader } from "./prompt-context.js";
 import type {
-  RinChatRunContext,
+  RinChatDeliveryContext,
   RinFrontendClient,
   RinPromptAdmission,
   RinPromptContext,
@@ -34,7 +34,7 @@ export type RinFrontendPromptTurnInput = {
   source?: string;
   frontendIdentity?: RinFrontendIdentity;
   requestTag?: string;
-  chatRunContext?: RinChatRunContext;
+  chatDeliveryContext?: RinChatDeliveryContext;
   streamingBehavior?: "steer" | "followUp";
   promptContext?: RinPromptContext;
   sessionFile?: string;
@@ -72,7 +72,9 @@ export async function submitNativeFrontendPromptTurn(
     streamingBehavior: input.streamingBehavior,
     source: input.source,
     requestTag: input.requestTag,
-    ...(input.chatRunContext ? { chatRunContext: input.chatRunContext } : {}),
+    ...(input.chatDeliveryContext
+      ? { chatDeliveryContext: input.chatDeliveryContext }
+      : {}),
   };
   const frontendIdentity = normalizeFrontendIdentity(input.frontendIdentity);
   if (frontendIdentity) promptOptions.frontendIdentity = frontendIdentity;

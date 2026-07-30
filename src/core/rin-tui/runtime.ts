@@ -29,7 +29,6 @@ import { executeRinFrontendInterruptIntent } from "../rin-frontend-sdk/frontend-
 import { waitForFrontendInputSubmissionReady } from "../rin-frontend-sdk/input-submission.js";
 import type { RpcFrontendClient } from "../rin-frontend-sdk/frontend-surface.js";
 import { createModelRegistry } from "../rin-frontend-sdk/model-registry.js";
-import { replayPendingTerminalTurnEvent } from "../rin-frontend-sdk/pending-terminal-turn.js";
 import {
   cycleRpcModel,
   cycleRpcThinkingLevel,
@@ -211,17 +210,6 @@ function asRawRuntimeError(error: unknown, fallback = "unknown error") {
   return new Error(rawErrorMessage(error) || fallback);
 }
 
-async function replayPendingTerminalTurnEventForTarget(target: any) {
-  return await replayPendingTerminalTurnEvent(
-    ({ type, ...payload }) => target.call(type, payload),
-    {
-      sessionFile:
-        target.sessionFile || target.sessionManager?.getSessionFile?.(),
-      sessionId: target.sessionId || target.sessionManager?.getSessionId?.(),
-    },
-  );
-}
-
 async function completeRpcRecovery(target: any) {
   const canApplyLightweightState =
     typeof target.call === "function" &&
@@ -236,23 +224,8 @@ async function completeRpcRecovery(target: any) {
     target.emitSessionResynced();
   }
   target.emitFrontendStatus(true);
-  await replayPendingTerminalTurnEventForTarget(target);
-  const timedOutPrompts = [...(target.timedOutPromptOps || [])];
-  target.timedOutPromptOps = [];
-  const queued = [...target.queuedOfflineOps];
-  if (
-    timedOutPrompts.length &&
-    !target.remoteTurnRunning &&
-    !target.isCompacting
-  ) {
-    queued.unshift(...timedOutPrompts);
-  }
-  target.queuedOfflineOps = [];
   if (typeof target.emitQueueUpdate === "function") {
     target.emitQueueUpdate();
-  }
-  for (const operation of queued) {
-    await target.sendOrQueue(operation);
   }
   if (canApplyLightweightState && typeof target.refreshState === "function") {
     void target
@@ -378,8 +351,6 @@ export class RpcInteractiveSession {
   private reconnecting = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectPromise: Promise<void> | null = null;
-  private queuedOfflineOps: PendingRpcOperation[] = [];
-  private timedOutPromptOps: PendingRpcOperation[] = [];
   private activeTurn: PendingRpcOperation | null = null;
   private rpcConnected = false;
   private remoteTurnRunning = false;
@@ -581,17 +552,6 @@ export class RpcInteractiveSession {
     });
   }
 
-  async resumeInterruptedTurn(options?: {
-    source?: string;
-    requestTag?: string;
-  }) {
-    await this.ensureRemoteSession({ persist: true });
-    await this.call("resume_interrupted_turn", {
-      source: options?.source,
-      requestTag: this.ensureRequestTag(options?.requestTag),
-    });
-  }
-
   async steer(
     message: string,
     images?: any[],
@@ -624,7 +584,6 @@ export class RpcInteractiveSession {
     const queued = this.visibleQueuedMessages();
     this.steeringMessages = [];
     this.followUpMessages = [];
-    this.queuedOfflineOps = [];
     this.syncPendingCount();
     this.emitQueueUpdate();
     if (
@@ -1538,24 +1497,13 @@ export class RpcInteractiveSession {
     return await this.waitForDaemonPromise;
   }
 
-  private queueOfflineOperation(operation: PendingRpcOperation) {
-    this.queuedOfflineOps.push(operation);
-    this.syncPendingCount();
-    this.emitQueueUpdate();
-    if (!this.client.isConnected() || !this.rpcConnected) {
-      this.startReconnectLoop();
-    }
-    this.emitFrontendStatus(true);
-  }
-
   private async sendOrQueue(operation: PendingRpcOperation) {
     if (
       !this.client.isConnected() ||
       !this.rpcConnected ||
       this.recoveryPending
     ) {
-      this.queueOfflineOperation(operation);
-      return;
+      throw new Error("rin_frontend_disconnected");
     }
 
     if (this.clearQueuePromise) await this.clearQueuePromise;
@@ -1615,13 +1563,11 @@ export class RpcInteractiveSession {
           this.activeTurn = null;
           this.syncStreamingState();
         }
-        this.queueOfflineOperation(operation);
-        return;
+        throw asRawRuntimeError(error);
       }
       if (operation.mode === "prompt" && isPromptSubmissionTimeout(message)) {
-        this.timedOutPromptOps.push(operation);
         this.handleSessionUnavailable();
-        return;
+        throw asRawRuntimeError(error);
       }
       if (tracksTurn) {
         this.activeTurn = null;
@@ -1996,8 +1942,6 @@ export class RpcInteractiveSession {
   private syncPendingCount() {
     const visible = this.visibleQueuedMessages();
     this.pendingMessageCount =
-      visible.steering.length +
-      visible.followUp.length +
-      this.queuedOfflineOps.length;
+      visible.steering.length + visible.followUp.length;
   }
 }
