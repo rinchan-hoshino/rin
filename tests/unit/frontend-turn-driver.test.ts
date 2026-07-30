@@ -542,15 +542,12 @@ test("frontend SDK turn driver settles from daemon terminal wait when the pushed
     "terminal wait was not registered before completion",
   );
   resolveTerminalWait!({
-    ok: true,
-    data: {
-      type: "rpc_turn_event",
-      event: "complete",
-      requestTag: terminalRequestTag,
-      finalText: "waited final",
-      sessionId: "frontend-session",
-      sessionFile: "/tmp/frontend-managed.jsonl",
-    },
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: terminalRequestTag,
+    finalText: "waited final",
+    sessionId: "frontend-session",
+    sessionFile: "/tmp/frontend-managed.jsonl",
   });
 
   const result = await withTimeout(

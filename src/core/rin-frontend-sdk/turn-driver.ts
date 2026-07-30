@@ -1370,17 +1370,9 @@ export class RinFrontendTurnDriver {
           requestTag,
         });
         void terminalWait.then(
-          async (response) => {
-            if (this.liveTurn !== liveTurn || response == null) return;
-            if (response.ok === false) {
-              this.failLiveTurn(
-                new Error(safeString(response.error) || "terminal_wait_failed"),
-              );
-              return;
-            }
-            if (response.data != null) {
-              await this.handleClientEvent(response.data);
-            }
+          async (event) => {
+            if (this.liveTurn !== liveTurn || event == null) return;
+            await this.handleClientEvent(event);
           },
           async (error) => {
             if (this.liveTurn !== liveTurn) return;
