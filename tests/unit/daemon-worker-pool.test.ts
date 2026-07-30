@@ -634,7 +634,7 @@ test("a failed owner command with a spaced id clears only its installed lifecycl
   );
 });
 
-test("exact terminal wait survives command detach with the same durable terminal event", async () => {
+test("exact terminal wait survives detach without leaking a raw terminal event", async () => {
   const dir = await makeTempDir("rin-worker-pool-session-events-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = path.join(dir, "session.jsonl");
@@ -689,7 +689,7 @@ test("exact terminal wait survives command detach with the same durable terminal
   assert.equal(result.terminalRecord.state, "complete");
   assert.equal(
     writes.some((line) => line.includes("durable final")),
-    true,
+    false,
   );
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
@@ -1303,7 +1303,7 @@ test("a started Pi steer does not transfer transport terminal ownership", async 
         value.includes('"requestTag":"tag-original"') &&
         value.includes('"finalText":"Pi-owned final"'),
     ),
-    true,
+    false,
   );
 
   pool.destroyAll();

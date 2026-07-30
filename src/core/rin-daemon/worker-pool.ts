@@ -1402,14 +1402,14 @@ export class WorkerPool {
           return;
         }
 
-        const terminalTurnEvent = isTerminalRpcTurnEvent(payload);
+        if (isTerminalRpcTurnEvent(payload)) {
+          this.resolveTerminalTurnWaiters(worker, payload);
+          return;
+        }
         for (const connection of this.getWorkerEventConnections(worker)) {
           if (this.shouldForwardWorkerPayload(connection, worker, payload)) {
             writeLine(connection.socket, payload);
           }
-        }
-        if (terminalTurnEvent) {
-          this.resolveTerminalTurnWaiters(worker, payload);
         }
       });
     });
