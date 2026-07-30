@@ -16,11 +16,7 @@ const { WorkerPool } = await import(
     path.join(rootDir, "dist", "core", "rin-daemon", "worker-pool.js"),
   ).href
 );
-const {
-  commitChatTerminalWal,
-  listStagedChatTerminalWal,
-  stageChatTerminalWal,
-} = await import(
+const { listStagedChatTerminalWal, stageChatTerminalWal } = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-daemon", "chat-terminal-wal.js"),
   ).href
@@ -4820,11 +4816,16 @@ test("worker pool replays staged canonical terminal WAL without consuming it", a
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("canonical terminal WAL redelivers on the same connection until committed", async () => {
-  const dir = await makeTempDir("rin-worker-pool-canonical-redelivery-");
+test("session-selected frontend receives terminal after command worker detaches", async () => {
+  const dir = await makeTempDir("rin-worker-pool-session-events-");
+  const workerPath = path.join(dir, "worker-source");
   const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
   const staged = stageChatTerminalWal(dir, {
-    runId: "canonical-run-redelivery",
+    runId: "session-event-run",
     ownerEpoch: "run-owner",
     producerIncarnation: "worker-incarnation",
     terminalKind: "complete",
@@ -4836,12 +4837,6 @@ test("canonical terminal WAL redelivers on the same connection until committed",
       finalText: "durable final",
     },
   });
-  const pool = new WorkerPool({
-    workerPath: path.join(dir, "unused-worker"),
-    cwd: dir,
-    agentDir: dir,
-    terminalRedeliveryMs: 20,
-  });
   const writes: string[] = [];
   const connection = {
     socket: {
@@ -4852,114 +4847,103 @@ test("canonical terminal WAL redelivers on the same connection until committed",
     },
     clientBuffer: "",
   };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  pool.registerConnection(connection);
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.attachWorkerToConnection(connection, worker);
+  pool.forwardToWorker(connection, worker, {
+    id: "prompt-1",
+    type: "prompt",
+    message: "run",
+    requestTag: "run-request",
+    sessionFile,
+  });
+  pool.detachWorker(connection, { release: false });
+  assert.equal(connection.attachedWorker, undefined);
+  assert.equal(connection.sessionFile, sessionFile);
 
+  const terminalPayload = {
+    type: "rpc_turn_event",
+    ...staged.terminalPayload,
+    chatRunContext: {
+      runId: staged.runId,
+      ownerEpoch: staged.ownerEpoch,
+      producerIncarnation: staged.producerIncarnation,
+    },
+    terminalWal: {
+      payloadHash: staged.payloadHash,
+      stagedAt: staged.stagedAt,
+    },
+  };
+  assert.equal(pool.frontendConnections.has(connection), true);
   assert.equal(
-    pool.replayPendingTerminalTurnEvent(connection, { sessionFile }),
+    pool.shouldForwardWorkerPayload(connection, worker, terminalPayload),
     true,
   );
-  assert.equal(writes.length, 1);
-  for (let attempt = 0; attempt < 20 && writes.length < 2; attempt += 1) {
+  worker.child.stdout.emit("data", `${JSON.stringify(terminalPayload)}\n`);
+
+  for (let index = 0; index < 100 && writes.length === 0; index += 1) {
     await sleep(10);
   }
-  assert.ok(writes.length >= 2, "unacknowledged terminal should redeliver");
-  assert.equal(
-    new Set(writes.map((value) => JSON.parse(value).terminalWal?.payloadHash))
-      .size,
-    1,
-  );
-
-  commitChatTerminalWal(dir, {
-    runId: staged.runId,
-    ownerEpoch: staged.ownerEpoch,
-    producerIncarnation: staged.producerIncarnation,
-    payloadHash: staged.payloadHash,
-    outboxId: "final-outbox",
-  });
-  await sleep(30);
-  const writesAfterCommit = writes.length;
-  await sleep(50);
-  assert.equal(writes.length, writesAfterCommit);
+  assert.equal(writes.length, 1);
+  assert.equal(JSON.parse(writes[0]).finalText, "durable final");
+  worker.child.stderr.emit("data", "worker detail\n");
+  for (let index = 0; index < 100 && writes.length < 2; index += 1) {
+    await sleep(10);
+  }
+  assert.equal(JSON.parse(writes[1]).type, "stderr");
+  pool.unregisterConnection(connection);
+  worker.child.stderr.emit("data", "must not deliver\n");
+  await sleep(20);
+  assert.equal(writes.length, 2);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("forwarded canonical terminal starts reliable same-connection redelivery", async () => {
-  const dir = await makeTempDir("rin-worker-pool-forwarded-redelivery-");
+test("worker exit reaches selected and transient command audiences", async () => {
+  const dir = await makeTempDir("rin-worker-pool-exit-audience-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = path.join(dir, "session.jsonl");
   await fs.writeFile(
     workerPath,
     "process.stdin.resume(); setInterval(() => {}, 1000);\n",
   );
-  const staged = stageChatTerminalWal(dir, {
-    runId: "forwarded-run-redelivery",
-    ownerEpoch: "run-owner",
-    producerIncarnation: "worker-incarnation",
-    terminalKind: "complete",
-    terminalPayload: {
-      event: "complete",
-      requestTag: "run-request",
-      sessionFile,
-      sessionId: "run-session",
-      finalText: "forwarded durable final",
-    },
-  });
-  const writes: string[] = [];
-  const connection = {
+  const selectedWrites: string[] = [];
+  const transientWrites: string[] = [];
+  const selected = {
     socket: {
       destroyed: false,
       write(value: string) {
-        writes.push(String(value));
+        selectedWrites.push(String(value));
       },
     },
     clientBuffer: "",
   };
-  const pool = new WorkerPool({
-    workerPath,
-    cwd: dir,
-    agentDir: dir,
-    terminalRedeliveryMs: 20,
-  });
+  const transient = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        transientWrites.push(String(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  pool.registerConnection(selected);
   const worker = pool.restoreSessionWorker({ sessionFile });
   assert.ok(worker);
-  pool.forwardToWorker(connection, worker, {
-    id: "prompt-1",
-    type: "prompt",
-    message: "run",
-    requestTag: "run-request",
-  });
-  worker.child.stdout.emit(
-    "data",
-    `${JSON.stringify({
-      type: "rpc_turn_event",
-      ...staged.terminalPayload,
-      chatRunContext: {
-        runId: staged.runId,
-        ownerEpoch: staged.ownerEpoch,
-        producerIncarnation: staged.producerIncarnation,
-      },
-      terminalWal: { payloadHash: staged.payloadHash },
-    })}\n`,
-  );
+  pool.attachWorkerToConnection(selected, worker);
+  pool.detachWorker(selected, { release: false });
+  pool.attachWorkerToConnection(transient, worker);
+  transient.sessionFile = undefined;
+  transient.sessionId = undefined;
 
-  for (let attempt = 0; attempt < 20 && writes.length < 2; attempt += 1) {
-    await sleep(10);
-  }
-  assert.ok(writes.length >= 2, "forwarded terminal should redeliver");
-  assert.equal(
-    new Set(writes.map((value) => JSON.parse(value).terminalWal?.payloadHash))
-      .size,
-    1,
-  );
+  pool.destroyWorker(worker);
 
-  commitChatTerminalWal(dir, {
-    runId: staged.runId,
-    ownerEpoch: staged.ownerEpoch,
-    producerIncarnation: staged.producerIncarnation,
-    payloadHash: staged.payloadHash,
-    outboxId: "final-outbox",
-  });
+  assert.equal(JSON.parse(selectedWrites[0]).type, "worker_exit");
+  assert.equal(JSON.parse(transientWrites[0]).type, "worker_exit");
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
 });

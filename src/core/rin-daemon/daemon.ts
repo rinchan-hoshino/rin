@@ -641,6 +641,7 @@ export async function startDaemon(
       socket,
       clientBuffer: "",
     };
+    workerPool.registerConnection(connection);
 
     socket.on("data", (chunk) => {
       connection.clientBuffer += String(chunk);
@@ -710,7 +711,8 @@ export async function startDaemon(
     });
 
     const cleanup = () => {
-      workerPool.detachWorker(connection);
+      workerPool.unregisterConnection(connection);
+      workerPool.detachWorker(connection, { clearSelection: true });
       workerPool.evictDetachedWorkers();
     };
 

@@ -61,13 +61,6 @@ type TerminalTurnWaiter = {
   reject: (error: Error) => void;
 };
 
-type StagedChatTerminal = ReturnType<typeof listStagedChatTerminalWal>[number];
-
-type TerminalRedelivery = {
-  payloadHash: string;
-  timer: NodeJS.Timeout;
-};
-
 type InterruptedTurnRecoveryIntent = {
   selector: SessionSelector;
   source: string;
@@ -209,11 +202,7 @@ export class WorkerPool {
   private readonly gcIdleMs: number;
   private readonly internalCommandTimeoutMs: number;
   private readonly switchSessionCommandTimeoutMs: number;
-  private readonly terminalRedeliveryMs: number;
-  private readonly terminalRedeliveries = new Map<
-    ConnectionState,
-    Map<string, TerminalRedelivery>
-  >();
+  private readonly frontendConnections = new Set<ConnectionState>();
   private readonly reaper: NodeJS.Timeout;
 
   constructor(
@@ -228,7 +217,6 @@ export class WorkerPool {
       sweepIntervalMs?: number;
       internalCommandTimeoutMs?: number;
       switchSessionCommandTimeoutMs?: number;
-      terminalRedeliveryMs?: number;
       resourceOptions?: Record<string, unknown>;
       resourceOptionsDir?: string;
       agentDir?: string;
@@ -250,10 +238,6 @@ export class WorkerPool {
       this.internalCommandTimeoutMs,
       switchSessionTimeoutDefault,
     );
-    this.terminalRedeliveryMs = Math.max(
-      10,
-      Number(options.terminalRedeliveryMs ?? 1_000),
-    );
     const sweepIntervalMs = Math.max(
       250,
       Number(options.sweepIntervalMs ?? Math.min(this.gcIdleMs || 250, 5_000)),
@@ -262,6 +246,14 @@ export class WorkerPool {
       this.evictDetachedWorkers();
     }, sweepIntervalMs);
     this.reaper.unref?.();
+  }
+
+  registerConnection(connection: ConnectionState) {
+    this.frontendConnections.add(connection);
+  }
+
+  unregisterConnection(connection: ConnectionState) {
+    this.frontendConnections.delete(connection);
   }
 
   detachWorker(
@@ -352,12 +344,19 @@ export class WorkerPool {
     if (!this.shuttingDown || !this.isWorkerRunning(worker)) {
       this.clearRunningWorkerRecord(worker);
     }
+    const workerExitConnections = Array.from(
+      this.getWorkerEventConnections(worker),
+    ).filter((connection) =>
+      this.shouldForwardWorkerPayload(connection, worker, {}),
+    );
     this.deleteWorkerSessionRefs(worker);
     for (const connection of Array.from(worker.connections)) {
       if (connection.attachedWorker === worker) {
         connection.attachedWorker = undefined;
       }
       worker.connections.delete(connection);
+    }
+    for (const connection of workerExitConnections) {
       writeLine(connection.socket, {
         type: "worker_exit",
         code: null,
@@ -721,12 +720,7 @@ export class WorkerPool {
 
   destroyAll() {
     clearInterval(this.reaper);
-    for (const redeliveries of this.terminalRedeliveries.values()) {
-      for (const redelivery of redeliveries.values()) {
-        clearTimeout(redelivery.timer);
-      }
-    }
-    this.terminalRedeliveries.clear();
+    this.frontendConnections.clear();
     for (const intent of this.interruptedTurnRecoveryIntents.values()) {
       if (intent.retryTimer) clearTimeout(intent.retryTimer);
     }
@@ -1859,22 +1853,9 @@ export class WorkerPool {
 
         const terminalTurnEvent = isTerminalRpcTurnEvent(payload);
         let forwarded = 0;
-        for (const connection of worker.connections) {
+        for (const connection of this.getWorkerEventConnections(worker)) {
           if (this.shouldForwardWorkerPayload(connection, worker, payload)) {
             writeLine(connection.socket, payload);
-            if (terminalTurnEvent && payload?.terminalWal?.payloadHash) {
-              const staged = listStagedChatTerminalWal(
-                String(this.options.agentDir || "").trim(),
-                sessionSelectorFromState(payload),
-              ).find(
-                (record) =>
-                  record.payloadHash ===
-                  String(payload.terminalWal.payloadHash),
-              );
-              if (staged) {
-                this.scheduleStagedChatTerminalRedelivery(connection, staged);
-              }
-            }
             forwarded += 1;
           }
         }
@@ -1895,7 +1876,7 @@ export class WorkerPool {
 
     child.stderr.on("data", (chunk) => {
       parseJsonl(String(chunk), worker.stderrBuffer, (line) => {
-        for (const connection of worker.connections) {
+        for (const connection of this.getWorkerEventConnections(worker)) {
           if (this.shouldForwardWorkerPayload(connection, worker, {})) {
             writeLine(connection.socket, { type: "stderr", line });
           }
@@ -1994,6 +1975,10 @@ export class WorkerPool {
     return worker;
   }
 
+  private getWorkerEventConnections(worker: WorkerHandle) {
+    return new Set([...this.frontendConnections, ...worker.connections]);
+  }
+
   private shouldForwardWorkerPayload(
     connection: ConnectionState,
     worker: WorkerHandle,
@@ -2037,7 +2022,19 @@ export class WorkerPool {
       effectiveSelector,
     );
     for (const record of stagedChatTerminals) {
-      this.deliverStagedChatTerminal(connection, record);
+      writeLine(connection.socket, {
+        type: "rpc_turn_event",
+        ...record.terminalPayload,
+        chatRunContext: {
+          runId: record.runId,
+          ownerEpoch: record.ownerEpoch,
+          producerIncarnation: record.producerIncarnation,
+        },
+        terminalWal: {
+          payloadHash: record.payloadHash,
+          stagedAt: record.stagedAt,
+        },
+      });
     }
     if (stagedChatTerminals.length > 0) return true;
     const pendingTerminalEvent = takePendingTerminalTurnEvent(
@@ -2047,89 +2044,6 @@ export class WorkerPool {
     if (!pendingTerminalEvent) return false;
     writeLine(connection.socket, pendingTerminalEvent);
     return true;
-  }
-
-  private deliverStagedChatTerminal(
-    connection: ConnectionState,
-    record: StagedChatTerminal,
-  ) {
-    writeLine(connection.socket, {
-      type: "rpc_turn_event",
-      ...record.terminalPayload,
-      chatRunContext: {
-        runId: record.runId,
-        ownerEpoch: record.ownerEpoch,
-        producerIncarnation: record.producerIncarnation,
-      },
-      terminalWal: {
-        payloadHash: record.payloadHash,
-        stagedAt: record.stagedAt,
-      },
-    });
-    this.scheduleStagedChatTerminalRedelivery(connection, record);
-  }
-
-  private scheduleStagedChatTerminalRedelivery(
-    connection: ConnectionState,
-    record: StagedChatTerminal,
-  ) {
-    let connectionRedeliveries = this.terminalRedeliveries.get(connection);
-    if (!connectionRedeliveries) {
-      connectionRedeliveries = new Map();
-      this.terminalRedeliveries.set(connection, connectionRedeliveries);
-    }
-    if (connectionRedeliveries.has(record.payloadHash)) return;
-
-    const stop = () => {
-      const current = this.terminalRedeliveries.get(connection);
-      const redelivery = current?.get(record.payloadHash);
-      if (redelivery) clearTimeout(redelivery.timer);
-      current?.delete(record.payloadHash);
-      if (current?.size === 0) this.terminalRedeliveries.delete(connection);
-    };
-    const retry = () => {
-      if (this.shuttingDown || connection.socket.destroyed) {
-        stop();
-        return;
-      }
-      const pending = listStagedChatTerminalWal(
-        String(this.options.agentDir || "").trim(),
-        {
-          sessionFile: String(record.terminalPayload.sessionFile || ""),
-          sessionId: String(record.terminalPayload.sessionId || ""),
-        },
-      ).find((candidate) => candidate.payloadHash === record.payloadHash);
-      if (!pending) {
-        stop();
-        return;
-      }
-      writeLine(connection.socket, {
-        type: "rpc_turn_event",
-        ...pending.terminalPayload,
-        chatRunContext: {
-          runId: pending.runId,
-          ownerEpoch: pending.ownerEpoch,
-          producerIncarnation: pending.producerIncarnation,
-        },
-        terminalWal: {
-          payloadHash: pending.payloadHash,
-          stagedAt: pending.stagedAt,
-        },
-      });
-      const timer = setTimeout(retry, this.terminalRedeliveryMs);
-      timer.unref?.();
-      connectionRedeliveries?.set(record.payloadHash, {
-        payloadHash: record.payloadHash,
-        timer,
-      });
-    };
-
-    const timer = setTimeout(retry, this.terminalRedeliveryMs);
-    timer.unref?.();
-    connectionRedeliveries.set(record.payloadHash, {
-      payloadHash: record.payloadHash,
-      timer,
-    });
   }
 
   private maybeReleaseWorker(worker: WorkerHandle) {
