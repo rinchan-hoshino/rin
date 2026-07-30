@@ -1269,7 +1269,17 @@ export function migrateChatDatabaseForInstall(
             `DELETE FROM schema_meta WHERE key = 'admission_model_version'`,
           )
           .run();
-        migrateLegacyChatControlData(agentDir, migrationDb);
+        const legacyMigrationMarker = migrationDb
+          .prepare(
+            `SELECT value FROM schema_meta
+              WHERE key = 'legacy_control_migration'`,
+          )
+          .get() as { value?: string } | undefined;
+        const legacyMigrationComplete =
+          legacyMigrationMarker?.value === "complete_v1";
+        if (needsInitialization || !legacyMigrationComplete) {
+          migrateLegacyChatControlData(agentDir, migrationDb);
+        }
         consumeOldAdmissionRowsForInstall(migrationDb);
       })
       .exclusive();

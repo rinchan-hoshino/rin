@@ -832,7 +832,7 @@ test("empty legacy authority paths recreated after cutover do not block migratio
   );
 });
 
-test("legacy authority content changed after completed cutover blocks startup", async () => {
+test("completed cutover never reimports recreated legacy authority", async () => {
   const agentDir = await tempDir();
   database.migrateChatDatabaseForInstall(agentDir);
   database.closeChatDatabase(agentDir);
@@ -841,13 +841,14 @@ test("legacy authority content changed after completed cutover blocks startup", 
     legacyOutbox("late-legacy-write"),
   );
 
-  assert.throws(
-    () => database.migrateChatDatabaseForInstall(agentDir),
-    /chat_legacy_migration_source_changed/,
+  const reopened = database.migrateChatDatabaseForInstall(agentDir);
+  assert.equal(
+    reopened.prepare("SELECT COUNT(*) AS count FROM outbox").get().count,
+    0,
   );
 });
 
-test("legacy archive content modified after completed cutover blocks startup", async () => {
+test("completed cutover ignores later modifications to retired legacy archives", async () => {
   const agentDir = await tempDir();
   const archiveFile = path.join(
     agentDir,
@@ -869,13 +870,18 @@ test("legacy archive content modified after completed cutover blocks startup", a
     routing: { text: "modified after cutover" },
   });
 
-  assert.throws(
-    () => database.migrateChatDatabaseForInstall(agentDir),
-    /chat_legacy_migration_source_changed/,
+  const reopened = database.migrateChatDatabaseForInstall(agentDir);
+  assert.equal(
+    reopened
+      .prepare(
+        "SELECT value FROM schema_meta WHERE key = 'legacy_control_migration'",
+      )
+      .get().value,
+    "complete_v1",
   );
 });
 
-test("legacy archive content deleted after completed cutover blocks startup", async () => {
+test("completed cutover ignores later deletions from retired legacy archives", async () => {
   const agentDir = await tempDir();
   const sourceFile = path.join(
     agentDir,
@@ -901,9 +907,14 @@ test("legacy archive content deleted after completed cutover blocks startup", as
     ),
   );
 
-  assert.throws(
-    () => database.migrateChatDatabaseForInstall(agentDir),
-    /chat_legacy_migration_source_changed/,
+  const reopened = database.migrateChatDatabaseForInstall(agentDir);
+  assert.equal(
+    reopened
+      .prepare(
+        "SELECT value FROM schema_meta WHERE key = 'legacy_control_migration'",
+      )
+      .get().value,
+    "complete_v1",
   );
 });
 
