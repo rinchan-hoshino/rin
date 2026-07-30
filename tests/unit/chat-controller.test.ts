@@ -32,12 +32,16 @@ const { claimChatInboxItem, enqueueChatInboxItem, failClaimedChatInboxItem } =
   await import(
     pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
   );
-const { beginDaemonTurn, daemonTurnTerminalEvent, recordDaemonTurnTerminal } =
-  await import(
-    pathToFileURL(
-      path.join(rootDir, "dist", "core", "rin-daemon", "turn-ledger.js"),
-    ).href
-  );
+const {
+  beginDaemonTurn,
+  daemonTurnTerminalEvent,
+  interruptDaemonTurn,
+  recordDaemonTurnTerminal,
+} = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-daemon", "turn-ledger.js"),
+  ).href
+);
 const {
   enqueueChatOutboxPayload,
   listChatOutboxHistoryItems,
@@ -7094,5 +7098,94 @@ test("authoritative daemon terminal replaces a local interrupted transport failu
       )
       .get(claim.itemId),
     { state: "terminal", terminal_kind: "outbox_final", last_error: null },
+  );
+});
+
+test("connect drains an older terminal before restoring the new primed turn", async () => {
+  const controller = await createController("telegram/1:2");
+  const oldInbound = enqueueChatInboxItem(controller.agentDir, {
+    chatKey: controller.chatKey,
+    messageId: "old-interrupted-message",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "2",
+      messageId: "old-interrupted-message",
+      content: "old turn",
+      stripped: { content: "old turn" },
+    },
+    elements: [{ type: "text", attrs: { content: "old turn" } }],
+  }).item;
+  const oldClaim = claimChatInboxItem(controller.agentDir, oldInbound.itemId);
+  failClaimedChatInboxItem(
+    controller.agentDir,
+    oldClaim,
+    "chat_turn_interrupted",
+  );
+  const requestTag = "old-interrupted-request";
+  beginDaemonTurn(controller.agentDir, {
+    requestTag,
+    sessionFile: "old-session.jsonl",
+    chatDeliveryContext: {
+      turnId: oldClaim.itemId,
+      chatKey: oldClaim.chatKey,
+      messageId: oldClaim.messageId,
+    },
+  });
+  const terminalEvent = daemonTurnTerminalEvent(
+    interruptDaemonTurn(controller.agentDir, requestTag, "rin_worker_exit"),
+  );
+  const newTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "new-message",
+    replyToMessageId: "new-message",
+    requestTag: "new-request",
+    workingNoticeSent: false,
+  };
+  controller.currentTurn = newTurn;
+  controller.awaitingTurnSettle = true;
+  controller.connect = ChatController.prototype.connect.bind(controller);
+  const acknowledgements = [];
+  controller.driver.connect = async () => true;
+  controller.driver.acknowledgeTerminal = async (tag, terminalId) => {
+    acknowledgements.push({ tag, terminalId });
+  };
+  controller.driver.recoverUnacknowledgedChatTerminals = async () => {
+    assert.equal(controller.currentTurn, null);
+    await controller.handleFrontendEvent({
+      type: "turn_error",
+      error: terminalEvent.error,
+      requestTag: terminalEvent.requestTag,
+      sessionFile: terminalEvent.sessionFile,
+      chatDeliveryContext: terminalEvent.chatDeliveryContext,
+      terminalRecord: terminalEvent.terminalRecord,
+    });
+    return 1;
+  };
+
+  await controller.connect();
+  assert.equal(controller.currentTurn, newTurn);
+  assert.equal(controller.awaitingTurnSettle, true);
+  assert.deepEqual(acknowledgements, [
+    {
+      tag: requestTag,
+      terminalId: terminalEvent.terminalRecord.terminalId,
+    },
+  ]);
+  const db = openChatDatabase(controller.agentDir);
+  assert.deepEqual(
+    db
+      .prepare(
+        `SELECT state, terminal_kind, last_error
+           FROM inbox_jobs WHERE turn_id = ?`,
+      )
+      .get(oldClaim.itemId),
+    { state: "terminal", terminal_kind: "outbox_error", last_error: null },
+  );
+  assert.equal(
+    db
+      .prepare(`SELECT COUNT(*) AS count FROM outbox WHERE turn_id = ?`)
+      .get(oldClaim.itemId).count,
+    1,
   );
 });

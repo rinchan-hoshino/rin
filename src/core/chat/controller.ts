@@ -471,7 +471,20 @@ export class ChatController {
       this.saveState();
     }
     if (connected) {
-      await this.driver.recoverUnacknowledgedChatTerminals(this.chatKey);
+      const reservedTurn = this.currentTurn;
+      const reservedAwaitingTurnSettle = this.awaitingTurnSettle;
+      if (reservedTurn) {
+        this.currentTurn = null;
+        this.awaitingTurnSettle = false;
+      }
+      try {
+        await this.driver.recoverUnacknowledgedChatTerminals(this.chatKey);
+      } finally {
+        if (reservedTurn) {
+          this.currentTurn = reservedTurn;
+          this.awaitingTurnSettle = reservedAwaitingTurnSettle;
+        }
+      }
     }
     return connected;
   }
@@ -720,11 +733,8 @@ export class ChatController {
       !this.currentTurn?.outboxTurnFence,
     );
     if (deliverFinal && (!this.currentTurn || shouldRestoreDurableTurn)) {
-      // Reconnecting a recovered frontend can replay progress before connect()
-      // resolves. Install the inbox identity first so those updates reuse the
-      // original reply-scoped editable working message instead of creating an
-      // unscoped channel-level message. A display-only external Working event
-      // may have arrived first; durable ownership replaces that presentation.
+      // Install reply identity before reconnect can replay progress. connect()
+      // temporarily yields that identity only while draining older terminals.
       this.setCurrentTurn(input);
       primedTurn = this.currentTurn;
       this.awaitingTurnSettle = true;
