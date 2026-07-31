@@ -672,6 +672,8 @@ export async function startChatBridge(
           });
           try {
             await controller.connect({ recoverTerminals: false });
+            const sessionFile = safeString(terminal?.sessionFile).trim();
+            if (sessionFile) await controller.resumeSessionFile(sessionFile);
             await controller.driver.handleClientEvent({
               type: "ui",
               payload: terminal,
