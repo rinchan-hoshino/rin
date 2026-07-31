@@ -43,6 +43,39 @@ export function writeFinalizeInstallPlanFile(
   return planPath;
 }
 
+export function cleanupConsumedFinalizeInstallPlan(
+  planPath: string,
+  deps: {
+    tmpdir?: typeof os.tmpdir;
+    realpathSync?: typeof fs.realpathSync;
+    lstatSync?: typeof fs.lstatSync;
+    rmSync?: typeof fs.rmSync;
+  } = {},
+) {
+  const tmpdir = deps.tmpdir || os.tmpdir;
+  const realpathSync = deps.realpathSync || fs.realpathSync;
+  const lstatSync = deps.lstatSync || fs.lstatSync;
+  const rmSync = deps.rmSync || fs.rmSync;
+  const resolvedPlan = path.resolve(planPath);
+  const planDir = path.dirname(resolvedPlan);
+  try {
+    const planDirStat = lstatSync(planDir);
+    if (
+      path.basename(resolvedPlan) !== "apply-plan.json" ||
+      !path.basename(planDir).startsWith("rin-install-plan-") ||
+      planDirStat.isSymbolicLink() ||
+      !planDirStat.isDirectory() ||
+      realpathSync(path.dirname(planDir)) !== realpathSync(tmpdir())
+    ) {
+      return false;
+    }
+    rmSync(planDir, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function buildFinalizeInstallPlanCommand(
   planPath: string,
   entryPath = process.argv[1] || fileURLToPath(import.meta.url),

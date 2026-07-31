@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -1731,22 +1731,37 @@ export class WorkerPool {
 
     const workerResourceOptions =
       resourceOptions || this.options.resourceOptions;
-    const workerArgs = [
-      this.options.workerPath,
-      ...this.writeWorkerResourceOptionsFile(workerResourceOptions),
-    ];
+    const workerResourceOptionsArgs = this.writeWorkerResourceOptionsFile(
+      workerResourceOptions,
+    );
+    const workerResourceOptionsFile = workerResourceOptionsArgs[1];
+    const workerArgs = [this.options.workerPath, ...workerResourceOptionsArgs];
     const workerId = `worker_${++this.workerSeq}`;
     const workerEnv = {
       ...process.env,
       [RIN_DAEMON_WORKER_OWNER_ENV]: os.userInfo().username,
     };
     delete workerEnv[WORKER_CGROUP_DELEGATION_ENV];
-    const child = spawn(process.execPath, workerArgs, {
-      cwd: this.options.cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: workerEnv,
-      windowsHide: true,
-    });
+    const cleanupWorkerResourceOptions = () => {
+      if (!workerResourceOptionsFile) return;
+      try {
+        fs.rmSync(workerResourceOptionsFile, { force: true });
+      } catch {}
+    };
+    let child: ChildProcessWithoutNullStreams;
+    try {
+      child = spawn(process.execPath, workerArgs, {
+        cwd: this.options.cwd,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: workerEnv,
+        windowsHide: true,
+      });
+    } catch (error) {
+      cleanupWorkerResourceOptions();
+      throw error;
+    }
+    child.once("error", cleanupWorkerResourceOptions);
+    child.once("close", cleanupWorkerResourceOptions);
     let cgroupLease: WorkerCgroupLease | undefined;
     if (this.options.workerCgroupIsolation) {
       if (!child.pid) {
@@ -1894,7 +1909,7 @@ export class WorkerPool {
       this.handleWorkerStdinFailure(worker, error);
     });
 
-    child.on("exit", async (code, signal) => {
+    child.on("close", async (code, signal) => {
       const liveConnections = new Set<ConnectionState>(worker.connections);
       for (const pending of worker.pendingResponses.values()) {
         pending.finalize?.();

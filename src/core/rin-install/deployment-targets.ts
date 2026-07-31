@@ -135,6 +135,24 @@ function writeCloudInit(targetName: string) {
   return filePath;
 }
 
+export function withTemporaryCloudInit<T>(
+  targetName: string,
+  action: (cloudInitPath: string) => T,
+  deps: {
+    writeCloudInit?: typeof writeCloudInit;
+    rmSync?: typeof fs.rmSync;
+  } = {},
+) {
+  const create = deps.writeCloudInit || writeCloudInit;
+  const remove = deps.rmSync || fs.rmSync;
+  const cloudInitPath = create(targetName);
+  try {
+    return action(cloudInitPath);
+  } finally {
+    remove(cloudInitPath, { force: true });
+  }
+}
+
 function waitForSsh(host: string, identityFile?: string, timeoutMs = 180000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -222,7 +240,6 @@ export function installCloudTarget(target: CloudInstallTarget) {
 function installHetznerTarget(target: CloudInstallTarget) {
   requireCommand("hcloud");
   const { privateKey, publicKey } = ensureSshKey(target.name);
-  const cloudInit = writeCloudInit(target.name);
   const env = { ...process.env, HCLOUD_TOKEN: target.token };
   const keyName = `rin-${normalizeTargetName(target.name)}`;
   spawnSync(
@@ -237,25 +254,27 @@ function installHetznerTarget(target: CloudInstallTarget) {
     ],
     { stdio: "ignore", env },
   );
-  run(
-    "hcloud",
-    [
-      "server",
-      "create",
-      "--name",
-      normalizeTargetName(target.name),
-      "--type",
-      target.size,
-      "--image",
-      target.image,
-      "--location",
-      target.region,
-      "--ssh-key",
-      keyName,
-      "--user-data-from-file",
-      cloudInit,
-    ],
-    { env },
+  withTemporaryCloudInit(target.name, (cloudInit) =>
+    run(
+      "hcloud",
+      [
+        "server",
+        "create",
+        "--name",
+        normalizeTargetName(target.name),
+        "--type",
+        target.size,
+        "--image",
+        target.image,
+        "--location",
+        target.region,
+        "--ssh-key",
+        keyName,
+        "--user-data-from-file",
+        cloudInit,
+      ],
+      { env },
+    ),
   );
   const ip = capture(
     "hcloud",
@@ -280,7 +299,6 @@ function installHetznerTarget(target: CloudInstallTarget) {
 function installDigitalOceanTarget(target: CloudInstallTarget) {
   requireCommand("doctl");
   const { privateKey, publicKey } = ensureSshKey(target.name);
-  const cloudInit = writeCloudInit(target.name);
   const env = { ...process.env, DIGITALOCEAN_ACCESS_TOKEN: target.token };
   const keyName = `rin-${normalizeTargetName(target.name)}`;
   spawnSync(
@@ -297,26 +315,28 @@ function installDigitalOceanTarget(target: CloudInstallTarget) {
     .map((line) => line.trim().split(/\s+/, 2))
     .find(([, name]) => name === keyName)?.[0];
   if (!keyId) throw new Error("rin_digitalocean_ssh_key_not_found");
-  run(
-    "doctl",
-    [
-      "compute",
-      "droplet",
-      "create",
-      normalizeTargetName(target.name),
-      "--region",
-      target.region,
-      "--size",
-      target.size,
-      "--image",
-      target.image,
-      "--ssh-keys",
-      keyId,
-      "--user-data-file",
-      cloudInit,
-      "--wait",
-    ],
-    { env },
+  withTemporaryCloudInit(target.name, (cloudInit) =>
+    run(
+      "doctl",
+      [
+        "compute",
+        "droplet",
+        "create",
+        normalizeTargetName(target.name),
+        "--region",
+        target.region,
+        "--size",
+        target.size,
+        "--image",
+        target.image,
+        "--ssh-keys",
+        keyId,
+        "--user-data-file",
+        cloudInit,
+        "--wait",
+      ],
+      { env },
+    ),
   );
   const ip = capture(
     "doctl",
@@ -373,18 +393,19 @@ export function installNasTarget(target: NasInstallTarget) {
 export function installVmTarget(target: VmInstallTarget) {
   requireCommand("multipass");
   const name = normalizeTargetName(target.name);
-  const cloudInit = writeCloudInit(target.name);
   const exists =
     spawnSync("multipass", ["info", name], { stdio: "ignore" }).status === 0;
   if (!exists) {
-    run("multipass", [
-      "launch",
-      target.image,
-      "--name",
-      name,
-      "--cloud-init",
-      cloudInit,
-    ]);
+    withTemporaryCloudInit(target.name, (cloudInit) =>
+      run("multipass", [
+        "launch",
+        target.image,
+        "--name",
+        name,
+        "--cloud-init",
+        cloudInit,
+      ]),
+    );
   }
   run("multipass", ["exec", name, "--", "sh", "-lc", INSTALL_COMMAND]);
   return upsertTarget({

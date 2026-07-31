@@ -23,6 +23,11 @@ const runtimeDependencyPrune = await import(
   ).href
 );
 
+const updateWorkflowSource = fsSync.readFileSync(
+  path.join(rootDir, "src", "core", "rin-install", "update-workflow.ts"),
+  "utf8",
+);
+
 async function withTempDir(fn: (dir: string) => Promise<void>) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-update-workflow-"));
   try {
@@ -51,6 +56,19 @@ async function writePackage(
   );
   await fs.writeFile(path.join(dir, "index.js"), "export {};\n", "utf8");
 }
+
+test("managed npm extraction stays on the update workspace filesystem", () => {
+  const start = updateWorkflowSource.indexOf(
+    "function downloadManagedNpmPackage",
+  );
+  const end = updateWorkflowSource.indexOf(
+    "function provisionPreparedCurrentNodeRuntime",
+  );
+  const implementation = updateWorkflowSource.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(implementation, /os\.tmpdir\(\)/);
+  assert.match(implementation, /path\.dirname\(targetNpmPackageRoot\)/);
+});
 
 test("update workflow removes exact duplicate Pi shrinkwrap dependencies", async () => {
   await withTempDir(async (sourceRoot) => {

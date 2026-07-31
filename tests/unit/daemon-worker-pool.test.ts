@@ -154,6 +154,20 @@ async function waitForChildExit(child: any, timeoutMs = 1000) {
   });
 }
 
+async function waitForChildClose(child: any, timeoutMs = 1000) {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("timed out waiting for child close")),
+      timeoutMs,
+    );
+    timer.unref?.();
+    child.once("close", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 afterEach(async () => {
   for (const pool of activePools) {
     pool.destroyAll();
@@ -345,6 +359,49 @@ test("new session workers receive rpc resource options through a private file", 
       await sleep(25);
     }
   }
+});
+
+test("worker pool reclaims resource options when a worker exits before consuming them", async () => {
+  const dir = await makeTempDir("rin-worker-options-cleanup-");
+  const optionsDir = path.join(dir, "worker-options");
+  const workerPath = path.join(dir, "worker-source");
+  await fs.writeFile(workerPath, "process.exit(0);\n");
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    gcIdleMs: 50,
+    resourceOptionsDir: optionsDir,
+  });
+  const worker = pool.resolveWorkerForCommand(
+    { socket: { destroyed: false, write() {} }, clientBuffer: "" },
+    { type: "new_session", resourceOptions: { systemPrompt: "test" } },
+  );
+  await waitForChildClose(worker.child);
+
+  assert.deepEqual(await fs.readdir(optionsDir), []);
+});
+
+test("worker pool reclaims resource options when worker spawn fails asynchronously", async () => {
+  const dir = await makeTempDir("rin-worker-options-spawn-error-");
+  const optionsDir = path.join(dir, "worker-options");
+  const missingCwd = path.join(dir, "missing-cwd");
+  const workerPath = path.join(dir, "worker-source");
+  await fs.writeFile(workerPath, "process.exit(0);\n");
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: missingCwd,
+    gcIdleMs: 50,
+    resourceOptionsDir: optionsDir,
+  });
+  const worker = pool.resolveWorkerForCommand(
+    { socket: { destroyed: false, write() {} }, clientBuffer: "" },
+    { type: "new_session", resourceOptions: { systemPrompt: "test" } },
+  );
+  await waitForChildClose(worker.child);
+
+  assert.deepEqual(await fs.readdir(optionsDir), []);
 });
 
 test("getRestorableSessionSelectors keeps live session workers and remembers turn state", async () => {

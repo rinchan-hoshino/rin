@@ -47,6 +47,45 @@ test("installer apply-plan writes a private terminal handoff plan and command", 
   );
 });
 
+test("installer apply-plan cleans only consumed Rin-owned handoff directories", async () => {
+  const ownedRoot = await fs.promises.mkdtemp(
+    path.join(
+      process.env.RIN_TEST_TMPDIR || "/home/rin/tmp",
+      "rin-install-plan-",
+    ),
+  );
+  const ownedPlan = path.join(ownedRoot, "apply-plan.json");
+  fs.writeFileSync(ownedPlan, "{}\n");
+  applyPlan.cleanupConsumedFinalizeInstallPlan(ownedPlan, {
+    tmpdir: () => path.dirname(ownedRoot),
+  });
+  assert.equal(fs.existsSync(ownedRoot), false);
+
+  const unrelatedRoot = await fs.promises.mkdtemp(
+    path.join(process.env.RIN_TEST_TMPDIR || "/home/rin/tmp", "other-plan-"),
+  );
+  const unrelatedPlan = path.join(unrelatedRoot, "apply-plan.json");
+  fs.writeFileSync(unrelatedPlan, "{}\n");
+  applyPlan.cleanupConsumedFinalizeInstallPlan(unrelatedPlan, {
+    tmpdir: () => path.dirname(unrelatedRoot),
+  });
+  assert.equal(fs.existsSync(unrelatedPlan), true);
+  await fs.promises.rm(unrelatedRoot, { recursive: true, force: true });
+
+  const outsideRoot = await fs.promises.mkdtemp(
+    path.join(process.env.RIN_TEST_TMPDIR || "/home/rin/tmp", "outside-"),
+  );
+  const lookalikeRoot = path.join(outsideRoot, "rin-install-plan-lookalike");
+  const lookalikePlan = path.join(lookalikeRoot, "apply-plan.json");
+  await fs.promises.mkdir(lookalikeRoot);
+  fs.writeFileSync(lookalikePlan, "{}\n");
+  applyPlan.cleanupConsumedFinalizeInstallPlan(lookalikePlan, {
+    tmpdir: () => path.dirname(outsideRoot),
+  });
+  assert.equal(fs.existsSync(lookalikePlan), true);
+  await fs.promises.rm(outsideRoot, { recursive: true, force: true });
+});
+
 test("runFinalizeInstallPlanInChild inherits stdio so sudo prompts stay interactive", async () => {
   const statuses = [];
   const spawnCalls = [];
@@ -87,6 +126,19 @@ test("runFinalizeInstallPlanInChild inherits stdio so sudo prompts stay interact
   assert.equal(spawnCalls[0].args.includes("--apply-plan-file"), true);
   assert.equal(spawnCalls[0].options.env, process.env);
   assert.deepEqual(result, { ok: true });
+});
+
+test("installer consumes external apply plans with owned handoff cleanup", () => {
+  const source = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "main.ts"),
+    "utf8",
+  );
+  const branch = source.slice(
+    source.indexOf("if (cli.applyPlanFile)"),
+    source.indexOf("if (cli.guiDisabled)"),
+  );
+  assert.match(branch, /finally/);
+  assert.match(branch, /cleanupConsumedFinalizeInstallPlan/);
 });
 
 test("runFinalizeInstallPlanInChild wires parent signal forwarding", () => {

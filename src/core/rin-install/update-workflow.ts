@@ -474,8 +474,10 @@ function downloadManagedNpmPackage(targetNpmPackageRoot: string) {
     }
   }
   verifyManagedNpmArchive(archivePath);
+  const targetParent = path.dirname(targetNpmPackageRoot);
+  fs.mkdirSync(targetParent, { recursive: true });
   const extractRoot = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-managed-npm-"),
+    path.join(targetParent, ".rin-managed-npm-"),
   );
   try {
     const tar = requireTool("tar", ["/usr/bin/tar", "/bin/tar"]);

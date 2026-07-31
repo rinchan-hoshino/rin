@@ -15,6 +15,7 @@ import {
 import chalk from "chalk";
 
 import {
+  cleanupConsumedFinalizeInstallPlan,
   runFinalizeInstallPlanInChild,
   type FinalizeInstallOptions,
 } from "./apply-plan.js";
@@ -201,6 +202,8 @@ export async function startInstaller(argv = process.argv.slice(2)) {
         } catch {}
       }
       throw error;
+    } finally {
+      cleanupConsumedFinalizeInstallPlan(cli.applyPlanFile);
     }
   }
 
