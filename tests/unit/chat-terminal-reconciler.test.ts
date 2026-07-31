@@ -30,26 +30,17 @@ test("terminal reconciler routes durable backlog without waiting for ingress", a
     },
   };
   const handled = [];
-  let controllerConnectCalls = 0;
   const terminals =
     await reconciler.listUnacknowledgedChatTerminalEvents(client);
-  const chatKeys = await reconciler.reconcileChatTerminalEvents(
+  const handledCount = await reconciler.reconcileChatTerminalEvents(
     terminals,
-    (chatKey) => ({
-      connect: async () => {
-        controllerConnectCalls += 1;
-      },
-      driver: {
-        handleClientEvent: async (event) => {
-          handled.push([chatKey, event.payload.terminalId]);
-        },
-      },
-    }),
+    async (chatKey, terminal) => {
+      handled.push([chatKey, terminal.terminalId]);
+    },
   );
 
   assert.equal(connectCalls, 1);
-  assert.equal(controllerConnectCalls, 1);
-  assert.deepEqual(chatKeys, ["discord/1:2"]);
+  assert.equal(handledCount, 2);
   assert.deepEqual(handled, [
     ["discord/1:2", "terminal-a"],
     ["discord/1:2", "terminal-b"],

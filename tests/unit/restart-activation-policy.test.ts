@@ -176,6 +176,10 @@ test("chat terminal backlog is reconciled without waiting for new ingress", () =
     chatMain,
     /listUnacknowledgedChatTerminalEvents\([\s\S]*reconcileChatTerminalEvents/,
   );
+  assert.match(
+    chatMain,
+    /terminal-reconcile:\$\{terminalId\}[\s\S]*affectChatBinding: false[\s\S]*recoverTerminals: false/,
+  );
 });
 
 test("chat lifecycle settlement is independent of restart and lease timing", () => {

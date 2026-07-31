@@ -660,13 +660,32 @@ export async function startChatBridge(
       const terminals = await listUnacknowledgedChatTerminalEvents(
         terminalRecoveryClient,
       );
-      const chatKeys = await reconcileChatTerminalEvents(
+      const handled = await reconcileChatTerminalEvents(
         terminals,
-        getController,
+        async (chatKey, terminal) => {
+          const terminalId = safeString(terminal?.terminalId).trim();
+          if (!terminalId) return;
+          const controllerKey = `terminal-reconcile:${terminalId}`;
+          const controller = getDetachedController(controllerKey, {
+            chatKey,
+            affectChatBinding: false,
+          });
+          try {
+            await controller.connect({ recoverTerminals: false });
+            await controller.driver.handleClientEvent({
+              type: "ui",
+              payload: terminal,
+            });
+          } finally {
+            controller.dispose();
+            detachedControllers.delete(controllerKey);
+            detachedControllerSignatures.delete(controllerKey);
+          }
+        },
       );
-      if (chatKeys.length) {
+      if (handled) {
         logger.info(
-          `chat terminal reconciliation completed chatKeys=${chatKeys.length} terminals=${terminals.length}`,
+          `chat terminal reconciliation completed terminals=${handled}`,
         );
       }
     })()

@@ -8,13 +8,6 @@ type TerminalLedgerClient = {
   disconnect: () => Promise<void>;
 };
 
-type TerminalRecoveryController = {
-  connect: () => Promise<unknown>;
-  driver: {
-    handleClientEvent: (event: unknown) => Promise<void>;
-  };
-};
-
 export async function listUnacknowledgedChatTerminalEvents(
   client: TerminalLedgerClient,
 ) {
@@ -32,28 +25,20 @@ export async function listUnacknowledgedChatTerminalEvents(
 
 export async function reconcileChatTerminalEvents(
   terminals: Record<string, unknown>[],
-  getController: (chatKey: string) => TerminalRecoveryController,
+  handleTerminal: (
+    chatKey: string,
+    terminal: Record<string, unknown>,
+  ) => Promise<void>,
 ) {
-  const grouped = new Map<string, Record<string, unknown>[]>();
+  let handled = 0;
   for (const terminal of terminals) {
     const context = terminal?.chatDeliveryContext as
       | Record<string, unknown>
       | undefined;
     const chatKey = safeString(context?.chatKey).trim();
     if (!chatKey) continue;
-    const events = grouped.get(chatKey) || [];
-    events.push(terminal);
-    grouped.set(chatKey, events);
+    await handleTerminal(chatKey, terminal);
+    handled += 1;
   }
-  for (const [chatKey, events] of grouped) {
-    const controller = getController(chatKey);
-    await controller.connect();
-    for (const terminal of events) {
-      await controller.driver.handleClientEvent({
-        type: "ui",
-        payload: terminal,
-      });
-    }
-  }
-  return [...grouped.keys()];
+  return handled;
 }

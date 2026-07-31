@@ -458,7 +458,9 @@ export class ChatController {
     return this.driver.frontendPhase;
   }
 
-  async connect(options: { restoreSession?: boolean } = {}) {
+  async connect(
+    options: { restoreSession?: boolean; recoverTerminals?: boolean } = {},
+  ) {
     const restoreSessionFile =
       options.restoreSession === false ? "" : this.getRecoverableSessionFile();
     const connected = await this.driver.connect({ restoreSessionFile });
@@ -469,7 +471,7 @@ export class ChatController {
       );
       this.saveState();
     }
-    if (connected) {
+    if (connected && options.recoverTerminals !== false) {
       const reservedTurn = this.currentTurn;
       const reservedAwaitingTurnSettle = this.awaitingTurnSettle;
       if (reservedTurn) {
