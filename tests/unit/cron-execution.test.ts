@@ -23,6 +23,11 @@ const selfImprovePromptMod = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "self-improve", "prompt.js"))
     .href
 );
+const runAuditMod = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "self-improve", "run-audit.js"),
+  ).href
+);
 test("cron execution resolves only existing dedicated session files", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const dedicatedSessionFile = path.join(
@@ -1791,7 +1796,7 @@ test("cron chat-bound shell task toggles frontend working while running", async 
   }
 });
 
-test("built-in self-improve cron task disables nested self-improve and writes distillation history", async () => {
+test("built-in self-improve cron task keeps audit observational", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const disabledRinCapabilities = ["self_improve"];
   const task = {
@@ -1880,33 +1885,88 @@ test("built-in self-improve cron task disables nested self-improve and writes di
       key: "builtin_self_improve_sleep_consolidation_daily",
     });
 
-    let recoveredRunCalls = 0;
-    const recoveredTask = {
+    let repeatedRunCalls = 0;
+    const repeatedTask = {
       ...task,
       runCount: 4,
       lastStartedAt: "2026-05-08T09:33:09.353Z",
     };
-    await execMod.executeCronTask(recoveredTask, {
+    await execMod.executeCronTask(repeatedTask, {
       agentDir,
       chat: {
         runTurn: async () => {
-          recoveredRunCalls += 1;
-          throw new Error("completed audit must short-circuit execution");
+          repeatedRunCalls += 1;
+          return { finalText: "second execution" };
         },
       },
     });
-    assert.equal(recoveredRunCalls, 0);
-    assert.match(
-      recoveredTask.lastResultText,
-      /exact terminal output evidence/,
-    );
-    assert.equal(recoveredTask.lastResultText.includes(secret), false);
+    assert.equal(repeatedRunCalls, 1);
+    assert.equal(repeatedTask.lastResultText, "second execution");
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
 
-test("audited cron terminal fails closed when its history reference cannot persist", async () => {
+test("built-in self-improve cron executes when audit initialization fails", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-cron-audit-init-failure-"),
+  );
+  try {
+    const stateDir = path.join(agentDir, "self_improve", "state");
+    const outside = path.join(agentDir, "outside-audits");
+    await fs.mkdir(stateDir, { recursive: true });
+    await fs.mkdir(outside, { recursive: true });
+    await fs.symlink(outside, path.join(stateDir, "run-audits"), "dir");
+    const task = {
+      id: "builtin_self_improve_sleep_consolidation_daily",
+      session: { mode: "none" },
+      trigger: { expression: "43 3 * * *", timezone: "local" },
+      target: {
+        kind: "agent_prompt",
+        prompt:
+          "Follow the self-improve distillation manual to optimize guidance.",
+      },
+      disabledRinCapabilities: ["self_improve"],
+      runCount: 2,
+      lastStartedAt: "2026-07-31T06:00:00.000Z",
+    };
+    let calls = 0;
+
+    await execMod.executeCronTask(task, {
+      agentDir,
+      chat: {
+        runTurn: async () => {
+          calls += 1;
+          return { finalText: "distilled" };
+        },
+      },
+    });
+
+    assert.equal(calls, 1);
+    assert.equal(task.lastResultText, "distilled");
+    const history = (
+      await fs.readFile(
+        path.join(
+          agentDir,
+          "self_improve",
+          "state",
+          "maintenance-history.jsonl",
+        ),
+        "utf8",
+      )
+    )
+      .trim()
+      .split(/\r?\n/g)
+      .map((line) => JSON.parse(line));
+    assert.equal(history[0].status, "completed");
+    assert.equal(history[0].audit, undefined);
+    assert.equal(history[0].auditError, "self_improve_audit_symlink_path");
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("audit history persistence failure does not block cron terminal projection", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-cron-audit-history-failure-"),
   );
@@ -1929,29 +1989,35 @@ test("audited cron terminal fails closed when its history reference cannot persi
     target: { kind: "agent_prompt", prompt: "self improve" },
   };
   try {
+    const auditHandle = await runAuditMod.beginSelfImproveRunAudit({
+      agentDir,
+      runId: "cron-history-failure",
+      kind: "cron",
+      startedAt: task.lastStartedAt,
+    });
+    const audit = await runAuditMod.completeSelfImproveRunAudit({
+      agentDir,
+      handle: auditHandle,
+      status: "completed",
+      finishedAt: "2026-05-08T09:34:00.000Z",
+      output: "done",
+    });
+    const pendingPath = path.join(agentDir, auditHandle.pendingPath);
     await fs.mkdir(historyPath, { recursive: true });
-    await assert.rejects(
-      () =>
-        execMod.projectCronTaskTerminal(
-          task,
-          {
-            status: "completed",
-            text: "done",
-            audit: {
-              version: 1,
-              path: "self_improve/state/run-audits/run.json",
-              sha256: "a".repeat(64),
-              complete: true,
-              redacted: false,
-              truncated: false,
-            },
-          },
-          { agentDir, startedAt: task.lastStartedAt },
-        ),
-      /EISDIR|illegal operation on a directory/i,
+    await execMod.projectCronTaskTerminal(
+      task,
+      {
+        status: "completed",
+        text: "done",
+        audit,
+        auditHandle,
+      },
+      { agentDir, startedAt: task.lastStartedAt },
     );
-    assert.equal((task as any).lastFinishedAt, undefined);
+    assert.equal(typeof (task as any).lastFinishedAt, "string");
+    assert.equal(task.lastResultText, "done");
     assert.equal(task.runCount, 1);
+    assert.equal((await fs.stat(pendingPath)).isFile(), true);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

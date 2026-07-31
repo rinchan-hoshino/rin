@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url";
 
 import lockfile from "proper-lockfile";
 
+import {
+  acknowledgeSelfImproveAuditObservation,
+  reportSelfImproveAuditObservationError,
+} from "./audit-observer.js";
 import { runMaintainerUnderMaintenanceLock } from "./maintainer.js";
 import { asArray } from "../json-utils.js";
 import {
@@ -18,9 +22,9 @@ import { sleep } from "../platform/process.js";
 import { normalizeSessionValue } from "../session/ref.js";
 import { nowIso, safeString, uniqueStrings } from "./core/utils.js";
 import {
-  acknowledgeSelfImproveRunAudit,
   resolveSafeSelfImprovePath,
   sanitizeSelfImproveHistoryText,
+  type SelfImproveRunAuditHandle,
   type SelfImproveRunAuditReference,
 } from "./run-audit.js";
 import {
@@ -42,7 +46,8 @@ export type MaintenanceJob = {
   snapshotKey?: string;
   additionalExtensionPaths?: string[];
   attempts?: number;
-  auditStartedAt?: string;
+  // Persisted before agent execution; its presence makes crash recovery at-most-once.
+  executionStartedAt?: string;
   lastError?: string;
   lastAttemptAt?: string;
 };
@@ -69,6 +74,7 @@ type MaintenanceHistoryRecord = {
   outputPreview?: string;
   changedFiles?: MaintenanceChangedFile[];
   audit?: SelfImproveRunAuditReference;
+  auditError?: string;
   historyRedacted?: boolean;
   historyTruncated?: boolean;
 };
@@ -98,12 +104,23 @@ async function ensureStateDir(agentDir: string) {
 
 async function loadQueue(agentDir: string): Promise<MaintenanceJob[]> {
   const parsed = readJsonFile<unknown>(maintenanceQueuePath(agentDir), []);
-  return asArray<MaintenanceJob>(parsed).filter(
-    (item) =>
-      item &&
-      typeof item === "object" &&
-      safeString((item as any).kind).trim() !== "session_summary",
-  );
+  return asArray<Record<string, unknown>>(parsed)
+    .filter(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        safeString(item.kind).trim() !== "session_summary",
+    )
+    .map((item) => {
+      const legacyStartedAt = safeString(item.auditStartedAt).trim();
+      const job = { ...item } as MaintenanceJob;
+      if (!job.executionStartedAt && legacyStartedAt) {
+        job.executionStartedAt = legacyStartedAt;
+      }
+      delete (job as MaintenanceJob & { auditStartedAt?: string })
+        .auditStartedAt;
+      return job;
+    });
 }
 
 async function saveQueue(agentDir: string, jobs: MaintenanceJob[]) {
@@ -178,7 +195,7 @@ async function enqueueMaintenanceJob(
   const nextJob = createMaintenanceJob(input);
   const jobs = await loadQueue(nextJob.agentDir);
   const existing = jobs.find((job) => sameJob(job, nextJob));
-  if (existing) {
+  if (existing && !existing.executionStartedAt) {
     existing.updatedAt = nextJob.updatedAt;
     existing.kind = nextJob.kind;
     existing.trigger = nextJob.trigger;
@@ -188,7 +205,7 @@ async function enqueueMaintenanceJob(
     existing.attempts = undefined;
     existing.lastError = undefined;
     existing.lastAttemptAt = undefined;
-  } else {
+  } else if (!existing) {
     jobs.push(nextJob);
   }
   await saveQueue(nextJob.agentDir, jobs);
@@ -500,6 +517,7 @@ export function sanitizeMaintenanceHistoryRecord(
     snapshotKey: text(record.snapshotKey, 4 * 1024),
     skipped: text(record.skipped, 4 * 1024),
     error: text(record.error, 64 * 1024),
+    auditError: text(record.auditError, 64 * 1024),
     outputPreview: truncateText(outputPreview, 800) || undefined,
     changedFiles: record.changedFiles?.map((entry) => ({
       ...entry,
@@ -646,6 +664,19 @@ async function appendHistoryRecord(
   );
 }
 
+async function commitHistoryRecord(
+  agentDir: string,
+  record: MaintenanceHistoryRecord,
+) {
+  try {
+    await appendHistoryRecord(agentDir, record);
+    return true;
+  } catch (error) {
+    reportSelfImproveAuditObservationError(error);
+    return false;
+  }
+}
+
 export async function appendMaintenanceHistoryRecord(
   agentDir: string,
   record: MaintenanceHistoryRecord,
@@ -653,17 +684,46 @@ export async function appendMaintenanceHistoryRecord(
   await appendHistoryRecord(resolveAgentDir(agentDir), record);
 }
 
-async function acknowledgeResultAudit(
+async function acknowledgeCommittedResultAudit(
   agentDir: string,
   audit: unknown,
   handle: unknown,
+  auditError?: string,
 ) {
-  if (!audit || !handle) return;
-  await acknowledgeSelfImproveRunAudit({
+  const result = await acknowledgeSelfImproveAuditObservation({
     agentDir,
-    handle: handle as any,
-    reference: audit as SelfImproveRunAuditReference,
+    handle: handle as SelfImproveRunAuditHandle | undefined,
+    reference: audit as SelfImproveRunAuditReference | undefined,
+    auditError,
   });
+  if (result && result !== auditError) {
+    reportSelfImproveAuditObservationError(result);
+  }
+}
+
+function persistedExecutionStartedAt(job: MaintenanceJob) {
+  return safeString(job.executionStartedAt).trim();
+}
+
+async function finalizeInterruptedJob(
+  agentDir: string,
+  job: MaintenanceJob,
+  startedAt: string,
+) {
+  await commitHistoryRecord(agentDir, {
+    id: job.id,
+    kind: job.kind,
+    status: "failed",
+    trigger: job.trigger,
+    sessionFile: job.sessionFile,
+    leafId: job.leafId,
+    snapshotKey: job.snapshotKey,
+    startedAt,
+    finishedAt: nowIso(),
+    attempts: Math.max(1, Number(job.attempts || 0) + 1),
+    error: "maintenance_job_interrupted_execution",
+  });
+  await removeMatchingJobs(agentDir, job, true);
 }
 
 async function processJob(
@@ -717,17 +777,26 @@ export async function runSelfImproveMaintenanceJobNow(
         sameJob(candidate, proposedJob),
     );
     job = persistedJob || proposedJob;
-    const startedAt = job.auditStartedAt || nowIso();
-    job.auditStartedAt = startedAt;
+    const interruptedAt = persistedExecutionStartedAt(job);
+    if (interruptedAt) {
+      await finalizeInterruptedJob(job.agentDir, job, interruptedAt);
+      return {
+        status: "failed",
+        error: "maintenance_job_interrupted_execution",
+      };
+    }
+    const startedAt = nowIso();
+    job.executionStartedAt = startedAt;
     await requeueMaintenanceJob(job);
     let result: any;
     try {
       result = await processJob(job, startedAt, handle);
     } catch (error: unknown) {
-      if ((error as any)?.selfImproveAuditPersistence === true) throw error;
       const finishedAt = nowIso();
       const message = normalizeErrorMessage(error);
-      await appendHistoryRecord(job.agentDir, {
+      const auditError =
+        safeString((error as any)?.selfImproveAuditError).trim() || undefined;
+      const historyCommitted = await commitHistoryRecord(job.agentDir, {
         id: job.id,
         kind: job.kind,
         status: "failed",
@@ -740,12 +809,16 @@ export async function runSelfImproveMaintenanceJobNow(
         attempts: 1,
         error: message,
         audit: normalizeAuditReference((error as any)?.selfImproveAudit),
+        auditError,
       });
-      await acknowledgeResultAudit(
-        job.agentDir,
-        (error as any)?.selfImproveAudit,
-        (error as any)?.selfImproveAuditHandle,
-      );
+      if (historyCommitted) {
+        await acknowledgeCommittedResultAudit(
+          job.agentDir,
+          (error as any)?.selfImproveAudit,
+          (error as any)?.selfImproveAuditHandle,
+          auditError,
+        );
+      }
       await removeMatchingJobs(job.agentDir, job, true);
       return {
         status: "failed",
@@ -755,7 +828,8 @@ export async function runSelfImproveMaintenanceJobNow(
     const finishedAt = nowIso();
     const changedFiles = normalizeChangedFiles(result?.changedFiles);
     const skipped = safeString(result?.skipped).trim() || undefined;
-    await appendHistoryRecord(job.agentDir, {
+    const auditError = safeString(result?.auditError).trim() || undefined;
+    const historyCommitted = await commitHistoryRecord(job.agentDir, {
       id: job.id,
       kind: job.kind,
       status: "completed",
@@ -772,12 +846,16 @@ export async function runSelfImproveMaintenanceJobNow(
         undefined,
       changedFiles,
       audit: normalizeAuditReference(result?.audit),
+      auditError,
     });
-    await acknowledgeResultAudit(
-      job.agentDir,
-      result?.audit,
-      result?.auditHandle,
-    );
+    if (historyCommitted) {
+      await acknowledgeCommittedResultAudit(
+        job.agentDir,
+        result?.audit,
+        result?.auditHandle,
+        auditError,
+      );
+    }
     await removeMatchingJobs(job.agentDir, job, true);
     return {
       status: "completed",
@@ -803,22 +881,27 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
       const jobs = await loadQueue(resolvedAgentDir);
       const job = jobs[0];
       if (!job) break;
-      const startedAt = safeString(job.auditStartedAt).trim() || nowIso();
-      if (!job.auditStartedAt) {
-        job.auditStartedAt = startedAt;
-        job.updatedAt = nowIso();
-        await saveQueue(resolvedAgentDir, jobs);
+      const interruptedAt = persistedExecutionStartedAt(job);
+      if (interruptedAt) {
+        await finalizeInterruptedJob(resolvedAgentDir, job, interruptedAt);
+        failed += 1;
+        continue;
       }
+      const startedAt = nowIso();
+      job.executionStartedAt = startedAt;
+      job.updatedAt = nowIso();
+      await saveQueue(resolvedAgentDir, jobs);
       await writeWorkerLock(resolvedAgentDir, job);
       let result: any;
       try {
         result = await processJob(job, startedAt, handle);
       } catch (error: unknown) {
-        if ((error as any)?.selfImproveAuditPersistence === true) throw error;
         const finishedAt = nowIso();
         const message = normalizeErrorMessage(error);
         const attempts = Math.max(1, Number(job.attempts || 0) + 1);
-        await appendHistoryRecord(resolvedAgentDir, {
+        const auditError =
+          safeString((error as any)?.selfImproveAuditError).trim() || undefined;
+        const historyCommitted = await commitHistoryRecord(resolvedAgentDir, {
           id: job.id,
           kind: job.kind,
           status: "failed",
@@ -831,12 +914,16 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
           attempts,
           error: message,
           audit: normalizeAuditReference((error as any)?.selfImproveAudit),
+          auditError,
         });
-        await acknowledgeResultAudit(
-          resolvedAgentDir,
-          (error as any)?.selfImproveAudit,
-          (error as any)?.selfImproveAuditHandle,
-        );
+        if (historyCommitted) {
+          await acknowledgeCommittedResultAudit(
+            resolvedAgentDir,
+            (error as any)?.selfImproveAudit,
+            (error as any)?.selfImproveAuditHandle,
+            auditError,
+          );
+        }
         await removeMatchingJobs(resolvedAgentDir, job);
         failed += 1;
         continue;
@@ -844,7 +931,8 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
       const finishedAt = nowIso();
       const changedFiles = normalizeChangedFiles(result?.changedFiles);
       const skipped = safeString(result?.skipped).trim() || undefined;
-      await appendHistoryRecord(resolvedAgentDir, {
+      const auditError = safeString(result?.auditError).trim() || undefined;
+      const historyCommitted = await commitHistoryRecord(resolvedAgentDir, {
         id: job.id,
         kind: job.kind,
         status: "completed",
@@ -859,12 +947,16 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
         outputPreview: safeString(result?.output).trim() || undefined,
         changedFiles,
         audit: normalizeAuditReference(result?.audit),
+        auditError,
       });
-      await acknowledgeResultAudit(
-        resolvedAgentDir,
-        result?.audit,
-        result?.auditHandle,
-      );
+      if (historyCommitted) {
+        await acknowledgeCommittedResultAudit(
+          resolvedAgentDir,
+          result?.audit,
+          result?.auditHandle,
+          auditError,
+        );
+      }
       await removeMatchingJobs(resolvedAgentDir, job);
       processed += 1;
     }
@@ -915,7 +1007,7 @@ export function spawnQueuedMemoryWorker(agentDir: string) {
     [workerPath, "--agent-dir", resolvedAgentDir],
     {
       detached: true,
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "inherit"],
       windowsHide: true,
     },
   );

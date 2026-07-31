@@ -44,6 +44,7 @@ type MaintenanceHistoryRecord = {
   attempts?: number;
   skipped?: string;
   error?: string;
+  auditError?: string;
   outputPreview?: string;
   changedFiles?: Array<{ path?: string; change?: string }>;
   audit?: SelfImproveRunAuditReference;
@@ -304,10 +305,13 @@ function summarize(records: MaintenanceHistoryRecord[]) {
   const invalidAudits = records.filter(
     (record) => record.auditIntegrity?.ok === false,
   ).length;
+  const observationFailures = records.filter(
+    (record) => record.auditError,
+  ).length;
   return [
     "overview",
     `  runs      ${records.length} total · ${completed} completed · ${failed} failed`,
-    `  audits    ${auditedRuns} linked run artifacts · ${invalidAudits} integrity failures`,
+    `  audits    ${auditedRuns} linked run artifacts · ${invalidAudits} integrity failures · ${observationFailures} observation failures`,
     `  changes   ${changedFiles} changed file records`,
     records.length
       ? `  range     ${recordTime(records.at(-1) || {}) || "-"} .. ${recordTime(records[0] || {}) || "-"}`
@@ -329,7 +333,7 @@ function renderRecentRuns(records: MaintenanceHistoryRecord[]) {
           ? "verified"
           : "INVALID"
         : "legacy",
-      error: record.error || record.skipped || "",
+      error: record.error || record.auditError || record.skipped || "",
     })),
     [
       "finished",
@@ -429,7 +433,7 @@ function renderSelfImproveList(records: MaintenanceHistoryRecord[]) {
     .map((record, index) => {
       const id = safeString(record.id).trim() || `#${index + 1}`;
       const changed = changedFileSummary(record);
-      const error = record.error || record.skipped;
+      const error = record.error || record.auditError || record.skipped;
       return [
         `${String(index + 1).padStart(2, " ")}. ${formatReportTime(record.finishedAt || record.startedAt)}  ${record.status || "-"}  ${record.trigger || "-"}`,
         `    id ${id} · session ${sessionLabel(record.sessionFile)} · attempts ${String(record.attempts || 1)}`,
@@ -492,6 +496,9 @@ function renderSelfImproveDetail(record: MaintenanceHistoryRecord | undefined) {
       `  integrity: ${record.auditIntegrity?.ok ? "verified" : `INVALID (${record.auditIntegrity?.error || "unknown"})`}`,
     );
   }
+  if (record.auditError) {
+    lines.push("", "audit observation error:", record.auditError);
+  }
   if (record.outputPreview) {
     lines.push("", "output preview:", record.outputPreview);
   }
@@ -532,6 +539,8 @@ export function buildSelfImproveBackendReport(
       failed,
       changedFiles,
       auditedRuns: records.filter((record) => record.audit?.path).length,
+      auditObservationFailures: records.filter((record) => record.auditError)
+        .length,
       first: recordTime(records.at(-1) || {}) || undefined,
       last: recordTime(records[0] || {}) || undefined,
     },

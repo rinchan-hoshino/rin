@@ -1167,6 +1167,131 @@ test("queued distillation drops invalid session jobs into history instead of blo
   });
 });
 
+test("queued distillation treats audit initialization failure as observational", async () => {
+  await withTempRoot(async (root) => {
+    const stateDir = path.join(root, "self_improve", "state");
+    const outside = path.join(root, "outside-audits");
+    await fs.mkdir(stateDir, { recursive: true });
+    await fs.mkdir(outside, { recursive: true });
+    await fs.symlink(outside, path.join(stateDir, "run-audits"), "dir");
+    await asyncJobs.enqueueSelfImproveMaintenanceJob({
+      agentDir: root,
+      sessionFile: path.join(root, "missing-session.jsonl"),
+      trigger: "self_improve:periodic_review",
+    });
+
+    const result = await asyncJobs.processQueuedSelfImproveJobs(root);
+    assert.equal(result.failed, 1);
+
+    const history = (await fs.readFile(historyPath(root), "utf8"))
+      .trim()
+      .split(/\r?\n/g)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert.match(history[0].error, /maintenance_job_missing_session_file:/);
+    assert.equal(history[0].auditError, "self_improve_audit_symlink_path");
+  });
+});
+
+test("queued distillation never reruns a durably started job after interruption", async () => {
+  await withTempRoot(async (root) => {
+    await asyncJobs.enqueueSelfImproveMaintenanceJob({
+      agentDir: root,
+      sessionFile: path.join(root, "missing-session.jsonl"),
+      trigger: "self_improve:periodic_review",
+    });
+    const queueFile = queuePath(root);
+    const queue = JSON.parse(await fs.readFile(queueFile, "utf8"));
+    queue[0].executionStartedAt = "2026-07-31T06:00:00.000Z";
+    await fs.writeFile(queueFile, JSON.stringify(queue, null, 2), "utf8");
+
+    const result = await asyncJobs.processQueuedSelfImproveJobs(root);
+    assert.equal(result.failed, 1);
+    const history = (await fs.readFile(historyPath(root), "utf8"))
+      .trim()
+      .split(/\r?\n/g)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert.equal(history[0].error, "maintenance_job_interrupted_execution");
+    assert.equal(history[0].startedAt, "2026-07-31T06:00:00.000Z");
+  });
+});
+
+test("duplicate enqueue cannot bypass an active execution claim", async () => {
+  await withTempRoot(async (root) => {
+    const input = {
+      agentDir: root,
+      sessionFile: path.join(root, "missing-session.jsonl"),
+      trigger: "self_improve:periodic_review",
+    };
+    await asyncJobs.enqueueSelfImproveMaintenanceJob(input);
+    const queueFile = queuePath(root);
+    const queue = JSON.parse(await fs.readFile(queueFile, "utf8"));
+    queue[0].executionStartedAt = "2026-07-31T06:00:00.000Z";
+    await fs.writeFile(queueFile, JSON.stringify(queue, null, 2), "utf8");
+
+    await asyncJobs.enqueueSelfImproveMaintenanceJob(input);
+
+    const deduplicated = JSON.parse(await fs.readFile(queueFile, "utf8"));
+    assert.equal(deduplicated.length, 1);
+    assert.equal(
+      deduplicated[0].executionStartedAt,
+      "2026-07-31T06:00:00.000Z",
+    );
+    await asyncJobs.processQueuedSelfImproveJobs(root);
+    const history = (await fs.readFile(historyPath(root), "utf8"))
+      .trim()
+      .split(/\r?\n/g)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert.equal(history.length, 1);
+    assert.equal(history[0].error, "maintenance_job_interrupted_execution");
+  });
+});
+
+test("legacy audit start markers migrate to interrupted execution state", async () => {
+  await withTempRoot(async (root) => {
+    await asyncJobs.enqueueSelfImproveMaintenanceJob({
+      agentDir: root,
+      sessionFile: path.join(root, "missing-session.jsonl"),
+      trigger: "self_improve:periodic_review",
+    });
+    const queueFile = queuePath(root);
+    const queue = JSON.parse(await fs.readFile(queueFile, "utf8"));
+    queue[0].auditStartedAt = "2026-07-31T05:59:00.000Z";
+    await fs.writeFile(queueFile, JSON.stringify(queue, null, 2), "utf8");
+
+    const result = await asyncJobs.processQueuedSelfImproveJobs(root);
+    assert.equal(result.failed, 1);
+    const history = (await fs.readFile(historyPath(root), "utf8"))
+      .trim()
+      .split(/\r?\n/g)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert.equal(history[0].error, "maintenance_job_interrupted_execution");
+    assert.equal(history[0].startedAt, "2026-07-31T05:59:00.000Z");
+  });
+});
+
+test("maintenance history persistence failure does not block the queue", async () => {
+  await withTempRoot(async (root) => {
+    await asyncJobs.enqueueSelfImproveMaintenanceJob({
+      agentDir: root,
+      sessionFile: path.join(root, "missing-session.jsonl"),
+      trigger: "self_improve:periodic_review",
+    });
+    await fs.mkdir(historyPath(root), { recursive: true });
+
+    const result = await asyncJobs.processQueuedSelfImproveJobs(root);
+
+    assert.equal(result.failed, 1);
+    assert.deepEqual(
+      JSON.parse(await fs.readFile(queuePath(root), "utf8")),
+      [],
+    );
+  });
+});
+
 test("queued distillation reclaims expired worker locks", async () => {
   await withTempRoot(async (root) => {
     await asyncJobs.enqueueSelfImproveMaintenanceJob({

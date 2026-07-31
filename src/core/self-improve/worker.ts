@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { processQueuedSelfImproveJobs } from "./async-jobs.js";
 import { safeString } from "./core/utils.js";
 import { resolveAgentDir } from "./agent-dir.js";
+import { sanitizeSelfImproveHistoryText } from "./run-audit.js";
 
 function readAgentDirArgValue() {
   for (let index = 2; index < process.argv.length; index += 1) {
@@ -29,12 +30,13 @@ const isDirectEntry =
 
 if (isDirectEntry) {
   runMemoryWorker().catch((error: any) => {
-    const message = String(
+    const message = sanitizeSelfImproveHistoryText(
       error && error.message
         ? error.message
         : error || "rin_memory_worker_failed",
-    );
-    console.error(message);
+      64 * 1024,
+    ).text;
+    console.error(`[rin-self-improve-worker] ${message}`);
     process.exit(1);
   });
 }
