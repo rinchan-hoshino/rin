@@ -22,10 +22,10 @@ import {
   type FinalizeInstallOptions,
 } from "./apply-plan.js";
 import { renderInstallerNote, wrapInstallerNoteText } from "./interactive.js";
-import { readInstallerJson } from "./fs-utils.js";
-import { installerManifestPath } from "./paths.js";
+import { commandAsUserInvocation, readInstallerJson } from "./fs-utils.js";
+import { installerManifestPath, managedNodeExecutablePath } from "./paths.js";
 import { runInstallerProgress } from "./progress.js";
-import { targetHomeForUser } from "./users.js";
+import { isSameSystemUser, targetHomeForUser } from "./users.js";
 import {
   createUpdateRuntimeSourceWorkspace,
   isInstalledReleaseCurrent,
@@ -127,6 +127,60 @@ async function resolveUpdateRelease(options: {
   );
 }
 
+export function buildTargetUserUpdaterCommand(
+  options: {
+    sourceRoot: string;
+    targetUser: string;
+    ownerHome: string;
+    installDir: string;
+    release: ResolvedRelease;
+  },
+  deps: {
+    commandAsUserInvocation?: typeof commandAsUserInvocation;
+  } = {},
+) {
+  const releaseArgs =
+    options.release.channel === "git"
+      ? ["--branch", options.release.ref]
+      : ["--version", options.release.version];
+  const invocation = (deps.commandAsUserInvocation ?? commandAsUserInvocation)(
+    options.targetUser,
+    managedNodeExecutablePath(options.installDir),
+    [
+      path.join(options.sourceRoot, "dist", "app", "rin-install", "main.js"),
+      "--update",
+      "--target-user",
+      options.targetUser,
+      "--install-dir",
+      options.installDir,
+      "--yes",
+      "--preconfirmed",
+      "--release-channel",
+      options.release.channel,
+      ...releaseArgs,
+    ],
+    { HOME: options.ownerHome },
+  );
+  return {
+    ...invocation,
+    options: {
+      cwd: options.sourceRoot,
+      env: process.env,
+    },
+  };
+}
+
+async function runTargetUserUpdater(options: {
+  sourceRoot: string;
+  targetUser: string;
+  ownerHome: string;
+  installDir: string;
+  release: ResolvedRelease;
+}) {
+  const command = buildTargetUserUpdaterCommand(options);
+  await runUpdateCommand(command.command, command.args, command.options);
+}
+
 export function buildPreparedUpdaterCommand(options: {
   sourceRoot: string;
   releaseFile: string;
@@ -172,6 +226,7 @@ export async function startUpdater(deps: {
   select?: typeof select;
   confirm?: typeof confirm;
   i18n?: InstallerI18n;
+  resolveUpdateRelease?: typeof resolveUpdateRelease;
   readInstalledRelease?: (target: {
     currentUser: string;
     targetUser: string;
@@ -179,6 +234,7 @@ export async function startUpdater(deps: {
     ownerHome: string;
   }) => any;
   runFinalizeInstallPlanInChild?: typeof runFinalizeInstallPlanInChildImpl;
+  runTargetUserUpdater?: typeof runTargetUserUpdater;
   requestedInstallDir?: string;
   requestedTargetUser?: string;
   assumeYes?: boolean;
@@ -228,7 +284,7 @@ export async function startUpdater(deps: {
   });
   const resolvedRelease = requireConcreteGitRelease(
     deps.release ||
-      (await resolveUpdateRelease({
+      (await (deps.resolveUpdateRelease ?? resolveUpdateRelease)({
         installedRelease,
         releaseRequest: deps.releaseRequest,
       })),
@@ -291,6 +347,21 @@ export async function startUpdater(deps: {
       outro(i18n.updaterFinishedWithoutWritingChanges);
       return;
     }
+  }
+
+  if (
+    !deps.release &&
+    process.platform !== "win32" &&
+    !isSameSystemUser(currentUser, targetUser)
+  ) {
+    await (deps.runTargetUserUpdater ?? runTargetUserUpdater)({
+      sourceRoot: deps.repoRootFromHere(),
+      targetUser,
+      ownerHome: target.ownerHome,
+      installDir,
+      release: resolvedRelease,
+    });
+    return;
   }
 
   if (!deps.release) {

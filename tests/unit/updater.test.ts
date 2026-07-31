@@ -99,6 +99,100 @@ test("buildPreparedUpdaterCommand launches prepared managed node", async () => {
   }
 });
 
+test("buildTargetUserUpdaterCommand delegates the complete updater entry", () => {
+  const calls: any[] = [];
+  const command = updater.buildTargetUserUpdaterCommand(
+    {
+      sourceRoot: "/opt/rin/source",
+      targetUser: "alice",
+      ownerHome: "/home/alice",
+      installDir: "/home/alice/.rin",
+      release: {
+        ...preparedRelease,
+        channel: "git",
+        branch: "main",
+        ref: "3347b88f",
+      },
+    },
+    {
+      commandAsUserInvocation: (
+        targetUser: string,
+        executable: string,
+        args: string[],
+        env: Record<string, string>,
+      ) => {
+        calls.push({ targetUser, executable, args, env });
+        return { command: "run-as-alice", args: [executable, ...args] };
+      },
+    },
+  );
+
+  assert.deepEqual(calls, [
+    {
+      targetUser: "alice",
+      executable: path.join(
+        "/home/alice/.rin",
+        "runtime",
+        "node",
+        "current",
+        process.platform === "win32" ? "node.exe" : "bin/node",
+      ),
+      args: [
+        path.join("/opt/rin/source", "dist", "app", "rin-install", "main.js"),
+        "--update",
+        "--target-user",
+        "alice",
+        "--install-dir",
+        "/home/alice/.rin",
+        "--yes",
+        "--preconfirmed",
+        "--release-channel",
+        "git",
+        "--branch",
+        "3347b88f",
+      ],
+      env: { HOME: "/home/alice" },
+    },
+  ]);
+  assert.equal(command.command, "run-as-alice");
+  assert.equal(command.options.cwd, "/opt/rin/source");
+});
+
+test("startUpdater hands off before creating the update workspace", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("cross-user delegation is Unix-specific");
+    return;
+  }
+  await withUpdaterStdout(async () => {
+    const handoffs: any[] = [];
+    await updater.startUpdater({
+      detectCurrentUser: () => "root",
+      repoRootFromHere: () => "/opt/rin/source",
+      ensureNotCancelled: (value: unknown) => value,
+      i18n: installerI18n.createInstallerI18n(),
+      requestedInstallDir: "/home/alice/.rin",
+      requestedTargetUser: "alice",
+      assumeYes: true,
+      preconfirmed: true,
+      readInstalledRelease: () => null,
+      resolveUpdateRelease: async () => preparedRelease,
+      runTargetUserUpdater: async (options: any) => {
+        handoffs.push(options);
+      },
+    });
+
+    assert.deepEqual(handoffs, [
+      {
+        sourceRoot: "/opt/rin/source",
+        targetUser: "alice",
+        ownerHome: "/home/alice",
+        installDir: "/home/alice/.rin",
+        release: preparedRelease,
+      },
+    ]);
+  });
+});
+
 test("buildPreparedUpdaterCommand requires prepared managed node", async () => {
   const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "rin-updater-"));
   try {
