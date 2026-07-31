@@ -854,6 +854,7 @@ export async function startChatBridge(
     identity: any,
     decision: Awaited<ReturnType<typeof shouldProcessText>>,
     receivedAt?: string,
+    mode: "turn" | "steer" = "turn",
   ): Promise<FrozenChatTurnSubmission> => {
     const messageId = pickMessageId(session);
     const quotedMessageId = pickReplyToMessageId(elements);
@@ -943,6 +944,7 @@ export async function startChatBridge(
       },
       incomingMessageId: messageId || undefined,
       replyToMessageId: messageId || undefined,
+      mode,
       sessionFile: linkedSessionFile || undefined,
       model: modelOptions.model,
       thinkingLevel: modelOptions.thinkingLevel,
@@ -1048,24 +1050,36 @@ export async function startChatBridge(
       return { errorMessage };
     };
     try {
-      const turnResult = options.resume
-        ? await controller.resumeTurn({
-            replyToMessageId: submission.replyToMessageId,
-            incomingMessageId: submission.incomingMessageId,
-            sessionFile: submission.sessionFile,
-            receivedAt: submission.receivedAt,
-          })
-        : await controller.runTurn({
-            text: submission.text,
-            attachments: submission.attachments,
-            promptMeta: submission.promptMeta,
-            replyToMessageId: submission.replyToMessageId,
-            incomingMessageId: submission.incomingMessageId,
-            sessionFile: submission.sessionFile,
-            model: submission.model,
-            thinkingLevel: submission.thinkingLevel,
-            receivedAt: submission.receivedAt,
-          });
+      if (submission.mode === "steer") {
+        await controller.steerTurn({
+          text: submission.text,
+          attachments: submission.attachments,
+          promptMeta: submission.promptMeta,
+          replyToMessageId: submission.replyToMessageId,
+          incomingMessageId: submission.incomingMessageId,
+        });
+        return { disposition: "actionable" as const };
+      }
+      if (options.resume) {
+        await controller.resumeTurn({
+          replyToMessageId: submission.replyToMessageId,
+          incomingMessageId: submission.incomingMessageId,
+          sessionFile: submission.sessionFile,
+          receivedAt: submission.receivedAt,
+        });
+      } else {
+        await controller.runTurn({
+          text: submission.text,
+          attachments: submission.attachments,
+          promptMeta: submission.promptMeta,
+          replyToMessageId: submission.replyToMessageId,
+          incomingMessageId: submission.incomingMessageId,
+          sessionFile: submission.sessionFile,
+          model: submission.model,
+          thinkingLevel: submission.thinkingLevel,
+          receivedAt: submission.receivedAt,
+        });
+      }
       return { disposition: "actionable" as const };
     } catch (error) {
       return await handleTurnFailure(error);
@@ -1410,6 +1424,7 @@ export async function startChatBridge(
       identity,
       decision,
       envelope.createdAt,
+      getController(decision.chatKey).hasActiveTurn() ? "steer" : "turn",
     );
     return commitAdmission({
       state: "actionable",
@@ -1488,8 +1503,9 @@ export async function startChatBridge(
       });
       if (admitted.kind !== "unclassified") {
         return (
-          admitted.kind === "command" &&
-          ["abort", "new"].includes(admitted.command.name)
+          admitted.kind === "turn" ||
+          (admitted.kind === "command" &&
+            ["abort", "new"].includes(admitted.command.name))
         );
       }
 
@@ -1509,6 +1525,7 @@ export async function startChatBridge(
         commandRows,
       );
       const commandName = commandRequest.command?.name || "";
+      if (!commandName) return true;
       if (!["abort", "new"].includes(commandName)) return false;
       return canRunCommand(
         trustOf(

@@ -294,10 +294,13 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat handling failed because the incoming text is empty. Send a non-empty message.",
   chat_turn_aborted: () => "The chat turn was aborted.",
   chat_turn_busy: () => "This chat is still processing another turn.",
+  chat_turn_not_active: () => "There is no active chat turn to steer.",
   frontend_turn_busy: () => "This session is still processing another turn.",
   frontend_turn_interrupted: () => "The active turn was interrupted.",
   frontend_turn_request_tag_missing: () =>
     "The frontend turn is missing its durable request identity.",
+  frontend_steer_unsupported: () =>
+    "This frontend connection does not support steering.",
   rin_frontend_disconnected: () =>
     "Rin is disconnected. Reconnect before submitting another turn.",
   chat_terminal_record_missing: () =>

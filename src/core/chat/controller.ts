@@ -2898,6 +2898,43 @@ export class ChatController {
     });
   }
 
+  async steerTurn(input: {
+    text: string;
+    attachments: SavedAttachment[];
+    incomingMessageId?: string;
+    replyToMessageId?: string;
+    promptMeta?: PromptContextMeta;
+    requestTag?: string;
+  }) {
+    if (!this.hasActiveTurn()) throw new Error("chat_turn_not_active");
+    const { text, images, frontendReady } = await this.prepareTurnPrompt(
+      input,
+      false,
+    );
+    const requestTag =
+      input.requestTag ||
+      this.requestTagForInboundMessage(input.incomingMessageId);
+    const promptMeta = {
+      ...input.promptMeta,
+      runtimeMetadata: {
+        ...input.promptMeta?.runtimeMetadata,
+        "request tag": requestTag,
+      },
+    };
+    const result = await this.driver.submitTurn({
+      text: formatPromptForChatContext(text, promptMeta),
+      images,
+      streamingBehavior: "steer",
+      transportCommand: "steer",
+      assumeSessionReady: frontendReady === true,
+      promptContext: promptMeta,
+      source: "chat-bridge",
+      requestTag,
+    });
+    this.lastActivityAt = Date.now();
+    return result;
+  }
+
   async runTurn(
     input: RinToolStartupOptions &
       Pick<RinPiPassthroughOptions, "piStartupOptions"> & {

@@ -1234,6 +1234,7 @@ export class RinFrontendTurnDriver {
       source?: string;
       requestTag?: string;
       streamingBehavior?: "steer" | "followUp";
+      transportCommand?: "prompt" | "steer";
       assumeSessionReady?: boolean;
       piStartupOptions?: RinPiPassthroughOptions["piStartupOptions"];
       disabledRinCapabilities?: string[];
@@ -1298,6 +1299,7 @@ export class RinFrontendTurnDriver {
       frontendIdentity: this.frontendIdentity,
       requestTag,
       streamingBehavior: input.streamingBehavior,
+      transportCommand: input.transportCommand,
       promptContext: input.promptContext,
       sessionFile: targetSessionFile,
       gate: inputGate,

@@ -132,6 +132,42 @@ function getSessionEntriesSince(session: any, since: unknown) {
   return { entries: entries.slice(index + 1) };
 }
 
+function hasPersistedUserRequestTag(session: any, requestTag: string) {
+  if (!requestTag) return false;
+  const marker = `request tag: ${requestTag}`;
+  return getSessionEntries(session).some((entry: any) => {
+    if (entry?.type !== "message" || entry?.message?.role !== "user") {
+      return false;
+    }
+    const content = entry.message.content;
+    const text = Array.isArray(content)
+      ? content
+          .filter((part: any) => part?.type === "text")
+          .map((part: any) => safeString(part.text))
+          .join("\n")
+      : safeString(content);
+    return text.includes(marker);
+  });
+}
+
+async function waitForPersistedUserRequestTag(
+  session: any,
+  requestTag: string,
+) {
+  if (hasPersistedUserRequestTag(session, requestTag)) return;
+  await new Promise<void>((resolve) => {
+    let unsubscribe = () => {};
+    const check = () => {
+      if (!hasPersistedUserRequestTag(session, requestTag)) return;
+      unsubscribe();
+      resolve();
+    };
+    const subscribed = session?.subscribe?.(check);
+    if (typeof subscribed === "function") unsubscribe = subscribed;
+    check();
+  });
+}
+
 function getSessionLeafId(session: any) {
   return session?.sessionManager?.getLeafId?.() ?? null;
 }
@@ -1421,6 +1457,9 @@ export async function runCustomRpcMode(
       }
       case "steer": {
         const requestTag = safeString(command.requestTag).trim();
+        if (hasPersistedUserRequestTag(session, requestTag)) {
+          return done(id, type, { acceptedAs: "steer", requestTag });
+        }
         const admitted = requestTag
           ? turnCoordinator.admittedKind(requestTag)
           : undefined;
@@ -1434,9 +1473,11 @@ export async function runCustomRpcMode(
           hasImages: Array.isArray(command.images) && command.images.length > 0,
         });
         try {
-          return await run(id, type, () =>
-            session.steer(command.message, command.images),
-          );
+          await session.steer(command.message, command.images);
+          if (requestTag) {
+            await waitForPersistedUserRequestTag(session, requestTag);
+          }
+          return done(id, type, { acceptedAs: "steer", requestTag });
         } catch (error) {
           turnCoordinator.removeAdmission(token);
           throw error;

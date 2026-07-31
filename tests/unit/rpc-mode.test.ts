@@ -4293,12 +4293,27 @@ test(
         prompt: async () => {},
         steer: async (message, images) => {
           calls.push(["steer", message, images]);
+          session.messages.push({
+            type: "message",
+            message: { role: "user", content: message },
+          });
         },
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
-        messages: [],
+        sessionManager: {
+          ...testSessionManager(() => session.messages || []),
+          getEntries: () => session.messages || [],
+        },
+        messages: [
+          {
+            type: "message",
+            message: {
+              role: "user",
+              content: "runtime metadata: request tag: tag-persisted",
+            },
+          },
+        ],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
         getLastAssistantText: () => "",
@@ -4338,13 +4353,22 @@ test(
       assert.equal(typeof onData, "function");
       onData(
         Buffer.from(
-          `${JSON.stringify({ id: "1", type: "steer", message: "hello", images: ["img"], requestTag: "tag-1" })}\n`,
+          `${JSON.stringify({ id: "1", type: "steer", message: "runtime metadata: request tag: tag-1\nhello", images: ["img"], requestTag: "tag-1" })}\n`,
+        ),
+      );
+      await wait(10);
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "2", type: "steer", message: "duplicate", requestTag: "tag-persisted" })}\n`,
         ),
       );
       await wait(10);
 
-      assert.deepEqual(calls, [["steer", "hello", ["img"]]]);
+      assert.deepEqual(calls, [
+        ["steer", "runtime metadata: request tag: tag-1\nhello", ["img"]],
+      ]);
       assert.ok(lines.join("").includes('"command":"steer"'));
+      assert.ok(lines.join("").includes('"requestTag":"tag-persisted"'));
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

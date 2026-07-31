@@ -3637,6 +3637,42 @@ test("chat controller marks /compact processed from compaction completion notice
   ]);
 });
 
+test("chat controller inserts steering without replacing the active terminal owner", async () => {
+  const controller = await createController("telegram/1:2");
+  const submissions: any[] = [];
+  controller.currentTurn = {
+    requestTag: "owner-tag",
+    assistantText: "",
+    interimText: "",
+  };
+  controller.hasActiveTurn = () => true;
+  controller.prepareTurnPrompt = async () => ({
+    text: "insert this",
+    images: ["img"],
+    frontendReady: true,
+  });
+  controller.driver.submitTurn = async (input) => {
+    submissions.push(input);
+    return { promptAccepted: false, skipped: true };
+  };
+
+  await controller.steerTurn({
+    text: "insert this",
+    attachments: [],
+    incomingMessageId: "m-steer",
+    replyToMessageId: "m-steer",
+  });
+
+  assert.equal(controller.currentTurn?.requestTag, "owner-tag");
+  assert.equal(submissions.length, 1);
+  assert.equal(submissions[0].streamingBehavior, "steer");
+  assert.match(submissions[0].requestTag, /^chat-inbox-[a-f0-9]{64}$/);
+  assert.equal(
+    submissions[0].promptContext.runtimeMetadata["request tag"],
+    submissions[0].requestTag,
+  );
+});
+
 test("chat controller delivers a backend terminal after remote-active admission without a local waiter", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];

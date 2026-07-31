@@ -36,6 +36,7 @@ export type RinFrontendPromptTurnInput = {
   requestTag?: string;
   chatDeliveryContext?: RinChatDeliveryContext;
   streamingBehavior?: "steer" | "followUp";
+  transportCommand?: "prompt" | "steer";
   promptContext?: RinPromptContext;
   sessionFile?: string;
   sessionId?: string;
@@ -62,7 +63,8 @@ export async function waitForFrontendInputSubmissionReady(
 }
 
 export async function submitNativeFrontendPromptTurn(
-  client: Pick<RinFrontendClient, "prompt">,
+  client: Pick<RinFrontendClient, "prompt"> &
+    Partial<Pick<RinFrontendClient, "steer">>,
   input: RinFrontendPromptTurnInput,
 ): Promise<RinPromptAdmission | void> {
   await waitForFrontendInputSubmissionReady(input.gate);
@@ -83,7 +85,14 @@ export async function submitNativeFrontendPromptTurn(
   if (sessionFile) promptOptions.sessionFile = sessionFile;
   const sessionId = safeString(input.sessionId || "").trim();
   if (sessionId) promptOptions.sessionId = sessionId;
-  return await client.prompt(
+  if (input.transportCommand === "steer" && !client.steer) {
+    throw new Error("frontend_steer_unsupported");
+  }
+  const submit =
+    input.transportCommand === "steer"
+      ? client.steer!.bind(client)
+      : client.prompt.bind(client);
+  return await submit(
     injectPromptContextHeader(input.promptContext, input.text),
     promptOptions,
   );

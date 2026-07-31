@@ -1782,6 +1782,38 @@ test("frontend SDK treats active-state input as an ordinary submission and waits
   assert.equal(promptCall.options.streamingBehavior, undefined);
 });
 
+test("frontend SDK sends explicit steering without opening a lifecycle turn", async () => {
+  const client = createFrontendClient();
+  (client as any).steer = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "steer", text, options });
+    return { acceptedAs: "steer", requestTag: options.requestTag };
+  };
+  client.prompt = async () => {
+    throw new Error("ordinary prompt must not carry steering");
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  await driver.submitTurn({
+    text: "steer now",
+    streamingBehavior: "steer",
+    transportCommand: "steer",
+    requestTag: "tag-steer",
+    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+  });
+
+  const steerCall = client.calls.find((call: any) => call.type === "steer");
+  assert.ok(steerCall);
+  assert.equal(steerCall.options.streamingBehavior, "steer");
+  assert.equal(steerCall.options.requestTag, "tag-steer");
+  assert.equal(
+    client.calls.some((call: any) => call.type === "prompt"),
+    false,
+  );
+});
+
 test("frontend SDK turn driver leaves terminal ownership with the backend after a queued steer starts", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;

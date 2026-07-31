@@ -12,6 +12,7 @@ export type FrozenChatTurnSubmission = {
   attachments: any[];
   promptMeta: PromptContextMeta;
   incomingMessageId: string;
+  mode?: "turn" | "steer";
   replyToMessageId?: string;
   sessionFile?: string;
   model?: string;
@@ -229,7 +230,10 @@ function frozenTurnSubmission(
       "model",
       "thinkingLevel",
       "receivedAt",
-    ])
+    ]) ||
+    (value.mode !== undefined &&
+      value.mode !== "turn" &&
+      value.mode !== "steer")
   ) {
     return null;
   }

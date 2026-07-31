@@ -243,6 +243,17 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     });
   }
 
+  async steer(text: string, options: Record<string, unknown> = {}) {
+    return await this.request({
+      type: "steer",
+      message: text,
+      ...(this.frontendIdentity
+        ? { frontendIdentity: this.frontendIdentity }
+        : {}),
+      ...options,
+    });
+  }
+
   async abort() {
     await this.request({ type: "abort" });
   }
