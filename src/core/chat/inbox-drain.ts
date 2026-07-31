@@ -185,10 +185,11 @@ export function createChatInboxDrain(deps: {
     }
 
     for (const [pendingChatKey, pendingItems] of pendingByChatKey) {
-      if (deps.isChatKeyBlocked?.(pendingChatKey)) continue;
       const pendingController = deps.getController(pendingChatKey);
       if (activeAdmissionChatKeys.has(pendingChatKey)) continue;
+      const chatKeyBlocked = deps.isChatKeyBlocked?.(pendingChatKey) === true;
       if (!deps.hasActiveChatKeyWorker?.(pendingChatKey)) {
+        if (chatKeyBlocked) continue;
         const pending = pendingItems[0];
         if (pending) {
           claimPendingItem(pending, pendingController, pendingChatKey);
@@ -197,10 +198,20 @@ export function createChatInboxDrain(deps: {
       }
       if (!pendingController?.hasActiveTurn?.()) continue;
 
-      const candidates = prioritizeActiveCandidates(
+      let candidates = prioritizeActiveCandidates(
         pendingItems,
         pendingController,
       );
+      if (chatKeyBlocked) {
+        if (!deps.isPriorityDuringActiveChatKeyWorker) continue;
+        candidates = candidates.filter((pending) =>
+          deps.isPriorityDuringActiveChatKeyWorker?.(
+            pending,
+            pendingController,
+          ),
+        );
+        if (!candidates.length) continue;
+      }
       for (let index = 0; index < candidates.length; index += 1) {
         const pending = candidates[index]!;
         const admission = deps.canClaimDuringActiveChatKeyWorker?.(

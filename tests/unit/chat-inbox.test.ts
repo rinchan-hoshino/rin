@@ -362,6 +362,36 @@ test("chat inbox drain leaves a recovering chat pending while unrelated chats ru
   );
 });
 
+test("chat inbox drain lets a reset command interrupt an active recovering chat", async () => {
+  const agentDir = await tempDir();
+  const abort = inbox.enqueueChatInboxItem(
+    agentDir,
+    input("abort-recovery", "discord/1:recovering"),
+  ).item;
+  const jobs = [];
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({
+      hasActiveTurn: () => true,
+      ownsInboundMessage: () => false,
+    }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => jobs.push(job),
+    isChatKeyBlocked: () => true,
+    hasActiveChatKeyWorker: () => true,
+    isPriorityDuringActiveChatKeyWorker: () => true,
+    canClaimDuringActiveChatKeyWorker: () => true,
+  });
+
+  await drain.drainChatInboxOnce();
+
+  assert.deepEqual(
+    jobs.map((job) => job.envelope.messageId),
+    ["abort-recovery"],
+  );
+  assert.equal(inbox.getChatInboxItem(agentDir, abort.itemId).state, "running");
+});
+
 test("chat inbox drain claims unrelated chats concurrently and serializes each chat", async () => {
   const agentDir = await tempDir();
   inbox.enqueueChatInboxItem(agentDir, input("a1", "telegram/1:a"));

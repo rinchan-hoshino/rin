@@ -120,6 +120,128 @@ test("chat main consumes inbound help messages through the inbox path only once"
   }
 });
 
+test("chat main lets an authorized /abort bypass a running same-chat turn", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-abort-bypass-"),
+  );
+  try {
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const inboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+
+      let runTurnCalls = 0;
+      let abortCalls = 0;
+      controllerMod.ChatController.prototype.runTurn = async function () {
+        runTurnCalls += 1;
+        await new Promise(() => {});
+      };
+      controllerMod.ChatController.prototype.hasActiveTurn = function () {
+        return runTurnCalls > 0;
+      };
+      controllerMod.ChatController.prototype.runCommand = async function (command) {
+        if (command !== "/abort") throw new Error("unexpected command: " + command);
+        abortCalls += 1;
+      };
+
+      const { app } = await mainMod.startChatBridge();
+      app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() {
+          return ["assistant-1"];
+        },
+        internal: {
+          async sendChatAction() {},
+        },
+      });
+
+      const makeMessage = (messageId, content, userId = "owner-1") => ({
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        userId,
+        messageId,
+        isDirect: true,
+        content,
+        stripped: { content },
+        elements: [h.createChatRuntimeH().text(content)],
+      });
+
+      app.emit("message", makeMessage("m-active", "start long turn"));
+      const activeDeadline = Date.now() + 5000;
+      while (Date.now() < activeDeadline && runTurnCalls < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (runTurnCalls !== 1) {
+        throw new Error(JSON.stringify({ stage: "turn-not-started", runTurnCalls }));
+      }
+
+      app.emit(
+        "message",
+        makeMessage("m-untrusted-abort", "/abort", "stranger-1"),
+      );
+      app.emit("message", makeMessage("m-abort", "/abort"));
+      const abortDeadline = Date.now() + 8000;
+      let abortItem = null;
+      while (Date.now() < abortDeadline) {
+        abortItem = inboxMod
+          .listChatInboxItems(agentDir, ["pending", "running", "terminal", "failed"])
+          .find((item) => item.messageId === "m-abort");
+        if (abortCalls === 1 && abortItem?.state === "terminal") break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      const untrustedAbortItem = inboxMod
+        .listChatInboxItems(agentDir, ["pending", "running", "terminal", "failed"])
+        .find((item) => item.messageId === "m-untrusted-abort");
+      if (
+        abortCalls !== 1 ||
+        abortItem?.state !== "terminal" ||
+        untrustedAbortItem?.state !== "pending"
+      ) {
+        throw new Error(JSON.stringify({
+          abortCalls,
+          abortItem,
+          untrustedAbortItem,
+          inboundRecovery: app.isInboundRecoveryChat("telegram/1:2"),
+        }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+        },
+        timeout: 20000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("chat send reports adapter dispatch as pending until delivery settles", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-main-dispatch-"),

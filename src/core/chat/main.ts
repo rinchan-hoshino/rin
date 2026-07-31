@@ -1425,7 +1425,44 @@ export async function startChatBridge(
       );
       return ["abort", "new"].includes(commandRequest.command?.name || "");
     },
-    canClaimDuringActiveChatKeyWorker: () => false,
+    canClaimDuringActiveChatKeyWorker: (envelope) => {
+      const admitted = resolveDurableChatAdmission(envelope.admission, {
+        chatKey: envelope.chatKey,
+        messageId: envelope.messageId,
+      });
+      if (admitted.kind !== "unclassified") {
+        return (
+          admitted.kind === "command" &&
+          ["abort", "new"].includes(admitted.command.name)
+        );
+      }
+
+      const queuedSession = restoreChatInboxSession(
+        envelope,
+        findRuntimeBot(
+          safeString(envelope?.session?.platform || "").trim(),
+          safeString(envelope?.session?.selfId || "").trim(),
+        ),
+      );
+      const queuedChatKey =
+        safeString(envelope.chatKey).trim() || sessionChatKey(queuedSession);
+      if (isRecordOnlyChatKey(queuedChatKey)) return false;
+      const commandRequest = parseInboundCommandRequest(
+        queuedSession,
+        elementsToCommandText(restoreChatInboxElements(envelope)),
+        commandRows,
+      );
+      const commandName = commandRequest.command?.name || "";
+      if (!["abort", "new"].includes(commandName)) return false;
+      return canRunCommand(
+        trustOf(
+          getIdentity(),
+          safeString(queuedSession?.platform).trim(),
+          pickUserId(queuedSession),
+        ),
+        commandName,
+      );
+    },
     logger,
   });
 
