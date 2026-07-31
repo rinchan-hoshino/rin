@@ -469,11 +469,13 @@ export class RinFrontendLifecycleTerminalGate {
   private readonly terminalIdentities = new Set<string>();
 
   private terminalIdentity(event: RinFrontendLifecycleEvent): string {
+    if (event.requestTag) return `request:${event.requestTag}`;
+    const terminalId = event.terminalRecord?.terminalId;
+    if (terminalId) return `terminal:${terminalId}`;
     const session = event.sessionId || event.sessionFile || "session";
     if (event.turnGeneration && event.turnGeneration > 0) {
       return `${session}:generation:${event.turnGeneration}`;
     }
-    if (event.requestTag) return `${session}:request:${event.requestTag}`;
     return `${session}:identityless`;
   }
 

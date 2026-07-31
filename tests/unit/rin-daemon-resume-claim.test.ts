@@ -10,6 +10,10 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
+const { RinDaemonFrontendClient } =
+  await import("../../dist/core/rin-frontend-sdk/daemon-client.js");
+const { RinFrontendTurnDriver } =
+  await import("../../dist/core/rin-frontend-sdk/turn-driver.js");
 
 async function waitForSocket(socketPath, timeoutMs = 5000) {
   const startedAt = Date.now();
@@ -775,6 +779,116 @@ process.stdin.on("data", (chunk) => {
   } finally {
     firstClient?.close();
     secondClient?.close();
+    try {
+      daemon.kill("SIGKILL");
+    } catch {
+      // ignore
+    }
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("frontend accepts distinct durable terminals when replacement workers reuse generation one", async () => {
+  const agentDir = await makeTempDir("rin-daemon-terminal-identity-");
+  const socketPath = path.join(agentDir, "daemon.sock");
+  const workerPath = path.join(agentDir, "fake-worker.js");
+  const sessionFile = path.join(agentDir, "sessions", "shared.jsonl");
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(sessionFile, "");
+  await fs.writeFile(
+    workerPath,
+    `
+const process = require("node:process");
+const sessionFile = ${JSON.stringify(sessionFile)};
+const sessionId = "shared-session";
+function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf("\\n");
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    if (command.type === "get_state") {
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionFile, sessionId, isStreaming: false, isCompacting: false } });
+      continue;
+    }
+    if (command.type === "prompt") {
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { requestTag: command.requestTag, sessionFile, sessionId } });
+      setTimeout(() => {
+        send({ type: "rpc_turn_event", event: "complete", requestTag: command.requestTag, sessionFile, sessionId, turnGeneration: 1, finalText: "final:" + command.requestTag });
+        setTimeout(() => process.exit(0), 25);
+      }, 5);
+      continue;
+    }
+    send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionFile, sessionId } });
+  }
+});
+`,
+  );
+
+  const daemon = spawnDaemon(agentDir, socketPath, workerPath);
+  const client = new RinDaemonFrontendClient({
+    socketPath,
+    frontendIdentity: {
+      clientType: "chat-bridge",
+      clientInstanceId: "terminal-identity-test",
+    },
+  });
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const runWithTimeout = async (requestTag) => {
+    let timeout;
+    try {
+      return await Promise.race([
+        driver.runTurn({
+          text: requestTag,
+          requestTag,
+          assumeConnected: true,
+          assumeSessionReady: true,
+        }),
+        new Promise((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error(`turn_timeout:${requestTag}`)),
+            3000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  try {
+    await waitForSocket(socketPath);
+    await driver.connect({ restoreSessionFile: sessionFile });
+    const first = await runWithTimeout("chat-inbox-recovered");
+    assert.equal(first.finalText, "final:chat-inbox-recovered");
+
+    let workerExited = false;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const status = await rpc(socketPath, {
+        id: `wait-worker-exit-${attempt}`,
+        type: "daemon_status",
+      });
+      if ((status.data?.workers || []).length === 0) {
+        workerExited = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(workerExited, true);
+
+    const second = await runWithTimeout("chat-inbox-current");
+    assert.equal(second.finalText, "final:chat-inbox-current");
+  } finally {
+    driver.dispose();
     try {
       daemon.kill("SIGKILL");
     } catch {
