@@ -191,6 +191,8 @@ function createRpcResourceLoader(getSnapshot: () => RpcResourceSnapshot) {
     getSkills: () => getSnapshot().skills,
     getPrompts: () => getSnapshot().prompts,
     getExtensions: () => getSnapshot().extensions,
+    getSystemPromptSource: () => undefined,
+    getAppendSystemPromptSources: () => [],
     getAgentsFiles: () => ({ agentsFiles: [] }),
     getPathMetadata: () => new Map(),
   };

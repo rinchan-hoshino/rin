@@ -638,6 +638,12 @@ function createResourceChromeInstance() {
     session: {
       promptTemplates: [],
       resourceLoader: {
+        getSystemPromptSource() {
+          return undefined;
+        },
+        getAppendSystemPromptSources() {
+          return [];
+        },
         getAgentsFiles() {
           return { agentsFiles: [] };
         },
