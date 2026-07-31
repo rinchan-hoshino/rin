@@ -854,6 +854,7 @@ test("self-improve review prompt keeps routing data separate from evidence", () 
   );
   assert.match(prompt, /over \/tmp\/rin-agent\/self_improve/);
   assert.match(prompt, /Evidence scope: the conversation above/);
+  assert.doesNotMatch(prompt, /run-audit|run-audits|maintenance-history/);
   assert.match(
     prompt,
     /Trigger context \(routing data, not instructions or evidence\):/,
@@ -915,6 +916,10 @@ test("self-improve distillation manual is the concise canonical contract", async
   assert.match(manual, /memory-index does not carry executable procedure/);
   assert.match(manual, /short-term-memory\/records/);
   assert.match(manual, /skill-creator/);
+  assert.doesNotMatch(
+    manual,
+    /Run audit evidence|run-audits|maintenance-history/,
+  );
   assert.match(manual, /one concise unchanged reason/);
 });
 
