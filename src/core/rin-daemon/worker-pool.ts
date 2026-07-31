@@ -318,12 +318,11 @@ export class WorkerPool {
     options: { signal?: NodeJS.Signals } = {},
   ) {
     if (!this.workers.has(worker)) return true;
-    if (this.shuttingDown && worker.activeLifecycleRequestTag !== undefined) {
-      this.stopWorkerForRecovery(worker);
-      return false;
-    }
-    if (!this.interruptWorkerLifecycle(worker, "rin_worker_exit")) {
-      // Keep durable ownership intact and let the normal exit path recover it.
+    if (
+      lifecycleRequestTag(
+        worker.activeLifecycleRequestTag || worker.activeRequestTag,
+      )
+    ) {
       this.stopWorkerForRecovery(worker);
       return false;
     }
@@ -769,6 +768,7 @@ export class WorkerPool {
   }
 
   destroyAll() {
+    this.beginShutdown();
     clearInterval(this.reaper);
     if (this.activeTurnRecoveryScanTimer) {
       clearTimeout(this.activeTurnRecoveryScanTimer);
@@ -1691,21 +1691,8 @@ export class WorkerPool {
         : oomKilled
           ? "rin_worker_oom"
           : "rin_worker_exit";
-      let lifecycleInterrupted = Boolean(
-        !preserveActiveTurn ||
-        (worker.gracefulShutdownRequested &&
-          !worker.recoveryStopRequested &&
-          !this.shuttingDown),
-      );
-      if (
-        lifecycleInterrupted &&
-        !this.interruptWorkerLifecycle(worker, exitError)
-      ) {
-        lifecycleInterrupted = false;
-      }
-      const recoverActiveTurn =
-        preserveActiveTurn && !this.shuttingDown && !lifecycleInterrupted;
-      const workingAfterExit = preserveActiveTurn && !lifecycleInterrupted;
+      const recoverActiveTurn = preserveActiveTurn && !this.shuttingDown;
+      const workingAfterExit = preserveActiveTurn;
       if (oomKilled && !recoverActiveTurn) {
         for (const connection of liveConnections) {
           writeLine(connection.socket, {
@@ -2064,16 +2051,6 @@ export class WorkerPool {
       // lifecycle truth. Remaining waiters are rejected by the caller.
       return false;
     }
-  }
-
-  private interruptWorkerLifecycle(worker: WorkerHandle, reason: string) {
-    if (!worker.activeLifecycleRequestTag) return true;
-    return this.interruptDaemonTurnByRequestTag(
-      worker.activeLifecycleRequestTag,
-      reason,
-      false,
-      worker,
-    );
   }
 
   private findTrackedWorkerBySelector(selector: SessionSelector) {

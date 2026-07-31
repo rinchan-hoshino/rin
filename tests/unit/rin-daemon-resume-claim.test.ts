@@ -14,6 +14,8 @@ const { RinDaemonFrontendClient } =
   await import("../../dist/core/rin-frontend-sdk/daemon-client.js");
 const { RinFrontendTurnDriver } =
   await import("../../dist/core/rin-frontend-sdk/turn-driver.js");
+const { readDaemonTurn } =
+  await import("../../dist/core/rin-daemon/turn-ledger.js");
 
 async function waitForSocket(socketPath, timeoutMs = 5000) {
   const startedAt = Date.now();
@@ -894,6 +896,107 @@ process.stdin.on("data", (chunk) => {
     } catch {
       // ignore
     }
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("hard daemon and worker death resumes the accepted ledger turn without prompt replay", async () => {
+  const agentDir = await makeTempDir("rin-daemon-hard-crash-");
+  const socketPath = path.join(agentDir, "daemon.sock");
+  const workerPath = path.join(agentDir, "crash-worker.mjs");
+  const logPath = path.join(agentDir, "worker.log");
+  const sessionFile = path.join(agentDir, "session.jsonl");
+  const requestTag = "hard-crash-turn";
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+import readline from "node:readline";
+const logPath = ${JSON.stringify(logPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+const log = (type) => fs.appendFileSync(logPath, process.pid + ":" + type + "\\n");
+const send = (payload) => process.stdout.write(JSON.stringify(payload) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const command = JSON.parse(line);
+  if (command.type === "get_state") {
+    send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionFile, sessionId: "crash-session", isStreaming: false, isCompacting: false } });
+    return;
+  }
+  if (command.type === "prompt") {
+    log("prompt");
+    send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+    send({ type: "rpc_turn_event", event: "start", requestTag: command.requestTag, turnGeneration: 1, sessionFile, sessionId: "crash-session" });
+    return;
+  }
+  if (command.type === "resume_interrupted_turn") {
+    log("resume");
+    send({ type: "response", id: command.id, command: command.type, success: true, data: { resumed: true } });
+    send({ type: "rpc_turn_event", event: "start", requestTag: command.requestTag, turnGeneration: 1, sessionFile, sessionId: "crash-session" });
+    setTimeout(() => send({ type: "rpc_turn_event", event: "complete", requestTag: command.requestTag, turnGeneration: 1, sessionFile, sessionId: "crash-session", finalText: "hard crash recovered final" }), 25);
+    return;
+  }
+  send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  let firstDaemon = spawnDaemon(agentDir, socketPath, workerPath);
+  let secondDaemon;
+  try {
+    await waitForSocket(socketPath);
+    const prompt = await withRpcConnection(socketPath, async (client) => {
+      const selected = await client.request({
+        id: "hard-crash-select",
+        type: "switch_session",
+        sessionFile,
+        sessionId: "crash-session",
+      });
+      assert.equal(selected.success, true);
+      return await client.request({
+        id: "hard-crash-prompt",
+        type: "prompt",
+        message: "execute once",
+        requestTag,
+      });
+    });
+    assert.equal(prompt.success, true);
+    assert.equal(readDaemonTurn(agentDir, requestTag)?.state, "active");
+
+    firstDaemon.kill("SIGKILL");
+    await new Promise((resolve) => firstDaemon.once("exit", resolve));
+    firstDaemon = undefined;
+    for (const line of await readLogLines(logPath)) {
+      const pid = Number(line.split(":", 1)[0]);
+      if (Number.isFinite(pid)) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {}
+      }
+    }
+
+    secondDaemon = spawnDaemon(agentDir, socketPath, workerPath);
+    await waitForSocket(socketPath, 10_000);
+    const deadline = Date.now() + 10_000;
+    let terminal;
+    while (Date.now() < deadline) {
+      terminal = readDaemonTurn(agentDir, requestTag);
+      if (terminal?.state === "complete") break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(terminal?.state, "complete");
+    assert.equal(
+      terminal?.terminalEvent?.finalText,
+      "hard crash recovered final",
+    );
+    const commands = (await readLogLines(logPath)).map((line) =>
+      line.slice(line.indexOf(":") + 1),
+    );
+    assert.equal(commands.filter((type) => type === "prompt").length, 1);
+    assert.equal(commands.filter((type) => type === "resume").length, 1);
+  } finally {
+    firstDaemon?.kill("SIGKILL");
+    secondDaemon?.kill("SIGTERM");
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });

@@ -75,12 +75,6 @@ export type ClaimedChatInboxItem = ChatInboxItem & {
   ownerEpoch: string;
 };
 
-export type RestoredChatInboxProcessingItem = {
-  itemId: string;
-  chatKey: string;
-  messageId: string;
-};
-
 const DEFAULT_CHAT_INBOX_LEASE_MS = 5 * 60 * 1000;
 
 export function buildChatInboxItem(input: {
@@ -296,6 +290,54 @@ export function listPendingChatInboxItems(agentDir: string) {
 
 export function listRunningChatInboxItems(agentDir: string) {
   return listChatInboxItems(agentDir, ["running"]) as ClaimedChatInboxItem[];
+}
+
+export function reclaimRunningChatInboxItem(
+  agentDir: string,
+  item: ClaimedChatInboxItem,
+  options: { nowMs?: number; leaseMs?: number; force?: boolean } = {},
+) {
+  const itemId = safeString(item?.itemId).trim();
+  const ownerEpoch = safeString(item?.ownerEpoch).trim() || null;
+  const attempt = Number(item?.attemptCount || 0);
+  if (!itemId || attempt < 1) return undefined;
+  const db = openChatDatabase(agentDir);
+  const nowMs = Number(options.nowMs ?? Date.now());
+  const timestamp = new Date(nowMs).toISOString();
+  const leaseUntil = new Date(
+    nowMs + Math.max(1, Number(options.leaseMs || DEFAULT_CHAT_INBOX_LEASE_MS)),
+  ).toISOString();
+  const nextOwnerEpoch = crypto.randomUUID();
+  return db
+    .transaction(() => {
+      const result = db
+        .prepare(
+          `UPDATE inbox_jobs
+           SET owner_epoch = ?, attempt = attempt + 1,
+               lease_until = ?, heartbeat_at = ?, updated_at = ?
+           WHERE turn_id = ? AND state = 'running'
+             AND owner_epoch IS ? AND attempt = ?
+             ${options.force ? "" : "AND (lease_until IS NULL OR lease_until <= ?)"}`,
+        )
+        .run(
+          nextOwnerEpoch,
+          leaseUntil,
+          timestamp,
+          timestamp,
+          itemId,
+          ownerEpoch,
+          attempt,
+          ...(!options.force ? [timestamp] : []),
+        );
+      if (result.changes !== 1) return undefined;
+      const row = db
+        .prepare(`${INBOX_SELECT} WHERE inbox_jobs.turn_id = ?`)
+        .get(itemId) as any;
+      return row
+        ? (rowToChatInboxItem(row) as ClaimedChatInboxItem)
+        : undefined;
+    })
+    .immediate();
 }
 
 export function enqueueChatInboxItem(
@@ -583,50 +625,6 @@ export function failClaimedChatInboxItem(
       claim.attempt,
     );
   return result.changes === 1 ? getChatInboxItem(agentDir, claim.itemId) : null;
-}
-
-export function interruptProcessingChatInboxItems(
-  agentDir: string,
-  options: { nowMs?: number; limit?: number } = {},
-) {
-  const db = openChatDatabase(agentDir);
-  const timestamp = new Date(Number(options.nowMs ?? Date.now())).toISOString();
-  const limit = Math.max(0, Math.floor(Number(options.limit || 0)));
-  return db
-    .transaction(() => {
-      const rows = db
-        .prepare(
-          `${INBOX_SELECT}
-         WHERE inbox_jobs.state = 'running'
-           AND (inbox_jobs.lease_until IS NULL OR inbox_jobs.lease_until <= ?)
-         ORDER BY inbox_jobs.sequence, inbox_jobs.turn_id
-         ${limit ? `LIMIT ${limit}` : ""}`,
-        )
-        .all(timestamp) as any[];
-      const restored: RestoredChatInboxProcessingItem[] = [];
-      for (const row of rows) {
-        const result = db
-          .prepare(
-            `UPDATE inbox_jobs
-           SET state = 'failed', terminal_kind = 'interrupted',
-               owner_epoch = NULL, lease_until = NULL,
-               heartbeat_at = NULL, next_attempt_at = NULL,
-               last_error = 'chat_turn_interrupted', updated_at = ?
-           WHERE turn_id = ? AND state = 'running'
-             AND (lease_until IS NULL OR lease_until <= ?)`,
-          )
-          .run(timestamp, row.turn_id, timestamp);
-        if (result.changes === 1) {
-          restored.push({
-            itemId: safeString(row.turn_id),
-            chatKey: safeString(row.chat_key),
-            messageId: safeString(row.message_id),
-          });
-        }
-      }
-      return restored;
-    })
-    .immediate();
 }
 
 function asRecord(value: unknown): Record<string, any> {

@@ -86,8 +86,8 @@ import {
   getChatInboxItem,
   restoreChatInboxElements,
   restoreChatInboxSession,
-  interruptProcessingChatInboxItems,
   listRunningChatInboxItems,
+  reclaimRunningChatInboxItem,
   touchClaimedChatInboxItem,
 } from "./inbox.js";
 import {
@@ -908,7 +908,7 @@ export async function startChatBridge(
         logger.info(
           `chat turn cancelled by frontend lifecycle chatKey=${submission.chatKey} err=${errorMessage}`,
         );
-        return { preserveForRestart: true };
+        return undefined;
       }
       if (
         [
@@ -923,13 +923,7 @@ export async function startChatBridge(
         logger.info(
           `chat turn interrupted without authoritative terminal chatKey=${submission.chatKey} err=${errorMessage}`,
         );
-        return { preserveForRestart: true };
-      }
-      if (chatBridgeStopping && messageId && !messageProcessed) {
-        logger.info(
-          `chat turn interrupted by bridge shutdown chatKey=${submission.chatKey} err=${errorMessage}`,
-        );
-        return { preserveForRestart: true };
+        return undefined;
       }
       logger.warn(
         `chat turn failed chatKey=${submission.chatKey} err=${errorMessage}`,
@@ -1016,13 +1010,19 @@ export async function startChatBridge(
   };
 
   let chatBridgeStopping = false;
+  let requestReconcileChatInbox: () => void = () => {};
   const claimedInboxJobs = new Map<string, ClaimedChatInboxJob>();
   const forgetClaimedInboxJob = (job: ClaimedChatInboxJob) => {
     if (claimedInboxJobs.get(job.envelope.itemId) === job) {
       claimedInboxJobs.delete(job.envelope.itemId);
     }
   };
-  const preserveClaimedInboxJobForRestart = (job: ClaimedChatInboxJob) => {
+  const releaseClaimedInboxJob = (job: ClaimedChatInboxJob) => {
+    if (!chatBridgeStopping) {
+      touchClaimedChatInboxItem(runtime.agentDir, job.envelope, {
+        leaseMs: CHAT_INBOX_POLL_INTERVAL_MS * 2,
+      });
+    }
     forgetClaimedInboxJob(job);
   };
   const finishClaimedInboxJob = (
@@ -1030,8 +1030,8 @@ export async function startChatBridge(
     result?: ChatInboxJobResult,
   ) => {
     try {
-      if (result?.preserveForRestart || chatBridgeStopping) {
-        preserveClaimedInboxJobForRestart(job);
+      if (!result) {
+        releaseClaimedInboxJob(job);
         return;
       }
       finalizeClaimedChatInboxJob(runtime.agentDir, job, result);
@@ -1088,18 +1088,10 @@ export async function startChatBridge(
       const result = await runWithChatOutboxTurnFence(fence, run);
       finishClaimedInboxJob(job, result);
     } catch (error) {
-      if (chatBridgeStopping) {
-        preserveClaimedInboxJobForRestart(job);
-        return;
-      }
       logger.warn(
-        `chat inbox worker failed chatKey=${job.envelope.chatKey} turn=${job.envelope.itemId} err=${safeString((error as any)?.message || error)}`,
+        `chat inbox worker detached without terminal chatKey=${job.envelope.chatKey} turn=${job.envelope.itemId} err=${safeString((error as any)?.message || error)}`,
       );
-      failClaimedChatInboxItem(
-        runtime.agentDir,
-        job.envelope,
-        (error as any)?.message || error,
-      );
+      releaseClaimedInboxJob(job);
     } finally {
       clearInterval(heartbeat);
       forgetClaimedInboxJob(job);
@@ -1251,6 +1243,11 @@ export async function startChatBridge(
     if (recoveredAdmission.kind !== "unclassified") {
       return prepareFromAdmission(envelope.admission, true);
     }
+    if (job.resumeOnly) {
+      return {
+        run: () => runClaimedInboxJob(job, async () => undefined),
+      };
+    }
 
     if (isRecordOnlyChatKey(queuedChatKey)) {
       return commitAdmission({
@@ -1385,7 +1382,7 @@ export async function startChatBridge(
   const enqueueClaimedInboxItem = (job: ClaimedChatInboxJob) => {
     claimedInboxJobs.set(job.envelope.itemId, job);
     if (chatBridgeStopping) {
-      preserveClaimedInboxJobForRestart(job);
+      releaseClaimedInboxJob(job);
       return;
     }
     chatKeyWorkers.enqueue(job.envelope.chatKey, job);
@@ -1465,6 +1462,18 @@ export async function startChatBridge(
   requestDrainChatInbox = () => {
     if (chatBridgeStopping) return;
     inboxDrain.requestDrainChatInbox();
+  };
+  requestReconcileChatInbox = () => {
+    if (chatBridgeStopping) return;
+    for (const envelope of listRunningChatInboxItems(runtime.agentDir)) {
+      if (claimedInboxJobs.has(envelope.itemId)) continue;
+      if (chatKeyWorkers.hasWorker(envelope.chatKey)) continue;
+      const reclaimed = reclaimRunningChatInboxItem(runtime.agentDir, envelope);
+      if (reclaimed) {
+        enqueueClaimedInboxItem({ envelope: reclaimed, resumeOnly: true });
+      }
+    }
+    requestDrainChatInbox();
   };
 
   app.on("inbound-recovery-chat-ready", () => {
@@ -1745,7 +1754,12 @@ export async function startChatBridge(
   reconcileCommittedChatOutboxProcessing(runtime.agentDir);
   const startupRecoverableProcessing = listRunningChatInboxItems(
     runtime.agentDir,
-  );
+  ).flatMap((envelope) => {
+    const reclaimed = reclaimRunningChatInboxItem(runtime.agentDir, envelope, {
+      force: true,
+    });
+    return reclaimed ? [reclaimed] : [];
+  });
   for (const envelope of startupRecoverableProcessing) {
     if (startupRecoveryChatKeys.has(envelope.chatKey)) continue;
     startupRecoveryChatKeys.add(envelope.chatKey);
@@ -1759,7 +1773,7 @@ export async function startChatBridge(
   );
 
   for (const envelope of startupRecoverableProcessing) {
-    enqueueClaimedInboxItem({ envelope });
+    enqueueClaimedInboxItem({ envelope, resumeOnly: true });
   }
   if (startupRecoverableProcessing.length) {
     logger.info(
@@ -1767,16 +1781,15 @@ export async function startChatBridge(
     );
   }
 
-  requestDrainChatInbox();
+  requestReconcileChatInbox();
   inboxPollTimer = setInterval(() => {
     try {
-      interruptProcessingChatInboxItems(runtime.agentDir);
+      requestReconcileChatInbox();
     } catch (error) {
       logger.warn(
-        `chat inbox lease sweep failed err=${safeString((error as any)?.message || error)}`,
+        `chat inbox reconciliation failed err=${safeString((error as any)?.message || error)}`,
       );
     }
-    requestDrainChatInbox();
   }, CHAT_INBOX_POLL_INTERVAL_MS);
   runOutboxHistoryCleanup();
   outboxHistoryCleanupTimer = setInterval(
@@ -1799,7 +1812,7 @@ export async function startChatBridge(
       if (outboxPollTimer) clearInterval(outboxPollTimer);
       if (outboxHistoryCleanupTimer) clearInterval(outboxHistoryCleanupTimer);
       for (const job of [...claimedInboxJobs.values()]) {
-        preserveClaimedInboxJobForRestart(job);
+        releaseClaimedInboxJob(job);
       }
       for (const controller of controllers.values()) {
         if (options.hosted === true) {

@@ -135,7 +135,40 @@ test("chat inbox duplicate delivery cannot revive a terminal turn", async () => 
   );
 });
 
-test("chat inbox heartbeat extends only the current claim", async () => {
+test("chat inbox reconciliation atomically fences the previous executor", async () => {
+  const agentDir = await tempDir();
+  const { item } = inbox.enqueueChatInboxItem(agentDir, input("m-reclaim"));
+  const nowMs = Date.now();
+  const first = inbox.claimChatInboxItem(agentDir, item.itemId, {
+    nowMs,
+    leaseMs: 100,
+  });
+  const reclaimed = inbox.reclaimRunningChatInboxItem(agentDir, first, {
+    nowMs: nowMs + 10,
+    force: true,
+  });
+  assert.equal(reclaimed.itemId, item.itemId);
+  assert.notEqual(reclaimed.ownerEpoch, first.ownerEpoch);
+  assert.equal(reclaimed.attemptCount, first.attemptCount + 1);
+  assert.equal(
+    inbox.touchClaimedChatInboxItem(agentDir, first, { nowMs: nowMs + 20 }),
+    false,
+  );
+  assert.equal(
+    inbox.completeClaimedChatInboxItem(agentDir, first, {
+      terminalKind: "complete",
+    }),
+    false,
+  );
+  assert.equal(
+    inbox.touchClaimedChatInboxItem(agentDir, reclaimed, {
+      nowMs: nowMs + 20,
+    }),
+    true,
+  );
+});
+
+test("chat inbox lease expiry never creates a business terminal", async () => {
   const agentDir = await tempDir();
   const { item } = inbox.enqueueChatInboxItem(agentDir, input());
   const claim = inbox.claimChatInboxItem(agentDir, item.itemId, {
@@ -149,15 +182,9 @@ test("chat inbox heartbeat extends only the current claim", async () => {
     }),
     true,
   );
-  assert.equal(
-    inbox.interruptProcessingChatInboxItems(agentDir, { nowMs: 1101 }).length,
-    0,
-  );
-  assert.equal(
-    inbox.interruptProcessingChatInboxItems(agentDir, { nowMs: 1151 }).length,
-    1,
-  );
-  assert.equal(inbox.getChatInboxItem(agentDir, item.itemId).state, "failed");
+  const current = inbox.getChatInboxItem(agentDir, item.itemId);
+  assert.equal(current.state, "running");
+  assert.equal(current.lastError, undefined);
 });
 
 test("chat generation interrupts old pending and running inbox_jobs while preserving /new", async () => {
@@ -237,12 +264,7 @@ test("chat inbox runtime recovery never synthesizes inbox_jobs for pre-atomic ac
     text: "update-owned migration only",
   });
 
-  assert.deepEqual(
-    inbox.interruptProcessingChatInboxItems(agentDir, {
-      nowMs: Date.parse("2026-07-14T01:01:00.000Z"),
-    }),
-    [],
-  );
+  assert.deepEqual(inbox.listRunningChatInboxItems(agentDir), []);
   assert.deepEqual(inbox.listPendingChatInboxItems(agentDir), []);
   assert.equal(
     database

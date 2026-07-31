@@ -11,10 +11,10 @@ import { safeString } from "../text-utils.js";
 
 export type ClaimedChatInboxJob = {
   envelope: ClaimedChatInboxItem;
+  resumeOnly?: boolean;
 };
 
 export type ChatInboxJobResult = {
-  preserveForRestart?: boolean;
   errorMessage?: string;
   disposition?: "record_only" | "actionable";
   terminalKind?: string;

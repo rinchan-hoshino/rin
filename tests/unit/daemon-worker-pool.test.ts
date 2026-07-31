@@ -849,7 +849,7 @@ setInterval(() => {}, 1000);
   pool.destroyAll();
 });
 
-test("an unexpected worker exit resumes the same durable turn in a replacement worker", async () => {
+test("worker exit cause never terminalizes an active durable turn", async () => {
   const dir = await makeTempDir("rin-worker-pool-resume-active-");
   const workerPath = path.join(dir, "worker.cjs");
   const commandLog = path.join(dir, "commands.jsonl");
@@ -909,6 +909,7 @@ setInterval(() => {}, 1000);
     "resume-request",
   );
   await sleep(50);
+  firstWorker.gracefulShutdownRequested = true;
   firstWorker.child.kill("SIGKILL");
 
   const event = await Promise.race([
@@ -2620,6 +2621,7 @@ test("client worker commands fail closed stdin without daemon stream errors", as
   });
 
   assert.equal(worker.pendingResponses.size, 0);
+  await sleep(50);
   assert.equal(pool.getStatusSnapshot().workerCount, 0);
   assert.ok(
     writes.some((line) => {
@@ -2631,7 +2633,7 @@ test("client worker commands fail closed stdin without daemon stream errors", as
           command: "prompt",
           success: false,
           error: "rin_worker_exit",
-          working: false,
+          working: true,
         })
       );
     }),
@@ -3072,9 +3074,8 @@ test("duplicate request admission returns the existing lifecycle without resendi
   assert.ok(worker);
   pool.attachWorkerToConnection(connection, worker);
   const commands = [];
-  pool.writeWorkerStdin = (_worker, command, callback) => {
+  pool.writeWorkerStdin = (_worker, command) => {
     commands.push(command);
-    callback?.();
   };
   const prompt = {
     type: "prompt",
