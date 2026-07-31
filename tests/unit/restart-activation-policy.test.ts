@@ -164,6 +164,23 @@ test("hosted chat bridge has no restart-specific quiescing state", () => {
   assert.doesNotMatch(shared, /prepareDaemonRestart|cancelDaemonRestart/);
 });
 
+test("chat interruption results preserve active inbox jobs independent of stop ordering", () => {
+  const chatMain = source("src/core/chat/main.ts");
+  const inboxDrain = source("src/core/chat/inbox-drain.ts");
+
+  assert.match(inboxDrain, /preserveForRestart\?: boolean/);
+  assert.match(chatMain, /return \{ preserveForRestart: true \}/);
+  const interruptionMarkers = chatMain.slice(
+    chatMain.indexOf("const interruptionMarkers"),
+    chatMain.indexOf("].some", chatMain.indexOf("const interruptionMarkers")),
+  );
+  assert.doesNotMatch(interruptionMarkers, /rin_worker_unavailable/);
+  assert.match(
+    chatMain,
+    /if \(result\?\.preserveForRestart \|\| chatBridgeStopping\) \{[\s\S]*preserveClaimedInboxJobForRestart\(job\)/,
+  );
+});
+
 test("chat snapshots inherited running jobs before adapters can claim new work", () => {
   const chatMain = source("src/core/chat/main.ts");
   const reconcile = chatMain.indexOf(

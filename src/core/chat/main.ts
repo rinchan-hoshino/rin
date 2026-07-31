@@ -908,11 +908,12 @@ export async function startChatBridge(
         logger.info(
           `chat turn cancelled by frontend lifecycle chatKey=${submission.chatKey} err=${errorMessage}`,
         );
-        return { errorMessage };
+        return { preserveForRestart: true };
       }
       if (
         [
           "frontend_turn_interrupted",
+          "chat_turn_interrupted",
           "rin_worker_exit",
           "rin_worker_oom",
           "chat_terminal_record_missing",
@@ -922,13 +923,13 @@ export async function startChatBridge(
         logger.info(
           `chat turn interrupted without authoritative terminal chatKey=${submission.chatKey} err=${errorMessage}`,
         );
-        return { errorMessage };
+        return { preserveForRestart: true };
       }
       if (chatBridgeStopping && messageId && !messageProcessed) {
         logger.info(
           `chat turn interrupted by bridge shutdown chatKey=${submission.chatKey} err=${errorMessage}`,
         );
-        return { errorMessage };
+        return { preserveForRestart: true };
       }
       logger.warn(
         `chat turn failed chatKey=${submission.chatKey} err=${errorMessage}`,
@@ -1029,7 +1030,7 @@ export async function startChatBridge(
     result?: ChatInboxJobResult,
   ) => {
     try {
-      if (chatBridgeStopping) {
+      if (result?.preserveForRestart || chatBridgeStopping) {
         preserveClaimedInboxJobForRestart(job);
         return;
       }

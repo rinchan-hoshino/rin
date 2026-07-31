@@ -2774,7 +2774,7 @@ test("chat startup honors terminal outbox ownership before orphan inbox recovery
   }
 });
 
-test("chat main reports an offline-queued frontend turn without retrying", async () => {
+test("chat main preserves an offline-queued frontend turn without retrying", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2886,12 +2886,16 @@ test("chat main reports an offline-queued frontend turn without retrying", async
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
       const failed = inboxMod.listChatInboxItems(agentDir, ["failed"]);
-      const interrupted = failed.some((item) =>
-        String(item.lastError || "").includes("queued_offline"),
-      );
+      const running = inboxMod.listChatInboxItems(agentDir, ["running"]);
       const succeeded = rows.some((item) => item.text === "retry after queued offline");
-      if (succeeded || rows.length !== 0 || !interrupted || runTurnCalls !== 1) {
-        throw new Error(JSON.stringify({ runTurnCalls, failed, rows }));
+      if (
+        succeeded ||
+        rows.length !== 0 ||
+        failed.length !== 0 ||
+        running.length !== 1 ||
+        runTurnCalls !== 1
+      ) {
+        throw new Error(JSON.stringify({ runTurnCalls, failed, running, rows }));
       }
       process.exit(0);
     `;
