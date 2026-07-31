@@ -41,11 +41,6 @@ import type {
 type CronChatCapability = {
   send?: (payload: ChatOutboxPayload) => Promise<any>;
   runTurn?: (payload: any) => Promise<any>;
-  setWorkingVisible?: (payload: {
-    chatKey?: string;
-    controllerKey?: string;
-    visible?: boolean;
-  }) => Promise<any>;
   terminateTurn?: (payload: {
     controllerKey?: string;
     chatKey?: string;
@@ -195,26 +190,6 @@ function shouldDeliverCronTaskFinal(
   frontend: ReturnType<typeof resolveCronTaskFrontend>,
 ) {
   return task.deliverFinal !== false && frontend?.kind === "chat";
-}
-
-async function setCronTaskFrontendWorking(
-  task: CronTaskRecord,
-  options: { chat?: CronChatCapability },
-  visible: boolean,
-) {
-  if (typeof options.chat?.setWorkingVisible !== "function") return false;
-  const frontend = resolveCronTaskFrontend(task);
-  if (!frontend) return false;
-  const chatKey = frontend.kind === "chat" ? frontend.key : undefined;
-  await options.chat
-    .setWorkingVisible({
-      ...(chatKey
-        ? { chatKey }
-        : { controllerKey: cronTaskRunControllerKey(task) }),
-      visible,
-    })
-    .catch(() => {});
-  return true;
 }
 
 export function buildCronTaskPromptContext(
@@ -850,7 +825,6 @@ export async function executeCronTask(
 ) {
   const startedAt = task.lastStartedAt || nowIso();
   const runId = cronTaskRunId(task, startedAt);
-  const showExternalWorking = task.target.kind === "shell_command";
   const audited = isSelfImproveDistillationTask(task);
   const maintenanceLock = audited
     ? await acquireSelfImproveMaintenanceLock(options.agentDir)
@@ -869,9 +843,6 @@ export async function executeCronTask(
       })
     : {};
   try {
-    if (showExternalWorking) {
-      await setCronTaskFrontendWorking(task, options, true);
-    }
     if (task.target.kind === "shell_command") {
       const text = await executeCronShellTask(task, {
         agentDir: options.agentDir,
@@ -933,9 +904,6 @@ export async function executeCronTask(
     };
   } finally {
     try {
-      if (showExternalWorking) {
-        await setCronTaskFrontendWorking(task, options, false);
-      }
       if (terminal) {
         await projectCronTaskTerminal(task, terminal, {
           agentDir: options.agentDir,

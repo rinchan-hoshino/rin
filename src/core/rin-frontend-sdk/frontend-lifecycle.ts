@@ -7,12 +7,6 @@ import type {
   RinFrontendBackendEvent,
 } from "./types.js";
 
-export type RinFrontendLifecyclePhase =
-  | "idle"
-  | "working"
-  | "compacting"
-  | "retrying";
-
 export type RinFrontendInterruptIntent =
   | "stop_turn"
   | "cancel_retry"
@@ -21,7 +15,6 @@ export type RinFrontendInterruptIntent =
 export interface RinFrontendLifecycleStateTarget {
   turnActive?: boolean;
   isStreaming?: boolean;
-  workingVisible?: boolean;
   isCompacting?: boolean;
   compactionReason?: string;
   retryAttempt?: number;
@@ -31,10 +24,8 @@ export interface RinFrontendLifecycleStateTarget {
 }
 
 export interface RinFrontendLifecycleState {
-  phase: RinFrontendLifecyclePhase;
   turnActive: boolean;
   isStreaming: boolean;
-  workingVisible: boolean;
   isCompacting: boolean;
   compactionReason: string;
   retryAttempt: number;
@@ -67,10 +58,6 @@ export type RinFrontendLifecycleEvent =
       settled: boolean;
     })
   | (LifecycleEventBase & { kind: "agent_settled" })
-  | (LifecycleEventBase & {
-      kind: "working_visibility";
-      visible: boolean;
-    })
   | (LifecycleEventBase & {
       kind: "compaction_started";
       reason: string;
@@ -193,10 +180,8 @@ export function createRinFrontendLifecycleState(
   initial: Partial<RinFrontendLifecycleState> = {},
 ): RinFrontendLifecycleState {
   return {
-    phase: "idle",
     turnActive: false,
     isStreaming: false,
-    workingVisible: false,
     isCompacting: false,
     compactionReason: "",
     retryAttempt: 0,
@@ -214,7 +199,6 @@ export function applyRinFrontendLifecycleEvent(
   const state = createRinFrontendLifecycleState({
     turnActive: target.turnActive === true,
     isStreaming: target.isStreaming === true,
-    workingVisible: target.workingVisible === true,
     isCompacting: target.isCompacting === true,
     compactionReason: safeString(target.compactionReason),
     retryAttempt: safeNumber(target.retryAttempt),
@@ -225,7 +209,6 @@ export function applyRinFrontendLifecycleEvent(
   reduceRinFrontendLifecycleState(state, event);
   target.turnActive = state.turnActive;
   target.isStreaming = state.isStreaming;
-  target.workingVisible = state.workingVisible;
   target.isCompacting = state.isCompacting;
   target.compactionReason = state.compactionReason;
   target.retryAttempt = state.retryAttempt;
@@ -251,12 +234,6 @@ export function projectRinFrontendLifecycleEvent(
       };
     case "agent_settled":
       return { kind: "agent_settled", ...requestTag };
-    case "working_visibility":
-      return {
-        kind: "working_visibility",
-        visible: payload.visible === true,
-        ...requestTag,
-      };
     case "compaction_start":
       return {
         kind: "compaction_started",
@@ -373,13 +350,6 @@ function clearRetry(state: RinFrontendLifecycleState) {
   state.retryError = "";
 }
 
-function phaseAfterTransientWork(
-  state: RinFrontendLifecycleState,
-): RinFrontendLifecyclePhase {
-  if (state.isCompacting) return "compacting";
-  return state.turnActive ? "working" : "idle";
-}
-
 export function reduceRinFrontendLifecycleState(
   state: RinFrontendLifecycleState,
   event: RinFrontendLifecycleEvent,
@@ -387,65 +357,51 @@ export function reduceRinFrontendLifecycleState(
   switch (event.kind) {
     case "turn_started":
       state.turnActive = true;
-      if (state.phase === "idle") state.phase = "working";
       break;
     case "agent_started":
       state.turnActive = true;
       state.isStreaming = true;
-      state.phase = "working";
       clearRetry(state);
       break;
     case "agent_stopped":
       state.isStreaming = false;
       clearRetry(state);
-      state.phase = phaseAfterTransientWork(state);
       break;
     case "agent_settled":
       state.isStreaming = false;
       state.isCompacting = false;
       state.compactionReason = "";
       clearRetry(state);
-      state.phase = phaseAfterTransientWork(state);
-      break;
-    case "working_visibility":
-      state.workingVisible = event.visible;
       break;
     case "compaction_started":
       state.isCompacting = true;
       state.compactionReason = event.reason;
       clearRetry(state);
-      state.phase = "compacting";
       break;
     case "compaction_finished":
       state.isCompacting = false;
       state.compactionReason = "";
       clearRetry(state);
-      state.phase = phaseAfterTransientWork(state);
       break;
     case "retry_scheduled":
       state.retryAttempt = event.attempt;
       state.maxRetryAttempts = event.maxAttempts;
       state.retryDelayMs = event.delayMs;
       state.retryError = event.errorMessage;
-      state.phase = "retrying";
       break;
     case "summarization_retry_started":
       clearRetry(state);
-      state.phase = state.isCompacting ? "compacting" : "working";
       break;
     case "summarization_retry_finished":
     case "retry_finished":
       clearRetry(state);
-      state.phase = phaseAfterTransientWork(state);
       break;
     case "turn_terminal":
       state.turnActive = false;
       state.isStreaming = false;
-      state.workingVisible = false;
       state.isCompacting = false;
       state.compactionReason = "";
       clearRetry(state);
-      state.phase = "idle";
       break;
   }
   return state;
@@ -484,10 +440,9 @@ export function isRinFrontendLifecyclePresentationEvent(
   event: RinFrontendLifecycleEvent,
 ): boolean {
   return (
-    event.kind === "working_visibility" ||
-    (event.kind !== "agent_stopped" &&
-      event.kind !== "agent_settled" &&
-      shouldRefreshRinFrontendLifecycleStatus(event))
+    event.kind !== "agent_stopped" &&
+    event.kind !== "agent_settled" &&
+    shouldRefreshRinFrontendLifecycleStatus(event)
   );
 }
 
@@ -499,13 +454,9 @@ export function renderRinFrontendLifecycleEvent(
     case "turn_started":
       return [withRequestTag(event, { type: "turn_accepted" })];
     case "agent_started":
-      return [{ type: "status", phase: "working" }];
     case "agent_stopped":
-      return [{ type: "status", phase: "working" }];
     case "agent_settled":
-      return [{ type: "status", phase: "working" }];
-    case "working_visibility":
-      return [{ type: "working_visible", visible: event.visible }];
+      return [];
     case "compaction_started":
       return [
         {

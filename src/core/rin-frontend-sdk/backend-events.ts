@@ -312,11 +312,6 @@ export function createRinFrontendBackendEventTranslator(
       }
 
       if (payload.type === "extension_ui_request") {
-        if (payload.method === "setWorkingVisible") {
-          return [
-            { type: "working_visible", visible: Boolean(payload.visible) },
-          ];
-        }
         return [];
       }
 

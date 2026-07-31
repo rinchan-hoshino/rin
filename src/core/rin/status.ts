@@ -240,7 +240,7 @@ function isRunningWorker(worker: unknown) {
     state === "working" ||
     state === "compacting" ||
     state === "stopping" ||
-    Boolean(value.rinWorking)
+    Boolean(value.working)
   );
 }
 
@@ -251,7 +251,7 @@ function workerItem(worker: unknown): StatusItem {
     value.turnActive ? "turn" : "",
     value.isStreaming ? "stream" : "",
     value.isCompacting ? "compact" : "",
-    value.rinWorking ? "rin" : "",
+    value.working ? "working" : "",
   ].filter(Boolean);
   const idle = value.idleSince
     ? formatDuration(Date.now() - Number(value.idleSince))

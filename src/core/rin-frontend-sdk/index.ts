@@ -79,7 +79,6 @@ export {
   type RinFrontendInterruptClient,
   type RinFrontendInterruptIntent,
   type RinFrontendLifecycleEvent,
-  type RinFrontendLifecyclePhase,
   type RinFrontendLifecycleRenderOptions,
   type RinFrontendLifecycleState,
   type RinFrontendLifecycleStateTarget,

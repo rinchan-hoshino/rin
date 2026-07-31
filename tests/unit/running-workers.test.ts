@@ -56,7 +56,7 @@ test("identical running worker state does not rewrite the recovery record", asyn
   }
 });
 
-test("running worker records preserve active frontend working visibility", async () => {
+test("running worker records contain recovery identity but no presentation state", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-running-workers-working-visible-"),
   );
@@ -69,14 +69,12 @@ test("running worker records preserve active frontend working visibility", async
       true,
       "chat-inbox-working",
       true,
-      true,
     );
     assert.deepEqual(listRunningWorkerSessions(agentDir), [
       {
         sessionFile,
         requestTag: "chat-inbox-working",
         frontendOwner: true,
-        workingVisible: true,
       },
     ]);
 
@@ -86,7 +84,6 @@ test("running worker records preserve active frontend working visibility", async
       true,
       "chat-inbox-working",
       true,
-      false,
     );
     assert.deepEqual(listRunningWorkerSessions(agentDir), [
       {
@@ -100,7 +97,7 @@ test("running worker records preserve active frontend working visibility", async
   }
 });
 
-test("running worker records discard working visibility without frontend ownership", async () => {
+test("running worker records discard retired presentation fields", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-running-workers-working-orphan-"),
   );
@@ -120,14 +117,7 @@ test("running worker records discard working visibility without frontend ownersh
 
     assert.deepEqual(listRunningWorkerSessions(agentDir), [{ sessionFile }]);
 
-    setRunningWorkerSession(
-      agentDir,
-      sessionFile,
-      true,
-      undefined,
-      false,
-      true,
-    );
+    setRunningWorkerSession(agentDir, sessionFile, true, undefined, false);
     const persisted = JSON.parse(await fs.readFile(statePath, "utf8"));
     assert.equal(persisted.workingVisibilities, undefined);
   } finally {

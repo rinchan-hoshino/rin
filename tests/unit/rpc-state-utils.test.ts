@@ -65,7 +65,7 @@ test("rpc state utils derive branch and apply state", () => {
 
   let remoteTurnActive = false;
   let agentStreaming = false;
-  let workingVisible = false;
+  let backendWorking = false;
   stateUtils.applyRpcSessionState(
     {
       ...target,
@@ -75,8 +75,8 @@ test("rpc state utils derive branch and apply state", () => {
       setAgentStreaming(value) {
         agentStreaming = value;
       },
-      setBackendWorkingVisible(value) {
-        workingVisible = value;
+      setBackendWorking(value) {
+        backendWorking = value;
       },
     },
     {
@@ -84,12 +84,12 @@ test("rpc state utils derive branch and apply state", () => {
       sessionFile: " /tmp/y ",
       turnActive: true,
       isStreaming: false,
-      workingVisible: true,
+      working: true,
     },
   );
   assert.equal(remoteTurnActive, true);
   assert.equal(agentStreaming, false);
-  assert.equal(workingVisible, true);
+  assert.equal(backendWorking, true);
 
   remoteTurnActive = true;
   const staleTurnTarget = {

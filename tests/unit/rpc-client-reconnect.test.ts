@@ -406,7 +406,7 @@ test("rpc interactive session keeps a recovering turn busy while reconnecting af
   session.recoveryPending = false;
   session.rpcConnected = true;
   session.activeTurn = { mode: "prompt", message: "hi" };
-  session.backendWorkingVisible = true;
+  session.backendWorking = true;
   session.syncStreamingState();
   seen.length = 0;
 
@@ -414,7 +414,7 @@ test("rpc interactive session keeps a recovering turn busy while reconnecting af
 
   assert.equal(session.isStreaming, true);
   assert.equal(session.activeTurn, null);
-  assert.equal(session.backendWorkingVisible, true);
+  assert.equal(session.backendWorking, true);
   assert.deepEqual(session.getFrontendStatusEvent(), {
     type: "rpc_frontend_status",
     phase: "connecting",
@@ -492,7 +492,7 @@ test("rpc interactive session exposes compaction as a distinct frontend phase", 
   });
 });
 
-test("rpc interactive session does not derive Working from turnActive snapshots", () => {
+test("rpc interactive session uses the explicit backend Working snapshot", () => {
   const client = { isConnected: () => true };
   const session = new RpcInteractiveSession(client);
   session.rpcConnected = true;
@@ -504,16 +504,16 @@ test("rpc interactive session does not derive Working from turnActive snapshots"
     turnActive: true,
     isStreaming: false,
     isCompacting: false,
-    workingVisible: false,
+    working: true,
   });
 
   assert.equal(session.remoteTurnRunning, true);
   assert.equal(session.agentStreaming, false);
   assert.equal(session.isStreaming, true);
-  assert.equal(session.getFrontendStatusEvent(), null);
+  assert.equal(session.getFrontendStatusEvent()?.phase, "working");
 });
 
-test("rpc interactive session applies backend visibility at Pi agent boundaries", async () => {
+test("rpc interactive session maps backend Working to the Pi presentation", async () => {
   const client = { isConnected: () => true };
   const session = new RpcInteractiveSession(client);
   const visible: boolean[] = [];
@@ -532,25 +532,39 @@ test("rpc interactive session applies backend visibility at Pi agent boundaries"
     type: "extension_ui_request",
     method: "setWorkingVisible",
     visible: true,
+    working: true,
   });
-  assert.equal(session.backendWorkingVisible, true);
-  assert.deepEqual(visible, []);
-  assert.equal(session.getFrontendStatusEvent()?.phase, "sending");
+  assert.equal(session.backendWorking, true);
+  assert.deepEqual(visible, [false, true]);
 
-  session.handleRpcEvent({ type: "agent_start" });
+  session.handleRpcEvent({ type: "agent_start", working: true });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(visible, [true]);
+  assert.equal(session.backendWorking, true);
+  assert.deepEqual(visible, [false, true, true]);
   assert.equal(session.getFrontendStatusEvent()?.phase, "working");
+
+  session.handleRpcEvent({ type: "agent_end", working: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.backendWorking, true);
+  assert.deepEqual(visible, [false, true, true, true]);
 
   session.handleRpcEvent({
     type: "extension_ui_request",
     method: "setWorkingVisible",
     visible: false,
   });
-  session.handleRpcEvent({ type: "agent_end" });
+  assert.equal(session.backendWorking, true);
+  assert.deepEqual(visible, [false, true, true, true, false]);
+  assert.equal(session.getFrontendStatusEvent()?.phase, "working");
+
+  session.handleRpcEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    working: false,
+  });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(visible, [true, false]);
-  assert.equal(session.getFrontendStatusEvent()?.phase, "sending");
+  assert.equal(session.backendWorking, false);
+  assert.deepEqual(visible, [false, true, true, true, false, false]);
 });
 
 test("rpc interactive session clears recovering turn state after an idle recovery snapshot", () => {
@@ -835,7 +849,7 @@ test("rpc interactive session exits connecting after get_state succeeds and dela
             followUpMode: "one-at-a-time",
             autoCompactionEnabled: false,
             isStreaming: true,
-            workingVisible: true,
+            working: true,
             isCompacting: false,
             pendingMessageCount: 0,
           },
@@ -861,7 +875,7 @@ test("rpc interactive session exits connecting after get_state succeeds and dela
 
   assert.equal(session.recoveryPending, false);
   assert.equal(resyncs, 0);
-  assert.equal(session.backendWorkingVisible, true);
+  assert.equal(session.backendWorking, true);
   assert.deepEqual(session.getFrontendStatusEvent(), {
     type: "rpc_frontend_status",
     phase: "working",

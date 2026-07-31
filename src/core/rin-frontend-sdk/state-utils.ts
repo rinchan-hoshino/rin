@@ -156,10 +156,10 @@ export function applyRpcSessionState(
     state: any;
     activeTurn?: unknown;
     remoteTurnRunning?: boolean;
-    backendWorkingVisible?: boolean;
+    backendWorking?: boolean;
     setTurnActive?: (active: boolean) => void;
     setAgentStreaming?: (streaming: boolean) => void;
-    setBackendWorkingVisible?: (visible: boolean) => void;
+    setBackendWorking?: (working: boolean) => void;
   },
   state: any,
 ) {
@@ -182,17 +182,17 @@ export function applyRpcSessionState(
   } else {
     target.remoteTurnRunning = nextTurnActive;
   }
-  const nextWorkingVisible = Boolean(state?.workingVisible);
-  if (typeof target.setBackendWorkingVisible === "function") {
-    target.setBackendWorkingVisible(nextWorkingVisible);
-  } else {
-    target.backendWorkingVisible = nextWorkingVisible;
-  }
   const nextAgentStreaming = Boolean(state?.isStreaming);
   if (typeof target.setAgentStreaming === "function") {
     target.setAgentStreaming(nextAgentStreaming);
   } else {
     target.isStreaming = nextAgentStreaming;
+  }
+  const nextWorking = Boolean(state?.working);
+  if (typeof target.setBackendWorking === "function") {
+    target.setBackendWorking(nextWorking);
+  } else {
+    target.backendWorking = nextWorking;
   }
   target.isCompacting = Boolean(state?.isCompacting);
   target.pendingMessageCount = normalizePendingMessageCount(

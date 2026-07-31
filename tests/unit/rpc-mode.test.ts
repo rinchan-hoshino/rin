@@ -141,7 +141,7 @@ test("rpc mode exposes Pi-compatible session entries and tree", async () => {
 });
 
 test(
-  "rpc mode publishes Pi working visibility before agent lifecycle events",
+  "rpc mode leaves Working state to the backend and forwards only explicit UI preferences",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -212,23 +212,8 @@ test(
         );
 
       assert.deepEqual(events, [
-        {
-          type: "extension_ui_request",
-          method: "setWorkingVisible",
-          visible: true,
-        },
         { type: "agent_start" },
-        {
-          type: "extension_ui_request",
-          method: "setWorkingVisible",
-          visible: false,
-        },
         { type: "agent_end" },
-        {
-          type: "extension_ui_request",
-          method: "setWorkingVisible",
-          visible: false,
-        },
         {
           type: "extension_ui_request",
           method: "setWorkingVisible",

@@ -1760,42 +1760,6 @@ test("cron chat-bound task can suppress final delivery without changing chat bin
   }
 });
 
-test("cron chat-bound shell task toggles frontend working while running", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const working = [];
-  const task = {
-    id: "cron_shell_working",
-    frontend: { kind: "chat", key: "telegram/demo:1" },
-    session: { mode: "none" },
-    trigger: { runAt: new Date(Date.now() - 1000).toISOString() },
-    target: { kind: "shell_command", command: "printf done" },
-    runCount: 1,
-  };
-  try {
-    await execMod.executeCronTask(task, {
-      agentDir,
-      chat: {
-        setWorkingVisible: async (payload) => {
-          working.push(payload);
-        },
-        send: async () => {},
-      },
-    });
-    assert.deepEqual(working, [
-      {
-        chatKey: "telegram/demo:1",
-        visible: true,
-      },
-      {
-        chatKey: "telegram/demo:1",
-        visible: false,
-      },
-    ]);
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
 test("built-in self-improve cron task keeps audit observational", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const disabledRinCapabilities = ["self_improve"];

@@ -224,7 +224,7 @@ test("chat frontend event failures are visible without terminating the active tu
   for (let occurrence = 0; occurrence < 2; occurrence += 1) {
     await frontendSubscriber({
       type: "ui",
-      payload: { type: "working_visible", visible: true },
+      payload: { type: "agent_start", working: true },
     });
   }
   for (let attempt = 0; attempt < 20 && warnings.length < 2; attempt += 1) {
@@ -684,6 +684,7 @@ function emitRpcTurnComplete(controller, options, finalText, result) {
   const terminalPayload = {
     type: "rpc_turn_event",
     event: "complete",
+    working: false,
     requestTag: options?.requestTag,
     finalText,
     result: result || {
@@ -1579,7 +1580,7 @@ test("chat controller can deliver image-only builtin command parts", async () =>
   ]);
 });
 
-test("chat controller starts command reactions from backend working visibility", async () => {
+test("chat controller starts command reactions from backend Working state", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
   const reactions = [];
@@ -1620,20 +1621,12 @@ test("chat controller starts command reactions from backend working visibility",
       commandStarted();
       await controller.handleClientEvent({
         type: "ui",
-        payload: {
-          type: "extension_ui_request",
-          method: "setWorkingVisible",
-          visible: true,
-        },
+        payload: { type: "backend_working_state", working: true },
       });
       await releaseCommandPromise;
       await controller.handleClientEvent({
         type: "ui",
-        payload: {
-          type: "extension_ui_request",
-          method: "setWorkingVisible",
-          visible: false,
-        },
+        payload: { type: "backend_working_state", working: false },
       });
       return {
         handled: true,
@@ -3851,42 +3844,6 @@ test("chat controller stages raw daemon command errors without retry classificat
   ]);
 });
 
-test("chat controller can expose external working indicators", async () => {
-  const actions = [];
-  const controller = await createController("telegram/1:2");
-  controller.app.bots[0].getWorkingIndicators = () => [
-    testPollingIndicator(actions),
-  ];
-  controller.driver.hasWorkerActiveTurn = () => true;
-
-  await controller.beginExternalWorking();
-
-  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
-});
-
-test("chat controller stops external typing when external working ends", async () => {
-  const controller = await createController("telegram/1:2");
-  const actions = [];
-  controller.app.bots[0].getWorkingIndicators = () => [
-    testPollingIndicator(actions),
-  ];
-  controller.currentTurn = {
-    startedAt: Date.now(),
-    incomingMessageId: "m-active-external",
-    workingNoticeSent: false,
-  };
-  controller.externalWorkingVisible = true;
-  controller.awaitingTurnSettle = true;
-  controller.driver.frontendState.turnActive = true;
-
-  await controller.endExternalWorking();
-
-  assert.equal(controller.currentTurn, null);
-  assert.equal(controller.externalWorkingVisible, false);
-  assert.equal(await controller.pollTyping(), false);
-  assert.deepEqual(actions, []);
-});
-
 test("chat controller replaces editable Working with a completed assistant summary", async () => {
   const controller = await createController("telegram/1:2");
   const contexts: any[] = [];
@@ -3916,8 +3873,8 @@ test("chat controller replaces editable Working with a completed assistant summa
   };
   controller.awaitingTurnSettle = true;
   controller.driver.frontendState.turnActive = true;
-  controller.driver.frontendState.workingVisible = true;
-  controller.driver.hasVisibleChatWorkingTurn = () => true;
+  controller.driver.frontendState.working = true;
+  controller.driver.isWorking = () => true;
 
   await controller.handleFrontendEvent({
     type: "assistant_summary",
@@ -3993,7 +3950,7 @@ test("chat controller keeps editable summary and compaction refreshes suppressed
   };
   controller.awaitingTurnSettle = true;
   controller.driver.frontendState = { turnActive: false, isStreaming: false };
-  controller.driver.hasVisibleChatWorkingTurn = () => false;
+  controller.driver.isWorking = () => false;
 
   await controller.handleFrontendEvent({
     type: "assistant_summary",
@@ -4045,7 +4002,7 @@ test("chat controller polls typing and rotating reactions while a turn is active
   const liveTurn = controller.startLiveTurn();
   liveTurn.promise.catch(() => {});
   controller.driver.frontendState.turnActive = true;
-  controller.driver.frontendState.workingVisible = true;
+  controller.driver.frontendState.working = true;
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
@@ -4104,7 +4061,7 @@ test("chat controller keeps typing heartbeat frequent while throttling editable 
     incomingMessageId: "m-edit-interval",
     workingNoticeSent: true,
   };
-  controller.driver.hasVisibleChatWorkingTurn = () => true;
+  controller.driver.isWorking = () => true;
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(calls, [
@@ -4174,17 +4131,13 @@ test("chat controller clears typing and working reactions after canonical comple
     }),
     prompt: async (_text, options = {}) => {
       await controller.handleSessionEvent({
-        type: "extension_ui_request",
-        method: "setWorkingVisible",
-        visible: true,
+        type: "agent_start",
+        working: true,
       });
-      await controller.handleSessionEvent({ type: "agent_start" });
       await controller.handleSessionEvent({
-        type: "extension_ui_request",
-        method: "setWorkingVisible",
-        visible: false,
+        type: "agent_end",
+        working: false,
       });
-      await controller.handleSessionEvent({ type: "agent_end" });
       emitRpcTurnComplete(controller, options, "done");
     },
     switchSession: async () => {},
@@ -4250,17 +4203,13 @@ test("chat controller stops typing at agent end while final delivery remains in 
       }),
       prompt: async (_text, options = {}) => {
         await controller.handleSessionEvent({
-          type: "extension_ui_request",
-          method: "setWorkingVisible",
-          visible: true,
+          type: "agent_start",
+          working: true,
         });
-        await controller.handleSessionEvent({ type: "agent_start" });
         await controller.handleSessionEvent({
-          type: "extension_ui_request",
-          method: "setWorkingVisible",
-          visible: false,
+          type: "agent_end",
+          working: false,
         });
-        await controller.handleSessionEvent({ type: "agent_end" });
         emitRpcTurnComplete(controller, options, "done after upload");
       },
       switchSession: async () => {},
@@ -4338,7 +4287,7 @@ test("chat controller uses adapter reaction capability for lark working indicato
   const liveTurn = controller.startLiveTurn();
   liveTurn.promise.catch(() => {});
   controller.driver.frontendState.turnActive = true;
-  controller.driver.frontendState.workingVisible = true;
+  controller.driver.frontendState.working = true;
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(reactions, [["create", "chat-1", "m-lark", "🤔"]]);
@@ -4393,7 +4342,7 @@ test("chat controller uses discord typing and reaction capabilities together", a
   const liveTurn = controller.startLiveTurn();
   liveTurn.promise.catch(() => {});
   controller.driver.frontendState.turnActive = true;
-  controller.driver.frontendState.workingVisible = true;
+  controller.driver.frontendState.working = true;
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(actions, [["typing", "channel-1"]]);
@@ -4455,7 +4404,7 @@ test("chat controller logs failed discord typing without changing its cadence", 
     workingNoticeSent: false,
   };
   controller.driver.frontendState.turnActive = true;
-  controller.driver.frontendState.workingVisible = true;
+  controller.driver.frontendState.working = true;
 
   const originalNow = Date.now;
   let now = 100_000;
@@ -4519,7 +4468,7 @@ test("chat controller starts typing immediately after creating editable progress
   assert.equal(typingTicks, 0);
 
   controller.driver.frontendState.turnActive = true;
-  controller.driver.frontendState.workingVisible = true;
+  controller.driver.frontendState.working = true;
   assert.equal(await controller.pollTyping(), true);
   assert.equal(typingTicks, 1);
   assert.equal(editableTicks, 1);
@@ -4575,7 +4524,7 @@ test("chat controller prioritizes reaction over marker while keeping typing inde
   const liveTurn = controller.startLiveTurn();
   liveTurn.promise.catch(() => {});
   controller.driver.frontendState.turnActive = true;
-  controller.driver.frontendState.workingVisible = true;
+  controller.driver.frontendState.working = true;
 
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(calls, ["typing:tick", "reaction:tick"]);
@@ -4843,15 +4792,13 @@ test("chat controller waits for backend Working after a cold connection", async 
   };
   controller.driver.runTurn = async () => {
     await controller.handleSessionEvent({
-      type: "extension_ui_request",
-      method: "setWorkingVisible",
-      visible: true,
+      type: "agent_start",
+      working: true,
     });
     calls.push("prompt");
     await controller.handleSessionEvent({
-      type: "extension_ui_request",
-      method: "setWorkingVisible",
-      visible: false,
+      type: "agent_end",
+      working: false,
     });
     return { finalText: "ok" };
   };
@@ -5628,7 +5575,7 @@ test("chat controller does not keep ordinary typing from standalone remote-worki
   }
 });
 
-test("chat typing and reactions follow only backend working visibility", async () => {
+test("chat typing and reactions follow only backend Working state", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
   const reactions = [];
@@ -5664,17 +5611,15 @@ test("chat typing and reactions follow only backend working visibility", async (
   assert.equal(await controller.pollTyping(), false);
 
   await controller.handleSessionEvent({
-    type: "extension_ui_request",
-    method: "setWorkingVisible",
-    visible: true,
+    type: "agent_start",
+    working: true,
   });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(controller.externalWorkingVisible, true);
+  assert.equal(controller.driver.isWorking(), true);
 
   await controller.handleSessionEvent({
-    type: "extension_ui_request",
-    method: "setWorkingVisible",
-    visible: false,
+    type: "agent_end",
+    working: false,
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(await controller.pollTyping(), false);
@@ -6628,16 +6573,14 @@ test("chat controller submits the prompt without waiting for editable Working an
   ];
   controller.driver.runTurn = async () => {
     await controller.handleSessionEvent({
-      type: "extension_ui_request",
-      method: "setWorkingVisible",
-      visible: true,
+      type: "agent_start",
+      working: true,
     });
     calls.push("prompt");
     await promptMayFinish;
     await controller.handleSessionEvent({
-      type: "extension_ui_request",
-      method: "setWorkingVisible",
-      visible: false,
+      type: "agent_end",
+      working: false,
     });
     return { finalText: "ok" };
   };

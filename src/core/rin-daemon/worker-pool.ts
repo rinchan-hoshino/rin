@@ -48,7 +48,7 @@ type PendingResponse = {
   commandType: string;
   selector?: SessionSelector;
   expectsTerminalTurnEvent?: boolean;
-  workingVisibilityEpoch: number;
+  stateEpoch: number;
   connection?: ConnectionState;
   resolve?: (payload: any) => void;
   reject?: (error: Error) => void;
@@ -89,18 +89,18 @@ export type WorkerHandle = {
   activeLifecycleFrontendOwner: boolean;
   activeLifecycleRecoveryProbeCommandId?: string;
   lifecycleEpoch: number;
+  stateEpoch: number;
   activeLifecycleEpoch?: number;
   activeLifecycleRecoveryProbeEpoch?: number;
   lastTurnGeneration: number;
   isStreaming: boolean;
   isCompacting: boolean;
-  rinWorking: boolean;
-  frontendWorkingVisible: boolean;
-  restoredFrontendWorkingVisible: boolean;
-  frontendWorkingVisibilityEpoch: number;
+  publishedWorking: boolean;
   lastUsedAt: number;
   idleSince: number | null;
   gracefulShutdownRequested: boolean;
+  recoveryStopRequested: boolean;
+  recoveryStopTimer?: NodeJS.Timeout;
 };
 
 function writeLine(socket: RpcSocketLike, payload: unknown) {
@@ -167,8 +167,10 @@ export class WorkerPool {
     Promise<WorkerHandle | undefined>
   >();
   private terminalTurnWaiters = new Set<TerminalTurnWaiter>();
+  private activeTurnRecoveryScanTimer?: NodeJS.Timeout;
   private activeTurnRecoveryTimers = new Map<string, NodeJS.Timeout>();
   private activeTurnRecoveryAttempts = new Map<string, number>();
+  private activeTurnRecoveryInFlight = new Map<string, Promise<boolean>>();
   private workerSeq = 0;
   private internalRequestSeq = 0;
   private shuttingDown = false;
@@ -315,8 +317,16 @@ export class WorkerPool {
     worker: WorkerHandle,
     options: { signal?: NodeJS.Signals } = {},
   ) {
-    if (!this.workers.has(worker)) return;
-    this.interruptWorkerLifecycle(worker, "rin_worker_exit");
+    if (!this.workers.has(worker)) return true;
+    if (this.shuttingDown && worker.activeLifecycleRequestTag !== undefined) {
+      this.stopWorkerForRecovery(worker);
+      return false;
+    }
+    if (!this.interruptWorkerLifecycle(worker, "rin_worker_exit")) {
+      // Keep durable ownership intact and let the normal exit path recover it.
+      this.stopWorkerForRecovery(worker);
+      return false;
+    }
     worker.gracefulShutdownRequested = true;
     this.workers.delete(worker);
     if (!this.shuttingDown || !this.isWorkerRunning(worker)) {
@@ -337,6 +347,7 @@ export class WorkerPool {
     for (const connection of workerExitConnections) {
       writeLine(connection.socket, {
         type: "worker_exit",
+        working: false,
         code: null,
         signal: "SIGTERM",
       });
@@ -348,10 +359,10 @@ export class WorkerPool {
         continue;
       }
       if (pending.connection) {
-        writeLine(
-          pending.connection.socket,
-          responseError(pending.id, pending.commandType, "rin_worker_exit"),
-        );
+        writeLine(pending.connection.socket, {
+          ...responseError(pending.id, pending.commandType, "rin_worker_exit"),
+          working: false,
+        });
       }
     }
     worker.pendingResponses.clear();
@@ -368,6 +379,21 @@ export class WorkerPool {
     try {
       worker.child.kill(options.signal || "SIGTERM");
     } catch {}
+    return true;
+  }
+
+  private stopWorkerForRecovery(worker: WorkerHandle) {
+    if (!this.workers.has(worker)) return;
+    worker.recoveryStopRequested = true;
+    try {
+      worker.child.kill("SIGKILL");
+    } catch {}
+    if (worker.recoveryStopTimer) return;
+    worker.recoveryStopTimer = setTimeout(() => {
+      worker.recoveryStopTimer = undefined;
+      this.stopWorkerForRecovery(worker);
+    }, 500);
+    worker.recoveryStopTimer.unref?.();
   }
 
   evictDetachedWorkers() {
@@ -384,6 +410,18 @@ export class WorkerPool {
   ) {
     const commandType = String(command?.type || "unknown");
     const commandId = command?.id ? String(command.id) : undefined;
+    if (
+      !this.isActiveTurnRecoveryConverged() &&
+      ACTIVE_COMMAND_TYPES.has(commandType)
+    ) {
+      if (commandId) {
+        writeLine(
+          connection.socket,
+          responseError(commandId, commandType, "rin_daemon_recovering"),
+        );
+      }
+      return;
+    }
     if (
       commandId !== undefined &&
       (worker.pendingResponses.has(commandId) ||
@@ -492,7 +530,7 @@ export class WorkerPool {
         commandType,
         selector: recoverySelector,
         expectsTerminalTurnEvent: keepUntilTerminalTurnEvent,
-        workingVisibilityEpoch: worker.frontendWorkingVisibilityEpoch,
+        stateEpoch: worker.stateEpoch,
         connection,
       });
     }
@@ -519,10 +557,10 @@ export class WorkerPool {
         true,
         worker.activeLifecycleRequestTag ?? worker.activeRequestTag,
         worker.activeLifecycleFrontendOwner,
-        worker.frontendWorkingVisible,
       );
     }
     this.syncRunningWorkerRecord(worker);
+    this.publishWorkerWorkingState(worker);
     const workerCommand = terminalLifecycleCommand
       ? Object.fromEntries(
           Object.entries(command).filter(
@@ -620,9 +658,16 @@ export class WorkerPool {
       this.attachWorker(connection, existing);
       return existing;
     }
-    if (!wanted.sessionFile) return undefined;
+    if (this.findTrackedWorkerBySelector(wanted)?.recoveryStopRequested) {
+      return undefined;
+    }
+    if (!wanted.sessionFile || !this.isActiveTurnRecoveryConverged()) {
+      return undefined;
+    }
 
     const claimed = await this.withSessionClaim(wanted, async () => {
+      const tracked = this.findTrackedWorkerBySelector(wanted);
+      if (tracked?.recoveryStopRequested) return undefined;
       const existing = this.findWorkerBySelector(wanted);
       if (existing) return existing;
       return this.createWorkerForSession(wanted, connection);
@@ -650,6 +695,7 @@ export class WorkerPool {
     const type = String(command?.type || "unknown");
 
     if (type === "new_session") {
+      if (!this.isActiveTurnRecoveryConverged()) return undefined;
       if (command.resourceOptions)
         connection.resourceOptions = command.resourceOptions;
       const managedSessionLeaf = String(
@@ -690,10 +736,7 @@ export class WorkerPool {
         ? "stopping"
         : worker.isCompacting
           ? "compacting"
-          : worker.turnActive ||
-              worker.terminalPending ||
-              worker.isStreaming ||
-              worker.rinWorking
+          : this.isWorkerWorking(worker)
             ? "working"
             : worker.idleSince
               ? "idle"
@@ -708,7 +751,7 @@ export class WorkerPool {
         turnActive: worker.turnActive,
         isStreaming: worker.isStreaming,
         isCompacting: worker.isCompacting,
-        rinWorking: worker.rinWorking,
+        working: this.isWorkerWorking(worker),
         state,
         lastUsedAt: worker.lastUsedAt,
         idleSince: worker.idleSince,
@@ -727,6 +770,10 @@ export class WorkerPool {
 
   destroyAll() {
     clearInterval(this.reaper);
+    if (this.activeTurnRecoveryScanTimer) {
+      clearTimeout(this.activeTurnRecoveryScanTimer);
+      this.activeTurnRecoveryScanTimer = undefined;
+    }
     this.frontendConnections.clear();
     for (const worker of Array.from(this.workers)) {
       this.destroyWorker(worker);
@@ -735,6 +782,10 @@ export class WorkerPool {
 
   beginShutdown() {
     this.shuttingDown = true;
+    if (this.activeTurnRecoveryScanTimer) {
+      clearTimeout(this.activeTurnRecoveryScanTimer);
+      this.activeTurnRecoveryScanTimer = undefined;
+    }
     for (const timer of this.activeTurnRecoveryTimers.values()) {
       clearTimeout(timer);
     }
@@ -776,17 +827,37 @@ export class WorkerPool {
 
   restoreSessionWorker(item: { sessionFile?: string }) {
     const selector = sessionSelectorFromState(item);
-    if (!selector.sessionFile) return;
+    if (!selector.sessionFile || !this.isActiveTurnRecoveryConverged()) return;
     return this.restoreWorkerForSession(selector);
   }
 
   async recoverActiveDaemonTurns() {
-    const records = listActiveDaemonTurns(this.daemonLedgerAgentDir());
+    let records;
+    try {
+      records = listActiveDaemonTurns(this.daemonLedgerAgentDir());
+    } catch (error) {
+      console.error(
+        `[rin-daemon] active turn recovery scan failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      this.scheduleActiveDaemonTurnRecoveryScan();
+      return [];
+    }
     const results = [];
     for (const record of records) {
       results.push(await this.recoverActiveDaemonTurn(record.requestTag));
     }
     return results;
+  }
+
+  private scheduleActiveDaemonTurnRecoveryScan() {
+    if (this.shuttingDown || this.activeTurnRecoveryScanTimer) return;
+    this.activeTurnRecoveryScanTimer = setTimeout(() => {
+      this.activeTurnRecoveryScanTimer = undefined;
+      void this.recoverActiveDaemonTurns();
+    }, 1_000);
+    this.activeTurnRecoveryScanTimer.unref?.();
   }
 
   private scheduleActiveDaemonTurnRecovery(requestTag: string) {
@@ -798,27 +869,77 @@ export class WorkerPool {
     const delayMs = Math.min(30_000, 500 * 2 ** Math.min(attempt - 1, 6));
     const timer = setTimeout(() => {
       this.activeTurnRecoveryTimers.delete(requestTag);
-      void this.recoverActiveDaemonTurn(requestTag);
+      void this.recoverActiveDaemonTurn(requestTag).catch((error) => {
+        console.error(
+          `[rin-daemon] recovery retry for turn ${requestTag}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        this.scheduleActiveDaemonTurnRecovery(requestTag);
+      });
     }, delayMs);
     timer.unref?.();
     this.activeTurnRecoveryTimers.set(requestTag, timer);
   }
 
-  private async recoverActiveDaemonTurn(requestTag: string) {
+  private recoverActiveDaemonTurn(requestTag: string) {
+    const existing = this.activeTurnRecoveryInFlight.get(requestTag);
+    if (existing) return existing;
+    const recovery = this.recoverActiveDaemonTurnOnce(requestTag).finally(
+      () => {
+        if (this.activeTurnRecoveryInFlight.get(requestTag) === recovery) {
+          this.activeTurnRecoveryInFlight.delete(requestTag);
+        }
+      },
+    );
+    this.activeTurnRecoveryInFlight.set(requestTag, recovery);
+    return recovery;
+  }
+
+  private async recoverActiveDaemonTurnOnce(requestTag: string) {
     if (this.shuttingDown) return false;
-    const record = readDaemonTurn(this.daemonLedgerAgentDir(), requestTag);
+    let record;
+    try {
+      record = readDaemonTurn(this.daemonLedgerAgentDir(), requestTag);
+    } catch (error) {
+      console.error(
+        `[rin-daemon] recovery retry for turn ${requestTag}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      this.scheduleActiveDaemonTurnRecovery(requestTag);
+      return false;
+    }
     if (!record || record.state !== "active") return false;
     const selector = sessionSelectorFromState(record);
     if (!selector.sessionFile) {
-      this.interruptDaemonTurnByRequestTag(
-        requestTag,
-        "rin_turn_recovery_session_missing",
-      );
+      if (
+        !this.interruptDaemonTurnByRequestTag(
+          requestTag,
+          "rin_turn_recovery_session_missing",
+          false,
+        )
+      ) {
+        this.scheduleActiveDaemonTurnRecovery(requestTag);
+      }
       return false;
+    }
+    const recoveredWorker = this.findTrackedWorkerBySelector(selector);
+    if (
+      recoveredWorker &&
+      !recoveredWorker.recoveryStopRequested &&
+      recoveredWorker.activeLifecycleRequestTag === requestTag &&
+      (recoveredWorker.turnActive ||
+        recoveredWorker.terminalPending ||
+        recoveredWorker.isStreaming)
+    ) {
+      return true;
     }
     let worker: WorkerHandle | undefined;
     try {
-      worker = await this.ensureWorkerForSession(selector);
+      worker = await this.ensureWorkerForSession(selector, {
+        recovery: true,
+      });
       if (
         worker.activeLifecycleRequestTag &&
         worker.activeLifecycleRequestTag !== requestTag
@@ -827,24 +948,39 @@ export class WorkerPool {
       }
       this.setLifecycleOwner(worker, requestTag, selector, undefined, false);
       worker.activeRequestTag = requestTag;
+      this.publishWorkerWorkingState(worker);
       const response = await this.sendInternalCommand(worker, {
         type: "resume_interrupted_turn",
         requestTag,
       });
       if (response?.data?.resumed !== true) {
+        const workingAfterInterruption =
+          this.isWorkerWorkingAfterLifecycleSettlement(worker);
+        if (
+          !this.interruptDaemonTurnByRequestTag(
+            requestTag,
+            "rin_turn_not_resumable",
+            workingAfterInterruption,
+            worker,
+          )
+        ) {
+          throw new Error("rin_turn_ledger_interrupt_failed");
+        }
         this.clearLifecycleOwner(worker);
-        this.interruptDaemonTurnByRequestTag(
-          requestTag,
-          "rin_turn_not_resumable",
-        );
+        this.publishWorkerWorkingState(worker);
         return false;
       }
+      worker.terminalPending = true;
+      this.publishWorkerWorkingState(worker);
       return true;
     } catch (error) {
-      if (
-        readDaemonTurn(this.daemonLedgerAgentDir(), requestTag)?.state !==
-        "active"
-      ) {
+      let turnRemainsActive = true;
+      try {
+        turnRemainsActive =
+          readDaemonTurn(this.daemonLedgerAgentDir(), requestTag)?.state ===
+          "active";
+      } catch {}
+      if (!turnRemainsActive) {
         this.activeTurnRecoveryAttempts.delete(requestTag);
         return true;
       }
@@ -857,7 +993,7 @@ export class WorkerPool {
         worker?.activeLifecycleRequestTag === requestTag &&
         worker.child.exitCode === null
       ) {
-        this.destroyWorker(worker, { signal: "SIGKILL" });
+        this.stopWorkerForRecovery(worker);
       }
       this.scheduleActiveDaemonTurnRecovery(requestTag);
       return false;
@@ -866,6 +1002,8 @@ export class WorkerPool {
 
   private restoreWorkerForSession(selector: SessionSelector) {
     if (!selector.sessionFile) return;
+    const tracked = this.findTrackedWorkerBySelector(selector);
+    if (tracked?.recoveryStopRequested) return undefined;
     const existing = this.findWorkerBySelector(selector);
     if (existing) return existing;
     const key = this.sessionClaimKey(selector);
@@ -873,10 +1011,12 @@ export class WorkerPool {
 
     const worker = this.createWorkerForSession(selector);
     void this.withSessionClaim(selector, async () => {
-      const existingAfterCreate = this.findWorkerBySelector(selector);
-      if (existingAfterCreate && existingAfterCreate !== worker) {
+      const trackedAfterCreate = this.findTrackedWorkerBySelector(selector);
+      if (trackedAfterCreate && trackedAfterCreate !== worker) {
         this.destroyWorker(worker);
-        return existingAfterCreate;
+        return trackedAfterCreate.recoveryStopRequested
+          ? undefined
+          : trackedAfterCreate;
       }
       return worker;
     }).catch(() => {});
@@ -893,6 +1033,10 @@ export class WorkerPool {
       }
     }
     this.destroyAll();
+    const forcedExitDeadline = Date.now() + 1_000;
+    while (this.workers.size > 0 && Date.now() < forcedExitDeadline) {
+      await sleep(50);
+    }
   }
 
   private setLifecycleOwner(
@@ -915,10 +1059,14 @@ export class WorkerPool {
     worker.activeLifecycleRecoveryProbeCommandId = undefined;
     worker.activeLifecycleRecoveryProbeEpoch = undefined;
     worker.lifecycleEpoch += 1;
+    worker.stateEpoch += 1;
     worker.activeLifecycleEpoch = worker.lifecycleEpoch;
   }
 
   private clearLifecycleOwner(worker: WorkerHandle) {
+    const hadLifecycleOwner =
+      worker.activeLifecycleRequestTag !== undefined ||
+      worker.activeLifecycleEpoch !== undefined;
     worker.activeLifecycleRequestTag = undefined;
     worker.activeLifecycleSelector = undefined;
     worker.activeLifecycleOwnerCommandId = undefined;
@@ -926,6 +1074,10 @@ export class WorkerPool {
     worker.activeLifecycleRecoveryProbeCommandId = undefined;
     worker.activeLifecycleEpoch = undefined;
     worker.activeLifecycleRecoveryProbeEpoch = undefined;
+    if (hadLifecycleOwner) {
+      worker.lifecycleEpoch += 1;
+      worker.stateEpoch += 1;
+    }
   }
 
   private extendLifecycleOwnerSelector(
@@ -1036,6 +1188,16 @@ export class WorkerPool {
     if (!payload || typeof payload !== "object") return false;
     if (!this.acceptsRpcTurnEvent(worker, payload)) return false;
     worker.lastUsedAt = Date.now();
+    if (
+      payload.type === "agent_start" ||
+      payload.type === "agent_end" ||
+      payload.type === "compaction_start" ||
+      payload.type === "compaction_end" ||
+      payload.type === "rpc_turn_event"
+    ) {
+      worker.stateEpoch += 1;
+    }
+    let settledPendingId: string | undefined;
     const pendingResponse = payload.id
       ? worker.pendingResponses.get(String(payload.id))
       : undefined;
@@ -1052,17 +1214,16 @@ export class WorkerPool {
         const reportedTurnActive = Boolean(data.turnActive ?? data.isStreaming);
         const hasLifecycleOwner =
           worker.activeLifecycleRequestTag !== undefined;
+        const stateSnapshotIsCurrent = Boolean(
+          pendingResponse && pendingResponse.stateEpoch === worker.stateEpoch,
+        );
         const isMatchingRecoveryProbe = Boolean(
-          pendingResponse &&
+          stateSnapshotIsCurrent &&
           worker.activeLifecycleEpoch !== undefined &&
-          worker.activeLifecycleRecoveryProbeCommandId === pendingResponse.id &&
+          worker.activeLifecycleRecoveryProbeCommandId ===
+            pendingResponse?.id &&
           worker.activeLifecycleRecoveryProbeEpoch ===
             worker.activeLifecycleEpoch,
-        );
-        const workingVisibilitySnapshotIsCurrent = Boolean(
-          pendingResponse &&
-          pendingResponse.workingVisibilityEpoch ===
-            worker.frontendWorkingVisibilityEpoch,
         );
         const reportedSelector = sessionSelectorFromState(data);
         const reportedSelectorMatchesLifecycle = Boolean(
@@ -1073,87 +1234,21 @@ export class WorkerPool {
               worker.activeLifecycleSelector,
             )),
         );
-        const appliesReportedTurnState = Boolean(
-          workingVisibilitySnapshotIsCurrent &&
+        if (
+          stateSnapshotIsCurrent &&
           (!hasLifecycleOwner ||
-            (isMatchingRecoveryProbe && reportedSelectorMatchesLifecycle)),
-        );
-        const reportedActiveTurnMatchesLifecycle = Boolean(
-          reportedSelectorMatchesLifecycle &&
-          (reportedTurnActive
-            ? lifecycleRequestTag(data.requestTag) ===
-                worker.activeLifecycleRequestTag &&
-              worker.activeTurnGeneration !== undefined &&
-              Number.isSafeInteger(Number(data.turnGeneration)) &&
-              Number(data.turnGeneration) === worker.activeTurnGeneration
-            : data.interruptedTurnResumable === true),
-        );
-        const appliesReportedWorkingVisibility = Boolean(
-          workingVisibilitySnapshotIsCurrent && data.workingVisible !== true,
-        );
-        const eventWorkingVisibleIsOwned = Boolean(
-          worker.frontendWorkingVisible &&
-          !worker.restoredFrontendWorkingVisible &&
-          hasLifecycleOwner &&
-          worker.activeLifecycleFrontendOwner &&
-          reportedActiveTurnMatchesLifecycle,
-        );
-        const restoredWorkingVisibleIsOwned = Boolean(
-          worker.restoredFrontendWorkingVisible &&
-          hasLifecycleOwner &&
-          worker.activeLifecycleFrontendOwner &&
-          reportedActiveTurnMatchesLifecycle,
-        );
-        if (!workingVisibilitySnapshotIsCurrent) {
-          data.workingVisible = worker.frontendWorkingVisible;
-        } else if (eventWorkingVisibleIsOwned) {
-          data.workingVisible = true;
-        } else if (restoredWorkingVisibleIsOwned) {
-          data.workingVisible = true;
-        } else if (
-          worker.restoredFrontendWorkingVisible &&
-          hasLifecycleOwner &&
-          (!worker.activeLifecycleFrontendOwner ||
-            !reportedActiveTurnMatchesLifecycle)
+            (isMatchingRecoveryProbe && reportedSelectorMatchesLifecycle))
         ) {
-          worker.frontendWorkingVisible = false;
-          worker.restoredFrontendWorkingVisible = false;
-          data.workingVisible = false;
-        } else if (
-          hasLifecycleOwner &&
-          (!worker.activeLifecycleFrontendOwner ||
-            !reportedActiveTurnMatchesLifecycle)
-        ) {
-          worker.frontendWorkingVisible = false;
-          worker.restoredFrontendWorkingVisible = false;
-          data.workingVisible = false;
-        } else if (appliesReportedWorkingVisibility) {
-          worker.frontendWorkingVisible = data.workingVisible === true;
-          worker.restoredFrontendWorkingVisible = false;
-        } else if (data.workingVisible === true) {
-          worker.frontendWorkingVisible = false;
-          worker.restoredFrontendWorkingVisible = false;
-          data.workingVisible = false;
-        }
-        if (appliesReportedTurnState) {
           worker.turnActive = reportedTurnActive;
           worker.isStreaming = Boolean(data.isStreaming);
-          worker.rinWorking = false;
         }
-        const clearsLifecycleOwner = Boolean(
-          workingVisibilitySnapshotIsCurrent &&
+        if (
+          stateSnapshotIsCurrent &&
           !reportedTurnActive &&
           !isMatchingRecoveryProbe &&
-          !hasLifecycleOwner,
-        );
-        if (clearsLifecycleOwner) {
+          !hasLifecycleOwner
+        ) {
           worker.terminalPending = false;
-          if (workingVisibilitySnapshotIsCurrent) {
-            worker.frontendWorkingVisible = false;
-            worker.restoredFrontendWorkingVisible = false;
-            worker.frontendWorkingVisibilityEpoch += 1;
-            data.workingVisible = false;
-          }
           worker.activeRequestTag = undefined;
           worker.activeTurnGeneration = undefined;
           this.clearLifecycleOwner(worker);
@@ -1161,7 +1256,10 @@ export class WorkerPool {
           worker.activeLifecycleRecoveryProbeCommandId = undefined;
           worker.activeLifecycleRecoveryProbeEpoch = undefined;
         }
-        worker.isCompacting = Boolean(data.isCompacting);
+        if (stateSnapshotIsCurrent) {
+          worker.isCompacting = Boolean(data.isCompacting);
+        }
+        data.working = this.isWorkerWorking(worker, pendingResponse?.id);
         this.maybeReleaseWorker(worker);
         return true;
       }
@@ -1174,14 +1272,27 @@ export class WorkerPool {
       pendingResponse &&
       worker.activeLifecycleOwnerCommandId === pendingResponse.id
     ) {
-      this.interruptWorkerLifecycle(
-        worker,
-        String(payload.error || "rin_worker_command_rejected"),
+      const rejectedRequestTag = worker.activeLifecycleRequestTag;
+      const rejectionReason = String(
+        payload.error || "rin_worker_command_rejected",
       );
+      const workingAfterInterruption =
+        this.isWorkerWorkingAfterLifecycleSettlement(
+          worker,
+          pendingResponse.id,
+        );
+      if (
+        !rejectedRequestTag ||
+        !this.interruptDaemonTurnByRequestTag(
+          rejectedRequestTag,
+          rejectionReason,
+          workingAfterInterruption,
+          worker,
+        )
+      ) {
+        throw new Error("rin_turn_ledger_interrupt_failed");
+      }
       worker.terminalPending = false;
-      worker.frontendWorkingVisible = false;
-      worker.restoredFrontendWorkingVisible = false;
-      worker.frontendWorkingVisibilityEpoch += 1;
       worker.activeRequestTag = undefined;
       this.clearLifecycleOwner(worker);
       this.syncRunningWorkerRecordForSelector(
@@ -1196,15 +1307,6 @@ export class WorkerPool {
       );
     }
 
-    if (
-      payload.type === "extension_ui_request" &&
-      payload.method === "setWorkingVisible"
-    ) {
-      worker.frontendWorkingVisible = payload.visible === true;
-      worker.restoredFrontendWorkingVisible = false;
-      worker.frontendWorkingVisibilityEpoch += 1;
-      this.syncRunningWorkerRecord(worker);
-    }
     if (payload.type === "agent_start") {
       if (!worker.rpcTurnActive) worker.turnActive = true;
       worker.isStreaming = true;
@@ -1213,15 +1315,6 @@ export class WorkerPool {
     if (payload.type === "agent_end") {
       worker.isStreaming = false;
       if (!worker.rpcTurnActive) worker.turnActive = false;
-      this.syncRunningWorkerRecord(worker);
-      this.maybeReleaseWorker(worker);
-    }
-    if (payload.type === "rin_working_start") {
-      worker.rinWorking = true;
-      this.syncRunningWorkerRecord(worker);
-    }
-    if (payload.type === "rin_working_end") {
-      worker.rinWorking = false;
       this.syncRunningWorkerRecord(worker);
       this.maybeReleaseWorker(worker);
     }
@@ -1261,20 +1354,21 @@ export class WorkerPool {
     ) {
       const requestTag = lifecycleRequestTag(payload.requestTag);
       if (!requestTag) throw new Error("rin_turn_ledger_request_tag_required");
-      const terminalRecord = recordDaemonTurnTerminal(
-        this.daemonLedgerAgentDir(),
-        {
+      settledPendingId = worker.activeLifecycleOwnerCommandId;
+      let terminalRecord;
+      try {
+        terminalRecord = recordDaemonTurnTerminal(this.daemonLedgerAgentDir(), {
           requestTag,
           terminalKind: payload.event,
           terminalEvent: payload,
-        },
-      );
-      this.activeTurnRecoveryAttempts.delete(requestTag);
-      Object.assign(payload, daemonTurnTerminalEvent(terminalRecord));
-      this.syncRunningWorkerRecordForSelector(
-        sessionSelectorFromState(payload),
-        false,
-      );
+        });
+      } catch (error: any) {
+        throw new Error(
+          `rin_turn_ledger_terminal_record_failed:${String(
+            error?.message || error,
+          )}`,
+        );
+      }
       worker.terminalPending = false;
       worker.rpcTurnActive = false;
       worker.activeRequestTag = undefined;
@@ -1282,16 +1376,39 @@ export class WorkerPool {
       this.clearLifecycleOwner(worker);
       worker.turnActive = false;
       worker.isStreaming = false;
-      worker.frontendWorkingVisible = false;
-      worker.restoredFrontendWorkingVisible = false;
-      worker.frontendWorkingVisibilityEpoch += 1;
-      this.syncRunningWorkerRecord(worker);
-      this.maybeReleaseWorker(worker);
+      this.activeTurnRecoveryAttempts.delete(requestTag);
+      Object.assign(payload, daemonTurnTerminalEvent(terminalRecord));
+      try {
+        this.syncRunningWorkerRecordForSelector(
+          sessionSelectorFromState(payload),
+          false,
+        );
+        this.syncRunningWorkerRecord(worker);
+        this.maybeReleaseWorker(worker);
+      } catch (error) {
+        console.error(
+          `[rin-daemon] terminal running-state projection failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
     if (payload.type === "rpc_turn_event" && payload.event === "complete") {
       this.setWorkerSessionRefs(worker, sessionSelectorFromState(payload), {
         syncConnections: false,
+        syncRunningWorkerRecord: false,
       });
+    }
+    payload.working = Boolean(
+      this.isWorkerWorking(
+        worker,
+        payload.type === "response" ? pendingResponse?.id : settledPendingId,
+      ) ||
+      (isTerminalRpcTurnEvent(payload) &&
+        this.currentBackendWorking(sessionSelectorFromState(payload), worker)),
+    );
+    if (payload.type !== "response" && !isTerminalRpcTurnEvent(payload)) {
+      worker.publishedWorking = payload.working;
     }
     return true;
   }
@@ -1403,18 +1520,17 @@ export class WorkerPool {
       activeLifecycleFrontendOwner: false,
       activeLifecycleRecoveryProbeCommandId: undefined,
       lifecycleEpoch: 0,
+      stateEpoch: 0,
       activeLifecycleEpoch: undefined,
       activeLifecycleRecoveryProbeEpoch: undefined,
       lastTurnGeneration: 0,
       isStreaming: false,
       isCompacting: false,
-      rinWorking: false,
-      frontendWorkingVisible: false,
-      restoredFrontendWorkingVisible: false,
-      frontendWorkingVisibilityEpoch: 0,
+      publishedWorking: false,
       lastUsedAt: Date.now(),
       idleSince: null,
       gracefulShutdownRequested: false,
+      recoveryStopRequested: false,
     };
     this.workers.add(worker);
 
@@ -1447,13 +1563,25 @@ export class WorkerPool {
         try {
           if (!this.updateWorkerMetadata(worker, payload)) return;
         } catch (error: any) {
+          const detail = String(error?.message || error);
+          const terminalPersistenceFailed = detail.startsWith(
+            "rin_turn_ledger_terminal_record_failed:",
+          );
           for (const connection of this.getWorkerEventConnections(worker)) {
             writeLine(connection.socket, {
               type: "rpc_protocol_error",
-              error: `rin_turn_ledger_terminal_record_failed:${String(
-                error?.message || error,
-              )}`,
+              error: terminalPersistenceFailed
+                ? detail
+                : `rin_turn_ledger_terminal_record_failed:${detail}`,
             });
+          }
+          if (
+            terminalPersistenceFailed &&
+            worker.activeLifecycleRequestTag !== undefined
+          ) {
+            // Preserve ledger ownership; the normal exit path resumes it.
+            this.stopWorkerForRecovery(worker);
+            return;
           }
           this.destroyWorker(worker);
           return;
@@ -1477,6 +1605,7 @@ export class WorkerPool {
             );
           }
           pending.finalize?.();
+          this.publishWorkerWorkingState(worker);
           if (pending.resolve) pending.resolve(payload);
           if (pending.connection) writeLine(pending.connection.socket, payload);
           this.maybeReleaseWorker(worker);
@@ -1484,6 +1613,7 @@ export class WorkerPool {
         }
 
         if (isTerminalRpcTurnEvent(payload)) {
+          this.publishWorkerWorkingState(worker, payload.working === true);
           this.resolveTerminalTurnWaiters(payload);
           return;
         }
@@ -1513,14 +1643,23 @@ export class WorkerPool {
       const activeRequestTag = lifecycleRequestTag(
         worker.activeLifecycleRequestTag || worker.activeRequestTag,
       );
-      const activeRecord = activeRequestTag
-        ? readDaemonTurn(this.daemonLedgerAgentDir(), activeRequestTag)
-        : undefined;
-      const preserveActiveTurn = activeRecord?.state === "active";
-      const recoverActiveTurn =
-        preserveActiveTurn &&
-        !this.shuttingDown &&
-        !worker.gracefulShutdownRequested;
+      let activeRecord;
+      let ledgerReadFailed = false;
+      try {
+        activeRecord = activeRequestTag
+          ? readDaemonTurn(this.daemonLedgerAgentDir(), activeRequestTag)
+          : undefined;
+      } catch {
+        ledgerReadFailed = true;
+      }
+      const preserveActiveTurn = Boolean(
+        activeRecord?.state === "active" ||
+        (ledgerReadFailed && activeRequestTag),
+      );
+      if (worker.recoveryStopTimer) {
+        clearTimeout(worker.recoveryStopTimer);
+        worker.recoveryStopTimer = undefined;
+      }
       const liveConnections = new Set<ConnectionState>(worker.connections);
       for (const pending of worker.pendingResponses.values()) {
         pending.finalize?.();
@@ -1552,16 +1691,26 @@ export class WorkerPool {
         : oomKilled
           ? "rin_worker_oom"
           : "rin_worker_exit";
-      if (
+      let lifecycleInterrupted = Boolean(
         !preserveActiveTurn ||
-        (worker.gracefulShutdownRequested && !this.shuttingDown)
+        (worker.gracefulShutdownRequested &&
+          !worker.recoveryStopRequested &&
+          !this.shuttingDown),
+      );
+      if (
+        lifecycleInterrupted &&
+        !this.interruptWorkerLifecycle(worker, exitError)
       ) {
-        this.interruptWorkerLifecycle(worker, exitError);
+        lifecycleInterrupted = false;
       }
+      const recoverActiveTurn =
+        preserveActiveTurn && !this.shuttingDown && !lifecycleInterrupted;
+      const workingAfterExit = preserveActiveTurn && !lifecycleInterrupted;
       if (oomKilled && !recoverActiveTurn) {
         for (const connection of liveConnections) {
           writeLine(connection.socket, {
             type: "worker_oom",
+            working: workingAfterExit,
             code: code ?? null,
             signal: signal ?? null,
           });
@@ -1571,6 +1720,7 @@ export class WorkerPool {
         for (const connection of liveConnections) {
           writeLine(connection.socket, {
             type: "worker_exit",
+            working: workingAfterExit,
             code: code ?? null,
             signal: signal ?? null,
           });
@@ -1582,14 +1732,16 @@ export class WorkerPool {
           continue;
         }
         if (entry.connection) {
-          writeLine(
-            entry.connection.socket,
-            responseError(entry.id, entry.commandType, exitError),
-          );
+          writeLine(entry.connection.socket, {
+            ...responseError(entry.id, entry.commandType, exitError),
+            working: workingAfterExit,
+          });
         }
       }
       if (recoverActiveTurn && activeRequestTag) {
         this.scheduleActiveDaemonTurnRecovery(activeRequestTag);
+      } else if (preserveActiveTurn && !this.shuttingDown) {
+        this.scheduleActiveDaemonTurnRecoveryScan();
       }
     });
 
@@ -1637,8 +1789,7 @@ export class WorkerPool {
       worker.turnActive ||
       worker.terminalPending ||
       worker.isStreaming ||
-      worker.isCompacting ||
-      worker.rinWorking
+      worker.isCompacting
     ) {
       worker.idleSince = null;
       return;
@@ -1701,19 +1852,89 @@ export class WorkerPool {
     connection.sessionId = next.sessionId;
   }
 
-  private async ensureWorkerForSession(selector: SessionSelector) {
+  private async ensureWorkerForSession(
+    selector: SessionSelector,
+    options: { recovery?: boolean } = {},
+  ) {
+    if (options.recovery !== true && !this.isActiveTurnRecoveryConverged()) {
+      throw new Error("rin_daemon_recovering");
+    }
     const wanted = sessionSelectorFromState(selector);
+    const tracked = this.findTrackedWorkerBySelector(wanted);
+    if (tracked?.recoveryStopRequested) {
+      throw new Error("rin_session_worker_unavailable");
+    }
     const existing = this.findWorkerBySelector(wanted);
     if (existing) return existing;
     if (!wanted.sessionFile) throw new Error("rin_session_file_required");
 
     const claimed = await this.withSessionClaim(wanted, async () => {
+      const tracked = this.findTrackedWorkerBySelector(wanted);
+      if (tracked?.recoveryStopRequested) {
+        throw new Error("rin_session_worker_unavailable");
+      }
       const existing = this.findWorkerBySelector(wanted);
       if (existing) return existing;
       return this.createWorkerForSession(wanted);
     });
     if (!claimed) throw new Error("rin_session_worker_unavailable");
     return claimed;
+  }
+
+  private isActiveTurnRecoveryConverged() {
+    let records;
+    try {
+      records = listActiveDaemonTurns(this.daemonLedgerAgentDir());
+    } catch {
+      this.scheduleActiveDaemonTurnRecoveryScan();
+      return false;
+    }
+    return records.every((record) => {
+      const worker = this.findTrackedWorkerBySelector(
+        sessionSelectorFromState(record),
+      );
+      return Boolean(
+        worker &&
+        !worker.recoveryStopRequested &&
+        worker.activeLifecycleRequestTag === record.requestTag &&
+        (worker.turnActive || worker.terminalPending || worker.isStreaming),
+      );
+    });
+  }
+
+  private currentBackendWorking(
+    selector: SessionSelector,
+    excludedWorker?: WorkerHandle,
+  ) {
+    const normalized = sessionSelectorFromState(selector);
+    if (!hasSessionSelector(normalized)) return false;
+    const worker = this.findWorkerBySelector(normalized);
+    if (worker && worker !== excludedWorker && this.isWorkerWorking(worker)) {
+      return true;
+    }
+    try {
+      return listActiveDaemonTurns(this.daemonLedgerAgentDir()).some((record) =>
+        sessionMatchesSelector(sessionSelectorFromState(record), normalized),
+      );
+    } catch {
+      this.scheduleActiveDaemonTurnRecoveryScan();
+      return true;
+    }
+  }
+
+  private terminalEventForDelivery(
+    record: any,
+    workingOverride?: boolean,
+    excludedWorker?: WorkerHandle,
+  ) {
+    const terminalEvent = daemonTurnTerminalEvent(record);
+    return {
+      ...terminalEvent,
+      // Working is current daemon state, not immutable terminal history.
+      working: Boolean(
+        workingOverride || this.currentBackendWorking(record, excludedWorker),
+      ),
+    };
   }
 
   private waitForTerminalTurnEvent(
@@ -1742,37 +1963,63 @@ export class WorkerPool {
     if (!normalizedRequestTag) {
       throw new Error("await_turn_terminal requires requestTag");
     }
-    const existing = readDaemonTurn(
-      this.daemonLedgerAgentDir(),
-      normalizedRequestTag,
-    );
-    if (!existing) throw new Error("rin_turn_ledger_record_missing");
-    if (existing.state !== "active") {
-      return daemonTurnTerminalEvent(existing);
-    }
 
-    const selected = sessionSelectorFromState(existing);
-    if (!this.findWorkerBySelector(selected)) {
-      this.scheduleActiveDaemonTurnRecovery(normalizedRequestTag);
-    }
+    while (true) {
+      let existing;
+      try {
+        existing = readDaemonTurn(
+          this.daemonLedgerAgentDir(),
+          normalizedRequestTag,
+        );
+      } catch {
+        this.scheduleActiveDaemonTurnRecoveryScan();
+        if (connection.socket.destroyed) throw new Error("rin_disconnected");
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+      if (!existing) throw new Error("rin_turn_ledger_record_missing");
+      if (existing.state !== "active") {
+        return this.terminalEventForDelivery(existing);
+      }
 
-    const { promise, waiter } = this.waitForTerminalTurnEvent(
-      normalizedRequestTag,
-      connection,
-    );
-    const afterRegistration = readDaemonTurn(
-      this.daemonLedgerAgentDir(),
-      normalizedRequestTag,
-    );
-    if (afterRegistration && afterRegistration.state !== "active") {
-      this.resolveTerminalTurnWaiters(
-        daemonTurnTerminalEvent(afterRegistration),
+      const selected = sessionSelectorFromState(existing);
+      if (!this.findWorkerBySelector(selected)) {
+        this.scheduleActiveDaemonTurnRecovery(normalizedRequestTag);
+      }
+
+      const { promise, waiter } = this.waitForTerminalTurnEvent(
+        normalizedRequestTag,
+        connection,
       );
-    }
-    try {
-      return await promise;
-    } finally {
-      this.terminalTurnWaiters.delete(waiter);
+      let afterRegistration;
+      try {
+        afterRegistration = readDaemonTurn(
+          this.daemonLedgerAgentDir(),
+          normalizedRequestTag,
+        );
+      } catch {
+        this.terminalTurnWaiters.delete(waiter);
+        this.scheduleActiveDaemonTurnRecoveryScan();
+        if (connection.socket.destroyed) throw new Error("rin_disconnected");
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+      if (!afterRegistration) {
+        this.terminalTurnWaiters.delete(waiter);
+        this.scheduleActiveDaemonTurnRecoveryScan();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+      if (afterRegistration.state !== "active") {
+        this.resolveTerminalTurnWaiters(
+          this.terminalEventForDelivery(afterRegistration),
+        );
+      }
+      try {
+        return await promise;
+      } finally {
+        this.terminalTurnWaiters.delete(waiter);
+      }
     }
   }
 
@@ -1788,48 +2035,70 @@ export class WorkerPool {
   private interruptDaemonTurnByRequestTag(
     requestTagValue: string,
     reason: string,
+    workingOverride?: boolean,
+    excludedWorker?: WorkerHandle,
   ) {
     const requestTag = lifecycleRequestTag(requestTagValue);
-    if (!requestTag) return;
+    if (!requestTag) return false;
     try {
       const terminal = interruptDaemonTurn(
         this.daemonLedgerAgentDir(),
         requestTag,
         reason,
       );
-      if (terminal.state === "active") return;
+      if (terminal.state === "active") return false;
       const timer = this.activeTurnRecoveryTimers.get(requestTag);
       if (timer) clearTimeout(timer);
       this.activeTurnRecoveryTimers.delete(requestTag);
       this.activeTurnRecoveryAttempts.delete(requestTag);
-      this.resolveTerminalTurnWaiters(daemonTurnTerminalEvent(terminal));
+      this.resolveTerminalTurnWaiters(
+        this.terminalEventForDelivery(
+          terminal,
+          workingOverride,
+          excludedWorker,
+        ),
+      );
+      return true;
     } catch {
       // A missing or unavailable ledger cannot be replaced with inferred
       // lifecycle truth. Remaining waiters are rejected by the caller.
+      return false;
     }
   }
 
   private interruptWorkerLifecycle(worker: WorkerHandle, reason: string) {
-    this.interruptDaemonTurnByRequestTag(
+    if (!worker.activeLifecycleRequestTag) return true;
+    return this.interruptDaemonTurnByRequestTag(
       worker.activeLifecycleRequestTag,
       reason,
+      false,
+      worker,
     );
   }
 
-  private findWorkerBySelector(selector: SessionSelector) {
+  private findTrackedWorkerBySelector(selector: SessionSelector) {
     if (selector.sessionFile) {
       const worker = this.workersBySessionFile.get(selector.sessionFile);
-      if (worker && this.isWorkerRoutable(worker)) return worker;
+      if (worker && this.workers.has(worker)) return worker;
     }
     if (selector.sessionId) {
       const worker = this.workersBySessionId.get(selector.sessionId);
-      if (worker && this.isWorkerRoutable(worker)) return worker;
+      if (worker && this.workers.has(worker)) return worker;
     }
     return undefined;
   }
 
+  private findWorkerBySelector(selector: SessionSelector) {
+    const worker = this.findTrackedWorkerBySelector(selector);
+    return worker && this.isWorkerRoutable(worker) ? worker : undefined;
+  }
+
   private isWorkerRoutable(worker: WorkerHandle) {
-    return this.workers.has(worker) && !worker.gracefulShutdownRequested;
+    return (
+      this.workers.has(worker) &&
+      !worker.gracefulShutdownRequested &&
+      !worker.recoveryStopRequested
+    );
   }
 
   private sessionClaimKey(selector: SessionSelector) {
@@ -1920,17 +2189,58 @@ export class WorkerPool {
     }
   }
 
-  private isWorkerRunning(worker: WorkerHandle) {
+  private isWorkerLifecycleActive(
+    worker: WorkerHandle,
+    excludedPendingId?: string,
+  ) {
     return Boolean(
+      worker.activeLifecycleRequestTag !== undefined ||
       worker.turnActive ||
       worker.terminalPending ||
       worker.isStreaming ||
       worker.isCompacting ||
-      worker.rinWorking ||
-      Array.from(worker.pendingResponses.values()).some((pending) =>
-        ACTIVE_COMMAND_TYPES.has(pending.commandType),
+      Array.from(worker.pendingResponses.values()).some(
+        (pending) =>
+          pending.id !== excludedPendingId &&
+          ACTIVE_COMMAND_TYPES.has(pending.commandType),
       ),
     );
+  }
+
+  private isWorkerWorking(worker: WorkerHandle, excludedPendingId?: string) {
+    return this.isWorkerLifecycleActive(worker, excludedPendingId);
+  }
+
+  private isWorkerWorkingAfterLifecycleSettlement(
+    worker: WorkerHandle,
+    settledPendingId?: string,
+  ) {
+    return Boolean(
+      worker.isStreaming ||
+      worker.isCompacting ||
+      Array.from(worker.pendingResponses.values()).some(
+        (pending) =>
+          pending.id !== settledPendingId &&
+          ACTIVE_COMMAND_TYPES.has(pending.commandType),
+      ),
+    );
+  }
+
+  private publishWorkerWorkingState(worker: WorkerHandle, override?: boolean) {
+    const working = override ?? this.isWorkerWorking(worker);
+    if (worker.publishedWorking === working) return;
+    worker.publishedWorking = working;
+    worker.stateEpoch += 1;
+    const payload = { type: "backend_working_state", working };
+    for (const connection of this.getWorkerEventConnections(worker)) {
+      if (this.shouldForwardWorkerPayload(connection, worker, payload)) {
+        writeLine(connection.socket, payload);
+      }
+    }
+  }
+
+  private isWorkerRunning(worker: WorkerHandle) {
+    return this.isWorkerLifecycleActive(worker);
   }
 
   private syncRunningWorkerRecordForSelector(
@@ -1938,7 +2248,6 @@ export class WorkerPool {
     running: boolean,
     requestTag?: string,
     frontendOwner = false,
-    workingVisible = false,
   ) {
     const sessionFile = sessionSelectorFromState(selector).sessionFile;
     if (!sessionFile) return;
@@ -1948,7 +2257,6 @@ export class WorkerPool {
       running,
       requestTag,
       frontendOwner,
-      workingVisible,
     );
   }
 
@@ -1961,7 +2269,6 @@ export class WorkerPool {
       this.isWorkerRunning(worker),
       worker.activeLifecycleRequestTag ?? worker.activeRequestTag,
       worker.activeLifecycleFrontendOwner,
-      worker.frontendWorkingVisible,
     );
   }
 
@@ -2051,30 +2358,23 @@ export class WorkerPool {
 
   private handleWorkerStdinFailure(worker: WorkerHandle, error: Error) {
     if (!this.workers.has(worker)) return;
-    for (const pending of Array.from(worker.pendingResponses.values())) {
-      if (TURN_TERMINAL_COMMAND_TYPES.has(pending.commandType)) {
-        worker.terminalPending = false;
-        this.syncRunningWorkerRecordForSelector(
-          resolveSessionSelector(
-            pending.selector,
-            this.getWorkerSelector(worker),
-          ),
-          false,
-        );
-      }
+    const pendingResponses = Array.from(worker.pendingResponses.values());
+    worker.pendingResponses.clear();
+    const lifecycleSettled = this.destroyWorker(worker);
+    const working =
+      !lifecycleSettled && worker.activeLifecycleRequestTag !== undefined;
+    for (const pending of pendingResponses) {
       pending.finalize?.();
       if (pending.reject) {
         pending.reject(error);
       } else if (pending.connection) {
-        writeLine(
-          pending.connection.socket,
-          responseError(pending.id, pending.commandType, "rin_worker_exit"),
-        );
+        writeLine(pending.connection.socket, {
+          ...responseError(pending.id, pending.commandType, "rin_worker_exit"),
+          working,
+        });
       }
     }
-    worker.pendingResponses.clear();
     worker.ignoredResponseIds.clear();
-    this.destroyWorker(worker);
   }
 
   private rejectInternalCommandWrite(
@@ -2084,19 +2384,9 @@ export class WorkerPool {
     reject: (error: Error) => void,
     error: unknown,
   ) {
-    const pending = worker.pendingResponses.get(id);
-    if (pending && TURN_TERMINAL_COMMAND_TYPES.has(pending.commandType)) {
-      worker.terminalPending = false;
-      this.syncRunningWorkerRecordForSelector(
-        resolveSessionSelector(
-          pending.selector,
-          this.getWorkerSelector(worker),
-        ),
-        false,
-      );
-    }
     worker.pendingResponses.delete(id);
     worker.ignoredResponseIds.add(id);
+    this.publishWorkerWorkingState(worker);
     finalize();
     const normalized =
       error instanceof Error ? error : new Error(String(error));
@@ -2137,6 +2427,7 @@ export class WorkerPool {
       if (!pending || pending.expectsTerminalTurnEvent !== true) {
         this.syncRunningWorkerRecord(worker);
       }
+      this.publishWorkerWorkingState(worker);
       this.maybeReleaseWorker(worker);
       rejectCommand(new Error(`rin_internal_timeout:${commandType}`));
     }, this.getInternalCommandTimeoutMs(command));
@@ -2148,7 +2439,7 @@ export class WorkerPool {
       commandType,
       selector,
       expectsTerminalTurnEvent: keepUntilTerminalTurnEvent,
-      workingVisibilityEpoch: worker.frontendWorkingVisibilityEpoch,
+      stateEpoch: worker.stateEpoch,
       resolve: resolveCommand,
       reject: rejectCommand,
       finalize,
@@ -2197,9 +2488,9 @@ export class WorkerPool {
         true,
         worker.activeLifecycleRequestTag ?? worker.activeRequestTag,
         worker.activeLifecycleFrontendOwner,
-        worker.frontendWorkingVisible,
       );
     }
+    this.publishWorkerWorkingState(worker);
 
     if (!this.isWorkerStdinWritable(worker)) {
       this.rejectInternalCommandWrite(

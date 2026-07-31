@@ -507,6 +507,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rin_container_name_required: () =>
     "Target operation needs a container name. Provide the container name.",
   rin_daemon_failed: () => "Rin's background service failed to start.",
+  rin_daemon_recovering: () =>
+    "Rin's background service is still recovering active turns and cannot accept new work yet.",
   rin_daemon_shutting_down: () =>
     "Rin is shutting down right now. Wait until it starts again.",
   rin_daemon_unavailable: (detail) =>
@@ -707,6 +709,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin rejected conflicting lifecycle ownership for this turn.",
   rin_turn_ledger_chat_key_required: () =>
     "Rin cannot route this turn because its chat target is missing.",
+  rin_turn_ledger_interrupt_failed: () =>
+    "Rin could not durably interrupt the active turn because the lifecycle ledger is unavailable.",
   rin_turn_ledger_interrupt_reason_required: () =>
     "Rin could not record why this turn was interrupted.",
   rin_turn_ledger_message_id_required: () =>
@@ -719,6 +723,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin cannot identify this turn request.",
   rin_turn_ledger_terminal_conflict: () =>
     "Rin rejected conflicting terminal outcomes for this turn.",
+  rin_turn_ledger_terminal_record_failed: () =>
+    "Rin could not durably record the turn result because the lifecycle ledger is unavailable.",
   rin_turn_ledger_terminal_id_mismatch: () =>
     "Rin rejected an acknowledgement for a different terminal outcome.",
   rin_turn_ledger_terminal_id_required: () =>

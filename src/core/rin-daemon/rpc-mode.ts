@@ -601,20 +601,9 @@ export async function runCustomRpcMode(
     PendingExtensionUiRequest
   >();
   let extensionUiRequestSeq = 0;
-  let agentRunning = Boolean(getSession()?.isStreaming);
-  let workingVisibleEnabled = true;
 
   const createExtensionUiRequestId = () =>
     `extension_ui_${Date.now().toString(36)}_${++extensionUiRequestSeq}`;
-
-  const emitWorkingVisibility = () => {
-    output({
-      type: "extension_ui_request",
-      id: createExtensionUiRequestId(),
-      method: "setWorkingVisible",
-      visible: workingVisibleEnabled && agentRunning,
-    });
-  };
 
   const resolvePendingExtensionUiRequest = (response: any) => {
     const requestId = safeString(response?.id).trim();
@@ -719,10 +708,13 @@ export async function runCustomRpcMode(
         method: "setWorkingMessage",
         message,
       }),
-    setWorkingVisible: (visible: boolean) => {
-      workingVisibleEnabled = Boolean(visible);
-      emitWorkingVisibility();
-    },
+    setWorkingVisible: (visible: boolean) =>
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "setWorkingVisible",
+        visible: Boolean(visible),
+      }),
     setWorkingIndicator: (options?: any) =>
       output({
         type: "extension_ui_request",
@@ -1187,7 +1179,6 @@ export async function runCustomRpcMode(
   let restoreSessionAppendMessage: (() => void) | undefined;
   const bindCurrentSession = async () => {
     const session = getSession();
-    agentRunning = Boolean(session?.isStreaming);
     turnCoordinator.resetAdmissions();
     await session.bindExtensions({
       uiContext: createExtensionUiContext(),
@@ -1261,13 +1252,6 @@ export async function runCustomRpcMode(
       restoreSessionAppendMessage = undefined;
     }
     unsubscribeSessionEvents = session.subscribe((event: any) => {
-      if (event?.type === "agent_start") {
-        agentRunning = true;
-        emitWorkingVisibility();
-      } else if (event?.type === "agent_end") {
-        agentRunning = false;
-        emitWorkingVisibility();
-      }
       let producerRequestTag = safeString(event?.requestTag).trim();
       if (event?.type === "message_start" && event.message?.role === "user") {
         const userText = Array.isArray(event.message?.content)
@@ -1557,7 +1541,6 @@ export async function runCustomRpcMode(
           type,
           getSessionState(session, {
             turnActive: turnCoordinator.isActive,
-            workingVisible: workingVisibleEnabled && agentRunning,
           }),
         );
       case "get_state": {
@@ -1565,7 +1548,6 @@ export async function runCustomRpcMode(
         return done(id, type, {
           ...getSessionState(session, {
             turnActive: trackedTurnActive,
-            workingVisible: workingVisibleEnabled && agentRunning,
           }),
           piActiveRun: Boolean(session.agent?.signal),
           ...(trackedTurnActive

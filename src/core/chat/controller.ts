@@ -370,7 +370,6 @@ export class ChatController {
   todoDeliveryQueue: Promise<void> = Promise.resolve();
   latestAssistantSummaryText = "";
   awaitingTurnSettle = false;
-  externalWorkingVisible = false;
   turnAbortRequested = false;
   turnAbortGeneration = 0;
   intentionallyAbortedTurnGenerations = new Set<number>();
@@ -500,7 +499,6 @@ export class ChatController {
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
-    this.externalWorkingVisible = false;
     this.turnAbortRequested = false;
     this.turnAbortGeneration += 1;
     this.intentionallyAbortedTurnGenerations.clear();
@@ -523,7 +521,6 @@ export class ChatController {
 
   async clearProcessingState() {
     this.awaitingTurnSettle = false;
-    this.externalWorkingVisible = false;
     this.turnAbortRequested = false;
     this.turnAbortGeneration += 1;
     this.intentionallyAbortedTurnGenerations.clear();
@@ -681,11 +678,7 @@ export class ChatController {
   }
 
   hasActiveTurn() {
-    return (
-      this.frontendPhase === "working" ||
-      this.awaitingTurnSettle ||
-      this.driver.hasActiveTurn()
-    );
+    return this.awaitingTurnSettle || this.driver.hasActiveTurn();
   }
 
   private setCurrentTurn(input: {
@@ -1267,10 +1260,7 @@ export class ChatController {
   }
 
   private shouldShowTypingIndicator() {
-    return Boolean(
-      this.currentTurn &&
-      (this.externalWorkingVisible || this.driver.hasVisibleChatWorkingTurn()),
-    );
+    return this.driver.isWorking();
   }
 
   private editableWorkingIndicator(indicators = this.getWorkingIndicators()) {
@@ -2595,7 +2585,6 @@ export class ChatController {
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
-    this.externalWorkingVisible = false;
     this.turnAbortRequested = false;
     this.turnAbortGeneration = 0;
   }
@@ -2769,6 +2758,7 @@ export class ChatController {
         restoreSession: !skipSessionRecovery,
       });
       if (commandPolicy.acceptInboundBeforeExecution) {
+        this.ensureVisibleCommandTurn();
         this.markAcceptedMessage(incomingMessageId);
       }
 
@@ -2852,34 +2842,6 @@ export class ChatController {
       this.stagedDelivery = null;
       this.saveState();
     }
-  }
-
-  async beginExternalWorking() {
-    this.externalWorkingVisible = true;
-    if (this.currentTurn?.outboxTurnFence) {
-      // Backend Working is presentation state. A recovered inbox claim already
-      // owns this controller, so do not replace its durable reply identity with
-      // an anonymous display-only turn.
-      await this.presentVisibleProcessingTurn(
-        this.currentTurn,
-        this.turnAbortGeneration,
-      );
-      return;
-    }
-    await this.beginVisibleProcessingTurn({});
-  }
-
-  async endExternalWorking() {
-    this.externalWorkingVisible = false;
-    if (this.driver.hasVisibleChatWorkingTurn()) return;
-    await this.clearWorkingReaction().catch(() => {});
-    if (this.currentTurn?.outboxTurnFence) {
-      // Ending backend Working must not release a claimed inbox turn. Its
-      // matching terminal, abort, or claim-loss path owns cleanup.
-      return;
-    }
-    this.awaitingTurnSettle = false;
-    this.clearCurrentTurn();
   }
 
   async resumeTurn(input: {
@@ -3221,14 +3183,7 @@ export class ChatController {
     switch (event.type) {
       case "frontend_status":
         return;
-      case "working_visible": {
-        this.externalWorkingVisible = Boolean(event.visible);
-        if (event.visible) {
-          this.ensureVisibleCommandTurn();
-          if (!this.currentTurn?.outboxTurnFence) {
-            this.markAcceptedMessage(this.currentIncomingMessageId());
-          }
-        }
+      case "working_state": {
         void this.pollTyping().catch(() => false);
         return;
       }

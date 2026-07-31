@@ -407,11 +407,6 @@ export type ChatBridgeHandle = {
     emoji?: string;
   }) => Promise<{ sent: boolean }>;
   runTurn: (payload: ChatBridgeTurnPayload) => Promise<any>;
-  setWorkingVisible: (payload: {
-    chatKey?: string;
-    controllerKey?: string;
-    visible?: boolean;
-  }) => Promise<{ handled: boolean }>;
   terminateTurn: (payload: {
     controllerKey?: string;
     chatKey?: string;
@@ -1657,30 +1652,6 @@ export async function startChatBridge(
       }
     }
   };
-  const setWorkingVisible = async (payload: {
-    chatKey?: string;
-    controllerKey?: string;
-    visible?: boolean;
-  }) => {
-    const chatKey = safeString(payload?.chatKey).trim();
-    const controllerKey =
-      safeString(payload?.controllerKey).trim() || (chatKey ? "default" : "");
-    if (!chatKey && !controllerKey) return { handled: false };
-    const useBoundController = Boolean(chatKey && controllerKey === "default");
-    const controller = useBoundController
-      ? getController(chatKey)
-      : getDetachedController(controllerKey, {
-          chatKey,
-          affectChatBinding: false,
-        });
-    if (payload?.visible === false) {
-      await controller.endExternalWorking().catch(() => {});
-      return { handled: true };
-    }
-    await controller.beginExternalWorking().catch(() => {});
-    return { handled: true };
-  };
-
   const terminateTurn = async (payload: {
     controllerKey?: string;
     chatKey?: string;
@@ -1894,7 +1865,6 @@ export async function startChatBridge(
     typing,
     react,
     runTurn,
-    setWorkingVisible,
     terminateTurn,
     evalBridge,
   };

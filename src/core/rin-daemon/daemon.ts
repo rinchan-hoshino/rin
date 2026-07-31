@@ -88,11 +88,6 @@ export async function startDaemon(
         messageId?: string;
         emoji?: string;
       }) => Promise<any>;
-      setWorkingVisible?: (payload: {
-        chatKey?: string;
-        controllerKey?: string;
-        visible?: boolean;
-      }) => Promise<any>;
       terminateTurn?: (payload: {
         controllerKey?: string;
         chatKey?: string;

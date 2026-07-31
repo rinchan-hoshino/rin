@@ -133,6 +133,7 @@ const EMPTY_SESSION_STATE = {
   thinkingLevel: "medium",
   turnActive: false,
   isStreaming: false,
+  working: false,
   isCompacting: false,
   steeringMode: "all",
   followUpMode: "one-at-a-time",

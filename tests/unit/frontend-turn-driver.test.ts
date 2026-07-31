@@ -262,7 +262,7 @@ test("unexpected client event failures are reported without inventing turn error
 
   await client.emit({
     type: "ui",
-    payload: { type: "working_visible", visible: true },
+    payload: { type: "agent_start", working: true },
   });
   await waitUntil(
     () => failures.length === 1,
@@ -540,7 +540,7 @@ test("frontend turn driver propagates canonical run identity through terminal pr
   );
 });
 
-test("backend working visibility is the only shared frontend Working source", async () => {
+test("backend Working state is the only shared frontend Working source", async () => {
   const driver = createDriver();
   const seen: any[] = [];
   driver.subscribe((event: any) => seen.push(event));
@@ -549,40 +549,40 @@ test("backend working visibility is the only shared frontend Working source", as
     type: "rpc_turn_event",
     event: "start",
     requestTag: "turn-1",
+    working: true,
   });
-  await emitDriverEvent(driver, { type: "agent_start" });
-  assert.deepEqual(
-    seen.filter((event) => event.type === "frontend_status"),
-    [],
-  );
-
-  await emitDriverEvent(driver, {
-    type: "extension_ui_request",
-    method: "setWorkingVisible",
-    visible: true,
-  });
-  await emitDriverEvent(driver, { type: "compaction_start" });
-  await emitDriverEvent(driver, { type: "compaction_end" });
-  await emitDriverEvent(driver, { type: "agent_end" });
-  assert.deepEqual(
-    seen.filter((event) => event.type === "frontend_status"),
-    [{ type: "frontend_status", phase: "working" }],
-  );
-
+  await emitDriverEvent(driver, { type: "agent_start", working: true });
   await emitDriverEvent(driver, {
     type: "extension_ui_request",
     method: "setWorkingVisible",
     visible: false,
   });
+  await emitDriverEvent(driver, { type: "compaction_start", working: true });
+  await emitDriverEvent(driver, { type: "compaction_end", working: true });
+  await emitDriverEvent(driver, { type: "agent_end", working: true });
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "turn-1",
+    working: false,
+  });
 
   assert.deepEqual(seen, [
     { type: "turn_accepted", requestTag: "turn-1" },
-    { type: "turn_accepted" },
     { type: "frontend_status", phase: "working" },
-    { type: "working_visible", visible: true },
+    { type: "working_state", working: true },
+    { type: "turn_accepted" },
     { type: "compaction_start_notice", text: "Compacting..." },
     { type: "frontend_status", phase: "idle" },
-    { type: "working_visible", visible: false },
+    { type: "working_state", working: false },
+    {
+      type: "turn_complete",
+      finalText: "",
+      result: undefined,
+      sessionId: undefined,
+      sessionFile: undefined,
+      requestTag: "turn-1",
+    },
   ]);
 });
 
@@ -686,6 +686,7 @@ async function emitRpcTurnComplete(
   await emitDriverEvent(driver, {
     type: "rpc_turn_event",
     event: "complete",
+    working: false,
     requestTag,
     finalText,
     result: {
@@ -1634,7 +1635,7 @@ test("frontend SDK turn driver applies turn-scoped thinking without persisting d
   });
 });
 
-test("frontend SDK visible chat working excludes standalone compaction and recovery state", async () => {
+test("frontend SDK displays only the backend Working decision", async () => {
   const client = createFrontendClient();
   client.getState = async () => ({
     sessionFile: "/tmp/frontend-chat.jsonl",
@@ -1643,7 +1644,7 @@ test("frontend SDK visible chat working excludes standalone compaction and recov
     turnActive: false,
     isCompacting: true,
     sessionRecovering: true,
-    workingVisible: false,
+    working: false,
   });
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
@@ -1653,7 +1654,7 @@ test("frontend SDK visible chat working excludes standalone compaction and recov
   await driver.connect();
 
   assert.equal(driver.hasActiveTurn(), false);
-  assert.equal(driver.hasVisibleChatWorkingTurn(), false);
+  assert.equal(driver.isWorking(), false);
 });
 
 test("frontend SDK turn driver reselects a restored session even when cached state matches", async () => {
@@ -1717,11 +1718,20 @@ test("frontend SDK ignores a stale terminal request tag while the current turn i
     () => Boolean((driver as any).liveTurn),
     "current live turn did not start",
   );
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "start",
+    requestTag: "current-request-tag",
+    working: true,
+  });
+  assert.equal(driver.isWorking(), true);
+
   await emitRpcTurnComplete(driver, "stale-request-tag", "stale final");
   assert.ok(
     (driver as any).liveTurn,
     "stale terminal settled the current turn",
   );
+  assert.equal(driver.isWorking(), true);
 
   await emitRpcTurnComplete(driver, "current-request-tag", "current final");
   assert.equal((await pending).finalText, "current final");

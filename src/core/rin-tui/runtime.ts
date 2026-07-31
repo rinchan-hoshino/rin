@@ -355,7 +355,8 @@ export class RpcInteractiveSession {
   private rpcConnected = false;
   private remoteTurnRunning = false;
   public agentStreaming = false;
-  public backendWorkingVisible = false;
+  public backendWorking = false;
+  private workingVisiblePreference = true;
   private recoveringTurnPending = false;
   private disposed = false;
   private pendingRefreshFlags: RefreshFlags = {};
@@ -1165,7 +1166,7 @@ export class RpcInteractiveSession {
       ...this.extensionBindings,
       ...bindings,
     };
-    this.setBackendWorkingVisible(this.backendWorkingVisible);
+    this.syncWorkingPresentation();
     await Promise.all([
       this.refreshDaemonCommandCatalog().catch(() => {}),
       this.refreshResourceDiagnostics().catch(() => {}),
@@ -1227,6 +1228,9 @@ export class RpcInteractiveSession {
             );
           } catch {}
         });
+      if (typeof payload.working === "boolean") {
+        this.setBackendWorking(payload.working);
+      }
       return;
     }
     void handleRpcSessionEvent(
@@ -1314,7 +1318,7 @@ export class RpcInteractiveSession {
         );
         return;
       case "setWorkingVisible":
-        this.setBackendWorkingVisible(Boolean(payload.visible));
+        this.setWorkingVisiblePreference(Boolean(payload.visible));
         return;
       case "setWorkingIndicator":
         ui?.setWorkingIndicator?.(payload.options);
@@ -1367,7 +1371,7 @@ export class RpcInteractiveSession {
     if (!this.rpcConnected || this.recoveryPending) return "connecting";
     if (this.isCompacting) return "compacting";
     if (this.retryAttempt > 0) return "retrying";
-    if (this.backendWorkingVisible && this.agentStreaming) return "working";
+    if (this.backendWorking) return "working";
     if (this.activeTurn) return "sending";
     return "idle";
   }
@@ -1431,19 +1435,24 @@ export class RpcInteractiveSession {
 
   setAgentStreaming(streaming: boolean) {
     this.agentStreaming = streaming;
-    if (streaming) {
-      this.extensionBindings.uiContext?.setWorkingVisible?.(
-        this.backendWorkingVisible,
-      );
-    }
     this.syncStreamingState();
   }
 
-  setBackendWorkingVisible(visible: boolean) {
-    this.backendWorkingVisible = visible;
-    if (!visible || this.agentStreaming) {
-      this.extensionBindings.uiContext?.setWorkingVisible?.(visible);
-    }
+  setBackendWorking(working: boolean) {
+    this.backendWorking = working;
+    this.syncWorkingPresentation();
+    this.emitFrontendStatus();
+  }
+
+  private setWorkingVisiblePreference(visible: boolean) {
+    this.workingVisiblePreference = visible;
+    this.syncWorkingPresentation();
+  }
+
+  private syncWorkingPresentation() {
+    this.extensionBindings.uiContext?.setWorkingVisible?.(
+      this.backendWorking && this.workingVisiblePreference,
+    );
   }
 
   private syncStreamingState() {

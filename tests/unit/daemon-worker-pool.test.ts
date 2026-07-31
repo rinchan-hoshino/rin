@@ -404,7 +404,90 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("replacement worker working events supersede stale get_state visibility snapshots", async () => {
+test("backend publishes level-triggered Working around active commands", async () => {
+  const dir = await makeTempDir("rin-worker-working-command-");
+  const workerPath = path.join(dir, "working-command-worker.mjs");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(sessionFile, "", "utf8");
+  await fs.writeFile(
+    workerPath,
+    `
+import readline from "node:readline";
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+rl.on("line", (line) => {
+  const command = JSON.parse(line);
+  if (command.type !== "run_command") return;
+  setTimeout(() => {
+    process.stdout.write(JSON.stringify({
+      type: "response",
+      id: command.id,
+      command: command.type,
+      success: true,
+      data: { ok: true },
+    }) + "\\n");
+  }, 20);
+});
+`,
+    "utf8",
+  );
+
+  const writes: any[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(chunk: string) {
+        for (const line of String(chunk).trim().split("\n")) {
+          if (line) writes.push(JSON.parse(line));
+        }
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    agentDir: dir,
+    gcIdleMs: 5000,
+  });
+  const worker = await pool.selectSession(connection, { sessionFile });
+  assert.ok(worker);
+  pool.forwardToWorker(connection, worker, {
+    type: "run_command",
+    id: "command-working",
+    command: "status",
+  });
+
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (writes.some((event) => event.id === "command-working")) break;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(
+    writes.some((event) => event.id === "command-working"),
+    true,
+  );
+  assert.deepEqual(
+    writes.filter(
+      (event) =>
+        event.type === "backend_working_state" ||
+        event.id === "command-working",
+    ),
+    [
+      { type: "backend_working_state", working: true },
+      { type: "backend_working_state", working: false },
+      {
+        type: "response",
+        id: "command-working",
+        command: "run_command",
+        success: true,
+        data: { ok: true },
+        working: false,
+      },
+    ],
+  );
+  pool.destroyAll();
+});
+
+test("backend Working survives stale worker state snapshots", async () => {
   const dir = await makeTempDir("rin-worker-pool-working-epoch-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = path.join(dir, "session.jsonl");
@@ -431,13 +514,15 @@ process.stdin.on("data", (chunk) => {
     buffer = buffer.slice(idx + 1);
     if (!line.trim()) continue;
     const command = JSON.parse(line);
-    const eventVisible = command.scenario === "event-visible";
     process.stdout.write(JSON.stringify({ type: "agent_start" }) + "\\n");
     process.stdout.write(JSON.stringify({
-      type: "extension_ui_request",
-      method: "setWorkingVisible",
-      visible: eventVisible,
+      type: "rpc_turn_event",
+      event: "start",
+      requestTag: "chat-inbox-working-epoch",
+      sessionFile,
     }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "agent_end" }) + "\\n");
+    process.stdout.write(JSON.stringify({ type: "compaction_start" }) + "\\n");
     setTimeout(() => {
       process.stdout.write(JSON.stringify({
         id: command.id,
@@ -447,9 +532,9 @@ process.stdin.on("data", (chunk) => {
         data: {
           sessionFile,
           sessionId: "working-epoch",
-          turnActive: true,
-          isStreaming: true,
-          workingVisible: !eventVisible,
+          turnActive: false,
+          isStreaming: false,
+          isCompacting: false,
           interruptedTurnResumable: true,
         },
       }) + "\\n");
@@ -460,8 +545,14 @@ setInterval(() => {}, 1000);
 `,
   );
 
+  const writes: string[] = [];
   const connection = {
-    socket: { destroyed: false, write() {} },
+    socket: {
+      destroyed: false,
+      write(chunk: string) {
+        writes.push(String(chunk));
+      },
+    },
     clientBuffer: "",
   };
   const pool = new WorkerPool({
@@ -474,31 +565,27 @@ setInterval(() => {}, 1000);
   assert.ok(worker);
   worker.activeLifecycleRequestTag = "chat-inbox-working-epoch";
   worker.activeLifecycleSelector = { sessionFile };
+  worker.terminalPending = true;
   worker.activeLifecycleFrontendOwner = true;
 
-  const visibleState = await pool.sendInternalCommand(worker, {
+  const state = await pool.sendInternalCommand(worker, {
     type: "get_state",
-    scenario: "event-visible",
   });
-  const persistedVisible = JSON.parse(await fs.readFile(statePath, "utf8"));
-  assert.equal(visibleState.data?.workingVisible, true);
-  assert.deepEqual(persistedVisible.workingVisibilities, {
-    [sessionFile]: true,
-  });
-
-  const hiddenState = await pool.sendInternalCommand(worker, {
-    type: "get_state",
-    scenario: "event-hidden",
-  });
-  const persistedHidden = JSON.parse(await fs.readFile(statePath, "utf8"));
-  assert.equal(hiddenState.data?.workingVisible, false);
-  assert.equal(persistedHidden.workingVisibilities, undefined);
+  const persisted = JSON.parse(await fs.readFile(statePath, "utf8"));
+  assert.equal(state.data?.working, true);
+  assert.equal(pool.getStatusSnapshot().workers[0]?.isCompacting, true);
+  assert.equal(persisted.workingVisibilities, undefined);
+  const forwardedAgentEnd = writes
+    .flatMap((chunk) => chunk.trim().split("\n"))
+    .map((line) => JSON.parse(line))
+    .find((event) => event.type === "agent_end");
+  assert.equal(forwardedAgentEnd?.working, true);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("unowned active snapshots cannot create working visibility", async () => {
+test("backend Working does not depend on frontend lifecycle ownership", async () => {
   const dir = await makeTempDir("rin-worker-pool-working-unowned-snapshot-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = path.join(dir, "session.jsonl");
@@ -537,7 +624,6 @@ process.stdin.on("data", (chunk) => {
         turnGeneration: 1,
         turnActive: true,
         isStreaming: true,
-        workingVisible: true,
         interruptedTurnResumable: true,
       },
     }) + "\\n");
@@ -562,7 +648,7 @@ setInterval(() => {}, 1000);
   const state = await pool.sendInternalCommand(worker, { type: "get_state" });
   const persistedState = JSON.parse(await fs.readFile(statePath, "utf8"));
 
-  assert.equal(state.data?.workingVisible, false);
+  assert.equal(state.data?.working, true);
   assert.equal(persistedState.workingVisibilities, undefined);
 
   pool.destroyAll();
@@ -695,6 +781,12 @@ test("exact terminal wait survives detach without leaking a raw terminal event",
   assert.equal(
     writes.some((line) => line.includes("durable final")),
     false,
+  );
+  assert.equal(
+    writes.some((line) =>
+      line.includes('"type":"backend_working_state","working":false'),
+    ),
+    true,
   );
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
@@ -829,6 +921,13 @@ setInterval(() => {}, 1000);
   ]);
   assert.equal(event.event, "complete");
   assert.equal(event.finalText, "resumed final");
+  assert.equal(event.working, false);
+  assert.equal(
+    writes.some((line) =>
+      line.includes('"type":"backend_working_state","working":true'),
+    ),
+    true,
+  );
   const commands = (await fs.readFile(commandLog, "utf8"))
     .trim()
     .split("\n")
@@ -838,6 +937,31 @@ setInterval(() => {}, 1000);
     commands.filter((entry) => entry.type === "resume_interrupted_turn").length,
     1,
   );
+});
+
+test("stored terminal delivery uses current backend Working for the session", async () => {
+  const dir = await makeTempDir("rin-worker-pool-terminal-current-working-");
+  const sessionFile = path.join(dir, "terminal-current-working.jsonl");
+  await fs.writeFile(sessionFile, "");
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ agentDir: dir });
+  pool.registerConnection(connection);
+
+  beginDaemonTurn(dir, { requestTag: "older-turn", sessionFile });
+  (pool as any).interruptDaemonTurnByRequestTag("older-turn", "older done");
+  beginDaemonTurn(dir, { requestTag: "newer-turn", sessionFile });
+
+  const event = await pool.awaitTerminalTurnEvent(
+    connection,
+    { sessionFile },
+    "older-turn",
+  );
+  assert.equal(event.requestTag, "older-turn");
+  assert.equal(event.working, true);
+  (pool as any).interruptDaemonTurnByRequestTag("newer-turn", "test cleanup");
 });
 
 test("terminal wait stays active while no replacement worker is available", async () => {
@@ -875,6 +999,7 @@ test("terminal wait stays active while no replacement worker is available", asyn
   assert.equal(event.requestTag, requestTag);
   assert.equal(event.event, "error");
   assert.equal(event.error, "rin_turn_recovery_session_missing");
+  assert.equal(event.working, false);
 });
 
 test("terminal wait uses request identity across stored and absolute session paths", async () => {
@@ -1082,8 +1207,18 @@ test("worker exit reaches selected and transient command audiences", async () =>
 
   pool.destroyWorker(worker);
 
-  assert.equal(JSON.parse(selectedWrites[0]).type, "worker_exit");
-  assert.equal(JSON.parse(transientWrites[0]).type, "worker_exit");
+  assert.deepEqual(JSON.parse(selectedWrites[0]), {
+    type: "worker_exit",
+    working: false,
+    code: null,
+    signal: "SIGTERM",
+  });
+  assert.deepEqual(JSON.parse(transientWrites[0]), {
+    type: "worker_exit",
+    working: false,
+    code: null,
+    signal: "SIGTERM",
+  });
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });
 });
@@ -2496,6 +2631,7 @@ test("client worker commands fail closed stdin without daemon stream errors", as
           command: "prompt",
           success: false,
           error: "rin_worker_exit",
+          working: false,
         })
       );
     }),
@@ -2789,12 +2925,12 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("worker status snapshot treats Rin pre-compaction work as working", async () => {
+test("worker status snapshot exposes the canonical backend Working state", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
     workerPath,
-    `process.stdout.write(JSON.stringify({ type: "rin_working_start", reason: "session_before_compact" }) + "\\n");
+    `process.stdout.write(JSON.stringify({ type: "agent_start" }) + "\\n");
 process.stdin.resume();
 setInterval(() => {}, 1000);
 `,
@@ -2808,13 +2944,13 @@ setInterval(() => {}, 1000);
 
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const status = pool.getStatusSnapshot();
-    if (status.workers[0]?.rinWorking) break;
+    if (status.workers[0]?.working) break;
     await sleep(25);
   }
 
   const status = pool.getStatusSnapshot();
   assert.equal(status.activeWorkerCount, 1);
-  assert.equal(status.workers[0]?.rinWorking, true);
+  assert.equal(status.workers[0]?.working, true);
   assert.equal(status.workers[0]?.state, "working");
 
   pool.destroyAll();
@@ -2986,7 +3122,10 @@ test("rejected prompt admission durably interrupts the ledger and resolves termi
   const worker = pool.restoreSessionWorker({ sessionFile });
   assert.ok(worker);
   pool.attachWorkerToConnection(connection, worker);
-  pool.writeWorkerStdin = () => {};
+  const sentCommands: any[] = [];
+  pool.writeWorkerStdin = (_worker, command) => {
+    sentCommands.push(command);
+  };
   pool.forwardToWorker(connection, worker, {
     id: "rejected-prompt",
     type: "prompt",
@@ -2994,6 +3133,11 @@ test("rejected prompt admission durably interrupts the ledger and resolves termi
     requestTag: "rejected-request",
     sessionFile,
   });
+  const staleState = pool.sendInternalCommand(worker, { type: "get_state" });
+  const staleStateCommand = sentCommands.find(
+    (command) => command.type === "get_state",
+  );
+  assert.ok(staleStateCommand?.id);
   const terminal = pool.awaitTerminalTurnEvent(
     connection,
     { sessionFile },
@@ -3009,10 +3153,28 @@ test("rejected prompt admission durably interrupts the ledger and resolves termi
       error: "rpc_prompt_rejected",
     })}\n`,
   );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({
+      id: staleStateCommand.id,
+      type: "response",
+      command: "get_state",
+      success: true,
+      data: {
+        sessionFile,
+        turnActive: true,
+        isStreaming: true,
+        isCompacting: true,
+      },
+    })}\n`,
+  );
   const result = await terminal;
+  await staleState;
   assert.equal(result.event, "error");
   assert.equal(result.error, "rpc_prompt_rejected");
   assert.equal(result.terminalRecord.state, "interrupted");
+  assert.equal(result.working, false);
+  assert.equal(pool.getStatusSnapshot().workers[0]?.working, false);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });

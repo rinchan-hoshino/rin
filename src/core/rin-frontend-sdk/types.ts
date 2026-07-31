@@ -113,7 +113,6 @@ export type RinFrontendBackendEvent =
       requestTag?: string;
     }
   | { type: "compaction_start_notice"; text: string }
-  | { type: "working_visible"; visible: boolean }
   | { type: "assistant_stream"; text: string; requestTag?: string }
   | { type: "assistant_summary"; text: string; requestTag?: string }
   | { type: "assistant_interim"; text: string; requestTag?: string }
@@ -206,7 +205,7 @@ export type RinSessionState = {
   thinkingLevel?: string;
   turnActive?: boolean;
   isStreaming?: boolean;
-  workingVisible?: boolean;
+  working?: boolean;
   isCompacting?: boolean;
   sessionFile?: string;
   sessionId?: string;

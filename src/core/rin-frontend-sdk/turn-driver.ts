@@ -107,7 +107,7 @@ export type RinFrontendEventHandlingFailure = {
 
 export type RinFrontendTurnDriverEvent =
   | { type: "frontend_status"; phase: RinFrontendTurnPhase }
-  | { type: "working_visible"; visible: boolean }
+  | { type: "working_state"; working: boolean }
   | { type: "turn_accepted"; requestTag?: string }
   | {
       type: "user_message_start";
@@ -424,8 +424,19 @@ export class RinFrontendTurnDriver {
     });
   }
 
+  private applyBackendWorkingState(
+    working: boolean,
+    previousWorking = Boolean(this.frontendState.working),
+  ) {
+    this.frontendState.working = working;
+    this.setFrontendPhase(working ? "working" : "idle");
+    if (working !== previousWorking) {
+      this.emit({ type: "working_state", working });
+    }
+  }
+
   private applyFrontendStateSnapshot(state: RinSessionState | undefined) {
-    const previousWorkingVisible = Boolean(this.frontendState.workingVisible);
+    const previousWorking = Boolean(this.frontendState.working);
     this.frontendState = { ...this.frontendState, ...(state || {}) };
     if (state && !Object.prototype.hasOwnProperty.call(state, "requestTag")) {
       delete this.frontendState.requestTag;
@@ -433,13 +444,8 @@ export class RinFrontendTurnDriver {
     if (Boolean(state?.turnActive || state?.isStreaming)) {
       this.backendTurnRequestTag = safeString(state?.requestTag).trim();
     }
-    if (typeof state?.workingVisible === "boolean") {
-      const workingVisible = state.workingVisible;
-      this.frontendState.workingVisible = workingVisible;
-      if (workingVisible !== previousWorkingVisible) {
-        this.setFrontendPhase(workingVisible ? "working" : "idle");
-        this.emit({ type: "working_visible", visible: workingVisible });
-      }
+    if (typeof state?.working === "boolean") {
+      this.applyBackendWorkingState(state.working, previousWorking);
     }
     return this.frontendState;
   }
@@ -625,8 +631,8 @@ export class RinFrontendTurnDriver {
     return Boolean(this.frontendState.sessionRecovering);
   }
 
-  private isVisibleChatWorkingTurn() {
-    return Boolean(this.frontendState.workingVisible);
+  private isBackendWorking() {
+    return Boolean(this.frontendState.working);
   }
 
   private emitPassiveNoticeAtPullCheckpoint(
@@ -687,12 +693,8 @@ export class RinFrontendTurnDriver {
     return this.isTurnActive();
   }
 
-  hasVisibleChatWorkingTurn() {
-    return this.isVisibleChatWorkingTurn();
-  }
-
-  hasExplicitWorkingVisible() {
-    return Boolean(this.frontendState.workingVisible);
+  isWorking() {
+    return this.isBackendWorking();
   }
 
   hasWorkerActiveTurn() {
@@ -1649,6 +1651,7 @@ export class RinFrontendTurnDriver {
       if (this.liveTurn) void this.interruptLiveTurnAfterDisconnect();
       return;
     }
+    const backendPayload = event.type === "ui" ? event.payload : event;
     if (event.type === "ui") {
       const payload: any = event.payload;
       const ignoredTerminal = this.consumeIgnoredTerminal(payload);
@@ -1657,8 +1660,12 @@ export class RinFrontendTurnDriver {
         return;
       }
       if (!this.terminalRpcTurnPayloadMatchesCurrentSession(payload)) return;
+      if (payload?.working === false) {
+        this.applyBackendWorkingState(false);
+      }
       if (
         projectRinFrontendLifecycleEvent(payload) ||
+        typeof payload?.working === "boolean" ||
         payload?.type === "worker_exit" ||
         payload?.type === "queue_update"
       ) {
@@ -1675,12 +1682,6 @@ export class RinFrontendTurnDriver {
           },
           set isStreaming(value: boolean) {
             frontendState.isStreaming = Boolean(value);
-          },
-          get workingVisible() {
-            return Boolean(frontendState.workingVisible);
-          },
-          set workingVisible(value: boolean) {
-            frontendState.workingVisible = Boolean(value);
           },
           get isCompacting() {
             return Boolean(frontendState.isCompacting);
@@ -1733,7 +1734,7 @@ export class RinFrontendTurnDriver {
           },
           handleSessionRecovered: () => {
             this.frontendState.sessionRecovering = false;
-            if (!this.frontendState.workingVisible) {
+            if (!this.frontendState.working) {
               this.setFrontendPhase("idle");
             }
           },
@@ -1749,6 +1750,8 @@ export class RinFrontendTurnDriver {
           },
         });
       }
+    } else if (backendPayload?.working === false) {
+      this.applyBackendWorkingState(false);
     }
     const backendEvents =
       event.type === "backend_event"
@@ -1756,6 +1759,9 @@ export class RinFrontendTurnDriver {
         : this.backendEventTranslator.translate(event);
     for (const backendEvent of backendEvents) {
       await this.handleBackendEvent(backendEvent);
+    }
+    if (backendPayload?.working === true) {
+      this.applyBackendWorkingState(true);
     }
   }
 
@@ -1768,10 +1774,7 @@ export class RinFrontendTurnDriver {
           event.phase === "sending"
         ) {
           this.setFrontendPhase(event.phase);
-        } else if (
-          event.phase === "idle" &&
-          !this.frontendState.workingVisible
-        ) {
+        } else if (event.phase === "idle" && !this.frontendState.working) {
           this.setFrontendPhase("idle");
         }
         if (typeof event.turnActive === "boolean") {
@@ -1833,11 +1836,6 @@ export class RinFrontendTurnDriver {
       case "compaction_start_notice":
         this.emit({ type: "compaction_start_notice", text: event.text });
         return;
-      case "working_visible":
-        this.frontendState.workingVisible = event.visible;
-        this.setFrontendPhase(event.visible ? "working" : "idle");
-        this.emit({ type: "working_visible", visible: event.visible });
-        return;
       case "assistant_stream":
         this.latestAssistantText = event.text;
         return;
@@ -1864,7 +1862,7 @@ export class RinFrontendTurnDriver {
         this.updateFrontendStateFrom(event);
         const finalText = safeString(event.finalText).trim();
         this.latestAssistantText = finalText;
-        if (!this.frontendState.workingVisible) {
+        if (!this.frontendState.working) {
           this.setFrontendPhase("idle");
         }
         const terminalEvent: Extract<
@@ -1902,7 +1900,7 @@ export class RinFrontendTurnDriver {
         this.frontendState.turnActive = false;
         this.frontendState.isStreaming = false;
         this.updateFrontendStateFrom(event);
-        if (!this.frontendState.workingVisible) {
+        if (!this.frontendState.working) {
           this.setFrontendPhase("idle");
         }
         const terminalEvent: Extract<
