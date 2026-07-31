@@ -319,7 +319,7 @@ test("TUI launch environment reports maintenance notice when the daemon is unava
     },
   );
   assert.equal(unavailable.runtimeEnv.BASE, "1");
-  assert.equal("RIN_TUI_RUNTIME_ROLE" in unavailable.runtimeEnv, false);
+  assert.equal(unavailable.runtimeEnv.RIN_TUI_RUNTIME_ROLE, "maintenance-tui");
   assert.match(
     unavailable.maintenanceModeNotice,
     /Rin daemon is unavailable \(daemon down\)\./,

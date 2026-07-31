@@ -1363,6 +1363,7 @@ export async function startChatBridge(
   };
 
   let requestDrainChatInbox: () => void = () => {};
+  const startupRecoveryChatKeys = new Set<string>();
   const chatKeyWorkers = createChatKeyWorkerPool<ClaimedChatInboxJob>({
     prepare: (job) => prepareClaimedInboxJob(job),
     onPrepareError: (job, chatKey, error) => {
@@ -1376,7 +1377,12 @@ export async function startChatBridge(
       );
       forgetClaimedInboxJob(job);
     },
-    onIdle: () => requestDrainChatInbox(),
+    onIdle: (chatKey: string) => {
+      if (startupRecoveryChatKeys.delete(chatKey)) {
+        app.completeInboundRecoveryChat(chatKey);
+      }
+      requestDrainChatInbox();
+    },
     logger,
   });
 
@@ -1731,6 +1737,11 @@ export async function startChatBridge(
   const startupRecoverableProcessing = listRunningChatInboxItems(
     runtime.agentDir,
   );
+  for (const envelope of startupRecoverableProcessing) {
+    if (startupRecoveryChatKeys.has(envelope.chatKey)) continue;
+    startupRecoveryChatKeys.add(envelope.chatKey);
+    app.beginInboundRecoveryChat(envelope.chatKey);
+  }
   await app.start();
   await syncTelegramCommands(app, logger, commandRows);
   await syncDiscordCommands(app, logger, commandRows);

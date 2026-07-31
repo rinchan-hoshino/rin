@@ -173,16 +173,25 @@ test("chat snapshots inherited running jobs before adapters can claim new work",
     "const startupRecoverableProcessing = listRunningChatInboxItems",
     reconcile,
   );
-  const adaptersStart = chatMain.indexOf("await app.start()", snapshot);
+  const recoveryFence = chatMain.indexOf(
+    "app.beginInboundRecoveryChat(envelope.chatKey)",
+    snapshot,
+  );
+  const adaptersStart = chatMain.indexOf("await app.start()", recoveryFence);
   const recoveryEnqueue = chatMain.indexOf(
     "for (const envelope of startupRecoverableProcessing)",
     adaptersStart,
   );
+  const recoveryRelease = chatMain.indexOf(
+    "app.completeInboundRecoveryChat(chatKey)",
+  );
 
   assert.ok(reconcile >= 0);
   assert.ok(snapshot > reconcile);
-  assert.ok(adaptersStart > snapshot);
+  assert.ok(recoveryFence > snapshot);
+  assert.ok(adaptersStart > recoveryFence);
   assert.ok(recoveryEnqueue > adaptersStart);
+  assert.ok(recoveryRelease >= 0);
 });
 
 test("daemon restart preserves and resumes active durable turns", () => {
