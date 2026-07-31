@@ -986,9 +986,9 @@ export async function startChatBridge(
         ].some((marker) => errorMessage.includes(marker))
       ) {
         logger.info(
-          `chat turn interrupted without authoritative terminal chatKey=${submission.chatKey} err=${errorMessage}`,
+          `chat turn detached without authoritative terminal chatKey=${submission.chatKey} err=${errorMessage}`,
         );
-        return undefined;
+        throw error;
       }
       logger.warn(
         `chat turn failed chatKey=${submission.chatKey} err=${errorMessage}`,
