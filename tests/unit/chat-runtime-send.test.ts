@@ -3037,6 +3037,7 @@ test("onebot group working indicator retries clearing a stale reaction without c
 
     const [indicator] = app.bots[0].getWorkingIndicators({ chatId: "123" });
     await indicator.tick({ chatId: "123", messageId: "101", tick: 0 });
+    await indicator.tick({ chatId: "123", messageId: "101", tick: 1 });
     await assert.rejects(
       indicator.end({ chatId: "123", messageId: "101" }),
       /transient clear failure/,
@@ -3141,7 +3142,7 @@ test("onebot private marker picks a custom working frame", async () => {
   });
 });
 
-test("discord working indicator replaces the previous reaction frame", async () => {
+test("discord working indicator adds one fixed reaction and removes it on end", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "discord",
@@ -3173,16 +3174,16 @@ test("discord working indicator replaces the previous reaction frame", async () 
     const indicator = requireReactionIndicator(app.bots[0]);
     await indicator.tick({ chatId: "C1", messageId: "m1", tick: 0 });
     await indicator.tick({ chatId: "C1", messageId: "m1", tick: 1 });
+    await indicator.end({ chatId: "C1", messageId: "m1" });
 
     assert.deepEqual(calls, [
       ["create", "🤔"],
       ["delete", ""],
-      ["create", "🔥"],
     ]);
   });
 });
 
-test("slack working indicator replaces the previous reaction frame", async () => {
+test("slack working indicator adds one fixed reaction and removes it on end", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "slack",
@@ -3205,16 +3206,16 @@ test("slack working indicator replaces the previous reaction frame", async () =>
     const indicator = requireReactionIndicator(app.bots[0]);
     await indicator.tick({ chatId: "C1", messageId: "1.1", tick: 0 });
     await indicator.tick({ chatId: "C1", messageId: "1.1", tick: 1 });
+    await indicator.end({ chatId: "C1", messageId: "1.1" });
 
     assert.deepEqual(calls, [
       ["create", "thinking_face"],
       ["delete", "thinking_face"],
-      ["create", "fire"],
     ]);
   });
 });
 
-test("lark working indicator replaces the previous reaction frame", async () => {
+test("lark working indicator adds one fixed reaction and removes it on end", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -3255,18 +3256,18 @@ test("lark working indicator replaces the previous reaction frame", async () => 
     const indicator = requireReactionIndicator(app.bots[0]);
     await indicator.tick({ chatId: "oc_1", messageId: "om_1", tick: 0 });
     await indicator.tick({ chatId: "oc_1", messageId: "om_1", tick: 1 });
+    await indicator.end({ chatId: "oc_1", messageId: "om_1" });
 
     assert.deepEqual(
       calls.map(([kind]) => kind),
-      ["create", "list", "delete", "create"],
+      ["create", "list", "delete"],
     );
     assert.equal(calls[0][1].data.reaction_type.emoji_type, "THINKING");
     assert.equal(calls[2][1].path.reaction_id, "reaction-thinking");
-    assert.equal(calls[3][1].data.reaction_type.emoji_type, "Fire");
   });
 });
 
-test("lark adapter maps fire working reaction to the supported emoji type", async () => {
+test("lark adapter maps manual and waiting reactions to supported emoji types", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "lark",
@@ -3287,7 +3288,9 @@ test("lark adapter maps fire working reaction to the supported emoji type", asyn
     };
 
     assert.equal(await app.bots[0].createReaction("oc_1", "om_1", "🔥"), true);
+    assert.equal(await app.bots[0].createReaction("oc_1", "om_2", "⏳"), true);
     assert.equal(calls[0].data.reaction_type.emoji_type, "Fire");
+    assert.equal(calls[1].data.reaction_type.emoji_type, "Hourglass");
   });
 });
 

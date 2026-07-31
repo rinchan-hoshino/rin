@@ -633,10 +633,10 @@ function testPollingIndicator(actions = [], reactions = [], selfId = "1") {
   let emoji = "";
   return {
     type: "polling",
-    async tick({ chatId, messageId, tick, reactionDue, reactionTick }) {
+    async tick({ chatId, messageId, workingStarted }) {
       actions.push({ chat_id: chatId, action: "typing" });
-      if (messageId && reactionDue !== false) {
-        emoji = Number(reactionTick ?? tick ?? 0) % 2 ? "🔥" : "🤔";
+      if (messageId && workingStarted !== false && !emoji) {
+        emoji = "🤔";
         reactions.push(["create", chatId, messageId, emoji]);
       }
       return true;
@@ -654,10 +654,11 @@ function testReactionPollingIndicator(reactions = [], selfId = "1") {
   let emoji = "";
   return {
     type: "polling",
-    async tick({ chatId, messageId, tick, reactionDue, reactionTick }) {
+    presentation: "reaction",
+    async tick({ chatId, messageId, workingStarted }) {
       if (!messageId) return false;
-      if (reactionDue === false) return true;
-      emoji = Number(reactionTick ?? tick ?? 0) % 2 ? "🔥" : "🤔";
+      if (workingStarted === false || emoji) return true;
+      emoji = "🤔";
       reactions.push(["create", chatId, messageId, emoji]);
       return true;
     },
@@ -4630,7 +4631,248 @@ test("chat controller keeps editable summary and compaction refreshes suppressed
   assert.deepEqual(deliveries, []);
 });
 
-test("chat controller polls typing and rotating reactions while a turn is active", async () => {
+test("chat controller transitions a queued message from waiting to fixed Working reaction", async () => {
+  const controller = await createController("telegram/1:2");
+  const reactions = [];
+  controller.app = {
+    bots: [
+      {
+        platform: "telegram",
+        selfId: "1",
+        workingIndicators: [testReactionPollingIndicator(reactions)],
+        async createReaction(chatId, messageId, emoji) {
+          reactions.push(["create", chatId, messageId, emoji]);
+        },
+        async deleteReaction(chatId, messageId, emoji, userId) {
+          reactions.push(["delete", chatId, messageId, emoji, userId]);
+        },
+      },
+    ],
+  };
+  controller.app.bots.telegram = controller.app.bots[0];
+  controller.pendingSubmittedDeliveryTargets = [
+    {
+      requestTag: "queued-1",
+      incomingMessageId: "m-queued",
+      replyToMessageId: "",
+    },
+  ];
+
+  await controller.handleFrontendEvent({
+    type: "turn_waiting",
+    requestTag: "queued-1",
+  });
+  await controller.handleFrontendEvent({
+    type: "user_message_start",
+    requestTag: "queued-1",
+    text: "queued input",
+  });
+  await controller.clearWorkingReaction();
+
+  assert.deepEqual(reactions, [
+    ["create", "2", "m-queued", "⏳"],
+    ["delete", "2", "m-queued", "⏳", "1"],
+    ["create", "2", "m-queued", "🤔"],
+    ["delete", "2", "m-queued", "🤔", "1"],
+  ]);
+});
+
+test("chat controller waits for queue-idle cleanup before adding Working reaction", async () => {
+  const controller = await createController("telegram/1:2");
+  const reactions = [];
+  let releaseDelete;
+  let markDeleteStarted;
+  const deleteStarted = new Promise((resolve) => {
+    markDeleteStarted = resolve;
+  });
+  const deleteGate = new Promise((resolve) => {
+    releaseDelete = resolve;
+  });
+  controller.app = {
+    bots: [
+      {
+        platform: "telegram",
+        selfId: "1",
+        workingIndicators: [testReactionPollingIndicator(reactions)],
+        async createReaction(chatId, messageId, emoji) {
+          reactions.push(["create", chatId, messageId, emoji]);
+        },
+        async deleteReaction(chatId, messageId, emoji, userId) {
+          reactions.push(["delete-start", chatId, messageId, emoji, userId]);
+          markDeleteStarted();
+          await deleteGate;
+          reactions.push(["delete-finish", chatId, messageId, emoji, userId]);
+        },
+      },
+    ],
+  };
+  controller.app.bots.telegram = controller.app.bots[0];
+  controller.pendingSubmittedDeliveryTargets = [
+    { requestTag: "queued-1", incomingMessageId: "m1" },
+  ];
+  await controller.handleFrontendEvent({
+    type: "turn_waiting",
+    requestTag: "queued-1",
+  });
+
+  const queueIdle = controller.handleFrontendEvent({ type: "queue_idle" });
+  await deleteStarted;
+  const userStart = controller.handleFrontendEvent({
+    type: "user_message_start",
+    requestTag: "queued-1",
+    text: "queued input",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    reactions.some(([kind, , , emoji]) => kind === "create" && emoji === "🤔"),
+    false,
+    JSON.stringify(reactions),
+  );
+
+  releaseDelete();
+  await Promise.all([queueIdle, userStart]);
+  assert.deepEqual(reactions, [
+    ["create", "2", "m1", "⏳"],
+    ["delete-start", "2", "m1", "⏳", "1"],
+    ["delete-finish", "2", "m1", "⏳", "1"],
+    ["create", "2", "m1", "🤔"],
+  ]);
+});
+
+test("chat controller retries failed waiting cleanup without adding a second status", async () => {
+  const controller = await createController("telegram/1:2");
+  const reactions = [];
+  let deleteAttempts = 0;
+  controller.app = {
+    bots: [
+      {
+        platform: "telegram",
+        selfId: "1",
+        workingIndicators: [testReactionPollingIndicator(reactions)],
+        async createReaction(chatId, messageId, emoji) {
+          reactions.push(["create", chatId, messageId, emoji]);
+        },
+        async deleteReaction(chatId, messageId, emoji, userId) {
+          deleteAttempts += 1;
+          reactions.push([
+            "delete",
+            chatId,
+            messageId,
+            emoji,
+            userId,
+            deleteAttempts,
+          ]);
+          if (deleteAttempts <= 2) throw new Error("transient-delete");
+        },
+      },
+    ],
+  };
+  controller.app.bots.telegram = controller.app.bots[0];
+  controller.pendingSubmittedDeliveryTargets = [
+    { requestTag: "queued-1", incomingMessageId: "m1" },
+  ];
+  await controller.handleFrontendEvent({
+    type: "turn_waiting",
+    requestTag: "queued-1",
+  });
+
+  await controller.handleFrontendEvent({
+    type: "user_message_start",
+    requestTag: "queued-1",
+    text: "queued input",
+  });
+  assert.equal(
+    reactions.some(([kind, , , emoji]) => kind === "create" && emoji === "🤔"),
+    false,
+  );
+
+  await controller.handleFrontendEvent({ type: "queue_idle" });
+  assert.deepEqual(reactions, [
+    ["create", "2", "m1", "⏳"],
+    ["delete", "2", "m1", "⏳", "1", 1],
+    ["delete", "2", "m1", "⏳", "1", 2],
+    ["delete", "2", "m1", "⏳", "1", 3],
+    ["create", "2", "m1", "🤔"],
+  ]);
+});
+
+test("chat controller ignores a late waiting event after that request started", async () => {
+  const controller = await createController("telegram/1:2");
+  const reactions = [];
+  controller.app = {
+    bots: [
+      {
+        platform: "telegram",
+        selfId: "1",
+        workingIndicators: [testReactionPollingIndicator(reactions)],
+        async createReaction(chatId, messageId, emoji) {
+          reactions.push(["create", chatId, messageId, emoji]);
+        },
+        async deleteReaction(chatId, messageId, emoji, userId) {
+          reactions.push(["delete", chatId, messageId, emoji, userId]);
+        },
+      },
+    ],
+  };
+  controller.app.bots.telegram = controller.app.bots[0];
+  controller.pendingSubmittedDeliveryTargets = [
+    { requestTag: "queued-1", incomingMessageId: "m1" },
+  ];
+
+  await controller.handleFrontendEvent({
+    type: "user_message_start",
+    requestTag: "queued-1",
+    text: "queued input",
+  });
+  await controller.handleFrontendEvent({
+    type: "turn_waiting",
+    requestTag: "queued-1",
+  });
+
+  assert.deepEqual(reactions, [["create", "2", "m1", "🤔"]]);
+});
+
+test("chat controller clears waiting reactions when the backend queue becomes idle", async () => {
+  const controller = await createController("telegram/1:2");
+  const reactions = [];
+  controller.app = {
+    bots: [
+      {
+        platform: "telegram",
+        selfId: "1",
+        async createReaction(chatId, messageId, emoji) {
+          reactions.push(["create", chatId, messageId, emoji]);
+        },
+        async deleteReaction(chatId, messageId, emoji, userId) {
+          reactions.push(["delete", chatId, messageId, emoji, userId]);
+        },
+      },
+    ],
+  };
+  controller.pendingSubmittedDeliveryTargets = [
+    { requestTag: "queued-1", incomingMessageId: "m1" },
+    { requestTag: "queued-2", incomingMessageId: "m2" },
+  ];
+
+  await controller.handleFrontendEvent({
+    type: "turn_waiting",
+    requestTag: "queued-1",
+  });
+  await controller.handleFrontendEvent({
+    type: "turn_waiting",
+    requestTag: "queued-2",
+  });
+  await controller.handleFrontendEvent({ type: "queue_idle" });
+
+  assert.deepEqual(reactions, [
+    ["create", "2", "m1", "⏳"],
+    ["create", "2", "m2", "⏳"],
+    ["delete", "2", "m1", "⏳", "1"],
+    ["delete", "2", "m2", "⏳", "1"],
+  ]);
+});
+
+test("chat controller polls typing without repeating the fixed working reaction", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
   const reactions = [];
@@ -4681,7 +4923,6 @@ test("chat controller polls typing and rotating reactions while a turn is active
   ]);
   assert.deepEqual(reactions, [["create", "2", "m1", "🤔"]]);
 
-  controller.lastWorkingReactionAt -= 30_000;
   controller.lastWorkingIndicatorAt -= 4_000;
   assert.equal(await controller.pollTyping(), true);
   assert.deepEqual(actions, [
@@ -4689,13 +4930,10 @@ test("chat controller polls typing and rotating reactions while a turn is active
     { chat_id: "2", action: "typing" },
     { chat_id: "2", action: "typing" },
   ]);
-  assert.deepEqual(reactions, [
-    ["create", "2", "m1", "🤔"],
-    ["create", "2", "m1", "🔥"],
-  ]);
+  assert.deepEqual(reactions, [["create", "2", "m1", "🤔"]]);
 });
 
-test("chat controller keeps typing heartbeat frequent while throttling editable Working animation to reaction interval", async () => {
+test("chat controller keeps typing heartbeat frequent while throttling editable Working refreshes", async () => {
   const controller = await createController("discord/1:2");
   const calls: Array<[string, number]> = [];
   controller.app.bots[0].platform = "discord";
@@ -4963,12 +5201,8 @@ test("chat controller uses adapter reaction capability for lark working indicato
   assert.equal(await controller.pollTyping(), false);
   assert.deepEqual(reactions, [["create", "chat-1", "m-lark", "🤔"]]);
   controller.lastWorkingIndicatorAt -= 30_000;
-  controller.lastWorkingReactionAt -= 30_000;
   assert.equal(await controller.pollTyping(), true);
-  assert.deepEqual(reactions, [
-    ["create", "chat-1", "m-lark", "🤔"],
-    ["create", "chat-1", "m-lark", "🔥"],
-  ]);
+  assert.deepEqual(reactions, [["create", "chat-1", "m-lark", "🤔"]]);
   assert.equal(noticeSent, false);
 });
 
@@ -6600,9 +6834,6 @@ test("chat controller clears the working reaction before dropping processing sta
       },
     },
   ];
-  controller.workingReactionEmoji = "🤔";
-  controller.workingReactionTick = 1;
-  controller.lastWorkingReactionAt = Date.now();
   controller.awaitingTurnSettle = true;
   controller.stagedDelivery = {
     chatKey: controller.chatKey,
@@ -6613,9 +6844,6 @@ test("chat controller clears the working reaction before dropping processing sta
 
   assert.deepEqual(reactions, [["delete", "2", "m-finished", "🤔", "1"]]);
   assert.equal(controller.currentTurn, null);
-  assert.equal(controller.workingReactionEmoji, "");
-  assert.equal(controller.workingReactionTick, 0);
-  assert.equal(controller.lastWorkingReactionAt, 0);
   assert.equal(controller.awaitingTurnSettle, false);
   assert.equal(controller.stagedDelivery, null);
 });

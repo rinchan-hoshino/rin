@@ -14,6 +14,7 @@ test("coordinator keeps one owner through a continuation that starts after settl
     text: "continue",
     hasImages: false,
   });
+  assert.equal(coordinator.isAdmissionPending("continuation-tag"), true);
 
   turn.observeAgentSettlement();
   const continuationsSettled = turn.waitForContinuations();
@@ -30,6 +31,7 @@ test("coordinator keeps one owner through a continuation that starts after settl
   });
   assert.equal(match?.admission, admission);
   assert.equal(match?.requestTag, "continuation-tag");
+  assert.equal(coordinator.isAdmissionPending("continuation-tag"), false);
   await wait();
   assert.equal(settled, false);
 

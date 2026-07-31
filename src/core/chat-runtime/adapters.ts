@@ -12,7 +12,7 @@ import {
   recoverInboundHeads,
 } from "./inbound-recovery.js";
 import { composeChatKeyForBot } from "../chat/support.js";
-import { getWorkingReactionFrame } from "../chat/transport.js";
+import { WORKING_REACTION_EMOJI } from "../chat/transport.js";
 import {
   createRinHttpTransport,
   discardRinHttpResponseBody,
@@ -112,6 +112,7 @@ function isOutboundMediaNodeType(type: string) {
 const SLACK_REACTION_NAMES: Record<string, string> = {
   "🤔": "thinking_face",
   "🔥": "fire",
+  "⏳": "hourglass_flowing_sand",
 };
 
 function createTypingWorkingIndicator(getBot: () => any) {
@@ -138,7 +139,7 @@ function createTypingWorkingIndicator(getBot: () => any) {
   };
 }
 
-function createReactionWorkingIndicator(platform: string, getBot: () => any) {
+function createReactionWorkingIndicator(getBot: () => any) {
   const reactions = new Map<string, string>();
   return {
     type: "polling",
@@ -155,32 +156,11 @@ function createReactionWorkingIndicator(platform: string, getBot: () => any) {
           : typeof bot?.internal?.createReaction === "function"
             ? bot.internal.createReaction.bind(bot.internal)
             : null;
-      const deleteReaction =
-        typeof bot?.deleteReaction === "function"
-          ? bot.deleteReaction.bind(bot)
-          : typeof bot?.internal?.deleteOwnReaction === "function"
-            ? bot.internal.deleteOwnReaction.bind(bot.internal)
-            : typeof bot?.internal?.deleteReaction === "function"
-              ? bot.internal.deleteReaction.bind(bot.internal)
-              : null;
-      if (messageId && createReaction && context?.reactionDue !== false) {
+      if (messageId && createReaction && context?.workingStarted !== false) {
         const key = `${chatId}:${messageId}`;
-        const previousEmoji = reactions.get(key) || "";
-        const nextEmoji = getWorkingReactionFrame(
-          platform,
-          Number(context?.reactionTick ?? context?.tick ?? 0),
-        );
-        if (nextEmoji && previousEmoji !== nextEmoji) {
-          if (previousEmoji && deleteReaction) {
-            await deleteReaction(
-              chatId,
-              messageId,
-              previousEmoji,
-              safeString(bot?.selfId).trim() || undefined,
-            );
-          }
-          await createReaction(chatId, messageId, nextEmoji);
-          reactions.set(key, nextEmoji);
+        if (!reactions.has(key)) {
+          await createReaction(chatId, messageId, WORKING_REACTION_EMOJI);
+          reactions.set(key, WORKING_REACTION_EMOJI);
           sent = true;
         }
       }
@@ -251,6 +231,7 @@ function larkFileType(name: string, mimeType: string): LarkFileType {
 const LARK_REACTION_TYPES: Record<string, string> = {
   "🤔": "THINKING",
   "🔥": "Fire",
+  "⏳": "Hourglass",
 };
 
 function escapeLarkTagText(text: string) {
@@ -688,7 +669,7 @@ export class DiscordAdapter {
       status: 0,
       workingIndicators: [
         this.editableWorking.indicator(),
-        createReactionWorkingIndicator("discord", () => this.bot),
+        createReactionWorkingIndicator(() => this.bot),
         createTypingWorkingIndicator(() => this.bot),
       ],
       user: {},
@@ -1529,7 +1510,7 @@ export class SlackAdapter {
       status: 0,
       workingIndicators: [
         this.editableWorking.indicator(),
-        createReactionWorkingIndicator("slack", () => this.bot),
+        createReactionWorkingIndicator(() => this.bot),
         createTypingWorkingIndicator(() => this.bot),
       ],
       user: {},
@@ -2093,7 +2074,7 @@ export class LarkAdapter {
       selfId: "",
       status: 0,
       workingIndicators: [
-        createReactionWorkingIndicator("lark", () => this.bot),
+        createReactionWorkingIndicator(() => this.bot),
         createTypingWorkingIndicator(() => this.bot),
       ],
       user: {},
@@ -3351,7 +3332,7 @@ export class MinecraftAdapter {
       selfId: safeString(config?.selfId).trim() || "minecraft",
       status: 0,
       workingIndicators: [
-        createReactionWorkingIndicator("minecraft", () => this.bot),
+        createReactionWorkingIndicator(() => this.bot),
         createTypingWorkingIndicator(() => this.bot),
       ],
       user: {},

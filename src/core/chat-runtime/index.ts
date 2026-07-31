@@ -5,7 +5,7 @@ import path from "node:path";
 import { Api as GrammyApi, InputFile } from "grammy";
 import WebSocket from "ws";
 
-import { getWorkingReactionFrame } from "../chat/transport.js";
+import { WORKING_REACTION_EMOJI } from "../chat/transport.js";
 import {
   createRinHttpTransport,
   discardRinHttpResponseBody,
@@ -2267,18 +2267,11 @@ class OneBotAdapter {
     const chatId = safeString(context?.chatId).trim();
     const messageId = safeString(context?.messageId).trim();
     if (!isOneBotGroupChatId(chatId) || !messageId) return false;
-    if (context?.reactionDue === false) return true;
+    if (context?.workingStarted === false) return true;
     const key = `${chatId}:${messageId}`;
-    const previousEmoji = this.workingReactions.get(key) || "";
-    const nextEmoji = getWorkingReactionFrame(
-      "onebot",
-      Number(context?.reactionTick ?? context?.tick ?? 0),
-    );
-    if (!nextEmoji || previousEmoji === nextEmoji) return true;
-    if (previousEmoji)
-      await this.deleteReaction(chatId, messageId, previousEmoji);
-    await this.createReaction(chatId, messageId, nextEmoji);
-    this.workingReactions.set(key, nextEmoji);
+    if (this.workingReactions.has(key)) return true;
+    await this.createReaction(chatId, messageId, WORKING_REACTION_EMOJI);
+    this.workingReactions.set(key, WORKING_REACTION_EMOJI);
     return true;
   }
 

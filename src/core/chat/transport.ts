@@ -42,8 +42,8 @@ import {
   resolveStoredSessionFile,
 } from "../session/ref.js";
 
-const DEFAULT_WORKING_REACTION_FRAMES = ["🤔", "🔥"] as const;
-const ONEBOT_WORKING_REACTION_FRAMES = ["🤔", "🔥"] as const;
+export const WORKING_REACTION_EMOJI = "🤔";
+export const WAITING_REACTION_EMOJI = "⏳";
 const CHAT_PRESENTATION_TIMEOUT_MS = 2500;
 const MODEL_IMAGE_MAX_BYTES = 1_250_000;
 const MODEL_IMAGE_MAX_EDGE = 1600;
@@ -68,19 +68,6 @@ async function withPresentationTimeout<T>(
       setTimeout(() => resolve(fallback), Math.max(1, timeoutMs));
     }),
   ]);
-}
-
-export function getWorkingReactionFrame(platform: string, index: number) {
-  const frames =
-    safeString(platform).trim() === "onebot"
-      ? ONEBOT_WORKING_REACTION_FRAMES
-      : DEFAULT_WORKING_REACTION_FRAMES;
-  const size = frames.length;
-  if (!size) return "";
-  const nextIndex = Number.isFinite(index)
-    ? Math.abs(Math.floor(index)) % size
-    : 0;
-  return frames[nextIndex] || frames[0] || "";
 }
 
 function pickCreateReaction(bot: any) {
@@ -166,75 +153,7 @@ export async function sendReaction(
   }, false);
 }
 
-export async function rotateWorkingReaction(
-  app: any,
-  chatKey: string,
-  messageId: string,
-  frameIndex: number,
-  previousEmoji = "",
-) {
-  const target = tryResolveChatTarget(app, chatKey);
-  if (!target) return previousEmoji || "";
-  const { parsed, bot } = target;
-  const nextEmoji = getWorkingReactionFrame(parsed.platform, frameIndex);
-  if (!nextEmoji) return previousEmoji || "";
-  if (previousEmoji && previousEmoji === nextEmoji) {
-    return previousEmoji;
-  }
-
-  if (
-    parsed.platform !== "onebot" &&
-    typeof bot?.internal?.setMessageReaction === "function"
-  ) {
-    return await withPresentationTimeout(async () => {
-      await bot.internal.setMessageReaction({
-        chat_id: parsed.chatId,
-        message_id: Number(messageId),
-        reaction: [{ type: "emoji", emoji: nextEmoji }],
-      });
-      return nextEmoji;
-    }, previousEmoji || "");
-  }
-
-  if (parsed.platform === "onebot" && isPrivateChat(parsed)) {
-    return previousEmoji || "";
-  }
-
-  const createReaction = pickCreateReaction(bot);
-  if (!createReaction) {
-    return previousEmoji || "";
-  }
-  const deleteReaction = pickDeleteReaction(bot);
-  const deletePrevious =
-    previousEmoji && previousEmoji !== nextEmoji && deleteReaction;
-  let previousDeleted = false;
-  if (deletePrevious) {
-    await withPresentationTimeout(async () => {
-      await deleteReaction(
-        parsed.chatId,
-        messageId,
-        previousEmoji,
-        safeString(bot?.selfId).trim() || undefined,
-      );
-      previousDeleted = true;
-      return true;
-    }, false);
-  }
-  const created = await withPresentationTimeout(async () => {
-    await createReaction(parsed.chatId, messageId, nextEmoji);
-    return nextEmoji;
-  }, "");
-  if (created) return created;
-  if (previousDeleted && previousEmoji) {
-    return await withPresentationTimeout(async () => {
-      await createReaction(parsed.chatId, messageId, previousEmoji);
-      return previousEmoji;
-    }, previousEmoji);
-  }
-  return previousEmoji || "";
-}
-
-export async function clearWorkingReaction(
+export async function clearReaction(
   app: any,
   chatKey: string,
   messageId: string,

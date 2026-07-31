@@ -87,13 +87,15 @@ import {
   writeChatSessionBindingWithFence,
 } from "./database.js";
 import {
+  clearReaction,
   restorePromptParts,
+  sendReaction,
   validateChatOutboxPayloadForDispatch,
+  WAITING_REACTION_EMOJI,
 } from "./transport.js";
 import { resolveChatQuietModeEnabled } from "./settings.js";
 
 const INTERMEDIATE_PREFIX = "... ";
-const WORKING_REACTION_INTERVAL_MS = 30_000;
 
 type ChatDeliveryOutcome = {
   messageIds: string[];
@@ -118,7 +120,7 @@ const PLATFORM_TYPING_POLL_INTERVAL_MS: Record<string, number> = {
   // Discord typing indicators expire after 10 seconds.
   discord: 9_000,
 };
-const DEFAULT_TYPING_POLL_INTERVAL_MS = WORKING_REACTION_INTERVAL_MS;
+const DEFAULT_TYPING_POLL_INTERVAL_MS = 30_000;
 const TYPING_FAILURE_WARNING_INTERVAL_MS = 30_000;
 
 function detachedControllerStatePath(dataDir: string, chatKey: string) {
@@ -354,9 +356,13 @@ export class ChatController {
   h: any;
   affectChatBinding: boolean;
   linkDeliveriesToSession: boolean;
-  workingReactionEmoji = "";
-  workingReactionTick = 0;
-  lastWorkingReactionAt = 0;
+  private readonly waitingReactionsByRequestTag = new Map<string, string>();
+  private readonly waitingReactionClearsByRequestTag = new Map<
+    string,
+    Promise<boolean>
+  >();
+  private readonly startedReactionRequestTags = new Set<string>();
+  private readonly deferredWorkingReactionRequestTags = new Set<string>();
   lastWorkingIndicatorAt = 0;
   lastTypingIndicatorAt = 0;
   lastTypingFailureWarningAt = 0;
@@ -366,8 +372,6 @@ export class ChatController {
   activeCanonicalRun: CanonicalChatRun | null = null;
   compactionTurn: ChatTurnMeta | null = null;
   compactionWorkingIndicators: WorkingIndicator[] = [];
-  compactionReactionTick = 0;
-  lastCompactionReactionAt = 0;
   lastCompactionIndicatorAt = 0;
   lastCompactionTypingIndicatorAt = 0;
   compactionIndicatorTick = 0;
@@ -493,6 +497,7 @@ export class ChatController {
     this.lastActivityAt = Date.now();
     void this.clearWorkingReaction().catch(() => {});
     void this.clearCompactionWorkingReaction().catch(() => {});
+    void this.clearAllWaitingReactions().catch(() => {});
     this.currentTurn = null;
     this.activeCanonicalRun = null;
     this.compactionTurn = null;
@@ -500,6 +505,8 @@ export class ChatController {
     this.activeCommandTurnInput = null;
     this.pendingSubmittedDeliveryTargets = [];
     this.coalescedDeliveryTargets = [];
+    this.startedReactionRequestTags.clear();
+    this.deferredWorkingReactionRequestTags.clear();
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
@@ -533,6 +540,7 @@ export class ChatController {
     this.stagedDelivery = null;
     await this.clearWorkingReaction().catch(() => {});
     await this.clearCompactionWorkingReaction().catch(() => {});
+    await this.clearAllWaitingReactions().catch(() => {});
     this.currentTurn = null;
     this.activeCanonicalRun = null;
     this.compactionTurn = null;
@@ -540,6 +548,8 @@ export class ChatController {
     this.activeCommandTurnInput = null;
     this.pendingSubmittedDeliveryTargets = [];
     this.coalescedDeliveryTargets = [];
+    this.startedReactionRequestTags.clear();
+    this.deferredWorkingReactionRequestTags.clear();
     this.backendAcceptedIncomingMessageId = "";
     this.saveState();
   }
@@ -559,6 +569,124 @@ export class ChatController {
 
   private currentIncomingMessageId() {
     return safeString(this.currentTurn?.incomingMessageId || "").trim();
+  }
+
+  private pendingIncomingMessageId(requestTag: string) {
+    return safeString(
+      this.pendingSubmittedDeliveryTargets.find(
+        (target) => target.requestTag === requestTag,
+      )?.incomingMessageId,
+    ).trim();
+  }
+
+  private async showWaitingReaction(requestTagValue: string) {
+    const requestTag = safeString(requestTagValue).trim();
+    if (
+      !requestTag ||
+      this.startedReactionRequestTags.has(requestTag) ||
+      this.waitingReactionsByRequestTag.has(requestTag)
+    ) {
+      return false;
+    }
+    const messageId = this.pendingIncomingMessageId(requestTag);
+    if (!messageId) return false;
+    await this.clearReactionWorkingIndicatorFor(messageId);
+    const sent = await sendReaction(
+      this.app,
+      this.chatKey,
+      messageId,
+      WAITING_REACTION_EMOJI,
+    ).catch(() => false);
+    if (sent) this.waitingReactionsByRequestTag.set(requestTag, messageId);
+    return sent;
+  }
+
+  private async clearWaitingReaction(requestTagValue: string) {
+    const requestTag = safeString(requestTagValue).trim();
+    if (!requestTag) return false;
+    const pendingClear = this.waitingReactionClearsByRequestTag.get(requestTag);
+    if (pendingClear) return await pendingClear;
+    const messageId = this.waitingReactionsByRequestTag.get(requestTag);
+    if (!messageId) return false;
+    const clear = clearReaction(
+      this.app,
+      this.chatKey,
+      messageId,
+      WAITING_REACTION_EMOJI,
+    ).catch(() => false);
+    this.waitingReactionClearsByRequestTag.set(requestTag, clear);
+    let cleared = false;
+    try {
+      cleared = await clear;
+      return cleared;
+    } finally {
+      if (this.waitingReactionClearsByRequestTag.get(requestTag) === clear) {
+        this.waitingReactionClearsByRequestTag.delete(requestTag);
+        if (
+          cleared &&
+          this.waitingReactionsByRequestTag.get(requestTag) === messageId
+        ) {
+          this.waitingReactionsByRequestTag.delete(requestTag);
+        }
+      }
+    }
+  }
+
+  private async clearAllWaitingReactions(
+    options: { startDeferredWorking?: boolean } = {},
+  ) {
+    const requestTags = [...this.waitingReactionsByRequestTag.keys()];
+    const results = await Promise.all(
+      requestTags.map(async (requestTag) => ({
+        requestTag,
+        cleared: await this.clearWaitingReaction(requestTag),
+      })),
+    );
+    if (options.startDeferredWorking) {
+      for (const result of results) {
+        if (result.cleared) {
+          await this.startDeferredWorkingReaction(result.requestTag);
+        }
+      }
+    }
+    return results.some((result) => result.cleared);
+  }
+
+  private async startDeferredWorkingReaction(requestTagValue: string) {
+    const requestTag = safeString(requestTagValue).trim();
+    if (
+      !requestTag ||
+      !this.deferredWorkingReactionRequestTags.has(requestTag) ||
+      !this.startedReactionRequestTags.has(requestTag) ||
+      safeString(this.currentTurn?.requestTag).trim() !== requestTag
+    ) {
+      return false;
+    }
+    this.deferredWorkingReactionRequestTags.delete(requestTag);
+    return await this.startBackendAcceptedWorkingReaction();
+  }
+
+  private async startBackendAcceptedWorkingReaction() {
+    if (!this.canDeliverReplies() || !this.currentIncomingMessageId()) {
+      return false;
+    }
+    const indicators = selectVisibleWorkingIndicatorsForKind(
+      this.getWorkingIndicators(),
+      "polling",
+    ).filter(
+      (indicator) => workingIndicatorPresentation(indicator) === "reaction",
+    );
+    if (!indicators.length) return false;
+    const context = this.workingIndicatorContext({
+      event: "tick",
+      workingStarted: true,
+    });
+    const results = await this.pollWorkingIndicators(
+      indicators,
+      context,
+      Date.now(),
+    );
+    return results.some(Boolean);
   }
 
   private currentReplyToMessageId() {
@@ -744,7 +872,30 @@ export class ChatController {
     return await this.clearWorkingReaction().catch(() => false);
   }
 
+  private async clearReactionWorkingIndicatorFor(messageIdValue: string) {
+    const messageId = safeString(messageIdValue).trim();
+    if (!messageId) return false;
+    const indicators = this.getWorkingIndicators().filter(
+      (indicator) => workingIndicatorPresentation(indicator) === "reaction",
+    );
+    const context = this.workingIndicatorContext({
+      event: "end",
+      messageId,
+    });
+    const results = await Promise.all(
+      indicators.map((indicator) =>
+        this.callWorkingIndicator(indicator, "end", context),
+      ),
+    );
+    return results.some(Boolean);
+  }
+
   private clearCurrentTurn() {
+    const requestTag = safeString(this.currentTurn?.requestTag).trim();
+    if (requestTag) {
+      this.startedReactionRequestTags.delete(requestTag);
+      this.deferredWorkingReactionRequestTags.delete(requestTag);
+    }
     this.currentTurn = null;
     this.backendAcceptedIncomingMessageId = "";
     this.latestAssistantSummaryText = "";
@@ -979,7 +1130,7 @@ export class ChatController {
       (indicator) =>
         workingIndicatorPresentation(indicator) === "editable-message",
     )
-      ? WORKING_REACTION_INTERVAL_MS
+      ? DEFAULT_TYPING_POLL_INTERVAL_MS
       : this.typingPollIntervalMs();
     return lastPolledAt <= 0 || now - lastPolledAt >= intervalMs;
   }
@@ -1098,9 +1249,6 @@ export class ChatController {
       : this.getWorkingIndicators();
     const todoNoticeText = this.latestTodoNoticeText;
     this.activeWorkingIndicators = [];
-    this.workingReactionEmoji = "";
-    this.workingReactionTick = 0;
-    this.lastWorkingReactionAt = 0;
     this.lastWorkingIndicatorAt = 0;
     this.lastTypingIndicatorAt = 0;
     this.workingIndicatorTick = 0;
@@ -1146,8 +1294,6 @@ export class ChatController {
       ? this.compactionWorkingIndicators
       : this.getWorkingIndicators();
     this.compactionWorkingIndicators = [];
-    this.compactionReactionTick = 0;
-    this.lastCompactionReactionAt = 0;
     this.lastCompactionIndicatorAt = 0;
     this.lastCompactionTypingIndicatorAt = 0;
     this.compactionIndicatorTick = 0;
@@ -1200,20 +1346,10 @@ export class ChatController {
       );
     if (!typingDue && !visibleDue) return false;
 
-    const messageId = safeString(
-      this.compactionTurn.incomingMessageId || "",
-    ).trim();
-    const reactionDue =
-      visibleDue &&
-      Boolean(messageId) &&
-      (this.lastCompactionReactionAt <= 0 ||
-        now - this.lastCompactionReactionAt >= WORKING_REACTION_INTERVAL_MS);
     const context = this.compactionWorkingIndicatorContext({
       event: "tick",
       tick: this.compactionIndicatorTick,
-      reactionDue,
-      reactionTick: this.compactionReactionTick,
-      reactionIntervalMs: WORKING_REACTION_INTERVAL_MS,
+      workingStarted: true,
     });
     const selected = [...typingIndicators, ...visibleIndicators];
     if (visibleIndicators.length || !this.compactionWorkingIndicators.length) {
@@ -1230,10 +1366,6 @@ export class ChatController {
         : Promise.resolve([]),
     ]);
     if (visibleDue) this.compactionIndicatorTick += 1;
-    if (reactionDue) {
-      this.lastCompactionReactionAt = now;
-      this.compactionReactionTick += 1;
-    }
     return [...typingResults, ...visibleResults].some(Boolean);
   }
 
@@ -1248,21 +1380,14 @@ export class ChatController {
     );
     if (!editable) return false;
     this.activeWorkingIndicators = selected;
-    const messageId = this.currentIncomingMessageId();
     const context = this.workingIndicatorContext({
       event: "tick",
       tick: 0,
-      reactionDue: Boolean(messageId),
-      reactionTick: this.workingReactionTick,
-      reactionIntervalMs: WORKING_REACTION_INTERVAL_MS,
+      workingStarted: true,
     });
     const result = await this.callWorkingIndicator(editable, "tick", context);
     this.lastWorkingIndicatorAt = Date.now();
     this.workingIndicatorTick += 1;
-    if (messageId) {
-      this.lastWorkingReactionAt = this.lastWorkingIndicatorAt;
-      this.workingReactionTick += 1;
-    }
     return Boolean(result);
   }
 
@@ -1282,7 +1407,7 @@ export class ChatController {
       return;
     }
     if (editableStarted) {
-      // Subsequent animation ticks still use the normal chat polling path.
+      // Subsequent editable-message refreshes use the normal chat polling path.
       // Do not poll synchronously here: before the driver marks the turn active,
       // pollTyping can classify the just-created Working notice as stale.
       return;
@@ -1436,7 +1561,6 @@ export class ChatController {
     const context = this.workingIndicatorContext({
       event: "tick",
       tick: this.workingIndicatorTick,
-      reactionDue: false,
     });
     const result = await this.callWorkingIndicator(
       editable,
@@ -1494,18 +1618,10 @@ export class ChatController {
       );
     if (!typingDue && !visibleDue) return false;
 
-    const messageId = this.currentIncomingMessageId();
-    const reactionDue =
-      visibleDue &&
-      Boolean(messageId) &&
-      (this.lastWorkingReactionAt <= 0 ||
-        now - this.lastWorkingReactionAt >= WORKING_REACTION_INTERVAL_MS);
     const context = this.workingIndicatorContext({
       event: "tick",
       tick: this.workingIndicatorTick,
-      reactionDue,
-      reactionTick: this.workingReactionTick,
-      reactionIntervalMs: WORKING_REACTION_INTERVAL_MS,
+      workingStarted: true,
     });
     const selected = [...typingIndicators, ...visibleIndicators];
     if (visibleIndicators.length || !this.activeWorkingIndicators.length) {
@@ -1522,10 +1638,6 @@ export class ChatController {
         : Promise.resolve([]),
     ]);
     if (visibleDue) this.workingIndicatorTick += 1;
-    if (reactionDue) {
-      this.lastWorkingReactionAt = now;
-      this.workingReactionTick += 1;
-    }
     return [...typingResults, ...visibleResults].some(Boolean);
   }
 
@@ -2795,12 +2907,15 @@ export class ChatController {
     const wanted = this.getRecoverableSessionFile();
     if (wanted) await this.connect({ restoreSession: true });
     await this.driver.shutdownSession();
+    await this.clearAllWaitingReactions().catch(() => {});
     this.currentTurn = null;
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
     this.pendingSubmittedDeliveryTargets = [];
     this.coalescedDeliveryTargets = [];
+    this.startedReactionRequestTags.clear();
+    this.deferredWorkingReactionRequestTags.clear();
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
@@ -3610,12 +3725,43 @@ export class ChatController {
         this.markAcceptedMessage(this.backendAcceptedIncomingMessageId);
         return;
       }
-      case "user_message_start":
+      case "turn_waiting":
+        await this.showWaitingReaction(event.requestTag);
+        return;
+      case "queue_idle":
+        await this.clearAllWaitingReactions({ startDeferredWorking: true });
+        return;
+      case "user_message_start": {
+        const requestTag = safeString(event.requestTag).trim();
+        if (requestTag) {
+          this.startedReactionRequestTags.add(requestTag);
+        }
+        const hadWaitingReaction = Boolean(
+          event.requestTag &&
+          (this.waitingReactionsByRequestTag.has(event.requestTag) ||
+            this.waitingReactionClearsByRequestTag.has(event.requestTag)),
+        );
+        const waitingReactionCleared =
+          !hadWaitingReaction ||
+          (event.requestTag
+            ? await this.clearWaitingReaction(event.requestTag)
+            : true);
         await this.activatePendingSubmittedDeliveryTarget(
           event.text,
           event.requestTag,
         );
+        this.backendAcceptedIncomingMessageId = this.currentIncomingMessageId();
+        this.markAcceptedMessage(this.backendAcceptedIncomingMessageId);
+        if (waitingReactionCleared) {
+          if (requestTag) {
+            this.deferredWorkingReactionRequestTags.delete(requestTag);
+          }
+          await this.startBackendAcceptedWorkingReaction();
+        } else if (hadWaitingReaction && requestTag) {
+          this.deferredWorkingReactionRequestTags.add(requestTag);
+        }
         return;
+      }
       case "passive_notice":
         if (event.noticeKind === "compaction_end") {
           await this.deliverCompactionEndNotice(event.text);
@@ -3649,6 +3795,11 @@ export class ChatController {
         }
         return;
       case "turn_complete":
+        if (event.requestTag) {
+          await this.clearWaitingReaction(event.requestTag);
+          this.startedReactionRequestTags.delete(event.requestTag);
+          this.deferredWorkingReactionRequestTags.delete(event.requestTag);
+        }
         if (event.chatRunContext) {
           this.recoverCanonicalRunEvent(
             event.chatRunContext,
@@ -3664,6 +3815,11 @@ export class ChatController {
         }
         return;
       case "turn_error":
+        if (event.requestTag) {
+          await this.clearWaitingReaction(event.requestTag);
+          this.startedReactionRequestTags.delete(event.requestTag);
+          this.deferredWorkingReactionRequestTags.delete(event.requestTag);
+        }
         if (event.chatRunContext) {
           this.recoverCanonicalRunEvent(
             event.chatRunContext,

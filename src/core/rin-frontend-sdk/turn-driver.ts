@@ -106,6 +106,8 @@ export type RinFrontendTurnDriverEvent =
   | { type: "frontend_status"; phase: RinFrontendTurnPhase }
   | { type: "working_visible"; visible: boolean }
   | { type: "turn_accepted"; requestTag?: string }
+  | { type: "turn_waiting"; requestTag: string }
+  | { type: "queue_idle" }
   | {
       type: "user_message_start";
       text: string;
@@ -197,6 +199,7 @@ export class RinFrontendTurnDriver {
   } | null = null;
   private turnInterruptionSeq = 0;
   private ignoredTerminalRequestTags = new Set<string>();
+  private readonly startedRequestTags = new Set<string>();
   private pendingTurnCount = 0;
   private daemonShutdownDetached = false;
 
@@ -330,6 +333,7 @@ export class RinFrontendTurnDriver {
   dispose() {
     this.failLiveTurn(createRinFrontendTurnCancelledError());
     this.resetAssistantSegmentTracking();
+    this.startedRequestTags.clear();
     this.frontendPhase = "idle";
     const client = this.client;
     this.client = null;
@@ -1407,6 +1411,7 @@ export class RinFrontendTurnDriver {
     } & RinToolStartupOptions,
   ): Promise<RinFrontendTurnResult> {
     const turnInterruptionSeq = this.turnInterruptionSeq;
+    let activeRequestTag = "";
     this.pendingTurnCount += 1;
     try {
       const promptSource = safeString(input.source).trim() || this.promptSource;
@@ -1498,6 +1503,7 @@ export class RinFrontendTurnDriver {
       this.throwIfTurnInterrupted(turnInterruptionSeq);
       const requestTag =
         safeString(input.requestTag).trim() || this.createTurnRequestTag();
+      activeRequestTag = requestTag;
       const existingLiveTurn = this.liveTurn;
       if (!existingLiveTurn) {
         this.resetAssistantSegmentTracking();
@@ -1525,6 +1531,13 @@ export class RinFrontendTurnDriver {
           sessionFile: targetSessionFile,
           gate: inputGate,
         });
+        if (
+          admission &&
+          admission.queued === true &&
+          !this.startedRequestTags.has(requestTag)
+        ) {
+          this.emit({ type: "turn_waiting", requestTag });
+        }
         this.throwIfQueuedOffline(requestTag);
         const terminalWait = this.client!.request<any>({
           type: "await_turn_terminal",
@@ -1611,6 +1624,7 @@ export class RinFrontendTurnDriver {
           ).trim() || undefined,
       };
     } finally {
+      if (activeRequestTag) this.startedRequestTags.delete(activeRequestTag);
       this.pendingTurnCount = Math.max(0, this.pendingTurnCount - 1);
     }
   }
@@ -1717,6 +1731,15 @@ export class RinFrontendTurnDriver {
             );
           },
         });
+        if (
+          payload.type === "queue_update" &&
+          Array.isArray(payload.steering) &&
+          Array.isArray(payload.followUp)
+        ) {
+          if (payload.steering.length + payload.followUp.length === 0) {
+            this.emit({ type: "queue_idle" });
+          }
+        }
       }
     }
     const backendEvents =
@@ -1764,6 +1787,7 @@ export class RinFrontendTurnDriver {
       }
       case "user_message_start": {
         const requestTag = safeString(event.requestTag).trim();
+        if (requestTag) this.startedRequestTags.add(requestTag);
         this.backendTurnRequestTag =
           requestTag ||
           this.backendTurnRequestTag ||

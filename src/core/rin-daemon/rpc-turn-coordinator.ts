@@ -306,6 +306,13 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
     );
   }
 
+  isAdmissionPending(requestTag: string): boolean {
+    this.assertAdmissionOpen();
+    return this.pendingAdmissions.some(
+      (admission) => admission.requestTag === requestTag,
+    );
+  }
+
   observePersistedUser(requestTag: string): void {
     if (!requestTag) return;
     const acceptedAs = this.admittedByTag.get(requestTag);
