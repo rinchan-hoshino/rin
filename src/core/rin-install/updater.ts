@@ -139,10 +139,12 @@ export function buildTargetUserUpdaterCommand(
     commandAsUserInvocation?: typeof commandAsUserInvocation;
   } = {},
 ) {
-  const releaseArgs =
+  const releaseArgs = [
+    "--version",
     options.release.channel === "git"
-      ? ["--branch", options.release.ref]
-      : ["--version", options.release.version];
+      ? options.release.ref
+      : options.release.version,
+  ];
   const invocation = (deps.commandAsUserInvocation ?? commandAsUserInvocation)(
     options.targetUser,
     managedNodeExecutablePath(options.installDir),

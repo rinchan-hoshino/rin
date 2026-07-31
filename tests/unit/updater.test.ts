@@ -148,7 +148,7 @@ test("buildTargetUserUpdaterCommand delegates the complete updater entry", () =>
         "--preconfirmed",
         "--release-channel",
         "git",
-        "--branch",
+        "--version",
         "3347b88f",
       ],
       env: { HOME: "/home/alice" },
