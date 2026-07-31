@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import os from "node:os";
-import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { sleep } from "../platform/process.js";
@@ -49,19 +48,12 @@ export type ManagedRuntimeServiceActionContext = Pick<
   | "capture"
   | "canConnectSocket"
 > &
-  NonNullable<Parameters<typeof readInstallerManifestForTarget>[1]> & {
-    holdServiceFile?: (
-      kind: ManagedRuntimeService["kind"],
-      filePath: string,
-      hold: boolean,
-    ) => void;
-  };
+  NonNullable<Parameters<typeof readInstallerManifestForTarget>[1]>;
 
 export function createManagedRuntimeServiceActionContext(options: {
   targetUser: string;
   installDir: string;
   currentUser?: string;
-  serviceFileHoldCommand?: string[];
 }): ManagedRuntimeServiceActionContext {
   const currentUser = String(options.currentUser || os.userInfo().username);
   const targetUser = String(options.targetUser || currentUser);
@@ -112,16 +104,6 @@ export function createManagedRuntimeServiceActionContext(options: {
     systemctl,
     exec,
     capture,
-    holdServiceFile: options.serviceFileHoldCommand?.length
-      ? (kind, filePath, hold) => {
-          exec([
-            ...options.serviceFileHoldCommand!,
-            kind,
-            hold ? "hold" : "release",
-            filePath,
-          ]);
-        }
-      : undefined,
     canConnectSocket: async () => await canConnectDaemonSocket(socketPath, 500),
   };
 }
@@ -338,156 +320,6 @@ async function tryManagedWindowsStartupAction(
     }
   }
   return service.label;
-}
-
-function fsyncParentDirectory(filePath: string) {
-  const fd = fs.openSync(path.dirname(filePath), "r");
-  try {
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
-export function setSystemdUnitFileHold(unitPath: string, hold: boolean) {
-  const heldPath = `${unitPath}.rin-update-hold`;
-  const unitEntry = fs.existsSync(unitPath) ? fs.lstatSync(unitPath) : null;
-  const heldEntry = fs.existsSync(heldPath) ? fs.lstatSync(heldPath) : null;
-  const isPersistentMask =
-    unitEntry?.isSymbolicLink() && fs.readlinkSync(unitPath) === "/dev/null";
-  if (hold) {
-    if (heldEntry?.isFile() && isPersistentMask) return heldPath;
-    if (heldEntry?.isFile() && !unitEntry) {
-      fs.symlinkSync("/dev/null", unitPath);
-      fsyncParentDirectory(unitPath);
-      return heldPath;
-    }
-    if (!unitEntry?.isFile() || heldEntry) {
-      throw new Error("rin_systemd_unit_hold_ambiguous");
-    }
-    fs.renameSync(unitPath, heldPath);
-    fs.symlinkSync("/dev/null", unitPath);
-    fsyncParentDirectory(unitPath);
-    return heldPath;
-  }
-  if (unitEntry?.isFile() && !heldEntry) return unitPath;
-  if (heldEntry?.isFile() && (isPersistentMask || !unitEntry)) {
-    if (isPersistentMask) fs.unlinkSync(unitPath);
-    fs.renameSync(heldPath, unitPath);
-    fsyncParentDirectory(unitPath);
-    return unitPath;
-  }
-  throw new Error("rin_systemd_unit_hold_ambiguous");
-}
-
-export function setWindowsStartupEntryHold(startupPath: string, hold: boolean) {
-  const heldPath = `${startupPath}.rin-update-hold`;
-  const startupExists = fs.existsSync(startupPath);
-  const heldExists = fs.existsSync(heldPath);
-  if (startupExists && heldExists) {
-    throw new Error("rin_windows_startup_hold_ambiguous");
-  }
-  if (hold) {
-    if (heldExists) return heldPath;
-    if (!startupExists) {
-      throw new Error(`rin_managed_service_missing_path:${startupPath}`);
-    }
-    fs.renameSync(startupPath, heldPath);
-    return heldPath;
-  }
-  if (startupExists) return startupPath;
-  if (!heldExists) {
-    throw new Error(`rin_managed_service_missing_path:${startupPath}`);
-  }
-  fs.renameSync(heldPath, startupPath);
-  return startupPath;
-}
-
-function setManagedServiceFileHold(
-  context: ManagedRuntimeServiceActionContext,
-  service: ManagedRuntimeService,
-  hold: boolean,
-) {
-  if (!service.path) {
-    throw new Error(`rin_managed_service_missing_path:${service.label}`);
-  }
-  if (context.holdServiceFile) {
-    context.holdServiceFile(service.kind, service.path, hold);
-    return;
-  }
-  if (!context.isTargetUser) {
-    throw new Error("rin_managed_service_file_hold_target_executor_required");
-  }
-  if (service.kind === "systemd") {
-    setSystemdUnitFileHold(service.path, hold);
-    return;
-  }
-  if (service.kind === "windows-startup") {
-    setWindowsStartupEntryHold(service.path, hold);
-  }
-}
-
-export async function setManagedServiceStartHold(
-  context: ManagedRuntimeServiceActionContext,
-  hold: boolean,
-  explicitService?: ManagedRuntimeService,
-) {
-  const service = explicitService || readManagedRuntimeService(context);
-  if (service.kind === "systemd") {
-    if (!context.systemctl) {
-      throw new Error("rin_managed_service_unsupported:systemd");
-    }
-    if (hold) {
-      context.exec([
-        context.systemctl,
-        "--user",
-        "mask",
-        "--runtime",
-        service.label,
-      ]);
-      setManagedServiceFileHold(context, service, true);
-      context.capture([context.systemctl, "--user", "daemon-reload"], {
-        stdio: "ignore",
-      });
-    } else {
-      setManagedServiceFileHold(context, service, false);
-      context.capture([context.systemctl, "--user", "daemon-reload"], {
-        stdio: "ignore",
-      });
-      context.exec([
-        context.systemctl,
-        "--user",
-        "unmask",
-        "--runtime",
-        service.label,
-      ]);
-    }
-    return service.label;
-  }
-  if (service.kind === "launchd") {
-    if (process.platform !== "darwin") {
-      throw new Error("rin_managed_service_unsupported:launchd");
-    }
-    const domain = launchdDomainForTargetUser(context.targetUser);
-    context.capture(
-      ["launchctl", hold ? "disable" : "enable", `${domain}/${service.label}`],
-      { stdio: "ignore" },
-    );
-    return service.label;
-  }
-  if (service.kind === "windows-startup") {
-    if (process.platform !== "win32") {
-      throw new Error("rin_managed_service_unsupported:windows-startup");
-    }
-    if (!context.isTargetUser) {
-      throw new Error(
-        `rin_windows_daemon_cross_user_unsupported:${context.targetUser}`,
-      );
-    }
-    setManagedServiceFileHold(context, service, hold);
-    return service.label;
-  }
-  throw new Error(`rin_managed_service_unsupported:${(service as any).kind}`);
 }
 
 export async function tryManagedServiceAction(

@@ -4,8 +4,8 @@ import {
   sourceFrontendIdentity,
 } from "../rin-frontend-sdk/index.js";
 import {
+  assertDaemonAvailable,
   createTargetExecutionContext,
-  ensureDaemonAvailable,
   extractSubcommandArgv,
   ParsedArgs,
 } from "../rin/shared.js";
@@ -18,7 +18,7 @@ export async function runGui(parsed: ParsedArgs, rawArgv: string[] = []) {
   parseRinGuiArgs(guiArgs);
   const context = createTargetExecutionContext(parsed);
 
-  await ensureDaemonAvailable(context);
+  await assertDaemonAvailable(context);
 
   const client = new RinDaemonFrontendClient({
     socketPath: context.socketPath,

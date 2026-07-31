@@ -61,6 +61,124 @@ function createLauncherDeps(options: { metadata?: any } = {}) {
   };
 }
 
+test("managed runtime fence release attempts update after migration failure", async () => {
+  const migrationFailure = new Error("migration release failed");
+  const updateFailure = new Error("update release failed");
+  const events: string[] = [];
+  await assert.rejects(
+    finalize.releaseManagedRuntimeFences({
+      releaseMigration: async () => {
+        events.push("migration");
+        throw migrationFailure;
+      },
+      releaseUpdate: async () => {
+        events.push("update");
+        throw updateFailure;
+      },
+    }),
+    (error: any) =>
+      error instanceof AggregateError &&
+      error.message === "rin_update_composite_fence_release_failed" &&
+      error.errors[0] === migrationFailure &&
+      error.errors[1] === updateFailure,
+  );
+  assert.deepEqual(events, ["migration", "update"]);
+});
+
+test("managed runtime transition holds an update fence before stop and releases it before restart", async () => {
+  const events: string[] = [];
+  await finalize.runManagedRuntimeTransition({
+    acquireFence: async () => {
+      events.push("fence:acquire");
+      return {
+        release: async () => {
+          events.push("fence:release");
+        },
+      };
+    },
+    stop: async () => events.push("stop"),
+    mutate: async () => events.push("mutate"),
+    activate: async () => events.push("activate"),
+    restart: async () => events.push("restart"),
+  });
+  assert.deepEqual(events, [
+    "fence:acquire",
+    "stop",
+    "mutate",
+    "activate",
+    "fence:release",
+    "restart",
+  ]);
+});
+
+test("managed runtime transition does not roll back committed state when fence release retries", async () => {
+  const events: string[] = [];
+  let releaseAttempts = 0;
+  await assert.rejects(
+    finalize.runManagedRuntimeTransition({
+      acquireFence: async () => ({
+        release: async () => {
+          events.push("fence:release");
+          releaseAttempts += 1;
+          if (releaseAttempts === 1) {
+            throw new Error("fence release failed");
+          }
+        },
+      }),
+      stop: async () => events.push("stop"),
+      mutate: async () => events.push("mutate"),
+      activate: async () => events.push("activate"),
+      commit: async () => events.push("commit"),
+      recover: async () => events.push("recover"),
+      restart: async () => events.push("restart"),
+    }),
+    /fence release failed/,
+  );
+  assert.deepEqual(events, [
+    "stop",
+    "mutate",
+    "activate",
+    "commit",
+    "fence:release",
+    "fence:release",
+    "restart",
+  ]);
+});
+
+test("managed runtime transition releases the fence before recovery restart", async () => {
+  for (const failingStep of ["stop", "mutate", "activate"] as const) {
+    const events: string[] = [];
+    await assert.rejects(
+      finalize.runManagedRuntimeTransition({
+        acquireFence: async () => {
+          events.push("fence:acquire");
+          return {
+            release: async () => events.push("fence:release"),
+          };
+        },
+        stop: async () => {
+          events.push("stop");
+          if (failingStep === "stop") throw new Error("interrupted:stop");
+        },
+        mutate: async () => {
+          events.push("mutate");
+          if (failingStep === "mutate") throw new Error("interrupted:mutate");
+        },
+        activate: async () => {
+          events.push("activate");
+          if (failingStep === "activate") {
+            throw new Error("interrupted:activate");
+          }
+        },
+        recover: async () => events.push("recover"),
+        restart: async () => events.push("restart"),
+      }),
+      new RegExp(`interrupted:${failingStep}`),
+    );
+    assert.deepEqual(events.slice(-3), ["recover", "fence:release", "restart"]);
+  }
+});
+
 test("managed runtime transition attempts restart when stop reports failure", async () => {
   const events: string[] = [];
   await assert.rejects(
@@ -347,6 +465,44 @@ test("managed runtime transition reports both mutation and recovery failures", a
       error.errors[0] === mutationFailure &&
       error.errors[1] === restartFailure,
   );
+});
+
+test("managed runtime transition reports recovery and bounded fence release failures", async () => {
+  const mutationFailure = new Error("migration failed");
+  const recoveryFailure = new Error("recovery failed");
+  let releaseAttempts = 0;
+  let restartAttempted = false;
+  await assert.rejects(
+    finalize.runManagedRuntimeTransition({
+      acquireFence: async () => ({
+        release: async () => {
+          releaseAttempts += 1;
+          throw new Error(`release failed:${releaseAttempts}`);
+        },
+      }),
+      stop: async () => {},
+      mutate: async () => {
+        throw mutationFailure;
+      },
+      activate: async () => {},
+      recover: async () => {
+        throw recoveryFailure;
+      },
+      restart: async () => {
+        restartAttempted = true;
+      },
+    }),
+    (error: any) =>
+      error instanceof AggregateError &&
+      error.message ===
+        "rin_update_failure_recovery_and_fence_release_failed" &&
+      error.errors[0] === mutationFailure &&
+      error.errors[1] === recoveryFailure &&
+      error.errors[2] instanceof AggregateError &&
+      error.errors[2].errors.length === 2,
+  );
+  assert.equal(releaseAttempts, 2);
+  assert.equal(restartAttempted, false);
 });
 
 test("core update launcher refresh rewrites the target user's launchers", () => {

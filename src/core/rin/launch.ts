@@ -7,8 +7,8 @@ import {
   RIN_TUI_RUNTIME_ROLE_ENV,
 } from "../tui-runtime-env.js";
 import {
+  assertDaemonAvailable,
   createTargetExecutionContext,
-  ensureDaemonAvailable,
   installConfigPath,
   ParsedArgs,
   resolveRuntimeAgentDirForTarget,
@@ -69,11 +69,11 @@ export async function resolveTuiLaunchEnvironment(
   context: ReturnType<typeof createTargetExecutionContext>,
   runtimeEnv: NodeJS.ProcessEnv,
   deps: {
-    ensureDaemonAvailable?: typeof ensureDaemonAvailable;
+    assertDaemonAvailable?: typeof assertDaemonAvailable;
   } = {},
 ): Promise<{ runtimeEnv: NodeJS.ProcessEnv; maintenanceModeNotice?: string }> {
   try {
-    await (deps.ensureDaemonAvailable || ensureDaemonAvailable)(context);
+    await (deps.assertDaemonAvailable || assertDaemonAvailable)(context);
     return { runtimeEnv };
   } catch (error) {
     return {

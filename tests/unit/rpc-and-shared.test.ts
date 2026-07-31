@@ -124,32 +124,27 @@ test("shared resolveParsedArgs keeps passthrough and install defaults coherent",
   );
 });
 
-test("ensureDaemonAvailable uses the managed service without spawning an unmanaged daemon", async () => {
+test("assertDaemonAvailable observes a ready daemon without lifecycle mutation", async () => {
   const execCalls: string[][] = [];
-  let socketChecks = 0;
-  await shared.ensureDaemonAvailable({
+  await shared.assertDaemonAvailable({
     targetUser: "demo",
-    systemctl: "/usr/bin/systemctl",
-    managedServiceUnits: ["rin-daemon-demo.service"],
-    canConnectSocket: async () => ++socketChecks > 1,
+    canConnectSocket: async () => true,
     exec: (argv: string[]) => execCalls.push(argv),
   } as any);
-  assert.deepEqual(execCalls, [
-    ["/usr/bin/systemctl", "--user", "start", "rin-daemon-demo.service"],
-  ]);
+  assert.deepEqual(execCalls, []);
 });
 
-test("ensureDaemonAvailable does not spawn unmanaged daemon without a managed service", async () => {
+test("assertDaemonAvailable reports an unavailable daemon without lifecycle mutation", async () => {
   const execCalls: string[][] = [];
   await assert.rejects(
-    shared.ensureDaemonAvailable({
+    shared.assertDaemonAvailable({
       targetUser: "demo",
-      systemctl: "",
-      managedServiceUnits: [],
+      systemctl: "/usr/bin/systemctl",
+      managedServiceUnits: ["rin-daemon-demo.service"],
       canConnectSocket: async () => false,
       exec: (argv: string[]) => execCalls.push(argv),
     } as any),
-    /rin_daemon_unavailable: managed daemon service did not become available for demo/,
+    /rin_daemon_unavailable: managed daemon service is unavailable for demo/,
   );
   assert.deepEqual(execCalls, []);
 });
@@ -300,37 +295,33 @@ test("tui launch helpers target the direct TUI runner", () => {
   );
 });
 
-test("TUI launch environment reports maintenance notice when the daemon is unavailable", async () => {
-  const available = await launch.resolveTuiLaunchEnvironment(
-    {} as any,
-    { BASE: "1" } as any,
-    { ensureDaemonAvailable: async () => undefined },
-  );
-  assert.equal(available.runtimeEnv.BASE, "1");
-  assert.equal("RIN_TUI_RUNTIME_ROLE" in available.runtimeEnv, false);
-
-  const unavailable = await launch.resolveTuiLaunchEnvironment(
-    {} as any,
-    { BASE: "1" } as any,
-    {
-      ensureDaemonAvailable: async () => {
-        throw new Error("daemon down");
-      },
+test("TUI launch observes daemon availability without starting the managed service", async () => {
+  const executed: string[][] = [];
+  let probes = 0;
+  const context = {
+    systemctl: "/usr/bin/systemctl",
+    managedServiceUnits: ["rin-daemon-rin.service"],
+    exec(argv: string[]) {
+      executed.push(argv);
     },
-  );
+    async canConnectSocket() {
+      probes += 1;
+      return probes > 1;
+    },
+  } as any;
+
+  const unavailable = await launch.resolveTuiLaunchEnvironment(context, {
+    BASE: "1",
+  } as any);
+
+  assert.deepEqual(executed, []);
+  assert.equal(probes, 1);
   assert.equal(unavailable.runtimeEnv.BASE, "1");
   assert.equal(unavailable.runtimeEnv.RIN_TUI_RUNTIME_ROLE, "maintenance-tui");
-  assert.match(
-    unavailable.maintenanceModeNotice,
-    /Rin daemon is unavailable \(daemon down\)\./,
-  );
+  assert.match(unavailable.maintenanceModeNotice, /Rin daemon is unavailable/);
   assert.match(
     unavailable.maintenanceModeNotice,
     /Entering temporary maintenance mode\./,
-  );
-  assert.match(
-    unavailable.maintenanceModeNotice,
-    /features may be unavailable/,
   );
 });
 

@@ -1,6 +1,7 @@
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFileSync, spawn } from "node:child_process";
 
 import {
@@ -21,6 +22,7 @@ import {
   installedAppEntryCandidates,
   launchAgentPlistPathForHome,
   managedLaunchdLabel,
+  managedNodeExecutablePath,
   managedSystemdUnitCandidates,
   managedSystemdUnitName,
   managedSystemdUnitPathsForHome,
@@ -29,6 +31,7 @@ import {
   windowsStartupLauncherPathForHome,
 } from "./paths.js";
 import { sleep } from "../platform/process.js";
+import { recoverOwnedLegacySystemdUnitHold } from "./legacy-service-hold.js";
 import {
   buildDaemonSocketProbeScript,
   canConnectDaemonSocket,
@@ -192,6 +195,13 @@ function writeManagedServiceFile(
     ownerGroup,
     mode = MANAGED_SERVICE_FILE_MODE,
   } = options;
+  try {
+    if (fs.lstatSync(filePath).isSymbolicLink()) {
+      throw new Error(`rin_managed_service_symlink_refused:${filePath}`);
+    }
+  } catch (error: any) {
+    if (error?.code !== "ENOENT") throw error;
+  }
   if (elevated) {
     writeTextFileWithPrivilege(filePath, value, ownerUser, ownerGroup, mode);
     return;
@@ -358,13 +368,78 @@ export function buildSystemdUserService(
   const execStart = [...nodeCommandArgs, daemonEntry]
     .map((entry) => systemdQuote(entry))
     .join(" ");
-  const service = `[Unit]\nDescription=Rin daemon for ${targetUser}\nAfter=network.target\n\n[Service]\nType=simple\nWorkingDirectory=${targetHome}\nEnvironment=${systemdQuote(`PATH=${runtimePath}`)}\nEnvironment=${systemdQuote(`RIN_DIR=${installDir}`)}\nEnvironment=${systemdQuote("RIN_SYSTEMD_CGROUP_DELEGATION=1")}\nExecStart=${execStart}\nDelegate=memory\nDelegateSubgroup=daemon\nOOMPolicy=continue\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  const service = `[Unit]\nDescription=Rin daemon for ${targetUser}\nAfter=network.target\nConditionPathExists=!%t/rin-daemon/update.lock\n\n[Service]\nType=simple\nWorkingDirectory=${targetHome}\nEnvironment=${systemdQuote(`PATH=${runtimePath}`)}\nEnvironment=${systemdQuote(`RIN_DIR=${installDir}`)}\nEnvironment=${systemdQuote("RIN_SYSTEMD_CGROUP_DELEGATION=1")}\nExecStart=${execStart}\nDelegate=memory\nDelegateSubgroup=daemon\nOOMPolicy=continue\nRestart=always\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
   return {
     kind: "systemd" as const,
     label: unitName,
     servicePath: unitPath,
     service,
   };
+}
+
+export function recoverOwnedLegacySystemdServiceHold(
+  targetUser: string,
+  installDir: string,
+  elevated: boolean,
+  deps: {
+    findSystemUser: (user: string) => any;
+    targetHomeForUser: (user: string) => string;
+    captureTargetCommand?: typeof captureCommandAsUser;
+    runSystemdCommand?: typeof runSystemdUserCommand;
+    targetNodePath?: string;
+  },
+) {
+  const label = managedSystemdUnitName(targetUser);
+  const servicePath = systemdUserUnitPathForHome(
+    deps.targetHomeForUser(targetUser),
+    label,
+  );
+  const context = systemdUserContext(targetUser, deps);
+  const runtimeMaskPath = path.join(
+    context.runtimeDir,
+    "systemd",
+    "user",
+    label,
+  );
+  if (elevated) {
+    const script = String.raw`
+import { pathToFileURL } from "node:url";
+const [modulePath, unitPath, runtimeMaskPath] = process.argv.slice(1);
+const { recoverOwnedLegacySystemdUnitHold } = await import(pathToFileURL(modulePath).href);
+process.stdout.write(recoverOwnedLegacySystemdUnitHold(unitPath, { runtimeMaskPath }) ? "owned\\n" : "none\\n");
+`;
+    let result = "";
+    try {
+      result = (deps.captureTargetCommand || captureCommandAsUser)(
+        targetUser,
+        deps.targetNodePath || managedNodeExecutablePath(installDir),
+        [
+          "--input-type=module",
+          "-e",
+          script,
+          fileURLToPath(new URL("./legacy-service-hold.js", import.meta.url)),
+          servicePath,
+          runtimeMaskPath,
+        ],
+      ).trim();
+    } catch (cause) {
+      throw new Error(`rin_systemd_legacy_hold_ambiguous:${servicePath}`, {
+        cause,
+      });
+    }
+    if (result === "none") return false;
+    if (result !== "owned") {
+      throw new Error(`rin_systemd_legacy_hold_invalid_result:${result}`);
+    }
+  } else if (
+    !recoverOwnedLegacySystemdUnitHold(servicePath, { runtimeMaskPath })
+  ) {
+    return false;
+  }
+
+  const runSystemd = deps.runSystemdCommand || runSystemdUserCommand;
+  runSystemd(targetUser, context, ["daemon-reload"], elevated);
+  return true;
 }
 
 export function installSystemdUserService(
@@ -382,6 +457,7 @@ export function installSystemdUserService(
     installDir,
     deps.targetHomeForUser,
   );
+  recoverOwnedLegacySystemdServiceHold(targetUser, installDir, elevated, deps);
   const { systemctl, userEnv, target } = systemdUserContext(targetUser, deps);
   const loginctl = firstExistingCommand(
     ["/usr/bin/loginctl", "/bin/loginctl"],
@@ -422,6 +498,7 @@ export function refreshManagedServiceFiles(
   },
 ) {
   if (process.platform !== "linux") return;
+  recoverOwnedLegacySystemdServiceHold(targetUser, installDir, elevated, deps);
   const spec = buildSystemdUserService(
     targetUser,
     installDir,
@@ -432,7 +509,14 @@ export function refreshManagedServiceFiles(
     deps.targetHomeForUser(targetUser),
     targetUser,
   )) {
-    if (!fs.existsSync(filePath)) continue;
+    let entry: fs.Stats;
+    try {
+      entry = fs.lstatSync(filePath);
+    } catch (error: any) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
+    if (!entry.isFile()) continue;
     writeManagedServiceFile(filePath, spec.service, {
       elevated,
       ownerUser: targetUser,
