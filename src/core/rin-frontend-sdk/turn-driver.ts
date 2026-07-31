@@ -207,6 +207,8 @@ export class RinFrontendTurnDriver {
   private disconnectedTurnRecovery: Promise<void> | null = null;
   private turnInterruptionSeq = 0;
   private ignoredTerminalRequestTags = new Set<string>();
+  private readonly acknowledgedIgnoredTerminalRequestTags = new Set<string>();
+  private readonly ignoredTerminalAckTasks = new Map<string, Promise<void>>();
   private readonly committedTerminalProjections = new Set<string>();
   private readonly terminalProjectionTasks = new Map<
     string,
@@ -570,6 +572,7 @@ export class RinFrontendTurnDriver {
         const oldest = this.ignoredTerminalRequestTags.values().next().value;
         if (!oldest) break;
         this.ignoredTerminalRequestTags.delete(oldest);
+        this.acknowledgedIgnoredTerminalRequestTags.delete(oldest);
       }
     }
     const session = this.abortedTurnSessionRef();
@@ -702,18 +705,60 @@ export class RinFrontendTurnDriver {
     return Boolean(this.client);
   }
 
+  private consumeIgnoredTerminal(payload: any) {
+    if (!payload || payload.type !== "rpc_turn_event") return null;
+    if (payload.event !== "complete" && payload.event !== "error") return null;
+    const requestTag = safeString(payload.requestTag).trim();
+    if (!requestTag || !this.ignoredTerminalRequestTags.has(requestTag)) {
+      return null;
+    }
+    return {
+      requestTag,
+      terminalId: safeString(payload.terminalRecord?.terminalId).trim(),
+    };
+  }
+
+  private async acknowledgeIgnoredTerminal(terminal: {
+    requestTag: string;
+    terminalId: string;
+  }) {
+    if (!terminal.terminalId) {
+      this.ignoredTerminalRequestTags.delete(terminal.requestTag);
+      this.acknowledgedIgnoredTerminalRequestTags.delete(terminal.requestTag);
+      return;
+    }
+    if (this.acknowledgedIgnoredTerminalRequestTags.has(terminal.requestTag)) {
+      return;
+    }
+    let task = this.ignoredTerminalAckTasks.get(terminal.requestTag);
+    if (!task) {
+      const acknowledgement = this.acknowledgeTerminal(
+        terminal.requestTag,
+        terminal.terminalId,
+      )
+        .then(() => {
+          this.acknowledgedIgnoredTerminalRequestTags.add(terminal.requestTag);
+        })
+        .finally(() => {
+          if (
+            this.ignoredTerminalAckTasks.get(terminal.requestTag) ===
+            acknowledgement
+          ) {
+            this.ignoredTerminalAckTasks.delete(terminal.requestTag);
+          }
+        });
+      task = acknowledgement;
+      this.ignoredTerminalAckTasks.set(terminal.requestTag, task);
+    }
+    await task.catch(() => {});
+  }
+
   private terminalRpcTurnPayloadMatchesCurrentSession(payload: any) {
     if (!payload || payload.type !== "rpc_turn_event") return true;
     if (payload.event !== "complete" && payload.event !== "error") {
       return true;
     }
     const incomingRequestTag = safeString(payload.requestTag).trim();
-    if (
-      incomingRequestTag &&
-      this.ignoredTerminalRequestTags.delete(incomingRequestTag)
-    ) {
-      return false;
-    }
     const incomingTurnId = safeString(
       payload.chatDeliveryContext?.turnId,
     ).trim();
@@ -1606,6 +1651,11 @@ export class RinFrontendTurnDriver {
     }
     if (event.type === "ui") {
       const payload: any = event.payload;
+      const ignoredTerminal = this.consumeIgnoredTerminal(payload);
+      if (ignoredTerminal) {
+        await this.acknowledgeIgnoredTerminal(ignoredTerminal);
+        return;
+      }
       if (!this.terminalRpcTurnPayloadMatchesCurrentSession(payload)) return;
       if (
         projectRinFrontendLifecycleEvent(payload) ||

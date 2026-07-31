@@ -1265,6 +1265,88 @@ test("frontend SDK shutdown session follows TUI shutdown without lifecycle cance
   assert.equal(settled, false);
 });
 
+test("frontend SDK retries one suppressed-terminal ACK without duplicate projection", async () => {
+  const client = createFrontendClient();
+  let ackAttempts = 0;
+  let finishRetryAck: (() => void) | null = null;
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type !== "ack_turn_terminal") return { ok: true };
+    ackAttempts += 1;
+    if (ackAttempts === 1) throw new Error("ack transport lost");
+    if (ackAttempts > 2) throw new Error("duplicate terminal ACK");
+    await new Promise<void>((resolve) => {
+      finishRetryAck = resolve;
+    });
+    return { ok: true };
+  };
+  let promptStarted = false;
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    promptStarted = true;
+    await new Promise(() => {});
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const activeTurn = driver.runTurn({
+    text: "abort me",
+    chatDeliveryContext: {
+      turnId: "turn-abort-terminal",
+      chatKey: "discord/1:2",
+      messageId: "message-abort-terminal",
+      ownerEpoch: "owner-abort-terminal",
+      attempt: 1,
+    },
+  });
+  activeTurn.catch(() => {});
+  await waitUntil(() => promptStarted, "active turn did not start");
+  const requestTag = client.calls.find((call: any) => call.type === "prompt")
+    .options.requestTag;
+
+  driver.interruptActiveTurnLikeTui();
+  await assert.rejects(activeTurn, /chat_turn_aborted/);
+  const terminalEvent = {
+    type: "rpc_turn_event",
+    event: "error",
+    requestTag,
+    error: "Request was aborted",
+    terminalRecord: {
+      terminalId: "terminal-aborted-turn",
+      state: "error",
+      terminalAt: "2026-07-31T10:01:42.000Z",
+    },
+  };
+  await emitDriverEvent(driver, terminalEvent);
+  assert.equal(ackAttempts, 1);
+
+  const retryOne = emitDriverEvent(driver, terminalEvent);
+  await waitUntil(() => ackAttempts === 2, "terminal ACK retry did not start");
+  const retryTwo = emitDriverEvent(driver, terminalEvent);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(ackAttempts, 2);
+  finishRetryAck?.();
+  await Promise.all([retryOne, retryTwo]);
+  await emitDriverEvent(driver, terminalEvent);
+  assert.equal(ackAttempts, 2);
+
+  const acknowledgements = client.calls.filter(
+    (call: any) =>
+      call.type === "request" && call.command?.type === "ack_turn_terminal",
+  );
+  assert.equal(acknowledgements.length, 2);
+  assert.deepEqual(acknowledgements[1], {
+    type: "request",
+    command: {
+      type: "ack_turn_terminal",
+      requestTag,
+      terminalId: "terminal-aborted-turn",
+    },
+  });
+});
+
 test("frontend SDK /new interrupts an active turn before creating the new session", async () => {
   const client = createFrontendClient();
   let promptStarted = false;
