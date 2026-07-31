@@ -993,7 +993,7 @@ export function publishInstalledRuntime(
     throw new Error("rin_current_release_replacement_requires_staging");
   }
   const stagedReleaseRoot =
-    releaseExists && deps.replaceExisting
+    releaseExists && (deps.activate === false || deps.replaceExisting)
       ? uniqueInstalledRuntimeSibling(releaseRoot, "reinstall", elevated)
       : undefined;
   const publishRoot = stagedReleaseRoot || releaseRoot;
@@ -1103,18 +1103,6 @@ export function publishInstalledRuntime(
           { cause: error },
         );
       }
-    }
-    if (
-      deps.activate === false &&
-      !stagedReleaseOwned &&
-      listInstalledReleaseNames(installDir, elevated).includes(
-        path.basename(publishRoot),
-      )
-    ) {
-      throw new Error(
-        `rin_staged_release_already_exists:${path.basename(publishRoot)}`,
-        { cause: error },
-      );
     }
     throw error;
   }

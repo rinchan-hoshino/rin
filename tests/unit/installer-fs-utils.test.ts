@@ -620,16 +620,27 @@ test("publishInstalledRuntime can stage a release without activating it", async 
     findSystemUser: () => null,
     release: release("1.0.0"),
   });
-  assert.throws(
-    () =>
-      fsUtils.publishInstalledRuntime(tempRoot, installDir, "rin", false, {
-        findSystemUser: () => null,
-        release: release("1.0.0"),
-        activate: false,
-      }),
-    /rin_staged_release_already_exists:1\.0\.0/,
+  const currentRestage = fsUtils.publishInstalledRuntime(
+    tempRoot,
+    installDir,
+    "rin",
+    false,
+    {
+      findSystemUser: () => null,
+      release: release("1.0.0"),
+      activate: false,
+    },
   );
+  assert.ok(currentRestage.stagedReleaseRoot);
   assert.equal(fsUtils.currentInstalledReleaseName(installDir, false), "1.0.0");
+  assert.equal(
+    fsUtils.discardStagedInstalledRuntime(
+      installDir,
+      currentRestage.stagedReleaseRoot,
+      false,
+    ),
+    true,
+  );
 
   const staged = fsUtils.publishInstalledRuntime(
     tempRoot,
@@ -644,14 +655,25 @@ test("publishInstalledRuntime can stage a release without activating it", async 
   );
   assert.equal(fsUtils.currentInstalledReleaseName(installDir, false), "1.0.0");
   await fs.access(staged.releaseRoot);
-  assert.throws(
-    () =>
-      fsUtils.publishInstalledRuntime(tempRoot, installDir, "rin", false, {
-        findSystemUser: () => null,
-        release: release("2.0.0"),
-        activate: false,
-      }),
-    /rin_staged_release_already_exists:2\.0\.0/,
+  const repeatedStage = fsUtils.publishInstalledRuntime(
+    tempRoot,
+    installDir,
+    "rin",
+    false,
+    {
+      findSystemUser: () => null,
+      release: release("2.0.0"),
+      activate: false,
+    },
+  );
+  assert.ok(repeatedStage.stagedReleaseRoot);
+  assert.equal(
+    fsUtils.discardStagedInstalledRuntime(
+      installDir,
+      repeatedStage.stagedReleaseRoot,
+      false,
+    ),
+    true,
   );
   await fs.access(staged.releaseRoot);
   assert.equal(
@@ -673,6 +695,81 @@ test("publishInstalledRuntime can stage a release without activating it", async 
     findSystemUser: () => null,
   });
   assert.equal(fsUtils.currentInstalledReleaseName(installDir, false), "2.0.0");
+});
+
+test("publishInstalledRuntime can atomically restage an existing unactivated release", async () => {
+  const tempRoot = await makeRuntimeSource();
+  const installDir = await fs.mkdtemp(
+    path.join(tempBaseDir, "rin-install-restage-"),
+  );
+  const release = {
+    channel: "stable",
+    version: "2.0.0",
+    branch: "stable",
+    ref: "v2.0.0",
+    sourceLabel: "stable 2.0.0",
+    archiveUrl: "https://example.invalid/rin-2.0.0.tgz",
+  };
+  const first = fsUtils.publishInstalledRuntime(
+    tempRoot,
+    installDir,
+    "rin",
+    false,
+    {
+      findSystemUser: () => null,
+      release,
+      activate: false,
+    },
+  );
+  const managedFile = path.join(
+    first.releaseRoot,
+    "dist",
+    "app",
+    "rin",
+    "main.js",
+  );
+  await fs.writeFile(
+    path.join(tempRoot, "dist", "app", "rin", "main.js"),
+    "restaged\n",
+    "utf8",
+  );
+
+  const restaged = fsUtils.publishInstalledRuntime(
+    tempRoot,
+    installDir,
+    "rin",
+    false,
+    {
+      findSystemUser: () => null,
+      release,
+      activate: false,
+    },
+  );
+  assert.ok(restaged.stagedReleaseRoot);
+  assert.equal(await fs.readFile(managedFile, "utf8"), "export {};");
+  assert.equal(
+    await fs.readFile(
+      path.join(restaged.stagedReleaseRoot, "dist", "app", "rin", "main.js"),
+      "utf8",
+    ),
+    "restaged\n",
+  );
+
+  const activated = fsUtils.activateInstalledRuntimeReplacement(
+    restaged.releaseRoot,
+    restaged.stagedReleaseRoot,
+    false,
+  );
+  assert.equal(await fs.readFile(managedFile, "utf8"), "restaged\n");
+  fsUtils.rollbackInstalledRuntimeReplacement(
+    restaged.releaseRoot,
+    activated.backupReleaseRoot,
+    false,
+  );
+  assert.equal(await fs.readFile(managedFile, "utf8"), "export {};");
+
+  await fs.rm(tempRoot, { recursive: true, force: true });
+  await fs.rm(installDir, { recursive: true, force: true });
 });
 
 test("publishInstalledRuntime can transactionally replace the current release", async () => {
