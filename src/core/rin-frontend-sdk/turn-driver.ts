@@ -487,6 +487,22 @@ export class RinFrontendTurnDriver {
     });
   }
 
+  async projectAuthoritativeTerminal(payload: Record<string, unknown>) {
+    const translated = this.backendEventTranslator.translate({
+      type: "ui",
+      payload,
+    });
+    let projected = false;
+    for (const event of translated) {
+      if (event.type !== "turn_complete" && event.type !== "turn_error") {
+        continue;
+      }
+      await this.handleBackendEvent(event);
+      projected = true;
+    }
+    return projected;
+  }
+
   async recoverUnacknowledgedChatTerminals(chatKey: string) {
     if (!this.client) throw new Error("frontend_session_not_connected");
     const response: any = await this.client.request({
@@ -497,11 +513,7 @@ export class RinFrontendTurnDriver {
       ? response.terminals
       : [];
     for (const terminal of terminals) {
-      const translated = this.backendEventTranslator.translate({
-        type: "ui",
-        payload: terminal,
-      });
-      for (const event of translated) await this.handleBackendEvent(event);
+      await this.projectAuthoritativeTerminal(terminal);
     }
     return terminals.length;
   }

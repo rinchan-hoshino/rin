@@ -2570,6 +2570,44 @@ test("frontend SDK turn driver does not reuse an older final when the current tu
   assert.notEqual(result.finalText, oldFinal);
 });
 
+test("frontend projects an authoritative terminal without current-session filtering", async () => {
+  const driver: any = createDriver();
+  const seen: any[] = [];
+  driver.subscribe((event: any) => seen.push(event));
+  await driver.connect();
+  driver.frontendState.sessionFile = "/tmp/newer-session.jsonl";
+
+  assert.equal(
+    await driver.projectAuthoritativeTerminal({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "detached-terminal-request",
+      sessionFile: "/tmp/older-session.jsonl",
+      sessionId: "older-session",
+      finalText: "detached terminal final",
+      chatDeliveryContext: {
+        turnId: "detached-terminal-turn",
+        chatKey: "discord/1:2",
+        messageId: "detached-terminal-message",
+      },
+      terminalRecord: {
+        terminalId: `terminal-${"c".repeat(64)}`,
+        state: "complete",
+        terminalAt: "2026-07-31T17:00:00.000Z",
+      },
+    }),
+    true,
+  );
+  assert.equal(
+    seen.some(
+      (event) =>
+        event.type === "turn_complete" &&
+        event.finalText === "detached terminal final",
+    ),
+    true,
+  );
+});
+
 test("frontend replays one durable terminal record and acknowledges it explicitly", async () => {
   const driver: any = createDriver();
   const seen: any[] = [];
