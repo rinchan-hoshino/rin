@@ -16,13 +16,19 @@ test("terminal reconciler routes durable backlog without waiting for ingress", a
       terminals: [
         {
           terminalId: "terminal-a",
+          requestTag: "chat-inbox-a",
           chatDeliveryContext: { chatKey: "discord/1:2" },
         },
         {
           terminalId: "terminal-b",
+          requestTag: "chat-inbox-b",
           chatDeliveryContext: { chatKey: "discord/1:2" },
         },
-        { terminalId: "not-chat-owned" },
+        {
+          terminalId: "scheduled-chat-delivery",
+          requestTag: "scheduled:cron:1",
+          chatDeliveryContext: { chatKey: "discord/1:2" },
+        },
       ],
     }),
     disconnect: async () => {

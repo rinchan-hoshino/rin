@@ -32,6 +32,8 @@ export async function reconcileChatTerminalEvents(
 ) {
   let handled = 0;
   for (const terminal of terminals) {
+    const requestTag = safeString(terminal?.requestTag).trim();
+    if (!requestTag.startsWith("chat-inbox-")) continue;
     const context = terminal?.chatDeliveryContext as
       | Record<string, unknown>
       | undefined;
