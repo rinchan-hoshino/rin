@@ -776,6 +776,8 @@ test("self-improve report renders recent distillation history", () => {
         startedAt: `2026-05-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
         finishedAt: `2026-05-${String(index + 1).padStart(2, "0")}T00:01:00.000Z`,
         attempts: 1,
+        auditError:
+          index === 24 ? "self_improve_audit_symlink_path" : undefined,
         changedFiles: [
           { path: "self_improve/skills/demo/SKILL.md", change: "updated" },
         ],
@@ -804,6 +806,8 @@ test("self-improve report renders recent distillation history", () => {
     assert.match(report, /Rin self-improve history/);
     assert.match(report, /self_improve:periodic_review/);
     assert.match(report, /25 linked run artifacts/);
+    assert.match(report, /1 observation failures/);
+    assert.match(report, /self_improve_audit_symlink_path/);
     assert.match(report, /updated:self_improve\/skills\/demo\/SKILL.md/);
 
     const detail = selfImprove.renderSelfImproveReport(agentDir, {
@@ -817,6 +821,8 @@ test("self-improve report renders recent distillation history", () => {
     assert.match(detail, /audit evidence:/);
     assert.match(detail, /run-25\.json/);
     assert.match(detail, /complete: yes/);
+    assert.match(detail, /audit observation error:/);
+    assert.match(detail, /self_improve_audit_symlink_path/);
 
     const tui = selfImprove.renderSelfImproveTui(
       agentDir,
@@ -849,6 +855,7 @@ test("self-improve report renders recent distillation history", () => {
     );
     assert.equal(backend.stats.totalRuns, 25);
     assert.equal(backend.stats.auditedRuns, 25);
+    assert.equal(backend.stats.auditObservationFailures, 1);
     assert.equal(backend.records.length, 25);
   } finally {
     fs.rmSync(agentDir, { recursive: true, force: true });

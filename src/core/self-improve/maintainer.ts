@@ -16,10 +16,9 @@ import { safeString } from "./core/utils.js";
 import { maintenanceLockPath } from "./paths.js";
 import { buildSelfImproveReviewPrompt } from "./prompt.js";
 import {
-  beginSelfImproveRunAudit,
-  completeSelfImproveRunAudit,
-  markSelfImproveRunAuditExecutionStarted,
-} from "./run-audit.js";
+  beginSelfImproveAuditObservation,
+  completeSelfImproveAuditObservation,
+} from "./audit-observer.js";
 
 export { buildSelfImproveReviewPrompt };
 
@@ -119,19 +118,6 @@ async function assertUsableSessionFile(sessionFile: string) {
   }
 }
 
-async function completeAuditOrPersistenceFailure(
-  input: Parameters<typeof completeSelfImproveRunAudit>[0],
-) {
-  try {
-    return await completeSelfImproveRunAudit(input);
-  } catch (error) {
-    if (error && typeof error === "object") {
-      Object.assign(error, { selfImproveAuditPersistence: true });
-    }
-    throw error;
-  }
-}
-
 async function runForkedSessionSelfImproveReview(options: {
   agentDir: string;
   runId: string;
@@ -142,89 +128,18 @@ async function runForkedSessionSelfImproveReview(options: {
   trigger?: string;
   additionalExtensionPaths?: string[];
 }) {
-  let auditHandle;
-  try {
-    auditHandle = await beginSelfImproveRunAudit({
-      agentDir: options.agentDir,
-      runId: options.runId,
-      kind: "self_improve_review",
-      startedAt: options.startedAt,
-      source: {
-        sessionFile: options.sessionFile,
-        leafId: options.leafId,
-        snapshotKey: options.snapshotKey,
-        trigger: options.trigger,
-      },
-    });
-  } catch (error) {
-    if (error && typeof error === "object") {
-      Object.assign(error, { selfImproveAuditPersistence: true });
-    }
-    throw error;
-  }
-  if (auditHandle.completedPath) {
-    const audit = await completeAuditOrPersistenceFailure({
-      agentDir: options.agentDir,
-      handle: auditHandle,
-      status: "completed",
-      finishedAt: new Date().toISOString(),
-    });
-    const exactEvidence = audit.evidenceRetained !== false && audit.complete;
-    if (audit.status === "failed") {
-      const error = new Error(
-        exactEvidence
-          ? audit.error || "self_improve_audit_recovered_failure"
-          : "self_improve_audit_recovered_incomplete_failure",
-      );
-      Object.assign(error, {
-        selfImproveAudit: audit,
-        selfImproveAuditHandle: auditHandle,
-      });
-      throw error;
-    }
-    return {
-      skipped: exactEvidence
-        ? "audit-already-completed"
-        : "audit-already-completed-incomplete",
-      forked: true,
-      saved: true,
-      recoveryIncomplete: !exactEvidence,
-      output: exactEvidence
-        ? audit.output || ""
-        : "Self-improve run already completed; exact terminal output evidence was redacted or truncated.",
-      changedFiles: audit.changedFiles,
-      audit,
-      auditHandle,
-    };
-  }
-
-  if (auditHandle.executionInterrupted) {
-    const error = new Error("self_improve_audit_interrupted_execution");
-    const audit = await completeAuditOrPersistenceFailure({
-      agentDir: options.agentDir,
-      handle: auditHandle,
-      status: "failed",
-      finishedAt: new Date().toISOString(),
-      error: error.message,
-    });
-    Object.assign(error, {
-      selfImproveAudit: audit,
-      selfImproveAuditHandle: auditHandle,
-    });
-    throw error;
-  }
-  try {
-    await markSelfImproveRunAuditExecutionStarted({
-      agentDir: options.agentDir,
-      handle: auditHandle,
-    });
-  } catch (error) {
-    if (error && typeof error === "object") {
-      Object.assign(error, { selfImproveAuditPersistence: true });
-    }
-    throw error;
-  }
-
+  const startedAudit = await beginSelfImproveAuditObservation({
+    agentDir: options.agentDir,
+    runId: options.runId,
+    kind: "self_improve_review",
+    startedAt: options.startedAt,
+    source: {
+      sessionFile: options.sessionFile,
+      leafId: options.leafId,
+      snapshotKey: options.snapshotKey,
+      trigger: options.trigger,
+    },
+  });
   let finalText: string;
   try {
     await assertUsableSessionFile(options.sessionFile);
@@ -239,59 +154,41 @@ async function runForkedSessionSelfImproveReview(options: {
       additionalExtensionPaths: options.additionalExtensionPaths,
     });
   } catch (error) {
-    let audit;
-    try {
-      audit = await completeAuditOrPersistenceFailure({
-        agentDir: options.agentDir,
-        handle: auditHandle,
-        status: "failed",
-        finishedAt: new Date().toISOString(),
-        error: error instanceof Error ? error.message : String(error),
-      });
-    } catch (auditError) {
-      if (auditError && typeof auditError === "object") {
-        Object.assign(auditError, { selfImproveAuditPersistence: true });
-      }
-      throw auditError;
-    }
-    if (error && typeof error === "object") {
-      Object.assign(error, {
-        selfImproveAudit: audit,
-        selfImproveAuditHandle: auditHandle,
-      });
-      throw error;
-    }
-    const wrapped = new Error(String(error));
-    Object.assign(wrapped, {
-      selfImproveAudit: audit,
-      selfImproveAuditHandle: auditHandle,
+    const observed = await completeSelfImproveAuditObservation({
+      agentDir: options.agentDir,
+      handle: startedAudit.handle,
+      status: "failed",
+      finishedAt: new Date().toISOString(),
+      error: error instanceof Error ? error.message : String(error),
+      auditError: startedAudit.auditError,
     });
-    throw wrapped;
+    const failure =
+      error && typeof error === "object" ? error : new Error(String(error));
+    Object.assign(failure, {
+      selfImproveAudit: observed.audit,
+      selfImproveAuditHandle: observed.auditHandle,
+      selfImproveAuditError: observed.auditError,
+    });
+    throw failure;
   }
 
-  let audit;
-  try {
-    audit = await completeAuditOrPersistenceFailure({
-      agentDir: options.agentDir,
-      handle: auditHandle,
-      status: "completed",
-      finishedAt: new Date().toISOString(),
-      output: finalText,
-    });
-  } catch (error) {
-    if (error && typeof error === "object") {
-      Object.assign(error, { selfImproveAuditPersistence: true });
-    }
-    throw error;
-  }
+  const observed = await completeSelfImproveAuditObservation({
+    agentDir: options.agentDir,
+    handle: startedAudit.handle,
+    status: "completed",
+    finishedAt: new Date().toISOString(),
+    output: finalText,
+    auditError: startedAudit.auditError,
+  });
   return {
     skipped: "",
     forked: true,
     saved: true,
     output: finalText,
-    changedFiles: audit.changedFiles,
-    audit,
-    auditHandle,
+    changedFiles: observed.changedFiles,
+    audit: observed.audit,
+    auditHandle: observed.auditHandle,
+    auditError: observed.auditError,
   };
 }
 

@@ -15,7 +15,7 @@ import {
   acknowledgeSelfImproveRunAudit,
   beginSelfImproveRunAudit,
   completeSelfImproveRunAudit,
-  markSelfImproveRunAuditExecutionStarted,
+  maintainSelfImproveRunAuditStorage,
   verifySelfImproveRunAudit,
 } from "../../dist/core/self-improve/run-audit.js";
 
@@ -167,6 +167,183 @@ test("self-improve run audit rejects non-ISO timestamp path input", async () => 
       }),
     /self_improve_audit_invalid_timestamp/,
   );
+});
+
+test("audit start ignores unrelated malformed completed evidence", async () => {
+  const agentDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-self-improve-audit-unrelated-"),
+  );
+  try {
+    const unrelatedPath = path.join(
+      agentDir,
+      "self_improve",
+      "state",
+      "run-audits",
+      "2026-07-01",
+      "unrelated.json",
+    );
+    fs.mkdirSync(path.dirname(unrelatedPath), { recursive: true });
+    fs.writeFileSync(unrelatedPath, '{"version":1}\n', { mode: 0o600 });
+
+    const handle = await beginSelfImproveRunAudit({
+      agentDir,
+      runId: "current-run",
+      kind: "self_improve_review",
+      startedAt: "2026-07-31T06:00:00.000Z",
+      source: { trigger: "manual" },
+    });
+
+    assert.equal(handle.runId, "current-run");
+  } finally {
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("independent audit observations do not serialize execution", async () => {
+  const agentDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-self-improve-audit-independent-"),
+  );
+  try {
+    const first = await beginSelfImproveRunAudit({
+      agentDir,
+      runId: "first-run",
+      kind: "self_improve_review",
+      startedAt: "2026-07-31T06:00:00.000Z",
+    });
+    const second = await beginSelfImproveRunAudit({
+      agentDir,
+      runId: "second-run",
+      kind: "self_improve_review",
+      startedAt: "2026-07-31T06:01:00.000Z",
+    });
+
+    assert.notEqual(first.storageId, second.storageId);
+    assert.equal(fs.existsSync(path.join(agentDir, first.pendingPath)), true);
+    assert.equal(fs.existsSync(path.join(agentDir, second.pendingPath)), true);
+  } finally {
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("audit maintenance recovers temporary artifacts and removes legacy execution markers", async () => {
+  const agentDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-self-improve-audit-maintenance-"),
+  );
+  try {
+    const handle = await beginSelfImproveRunAudit({
+      agentDir,
+      runId: "maintenance-run",
+      kind: "self_improve_review",
+      startedAt: "2026-07-31T06:00:00.000Z",
+    });
+    const reference = await completeSelfImproveRunAudit({
+      agentDir,
+      handle,
+      status: "completed",
+      finishedAt: "2026-07-31T06:01:00.000Z",
+      output: "done",
+    });
+    const completedPath = path.join(agentDir, reference.path);
+    const tempPath = `${completedPath}.123.00000000-0000-4000-8000-000000000000.tmp`;
+    fs.renameSync(completedPath, tempPath);
+    const legacyMarker = path.join(
+      agentDir,
+      "self_improve",
+      "state",
+      "run-audits-executing",
+      "legacy.json",
+    );
+    fs.mkdirSync(path.dirname(legacyMarker), { recursive: true });
+    fs.writeFileSync(legacyMarker, "{}\n", { mode: 0o600 });
+
+    await maintainSelfImproveRunAuditStorage({ agentDir });
+
+    assert.equal(fs.existsSync(completedPath), true);
+    assert.equal(fs.existsSync(tempPath), false);
+    assert.equal(fs.existsSync(legacyMarker), false);
+  } finally {
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("retention protects every observation still awaiting history acknowledgment", async () => {
+  const agentDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-self-improve-audit-pending-retention-"),
+  );
+  try {
+    const firstStartedAt = "2026-07-31T06:00:00.000Z";
+    const first = await beginSelfImproveRunAudit({
+      agentDir,
+      runId: "first-pending-run",
+      kind: "self_improve_review",
+      startedAt: firstStartedAt,
+      policy: { maxArtifacts: 1, maxAgeMs: 1 },
+    });
+    const firstReference = await completeSelfImproveRunAudit({
+      agentDir,
+      handle: first,
+      status: "completed",
+      finishedAt: "2026-07-31T06:00:00.001Z",
+      output: "first",
+      nowMs: Date.parse("2026-07-31T06:00:00.001Z"),
+    });
+    const second = await beginSelfImproveRunAudit({
+      agentDir,
+      runId: "second-pending-run",
+      kind: "self_improve_review",
+      startedAt: "2026-07-31T06:01:00.000Z",
+      policy: { maxArtifacts: 1, maxAgeMs: 1 },
+    });
+    await completeSelfImproveRunAudit({
+      agentDir,
+      handle: second,
+      status: "completed",
+      finishedAt: "2026-07-31T06:01:00.001Z",
+      output: "second",
+      nowMs: Date.parse("2026-07-31T06:01:00.001Z"),
+    });
+
+    assert.equal(fs.existsSync(path.join(agentDir, firstReference.path)), true);
+    assert.equal(fs.existsSync(path.join(agentDir, first.pendingPath)), true);
+  } finally {
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("audit maintenance finishes a partially persisted acknowledgment", async () => {
+  const agentDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-self-improve-audit-partial-ack-"),
+  );
+  try {
+    const handle = await beginSelfImproveRunAudit({
+      agentDir,
+      runId: "partial-ack-run",
+      kind: "self_improve_review",
+      startedAt: "2026-07-31T06:00:00.000Z",
+    });
+    const pendingPath = path.join(agentDir, handle.pendingPath);
+    const pendingBytes = fs.readFileSync(pendingPath);
+    const reference = await completeSelfImproveRunAudit({
+      agentDir,
+      handle,
+      status: "completed",
+      finishedAt: "2026-07-31T06:01:00.000Z",
+      output: "done",
+    });
+    await acknowledgeSelfImproveRunAudit({
+      agentDir,
+      handle,
+      reference,
+    });
+    fs.writeFileSync(pendingPath, pendingBytes, { mode: 0o600 });
+
+    await maintainSelfImproveRunAuditStorage({ agentDir });
+
+    assert.equal(fs.existsSync(pendingPath), false);
+    assert.equal(fs.existsSync(path.join(agentDir, reference.path)), true);
+  } finally {
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  }
 });
 
 test("self-improve run audit rejects symlinked managed and audit storage roots", async () => {
@@ -420,323 +597,6 @@ test("pending audit policy and snapshot evidence are integrity protected", async
   );
 });
 
-test("integrity-consistent pending evidence still validates its persisted policy", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-pending-policy-"),
-  );
-  const input = {
-    agentDir,
-    runId: "run:pending-policy",
-    kind: "self_improve_review",
-    startedAt: "2026-07-28T06:00:00.000Z",
-  };
-  const handle = await beginSelfImproveRunAudit(input);
-  const pendingPath = path.join(agentDir, handle.pendingPath);
-  const pending = JSON.parse(fs.readFileSync(pendingPath, "utf8"));
-  pending.policy.maxAgeMs = "forever";
-  const { integritySha256: _oldIntegrity, ...unsigned } = pending;
-  pending.integritySha256 = crypto
-    .createHash("sha256")
-    .update(JSON.stringify(unsigned))
-    .digest("hex");
-  fs.writeFileSync(pendingPath, `${JSON.stringify(pending, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  await assert.rejects(
-    () => beginSelfImproveRunAudit(input),
-    /self_improve_audit_invalid_policy/,
-  );
-});
-
-test("default policy blocks a distinct run while prior audit evidence is unresolved", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-pending-capacity-"),
-  );
-  await beginSelfImproveRunAudit({
-    agentDir,
-    runId: "run:pending-capacity-1",
-    kind: "self_improve_review",
-    startedAt: "2026-07-28T06:00:00.000Z",
-  });
-  await assert.rejects(
-    () =>
-      beginSelfImproveRunAudit({
-        agentDir,
-        runId: "run:pending-capacity-2",
-        kind: "self_improve_review",
-        startedAt: "2026-07-28T07:00:00.000Z",
-      }),
-    /self_improve_audit_pending_capacity/,
-  );
-});
-
-test("pending and execution recovery state must remain private regular files", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-private-state-"),
-  );
-  const input = {
-    agentDir,
-    runId: "run:private-state",
-    kind: "self_improve_review",
-    startedAt: "2026-07-28T06:00:00.000Z",
-  };
-  const pendingHandle = await beginSelfImproveRunAudit(input);
-  fs.chmodSync(path.join(agentDir, pendingHandle.pendingPath), 0o644);
-  await assert.rejects(
-    () => beginSelfImproveRunAudit(input),
-    /self_improve_audit_pending_mismatch/,
-  );
-
-  const secondAgentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-private-marker-"),
-  );
-  const markerInput = { ...input, agentDir: secondAgentDir };
-  const markerHandle = await beginSelfImproveRunAudit(markerInput);
-  await markSelfImproveRunAuditExecutionStarted({
-    agentDir: secondAgentDir,
-    handle: markerHandle,
-  });
-  fs.chmodSync(
-    path.join(secondAgentDir, markerHandle.executionStartedPath),
-    0o644,
-  );
-  await assert.rejects(
-    () => beginSelfImproveRunAudit(markerInput),
-    /self_improve_audit_pending_mismatch/,
-  );
-});
-
-test("renamed execution markers and finalized artifacts fail closed", async () => {
-  const markerAgentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-renamed-marker-"),
-  );
-  const markerInput = {
-    agentDir: markerAgentDir,
-    runId: "run:renamed-marker",
-    kind: "self_improve_review",
-    startedAt: "2026-07-28T06:00:00.000Z",
-  };
-  const markerHandle = await beginSelfImproveRunAudit(markerInput);
-  await markSelfImproveRunAuditExecutionStarted({
-    agentDir: markerAgentDir,
-    handle: markerHandle,
-  });
-  const markerPath = path.join(
-    markerAgentDir,
-    markerHandle.executionStartedPath,
-  );
-  fs.renameSync(markerPath, `${markerPath}.moved`);
-  await assert.rejects(
-    () => beginSelfImproveRunAudit(markerInput),
-    /self_improve_audit_pending_mismatch/,
-  );
-
-  const artifactAgentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-renamed-final-"),
-  );
-  const artifactInput = {
-    ...markerInput,
-    agentDir: artifactAgentDir,
-    runId: "run:renamed-final",
-  };
-  const artifactHandle = await beginSelfImproveRunAudit(artifactInput);
-  const reference = await completeSelfImproveRunAudit({
-    agentDir: artifactAgentDir,
-    handle: artifactHandle,
-    status: "completed",
-    finishedAt: "2026-07-28T06:01:00.000Z",
-    output: "done",
-  });
-  const artifactPath = path.join(artifactAgentDir, reference.path);
-  fs.renameSync(artifactPath, `${artifactPath}.moved`);
-  await assert.rejects(
-    () => beginSelfImproveRunAudit(artifactInput),
-    /self_improve_audit_pending_mismatch/,
-  );
-});
-
-test("completed artifact recovery validates internal integrity before linking", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-artifact-integrity-"),
-  );
-  const startedAt = "2026-07-28T06:00:00.000Z";
-  const handle = await beginSelfImproveRunAudit({
-    agentDir,
-    runId: "run:artifact-integrity",
-    kind: "self_improve_review",
-    startedAt,
-  });
-  const reference = await completeSelfImproveRunAudit({
-    agentDir,
-    handle,
-    status: "completed",
-    finishedAt: "2026-07-28T06:01:00.000Z",
-    output: "trusted",
-  });
-  const artifactPath = path.join(agentDir, reference.path);
-  const artifact = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
-  artifact.output.text = "tampered";
-  fs.writeFileSync(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  await assert.rejects(
-    () =>
-      beginSelfImproveRunAudit({
-        agentDir,
-        runId: "run:artifact-integrity",
-        kind: "self_improve_review",
-        startedAt,
-      }),
-    /self_improve_audit_pending_mismatch/,
-  );
-});
-
-test("an interrupted execution marker prevents mutation rerun and finalizes observed changes", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-interrupted-"),
-  );
-  writeManagedFile(agentDir, "skills/demo/SKILL.md", "before\n");
-  const input = {
-    agentDir,
-    runId: "run:interrupted",
-    kind: "self_improve_review",
-    startedAt: "2020-01-01T06:00:00.000Z",
-    policy: { maxAgeMs: 1 },
-  };
-  const first = await beginSelfImproveRunAudit(input);
-  await markSelfImproveRunAuditExecutionStarted({ agentDir, handle: first });
-  writeManagedFile(agentDir, "skills/demo/SKILL.md", "after\n");
-  const recovered = await beginSelfImproveRunAudit(input);
-  assert.equal(recovered.executionInterrupted, true);
-  const reference = await completeSelfImproveRunAudit({
-    agentDir,
-    handle: recovered,
-    status: "failed",
-    finishedAt: "2026-07-28T06:01:00.000Z",
-    error: "self_improve_audit_interrupted_execution",
-  });
-  const artifact = JSON.parse(
-    fs.readFileSync(path.join(agentDir, reference.path), "utf8"),
-  );
-  assert.equal(artifact.status, "failed");
-  assert.equal(artifact.changes.length, 1);
-  assert.match(artifact.changes[0].patch, /-before/);
-  assert.match(artifact.changes[0].patch, /\+after/);
-  assert.equal(fs.existsSync(path.join(agentDir, recovered.pendingPath)), true);
-  await acknowledgeSelfImproveRunAudit({
-    agentDir,
-    handle: recovered,
-    reference,
-  });
-  assert.equal(
-    fs.existsSync(path.join(agentDir, recovered.executionStartedPath)),
-    false,
-  );
-});
-
-test("begin audit reuses the original pending snapshot after an interrupted retry", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-resume-"),
-  );
-  writeManagedFile(agentDir, "skills/demo/SKILL.md", "before\n");
-  const first = await beginSelfImproveRunAudit({
-    agentDir,
-    runId: "run:resume",
-    kind: "cron",
-    startedAt: "2026-07-28T06:00:00.000Z",
-  });
-  writeManagedFile(agentDir, "skills/demo/SKILL.md", "intermediate\n");
-  const resumed = await beginSelfImproveRunAudit({
-    agentDir,
-    runId: "run:resume",
-    kind: "cron",
-    startedAt: "2026-07-28T06:00:00.000Z",
-  });
-  assert.equal(resumed.pendingPath, first.pendingPath);
-  writeManagedFile(agentDir, "skills/demo/SKILL.md", "after\n");
-
-  const reference = await completeSelfImproveRunAudit({
-    agentDir,
-    handle: resumed,
-    status: "completed",
-    finishedAt: "2026-07-28T06:02:00.000Z",
-    output: "done",
-  });
-  const artifact = readAudit(agentDir, reference.path);
-  assert.match(artifact.changes[0].patch, /-before/);
-  assert.match(artifact.changes[0].patch, /\+after/);
-  assert.doesNotMatch(artifact.changes[0].patch, /intermediate/);
-});
-
-test("duplicate run ids keep immutable evidence identities and exact retries reuse the artifact", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-id-"),
-  );
-  writeManagedFile(agentDir, "skills/demo/SKILL.md", "zero\n");
-
-  const firstHandle = await beginSelfImproveRunAudit({
-    agentDir,
-    runId: "duplicate-run",
-    kind: "self_improve_review",
-    startedAt: "2026-07-28T06:00:00.000Z",
-    source: { leafId: "leaf-1" },
-  });
-  writeManagedFile(agentDir, "skills/demo/SKILL.md", "one\n");
-  const first = await completeSelfImproveRunAudit({
-    agentDir,
-    handle: firstHandle,
-    status: "completed",
-    finishedAt: "2026-07-28T06:01:00.000Z",
-    output: "first",
-  });
-
-  const exactRetryHandle = await beginSelfImproveRunAudit({
-    agentDir,
-    runId: "duplicate-run",
-    kind: "self_improve_review",
-    startedAt: "2026-07-28T06:00:00.000Z",
-    source: { leafId: "leaf-1" },
-  });
-  assert.ok(exactRetryHandle.completedPath);
-  const exactRetry = await completeSelfImproveRunAudit({
-    agentDir,
-    handle: exactRetryHandle,
-    status: "completed",
-    finishedAt: "2026-07-28T06:02:00.000Z",
-    output: "must not overwrite",
-  });
-  assert.equal(exactRetry.path, first.path);
-  assert.equal(exactRetry.sha256, first.sha256);
-  await acknowledgeSelfImproveRunAudit({
-    agentDir,
-    handle: exactRetryHandle,
-    reference: exactRetry,
-  });
-
-  const secondHandle = await beginSelfImproveRunAudit({
-    agentDir,
-    runId: "duplicate-run",
-    kind: "self_improve_review",
-    startedAt: "2026-07-28T07:00:00.000Z",
-    source: { leafId: "leaf-2" },
-  });
-  writeManagedFile(agentDir, "skills/demo/SKILL.md", "two\n");
-  const second = await completeSelfImproveRunAudit({
-    agentDir,
-    handle: secondHandle,
-    status: "completed",
-    finishedAt: "2026-07-28T07:01:00.000Z",
-    output: "second",
-  });
-  assert.notEqual(second.path, first.path);
-  assert.deepEqual(await verifySelfImproveRunAudit(agentDir, first), {
-    ok: true,
-  });
-  assert.deepEqual(await verifySelfImproveRunAudit(agentDir, second), {
-    ok: true,
-  });
-});
-
 test("audit redacts and bounds run/source/error metadata", async () => {
   const agentDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "rin-self-improve-audit-metadata-"),
@@ -778,186 +638,6 @@ test("audit redacts and bounds run/source/error metadata", async () => {
   assert.equal(artifact.error.truncated, true);
   assert.match(artifact.source.sessionFile, /\[REDACTED\]/);
   assert.match(artifact.changes[0].path, /\[REDACTED\]/);
-});
-
-test("retention expiry keeps a compact acknowledgment that prevents mutation rerun", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-no-reuse-"),
-  );
-  const firstInput = {
-    agentDir,
-    runId: "run:no-reuse-1",
-    kind: "self_improve_review",
-    startedAt: "2026-07-28T05:00:00.000Z",
-    policy: { maxArtifacts: 1 },
-  };
-  const first = await beginSelfImproveRunAudit(firstInput);
-  const firstReference = await completeSelfImproveRunAudit({
-    agentDir,
-    handle: first,
-    status: "completed",
-    finishedAt: "2026-07-28T05:01:00.000Z",
-    output: "one",
-  });
-  await acknowledgeSelfImproveRunAudit({
-    agentDir,
-    handle: first,
-    reference: firstReference,
-  });
-  const second = await beginSelfImproveRunAudit({
-    agentDir,
-    runId: "run:no-reuse-2",
-    kind: "self_improve_review",
-    startedAt: "2026-07-28T06:00:00.000Z",
-    policy: { maxArtifacts: 1 },
-  });
-  const secondReference = await completeSelfImproveRunAudit({
-    agentDir,
-    handle: second,
-    status: "completed",
-    finishedAt: "2026-07-28T06:01:00.000Z",
-    output: "two",
-  });
-  await acknowledgeSelfImproveRunAudit({
-    agentDir,
-    handle: second,
-    reference: secondReference,
-  });
-  assert.equal(fs.existsSync(path.join(agentDir, firstReference.path)), false);
-  const replacement = await beginSelfImproveRunAudit(firstInput);
-  assert.equal(replacement.auditId, first.auditId);
-  assert.equal(replacement.completedPath, firstReference.path);
-  assert.ok(replacement.acknowledged);
-  const replacementReference = await completeSelfImproveRunAudit({
-    agentDir,
-    handle: replacement,
-    status: "completed",
-    finishedAt: "2026-07-28T07:01:00.000Z",
-    output: "replacement",
-  });
-  assert.equal(replacementReference.path, firstReference.path);
-  assert.equal(replacementReference.evidenceRetained, false);
-});
-
-test("age expiry never replaces a completed artifact that is still awaiting history acknowledgment", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-unacked-expiry-"),
-  );
-  const input = {
-    agentDir,
-    runId: "run:unacked-expiry",
-    kind: "self_improve_review",
-    startedAt: "2020-01-01T00:00:00.000Z",
-    policy: { maxAgeMs: 1 },
-  };
-  const handle = await beginSelfImproveRunAudit(input);
-  const reference = await completeSelfImproveRunAudit({
-    agentDir,
-    handle,
-    status: "completed",
-    finishedAt: "2020-01-01T00:01:00.000Z",
-    output: "unacknowledged",
-  });
-  fs.rmSync(path.join(agentDir, handle.pendingPath), { force: true });
-  const recovered = await beginSelfImproveRunAudit(input);
-  assert.equal(recovered.auditId, handle.auditId);
-  assert.equal(recovered.completedPath, reference.path);
-  assert.equal(fs.existsSync(path.join(agentDir, reference.path)), true);
-});
-
-test("valid pre-link artifact temporary files are promoted during recovery", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-temp-recovery-"),
-  );
-  const input = {
-    agentDir,
-    runId: "run:temp-recovery",
-    kind: "self_improve_review",
-    startedAt: "2026-07-28T06:00:00.000Z",
-  };
-  const handle = await beginSelfImproveRunAudit(input);
-  const reference = await completeSelfImproveRunAudit({
-    agentDir,
-    handle,
-    status: "completed",
-    finishedAt: "2026-07-28T06:01:00.000Z",
-    output: "recover temp",
-  });
-  const artifactPath = path.join(agentDir, reference.path);
-  const tempPath = `${artifactPath}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  fs.renameSync(artifactPath, tempPath);
-  const recovered = await beginSelfImproveRunAudit(input);
-  assert.equal(recovered.completedPath, reference.path);
-  assert.equal(fs.existsSync(artifactPath), true);
-  assert.equal(fs.existsSync(tempPath), false);
-});
-
-test("acknowledgment markers are bound to their canonical private path", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-marker-path-"),
-  );
-  const input = {
-    agentDir,
-    runId: "run:marker-path",
-    kind: "self_improve_review",
-    startedAt: "2026-07-28T06:00:00.000Z",
-  };
-  const handle = await beginSelfImproveRunAudit(input);
-  const reference = await completeSelfImproveRunAudit({
-    agentDir,
-    handle,
-    status: "completed",
-    finishedAt: "2026-07-28T06:01:00.000Z",
-    output: "done",
-  });
-  await acknowledgeSelfImproveRunAudit({ agentDir, handle, reference });
-  fs.rmSync(path.join(agentDir, reference.path), { force: true });
-  const markerDir = path.join(
-    agentDir,
-    "self_improve",
-    "state",
-    "run-audits-acknowledged",
-  );
-  const markerName = fs.readdirSync(markerDir)[0];
-  fs.renameSync(
-    path.join(markerDir, markerName),
-    path.join(markerDir, `renamed-${markerName}.moved`),
-  );
-  await assert.rejects(
-    () => beginSelfImproveRunAudit(input),
-    /self_improve_audit_pending_mismatch/,
-  );
-});
-
-test("age-expired acknowledged evidence remains a no-rerun tombstone", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-age-expiry-"),
-  );
-  const input = {
-    agentDir,
-    runId: "run:age-expiry",
-    kind: "self_improve_review",
-    startedAt: "2020-01-01T00:00:00.000Z",
-    policy: { maxAgeMs: 1 },
-  };
-  const first = await beginSelfImproveRunAudit(input);
-  const firstReference = await completeSelfImproveRunAudit({
-    agentDir,
-    handle: first,
-    status: "completed",
-    finishedAt: "2020-01-01T00:01:00.000Z",
-    output: "first",
-  });
-  await acknowledgeSelfImproveRunAudit({
-    agentDir,
-    handle: first,
-    reference: firstReference,
-  });
-  const replacement = await beginSelfImproveRunAudit(input);
-  assert.equal(replacement.auditId, first.auditId);
-  assert.equal(replacement.completedPath, firstReference.path);
-  assert.ok(replacement.acknowledged);
-  assert.equal(fs.existsSync(path.join(agentDir, firstReference.path)), false);
 });
 
 test("retention applies each artifact persisted policy instead of the current run policy", async () => {
@@ -1034,88 +714,6 @@ test("retention refuses to delete completed evidence without a valid acknowledgm
     finishedAt: "2026-07-28T06:01:00.000Z",
     output: "second",
   });
-  assert.equal(fs.existsSync(path.join(agentDir, firstReference.path)), true);
-});
-
-test("retention validates every artifact before deleting any evidence", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-retention-corrupt-"),
-  );
-  const first = await beginSelfImproveRunAudit({
-    agentDir,
-    runId: "run:retention-corrupt-1",
-    kind: "self_improve_review",
-    startedAt: "2026-07-28T05:00:00.000Z",
-    policy: { maxArtifacts: 1 },
-  });
-  const firstReference = await completeSelfImproveRunAudit({
-    agentDir,
-    handle: first,
-    status: "completed",
-    finishedAt: "2026-07-28T05:01:00.000Z",
-    output: "one",
-  });
-  await acknowledgeSelfImproveRunAudit({
-    agentDir,
-    handle: first,
-    reference: firstReference,
-  });
-  const firstPath = path.join(agentDir, firstReference.path);
-  const corrupt = JSON.parse(fs.readFileSync(firstPath, "utf8"));
-  corrupt.finishedAt = "not-a-time";
-  fs.writeFileSync(firstPath, `${JSON.stringify(corrupt, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  await assert.rejects(() =>
-    beginSelfImproveRunAudit({
-      agentDir,
-      runId: "run:retention-corrupt-2",
-      kind: "self_improve_review",
-      startedAt: "2026-07-28T06:00:00.000Z",
-      policy: { maxArtifacts: 1 },
-    }),
-  );
-  assert.equal(fs.existsSync(firstPath), true);
-  const auditFiles = fs
-    .readdirSync(path.join(agentDir, "self_improve", "state", "run-audits"), {
-      recursive: true,
-    })
-    .filter((entry) => String(entry).endsWith(".json"));
-  assert.equal(auditFiles.length, 1);
-});
-
-test("retention protects completed artifacts that still have pending recovery markers", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-self-improve-audit-retention-pending-"),
-  );
-  const first = await beginSelfImproveRunAudit({
-    agentDir,
-    runId: "run:retention-pending-1",
-    kind: "self_improve_review",
-    startedAt: "2026-07-28T05:00:00.000Z",
-    policy: { maxArtifacts: 1 },
-  });
-  const pendingPath = path.join(agentDir, first.pendingPath);
-  const pendingEvidence = fs.readFileSync(pendingPath);
-  const firstReference = await completeSelfImproveRunAudit({
-    agentDir,
-    handle: first,
-    status: "completed",
-    finishedAt: "2026-07-28T05:01:00.000Z",
-    output: "one",
-  });
-  fs.mkdirSync(path.dirname(pendingPath), { recursive: true });
-  fs.writeFileSync(pendingPath, pendingEvidence, { mode: 0o600 });
-  await assert.rejects(
-    () =>
-      beginSelfImproveRunAudit({
-        agentDir,
-        runId: "run:retention-pending-2",
-        kind: "self_improve_review",
-        startedAt: "2026-07-28T06:00:00.000Z",
-      }),
-    /self_improve_audit_pending_capacity/,
-  );
   assert.equal(fs.existsSync(path.join(agentDir, firstReference.path)), true);
 });
 

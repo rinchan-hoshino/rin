@@ -35,13 +35,6 @@ export type SelfImproveRunAuditHandle = {
   auditId: string;
   storageId: string;
   pendingPath: string;
-  executionStartedPath: string;
-  executionInterrupted?: boolean;
-  acknowledged?: {
-    reference: SelfImproveRunAuditReference;
-    status: "completed" | "failed";
-  };
-  completedPath?: string;
 };
 
 export type SelfImproveRunAuditReference = {
@@ -91,14 +84,6 @@ type AcknowledgedAuditMarker = {
   reference: SelfImproveRunAuditReference;
   status: "completed" | "failed";
   integritySha256: string;
-};
-
-type ExecutionStartedMarker = {
-  version: 1;
-  auditId: string;
-  storageId: string;
-  fileName: string;
-  startedAt: string;
 };
 
 type PendingAudit = {
@@ -385,10 +370,6 @@ function pendingDir(agentDir: string) {
   return path.join(selfImproveStateDir(agentDir), "run-audits-pending");
 }
 
-function executionDir(agentDir: string) {
-  return path.join(selfImproveStateDir(agentDir), "run-audits-executing");
-}
-
 function acknowledgedDir(agentDir: string) {
   return path.join(selfImproveStateDir(agentDir), "run-audits-acknowledged");
 }
@@ -558,150 +539,6 @@ async function readAcknowledgedMarker(
   return marker;
 }
 
-async function validateAcknowledgedMarkerDirectory(agentDir: string) {
-  const root = acknowledgedDir(agentDir);
-  await assertSafeAgentPath(agentDir, root);
-  for (const markerPath of await listFilesEnding(root, "")) {
-    const raw = await readJson<AcknowledgedAuditMarker>(markerPath);
-    await readAcknowledgedMarker(agentDir, markerPath, raw.storageId);
-  }
-}
-
-async function validateRecoveryStateDirectories(agentDir: string) {
-  const pendingRoot = pendingDir(agentDir);
-  const executionRoot = executionDir(agentDir);
-  await assertSafeAgentPath(agentDir, pendingRoot);
-  await assertSafeAgentPath(agentDir, executionRoot);
-  const pendingByName = new Map<string, PendingAudit>();
-  for (const pendingPath of await listFilesEnding(pendingRoot, "")) {
-    const pending = await readPrivateJson<PendingAudit>(agentDir, pendingPath);
-    validatePendingAudit(
-      pending,
-      pending.storageId,
-      pending.auditId,
-      path.basename(pendingPath),
-    );
-    pendingByName.set(path.basename(pendingPath), pending);
-  }
-  for (const markerPath of await listFilesEnding(executionRoot, "")) {
-    const marker = await readPrivateJson<ExecutionStartedMarker>(
-      agentDir,
-      markerPath,
-    );
-    const pending = pendingByName.get(path.basename(markerPath));
-    if (
-      marker.version !== 1 ||
-      marker.fileName !== path.basename(markerPath) ||
-      !pending ||
-      marker.auditId !== pending.auditId ||
-      marker.storageId !== pending.storageId
-    ) {
-      throw new Error("self_improve_audit_pending_mismatch");
-    }
-    normalizeIsoTimestamp(marker.startedAt);
-  }
-}
-
-async function recoverAuditTemporaryFiles(agentDir: string) {
-  for (const root of [
-    pendingDir(agentDir),
-    executionDir(agentDir),
-    acknowledgedDir(agentDir),
-  ]) {
-    await assertSafeAgentPath(agentDir, root);
-    for (const tempPath of await listFilesEnding(root, ".tmp")) {
-      await assertSafeAgentPath(agentDir, tempPath);
-      await fs.rm(tempPath, { force: true });
-      await syncDirectory(path.dirname(tempPath));
-    }
-  }
-  const root = auditsDir(agentDir);
-  await assertSafeAgentPath(agentDir, root);
-  for (const tempPath of await listFilesEnding(root, ".tmp")) {
-    await assertSafeAgentPath(agentDir, tempPath);
-    const artifactPath = tempPath.replace(/\.\d+\.[0-9a-f-]+\.tmp$/i, "");
-    if (artifactPath === tempPath) {
-      await fs.rm(tempPath, { force: true });
-      await syncDirectory(path.dirname(tempPath));
-      continue;
-    }
-    let validated:
-      | Awaited<ReturnType<typeof readValidatedCompletedArtifact>>
-      | undefined;
-    try {
-      validated = await readValidatedCompletedArtifact(
-        agentDir,
-        tempPath,
-        undefined,
-        undefined,
-        path.basename(artifactPath),
-      );
-    } catch (error: any) {
-      if (
-        !(error instanceof SyntaxError) &&
-        error?.message !== "self_improve_audit_pending_mismatch"
-      ) {
-        throw error;
-      }
-      await fs.rm(tempPath, { force: true });
-      await syncDirectory(path.dirname(tempPath));
-      continue;
-    }
-    const { artifact, artifactBuffer } = validated;
-    await assertSafeAgentPath(agentDir, artifactPath);
-    if (fssync.existsSync(artifactPath)) {
-      const existing = await readValidatedCompletedArtifact(
-        agentDir,
-        artifactPath,
-        artifact.auditId,
-        artifact.storageId,
-      );
-      if (sha256(existing.artifactBuffer) !== sha256(artifactBuffer)) {
-        throw new Error("self_improve_audit_pending_mismatch");
-      }
-    } else {
-      await fs.link(tempPath, artifactPath);
-      await syncDirectory(path.dirname(artifactPath));
-    }
-    await fs.rm(tempPath, { force: true });
-    await syncDirectory(path.dirname(tempPath));
-  }
-}
-
-async function findCompletedAuditByStorageId(
-  agentDir: string,
-  storageId: string,
-) {
-  let match:
-    | {
-        filePath: string;
-        reference: CompletedSelfImproveRunAudit;
-        finishedAt: string;
-        policy: SelfImproveRunAuditPolicy;
-      }
-    | undefined;
-  for (const filePath of await listFilesEnding(auditsDir(agentDir), "")) {
-    const { artifact } = await readValidatedCompletedArtifact(
-      agentDir,
-      filePath,
-    );
-    if (artifact.storageId !== storageId) continue;
-    if (match) throw new Error("self_improve_audit_pending_mismatch");
-    match = {
-      filePath,
-      finishedAt: normalizeIsoTimestamp(artifact.finishedAt),
-      policy: policyWithDefaults(artifact.policy),
-      reference: await completedReference(
-        agentDir,
-        filePath,
-        artifact.auditId,
-        storageId,
-      ),
-    };
-  }
-  return match;
-}
-
 export async function beginSelfImproveRunAudit(input: {
   agentDir: string;
   runId: string;
@@ -711,9 +548,6 @@ export async function beginSelfImproveRunAudit(input: {
   policy?: Partial<SelfImproveRunAuditPolicy>;
 }): Promise<SelfImproveRunAuditHandle> {
   const agentDir = await canonicalAgentRoot(input.agentDir);
-  await recoverAuditTemporaryFiles(agentDir);
-  await validateAcknowledgedMarkerDirectory(agentDir);
-  await validateRecoveryStateDirectories(agentDir);
   const policy = policyWithDefaults(input.policy);
   const startedAt = normalizeIsoTimestamp(input.startedAt);
   const storageId = sha256(
@@ -732,199 +566,7 @@ export async function beginSelfImproveRunAudit(input: {
   const sourceMetadata = sanitizeSource(input.source, policy.maxMetadataBytes);
   const fileName = `${safeRunFileName(runIdMetadata.text, storageId)}.json`;
   const filePath = path.join(pendingDir(agentDir), fileName);
-  const executionStartedPath = path.join(executionDir(agentDir), fileName);
-  const acknowledgedPath = path.join(acknowledgedDir(agentDir), fileName);
   await assertSafeAgentPath(agentDir, filePath);
-  await assertSafeAgentPath(agentDir, executionStartedPath);
-  await assertSafeAgentPath(agentDir, acknowledgedPath);
-  const completedMatch = await findCompletedAuditByStorageId(
-    agentDir,
-    storageId,
-  );
-  if (completedMatch) {
-    let unacknowledged = false;
-    if (fssync.existsSync(filePath)) {
-      const pending = await readPrivateJson<PendingAudit>(agentDir, filePath);
-      validatePendingAudit(
-        pending,
-        storageId,
-        completedMatch.reference.auditId,
-        path.basename(filePath),
-      );
-      if (fssync.existsSync(executionStartedPath)) {
-        const marker = await readPrivateJson<ExecutionStartedMarker>(
-          agentDir,
-          executionStartedPath,
-        );
-        if (
-          marker.version !== 1 ||
-          marker.fileName !== path.basename(executionStartedPath) ||
-          marker.auditId !== pending.auditId ||
-          marker.storageId !== storageId
-        ) {
-          throw new Error("self_improve_audit_pending_mismatch");
-        }
-        normalizeIsoTimestamp(marker.startedAt);
-      }
-      unacknowledged = true;
-    }
-    const expired =
-      Date.now() - Date.parse(completedMatch.finishedAt) >
-      completedMatch.policy.maxAgeMs;
-    let retentionAcknowledged = false;
-    if (expired && fssync.existsSync(acknowledgedPath)) {
-      const marker = await readAcknowledgedMarker(
-        agentDir,
-        acknowledgedPath,
-        storageId,
-      );
-      if (
-        marker.status !== completedMatch.reference.status ||
-        JSON.stringify(marker.reference) !==
-          JSON.stringify(referenceOnly(completedMatch.reference))
-      ) {
-        throw new Error("self_improve_audit_pending_mismatch");
-      }
-      retentionAcknowledged = true;
-    }
-    if (unacknowledged || !expired || !retentionAcknowledged) {
-      if (!completedMatch.reference.auditId) {
-        throw new Error("self_improve_audit_pending_mismatch");
-      }
-      return {
-        version: 1,
-        runId: input.runId,
-        auditId: completedMatch.reference.auditId,
-        storageId,
-        pendingPath: relativeToAgent(agentDir, filePath),
-        executionStartedPath: relativeToAgent(agentDir, executionStartedPath),
-        completedPath: relativeToAgent(agentDir, completedMatch.filePath),
-      };
-    }
-    await assertSafeAgentPath(agentDir, completedMatch.filePath);
-    await fs.rm(completedMatch.filePath, { force: true });
-    await syncDirectory(path.dirname(completedMatch.filePath));
-  }
-  if (fssync.existsSync(acknowledgedPath)) {
-    const marker = await readAcknowledgedMarker(
-      agentDir,
-      acknowledgedPath,
-      storageId,
-    );
-    return {
-      version: 1,
-      runId: input.runId,
-      auditId: marker.auditId,
-      storageId,
-      pendingPath: relativeToAgent(agentDir, filePath),
-      executionStartedPath: relativeToAgent(agentDir, executionStartedPath),
-      completedPath: marker.reference.path,
-      acknowledged: {
-        reference: marker.reference,
-        status: marker.status,
-      },
-    };
-  }
-  if (fssync.existsSync(filePath)) {
-    const pending = await readPrivateJson<PendingAudit>(agentDir, filePath);
-    const pendingPolicy = validatePendingAudit(
-      pending,
-      storageId,
-      undefined,
-      path.basename(filePath),
-    );
-    const executionInterrupted = fssync.existsSync(executionStartedPath);
-    if (executionInterrupted) {
-      const marker = await readPrivateJson<ExecutionStartedMarker>(
-        agentDir,
-        executionStartedPath,
-      );
-      if (
-        marker.version !== 1 ||
-        marker.fileName !== path.basename(executionStartedPath) ||
-        marker.auditId !== pending.auditId ||
-        marker.storageId !== storageId
-      ) {
-        throw new Error("self_improve_audit_pending_mismatch");
-      }
-      normalizeIsoTimestamp(marker.startedAt);
-    }
-    if (
-      executionInterrupted ||
-      Date.now() - Date.parse(normalizeIsoTimestamp(pending.startedAt)) <=
-        pendingPolicy.maxAgeMs
-    ) {
-      return {
-        version: 1,
-        runId: input.runId,
-        auditId: pending.auditId,
-        storageId,
-        pendingPath: relativeToAgent(agentDir, filePath),
-        executionStartedPath: relativeToAgent(agentDir, executionStartedPath),
-        executionInterrupted,
-      };
-    }
-    await assertSafeAgentPath(agentDir, filePath);
-    await fs.rm(filePath, { force: true });
-    await syncDirectory(path.dirname(filePath));
-  }
-  const activePendingFiles: string[] = [];
-  const expiredPendingFiles: string[] = [];
-  for (const pendingFile of await listFilesEnding(pendingDir(agentDir), "")) {
-    const pending = await readPrivateJson<PendingAudit>(agentDir, pendingFile);
-    const pendingPolicy = validatePendingAudit(
-      pending,
-      pending.storageId,
-      pending.auditId,
-      path.basename(pendingFile),
-    );
-    const markerPath = path.join(
-      executionDir(agentDir),
-      path.basename(pendingFile),
-    );
-    if (fssync.existsSync(markerPath)) {
-      const marker = await readPrivateJson<ExecutionStartedMarker>(
-        agentDir,
-        markerPath,
-      );
-      if (
-        marker.version !== 1 ||
-        marker.fileName !== path.basename(markerPath) ||
-        marker.auditId !== pending.auditId ||
-        marker.storageId !== pending.storageId
-      ) {
-        throw new Error("self_improve_audit_pending_mismatch");
-      }
-      normalizeIsoTimestamp(marker.startedAt);
-      activePendingFiles.push(pendingFile);
-      continue;
-    }
-    const pendingStartedAt = Date.parse(
-      normalizeIsoTimestamp(pending.startedAt),
-    );
-    if (Date.now() - pendingStartedAt > pendingPolicy.maxAgeMs) {
-      expiredPendingFiles.push(pendingFile);
-    } else {
-      activePendingFiles.push(pendingFile);
-    }
-  }
-  for (const pendingFile of expiredPendingFiles) {
-    await assertSafeAgentPath(agentDir, pendingFile);
-    await fs.rm(pendingFile, { force: true });
-    await syncDirectory(path.dirname(pendingFile));
-    const markerPath = path.join(
-      executionDir(agentDir),
-      path.basename(pendingFile),
-    );
-    await assertSafeAgentPath(agentDir, markerPath);
-    await fs.rm(markerPath, { force: true });
-    if (fssync.existsSync(path.dirname(markerPath))) {
-      await syncDirectory(path.dirname(markerPath));
-    }
-  }
-  if (activePendingFiles.length > 0) {
-    throw new Error("self_improve_audit_pending_capacity");
-  }
   const before = await captureSnapshot(agentDir, policy);
   const generationId = crypto.randomUUID();
   const auditId = sha256(
@@ -963,7 +605,6 @@ export async function beginSelfImproveRunAudit(input: {
     auditId,
     storageId,
     pendingPath: relativeToAgent(agentDir, filePath),
-    executionStartedPath: relativeToAgent(agentDir, executionStartedPath),
   };
 }
 
@@ -1065,6 +706,128 @@ async function listFilesEnding(
   return files;
 }
 
+export async function maintainSelfImproveRunAuditStorage(input: {
+  agentDir: string;
+}) {
+  const agentDir = await canonicalAgentRoot(input.agentDir);
+  const legacyExecutionRoot = path.join(
+    selfImproveStateDir(agentDir),
+    "run-audits-executing",
+  );
+  for (const root of [
+    pendingDir(agentDir),
+    acknowledgedDir(agentDir),
+    legacyExecutionRoot,
+  ]) {
+    await assertSafeAgentPath(agentDir, root);
+    for (const tempPath of await listFilesEnding(root, ".tmp")) {
+      await assertSafeAgentPath(agentDir, tempPath);
+      await fs.rm(tempPath, { force: true });
+      await syncDirectory(path.dirname(tempPath));
+    }
+  }
+  for (const markerPath of await listFilesEnding(
+    acknowledgedDir(agentDir),
+    "",
+  )) {
+    const raw = await readJson<AcknowledgedAuditMarker>(markerPath);
+    const marker = await readAcknowledgedMarker(
+      agentDir,
+      markerPath,
+      raw.storageId,
+    );
+    const pendingPath = path.join(pendingDir(agentDir), marker.fileName);
+    if (!fssync.existsSync(pendingPath)) continue;
+    const pending = await readPrivateJson<PendingAudit>(agentDir, pendingPath);
+    validatePendingAudit(
+      pending,
+      marker.storageId,
+      marker.auditId,
+      marker.fileName,
+    );
+    const expectedReferencePath = relativeToAgent(
+      agentDir,
+      completedAuditPath(
+        agentDir,
+        pending.startedAt,
+        pending.runId,
+        pending.auditId,
+      ),
+    );
+    if (marker.reference.path !== expectedReferencePath) {
+      throw new Error("self_improve_audit_pending_mismatch");
+    }
+    const verified = await verifySelfImproveRunAudit(
+      agentDir,
+      marker.reference,
+    );
+    if (!verified.ok) {
+      throw new Error("self_improve_audit_pending_mismatch");
+    }
+    await assertSafeAgentPath(agentDir, pendingPath);
+    await fs.rm(pendingPath, { force: true });
+    await syncDirectory(path.dirname(pendingPath));
+  }
+
+  for (const markerPath of await listFilesEnding(legacyExecutionRoot, "")) {
+    await assertSafeAgentPath(agentDir, markerPath);
+    await fs.rm(markerPath, { force: true });
+    await syncDirectory(path.dirname(markerPath));
+  }
+
+  const root = auditsDir(agentDir);
+  await assertSafeAgentPath(agentDir, root);
+  for (const tempPath of await listFilesEnding(root, ".tmp")) {
+    await assertSafeAgentPath(agentDir, tempPath);
+    const artifactPath = tempPath.replace(/\.\d+\.[0-9a-f-]+\.tmp$/i, "");
+    if (artifactPath === tempPath) {
+      await fs.rm(tempPath, { force: true });
+      await syncDirectory(path.dirname(tempPath));
+      continue;
+    }
+    let validated:
+      | Awaited<ReturnType<typeof readValidatedCompletedArtifact>>
+      | undefined;
+    try {
+      validated = await readValidatedCompletedArtifact(
+        agentDir,
+        tempPath,
+        undefined,
+        undefined,
+        path.basename(artifactPath),
+      );
+    } catch (error: any) {
+      if (
+        !(error instanceof SyntaxError) &&
+        error?.message !== "self_improve_audit_pending_mismatch"
+      ) {
+        throw error;
+      }
+      await fs.rm(tempPath, { force: true });
+      await syncDirectory(path.dirname(tempPath));
+      continue;
+    }
+    const { artifact, artifactBuffer } = validated;
+    await assertSafeAgentPath(agentDir, artifactPath);
+    if (fssync.existsSync(artifactPath)) {
+      const existing = await readValidatedCompletedArtifact(
+        agentDir,
+        artifactPath,
+        artifact.auditId,
+        artifact.storageId,
+      );
+      if (sha256(existing.artifactBuffer) !== sha256(artifactBuffer)) {
+        throw new Error("self_improve_audit_pending_mismatch");
+      }
+    } else {
+      await fs.link(tempPath, artifactPath);
+      await syncDirectory(path.dirname(artifactPath));
+    }
+    await fs.rm(tempPath, { force: true });
+    await syncDirectory(path.dirname(tempPath));
+  }
+}
+
 async function pruneRunAudits(
   agentDir: string,
   _policy: SelfImproveRunAuditPolicy,
@@ -1077,74 +840,25 @@ async function pruneRunAudits(
   await assertSafeAgentPath(agentDir, root);
 
   const pendingRoot = pendingDir(agentDir);
-  const executionRoot = executionDir(agentDir);
   await assertSafeAgentPath(agentDir, pendingRoot);
-  await assertSafeAgentPath(agentDir, executionRoot);
-  const pendingRows: Array<{
-    filePath: string;
-    startedAt: number;
-    maxAgeMs: number;
-    completedPath: string;
-    executionStarted: boolean;
-  }> = [];
   for (const filePath of await listFilesEnding(pendingRoot, "")) {
     const pending = await readPrivateJson<PendingAudit>(agentDir, filePath);
-    const pendingPolicy = validatePendingAudit(
+    validatePendingAudit(
       pending,
       pending.storageId,
       pending.auditId,
       path.basename(filePath),
     );
-    const completedPath = path.resolve(
-      completedAuditPath(
-        agentDir,
-        pending.startedAt,
-        pending.runId,
-        pending.auditId,
+    protectedPaths.add(
+      path.resolve(
+        completedAuditPath(
+          agentDir,
+          pending.startedAt,
+          pending.runId,
+          pending.auditId,
+        ),
       ),
     );
-    const markerPath = path.join(executionRoot, path.basename(filePath));
-    const executionStarted = fssync.existsSync(markerPath);
-    if (executionStarted) {
-      const marker = await readPrivateJson<ExecutionStartedMarker>(
-        agentDir,
-        markerPath,
-      );
-      if (
-        marker.version !== 1 ||
-        marker.fileName !== path.basename(markerPath) ||
-        marker.auditId !== pending.auditId ||
-        marker.storageId !== pending.storageId
-      ) {
-        throw new Error("self_improve_audit_pending_mismatch");
-      }
-      normalizeIsoTimestamp(marker.startedAt);
-    }
-    pendingRows.push({
-      filePath,
-      startedAt: Date.parse(normalizeIsoTimestamp(pending.startedAt)),
-      maxAgeMs: pendingPolicy.maxAgeMs,
-      completedPath,
-      executionStarted,
-    });
-  }
-  pendingRows.sort(
-    (a, b) => b.startedAt - a.startedAt || b.filePath.localeCompare(a.filePath),
-  );
-  const preservedPendingPath = preservePath
-    ? path.resolve(preservePath)
-    : undefined;
-  const pendingRemovals: string[] = [];
-  for (const row of pendingRows) {
-    if (row.completedPath === preservedPendingPath || row.executionStarted) {
-      protectedPaths.add(row.completedPath);
-      continue;
-    }
-    if (nowMs - row.startedAt > row.maxAgeMs) {
-      pendingRemovals.push(row.filePath);
-      continue;
-    }
-    protectedPaths.add(row.completedPath);
   }
 
   const acknowledgedRoot = acknowledgedDir(agentDir);
@@ -1214,7 +928,7 @@ async function pruneRunAudits(
       removals.push(row.filePath);
     }
   }
-  for (const filePath of [...removals, ...pendingRemovals]) {
+  for (const filePath of removals) {
     await assertSafeAgentPath(agentDir, filePath);
     await fs.rm(filePath, { force: true });
     await syncDirectory(path.dirname(filePath));
@@ -1285,38 +999,6 @@ async function completedReference(
   };
 }
 
-export async function markSelfImproveRunAuditExecutionStarted(input: {
-  agentDir: string;
-  handle: SelfImproveRunAuditHandle;
-  startedAt?: string;
-}) {
-  if (input.handle.completedPath || input.handle.executionInterrupted) {
-    throw new Error("self_improve_audit_pending_mismatch");
-  }
-  const agentDir = await canonicalAgentRoot(input.agentDir);
-  const pendingPath = path.resolve(agentDir, input.handle.pendingPath);
-  const markerPath = path.resolve(agentDir, input.handle.executionStartedPath);
-  await assertSafeAgentPath(agentDir, pendingPath);
-  await assertSafeAgentPath(agentDir, markerPath);
-  const pending = await readPrivateJson<PendingAudit>(agentDir, pendingPath);
-  validatePendingAudit(
-    pending,
-    input.handle.storageId,
-    input.handle.auditId,
-    path.basename(pendingPath),
-  );
-  const marker: ExecutionStartedMarker = {
-    version: 1,
-    auditId: input.handle.auditId,
-    storageId: input.handle.storageId,
-    fileName: path.basename(markerPath),
-    startedAt: normalizeIsoTimestamp(
-      input.startedAt || new Date().toISOString(),
-    ),
-  };
-  await writeJsonPrivate(agentDir, markerPath, marker, { exclusive: true });
-}
-
 export async function completeSelfImproveRunAudit(input: {
   agentDir: string;
   handle: SelfImproveRunAuditHandle;
@@ -1328,46 +1010,6 @@ export async function completeSelfImproveRunAudit(input: {
 }): Promise<CompletedSelfImproveRunAudit> {
   const agentDir = await canonicalAgentRoot(input.agentDir);
   const finishedAt = normalizeIsoTimestamp(input.finishedAt);
-  if (input.handle.acknowledged) {
-    return {
-      ...input.handle.acknowledged.reference,
-      status: input.handle.acknowledged.status,
-      evidenceRetained: false,
-      output: "",
-      error:
-        input.handle.acknowledged.status === "failed"
-          ? "self_improve_audit_acknowledged_evidence_expired"
-          : undefined,
-      changedFiles: [],
-    };
-  }
-  if (input.handle.completedPath) {
-    const completedPath = path.resolve(agentDir, input.handle.completedPath);
-    if (!completedPath.startsWith(`${agentDir}${path.sep}`)) {
-      throw new Error("self_improve_audit_pending_path_outside_agent_dir");
-    }
-    await assertSafeAgentPath(agentDir, completedPath);
-    const { artifact } = await readValidatedCompletedArtifact(
-      agentDir,
-      completedPath,
-      input.handle.auditId,
-      input.handle.storageId,
-    );
-    const reference = await completedReference(
-      agentDir,
-      completedPath,
-      input.handle.auditId,
-      input.handle.storageId,
-    );
-    await pruneRunAudits(
-      agentDir,
-      policyWithDefaults(artifact.policy),
-      input.nowMs ?? Date.now(),
-      completedPath,
-    );
-    return reference;
-  }
-
   const pendingPath = path.resolve(agentDir, input.handle.pendingPath);
   if (!pendingPath.startsWith(`${agentDir}${path.sep}`)) {
     throw new Error("self_improve_audit_pending_path_outside_agent_dir");
@@ -1498,10 +1140,6 @@ export async function acknowledgeSelfImproveRunAudit(input: {
 }) {
   const agentDir = await canonicalAgentRoot(input.agentDir);
   const pendingPath = path.resolve(agentDir, input.handle.pendingPath);
-  const executionStartedPath = path.resolve(
-    agentDir,
-    input.handle.executionStartedPath,
-  );
   if (!pendingPath.startsWith(`${agentDir}${path.sep}`)) {
     throw new Error("self_improve_audit_pending_path_outside_agent_dir");
   }
@@ -1565,11 +1203,6 @@ export async function acknowledgeSelfImproveRunAudit(input: {
     );
   }
   await assertSafeAgentPath(agentDir, pendingPath);
-  await assertSafeAgentPath(agentDir, executionStartedPath);
-  await fs.rm(executionStartedPath, { force: true });
-  if (fssync.existsSync(path.dirname(executionStartedPath))) {
-    await syncDirectory(path.dirname(executionStartedPath));
-  }
   await fs.rm(pendingPath, { force: true });
   await syncDirectory(path.dirname(pendingPath));
 }
