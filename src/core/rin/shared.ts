@@ -5,7 +5,6 @@ import { execFileSync, spawn } from "node:child_process";
 
 import { bridgeDaemonSocketPath } from "../rin-lib/common.js";
 import { readJsonFile } from "../platform/fs.js";
-import { sleep } from "../platform/process.js";
 import {
   buildDaemonSocketProbeScript,
   buildDaemonStatusScript,
@@ -29,7 +28,6 @@ import {
   managedNodeExecutablePath,
   managedSystemdUnitCandidates,
 } from "../rin-install/paths.js";
-import { tryManagedSystemdAction } from "../rin-install/managed-service.js";
 import { type ReleaseChannel } from "../rin-lib/release.js";
 import { launchDaemonIndependentUpdateJob } from "./update-job.js";
 import {
@@ -243,24 +241,15 @@ export function targetPathExists(
   }
 }
 
-export async function ensureDaemonAvailable(context: TargetExecutionContext) {
-  if (await context.canConnectSocket()) return;
-
-  if (context.systemctl) {
-    tryManagedSystemdAction(context.managedServiceUnits, {
-      runAction: (unit) =>
-        context.exec([context.systemctl, "--user", "start", unit]),
-    });
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 5000) {
-      if (await context.canConnectSocket()) return;
-      await sleep(150);
-    }
-  }
-
-  throw new Error(
-    `rin_daemon_unavailable: managed daemon service did not become available for ${context.targetUser}`,
+function daemonUnavailableError(context: TargetExecutionContext) {
+  return new Error(
+    `rin_daemon_unavailable: managed daemon service is unavailable for ${context.targetUser}`,
   );
+}
+
+export async function assertDaemonAvailable(context: TargetExecutionContext) {
+  if (await context.canConnectSocket()) return;
+  throw daemonUnavailableError(context);
 }
 
 const FORWARDED_CHILD_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;

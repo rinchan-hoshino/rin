@@ -158,6 +158,10 @@ test("installer service helpers prefer current daemon entry, quote systemd value
     );
     assert.match(
       spec.service,
+      /^ConditionPathExists=!%t\/rin-daemon\/update\.lock$/m,
+    );
+    assert.match(
+      spec.service,
       new RegExp(
         `^ExecStart="${escapeRegex(managedNode)}" "${escapeRegex(currentDaemon)}"$`,
         "m",

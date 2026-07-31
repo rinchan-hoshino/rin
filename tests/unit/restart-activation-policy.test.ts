@@ -21,6 +21,15 @@ test("rin restart performs one managed restart and waits only for daemon availab
   );
 
   assert.match(restartBlock, /tryManagedServiceAction\(context, "restart"\)/);
+  assert.ok(
+    restartBlock.indexOf("assertLifecycleUpdateFence") <
+      restartBlock.indexOf('tryManagedServiceAction(context, "restart")'),
+    "explicit restart must clear a stale fence or reject a live update before systemd",
+  );
+  assert.match(
+    control,
+    /if \(context\.isTargetUser\)[\s\S]*assertNoDaemonUpdateInProgress[\s\S]*context\.exec\([\s\S]*update-fence-check\.js/,
+  );
   assert.match(restartBlock, /waitForDaemonAvailable/);
   assert.doesNotMatch(restartBlock, /queryDaemonStatus/);
   assert.doesNotMatch(restartBlock, /activateDaemonRestart/);
@@ -30,31 +39,37 @@ test("rin restart performs one managed restart and waits only for daemon availab
   assert.doesNotMatch(restartBlock, /waitForDaemonDrain/);
 });
 
-test("rin update preflights, stops, migrates, activates, and restarts in order", () => {
+test("rin update fences daemon startup without masking the managed service", () => {
   const finalize = source("src/core/rin-install/finalize.ts");
+  const service = source("src/core/rin-install/service.ts");
   const restartBlock = finalize.slice(
     finalize.indexOf("function managedRuntimeServiceFromInstallSpec"),
     finalize.indexOf("export async function finalizeQuickRunInstall"),
   );
 
+  assert.match(restartBlock, /acquireTargetDaemonUpdateFence/);
+  assert.match(restartBlock, /stopManagedRuntimeForUpdate/);
   assert.match(restartBlock, /tryManagedServiceAction\([\s\S]*"restart"/);
   assert.match(
     restartBlock,
     /if \(publishRuntime && !manageDaemon\)[\s\S]*requires managed daemon control/,
   );
-  assert.match(
-    restartBlock,
-    /serviceFileHoldCommand:[\s\S]*executionContext\.targetNodePath[\s\S]*service-file-hold\.js/,
-  );
+  assert.doesNotMatch(restartBlock, /setManagedServiceStartHold/);
+  assert.doesNotMatch(restartBlock, /service-file-hold/);
+  assert.doesNotMatch(restartBlock, /"mask"|"unmask"/);
+  assert.match(service, /ConditionPathExists=!%t\/rin-daemon\/update\.lock/);
+
   const preflightIndex = restartBlock.indexOf(
     "preflightInstallUpgradeMigrations",
   );
-  const holdIndex = restartBlock.indexOf(
-    "setManagedServiceStartHold(serviceContext, true",
+  const fenceIndex = restartBlock.indexOf("acquireTargetDaemonUpdateFence");
+  const stopIndex = restartBlock.indexOf(
+    "stopManagedRuntimeForUpdate",
+    fenceIndex + 1,
   );
-  const stopIndex = restartBlock.indexOf('"stop"');
-  const migrationFenceAcquireIndex = restartBlock.indexOf(
-    "chatMigrationFence = await acquireDaemonInstanceLock",
+  const migrationLockIndex = restartBlock.indexOf(
+    "acquireTargetDaemonMigrationLock",
+    stopIndex,
   );
   const quiescedIndex = restartBlock.indexOf(
     "migrationOptions.chatRuntimeQuiesced = true",
@@ -65,39 +80,26 @@ test("rin update preflights, stops, migrates, activates, and restarts in order",
     "finalizeInstallUpgradeMigrations",
     activateIndex,
   );
-  const migrationFenceReleaseIndex = restartBlock.indexOf(
-    "releaseChatMigrationFence()",
-    finalizeMigrationIndex,
-  );
-  const releaseIndex = restartBlock.indexOf(
-    "setManagedServiceStartHold(serviceContext, false",
-    activateIndex,
-  );
   const restartIndex = restartBlock.indexOf("restart:", activateIndex);
   const daemonRestartIndex = restartBlock.indexOf(
     'tryManagedServiceAction(serviceContext, "restart"',
-    releaseIndex,
+    restartIndex,
   );
   assert.ok(
-    preflightIndex >= 0 && preflightIndex < holdIndex,
-    "migration preparation must finish before the daemon start hold",
+    preflightIndex >= 0 && preflightIndex < fenceIndex,
+    "migration preflight must finish before the update fence",
   );
   assert.ok(
-    holdIndex >= 0 && holdIndex < stopIndex,
-    "service starts must be persistently disabled before the old daemon stops",
+    fenceIndex >= 0 && fenceIndex < stopIndex,
+    "the update fence must be acquired before daemon stop",
   );
   assert.ok(
-    preflightIndex >= 0 && preflightIndex < stopIndex,
-    "read-only migration preflight must finish before daemon stop",
+    stopIndex >= 0 && stopIndex < migrationLockIndex,
+    "the installer must request daemon stop before proving exclusive ownership",
   );
   assert.ok(
-    stopIndex >= 0 && stopIndex < quiescedIndex,
-    "the installer must not authorize turn interruption before daemon stop",
-  );
-  assert.ok(
-    migrationFenceAcquireIndex >= 0 &&
-      migrationFenceAcquireIndex < quiescedIndex,
-    "the installer must acquire the daemon lock before authorizing interruption",
+    migrationLockIndex >= 0 && migrationLockIndex < quiescedIndex,
+    "the installer must hold the daemon instance lease before authorizing interruption",
   );
   assert.ok(
     quiescedIndex >= 0 && quiescedIndex < mutateIndex,
@@ -112,40 +114,18 @@ test("rin update preflights, stops, migrates, activates, and restarts in order",
     "runtime activation must finish before finalizing the data migration",
   );
   assert.ok(
-    finalizeMigrationIndex >= 0 &&
-      finalizeMigrationIndex < migrationFenceReleaseIndex,
-    "the daemon lock must remain held until data migration finalization",
+    finalizeMigrationIndex >= 0 && finalizeMigrationIndex < restartIndex,
+    "data migration must finalize before daemon restart",
   );
   assert.ok(
-    migrationFenceReleaseIndex >= 0 &&
-      migrationFenceReleaseIndex < releaseIndex,
-    "the daemon lock must release before the managed service start hold",
-  );
-  assert.ok(
-    finalizeMigrationIndex >= 0 && finalizeMigrationIndex < releaseIndex,
-    "data migration must finalize before releasing the service start hold",
-  );
-  assert.ok(
-    activateIndex >= 0 && activateIndex < releaseIndex,
-    "runtime activation must finish before releasing the service start hold",
+    restartIndex >= 0 && restartIndex < daemonRestartIndex,
+    "the transition restart step must own the managed daemon restart",
   );
   assert.match(restartBlock, /rollbackInstallUpgradeMigrations/);
-  assert.ok(
-    releaseIndex >= 0 && releaseIndex < daemonRestartIndex,
-    "service starts must be released before daemon restart",
-  );
-  assert.ok(
-    activateIndex >= 0 && activateIndex < restartIndex,
-    "runtime activation must finish before daemon restart",
-  );
   assert.match(restartBlock, /waitForSocket/);
   assert.doesNotMatch(restartBlock, /queryInstalledDaemonStatus/);
-  assert.doesNotMatch(restartBlock, /activateDaemonRestart/);
-  assert.doesNotMatch(restartBlock, /snapshotDaemonRestart/);
   assert.match(restartBlock, /installDaemonService\([\s\S]*activate:\s*false/);
   assert.equal(restartBlock.match(/installDaemonService\(/g)?.length, 1);
-  assert.doesNotMatch(restartBlock, /prepareInstalledDaemonRestart/);
-  assert.doesNotMatch(restartBlock, /cancelInstalledDaemonRestart/);
   assert.equal(
     existsSync(
       path.join(rootDir, "src", "core", "rin", "daemon-activation.ts"),

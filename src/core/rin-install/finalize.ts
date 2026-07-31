@@ -47,10 +47,13 @@ import {
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
 import { preparePiManagedToolsForInstall } from "./pi-tools.js";
 import { buildGitHubRefArchiveUrl } from "../rin-lib/release.js";
-import { acquireDaemonInstanceLock } from "../rin-daemon/lock.js";
+import { sleep } from "../platform/process.js";
+import {
+  acquireTargetDaemonMigrationLock,
+  acquireTargetDaemonUpdateFence,
+} from "./daemon-update-fence.js";
 import {
   createManagedRuntimeServiceActionContext,
-  setManagedServiceStartHold,
   tryManagedServiceAction,
   type ManagedRuntimeService,
 } from "../rin/managed-runtime-service.js";
@@ -93,6 +96,20 @@ function buildInstallStageManagedRuntimeService(
     targetHomeForUser,
   );
   return managedRuntimeServiceFromInstallSpec(service);
+}
+
+async function stopManagedRuntimeForUpdate(
+  context: ReturnType<typeof createManagedRuntimeServiceActionContext>,
+  service?: ManagedRuntimeService,
+) {
+  await tryManagedServiceAction(context, "stop", service);
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 5000) {
+    if (!(await context.canConnectSocket())) return;
+    await sleep(150);
+  }
+  if (!(await context.canConnectSocket())) return;
+  throw new Error("rin_update_daemon_stop_incomplete");
 }
 
 export function readExistingInitializationComplete(installDir: string) {
@@ -221,10 +238,36 @@ export function refreshCoreUpdateLaunchers(
   return { targetLaunchers, currentLaunchers: null };
 }
 
+export async function releaseManagedRuntimeFences(options: {
+  releaseMigration: () => Promise<void>;
+  releaseUpdate: () => Promise<void>;
+}) {
+  const releaseErrors: unknown[] = [];
+  try {
+    await options.releaseMigration();
+  } catch (error) {
+    releaseErrors.push(error);
+  }
+  try {
+    await options.releaseUpdate();
+  } catch (error) {
+    releaseErrors.push(error);
+  }
+  if (releaseErrors.length > 0) {
+    throw new AggregateError(
+      releaseErrors,
+      "rin_update_composite_fence_release_failed",
+    );
+  }
+}
+
 export async function runManagedRuntimeTransition<
   TMutation,
   TActivation,
 >(steps: {
+  acquireFence?: () =>
+    | { release(): unknown | Promise<unknown> }
+    | Promise<{ release(): unknown | Promise<unknown> }>;
   stop: () => unknown | Promise<unknown>;
   mutate: () => TMutation | Promise<TMutation>;
   activate: (mutation: TMutation) => TActivation | Promise<TActivation>;
@@ -235,29 +278,66 @@ export async function runManagedRuntimeTransition<
   recover?: (error: unknown) => unknown | Promise<unknown>;
   restart: () => unknown | Promise<unknown>;
 }) {
+  let fence: { release(): unknown | Promise<unknown> } | null = null;
   let stopAttempted = false;
+  let commitCompleted = false;
   let restartAttempted = false;
+  const releaseFence = async () => {
+    if (!fence) return;
+    const heldFence = fence;
+    await heldFence.release();
+    fence = null;
+  };
+  const releaseFenceWithRetry = async () => {
+    try {
+      await releaseFence();
+    } catch (firstReleaseError) {
+      try {
+        await releaseFence();
+      } catch (secondReleaseError) {
+        throw new AggregateError(
+          [firstReleaseError, secondReleaseError],
+          "rin_update_fence_release_failed",
+        );
+      }
+    }
+  };
   try {
+    fence = (await steps.acquireFence?.()) || null;
     stopAttempted = true;
     await steps.stop();
     const mutation = await steps.mutate();
     const activation = await steps.activate(mutation);
     await steps.commit?.(mutation, activation);
+    commitCompleted = true;
+    await releaseFence();
     restartAttempted = true;
     await steps.restart();
     return { mutation, activation };
   } catch (error) {
     if (stopAttempted && !restartAttempted) {
-      try {
-        await steps.recover?.(error);
-      } catch (recoveryError) {
-        throw new AggregateError(
-          [error, recoveryError],
-          "rin_update_failure_recovery_failed",
-          { cause: error },
-        );
+      if (!commitCompleted) {
+        try {
+          await steps.recover?.(error);
+        } catch (recoveryError) {
+          try {
+            await releaseFenceWithRetry();
+          } catch (releaseError) {
+            throw new AggregateError(
+              [error, recoveryError, releaseError],
+              "rin_update_failure_recovery_and_fence_release_failed",
+              { cause: error },
+            );
+          }
+          throw new AggregateError(
+            [error, recoveryError],
+            "rin_update_failure_recovery_failed",
+            { cause: error },
+          );
+        }
       }
       try {
+        await releaseFenceWithRetry();
         restartAttempted = true;
         await steps.restart();
       } catch (restartError) {
@@ -267,6 +347,8 @@ export async function runManagedRuntimeTransition<
           { cause: error },
         );
       }
+    } else {
+      await releaseFenceWithRetry();
     }
     throw error;
   }
@@ -616,37 +698,54 @@ async function applyInstalledRuntime(
       currentUser,
       targetUser,
       installDir,
-      serviceFileHoldCommand: publishRuntime
-        ? [
-            executionContext.targetNodePath,
-            path.join(
-              publishedRuntime.releaseRoot,
-              "dist/app/rin-install/service-file-hold.js",
-            ),
-          ]
-        : undefined,
     });
+    const daemonSocketPath = daemonSocketPathForUser(targetUser, serviceDeps);
     const service =
       managedRuntimeServiceFromInstallSpec(installedService) ||
       buildInstallStageManagedRuntimeService(targetUser, installDir);
-    let serviceStartsHeld = false;
-    let chatMigrationFence: Awaited<
-      ReturnType<typeof acquireDaemonInstanceLock>
+    const lockModulePath = path.join(
+      sourceRoot,
+      "dist/core/rin-daemon/lock.js",
+    );
+    let migrationLock: Awaited<
+      ReturnType<typeof acquireTargetDaemonMigrationLock>
     > | null = null;
-    const releaseChatMigrationFence = () => {
-      chatMigrationFence?.release();
-      chatMigrationFence = null;
-    };
     const transition = await runManagedRuntimeTransition({
+      acquireFence:
+        manageDaemon && publishRuntime
+          ? async () => {
+              const updateFence = await acquireTargetDaemonUpdateFence({
+                targetUser,
+                nodePath: executionContext.targetNodePath,
+                lockModulePath,
+                agentDir: serviceContext.agentDir,
+                socketPath: daemonSocketPath,
+              });
+              return {
+                async release() {
+                  await releaseManagedRuntimeFences({
+                    releaseMigration: async () => {
+                      if (!migrationLock) return;
+                      const heldMigrationLock = migrationLock;
+                      await heldMigrationLock.release();
+                      migrationLock = null;
+                    },
+                    releaseUpdate: async () => updateFence.release(),
+                  });
+                },
+              };
+            }
+          : undefined,
       stop: async () => {
         if (manageDaemon && publishRuntime) {
-          serviceStartsHeld = true;
-          await setManagedServiceStartHold(serviceContext, true, service);
-          await tryManagedServiceAction(serviceContext, "stop", service);
-          chatMigrationFence = await acquireDaemonInstanceLock(
-            serviceContext.agentDir,
-            { socketPath: daemonSocketPathForUser(targetUser, serviceDeps) },
-          );
+          await stopManagedRuntimeForUpdate(serviceContext, service);
+          migrationLock = await acquireTargetDaemonMigrationLock({
+            targetUser,
+            nodePath: executionContext.targetNodePath,
+            lockModulePath,
+            agentDir: serviceContext.agentDir,
+            socketPath: daemonSocketPath,
+          });
           migrationOptions.chatRuntimeQuiesced = true;
         }
       },
@@ -657,34 +756,24 @@ async function applyInstalledRuntime(
           finalizeInstallUpgradeMigrations(migrationOptions, migrationDeps);
           runtimeReplacement.commit();
         }
-        releaseChatMigrationFence();
       },
       recover: async () => {
-        try {
-          if (publishRuntime) {
-            rollbackInstallUpgradeMigrations(migrationOptions, migrationDeps);
-            if (runtimeReplacement.isActive()) {
-              runtimeReplacement.rollback();
-            } else if (deferRuntimeActivation && previousReleaseName) {
-              switchInstalledCurrentRelease(
-                installDir,
-                previousReleaseName,
-                targetUser,
-                useElevatedWrite,
-                { findSystemUser },
-              );
-            }
+        if (publishRuntime) {
+          rollbackInstallUpgradeMigrations(migrationOptions, migrationDeps);
+          if (runtimeReplacement.isActive()) {
+            runtimeReplacement.rollback();
+          } else if (deferRuntimeActivation && previousReleaseName) {
+            switchInstalledCurrentRelease(
+              installDir,
+              previousReleaseName,
+              targetUser,
+              useElevatedWrite,
+              { findSystemUser },
+            );
           }
-        } finally {
-          releaseChatMigrationFence();
         }
       },
       restart: async () => {
-        releaseChatMigrationFence();
-        if (serviceStartsHeld) {
-          await setManagedServiceStartHold(serviceContext, false, service);
-          serviceStartsHeld = false;
-        }
         if (manageDaemon) {
           await tryManagedServiceAction(serviceContext, "restart", service);
         }
@@ -703,7 +792,7 @@ async function applyInstalledRuntime(
 
     const daemonReady = installedService
       ? await waitForSocket(
-          daemonSocketPathForUser(targetUser, serviceDeps),
+          daemonSocketPath,
           daemonReadyTimeoutMs,
           targetUser,
           {

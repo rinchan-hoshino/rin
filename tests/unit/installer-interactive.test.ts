@@ -307,7 +307,10 @@ test("core update preflights before stop and activates after migrations", () => 
     "preflightInstallUpgradeMigrations",
   );
   const transitionIndex = applyBlock.indexOf("runManagedRuntimeTransition");
-  const stopIndex = applyBlock.indexOf('"stop"', transitionIndex);
+  const stopIndex = applyBlock.indexOf(
+    "stopManagedRuntimeForUpdate",
+    transitionIndex,
+  );
   const mutateIndex = applyBlock.indexOf("mutate: writeInstalledState");
   const activateIndex = applyBlock.indexOf("activate:", mutateIndex);
   const restartIndex = applyBlock.indexOf("restart:", activateIndex);

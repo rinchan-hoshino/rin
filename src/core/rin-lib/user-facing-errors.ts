@@ -559,6 +559,12 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rin_container_name_required: () =>
     "Target operation needs a container name. Provide the container name.",
   rin_daemon_failed: () => "Rin's background service failed to start.",
+  rin_daemon_lock_owner_pending: () =>
+    "Rin found incomplete background-service ownership state and stopped safely.",
+  rin_daemon_lock_release_identity_changed: () =>
+    "Rin stopped safely because background-service ownership changed during release.",
+  rin_daemon_update_in_progress: () =>
+    "Rin's background service is paused while an update is in progress.",
   rin_daemon_shutting_down: () =>
     "Rin is shutting down right now. Wait until it starts again.",
   rin_daemon_unavailable: (detail) =>
@@ -635,18 +641,14 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin install metadata does not record a background service.",
   rin_managed_service_missing_path: () =>
     "Rin install metadata points to a missing background service file.",
+  rin_managed_service_symlink_refused: () =>
+    "Rin left the managed service link unchanged because its ownership could not be verified.",
   rin_managed_service_unsupported: () =>
     "This Rin install does not support that lifecycle command on this platform.",
-  rin_windows_startup_hold_ambiguous: () =>
-    "Rin found both active and update-held Windows startup entries. Remove the duplicate entry before retrying the update.",
-  rin_systemd_unit_hold_ambiguous: () =>
-    "Rin found an ambiguous systemd unit-file hold state. Inspect the recorded unit before retrying the update.",
-  rin_managed_service_file_hold_target_executor_required: () =>
-    "Rin cannot update the target user's service file without a target-user executor.",
-  rin_service_file_hold_arguments_invalid: () =>
-    "Rin received invalid service-file hold arguments.",
-  rin_service_file_hold_kind_invalid: () =>
-    "Rin received an unsupported service-file hold kind.",
+  rin_systemd_legacy_hold_ambiguous: () =>
+    "Rin found an ambiguous legacy service hold and left it unchanged.",
+  rin_systemd_legacy_hold_invalid_result: () =>
+    "Rin could not verify the legacy service hold recovery result.",
   rin_managed_node_runtime_missing: () =>
     "Rin could not find its managed Node runtime. Repair or reinstall Rin before starting managed services or updating.",
   rin_managed_node_npm_missing: () =>
@@ -732,6 +734,30 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     `Rin timed out while ${describeRuntimeOperation(detail)}.`,
   rin_tui_disposed: () => "Rin TUI session has already closed. Reopen Rin.",
   rin_tui_failed: () => "Rin TUI failed before it could start.",
+  rin_update_composite_fence_release_failed: () =>
+    "Rin update could not release all background-service maintenance locks.",
+  rin_update_daemon_stop_incomplete: () =>
+    "Rin update stopped because the background service did not shut down.",
+  rin_update_fence_check_args_missing: () =>
+    "Rin could not check the background-service maintenance fence.",
+  rin_update_fence_holder_acquire_missing: () =>
+    "Rin update could not establish the background-service maintenance fence.",
+  rin_update_fence_holder_exit_timeout: () =>
+    "Rin update could not release the background-service maintenance fence.",
+  rin_update_fence_holder_exited: () =>
+    "Rin update could not establish the background-service maintenance fence.",
+  rin_update_fence_holder_invalid_ready: () =>
+    "Rin update could not verify the background-service maintenance fence.",
+  rin_update_fence_holder_ready_timeout: () =>
+    "Rin update could not establish the background-service maintenance fence.",
+  rin_update_fence_holder_lost: () =>
+    "Rin update stopped immediately because background-service maintenance ownership was lost.",
+  rin_update_fence_holder_release_failed: () =>
+    "Rin update could not release the background-service maintenance fence.",
+  rin_update_fence_release_failed: () =>
+    "Rin update could not release the background-service maintenance fence after retrying.",
+  rin_update_failure_recovery_and_fence_release_failed: () =>
+    "Rin update recovery failed and the background-service maintenance fence could not be released cleanly.",
   rin_update_installed_release_channel_missing: () =>
     "Rin update could not find the installed release channel. Repair the installed release metadata before updating.",
   rin_update_job_invalid: () =>
