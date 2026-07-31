@@ -279,7 +279,7 @@ test("unexpected client event failures are reported without inventing turn error
   assert.equal(driver.liveTurn, null);
 });
 
-test("terminal listener failures remain terminal while becoming observable", async () => {
+test("failed terminal projection remains replayable until listeners commit it", async () => {
   const client = createFrontendClient();
   const failures: any[] = [];
   const driver = new RinFrontendTurnDriver({
@@ -287,19 +287,231 @@ test("terminal listener failures remain terminal while becoming observable", asy
     promptSource: "chat-bridge",
     onEventHandlingError: (failure: any) => failures.push(failure),
   });
+  let attempts = 0;
   driver.subscribe((event: any) => {
-    if (event.type === "turn_complete") {
-      throw new Error("terminal projection failed");
-    }
+    if (event.type !== "turn_complete") return;
+    attempts += 1;
+    if (attempts === 1) throw new Error("terminal projection failed once");
   });
+  const terminal = {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "replayable-terminal",
+    finalText: "durable final",
+    sessionId: "frontend-session",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    terminalRecord: {
+      terminalId: `terminal-${"b".repeat(64)}`,
+      state: "complete",
+      terminalAt: "2026-07-31T04:00:00.000Z",
+    },
+  };
 
-  await assert.rejects(
-    driver.runTurn({ text: "finish this turn" }),
-    /terminal projection failed/,
-  );
+  await driver.connect();
+  await emitDriverEvent(driver, terminal);
+  await emitDriverEvent(driver, terminal);
+  await emitDriverEvent(driver, terminal);
+
+  assert.equal(attempts, 2);
   assert.equal(failures.length, 1);
   assert.equal(failures[0].stage, "terminal_listener");
-  assert.equal(failures[0].frontendEvent.type, "turn_complete");
+});
+
+test("terminal projection retries only listeners that have not committed", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+    onEventHandlingError() {},
+  });
+  let committedCalls = 0;
+  let retryingCalls = 0;
+  driver.subscribe((event: any) => {
+    if (event.type === "turn_complete") committedCalls += 1;
+  });
+  driver.subscribe((event: any) => {
+    if (event.type !== "turn_complete") return;
+    retryingCalls += 1;
+    if (retryingCalls === 1) throw new Error("retry this listener only");
+  });
+
+  await driver.connect();
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "listener-commit-boundary",
+    finalText: "durable final",
+    sessionId: "frontend-session",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    terminalRecord: {
+      terminalId: `terminal-${"f".repeat(64)}`,
+      state: "complete",
+      terminalAt: "2026-07-31T04:00:00.000Z",
+    },
+  });
+
+  assert.equal(committedCalls, 1);
+  assert.equal(retryingCalls, 2);
+});
+
+test("terminal projection requires the daemon requestTag", async () => {
+  const client = createFrontendClient();
+  const failures: any[] = [];
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+    onEventHandlingError: (failure: any) => failures.push(failure),
+  });
+  let projected = 0;
+  driver.subscribe((event: any) => {
+    if (event.type === "turn_complete") projected += 1;
+  });
+  const terminalRecord = {
+    terminalId: `terminal-${"9".repeat(64)}`,
+    state: "complete",
+    terminalAt: "2026-07-31T04:00:00.000Z",
+  };
+  const base = {
+    type: "rpc_turn_event",
+    event: "complete",
+    finalText: "durable final",
+    sessionId: "frontend-session",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    terminalRecord,
+  };
+
+  await driver.connect();
+  await emitDriverEvent(driver, base);
+  await emitDriverEvent(driver, {
+    ...base,
+    requestTag: "full-terminal-request",
+  });
+
+  assert.equal(projected, 1);
+  assert.equal(failures.length, 1);
+  assert.match(String(failures[0].error), /rin_terminal_request_tag_missing/);
+});
+
+test("concurrent replay of one requestTag shares one projection task", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  let projected = 0;
+  let releaseProjection!: () => void;
+  let projectionStarted!: () => void;
+  const projectionGate = new Promise<void>((resolve) => {
+    releaseProjection = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    projectionStarted = resolve;
+  });
+  driver.subscribe(async (event: any) => {
+    if (event.type !== "turn_complete") return;
+    projected += 1;
+    projectionStarted();
+    await projectionGate;
+  });
+  const terminalRecord = {
+    terminalId: `terminal-${"8".repeat(64)}`,
+    state: "complete",
+    terminalAt: "2026-07-31T04:00:00.000Z",
+  };
+  const base = {
+    type: "rpc_turn_event",
+    event: "complete",
+    finalText: "durable final",
+    sessionId: "frontend-session",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+  };
+
+  await driver.connect();
+  const terminal = {
+    ...base,
+    requestTag: "concurrent-terminal-request",
+    terminalRecord,
+  };
+  const first = emitDriverEvent(driver, terminal);
+  await started;
+  const second = emitDriverEvent(driver, terminal);
+  const third = emitDriverEvent(driver, terminal);
+  releaseProjection();
+  await Promise.all([first, second, third]);
+
+  assert.equal(projected, 1);
+});
+
+test("terminal identity never borrows an unrelated live requestTag", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  let resolved = 0;
+  (driver as any).liveTurn = {
+    requestTag: "current-live-request",
+    resolve() {
+      resolved += 1;
+    },
+  };
+
+  await driver.connect();
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: "older-durable-request",
+    finalText: "older durable terminal",
+    sessionId: "frontend-session",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    terminalRecord: {
+      terminalId: `terminal-${"a".repeat(64)}`,
+      state: "complete",
+      terminalAt: "2026-07-31T04:00:00.000Z",
+    },
+  });
+
+  assert.equal(resolved, 0);
+});
+
+test("frontend terminal identity ignores replacement-worker generation reuse", async () => {
+  const client = createFrontendClient();
+  const projected: string[] = [];
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  driver.subscribe((event: any) => {
+    if (event.type === "turn_complete") {
+      projected.push(event.requestTag);
+    }
+  });
+  const terminal = (requestTag: string, terminalId: string) => ({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    turnGeneration: 1,
+    finalText: requestTag,
+    sessionId: "frontend-session",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    terminalRecord: {
+      terminalId,
+      state: "complete",
+      terminalAt: "2026-07-31T04:00:00.000Z",
+    },
+  });
+  const recovered = terminal(
+    "chat-inbox-recovered",
+    `terminal-${"c".repeat(64)}`,
+  );
+  const current = terminal("chat-inbox-current", `terminal-${"d".repeat(64)}`);
+
+  await driver.connect();
+  await emitDriverEvent(driver, recovered);
+  await emitDriverEvent(driver, current);
+  await emitDriverEvent(driver, { ...current, turnGeneration: 2 });
+
+  assert.deepEqual(projected, ["chat-inbox-recovered", "chat-inbox-current"]);
 });
 
 test("frontend turn driver propagates canonical run identity through terminal projection", async () => {
@@ -556,6 +768,49 @@ test("frontend SDK turn driver settles from daemon terminal wait when the pushed
     "daemon terminal wait did not settle the turn",
   );
   assert.equal(result.finalText, "waited final");
+});
+
+test("frontend SDK turn driver follows daemon terminal after its worker request exits", async () => {
+  const client = createFrontendClient();
+  const originalRequest = client.request.bind(client);
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    throw new Error("rin_worker_exit");
+  };
+  client.request = async (command: any) => {
+    if (command.type !== "await_turn_terminal") {
+      return await originalRequest(command);
+    }
+    return {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: command.requestTag,
+      finalText: "replacement worker final",
+      sessionId: "frontend-session",
+      sessionFile: "/tmp/frontend-managed.jsonl",
+      terminalRecord: {
+        terminalId: `terminal-${"e".repeat(64)}`,
+        state: "complete",
+        terminalAt: "2026-07-31T04:00:00.000Z",
+      },
+    };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const result = await driver.runTurn({
+    text: "survive worker exit",
+    managedSessionLeaf: "telegram/1:2",
+    requestTag: "worker-exit-ledger-owned",
+  });
+
+  assert.equal(result.finalText, "replacement worker final");
+  assert.equal(
+    client.calls.filter((call: any) => call.type === "prompt").length,
+    1,
+  );
 });
 
 test("frontend SDK turn driver runs turns through a frontend client", async () => {
@@ -1523,6 +1778,7 @@ test("frontend SDK submits ordinary input unchanged during a backend tool gap", 
     sessionId: "frontend-session",
     isStreaming: false,
     turnActive: true,
+    requestTag: "backend-terminal-owner",
   });
   client.prompt = async (text: string, options: any = {}) => {
     client.calls.push({ type: "prompt", text, options });
@@ -1557,6 +1813,7 @@ test("frontend SDK keeps ordinary input transport-pending until compaction ends"
     sessionId: "frontend-session",
     isStreaming: true,
     turnActive: true,
+    requestTag: "backend-terminal-owner",
     isCompacting: compacting,
   });
   client.prompt = async (text: string, options: any = {}) => {
@@ -1984,6 +2241,7 @@ test("frontend SDK turn driver follows active turn across transient reconnect be
       sessionId: "frontend-session",
       isStreaming: true,
       turnActive: true,
+      requestTag: "backend-reconnect-request",
     };
   };
   client.prompt = async (text: string, options: any = {}) => {
@@ -2000,7 +2258,7 @@ test("frontend SDK turn driver follows active turn across transient reconnect be
   await emitDriverEvent(driver as any, {
     type: "rpc_turn_event",
     event: "complete",
-    requestTag: "",
+    requestTag: "backend-reconnect-request",
     finalText: "final after reconnect",
     result: { messages: [{ type: "text", text: "final after reconnect" }] },
     sessionId: "frontend-session",

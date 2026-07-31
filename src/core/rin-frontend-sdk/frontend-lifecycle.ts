@@ -465,29 +465,6 @@ function retryStatusText(
   return `Retrying (${event.attempt}/${event.maxAttempts}) in ${seconds}s... (/abort to stop)`;
 }
 
-export class RinFrontendLifecycleTerminalGate {
-  private readonly terminalIdentities = new Set<string>();
-
-  private terminalIdentity(event: RinFrontendLifecycleEvent): string {
-    if (event.requestTag) return `request:${event.requestTag}`;
-    const terminalId = event.terminalRecord?.terminalId;
-    if (terminalId) return `terminal:${terminalId}`;
-    const session = event.sessionId || event.sessionFile || "session";
-    if (event.turnGeneration && event.turnGeneration > 0) {
-      return `${session}:generation:${event.turnGeneration}`;
-    }
-    return `${session}:identityless`;
-  }
-
-  accept(event: RinFrontendLifecycleEvent): boolean {
-    if (event.kind !== "turn_terminal") return true;
-    const identity = this.terminalIdentity(event);
-    if (this.terminalIdentities.has(identity)) return false;
-    this.terminalIdentities.add(identity);
-    return true;
-  }
-}
-
 export function shouldRefreshRinFrontendLifecycleStatus(
   event: RinFrontendLifecycleEvent,
 ): boolean {

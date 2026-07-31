@@ -88,7 +88,8 @@ function isRecoverableConnectionError(error: unknown) {
     isRinFrontendTurnCancelledError(error) ||
     /rin_tui_not_connected|rin_disconnected|frontend_turn_driver_disposed/.test(
       message,
-    )
+    ) ||
+    /rin_worker_(?:exit|unavailable|oom|cleanup_failed)/.test(message)
   );
 }
 
@@ -206,6 +207,11 @@ export class RinFrontendTurnDriver {
   private disconnectedTurnRecovery: Promise<void> | null = null;
   private turnInterruptionSeq = 0;
   private ignoredTerminalRequestTags = new Set<string>();
+  private readonly committedTerminalProjections = new Set<string>();
+  private readonly terminalProjectionTasks = new Map<
+    string,
+    Promise<boolean>
+  >();
   private pendingTurnCount = 0;
   private daemonShutdownDetached = false;
 
@@ -1508,6 +1514,90 @@ export class RinFrontendTurnDriver {
     }
   }
 
+  private terminalProjectionIdentity(
+    event: Extract<
+      RinFrontendTurnDriverEvent,
+      { type: "turn_complete" | "turn_error" }
+    >,
+  ) {
+    const requestTag = safeString(event.requestTag).trim();
+    return requestTag ? `request:${requestTag}` : "";
+  }
+
+  private terminalOwnsLiveTurn(requestTag?: string) {
+    const terminalRequestTag = safeString(requestTag).trim();
+    return Boolean(
+      this.liveTurn &&
+      terminalRequestTag &&
+      (this.liveTurn.requestTag === terminalRequestTag ||
+        this.backendTurnRequestTag === terminalRequestTag),
+    );
+  }
+
+  private async emitTerminalAfterCommit(
+    event: Extract<
+      RinFrontendTurnDriverEvent,
+      { type: "turn_complete" | "turn_error" }
+    >,
+  ) {
+    const terminalIdentity = this.terminalProjectionIdentity(event);
+    if (!terminalIdentity) {
+      this.reportEventHandlingError({
+        stage: "terminal_listener",
+        error: new Error("rin_terminal_request_tag_missing"),
+        frontendEvent: event,
+      });
+      return false;
+    }
+    if (this.committedTerminalProjections.has(terminalIdentity)) return true;
+
+    let projection = this.terminalProjectionTasks.get(terminalIdentity);
+    if (!projection) {
+      projection = (async () => {
+        const pendingListeners = new Set(this.listeners);
+        let attempt = 0;
+        while (pendingListeners.size > 0) {
+          const failures: unknown[] = [];
+          await Promise.all(
+            Array.from(pendingListeners, async (listener) => {
+              try {
+                await listener(event);
+                pendingListeners.delete(listener);
+              } catch (error) {
+                failures.push(error);
+              }
+            }),
+          );
+          if (failures.length === 0) return true;
+          attempt += 1;
+          for (const failure of failures) {
+            this.reportEventHandlingError({
+              stage: "terminal_listener",
+              error: failure,
+              frontendEvent: event,
+            });
+          }
+          if (!this.client) return false;
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.min(2_000, 100 * 2 ** (attempt - 1))),
+          );
+        }
+        return true;
+      })();
+      this.terminalProjectionTasks.set(terminalIdentity, projection);
+    }
+
+    try {
+      if (!(await projection)) return false;
+      this.committedTerminalProjections.add(terminalIdentity);
+      return true;
+    } finally {
+      if (this.terminalProjectionTasks.get(terminalIdentity) === projection) {
+        this.terminalProjectionTasks.delete(terminalIdentity);
+      }
+    }
+  }
+
   async handleClientEvent(event: any) {
     if (!event || typeof event !== "object") return;
     if (event.type === "ui" && event.name === "connection_lost") {
@@ -1727,52 +1817,35 @@ export class RinFrontendTurnDriver {
         if (!this.frontendState.workingVisible) {
           this.setFrontendPhase("idle");
         }
-        try {
-          await this.emitAndWait({
-            type: "turn_complete",
-            finalText,
-            result: event.result,
-            sessionId: event.sessionId,
-            sessionFile: event.sessionFile,
-            requestTag: safeString(event.requestTag).trim() || undefined,
-            ...(event.chatDeliveryContext
-              ? { chatDeliveryContext: event.chatDeliveryContext }
-              : {}),
-            ...(event.terminalRecord
-              ? { terminalRecord: event.terminalRecord }
-              : {}),
-          });
-        } catch (error) {
-          this.reportEventHandlingError({
-            stage: "terminal_listener",
-            error,
-            frontendEvent: {
-              type: "turn_complete",
-              finalText,
-              result: event.result,
-              sessionId: event.sessionId,
-              sessionFile: event.sessionFile,
-              requestTag: safeString(event.requestTag).trim() || undefined,
-              chatDeliveryContext: event.chatDeliveryContext,
-              terminalRecord: event.terminalRecord,
-            },
-          });
-          const terminalError = (
-            error instanceof Error ? error : new Error(String(error))
-          ) as Error & { rinTurnTerminal?: boolean };
-          terminalError.rinTurnTerminal = true;
-          this.failLiveTurn(terminalError);
-          return;
-        }
-        this.liveTurn?.resolve({
+        const terminalEvent: Extract<
+          RinFrontendTurnDriverEvent,
+          { type: "turn_complete" }
+        > = {
+          type: "turn_complete",
           finalText,
           result: event.result,
           sessionId: event.sessionId,
           sessionFile: event.sessionFile,
           requestTag: safeString(event.requestTag).trim() || undefined,
-          chatDeliveryContext: event.chatDeliveryContext,
-          terminalRecord: event.terminalRecord,
-        });
+          ...(event.chatDeliveryContext
+            ? { chatDeliveryContext: event.chatDeliveryContext }
+            : {}),
+          ...(event.terminalRecord
+            ? { terminalRecord: event.terminalRecord }
+            : {}),
+        };
+        if (!(await this.emitTerminalAfterCommit(terminalEvent))) return;
+        if (this.terminalOwnsLiveTurn(terminalEvent.requestTag)) {
+          this.liveTurn.resolve({
+            finalText,
+            result: event.result,
+            sessionId: event.sessionId,
+            sessionFile: event.sessionFile,
+            requestTag: terminalEvent.requestTag,
+            chatDeliveryContext: event.chatDeliveryContext,
+            terminalRecord: event.terminalRecord,
+          });
+        }
         return;
       }
       case "turn_error": {
@@ -1782,42 +1855,24 @@ export class RinFrontendTurnDriver {
         if (!this.frontendState.workingVisible) {
           this.setFrontendPhase("idle");
         }
-        try {
-          await this.emitAndWait({
-            type: "turn_error",
-            error: event.error,
-            sessionId: event.sessionId,
-            sessionFile: event.sessionFile,
-            requestTag: safeString(event.requestTag).trim() || undefined,
-            ...(event.chatDeliveryContext
-              ? { chatDeliveryContext: event.chatDeliveryContext }
-              : {}),
-            ...(event.terminalRecord
-              ? { terminalRecord: event.terminalRecord }
-              : {}),
-          });
-        } catch (error) {
-          this.reportEventHandlingError({
-            stage: "terminal_listener",
-            error,
-            frontendEvent: {
-              type: "turn_error",
-              error: event.error,
-              sessionId: event.sessionId,
-              sessionFile: event.sessionFile,
-              requestTag: safeString(event.requestTag).trim() || undefined,
-              chatDeliveryContext: event.chatDeliveryContext,
-              terminalRecord: event.terminalRecord,
-            },
-          });
-          const terminalError = (
-            error instanceof Error ? error : new Error(String(error))
-          ) as Error & { rinTurnTerminal?: boolean };
-          terminalError.rinTurnTerminal = true;
-          this.failLiveTurn(terminalError);
-          return;
-        }
-        if (!this.liveTurn) return;
+        const terminalEvent: Extract<
+          RinFrontendTurnDriverEvent,
+          { type: "turn_error" }
+        > = {
+          type: "turn_error",
+          error: event.error,
+          sessionId: event.sessionId,
+          sessionFile: event.sessionFile,
+          requestTag: safeString(event.requestTag).trim() || undefined,
+          ...(event.chatDeliveryContext
+            ? { chatDeliveryContext: event.chatDeliveryContext }
+            : {}),
+          ...(event.terminalRecord
+            ? { terminalRecord: event.terminalRecord }
+            : {}),
+        };
+        if (!(await this.emitTerminalAfterCommit(terminalEvent))) return;
+        if (!this.terminalOwnsLiveTurn(terminalEvent.requestTag)) return;
         const error = new Error(event.error) as Error & {
           sessionId?: string;
           sessionFile?: string;

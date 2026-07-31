@@ -56,10 +56,8 @@ type PendingResponse = {
 };
 
 type TerminalTurnWaiter = {
-  worker: WorkerHandle;
   connection?: ConnectionState;
-  selector: SessionSelector;
-  requestTag?: string;
+  requestTag: string;
   resolve: (payload: any) => void;
   reject: (error: Error) => void;
 };
@@ -319,7 +317,6 @@ export class WorkerPool {
   ) {
     if (!this.workers.has(worker)) return;
     this.interruptWorkerLifecycle(worker, "rin_worker_exit");
-    this.rejectTerminalTurnWaiters(worker, new Error("rin_worker_exit"));
     worker.gracefulShutdownRequested = true;
     this.workers.delete(worker);
     if (!this.shuttingDown || !this.isWorkerRunning(worker)) {
@@ -1560,7 +1557,6 @@ export class WorkerPool {
         (worker.gracefulShutdownRequested && !this.shuttingDown)
       ) {
         this.interruptWorkerLifecycle(worker, exitError);
-        this.rejectTerminalTurnWaiters(worker, new Error(exitError));
       }
       if (oomKilled && !recoverActiveTurn) {
         for (const connection of liveConnections) {
@@ -1721,17 +1717,13 @@ export class WorkerPool {
   }
 
   private waitForTerminalTurnEvent(
-    worker: WorkerHandle,
-    selector: SessionSelector,
-    requestTag?: string,
+    requestTag: string,
     connection?: ConnectionState,
   ) {
     let waiter!: TerminalTurnWaiter;
     const promise = new Promise<any>((resolve, reject) => {
       waiter = {
-        worker,
         connection,
-        selector,
         requestTag,
         resolve,
         reject,
@@ -1743,12 +1735,9 @@ export class WorkerPool {
 
   async awaitTerminalTurnEvent(
     connection: ConnectionState,
-    selector: SessionSelector,
+    _selector: SessionSelector,
     requestTag?: string,
   ) {
-    const selected = hasSessionSelector(selector)
-      ? selector
-      : this.getConnectionSelector(connection);
     const normalizedRequestTag = String(requestTag || "").trim();
     if (!normalizedRequestTag) {
       throw new Error("await_turn_terminal requires requestTag");
@@ -1762,23 +1751,24 @@ export class WorkerPool {
       return daemonTurnTerminalEvent(existing);
     }
 
-    const worker = this.resolveWorkerForCommand(connection, selected);
-    if (!worker) {
-      return daemonTurnTerminalEvent(
-        interruptDaemonTurn(
-          this.daemonLedgerAgentDir(),
-          normalizedRequestTag,
-          "rin_worker_unavailable",
-        ),
-      );
+    const selected = sessionSelectorFromState(existing);
+    if (!this.findWorkerBySelector(selected)) {
+      this.scheduleActiveDaemonTurnRecovery(normalizedRequestTag);
     }
 
     const { promise, waiter } = this.waitForTerminalTurnEvent(
-      worker,
-      selected,
       normalizedRequestTag,
       connection,
     );
+    const afterRegistration = readDaemonTurn(
+      this.daemonLedgerAgentDir(),
+      normalizedRequestTag,
+    );
+    if (afterRegistration && afterRegistration.state !== "active") {
+      this.resolveTerminalTurnWaiters(
+        daemonTurnTerminalEvent(afterRegistration),
+      );
+    }
     try {
       return await promise;
     } finally {
@@ -1824,14 +1814,6 @@ export class WorkerPool {
       worker.activeLifecycleRequestTag,
       reason,
     );
-  }
-
-  private rejectTerminalTurnWaiters(worker: WorkerHandle, error: Error) {
-    for (const waiter of Array.from(this.terminalTurnWaiters)) {
-      if (waiter.worker !== worker) continue;
-      this.terminalTurnWaiters.delete(waiter);
-      waiter.reject(error);
-    }
   }
 
   private findWorkerBySelector(selector: SessionSelector) {

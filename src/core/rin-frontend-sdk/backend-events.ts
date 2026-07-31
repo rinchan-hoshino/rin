@@ -18,7 +18,6 @@ import {
 } from "./command-responses.js";
 import {
   isRinFrontendLifecyclePresentationEvent,
-  RinFrontendLifecycleTerminalGate,
   projectRinFrontendLifecycleEvent,
   renderRinFrontendLifecycleEvent,
 } from "./frontend-lifecycle.js";
@@ -232,7 +231,6 @@ export function createRinFrontendBackendEventTranslator(
   let latestAssistantText = "";
   let latestAssistantFinalText = "";
   let activeToolBatch: ActiveToolBatch | null = null;
-  const lifecycleTerminalGate = new RinFrontendLifecycleTerminalGate();
   let latestDeliveredAssistantSummary = "";
   const deliveredAssistantInterimTexts = new Set<string>();
 
@@ -279,9 +277,6 @@ export function createRinFrontendBackendEventTranslator(
       const lifecycleEvent = projectRinFrontendLifecycleEvent(
         normalizedLifecyclePayload,
       );
-      if (lifecycleEvent && !lifecycleTerminalGate.accept(lifecycleEvent)) {
-        return [];
-      }
       const renderLifecycle = () =>
         lifecycleEvent
           ? renderRinFrontendLifecycleEvent(lifecycleEvent, {

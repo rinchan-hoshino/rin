@@ -840,6 +840,43 @@ setInterval(() => {}, 1000);
   );
 });
 
+test("terminal wait stays active while no replacement worker is available", async () => {
+  const dir = await makeTempDir("rin-worker-pool-terminal-wait-ledger-owned-");
+  const sessionFile = path.join(dir, "terminal-wait-ledger-owned.jsonl");
+  await fs.writeFile(sessionFile, "");
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ agentDir: dir });
+  pool.registerConnection(connection);
+  const requestTag = "terminal-wait-ledger-owned";
+  beginDaemonTurn(dir, {
+    requestTag,
+    sessionFile,
+  });
+
+  let settled = false;
+  const terminal = pool
+    .awaitTerminalTurnEvent(connection, { sessionFile }, requestTag)
+    .finally(() => {
+      settled = true;
+    });
+  await sleep(25);
+
+  assert.equal(readDaemonTurn(dir, requestTag)?.state, "active");
+  assert.equal(settled, false);
+
+  (pool as any).interruptDaemonTurnByRequestTag(
+    requestTag,
+    "rin_turn_recovery_session_missing",
+  );
+  const event = await terminal;
+  assert.equal(event.requestTag, requestTag);
+  assert.equal(event.event, "error");
+  assert.equal(event.error, "rin_turn_recovery_session_missing");
+});
+
 test("terminal wait uses request identity across stored and absolute session paths", async () => {
   const dir = await makeTempDir("rin-worker-pool-terminal-session-path-");
   const workerPath = path.join(dir, "worker-source");
@@ -1397,9 +1434,8 @@ test("a started Pi steer does not transfer transport terminal ownership", async 
     })}\n`,
   );
   const terminalResultPromise = (pool as any).waitForTerminalTurnEvent(
-    worker,
-    { sessionFile },
     "tag-original",
+    connection,
   ).promise;
   const lifecycleEpochBeforeSteer = worker.activeLifecycleEpoch;
   worker.child.stdout.emit(

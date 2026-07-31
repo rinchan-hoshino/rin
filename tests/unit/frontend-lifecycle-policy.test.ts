@@ -7,7 +7,6 @@ import {
   executeRinFrontendInterruptIntent,
   projectRinFrontendLifecycleEvent,
   reduceRinFrontendLifecycleState,
-  RinFrontendLifecycleTerminalGate,
   renderRinFrontendLifecycleEvent,
 } from "../../src/core/rin-frontend-sdk/frontend-lifecycle.js";
 
@@ -263,115 +262,6 @@ test("canonical lifecycle represents aborted terminals and normalizes fallback e
       requestTag: undefined,
     },
   ]);
-});
-
-test("canonical terminal gate admits exactly one terminal outcome per request", () => {
-  const gate = new RinFrontendLifecycleTerminalGate();
-  const start = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "start",
-    requestTag: "turn-once",
-    turnGeneration: 9,
-    sessionId: "session-1",
-  });
-  const complete = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "complete",
-    requestTag: "turn-once",
-    turnGeneration: 9,
-    sessionId: "session-1",
-  });
-  const lateError = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "error",
-    error: "late",
-    requestTag: "turn-once",
-    turnGeneration: 9,
-    sessionId: "session-1",
-  });
-  assert.ok(start && complete && lateError);
-  assert.equal(gate.accept(start), true);
-  assert.equal(gate.accept(complete), true);
-  assert.equal(gate.accept(start), true);
-  assert.equal(gate.accept(lateError), false);
-
-  const repeatedRequest = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "complete",
-    requestTag: "turn-once",
-    turnGeneration: 10,
-    sessionId: "session-1",
-  });
-  const nextComplete = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "complete",
-    requestTag: "turn-next",
-    turnGeneration: 9,
-    sessionId: "session-1",
-  });
-  assert.ok(repeatedRequest && nextComplete);
-  assert.equal(gate.accept(repeatedRequest), false);
-  assert.equal(gate.accept(nextComplete), true);
-});
-
-test("terminal gate does not collapse different durable turns when worker generation restarts", () => {
-  const gate = new RinFrontendLifecycleTerminalGate();
-  const recovered = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "complete",
-    requestTag: "chat-inbox-recovered",
-    turnGeneration: 1,
-    sessionId: "shared-session",
-    terminalRecord: {
-      terminalId: "terminal-recovered",
-      state: "complete",
-    },
-  });
-  const current = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "complete",
-    requestTag: "chat-inbox-current",
-    turnGeneration: 1,
-    sessionId: "shared-session",
-    terminalRecord: {
-      terminalId: "terminal-current",
-      state: "complete",
-    },
-  });
-  const replayedCurrent = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "complete",
-    requestTag: "chat-inbox-current",
-    turnGeneration: 2,
-    sessionId: "shared-session",
-  });
-  assert.ok(recovered && current && replayedCurrent);
-  const terminalOnly = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "complete",
-    turnGeneration: 3,
-    sessionId: "legacy-session",
-    terminalRecord: {
-      terminalId: "terminal-without-request-tag",
-      state: "complete",
-    },
-  });
-  const replayedTerminalOnly = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "complete",
-    turnGeneration: 4,
-    sessionId: "legacy-session",
-    terminalRecord: {
-      terminalId: "terminal-without-request-tag",
-      state: "complete",
-    },
-  });
-  assert.ok(terminalOnly && replayedTerminalOnly);
-  assert.equal(gate.accept(recovered), true);
-  assert.equal(gate.accept(current), true);
-  assert.equal(gate.accept(replayedCurrent), false);
-  assert.equal(gate.accept(terminalOnly), true);
-  assert.equal(gate.accept(replayedTerminalOnly), false);
 });
 
 test("canonical interrupt intents preserve frontend meaning while sharing one command policy", async () => {

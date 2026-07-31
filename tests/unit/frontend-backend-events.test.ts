@@ -790,7 +790,7 @@ test("frontend backend event translator exposes retry lifecycle without terminal
   );
 });
 
-test("frontend backend event translator returns final typed turn events after completion", () => {
+test("frontend backend event translator leaves terminal commit dedupe to the driver", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
   assert.deepEqual(
@@ -831,6 +831,14 @@ test("frontend backend event translator returns final typed turn events after co
       sessionId: "session-1",
       sessionFile: "/tmp/session.jsonl",
     }),
-    [],
+    [
+      {
+        type: "turn_error",
+        error: "late duplicate terminal",
+        sessionId: "session-1",
+        sessionFile: "/tmp/session.jsonl",
+        requestTag: "tag-1",
+      },
+    ],
   );
 });

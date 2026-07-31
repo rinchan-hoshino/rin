@@ -74,7 +74,6 @@ export {
   isRinFrontendLifecyclePresentationEvent,
   projectRinFrontendLifecycleEvent,
   reduceRinFrontendLifecycleState,
-  RinFrontendLifecycleTerminalGate,
   renderRinFrontendLifecycleEvent,
   shouldRefreshRinFrontendLifecycleStatus,
   type RinFrontendInterruptClient,
