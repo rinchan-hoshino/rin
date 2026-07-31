@@ -14,6 +14,7 @@ export type ClaimedChatInboxJob = {
 };
 
 export type ChatInboxJobResult = {
+  preserveForRestart?: boolean;
   errorMessage?: string;
   disposition?: "record_only" | "actionable";
   terminalKind?: string;
