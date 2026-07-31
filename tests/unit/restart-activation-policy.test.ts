@@ -164,6 +164,20 @@ test("hosted chat bridge has no restart-specific quiescing state", () => {
   assert.doesNotMatch(shared, /prepareDaemonRestart|cancelDaemonRestart/);
 });
 
+test("chat terminal backlog is reconciled without waiting for new ingress", () => {
+  const chatMain = source("src/core/chat/main.ts");
+
+  assert.match(chatMain, /requestReconcileChatTerminals\(\);/);
+  assert.match(
+    chatMain,
+    /inboxPollTimer = setInterval\([\s\S]*requestReconcileChatInbox\(\);[\s\S]*requestReconcileChatTerminals\(\);/,
+  );
+  assert.match(
+    chatMain,
+    /listUnacknowledgedChatTerminalEvents\([\s\S]*reconcileChatTerminalEvents/,
+  );
+});
+
 test("chat lifecycle settlement is independent of restart and lease timing", () => {
   const chatMain = source("src/core/chat/main.ts");
   const inboxDrain = source("src/core/chat/inbox-drain.ts");

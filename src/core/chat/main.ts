@@ -116,6 +116,7 @@ import {
   listChatRuntimeAdapterEntries,
 } from "./runtime-config.js";
 import { composeChatKeyForBot, loadIdentity, trustOf } from "./support.js";
+import { RinDaemonFrontendClient } from "../rin-frontend-sdk/daemon-client.js";
 import type { PromptContextMeta } from "../rin-frontend-sdk/prompt-context.js";
 import {
   normalizeFrontendIdentity,
@@ -124,6 +125,10 @@ import {
 import { isRinFrontendTurnCancelledError } from "../rin-frontend-sdk/lifecycle-errors.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
+import {
+  listUnacknowledgedChatTerminalEvents,
+  reconcileChatTerminalEvents,
+} from "./terminal-reconciler.js";
 import {
   cleanupChatOutboxHistory,
   enqueueChatOutboxPayload,
@@ -529,6 +534,10 @@ export async function startChatBridge(
   >();
   let inboxPollTimer: NodeJS.Timeout | null = null;
   let outboxPollTimer: NodeJS.Timeout | null = null;
+  const terminalRecoveryClient =
+    options.frontendClientFactory?.() ||
+    (isDirectEntry ? new RinDaemonFrontendClient() : null);
+  let terminalReconcileInFlight: Promise<void> | null = null;
   let outboxHistoryCleanupTimer: NodeJS.Timeout | null = null;
   const runOutboxHistoryCleanup = () => {
     const result = cleanupChatOutboxHistory(runtime.agentDir);
@@ -638,6 +647,37 @@ export async function startChatBridge(
       detachedControllerSignatures.set(controllerKey, signature);
     }
     return controller;
+  };
+  const requestReconcileChatTerminals = () => {
+    if (
+      chatBridgeStopping ||
+      terminalReconcileInFlight ||
+      !terminalRecoveryClient
+    ) {
+      return;
+    }
+    terminalReconcileInFlight = (async () => {
+      const terminals = await listUnacknowledgedChatTerminalEvents(
+        terminalRecoveryClient,
+      );
+      const chatKeys = await reconcileChatTerminalEvents(
+        terminals,
+        getController,
+      );
+      if (chatKeys.length) {
+        logger.info(
+          `chat terminal reconciliation completed chatKeys=${chatKeys.length} terminals=${terminals.length}`,
+        );
+      }
+    })()
+      .catch((error) => {
+        logger.warn(
+          `chat terminal reconciliation failed err=${safeString((error as any)?.message || error)}`,
+        );
+      })
+      .finally(() => {
+        terminalReconcileInFlight = null;
+      });
   };
   const findRuntimeBot = (platform: string, selfId: string) =>
     (Array.isArray(app.bots) ? app.bots : []).find(
@@ -1782,9 +1822,11 @@ export async function startChatBridge(
   }
 
   requestReconcileChatInbox();
+  requestReconcileChatTerminals();
   inboxPollTimer = setInterval(() => {
     try {
       requestReconcileChatInbox();
+      requestReconcileChatTerminals();
     } catch (error) {
       logger.warn(
         `chat inbox reconciliation failed err=${safeString((error as any)?.message || error)}`,
@@ -1811,6 +1853,7 @@ export async function startChatBridge(
       if (inboxPollTimer) clearInterval(inboxPollTimer);
       if (outboxPollTimer) clearInterval(outboxPollTimer);
       if (outboxHistoryCleanupTimer) clearInterval(outboxHistoryCleanupTimer);
+      await terminalRecoveryClient?.disconnect().catch(() => {});
       for (const job of [...claimedInboxJobs.values()]) {
         releaseClaimedInboxJob(job);
       }
