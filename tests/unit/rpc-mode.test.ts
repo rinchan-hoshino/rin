@@ -5483,6 +5483,7 @@ test(
         (event) => event.type === "response" && event.id === "turn-steer",
       );
       assert.equal(secondAdmission?.data?.acceptedAs, "prompt");
+      assert.equal(secondAdmission?.data?.queued, true);
 
       const steeredUser = {
         role: "user",
@@ -5503,6 +5504,17 @@ test(
       );
       assert.equal(projectedUserStart?.requestTag, "tag-steer");
       assert.equal(projectedUserStart?.message?.requestTag, "tag-steer");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "turn-steer-retry", type: "prompt", message: "steer now", requestTag: "tag-steer" })}\n`,
+        ),
+      );
+      await wait(10);
+      const startedAdmission = parseRpcOutput(lines).find(
+        (event) => event.type === "response" && event.id === "turn-steer-retry",
+      );
+      assert.equal(startedAdmission?.data?.acceptedAs, "prompt");
+      assert.equal(startedAdmission?.data?.queued, false);
       assert.equal(
         parseRpcOutput(lines).some(
           (event) =>

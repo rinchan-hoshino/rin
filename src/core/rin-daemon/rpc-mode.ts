@@ -120,7 +120,7 @@ function promptAdmission(
   session: any,
   acceptedAs: "prompt" | "steer" | "followUp" | "rejoin",
   requestTag: unknown,
-  options: { turnActive: boolean },
+  options: { turnActive: boolean; queued?: boolean },
 ) {
   const normalizedRequestTag = rpcRequestTag(requestTag);
   return {
@@ -132,6 +132,7 @@ function promptAdmission(
     sessionId: session?.sessionId,
     turnActive: options.turnActive,
     isStreaming: Boolean(session?.isStreaming),
+    queued: options.queued === true,
   };
 }
 
@@ -1410,9 +1411,11 @@ export async function runCustomRpcMode(
             "prompt",
             promptAdmission(session, admittedAs, requestTag, {
               turnActive: true,
+              queued: turnCoordinator.isAdmissionPending(requestTag),
             }),
           );
         }
+        const wasTurnActive = turnCoordinator.isActive;
         const requestedQueueBehavior = "steer";
         const promptOptions: Record<string, unknown> = {
           images: command.images,
@@ -1441,7 +1444,7 @@ export async function runCustomRpcMode(
           hasImages: Array.isArray(command.images) && command.images.length > 0,
         });
         try {
-          if (turnCoordinator.isActive) {
+          if (wasTurnActive) {
             await session.prompt(command.message, promptOptions);
           } else {
             startTurnTask(
@@ -1470,6 +1473,7 @@ export async function runCustomRpcMode(
           "prompt",
           promptAdmission(session, "prompt", command.requestTag, {
             turnActive: true,
+            queued: turnCoordinator.isAdmissionPending(command.requestTag),
           }),
         );
       }

@@ -228,6 +228,7 @@ export type RinPromptAdmission = {
   sessionId?: string;
   turnActive?: boolean;
   isStreaming?: boolean;
+  queued?: boolean;
 };
 
 export type RinPromptOptions = {

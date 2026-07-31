@@ -175,6 +175,116 @@ function createFrontendClient() {
   };
 }
 
+test("frontend driver reports a prompt that entered the backend queue", async () => {
+  const client = createFrontendClient();
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    return { acceptedAs: "prompt", queued: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const seen: any[] = [];
+  driver.subscribe((event: any) => seen.push(event));
+  await driver.connect();
+
+  const turn = driver.runTurn({ text: "wait for me", requestTag: "queued-1" });
+  await new Promise((resolve) => setImmediate(resolve));
+  await client.emit({
+    type: "ui",
+    payload: {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "queued-1",
+      finalText: "done",
+      sessionId: "frontend-session",
+      sessionFile: "/tmp/frontend-chat.jsonl",
+    },
+  });
+  await turn;
+
+  assert.equal(
+    seen.some(
+      (event) =>
+        event.type === "turn_waiting" && event.requestTag === "queued-1",
+    ),
+    true,
+  );
+});
+
+test("frontend driver ignores a late queued admission after this request started", async () => {
+  const client = createFrontendClient();
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    await client.emit({
+      type: "ui",
+      payload: {
+        type: "message_start",
+        requestTag: options.requestTag,
+        message: { role: "user", content: text },
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    return { acceptedAs: "prompt", queued: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const seen: any[] = [];
+  driver.subscribe((event: any) => seen.push(event));
+  await driver.connect();
+
+  const turn = driver.runTurn({
+    text: "already starting",
+    requestTag: "queued-2",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await client.emit({
+    type: "ui",
+    payload: {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: "queued-2",
+      finalText: "done",
+      sessionId: "frontend-session",
+      sessionFile: "/tmp/frontend-chat.jsonl",
+    },
+  });
+  await turn;
+
+  assert.equal(
+    seen.some((event) => event.type === "turn_waiting"),
+    false,
+  );
+});
+
+test("frontend driver reports when the backend queue becomes idle", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const seen: any[] = [];
+  driver.subscribe((event: any) => seen.push(event));
+  await driver.connect();
+
+  await client.emit({
+    type: "ui",
+    payload: {
+      type: "queue_update",
+      steering: [],
+      followUp: [],
+    },
+  });
+
+  assert.equal(
+    seen.some((event) => event.type === "queue_idle"),
+    true,
+  );
+});
+
 test("frontend client event handler failures are reported without becoming turn errors", async () => {
   const client = createFrontendClient();
   const failures: any[] = [];

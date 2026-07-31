@@ -605,7 +605,7 @@ test("chat transport rejects invalid parts and empty deliveries early", async ()
   });
 });
 
-test("chat transport prefers internal telegram reaction calls for working reactions", async () => {
+test("chat transport sets and clears one fixed Telegram working reaction", async () => {
   const calls = [];
   const app = {
     bots: [
@@ -621,29 +621,20 @@ test("chat transport prefers internal telegram reaction calls for working reacti
     ],
   };
 
-  const first = await transport.rotateWorkingReaction(
+  const sent = await transport.sendReaction(
     app,
     "telegram/1:2",
     "41",
-    0,
-    "",
+    transport.WORKING_REACTION_EMOJI,
   );
-  const second = await transport.rotateWorkingReaction(
+  const cleared = await transport.clearReaction(
     app,
     "telegram/1:2",
     "41",
-    1,
-    first,
-  );
-  const cleared = await transport.clearWorkingReaction(
-    app,
-    "telegram/1:2",
-    "41",
-    second,
+    transport.WORKING_REACTION_EMOJI,
   );
 
-  assert.equal(first, "🤔");
-  assert.equal(second, "🔥");
+  assert.equal(sent, true);
   assert.equal(cleared, true);
   assert.deepEqual(calls, [
     {
@@ -654,17 +645,12 @@ test("chat transport prefers internal telegram reaction calls for working reacti
     {
       chat_id: "2",
       message_id: 41,
-      reaction: [{ type: "emoji", emoji: "🔥" }],
-    },
-    {
-      chat_id: "2",
-      message_id: 41,
       reaction: [],
     },
   ]);
 });
 
-test("chat transport sends the fixed Telegram working pair without checking chat reaction compatibility", async () => {
+test("chat transport sets the fixed Telegram waiting reaction without compatibility probing", async () => {
   const calls = [];
   const chats = [];
   const app = {
@@ -675,12 +661,7 @@ test("chat transport sends the fixed Telegram working pair without checking chat
         internal: {
           async getChat(payload) {
             chats.push(payload);
-            return {
-              available_reactions: [
-                { type: "emoji", emoji: "❤️" },
-                { type: "emoji", emoji: "🌕" },
-              ],
-            };
+            return { available_reactions: [] };
           },
           async setMessageReaction(payload) {
             calls.push(payload);
@@ -690,39 +671,25 @@ test("chat transport sends the fixed Telegram working pair without checking chat
     ],
   };
 
-  const first = await transport.rotateWorkingReaction(
+  const sent = await transport.sendReaction(
     app,
     "telegram/1:2",
     "41",
-    0,
-    "",
-  );
-  const second = await transport.rotateWorkingReaction(
-    app,
-    "telegram/1:2",
-    "41",
-    1,
-    first,
+    transport.WAITING_REACTION_EMOJI,
   );
 
-  assert.equal(first, "🤔");
-  assert.equal(second, "🔥");
+  assert.equal(sent, true);
   assert.deepEqual(chats, []);
   assert.deepEqual(calls, [
     {
       chat_id: "2",
       message_id: 41,
-      reaction: [{ type: "emoji", emoji: "🤔" }],
-    },
-    {
-      chat_id: "2",
-      message_id: 41,
-      reaction: [{ type: "emoji", emoji: "🔥" }],
+      reaction: [{ type: "emoji", emoji: "⏳" }],
     },
   ]);
 });
 
-test("chat transport uses bot reaction helpers for onebot working reactions", async () => {
+test("chat transport uses bot reaction helpers for onebot status reactions", async () => {
   const calls = [];
   const app = {
     bots: [
@@ -739,51 +706,34 @@ test("chat transport uses bot reaction helpers for onebot working reactions", as
     ],
   };
 
-  const first = await transport.rotateWorkingReaction(
+  const sent = await transport.sendReaction(
     app,
     "onebot/2301401877:1067390680",
     "52",
-    0,
-    "",
+    transport.WAITING_REACTION_EMOJI,
   );
-  const second = await transport.rotateWorkingReaction(
+  const cleared = await transport.clearReaction(
     app,
     "onebot/2301401877:1067390680",
     "52",
-    1,
-    first,
-  );
-  const cleared = await transport.clearWorkingReaction(
-    app,
-    "onebot/2301401877:1067390680",
-    "52",
-    second,
+    transport.WAITING_REACTION_EMOJI,
   );
 
-  assert.equal(first, "🤔");
-  assert.equal(second, "🔥");
+  assert.equal(sent, true);
   assert.equal(cleared, true);
   assert.deepEqual(calls, [
-    { kind: "create", chatId: "1067390680", messageId: "52", emoji: "🤔" },
+    { kind: "create", chatId: "1067390680", messageId: "52", emoji: "⏳" },
     {
       kind: "delete",
       chatId: "1067390680",
       messageId: "52",
-      emoji: "🤔",
-      userId: "2301401877",
-    },
-    { kind: "create", chatId: "1067390680", messageId: "52", emoji: "🔥" },
-    {
-      kind: "delete",
-      chatId: "1067390680",
-      messageId: "52",
-      emoji: "🔥",
+      emoji: "⏳",
       userId: "2301401877",
     },
   ]);
 });
 
-test("chat transport skips onebot working reactions in private chats", async () => {
+test("chat transport skips onebot status reactions in private chats", async () => {
   const calls = [];
   const app = {
     bots: [
@@ -800,21 +750,20 @@ test("chat transport skips onebot working reactions in private chats", async () 
     ],
   };
 
-  const first = await transport.rotateWorkingReaction(
+  const sent = await transport.sendReaction(
     app,
     "onebot/2301401877:private:519418441",
     "52",
-    0,
-    "",
+    transport.WAITING_REACTION_EMOJI,
   );
-  const cleared = await transport.clearWorkingReaction(
+  const cleared = await transport.clearReaction(
     app,
     "onebot/2301401877:private:519418441",
     "52",
-    "🤔",
+    transport.WAITING_REACTION_EMOJI,
   );
 
-  assert.equal(first, "");
+  assert.equal(sent, false);
   assert.equal(cleared, false);
   assert.deepEqual(calls, []);
 });
