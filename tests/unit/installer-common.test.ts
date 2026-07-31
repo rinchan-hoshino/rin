@@ -13,6 +13,17 @@ const common = await import(
     .href
 );
 
+test("installer update executor identity ignores the sudo entry user", () => {
+  const previousSudoUser = process.env.SUDO_USER;
+  process.env.SUDO_USER = "root";
+  try {
+    assert.equal(common.detectExecutorUser({ osUser: "rin" }), "rin");
+  } finally {
+    if (previousSudoUser === undefined) delete process.env.SUDO_USER;
+    else process.env.SUDO_USER = previousSudoUser;
+  }
+});
+
 test("installer runCommand uses shell for Windows cmd launchers", () => {
   assert.equal(
     common.shouldRunCommandThroughShell(
