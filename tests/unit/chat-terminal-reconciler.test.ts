@@ -15,17 +15,17 @@ test("terminal reconciler routes durable backlog without waiting for ingress", a
     request: async () => ({
       terminals: [
         {
-          terminalId: "terminal-a",
+          chatTerminalRecordId: "terminal-a",
           requestTag: "chat-inbox-a",
           chatDeliveryContext: { chatKey: "discord/1:2" },
         },
         {
-          terminalId: "terminal-b",
+          chatTerminalRecordId: "terminal-b",
           requestTag: "chat-inbox-b",
           chatDeliveryContext: { chatKey: "discord/1:2" },
         },
         {
-          terminalId: "scheduled-chat-delivery",
+          chatTerminalRecordId: "scheduled-chat-delivery",
           requestTag: "scheduled:cron:1",
           chatDeliveryContext: { chatKey: "discord/1:2" },
         },
@@ -41,7 +41,7 @@ test("terminal reconciler routes durable backlog without waiting for ingress", a
   const handledCount = await reconciler.reconcileChatTerminalEvents(
     terminals,
     async (chatKey, terminal) => {
-      handled.push([chatKey, terminal.terminalId]);
+      handled.push([chatKey, terminal.chatTerminalRecordId]);
     },
   );
 

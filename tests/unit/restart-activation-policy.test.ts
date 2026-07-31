@@ -178,7 +178,7 @@ test("chat terminal backlog is reconciled without waiting for new ingress", () =
   );
   assert.match(
     chatMain,
-    /terminal-reconcile:\$\{terminalId\}[\s\S]*affectChatBinding: false[\s\S]*recoverTerminals: false[\s\S]*resumeSessionFile\(sessionFile\)/,
+    /chatTerminalRecordId[\s\S]*terminal-reconcile:\$\{terminalId\}[\s\S]*affectChatBinding: false[\s\S]*recoverTerminals: false[\s\S]*resumeSessionFile\(sessionFile\)/,
   );
 });
 

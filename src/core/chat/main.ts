@@ -663,7 +663,9 @@ export async function startChatBridge(
       const handled = await reconcileChatTerminalEvents(
         terminals,
         async (chatKey, terminal) => {
-          const terminalId = safeString(terminal?.terminalId).trim();
+          const terminalId = safeString(
+            terminal?.chatTerminalRecordId || terminal?.terminalId,
+          ).trim();
           if (!terminalId) return;
           const controllerKey = `terminal-reconcile:${terminalId}`;
           const controller = getDetachedController(controllerKey, {
