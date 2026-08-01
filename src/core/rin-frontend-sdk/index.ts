@@ -107,6 +107,12 @@ export {
 } from "./rpc-session-events.js";
 
 export {
+  RIN_FRONTEND_SESSION_NOT_CONNECTED,
+  RinFrontendSessionNotConnectedError,
+  isRinFrontendSessionNotConnectedError,
+} from "./errors.js";
+
+export {
   RinFrontendTurnDriver,
   submitNativeFrontendPromptTurn,
   type RinFrontendEventHandlingFailure,

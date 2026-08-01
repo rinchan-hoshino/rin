@@ -2958,7 +2958,9 @@ test("chat main reconciles a retained turn only after durable acceptance", async
       controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
         runTurnCalls += 1;
         if (runTurnCalls === 1) {
-          throw new Error("frontend_session_not_connected");
+          throw Object.assign(new Error("frontend session unavailable"), {
+            code: "frontend_session_not_connected",
+          });
         }
         throw new Error("unexpected prompt replay");
       };

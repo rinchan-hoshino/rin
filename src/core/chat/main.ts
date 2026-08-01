@@ -10,6 +10,7 @@ import {
 } from "../rin-lib/profile.js";
 import {
   getRinNonInteractiveCommandInteractionPolicy,
+  isRinFrontendSessionNotConnectedError,
   type RinFrontendTurnClient,
 } from "../rin-frontend-sdk/index.js";
 import {
@@ -985,9 +986,9 @@ export async function startChatBridge(
         return undefined;
       }
       if (
+        isRinFrontendSessionNotConnectedError(error) ||
         [
           "frontend_turn_interrupted",
-          "frontend_session_not_connected",
           "chat_turn_interrupted",
           "rin_worker_exit",
           "rin_worker_oom",
