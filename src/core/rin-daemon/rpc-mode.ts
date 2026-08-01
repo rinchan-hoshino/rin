@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { getLatestCompactionEntry } from "@earendil-works/pi-coding-agent";
 
 import {
@@ -18,7 +20,6 @@ import {
   type RinTurnScope,
 } from "../session/turn-scope.js";
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
-import { resolveSubmittedTurnFromMessages } from "../rin-frontend-sdk/submitted-turn.js";
 import {
   RIN_TURN_TERMINAL_ABSENT,
   RinTurnSettlementProjector,
@@ -33,7 +34,6 @@ import {
 } from "../pi/session-host.js";
 import { safeString } from "../text-utils.js";
 import { rawErrorMessage } from "../rin-lib/user-facing-errors.js";
-import { stageChatTerminalWal } from "./chat-terminal-wal.js";
 import {
   RpcTurnCoordinator,
   type RpcTurnInterrupt,
@@ -100,31 +100,27 @@ function rpcRequestTag(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
-function normalizeRpcChatRunContext(value: unknown) {
-  if (value === undefined || value === null) return undefined;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("rpc_invalid_chat_run_context");
-  }
-  const runId = safeString((value as any).runId).trim();
-  const ownerEpoch = safeString((value as any).ownerEpoch).trim();
-  const producerIncarnation = safeString(
-    (value as any).producerIncarnation,
-  ).trim();
-  if (!runId || !ownerEpoch || !producerIncarnation) {
-    throw new Error("rpc_invalid_chat_run_context");
-  }
-  return { runId, ownerEpoch, producerIncarnation };
-}
+type NativeInputOutcome =
+  | "terminalOwner"
+  | "nonterminal"
+  | "rejected"
+  | "indeterminate";
 
-function promptAdmission(
+function nativeInputOutcome(
   session: any,
-  acceptedAs: "prompt" | "steer" | "followUp" | "rejoin",
+  outcome: NativeInputOutcome | "rejoined",
   requestTag: unknown,
-  options: { turnActive: boolean; queued?: boolean },
+  options: {
+    turnActive: boolean;
+    originalOutcome?: NativeInputOutcome;
+  },
 ) {
   const normalizedRequestTag = rpcRequestTag(requestTag);
   return {
-    acceptedAs,
+    outcome,
+    ...(options.originalOutcome
+      ? { originalOutcome: options.originalOutcome }
+      : {}),
     ...(normalizedRequestTag.length > 0
       ? { requestTag: normalizedRequestTag }
       : {}),
@@ -132,7 +128,6 @@ function promptAdmission(
     sessionId: session?.sessionId,
     turnActive: options.turnActive,
     isStreaming: Boolean(session?.isStreaming),
-    queued: options.queued === true,
   };
 }
 
@@ -151,6 +146,132 @@ function getSessionEntriesSince(session: any, since: unknown) {
   return { entries: entries.slice(index + 1) };
 }
 
+function persistedNativeIdentityOutcome(
+  session: any,
+  requestTag: string,
+): "terminalOwner" | "nonterminal" | undefined {
+  if (!requestTag) return undefined;
+  const entries = getSessionEntries(session);
+  const userEntryIndexes = new Map<string, number[]>();
+  entries.forEach((entry: any, index: number) => {
+    if (entry?.type !== "message" || entry?.message?.role !== "user") return;
+    const entryId = safeString(entry.id).trim();
+    if (!entryId) return;
+    const indexes = userEntryIndexes.get(entryId) || [];
+    indexes.push(index);
+    userEntryIndexes.set(entryId, indexes);
+  });
+  const identities = entries
+    .map((entry: any, index: number) => ({ entry, index }))
+    .filter(
+      ({ entry }) =>
+        entry?.type === "custom" &&
+        entry?.customType === "rin_request_identity" &&
+        safeString(entry?.data?.requestId).trim() === requestTag,
+    );
+  if (identities.length !== 1) return undefined;
+  const identity = identities[0];
+  const messageEntryId = safeString(
+    identity.entry?.data?.messageEntryId,
+  ).trim();
+  const messageIndexes = userEntryIndexes.get(messageEntryId) || [];
+  if (messageIndexes.length !== 1 || messageIndexes[0] >= identity.index) {
+    return undefined;
+  }
+  const observedRole = safeString(identity.entry?.data?.observedRole).trim();
+  return observedRole === "terminalOwner" || observedRole === "nonterminal"
+    ? observedRole
+    : undefined;
+}
+
+function persistedNativeRequestOutcome(
+  session: any,
+  requestTag: string,
+): NativeInputOutcome | undefined {
+  const entries = getSessionEntries(session);
+  const identityEntries = entries.filter(
+    (entry: any) =>
+      entry?.type === "custom" &&
+      entry?.customType === "rin_request_identity" &&
+      safeString(entry?.data?.requestId).trim() === requestTag,
+  );
+  const identityOutcome = persistedNativeIdentityOutcome(session, requestTag);
+  const outcomeEntries = entries.filter(
+    (entry: any) =>
+      entry?.type === "custom" &&
+      entry?.customType === "rin_request_outcome" &&
+      safeString(entry?.data?.requestId).trim() === requestTag,
+  );
+  if (identityEntries.length && outcomeEntries.length) return undefined;
+  if (identityEntries.length) return identityOutcome;
+  if (outcomeEntries.length !== 1) return undefined;
+  const outcome = safeString(outcomeEntries[0]?.data?.outcome).trim();
+  return outcome === "rejected" || outcome === "indeterminate"
+    ? outcome
+    : undefined;
+}
+
+function nativeRequestReceiptState(
+  session: any,
+  requestTag: string,
+): "missing" | "valid" | "conflict" {
+  const receipts = getSessionEntries(session).filter(
+    (entry: any) =>
+      entry?.type === "custom" &&
+      (entry?.customType === "rin_request_identity" ||
+        entry?.customType === "rin_request_outcome") &&
+      safeString(entry?.data?.requestId).trim() === requestTag,
+  );
+  if (!receipts.length) return "missing";
+  return persistedNativeRequestOutcome(session, requestTag)
+    ? "valid"
+    : "conflict";
+}
+
+function persistNativeRequestOutcome(
+  session: any,
+  requestTag: string,
+  outcome: "rejected" | "indeterminate",
+) {
+  if (!requestTag) return true;
+  if (persistedNativeRequestOutcome(session, requestTag) === outcome) {
+    return true;
+  }
+  session?.sessionManager?.appendCustomEntry?.("rin_request_outcome", {
+    requestId: requestTag,
+    outcome,
+  });
+  return persistedNativeRequestOutcome(session, requestTag) === outcome;
+}
+
+function hasPersistedUserRequestTag(session: any, requestTag: string) {
+  return Boolean(
+    requestTag && persistedNativeIdentityOutcome(session, requestTag),
+  );
+}
+
+async function waitForPersistedUserRequestTag(
+  session: any,
+  requestTag: string,
+) {
+  if (hasPersistedUserRequestTag(session, requestTag)) return;
+  await new Promise<void>((resolve, reject) => {
+    const check = () => {
+      const receiptState = nativeRequestReceiptState(session, requestTag);
+      if (receiptState === "missing") return;
+      clearInterval(pollTimer);
+      if (receiptState === "conflict") {
+        reject(new Error("rin_prompt_outcome_indeterminate"));
+        return;
+      }
+      resolve();
+    };
+    const pollTimer = setInterval(check, 10);
+    pollTimer.unref();
+    check();
+  });
+}
+
 function getSessionLeafId(session: any) {
   return session?.sessionManager?.getLeafId?.() ?? null;
 }
@@ -160,20 +281,15 @@ function getSessionTree(session: any) {
   return Array.isArray(tree) ? tree : [];
 }
 
-function lastPersistedMessage(session: any) {
-  const entries = getSessionEntries(session);
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (entry?.type === "message") return entry.message;
-  }
-  return undefined;
-}
-
 function ensureInterruptedAssistantPersisted(session: any, message: any) {
   const manager = session?.sessionManager;
   if (typeof manager?.appendMessage !== "function") return;
-  if (stableJson(lastPersistedMessage(session)) === stableJson(message)) return;
-  manager.appendMessage(message);
+  const serialized = stableJson(message);
+  const persisted = getSessionEntries(session).some(
+    (entry: any) =>
+      entry?.type === "message" && stableJson(entry.message) === serialized,
+  );
+  if (!persisted) manager.appendMessage(message);
 }
 
 function appendInterruptedToolResults(
@@ -183,23 +299,65 @@ function appendInterruptedToolResults(
   const messages = Array.isArray(session?.agent?.state?.messages)
     ? session.agent.state.messages
     : [];
-  const lastMessage = messages[messages.length - 1];
-  if (!lastMessage || lastMessage.role !== "assistant") return false;
-  const toolCalls = extractPiContinuableToolCallParts(lastMessage);
+  let assistantIndex = messages.length - 1;
+  while (
+    assistantIndex >= 0 &&
+    messages[assistantIndex]?.role === "toolResult"
+  ) {
+    assistantIndex -= 1;
+  }
+  if (assistantIndex < 0) return false;
+  const toolCalls = extractPiContinuableToolCallParts(messages[assistantIndex]);
   if (!toolCalls.length) return false;
+  const completedToolCallIds = new Set(
+    messages
+      .slice(assistantIndex + 1)
+      .filter((message: any) => message?.role === "toolResult")
+      .map((message: any) => safeString(message?.toolCallId).trim())
+      .filter(Boolean),
+  );
+  const interruptedToolCalls = toolCalls.filter(
+    (toolCall) => !completedToolCallIds.has(safeString(toolCall?.id).trim()),
+  );
+  if (!interruptedToolCalls.length) return false;
 
   const persistToSession = options.persistToSession !== false;
-  if (persistToSession)
-    ensureInterruptedAssistantPersisted(session, lastMessage);
+  if (persistToSession) {
+    ensureInterruptedAssistantPersisted(session, messages[assistantIndex]);
+  }
 
-  for (const toolCall of toolCalls) {
+  for (const toolCall of interruptedToolCalls) {
     const message = createInterruptedToolResultMessage(toolCall);
     session.agent.state.messages.push(message);
-    if (persistToSession) {
-      session.sessionManager.appendMessage(message);
-    }
+    if (persistToSession) session.sessionManager.appendMessage(message);
   }
   return true;
+}
+
+function isInterruptedTurnResumable(session: any) {
+  if (session?.agent?.signal) return true;
+  const messages = Array.isArray(session?.agent?.state?.messages)
+    ? session.agent.state.messages
+    : [];
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage) return false;
+  return true;
+}
+
+async function resumeInterruptedTurn(session: any) {
+  const messages = Array.isArray(session?.agent?.state?.messages)
+    ? session.agent.state.messages
+    : [];
+  if (!messages.length) return;
+  const appendedInterruption = appendInterruptedToolResults(session);
+  const lastMessage = session.agent.state.messages.at(-1);
+  if (!appendedInterruption && lastMessage?.role === "assistant") {
+    return {
+      finalText: safeString(session.getLastAssistantText?.()),
+      result: { messages: [lastMessage] },
+    };
+  }
+  await resumePiSessionTurn(session);
 }
 
 function clampSessionThinkingLevel(session: any, level: string) {
@@ -533,34 +691,6 @@ function captureTurnScopeBeforeUserMessage(
   };
 }
 
-function isInterruptedTurnResumable(session: any) {
-  if (session?.agent?.signal) return true;
-  const messages = Array.isArray(session?.agent?.state?.messages)
-    ? session.agent.state.messages
-    : [];
-  const lastMessage = messages[messages.length - 1];
-  if (!lastMessage) return false;
-  if (lastMessage.role !== "assistant") return true;
-  return extractPiContinuableToolCallParts(lastMessage).length > 0;
-}
-
-async function resumeInterruptedTurn(
-  session: any,
-  options: { persistInterruptionMessage?: boolean } = {},
-): Promise<void> {
-  const lastMessage = Array.isArray(session?.agent?.state?.messages)
-    ? session.agent.state.messages[session.agent.state.messages.length - 1]
-    : null;
-  if (!lastMessage) return;
-  if (lastMessage.role === "assistant") {
-    const appendedInterruption = appendInterruptedToolResults(session, {
-      persistToSession: options.persistInterruptionMessage,
-    });
-    if (!appendedInterruption) return;
-  }
-  await resumePiSessionTurn(session);
-}
-
 function isWorkerLocalSessionReplacementCommand(commandLine: string) {
   const trimmed = safeString(commandLine).trim();
   if (trimmed === "/new") return true;
@@ -611,20 +741,9 @@ export async function runCustomRpcMode(
     PendingExtensionUiRequest
   >();
   let extensionUiRequestSeq = 0;
-  let agentRunning = Boolean(getSession()?.isStreaming);
-  let workingVisibleEnabled = true;
 
   const createExtensionUiRequestId = () =>
     `extension_ui_${Date.now().toString(36)}_${++extensionUiRequestSeq}`;
-
-  const emitWorkingVisibility = () => {
-    output({
-      type: "extension_ui_request",
-      id: createExtensionUiRequestId(),
-      method: "setWorkingVisible",
-      visible: workingVisibleEnabled && agentRunning,
-    });
-  };
 
   const resolvePendingExtensionUiRequest = (response: any) => {
     const requestId = safeString(response?.id).trim();
@@ -729,10 +848,13 @@ export async function runCustomRpcMode(
         method: "setWorkingMessage",
         message,
       }),
-    setWorkingVisible: (visible: boolean) => {
-      workingVisibleEnabled = Boolean(visible);
-      emitWorkingVisibility();
-    },
+    setWorkingVisible: (visible: boolean) =>
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "setWorkingVisible",
+        visible: Boolean(visible),
+      }),
     setWorkingIndicator: (options?: any) =>
       output({
         type: "extension_ui_request",
@@ -825,6 +947,22 @@ export async function runCustomRpcMode(
     return done(id, type, map ? map(value) : value);
   };
   const turnCoordinator = new RpcTurnCoordinator<RinTurnTerminalOutcome>();
+  type NativeInputSubmission = {
+    requestTag: string;
+    text: string;
+    hasImages: boolean;
+    streamingBehavior: "steer" | "followUp";
+    promptTask?: Promise<unknown>;
+    promptTaskReady: Promise<void>;
+    resolvePromptTaskReady: () => void;
+    turnScope: ReturnType<typeof captureTurnScope>;
+    admissionToken?: ReturnType<typeof turnCoordinator.admit>;
+    outcome?: NativeInputOutcome;
+    resolveObserved: (outcome: NativeInputOutcome) => void;
+    observed: Promise<NativeInputOutcome>;
+  };
+  const nativeInputContext = new AsyncLocalStorage<NativeInputSubmission>();
+  let nativeInputAdmissionTail: Promise<void> = Promise.resolve();
   let gracefulSessionShutdown = false;
   let latestAutoRetryFailureMessage = "";
   const emitTurnEvent = (
@@ -841,23 +979,58 @@ export async function runCustomRpcMode(
       ...payload,
     });
   };
+  const observeNativeInput = (
+    submission: NativeInputSubmission,
+    outcome: NativeInputOutcome,
+  ) => {
+    if (submission.outcome) return;
+    submission.outcome = outcome;
+    submission.resolveObserved(outcome);
+  };
+  const observeNativeTerminalOwner = (
+    submission: NativeInputSubmission,
+  ): Promise<void> | undefined => {
+    if (submission.outcome) return undefined;
+    const startOwner = () => {
+      if (submission.outcome) return;
+      startTurnTask(
+        submission.requestTag,
+        async () => {
+          await submission.promptTaskReady;
+          if (!submission.promptTask) {
+            throw new Error("rin_prompt_task_missing");
+          }
+          return await submission.promptTask;
+        },
+        { turnScope: submission.turnScope },
+      );
+      submission.admissionToken = turnCoordinator.admit({
+        requestTag: submission.requestTag,
+        observedRole: "terminalOwner",
+        text: submission.text,
+        hasImages: submission.hasImages,
+      });
+      observeNativeInput(submission, "terminalOwner");
+    };
+    if (!turnCoordinator.isActive) {
+      startOwner();
+      return undefined;
+    }
+    return turnCoordinator.waitForIdle().then(startOwner);
+  };
   const startTurnTask = (
     requestTag: string,
     task: () => Promise<unknown>,
     options: {
       forceTurnEvents?: boolean;
       interrupt?: RpcTurnInterrupt;
-      chatRunContext?: {
-        runId: string;
-        ownerEpoch: string;
-        producerIncarnation: string;
-      };
+      turnScope?: ReturnType<typeof captureTurnScope>;
     } = {},
   ) => {
     if (turnCoordinator.isActive) throw new Error("rpc_turn_already_active");
     latestAutoRetryFailureMessage = "";
     const turnSession = getSession();
-    let terminalScope = captureTurnScope(turnSession);
+    let terminalScope = options.turnScope ?? captureTurnScope(turnSession);
     const trackedTurn = turnCoordinator.openTurn(
       requestTag,
       (message) => {
@@ -903,6 +1076,7 @@ export async function runCustomRpcMode(
               );
             }, TURN_HEARTBEAT_INTERVAL_MS)
           : null;
+      heartbeatTimer?.unref();
       const commitTurnTerminal = (
         outcome:
           | Extract<RinTurnTerminalOutcome, { kind: "complete" }>
@@ -924,37 +1098,6 @@ export async function runCustomRpcMode(
                 sessionId: turnSession.sessionId,
                 error: outcome.error,
               };
-        if (options.chatRunContext) {
-          try {
-            const agentDir = safeString(runtime.services?.agentDir).trim();
-            if (!agentDir) throw new Error("rpc_chat_run_agent_dir_missing");
-            const staged = stageChatTerminalWal(agentDir, {
-              ...options.chatRunContext,
-              terminalKind: outcome.kind,
-              terminalPayload: {
-                event,
-                requestTag,
-                ...payload,
-              },
-            });
-            Object.assign(payload, {
-              chatRunContext: options.chatRunContext,
-              terminalWal: {
-                payloadHash: staged.payloadHash,
-                stagedAt: staged.stagedAt,
-              },
-            });
-          } catch (error: any) {
-            output({
-              type: "rpc_protocol_error",
-              error: `rpc_chat_terminal_wal_stage_failed:${String(
-                error?.message || error,
-              )}`,
-              requestTag,
-            });
-            throw error;
-          }
-        }
         const terminalKey = JSON.stringify({ event, payload });
         const committed = trackedTurn.commitTerminal(terminalKey, () => {
           emitTurnEvent(event, requestTag, payload, forceTurnEvents);
@@ -1233,7 +1376,6 @@ export async function runCustomRpcMode(
   let restoreSessionAppendMessage: (() => void) | undefined;
   const bindCurrentSession = async () => {
     const session = getSession();
-    agentRunning = Boolean(session?.isStreaming);
     turnCoordinator.resetAdmissions();
     await session.bindExtensions({
       uiContext: createExtensionUiContext(),
@@ -1282,14 +1424,19 @@ export async function runCustomRpcMode(
           message?.role === "user" && typeof message === "object"
             ? userMessageRequestTags.get(message)
             : undefined;
-        if (requestTag && message.requestTag === undefined) {
-          message.requestTag = requestTag;
-        }
         const result = originalAppendMessage.call(this, message);
         const sessionLeafId = safeString(result).trim();
         if (message?.role === "user" && sessionLeafId) {
           if (requestTag) {
-            turnCoordinator.observePersistedUser(requestTag);
+            const observedRole = turnCoordinator.observedRole(requestTag);
+            if (observedRole) {
+              sessionManager.appendCustomEntry?.("rin_request_identity", {
+                requestId: requestTag,
+                messageEntryId: sessionLeafId,
+                observedRole,
+              });
+              turnCoordinator.observePersistedUser(requestTag);
+            }
           }
           if (message && typeof message === "object") {
             userMessageRequestTags.delete(message);
@@ -1306,15 +1453,31 @@ export async function runCustomRpcMode(
     } else {
       restoreSessionAppendMessage = undefined;
     }
-    unsubscribeSessionEvents = session.subscribe((event: any) => {
-      if (event?.type === "agent_start") {
-        agentRunning = true;
-        emitWorkingVisibility();
-      } else if (event?.type === "agent_end") {
-        agentRunning = false;
-        emitWorkingVisibility();
+    unsubscribeSessionEvents = session.subscribe(async (event: any) => {
+      const nativeSubmission = nativeInputContext.getStore();
+      if (event?.type === "agent_start" && nativeSubmission) {
+        const ownerBarrier = observeNativeTerminalOwner(nativeSubmission);
+        if (ownerBarrier) await ownerBarrier;
+      }
+      if (event?.type === "queue_update" && nativeSubmission) {
+        nativeSubmission.admissionToken = turnCoordinator.admit({
+          requestTag: nativeSubmission.requestTag,
+          observedRole: "nonterminal",
+          text: nativeSubmission.text,
+          hasImages: nativeSubmission.hasImages,
+        });
+        observeNativeInput(nativeSubmission, "nonterminal");
       }
       let producerRequestTag = safeString(event?.requestTag).trim();
+      if (
+        event?.type === "message_start" &&
+        event.message?.role === "user" &&
+        nativeSubmission &&
+        !nativeSubmission.outcome
+      ) {
+        const ownerBarrier = observeNativeTerminalOwner(nativeSubmission);
+        if (ownerBarrier) await ownerBarrier;
+      }
       if (event?.type === "message_start" && event.message?.role === "user") {
         const userText = Array.isArray(event.message?.content)
           ? event.message.content
@@ -1366,9 +1529,6 @@ export async function runCustomRpcMode(
       }
       if (event?.type === "message_start" && event.message?.role === "user") {
         if (producerRequestTag) {
-          if (event.message.requestTag === undefined) {
-            event.message.requestTag = producerRequestTag;
-          }
           userMessageRequestTags.set(event.message, producerRequestTag);
         }
         output(withCompactionEventMetadata(session, taggedEvent));
@@ -1390,39 +1550,136 @@ export async function runCustomRpcMode(
         return done(id, type);
       case "prompt": {
         const requestTag = rpcRequestTag(command.requestTag);
+        const persistedOutcome = persistedNativeRequestOutcome(
+          session,
+          requestTag,
+        );
+        if (persistedOutcome) {
+          return done(
+            id,
+            "prompt",
+            nativeInputOutcome(session, "rejoined", requestTag, {
+              originalOutcome: persistedOutcome,
+              turnActive: turnCoordinator.isActive,
+            }),
+          );
+        }
+        if (
+          requestTag &&
+          nativeRequestReceiptState(session, requestTag) === "conflict"
+        ) {
+          return done(
+            id,
+            "prompt",
+            nativeInputOutcome(session, "indeterminate", requestTag, {
+              turnActive: turnCoordinator.isActive,
+            }),
+          );
+        }
         turnCoordinator.assertAdmissionOpen();
         if (
           turnCoordinator.isActive &&
           requestTag &&
           requestTag === turnCoordinator.activeRequestTag
         ) {
+          await waitForPersistedUserRequestTag(session, requestTag);
+          const durableOutcome = persistedNativeRequestOutcome(
+            session,
+            requestTag,
+          );
+          if (!durableOutcome)
+            throw new Error("rin_prompt_outcome_indeterminate");
           return done(
             id,
             "prompt",
-            promptAdmission(session, "rejoin", requestTag, {
+            nativeInputOutcome(session, "rejoined", requestTag, {
+              originalOutcome: durableOutcome,
               turnActive: true,
             }),
           );
         }
-        const admittedAs = turnCoordinator.admittedKind(requestTag);
-        if (requestTag && admittedAs) {
+        const observedRole = turnCoordinator.observedRole(requestTag);
+        if (requestTag && observedRole) {
+          await waitForPersistedUserRequestTag(session, requestTag);
+          const durableOutcome = persistedNativeRequestOutcome(
+            session,
+            requestTag,
+          );
+          if (!durableOutcome)
+            throw new Error("rin_prompt_outcome_indeterminate");
           return done(
             id,
             "prompt",
-            promptAdmission(session, admittedAs, requestTag, {
-              turnActive: true,
-              queued: turnCoordinator.isAdmissionPending(requestTag),
+            nativeInputOutcome(session, "rejoined", requestTag, {
+              originalOutcome: durableOutcome,
+              turnActive: turnCoordinator.isActive,
             }),
           );
         }
-        const wasTurnActive = turnCoordinator.isActive;
-        const requestedQueueBehavior = "steer";
+
+        const previousAdmission = nativeInputAdmissionTail;
+        let releaseAdmission!: () => void;
+        nativeInputAdmissionTail = new Promise<void>((resolve) => {
+          releaseAdmission = resolve;
+        });
+        await previousAdmission;
+        const serializedPersistedOutcome = persistedNativeRequestOutcome(
+          session,
+          requestTag,
+        );
+        if (serializedPersistedOutcome) {
+          releaseAdmission();
+          return done(
+            id,
+            "prompt",
+            nativeInputOutcome(session, "rejoined", requestTag, {
+              originalOutcome: serializedPersistedOutcome,
+              turnActive: turnCoordinator.isActive,
+            }),
+          );
+        }
+        if (
+          requestTag &&
+          nativeRequestReceiptState(session, requestTag) === "conflict"
+        ) {
+          releaseAdmission();
+          return done(
+            id,
+            "prompt",
+            nativeInputOutcome(session, "indeterminate", requestTag, {
+              turnActive: turnCoordinator.isActive,
+            }),
+          );
+        }
+        const serializedOutcome = turnCoordinator.observedRole(requestTag);
+        if (
+          requestTag &&
+          (serializedOutcome || requestTag === turnCoordinator.activeRequestTag)
+        ) {
+          await waitForPersistedUserRequestTag(session, requestTag);
+          const durableOutcome = persistedNativeRequestOutcome(
+            session,
+            requestTag,
+          );
+          releaseAdmission();
+          if (!durableOutcome)
+            throw new Error("rin_prompt_outcome_indeterminate");
+          return done(
+            id,
+            "prompt",
+            nativeInputOutcome(session, "rejoined", requestTag, {
+              originalOutcome: durableOutcome,
+              turnActive: turnCoordinator.isActive,
+            }),
+          );
+        }
+
+        captureTurnScope(session);
+        const streamingBehavior =
+          command.streamingBehavior === "followUp" ? "followUp" : "steer";
         const promptOptions: Record<string, unknown> = {
           images: command.images,
-          // Match Pi's interactive Enter path without copying its state check:
-          // AgentSession.prompt() decides atomically whether this is an idle
-          // prompt or a streaming steer from its own authoritative state.
-          streamingBehavior: requestedQueueBehavior,
+          streamingBehavior,
           source: command.source || "rpc",
         };
         if (typeof command.requestTag === "string") {
@@ -1437,100 +1694,87 @@ export async function runCustomRpcMode(
         if (frontendIdentity !== undefined) {
           promptOptions.frontendIdentity = frontendIdentity;
         }
-        const requestTagToken = turnCoordinator.admit({
+        let resolveObserved!: (outcome: NativeInputOutcome) => void;
+        const observed = new Promise<NativeInputOutcome>((resolve) => {
+          resolveObserved = resolve;
+        });
+        let resolvePromptTaskReady!: () => void;
+        const promptTaskReady = new Promise<void>((resolve) => {
+          resolvePromptTaskReady = resolve;
+        });
+        const submission: NativeInputSubmission = {
           requestTag,
-          acceptedAs: "prompt",
           text: safeString(command.message),
           hasImages: Array.isArray(command.images) && command.images.length > 0,
-        });
+          streamingBehavior,
+          turnScope: captureTurnScope(session),
+          promptTaskReady,
+          resolvePromptTaskReady,
+          resolveObserved,
+          observed,
+        };
+        promptOptions.preflightResult = (accepted: boolean) => {
+          if (!accepted) submission.resolveObserved("rejected");
+        };
+        let promptTask: Promise<unknown> | undefined;
         try {
-          if (wasTurnActive) {
-            await session.prompt(command.message, promptOptions);
-          } else {
-            startTurnTask(
-              requestTag,
-              async () => {
-                try {
-                  return await session.prompt(command.message, promptOptions);
-                } catch (error) {
-                  turnCoordinator.removeAdmission(requestTagToken);
-                  throw error;
-                }
-              },
-              {
-                chatRunContext: normalizeRpcChatRunContext(
-                  command.chatRunContext,
-                ),
-              },
-            );
+          promptTask = nativeInputContext.run(submission, () =>
+            session.prompt(command.message, promptOptions),
+          );
+          submission.promptTask = promptTask;
+          submission.resolvePromptTaskReady();
+          const firstResult = await Promise.race([
+            observed.then((outcome) => ({
+              type: "observed" as const,
+              outcome,
+            })),
+            promptTask.then(() => ({ type: "settled" as const })),
+          ]);
+          const outcome =
+            firstResult.type === "observed"
+              ? firstResult.outcome
+              : "indeterminate";
+          if (outcome === "nonterminal") await promptTask;
+          if (
+            requestTag &&
+            (outcome === "terminalOwner" || outcome === "nonterminal")
+          ) {
+            await waitForPersistedUserRequestTag(session, requestTag);
           }
+          if (
+            (outcome === "rejected" || outcome === "indeterminate") &&
+            !persistNativeRequestOutcome(session, requestTag, outcome)
+          ) {
+            throw new Error("rin_prompt_outcome_indeterminate");
+          }
+          releaseAdmission();
+          observeNativeInput(submission, outcome);
+          return done(
+            id,
+            "prompt",
+            nativeInputOutcome(session, outcome, requestTag, {
+              turnActive:
+                outcome === "terminalOwner" || turnCoordinator.isActive,
+            }),
+          );
         } catch (error) {
-          turnCoordinator.removeAdmission(requestTagToken);
+          releaseAdmission();
+          if (submission.admissionToken) {
+            turnCoordinator.removeAdmission(submission.admissionToken);
+          }
           throw error;
         }
-        return done(
-          id,
-          "prompt",
-          promptAdmission(session, "prompt", command.requestTag, {
-            turnActive: true,
-            queued: turnCoordinator.isAdmissionPending(command.requestTag),
-          }),
-        );
       }
-      case "resume_interrupted_turn":
+      case "resume_interrupted_turn": {
+        const requestTag = rpcRequestTag(command.requestTag);
         if (!isInterruptedTurnResumable(session)) {
-          return done(id, "resume_interrupted_turn", { resumed: false });
+          return done(id, type, { resumed: false });
         }
-        await startInterruptTurnTask(
-          rpcRequestTag(command.requestTag),
+        startInterruptTurnTask(
+          requestTag,
           async () => await resumeInterruptedTurn(session),
         );
-        return done(id, "resume_interrupted_turn", { resumed: true });
-      case "steer": {
-        const requestTag = safeString(command.requestTag).trim();
-        const admitted = requestTag
-          ? turnCoordinator.admittedKind(requestTag)
-          : undefined;
-        if (admitted) {
-          return done(id, type, { acceptedAs: admitted, requestTag });
-        }
-        const token = turnCoordinator.admit({
-          requestTag,
-          acceptedAs: "steer",
-          text: safeString(command.message),
-          hasImages: Array.isArray(command.images) && command.images.length > 0,
-        });
-        try {
-          return await run(id, type, () =>
-            session.steer(command.message, command.images),
-          );
-        } catch (error) {
-          turnCoordinator.removeAdmission(token);
-          throw error;
-        }
-      }
-      case "follow_up": {
-        const requestTag = safeString(command.requestTag).trim();
-        const admitted = requestTag
-          ? turnCoordinator.admittedKind(requestTag)
-          : undefined;
-        if (admitted) {
-          return done(id, type, { acceptedAs: admitted, requestTag });
-        }
-        const token = turnCoordinator.admit({
-          requestTag,
-          acceptedAs: "followUp",
-          text: safeString(command.message),
-          hasImages: Array.isArray(command.images) && command.images.length > 0,
-        });
-        try {
-          return await run(id, type, () =>
-            session.followUp(command.message, command.images),
-          );
-        } catch (error) {
-          turnCoordinator.removeAdmission(token);
-          throw error;
-        }
+        return done(id, type, { resumed: true, requestTag });
       }
       case "clear_queue":
         turnCoordinator.clearTrackedAdmissions();
@@ -1608,7 +1852,6 @@ export async function runCustomRpcMode(
           type,
           getSessionState(session, {
             turnActive: turnCoordinator.isActive,
-            workingVisible: workingVisibleEnabled && agentRunning,
           }),
         );
       case "get_state": {
@@ -1616,10 +1859,8 @@ export async function runCustomRpcMode(
         return done(id, type, {
           ...getSessionState(session, {
             turnActive: trackedTurnActive,
-            workingVisible: workingVisibleEnabled && agentRunning,
           }),
           piActiveRun: Boolean(session.agent?.signal),
-          interruptedTurnResumable: isInterruptedTurnResumable(session),
           ...(trackedTurnActive
             ? {
                 requestTag: turnCoordinator.activeRequestTag,
@@ -1797,33 +2038,6 @@ export async function runCustomRpcMode(
         return done(id, type, { text: session.getLastAssistantText() });
       case "get_messages":
         return done(id, type, { messages: session.messages });
-      case "resolve_submitted_turn": {
-        const resolved = resolveSubmittedTurnFromMessages(
-          session.messages,
-          {
-            text: safeString(command.text).trim(),
-            sentAt: Number(command.sentAt || 0),
-            requestTag: rpcRequestTag(command.requestTag),
-          },
-          {
-            turnActive: Boolean(
-              turnCoordinator.isActive ||
-              session.isStreaming ||
-              session.isCompacting ||
-              session.isRetrying ||
-              session.retryAttempt > 0,
-            ),
-          },
-        );
-        if (resolved && !("submitted" in resolved)) {
-          return done(id, type, {
-            ...resolved,
-            sessionId: session.sessionId,
-            sessionFile: session.sessionFile,
-          });
-        }
-        return done(id, type, resolved);
-      }
       case "get_active_tools":
         return done(id, type, {
           tools: session.getActiveToolNames?.() || [],

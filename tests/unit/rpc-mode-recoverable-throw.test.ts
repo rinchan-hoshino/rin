@@ -18,7 +18,7 @@ function wait(ms = 0) {
 }
 
 test(
-  "rpc mode surfaces websocket prompt throws instead of waiting for continuation",
+  "rpc mode reports a prompt rejection without inventing a process-error terminal",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -55,7 +55,8 @@ test(
           sessionSubscribers.add(handler);
           return () => sessionSubscribers.delete(handler);
         },
-        prompt: async () => {
+        prompt: async (_message: string, options: any) => {
+          options?.preflightResult?.(true);
           const errorMessage = {
             role: "assistant",
             content: [],
@@ -148,17 +149,27 @@ test(
           }
         })
         .filter(Boolean);
-      const error = events.find(
-        (event) => event.type === "rpc_turn_event" && event.event === "error",
+      const response = events.find(
+        (event) => event.type === "response" && event.id === "1",
       );
-      assert.equal(error?.requestTag, "tag-1");
-      assert.match(String(error?.error || ""), /WebSocket closed 1009/);
+      assert.equal(response?.success, false);
+      assert.match(String(response?.error || ""), /WebSocket closed 1009/);
       assert.equal(
         events.some(
           (event) =>
-            event.type === "rpc_turn_event" && event.event === "complete",
+            event.type === "rpc_turn_event" &&
+            (event.event === "error" || event.event === "complete"),
         ),
         false,
+      );
+      assert.equal(
+        events.some(
+          (event) =>
+            event.type === "rpc_turn_event" &&
+            event.event === "start" &&
+            event.requestTag === "tag-1",
+        ),
+        true,
       );
     } finally {
       process.stdin.on = stdinOn;

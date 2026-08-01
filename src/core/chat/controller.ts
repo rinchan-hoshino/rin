@@ -11,6 +11,7 @@ import {
   type RinFrontendEventHandlingFailure,
   type RinFrontendIdentity,
   type RinFrontendTurnClient,
+  type RinChatDeliveryContext,
 } from "../rin-frontend-sdk/index.js";
 import { isRinFrontendTurnCancelledError } from "../rin-frontend-sdk/lifecycle-errors.js";
 import {
@@ -64,25 +65,13 @@ import {
   type ChatOutboxTurnFence,
 } from "../rin-lib/chat-outbox.js";
 import { drainChatOutbox } from "./boot.js";
-import {
-  attachChatTurnToRun,
-  commitCanonicalChatRunTerminal,
-  createCanonicalChatRun,
-  loadCanonicalChatRunForRecovery,
-  type CanonicalChatRun,
-  type CanonicalChatRunFence,
-} from "./run-store.js";
-import {
-  commitChatTerminalWal,
-  verifyChatTerminalWal,
-} from "../rin-daemon/chat-terminal-wal.js";
+import { assistantDeliveryParts } from "./terminal-delivery.js";
 import {
   advanceChatGeneration,
   completeChatTurnWithoutDelivery,
   markChatMessageAcceptedWithFence,
   openChatDatabase,
   readChatSessionBinding,
-  supersedeChatTurnWithFence,
   writeChatSessionBinding,
   writeChatSessionBindingWithFence,
 } from "./database.js";
@@ -351,7 +340,6 @@ export class ChatController {
   state: ChatState;
   driver: RinFrontendTurnDriver;
   frontendClientFactory?: () => RinFrontendTurnClient;
-  turnQueue: Promise<void> = Promise.resolve();
   logger: any;
   h: any;
   affectChatBinding: boolean;
@@ -373,15 +361,12 @@ export class ChatController {
   activeWorkingIndicators: WorkingIndicator[] = [];
   workingIndicatorTick = 0;
   currentTurn: ChatTurnMeta | null = null;
-  activeCanonicalRun: CanonicalChatRun | null = null;
   compactionTurn: ChatTurnMeta | null = null;
   compactionWorkingIndicators: WorkingIndicator[] = [];
   lastCompactionIndicatorAt = 0;
   lastCompactionTypingIndicatorAt = 0;
   compactionIndicatorTick = 0;
   activeCommandTurnInput: ChatTurnTarget | null = null;
-  pendingSubmittedDeliveryTargets: ChatTurnTarget[] = [];
-  coalescedDeliveryTargets: ChatTurnTarget[] = [];
   backendAcceptedIncomingMessageId = "";
   stagedDelivery: ChatAssistantDelivery | null = null;
   pendingPassiveNotices: string[] = [];
@@ -392,7 +377,6 @@ export class ChatController {
   todoDeliveryQueue: Promise<void> = Promise.resolve();
   latestAssistantSummaryText = "";
   awaitingTurnSettle = false;
-  externalWorkingVisible = false;
   turnAbortRequested = false;
   turnAbortGeneration = 0;
   intentionallyAbortedTurnGenerations = new Set<number>();
@@ -437,9 +421,7 @@ export class ChatController {
         readChatSessionBinding(this.agentDir, chatKey) || undefined;
     }
     // Unconfirmed submissions are transport-local. Durable ownership remains
-    // in the SQLite turn ledger and is never revived from controller JSON.
-    this.pendingSubmittedDeliveryTargets = [];
-    this.coalescedDeliveryTargets = [];
+    // in the SQLite transport ledger and is never reconstructed from controller JSON.
     this.logger = deps.logger;
     this.h = deps.h;
     this.sleepAfterIdleMs = Math.max(0, Number(deps.sleepAfterIdleMs || 0));
@@ -483,7 +465,9 @@ export class ChatController {
     return this.driver.frontendPhase;
   }
 
-  async connect(options: { restoreSession?: boolean } = {}) {
+  async connect(
+    options: { restoreSession?: boolean; recoverTerminals?: boolean } = {},
+  ) {
     const restoreSessionFile =
       options.restoreSession === false ? "" : this.getRecoverableSessionFile();
     const connected = await this.driver.connect({ restoreSessionFile });
@@ -494,6 +478,22 @@ export class ChatController {
       );
       this.saveState();
     }
+    if (connected && options.recoverTerminals !== false) {
+      const reservedTurn = this.currentTurn;
+      const reservedAwaitingTurnSettle = this.awaitingTurnSettle;
+      if (reservedTurn) {
+        this.currentTurn = null;
+        this.awaitingTurnSettle = false;
+      }
+      try {
+        await this.driver.recoverUnacknowledgedChatTerminals(this.chatKey);
+      } finally {
+        if (reservedTurn) {
+          this.currentTurn = reservedTurn;
+          this.awaitingTurnSettle = reservedAwaitingTurnSettle;
+        }
+      }
+    }
     return connected;
   }
 
@@ -503,18 +503,14 @@ export class ChatController {
     void this.clearCompactionWorkingReaction().catch(() => {});
     void this.clearAllWaitingReactions().catch(() => {});
     this.currentTurn = null;
-    this.activeCanonicalRun = null;
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
-    this.pendingSubmittedDeliveryTargets = [];
-    this.coalescedDeliveryTargets = [];
     this.startedReactionRequestTags.clear();
     this.deferredWorkingReactionRequestTags.clear();
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
-    this.externalWorkingVisible = false;
     this.turnAbortRequested = false;
     this.turnAbortGeneration += 1;
     this.intentionallyAbortedTurnGenerations.clear();
@@ -537,7 +533,6 @@ export class ChatController {
 
   async clearProcessingState() {
     this.awaitingTurnSettle = false;
-    this.externalWorkingVisible = false;
     this.turnAbortRequested = false;
     this.turnAbortGeneration += 1;
     this.intentionallyAbortedTurnGenerations.clear();
@@ -546,12 +541,9 @@ export class ChatController {
     await this.clearCompactionWorkingReaction().catch(() => {});
     await this.clearAllWaitingReactions().catch(() => {});
     this.currentTurn = null;
-    this.activeCanonicalRun = null;
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
-    this.pendingSubmittedDeliveryTargets = [];
-    this.coalescedDeliveryTargets = [];
     this.startedReactionRequestTags.clear();
     this.deferredWorkingReactionRequestTags.clear();
     this.backendAcceptedIncomingMessageId = "";
@@ -575,12 +567,8 @@ export class ChatController {
     return safeString(this.currentTurn?.incomingMessageId || "").trim();
   }
 
-  private pendingIncomingMessageId(requestTag: string) {
-    return safeString(
-      this.pendingSubmittedDeliveryTargets.find(
-        (target) => target.requestTag === requestTag,
-      )?.incomingMessageId,
-    ).trim();
+  private pendingIncomingMessageId(_requestTag: string) {
+    return this.currentIncomingMessageId();
   }
 
   private async showWaitingReaction(requestTagValue: string) {
@@ -737,45 +725,89 @@ export class ChatController {
     )}`;
   }
 
-  private ensureCanonicalRun(turnFence?: ChatOutboxTurnFence) {
-    if (this.activeCanonicalRun) return this.activeCanonicalRun;
-    if (!turnFence) return undefined;
-    this.activeCanonicalRun = createCanonicalChatRun(this.agentDir, {
-      turnFence,
-      producerIncarnation: crypto.randomUUID(),
-    });
-    return this.activeCanonicalRun;
-  }
-
-  private recoverCanonicalRunEvent(
-    chatRunContext?: CanonicalChatRunFence,
+  private recoverTerminalDeliveryEvent(
+    chatDeliveryContext?: RinChatDeliveryContext,
     requestTag?: string,
-    terminalStagedAt?: string,
   ) {
-    if (!chatRunContext) return;
-    const stagedAt = safeString(terminalStagedAt).trim();
-    if (this.activeCanonicalRun && !stagedAt) return;
-    const recovered = loadCanonicalChatRunForRecovery(
-      this.agentDir,
-      chatRunContext,
-      { terminalStagedAt: stagedAt || undefined },
-    );
-    if (!recovered || recovered.run.chatKey !== this.chatKey) return;
-    this.activeCanonicalRun = recovered.run;
-    this.setCurrentTurn({
-      ...recovered.turn,
-      requestTag: safeString(requestTag).trim() || undefined,
-    });
+    if (!chatDeliveryContext || this.currentTurn) return;
+    const db = openChatDatabase(this.agentDir);
+    try {
+      const row = db
+        .prepare(
+          `SELECT inbox_jobs.turn_id, inbox_jobs.owner_epoch, inbox_jobs.attempt,
+                  messages.message_id
+           FROM inbox_jobs
+           JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+           WHERE inbox_jobs.turn_id = ? AND inbox_jobs.chat_key = ?
+             AND messages.message_id = ?
+             AND (
+               inbox_jobs.state IN ('running', 'terminal')
+               OR (inbox_jobs.state = 'failed'
+                   AND inbox_jobs.terminal_kind = 'interrupted')
+             )`,
+        )
+        .get(
+          chatDeliveryContext.turnId,
+          chatDeliveryContext.chatKey,
+          chatDeliveryContext.messageId,
+        ) as any;
+      if (!row || chatDeliveryContext.chatKey !== this.chatKey) return;
+      this.setCurrentTurn({
+        incomingMessageId: row.message_id,
+        outboxTurnFence: {
+          agentDir: this.agentDir,
+          chatKey: this.chatKey,
+          messageId: row.message_id,
+          turnId: row.turn_id,
+          ownerEpoch: row.owner_epoch,
+          attempt: Number(row.attempt || 0),
+        },
+        requestTag: safeString(requestTag).trim() || undefined,
+      });
+    } finally {
+      db.close();
+    }
   }
 
-  private acceptsCanonicalRunEvent(chatRunContext?: CanonicalChatRunFence) {
-    if (!chatRunContext) return !this.activeCanonicalRun;
-    const active = this.activeCanonicalRun;
+  private authoritativeTerminalEvent(
+    event: {
+      requestTag?: string;
+      chatDeliveryContext?: RinChatDeliveryContext;
+      terminalRecord?: {
+        terminalId: string;
+        state: "complete" | "error" | "interrupted";
+        terminalAt?: string;
+      };
+    },
+    terminalKind: "complete" | "error",
+  ) {
+    const context = event.chatDeliveryContext;
+    const requestTag = safeString(event.requestTag).trim();
+    const terminalId = safeString(event.terminalRecord?.terminalId).trim();
+    const terminalState = safeString(event.terminalRecord?.state).trim();
+    if (!context || !requestTag || !terminalId) {
+      throw new Error("chat_terminal_record_missing");
+    }
+    if (
+      (terminalKind === "complete" && terminalState !== "complete") ||
+      (terminalKind === "error" &&
+        terminalState !== "error" &&
+        terminalState !== "interrupted")
+    ) {
+      throw new Error("chat_terminal_delivery_mismatch");
+    }
+    return event;
+  }
+
+  private acceptsTerminalDeliveryEvent(
+    chatDeliveryContext?: RinChatDeliveryContext,
+  ) {
+    if (!chatDeliveryContext) return false;
     return Boolean(
-      active &&
-      active.runId === chatRunContext.runId &&
-      active.ownerEpoch === chatRunContext.ownerEpoch &&
-      active.producerIncarnation === chatRunContext.producerIncarnation,
+      chatDeliveryContext.chatKey === this.chatKey &&
+      this.currentTurn?.outboxTurnFence?.turnId ===
+        chatDeliveryContext.turnId &&
+      this.currentTurn?.incomingMessageId === chatDeliveryContext.messageId,
     );
   }
 
@@ -800,11 +832,7 @@ export class ChatController {
   }
 
   hasActiveTurn() {
-    return (
-      this.frontendPhase === "working" ||
-      this.awaitingTurnSettle ||
-      this.driver.hasActiveTurn()
-    );
+    return this.awaitingTurnSettle || this.driver.hasActiveTurn();
   }
 
   private setCurrentTurn(input: {
@@ -852,11 +880,8 @@ export class ChatController {
       !this.currentTurn?.outboxTurnFence,
     );
     if (deliverFinal && (!this.currentTurn || shouldRestoreDurableTurn)) {
-      // Reconnecting a recovered frontend can replay progress before connect()
-      // resolves. Install the inbox identity first so those updates reuse the
-      // original reply-scoped editable working message instead of creating an
-      // unscoped channel-level message. A display-only external Working event
-      // may have arrived first; durable ownership supersedes that presentation.
+      // Install reply identity before reconnect can replay progress. connect()
+      // temporarily yields that identity only while draining older terminals.
       this.setCurrentTurn(input);
       primedTurn = this.currentTurn;
       this.awaitingTurnSettle = true;
@@ -957,47 +982,6 @@ export class ChatController {
     this.activeCommandTurnInput = null;
   }
 
-  private rememberPendingSubmittedDeliveryTarget(input: ChatTurnTarget) {
-    const incomingMessageId = safeString(input.incomingMessageId || "").trim();
-    const replyToMessageId =
-      safeString(input.replyToMessageId || "").trim() || incomingMessageId;
-    if (!incomingMessageId && !replyToMessageId) return;
-    const existingIndex = this.pendingSubmittedDeliveryTargets.findIndex(
-      (target) =>
-        safeString(target.incomingMessageId).trim() === incomingMessageId,
-    );
-    if (existingIndex >= 0) {
-      this.pendingSubmittedDeliveryTargets.splice(existingIndex, 1);
-    }
-    this.pendingSubmittedDeliveryTargets.push({
-      incomingMessageId: incomingMessageId || undefined,
-      replyToMessageId: replyToMessageId || undefined,
-      text: safeString(input.text || "").trim() || undefined,
-      submittedText: safeString(input.submittedText || "").trim() || undefined,
-      requestTag: safeString(input.requestTag).trim() || undefined,
-      outboxTurnFence: input.outboxTurnFence,
-    });
-  }
-
-  private removePendingSubmittedDeliveryTarget(messageId?: string) {
-    const targetMessageId = safeString(messageId).trim();
-    if (!targetMessageId) return;
-    this.pendingSubmittedDeliveryTargets =
-      this.pendingSubmittedDeliveryTargets.filter(
-        (target) =>
-          safeString(target.incomingMessageId).trim() !== targetMessageId,
-      );
-  }
-
-  hasPendingSubmittedDeliveryTarget(messageId?: string) {
-    const nextMessageId = safeString(messageId || "").trim();
-    if (!nextMessageId) return false;
-    return this.pendingSubmittedDeliveryTargets.some(
-      (target) =>
-        safeString(target.incomingMessageId || "").trim() === nextMessageId,
-    );
-  }
-
   ownsOutboxTurnFence(fence?: ChatOutboxTurnFence) {
     if (!fence) return false;
     const matches = (candidate?: ChatOutboxTurnFence) =>
@@ -1018,81 +1002,8 @@ export class ChatController {
   ownsInboundMessage(messageId?: string) {
     return (
       this.claimsInboundMessage(messageId) ||
-      this.hasBackendAcceptedInboundMessage(messageId) ||
-      this.hasPendingSubmittedDeliveryTarget(messageId)
+      this.hasBackendAcceptedInboundMessage(messageId)
     );
-  }
-
-  private async activatePendingSubmittedDeliveryTarget(
-    startedText?: string,
-    backendRequestTag?: string,
-  ) {
-    const text = safeString(startedText || "").trim();
-    if (!text || !this.pendingSubmittedDeliveryTargets.length) return false;
-    const requestTag = safeString(backendRequestTag).trim();
-    let index = -1;
-    if (requestTag) {
-      index = this.pendingSubmittedDeliveryTargets.findIndex(
-        (target) => safeString(target?.requestTag).trim() === requestTag,
-      );
-    } else {
-      const matches = this.pendingSubmittedDeliveryTargets.flatMap(
-        (target, candidateIndex) => {
-          const raw = safeString(target?.text).trim();
-          const submitted = safeString(target?.submittedText).trim();
-          return (submitted && submitted === text) || (raw && raw === text)
-            ? [candidateIndex]
-            : [];
-        },
-      );
-      if (matches.length === 1) index = matches[0];
-    }
-    if (index < 0) return false;
-    const [target] = this.pendingSubmittedDeliveryTargets.splice(index, 1);
-    const previousMessageId = this.currentIncomingMessageId();
-    if (
-      previousMessageId &&
-      previousMessageId !== safeString(target?.incomingMessageId).trim()
-    ) {
-      this.coalescedDeliveryTargets.push({
-        incomingMessageId: previousMessageId,
-        replyToMessageId: this.currentReplyToMessageId() || undefined,
-        requestTag: this.currentTurn?.requestTag,
-        outboxTurnFence: this.currentTurn?.outboxTurnFence,
-      });
-    }
-    if (this.activeCanonicalRun && target?.outboxTurnFence) {
-      attachChatTurnToRun(this.agentDir, {
-        runId: this.activeCanonicalRun.runId,
-        ownerEpoch: this.activeCanonicalRun.ownerEpoch,
-        producerIncarnation: this.activeCanonicalRun.producerIncarnation,
-        turnFence: target.outboxTurnFence,
-      });
-      this.activeCanonicalRun = {
-        ...this.activeCanonicalRun,
-        deliveryTurnId: target.outboxTurnFence.turnId,
-      };
-    }
-    this.saveState();
-    const nextTurn = {
-      incomingMessageId: target?.incomingMessageId,
-      replyToMessageId: target?.replyToMessageId,
-      requestTag: requestTag || target?.requestTag,
-      outboxTurnFence: target?.outboxTurnFence,
-    };
-    if (this.driver.hasVisibleChatWorkingTurn()) {
-      await this.beginVisibleProcessingTurn(nextTurn);
-    } else {
-      const previousWorkingCleanup = this.clearWorkingReaction().catch(
-        () => false,
-      );
-      // Move the display/outbox target before transport cleanup can yield.
-      this.setCurrentTurn(nextTurn);
-      this.awaitingTurnSettle = true;
-      await previousWorkingCleanup;
-    }
-    this.markAcceptedMessage(target?.incomingMessageId);
-    return true;
   }
 
   private ensureVisibleCommandTurn() {
@@ -1499,65 +1410,8 @@ export class ChatController {
     };
   }
 
-  private coalescedSupersessionFences(
-    originalIncomingMessageId: unknown,
-    targetIncomingMessageId: unknown,
-    fence?: ChatOutboxTurnFence,
-  ) {
-    const original = safeString(originalIncomingMessageId).trim();
-    const target = safeString(targetIncomingMessageId).trim();
-    const candidates = [
-      ...(original && original !== target
-        ? [fence || this.turnFenceForInboundMessage(original)]
-        : []),
-      ...this.coalescedDeliveryTargets.map(
-        (entry) =>
-          entry.outboxTurnFence ||
-          this.turnFenceForInboundMessage(entry.incomingMessageId),
-      ),
-    ];
-    const seen = new Set<string>();
-    return candidates.filter((candidate): candidate is ChatOutboxTurnFence => {
-      const turnId = safeString(candidate?.turnId).trim();
-      const messageId = safeString(candidate?.messageId).trim();
-      if (!turnId || messageId === target || seen.has(turnId)) return false;
-      seen.add(turnId);
-      return true;
-    });
-  }
-
-  private async finishSupersededRecoveredTurn(
-    input: {
-      incomingMessageId?: string;
-      outboxTurnFence?: ChatOutboxTurnFence;
-    },
-    result: any,
-  ) {
-    const fence =
-      input.outboxTurnFence ||
-      this.turnFenceForInboundMessage(input.incomingMessageId);
-    if (fence && !supersedeChatTurnWithFence(this.agentDir, fence)) {
-      throw new Error("chat_turn_fence_lost");
-    }
-    await this.clearWorkingReactionFor(input.incomingMessageId);
-    this.clearCurrentTurnFor(input.incomingMessageId);
-    this.awaitingTurnSettle = false;
-    return {
-      superseded: true,
-      sessionId:
-        safeString(result?.sessionId || this.currentSessionId()).trim() ||
-        undefined,
-      sessionFile:
-        safeString(result?.sessionFile || this.currentSessionFile()).trim() ||
-        undefined,
-    };
-  }
-
   private shouldShowTypingIndicator() {
-    return Boolean(
-      this.currentTurn &&
-      (this.externalWorkingVisible || this.driver.hasVisibleChatWorkingTurn()),
-    );
+    return this.driver.isWorking();
   }
 
   private editableWorkingIndicator(indicators = this.getWorkingIndicators()) {
@@ -1668,21 +1522,6 @@ export class ChatController {
     ]);
     if (visibleDue) this.workingIndicatorTick += 1;
     return [...typingResults, ...visibleResults].some(Boolean);
-  }
-
-  private async runExclusiveTurn<T>(run: () => Promise<T>) {
-    const previous = this.turnQueue;
-    let release!: () => void;
-    const slot = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.turnQueue = previous.then(() => slot);
-    await previous;
-    try {
-      return await run();
-    } finally {
-      release();
-    }
   }
 
   currentSessionId() {
@@ -1858,9 +1697,9 @@ export class ChatController {
       openChatDatabase(this.agentDir)
         .prepare(
           `SELECT 1
-           FROM turns
-           JOIN messages ON messages.id = turns.inbound_message_id
-           WHERE turns.chat_key = ? AND messages.message_id = ?
+           FROM inbox_jobs
+           JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+           WHERE inbox_jobs.chat_key = ? AND messages.message_id = ?
            LIMIT 1`,
         )
         .get(this.chatKey, nextMessageId),
@@ -2016,10 +1855,9 @@ export class ChatController {
       waitUntilDeliverySettled?: boolean;
       turnFence?: ChatOutboxTurnFence;
       nonTerminalError?: boolean;
-      supersedeTurnFences?: ChatOutboxTurnFence[];
-      canonicalRunFence?: CanonicalChatRunFence;
-      terminalWalPayloadHash?: string;
-      terminalWalStagedAt?: string;
+      terminalTurn?: RinChatDeliveryContext;
+      terminalRequestTag?: string;
+      terminalRecordId?: string;
     } = {},
   ) {
     const idempotencyKey = safeString(options.idempotencyKey).trim();
@@ -2045,42 +1883,36 @@ export class ChatController {
     }
     await validateChatOutboxPayloadForDispatch(normalizedPayload, this.h);
     let outboxId: string;
-    if (options.canonicalRunFence) {
+    if (options.terminalTurn) {
       if (deliveryKind !== "final" && deliveryKind !== "error") {
-        throw new Error("chat_run_invalid_terminal_delivery_kind");
+        throw new Error("chat_terminal_invalid_delivery_kind");
       }
-      const terminalWalPayloadHash = safeString(
-        options.terminalWalPayloadHash,
-      ).trim();
-      if (!terminalWalPayloadHash) {
-        throw new Error("chat_terminal_wal_missing");
+      const terminalRequestTag = safeString(options.terminalRequestTag).trim();
+      const terminalRecordId = safeString(options.terminalRecordId).trim();
+      if (!terminalRequestTag || !terminalRecordId) {
+        throw new Error("chat_terminal_record_missing");
       }
-      verifyChatTerminalWal(this.agentDir, {
-        ...options.canonicalRunFence,
-        payloadHash: terminalWalPayloadHash,
+      const terminalOutboxId = `chat-${terminalRecordId}`;
+      outboxId = enqueueChatOutboxPayload(this.agentDir, normalizedPayload, {
+        id: terminalOutboxId,
+        idempotencyKey: terminalOutboxId,
+        deliveryKind: deliveryKind as any,
+        postDelivery: options.postDelivery,
+        terminalTurn: options.terminalTurn,
+        terminalRecordId,
       });
-      outboxId = commitCanonicalChatRunTerminal(
-        this.agentDir,
-        options.canonicalRunFence,
-        normalizedPayload,
-        {
-          deliveryKind,
-          terminalStagedAt: options.terminalWalStagedAt,
-          enqueueOptions: {
-            id,
-            postDelivery: options.postDelivery,
-            nonTerminalError: options.nonTerminalError,
-            supersedeTurnFences: options.terminalWalStagedAt
-              ? undefined
-              : options.supersedeTurnFences,
-          },
-        },
-      ).outboxId;
-      commitChatTerminalWal(this.agentDir, {
-        ...options.canonicalRunFence,
-        payloadHash: terminalWalPayloadHash,
-        outboxId,
-      });
+      try {
+        await this.driver.acknowledgeTerminal(
+          terminalRequestTag,
+          terminalRecordId,
+        );
+      } catch (error: any) {
+        this.logger?.warn?.(
+          `chat terminal acknowledgement deferred: ${String(
+            error?.message || error,
+          )}`,
+        );
+      }
     } else {
       outboxId = enqueueChatOutboxPayload(this.agentDir, normalizedPayload, {
         ...options,
@@ -2167,10 +1999,9 @@ export class ChatController {
       id?: string;
       idempotencyKey?: string;
       turnFence?: ChatOutboxTurnFence;
-      supersedeTurnFences?: ChatOutboxTurnFence[];
-      canonicalRunFence?: CanonicalChatRunFence;
-      terminalWalPayloadHash?: string;
-      terminalWalStagedAt?: string;
+      terminalTurn?: RinChatDeliveryContext;
+      terminalRequestTag?: string;
+      terminalRecordId?: string;
     } = {},
   ) {
     const pending = this.stagedDelivery;
@@ -2198,76 +2029,14 @@ export class ChatController {
     if (clearProcessing) {
       await this.clearWorkingReaction().catch(() => {});
       this.currentTurn = null;
-      this.activeCanonicalRun = null;
-      this.coalescedDeliveryTargets = [];
     }
     return outcome;
-  }
-
-  private assistantResultParts(result: any): ChatMessagePart[] {
-    if (!Array.isArray(result?.messages)) return [];
-    return result.messages.flatMap((message: any): ChatMessagePart[] => {
-      if (message?.type === "text") {
-        const text = safeString(message.text).trim();
-        return text ? [{ type: "text", text }] : [];
-      }
-      if (message?.type === "image") {
-        const data = safeString(message.data).trim();
-        const path = safeString(message.path).trim();
-        const url = safeString(message.url).trim();
-        const mimeType = safeString(message.mimeType).trim() || undefined;
-        if (path) return [{ type: "image", path, mimeType }];
-        if (url) return [{ type: "image", url, mimeType }];
-        if (data) {
-          return [
-            {
-              type: "image",
-              url: `data:${mimeType || "image/png"};base64,${data}`,
-              mimeType,
-            },
-          ];
-        }
-        return [];
-      }
-      if (message?.type === "file") {
-        const path = safeString(message.path).trim();
-        const url = safeString(message.url).trim();
-        if (!path && !url) return [];
-        return [
-          {
-            type: "file",
-            ...(path ? { path } : {}),
-            ...(url ? { url } : {}),
-            name: safeString(message.name).trim() || undefined,
-            mimeType: safeString(message.mimeType).trim() || undefined,
-          },
-        ];
-      }
-      return [];
-    });
-  }
-
-  private assistantDeliveryParts(finalText: unknown, result: any) {
-    const text = safeString(finalText).trim();
-    const resultParts = this.assistantResultParts(result);
-    if (!text) return resultParts;
-    if (!resultParts.length) return [];
-    let replacedText = false;
-    const canonicalParts = resultParts.map((part) => {
-      if (part.type !== "text" || replacedText) return part;
-      replacedText = true;
-      return { type: "text" as const, text };
-    });
-    return replacedText
-      ? canonicalParts
-      : [{ type: "text" as const, text }, ...canonicalParts];
   }
 
   private async settleEmptyAssistantCompletion(input: {
     incomingMessageId?: string;
     sessionFile?: string;
     outboxTurnFence?: ChatOutboxTurnFence;
-    supersedeTurnFences?: ChatOutboxTurnFence[];
   }) {
     const incomingMessageId = safeString(input.incomingMessageId).trim();
     const fence =
@@ -2279,7 +2048,6 @@ export class ChatController {
           this.agentDir,
           input.sessionFile || this.currentSessionFile(),
         ),
-        supersedeTurnFences: input.supersedeTurnFences,
       });
       if (!completed) throw new Error("chat_turn_fence_lost");
     } else {
@@ -2287,7 +2055,6 @@ export class ChatController {
     }
     await this.clearWorkingReaction().catch(() => {});
     this.currentTurn = null;
-    this.coalescedDeliveryTargets = [];
   }
 
   private async deliverAssistantReply(input: {
@@ -2301,10 +2068,9 @@ export class ChatController {
     deliveryKind?: "final" | "error";
     idempotencyKey?: string;
     outboxTurnFence?: ChatOutboxTurnFence;
-    supersedeTurnFences?: ChatOutboxTurnFence[];
-    canonicalRunFence?: CanonicalChatRunFence;
-    terminalWalPayloadHash?: string;
-    terminalWalStagedAt?: string;
+    terminalTurn?: RinChatDeliveryContext;
+    terminalRequestTag?: string;
+    terminalRecordId?: string;
   }) {
     const linkSession =
       input.bindSession !== false && this.linkDeliveriesToSession;
@@ -2359,10 +2125,9 @@ export class ChatController {
         id,
         idempotencyKey,
         turnFence: input.outboxTurnFence || activeCommandFence,
-        supersedeTurnFences: input.supersedeTurnFences,
-        canonicalRunFence: input.canonicalRunFence,
-        terminalWalPayloadHash: input.terminalWalPayloadHash,
-        terminalWalStagedAt: input.terminalWalStagedAt,
+        terminalTurn: input.terminalTurn,
+        terminalRequestTag: input.terminalRequestTag,
+        terminalRecordId: input.terminalRecordId,
       },
     );
     if (delivery?.accepted !== false && delivery?.settled !== false) {
@@ -2941,14 +2706,11 @@ export class ChatController {
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
-    this.pendingSubmittedDeliveryTargets = [];
-    this.coalescedDeliveryTargets = [];
     this.startedReactionRequestTags.clear();
     this.deferredWorkingReactionRequestTags.clear();
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
-    this.externalWorkingVisible = false;
     this.turnAbortRequested = false;
     this.turnAbortGeneration = 0;
   }
@@ -3086,14 +2848,12 @@ export class ChatController {
         this.turnAbortRequested = false;
         await this.clearWorkingReaction().catch(() => {});
         this.clearCurrentTurn();
-        this.pendingSubmittedDeliveryTargets = [];
-        this.coalescedDeliveryTargets = [];
         this.stagedDelivery = null;
         this.saveState();
       }
     }
     const skipSessionRecovery = commandPolicy.skipSessionRecovery;
-    // Slash commands are controls; reply-bound session files belong to prompt turns only.
+    // Slash commands are controls; reply-bound session files belong to prompt inbox_jobs only.
     const explicitSessionFile = "";
     const restoreSessionFile = skipSessionRecovery
       ? ""
@@ -3124,6 +2884,7 @@ export class ChatController {
         restoreSession: !skipSessionRecovery,
       });
       if (commandPolicy.acceptInboundBeforeExecution) {
+        this.ensureVisibleCommandTurn();
         this.markAcceptedMessage(incomingMessageId);
       }
 
@@ -3202,8 +2963,6 @@ export class ChatController {
       await this.clearWorkingReaction().catch(() => {});
       this.clearCurrentTurn();
       if (interruptingActiveTurn) {
-        this.pendingSubmittedDeliveryTargets = [];
-        this.coalescedDeliveryTargets = [];
       }
       this.clearActiveCommandTurnInput();
       this.stagedDelivery = null;
@@ -3211,32 +2970,54 @@ export class ChatController {
     }
   }
 
-  async beginExternalWorking() {
-    this.externalWorkingVisible = true;
-    if (this.currentTurn?.outboxTurnFence) {
-      // Backend Working is presentation state. A recovered inbox claim already
-      // owns this controller, so do not replace its durable reply identity with
-      // an anonymous display-only turn.
-      await this.presentVisibleProcessingTurn(
-        this.currentTurn,
-        this.turnAbortGeneration,
-      );
-      return;
-    }
-    await this.beginVisibleProcessingTurn({});
-  }
-
-  async endExternalWorking() {
-    this.externalWorkingVisible = false;
-    if (this.driver.hasVisibleChatWorkingTurn()) return;
-    await this.clearWorkingReaction().catch(() => {});
-    if (this.currentTurn?.outboxTurnFence) {
-      // Ending backend Working must not release a claimed inbox turn. Its
-      // matching terminal, supersede, abort, or claim-loss path owns cleanup.
-      return;
-    }
-    this.awaitingTurnSettle = false;
-    this.clearCurrentTurn();
+  async resumeTurn(input: {
+    incomingMessageId?: string;
+    replyToMessageId?: string;
+    receivedAt?: string;
+    requestTag?: string;
+    sessionFile?: string;
+    outboxTurnFence?: ChatOutboxTurnFence;
+  }) {
+    input.outboxTurnFence ||= getActiveChatOutboxTurnFence();
+    input.requestTag ||=
+      this.requestTagForInboundMessage(
+        input.incomingMessageId,
+        input.outboxTurnFence,
+      ) || undefined;
+    return await (async () => {
+      const requestTag = safeString(input.requestTag).trim();
+      const sessionFile = this.resolveSessionFileForUse(input.sessionFile);
+      const messageId = safeString(input.incomingMessageId).trim();
+      if (!requestTag) throw new Error("chat_turn_request_tag_missing");
+      if (!sessionFile || !sessionFileExists(sessionFile)) {
+        throw missingSessionFileError(sessionFile);
+      }
+      this.setCurrentTurn({ ...input, requestTag });
+      const recoveredTurn = this.currentTurn;
+      this.awaitingTurnSettle = true;
+      try {
+        await this.connect();
+        if (this.currentTurn) this.currentTurn.frontendReadyAt = Date.now();
+        return await this.driver.resumeTurn({
+          requestTag,
+          sessionFile,
+          chatDeliveryContext:
+            input.outboxTurnFence && messageId
+              ? {
+                  turnId: input.outboxTurnFence.turnId,
+                  chatKey: this.chatKey,
+                  messageId,
+                }
+              : undefined,
+        });
+      } catch (error) {
+        if (recoveredTurn && this.currentTurn === recoveredTurn) {
+          this.awaitingTurnSettle = false;
+          this.clearCurrentTurn();
+        }
+        throw error;
+      }
+    })();
   }
 
   async runTurn(
@@ -3271,97 +3052,13 @@ export class ChatController {
     this.rememberPromptChatType(input.promptMeta);
     this.lastActivityAt = Date.now();
     const deliverFinal = input.deliverFinal !== false;
-    if (this.hasActiveTurn() && !this.turnAbortRequested) {
-      const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
-      const wantedSessionFile =
-        this.resolveSessionFileForUse(rawWantedSessionFile);
-      if (
-        wantedSessionFile &&
-        !input.createSessionFileIfMissing &&
-        !sessionFileExists(wantedSessionFile)
-      ) {
-        throw missingSessionFileError(wantedSessionFile);
-      }
-      const restoreSessionFile =
-        wantedSessionFile || this.getRecoverableSessionFile();
-      const managedSessionLeaf =
-        !wantedSessionFile && !restoreSessionFile
-          ? safeString(input.managedSessionLeaf).trim() ||
-            this.managedSessionLeafForFreshChat()
-          : undefined;
-      const { text, images, frontendReady } = await this.prepareTurnPrompt(
-        input,
-        deliverFinal,
-      );
-      const submittedText = formatPromptForChatContext(text, input.promptMeta);
-      if (deliverFinal) {
-        this.rememberPendingSubmittedDeliveryTarget({
-          incomingMessageId: input.incomingMessageId,
-          replyToMessageId: input.replyToMessageId,
-          text,
-          submittedText,
-          requestTag: input.requestTag,
-          outboxTurnFence: input.outboxTurnFence,
-        });
-      }
-      try {
-        const canonicalRun = this.ensureCanonicalRun(
-          this.currentTurn?.outboxTurnFence,
-        );
-        const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
-          text: submittedText,
-          chatRunContext: canonicalRun,
-          images,
-          assumeConnected: frontendReady === true,
-          assumeSessionReady:
-            frontendReady === true &&
-            sameSessionFile(
-              this.agentDir,
-              this.driver.currentSessionFile(),
-              restoreSessionFile,
-            ),
-          sessionFile: wantedSessionFile,
-          restoreSessionFile,
-          managedSessionLeaf,
-          createSessionFileIfMissing: input.createSessionFileIfMissing,
-          sessionName: input.sessionName,
-          tools: input.tools,
-          excludeTools: input.excludeTools,
-          noTools: input.noTools,
-          disabledRinCapabilities: input.disabledRinCapabilities,
-          piStartupOptions: input.piStartupOptions,
-          resetModelOptionsFromSettings: true,
-          model: input.model,
-          thinkingLevel: input.thinkingLevel,
-          promptContext: input.promptMeta,
-          source: "chat-bridge",
-          requestTag:
-            safeString(input.requestTag).trim() ||
-            this.requestTagForInboundMessage(input.incomingMessageId),
-        });
-        this.assertRestoredTurnStayedOnSession(
-          restoreSessionFile,
-          result.sessionFile || this.driver.currentSessionFile(),
-        );
-        this.updateStoredSessionFile(
-          result.sessionFile,
-          this.driver.currentSessionFile(),
-        );
-        this.saveState();
-        return {
-          finalText: result.finalText,
-          result: result.result,
-          sessionId: this.currentSessionId() || undefined,
-          sessionFile: this.currentSessionFile(),
-          ...(deliverFinal ? { superseded: true } : {}),
-        };
-      } catch (error) {
-        this.removePendingSubmittedDeliveryTarget(input.incomingMessageId);
-        throw error;
-      }
-    }
-
-    return await this.runExclusiveTurn(async () => {
+    const currentTurnBeforeSubmission = this.currentTurn;
+    let preserveCurrentTurn = Boolean(
+      currentTurnBeforeSubmission &&
+      input.incomingMessageId &&
+      currentTurnBeforeSubmission.incomingMessageId !== input.incomingMessageId,
+    );
+    return await (async () => {
       const turnAbortGeneration = this.turnAbortGeneration;
       const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
       const wantedSessionFile =
@@ -3384,7 +3081,14 @@ export class ChatController {
         input,
         deliverFinal,
       );
-      let originalSuperseded = false;
+      const requestTag =
+        safeString(input.requestTag).trim() ||
+        this.requestTagForInboundMessage(
+          input.incomingMessageId,
+          input.outboxTurnFence,
+        );
+      if (this.currentTurn && !preserveCurrentTurn)
+        this.currentTurn.requestTag = requestTag || undefined;
       try {
         if (this.turnAbortGeneration !== turnAbortGeneration) {
           throw new Error("chat_turn_aborted");
@@ -3393,10 +3097,18 @@ export class ChatController {
           text,
           input.promptMeta,
         );
-        const canonicalRun = this.ensureCanonicalRun(input.outboxTurnFence);
+        const messageId = safeString(input.incomingMessageId).trim();
+        const chatDeliveryContext =
+          input.outboxTurnFence && messageId
+            ? {
+                turnId: input.outboxTurnFence.turnId,
+                chatKey: this.chatKey,
+                messageId,
+              }
+            : undefined;
         const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
           text: submittedText,
-          chatRunContext: canonicalRun,
+          chatDeliveryContext,
           images,
           assumeConnected: frontendReady === true,
           assumeSessionReady:
@@ -3421,9 +3133,7 @@ export class ChatController {
           thinkingLevel: input.thinkingLevel,
           promptContext: input.promptMeta,
           source: "chat-bridge",
-          requestTag:
-            safeString(input.requestTag).trim() ||
-            this.requestTagForInboundMessage(input.incomingMessageId),
+          requestTag,
         });
         this.assertRestoredTurnStayedOnSession(
           restoreSessionFile,
@@ -3434,215 +3144,113 @@ export class ChatController {
           this.driver.currentSessionFile(),
         );
         this.saveState();
-        if (result.superseded) {
-          return await this.finishSupersededRecoveredTurn(input, result);
+        if (result.outcome === "terminalOwner" && preserveCurrentTurn) {
+          this.setCurrentTurn(input);
+          preserveCurrentTurn = false;
         }
-        if (deliverFinal && this.currentTurn) {
-          const deliveryTarget = this.currentDeliveryTarget(input);
-          const supersedeTurnFences = this.coalescedSupersessionFences(
-            input.incomingMessageId,
-            deliveryTarget.incomingMessageId,
-            input.outboxTurnFence,
-          );
-          const resultParts = this.assistantDeliveryParts(
-            result.finalText,
-            result.result,
-          );
-          if (safeString(result.finalText).trim() || resultParts.length) {
-            await this.deliverAssistantReply({
-              text: result.finalText,
-              parts: resultParts.length ? resultParts : undefined,
-              replyToMessageId: deliveryTarget.replyToMessageId,
-              sessionFile: result.sessionFile,
-              incomingMessageId: deliveryTarget.incomingMessageId,
-              outboxTurnFence: deliveryTarget.outboxTurnFence,
-              idempotencyKey: input.deliveryIdempotencyKey,
-              supersedeTurnFences,
-              clearProcessing: true,
-            });
-          } else {
-            await this.settleEmptyAssistantCompletion({
-              incomingMessageId: deliveryTarget.incomingMessageId,
-              sessionFile: result.sessionFile,
-              outboxTurnFence: deliveryTarget.outboxTurnFence,
-              supersedeTurnFences,
-            });
+        if (this.currentTurn && !preserveCurrentTurn) {
+          this.currentTurn.requestTag = result.requestTag || requestTag;
+        }
+        if (deliverFinal && this.currentTurn && !result.superseded) {
+          if (
+            this.currentTurn.outboxTurnFence &&
+            (!result.chatDeliveryContext || !result.terminalRecord)
+          ) {
+            throw new Error("chat_terminal_record_missing");
           }
-          originalSuperseded = supersedeTurnFences.length > 0;
-          this.awaitingTurnSettle = false;
-          await new Promise((resolve) => setImmediate(resolve));
-          await this.flushPendingPassiveNotices(input.quietMode);
+          await this.settleProjectedTurnComplete({
+            finalText: result.finalText,
+            deliveryIdempotencyKey: input.deliveryIdempotencyKey,
+            result: result.result,
+            sessionFile: result.sessionFile,
+            requestTag: result.requestTag || requestTag,
+            chatDeliveryContext: result.chatDeliveryContext,
+            terminalRecord: result.terminalRecord,
+          });
         }
-        this.clearCurrentTurn();
+        await this.flushPendingPassiveNotices(input.quietMode);
         return {
           finalText: result.finalText,
           result: result.result,
           sessionId: this.currentSessionId() || undefined,
           sessionFile: this.currentSessionFile(),
-          ...(originalSuperseded ? { superseded: true } : {}),
+          superseded: result.superseded,
         };
       } catch (error) {
-        const errorMessage = safeString(
-          (error as any)?.message || error,
-        ).trim();
-        if (errorMessage === "chat_turn_aborted") {
-          const ownsCurrentTurn = this.hasCurrentTurnMatching(
-            input.incomingMessageId,
-          );
-          const abortedSession = normalizeSessionRef(error);
-          const intentionallyAborted =
-            this.consumeIntentionalTurnAbort(turnAbortGeneration);
-          await this.clearWorkingReactionFor(input.incomingMessageId);
-          this.clearCurrentTurnFor(input.incomingMessageId);
-          if (ownsCurrentTurn) {
-            this.awaitingTurnSettle = false;
-            this.turnAbortRequested = false;
-            this.pendingSubmittedDeliveryTargets = [];
-            this.coalescedDeliveryTargets = [];
-            this.stagedDelivery = null;
-          }
-          this.saveState();
-          if (!intentionallyAborted) {
-            throw error;
-          }
-          if (input.outboxTurnFence) {
-            return await this.finishSupersededRecoveredTurn(
-              input,
-              abortedSession,
-            );
-          }
-          this.markProcessedMessage(input.incomingMessageId, false);
-          return {
-            aborted: true,
-            sessionId:
-              abortedSession.sessionId || this.currentSessionId() || undefined,
-            sessionFile:
-              abortedSession.sessionFile || this.currentSessionFile(),
-          };
-        }
-        if ((error as any)?.rinTurnTerminal) {
-          throw error;
-        }
-        if (isRinFrontendTurnCancelledError(error)) {
-          throw error;
-        }
-        const errorSession = normalizeSessionRef(error as any);
-        if (errorMessage !== "chat_restored_session_mismatch") {
-          const errorSessionFile = this.updateStoredSessionFile(
-            errorSession.sessionFile,
-            this.driver.currentSessionFile(),
-          );
-          if (errorSession.sessionFile && errorMessage) {
-            const deliveryTarget = this.currentDeliveryTarget(input);
-            const supersedeTurnFences = this.coalescedSupersessionFences(
-              input.incomingMessageId,
-              deliveryTarget.incomingMessageId,
-              input.outboxTurnFence,
-            );
-            await this.deliverAssistantReply({
-              text: errorMessage,
-              replyToMessageId: deliveryTarget.replyToMessageId,
-              incomingMessageId: deliveryTarget.incomingMessageId,
-              outboxTurnFence: deliveryTarget.outboxTurnFence,
-              sessionFile: errorSessionFile || this.currentSessionFile(),
-              idempotencyKey: input.deliveryIdempotencyKey,
-              supersedeTurnFences,
-              clearProcessing: true,
-              deliveryKind: "error",
-            });
-            originalSuperseded = supersedeTurnFences.length > 0;
-            this.awaitingTurnSettle = false;
-          }
-        }
-        if (originalSuperseded) {
-          return {
-            superseded: true,
-            sessionId: this.currentSessionId() || undefined,
-            sessionFile: this.currentSessionFile(),
-          };
-        }
-        const ownsCurrentTurn = this.hasCurrentTurnMatching(
-          input.incomingMessageId,
-        );
-        await this.clearWorkingReactionFor(input.incomingMessageId);
-        this.clearCurrentTurnFor(input.incomingMessageId);
-        if (ownsCurrentTurn) {
-          this.awaitingTurnSettle = false;
-          this.turnAbortRequested = false;
-          this.pendingSubmittedDeliveryTargets = [];
-          this.coalescedDeliveryTargets = [];
-          this.stagedDelivery = null;
-        }
-        this.saveState();
+        if ((error as any)?.rinTurnTerminal) throw error;
+        if (isRinFrontendTurnCancelledError(error)) throw error;
         throw error;
       } finally {
-        if (this.hasCurrentTurnMatching(input.incomingMessageId)) {
-          this.awaitingTurnSettle = false;
-          this.turnAbortRequested = false;
+        await this.clearWorkingReactionFor(input.incomingMessageId);
+        if (!preserveCurrentTurn) {
+          this.clearCurrentTurnFor(input.incomingMessageId);
         }
+        this.awaitingTurnSettle = false;
+        this.turnAbortRequested = false;
+        this.stagedDelivery = null;
+        this.saveState();
       }
-    });
+    })();
   }
 
   private async settleProjectedTurnComplete(event: {
     finalText?: string;
+    deliveryIdempotencyKey?: string;
     result?: unknown;
     sessionFile?: string;
-    chatRunContext?: CanonicalChatRunFence;
-    terminalWal?: { payloadHash: string; stagedAt?: string };
+    requestTag?: string;
+    chatDeliveryContext?: RinChatDeliveryContext;
+    terminalRecord?: {
+      terminalId: string;
+      state: "complete" | "error" | "interrupted";
+      terminalAt?: string;
+    };
   }) {
     if (!this.currentTurn) return;
+    if (event.chatDeliveryContext) {
+      event = this.authoritativeTerminalEvent(
+        event,
+        "complete",
+      ) as typeof event;
+    }
     const deliveryTarget = this.currentDeliveryTarget(this.currentTurn);
-    const supersedeTurnFences = this.coalescedSupersessionFences(
-      undefined,
-      deliveryTarget.incomingMessageId,
-      deliveryTarget.outboxTurnFence,
-    );
-    const resultParts = this.assistantDeliveryParts(
-      event.finalText,
-      event.result,
-    );
+    const resultParts = assistantDeliveryParts(event.finalText, event.result);
     if (safeString(event.finalText).trim() || resultParts.length) {
       await this.deliverAssistantReply({
         text: event.finalText,
         parts: resultParts.length ? resultParts : undefined,
+        idempotencyKey: event.deliveryIdempotencyKey,
         replyToMessageId: deliveryTarget.replyToMessageId,
         incomingMessageId: deliveryTarget.incomingMessageId,
         outboxTurnFence: deliveryTarget.outboxTurnFence,
         sessionFile: event.sessionFile || this.currentSessionFile(),
-        supersedeTurnFences,
-        canonicalRunFence: event.chatRunContext,
-        terminalWalPayloadHash: event.terminalWal?.payloadHash,
-        terminalWalStagedAt: event.terminalWal?.stagedAt,
+        terminalTurn: event.chatDeliveryContext,
+        terminalRequestTag: this.currentTurn?.requestTag,
+        terminalRecordId: event.terminalRecord?.terminalId,
         clearProcessing: true,
       });
-    } else if (event.chatRunContext) {
+    } else if (event.chatDeliveryContext) {
       await this.deliverAssistantReply({
-        text: "rin error: empty assistant completion",
+        text: "Rin completed this turn without a text response.",
         replyToMessageId: deliveryTarget.replyToMessageId,
         incomingMessageId: deliveryTarget.incomingMessageId,
         outboxTurnFence: deliveryTarget.outboxTurnFence,
         sessionFile: event.sessionFile || this.currentSessionFile(),
-        supersedeTurnFences,
-        canonicalRunFence: event.chatRunContext,
-        terminalWalPayloadHash: event.terminalWal?.payloadHash,
-        terminalWalStagedAt: event.terminalWal?.stagedAt,
+        terminalTurn: event.chatDeliveryContext,
+        terminalRequestTag: this.currentTurn?.requestTag,
+        terminalRecordId: event.terminalRecord?.terminalId,
         clearProcessing: true,
-        deliveryKind: "error",
+        deliveryKind: "final",
       });
     } else {
       await this.settleEmptyAssistantCompletion({
         incomingMessageId: deliveryTarget.incomingMessageId,
         outboxTurnFence: deliveryTarget.outboxTurnFence,
         sessionFile: event.sessionFile || this.currentSessionFile(),
-        supersedeTurnFences,
       });
     }
     this.awaitingTurnSettle = false;
-    if (event.chatRunContext) this.activeCanonicalRun = null;
     this.clearCurrentTurn();
-    this.pendingSubmittedDeliveryTargets = [];
-    this.coalescedDeliveryTargets = [];
     this.saveState();
     await this.flushPendingPassiveNotices(false);
   }
@@ -3650,36 +3258,35 @@ export class ChatController {
   private async settleProjectedTurnError(event: {
     error?: string;
     sessionFile?: string;
-    chatRunContext?: CanonicalChatRunFence;
-    terminalWal?: { payloadHash: string; stagedAt?: string };
+    requestTag?: string;
+    chatDeliveryContext?: RinChatDeliveryContext;
+    terminalRecord?: {
+      terminalId: string;
+      state: "complete" | "error" | "interrupted";
+      terminalAt?: string;
+    };
   }) {
     if (!this.currentTurn) return;
+    if (event.chatDeliveryContext) {
+      event = this.authoritativeTerminalEvent(event, "error") as typeof event;
+    }
     const errorMessage = safeString(event.error).trim() || "rpc_turn_failed";
     if (errorMessage === "chat_turn_aborted") return;
     const deliveryTarget = this.currentDeliveryTarget(this.currentTurn);
-    const supersedeTurnFences = this.coalescedSupersessionFences(
-      undefined,
-      deliveryTarget.incomingMessageId,
-      deliveryTarget.outboxTurnFence,
-    );
     await this.deliverAssistantReply({
       text: errorMessage,
       replyToMessageId: deliveryTarget.replyToMessageId,
       incomingMessageId: deliveryTarget.incomingMessageId,
       outboxTurnFence: deliveryTarget.outboxTurnFence,
       sessionFile: event.sessionFile || this.currentSessionFile(),
-      supersedeTurnFences,
-      canonicalRunFence: event.chatRunContext,
-      terminalWalPayloadHash: event.terminalWal?.payloadHash,
-      terminalWalStagedAt: event.terminalWal?.stagedAt,
+      terminalTurn: event.chatDeliveryContext,
+      terminalRequestTag: this.currentTurn?.requestTag,
+      terminalRecordId: event.terminalRecord?.terminalId,
       clearProcessing: true,
       deliveryKind: "error",
     });
     this.awaitingTurnSettle = false;
-    if (event.chatRunContext) this.activeCanonicalRun = null;
     this.clearCurrentTurn();
-    this.pendingSubmittedDeliveryTargets = [];
-    this.coalescedDeliveryTargets = [];
     this.saveState();
     await this.flushPendingPassiveNotices(false);
   }
@@ -3688,10 +3295,6 @@ export class ChatController {
     await this.pollTyping().catch(() => {});
     await this.pollCompactionTyping().catch(() => {});
     await this.sleepIfIdle().catch(() => false);
-  }
-
-  async recoverIfNeeded() {
-    return;
   }
 
   async handleClientEvent(event: any) {
@@ -3704,17 +3307,19 @@ export class ChatController {
 
   private async handleFrontendEvent(event: any) {
     if (!event || typeof event !== "object") return;
+    const activeRequestTag = safeString(this.currentTurn?.requestTag).trim();
+    const eventRequestTag = safeString(event.requestTag).trim();
+    if (
+      activeRequestTag &&
+      eventRequestTag &&
+      activeRequestTag !== eventRequestTag
+    ) {
+      return;
+    }
     switch (event.type) {
       case "frontend_status":
         return;
-      case "working_visible": {
-        this.externalWorkingVisible = Boolean(event.visible);
-        if (event.visible) {
-          this.ensureVisibleCommandTurn();
-          if (!this.currentTurn?.outboxTurnFence) {
-            this.markAcceptedMessage(this.currentIncomingMessageId());
-          }
-        }
+      case "working_state": {
         void this.pollTyping().catch(() => false);
         return;
       }
@@ -3776,10 +3381,6 @@ export class ChatController {
           (event.requestTag
             ? await this.clearWaitingReaction(event.requestTag)
             : true);
-        await this.activatePendingSubmittedDeliveryTarget(
-          event.text,
-          event.requestTag,
-        );
         this.backendAcceptedIncomingMessageId = this.currentIncomingMessageId();
         this.markAcceptedMessage(this.backendAcceptedIncomingMessageId);
         if (waitingReactionCleared) {
@@ -3830,14 +3431,19 @@ export class ChatController {
           this.startedReactionRequestTags.delete(event.requestTag);
           this.deferredWorkingReactionRequestTags.delete(event.requestTag);
         }
-        if (event.chatRunContext) {
-          this.recoverCanonicalRunEvent(
-            event.chatRunContext,
+        if (
+          this.currentTurn?.outboxTurnFence &&
+          (!event.chatDeliveryContext || !event.terminalRecord)
+        ) {
+          throw new Error("chat_terminal_record_missing");
+        }
+        if (event.chatDeliveryContext) {
+          this.recoverTerminalDeliveryEvent(
+            event.chatDeliveryContext,
             event.requestTag,
-            event.terminalWal?.stagedAt,
           );
-          if (!this.acceptsCanonicalRunEvent(event.chatRunContext)) {
-            throw new Error("chat_run_terminal_fence_mismatch");
+          if (!this.acceptsTerminalDeliveryEvent(event.chatDeliveryContext)) {
+            throw new Error("chat_terminal_delivery_mismatch");
           }
           await this.settleProjectedTurnComplete(event);
         } else if (this.acceptsScopedTurnEvent(event.requestTag)) {
@@ -3850,14 +3456,19 @@ export class ChatController {
           this.startedReactionRequestTags.delete(event.requestTag);
           this.deferredWorkingReactionRequestTags.delete(event.requestTag);
         }
-        if (event.chatRunContext) {
-          this.recoverCanonicalRunEvent(
-            event.chatRunContext,
+        if (
+          this.currentTurn?.outboxTurnFence &&
+          (!event.chatDeliveryContext || !event.terminalRecord)
+        ) {
+          throw new Error("chat_terminal_record_missing");
+        }
+        if (event.chatDeliveryContext) {
+          this.recoverTerminalDeliveryEvent(
+            event.chatDeliveryContext,
             event.requestTag,
-            event.terminalWal?.stagedAt,
           );
-          if (!this.acceptsCanonicalRunEvent(event.chatRunContext)) {
-            throw new Error("chat_run_terminal_fence_mismatch");
+          if (!this.acceptsTerminalDeliveryEvent(event.chatDeliveryContext)) {
+            throw new Error("chat_terminal_delivery_mismatch");
           }
           await this.settleProjectedTurnError(event);
         } else if (this.acceptsScopedTurnEvent(event.requestTag)) {

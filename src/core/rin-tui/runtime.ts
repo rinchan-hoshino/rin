@@ -29,7 +29,6 @@ import { executeRinFrontendInterruptIntent } from "../rin-frontend-sdk/frontend-
 import { waitForFrontendInputSubmissionReady } from "../rin-frontend-sdk/input-submission.js";
 import type { RpcFrontendClient } from "../rin-frontend-sdk/frontend-surface.js";
 import { createModelRegistry } from "../rin-frontend-sdk/model-registry.js";
-import { replayPendingTerminalTurnEvent } from "../rin-frontend-sdk/pending-terminal-turn.js";
 import {
   cycleRpcModel,
   cycleRpcThinkingLevel,
@@ -60,7 +59,7 @@ import { submitNativeFrontendPromptTurn } from "../rin-frontend-sdk/turn-driver.
 import { handleRpcSessionEvent } from "./events.js";
 import type { TuiResourceOptions } from "./cli-options.js";
 type PendingRpcOperation = {
-  mode: "prompt" | "steer" | "follow_up";
+  mode: "prompt";
   message: string;
   images?: any[];
   streamingBehavior?: "steer" | "followUp";
@@ -213,17 +212,6 @@ function asRawRuntimeError(error: unknown, fallback = "unknown error") {
   return new Error(rawErrorMessage(error) || fallback);
 }
 
-async function replayPendingTerminalTurnEventForTarget(target: any) {
-  return await replayPendingTerminalTurnEvent(
-    ({ type, ...payload }) => target.call(type, payload),
-    {
-      sessionFile:
-        target.sessionFile || target.sessionManager?.getSessionFile?.(),
-      sessionId: target.sessionId || target.sessionManager?.getSessionId?.(),
-    },
-  );
-}
-
 async function completeRpcRecovery(target: any) {
   const canApplyLightweightState =
     typeof target.call === "function" &&
@@ -238,23 +226,8 @@ async function completeRpcRecovery(target: any) {
     target.emitSessionResynced();
   }
   target.emitFrontendStatus(true);
-  await replayPendingTerminalTurnEventForTarget(target);
-  const timedOutPrompts = [...(target.timedOutPromptOps || [])];
-  target.timedOutPromptOps = [];
-  const queued = [...target.queuedOfflineOps];
-  if (
-    timedOutPrompts.length &&
-    !target.remoteTurnRunning &&
-    !target.isCompacting
-  ) {
-    queued.unshift(...timedOutPrompts);
-  }
-  target.queuedOfflineOps = [];
   if (typeof target.emitQueueUpdate === "function") {
     target.emitQueueUpdate();
-  }
-  for (const operation of queued) {
-    await target.sendOrQueue(operation);
   }
   if (canApplyLightweightState && typeof target.refreshState === "function") {
     void target
@@ -380,13 +353,12 @@ export class RpcInteractiveSession {
   private reconnecting = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectPromise: Promise<void> | null = null;
-  private queuedOfflineOps: PendingRpcOperation[] = [];
-  private timedOutPromptOps: PendingRpcOperation[] = [];
   private activeTurn: PendingRpcOperation | null = null;
   private rpcConnected = false;
   private remoteTurnRunning = false;
   public agentStreaming = false;
-  public backendWorkingVisible = false;
+  public backendWorking = false;
+  private workingVisiblePreference = true;
   private recoveringTurnPending = false;
   private disposed = false;
   private pendingRefreshFlags: RefreshFlags = {};
@@ -558,13 +530,6 @@ export class RpcInteractiveSession {
       expandPromptTemplates?: boolean;
     },
   ) {
-    if (options?.streamingBehavior === "followUp") {
-      await this.followUp(message, options.images, {
-        source: options.source,
-        requestTag: options.requestTag,
-      });
-      return;
-    }
     const expandPromptTemplates = options?.expandPromptTemplates ?? true;
     if (
       expandPromptTemplates &&
@@ -583,28 +548,17 @@ export class RpcInteractiveSession {
     });
   }
 
-  async resumeInterruptedTurn(options?: {
-    source?: string;
-    requestTag?: string;
-  }) {
-    await this.ensureRemoteSession({ persist: true });
-    await this.call("resume_interrupted_turn", {
-      source: options?.source,
-      requestTag: this.ensureRequestTag(options?.requestTag),
-    });
-  }
-
   async steer(
     message: string,
     images?: any[],
     options?: { source?: string; requestTag?: string },
   ) {
-    await this.sendOrQueue({
-      mode: "steer",
-      message,
+    await this.prompt(message, {
       images,
       source: options?.source,
-      requestTag: this.ensureRequestTag(options?.requestTag),
+      requestTag: options?.requestTag,
+      streamingBehavior: "steer",
+      expandPromptTemplates: false,
     });
   }
 
@@ -613,12 +567,12 @@ export class RpcInteractiveSession {
     images?: any[],
     options?: { source?: string; requestTag?: string },
   ) {
-    await this.sendOrQueue({
-      mode: "follow_up",
-      message,
+    await this.prompt(message, {
       images,
       source: options?.source,
-      requestTag: this.ensureRequestTag(options?.requestTag),
+      requestTag: options?.requestTag,
+      streamingBehavior: "followUp",
+      expandPromptTemplates: false,
     });
   }
 
@@ -626,7 +580,6 @@ export class RpcInteractiveSession {
     const queued = this.visibleQueuedMessages();
     this.steeringMessages = [];
     this.followUpMessages = [];
-    this.queuedOfflineOps = [];
     this.syncPendingCount();
     this.emitQueueUpdate();
     if (
@@ -1208,7 +1161,7 @@ export class RpcInteractiveSession {
       ...this.extensionBindings,
       ...bindings,
     };
-    this.setBackendWorkingVisible(this.backendWorkingVisible);
+    this.syncWorkingPresentation();
     await Promise.all([
       this.refreshDaemonCommandCatalog().catch(() => {}),
       this.refreshResourceDiagnostics().catch(() => {}),
@@ -1270,6 +1223,9 @@ export class RpcInteractiveSession {
             );
           } catch {}
         });
+      if (typeof payload.working === "boolean") {
+        this.setBackendWorking(payload.working);
+      }
       return;
     }
     void handleRpcSessionEvent(
@@ -1357,7 +1313,7 @@ export class RpcInteractiveSession {
         );
         return;
       case "setWorkingVisible":
-        this.setBackendWorkingVisible(Boolean(payload.visible));
+        this.setWorkingVisiblePreference(Boolean(payload.visible));
         return;
       case "setWorkingIndicator":
         ui?.setWorkingIndicator?.(payload.options);
@@ -1410,7 +1366,7 @@ export class RpcInteractiveSession {
     if (!this.rpcConnected || this.recoveryPending) return "connecting";
     if (this.isCompacting) return "compacting";
     if (this.retryAttempt > 0) return "retrying";
-    if (this.backendWorkingVisible && this.agentStreaming) return "working";
+    if (this.backendWorking) return "working";
     if (this.activeTurn) return "sending";
     return "idle";
   }
@@ -1474,19 +1430,24 @@ export class RpcInteractiveSession {
 
   setAgentStreaming(streaming: boolean) {
     this.agentStreaming = streaming;
-    if (streaming) {
-      this.extensionBindings.uiContext?.setWorkingVisible?.(
-        this.backendWorkingVisible,
-      );
-    }
     this.syncStreamingState();
   }
 
-  setBackendWorkingVisible(visible: boolean) {
-    this.backendWorkingVisible = visible;
-    if (!visible || this.agentStreaming) {
-      this.extensionBindings.uiContext?.setWorkingVisible?.(visible);
-    }
+  setBackendWorking(working: boolean) {
+    this.backendWorking = working;
+    this.syncWorkingPresentation();
+    this.emitFrontendStatus();
+  }
+
+  private setWorkingVisiblePreference(visible: boolean) {
+    this.workingVisiblePreference = visible;
+    this.syncWorkingPresentation();
+  }
+
+  private syncWorkingPresentation() {
+    this.extensionBindings.uiContext?.setWorkingVisible?.(
+      this.backendWorking && this.workingVisiblePreference,
+    );
   }
 
   private syncStreamingState() {
@@ -1540,24 +1501,13 @@ export class RpcInteractiveSession {
     return await this.waitForDaemonPromise;
   }
 
-  private queueOfflineOperation(operation: PendingRpcOperation) {
-    this.queuedOfflineOps.push(operation);
-    this.syncPendingCount();
-    this.emitQueueUpdate();
-    if (!this.client.isConnected() || !this.rpcConnected) {
-      this.startReconnectLoop();
-    }
-    this.emitFrontendStatus(true);
-  }
-
   private async sendOrQueue(operation: PendingRpcOperation) {
     if (
       !this.client.isConnected() ||
       !this.rpcConnected ||
       this.recoveryPending
     ) {
-      this.queueOfflineOperation(operation);
-      return;
+      throw new Error("rin_frontend_disconnected");
     }
 
     if (this.clearQueuePromise) await this.clearQueuePromise;
@@ -1617,13 +1567,11 @@ export class RpcInteractiveSession {
           this.activeTurn = null;
           this.syncStreamingState();
         }
-        this.queueOfflineOperation(operation);
-        return;
+        throw asRawRuntimeError(error);
       }
       if (operation.mode === "prompt" && isPromptSubmissionTimeout(message)) {
-        this.timedOutPromptOps.push(operation);
         this.handleSessionUnavailable();
-        return;
+        throw asRawRuntimeError(error);
       }
       if (tracksTurn) {
         this.activeTurn = null;
@@ -1998,8 +1946,6 @@ export class RpcInteractiveSession {
   private syncPendingCount() {
     const visible = this.visibleQueuedMessages();
     this.pendingMessageCount =
-      visible.steering.length +
-      visible.followUp.length +
-      this.queuedOfflineOps.length;
+      visible.steering.length + visible.followUp.length;
   }
 }

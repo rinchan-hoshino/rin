@@ -155,10 +155,6 @@ test("runtime error formatter maps known internal markers to actionable messages
     "Choose either --session or --managed-session, not both.",
   );
   assert.equal(
-    formatRuntimeErrorForUser("rin_turn_result_recovery_timeout"),
-    "Rin could not recover the remote turn result before the timeout.",
-  );
-  assert.equal(
     formatRuntimeErrorForUser("rin_turn_settled_without_terminal"),
     "Rin could not determine the completed turn result.",
   );

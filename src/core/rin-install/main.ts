@@ -34,7 +34,12 @@ import {
   promptInstallTarget,
 } from "./interactive.js";
 import { createInstallerI18n } from "./i18n.js";
-import { detectCurrentUser, repoRootFromHere, runCommand } from "./common.js";
+import {
+  detectCurrentUser,
+  detectExecutorUser,
+  repoRootFromHere,
+  runCommand,
+} from "./common.js";
 import { finalizeCoreUpdate, finalizeInstallPlan } from "./finalize.js";
 import {
   releaseInfoFromFile,
@@ -218,7 +223,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
   }
 
   if (cli.update) {
-    const updateCurrentUser = detectCurrentUser();
+    const updateCurrentUser = detectExecutorUser();
     const updateTargetUser = cli.updateTargetUser || updateCurrentUser;
     const i18n = createInstallerI18n();
     const localizedConfirm: typeof confirm = (options) =>

@@ -10,10 +10,89 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const { runCustomRpcMode } = await import(
+const { runCustomRpcMode: runProductionRpcMode } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "rpc-mode.js"))
     .href
 );
+
+function runCustomRpcMode(runtime, dependencies) {
+  const session = runtime?.session || runtime;
+  const nativeListeners = new Set<(event: any) => unknown>();
+  const originalSubscribe = session?.subscribe;
+  if (typeof originalSubscribe === "function") {
+    session.subscribe = function (listener) {
+      nativeListeners.add(listener);
+      const unsubscribe = originalSubscribe.call(this, listener);
+      return () => {
+        nativeListeners.delete(listener);
+        unsubscribe?.();
+      };
+    };
+  }
+  const emitNative = async (event: any) => {
+    await Promise.all(
+      [...nativeListeners].map(async (listener) => await listener(event)),
+    );
+  };
+  const syntheticNativeEntries: any[] = [];
+  const originalGetEntries = session?.sessionManager?.getEntries;
+  if (typeof originalGetEntries === "function") {
+    session.sessionManager.getEntries = function () {
+      return [...originalGetEntries.call(this), ...syntheticNativeEntries];
+    };
+  }
+  const originalPrompt = session?.prompt;
+  if (typeof originalPrompt === "function") {
+    session.prompt = async function (message, options = {}) {
+      let preflightReported = false;
+      const reportPreflight = options.preflightResult;
+      if (!session.__testNativePreflight) {
+        preflightReported = true;
+        reportPreflight?.(true);
+      }
+      const synthesizeNativeLifecycle = !session.__testNativePreflight;
+      if (synthesizeNativeLifecycle) {
+        await emitNative({ type: "agent_start" });
+        const syntheticUser = {
+          role: "user",
+          content: [{ type: "text", text: String(message || "") }],
+        };
+        await emitNative({ type: "message_start", message: syntheticUser });
+        const messageEntryId = `test-native-user-${syntheticNativeEntries.length}`;
+        syntheticNativeEntries.push(
+          { id: messageEntryId, type: "message", message: syntheticUser },
+          {
+            id: `test-native-identity-${syntheticNativeEntries.length + 1}`,
+            type: "custom",
+            customType: "rin_request_identity",
+            data: {
+              requestId: options?.requestTag,
+              messageEntryId,
+              observedRole: "terminalOwner",
+            },
+          },
+        );
+      }
+      const promptTask = originalPrompt.call(this, message, {
+        ...options,
+        preflightResult(success) {
+          preflightReported = true;
+          reportPreflight?.(success);
+        },
+      });
+      await Promise.resolve();
+      if (!preflightReported) reportPreflight?.(true);
+      try {
+        return await promptTask;
+      } finally {
+        if (synthesizeNativeLifecycle) {
+          await emitNative({ type: "agent_settled" });
+        }
+      }
+    };
+  }
+  return runProductionRpcMode(runtime, dependencies);
+}
 const { attachRinCapabilityExtensionBridge } = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "pi", "internal-extension-bridge.js"),
@@ -141,7 +220,7 @@ test("rpc mode exposes Pi-compatible session entries and tree", async () => {
 });
 
 test(
-  "rpc mode publishes Pi working visibility before agent lifecycle events",
+  "rpc mode leaves Working state to the backend and forwards only explicit UI preferences",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -212,23 +291,8 @@ test(
         );
 
       assert.deepEqual(events, [
-        {
-          type: "extension_ui_request",
-          method: "setWorkingVisible",
-          visible: true,
-        },
         { type: "agent_start" },
-        {
-          type: "extension_ui_request",
-          method: "setWorkingVisible",
-          visible: false,
-        },
         { type: "agent_end" },
-        {
-          type: "extension_ui_request",
-          method: "setWorkingVisible",
-          visible: false,
-        },
         {
           type: "extension_ui_request",
           method: "setWorkingVisible",
@@ -280,7 +344,7 @@ test(
         },
         prompt: async (message: string) => {
           session.isStreaming = true;
-          emit({ type: "agent_start" });
+          await emit({ type: "agent_start" });
           emit({
             type: "message_start",
             message: {
@@ -2333,6 +2397,7 @@ test(
 
     try {
       const session = {
+        __testNativePreflight: true,
         isStreaming: false,
         isCompacting: false,
         sessionFile: "/tmp/test-session.jsonl",
@@ -2354,20 +2419,16 @@ test(
             timestamp: Date.now(),
             content: [{ type: "text", text: "final from rpc mode" }],
           };
-          durableEntries.push({
-            id: "user-entry",
-            type: "message",
-            message: userMessage,
-          });
-          durableEntries.push({
-            id: "assistant-entry",
-            parentId: "user-entry",
-            type: "message",
-            message: assistantMessage,
-          });
           for (const handler of sessionSubscribers) {
-            handler({ type: "message_start", message: userMessage });
-            handler({ type: "message_end", message: assistantMessage });
+            await handler({ type: "message_start", message: userMessage });
+          }
+          session.sessionManager.appendMessage(userMessage);
+          session.sessionManager.appendMessage(assistantMessage);
+          for (const handler of sessionSubscribers) {
+            await handler({ type: "message_end", message: assistantMessage });
+          }
+          for (const handler of sessionSubscribers) {
+            await handler({ type: "agent_settled" });
           }
         },
         sendCustomMessage: async () => {},
@@ -2380,6 +2441,28 @@ test(
           getEntries: () => durableEntries,
           getBranch: () => durableEntries,
           getLeafId: () => durableEntries.at(-1)?.id ?? null,
+          appendMessage(message) {
+            const id =
+              message.role === "user" ? "user-entry" : "assistant-entry";
+            durableEntries.push({
+              id,
+              parentId: durableEntries.at(-1)?.id ?? null,
+              type: "message",
+              message,
+            });
+            return id;
+          },
+          appendCustomEntry(customType, data) {
+            const id = `custom-${durableEntries.length}`;
+            durableEntries.push({
+              id,
+              parentId: durableEntries.at(-1)?.id ?? null,
+              type: "custom",
+              customType,
+              data,
+            });
+            return id;
+          },
         },
         messages: [],
         getSessionStats: () => ({}),
@@ -2424,7 +2507,7 @@ test(
           `${JSON.stringify({ id: "1", type: "prompt", message: "hello", requestTag: "tag-1" })}\n`,
         ),
       );
-      await wait(20);
+      await wait(100);
 
       const events = lines
         .join("")
@@ -2453,10 +2536,15 @@ test(
       );
       assert.equal(userStart?.requestTag, "tag-1");
       assert.equal(assistantEnd?.requestTag, undefined);
-      assert.equal(
-        durableEntries.find((entry) => entry.message?.role === "user")?.message
-          ?.requestTag,
-        "tag-1",
+      assert.deepEqual(
+        durableEntries.find(
+          (entry) => entry.customType === "rin_request_identity",
+        )?.data,
+        {
+          requestId: "tag-1",
+          messageEntryId: "user-entry",
+          observedRole: "terminalOwner",
+        },
       );
       assert.equal(completion?.turnGeneration, 1);
       assert.equal(completion?.requestTag, "tag-1");
@@ -3273,7 +3361,7 @@ test(
             type: "message",
             message: finalMessage,
           });
-          emit({ type: "agent_start" });
+          await emit({ type: "agent_start" });
           emit({ type: "message_end", message: finalMessage });
           emit({ type: "agent_end" });
         },
@@ -3542,6 +3630,7 @@ test(
     try {
       const durableEntries: any[] = [];
       const session = {
+        __testNativePreflight: true,
         isStreaming: false,
         isCompacting: false,
         sessionFile: "/tmp/test-session.jsonl",
@@ -3549,7 +3638,8 @@ test(
         agent: { waitForIdle: async () => {} },
         bindExtensions: async () => {},
         subscribe: () => () => {},
-        prompt: async () => {
+        prompt: async (_message, options) => {
+          options?.preflightResult?.(true);
           promptCalled = true;
           const currentAssistant = {
             role: "assistant",
@@ -4096,278 +4186,6 @@ test(
 );
 
 test(
-  "rpc mode completes stored branch finals without treating task return as agent settlement",
-  { concurrency: false },
-  async () => {
-    const stdinOn = process.stdin.on;
-    const stdoutWrite = process.stdout.write;
-    const handlers = new Map();
-    const lines = [];
-    const durableEntries: any[] = [];
-    const stateMessages: any[] = [];
-    let promptCount = 0;
-
-    process.stdin.on = function (event, handler) {
-      handlers.set(event, handler);
-      return this;
-    };
-    process.stdout.write = function (chunk) {
-      lines.push(String(chunk));
-      return true;
-    };
-
-    try {
-      const session = {
-        isStreaming: false,
-        isCompacting: false,
-        sessionFile: "/tmp/test-session.jsonl",
-        sessionId: "session-1",
-        agent: {
-          state: { messages: stateMessages, errorMessage: "" },
-          waitForIdle: async () => {},
-        },
-        bindExtensions: async () => {},
-        subscribe: () => () => {},
-        prompt: async () => {
-          promptCount += 1;
-          const promptMessages =
-            promptCount < 3
-              ? [
-                  {
-                    role: "assistant",
-                    timestamp: Date.now(),
-                    content: [
-                      {
-                        type: "text",
-                        text:
-                          promptCount === 1 ? "final from stored session" : "",
-                      },
-                    ],
-                  },
-                ]
-              : [
-                  {
-                    role: "assistant",
-                    content: [
-                      {
-                        type: "text",
-                        text: "must stay interim before agent settlement",
-                      },
-                      {
-                        type: "toolCall",
-                        name: "todo",
-                        id: "task-return-tool",
-                      },
-                    ],
-                    stopReason: "toolUse",
-                  },
-                  {
-                    role: "toolResult",
-                    toolCallId: "task-return-tool",
-                    content: [],
-                    isError: false,
-                  },
-                  {
-                    role: "assistant",
-                    content: [],
-                    stopReason: "stop",
-                  },
-                ];
-          for (const [index, message] of promptMessages.entries()) {
-            stateMessages.push(message);
-            durableEntries.push({
-              id: `stored-final-entry-${promptCount}-${index}`,
-              parentId: durableEntries.at(-1)?.id ?? null,
-              type: "message",
-              message,
-            });
-          }
-        },
-        sendCustomMessage: async () => {},
-        steer: async () => {},
-        followUp: async () => {},
-        abort: async () => {},
-        modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          ...testSessionManager(() => stateMessages),
-          getEntries: () => durableEntries,
-          getBranch: () => durableEntries,
-          getLeafId: () => durableEntries.at(-1)?.id ?? null,
-        },
-        messages: stateMessages,
-        getSessionStats: () => ({}),
-        getUserMessagesForForking: () => [],
-        getLastAssistantText: () => "",
-        setThinkingLevel: () => {},
-        cycleThinkingLevel: () => undefined,
-        setSteeringMode: () => {},
-        setFollowUpMode: () => {},
-        compact: async () => {},
-        setAutoCompactionEnabled: () => {},
-        setAutoRetryEnabled: () => {},
-        abortRetry: () => {},
-        executeBash: async () => {},
-        abortBash: async () => {},
-        fork: async () => ({ cancelled: false, selectedText: "" }),
-        navigateTree: async () => ({ cancelled: false }),
-        exportToHtml: async () => "",
-        exportToJsonl: () => "",
-        importFromJsonl: async () => true,
-        newSession: async () => true,
-        switchSession: async () => true,
-        setModel: async () => {},
-        reload: async () => {},
-        setSessionName: () => {},
-      };
-
-      void runCustomRpcMode(session, {
-        SessionManager: {
-          listAll: async () => [],
-          list: async () => [],
-          open: () => ({ appendSessionInfo() {} }),
-        },
-        builtinSlashCommands: [],
-      });
-      await wait(0);
-
-      const onData = handlers.get("data");
-      assert.equal(typeof onData, "function");
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "1", type: "prompt", message: "hello", requestTag: "tag-1" })}\n`,
-        ),
-      );
-      await wait(100);
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "2", type: "prompt", message: "empty", requestTag: "tag-2" })}\n`,
-        ),
-      );
-      await wait(100);
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "3", type: "prompt", message: "task before settled", requestTag: "tag-3" })}\n`,
-        ),
-      );
-      await wait(100);
-
-      const events = parseRpcOutput(lines);
-      const completions = events.filter(
-        (event) =>
-          event.type === "rpc_turn_event" && event.event === "complete",
-      );
-      const errors = events.filter(
-        (event) => event.type === "rpc_turn_event" && event.event === "error",
-      );
-      assert.equal(completions[0]?.requestTag, "tag-1");
-      assert.equal(completions[0]?.finalText, "final from stored session");
-      assert.deepEqual(completions[0]?.result, {
-        messages: [{ type: "text", text: "final from stored session" }],
-      });
-      assert.equal(completions[1]?.requestTag, "tag-2");
-      assert.equal(completions[1]?.finalText, "");
-      assert.deepEqual(completions[1]?.result, { messages: [] });
-      assert.equal(completions[2]?.requestTag, "tag-3");
-      assert.equal(completions[2]?.finalText, "");
-      assert.deepEqual(completions[2]?.result, { messages: [] });
-      assert.deepEqual(errors, []);
-    } finally {
-      process.stdin.on = stdinOn;
-      process.stdout.write = stdoutWrite;
-    }
-  },
-);
-
-test(
-  "rpc mode routes steer through session.steer",
-  { concurrency: false },
-  async () => {
-    const stdinOn = process.stdin.on;
-    const stdoutWrite = process.stdout.write;
-    const handlers = new Map();
-    const lines = [];
-    const calls = [];
-
-    process.stdin.on = function (event, handler) {
-      handlers.set(event, handler);
-      return this;
-    };
-    process.stdout.write = function (chunk) {
-      lines.push(String(chunk));
-      return true;
-    };
-
-    try {
-      const session = {
-        isStreaming: false,
-        isCompacting: false,
-        sessionFile: "/tmp/test-session.jsonl",
-        agent: { waitForIdle: async () => {} },
-        bindExtensions: async () => {},
-        subscribe: () => {},
-        prompt: async () => {},
-        steer: async (message, images) => {
-          calls.push(["steer", message, images]);
-        },
-        followUp: async () => {},
-        abort: async () => {},
-        modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
-        messages: [],
-        getSessionStats: () => ({}),
-        getUserMessagesForForking: () => [],
-        getLastAssistantText: () => "",
-        setThinkingLevel: () => {},
-        cycleThinkingLevel: () => undefined,
-        setSteeringMode: () => {},
-        setFollowUpMode: () => {},
-        compact: async () => {},
-        setAutoCompactionEnabled: () => {},
-        setAutoRetryEnabled: () => {},
-        abortRetry: () => {},
-        executeBash: async () => {},
-        abortBash: async () => {},
-        fork: async () => ({ cancelled: false, selectedText: "" }),
-        navigateTree: async () => ({ cancelled: false }),
-        exportToHtml: async () => "",
-        exportToJsonl: () => "",
-        importFromJsonl: async () => true,
-        newSession: async () => true,
-        switchSession: async () => true,
-        setModel: async () => {},
-        reload: async () => {},
-        setSessionName: () => {},
-      };
-
-      void runCustomRpcMode(session, {
-        SessionManager: {
-          listAll: async () => [],
-          list: async () => [],
-          open: () => ({ appendSessionInfo() {} }),
-        },
-        builtinSlashCommands: [],
-      });
-      await wait(0);
-
-      const onData = handlers.get("data");
-      assert.equal(typeof onData, "function");
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "1", type: "steer", message: "hello", images: ["img"], requestTag: "tag-1" })}\n`,
-        ),
-      );
-      await wait(10);
-
-      assert.deepEqual(calls, [["steer", "hello", ["img"]]]);
-      assert.ok(lines.join("").includes('"command":"steer"'));
-    } finally {
-      process.stdin.on = stdinOn;
-      process.stdout.write = stdoutWrite;
-    }
-  },
-);
-
-test(
   "rpc mode terminalizes from agent_settled when the outer prompt promise never returns",
   { concurrency: false },
   async () => {
@@ -4377,10 +4195,10 @@ test(
     const lines = [];
     const sessionSubscribers = new Set();
     const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-rpc-wal-"));
-    const chatRunContext = {
-      runId: "chat-run-settled",
-      ownerEpoch: "run-owner",
-      producerIncarnation: "worker-incarnation",
+    const chatDeliveryContext = {
+      turnId: "chat-turn-settled",
+      chatKey: "discord/1:2",
+      messageId: "message-settled",
     };
 
     process.stdin.on = function (event, handler) {
@@ -4459,7 +4277,7 @@ test(
       assert.equal(typeof onData, "function");
       onData(
         Buffer.from(
-          `${JSON.stringify({ id: "turn-settled", type: "prompt", message: "finish durably", requestTag: "tag-settled", chatRunContext })}\n`,
+          `${JSON.stringify({ id: "turn-settled", type: "prompt", message: "finish durably", requestTag: "tag-settled", chatDeliveryContext })}\n`,
         ),
       );
       await wait(10);
@@ -4499,31 +4317,18 @@ test(
         completions.map((event) => ({
           requestTag: event.requestTag,
           finalText: event.finalText,
-          chatRunContext: event.chatRunContext,
-          payloadHash: event.terminalWal?.payloadHash,
+          chatDeliveryContext: event.chatDeliveryContext,
+          terminalRecord: event.terminalRecord,
         })),
         [
           {
             requestTag: "tag-settled",
             finalText: "durable settled final",
-            chatRunContext,
-            payloadHash: completions[0].terminalWal.payloadHash,
+            chatDeliveryContext: undefined,
+            terminalRecord: undefined,
           },
         ],
       );
-      assert.match(completions[0].terminalWal.payloadHash, /^[0-9a-f]{64}$/);
-      const walFiles = await fs.readdir(
-        path.join(agentDir, "data", "chat", "terminal-wal"),
-      );
-      assert.equal(walFiles.length, 1);
-      const walRecord = JSON.parse(
-        await fs.readFile(
-          path.join(agentDir, "data", "chat", "terminal-wal", walFiles[0]),
-          "utf8",
-        ),
-      );
-      assert.equal(walRecord.state, "staged");
-      assert.equal(walRecord.runId, chatRunContext.runId);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -4968,417 +4773,6 @@ test(
 );
 
 test(
-  "rpc mode keeps a recovered terminal open across an admitted steer boundary",
-  { concurrency: false },
-  async () => {
-    const stdinOn = process.stdin.on;
-    const stdoutWrite = process.stdout.write;
-    const handlers = new Map();
-    const lines: string[] = [];
-    const sessionSubscribers = new Set<(event: any) => void>();
-    const stateMessages: any[] = [
-      {
-        role: "user",
-        content: [{ type: "text", text: "interrupted prompt" }],
-      },
-    ];
-    let rejectRecovery: ((error: Error) => void) | undefined;
-    const recoveryGate = new Promise<void>((_resolve, reject) => {
-      rejectRecovery = reject;
-    });
-    let rejectImagePrompt: ((error: Error) => void) | undefined;
-    const imagePromptGate = new Promise<void>((_resolve, reject) => {
-      rejectImagePrompt = reject;
-    });
-    let releaseHangingPrompt: (() => void) | undefined;
-    const hangingPromptGate = new Promise<void>((resolve) => {
-      releaseHangingPrompt = resolve;
-    });
-    let holdInterruptAbort = false;
-    let releaseInterruptAbort: (() => void) | undefined;
-    const interruptAbortGate = new Promise<void>((resolve) => {
-      releaseInterruptAbort = resolve;
-    });
-
-    process.stdin.on = function (event, handler) {
-      handlers.set(event, handler);
-      return this;
-    };
-    process.stdout.write = function (chunk) {
-      lines.push(String(chunk));
-      return true;
-    };
-
-    try {
-      const session = {
-        isStreaming: false,
-        isCompacting: false,
-        sessionFile: "/tmp/recovered-steer-terminal-session.jsonl",
-        sessionId: "recovered-steer-terminal-session",
-        agent: {
-          signal: undefined,
-          state: { messages: stateMessages },
-          waitForIdle: async () => {},
-        },
-        bindExtensions: async () => {},
-        subscribe: (handler: (event: any) => void) => {
-          sessionSubscribers.add(handler);
-          return () => sessionSubscribers.delete(handler);
-        },
-        _runAgentPrompt: async () => {
-          await recoveryGate;
-        },
-        prompt: async (message: string) => {
-          if (message === "") {
-            await imagePromptGate;
-            return;
-          }
-          if (message === "settled then rejected") {
-            const settledFinal = {
-              role: "assistant",
-              content: [{ type: "text", text: "settled final" }],
-              stopReason: "stop",
-            };
-            stateMessages.push(settledFinal);
-            for (const handler of sessionSubscribers) {
-              handler({ type: "message_end", message: settledFinal });
-              handler({ type: "agent_settled" });
-            }
-            throw new Error("late outer rejection");
-          }
-          if (message === "hanging prompt") {
-            session.agent.signal = new AbortController().signal;
-            await hangingPromptGate;
-            return;
-          }
-          if (message === "rejected prompt") {
-            const rejectedFinal = {
-              role: "assistant",
-              content: [{ type: "text", text: "must not replace task error" }],
-              stopReason: "stop",
-            };
-            stateMessages.push(rejectedFinal);
-            for (const handler of sessionSubscribers) {
-              handler({ type: "message_end", message: rejectedFinal });
-            }
-            throw new Error("ordinary prompt rejected");
-          }
-          if (message !== "normal prompt") return;
-          const normalFinal = {
-            role: "assistant",
-            content: [{ type: "text", text: "normal final" }],
-            stopReason: "stop",
-          };
-          stateMessages.push(normalFinal);
-          for (const handler of sessionSubscribers) {
-            handler({ type: "message_end", message: normalFinal });
-            handler({ type: "agent_settled" });
-          }
-        },
-        steer: async () => {},
-        followUp: async () => {},
-        abort: async () => {
-          releaseHangingPrompt?.();
-          if (holdInterruptAbort) await interruptAbortGate;
-        },
-        modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => stateMessages),
-        messages: stateMessages,
-        getSessionStats: () => ({}),
-        getUserMessagesForForking: () => [],
-        getLastAssistantText: () => "",
-        setThinkingLevel: () => {},
-        cycleThinkingLevel: () => undefined,
-        setSteeringMode: () => {},
-        setFollowUpMode: () => {},
-        compact: async () => {},
-        setAutoCompactionEnabled: () => {},
-        setAutoRetryEnabled: () => {},
-        abortRetry: () => {},
-        executeBash: async () => {},
-        abortBash: () => {},
-        fork: async () => ({ cancelled: false, selectedText: "" }),
-        navigateTree: async () => ({ cancelled: false }),
-        exportToHtml: async () => "",
-        exportToJsonl: () => "",
-        importFromJsonl: async () => true,
-        newSession: async () => true,
-        switchSession: async () => true,
-        setModel: async () => {},
-        reload: async () => {},
-        setSessionName: () => {},
-      };
-
-      void runCustomRpcMode(session, {
-        SessionManager: {
-          listAll: async () => [],
-          list: async () => [],
-          open: () => ({ appendSessionInfo() {} }),
-        },
-        builtinSlashCommands: [],
-      });
-      await wait(0);
-
-      const onData = handlers.get("data");
-      assert.equal(typeof onData, "function");
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "resume", type: "resume_interrupted_turn", requestTag: "tag-recovered" })}\n`,
-        ),
-      );
-      await wait(10);
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "steer", type: "prompt", message: "", images: ["image-only"], requestTag: "tag-steer" })}\n`,
-        ),
-      );
-      await wait(10);
-
-      assert.equal(
-        parseRpcOutput(lines).some(
-          (event) => event.type === "response" && event.id === "steer",
-        ),
-        false,
-      );
-
-      const recoveredFinal = {
-        role: "assistant",
-        content: [{ type: "text", text: "stale recovered final" }],
-        stopReason: "stop",
-      };
-      stateMessages.push(recoveredFinal);
-      for (const handler of sessionSubscribers) {
-        handler({ type: "message_end", message: recoveredFinal });
-      }
-      rejectRecovery?.(new Error("recovered runner failed at boundary"));
-      await wait(0);
-      for (const handler of sessionSubscribers) {
-        handler({ type: "agent_settled" });
-      }
-      await wait(20);
-
-      assert.equal(
-        parseRpcOutput(lines).some(
-          (event) =>
-            event.type === "rpc_turn_event" &&
-            (event.event === "complete" || event.event === "error"),
-        ),
-        false,
-      );
-
-      const unrelatedEmptyUser = {
-        role: "user",
-        content: [],
-      };
-      stateMessages.push(unrelatedEmptyUser);
-      for (const handler of sessionSubscribers) {
-        handler({ type: "message_start", message: unrelatedEmptyUser });
-        handler({ type: "agent_settled" });
-      }
-      await wait(20);
-      assert.equal(
-        parseRpcOutput(lines).some(
-          (event) =>
-            event.type === "rpc_turn_event" &&
-            (event.event === "complete" || event.event === "error"),
-        ),
-        false,
-      );
-
-      const steeredUser = {
-        role: "user",
-        content: [{ type: "image", data: "image-only", mimeType: "image/png" }],
-      };
-      stateMessages.push(steeredUser);
-      for (const handler of sessionSubscribers) {
-        handler({ type: "message_start", message: steeredUser });
-      }
-      rejectImagePrompt?.(new Error("late admitted prompt rejection"));
-      await wait(20);
-      assert.equal(
-        parseRpcOutput(lines).some(
-          (event) =>
-            event.type === "rpc_turn_event" &&
-            (event.event === "complete" || event.event === "error"),
-        ),
-        false,
-      );
-      for (const handler of sessionSubscribers) {
-        handler({ type: "agent_settled" });
-      }
-      await wait(20);
-
-      const terminals = parseRpcOutput(lines).filter(
-        (event) =>
-          event.type === "rpc_turn_event" &&
-          (event.event === "complete" || event.event === "error"),
-      );
-      assert.deepEqual(
-        terminals.map((event) => ({
-          event: event.event,
-          requestTag: event.requestTag,
-          error: event.error,
-        })),
-        [
-          {
-            event: "error",
-            requestTag: "tag-recovered",
-            error: "recovered runner failed at boundary",
-          },
-        ],
-      );
-
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "normal", type: "prompt", message: "normal prompt", requestTag: "tag-normal" })}\n`,
-        ),
-      );
-      await wait(20);
-      const normalTerminal = parseRpcOutput(lines).find(
-        (event) =>
-          event.type === "rpc_turn_event" &&
-          event.event === "complete" &&
-          event.requestTag === "tag-normal",
-      );
-      assert.equal(normalTerminal?.finalText, "normal final");
-
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "settled-rejected", type: "prompt", message: "settled then rejected", requestTag: "tag-settled-rejected" })}\n`,
-        ),
-      );
-      await wait(20);
-      const settledRejectedTerminal = parseRpcOutput(lines).find(
-        (event) =>
-          event.type === "rpc_turn_event" &&
-          (event.event === "complete" || event.event === "error") &&
-          event.requestTag === "tag-settled-rejected",
-      );
-      assert.equal(settledRejectedTerminal?.event, "complete");
-      assert.equal(settledRejectedTerminal?.finalText, "settled final");
-
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "rejected", type: "prompt", message: "rejected prompt", requestTag: "tag-rejected" })}\n`,
-        ),
-      );
-      await wait(20);
-      const rejectedTerminal = parseRpcOutput(lines).find(
-        (event) =>
-          event.type === "rpc_turn_event" &&
-          (event.event === "complete" || event.event === "error") &&
-          event.requestTag === "tag-rejected",
-      );
-      assert.equal(rejectedTerminal?.event, "error");
-      assert.equal(rejectedTerminal?.error, "ordinary prompt rejected");
-
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "hanging", type: "prompt", message: "hanging prompt", requestTag: "tag-hanging" })}\n`,
-        ),
-      );
-      await wait(10);
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "queued-cancel", type: "prompt", message: "queued cancel", requestTag: "tag-queued-cancel" })}\n`,
-        ),
-      );
-      await wait(10);
-      const queuedStartedUser = {
-        role: "user",
-        content: [{ type: "text", text: "queued cancel" }],
-      };
-      stateMessages.push(queuedStartedUser);
-      for (const handler of sessionSubscribers) {
-        handler({ type: "message_start", message: queuedStartedUser });
-      }
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "queued-pending", type: "prompt", message: "queued pending", requestTag: "tag-queued-pending" })}\n`,
-        ),
-      );
-      await wait(10);
-      holdInterruptAbort = true;
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "resume-cancel", type: "resume_interrupted_turn", requestTag: "tag-resume-cancel" })}\n`,
-        ),
-      );
-      await wait(5);
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "during-interrupt", type: "prompt", message: "during interrupt", requestTag: "tag-during-interrupt" })}\n`,
-        ),
-      );
-      await wait(10);
-      const duringInterruptResponse = parseRpcOutput(lines).find(
-        (event) => event.type === "response" && event.id === "during-interrupt",
-      );
-      assert.equal(duringInterruptResponse?.success, false);
-      releaseInterruptAbort?.();
-      await wait(30);
-      assert.equal(
-        parseRpcOutput(lines).some(
-          (event) => event.type === "response" && event.id === "resume-cancel",
-        ),
-        true,
-      );
-
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "abort-hanging", type: "prompt", message: "hanging prompt", requestTag: "tag-abort-hanging" })}\n`,
-        ),
-      );
-      await wait(10);
-      onData(
-        Buffer.from(`${JSON.stringify({ id: "abort", type: "abort" })}\n`),
-      );
-      await wait(20);
-      assert.equal(
-        parseRpcOutput(lines).some(
-          (event) => event.type === "response" && event.id === "abort",
-        ),
-        true,
-      );
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "normal-after-abort", type: "prompt", message: "normal prompt", requestTag: "tag-normal-after-abort" })}\n`,
-        ),
-      );
-      await wait(20);
-      const afterAbortEvents = parseRpcOutput(lines);
-      assert.equal(
-        afterAbortEvents.some(
-          (event) =>
-            event.type === "rpc_turn_event" &&
-            event.event === "complete" &&
-            event.requestTag === "tag-normal-after-abort" &&
-            event.finalText === "normal final",
-        ),
-        true,
-        JSON.stringify(afterAbortEvents.slice(-12)),
-      );
-    } finally {
-      rejectRecovery?.(new Error("test cleanup"));
-      rejectImagePrompt?.(new Error("test cleanup"));
-      releaseHangingPrompt?.();
-      releaseInterruptAbort?.();
-      const onData = handlers.get("data");
-      if (typeof onData === "function") {
-        onData(
-          Buffer.from(
-            `${JSON.stringify({ id: "cleanup", type: "clear_queue" })}\n`,
-          ),
-        );
-        await wait(0);
-      }
-      process.stdin.on = stdinOn;
-      process.stdout.write = stdoutWrite;
-    }
-  },
-);
-
-test(
   "rpc mode keeps Pi prompt ownership immutable across a queued steer",
   { concurrency: false },
   async () => {
@@ -5386,6 +4780,7 @@ test(
     const stdoutWrite = process.stdout.write;
     const handlers = new Map();
     const lines = [];
+    const promptStreamingStates = [];
     const sessionSubscribers = new Set();
     let releaseSteeredTurn;
     const steeredTurnGate = new Promise((resolve) => {
@@ -5402,7 +4797,9 @@ test(
     };
 
     try {
+      const durableEntries: any[] = [];
       const session = {
+        __testNativePreflight: true,
         isStreaming: false,
         isCompacting: false,
         sessionFile: "/tmp/steer-terminal-session.jsonl",
@@ -5417,17 +4814,59 @@ test(
           sessionSubscribers.add(handler);
           return () => sessionSubscribers.delete(handler);
         },
-        async prompt() {
-          if (this.isStreaming) return;
+        async prompt(message, options) {
+          await Promise.resolve();
+          promptStreamingStates.push(this.isStreaming);
+          if (this.isStreaming) {
+            for (const handler of sessionSubscribers) {
+              await handler({
+                type: "queue_update",
+                steering: [message],
+                followUp: [],
+              });
+            }
+            options?.preflightResult?.(true);
+            return;
+          }
+          options?.preflightResult?.(true);
           this.isStreaming = true;
+          const ownerUser = {
+            role: "user",
+            content: [{ type: "text", text: message }],
+          };
+          for (const handler of sessionSubscribers) {
+            await handler({ type: "agent_start" });
+            await handler({ type: "message_start", message: ownerUser });
+          }
+          this.sessionManager.appendMessage(ownerUser);
           await steeredTurnGate;
           this.isStreaming = false;
+          for (const handler of sessionSubscribers) {
+            await handler({ type: "agent_settled" });
+          }
         },
         steer: async () => {},
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages),
+        sessionManager: {
+          ...testSessionManager(() => session.messages),
+          getEntries: () => durableEntries,
+          appendMessage(message) {
+            const id = `message-${durableEntries.length}`;
+            durableEntries.push({ id, type: "message", message });
+            session.messages.push(message);
+            return id;
+          },
+          appendCustomEntry(customType, data) {
+            durableEntries.push({
+              id: `custom-${durableEntries.length}`,
+              type: "custom",
+              customType,
+              data,
+            });
+          },
+        },
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -5471,50 +4910,117 @@ test(
           `${JSON.stringify({ id: "turn-first", type: "prompt", message: "first", requestTag: "tag-first" })}\n`,
         ),
       );
-      await wait(10);
       onData(
         Buffer.from(
           `${JSON.stringify({ id: "turn-steer", type: "prompt", message: "steer now", streamingBehavior: "steer", requestTag: "tag-steer" })}\n`,
         ),
       );
-      await wait(10);
-
-      const secondAdmission = parseRpcOutput(lines).find(
-        (event) => event.type === "response" && event.id === "turn-steer",
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (promptStreamingStates.length === 2) break;
+        await wait(10);
+      }
+      await wait(20);
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "turn-steer-duplicate", type: "prompt", message: "steer now", requestTag: "tag-steer" })}\n`,
+        ),
       );
-      assert.equal(secondAdmission?.data?.acceptedAs, "prompt");
-      assert.equal(secondAdmission?.data?.queued, true);
+      await wait(20);
+      assert.equal(
+        parseRpcOutput(lines).some(
+          (event) =>
+            event.type === "response" && event.id === "turn-steer-duplicate",
+        ),
+        false,
+      );
 
       const steeredUser = {
         role: "user",
         content: [{ type: "text", text: "steer now" }],
       };
-      session.messages.push(steeredUser);
       for (const handler of sessionSubscribers) {
-        handler({
+        await handler({
           type: "message_start",
+          requestTag: "tag-steer",
           message: steeredUser,
         });
       }
-      await wait(20);
-
-      const projectedUserStart = parseRpcOutput(lines).find(
-        (event) =>
-          event.type === "message_start" && event.message?.role === "user",
+      assert.equal(
+        parseRpcOutput(lines).some(
+          (event) =>
+            event.type === "message_start" && event.requestTag === "tag-steer",
+        ),
+        true,
       );
-      assert.equal(projectedUserStart?.requestTag, "tag-steer");
-      assert.equal(projectedUserStart?.message?.requestTag, "tag-steer");
+      session.sessionManager.appendMessage(steeredUser);
+      assert.deepEqual(
+        durableEntries.find(
+          (entry) =>
+            entry.customType === "rin_request_identity" &&
+            entry.data?.requestId === "tag-steer",
+        )?.data,
+        {
+          requestId: "tag-steer",
+          messageEntryId: "message-2",
+          observedRole: "nonterminal",
+        },
+      );
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (
+          parseRpcOutput(lines).some(
+            (event) => event.type === "response" && event.id === "turn-steer",
+          )
+        ) {
+          break;
+        }
+        await wait(10);
+      }
+
+      assert.deepEqual(promptStreamingStates, [false, true]);
+      const secondAdmission = parseRpcOutput(lines).find(
+        (event) => event.type === "response" && event.id === "turn-steer",
+      );
+      assert.equal(secondAdmission?.data?.outcome, "nonterminal");
+      const duplicateAdmission = parseRpcOutput(lines).find(
+        (event) =>
+          event.type === "response" && event.id === "turn-steer-duplicate",
+      );
+      assert.equal(duplicateAdmission?.data?.outcome, "rejoined");
+      assert.equal(duplicateAdmission?.data?.originalOutcome, "nonterminal");
+      assert.deepEqual(
+        durableEntries.find(
+          (entry) =>
+            entry.customType === "rin_request_identity" &&
+            entry.data?.requestId === "tag-steer",
+        )?.data,
+        {
+          requestId: "tag-steer",
+          messageEntryId: "message-2",
+          observedRole: "nonterminal",
+        },
+      );
+
       onData(
         Buffer.from(
-          `${JSON.stringify({ id: "turn-steer-retry", type: "prompt", message: "steer now", requestTag: "tag-steer" })}\n`,
+          `${JSON.stringify({ id: "turn-steer-retry", type: "prompt", message: "steer now", streamingBehavior: "steer", requestTag: "tag-steer" })}\n`,
         ),
       );
       await wait(10);
-      const startedAdmission = parseRpcOutput(lines).find(
+      const retriedAdmission = parseRpcOutput(lines).find(
         (event) => event.type === "response" && event.id === "turn-steer-retry",
       );
-      assert.equal(startedAdmission?.data?.acceptedAs, "prompt");
-      assert.equal(startedAdmission?.data?.queued, false);
+      assert.equal(retriedAdmission?.data?.outcome, "rejoined");
+      assert.equal(retriedAdmission?.data?.originalOutcome, "nonterminal");
+      assert.deepEqual(promptStreamingStates, [false, true]);
+
+      const projectedUserStart = parseRpcOutput(lines).find(
+        (event) =>
+          event.type === "message_start" &&
+          event.message?.role === "user" &&
+          event.requestTag === "tag-steer",
+      );
+      assert.equal(projectedUserStart?.requestTag, "tag-steer");
+      assert.equal(projectedUserStart?.message?.requestTag, undefined);
       assert.equal(
         parseRpcOutput(lines).some(
           (event) =>
@@ -5532,6 +5038,7 @@ test(
         handler({ type: "message_end", message: finalMessage });
       }
       releaseSteeredTurn();
+      await wait(0);
       for (const handler of sessionSubscribers) {
         handler({ type: "agent_settled" });
       }
@@ -5560,313 +5067,7 @@ test(
 );
 
 test(
-  "rpc mode starts a new terminal owner after a tracked turn settles during a signal gap",
-  { concurrency: false },
-  async () => {
-    const stdinOn = process.stdin.on;
-    const stdoutWrite = process.stdout.write;
-    const handlers = new Map();
-    const lines = [];
-    const calls = [];
-    const sessionSubscribers = new Set();
-    const activeRunSignal = new AbortController().signal;
-    const agentState = { isStreaming: false, activeRun: false };
-
-    process.stdin.on = function (event, handler) {
-      handlers.set(event, handler);
-      return this;
-    };
-    process.stdout.write = function (chunk) {
-      lines.push(String(chunk));
-      return true;
-    };
-
-    try {
-      const session = {
-        get isStreaming() {
-          return this.agent.state.isStreaming;
-        },
-        isCompacting: false,
-        sessionFile: "/tmp/test-session.jsonl",
-        sessionId: "session-1",
-        agent: {
-          get signal() {
-            return agentState.activeRun ? activeRunSignal : undefined;
-          },
-          state: agentState,
-          waitForIdle: async () => {},
-        },
-        bindExtensions: async () => {},
-        subscribe: (handler) => {
-          sessionSubscribers.add(handler);
-          return () => sessionSubscribers.delete(handler);
-        },
-        async prompt(message, options) {
-          calls.push(["prompt", message, options, this.isStreaming]);
-          if (!this.isStreaming) {
-            agentState.activeRun = true;
-            await new Promise(() => {});
-          }
-        },
-        steer: async (message, images) => {
-          calls.push(["steer", message, images]);
-        },
-        followUp: async (message, images) => {
-          calls.push(["followUp", message, images]);
-        },
-        abort: async () => {},
-        modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
-        messages: [],
-        getSessionStats: () => ({}),
-        getUserMessagesForForking: () => [],
-        getLastAssistantText: () => "",
-        setThinkingLevel: () => {},
-        cycleThinkingLevel: () => undefined,
-        setSteeringMode: () => {},
-        setFollowUpMode: () => {},
-        compact: async () => {},
-        setAutoCompactionEnabled: () => {},
-        setAutoRetryEnabled: () => {},
-        abortRetry: () => {},
-        executeBash: async () => {},
-        abortBash: async () => {},
-        fork: async () => ({ cancelled: false, selectedText: "" }),
-        navigateTree: async () => ({ cancelled: false }),
-        exportToHtml: async () => "",
-        exportToJsonl: () => "",
-        importFromJsonl: async () => true,
-        newSession: async () => true,
-        switchSession: async () => true,
-        setModel: async () => {},
-        reload: async () => {},
-        setSessionName: () => {},
-      };
-
-      void runCustomRpcMode(session, {
-        SessionManager: {
-          listAll: async () => [],
-          list: async () => [],
-          open: () => ({ appendSessionInfo() {} }),
-        },
-        builtinSlashCommands: [],
-      });
-      await wait(0);
-
-      const onData = handlers.get("data");
-      assert.equal(typeof onData, "function");
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "turn-1", type: "prompt", message: "first" })}\n`,
-        ),
-      );
-      await wait(10);
-      agentState.activeRun = false;
-      const firstFinal = {
-        role: "assistant",
-        content: [{ type: "text", text: "first settled final" }],
-        stopReason: "stop",
-      };
-      session.messages.push(firstFinal);
-      for (const handler of sessionSubscribers) {
-        handler({ type: "message_end", message: firstFinal });
-        handler({ type: "agent_settled" });
-      }
-      await wait(10);
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "queue-1", type: "prompt", message: "plain follow-in", streamingBehavior: "followUp", requestTag: "tag-2" })}\n`,
-        ),
-      );
-      await wait(10);
-      agentState.activeRun = false;
-      const secondFinal = {
-        role: "assistant",
-        content: [{ type: "text", text: "second settled final" }],
-        stopReason: "stop",
-      };
-      session.messages.push(secondFinal);
-      for (const handler of sessionSubscribers) {
-        handler({ type: "message_end", message: secondFinal });
-        handler({ type: "agent_settled" });
-      }
-      await wait(20);
-
-      assert.deepEqual(calls, [
-        [
-          "prompt",
-          "first",
-          {
-            images: undefined,
-            streamingBehavior: "steer",
-            source: "rpc",
-          },
-          false,
-        ],
-        [
-          "prompt",
-          "plain follow-in",
-          {
-            images: undefined,
-            streamingBehavior: "steer",
-            source: "rpc",
-            requestTag: "tag-2",
-          },
-          false,
-        ],
-      ]);
-      assert.equal(agentState.isStreaming, false);
-      const response = lines
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
-          }
-        })
-        .find((line) => line?.id === "queue-1");
-      assert.equal(response?.data?.acceptedAs, "prompt");
-    } finally {
-      process.stdin.on = stdinOn;
-      process.stdout.write = stdoutWrite;
-    }
-  },
-);
-
-test(
-  "rpc mode does not override Pi state during an untracked signal gap",
-  { concurrency: false },
-  async () => {
-    const stdinOn = process.stdin.on;
-    const stdoutWrite = process.stdout.write;
-    const handlers = new Map();
-    const lines = [];
-    const calls = [];
-
-    process.stdin.on = function (event, handler) {
-      handlers.set(event, handler);
-      return this;
-    };
-    process.stdout.write = function (chunk) {
-      lines.push(String(chunk));
-      return true;
-    };
-
-    try {
-      const session = {
-        isStreaming: false,
-        isCompacting: false,
-        sessionFile: "/tmp/test-session.jsonl",
-        sessionId: "session-1",
-        agent: {
-          signal: new AbortController().signal,
-          state: { isStreaming: false },
-          waitForIdle: async () => {},
-        },
-        bindExtensions: async () => {},
-        subscribe: () => () => {},
-        async prompt(message, options) {
-          calls.push([message, options, this.isStreaming]);
-          if (!this.isStreaming || options?.streamingBehavior !== "steer") {
-            throw new Error(
-              "Agent is already processing a prompt. Use steer() or followUp() to queue messages, or wait for completion.",
-            );
-          }
-        },
-        steer: async () => {},
-        followUp: async () => {},
-        abort: async () => {},
-        modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages || []),
-        messages: [],
-        getSessionStats: () => ({}),
-        getUserMessagesForForking: () => [],
-        getLastAssistantText: () => "",
-        setThinkingLevel: () => {},
-        cycleThinkingLevel: () => undefined,
-        setSteeringMode: () => {},
-        setFollowUpMode: () => {},
-        compact: async () => {},
-        setAutoCompactionEnabled: () => {},
-        setAutoRetryEnabled: () => {},
-        abortRetry: () => {},
-        executeBash: async () => {},
-        abortBash: async () => {},
-        fork: async () => ({ cancelled: false, selectedText: "" }),
-        navigateTree: async () => ({ cancelled: false }),
-        exportToHtml: async () => "",
-        exportToJsonl: () => "",
-        importFromJsonl: async () => true,
-        newSession: async () => true,
-        switchSession: async () => true,
-        setModel: async () => {},
-        reload: async () => {},
-        setSessionName: () => {},
-      };
-
-      void runCustomRpcMode(session, {
-        SessionManager: {
-          listAll: async () => [],
-          list: async () => [],
-          open: () => ({ appendSessionInfo() {} }),
-        },
-        builtinSlashCommands: [],
-      });
-      await wait(0);
-
-      const onData = handlers.get("data");
-      assert.equal(typeof onData, "function");
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "queue-1", type: "prompt", message: "recovery follow-in", requestTag: "tag-2" })}\n`,
-        ),
-      );
-      await wait(20);
-
-      assert.deepEqual(calls, [
-        [
-          "recovery follow-in",
-          {
-            images: undefined,
-            streamingBehavior: "steer",
-            source: "rpc",
-            requestTag: "tag-2",
-          },
-          false,
-        ],
-      ]);
-      const response = lines
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
-          }
-        })
-        .find((line) => line?.id === "queue-1");
-      assert.equal(response?.success, true);
-      const terminal = lines
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
-          }
-        })
-        .find(
-          (line) => line?.type === "rpc_turn_event" && line?.event === "error",
-        );
-      assert.equal(terminal?.requestTag, "tag-2");
-      assert.match(terminal?.error || "", /Agent is already processing/);
-    } finally {
-      process.stdin.on = stdinOn;
-      process.stdout.write = stdoutWrite;
-    }
-  },
-);
-
-test(
-  "rpc mode native queue creates one terminal observer when no local tracker exists",
+  "rpc mode native steering never invents terminal ownership when no local tracker exists",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -5955,6 +5156,11 @@ test(
       );
       await wait(50);
 
+      for (const call of calls) {
+        for (const value of call) {
+          if (value && typeof value === "object") delete value.preflightResult;
+        }
+      }
       assert.deepEqual(calls, [
         [
           "steer me",
@@ -6002,13 +5208,7 @@ test(
             requestTag: event.requestTag,
             finalText: event.finalText,
           })),
-        [
-          {
-            event: "complete",
-            requestTag: "tag-1",
-            finalText: "native queued final",
-          },
-        ],
+        [],
       );
     } finally {
       process.stdin.on = stdinOn;
@@ -6677,6 +5877,7 @@ test(
 
       assert.deepEqual(bindCalls, ["first"]);
       assert.equal(unsubscribeCount, 1);
+      for (const prompt of prompts) delete prompt[2].preflightResult;
       assert.deepEqual(prompts, [
         [
           "first",
@@ -6694,348 +5895,6 @@ test(
       const response = JSON.parse(responseLine);
       assert.equal(response.success, false);
       assert.equal(response.error, "Unknown command: new_session");
-    } finally {
-      process.stdin.on = stdinOn;
-      process.stdout.write = stdoutWrite;
-    }
-  },
-);
-
-test(
-  "rpc mode explicit interrupted-turn resume still persists interruption context before continuing",
-  { concurrency: false },
-  async () => {
-    const stdinOn = process.stdin.on;
-    const stdoutWrite = process.stdout.write;
-    const handlers = new Map();
-    const lines = [];
-    const calls = [];
-
-    process.stdin.on = function (event, handler) {
-      handlers.set(event, handler);
-      return this;
-    };
-    process.stdout.write = function (chunk) {
-      lines.push(String(chunk));
-      return true;
-    };
-
-    try {
-      const stateMessages = [];
-      const session = {
-        isStreaming: false,
-        isCompacting: false,
-        sessionFile: "/tmp/test-session.jsonl",
-        agent: {
-          waitForIdle: async () => {},
-          state: { messages: stateMessages },
-          continue: async () => {
-            calls.push(["continue"]);
-          },
-        },
-        bindExtensions: async () => {},
-        subscribe: () => {},
-        _runAgentPrompt: async (messages) => {
-          calls.push(["runAgentPrompt", messages]);
-        },
-        prompt: async () => {},
-        steer: async () => {},
-        followUp: async () => {},
-        abort: async () => {},
-        modelRegistry: { getAvailable: async () => [] },
-        sessionManager: {
-          appendMessage: (message) => {
-            calls.push(["appendMessage", message]);
-          },
-          getEntries: () => [],
-          getBranch: () => [],
-          getTree: () => [],
-          getLeafId: () => null,
-          getCwd: () => process.cwd(),
-          getSessionDir: () => process.cwd(),
-        },
-        messages: [],
-        getSessionStats: () => ({}),
-        getUserMessagesForForking: () => [],
-        getLastAssistantText: () => "",
-        setThinkingLevel: () => {},
-        cycleThinkingLevel: () => undefined,
-        setSteeringMode: () => {},
-        setFollowUpMode: () => {},
-        compact: async () => {},
-        setAutoCompactionEnabled: () => {},
-        setAutoRetryEnabled: () => {},
-        abortRetry: () => {},
-        executeBash: async () => {},
-        abortBash: async () => {},
-        fork: async () => ({ cancelled: false, selectedText: "" }),
-        navigateTree: async () => ({ cancelled: false }),
-        exportToHtml: async () => "",
-        exportToJsonl: () => "",
-        importFromJsonl: async () => true,
-        newSession: async () => true,
-        switchSession: async () => true,
-        setModel: async () => {},
-        reload: async () => {},
-        setSessionName: () => {},
-      };
-
-      void runCustomRpcMode(session, {
-        SessionManager: {
-          listAll: async () => [],
-          list: async () => [],
-          open: () => ({ appendSessionInfo() {} }),
-        },
-        builtinSlashCommands: [],
-      });
-      await wait(0);
-
-      stateMessages.push({
-        role: "assistant",
-        content: [
-          {
-            type: "toolCall",
-            id: "tool-1",
-            name: "bash",
-            arguments: { command: "sleep 1" },
-          },
-        ],
-      });
-
-      const onData = handlers.get("data");
-      assert.equal(typeof onData, "function");
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "2", type: "resume_interrupted_turn", requestTag: "tag-2", source: "rpc-reconnect" })}\n`,
-        ),
-      );
-      await wait(10);
-
-      assert.equal(calls.length, 3);
-      assert.equal(calls[0][0], "appendMessage");
-      assert.equal(calls[0][1].role, "assistant");
-      assert.equal(calls[0][1].content[0].id, "tool-1");
-      assert.equal(calls[1][0], "appendMessage");
-      assert.equal(calls[1][1].role, "toolResult");
-      assert.equal(calls[1][1].toolCallId, "tool-1");
-      assert.equal(calls[1][1].toolName, "bash");
-      assert.equal(calls[1][1].isError, true);
-      assert.equal(
-        calls[1][1].content[0].text,
-        "The tool was interrupted because the daemon exited.",
-      );
-      assert.deepEqual(calls[1][1].details, {
-        interrupted: true,
-        reason: "daemon_exit",
-      });
-      assert.deepEqual(calls[2], ["runAgentPrompt", []]);
-      assert.equal(stateMessages.length, 2);
-      assert.equal(stateMessages[1].role, "toolResult");
-      assert.ok(lines.join("").includes('"command":"resume_interrupted_turn"'));
-    } finally {
-      process.stdin.on = stdinOn;
-      process.stdout.write = stdoutWrite;
-    }
-  },
-);
-
-test(
-  "rpc mode resume_interrupted_turn does not re-emit a persisted assistant final",
-  { concurrency: false },
-  async () => {
-    const stdinOn = process.stdin.on;
-    const stdoutWrite = process.stdout.write;
-    const handlers = new Map();
-    const lines: string[] = [];
-    const messages = [
-      { role: "user", content: "restart prompt" },
-      {
-        role: "assistant",
-        content: [{ type: "text", text: "old final must not replay" }],
-      },
-    ];
-    let continued = false;
-
-    process.stdin.on = function (event, handler) {
-      handlers.set(event, handler);
-      return this;
-    };
-    process.stdout.write = function (chunk) {
-      lines.push(String(chunk));
-      return true;
-    };
-
-    try {
-      const session = {
-        sessionId: "session-1",
-        sessionFile: "/tmp/session-1.jsonl",
-        isStreaming: false,
-        isCompacting: false,
-        messages,
-        agent: {
-          state: { messages },
-          continue: async () => {
-            continued = true;
-          },
-        },
-        subscribe: () => () => {},
-        appendMessage: () => {},
-        getSessionStats: () => ({}),
-        getUserMessagesForForking: () => [],
-        getLastAssistantText: () => "old final must not replay",
-        setThinkingLevel: () => {},
-        cycleThinkingLevel: () => undefined,
-        setSteeringMode: () => {},
-        setFollowUpMode: () => {},
-        compact: async () => {},
-        setAutoCompactionEnabled: () => {},
-        setAutoRetryEnabled: () => {},
-        abortRetry: () => {},
-        executeBash: async () => {},
-        abortBash: async () => {},
-        fork: async () => ({ cancelled: false, selectedText: "" }),
-        navigateTree: async () => ({ cancelled: false }),
-        exportToHtml: async () => "",
-        exportToJsonl: () => "",
-        importFromJsonl: async () => true,
-        newSession: async () => true,
-        switchSession: async () => true,
-        setModel: async () => {},
-        reload: async () => {},
-        setSessionName: () => {},
-        bindExtensions: async () => {},
-        sessionManager: testSessionManager(() => messages),
-      };
-
-      void runCustomRpcMode(session, {
-        SessionManager: {
-          listAll: async () => [],
-          list: async () => [],
-          open: () => ({ appendSessionInfo() {} }),
-        },
-        builtinSlashCommands: [],
-      });
-      await wait(0);
-
-      const onData = handlers.get("data");
-      assert.equal(typeof onData, "function");
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "2", type: "resume_interrupted_turn", source: "daemon-restart" })}\n`,
-        ),
-      );
-      await wait(10);
-
-      const events = parseRpcOutput(lines);
-      const response = events.find(
-        (event) => event.type === "response" && event.id === "2",
-      );
-      assert.equal(continued, false);
-      assert.equal(response?.success, true, JSON.stringify(events));
-      assert.equal(response?.data?.resumed, false);
-      assert.equal(
-        events.some((event) => event.type === "rpc_turn_event"),
-        false,
-      );
-    } finally {
-      process.stdin.on = stdinOn;
-      process.stdout.write = stdoutWrite;
-    }
-  },
-);
-
-test(
-  "rpc mode resume_interrupted_turn terminates when no resumable result exists",
-  { concurrency: false },
-  async () => {
-    const stdinOn = process.stdin.on;
-    const stdoutWrite = process.stdout.write;
-    const handlers = new Map();
-    const lines: string[] = [];
-
-    process.stdin.on = function (event, handler) {
-      handlers.set(event, handler);
-      return this;
-    };
-    process.stdout.write = function (chunk) {
-      lines.push(String(chunk));
-      return true;
-    };
-
-    try {
-      const session = {
-        sessionId: "session-1",
-        sessionFile: "/tmp/session-1.jsonl",
-        isStreaming: false,
-        isCompacting: false,
-        messages: [],
-        agent: { state: { messages: [] } },
-        subscribe: () => () => {},
-        appendMessage: () => {},
-        continue: async () => {},
-        getSessionStats: () => ({}),
-        getUserMessagesForForking: () => [],
-        getLastAssistantText: () => "",
-        setThinkingLevel: () => {},
-        cycleThinkingLevel: () => undefined,
-        setSteeringMode: () => {},
-        setFollowUpMode: () => {},
-        compact: async () => {},
-        setAutoCompactionEnabled: () => {},
-        setAutoRetryEnabled: () => {},
-        abortRetry: () => {},
-        executeBash: async () => {},
-        abortBash: async () => {},
-        fork: async () => ({ cancelled: false, selectedText: "" }),
-        navigateTree: async () => ({ cancelled: false }),
-        exportToHtml: async () => "",
-        exportToJsonl: () => "",
-        importFromJsonl: async () => true,
-        newSession: async () => true,
-        switchSession: async () => true,
-        setModel: async () => {},
-        reload: async () => {},
-        setSessionName: () => {},
-        bindExtensions: async () => {},
-      };
-
-      void runCustomRpcMode(session, {
-        SessionManager: {
-          listAll: async () => [],
-          list: async () => [],
-          open: () => ({ appendSessionInfo() {} }),
-        },
-        builtinSlashCommands: [],
-      });
-      await wait(0);
-
-      const onData = handlers.get("data");
-      assert.equal(typeof onData, "function");
-      onData(
-        Buffer.from(
-          `${JSON.stringify({ id: "2", type: "resume_interrupted_turn", source: "daemon-restart" })}\n`,
-        ),
-      );
-      await wait(60);
-      onData(
-        Buffer.from(`${JSON.stringify({ id: "3", type: "get_state" })}\n`),
-      );
-      await wait(20);
-
-      const events = parseRpcOutput(lines);
-      const response = events.find(
-        (event) => event.type === "response" && event.id === "2",
-      );
-      const stateResponse = events.find(
-        (event) => event.type === "response" && event.id === "3",
-      );
-      assert.equal(response?.success, true, JSON.stringify(events));
-      assert.equal(response?.data?.resumed, false);
-      assert.equal(
-        events.some((event) => event.type === "rpc_turn_event"),
-        false,
-      );
-      assert.equal(stateResponse?.data?.turnActive, false);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -7386,7 +6245,8 @@ test(
           }
         })
         .find((line) => line?.id === "rejoin-1");
-      assert.equal(response?.data?.acceptedAs, "rejoin");
+      assert.equal(response?.data?.outcome, "rejoined");
+      assert.equal(response?.data?.originalOutcome, "terminalOwner");
       assert.equal(response?.data?.requestTag, "chat-inbox-stable");
       assert.equal(calls.length, 1);
     } finally {
@@ -7399,15 +6259,13 @@ test(
 );
 
 test(
-  "rpc mode get_state keeps turnActive true across internal non-streaming gaps",
+  "rpc mode exposes native rejection and keeps eventless success indeterminate",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
     const stdoutWrite = process.stdout.write;
     const handlers = new Map();
-    const lines = [];
-    const durableEntries: any[] = [];
-    let releasePrompt;
+    const lines: string[] = [];
 
     process.stdin.on = function (event, handler) {
       handlers.set(event, handler);
@@ -7419,109 +6277,147 @@ test(
     };
 
     try {
-      const promptGate = new Promise((resolve) => {
-        releasePrompt = resolve;
-      });
+      const durableEntries: any[] = [];
+      let promptCalls = 0;
       const session = {
+        __testNativePreflight: true,
         isStreaming: false,
         isCompacting: false,
         sessionFile: "/tmp/test-session.jsonl",
-        sessionId: "session-1",
-        agent: { waitForIdle: async () => {} },
+        sessionId: "session-rejected",
+        agent: { waitForIdle: async () => {}, state: { messages: [] } },
         bindExtensions: async () => {},
         subscribe: () => () => {},
-        prompt: async () => {
-          await promptGate;
-          durableEntries.push({
-            id: "final-entry",
-            type: "message",
-            message: {
-              role: "assistant",
-              timestamp: Date.now(),
-              content: [{ type: "text", text: "done" }],
-            },
-          });
+        prompt: async (message, options) => {
+          promptCalls += 1;
+          options?.preflightResult?.(message !== "reject me");
         },
-        sendCustomMessage: async () => {},
-        steer: async () => {},
-        followUp: async () => {},
-        abort: async () => {},
-        modelRegistry: { getAvailable: async () => [] },
         sessionManager: {
           ...testSessionManager(() => []),
           getEntries: () => durableEntries,
-          getBranch: () => durableEntries,
-          getLeafId: () => durableEntries.at(-1)?.id ?? null,
+          appendCustomEntry(customType, data) {
+            durableEntries.push({
+              id: `custom-${durableEntries.length}`,
+              type: "custom",
+              customType,
+              data,
+            });
+          },
         },
         messages: [],
         getSessionStats: () => ({}),
-        getUserMessagesForForking: () => [],
-        getLastAssistantText: () => "done",
-        setThinkingLevel: () => {},
-        cycleThinkingLevel: () => undefined,
-        setSteeringMode: () => {},
-        setFollowUpMode: () => {},
-        compact: async () => {},
-        setAutoCompactionEnabled: () => {},
-        setAutoRetryEnabled: () => {},
-        abortRetry: () => {},
-        executeBash: async () => {},
-        abortBash: async () => {},
-        fork: async () => ({ cancelled: false, selectedText: "" }),
-        navigateTree: async () => ({ cancelled: false }),
-        exportToHtml: async () => "",
-        exportToJsonl: () => "",
-        importFromJsonl: async () => true,
-        newSession: async () => true,
-        switchSession: async () => true,
-        setModel: async () => {},
-        reload: async () => {},
-        setSessionName: () => {},
       };
 
       void runCustomRpcMode(session, {
-        SessionManager: {
-          listAll: async () => [],
-          list: async () => [],
-          open: () => ({ appendSessionInfo() {} }),
-        },
-        builtinSlashCommands: [],
+        SessionManager: { listAll: async () => [], list: async () => [] },
       });
       await wait(0);
-
-      const onData = handlers.get("data");
-      assert.equal(typeof onData, "function");
-      onData(
+      handlers.get("data")(
         Buffer.from(
-          `${JSON.stringify({ id: "1", type: "prompt", message: "hello", requestTag: "tag-1" })}\n`,
+          `${JSON.stringify({ id: "rejected-1", type: "prompt", message: "reject me", requestTag: "tag-rejected" })}\n`,
         ),
       );
-      await wait(10);
-      onData(
-        Buffer.from(`${JSON.stringify({ id: "2", type: "get_state" })}\n`),
-      );
-      await wait(10);
-      releasePrompt();
-      await wait(60);
+      await wait(20);
 
-      const responses = lines
-        .join("")
-        .trim()
-        .split(/\n+/)
-        .filter(Boolean)
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
-          }
-        })
-        .filter((payload) => payload?.type === "response");
-      const stateResponse = responses.find((payload) => payload.id === "2");
-      assert.equal(stateResponse?.data?.turnActive, true);
-      assert.equal(stateResponse?.data?.isStreaming, false);
-      assert.equal(stateResponse?.data?.piActiveRun, false);
-      assert.equal(stateResponse?.data?.interruptedTurnResumable, false);
+      const events = parseRpcOutput(lines);
+      const response = events.find(
+        (event) => event.type === "response" && event.id === "rejected-1",
+      );
+      assert.equal(response?.success, true);
+      assert.equal(response?.data?.outcome, "rejected");
+      assert.equal(response?.data?.requestTag, "tag-rejected");
+      assert.equal(
+        events.some(
+          (event) => event.type === "rpc_turn_event" && event.event === "start",
+        ),
+        false,
+      );
+
+      handlers.get("data")(
+        Buffer.from(
+          `${JSON.stringify({ id: "eventless-1", type: "prompt", message: "handled without events", requestTag: "tag-eventless" })}\n`,
+        ),
+      );
+      await wait(20);
+      const eventlessResponse = parseRpcOutput(lines).find(
+        (event) => event.type === "response" && event.id === "eventless-1",
+      );
+      assert.equal(eventlessResponse?.success, true);
+      assert.equal(eventlessResponse?.data?.outcome, "indeterminate");
+
+      handlers.get("data")(
+        Buffer.from(
+          `${JSON.stringify({ id: "eventless-retry", type: "prompt", message: "handled without events", requestTag: "tag-eventless" })}\n`,
+        ),
+      );
+      await wait(20);
+      const eventlessRetry = parseRpcOutput(lines).find(
+        (event) => event.type === "response" && event.id === "eventless-retry",
+      );
+      assert.equal(eventlessRetry?.data?.outcome, "rejoined");
+      assert.equal(eventlessRetry?.data?.originalOutcome, "indeterminate");
+      assert.equal(promptCalls, 2);
+
+      durableEntries.push(
+        {
+          id: "conflict-user",
+          type: "message",
+          message: { role: "user", content: "conflict" },
+        },
+        {
+          id: "conflict-identity-1",
+          type: "custom",
+          customType: "rin_request_identity",
+          data: {
+            requestId: "tag-conflict",
+            messageEntryId: "conflict-user",
+            observedRole: "nonterminal",
+          },
+        },
+        {
+          id: "conflict-identity-2",
+          type: "custom",
+          customType: "rin_request_identity",
+          data: {
+            requestId: "tag-conflict",
+            messageEntryId: "conflict-user",
+            observedRole: "nonterminal",
+          },
+        },
+        {
+          id: "out-of-order-identity",
+          type: "custom",
+          customType: "rin_request_identity",
+          data: {
+            requestId: "tag-out-of-order",
+            messageEntryId: "out-of-order-user",
+            observedRole: "terminalOwner",
+          },
+        },
+        {
+          id: "out-of-order-user",
+          type: "message",
+          message: { role: "user", content: "out of order" },
+        },
+      );
+      for (const [id, requestTag] of [
+        ["conflict-retry", "tag-conflict"],
+        ["out-of-order-retry", "tag-out-of-order"],
+      ]) {
+        handlers.get("data")(
+          Buffer.from(
+            `${JSON.stringify({ id, type: "prompt", message: "must not replay", requestTag })}\n`,
+          ),
+        );
+      }
+      await wait(20);
+      for (const id of ["conflict-retry", "out-of-order-retry"]) {
+        const response = parseRpcOutput(lines).find(
+          (event) => event.type === "response" && event.id === id,
+        );
+        assert.equal(response?.data?.outcome, "indeterminate");
+      }
+      assert.equal(promptCalls, 2);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

@@ -24,7 +24,12 @@ function createSessionFrontendClient(controller) {
       return () => {};
     },
     async prompt(text, options = {}) {
-      return await controller.session?.prompt?.(text, options);
+      return (
+        (await controller.session?.prompt?.(text, options)) || {
+          outcome: "terminalOwner",
+          requestTag: options.requestTag,
+        }
+      );
     },
     async getState() {
       return state();
@@ -141,16 +146,6 @@ function createSessionFrontendClient(controller) {
       return await controller.session?.resetModelOptionsFromSettings?.();
     },
     async respondExtensionUi() {},
-    consumeQueuedOfflineOperation(requestTag) {
-      const queued = controller.session?.queuedOfflineOps;
-      if (!Array.isArray(queued) || !requestTag) return false;
-      const index = queued.findIndex((item) => item?.requestTag === requestTag);
-      if (index < 0) return false;
-      queued.splice(index, 1);
-      controller.session?.syncPendingCount?.();
-      controller.session?.emitFrontendStatus?.(true);
-      return true;
-    },
   };
 }
 

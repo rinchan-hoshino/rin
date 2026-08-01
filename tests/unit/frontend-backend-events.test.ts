@@ -91,7 +91,7 @@ test("frontend backend event translator exposes status as a shared frontend even
   );
 });
 
-test("frontend backend event translator exposes Pi working and compaction events", () => {
+test("shared frontend translation ignores TUI visibility preferences", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
   assert.deepEqual(
@@ -100,7 +100,7 @@ test("frontend backend event translator exposes Pi working and compaction events
       method: "setWorkingVisible",
       visible: true,
     }),
-    [{ type: "working_visible", visible: true }],
+    [],
   );
   assert.deepEqual(
     translator.translate({
@@ -108,7 +108,7 @@ test("frontend backend event translator exposes Pi working and compaction events
       method: "setWorkingVisible",
       visible: false,
     }),
-    [{ type: "working_visible", visible: false }],
+    [],
   );
   assert.deepEqual(translator.translate({ type: "rin_working_start" }), []);
   assert.deepEqual(translator.translate({ type: "rin_working_end" }), []);
@@ -790,7 +790,7 @@ test("frontend backend event translator exposes retry lifecycle without terminal
   );
 });
 
-test("frontend backend event translator returns final typed turn events after completion", () => {
+test("frontend backend event translator leaves terminal commit dedupe to the driver", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
   assert.deepEqual(
@@ -831,6 +831,14 @@ test("frontend backend event translator returns final typed turn events after co
       sessionId: "session-1",
       sessionFile: "/tmp/session.jsonl",
     }),
-    [],
+    [
+      {
+        type: "turn_error",
+        error: "late duplicate terminal",
+        sessionId: "session-1",
+        sessionFile: "/tmp/session.jsonl",
+        requestTag: "tag-1",
+      },
+    ],
   );
 });

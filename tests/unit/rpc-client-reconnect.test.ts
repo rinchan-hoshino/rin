@@ -406,7 +406,7 @@ test("rpc interactive session keeps a recovering turn busy while reconnecting af
   session.recoveryPending = false;
   session.rpcConnected = true;
   session.activeTurn = { mode: "prompt", message: "hi" };
-  session.backendWorkingVisible = true;
+  session.backendWorking = true;
   session.syncStreamingState();
   seen.length = 0;
 
@@ -414,7 +414,7 @@ test("rpc interactive session keeps a recovering turn busy while reconnecting af
 
   assert.equal(session.isStreaming, true);
   assert.equal(session.activeTurn, null);
-  assert.equal(session.backendWorkingVisible, true);
+  assert.equal(session.backendWorking, true);
   assert.deepEqual(session.getFrontendStatusEvent(), {
     type: "rpc_frontend_status",
     phase: "connecting",
@@ -492,7 +492,7 @@ test("rpc interactive session exposes compaction as a distinct frontend phase", 
   });
 });
 
-test("rpc interactive session does not derive Working from turnActive snapshots", () => {
+test("rpc interactive session uses the explicit backend Working snapshot", () => {
   const client = { isConnected: () => true };
   const session = new RpcInteractiveSession(client);
   session.rpcConnected = true;
@@ -504,16 +504,16 @@ test("rpc interactive session does not derive Working from turnActive snapshots"
     turnActive: true,
     isStreaming: false,
     isCompacting: false,
-    workingVisible: false,
+    working: true,
   });
 
   assert.equal(session.remoteTurnRunning, true);
   assert.equal(session.agentStreaming, false);
   assert.equal(session.isStreaming, true);
-  assert.equal(session.getFrontendStatusEvent(), null);
+  assert.equal(session.getFrontendStatusEvent()?.phase, "working");
 });
 
-test("rpc interactive session applies backend visibility at Pi agent boundaries", async () => {
+test("rpc interactive session maps backend Working to the Pi presentation", async () => {
   const client = { isConnected: () => true };
   const session = new RpcInteractiveSession(client);
   const visible: boolean[] = [];
@@ -532,25 +532,39 @@ test("rpc interactive session applies backend visibility at Pi agent boundaries"
     type: "extension_ui_request",
     method: "setWorkingVisible",
     visible: true,
+    working: true,
   });
-  assert.equal(session.backendWorkingVisible, true);
-  assert.deepEqual(visible, []);
-  assert.equal(session.getFrontendStatusEvent()?.phase, "sending");
+  assert.equal(session.backendWorking, true);
+  assert.deepEqual(visible, [false, true]);
 
-  session.handleRpcEvent({ type: "agent_start" });
+  session.handleRpcEvent({ type: "agent_start", working: true });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(visible, [true]);
+  assert.equal(session.backendWorking, true);
+  assert.deepEqual(visible, [false, true, true]);
   assert.equal(session.getFrontendStatusEvent()?.phase, "working");
+
+  session.handleRpcEvent({ type: "agent_end", working: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(session.backendWorking, true);
+  assert.deepEqual(visible, [false, true, true, true]);
 
   session.handleRpcEvent({
     type: "extension_ui_request",
     method: "setWorkingVisible",
     visible: false,
   });
-  session.handleRpcEvent({ type: "agent_end" });
+  assert.equal(session.backendWorking, true);
+  assert.deepEqual(visible, [false, true, true, true, false]);
+  assert.equal(session.getFrontendStatusEvent()?.phase, "working");
+
+  session.handleRpcEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    working: false,
+  });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(visible, [true, false]);
-  assert.equal(session.getFrontendStatusEvent()?.phase, "sending");
+  assert.equal(session.backendWorking, false);
+  assert.deepEqual(visible, [false, true, true, true, false, false]);
 });
 
 test("rpc interactive session clears recovering turn state after an idle recovery snapshot", () => {
@@ -725,7 +739,7 @@ test("rpc interactive session does not self-deadlock when restore sees a disconn
   assert.equal(session.recoveryPending, true);
 });
 
-test("rpc interactive session routes explicit follow-up through its distinct action", async () => {
+test("rpc interactive session routes follow-up intent through the ordinary prompt RPC", async () => {
   const calls = [];
   const client = {
     isConnected: () => true,
@@ -742,12 +756,12 @@ test("rpc interactive session routes explicit follow-up through its distinct act
     expandPromptTemplates: false,
     images: [{ path: "/tmp/a.png" }],
     source: "tui-test",
-    streamingBehavior: "followUp",
+    streamingBehavior: undefined,
   });
 
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0], {
-    type: "follow_up",
+    type: "prompt",
     message: "  hello  ",
     images: [{ path: "/tmp/a.png" }],
     source: "tui-test",
@@ -775,144 +789,6 @@ test("rpc interactive session attaches a request tag to prompt turns by default"
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.type, "prompt");
   assert.match(String(calls[0]?.requestTag || ""), /^rin-tui-/);
-});
-
-test("rpc interactive session recovers prompt submission timeout without surfacing an editor exception", async () => {
-  const calls = [];
-  let promptCalls = 0;
-  const client = {
-    isConnected: () => true,
-    send: async (payload) => {
-      calls.push(payload);
-      if (payload.type === "prompt") {
-        promptCalls += 1;
-        if (promptCalls === 1) throw new Error("rin_timeout:prompt");
-        return { success: true, data: {} };
-      }
-      if (payload.type === "get_state") {
-        return {
-          success: true,
-          data: {
-            sessionId: "s1",
-            sessionFile: "/tmp/s1.jsonl",
-            thinkingLevel: "medium",
-            steeringMode: "all",
-            followUpMode: "one-at-a-time",
-            autoCompactionEnabled: false,
-            turnActive: false,
-            isStreaming: false,
-            isCompacting: false,
-            pendingMessageCount: 0,
-          },
-        };
-      }
-      return { success: true, data: {} };
-    },
-  };
-  const session = new RpcInteractiveSession(client);
-  session.ensureRemoteSession = async () => {};
-  session.refreshState = async () => {};
-  session.ensureReconnectLoop = () => Promise.resolve();
-  session.rpcConnected = true;
-  session.startupPending = false;
-
-  await session.prompt("hello", { expandPromptTemplates: false });
-
-  assert.equal(promptCalls, 1);
-  assert.equal(session.recoveryPending, true);
-  assert.deepEqual(session.getFrontendStatusEvent(), {
-    type: "rpc_frontend_status",
-    phase: "connecting",
-    label: "Connecting",
-    connected: true,
-  });
-
-  session.handleSessionRecovered();
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(promptCalls, 2);
-  assert.deepEqual(
-    calls
-      .filter((payload) => payload.type === "prompt")
-      .map((payload) => payload.message),
-    ["hello", "hello"],
-  );
-  assert.equal(session.recoveryPending, false);
-});
-
-test("rpc interactive session recovers steer prompt timeout without surfacing an editor exception", async () => {
-  const calls = [];
-  let promptCalls = 0;
-  const client = {
-    isConnected: () => true,
-    send: async (payload) => {
-      calls.push(payload);
-      if (payload.type === "prompt") {
-        promptCalls += 1;
-        throw new Error("rin_timeout:prompt");
-      }
-      if (payload.type === "get_state") {
-        return {
-          success: true,
-          data: {
-            sessionId: "s1",
-            sessionFile: "/tmp/s1.jsonl",
-            thinkingLevel: "medium",
-            steeringMode: "all",
-            followUpMode: "one-at-a-time",
-            autoCompactionEnabled: false,
-            turnActive: true,
-            isStreaming: true,
-            isCompacting: false,
-            pendingMessageCount: 0,
-          },
-        };
-      }
-      return { success: true, data: {} };
-    },
-  };
-  const session = new RpcInteractiveSession(client);
-  session.ensureRemoteSession = async () => {};
-  session.refreshState = async () => {};
-  session.ensureReconnectLoop = () => Promise.resolve();
-  session.rpcConnected = true;
-  session.startupPending = false;
-  session.remoteTurnRunning = true;
-  session.syncStreamingState();
-
-  await session.prompt("steer", {
-    expandPromptTemplates: false,
-    streamingBehavior: "steer",
-  });
-
-  assert.equal(promptCalls, 1);
-  assert.equal(session.recoveryPending, true);
-  assert.deepEqual(session.getFrontendStatusEvent(), {
-    type: "rpc_frontend_status",
-    phase: "connecting",
-    label: "Connecting",
-    connected: true,
-  });
-
-  session.handleSessionRecovered();
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(promptCalls, 1);
-  assert.deepEqual(
-    calls.filter((payload) => payload.type === "prompt"),
-    [
-      {
-        type: "prompt",
-        message: "steer",
-        images: undefined,
-        streamingBehavior: undefined,
-        source: undefined,
-        requestTag: calls[0]?.requestTag,
-      },
-    ],
-  );
-  assert.equal(session.recoveryPending, false);
-  assert.equal(session.remoteTurnRunning, true);
 });
 
 test("rpc interactive session preserves raw runtime error markers inside session logic", async () => {
@@ -951,60 +827,6 @@ test("rpc interactive session can shut down or terminate an attached worker with
   assert.equal(calls[1]?.type, "terminate_session");
 });
 
-test("rpc interactive session keeps recovery-pending prompts out of the Pi queue projection", async () => {
-  const calls = [];
-  const seen = [];
-  const session = new RpcInteractiveSession({
-    isConnected: () => true,
-    send: async (payload) => {
-      calls.push(payload);
-      return { success: true, data: {} };
-    },
-  });
-  session.ensureReconnectLoop = () => Promise.resolve();
-  session.startupPending = false;
-  session.recoveryPending = true;
-  session.rpcConnected = true;
-  session.subscribe((event) => seen.push(event));
-  seen.length = 0;
-
-  await session.prompt("hello", { expandPromptTemplates: false });
-
-  assert.equal(calls.length, 0);
-  assert.deepEqual(session.queuedOfflineOps, [
-    {
-      mode: "prompt",
-      message: "hello",
-      images: undefined,
-      streamingBehavior: undefined,
-      source: undefined,
-      requestTag: session.queuedOfflineOps[0]?.requestTag,
-    },
-  ]);
-  assert.match(
-    String(session.queuedOfflineOps[0]?.requestTag || ""),
-    /^rin-tui-/,
-  );
-  assert.deepEqual(session.getSteeringMessages(), []);
-  assert.equal(session.pendingMessageCount, 1);
-  assert.deepEqual(
-    seen.filter((event) => event.type === "queue_update"),
-    [{ type: "queue_update", steering: [], followUp: [] }],
-  );
-  assert.deepEqual(session.getFrontendStatusEvent(), {
-    type: "rpc_frontend_status",
-    phase: "connecting",
-    label: "Connecting",
-    connected: true,
-  });
-
-  const cleared = session.clearQueue();
-  assert.deepEqual(cleared, { steering: [], followUp: [] });
-  assert.deepEqual(session.queuedOfflineOps, []);
-  assert.deepEqual(session.getSteeringMessages(), []);
-  assert.equal(session.pendingMessageCount, 0);
-});
-
 test("rpc interactive session exits connecting after get_state succeeds and delays resync until history refresh finishes", async () => {
   const calls = [];
   const refreshes = [];
@@ -1027,7 +849,7 @@ test("rpc interactive session exits connecting after get_state succeeds and dela
             followUpMode: "one-at-a-time",
             autoCompactionEnabled: false,
             isStreaming: true,
-            workingVisible: true,
+            working: true,
             isCompacting: false,
             pendingMessageCount: 0,
           },
@@ -1053,7 +875,7 @@ test("rpc interactive session exits connecting after get_state succeeds and dela
 
   assert.equal(session.recoveryPending, false);
   assert.equal(resyncs, 0);
-  assert.equal(session.backendWorkingVisible, true);
+  assert.equal(session.backendWorking, true);
   assert.deepEqual(session.getFrontendStatusEvent(), {
     type: "rpc_frontend_status",
     phase: "working",
@@ -1062,7 +884,7 @@ test("rpc interactive session exits connecting after get_state succeeds and dela
   });
   assert.deepEqual(
     calls.map((payload) => payload.type),
-    ["get_state", "replay_pending_terminal_turn_event"],
+    ["get_state"],
   );
   assert.deepEqual(refreshes, [{ messages: true, session: true }]);
 
@@ -1071,7 +893,7 @@ test("rpc interactive session exits connecting after get_state succeeds and dela
   assert.equal(resyncs, 1);
 });
 
-test("rpc interactive session finishes daemon-side session recovery without dropping transport", async () => {
+test("rpc interactive session reconnects without replaying queued turns", async () => {
   const calls = [];
   const refreshes = [];
   let releaseRefresh;
@@ -1114,23 +936,14 @@ test("rpc interactive session finishes daemon-side session recovery without drop
   session.rpcConnected = true;
   session.startupPending = false;
   session.recoveryPending = true;
-  session.queuedOfflineOps = [
-    {
-      mode: "prompt",
-      message: "hello",
-      requestTag: "tag-1",
-    },
-  ];
-
   session.handleSessionRecovered();
   await new Promise((resolve) => setTimeout(resolve, 10));
 
   assert.equal(session.recoveryPending, false);
   assert.equal(resyncs, 0);
-  assert.equal(session.queuedOfflineOps.length, 0);
   assert.deepEqual(
     calls.map((payload) => payload.type),
-    ["get_state", "replay_pending_terminal_turn_event", "prompt"],
+    ["get_state"],
   );
   assert.deepEqual(refreshes, [{ messages: true, session: true }]);
 

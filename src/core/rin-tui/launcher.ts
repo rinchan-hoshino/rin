@@ -10,6 +10,7 @@ import {
 import {
   RIN_TUI_MAINTENANCE_ROLE,
   RIN_TUI_RPC_FRONTEND_ROLE,
+  RIN_TUI_RUNTIME_ROLE_ENV,
   setRinTuiRuntimeRole,
   type RinTuiRuntimeRole,
 } from "../tui-runtime-env.js";
@@ -476,7 +477,11 @@ export async function startTui(options: StartTuiOptions = {}) {
       options.additionalExtensionPaths ??
       parsedTuiOptions.resources.additionalExtensionPaths,
   };
-  const maintenanceMode = await shouldStartMaintenanceMode();
+  const requestedRole =
+    process.env[RIN_TUI_RUNTIME_ROLE_ENV] === RIN_TUI_MAINTENANCE_ROLE
+      ? RIN_TUI_MAINTENANCE_ROLE
+      : undefined;
+  const maintenanceMode = await shouldStartMaintenanceMode({ requestedRole });
   applyTuiRuntimeRole(maintenanceMode);
   const interactiveOptions: TuiInteractiveOptions = {
     initialMessage: parsedTuiOptions.initialMessage,

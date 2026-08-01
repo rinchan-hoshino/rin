@@ -3,6 +3,10 @@ import path from "node:path";
 import { RIN_DIR_ENV } from "../rin-lib/runtime.js";
 import { buildUserShell, targetUserRuntimeEnv } from "../rin-lib/system.js";
 import {
+  RIN_TUI_MAINTENANCE_ROLE,
+  RIN_TUI_RUNTIME_ROLE_ENV,
+} from "../tui-runtime-env.js";
+import {
   assertDaemonAvailable,
   createTargetExecutionContext,
   installConfigPath,
@@ -73,7 +77,10 @@ export async function resolveTuiLaunchEnvironment(
     return { runtimeEnv };
   } catch (error) {
     return {
-      runtimeEnv,
+      runtimeEnv: {
+        ...runtimeEnv,
+        [RIN_TUI_RUNTIME_ROLE_ENV]: RIN_TUI_MAINTENANCE_ROLE,
+      },
       maintenanceModeNotice: formatMaintenanceModeNotice(error),
     };
   }

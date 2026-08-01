@@ -62,7 +62,7 @@ test("chat inbox atomically commits the inbound message and one durable turn", a
   );
   const db = database.openChatDatabase(agentDir);
   assert.equal(
-    db.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
+    db.prepare("SELECT COUNT(*) AS value FROM inbox_jobs").get().value,
     1,
   );
   assert.equal(
@@ -76,7 +76,7 @@ test("chat inbox transaction rolls back the message when turn commit crashes", a
   const db = database.openChatDatabase(agentDir);
   db.exec(`
     CREATE TRIGGER crash_turn_insert
-    BEFORE INSERT ON turns
+    BEFORE INSERT ON inbox_jobs
     BEGIN
       SELECT RAISE(ABORT, 'injected_turn_crash');
     END;
@@ -90,7 +90,7 @@ test("chat inbox transaction rolls back the message when turn commit crashes", a
     0,
   );
   assert.equal(
-    db.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
+    db.prepare("SELECT COUNT(*) AS value FROM inbox_jobs").get().value,
     0,
   );
 });
@@ -135,245 +135,40 @@ test("chat inbox duplicate delivery cannot revive a terminal turn", async () => 
   );
 });
 
-test("chat inbox claim is unique and fenced through retry ownership", async () => {
+test("chat inbox reconciliation atomically fences the previous executor", async () => {
   const agentDir = await tempDir();
-  const { item } = inbox.enqueueChatInboxItem(agentDir, input());
+  const { item } = inbox.enqueueChatInboxItem(agentDir, input("m-reclaim"));
+  const nowMs = Date.now();
   const first = inbox.claimChatInboxItem(agentDir, item.itemId, {
-    leaseMs: 10,
-    nowMs: 1000,
+    nowMs,
+    leaseMs: 100,
   });
-  assert.ok(first);
-  assert.equal(inbox.claimChatInboxItem(agentDir, item.itemId), null);
-
-  const restored = inbox.restoreProcessingChatInboxItems(agentDir, {
-    nowMs: 1011,
+  const reclaimed = inbox.reclaimRunningChatInboxItem(agentDir, first, {
+    nowMs: nowMs + 10,
+    force: true,
   });
-  assert.equal(restored.length, 1);
-  const second = inbox.claimChatInboxItem(agentDir, item.itemId, {
-    nowMs: 1012,
-  });
-  assert.ok(second);
-  assert.notEqual(second.ownerEpoch, first.ownerEpoch);
+  assert.equal(reclaimed.itemId, item.itemId);
+  assert.notEqual(reclaimed.ownerEpoch, first.ownerEpoch);
+  assert.equal(reclaimed.attemptCount, first.attemptCount + 1);
+  assert.equal(
+    inbox.touchClaimedChatInboxItem(agentDir, first, { nowMs: nowMs + 20 }),
+    false,
+  );
   assert.equal(
     inbox.completeClaimedChatInboxItem(agentDir, first, {
-      disposition: "actionable",
+      terminalKind: "complete",
     }),
     false,
   );
   assert.equal(
-    inbox.completeClaimedChatInboxItem(agentDir, second, {
-      disposition: "actionable",
+    inbox.touchClaimedChatInboxItem(agentDir, reclaimed, {
+      nowMs: nowMs + 20,
     }),
     true,
   );
-  assert.equal(inbox.getChatInboxItem(agentDir, item.itemId).state, "terminal");
 });
 
-test("chat inbox admission is write-once across retry ownership", async () => {
-  const agentDir = await tempDir();
-  const { item } = inbox.enqueueChatInboxItem(agentDir, input());
-  const claim = inbox.claimChatInboxItem(agentDir, item.itemId);
-  assert.throws(
-    () =>
-      inbox.commitClaimedChatInboxAdmission(agentDir, claim, {
-        state: "actionable",
-        decision: {
-          version: 1,
-          kind: "message",
-          decision: { allow: true },
-        },
-        submission: {
-          version: 1,
-          chatKey: "telegram/other:chat",
-          incomingMessageId: claim.messageId,
-          text: "wrong chat",
-          attachments: [],
-          promptMeta: { chatKey: "telegram/other:chat", sentAt: 1234 },
-        },
-      }),
-    /chat_inbox_admission_identity_mismatch/,
-  );
-  const actionable = inbox.commitClaimedChatInboxAdmission(agentDir, claim, {
-    state: "actionable",
-    decision: {
-      version: 1,
-      kind: "message",
-      decision: {
-        allow: true,
-        chatKey: claim.chatKey,
-        chatType: "private",
-      },
-    },
-    submission: {
-      version: 1,
-      chatKey: claim.chatKey,
-      incomingMessageId: claim.messageId,
-      text: "frozen prompt",
-      attachments: [],
-      promptMeta: { chatKey: claim.chatKey, sentAt: 1234 },
-    },
-  });
-  assert.equal(actionable?.state, "actionable");
-  assert.equal(actionable?.submission?.text, "frozen prompt");
-
-  const db = database.openChatDatabase(agentDir);
-  assert.equal(
-    db.prepare("SELECT disposition FROM messages WHERE message_id = 'm1'").get()
-      .disposition,
-    "actionable",
-  );
-  const hashes = db
-    .prepare(
-      "SELECT admission_json, admission_hash, submission_json, submission_hash " +
-        "FROM turns WHERE turn_id = ?",
-    )
-    .get(item.itemId);
-  assert.deepEqual(
-    {
-      decision: inbox.getChatInboxItem(agentDir, item.itemId).admission
-        .decisionIntegrity,
-      submission: inbox.getChatInboxItem(agentDir, item.itemId).admission
-        .submissionIntegrity,
-    },
-    { decision: "valid", submission: "valid" },
-  );
-  for (const invalidHash of [null, "mismatch"]) {
-    db.prepare("UPDATE turns SET submission_hash = ? WHERE turn_id = ?").run(
-      invalidHash,
-      item.itemId,
-    );
-    assert.equal(
-      inbox.getChatInboxItem(agentDir, item.itemId).admission
-        .submissionIntegrity,
-      "invalid",
-    );
-  }
-  db.prepare("UPDATE turns SET submission_hash = ? WHERE turn_id = ?").run(
-    hashes.submission_hash,
-    item.itemId,
-  );
-  for (const invalidHash of [null, "mismatch"]) {
-    db.prepare("UPDATE turns SET admission_hash = ? WHERE turn_id = ?").run(
-      invalidHash,
-      item.itemId,
-    );
-    assert.equal(
-      inbox.getChatInboxItem(agentDir, item.itemId).admission.decisionIntegrity,
-      "invalid",
-    );
-  }
-  db.prepare("UPDATE turns SET admission_hash = ? WHERE turn_id = ?").run(
-    hashes.admission_hash,
-    item.itemId,
-  );
-  for (const column of ["admission_json", "submission_json"]) {
-    db.prepare(
-      `UPDATE turns SET ${column} = ' ' || ${column} WHERE turn_id = ?`,
-    ).run(item.itemId);
-    const integrity = inbox.getChatInboxItem(agentDir, item.itemId).admission;
-    assert.equal(
-      column === "admission_json"
-        ? integrity.decisionIntegrity
-        : integrity.submissionIntegrity,
-      "invalid",
-    );
-    db.prepare(`UPDATE turns SET ${column} = ? WHERE turn_id = ?`).run(
-      column === "admission_json"
-        ? hashes.admission_json
-        : hashes.submission_json,
-      item.itemId,
-    );
-  }
-  inbox.requeueClaimedChatInboxItem(agentDir, claim, { delayMs: 0 });
-  inbox.enqueueChatInboxItem(agentDir, {
-    ...input(),
-    session: { ...input().session, content: "changed duplicate" },
-  });
-  const next = inbox.claimChatInboxItem(agentDir, item.itemId);
-  assert.equal(next.session.content, "content m1");
-  assert.equal(
-    inbox.commitClaimedChatInboxAdmission(agentDir, claim, {
-      state: "record_only",
-      decision: {
-        version: 1,
-        kind: "policy_rejected",
-        decision: { allow: false },
-      },
-    }),
-    null,
-  );
-  const preserved = inbox.commitClaimedChatInboxAdmission(agentDir, next, {
-    state: "record_only",
-    decision: {
-      version: 1,
-      kind: "policy_rejected",
-      decision: { allow: false },
-    },
-  });
-  assert.equal(preserved?.state, "actionable");
-  assert.equal(preserved?.submission?.text, "frozen prompt");
-  assert.equal(
-    inbox.getChatInboxItem(agentDir, item.itemId).admission.state,
-    "actionable",
-  );
-});
-
-test("chat inbox retry state and attempts are transactional", async () => {
-  const agentDir = await tempDir();
-  const { item } = inbox.enqueueChatInboxItem(agentDir, input());
-  const first = inbox.claimChatInboxItem(agentDir, item.itemId);
-  const pending = inbox.requeueClaimedChatInboxItem(agentDir, first, {
-    delayMs: 0,
-    error: "temporary",
-  });
-  assert.equal(pending.state, "pending");
-  assert.equal(pending.lastError, "temporary");
-  const second = inbox.claimChatInboxItem(agentDir, item.itemId);
-  assert.equal(second.attemptCount, 2);
-  const failed = inbox.failClaimedChatInboxItem(agentDir, second, "fatal");
-  assert.equal(failed.state, "failed");
-  assert.equal(failed.lastError, "fatal");
-});
-
-test("durably admitted inbox work remains pending after retry limit", async () => {
-  const agentDir = await tempDir();
-  const { item } = inbox.enqueueChatInboxItem(
-    agentDir,
-    input("accepted-retry-limit"),
-  );
-  const claim = inbox.claimChatInboxItem(agentDir, item.itemId);
-  inbox.commitClaimedChatInboxAdmission(agentDir, claim, {
-    state: "actionable",
-    decision: {
-      version: 1,
-      kind: "message",
-      decision: { allow: true },
-    },
-    submission: {
-      version: 1,
-      chatKey: claim.chatKey,
-      incomingMessageId: claim.messageId,
-      text: "recover me",
-      attachments: [],
-      promptMeta: { chatKey: claim.chatKey, sentAt: 1234 },
-    },
-  });
-  const db = database.openChatDatabase(agentDir);
-  db.prepare(`UPDATE turns SET attempt = 5 WHERE turn_id = ?`).run(
-    claim.itemId,
-  );
-
-  const pending = inboxDrain.requeueClaimedChatInboxJob(
-    agentDir,
-    { envelope: { ...claim, attemptCount: 5 } },
-    "still recovering",
-  );
-  assert.equal(pending.state, "pending");
-  assert.equal(pending.lastError, "still recovering");
-  assert.equal(inbox.getChatInboxItem(agentDir, item.itemId).state, "pending");
-});
-
-test("chat inbox heartbeat extends only the current claim", async () => {
+test("chat inbox lease expiry never creates a business terminal", async () => {
   const agentDir = await tempDir();
   const { item } = inbox.enqueueChatInboxItem(agentDir, input());
   const claim = inbox.claimChatInboxItem(agentDir, item.itemId, {
@@ -387,17 +182,12 @@ test("chat inbox heartbeat extends only the current claim", async () => {
     }),
     true,
   );
-  assert.equal(
-    inbox.restoreProcessingChatInboxItems(agentDir, { nowMs: 1101 }).length,
-    0,
-  );
-  assert.equal(
-    inbox.restoreProcessingChatInboxItems(agentDir, { nowMs: 1151 }).length,
-    1,
-  );
+  const current = inbox.getChatInboxItem(agentDir, item.itemId);
+  assert.equal(current.state, "running");
+  assert.equal(current.lastError, undefined);
 });
 
-test("chat generation supersedes old pending and running turns while preserving /new", async () => {
+test("chat generation interrupts old pending and running inbox_jobs while preserving /new", async () => {
   const agentDir = await tempDir();
   const oldPending = inbox.enqueueChatInboxItem(
     agentDir,
@@ -425,11 +215,11 @@ test("chat generation supersedes old pending and running turns while preserving 
   assert.equal(generation.currentGeneration, 1);
   assert.equal(
     inbox.getChatInboxItem(agentDir, oldPending.itemId).state,
-    "superseded",
+    "failed",
   );
   assert.equal(
     inbox.getChatInboxItem(agentDir, oldRunningItem.itemId).state,
-    "superseded",
+    "failed",
   );
   assert.equal(inbox.getChatInboxItem(agentDir, reset.itemId).state, "running");
   assert.equal(
@@ -439,7 +229,7 @@ test("chat generation supersedes old pending and running turns while preserving 
   assert.equal(
     database
       .openChatDatabase(agentDir)
-      .prepare("SELECT generation FROM turns WHERE turn_id = ?")
+      .prepare("SELECT generation FROM inbox_jobs WHERE turn_id = ?")
       .get(arrivedDuringReset.itemId).generation,
     1,
   );
@@ -453,13 +243,13 @@ test("chat generation supersedes old pending and running turns while preserving 
   const db = database.openChatDatabase(agentDir);
   assert.equal(
     db
-      .prepare("SELECT generation FROM turns WHERE turn_id = ?")
+      .prepare("SELECT generation FROM inbox_jobs WHERE turn_id = ?")
       .get(next.itemId).generation,
     1,
   );
 });
 
-test("chat inbox runtime recovery never synthesizes turns for pre-atomic accepted messages", async () => {
+test("chat inbox runtime recovery never synthesizes inbox_jobs for pre-atomic accepted messages", async () => {
   const agentDir = await tempDir();
   messageStore.saveChatMessage(agentDir, {
     chatKey: "discord/1:room",
@@ -474,39 +264,15 @@ test("chat inbox runtime recovery never synthesizes turns for pre-atomic accepte
     text: "update-owned migration only",
   });
 
-  assert.deepEqual(
-    inbox.restoreProcessingChatInboxItems(agentDir, {
-      nowMs: Date.parse("2026-07-14T01:01:00.000Z"),
-    }),
-    [],
-  );
+  assert.deepEqual(inbox.listRunningChatInboxItems(agentDir), []);
   assert.deepEqual(inbox.listPendingChatInboxItems(agentDir), []);
   assert.equal(
     database
       .openChatDatabase(agentDir)
-      .prepare("SELECT COUNT(*) AS count FROM turns")
+      .prepare("SELECT COUNT(*) AS count FROM inbox_jobs")
       .get().count,
     0,
   );
-});
-
-test("chat inbox drain requeues a reclaimed lease while the old controller still owns it", async () => {
-  const agentDir = await tempDir();
-  const item = inbox.enqueueChatInboxItem(agentDir, input("reclaimed")).item;
-  const jobs = [];
-  const drain = inboxDrain.createChatInboxDrain({
-    agentDir,
-    getController: () => ({ ownsInboundMessage: () => true }),
-    isInboundMessageProcessed: () => false,
-    enqueueClaimedInboxItem: (job) => jobs.push(job),
-    hasActiveChatKeyWorker: () => false,
-  });
-  await drain.drainChatInboxOnce();
-  assert.deepEqual(jobs, []);
-  const current = inbox.getChatInboxItem(agentDir, item.itemId);
-  assert.equal(current.state, "pending");
-  assert.match(current.lastError, /chat_inbound_still_owned/);
-  assert.ok(Date.parse(current.nextAttemptAt) > Date.now());
 });
 
 test("chat inbox drain skips rejected active-turn chatter and claims a later command", async () => {
@@ -618,6 +384,36 @@ test("chat inbox drain leaves a recovering chat pending while unrelated chats ru
   );
 });
 
+test("chat inbox drain lets a reset command interrupt an active recovering chat", async () => {
+  const agentDir = await tempDir();
+  const abort = inbox.enqueueChatInboxItem(
+    agentDir,
+    input("abort-recovery", "discord/1:recovering"),
+  ).item;
+  const jobs = [];
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({
+      hasActiveTurn: () => true,
+      ownsInboundMessage: () => false,
+    }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => jobs.push(job),
+    isChatKeyBlocked: () => true,
+    hasActiveChatKeyWorker: () => true,
+    isPriorityDuringActiveChatKeyWorker: () => true,
+    canClaimDuringActiveChatKeyWorker: () => true,
+  });
+
+  await drain.drainChatInboxOnce();
+
+  assert.deepEqual(
+    jobs.map((job) => job.envelope.messageId),
+    ["abort-recovery"],
+  );
+  assert.equal(inbox.getChatInboxItem(agentDir, abort.itemId).state, "running");
+});
+
 test("chat inbox drain claims unrelated chats concurrently and serializes each chat", async () => {
   const agentDir = await tempDir();
   inbox.enqueueChatInboxItem(agentDir, input("a1", "telegram/1:a"));
@@ -685,5 +481,5 @@ test("inbox implementation has no file queue or list-all-message recovery depend
   assert.doesNotMatch(source, /listChatMessages\s*\(/);
   assert.doesNotMatch(source, /listJsonFiles|writeJsonAtomic|claimFileToDir/);
   assert.match(source, /FROM messages/);
-  assert.match(source, /FROM turns/);
+  assert.match(source, /FROM inbox_jobs/);
 });

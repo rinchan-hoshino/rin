@@ -7,7 +7,6 @@ import {
   executeRinFrontendInterruptIntent,
   projectRinFrontendLifecycleEvent,
   reduceRinFrontendLifecycleState,
-  RinFrontendLifecycleTerminalGate,
   renderRinFrontendLifecycleEvent,
 } from "../../src/core/rin-frontend-sdk/frontend-lifecycle.js";
 
@@ -21,15 +20,13 @@ function apply(
   return event;
 }
 
-test("canonical lifecycle reducer owns working, compaction, retry, and terminal phases", () => {
+test("shared lifecycle reducer tracks facts without owning Working presentation", () => {
   const state = createRinFrontendLifecycleState();
 
   apply(state, { type: "agent_start" });
   assert.deepEqual(state, {
-    phase: "working",
     turnActive: true,
     isStreaming: true,
-    workingVisible: false,
     isCompacting: false,
     compactionReason: "",
     retryAttempt: 0,
@@ -39,7 +36,6 @@ test("canonical lifecycle reducer owns working, compaction, retry, and terminal 
   });
 
   apply(state, { type: "compaction_start", reason: "threshold" });
-  assert.equal(state.phase, "compacting");
   assert.equal(state.isCompacting, true);
   assert.equal(state.compactionReason, "threshold");
 
@@ -50,7 +46,6 @@ test("canonical lifecycle reducer owns working, compaction, retry, and terminal 
     delayMs: 2000,
     errorMessage: "Compaction failed: overloaded",
   });
-  assert.equal(state.phase, "retrying");
   assert.equal(state.retryAttempt, 1);
   assert.equal(state.maxRetryAttempts, 3);
   assert.equal(state.retryError, "Compaction failed: overloaded");
@@ -60,7 +55,6 @@ test("canonical lifecycle reducer owns working, compaction, retry, and terminal 
     source: "compaction",
     reason: "threshold",
   });
-  assert.equal(state.phase, "compacting");
   assert.equal(state.retryAttempt, 0);
   assert.equal(state.isCompacting, true);
 
@@ -71,7 +65,6 @@ test("canonical lifecycle reducer owns working, compaction, retry, and terminal 
     willRetry: false,
     errorMessage: "Compaction failed after retries",
   });
-  assert.equal(state.phase, "working");
   assert.equal(state.isCompacting, false);
 
   apply(state, {
@@ -81,17 +74,14 @@ test("canonical lifecycle reducer owns working, compaction, retry, and terminal 
     delayMs: 1000,
     errorMessage: "Provider unavailable",
   });
-  assert.equal(state.phase, "retrying");
   assert.equal(state.retryAttempt, 2);
 
   apply(state, { type: "auto_retry_end", success: true, attempt: 2 });
-  assert.equal(state.phase, "working");
   assert.equal(state.retryAttempt, 0);
 
   apply(state, { type: "agent_end" });
   apply(state, { type: "agent_settled" });
   assert.equal(state.turnActive, true);
-  assert.equal(state.phase, "working");
 
   apply(state, {
     type: "rpc_turn_event",
@@ -99,7 +89,6 @@ test("canonical lifecycle reducer owns working, compaction, retry, and terminal 
     error: "Provider unavailable",
     requestTag: "turn-1",
   });
-  assert.equal(state.phase, "idle");
   assert.equal(state.turnActive, false);
   assert.equal(state.isStreaming, false);
 });
@@ -216,7 +205,6 @@ test("canonical lifecycle represents aborted terminals and normalizes fallback e
   const state = createRinFrontendLifecycleState({
     turnActive: true,
     isStreaming: true,
-    workingVisible: true,
   });
   const aborted = projectRinFrontendLifecycleEvent({
     type: "frontend_turn_aborted",
@@ -225,10 +213,8 @@ test("canonical lifecycle represents aborted terminals and normalizes fallback e
   });
   assert.ok(aborted);
   applyRinFrontendLifecycleEvent(state, aborted);
-  assert.equal(state.phase, "idle");
   assert.equal(state.turnActive, false);
   assert.equal(state.isStreaming, false);
-  assert.equal(state.workingVisible, false);
   assert.deepEqual(renderRinFrontendLifecycleEvent(aborted), [
     {
       type: "turn_error",
@@ -244,9 +230,7 @@ test("canonical lifecycle represents aborted terminals and normalizes fallback e
     settled: true,
   });
   assert.ok(agentStopped);
-  assert.deepEqual(renderRinFrontendLifecycleEvent(agentStopped), [
-    { type: "status", phase: "working" },
-  ]);
+  assert.deepEqual(renderRinFrontendLifecycleEvent(agentStopped), []);
 
   const failed = projectRinFrontendLifecycleEvent({
     type: "rpc_turn_event",
@@ -263,47 +247,6 @@ test("canonical lifecycle represents aborted terminals and normalizes fallback e
       requestTag: undefined,
     },
   ]);
-});
-
-test("canonical terminal gate admits exactly one terminal outcome per request", () => {
-  const gate = new RinFrontendLifecycleTerminalGate();
-  const start = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "start",
-    requestTag: "turn-once",
-    turnGeneration: 9,
-    sessionId: "session-1",
-  });
-  const complete = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "complete",
-    requestTag: "turn-once",
-    turnGeneration: 9,
-    sessionId: "session-1",
-  });
-  const lateError = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "error",
-    error: "late",
-    requestTag: "turn-once",
-    turnGeneration: 9,
-    sessionId: "session-1",
-  });
-  assert.ok(start && complete && lateError);
-  assert.equal(gate.accept(start), true);
-  assert.equal(gate.accept(complete), true);
-  assert.equal(gate.accept(start), true);
-  assert.equal(gate.accept(lateError), false);
-
-  const nextComplete = projectRinFrontendLifecycleEvent({
-    type: "rpc_turn_event",
-    event: "complete",
-    requestTag: "turn-once",
-    turnGeneration: 10,
-    sessionId: "session-1",
-  });
-  assert.ok(nextComplete);
-  assert.equal(gate.accept(nextComplete), true);
 });
 
 test("canonical interrupt intents preserve frontend meaning while sharing one command policy", async () => {

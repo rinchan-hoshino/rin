@@ -207,7 +207,7 @@ test("legacy message, inbox, and outbox authority migrates once into chat.sqlite
     3,
   );
   assert.equal(
-    reopened.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
+    reopened.prepare("SELECT COUNT(*) AS value FROM inbox_jobs").get().value,
     3,
   );
   assert.equal(
@@ -534,7 +534,7 @@ test("malformed legacy record JSON is preserved while valid records complete aut
 
   const db = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
-    db.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
+    db.prepare("SELECT COUNT(*) AS value FROM inbox_jobs").get().value,
     1,
   );
   assert.equal(
@@ -597,7 +597,7 @@ test("one invalid inbox file is reported once across message and turn conversion
     0,
   );
   assert.equal(
-    db.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
+    db.prepare("SELECT COUNT(*) AS value FROM inbox_jobs").get().value,
     0,
   );
   const summary = JSON.parse(
@@ -832,7 +832,7 @@ test("empty legacy authority paths recreated after cutover do not block migratio
   );
 });
 
-test("legacy authority content changed after completed cutover blocks startup", async () => {
+test("completed cutover never reimports recreated legacy authority", async () => {
   const agentDir = await tempDir();
   database.migrateChatDatabaseForInstall(agentDir);
   database.closeChatDatabase(agentDir);
@@ -841,13 +841,14 @@ test("legacy authority content changed after completed cutover blocks startup", 
     legacyOutbox("late-legacy-write"),
   );
 
-  assert.throws(
-    () => database.migrateChatDatabaseForInstall(agentDir),
-    /chat_legacy_migration_source_changed/,
+  const reopened = database.migrateChatDatabaseForInstall(agentDir);
+  assert.equal(
+    reopened.prepare("SELECT COUNT(*) AS count FROM outbox").get().count,
+    0,
   );
 });
 
-test("legacy archive content modified after completed cutover blocks startup", async () => {
+test("completed cutover ignores later modifications to retired legacy archives", async () => {
   const agentDir = await tempDir();
   const archiveFile = path.join(
     agentDir,
@@ -869,13 +870,18 @@ test("legacy archive content modified after completed cutover blocks startup", a
     routing: { text: "modified after cutover" },
   });
 
-  assert.throws(
-    () => database.migrateChatDatabaseForInstall(agentDir),
-    /chat_legacy_migration_source_changed/,
+  const reopened = database.migrateChatDatabaseForInstall(agentDir);
+  assert.equal(
+    reopened
+      .prepare(
+        "SELECT value FROM schema_meta WHERE key = 'legacy_control_migration'",
+      )
+      .get().value,
+    "complete_v1",
   );
 });
 
-test("legacy archive content deleted after completed cutover blocks startup", async () => {
+test("completed cutover ignores later deletions from retired legacy archives", async () => {
   const agentDir = await tempDir();
   const sourceFile = path.join(
     agentDir,
@@ -901,13 +907,18 @@ test("legacy archive content deleted after completed cutover blocks startup", as
     ),
   );
 
-  assert.throws(
-    () => database.migrateChatDatabaseForInstall(agentDir),
-    /chat_legacy_migration_source_changed/,
+  const reopened = database.migrateChatDatabaseForInstall(agentDir);
+  assert.equal(
+    reopened
+      .prepare(
+        "SELECT value FROM schema_meta WHERE key = 'legacy_control_migration'",
+      )
+      .get().value,
+    "complete_v1",
   );
 });
 
-test("legacy timeline sequence prevents replaying older pending work after newer handled history", async () => {
+test("legacy timeline sequence interrupts older pending work after newer handled history", async () => {
   const agentDir = await tempDir();
   const chatRoot = path.join(agentDir, "data", "chat");
   const newer = {
@@ -933,7 +944,10 @@ test("legacy timeline sequence prevents replaying older pending work after newer
     rows.map((row) => row.message_id),
     ["older-pending", "newer-handled"],
   );
-  assert.equal(db.prepare("SELECT state FROM turns").get().state, "superseded");
+  assert.equal(
+    db.prepare("SELECT state FROM inbox_jobs").get().state,
+    "failed",
+  );
   assert.deepEqual(inbox.listPendingChatInboxItems(agentDir), []);
 });
 
@@ -959,7 +973,7 @@ test("atomic cutover retry imports legacy writes after marker rollback", async (
 
   const reopened = database.migrateChatDatabaseForInstall(agentDir);
   assert.equal(
-    reopened.prepare("SELECT COUNT(*) AS value FROM turns").get().value,
+    reopened.prepare("SELECT COUNT(*) AS value FROM inbox_jobs").get().value,
     1,
   );
   assert.equal(

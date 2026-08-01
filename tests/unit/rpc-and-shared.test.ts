@@ -317,7 +317,7 @@ test("TUI launch observes daemon availability without starting the managed servi
   assert.deepEqual(executed, []);
   assert.equal(probes, 1);
   assert.equal(unavailable.runtimeEnv.BASE, "1");
-  assert.equal("RIN_TUI_RUNTIME_ROLE" in unavailable.runtimeEnv, false);
+  assert.equal(unavailable.runtimeEnv.RIN_TUI_RUNTIME_ROLE, "maintenance-tui");
   assert.match(unavailable.maintenanceModeNotice, /Rin daemon is unavailable/);
   assert.match(
     unavailable.maintenanceModeNotice,

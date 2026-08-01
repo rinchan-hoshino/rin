@@ -10,7 +10,7 @@ test("coordinator keeps one owner through a continuation that starts after settl
   const turn = coordinator.openTurn("owner-tag");
   const admission = coordinator.admit({
     requestTag: "continuation-tag",
-    acceptedAs: "prompt",
+    outcome: "terminalOwner",
     text: "continue",
     hasImages: false,
   });
@@ -68,7 +68,7 @@ test("coordinator does not cross-match empty image and non-image admissions", ()
   const turn = coordinator.openTurn("owner-tag");
   const imageAdmission = coordinator.admit({
     requestTag: "image-tag",
-    acceptedAs: "prompt",
+    outcome: "terminalOwner",
     text: "",
     hasImages: true,
   });
@@ -175,7 +175,7 @@ test("coordinator interruption closes admissions and cancels every active wait",
   const turn = coordinator.openTurn("owner-tag");
   coordinator.admit({
     requestTag: "started-tag",
-    acceptedAs: "prompt",
+    outcome: "terminalOwner",
     text: "started",
     hasImages: false,
   });
@@ -187,7 +187,7 @@ test("coordinator interruption closes admissions and cancels every active wait",
   });
   coordinator.admit({
     requestTag: "pending-tag",
-    acceptedAs: "prompt",
+    outcome: "terminalOwner",
     text: "pending",
     hasImages: false,
   });
@@ -199,14 +199,14 @@ test("coordinator interruption closes admissions and cancels every active wait",
       () =>
         coordinator.admit({
           requestTag: "blocked-tag",
-          acceptedAs: "prompt",
+          outcome: "terminalOwner",
           text: "blocked",
           hasImages: false,
         }),
       /interruption is in progress/i,
     );
     assert.throws(
-      () => coordinator.admittedKind("pending-tag"),
+      () => coordinator.observedRole("pending-tag"),
       /interruption is in progress/i,
     );
     coordinator.cancelActiveTurn();

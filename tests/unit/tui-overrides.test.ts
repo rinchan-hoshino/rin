@@ -1945,7 +1945,7 @@ test("rpc transport status cannot synthesize Pi Working", async () => {
   }
 });
 
-test("rpc backend visibility keeps Pi native agent_start Working disabled", async () => {
+test("TUI visibility preference can hide Pi Working without changing backend state", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 

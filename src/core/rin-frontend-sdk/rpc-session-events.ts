@@ -13,7 +13,6 @@ export type RinRpcSessionEventTarget = {
   maxRetryAttempts?: number;
   retryDelayMs?: number;
   retryError?: string;
-  workingVisible?: boolean;
   handleSessionUnavailable?: () => void;
   handleSessionRecovered?: () => void;
   applyQueueUpdate?: (payload: any) => void;
@@ -21,6 +20,7 @@ export type RinRpcSessionEventTarget = {
   emitFrontendStatus?: (force?: boolean) => void;
   setTurnActive?: (active: boolean) => void;
   setAgentStreaming?: (streaming: boolean) => void;
+  setBackendWorking?: (working: boolean) => void;
   turnActive?: boolean;
   remoteTurnRunning?: boolean;
   isStreaming?: boolean;
@@ -113,6 +113,9 @@ export async function handleRinRpcSessionEvent(
     void refresh.refreshMessages();
   }
   target.emitEvent?.(payload);
+  if (typeof payload.working === "boolean") {
+    target.setBackendWorking?.(payload.working);
+  }
   if (
     lifecycleEvent &&
     shouldRefreshRinFrontendLifecycleStatus(lifecycleEvent)

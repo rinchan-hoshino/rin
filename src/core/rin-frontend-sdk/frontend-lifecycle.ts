@@ -2,13 +2,10 @@ import {
   formatCompactionSummaryCollapsedText,
   type CompactionSummaryCollapsedTextOptions,
 } from "./compaction-summary-format.js";
-import type { RinChatRunContext, RinFrontendBackendEvent } from "./types.js";
-
-export type RinFrontendLifecyclePhase =
-  | "idle"
-  | "working"
-  | "compacting"
-  | "retrying";
+import type {
+  RinChatDeliveryContext,
+  RinFrontendBackendEvent,
+} from "./types.js";
 
 export type RinFrontendInterruptIntent =
   | "stop_turn"
@@ -18,7 +15,6 @@ export type RinFrontendInterruptIntent =
 export interface RinFrontendLifecycleStateTarget {
   turnActive?: boolean;
   isStreaming?: boolean;
-  workingVisible?: boolean;
   isCompacting?: boolean;
   compactionReason?: string;
   retryAttempt?: number;
@@ -28,10 +24,8 @@ export interface RinFrontendLifecycleStateTarget {
 }
 
 export interface RinFrontendLifecycleState {
-  phase: RinFrontendLifecyclePhase;
   turnActive: boolean;
   isStreaming: boolean;
-  workingVisible: boolean;
   isCompacting: boolean;
   compactionReason: string;
   retryAttempt: number;
@@ -42,8 +36,12 @@ export interface RinFrontendLifecycleState {
 
 interface LifecycleEventBase {
   requestTag?: string;
-  chatRunContext?: RinChatRunContext;
-  terminalWal?: { payloadHash: string; stagedAt?: string };
+  chatDeliveryContext?: RinChatDeliveryContext;
+  terminalRecord?: {
+    terminalId: string;
+    state: "complete" | "error" | "interrupted";
+    terminalAt?: string;
+  };
   turnGeneration?: number;
   sessionId?: string;
   sessionFile?: string;
@@ -60,10 +58,6 @@ export type RinFrontendLifecycleEvent =
       settled: boolean;
     })
   | (LifecycleEventBase & { kind: "agent_settled" })
-  | (LifecycleEventBase & {
-      kind: "working_visibility";
-      visible: boolean;
-    })
   | (LifecycleEventBase & {
       kind: "compaction_started";
       reason: string;
@@ -132,25 +126,35 @@ function safeNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function optionalChatRunContext(value: unknown): RinChatRunContext | undefined {
+function optionalChatDeliveryContext(
+  value: unknown,
+): RinChatDeliveryContext | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
-  const runId = safeString((value as any).runId).trim();
-  const ownerEpoch = safeString((value as any).ownerEpoch).trim();
-  const producerIncarnation = safeString(
-    (value as any).producerIncarnation,
-  ).trim();
-  if (!runId || !ownerEpoch || !producerIncarnation) return;
-  return { runId, ownerEpoch, producerIncarnation };
+  const turnId = safeString((value as any).turnId).trim();
+  const chatKey = safeString((value as any).chatKey).trim();
+  const messageId = safeString((value as any).messageId).trim();
+  if (!turnId || !chatKey || !messageId) return;
+  return { turnId, chatKey, messageId };
 }
 
-function optionalTerminalWal(value: unknown) {
+function optionalTerminalRecord(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
-  const payloadHash = safeString((value as any).payloadHash).trim();
-  if (!/^[0-9a-f]{64}$/.test(payloadHash)) return;
-  const stagedAt = safeString((value as any).stagedAt).trim();
+  const terminalId = safeString((value as any).terminalId).trim();
+  const state = safeString((value as any).state).trim() as
+    | "complete"
+    | "error"
+    | "interrupted";
+  if (
+    !terminalId ||
+    (state !== "complete" && state !== "error" && state !== "interrupted")
+  ) {
+    return;
+  }
+  const terminalAt = safeString((value as any).terminalAt).trim();
   return {
-    payloadHash,
-    ...(stagedAt ? { stagedAt } : {}),
+    terminalId,
+    state,
+    ...(terminalAt ? { terminalAt } : {}),
   };
 }
 
@@ -176,10 +180,8 @@ export function createRinFrontendLifecycleState(
   initial: Partial<RinFrontendLifecycleState> = {},
 ): RinFrontendLifecycleState {
   return {
-    phase: "idle",
     turnActive: false,
     isStreaming: false,
-    workingVisible: false,
     isCompacting: false,
     compactionReason: "",
     retryAttempt: 0,
@@ -197,7 +199,6 @@ export function applyRinFrontendLifecycleEvent(
   const state = createRinFrontendLifecycleState({
     turnActive: target.turnActive === true,
     isStreaming: target.isStreaming === true,
-    workingVisible: target.workingVisible === true,
     isCompacting: target.isCompacting === true,
     compactionReason: safeString(target.compactionReason),
     retryAttempt: safeNumber(target.retryAttempt),
@@ -208,7 +209,6 @@ export function applyRinFrontendLifecycleEvent(
   reduceRinFrontendLifecycleState(state, event);
   target.turnActive = state.turnActive;
   target.isStreaming = state.isStreaming;
-  target.workingVisible = state.workingVisible;
   target.isCompacting = state.isCompacting;
   target.compactionReason = state.compactionReason;
   target.retryAttempt = state.retryAttempt;
@@ -234,12 +234,6 @@ export function projectRinFrontendLifecycleEvent(
       };
     case "agent_settled":
       return { kind: "agent_settled", ...requestTag };
-    case "working_visibility":
-      return {
-        kind: "working_visibility",
-        visible: payload.visible === true,
-        ...requestTag,
-      };
     case "compaction_start":
       return {
         kind: "compaction_started",
@@ -313,8 +307,10 @@ export function projectRinFrontendLifecycleEvent(
           result: payload.result,
           sessionId: optionalText(payload.sessionId),
           sessionFile: optionalText(payload.sessionFile),
-          chatRunContext: optionalChatRunContext(payload.chatRunContext),
-          terminalWal: optionalTerminalWal(payload.terminalWal),
+          chatDeliveryContext: optionalChatDeliveryContext(
+            payload.chatDeliveryContext,
+          ),
+          terminalRecord: optionalTerminalRecord(payload.terminalRecord),
           ...requestTag,
         };
       }
@@ -325,8 +321,10 @@ export function projectRinFrontendLifecycleEvent(
           error: safeString(payload.error).trim() || "rpc_turn_failed",
           sessionId: optionalText(payload.sessionId),
           sessionFile: optionalText(payload.sessionFile),
-          chatRunContext: optionalChatRunContext(payload.chatRunContext),
-          terminalWal: optionalTerminalWal(payload.terminalWal),
+          chatDeliveryContext: optionalChatDeliveryContext(
+            payload.chatDeliveryContext,
+          ),
+          terminalRecord: optionalTerminalRecord(payload.terminalRecord),
           ...requestTag,
         };
       }
@@ -352,13 +350,6 @@ function clearRetry(state: RinFrontendLifecycleState) {
   state.retryError = "";
 }
 
-function phaseAfterTransientWork(
-  state: RinFrontendLifecycleState,
-): RinFrontendLifecyclePhase {
-  if (state.isCompacting) return "compacting";
-  return state.turnActive ? "working" : "idle";
-}
-
 export function reduceRinFrontendLifecycleState(
   state: RinFrontendLifecycleState,
   event: RinFrontendLifecycleEvent,
@@ -366,65 +357,51 @@ export function reduceRinFrontendLifecycleState(
   switch (event.kind) {
     case "turn_started":
       state.turnActive = true;
-      if (state.phase === "idle") state.phase = "working";
       break;
     case "agent_started":
       state.turnActive = true;
       state.isStreaming = true;
-      state.phase = "working";
       clearRetry(state);
       break;
     case "agent_stopped":
       state.isStreaming = false;
       clearRetry(state);
-      state.phase = phaseAfterTransientWork(state);
       break;
     case "agent_settled":
       state.isStreaming = false;
       state.isCompacting = false;
       state.compactionReason = "";
       clearRetry(state);
-      state.phase = phaseAfterTransientWork(state);
-      break;
-    case "working_visibility":
-      state.workingVisible = event.visible;
       break;
     case "compaction_started":
       state.isCompacting = true;
       state.compactionReason = event.reason;
       clearRetry(state);
-      state.phase = "compacting";
       break;
     case "compaction_finished":
       state.isCompacting = false;
       state.compactionReason = "";
       clearRetry(state);
-      state.phase = phaseAfterTransientWork(state);
       break;
     case "retry_scheduled":
       state.retryAttempt = event.attempt;
       state.maxRetryAttempts = event.maxAttempts;
       state.retryDelayMs = event.delayMs;
       state.retryError = event.errorMessage;
-      state.phase = "retrying";
       break;
     case "summarization_retry_started":
       clearRetry(state);
-      state.phase = state.isCompacting ? "compacting" : "working";
       break;
     case "summarization_retry_finished":
     case "retry_finished":
       clearRetry(state);
-      state.phase = phaseAfterTransientWork(state);
       break;
     case "turn_terminal":
       state.turnActive = false;
       state.isStreaming = false;
-      state.workingVisible = false;
       state.isCompacting = false;
       state.compactionReason = "";
       clearRetry(state);
-      state.phase = "idle";
       break;
   }
   return state;
@@ -442,27 +419,6 @@ function retryStatusText(
 ) {
   const seconds = Math.ceil(event.delayMs / 1000);
   return `Retrying (${event.attempt}/${event.maxAttempts}) in ${seconds}s... (/abort to stop)`;
-}
-
-export class RinFrontendLifecycleTerminalGate {
-  private readonly terminalIdentities = new Set<string>();
-
-  private terminalIdentity(event: RinFrontendLifecycleEvent): string {
-    const session = event.sessionId || event.sessionFile || "session";
-    if (event.turnGeneration && event.turnGeneration > 0) {
-      return `${session}:generation:${event.turnGeneration}`;
-    }
-    if (event.requestTag) return `${session}:request:${event.requestTag}`;
-    return `${session}:identityless`;
-  }
-
-  accept(event: RinFrontendLifecycleEvent): boolean {
-    if (event.kind !== "turn_terminal") return true;
-    const identity = this.terminalIdentity(event);
-    if (this.terminalIdentities.has(identity)) return false;
-    this.terminalIdentities.add(identity);
-    return true;
-  }
 }
 
 export function shouldRefreshRinFrontendLifecycleStatus(
@@ -484,10 +440,9 @@ export function isRinFrontendLifecyclePresentationEvent(
   event: RinFrontendLifecycleEvent,
 ): boolean {
   return (
-    event.kind === "working_visibility" ||
-    (event.kind !== "agent_stopped" &&
-      event.kind !== "agent_settled" &&
-      shouldRefreshRinFrontendLifecycleStatus(event))
+    event.kind !== "agent_stopped" &&
+    event.kind !== "agent_settled" &&
+    shouldRefreshRinFrontendLifecycleStatus(event)
   );
 }
 
@@ -499,13 +454,9 @@ export function renderRinFrontendLifecycleEvent(
     case "turn_started":
       return [withRequestTag(event, { type: "turn_accepted" })];
     case "agent_started":
-      return [{ type: "status", phase: "working" }];
     case "agent_stopped":
-      return [{ type: "status", phase: "working" }];
     case "agent_settled":
-      return [{ type: "status", phase: "working" }];
-    case "working_visibility":
-      return [{ type: "working_visible", visible: event.visible }];
+      return [];
     case "compaction_started":
       return [
         {
@@ -600,10 +551,12 @@ export function renderRinFrontendLifecycleEvent(
           sessionId: event.sessionId,
           sessionFile: event.sessionFile,
           requestTag: event.requestTag,
-          ...(event.chatRunContext
-            ? { chatRunContext: event.chatRunContext }
+          ...(event.chatDeliveryContext
+            ? { chatDeliveryContext: event.chatDeliveryContext }
             : {}),
-          ...(event.terminalWal ? { terminalWal: event.terminalWal } : {}),
+          ...(event.terminalRecord
+            ? { terminalRecord: event.terminalRecord }
+            : {}),
         };
         return event.finalText
           ? [
@@ -614,11 +567,11 @@ export function renderRinFrontendLifecycleEvent(
                 sessionId: event.sessionId,
                 sessionFile: event.sessionFile,
                 requestTag: event.requestTag,
-                ...(event.chatRunContext
-                  ? { chatRunContext: event.chatRunContext }
+                ...(event.chatDeliveryContext
+                  ? { chatDeliveryContext: event.chatDeliveryContext }
                   : {}),
-                ...(event.terminalWal
-                  ? { terminalWal: event.terminalWal }
+                ...(event.terminalRecord
+                  ? { terminalRecord: event.terminalRecord }
                   : {}),
               },
               terminal,
@@ -632,10 +585,12 @@ export function renderRinFrontendLifecycleEvent(
           sessionId: event.sessionId,
           sessionFile: event.sessionFile,
           requestTag: event.requestTag,
-          ...(event.chatRunContext
-            ? { chatRunContext: event.chatRunContext }
+          ...(event.chatDeliveryContext
+            ? { chatDeliveryContext: event.chatDeliveryContext }
             : {}),
-          ...(event.terminalWal ? { terminalWal: event.terminalWal } : {}),
+          ...(event.terminalRecord
+            ? { terminalRecord: event.terminalRecord }
+            : {}),
         },
       ];
   }

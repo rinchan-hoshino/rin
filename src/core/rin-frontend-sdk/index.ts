@@ -4,6 +4,7 @@ export type {
   RinExtensionUiResponse,
   RinFrontendAutocompleteItem,
   RinFrontendClient,
+  RinChatDeliveryContext,
   RinFrontendCommandItem,
   RinFrontendEvent,
   RinFrontendBackendEvent,
@@ -73,13 +74,11 @@ export {
   isRinFrontendLifecyclePresentationEvent,
   projectRinFrontendLifecycleEvent,
   reduceRinFrontendLifecycleState,
-  RinFrontendLifecycleTerminalGate,
   renderRinFrontendLifecycleEvent,
   shouldRefreshRinFrontendLifecycleStatus,
   type RinFrontendInterruptClient,
   type RinFrontendInterruptIntent,
   type RinFrontendLifecycleEvent,
-  type RinFrontendLifecyclePhase,
   type RinFrontendLifecycleRenderOptions,
   type RinFrontendLifecycleState,
   type RinFrontendLifecycleStateTarget,
@@ -100,12 +99,6 @@ export {
   injectPromptContextHeader,
   type PromptContextMeta,
 } from "./prompt-context.js";
-
-export {
-  replayPendingTerminalTurnEvent,
-  type RinPendingTerminalTurnEventCommand,
-  type RinPendingTerminalTurnEventRequester,
-} from "./pending-terminal-turn.js";
 
 export {
   handleRinRpcSessionEvent,

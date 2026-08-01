@@ -59,14 +59,20 @@ export function runCommand(command: string, args: string[], options: any = {}) {
   });
 }
 
+function processOsUser() {
+  try {
+    return os.userInfo().username;
+  } catch {
+    return "";
+  }
+}
+
+export function detectExecutorUser(options: { osUser?: string } = {}) {
+  return normalizeUserName(options.osUser ?? processOsUser()) || "unknown";
+}
+
 export function detectCurrentUser() {
-  const osUser = (() => {
-    try {
-      return os.userInfo().username;
-    } catch {
-      return "";
-    }
-  })();
+  const osUser = processOsUser();
   const candidates =
     process.platform === "win32"
       ? [process.env.USERNAME, osUser, process.env.LOGNAME, process.env.USER]

@@ -144,13 +144,114 @@ test("hosted chat bridge has no restart-specific quiescing state", () => {
   assert.doesNotMatch(shared, /prepareDaemonRestart|cancelDaemonRestart/);
 });
 
-test("daemon shutdown remains the owner of interrupting active workers", () => {
+test("chat terminal backlog is reconciled without waiting for new ingress", () => {
+  const chatMain = source("src/core/chat/main.ts");
+
+  assert.match(chatMain, /requestReconcileChatTerminals\(\);/);
+  assert.match(
+    chatMain,
+    /inboxPollTimer = setInterval\([\s\S]*requestReconcileChatInbox\(\);[\s\S]*requestReconcileChatTerminals\(\);/,
+  );
+  assert.match(
+    chatMain,
+    /listUnacknowledgedChatTerminalEvents\([\s\S]*reconcileChatTerminalEvents/,
+  );
+  assert.match(
+    chatMain,
+    /terminalRecord\?\.terminalId[\s\S]*terminal-reconcile:\$\{terminalId\}[\s\S]*affectChatBinding: false[\s\S]*recoverTerminals: false[\s\S]*projectAuthoritativeTerminal\(terminal\)/,
+  );
+  assert.match(chatMain, /terminalProjectionInFlight = new Set<string>\(\)/);
+  assert.match(
+    chatMain,
+    /terminalProjectionInFlight\.has\(terminalId\)[\s\S]*void \(async \(\) =>[\s\S]*terminalProjectionInFlight\.delete\(terminalId\)/,
+  );
+});
+
+test("native Pi events, not Chat or Pi state inference, decide input ownership", () => {
+  const chatMain = source("src/core/chat/main.ts");
+  const controller = source("src/core/chat/controller.ts");
+  const admission = source("src/core/chat/durable-admission.ts");
+  const rpcMode = source("src/core/rin-daemon/rpc-mode.ts");
+  const workerPool = source("src/core/rin-daemon/worker-pool.ts");
+
+  assert.doesNotMatch(chatMain, /submission\.mode\b/);
+  assert.doesNotMatch(chatMain, /hasActiveTurn\(\) \? "steer" : "turn"/);
+  assert.doesNotMatch(controller, /async steerTurn\(/);
+  assert.doesNotMatch(controller, /streamingBehavior:\s*"steer"/);
+  assert.doesNotMatch(admission, /mode\?: "turn" \| "steer"/);
+  assert.doesNotMatch(
+    rpcMode,
+    /acceptedAs|rinAcceptedAs|rin_turn_admission_pending/,
+  );
+  assert.match(rpcMode, /AsyncLocalStorage<NativeInputSubmission>/);
+  assert.match(rpcMode, /event\?\.type === "agent_start"/);
+  assert.match(rpcMode, /event\?\.type === "queue_update"/);
+  assert.match(rpcMode, /appendCustomEntry\?\.\("rin_request_identity"/);
+  assert.doesNotMatch(workerPool, /piAdmissionKind|acceptedAs|rinAcceptedAs/);
+  assert.match(
+    workerPool,
+    /observed\.outcome === "terminalOwner"[\s\S]*establishPiPromptLifecycle/,
+  );
+});
+
+test("chat lifecycle settlement is independent of restart and lease timing", () => {
+  const chatMain = source("src/core/chat/main.ts");
+  const inboxDrain = source("src/core/chat/inbox-drain.ts");
+  const inbox = source("src/core/chat/inbox.ts");
+
+  assert.doesNotMatch(inboxDrain, /preserveForRestart/);
+  assert.doesNotMatch(chatMain, /preserveForRestart/);
+  assert.doesNotMatch(chatMain, /preserveClaimedInboxJobForRestart/);
+  assert.doesNotMatch(chatMain, /interruptProcessingChatInboxItems/);
+  assert.match(
+    chatMain,
+    /chat turn detached without authoritative terminal[\s\S]*throw error;/,
+  );
+  assert.doesNotMatch(inbox, /lease_expired/);
+});
+
+test("chat snapshots inherited running jobs before adapters can claim new work", () => {
+  const chatMain = source("src/core/chat/main.ts");
+  const reconcile = chatMain.indexOf(
+    "reconcileCommittedChatOutboxProcessing(runtime.agentDir)",
+  );
+  const snapshot = chatMain.indexOf(
+    "const startupRecoverableProcessing = listRunningChatInboxItems",
+    reconcile,
+  );
+  const recoveryFence = chatMain.indexOf(
+    "app.beginInboundRecoveryChat(envelope.chatKey)",
+    snapshot,
+  );
+  const adaptersStart = chatMain.indexOf("await app.start()", recoveryFence);
+  const recoveryEnqueue = chatMain.indexOf(
+    "for (const envelope of startupRecoverableProcessing)",
+    adaptersStart,
+  );
+  const recoveryRelease = chatMain.indexOf(
+    "app.completeInboundRecoveryChat(chatKey)",
+  );
+
+  assert.ok(reconcile >= 0);
+  assert.ok(snapshot > reconcile);
+  assert.ok(recoveryFence > snapshot);
+  assert.ok(adaptersStart > recoveryFence);
+  assert.ok(recoveryEnqueue > adaptersStart);
+  assert.ok(recoveryRelease >= 0);
+});
+
+test("daemon restart preserves and resumes active durable turns", () => {
+  const daemon = source("src/core/rin-daemon/daemon.ts");
   const workerPool = source("src/core/rin-daemon/worker-pool.ts");
   const shutdownBlock = workerPool.slice(
     workerPool.indexOf("async shutdown(graceMs: number)"),
     workerPool.indexOf("private updateWorkerMetadata"),
   );
 
+  assert.doesNotMatch(daemon, /interruptActiveDaemonTurns/);
+  assert.match(daemon, /await workerPool\.recoverActiveDaemonTurns\(\)/);
   assert.match(shutdownBlock, /this\.beginShutdown\(\)/);
   assert.match(shutdownBlock, /this\.destroyAll\(\)/);
+  assert.match(workerPool, /preserveActiveTurn/);
+  assert.match(workerPool, /resume_interrupted_turn/);
 });

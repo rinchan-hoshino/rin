@@ -881,7 +881,7 @@ test("unresolved settings and records together do not block SQLite cutover", asy
     assert.equal(result.keyMigration.unresolvedSettings, 1);
     assert.equal(result.keyMigration.unresolvedRecords, 1);
     const db = database.openChatDatabase(agentDir);
-    assert.equal(Number(db.pragma("user_version", { simple: true })), 8);
+    assert.equal(Number(db.pragma("user_version", { simple: true })), 9);
     assert.equal(
       db.prepare("SELECT COUNT(*) AS count FROM messages").get().count,
       0,

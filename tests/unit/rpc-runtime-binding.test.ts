@@ -2007,7 +2007,7 @@ test("rpc runtime applies daemon queue updates before the user message starts", 
   ]);
 });
 
-test("rpc runtime keeps an unconfirmed connecting prompt out of the Pi steering projection", async () => {
+test("rpc runtime rejects an unconfirmed connecting prompt instead of queuing it", async () => {
   const session = new RpcInteractiveSession({
     send() {
       return Promise.resolve({ success: true, data: {} });
@@ -2036,28 +2036,17 @@ test("rpc runtime keeps an unconfirmed connecting prompt out of the Pi steering 
   session.subscribe((event) => seen.push(event));
   seen.length = 0;
 
-  await session.prompt("hello", {
-    expandPromptTemplates: false,
-  });
+  await assert.rejects(
+    session.prompt("hello", {
+      expandPromptTemplates: false,
+    }),
+    /rin_frontend_disconnected/,
+  );
 
   assert.deepEqual(session.getSteeringMessages(), []);
   assert.equal(
     seen.some((event) => event?.type === "rpc_local_user_message"),
     false,
-  );
-  assert.deepEqual(seen[0], {
-    type: "queue_update",
-    steering: [],
-    followUp: [],
-  });
-  assert.deepEqual(
-    seen.filter((event) => event?.type === "rpc_frontend_status").at(-1),
-    {
-      type: "rpc_frontend_status",
-      phase: "connecting",
-      label: "Connecting",
-      connected: false,
-    },
   );
 });
 

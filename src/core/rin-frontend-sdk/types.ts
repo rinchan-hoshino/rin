@@ -74,10 +74,16 @@ export type RinFrontendStatusPhase =
   | "compacting"
   | "retrying";
 
-export type RinChatRunContext = {
-  runId: string;
-  ownerEpoch: string;
-  producerIncarnation: string;
+export type RinChatDeliveryContext = {
+  turnId: string;
+  chatKey: string;
+  messageId: string;
+};
+
+export type RinTerminalRecord = {
+  terminalId: string;
+  state: "complete" | "error" | "interrupted";
+  terminalAt?: string;
 };
 
 export type RinFrontendBackendEvent =
@@ -107,7 +113,6 @@ export type RinFrontendBackendEvent =
       requestTag?: string;
     }
   | { type: "compaction_start_notice"; text: string }
-  | { type: "working_visible"; visible: boolean }
   | { type: "assistant_stream"; text: string; requestTag?: string }
   | { type: "assistant_summary"; text: string; requestTag?: string }
   | { type: "assistant_interim"; text: string; requestTag?: string }
@@ -118,8 +123,8 @@ export type RinFrontendBackendEvent =
       sessionId?: string;
       sessionFile?: string;
       requestTag?: string;
-      chatRunContext?: RinChatRunContext;
-      terminalWal?: { payloadHash: string; stagedAt?: string };
+      chatDeliveryContext?: RinChatDeliveryContext;
+      terminalRecord?: RinTerminalRecord;
     }
   | {
       type: "turn_complete";
@@ -128,8 +133,8 @@ export type RinFrontendBackendEvent =
       sessionId?: string;
       sessionFile?: string;
       requestTag?: string;
-      chatRunContext?: RinChatRunContext;
-      terminalWal?: { payloadHash: string; stagedAt?: string };
+      chatDeliveryContext?: RinChatDeliveryContext;
+      terminalRecord?: RinTerminalRecord;
     }
   | {
       type: "turn_error";
@@ -137,8 +142,8 @@ export type RinFrontendBackendEvent =
       sessionId?: string;
       sessionFile?: string;
       requestTag?: string;
-      chatRunContext?: RinChatRunContext;
-      terminalWal?: { payloadHash: string; stagedAt?: string };
+      chatDeliveryContext?: RinChatDeliveryContext;
+      terminalRecord?: RinTerminalRecord;
     };
 
 export type RinFrontendEvent =
@@ -200,7 +205,7 @@ export type RinSessionState = {
   thinkingLevel?: string;
   turnActive?: boolean;
   isStreaming?: boolean;
-  workingVisible?: boolean;
+  working?: boolean;
   isCompacting?: boolean;
   sessionFile?: string;
   sessionId?: string;
@@ -221,15 +226,26 @@ export type RinNewSessionResult = RinSessionState & {
 
 export type RinPromptContext = PromptContextMeta;
 
-export type RinPromptAdmission = {
-  acceptedAs?: "prompt" | "steer" | "followUp" | "rejoin";
-  requestTag?: string;
-  sessionFile?: string;
-  sessionId?: string;
-  turnActive?: boolean;
-  isStreaming?: boolean;
-  queued?: boolean;
-};
+export type RinInputSubmissionOutcome =
+  | {
+      outcome: "terminalOwner" | "nonterminal" | "rejected" | "indeterminate";
+      requestTag?: string;
+      sessionFile?: string;
+      sessionId?: string;
+      turnActive?: boolean;
+      isStreaming?: boolean;
+      queued?: boolean;
+    }
+  | {
+      outcome: "rejoined";
+      originalOutcome: "terminalOwner" | "nonterminal";
+      requestTag?: string;
+      sessionFile?: string;
+      sessionId?: string;
+      turnActive?: boolean;
+      isStreaming?: boolean;
+      queued?: boolean;
+    };
 
 export type RinPromptOptions = {
   images?: unknown[];
@@ -237,7 +253,7 @@ export type RinPromptOptions = {
   source?: string;
   frontendIdentity?: RinFrontendIdentity;
   requestTag?: string;
-  chatRunContext?: RinChatRunContext;
+  chatDeliveryContext?: RinChatDeliveryContext;
   promptContext?: RinPromptContext;
   sessionFile?: string;
   sessionId?: string;
@@ -250,11 +266,11 @@ export interface RinFrontendClient {
   subscribe(listener: (event: RinFrontendEvent) => void): () => void;
   request<T = unknown>(command: RinRpcCommand): Promise<T>;
   send(command: RinRpcCommand): Promise<RinRpcResponse>;
-  submit(text: string): Promise<RinPromptAdmission | void>;
+  submit(text: string): Promise<RinInputSubmissionOutcome | void>;
   prompt(
     text: string,
     options?: RinPromptOptions,
-  ): Promise<RinPromptAdmission | void>;
+  ): Promise<RinInputSubmissionOutcome | void>;
   abort(): Promise<void>;
   getState(): Promise<RinSessionState>;
   getMessages(): Promise<unknown[]>;

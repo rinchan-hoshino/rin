@@ -1,4 +1,4 @@
-export type RpcPromptAdmissionKind = "prompt" | "steer" | "followUp";
+export type RpcInputObservedRole = "terminalOwner" | "nonterminal";
 
 export type RpcTurnPhase = "idle" | "running" | "interrupting";
 
@@ -6,7 +6,7 @@ export type RpcTurnInterrupt = Readonly<{ id: number; epoch: number }>;
 
 export type RpcTurnAdmission = {
   readonly requestTag: string;
-  readonly acceptedAs: RpcPromptAdmissionKind;
+  readonly observedRole: RpcInputObservedRole;
   readonly text: string;
   readonly hasImages: boolean;
   readonly turn?: RpcTrackedTurn<unknown>;
@@ -152,8 +152,9 @@ export class RpcTrackedTurn<TSettlement = unknown> {
 export class RpcTurnCoordinator<TSettlement = unknown> {
   private state: RpcCoordinatorState<TSettlement> = { phase: "idle" };
   private readonly pendingAdmissions: RpcTurnAdmission[] = [];
-  private readonly admittedByTag = new Map<string, RpcPromptAdmissionKind>();
-  private readonly recentByTag = new Map<string, RpcPromptAdmissionKind>();
+  private readonly admittedByTag = new Map<string, RpcInputObservedRole>();
+  private readonly recentByTag = new Map<string, RpcInputObservedRole>();
+  private readonly idleWaiters = new Set<() => void>();
   private interruptEpoch = 0;
   private interruptQueue: Promise<void> = Promise.resolve();
   private nextInterruptId = 0;
@@ -177,6 +178,11 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
 
   get completion(): Promise<void> | null {
     return this.currentTurn?.completion || null;
+  }
+
+  async waitForIdle() {
+    if (!this.currentTurn) return;
+    await new Promise<void>((resolve) => this.idleWaiters.add(resolve));
   }
 
   openTurn(
@@ -216,9 +222,11 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
     if (this.state.phase === "interrupting") {
       const { turn: _turn, ...interruptState } = this.state;
       this.state = interruptState;
-      return;
+    } else {
+      this.state = { phase: "idle" };
     }
-    this.state = { phase: "idle" };
+    for (const resolve of this.idleWaiters) resolve();
+    this.idleWaiters.clear();
   }
 
   assertAdmissionOpen(): void {
@@ -229,7 +237,7 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
 
   admit(input: {
     requestTag: string;
-    acceptedAs: RpcPromptAdmissionKind;
+    observedRole: RpcInputObservedRole;
     text: string;
     hasImages: boolean;
   }): RpcTurnAdmission {
@@ -249,7 +257,7 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
       : undefined;
     const admission: RpcTurnAdmission = {
       requestTag: input.requestTag,
-      acceptedAs: input.acceptedAs,
+      observedRole: input.observedRole,
       text: input.text.trim(),
       hasImages: input.hasImages,
       turn: trackedTurn as RpcTrackedTurn<unknown> | undefined,
@@ -261,7 +269,7 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
     this.pendingAdmissions.push(admission);
     trackedTurn?.admissions.push(admission);
     if (input.requestTag) {
-      this.admittedByTag.set(input.requestTag, input.acceptedAs);
+      this.admittedByTag.set(input.requestTag, input.observedRole);
     }
     return admission;
   }
@@ -299,7 +307,7 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
     this.clearTrackedAdmissions();
   }
 
-  admittedKind(requestTag: string): RpcPromptAdmissionKind | undefined {
+  observedRole(requestTag: string): RpcInputObservedRole | undefined {
     this.assertAdmissionOpen();
     return (
       this.admittedByTag.get(requestTag) || this.recentByTag.get(requestTag)
@@ -315,10 +323,10 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
 
   observePersistedUser(requestTag: string): void {
     if (!requestTag) return;
-    const acceptedAs = this.admittedByTag.get(requestTag);
-    if (!acceptedAs) return;
+    const observedRole = this.admittedByTag.get(requestTag);
+    if (!observedRole) return;
     this.admittedByTag.delete(requestTag);
-    this.rememberRecent(requestTag, acceptedAs);
+    this.rememberRecent(requestTag, observedRole);
   }
 
   observeUserStart(input: RpcUserStart): RpcUserStartMatch | undefined {
@@ -335,12 +343,14 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
     const admission = this.pendingAdmissions.splice(index, 1)[0];
     if (admission.requestTag) {
       this.admittedByTag.delete(admission.requestTag);
-      this.rememberRecent(admission.requestTag, admission.acceptedAs);
+      this.rememberRecent(admission.requestTag, admission.observedRole);
     }
     const trackedTurn = admission.turn as
       | RpcTrackedTurn<TSettlement>
       | undefined;
-    trackedTurn?.onOwnedUserStart?.(input.message);
+    if (admission.observedRole === "nonterminal") {
+      trackedTurn?.onOwnedUserStart?.(input.message);
+    }
     admission.resolveStarted?.(trackedTurn?.settlementGeneration ?? null);
     admission.resolveStarted = undefined;
     return {
@@ -428,10 +438,10 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
 
   private rememberRecent(
     requestTag: string,
-    acceptedAs: RpcPromptAdmissionKind,
+    observedRole: RpcInputObservedRole,
   ): void {
     this.recentByTag.delete(requestTag);
-    this.recentByTag.set(requestTag, acceptedAs);
+    this.recentByTag.set(requestTag, observedRole);
     while (this.recentByTag.size > 1024) {
       const oldest = this.recentByTag.keys().next().value;
       if (!oldest) break;

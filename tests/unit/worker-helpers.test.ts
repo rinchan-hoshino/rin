@@ -261,7 +261,7 @@ test("worker helpers expose normalized slash commands and oauth state", async ()
   });
 });
 
-test("getSessionState exposes turn, streaming, and Working independently", () => {
+test("getSessionState leaves platform Working judgment to the daemon", () => {
   const state = workerHelpers.getSessionState(
     {
       model: null,
@@ -277,12 +277,12 @@ test("getSessionState exposes turn, streaming, and Working independently", () =>
       messages: [],
       pendingMessageCount: 0,
     },
-    { turnActive: true, workingVisible: true },
+    { turnActive: true },
   );
 
   assert.equal(state.turnActive, true);
   assert.equal(state.isStreaming, false);
-  assert.equal(state.workingVisible, true);
+  assert.equal("working" in state, false);
 });
 
 test("runBuiltinCommand lists available sessions and reports missing session ids", async () => {

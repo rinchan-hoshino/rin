@@ -127,11 +127,11 @@ test("rpc frontend status keeps backend Working ahead of prompt transport", () =
     connected: true,
   });
 
-  session.setBackendWorkingVisible(true);
+  session.setBackendWorking(true);
   assert.deepEqual(session.getFrontendStatusEvent(), {
     type: "rpc_frontend_status",
-    phase: "sending",
-    label: "Sending",
+    phase: "working",
+    label: "Working",
     connected: true,
   });
 
@@ -143,7 +143,7 @@ test("rpc frontend status keeps backend Working ahead of prompt transport", () =
     connected: true,
   });
 
-  session.setBackendWorkingVisible(false);
+  session.setBackendWorking(false);
   assert.deepEqual(session.getFrontendStatusEvent(), {
     type: "rpc_frontend_status",
     phase: "sending",

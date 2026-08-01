@@ -10,6 +10,12 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
+const { RinDaemonFrontendClient } =
+  await import("../../dist/core/rin-frontend-sdk/daemon-client.js");
+const { RinFrontendTurnDriver } =
+  await import("../../dist/core/rin-frontend-sdk/turn-driver.js");
+const { readDaemonTurn } =
+  await import("../../dist/core/rin-daemon/turn-ledger.js");
 
 async function waitForSocket(socketPath, timeoutMs = 5000) {
   const startedAt = Date.now();
@@ -452,7 +458,7 @@ process.stdin.on("data", (chunk) => {
       continue;
     }
     if (command.type === "prompt") {
-      send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { outcome: "terminalOwner" } });
       continue;
     }
     if (command.type === "shutdown_session") {
@@ -784,148 +790,19 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
-test("daemon auto-resumes sessions recorded as running before restart", async () => {
-  const agentDir = await makeTempDir("rin-daemon-resume-");
+test("frontend accepts distinct durable terminals when replacement workers reuse generation one", async () => {
+  const agentDir = await makeTempDir("rin-daemon-terminal-identity-");
   const socketPath = path.join(agentDir, "daemon.sock");
   const workerPath = path.join(agentDir, "fake-worker.js");
-  const logPath = path.join(agentDir, "commands.log");
-  const sessionFile = path.join(agentDir, "sessions", "active-session.jsonl");
+  const sessionFile = path.join(agentDir, "sessions", "shared.jsonl");
   await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-  await fs.mkdir(path.join(agentDir, "data", "core", "workers"), {
-    recursive: true,
-  });
   await fs.writeFile(sessionFile, "");
-  await fs.writeFile(
-    path.join(agentDir, "data", "core", "workers", "running-workers.json"),
-    `${JSON.stringify({
-      schemaVersion: 1,
-      sessionFiles: [sessionFile],
-      requestTags: { [sessionFile]: "chat-inbox-stable" },
-    })}\n`,
-  );
   await fs.writeFile(
     workerPath,
     `
-const fs = require("node:fs");
 const process = require("node:process");
-const logPath = ${JSON.stringify(logPath)};
 const sessionFile = ${JSON.stringify(sessionFile)};
-function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
-function log(command) { fs.appendFileSync(logPath, JSON.stringify(command) + "\\n"); }
-let buffer = "";
-let switched = false;
-async function handle(command) {
-  log(command);
-  if (command.type === "switch_session") {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    switched = true;
-    send({ type: "response", id: command.id, command: command.type, success: true, data: { cancelled: false, sessionFile, sessionId: "active-session" } });
-    return;
-  }
-  if (command.type === "get_state") {
-    send({
-      type: "response",
-      id: command.id,
-      command: command.type,
-      success: true,
-      data: {
-        sessionFile,
-        sessionId: "active-session",
-        turnActive: false,
-        isStreaming: false,
-        interruptedTurnResumable: true,
-      },
-    });
-    return;
-  }
-  if (command.type === "resume_interrupted_turn") {
-    send({ type: "agent_start" });
-    send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
-    return;
-  }
-  send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
-}
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk) => {
-  buffer += chunk;
-  while (true) {
-    const idx = buffer.indexOf("\\n");
-    if (idx < 0) break;
-    const line = buffer.slice(0, idx);
-    buffer = buffer.slice(idx + 1);
-    if (!line.trim()) continue;
-    handle(JSON.parse(line));
-  }
-});
-`,
-  );
-
-  const daemon = spawnDaemon(agentDir, socketPath, workerPath);
-  try {
-    await waitForSocket(socketPath);
-    let status;
-    for (let i = 0; i < 20; i += 1) {
-      status = await rpc(socketPath, { id: `3-${i}`, type: "daemon_status" });
-      const workers = status.data?.workers || [];
-      if (workers.length === 1 && workers[0].isStreaming === true) break;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    const workers = status.data?.workers || [];
-
-    assert.equal(status.success, true);
-    assert.equal(workers.length, 1);
-    assert.equal(workers[0].sessionFile, sessionFile);
-    assert.equal(workers[0].attachedConnections, 0);
-    assert.equal(workers[0].isStreaming, true);
-    const commands = (await readLogLines(logPath)).map((line) =>
-      JSON.parse(line),
-    );
-    assert.deepEqual(
-      commands.map((command) => command.type),
-      ["get_state", "resume_interrupted_turn"],
-    );
-    assert.equal(commands[1].requestTag, "chat-inbox-stable");
-  } finally {
-    try {
-      daemon.kill("SIGKILL");
-    } catch {
-      // ignore
-    }
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("daemon discards a recorded running turn when the restored session is already terminal", async () => {
-  const agentDir = await makeTempDir("rin-daemon-stale-resume-");
-  const socketPath = path.join(agentDir, "daemon.sock");
-  const workerPath = path.join(agentDir, "fake-worker.js");
-  const logPath = path.join(agentDir, "commands.log");
-  const sessionFile = path.join(agentDir, "sessions", "terminal-session.jsonl");
-  const runningWorkersPath = path.join(
-    agentDir,
-    "data",
-    "core",
-    "workers",
-    "running-workers.json",
-  );
-  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-  await fs.mkdir(path.dirname(runningWorkersPath), { recursive: true });
-  await fs.writeFile(sessionFile, "");
-  await fs.writeFile(
-    runningWorkersPath,
-    `${JSON.stringify({
-      schemaVersion: 1,
-      sessionFiles: [sessionFile],
-      requestTags: { [sessionFile]: "chat-inbox-already-final" },
-    })}\n`,
-  );
-  await fs.writeFile(
-    workerPath,
-    `
-const fs = require("node:fs");
-const process = require("node:process");
-const logPath = ${JSON.stringify(logPath)};
-const sessionFile = ${JSON.stringify(sessionFile)};
+const sessionId = "shared-session";
 function send(payload) { process.stdout.write(JSON.stringify(payload) + "\\n"); }
 let buffer = "";
 process.stdin.setEncoding("utf8");
@@ -938,48 +815,235 @@ process.stdin.on("data", (chunk) => {
     buffer = buffer.slice(idx + 1);
     if (!line.trim()) continue;
     const command = JSON.parse(line);
-    fs.appendFileSync(logPath, JSON.stringify(command) + "\\n");
     if (command.type === "get_state") {
-      send({
-        type: "response",
-        id: command.id,
-        command: command.type,
-        success: true,
-        data: {
-          sessionFile,
-          sessionId: "terminal-session",
-          turnActive: false,
-          isStreaming: false,
-          interruptedTurnResumable: false,
-        },
-      });
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionFile, sessionId, isStreaming: false, isCompacting: false } });
       continue;
     }
-    send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+    if (command.type === "prompt") {
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { outcome: "terminalOwner", requestTag: command.requestTag, sessionFile, sessionId } });
+      setTimeout(() => {
+        send({ type: "rpc_turn_event", event: "complete", requestTag: command.requestTag, sessionFile, sessionId, turnGeneration: 1, finalText: "final:" + command.requestTag });
+        setTimeout(() => process.exit(0), 25);
+      }, 5);
+      continue;
+    }
+    send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionFile, sessionId } });
   }
 });
 `,
   );
 
   const daemon = spawnDaemon(agentDir, socketPath, workerPath);
+  const client = new RinDaemonFrontendClient({
+    socketPath,
+    frontendIdentity: {
+      clientType: "chat-bridge",
+      clientInstanceId: "terminal-identity-test",
+    },
+  });
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const runWithTimeout = async (requestTag) => {
+    let timeout;
+    try {
+      return await Promise.race([
+        driver.runTurn({
+          text: requestTag,
+          requestTag,
+          assumeConnected: true,
+          assumeSessionReady: true,
+        }),
+        new Promise((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error(`turn_timeout:${requestTag}`)),
+            3000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
   try {
     await waitForSocket(socketPath);
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await driver.connect({ restoreSessionFile: sessionFile });
+    const first = await runWithTimeout("chat-inbox-recovered");
+    assert.equal(first.finalText, "final:chat-inbox-recovered");
 
+    let workerExited = false;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const status = await rpc(socketPath, {
+        id: `wait-worker-exit-${attempt}`,
+        type: "daemon_status",
+      });
+      if ((status.data?.workers || []).length === 0) {
+        workerExited = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(workerExited, true);
+
+    const second = await runWithTimeout("chat-inbox-current");
+    assert.equal(second.finalText, "final:chat-inbox-current");
+  } finally {
+    driver.dispose();
+    try {
+      daemon.kill("SIGKILL");
+    } catch {
+      // ignore
+    }
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("hard daemon and worker death resumes the accepted ledger turn without prompt replay", async () => {
+  const agentDir = await makeTempDir("rin-daemon-hard-crash-");
+  const socketPath = path.join(agentDir, "daemon.sock");
+  const workerPath = path.join(agentDir, "crash-worker.mjs");
+  const logPath = path.join(agentDir, "worker.log");
+  const sessionFile = path.join(agentDir, "session.jsonl");
+  const requestTag = "hard-crash-turn";
+  await fs.writeFile(
+    workerPath,
+    `
+import fs from "node:fs";
+import readline from "node:readline";
+const logPath = ${JSON.stringify(logPath)};
+const sessionFile = ${JSON.stringify(sessionFile)};
+const log = (type) => fs.appendFileSync(logPath, process.pid + ":" + type + "\\n");
+const send = (payload) => process.stdout.write(JSON.stringify(payload) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const command = JSON.parse(line);
+  if (command.type === "get_state") {
+    send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionFile, sessionId: "crash-session", isStreaming: false, isCompacting: false } });
+    return;
+  }
+  if (command.type === "prompt") {
+    log("prompt");
+    send({ type: "response", id: command.id, command: command.type, success: true, data: { outcome: "terminalOwner" } });
+    send({ type: "rpc_turn_event", event: "start", requestTag: command.requestTag, turnGeneration: 1, sessionFile, sessionId: "crash-session" });
+    return;
+  }
+  if (command.type === "resume_interrupted_turn") {
+    log("resume");
+    send({ type: "response", id: command.id, command: command.type, success: true, data: { resumed: true } });
+    send({ type: "rpc_turn_event", event: "start", requestTag: command.requestTag, turnGeneration: 1, sessionFile, sessionId: "crash-session" });
+    setTimeout(() => send({ type: "rpc_turn_event", event: "complete", requestTag: command.requestTag, turnGeneration: 1, sessionFile, sessionId: "crash-session", finalText: "hard crash recovered final" }), 25);
+    return;
+  }
+  send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  let firstDaemon = spawnDaemon(agentDir, socketPath, workerPath);
+  let secondDaemon;
+  try {
+    await waitForSocket(socketPath);
+    const prompt = await withRpcConnection(socketPath, async (client) => {
+      const selected = await client.request({
+        id: "hard-crash-select",
+        type: "switch_session",
+        sessionFile,
+        sessionId: "crash-session",
+      });
+      assert.equal(selected.success, true);
+      return await client.request({
+        id: "hard-crash-prompt",
+        type: "prompt",
+        message: "execute once",
+        requestTag,
+      });
+    });
+    assert.equal(prompt.success, true);
+    assert.equal(readDaemonTurn(agentDir, requestTag)?.state, "active");
+
+    firstDaemon.kill("SIGKILL");
+    await new Promise((resolve) => firstDaemon.once("exit", resolve));
+    firstDaemon = undefined;
+    for (const line of await readLogLines(logPath)) {
+      const pid = Number(line.split(":", 1)[0]);
+      if (Number.isFinite(pid)) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {}
+      }
+    }
+
+    secondDaemon = spawnDaemon(agentDir, socketPath, workerPath);
+    await waitForSocket(socketPath, 10_000);
+    const deadline = Date.now() + 10_000;
+    let terminal;
+    while (Date.now() < deadline) {
+      terminal = readDaemonTurn(agentDir, requestTag);
+      if (terminal?.state === "complete") break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(terminal?.state, "complete");
+    assert.equal(
+      terminal?.terminalEvent?.finalText,
+      "hard crash recovered final",
+    );
     const commands = (await readLogLines(logPath)).map((line) =>
-      JSON.parse(line),
+      line.slice(line.indexOf(":") + 1),
     );
-    assert.deepEqual(
-      commands.map((command) => command.type),
-      ["get_state"],
-    );
-    assert.deepEqual(
-      JSON.parse(await fs.readFile(runningWorkersPath, "utf8")),
-      {
-        schemaVersion: 1,
-        sessionFiles: [],
-      },
-    );
+    assert.equal(commands.filter((type) => type === "prompt").length, 1);
+    assert.equal(commands.filter((type) => type === "resume").length, 1);
+  } finally {
+    for (const daemon of [firstDaemon, secondDaemon]) {
+      if (!daemon || daemon.exitCode !== null) continue;
+      daemon.kill("SIGKILL");
+      await Promise.race([
+        new Promise((resolve) => daemon.once("exit", resolve)),
+        new Promise((resolve) => setTimeout(resolve, 1000)),
+      ]);
+    }
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("daemon does not revive sessions recorded as running before restart", async () => {
+  const agentDir = await makeTempDir("rin-daemon-no-revival-");
+  const socketPath = path.join(agentDir, "daemon.sock");
+  const workerPath = path.join(agentDir, "fake-worker.js");
+  const logPath = path.join(agentDir, "commands.log");
+  const sessionFile = path.join(agentDir, "sessions", "interrupted.jsonl");
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.mkdir(path.join(agentDir, "data", "core", "workers"), {
+    recursive: true,
+  });
+  await fs.writeFile(sessionFile, "");
+  await fs.writeFile(
+    path.join(agentDir, "data", "core", "workers", "running-workers.json"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      sessionFiles: [sessionFile],
+      requestTags: { [sessionFile]: "chat-inbox-interrupted" },
+    })}\n`,
+  );
+  await fs.writeFile(
+    workerPath,
+    `const fs = require("node:fs");
+fs.appendFileSync(${JSON.stringify(logPath)}, "spawned\\n");
+process.stdin.resume();\n`,
+  );
+
+  const daemon = spawnDaemon(agentDir, socketPath, workerPath);
+  try {
+    await waitForSocket(socketPath);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const status = await rpc(socketPath, {
+      id: "no-revival-status",
+      type: "daemon_status",
+    });
+    assert.equal(status.success, true);
+    assert.deepEqual(status.data?.workers || [], []);
+    assert.deepEqual(await readLogLines(logPath), []);
   } finally {
     try {
       daemon.kill("SIGKILL");

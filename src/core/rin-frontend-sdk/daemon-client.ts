@@ -15,6 +15,7 @@ import {
 import type {
   RinExtensionUiRequest,
   RinExtensionUiResponse,
+  RinInputSubmissionOutcome,
   RinRpcCommand,
   RinRpcResponse,
 } from "./types.js";
@@ -228,12 +229,15 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     return () => this.listeners.delete(listener);
   }
 
-  async submit(text: string) {
+  async submit(text: string): Promise<RinInputSubmissionOutcome | void> {
     return await this.prompt(text);
   }
 
-  async prompt(text: string, options: Record<string, unknown> = {}) {
-    return await this.request({
+  async prompt(
+    text: string,
+    options: Record<string, unknown> = {},
+  ): Promise<RinInputSubmissionOutcome | void> {
+    return await this.request<RinInputSubmissionOutcome>({
       type: "prompt",
       message: text,
       ...(this.frontendIdentity
