@@ -2958,7 +2958,7 @@ test("chat main reconciles a retained turn only after durable acceptance", async
       controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
         runTurnCalls += 1;
         if (runTurnCalls === 1) {
-          throw new Error("rin_disconnected:rpc_turn_queued_offline");
+          throw new Error("frontend_session_not_connected");
         }
         throw new Error("unexpected prompt replay");
       };

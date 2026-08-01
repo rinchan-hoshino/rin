@@ -987,6 +987,7 @@ export async function startChatBridge(
       if (
         [
           "frontend_turn_interrupted",
+          "frontend_session_not_connected",
           "chat_turn_interrupted",
           "rin_worker_exit",
           "rin_worker_oom",
