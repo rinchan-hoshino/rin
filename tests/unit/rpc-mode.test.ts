@@ -2409,6 +2409,7 @@ test(
           return () => sessionSubscribers.delete(handler);
         },
         prompt: async () => {
+          session.isStreaming = true;
           const userMessage = {
             role: "user",
             timestamp: Date.now(),
@@ -2423,13 +2424,16 @@ test(
             await handler({ type: "message_start", message: userMessage });
           }
           session.sessionManager.appendMessage(userMessage);
-          session.sessionManager.appendMessage(assistantMessage);
-          for (const handler of sessionSubscribers) {
-            await handler({ type: "message_end", message: assistantMessage });
-          }
-          for (const handler of sessionSubscribers) {
-            await handler({ type: "agent_settled" });
-          }
+          setTimeout(async () => {
+            session.sessionManager.appendMessage(assistantMessage);
+            for (const handler of sessionSubscribers) {
+              await handler({ type: "message_end", message: assistantMessage });
+            }
+            session.isStreaming = false;
+            for (const handler of sessionSubscribers) {
+              await handler({ type: "agent_settled" });
+            }
+          }, 10);
         },
         sendCustomMessage: async () => {},
         steer: async () => {},
@@ -4822,6 +4826,11 @@ test(
               await handler({
                 type: "queue_update",
                 steering: [message],
+                followUp: [],
+              });
+              await handler({
+                type: "queue_update",
+                steering: [],
                 followUp: [],
               });
             }

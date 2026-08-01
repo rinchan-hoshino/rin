@@ -1459,7 +1459,11 @@ export async function runCustomRpcMode(
         const ownerBarrier = observeNativeTerminalOwner(nativeSubmission);
         if (ownerBarrier) await ownerBarrier;
       }
-      if (event?.type === "queue_update" && nativeSubmission) {
+      if (
+        event?.type === "queue_update" &&
+        nativeSubmission &&
+        !nativeSubmission.admissionToken
+      ) {
         nativeSubmission.admissionToken = turnCoordinator.admit({
           requestTag: nativeSubmission.requestTag,
           observedRole: "nonterminal",
