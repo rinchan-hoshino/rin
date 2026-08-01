@@ -259,10 +259,6 @@ export interface RinFrontendClient {
     text: string,
     options?: RinPromptOptions,
   ): Promise<RinPromptAdmission | void>;
-  steer?(
-    text: string,
-    options?: RinPromptOptions,
-  ): Promise<RinPromptAdmission | void>;
   abort(): Promise<void>;
   getState(): Promise<RinSessionState>;
   getMessages(): Promise<unknown[]>;

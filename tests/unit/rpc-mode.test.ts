@@ -10,10 +10,36 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const { runCustomRpcMode } = await import(
+const { runCustomRpcMode: runProductionRpcMode } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "rpc-mode.js"))
     .href
 );
+
+function runCustomRpcMode(runtime, dependencies) {
+  const session = runtime?.session || runtime;
+  const originalPrompt = session?.prompt;
+  if (typeof originalPrompt === "function") {
+    session.prompt = async function (message, options = {}) {
+      let preflightReported = false;
+      const reportPreflight = options.preflightResult;
+      if (!session.__testNativePreflight) {
+        preflightReported = true;
+        reportPreflight?.(true);
+      }
+      const promptTask = originalPrompt.call(this, message, {
+        ...options,
+        preflightResult(success) {
+          preflightReported = true;
+          reportPreflight?.(success);
+        },
+      });
+      await Promise.resolve();
+      if (!preflightReported) reportPreflight?.(true);
+      return await promptTask;
+    };
+  }
+  return runProductionRpcMode(runtime, dependencies);
+}
 const { attachRinCapabilityExtensionBridge } = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "pi", "internal-extension-bridge.js"),
@@ -3527,6 +3553,7 @@ test(
     try {
       const durableEntries: any[] = [];
       const session = {
+        __testNativePreflight: true,
         isStreaming: false,
         isCompacting: false,
         sessionFile: "/tmp/test-session.jsonl",
@@ -3534,7 +3561,8 @@ test(
         agent: { waitForIdle: async () => {} },
         bindExtensions: async () => {},
         subscribe: () => () => {},
-        prompt: async () => {
+        prompt: async (_message, options) => {
+          options?.preflightResult?.(true);
           promptCalled = true;
           const currentAssistant = {
             role: "assistant",
@@ -4971,6 +4999,7 @@ test(
     const stdoutWrite = process.stdout.write;
     const handlers = new Map();
     const lines = [];
+    const promptStreamingStates = [];
     const sessionSubscribers = new Set();
     let releaseSteeredTurn;
     const steeredTurnGate = new Promise((resolve) => {
@@ -4988,6 +5017,7 @@ test(
 
     try {
       const session = {
+        __testNativePreflight: true,
         isStreaming: false,
         isCompacting: false,
         sessionFile: "/tmp/steer-terminal-session.jsonl",
@@ -5002,7 +5032,10 @@ test(
           sessionSubscribers.add(handler);
           return () => sessionSubscribers.delete(handler);
         },
-        async prompt() {
+        async prompt(_message, options) {
+          await Promise.resolve();
+          promptStreamingStates.push(this.isStreaming);
+          options?.preflightResult?.(true);
           if (this.isStreaming) return;
           this.isStreaming = true;
           await steeredTurnGate;
@@ -5012,7 +5045,11 @@ test(
         followUp: async () => {},
         abort: async () => {},
         modelRegistry: { getAvailable: async () => [] },
-        sessionManager: testSessionManager(() => session.messages),
+        sessionManager: {
+          ...testSessionManager(() => session.messages),
+          getEntries: () =>
+            session.messages.map((message) => ({ type: "message", message })),
+        },
         messages: [],
         getSessionStats: () => ({}),
         getUserMessagesForForking: () => [],
@@ -5064,13 +5101,9 @@ test(
       );
       await wait(10);
 
-      const secondAdmission = parseRpcOutput(lines).find(
-        (event) => event.type === "response" && event.id === "turn-steer",
-      );
-      assert.equal(secondAdmission?.data?.acceptedAs, "prompt");
-
       const steeredUser = {
         role: "user",
+        requestTag: "tag-steer",
         content: [{ type: "text", text: "steer now" }],
       };
       session.messages.push(steeredUser);
@@ -5081,6 +5114,25 @@ test(
         });
       }
       await wait(20);
+
+      assert.deepEqual(promptStreamingStates, [false, true]);
+      const secondAdmission = parseRpcOutput(lines).find(
+        (event) => event.type === "response" && event.id === "turn-steer",
+      );
+      assert.equal(secondAdmission?.data?.acceptedAs, "steer");
+      assert.equal((steeredUser as any).rinAcceptedAs, "steer");
+
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "turn-steer-retry", type: "prompt", message: "steer now", streamingBehavior: "steer", requestTag: "tag-steer" })}\n`,
+        ),
+      );
+      await wait(10);
+      const retriedAdmission = parseRpcOutput(lines).find(
+        (event) => event.type === "response" && event.id === "turn-steer-retry",
+      );
+      assert.equal(retriedAdmission?.data?.acceptedAs, "steer");
+      assert.deepEqual(promptStreamingStates, [false, true]);
 
       const projectedUserStart = parseRpcOutput(lines).find(
         (event) =>
@@ -5105,6 +5157,7 @@ test(
         handler({ type: "message_end", message: finalMessage });
       }
       releaseSteeredTurn();
+      await wait(0);
       for (const handler of sessionSubscribers) {
         handler({ type: "agent_settled" });
       }
@@ -5235,6 +5288,19 @@ test(
       );
       await wait(10);
       agentState.activeRun = false;
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "queue-race", type: "prompt", message: "too early", requestTag: "tag-race" })}\n`,
+        ),
+      );
+      await wait(30);
+      const raceResponse = parseRpcOutput(lines).find(
+        (event) => event.type === "response" && event.id === "queue-race",
+      );
+      assert.equal(raceResponse?.success, false);
+      assert.equal(raceResponse?.error, "rin_turn_admission_pending");
+      assert.equal(calls.length, 1);
+
       const firstFinal = {
         role: "assistant",
         content: [{ type: "text", text: "first settled final" }],
@@ -5265,6 +5331,11 @@ test(
       }
       await wait(20);
 
+      for (const call of calls) {
+        for (const value of call) {
+          if (value && typeof value === "object") delete value.preflightResult;
+        }
+      }
       assert.deepEqual(calls, [
         [
           "prompt",
@@ -5281,7 +5352,7 @@ test(
           "plain follow-in",
           {
             images: undefined,
-            streamingBehavior: "steer",
+            streamingBehavior: "followUp",
             source: "rpc",
             requestTag: "tag-2",
           },
@@ -5396,6 +5467,11 @@ test(
       );
       await wait(20);
 
+      for (const call of calls) {
+        for (const value of call) {
+          if (value && typeof value === "object") delete value.preflightResult;
+        }
+      }
       assert.deepEqual(calls, [
         [
           "recovery follow-in",
@@ -5439,7 +5515,7 @@ test(
 );
 
 test(
-  "rpc mode native queue creates one terminal observer when no local tracker exists",
+  "rpc mode native steering never invents terminal ownership when no local tracker exists",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -5528,6 +5604,11 @@ test(
       );
       await wait(50);
 
+      for (const call of calls) {
+        for (const value of call) {
+          if (value && typeof value === "object") delete value.preflightResult;
+        }
+      }
       assert.deepEqual(calls, [
         [
           "steer me",
@@ -5575,13 +5656,7 @@ test(
             requestTag: event.requestTag,
             finalText: event.finalText,
           })),
-        [
-          {
-            event: "complete",
-            requestTag: "tag-1",
-            finalText: "native queued final",
-          },
-        ],
+        [],
       );
     } finally {
       process.stdin.on = stdinOn;
@@ -6250,6 +6325,7 @@ test(
 
       assert.deepEqual(bindCalls, ["first"]);
       assert.equal(unsubscribeCount, 1);
+      for (const prompt of prompts) delete prompt[2].preflightResult;
       assert.deepEqual(prompts, [
         [
           "first",

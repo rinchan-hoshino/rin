@@ -24,10 +24,12 @@ function createSessionFrontendClient(controller) {
       return () => {};
     },
     async prompt(text, options = {}) {
-      return await controller.session?.prompt?.(text, options);
-    },
-    async steer(text, options = {}) {
-      return await controller.session?.steer?.(text, options);
+      return (
+        (await controller.session?.prompt?.(text, options)) || {
+          acceptedAs: "prompt",
+          requestTag: options.requestTag,
+        }
+      );
     },
     async getState() {
       return state();

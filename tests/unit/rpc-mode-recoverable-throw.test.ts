@@ -55,7 +55,8 @@ test(
           sessionSubscribers.add(handler);
           return () => sessionSubscribers.delete(handler);
         },
-        prompt: async () => {
+        prompt: async (_message: string, options: any) => {
+          options?.preflightResult?.(true);
           const errorMessage = {
             role: "assistant",
             content: [],

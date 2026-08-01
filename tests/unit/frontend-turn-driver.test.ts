@@ -79,6 +79,7 @@ function createFrontendClient() {
             : {}),
         },
       });
+      return { acceptedAs: "prompt", requestTag: options.requestTag };
     },
     async runCommand(commandLine: string) {
       calls.push({ type: "runCommand", commandLine });
@@ -740,6 +741,7 @@ test("frontend SDK turn driver settles from daemon terminal wait when the pushed
   };
   client.prompt = async (text: string, options: any = {}) => {
     client.calls.push({ type: "prompt", text, options });
+    return { acceptedAs: "prompt", requestTag: options.requestTag };
   };
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
@@ -1737,7 +1739,7 @@ test("frontend SDK ignores a stale terminal request tag while the current turn i
   assert.equal((await pending).finalText, "current final");
 });
 
-test("frontend SDK treats active-state input as an ordinary submission and waits for Pi terminal", async () => {
+test("frontend SDK settles Pi-native steering without taking terminal ownership", async () => {
   const client = createFrontendClient();
   client.getState = async () => ({
     sessionFile: "/tmp/frontend-chat.jsonl",
@@ -1757,39 +1759,45 @@ test("frontend SDK treats active-state input as an ordinary submission and waits
 
   const pending = driver.runTurn({
     text: "restored job",
+    streamingBehavior: "steer",
     promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
   });
   await waitUntil(
     () => client.calls.some((call: any) => call.type === "prompt"),
     "ordinary submission did not reach backend",
   );
-  await emitRpcTurnComplete(
-    driver,
-    "backend-terminal-owner",
-    "Pi terminal",
-    "/tmp/frontend-chat.jsonl",
-    "frontend-session",
-  );
-
   const result = await withTimeout(
     pending,
     250,
-    "backend-owned terminal did not settle the active frontend turn",
+    "Pi-native steering admission did not settle",
   );
-  assert.equal(result.finalText, "Pi terminal");
+  assert.equal(result.acceptedAs, "steer");
+  assert.equal(result.superseded, true);
+  assert.equal(result.finalText, undefined);
   const promptCall = client.calls.find((call: any) => call.type === "prompt");
   assert.equal(promptCall.text, "restored job");
-  assert.equal(promptCall.options.streamingBehavior, undefined);
+  assert.equal(promptCall.options.streamingBehavior, "steer");
 });
 
-test("frontend SDK sends explicit steering without opening a lifecycle turn", async () => {
+test("frontend SDK rejects a missing Pi admission instead of assuming prompt", async () => {
   const client = createFrontendClient();
-  (client as any).steer = async (text: string, options: any = {}) => {
-    client.calls.push({ type: "steer", text, options });
+  client.prompt = async () => undefined;
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  await assert.rejects(
+    driver.submitTurn({ text: "missing admission" }),
+    /rin_prompt_admission_invalid/,
+  );
+});
+
+test("frontend SDK lets Pi classify steering through the ordinary prompt RPC", async () => {
+  const client = createFrontendClient();
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
     return { acceptedAs: "steer", requestTag: options.requestTag };
-  };
-  client.prompt = async () => {
-    throw new Error("ordinary prompt must not carry steering");
   };
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
@@ -1799,19 +1807,40 @@ test("frontend SDK sends explicit steering without opening a lifecycle turn", as
   await driver.submitTurn({
     text: "steer now",
     streamingBehavior: "steer",
-    transportCommand: "steer",
     requestTag: "tag-steer",
     promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
   });
 
-  const steerCall = client.calls.find((call: any) => call.type === "steer");
-  assert.ok(steerCall);
-  assert.equal(steerCall.options.streamingBehavior, "steer");
-  assert.equal(steerCall.options.requestTag, "tag-steer");
-  assert.equal(
-    client.calls.some((call: any) => call.type === "prompt"),
-    false,
-  );
+  const promptCall = client.calls.find((call: any) => call.type === "prompt");
+  assert.ok(promptCall);
+  assert.equal(promptCall.options.streamingBehavior, "steer");
+  assert.equal(promptCall.options.requestTag, "tag-steer");
+});
+
+test("frontend SDK runTurn settles when Pi reports nonterminal admission without a prior local turn", async () => {
+  const client = createFrontendClient();
+  client.prompt = async (_text: string, options: any = {}) => ({
+    acceptedAs: "steer",
+    requestTag: options.requestTag,
+  });
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const result = await Promise.race([
+    driver.runTurn({
+      text: "remote steering",
+      streamingBehavior: "steer",
+      requestTag: "tag-remote-steer",
+    }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("runTurn hung")), 250),
+    ),
+  ]);
+
+  assert.equal(result.acceptedAs, "steer");
+  assert.equal(result.superseded, true);
 });
 
 test("frontend SDK turn driver leaves terminal ownership with the backend after a queued steer starts", async () => {
@@ -1819,6 +1848,7 @@ test("frontend SDK turn driver leaves terminal ownership with the backend after 
   const client = (driver as any).testClient;
   client.prompt = async (text: string, options: any = {}) => {
     client.calls.push({ type: "prompt", text, options });
+    return { acceptedAs: "prompt", requestTag: options.requestTag };
   };
 
   const turn = driver.runTurn({
@@ -1895,7 +1925,7 @@ test("frontend SDK projects a backend terminal after ordinary submission without
   ]);
 });
 
-test("frontend SDK submits ordinary input unchanged during a backend tool gap", async () => {
+test("frontend SDK accepts Pi-native steering during a backend tool gap", async () => {
   const client = createFrontendClient();
   client.getState = async () => ({
     sessionFile: "/tmp/frontend-chat.jsonl",
@@ -1915,18 +1945,19 @@ test("frontend SDK submits ordinary input unchanged during a backend tool gap", 
 
   const pending = driver.runTurn({
     text: "input between tools",
+    streamingBehavior: "steer",
     promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
   });
   await waitUntil(
     () => client.calls.some((call: any) => call.type === "prompt"),
     "ordinary tool-gap input did not reach backend",
   );
-  await emitRpcTurnComplete(driver, "backend-terminal-owner", "tool-gap final");
-
-  assert.equal((await pending).finalText, "tool-gap final");
+  const result = await pending;
+  assert.equal(result.acceptedAs, "steer");
+  assert.equal(result.superseded, true);
   const promptCall = client.calls.find((call: any) => call.type === "prompt");
   assert.equal(promptCall.text, "input between tools");
-  assert.equal(promptCall.options.streamingBehavior, undefined);
+  assert.equal(promptCall.options.streamingBehavior, "steer");
 });
 
 test("frontend SDK keeps ordinary input transport-pending until compaction ends", async () => {
@@ -2216,6 +2247,7 @@ test("frontend SDK turn driver waits for real final after interim and compaction
         );
       })();
     }, 5);
+    return { acceptedAs: "prompt", requestTag: options.requestTag };
   };
 
   const result = await driver.runTurn({ text: "hello" });

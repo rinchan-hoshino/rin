@@ -458,7 +458,7 @@ process.stdin.on("data", (chunk) => {
       continue;
     }
     if (command.type === "prompt") {
-      send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { acceptedAs: "prompt" } });
       continue;
     }
     if (command.type === "shutdown_session") {
@@ -820,7 +820,7 @@ process.stdin.on("data", (chunk) => {
       continue;
     }
     if (command.type === "prompt") {
-      send({ type: "response", id: command.id, command: command.type, success: true, data: { requestTag: command.requestTag, sessionFile, sessionId } });
+      send({ type: "response", id: command.id, command: command.type, success: true, data: { acceptedAs: "prompt", requestTag: command.requestTag, sessionFile, sessionId } });
       setTimeout(() => {
         send({ type: "rpc_turn_event", event: "complete", requestTag: command.requestTag, sessionFile, sessionId, turnGeneration: 1, finalText: "final:" + command.requestTag });
         setTimeout(() => process.exit(0), 25);
@@ -924,7 +924,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (command.type === "prompt") {
     log("prompt");
-    send({ type: "response", id: command.id, command: command.type, success: true, data: {} });
+    send({ type: "response", id: command.id, command: command.type, success: true, data: { acceptedAs: "prompt" } });
     send({ type: "rpc_turn_event", event: "start", requestTag: command.requestTag, turnGeneration: 1, sessionFile, sessionId: "crash-session" });
     return;
   }
@@ -995,8 +995,14 @@ setInterval(() => {}, 1000);
     assert.equal(commands.filter((type) => type === "prompt").length, 1);
     assert.equal(commands.filter((type) => type === "resume").length, 1);
   } finally {
-    firstDaemon?.kill("SIGKILL");
-    secondDaemon?.kill("SIGTERM");
+    for (const daemon of [firstDaemon, secondDaemon]) {
+      if (!daemon || daemon.exitCode !== null) continue;
+      daemon.kill("SIGKILL");
+      await Promise.race([
+        new Promise((resolve) => daemon.once("exit", resolve)),
+        new Promise((resolve) => setTimeout(resolve, 1000)),
+      ]);
+    }
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });

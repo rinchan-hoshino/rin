@@ -132,12 +132,36 @@ function getSessionEntriesSince(session: any, since: unknown) {
   return { entries: entries.slice(index + 1) };
 }
 
+function persistedNonterminalPromptAdmission(
+  session: any,
+  requestTag: string,
+): "steer" | "followUp" | undefined {
+  if (!requestTag) return undefined;
+  for (const entry of [...getSessionEntries(session)].reverse()) {
+    if (
+      entry?.type !== "message" ||
+      entry?.message?.role !== "user" ||
+      safeString(entry.message.requestTag).trim() !== requestTag
+    ) {
+      continue;
+    }
+    const acceptedAs = safeString(entry.message.rinAcceptedAs).trim();
+    return acceptedAs === "steer" || acceptedAs === "followUp"
+      ? acceptedAs
+      : undefined;
+  }
+  return undefined;
+}
+
 function hasPersistedUserRequestTag(session: any, requestTag: string) {
   if (!requestTag) return false;
   const marker = `request tag: ${requestTag}`;
   return getSessionEntries(session).some((entry: any) => {
     if (entry?.type !== "message" || entry?.message?.role !== "user") {
       return false;
+    }
+    if (safeString(entry.message.requestTag).trim() === requestTag) {
+      return true;
     }
     const content = entry.message.content;
     const text = Array.isArray(content)
@@ -1317,6 +1341,14 @@ export async function runCustomRpcMode(
           message: event.message,
         });
         producerRequestTag = producerRequestTag || match?.requestTag || "";
+        if (
+          match &&
+          (match.admission.acceptedAs === "steer" ||
+            match.admission.acceptedAs === "followUp") &&
+          event.message.rinAcceptedAs === undefined
+        ) {
+          event.message.rinAcceptedAs = match.admission.acceptedAs;
+        }
       }
       const taggedEvent =
         producerRequestTag && !safeString(event?.requestTag).trim()
@@ -1364,6 +1396,19 @@ export async function runCustomRpcMode(
         return done(id, type);
       case "prompt": {
         const requestTag = rpcRequestTag(command.requestTag);
+        const persistedAdmission = persistedNonterminalPromptAdmission(
+          session,
+          requestTag,
+        );
+        if (persistedAdmission) {
+          return done(
+            id,
+            "prompt",
+            promptAdmission(session, persistedAdmission, requestTag, {
+              turnActive: turnCoordinator.isActive,
+            }),
+          );
+        }
         turnCoordinator.assertAdmissionOpen();
         if (
           turnCoordinator.isActive &&
@@ -1388,7 +1433,9 @@ export async function runCustomRpcMode(
             }),
           );
         }
-        const requestedQueueBehavior = "steer";
+        captureTurnScope(session);
+        const requestedQueueBehavior =
+          command.streamingBehavior === "followUp" ? "followUp" : "steer";
         const promptOptions: Record<string, unknown> = {
           images: command.images,
           // Match Pi's interactive Enter path without copying its state check:
@@ -1409,38 +1456,88 @@ export async function runCustomRpcMode(
         if (frontendIdentity !== undefined) {
           promptOptions.frontendIdentity = frontendIdentity;
         }
-        const requestTagToken = turnCoordinator.admit({
-          requestTag,
-          acceptedAs: "prompt",
-          text: safeString(command.message),
-          hasImages: Array.isArray(command.images) && command.images.length > 0,
+        let resolveAdmission!: (
+          acceptedAs: "prompt" | "steer" | "followUp",
+        ) => void;
+        let rejectAdmission!: (error: unknown) => void;
+        const piAdmission = new Promise<"prompt" | "steer" | "followUp">(
+          (resolve, reject) => {
+            resolveAdmission = resolve;
+            rejectAdmission = reject;
+          },
+        );
+        let requestTagToken:
+          | ReturnType<typeof turnCoordinator.admit>
+          | undefined;
+        let resolvePromptTask!: (value: unknown) => void;
+        let rejectPromptTask!: (error: unknown) => void;
+        const trackedPromptTask = new Promise<unknown>((resolve, reject) => {
+          resolvePromptTask = resolve;
+          rejectPromptTask = reject;
         });
-        try {
-          if (turnCoordinator.isActive) {
-            await session.prompt(command.message, promptOptions);
-          } else {
+        trackedPromptTask.catch(() => {});
+        promptOptions.preflightResult = (success: boolean) => {
+          if (!success) {
+            resolveAdmission("followUp");
+            return;
+          }
+          const acceptedAs = session.isStreaming
+            ? requestedQueueBehavior
+            : "prompt";
+          if (acceptedAs === "prompt" && turnCoordinator.isActive) {
+            const error = new Error("rin_turn_admission_pending");
+            rejectAdmission(error);
+            throw error;
+          }
+          const shouldStartTurn =
+            acceptedAs === "prompt" && !turnCoordinator.isActive;
+          requestTagToken = turnCoordinator.admit({
+            requestTag,
+            acceptedAs,
+            text: safeString(command.message),
+            hasImages:
+              Array.isArray(command.images) && command.images.length > 0,
+          });
+          if (shouldStartTurn) {
             startTurnTask(
               requestTag,
               async () => {
                 try {
-                  return await session.prompt(command.message, promptOptions);
+                  return await trackedPromptTask;
                 } catch (error) {
-                  turnCoordinator.removeAdmission(requestTagToken);
+                  if (requestTagToken) {
+                    turnCoordinator.removeAdmission(requestTagToken);
+                  }
                   throw error;
                 }
               },
               {},
             );
           }
-        } catch (error) {
-          turnCoordinator.removeAdmission(requestTagToken);
-          throw error;
+          resolveAdmission(acceptedAs);
+        };
+        const promptTask = session.prompt(command.message, promptOptions);
+        promptTask.then(resolvePromptTask, rejectPromptTask);
+        promptTask.catch(rejectAdmission);
+        const acceptedAs = await piAdmission;
+        if (acceptedAs !== "prompt") {
+          try {
+            await promptTask;
+            if (requestTag) {
+              await waitForPersistedUserRequestTag(session, requestTag);
+            }
+          } catch (error) {
+            if (requestTagToken) {
+              turnCoordinator.removeAdmission(requestTagToken);
+            }
+            throw error;
+          }
         }
         return done(
           id,
           "prompt",
-          promptAdmission(session, "prompt", command.requestTag, {
-            turnActive: true,
+          promptAdmission(session, acceptedAs, command.requestTag, {
+            turnActive: acceptedAs === "prompt" || turnCoordinator.isActive,
           }),
         );
       }

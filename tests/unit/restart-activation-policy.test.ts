@@ -160,6 +160,40 @@ test("chat terminal backlog is reconciled without waiting for new ingress", () =
     chatMain,
     /terminalRecord\?\.terminalId[\s\S]*terminal-reconcile:\$\{terminalId\}[\s\S]*affectChatBinding: false[\s\S]*recoverTerminals: false[\s\S]*projectAuthoritativeTerminal\(terminal\)/,
   );
+  assert.match(chatMain, /terminalProjectionInFlight = new Set<string>\(\)/);
+  assert.match(
+    chatMain,
+    /terminalProjectionInFlight\.has\(terminalId\)[\s\S]*void \(async \(\) =>[\s\S]*terminalProjectionInFlight\.delete\(terminalId\)/,
+  );
+});
+
+test("Pi admission, not Chat state, decides prompt versus steering", () => {
+  const chatMain = source("src/core/chat/main.ts");
+  const controller = source("src/core/chat/controller.ts");
+  const admission = source("src/core/chat/durable-admission.ts");
+  const rpcMode = source("src/core/rin-daemon/rpc-mode.ts");
+  const workerPool = source("src/core/rin-daemon/worker-pool.ts");
+
+  assert.doesNotMatch(chatMain, /submission\.mode\b/);
+  assert.doesNotMatch(chatMain, /hasActiveTurn\(\) \? "steer" : "turn"/);
+  assert.doesNotMatch(controller, /async steerTurn\(/);
+  assert.doesNotMatch(admission, /mode\?: "turn" \| "steer"/);
+  assert.match(
+    rpcMode,
+    /promptOptions\.preflightResult[\s\S]*session\.isStreaming[\s\S]*acceptedAs === "prompt" && turnCoordinator\.isActive[\s\S]*rin_turn_admission_pending[\s\S]*resolveAdmission\(acceptedAs\)/,
+  );
+  assert.match(
+    workerPool,
+    /acceptedAs = piAdmissionKind\(data\.acceptedAs\)[\s\S]*acceptedAs === "prompt"[\s\S]*establishPiPromptLifecycle/,
+  );
+  assert.match(
+    workerPool,
+    /establishPiPromptLifecycle[\s\S]*beginDaemonTurn[\s\S]*setLifecycleOwner/,
+  );
+  assert.match(
+    workerPool,
+    /piAdmissionKind\(data\.acceptedAs\)[\s\S]*rin_prompt_admission_invalid/,
+  );
 });
 
 test("chat lifecycle settlement is independent of restart and lease timing", () => {

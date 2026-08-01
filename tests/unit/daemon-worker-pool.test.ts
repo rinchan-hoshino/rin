@@ -655,7 +655,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("a failed owner command with a spaced id clears only its installed lifecycle", async () => {
+test("a failed Pi admission with a spaced id never installs lifecycle ownership", async () => {
   const dir = await makeTempDir("rin-worker-pool-spaced-owner-id-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = path.join(dir, "session.jsonl");
@@ -696,7 +696,7 @@ test("a failed owner command with a spaced id clears only its installed lifecycl
     },
     true,
   );
-  assert.equal(worker.activeLifecycleOwnerCommandId, " owner-command ");
+  assert.equal(worker.activeLifecycleOwnerCommandId, undefined);
   worker.child.stdout.emit(
     "data",
     `${JSON.stringify({
@@ -764,6 +764,7 @@ test("exact terminal wait survives detach without leaking a raw terminal event",
     "data",
     `${JSON.stringify({ type: "rpc_turn_event", event: "start", requestTag: "run-request", turnGeneration: 1, sessionFile, sessionId: "run-session" })}\n`,
   );
+  await sleep(20);
   writes.length = 0;
   pool.detachWorker(connection, { release: false });
   const terminal = pool.awaitTerminalTurnEvent(
@@ -869,7 +870,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   if (command.type === "prompt") {
-    process.stdout.write(JSON.stringify({ id: command.id, success: true, command: command.type, data: { accepted: true, requestTag: command.requestTag, sessionFile, sessionId: "resume-session" } }) + "\\n");
+    process.stdout.write(JSON.stringify({ id: command.id, type: "response", success: true, command: command.type, data: { acceptedAs: "prompt", requestTag: command.requestTag, sessionFile, sessionId: "resume-session" } }) + "\\n");
     return;
   }
   if (command.type === "resume_interrupted_turn") {
@@ -903,6 +904,7 @@ setInterval(() => {}, 1000);
     requestTag: "resume-request",
     sessionFile,
   });
+  await sleep(50);
   const terminal = pool.awaitTerminalTurnEvent(
     connection,
     { sessionFile },
@@ -1030,6 +1032,11 @@ test("terminal wait uses request identity across stored and absolute session pat
     requestTag: "path-request",
     sessionFile: storedSessionFile,
   });
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({ id: "path-prompt", type: "response", command: "prompt", success: true, data: { acceptedAs: "prompt", requestTag: "path-request", sessionFile: absoluteSessionFile, sessionId: "path-session" } })}\n`,
+  );
+  await sleep(20);
   const terminal = pool.awaitTerminalTurnEvent(
     connection,
     { sessionFile: storedSessionFile },
@@ -1083,11 +1090,6 @@ test("terminal wait resolves independently of pushed frontend event delivery", a
     requestTag: "wait-request",
     sessionFile,
   });
-  const terminal = pool.awaitTerminalTurnEvent(
-    connection,
-    { sessionFile },
-    "wait-request",
-  );
   worker.child.stdout.emit(
     "data",
     `${JSON.stringify({
@@ -1098,6 +1100,12 @@ test("terminal wait resolves independently of pushed frontend event delivery", a
       sessionFile,
       sessionId: "wait-session",
     })}\n`,
+  );
+  await sleep(20);
+  const terminal = pool.awaitTerminalTurnEvent(
+    connection,
+    { sessionFile },
+    "wait-request",
   );
   pool.detachWorker(connection, { release: false });
 
@@ -1154,6 +1162,11 @@ test("disconnect rejects and removes terminal waits", async () => {
     requestTag: "disconnect-request",
     sessionFile,
   });
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({ id: "disconnect-prompt", type: "response", command: "prompt", success: true, data: { acceptedAs: "prompt", requestTag: "disconnect-request", sessionFile, sessionId: "disconnect-session" } })}\n`,
+  );
+  await sleep(20);
   const terminal = pool.awaitTerminalTurnEvent(
     connection,
     { sessionFile },
@@ -1331,7 +1344,7 @@ process.stdin.on('data', (chunk) => {
       type: 'response',
       command: command.type,
       success: true,
-      data: { sessionFile: command.sessionFile, sessionId: 'command-shutdown' },
+      data: { acceptedAs: 'prompt', sessionFile: command.sessionFile, sessionId: 'command-shutdown' },
     }) + '\n');
   }
 });
@@ -1411,7 +1424,7 @@ process.stdin.on('data', (chunk) => {
       type: 'response',
       command: command.type,
       success: true,
-      data: {},
+      data: { acceptedAs: 'prompt' },
     }) + '\n');
     process.stdout.write(JSON.stringify({
       type: 'rpc_turn_event',
@@ -1555,7 +1568,7 @@ test("a started Pi steer does not transfer transport terminal ownership", async 
       type: "response",
       command: "prompt",
       success: true,
-      data: {},
+      data: { acceptedAs: "prompt" },
     })}\n`,
   );
   worker.child.stdout.emit(
@@ -1680,7 +1693,7 @@ test("stale terminal events do not clear a newer tagged active turn", async () =
       type: "response",
       command: "prompt",
       success: true,
-      data: {},
+      data: { acceptedAs: "prompt" },
     })}\n`,
   );
 
@@ -1818,7 +1831,7 @@ test("older turn events cannot overwrite or reactivate a newer generation", asyn
       type: "response",
       command: "prompt",
       success: true,
-      data: {},
+      data: { acceptedAs: "prompt" },
     })}\n`,
   );
 
@@ -2633,7 +2646,7 @@ test("client worker commands fail closed stdin without daemon stream errors", as
           command: "prompt",
           success: false,
           error: "rin_worker_exit",
-          working: true,
+          working: false,
         })
       );
     }),
@@ -3021,6 +3034,7 @@ test("terminal ledger replays an exact result after socket delivery is missed", 
       sessionId: "replay-session",
     })}\n`,
   );
+  await sleep(20);
   first.socket.destroyed = true;
   worker.child.stdout.emit(
     "data",
@@ -3097,8 +3111,25 @@ test("duplicate request admission returns the existing lifecycle without resendi
     responses.some(
       (response) =>
         response.id === "prompt-retry" &&
+        response.success === false &&
+        response.error === "rin_turn_admission_pending",
+    ),
+    true,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({ id: "prompt-first", type: "response", command: "prompt", success: true, data: { acceptedAs: "prompt", requestTag: "idempotent-request", sessionFile, sessionId: "idempotent-session" } })}\n`,
+  );
+  await sleep(20);
+  pool.forwardToWorker(connection, worker, { id: "prompt-rejoin", ...prompt });
+  assert.equal(commands.length, 1);
+  assert.equal(
+    responses.some(
+      (response) =>
+        response.id === "prompt-rejoin" &&
         response.success === true &&
-        response.data?.duplicate === true,
+        response.data?.duplicate === true &&
+        response.data?.acceptedAs === "rejoin",
     ),
     true,
   );
@@ -3106,7 +3137,111 @@ test("duplicate request admission returns the existing lifecycle without resendi
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("rejected prompt admission durably interrupts the ledger and resolves terminal wait", async () => {
+test("worker pool lets Pi classify a later prompt as steering without opening another ledger turn", async () => {
+  const dir = await makeTempDir("rin-worker-pool-pi-steer-");
+  const workerPath = path.join(dir, "worker-source");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(
+    workerPath,
+    "process.stdin.resume(); setInterval(() => {}, 1000);\n",
+  );
+  const responses: any[] = [];
+  const connection = {
+    socket: {
+      destroyed: false,
+      write(value: string) {
+        responses.push(JSON.parse(value));
+      },
+    },
+    clientBuffer: "",
+  };
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+  pool.registerConnection(connection);
+  const worker = pool.restoreSessionWorker({ sessionFile });
+  assert.ok(worker);
+  pool.attachWorkerToConnection(connection, worker);
+  const commands: any[] = [];
+  pool.writeWorkerStdin = (_worker, command) => commands.push(command);
+
+  pool.forwardToWorker(connection, worker, {
+    id: "owner-prompt",
+    type: "prompt",
+    message: "start",
+    requestTag: "owner-request",
+    sessionFile,
+  });
+  assert.equal(
+    [...worker.pendingResponses.values()][0]?.piAdmission?.requestTag,
+    "owner-request",
+  );
+  assert.equal(
+    pool.updateWorkerMetadata(worker, {
+      type: "rpc_turn_event",
+      event: "start",
+      requestTag: "owner-request",
+      turnGeneration: 1,
+      sessionFile,
+      sessionId: "pi-session",
+    }),
+    true,
+  );
+  assert.equal(readDaemonTurn(dir, "owner-request")?.state, "active");
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({ id: "owner-prompt", type: "response", command: "prompt", success: true, data: { acceptedAs: "prompt", requestTag: "owner-request", sessionFile, sessionId: "pi-session" } })}\n`,
+  );
+  await sleep(20);
+
+  pool.forwardToWorker(connection, worker, {
+    id: "later-input",
+    type: "prompt",
+    message: "insert",
+    streamingBehavior: "steer",
+    requestTag: "steer-request",
+    sessionFile,
+  });
+  assert.equal(
+    commands.filter((command) => command.type === "prompt").length,
+    2,
+  );
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({ id: "later-input", type: "response", command: "prompt", success: true, data: { acceptedAs: "steer", requestTag: "steer-request", sessionFile, sessionId: "pi-session" } })}\n`,
+  );
+  await sleep(20);
+
+  assert.equal(readDaemonTurn(dir, "owner-request")?.state, "active");
+  assert.equal(readDaemonTurn(dir, "steer-request"), undefined);
+  assert.equal(worker.activeLifecycleRequestTag, "owner-request");
+
+  pool.forwardToWorker(connection, worker, {
+    id: "invalid-input",
+    type: "prompt",
+    message: "invalid admission",
+    requestTag: "invalid-request",
+    sessionFile,
+  });
+  worker.child.stdout.emit(
+    "data",
+    `${JSON.stringify({ id: "invalid-input", type: "response", command: "prompt", success: true, data: { requestTag: "invalid-request", sessionFile, sessionId: "pi-session" } })}\n`,
+  );
+  await sleep(20);
+  assert.equal(readDaemonTurn(dir, "invalid-request"), undefined);
+  assert.equal(
+    responses.some(
+      (response) =>
+        response.id === "invalid-input" &&
+        response.success === false &&
+        response.error === "rin_prompt_admission_invalid",
+    ),
+    true,
+  );
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("rejected prompt admission leaves no business terminal", async () => {
   const dir = await makeTempDir("rin-worker-pool-rejected-admission-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = path.join(dir, "session.jsonl");
@@ -3123,10 +3258,6 @@ test("rejected prompt admission durably interrupts the ledger and resolves termi
   const worker = pool.restoreSessionWorker({ sessionFile });
   assert.ok(worker);
   pool.attachWorkerToConnection(connection, worker);
-  const sentCommands: any[] = [];
-  pool.writeWorkerStdin = (_worker, command) => {
-    sentCommands.push(command);
-  };
   pool.forwardToWorker(connection, worker, {
     id: "rejected-prompt",
     type: "prompt",
@@ -3134,16 +3265,6 @@ test("rejected prompt admission durably interrupts the ledger and resolves termi
     requestTag: "rejected-request",
     sessionFile,
   });
-  const staleState = pool.sendInternalCommand(worker, { type: "get_state" });
-  const staleStateCommand = sentCommands.find(
-    (command) => command.type === "get_state",
-  );
-  assert.ok(staleStateCommand?.id);
-  const terminal = pool.awaitTerminalTurnEvent(
-    connection,
-    { sessionFile },
-    "rejected-request",
-  );
   worker.child.stdout.emit(
     "data",
     `${JSON.stringify({
@@ -3154,28 +3275,18 @@ test("rejected prompt admission durably interrupts the ledger and resolves termi
       error: "rpc_prompt_rejected",
     })}\n`,
   );
-  worker.child.stdout.emit(
-    "data",
-    `${JSON.stringify({
-      id: staleStateCommand.id,
-      type: "response",
-      command: "get_state",
-      success: true,
-      data: {
-        sessionFile,
-        turnActive: true,
-        isStreaming: true,
-        isCompacting: true,
-      },
-    })}\n`,
+  await sleep(0);
+
+  assert.equal(readDaemonTurn(dir, "rejected-request"), undefined);
+  await assert.rejects(
+    pool.awaitTerminalTurnEvent(
+      connection,
+      { sessionFile },
+      "rejected-request",
+    ),
+    /rin_turn_ledger_record_missing/,
   );
-  const result = await terminal;
-  await staleState;
-  assert.equal(result.event, "error");
-  assert.equal(result.error, "rpc_prompt_rejected");
-  assert.equal(result.terminalRecord.state, "interrupted");
-  assert.equal(result.working, false);
-  assert.equal(pool.getStatusSnapshot().workers[0]?.working, false);
+  assert.equal(worker.activeLifecycleRequestTag, undefined);
 
   pool.destroyAll();
   await fs.rm(dir, { recursive: true, force: true });

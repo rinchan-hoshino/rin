@@ -48,6 +48,14 @@ type PendingResponse = {
   commandType: string;
   selector?: SessionSelector;
   expectsTerminalTurnEvent?: boolean;
+  piAdmission?: {
+    requestTag: string;
+    chatDeliveryContext?: {
+      turnId: string;
+      chatKey: string;
+      messageId: string;
+    };
+  };
   stateEpoch: number;
   connection?: ConnectionState;
   resolve?: (payload: any) => void;
@@ -151,6 +159,13 @@ const TURN_TERMINAL_COMMAND_TYPES = new Set(["prompt", "send_user_message"]);
 
 function lifecycleRequestTag(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function piAdmissionKind(value: unknown) {
+  const acceptedAs = typeof value === "string" ? value.trim() : "";
+  return ["prompt", "steer", "followUp", "rejoin"].includes(acceptedAs)
+    ? (acceptedAs as "prompt" | "steer" | "followUp" | "rejoin")
+    : undefined;
 }
 
 function expectsTerminalTurnEvent(commandType: string, command: any) {
@@ -447,28 +462,51 @@ export class WorkerPool {
         this.getWorkerSelector(worker),
       ),
     );
-    const keepUntilTerminalTurnEvent = expectsTerminalTurnEvent(
-      commandType,
-      command,
-    );
+    const piAdmissionCommand = commandType === "prompt";
+    const keepUntilTerminalTurnEvent =
+      !piAdmissionCommand && expectsTerminalTurnEvent(commandType, command);
     const commandRequestTag = lifecycleRequestTag(command?.requestTag);
-    const terminalLifecycleCommand =
+    const requiresLifecycleRequestTag =
       TURN_TERMINAL_COMMAND_TYPES.has(commandType);
-    const canSubmitPromptToOwnedLifecycle = Boolean(
-      commandType === "prompt" &&
-      worker.activeLifecycleFrontendOwner &&
-      commandRequestTag === worker.activeLifecycleRequestTag,
-    );
+    const terminalLifecycleCommand =
+      requiresLifecycleRequestTag && !piAdmissionCommand;
+    if (piAdmissionCommand && commandRequestTag) {
+      const inFlight = [...worker.pendingResponses.values()].some(
+        (pending) => pending.piAdmission?.requestTag === commandRequestTag,
+      );
+      if (inFlight) {
+        writeLine(
+          connection.socket,
+          responseError(commandId, commandType, "rin_turn_admission_pending"),
+        );
+        return;
+      }
+      const existing = readDaemonTurn(
+        this.daemonLedgerAgentDir(),
+        commandRequestTag,
+      );
+      if (existing) {
+        writeLine(
+          connection.socket,
+          responseSuccess(commandId, commandType, {
+            acceptedAs: "rejoin",
+            requestTag: commandRequestTag,
+            duplicate: true,
+            ledgerState: existing.state,
+          }),
+        );
+        return;
+      }
+    }
     let lifecycleAdmissionError = "";
     if (
-      terminalLifecycleCommand &&
+      requiresLifecycleRequestTag &&
       (commandRequestTag === undefined || commandRequestTag.length === 0)
     ) {
       lifecycleAdmissionError = "rin_turn_request_tag_required";
     } else if (
       terminalLifecycleCommand &&
-      worker.activeLifecycleRequestTag !== undefined &&
-      !canSubmitPromptToOwnedLifecycle
+      worker.activeLifecycleRequestTag !== undefined
     ) {
       lifecycleAdmissionError = "rin_turn_in_progress";
     } else if (
@@ -529,6 +567,20 @@ export class WorkerPool {
         commandType,
         selector: recoverySelector,
         expectsTerminalTurnEvent: keepUntilTerminalTurnEvent,
+        ...(piAdmissionCommand && commandRequestTag
+          ? {
+              piAdmission: {
+                requestTag: commandRequestTag,
+                chatDeliveryContext: command.chatDeliveryContext as
+                  | {
+                      turnId: string;
+                      chatKey: string;
+                      messageId: string;
+                    }
+                  | undefined,
+              },
+            }
+          : {}),
         stateEpoch: worker.stateEpoch,
         connection,
       });
@@ -560,7 +612,7 @@ export class WorkerPool {
     }
     this.syncRunningWorkerRecord(worker);
     this.publishWorkerWorkingState(worker);
-    const workerCommand = terminalLifecycleCommand
+    const workerCommand = requiresLifecycleRequestTag
       ? Object.fromEntries(
           Object.entries(command).filter(
             ([key]) => key !== "chatDeliveryContext",
@@ -1039,6 +1091,38 @@ export class WorkerPool {
     }
   }
 
+  private establishPiPromptLifecycle(
+    worker: WorkerHandle,
+    pending: PendingResponse,
+    selector: SessionSelector,
+  ) {
+    const requestTag = pending.piAdmission?.requestTag;
+    if (!requestTag) return;
+    if (
+      worker.activeLifecycleRequestTag &&
+      worker.activeLifecycleRequestTag !== requestTag
+    ) {
+      throw new Error("rin_turn_admission_pending");
+    }
+    pending.expectsTerminalTurnEvent = true;
+    const admission = beginDaemonTurn(this.daemonLedgerAgentDir(), {
+      requestTag,
+      sessionFile: selector.sessionFile,
+      sessionId: selector.sessionId,
+      chatDeliveryContext: pending.piAdmission?.chatDeliveryContext,
+    });
+    if (admission.record.state !== "active") return;
+    worker.terminalPending = true;
+    this.setLifecycleOwner(
+      worker,
+      requestTag,
+      selector,
+      pending.id,
+      pending.connection !== undefined,
+    );
+    worker.activeRequestTag = requestTag;
+  }
+
   private setLifecycleOwner(
     worker: WorkerHandle,
     requestTag: string,
@@ -1121,7 +1205,20 @@ export class WorkerPool {
     const isLifecycle =
       event === "start" || event === "heartbeat" || isTerminal;
     if (!isLifecycle) return true;
-    if (!this.rpcTurnEventMatchesLifecycleOwner(worker, payload)) return false;
+    const pendingPiAdmission =
+      event === "start" && !worker.activeLifecycleRequestTag
+        ? [...worker.pendingResponses.values()].some(
+            (pending) =>
+              pending.piAdmission?.requestTag ===
+              lifecycleRequestTag(payload.requestTag),
+          )
+        : false;
+    if (
+      !pendingPiAdmission &&
+      !this.rpcTurnEventMatchesLifecycleOwner(worker, payload)
+    ) {
+      return false;
+    }
 
     const hasGeneration = Object.prototype.hasOwnProperty.call(
       payload,
@@ -1204,6 +1301,41 @@ export class WorkerPool {
 
     if (payload.type === "response" && payload.success === true) {
       const data = payload.data || {};
+      if (pendingResponse?.piAdmission) {
+        const acceptedAs = piAdmissionKind(data.acceptedAs);
+        if (!acceptedAs) {
+          pendingResponse.expectsTerminalTurnEvent = false;
+          payload.success = false;
+          payload.error = "rin_prompt_admission_invalid";
+          return true;
+        }
+        if (
+          (acceptedAs === "prompt" || acceptedAs === "rejoin") &&
+          worker.activeLifecycleRequestTag &&
+          worker.activeLifecycleRequestTag !==
+            pendingResponse.piAdmission.requestTag
+        ) {
+          pendingResponse.expectsTerminalTurnEvent = false;
+          payload.success = false;
+          payload.error = "rin_turn_admission_pending";
+          return true;
+        }
+        const ownsTerminal = acceptedAs === "prompt" || acceptedAs === "rejoin";
+        pendingResponse.expectsTerminalTurnEvent = ownsTerminal;
+        if (ownsTerminal) {
+          this.establishPiPromptLifecycle(
+            worker,
+            pendingResponse,
+            resolveSessionSelector(
+              pendingResponse.selector ?? {},
+              normalizeSessionSelector({
+                sessionFile: data.sessionFile,
+                sessionId: data.sessionId,
+              }),
+            ),
+          );
+        }
+      }
       if (
         typeof data.sessionFile === "string" ||
         typeof data.sessionId === "string"
@@ -1339,7 +1471,22 @@ export class WorkerPool {
           syncRunningWorkerRecord: false,
         });
       }
-      worker.terminalPending = false;
+      if (payload.event === "start") {
+        const requestTag = lifecycleRequestTag(payload.requestTag);
+        const piAdmission = requestTag
+          ? [...worker.pendingResponses.values()].find(
+              (candidate) => candidate.piAdmission?.requestTag === requestTag,
+            )
+          : undefined;
+        if (requestTag && piAdmission?.piAdmission) {
+          this.establishPiPromptLifecycle(
+            worker,
+            piAdmission,
+            resolveSessionSelector(piAdmission.selector ?? {}, selector),
+          );
+        }
+      }
+      worker.terminalPending = Boolean(worker.activeLifecycleRequestTag);
       worker.rpcTurnActive = true;
       worker.turnActive = true;
       if (payload.event === "start") {

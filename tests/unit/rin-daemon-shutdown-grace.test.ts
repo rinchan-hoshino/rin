@@ -157,6 +157,7 @@ process.stdin.on("data", (chunk) => {
       continue;
     }
     if (command.type === "prompt") {
+      send({ type: "rpc_turn_event", event: "start", turnGeneration: 1, requestTag: command.requestTag, sessionFile: "/tmp/fake-session.jsonl", sessionId: "fake-session" });
       send({ type: "agent_start" });
       const delay = __FAKE_STEP_MS__;
       const timer = setTimeout(() => {

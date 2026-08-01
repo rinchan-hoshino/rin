@@ -74,6 +74,9 @@ export type RinFrontendTurnResult = {
   sessionFile?: string;
   requestTag?: string;
   chatDeliveryContext?: RinChatDeliveryContext;
+  acceptedAs?: "prompt" | "steer" | "followUp" | "rejoin";
+  promptAccepted?: boolean;
+  superseded?: boolean;
   terminalRecord?: {
     terminalId: string;
     state: "complete" | "error" | "interrupted";
@@ -175,6 +178,14 @@ function parseResumeCommandTarget(commandLine: string) {
   const trimmed = safeString(commandLine).trim();
   if (!trimmed.startsWith("/resume ")) return "";
   return trimmed.slice("/resume ".length).trim();
+}
+
+function requirePiAdmission(value: unknown) {
+  const acceptedAs = safeString(value).trim();
+  if (["prompt", "steer", "followUp", "rejoin"].includes(acceptedAs)) {
+    return acceptedAs as NonNullable<RinFrontendTurnResult["acceptedAs"]>;
+  }
+  throw new Error("rin_prompt_admission_invalid");
 }
 
 export class RinFrontendTurnDriver {
@@ -1234,7 +1245,6 @@ export class RinFrontendTurnDriver {
       source?: string;
       requestTag?: string;
       streamingBehavior?: "steer" | "followUp";
-      transportCommand?: "prompt" | "steer";
       assumeSessionReady?: boolean;
       piStartupOptions?: RinPiPassthroughOptions["piStartupOptions"];
       disabledRinCapabilities?: string[];
@@ -1292,19 +1302,22 @@ export class RinFrontendTurnDriver {
     const requestTag =
       safeString(input.requestTag).trim() || this.createTurnRequestTag();
     const text = injectPromptContextHeader(input.promptContext, input.text);
-    await submitNativeFrontendPromptTurn(this.client, {
+    const admission = await submitNativeFrontendPromptTurn(this.client, {
       text,
       images: input.images,
       source: safeString(input.source).trim() ? promptSource : input.source,
       frontendIdentity: this.frontendIdentity,
       requestTag,
       streamingBehavior: input.streamingBehavior,
-      transportCommand: input.transportCommand,
       promptContext: input.promptContext,
       sessionFile: targetSessionFile,
       gate: inputGate,
     });
+    const acceptedAs = requirePiAdmission((admission as any)?.acceptedAs);
     return {
+      acceptedAs,
+      requestTag,
+      promptAccepted: acceptedAs === "prompt" || acceptedAs === "rejoin",
       sessionId:
         safeString(ready?.sessionId || this.currentSessionId()).trim() ||
         undefined,
@@ -1329,6 +1342,7 @@ export class RinFrontendTurnDriver {
       promptContext?: RinPromptContext;
       source?: string;
       requestTag?: string;
+      streamingBehavior?: "steer" | "followUp";
       chatDeliveryContext?: RinChatDeliveryContext;
       assumeConnected?: boolean;
       assumeSessionReady?: boolean;
@@ -1401,11 +1415,44 @@ export class RinFrontendTurnDriver {
       );
       const images = Array.isArray(input.images) ? input.images : [];
       this.throwIfTurnInterrupted(turnInterruptionSeq);
-
-      this.throwIfTurnInterrupted(turnInterruptionSeq);
-      if (this.liveTurn) throw new Error("frontend_turn_busy");
       const requestTag =
         safeString(input.requestTag).trim() || this.createTurnRequestTag();
+      if (this.liveTurn) {
+        const existingLiveTurn = this.liveTurn;
+        const admission = await submitNativeFrontendPromptTurn(this.client!, {
+          text,
+          images,
+          source: promptSource,
+          frontendIdentity: this.frontendIdentity,
+          requestTag,
+          streamingBehavior: input.streamingBehavior,
+          chatDeliveryContext: input.chatDeliveryContext,
+          promptContext: input.promptContext,
+          sessionFile: targetSessionFile,
+          gate: inputGate,
+        });
+        const acceptedAs = requirePiAdmission((admission as any)?.acceptedAs);
+        if (acceptedAs !== "prompt" && acceptedAs !== "rejoin") {
+          return {
+            acceptedAs,
+            superseded: true,
+            requestTag,
+            sessionId:
+              safeString(ready?.sessionId || this.currentSessionId()).trim() ||
+              undefined,
+            sessionFile:
+              safeString(
+                ready?.sessionFile || this.currentSessionFile(),
+              ).trim() || undefined,
+          };
+        }
+        await existingLiveTurn.promise.catch(() => {});
+        return await this.resumeTurn({
+          requestTag,
+          sessionFile: targetSessionFile,
+          chatDeliveryContext: input.chatDeliveryContext,
+        });
+      }
       this.resetAssistantSegmentTracking();
       this.latestAssistantText = "";
       const liveTurn = this.startLiveTurn(
@@ -1426,11 +1473,16 @@ export class RinFrontendTurnDriver {
           source: promptSource,
           frontendIdentity: this.frontendIdentity,
           requestTag,
+          streamingBehavior: input.streamingBehavior,
           chatDeliveryContext: input.chatDeliveryContext,
           promptContext: input.promptContext,
           sessionFile: targetSessionFile,
           gate: inputGate,
         });
+        const acceptedAs = requirePiAdmission((admission as any)?.acceptedAs);
+        if (acceptedAs !== "prompt" && acceptedAs !== "rejoin") {
+          return admission;
+        }
         const terminalWait = this.client!.request<any>({
           type: "await_turn_terminal",
           sessionFile: targetSessionFile || undefined,
@@ -1488,6 +1540,27 @@ export class RinFrontendTurnDriver {
         }
         this.liveTurnRecoveryContext = null;
         throw firstResult.error;
+      }
+      if (firstResult.type === "prompt_submitted") {
+        const acceptedAs = requirePiAdmission(
+          (firstResult.admission as any)?.acceptedAs,
+        );
+        if (acceptedAs !== "prompt" && acceptedAs !== "rejoin") {
+          liveTurn.resolve({});
+          this.liveTurnRecoveryContext = null;
+          return {
+            acceptedAs,
+            superseded: true,
+            requestTag,
+            sessionId:
+              safeString(ready?.sessionId || this.currentSessionId()).trim() ||
+              undefined,
+            sessionFile:
+              safeString(
+                ready?.sessionFile || this.currentSessionFile(),
+              ).trim() || undefined,
+          };
+        }
       }
       const completion =
         firstResult.type === "turn_complete"

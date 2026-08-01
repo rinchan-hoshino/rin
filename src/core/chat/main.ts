@@ -537,7 +537,8 @@ export async function startChatBridge(
   const terminalRecoveryClient =
     options.frontendClientFactory?.() ||
     (isDirectEntry ? new RinDaemonFrontendClient() : null);
-  let terminalReconcileInFlight: Promise<void> | null = null;
+  let terminalListInFlight: Promise<void> | null = null;
+  const terminalProjectionInFlight = new Set<string>();
   let outboxHistoryCleanupTimer: NodeJS.Timeout | null = null;
   const runOutboxHistoryCleanup = () => {
     const result = cleanupChatOutboxHistory(runtime.agentDir);
@@ -649,18 +650,15 @@ export async function startChatBridge(
     return controller;
   };
   const requestReconcileChatTerminals = () => {
-    if (
-      chatBridgeStopping ||
-      terminalReconcileInFlight ||
-      !terminalRecoveryClient
-    ) {
+    if (chatBridgeStopping || terminalListInFlight || !terminalRecoveryClient) {
       return;
     }
-    terminalReconcileInFlight = (async () => {
+    terminalListInFlight = (async () => {
       const terminals = await listUnacknowledgedChatTerminalEvents(
         terminalRecoveryClient,
       );
-      const handled = await reconcileChatTerminalEvents(
+      let scheduled = 0;
+      await reconcileChatTerminalEvents(
         terminals,
         async (chatKey, terminal) => {
           const terminalRecord = terminal?.terminalRecord as
@@ -672,24 +670,37 @@ export async function startChatBridge(
               terminal?.terminalId,
           ).trim();
           if (!terminalId) return;
-          const controllerKey = `terminal-reconcile:${terminalId}`;
-          const controller = getDetachedController(controllerKey, {
-            chatKey,
-            affectChatBinding: false,
-          });
-          try {
-            await controller.connect({ recoverTerminals: false });
-            await controller.driver.projectAuthoritativeTerminal(terminal);
-          } finally {
-            controller.dispose();
-            detachedControllers.delete(controllerKey);
-            detachedControllerSignatures.delete(controllerKey);
-          }
+          if (terminalProjectionInFlight.has(terminalId)) return;
+          terminalProjectionInFlight.add(terminalId);
+          scheduled += 1;
+          void (async () => {
+            const controllerKey = `terminal-reconcile:${terminalId}`;
+            const controller = getDetachedController(controllerKey, {
+              chatKey,
+              affectChatBinding: false,
+            });
+            try {
+              await controller.connect({ recoverTerminals: false });
+              await controller.driver.projectAuthoritativeTerminal(terminal);
+            } finally {
+              controller.dispose();
+              detachedControllers.delete(controllerKey);
+              detachedControllerSignatures.delete(controllerKey);
+            }
+          })()
+            .catch((error) => {
+              logger.warn(
+                `chat terminal projection failed terminalId=${terminalId} err=${safeString((error as any)?.message || error)}`,
+              );
+            })
+            .finally(() => {
+              terminalProjectionInFlight.delete(terminalId);
+            });
         },
       );
-      if (handled) {
+      if (scheduled) {
         logger.info(
-          `chat terminal reconciliation completed terminals=${handled}`,
+          `chat terminal reconciliation scheduled projections=${scheduled}`,
         );
       }
     })()
@@ -699,7 +710,7 @@ export async function startChatBridge(
         );
       })
       .finally(() => {
-        terminalReconcileInFlight = null;
+        terminalListInFlight = null;
       });
   };
   const findRuntimeBot = (platform: string, selfId: string) =>
@@ -854,7 +865,6 @@ export async function startChatBridge(
     identity: any,
     decision: Awaited<ReturnType<typeof shouldProcessText>>,
     receivedAt?: string,
-    mode: "turn" | "steer" = "turn",
   ): Promise<FrozenChatTurnSubmission> => {
     const messageId = pickMessageId(session);
     const quotedMessageId = pickReplyToMessageId(elements);
@@ -944,7 +954,6 @@ export async function startChatBridge(
       },
       incomingMessageId: messageId || undefined,
       replyToMessageId: messageId || undefined,
-      mode,
       sessionFile: linkedSessionFile || undefined,
       model: modelOptions.model,
       thinkingLevel: modelOptions.thinkingLevel,
@@ -983,6 +992,7 @@ export async function startChatBridge(
           "rin_worker_oom",
           "chat_terminal_record_missing",
           "rin_disconnected",
+          "rin_turn_admission_pending",
         ].some((marker) => errorMessage.includes(marker))
       ) {
         logger.info(
@@ -1050,16 +1060,6 @@ export async function startChatBridge(
       return { errorMessage };
     };
     try {
-      if (submission.mode === "steer") {
-        await controller.steerTurn({
-          text: submission.text,
-          attachments: submission.attachments,
-          promptMeta: submission.promptMeta,
-          replyToMessageId: submission.replyToMessageId,
-          incomingMessageId: submission.incomingMessageId,
-        });
-        return { disposition: "actionable" as const };
-      }
       if (options.resume) {
         await controller.resumeTurn({
           replyToMessageId: submission.replyToMessageId,
@@ -1424,7 +1424,6 @@ export async function startChatBridge(
       identity,
       decision,
       envelope.createdAt,
-      getController(decision.chatKey).hasActiveTurn() ? "steer" : "turn",
     );
     return commitAdmission({
       state: "actionable",

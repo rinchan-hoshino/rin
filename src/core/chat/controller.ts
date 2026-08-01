@@ -2898,43 +2898,6 @@ export class ChatController {
     });
   }
 
-  async steerTurn(input: {
-    text: string;
-    attachments: SavedAttachment[];
-    incomingMessageId?: string;
-    replyToMessageId?: string;
-    promptMeta?: PromptContextMeta;
-    requestTag?: string;
-  }) {
-    if (!this.hasActiveTurn()) throw new Error("chat_turn_not_active");
-    const { text, images, frontendReady } = await this.prepareTurnPrompt(
-      input,
-      false,
-    );
-    const requestTag =
-      input.requestTag ||
-      this.requestTagForInboundMessage(input.incomingMessageId);
-    const promptMeta = {
-      ...input.promptMeta,
-      runtimeMetadata: {
-        ...input.promptMeta?.runtimeMetadata,
-        "request tag": requestTag,
-      },
-    };
-    const result = await this.driver.submitTurn({
-      text: formatPromptForChatContext(text, promptMeta),
-      images,
-      streamingBehavior: "steer",
-      transportCommand: "steer",
-      assumeSessionReady: frontendReady === true,
-      promptContext: promptMeta,
-      source: "chat-bridge",
-      requestTag,
-    });
-    this.lastActivityAt = Date.now();
-    return result;
-  }
-
   async runTurn(
     input: RinToolStartupOptions &
       Pick<RinPiPassthroughOptions, "piStartupOptions"> & {
@@ -2967,8 +2930,63 @@ export class ChatController {
     this.rememberPromptChatType(input.promptMeta);
     this.lastActivityAt = Date.now();
     const deliverFinal = input.deliverFinal !== false;
-    if (this.hasActiveTurn()) {
-      throw new Error("chat_turn_busy");
+    if (this.hasActiveTurn() && !this.turnAbortRequested) {
+      const { text, images, frontendReady } = await this.prepareTurnPrompt(
+        input,
+        false,
+      );
+      const requestTag =
+        safeString(input.requestTag).trim() ||
+        this.requestTagForInboundMessage(input.incomingMessageId);
+      const messageId = safeString(input.incomingMessageId).trim();
+      const chatDeliveryContext =
+        input.outboxTurnFence && messageId
+          ? {
+              turnId: input.outboxTurnFence.turnId,
+              chatKey: this.chatKey,
+              messageId,
+            }
+          : undefined;
+      const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
+        text: formatPromptForChatContext(text, input.promptMeta),
+        chatDeliveryContext,
+        images,
+        assumeConnected: frontendReady === true,
+        assumeSessionReady: frontendReady === true,
+        promptContext: input.promptMeta,
+        source: "chat-bridge",
+        requestTag,
+        streamingBehavior: "steer",
+      });
+      if (!result.superseded && deliverFinal) {
+        const resultParts = assistantDeliveryParts(
+          result.finalText,
+          result.result,
+        );
+        await this.deliverAssistantReply({
+          text:
+            safeString(result.finalText).trim() || resultParts.length
+              ? result.finalText
+              : "Rin completed this turn without a text response.",
+          parts: resultParts.length ? resultParts : undefined,
+          replyToMessageId: input.replyToMessageId,
+          incomingMessageId: input.incomingMessageId,
+          outboxTurnFence: input.outboxTurnFence,
+          sessionFile: result.sessionFile || this.currentSessionFile(),
+          terminalTurn: result.chatDeliveryContext,
+          terminalRequestTag: result.requestTag || requestTag,
+          terminalRecordId: result.terminalRecord?.terminalId,
+          clearProcessing: true,
+          deliveryKind: "final",
+        });
+      }
+      return {
+        finalText: result.finalText,
+        result: result.result,
+        sessionId: this.currentSessionId() || undefined,
+        sessionFile: this.currentSessionFile(),
+        superseded: result.superseded,
+      };
     }
 
     return await this.runExclusiveTurn(async () => {
@@ -3047,6 +3065,7 @@ export class ChatController {
           promptContext: input.promptMeta,
           source: "chat-bridge",
           requestTag,
+          streamingBehavior: "steer",
         });
         this.assertRestoredTurnStayedOnSession(
           restoreSessionFile,
@@ -3057,7 +3076,7 @@ export class ChatController {
           this.driver.currentSessionFile(),
         );
         this.saveState();
-        if (deliverFinal && this.currentTurn) {
+        if (deliverFinal && this.currentTurn && !result.superseded) {
           if (
             this.currentTurn.outboxTurnFence &&
             (!result.chatDeliveryContext || !result.terminalRecord)
@@ -3080,6 +3099,7 @@ export class ChatController {
           result: result.result,
           sessionId: this.currentSessionId() || undefined,
           sessionFile: this.currentSessionFile(),
+          superseded: result.superseded,
         };
       } catch (error) {
         if ((error as any)?.rinTurnTerminal) throw error;
