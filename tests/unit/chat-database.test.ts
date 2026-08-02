@@ -279,6 +279,193 @@ test("chat database cutover migrates v8 run ownership to interrupted delivery-on
   });
 });
 
+test("quiesced install releases a current running claim without creating a terminal", async () => {
+  await withTempDir(async (agentDir) => {
+    const item = chatInbox.enqueueChatInboxItem(agentDir, {
+      chatKey: "discord/1:current-running",
+      messageId: "current-running",
+      session: {
+        platform: "discord",
+        selfId: "1",
+        channelId: "current-running",
+        messageId: "current-running",
+        content: "preserve this turn",
+        stripped: { content: "preserve this turn" },
+      },
+      elements: [{ type: "text", attrs: { content: "preserve this turn" } }],
+    }).item;
+    const claim = chatInbox.claimChatInboxItem(agentDir, item.itemId);
+    assert.ok(claim);
+    const db = chatDatabase.openChatDatabase(agentDir);
+    db.prepare(
+      `UPDATE inbox_jobs
+          SET admission_state = 'actionable', admission_json = ?,
+              admission_hash = ?, submission_json = ?, submission_hash = ?,
+              execution_session_file = ?, last_error = ?
+        WHERE turn_id = ?`,
+    ).run(
+      JSON.stringify({ kind: "rin", v: 1, outcome: "terminalOwner" }),
+      "admission-hash",
+      JSON.stringify({ kind: "prompt", text: "preserve this turn" }),
+      "submission-hash",
+      "/sessions/current.jsonl",
+      "prior transient diagnostic",
+      item.itemId,
+    );
+    chatDatabase.closeChatDatabase(agentDir);
+
+    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir, {
+      runtimeQuiesced: true,
+    });
+    assert.deepEqual(
+      migrated
+        .prepare(
+          `SELECT state, terminal_kind, owner_epoch, lease_until,
+                  heartbeat_at, next_attempt_at, last_error, attempt,
+                  admission_state, admission_json, admission_hash,
+                  submission_json, submission_hash, execution_session_file
+             FROM inbox_jobs WHERE turn_id = ?`,
+        )
+        .get(item.itemId),
+      {
+        state: "running",
+        terminal_kind: null,
+        owner_epoch: null,
+        lease_until: null,
+        heartbeat_at: null,
+        next_attempt_at: null,
+        last_error: "prior transient diagnostic",
+        attempt: 1,
+        admission_state: "actionable",
+        admission_json: JSON.stringify({
+          kind: "rin",
+          v: 1,
+          outcome: "terminalOwner",
+        }),
+        admission_hash: "admission-hash",
+        submission_json: JSON.stringify({
+          kind: "prompt",
+          text: "preserve this turn",
+        }),
+        submission_hash: "submission-hash",
+        execution_session_file: "/sessions/current.jsonl",
+      },
+    );
+    assert.equal(
+      migrated
+        .prepare(
+          `SELECT processed_at FROM messages
+            WHERE id = (SELECT inbound_message_id FROM inbox_jobs WHERE turn_id = ?)`,
+        )
+        .get(item.itemId).processed_at,
+      null,
+    );
+    assert.equal(
+      chatDatabase.readAdmissionModelInstallMigrationSummary(migrated)
+        .releasedCurrentClaims,
+      1,
+    );
+    chatDatabase.closeChatDatabase(agentDir);
+
+    const reopened = chatDatabase.migrateChatDatabaseForInstall(agentDir, {
+      runtimeQuiesced: true,
+    });
+    assert.equal(
+      reopened
+        .prepare(`SELECT state FROM inbox_jobs WHERE turn_id = ?`)
+        .get(item.itemId).state,
+      "running",
+    );
+    assert.equal(
+      chatDatabase.readAdmissionModelInstallMigrationSummary(reopened)
+        .releasedCurrentClaims,
+      1,
+    );
+  });
+});
+
+test("install consumes old admission rows only before recording the current model version", async () => {
+  await withTempDir(async (agentDir) => {
+    const enqueueOldAdmission = (messageId) => {
+      const item = chatInbox.enqueueChatInboxItem(agentDir, {
+        chatKey: "discord/1:old-admission",
+        messageId,
+        session: {
+          platform: "discord",
+          selfId: "1",
+          channelId: "old-admission",
+          messageId,
+          content: messageId,
+          stripped: { content: messageId },
+        },
+        elements: [{ type: "text", attrs: { content: messageId } }],
+      }).item;
+      const db = chatDatabase.openChatDatabase(agentDir);
+      db.prepare(
+        `UPDATE inbox_jobs
+            SET admission_state = 'actionable', admission_json = ?
+          WHERE turn_id = ?`,
+      ).run(JSON.stringify({ kind: "legacy_message_projection" }), item.itemId);
+      return item;
+    };
+
+    const migratedOnce = enqueueOldAdmission("old-before-marker");
+    const before = chatDatabase.openChatDatabase(agentDir);
+    before
+      .prepare(`DELETE FROM schema_meta WHERE key = 'admission_model_version'`)
+      .run();
+    chatDatabase.closeChatDatabase(agentDir);
+
+    const first = chatDatabase.migrateChatDatabaseForInstall(agentDir, {
+      runtimeQuiesced: true,
+    });
+    assert.deepEqual(
+      first
+        .prepare(
+          `SELECT state, terminal_kind, admission_state, admission_json
+             FROM inbox_jobs WHERE turn_id = ?`,
+        )
+        .get(migratedOnce.itemId),
+      {
+        state: "terminal",
+        terminal_kind: "interrupted_unknown",
+        admission_state: "unclassified",
+        admission_json: null,
+      },
+    );
+    assert.equal(
+      first
+        .prepare(
+          `SELECT value FROM schema_meta WHERE key = 'admission_model_version'`,
+        )
+        .get().value,
+      "1",
+    );
+    chatDatabase.closeChatDatabase(agentDir);
+
+    const preservedAfterMarker = enqueueOldAdmission("old-after-marker");
+    chatDatabase.closeChatDatabase(agentDir);
+    const second = chatDatabase.migrateChatDatabaseForInstall(agentDir, {
+      runtimeQuiesced: true,
+    });
+    assert.deepEqual(
+      second
+        .prepare(
+          `SELECT state, terminal_kind, admission_state,
+                  json_extract(admission_json, '$.kind') AS admission_kind
+             FROM inbox_jobs WHERE turn_id = ?`,
+        )
+        .get(preservedAfterMarker.itemId),
+      {
+        state: "pending",
+        terminal_kind: null,
+        admission_state: "actionable",
+        admission_kind: "legacy_message_projection",
+      },
+    );
+  });
+});
+
 test("chat database reopens the current version 9 delivery-only layout", async () => {
   await withTempDir(async (agentDir) => {
     const created = chatDatabase.openChatDatabase(agentDir);

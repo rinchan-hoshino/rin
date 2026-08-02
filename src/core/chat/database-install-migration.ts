@@ -1108,17 +1108,6 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
         interruptedUnknown += 1;
         orphanedMessages += 1;
       }
-      const releasedCurrentClaims = db
-        .prepare(
-          `UPDATE inbox_jobs
-              SET state = 'failed', terminal_kind = 'interrupted',
-                  owner_epoch = NULL, lease_until = NULL,
-                  heartbeat_at = NULL, next_attempt_at = NULL,
-                  last_error = 'chat_turn_interrupted', updated_at = ?
-            WHERE state = 'running' ${hasRunId ? "AND run_id IS NULL" : ""}`,
-        )
-        .run(timestamp).changes;
-
       const previous = readAdmissionModelInstallMigrationSummary(db);
       const summary = {
         turns: previous.turns + migratedTurns,
@@ -1126,8 +1115,7 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
         interruptedUnknown: previous.interruptedUnknown + interruptedUnknown,
         historyResolved: previous.historyResolved + historyResolved,
         legacyNotices: previous.legacyNotices,
-        releasedCurrentClaims:
-          previous.releasedCurrentClaims + releasedCurrentClaims,
+        releasedCurrentClaims: previous.releasedCurrentClaims,
       };
       db.prepare(
         `INSERT INTO schema_meta (key, value)
@@ -1142,6 +1130,35 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
       return summary;
     })
     .immediate();
+}
+
+function releaseCurrentClaimsForInstall(db: BetterSqlite3.Database) {
+  const timestamp = nowIso();
+  const hasRunId = tableHasColumn(db, "inbox_jobs", "run_id");
+  const releasedCurrentClaims = db
+    .prepare(
+      `UPDATE inbox_jobs
+          SET owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL,
+              next_attempt_at = NULL, updated_at = ?
+        WHERE state = 'running' ${hasRunId ? "AND run_id IS NULL" : ""}
+          AND (owner_epoch IS NOT NULL OR lease_until IS NOT NULL
+               OR heartbeat_at IS NOT NULL OR next_attempt_at IS NOT NULL)`,
+    )
+    .run(timestamp).changes;
+  if (releasedCurrentClaims === 0) return;
+
+  const previous = readAdmissionModelInstallMigrationSummary(db);
+  db.prepare(
+    `INSERT INTO schema_meta (key, value)
+     VALUES ('admission_model_migration_summary', ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  ).run(
+    JSON.stringify({
+      ...previous,
+      releasedCurrentClaims:
+        previous.releasedCurrentClaims + releasedCurrentClaims,
+    }),
+  );
 }
 
 export function readAdmissionModelInstallMigrationSummary(
@@ -1267,11 +1284,6 @@ export function migrateChatDatabaseForInstall(
           assertNoUnfencedRunningTurns(migrationDb, currentVersion);
         }
         upgradeRecordedChatDatabase(migrationDb, options);
-        migrationDb
-          .prepare(
-            `DELETE FROM schema_meta WHERE key = 'admission_model_version'`,
-          )
-          .run();
         const legacyMigrationMarker = migrationDb
           .prepare(
             `SELECT value FROM schema_meta
@@ -1283,7 +1295,22 @@ export function migrateChatDatabaseForInstall(
         if (needsInitialization || !legacyMigrationComplete) {
           migrateLegacyChatControlData(agentDir, migrationDb);
         }
-        consumeOldAdmissionRowsForInstall(migrationDb);
+        const admissionModelVersion = safeString(
+          (
+            migrationDb
+              .prepare(
+                `SELECT value FROM schema_meta
+                  WHERE key = 'admission_model_version'`,
+              )
+              .get() as { value?: string } | undefined
+          )?.value,
+        ).trim();
+        if (admissionModelVersion !== CHAT_ADMISSION_MODEL_VERSION) {
+          consumeOldAdmissionRowsForInstall(migrationDb);
+        }
+        if (options.runtimeQuiesced === true) {
+          releaseCurrentClaimsForInstall(migrationDb);
+        }
       })
       .exclusive();
     const foreignKeyViolations = migrationDb.pragma(
