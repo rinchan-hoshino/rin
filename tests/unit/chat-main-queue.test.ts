@@ -2627,10 +2627,10 @@ test("hard Chat process death leaves the claimed inbox lifecycle active", async 
       let resumeTurnCalls = 0;
       controllerMod.ChatController.prototype.runTurn = async function () {
         runTurnCalls += 1;
-        throw new Error("prompt replay");
       };
       controllerMod.ChatController.prototype.resumeTurn = async function () {
         resumeTurnCalls += 1;
+        throw new Error("uncommitted turn must use ordinary prompt RPC");
       };
       const bridge = await mainMod.startChatBridge({ hosted: true });
       bridge.app.bots.push({
@@ -2645,7 +2645,7 @@ test("hard Chat process death leaves the claimed inbox lifecycle active", async 
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
       const terminal = inboxMod.listChatInboxItems(agentDir, ["terminal"]);
-      if (terminal.length !== 1 || runTurnCalls !== 0 || resumeTurnCalls !== 1) {
+      if (terminal.length !== 1 || runTurnCalls !== 1 || resumeTurnCalls !== 0) {
         throw new Error(JSON.stringify({ terminal, runTurnCalls, resumeTurnCalls }));
       }
       process.exit(0);
@@ -2664,7 +2664,7 @@ test("hard Chat process death leaves the claimed inbox lifecycle active", async 
   }
 });
 
-test("chat main keeps an accepted local error pending across restart without prompt replay", async () => {
+test("chat main resumes a backend-accepted turn after restart without another prompt RPC", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2682,7 +2682,7 @@ test("chat main keeps an accepted local error pending across restart without pro
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const chatHelpersMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js")).href);
+      const databaseMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
@@ -2693,15 +2693,19 @@ test("chat main keeps an accepted local error pending across restart without pro
       });
 
       let runTurnCalls = 0;
+      let resumeTurnCalls = 0;
       controllerMod.ChatController.prototype.runTurn = async function (input) {
         runTurnCalls += 1;
-        chatHelpersMod.markProcessedChatMessage(
-          agentDir,
-          this.chatKey,
-          input.incomingMessageId,
-          { acceptedAt: new Date().toISOString() },
-        );
+        const fence = this.turnFenceForInboundMessage(input.incomingMessageId);
+        if (!fence) throw new Error("turn fence missing");
+        databaseMod.markChatMessageAcceptedWithFence(agentDir, fence, {
+          acceptedAt: new Date().toISOString(),
+          sessionFile: "managed/chat/backend-accepted.jsonl",
+        });
         throw undefined;
+      };
+      controllerMod.ChatController.prototype.resumeTurn = async function () {
+        resumeTurnCalls += 1;
       };
       const createBot = () => ({
         platform: "telegram",
@@ -2753,15 +2757,24 @@ test("chat main keeps an accepted local error pending across restart without pro
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant" && item.deliveryKind === "error");
       const inboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
       const running = inboxMod.listChatInboxItems(agentDir, ["running"]);
+      const terminal = inboxMod.listChatInboxItems(agentDir, ["terminal"]);
       if (
         runTurnCalls !== 1 ||
+        resumeTurnCalls !== 1 ||
         !inbound?.acceptedAt ||
-        inbound?.processedAt ||
         errors.length !== 0 ||
-        running.length !== 1
+        running.length !== 0 ||
+        terminal.length !== 1
       ) {
         throw new Error(
-          JSON.stringify({ runTurnCalls, inbound, errors, running }),
+          JSON.stringify({
+            runTurnCalls,
+            resumeTurnCalls,
+            inbound,
+            errors,
+            running,
+            terminal,
+          }),
         );
       }
       process.exit(0);
@@ -2906,7 +2919,7 @@ test("chat startup honors terminal outbox ownership before orphan inbox recovery
   }
 });
 
-test("chat main leaves every local turn error pending until durable acceptance", async () => {
+test("chat main retries an uncommitted turn through ordinary prompt RPC", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2927,7 +2940,6 @@ test("chat main leaves every local turn error pending until durable acceptance",
       installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
-      const helperMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js")).href);
       const inboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
@@ -2939,7 +2951,6 @@ test("chat main leaves every local turn error pending until durable acceptance",
 
       let runTurnCalls = 0;
       let resumeTurnCalls = 0;
-      let daemonAccepted = false;
       controllerMod.ChatController.prototype.connect = async function () {
         if (this.session && this.client) return;
         const controller = this;
@@ -2973,16 +2984,15 @@ test("chat main leaves every local turn error pending until durable acceptance",
           switchSession: async () => {},
         };
       };
-      controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
+      controllerMod.ChatController.prototype.runTurn = async function () {
         runTurnCalls += 1;
         if (runTurnCalls === 1) {
           throw new Error("arbitrary local turn failure");
         }
-        throw new Error("unexpected prompt replay");
       };
       controllerMod.ChatController.prototype.resumeTurn = async function () {
         resumeTurnCalls += 1;
-        if (!daemonAccepted) throw new Error("rin_turn_not_resumable");
+        throw new Error("uncommitted turn must use ordinary prompt RPC");
       };
 
       const { app } = await mainMod.startChatBridge();
@@ -3017,13 +3027,6 @@ test("chat main leaves every local turn error pending until durable acceptance",
         throw new Error(JSON.stringify({ phase: "before_acceptance", runTurnCalls, retained }));
       }
 
-      daemonAccepted = true;
-      helperMod.markProcessedChatMessage(
-        agentDir,
-        "telegram/1:2",
-        "m-offline-queued",
-        { acceptedAt: new Date().toISOString() },
-      );
       const deadline = Date.now() + 8000;
       while (Date.now() < deadline) {
         const succeeded = inboxMod.listChatInboxItems(agentDir, ["terminal"]);
@@ -3038,8 +3041,8 @@ test("chat main leaves every local turn error pending until durable acceptance",
         succeeded.length !== 1 ||
         failed.length !== 0 ||
         running.length !== 0 ||
-        runTurnCalls !== 1 ||
-        resumeTurnCalls < 1
+        runTurnCalls !== 2 ||
+        resumeTurnCalls !== 0
       ) {
         throw new Error(JSON.stringify({ phase: "after_acceptance", runTurnCalls, resumeTurnCalls, failed, running, succeeded }));
       }

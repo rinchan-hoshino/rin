@@ -482,13 +482,7 @@ export async function startDaemon(
       }
       writeLine(
         connection.socket,
-        response(id, type, true, {
-          cancelled: false,
-          session: {
-            sessionFile: worker.sessionFile,
-            sessionId: worker.sessionId,
-          },
-        }),
+        response(id, type, true, { cancelled: false }),
       );
       workerPool.evictDetachedWorkers();
       return true;

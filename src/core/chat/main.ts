@@ -1196,7 +1196,9 @@ export async function startChatBridge(
             run: () =>
               runClaimedInboxJob(job, () =>
                 handlePreparedChatTurnSubmission(resolved.submission, {
-                  resume: recoverCommittedWork,
+                  resume:
+                    recoverCommittedWork &&
+                    Boolean(admission.executionSessionFile),
                 }),
               ),
           };
