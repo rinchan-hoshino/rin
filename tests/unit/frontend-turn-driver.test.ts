@@ -788,11 +788,6 @@ test("turn driver carries canonical retry and compaction failures to chat withou
       },
       {
         type: "assistant_summary",
-        text: "Retrying (1/3) in 2s... (/abort to stop)",
-        requestTag: "retry-turn",
-      },
-      {
-        type: "assistant_summary",
         text: "Compacting context...",
         requestTag: "retry-turn",
       },

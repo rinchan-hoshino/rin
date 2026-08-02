@@ -93,7 +93,7 @@ test("shared lifecycle reducer tracks facts without owning Working presentation"
   assert.equal(state.isStreaming, false);
 });
 
-test("canonical lifecycle renderer gives chat the same retry and compaction evidence as TUI", () => {
+test("canonical lifecycle renderer keeps retry schedules silent while preserving compaction errors", () => {
   const scheduled = projectRinFrontendLifecycleEvent({
     type: "summarization_retry_scheduled",
     attempt: 1,
@@ -110,11 +110,6 @@ test("canonical lifecycle renderer gives chat the same retry and compaction evid
       level: "error",
       deferDuringTurn: false,
       noticeKind: "lifecycle_error",
-      requestTag: "turn-1",
-    },
-    {
-      type: "assistant_summary",
-      text: "Retrying (1/3) in 2s... (/abort to stop)",
       requestTag: "turn-1",
     },
   ]);
@@ -146,13 +141,7 @@ test("canonical lifecycle renderer gives chat the same retry and compaction evid
     requestTag: "turn-2",
   });
   assert.ok(retry);
-  assert.deepEqual(renderRinFrontendLifecycleEvent(retry), [
-    {
-      type: "assistant_summary",
-      text: "Retrying (2/3) in 1s... (/abort to stop)",
-      requestTag: "turn-2",
-    },
-  ]);
+  assert.deepEqual(renderRinFrontendLifecycleEvent(retry), []);
 });
 
 test("canonical lifecycle renderer owns complete and error terminal projection", () => {

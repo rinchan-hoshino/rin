@@ -723,7 +723,7 @@ test("frontend backend event translator preserves producer request tags on progr
   );
 });
 
-test("frontend backend event translator exposes retry lifecycle without terminalizing the turn", () => {
+test("frontend backend event translator keeps retry schedules silent without terminalizing the turn", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
   assert.deepEqual(
@@ -735,13 +735,7 @@ test("frontend backend event translator exposes retry lifecycle without terminal
       errorMessage: "Provider unavailable",
       requestTag: "retry-turn",
     }),
-    [
-      {
-        type: "assistant_summary",
-        text: "Retrying (2/3) in 1s... (/abort to stop)",
-        requestTag: "retry-turn",
-      },
-    ],
+    [],
   );
   assert.deepEqual(
     translator.translate({
@@ -759,11 +753,6 @@ test("frontend backend event translator exposes retry lifecycle without terminal
         level: "error",
         deferDuringTurn: false,
         noticeKind: "lifecycle_error",
-        requestTag: "retry-turn",
-      },
-      {
-        type: "assistant_summary",
-        text: "Retrying (1/3) in 2s... (/abort to stop)",
         requestTag: "retry-turn",
       },
     ],

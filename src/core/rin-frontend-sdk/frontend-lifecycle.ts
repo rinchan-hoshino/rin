@@ -414,13 +414,6 @@ function withRequestTag<T extends Record<string, unknown>>(
   return event.requestTag ? { ...value, requestTag: event.requestTag } : value;
 }
 
-function retryStatusText(
-  event: Extract<RinFrontendLifecycleEvent, { kind: "retry_scheduled" }>,
-) {
-  const seconds = Math.ceil(event.delayMs / 1000);
-  return `Retrying (${event.attempt}/${event.maxAttempts}) in ${seconds}s... (/abort to stop)`;
-}
-
 export function shouldRefreshRinFrontendLifecycleStatus(
   event: RinFrontendLifecycleEvent,
 ): boolean {
@@ -508,27 +501,18 @@ export function renderRinFrontendLifecycleEvent(
           ]
         : [];
     }
-    case "retry_scheduled": {
-      const events: RinFrontendBackendEvent[] = [];
-      if (event.source === "summarization" && event.errorMessage) {
-        events.push(
-          withRequestTag(event, {
-            type: "passive_notice",
-            text: event.errorMessage,
-            level: "error",
-            deferDuringTurn: false,
-            noticeKind: "lifecycle_error",
-          }),
-        );
-      }
-      events.push(
-        withRequestTag(event, {
-          type: "assistant_summary",
-          text: retryStatusText(event),
-        }),
-      );
-      return events;
-    }
+    case "retry_scheduled":
+      return event.source === "summarization" && event.errorMessage
+        ? [
+            withRequestTag(event, {
+              type: "passive_notice",
+              text: event.errorMessage,
+              level: "error",
+              deferDuringTurn: false,
+              noticeKind: "lifecycle_error",
+            }),
+          ]
+        : [];
     case "summarization_retry_started":
       return [
         withRequestTag(event, {
