@@ -662,6 +662,7 @@ process.stdin.on("data", (chunk) => {
       const state = await client.request({ id: "2", type: "get_state" });
 
       assert.equal(selected.success, true);
+      assert.equal(selected.data?.session?.sessionFile, sessionFile);
       assert.equal(state.success, true);
       assert.equal(state.data?.sessionFile, sessionFile);
       assert.deepEqual(await readLogLines(logPath), ["get_state"]);
