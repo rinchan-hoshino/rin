@@ -1562,6 +1562,9 @@ export class RinFrontendTurnDriver {
       }
       const ownsTerminal = effectiveOutcome === "terminalOwner";
       if (!ownsTerminal) {
+        if (effectiveOutcome === "nonterminal") {
+          this.emit({ type: "turn_accepted", requestTag });
+        }
         return {
           ...observed,
           superseded: true,

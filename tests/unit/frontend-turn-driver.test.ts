@@ -1891,9 +1891,12 @@ test("frontend SDK settles Pi-native steering without taking terminal ownership"
     clientFactory: () => client,
     promptSource: "chat-bridge",
   });
+  const events: any[] = [];
+  driver.subscribe((event: any) => events.push(event));
 
   const pending = driver.runTurn({
     text: "restored job",
+    requestTag: "nonterminal-input",
     streamingBehavior: "steer",
     promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
   });
@@ -1909,6 +1912,10 @@ test("frontend SDK settles Pi-native steering without taking terminal ownership"
   assert.equal(result.outcome, "nonterminal");
   assert.equal(result.superseded, true);
   assert.equal(result.finalText, undefined);
+  assert.deepEqual(events, [
+    { type: "frontend_status", phase: "sending" },
+    { type: "turn_accepted", requestTag: "nonterminal-input" },
+  ]);
   const promptCall = client.calls.find((call: any) => call.type === "prompt");
   assert.equal(promptCall.text, "restored job");
   assert.equal(promptCall.options.streamingBehavior, "steer");
