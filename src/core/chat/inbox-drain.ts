@@ -4,7 +4,6 @@ import {
   type ClaimedChatInboxItem,
   claimChatInboxItem,
   completeClaimedChatInboxItem,
-  failClaimedChatInboxItem,
   listPendingChatInboxItems,
 } from "./inbox.js";
 import { safeString } from "../text-utils.js";
@@ -84,24 +83,15 @@ export function createChatInboxDrain(deps: {
       pendingController: ChatController,
       pendingChatKey: string,
     ): ClaimPendingItemResult => {
+      if (pendingController?.ownsInboundMessage?.(pending.messageId)) {
+        return "waitForChat";
+      }
       const envelope = claimChatInboxItem(deps.agentDir, pending.itemId);
       if (!envelope) {
         const dueAt = Date.parse(safeString(pending.nextAttemptAt).trim());
         return Number.isFinite(dueAt) && dueAt > Date.now()
           ? "waitForChat"
           : "unavailable";
-      }
-      const controller =
-        envelope.chatKey === pendingChatKey
-          ? pendingController
-          : deps.getController(envelope.chatKey);
-      if (controller?.ownsInboundMessage?.(envelope.messageId)) {
-        failClaimedChatInboxItem(
-          deps.agentDir,
-          envelope,
-          "chat_inbound_still_owned",
-        );
-        return "unavailable";
       }
       if (
         deps.isInboundMessageProcessed(envelope.chatKey, envelope.messageId)

@@ -10,7 +10,6 @@ import {
 } from "../rin-lib/profile.js";
 import {
   getRinNonInteractiveCommandInteractionPolicy,
-  isRinFrontendSessionNotConnectedError,
   type RinFrontendTurnClient,
 } from "../rin-frontend-sdk/index.js";
 import {
@@ -83,7 +82,6 @@ import {
 import {
   type ChatInboxItem,
   commitClaimedChatInboxAdmission,
-  failClaimedChatInboxItem,
   getChatInboxItem,
   restoreChatInboxElements,
   restoreChatInboxSession,
@@ -123,7 +121,6 @@ import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
 } from "../rin-frontend-sdk/frontend-identity.js";
-import { isRinFrontendTurnCancelledError } from "../rin-frontend-sdk/lifecycle-errors.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
@@ -966,127 +963,28 @@ export async function startChatBridge(
     submission: FrozenChatTurnSubmission,
     options: { resume?: boolean } = {},
   ) => {
-    const messageId = safeString(submission.incomingMessageId).trim();
     const controller = getController(submission.chatKey);
-    const handleTurnFailure = async (error: any) => {
-      const errorMessage =
-        safeString((error as any)?.message || error).trim() ||
-        "Chat turn failed.";
-      const messageProcessed = messageId
-        ? isInboundChatMessageProcessed(
-            runtime.agentDir,
-            submission.chatKey,
-            messageId,
-          )
-        : false;
-      if (isRinFrontendTurnCancelledError(error)) {
-        logger.info(
-          `chat turn cancelled by frontend lifecycle chatKey=${submission.chatKey} err=${errorMessage}`,
-        );
-        return undefined;
-      }
-      if (
-        isRinFrontendSessionNotConnectedError(error) ||
-        [
-          "frontend_turn_interrupted",
-          "chat_turn_interrupted",
-          "rin_worker_exit",
-          "rin_worker_oom",
-          "chat_terminal_record_missing",
-          "rin_disconnected",
-          "rin_turn_admission_pending",
-          "rin_prompt_outcome_indeterminate",
-        ].some((marker) => errorMessage.includes(marker))
-      ) {
-        logger.info(
-          `chat turn detached without authoritative terminal chatKey=${submission.chatKey} err=${errorMessage}`,
-        );
-        throw error;
-      }
-      logger.warn(
-        `chat turn failed chatKey=${submission.chatKey} err=${errorMessage}`,
-      );
-      if (errorMessage && messageId && !messageProcessed) {
-        let terminalErrorCommitted = false;
-        try {
-          await enqueueAndDrainOutbox(
-            {
-              createdAt: nowIso(),
-              chatKey: submission.chatKey,
-              parts: withChatQuotePart(
-                [{ type: "text", text: errorMessage }],
-                messageId,
-              ),
-              sessionFile: submission.sessionFile,
-            },
-            "error",
-            {
-              id: `error-${buildChatMessageRecordKey(submission.chatKey, messageId)}`,
-              idempotencyKey: JSON.stringify([
-                "error",
-                submission.chatKey,
-                messageId,
-              ]),
-              postDelivery: {
-                markProcessed: {
-                  chatKey: submission.chatKey,
-                  messageId,
-                  bindSession: false,
-                },
-              },
-              onEnqueued: () => {
-                terminalErrorCommitted = true;
-                const timestamp = nowIso();
-                markProcessedChatMessage(
-                  runtime.agentDir,
-                  submission.chatKey,
-                  messageId,
-                  { acceptedAt: timestamp, processedAt: timestamp },
-                );
-              },
-            },
-          );
-        } catch {
-          if (
-            !terminalErrorCommitted &&
-            !hasCommittedTerminalChatOutbox(
-              runtime.agentDir,
-              submission.chatKey,
-              messageId,
-            )
-          ) {
-            return { errorMessage };
-          }
-        }
-        await controller.clearProcessingState().catch(() => {});
-      }
-      return { errorMessage };
-    };
-    try {
-      if (options.resume) {
-        await controller.resumeTurn({
-          replyToMessageId: submission.replyToMessageId,
-          incomingMessageId: submission.incomingMessageId,
-          sessionFile: submission.sessionFile,
-          receivedAt: submission.receivedAt,
-        });
-      } else {
-        await controller.runTurn({
-          text: submission.text,
-          attachments: submission.attachments,
-          promptMeta: submission.promptMeta,
-          replyToMessageId: submission.replyToMessageId,
-          incomingMessageId: submission.incomingMessageId,
-          sessionFile: submission.sessionFile,
-          model: submission.model,
-          thinkingLevel: submission.thinkingLevel,
-          receivedAt: submission.receivedAt,
-        });
-      }
-      return { disposition: "actionable" as const };
-    } catch (error) {
-      return await handleTurnFailure(error);
+    if (options.resume) {
+      await controller.resumeTurn({
+        replyToMessageId: submission.replyToMessageId,
+        incomingMessageId: submission.incomingMessageId,
+        sessionFile: submission.sessionFile,
+        receivedAt: submission.receivedAt,
+      });
+    } else {
+      await controller.runTurn({
+        text: submission.text,
+        attachments: submission.attachments,
+        promptMeta: submission.promptMeta,
+        replyToMessageId: submission.replyToMessageId,
+        incomingMessageId: submission.incomingMessageId,
+        sessionFile: submission.sessionFile,
+        model: submission.model,
+        thinkingLevel: submission.thinkingLevel,
+        receivedAt: submission.receivedAt,
+      });
     }
+    return { disposition: "actionable" as const };
   };
 
   let chatBridgeStopping = false;
@@ -1441,14 +1339,9 @@ export async function startChatBridge(
     prepare: (job) => prepareClaimedInboxJob(job),
     onPrepareError: (job, chatKey, error) => {
       logger.warn(
-        `chat inbox prepare failed chatKey=${chatKey} turn=${job.envelope.itemId} err=${safeString((error as any)?.message || error)}`,
+        `chat inbox prepare error; leaving inbox running chatKey=${chatKey} turn=${job.envelope.itemId} err=${safeString((error as any)?.message || error)}`,
       );
-      failClaimedChatInboxItem(
-        runtime.agentDir,
-        job.envelope,
-        (error as any)?.message || error,
-      );
-      forgetClaimedInboxJob(job);
+      releaseClaimedInboxJob(job);
     },
     onIdle: (chatKey: string) => {
       if (startupRecoveryChatKeys.delete(chatKey)) {

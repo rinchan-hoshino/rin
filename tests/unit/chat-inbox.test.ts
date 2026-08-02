@@ -384,6 +384,27 @@ test("chat inbox drain leaves a recovering chat pending while unrelated chats ru
   );
 });
 
+test("chat inbox drain leaves an inbound already owned by its controller pending", async () => {
+  const agentDir = await tempDir();
+  const owned = inbox.enqueueChatInboxItem(
+    agentDir,
+    input("already-owned", "discord/1:owned"),
+  ).item;
+  const jobs = [];
+  const drain = inboxDrain.createChatInboxDrain({
+    agentDir,
+    getController: () => ({ ownsInboundMessage: () => true }),
+    isInboundMessageProcessed: () => false,
+    enqueueClaimedInboxItem: (job) => jobs.push(job),
+    hasActiveChatKeyWorker: () => false,
+  });
+
+  await drain.drainChatInboxOnce();
+
+  assert.deepEqual(jobs, []);
+  assert.equal(inbox.getChatInboxItem(agentDir, owned.itemId).state, "pending");
+});
+
 test("chat inbox drain lets a reset command interrupt an active recovering chat", async () => {
   const agentDir = await tempDir();
   const abort = inbox.enqueueChatInboxItem(

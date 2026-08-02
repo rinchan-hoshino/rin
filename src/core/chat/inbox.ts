@@ -602,31 +602,6 @@ export function completeClaimedChatInboxItem(
     .immediate();
 }
 
-export function failClaimedChatInboxItem(
-  agentDir: string,
-  item: ClaimedChatInboxItem,
-  error?: string,
-) {
-  const claim = requireClaim(item);
-  const timestamp = nowIso();
-  const result = openChatDatabase(agentDir)
-    .prepare(
-      `UPDATE inbox_jobs
-     SET state = 'failed', terminal_kind = 'interrupted',
-         owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL,
-         next_attempt_at = NULL, last_error = ?, updated_at = ?
-     WHERE turn_id = ? AND state = 'running' AND owner_epoch = ? AND attempt = ?`,
-    )
-    .run(
-      safeString(error).trim() || null,
-      timestamp,
-      claim.itemId,
-      claim.ownerEpoch,
-      claim.attempt,
-    );
-  return result.changes === 1 ? getChatInboxItem(agentDir, claim.itemId) : null;
-}
-
 function asRecord(value: unknown): Record<string, any> {
   return isJsonRecord(value) ? value : {};
 }

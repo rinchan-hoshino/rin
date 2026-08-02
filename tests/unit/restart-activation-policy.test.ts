@@ -203,9 +203,17 @@ test("chat lifecycle settlement is independent of restart and lease timing", () 
   assert.doesNotMatch(chatMain, /preserveForRestart/);
   assert.doesNotMatch(chatMain, /preserveClaimedInboxJobForRestart/);
   assert.doesNotMatch(chatMain, /interruptProcessingChatInboxItems/);
+  assert.doesNotMatch(
+    chatMain,
+    /handleTurnFailure|chat turn failed|frontend_turn_interrupted|rin_worker_exit|rin_prompt_outcome_indeterminate/,
+  );
+  assert.doesNotMatch(
+    `${chatMain}\n${inboxDrain}\n${inbox}`,
+    /failClaimedChatInboxItem|chat_inbound_still_owned/,
+  );
   assert.match(
     chatMain,
-    /chat turn detached without authoritative terminal[\s\S]*throw error;/,
+    /chat inbox worker detached without terminal[\s\S]*releaseClaimedInboxJob\(job\)/,
   );
   assert.doesNotMatch(inbox, /lease_expired/);
 });

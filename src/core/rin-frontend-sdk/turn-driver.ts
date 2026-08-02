@@ -36,7 +36,6 @@ import {
   executeRinFrontendInterruptIntent,
   projectRinFrontendLifecycleEvent,
 } from "./frontend-lifecycle.js";
-import { RinFrontendSessionNotConnectedError } from "./errors.js";
 import { injectPromptContextHeader } from "./prompt-context.js";
 import {
   submitNativeFrontendPromptTurn,
@@ -542,7 +541,7 @@ export class RinFrontendTurnDriver {
   }
 
   async acknowledgeTerminal(requestTag: string, terminalId: string) {
-    if (!this.client) throw new RinFrontendSessionNotConnectedError();
+    if (!this.client) throw new Error("frontend_session_not_connected");
     return await this.client.request({
       type: "ack_turn_terminal",
       requestTag,
@@ -567,7 +566,7 @@ export class RinFrontendTurnDriver {
   }
 
   async recoverUnacknowledgedChatTerminals(chatKey: string) {
-    if (!this.client) throw new RinFrontendSessionNotConnectedError();
+    if (!this.client) throw new Error("frontend_session_not_connected");
     const response: any = await this.client.request({
       type: "list_unacknowledged_chat_terminals",
       chatKey,
@@ -915,7 +914,7 @@ export class RinFrontendTurnDriver {
       while (this.liveTurn?.requestTag === requestTag) {
         try {
           await this.connect({ restoreSessionFile: recovery?.sessionFile });
-          if (!this.client) throw new RinFrontendSessionNotConnectedError();
+          if (!this.client) throw new Error("frontend_session_not_connected");
           const payload = await this.client.request({
             type: "await_turn_terminal",
             requestTag,
@@ -950,7 +949,7 @@ export class RinFrontendTurnDriver {
   private async selectSessionTarget(sessionFile?: string) {
     const wanted = safeString(sessionFile || "").trim();
     if (!wanted) return { changed: false };
-    if (!this.client) throw new RinFrontendSessionNotConnectedError();
+    if (!this.client) throw new Error("frontend_session_not_connected");
     const before = this.currentSessionFile();
     await this.client.resumeSession(wanted, {
       frontendIdentity: this.frontendIdentity,
@@ -978,7 +977,7 @@ export class RinFrontendTurnDriver {
         disabledRinCapabilities?: string[];
       },
   ) {
-    if (!this.client) throw new RinFrontendSessionNotConnectedError();
+    if (!this.client) throw new Error("frontend_session_not_connected");
     if (this.client.ensureSessionReady) {
       const ready = await this.client.ensureSessionReady(
         restoreSessionFile,
@@ -1027,7 +1026,7 @@ export class RinFrontendTurnDriver {
     sessionFile?: string,
   ) {
     if (!hasRinToolStartupOptions(options)) return;
-    if (!this.client) throw new RinFrontendSessionNotConnectedError();
+    if (!this.client) throw new Error("frontend_session_not_connected");
     const wanted = safeString(sessionFile || "").trim();
     const target = wanted ? { sessionFile: wanted } : {};
     const hasExplicitToolAllowlist = options?.tools !== undefined;
@@ -1086,11 +1085,11 @@ export class RinFrontendTurnDriver {
     }
     if (options.assumeConnected) {
       if (!this.client?.isConnected())
-        throw new RinFrontendSessionNotConnectedError();
+        throw new Error("frontend_session_not_connected");
     } else {
       await this.connect();
     }
-    if (!this.client) throw new RinFrontendSessionNotConnectedError();
+    if (!this.client) throw new Error("frontend_session_not_connected");
     if (isFrontendNewSessionCommand(commandLine)) {
       if (sessionFile && !managedSessionLeaf) {
         throw new Error("new_session_session_file_unsupported");
@@ -1193,7 +1192,7 @@ export class RinFrontendTurnDriver {
     commandLine: string,
     sessionFile?: string,
   ) {
-    if (!this.client) throw new RinFrontendSessionNotConnectedError();
+    if (!this.client) throw new Error("frontend_session_not_connected");
     const wanted = safeString(sessionFile || "").trim();
     if (!wanted) return await this.client.runCommand(commandLine);
     return await this.client.request({
@@ -1204,7 +1203,7 @@ export class RinFrontendTurnDriver {
   }
 
   private async resetModelOptionsFromSettings(sessionFile?: string) {
-    if (!this.client) throw new RinFrontendSessionNotConnectedError();
+    if (!this.client) throw new Error("frontend_session_not_connected");
     const wanted = safeString(sessionFile || "").trim();
     if (wanted) {
       await this.client.request({
@@ -1224,7 +1223,7 @@ export class RinFrontendTurnDriver {
     },
     sessionFile?: string,
   ) {
-    if (!this.client) throw new RinFrontendSessionNotConnectedError();
+    if (!this.client) throw new Error("frontend_session_not_connected");
     const wanted = safeString(sessionFile || "").trim();
     const modelRef = safeString(options.model || "").trim();
     if (modelRef) {
@@ -1325,14 +1324,14 @@ export class RinFrontendTurnDriver {
     if (input.assumeSessionReady) {
       if (!this.client) this.client = this.clientFactory();
       if (!this.client?.isConnected())
-        throw new RinFrontendSessionNotConnectedError();
+        throw new Error("frontend_session_not_connected");
       ready = {
         sessionId: this.currentSessionId() || undefined,
         sessionFile: this.currentSessionFile() || undefined,
       };
     } else {
       await this.connect();
-      if (!this.client) throw new RinFrontendSessionNotConnectedError();
+      if (!this.client) throw new Error("frontend_session_not_connected");
       if (sessionFile && !sessionFileExists(sessionFile)) {
         throw missingSessionFileError(sessionFile);
       }
@@ -1430,11 +1429,11 @@ export class RinFrontendTurnDriver {
       ).trim();
       if (input.assumeConnected) {
         if (!this.client?.isConnected())
-          throw new RinFrontendSessionNotConnectedError();
+          throw new Error("frontend_session_not_connected");
       } else {
         await this.connect();
       }
-      if (!this.client) throw new RinFrontendSessionNotConnectedError();
+      if (!this.client) throw new Error("frontend_session_not_connected");
       if (
         sessionFile &&
         !input.createSessionFileIfMissing &&
@@ -1602,7 +1601,7 @@ export class RinFrontendTurnDriver {
       if (!this.client?.isConnected()) {
         await this.connect({ restoreSessionFile: input.sessionFile });
       }
-      if (!this.client) throw new RinFrontendSessionNotConnectedError();
+      if (!this.client) throw new Error("frontend_session_not_connected");
       if (this.liveTurn) throw new Error("frontend_turn_busy");
       this.resetAssistantSegmentTracking();
       this.latestAssistantText = "";

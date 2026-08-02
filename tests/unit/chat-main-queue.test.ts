@@ -2009,7 +2009,7 @@ test("chat main finalizes once after controller reinbox_jobs from canonical term
   }
 });
 
-test("chat main reports daemon startup failure without retrying", async () => {
+test("chat main leaves daemon startup failure pending without an error outbox", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2104,21 +2104,30 @@ test("chat main reports daemon startup failure without retrying", async () => {
       });
 
       const deadline = Date.now() + 8000;
-      while (Date.now() < deadline) {
-        const rows = storeMod
-          .listChatMessages(agentDir)
-          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-        if (rows.some((item) => item.text === "retry reply")) break;
+      while (Date.now() < deadline && connectCalls < 1) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
       const rows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
-      const errorNotice = rows.find((item) => String(item.text || "").includes("connect ENOENT"));
-      const succeeded = rows.some((item) => item.text === "retry reply");
-      if (succeeded || !errorNotice || errorNotice.deliveryKind !== "error" || connectCalls !== 1) {
-        throw new Error(JSON.stringify({ connectCalls, errorNotice, rows }));
+      const inbound = storeMod.getChatMessage(
+        agentDir,
+        "telegram/1:2",
+        "m-retry",
+      );
+      const inboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
+      const running = inboxMod.listChatInboxItems(agentDir, ["running"]);
+      if (
+        rows.length !== 0 ||
+        connectCalls !== 1 ||
+        !inbound ||
+        inbound.processedAt ||
+        running.length !== 1
+      ) {
+        throw new Error(
+          JSON.stringify({ connectCalls, inbound, rows, running }),
+        );
       }
       process.exit(0);
     `;
@@ -2655,7 +2664,7 @@ test("hard Chat process death leaves the claimed inbox lifecycle active", async 
   }
 });
 
-test("chat main commits one terminal error so restart recovery cannot replay the same inbound", async () => {
+test("chat main keeps an accepted local error pending across restart without prompt replay", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2719,20 +2728,19 @@ test("chat main commits one terminal error so restart recovery cannot replay the
 
       const firstDeadline = Date.now() + 8000;
       while (Date.now() < firstDeadline) {
-        const errors = storeMod
-          .listChatMessages(agentDir)
-          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant" && item.deliveryKind === "error");
-        if (errors.length >= 1) break;
+        const inbound = storeMod.getChatMessage(
+          agentDir,
+          "telegram/1:2",
+          "m-terminal-error-once",
+        );
+        if (inbound?.acceptedAt) break;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
       await first.stop();
 
       const second = await mainMod.startChatBridge({ hosted: true });
       second.app.bots.push(createBot());
-      const secondDeadline = Date.now() + 3000;
-      while (Date.now() < secondDeadline && runTurnCalls < 2) {
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       await second.stop();
 
       const inbound = storeMod.getChatMessage(
@@ -2743,8 +2751,18 @@ test("chat main commits one terminal error so restart recovery cannot replay the
       const errors = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant" && item.deliveryKind === "error");
-      if (runTurnCalls !== 1 || !inbound?.processedAt || errors.length !== 1) {
-        throw new Error(JSON.stringify({ runTurnCalls, inbound, errors }));
+      const inboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
+      const running = inboxMod.listChatInboxItems(agentDir, ["running"]);
+      if (
+        runTurnCalls !== 1 ||
+        !inbound?.acceptedAt ||
+        inbound?.processedAt ||
+        errors.length !== 0 ||
+        running.length !== 1
+      ) {
+        throw new Error(
+          JSON.stringify({ runTurnCalls, inbound, errors, running }),
+        );
       }
       process.exit(0);
     `;
@@ -2888,7 +2906,7 @@ test("chat startup honors terminal outbox ownership before orphan inbox recovery
   }
 });
 
-test("chat main reconciles a retained turn only after durable acceptance", async () => {
+test("chat main leaves every local turn error pending until durable acceptance", async () => {
   const tempRoot = "/home/rin/tmp";
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2958,9 +2976,7 @@ test("chat main reconciles a retained turn only after durable acceptance", async
       controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
         runTurnCalls += 1;
         if (runTurnCalls === 1) {
-          throw Object.assign(new Error("frontend session unavailable"), {
-            code: "frontend_session_not_connected",
-          });
+          throw new Error("arbitrary local turn failure");
         }
         throw new Error("unexpected prompt replay");
       };

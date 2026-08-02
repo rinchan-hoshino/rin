@@ -28,10 +28,9 @@ const { lookupReplySession } = await import(
 const { openChatDatabase, readChatState } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
 );
-const { claimChatInboxItem, enqueueChatInboxItem, failClaimedChatInboxItem } =
-  await import(
-    pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
-  );
+const { claimChatInboxItem, enqueueChatInboxItem } = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
+);
 const {
   beginDaemonTurn,
   daemonTurnTerminalEvent,
@@ -42,6 +41,24 @@ const {
     path.join(rootDir, "dist", "core", "rin-daemon", "turn-ledger.js"),
   ).href
 );
+function setLegacyInterruptedInboxFixture(agentDir, claim, error) {
+  openChatDatabase(agentDir)
+    .prepare(
+      `UPDATE inbox_jobs
+       SET state = 'failed', terminal_kind = 'interrupted',
+           owner_epoch = NULL, lease_until = NULL, heartbeat_at = NULL,
+           next_attempt_at = NULL, last_error = ?, updated_at = ?
+       WHERE turn_id = ? AND state = 'running' AND owner_epoch = ? AND attempt = ?`,
+    )
+    .run(
+      error,
+      new Date().toISOString(),
+      claim.itemId,
+      claim.ownerEpoch,
+      claim.attemptCount,
+    );
+}
+
 const {
   enqueueChatOutboxPayload,
   listChatOutboxHistoryItems,
@@ -6895,7 +6912,7 @@ test("authoritative terminal replay adopts one outbox after the transport job se
   );
 });
 
-test("authoritative daemon terminal replaces a local interrupted transport failure", async () => {
+test("authoritative daemon terminal replaces a legacy interrupted inbox fixture", async () => {
   const controller = await createController("telegram/1:2");
   const inbound = enqueueChatInboxItem(controller.agentDir, {
     chatKey: controller.chatKey,
@@ -6912,7 +6929,7 @@ test("authoritative daemon terminal replaces a local interrupted transport failu
   }).item;
   const claim = claimChatInboxItem(controller.agentDir, inbound.itemId);
   const db = openChatDatabase(controller.agentDir);
-  failClaimedChatInboxItem(
+  setLegacyInterruptedInboxFixture(
     controller.agentDir,
     claim,
     "frontend_turn_interrupted",
@@ -7237,7 +7254,7 @@ test("connect drains an older terminal before restoring the new primed turn", as
     elements: [{ type: "text", attrs: { content: "old turn" } }],
   }).item;
   const oldClaim = claimChatInboxItem(controller.agentDir, oldInbound.itemId);
-  failClaimedChatInboxItem(
+  setLegacyInterruptedInboxFixture(
     controller.agentDir,
     oldClaim,
     "chat_turn_interrupted",
