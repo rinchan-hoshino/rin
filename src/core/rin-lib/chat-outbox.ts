@@ -681,6 +681,13 @@ export function enqueueChatOutboxPayload(
               contextualFence,
             );
       const desiredTurnId = fencedTurn?.turn_id || turn?.turn_id || "";
+      // `completed` settles Chat admission transport, not backend lifecycle truth.
+      const projectsAuthoritativeTerminalOverCompletedTransport = Boolean(
+        options.terminalTurn &&
+        terminalRecordId &&
+        turn?.state === "terminal" &&
+        safeString(turn.terminal_kind) === "completed",
+      );
       const existingAuthoritativeTerminal = desiredTurnId
         ? (db
             .prepare(
@@ -811,6 +818,8 @@ export function enqueueChatOutboxPayload(
                          OR execution_session_file = ?))
                    OR
                    (state = 'failed' AND terminal_kind = 'interrupted')
+                   OR
+                   (state = 'terminal' AND terminal_kind = 'completed' AND ? = 1)
                  )`,
             )
             .run(
@@ -822,6 +831,7 @@ export function enqueueChatOutboxPayload(
               Number(turn.attempt),
               executionSessionFile,
               executionSessionFile,
+              projectsAuthoritativeTerminalOverCompletedTransport ? 1 : 0,
             );
           if (terminalized.changes !== 1) {
             throw new Error("chat_turn_fence_lost");
@@ -870,7 +880,10 @@ export function enqueueChatOutboxPayload(
           });
         }
       }
-      if (turn?.state === "terminal") {
+      if (
+        turn?.state === "terminal" &&
+        !projectsAuthoritativeTerminalOverCompletedTransport
+      ) {
         throw new Error("chat_terminal_turn_mismatch");
       }
       const sequence = Number(
@@ -938,6 +951,8 @@ export function enqueueChatOutboxPayload(
                        OR execution_session_file = ?))
                  OR
                  (state = 'failed' AND terminal_kind = 'interrupted')
+                 OR
+                 (state = 'terminal' AND terminal_kind = 'completed' AND ? = 1)
                )`,
           )
           .run(
@@ -949,6 +964,7 @@ export function enqueueChatOutboxPayload(
             Number(turn.attempt),
             executionSessionFile,
             executionSessionFile,
+            projectsAuthoritativeTerminalOverCompletedTransport ? 1 : 0,
           );
         if (terminalized.changes !== 1) {
           throw new Error("chat_turn_fence_lost");

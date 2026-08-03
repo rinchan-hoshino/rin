@@ -28,7 +28,11 @@ const { lookupReplySession } = await import(
 const { openChatDatabase, readChatState } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
 );
-const { claimChatInboxItem, enqueueChatInboxItem } = await import(
+const {
+  claimChatInboxItem,
+  completeClaimedChatInboxItem,
+  enqueueChatInboxItem,
+} = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
 );
 const {
@@ -6848,6 +6852,7 @@ test("authoritative terminal replay adopts one outbox after the transport job se
     elements: [{ type: "text", attrs: { content: "run" } }],
   }).item;
   const claim = claimChatInboxItem(controller.agentDir, inbound.itemId);
+  assert.equal(completeClaimedChatInboxItem(controller.agentDir, claim), true);
   const payload = {
     createdAt: new Date().toISOString(),
     chatKey: controller.chatKey,
@@ -6898,11 +6903,11 @@ test("authoritative terminal replay adopts one outbox after the transport job se
     /chat_outbox_idempotency_collision|chat_terminal_turn_mismatch/,
   );
   const db = openChatDatabase(controller.agentDir);
-  assert.equal(
+  assert.deepEqual(
     db
-      .prepare(`SELECT state FROM inbox_jobs WHERE turn_id = ?`)
-      .get(claim.itemId).state,
-    "terminal",
+      .prepare(`SELECT state, terminal_kind FROM inbox_jobs WHERE turn_id = ?`)
+      .get(claim.itemId),
+    { state: "terminal", terminal_kind: "outbox_final" },
   );
   assert.equal(
     db
