@@ -116,7 +116,7 @@ Helper contract:
 - Scheduled task records are persisted in `~/.rin/data/scheduler/tasks.json`; use `rin.tasks.reload()` or `rin tasks reload` to explicitly load valid direct file edits, additions, and removals into the running daemon without restart.
 - `rin.tasks.list()` returns agent-visible scheduled tasks.
 - `rin.tasks.get(taskId)` reads one agent-visible task.
-- `rin.tasks.upsert(task, defaults?)` creates or updates a task; pass `condition: null`, `termination: null`, or `frontend: null` to remove optional fields. Root `quiet` defaults to `true` and uses chat quiet-mode semantics for chat-bound agent turns.
+- `rin.tasks.upsert(task, defaults?)` creates or updates a task; pass `condition: null`, `termination: null`, or `frontend: null` to remove optional fields. Root `quiet` defaults to `false`; when enabled, the task runs without a bound delivery frontend and emits no automatic working, interim, error, or final messages.
 - `rin.tasks.reload()` reloads the persisted task file into the running daemon; invalid JSON or task data leaves current daemon state unchanged and fails the reload.
 - `rin.tasks.run(taskId)` starts the existing task through scheduler semantics, including condition evaluation.
 - `rin.tasks.wake(taskId)` moves the next run to now; the scheduler still evaluates the task normally.

@@ -194,7 +194,7 @@ function shouldDeliverCronTaskFinal(
   task: CronTaskRecord,
   frontend: ReturnType<typeof resolveCronTaskFrontend>,
 ) {
-  return task.deliverFinal !== false && frontend?.kind === "chat";
+  return task.quiet !== true && frontend?.kind === "chat";
 }
 
 async function setCronTaskFrontendWorking(
@@ -484,17 +484,16 @@ export async function executeCronAgentTask(
     : String(task.target.prompt || "").trim();
   if (!basePrompt) throw new Error("cron_prompt_required");
   const prompt = basePrompt;
+  const quiet = task.quiet === true;
+  const deliveryChatKey = quiet ? undefined : chatKey;
   const result = await options.chat.runTurn({
-    controllerKey,
-    ...(chatKey
-      ? {
-          chatKey,
-          affectChatBinding: false,
-          linkDeliveriesToSession: true,
-          deliverFinal: task.deliverFinal !== false,
-          quietMode: task.quiet !== false,
-        }
-      : { affectChatBinding: false, quietMode: task.quiet !== false }),
+    controllerKey: quiet ? task.id : controllerKey,
+    ...(deliveryChatKey
+      ? { chatKey: deliveryChatKey, linkDeliveriesToSession: true }
+      : {}),
+    affectChatBinding: false,
+    deliverFinal: !quiet,
+    quietMode: quiet,
     disposeAfterTurn: sessionMode === "none",
     shutdownAfterTurn: shouldShutdownTaskSessionAfterRun(sessionMode),
     text: prompt,
@@ -515,12 +514,13 @@ export async function executeCronAgentTask(
     ...(task.disabledRinCapabilities
       ? { disabledRinCapabilities: task.disabledRinCapabilities }
       : {}),
-    frontend: frontend
-      ? {
-          kind: frontend.kind || "scheduled-task",
-          key: frontend.key,
-        }
-      : { kind: "scheduled-task", key: task.id },
+    frontend:
+      !quiet && frontend
+        ? {
+            kind: frontend.kind || "scheduled-task",
+            key: frontend.key,
+          }
+        : { kind: "scheduled-task", key: task.id },
     promptMeta: options.promptMeta || buildCronTaskPromptContext(task),
   });
   const completion = resolveTurnCompletion(result);
@@ -591,8 +591,7 @@ export function createCronSessionInvocation(
       (existsSync(sessionFile) || task.runCount > 1),
     name: task.name,
     frontend: task.frontend ? { ...task.frontend } : undefined,
-    deliverFinal: task.deliverFinal,
-    quiet: task.quiet,
+    quiet: task.quiet === true,
     model: task.model,
     thinkingLevel: task.thinkingLevel,
     disabledRinCapabilities: task.disabledRinCapabilities
@@ -617,8 +616,7 @@ function taskFromSessionInvocation(
     name: invocation.name,
     enabled: true,
     frontend: invocation.frontend,
-    deliverFinal: invocation.deliverFinal,
-    quiet: invocation.quiet,
+    quiet: invocation.quiet === true,
     model: invocation.model,
     thinkingLevel: invocation.thinkingLevel,
     disabledRinCapabilities: invocation.disabledRinCapabilities,
@@ -850,7 +848,8 @@ export async function executeCronTask(
 ) {
   const startedAt = task.lastStartedAt || nowIso();
   const runId = cronTaskRunId(task, startedAt);
-  const showExternalWorking = task.target.kind === "shell_command";
+  const showExternalWorking =
+    task.target.kind === "shell_command" && task.quiet !== true;
   const audited = isSelfImproveDistillationTask(task);
   const maintenanceLock = audited
     ? await acquireSelfImproveMaintenanceLock(options.agentDir)

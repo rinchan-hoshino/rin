@@ -91,7 +91,6 @@ export type CronSessionInvocation = {
   continuing?: boolean;
   name?: string;
   frontend?: CronTaskFrontendBinding;
-  deliverFinal?: boolean;
   quiet?: boolean;
   model?: string;
   thinkingLevel?: CronTaskThinkingLevel;
@@ -119,7 +118,6 @@ export type CronTaskRecord = {
   completionReason?: string;
   pausedAt?: string;
   frontend?: CronTaskFrontendBinding;
-  deliverFinal?: boolean;
   quiet?: boolean;
   model?: string;
   thinkingLevel?: CronTaskThinkingLevel;
@@ -148,7 +146,6 @@ export type CronTaskInput = {
   name?: string;
   enabled?: boolean;
   frontend?: CronTaskFrontendBinding | null;
-  deliverFinal?: boolean;
   quiet?: boolean;
   model?: string;
   thinkingLevel?: CronTaskThinkingLevel;
@@ -348,8 +345,7 @@ function createBuiltInMemoryIndexRepairTask(agentDir: string): CronTaskRecord {
     },
     session: { mode: "none" },
     target: { kind: "shell_command", command },
-    deliverFinal: true,
-    quiet: true,
+    quiet: false,
     runCount: 0,
     running: false,
   };
@@ -376,7 +372,6 @@ function createBuiltInAgentPracticesDocsSyncTask(
     },
     session: { mode: "none" },
     target: { kind: "shell_command", command },
-    deliverFinal: false,
     quiet: true,
     runCount: 0,
     running: false,
@@ -405,8 +400,7 @@ function createBuiltInSelfImproveSleepConsolidationTask(
     session: { mode: "none" },
     target: { kind: "agent_prompt", prompt },
     disabledRinCapabilities: ["self_improve"],
-    deliverFinal: true,
-    quiet: true,
+    quiet: false,
     runCount: 0,
     running: false,
   };
@@ -509,9 +503,7 @@ function normalizeCronSessionInvocation(
       raw.continuing === undefined ? undefined : Boolean(raw.continuing),
     name: safeString(raw.name).trim() || undefined,
     frontend: normalizeTaskFrontend(raw.frontend, undefined),
-    deliverFinal:
-      raw.deliverFinal === undefined ? undefined : Boolean(raw.deliverFinal),
-    quiet: raw.quiet === undefined ? undefined : Boolean(raw.quiet),
+    quiet: Boolean(raw.quiet),
     model: normalizeModelOverride(raw.model),
     thinkingLevel: normalizeThinkingLevel(raw.thinkingLevel),
     disabledRinCapabilities: normalizeDisabledRinCapabilities(
@@ -677,16 +669,10 @@ export class CronScheduler {
       completionReason: existing?.completionReason,
       pausedAt: existing?.pausedAt,
       frontend,
-      deliverFinal:
-        input.deliverFinal !== undefined
-          ? Boolean(input.deliverFinal)
-          : (existing?.deliverFinal ?? true),
       quiet:
         input.quiet !== undefined
           ? Boolean(input.quiet)
-          : existing
-            ? existing.quiet
-            : true,
+          : (existing?.quiet ?? false),
       model,
       thinkingLevel,
       disabledRinCapabilities,
@@ -881,7 +867,8 @@ export class CronScheduler {
         row.lastError = row.lastError ? safeString(row.lastError) : undefined;
         row.thinkingLevel = normalizeThinkingLevel(row.thinkingLevel);
         row.model = normalizeModelOverride(row.model);
-        row.deliverFinal = row.deliverFinal !== false;
+        row.quiet = Boolean(row.quiet);
+        delete (row as any).deliverFinal;
         if (row.createdFrom?.frontend) {
           row.createdFrom = {
             ...row.createdFrom,

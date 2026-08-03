@@ -67,7 +67,7 @@ Choose the smallest task shape that preserves the user-visible contract:
 5. **Task prompt:** use `rin-prompt-engineering` for `target.prompt` and `target.continuationPrompt` on `agent_prompt` tasks.
 6. **Storage/edit path:** SDK writes and CLI operations update daemon scheduler state and the same scheduler file. If `~/.rin/data/scheduler/tasks.json` is edited outside the daemon, run `rin tasks reload` or `rin.tasks.reload()` explicitly; the daemon does not watch the file automatically.
 7. **Session:** `none` for normal tasks; `dedicated` for a task-owned continuing thread.
-8. **Delivery:** optional addressable `frontend`, chat binding, `deliverFinal`, and `quiet`. A TUI is unaddressed and cannot be a task frontend binding.
+8. **Delivery:** optional addressable `frontend`, chat binding, and `quiet`. A TUI is unaddressed and cannot be a task frontend binding.
 9. **Termination:** optional `maxRuns` or `stopAt`.
 10. **Verification:** re-read the task and check liveness when active producers matter.
 
@@ -96,7 +96,7 @@ Verify these fields before reporting success:
 - `trigger`, `nextRunAt`, and expected local time;
 - `condition`, plus `condition.lastEvaluatedAt` / `condition.lastResult` after a run-now or due tick;
 - `session.mode`, and `dedicatedSessionFile` for dedicated sessions;
-- `target.kind`, prompt or command intent, `frontend`, `deliverFinal`, and `quiet`;
+- `target.kind`, prompt or command intent, `frontend`, and `quiet`;
 - `model`, `thinkingLevel`;
 - `termination`, `runCount`, `lastStartedAt`, `lastFinishedAt`, `lastResultText`, `lastError`.
 
@@ -114,7 +114,6 @@ type WritableTaskPatch = {
   name?: string;
   enabled?: boolean;
   frontend?: { kind?: string; key: string } | null;
-  deliverFinal?: boolean;
   quiet?: boolean;
   model?: string;
   thinkingLevel?:
@@ -287,8 +286,8 @@ Behavior:
 - Rin disposes or shuts down the no-session turn after completion, except special self-improve distillation tasks.
 - If an addressable `frontend` is set, Rin routes the scheduled turn through that frontend and a task-owned controller identity.
 - TUI frontends have no key and cannot be addressed. Tasks created from a TUI omit `frontend` and run independently.
-- If `frontend.kind` is `"chat"`, the final task result is sent to that chat and linked to the task execution session for quote/resume context without reading or changing the chat's current session binding.
-- Root `deliverFinal: false` suppresses automatic final delivery; the agent may explicitly send through the SDK when useful. It does not change chat session binding.
+- If `frontend.kind` is `"chat"` and `quiet` is not enabled, task output is sent to that chat and the final is linked to the task execution session for quote/resume context without reading or changing the chat's current session binding.
+- Root `quiet: true` runs without a bound delivery frontend. It suppresses all automatic working, interim, passive-notice, independent-error, and final messages while preserving task result and error state. It does not change chat session binding.
 
 ### `session.mode: "dedicated"`
 
@@ -317,8 +316,8 @@ Runs an agent turn. Use this for owner-facing reports, summaries, checks that ne
 - An addressable `frontend` routes execution through a frontend and task-owned controller identity without changing that frontend's current chat session.
 - `frontend: { kind: "chat", key: "..." }` routes delivery to a chat bridge target and links delivered task messages to the task execution session so a later user quote can select it.
 - TUI frontends are unaddressed and cannot be specified as task frontend bindings.
-- Root `deliverFinal: false` suppresses automatic final delivery without changing chat session binding.
-- Root `quiet` defaults to `true`. For chat-bound agent turns it has the same meaning as chat quiet mode: interim and passive-notice deliveries are suppressed, while independent errors remain visible and final delivery itself remains controlled by `deliverFinal`.
+- Root `quiet` defaults to `false`. When `true`, the scheduler runs the turn without its configured delivery frontend, so no automatic working, interim, passive-notice, independent-error, or final message is emitted. The task still records its summarized result or error.
+- `quiet` controls scheduler-managed frontend delivery. A task prompt that explicitly invokes a separate outbound SDK operation remains an intentional side effect and must be governed by that prompt's permission boundary.
 - `model` and `thinkingLevel` override the run when present.
 - Rin stores a summarized final result in `lastResultText`.
 - If the agent turn has no canonical final assistant text, the task records `lastError`.
@@ -447,6 +446,6 @@ Report:
 ## Troubleshooting contract
 
 - Task stayed idle: inspect `enabled`, `completedAt`, `pausedAt`, `nextRunAt`, `condition.lastResult`, `lastError`, and `rin status --json`.
-- Run-now finished without a recipient-visible report: inspect `running`, `lastStartedAt`, active frontend turn, `lastError`, `frontend`, and `deliverFinal`.
+- Run-now finished without a recipient-visible report: inspect `running`, `lastStartedAt`, active frontend turn, `lastError`, `frontend`, and `quiet`.
 - Recurring task is noisy: add a `condition`, persist a deduplication/change-detection key, narrow delivery, or change the prompt to report only changed evidence. Adjust `thinkingLevel` for computation cost, not notification frequency.
 - Report formatting is raw: replace direct `shell_command` delivery with an `agent_prompt` wrapper.
