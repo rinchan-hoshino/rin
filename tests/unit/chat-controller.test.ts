@@ -3767,6 +3767,167 @@ test("chat controller settles remote Pi steering without taking or delivering it
   assert.equal(controller.currentTurn, null);
 });
 
+test("nonterminal input durably joins the terminal owner and takes presentation ownership", async () => {
+  const controller = await createController("telegram/1:2");
+  const ownerInbound = enqueueChatInboxItem(controller.agentDir, {
+    chatKey: controller.chatKey,
+    messageId: "m-terminal-owner",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "2",
+      messageId: "m-terminal-owner",
+      content: "first request",
+      stripped: { content: "first request" },
+    },
+    elements: [{ type: "text", attrs: { content: "first request" } }],
+  }).item;
+  const ownerClaim = claimChatInboxItem(
+    controller.agentDir,
+    ownerInbound.itemId,
+  );
+  const joinedInbound = enqueueChatInboxItem(controller.agentDir, {
+    chatKey: controller.chatKey,
+    messageId: "m-joined-input",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "2",
+      messageId: "m-joined-input",
+      content: "second request",
+      stripped: { content: "second request" },
+    },
+    elements: [{ type: "text", attrs: { content: "second request" } }],
+  }).item;
+  const joinedClaim = claimChatInboxItem(
+    controller.agentDir,
+    joinedInbound.itemId,
+  );
+  const ownerFence = {
+    turnId: ownerClaim.itemId,
+    chatKey: controller.chatKey,
+    messageId: ownerClaim.messageId,
+    ownerEpoch: ownerClaim.ownerEpoch,
+    attempt: ownerClaim.attemptCount,
+  };
+  const joinedFence = {
+    turnId: joinedClaim.itemId,
+    chatKey: controller.chatKey,
+    messageId: joinedClaim.messageId,
+    ownerEpoch: joinedClaim.ownerEpoch,
+    attempt: joinedClaim.attemptCount,
+  };
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: ownerClaim.messageId,
+    replyToMessageId: ownerClaim.messageId,
+    requestTag: "request-terminal-owner",
+    outboxTurnFence: ownerFence,
+    workingNoticeSent: false,
+  };
+  controller.prepareTurnPrompt = async () => ({
+    text: "second request",
+    images: [],
+    frontendReady: true,
+  });
+  controller.driver.runTurn = async () => ({
+    outcome: "nonterminal",
+    superseded: true,
+    requestTag: "request-joined-input",
+    sessionFile: "/tmp/joined-input.jsonl",
+  });
+  const enqueueAndDrainDelivery =
+    controller.enqueueAndDrainDelivery.bind(controller);
+  const interimPayloads: any[] = [];
+  controller.enqueueAndDrainDelivery = async (payload: any) => {
+    interimPayloads.push(payload);
+    return { accepted: true, settled: true, messageIds: ["sent-interim"] };
+  };
+
+  await controller.runTurn({
+    text: "second request",
+    attachments: [],
+    incomingMessageId: joinedClaim.messageId,
+    replyToMessageId: joinedClaim.messageId,
+    outboxTurnFence: joinedFence,
+  });
+
+  const db = openChatDatabase(controller.agentDir);
+  const joined = db
+    .prepare(
+      `SELECT messages.accepted_at,
+              json_extract(inbox_jobs.admission_json, '$.joinedTurnId') AS joined_turn_id
+         FROM inbox_jobs
+         JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+        WHERE inbox_jobs.turn_id = ?`,
+    )
+    .get(joinedClaim.itemId);
+  assert.ok(joined.accepted_at);
+  assert.equal(joined.joined_turn_id, ownerClaim.itemId);
+  assert.equal(
+    controller.currentTurn.outboxTurnFence.turnId,
+    ownerClaim.itemId,
+  );
+
+  await controller.deliverAssistantInterim("response to second request");
+  assert.equal(interimPayloads[0].parts[0].type, "quote");
+  assert.equal(interimPayloads[0].parts[0].id, joinedClaim.messageId);
+  assert.equal(
+    completeClaimedChatInboxItem(controller.agentDir, joinedClaim),
+    true,
+  );
+  assert.equal(
+    completeClaimedChatInboxItem(controller.agentDir, ownerClaim),
+    true,
+  );
+
+  controller.enqueueAndDrainDelivery = enqueueAndDrainDelivery;
+  controller.presentationIncomingMessageId = "";
+  controller.presentationReplyToMessageId = "";
+  controller.setCurrentTurn({
+    incomingMessageId: ownerClaim.messageId,
+    replyToMessageId: ownerClaim.messageId,
+    requestTag: "request-terminal-owner",
+    outboxTurnFence: ownerFence,
+  });
+  const finalDeliveries: any[] = [];
+  controller.app.bots[0].sendMessage = async (
+    chatId: string,
+    content: any,
+    options: any,
+  ) => {
+    finalDeliveries.push({ chatId, content, options });
+    return ["sent-final"];
+  };
+  await controller.settleProjectedTurnComplete({
+    finalText: "aggregate final",
+    requestTag: "request-terminal-owner",
+    chatDeliveryContext: {
+      chatKey: controller.chatKey,
+      turnId: ownerClaim.itemId,
+      messageId: ownerClaim.messageId,
+    },
+    terminalRecord: {
+      terminalId: "terminal-joined-owner",
+      state: "complete",
+    },
+  });
+  assert.equal(finalDeliveries[0].content[0].type, "quote");
+  assert.equal(finalDeliveries[0].content[0].attrs.id, joinedClaim.messageId);
+  const processed = db
+    .prepare(
+      `SELECT messages.processed_at, messages.delivery_kind,
+              json_extract(inbox_jobs.admission_json, '$.settledOutboxId') AS outbox_id
+         FROM inbox_jobs
+         JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+        WHERE inbox_jobs.turn_id = ?`,
+    )
+    .get(joinedClaim.itemId);
+  assert.ok(processed.processed_at);
+  assert.equal(processed.delivery_kind, "outbox_final");
+  assert.equal(processed.outbox_id, "chat-terminal-joined-owner");
+});
+
 test("chat controller stages raw non-transient command errors for the outbox", async () => {
   const controller = await createController();
   const deliveries = [];

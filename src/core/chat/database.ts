@@ -883,7 +883,11 @@ type ChatTurnFenceInput = {
 export function markChatMessageAcceptedWithFence(
   agentDir: string,
   fence: ChatTurnFenceInput,
-  input: { acceptedAt?: string; sessionFile?: string } = {},
+  input: {
+    acceptedAt?: string;
+    sessionFile?: string;
+    joinedTurnId?: string;
+  } = {},
 ) {
   const db = openChatDatabase(agentDir);
   return db
@@ -891,10 +895,15 @@ export function markChatMessageAcceptedWithFence(
       const timestamp = safeString(input.acceptedAt).trim() || nowIso();
       const updatedAt = nowIso();
       const sessionFile = safeString(input.sessionFile).trim() || null;
+      const joinedTurnId = safeString(input.joinedTurnId).trim() || null;
       const turn = db
         .prepare(
           `UPDATE inbox_jobs
            SET execution_session_file = COALESCE(execution_session_file, ?),
+               admission_json = CASE
+                 WHEN ? IS NULL THEN admission_json
+                 ELSE json_set(COALESCE(admission_json, '{}'), '$.joinedTurnId', ?)
+               END,
                updated_at = ?
            WHERE turn_id = ? AND chat_key = ? AND state = 'running'
              AND owner_epoch = ? AND attempt = ?
@@ -911,6 +920,8 @@ export function markChatMessageAcceptedWithFence(
         )
         .run(
           sessionFile,
+          joinedTurnId,
+          joinedTurnId,
           updatedAt,
           requiredText(fence.turnId, "chat_turn_id_required"),
           requiredText(fence.chatKey, "chat_turn_chat_key_required"),
@@ -950,6 +961,96 @@ export function markChatMessageAcceptedWithFence(
         );
       if (message.changes !== 1) throw new Error("chat_turn_fence_lost");
       return true;
+    })
+    .immediate();
+}
+
+export function readLatestJoinedChatPresentation(
+  agentDir: string,
+  ownerTurnIdValue: string,
+): { turnId: string; chatKey: string; messageId: string } | null {
+  const ownerTurnId = requiredText(ownerTurnIdValue, "chat_turn_id_required");
+  const db = openChatDatabase(agentDir);
+  return (
+    (db
+      .prepare(
+        `SELECT inbox_jobs.turn_id AS turnId,
+                inbox_jobs.chat_key AS chatKey,
+                messages.message_id AS messageId
+           FROM inbox_jobs
+           JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+          WHERE json_extract(inbox_jobs.admission_json, '$.joinedTurnId') = ?
+            AND messages.accepted_at IS NOT NULL
+          ORDER BY messages.sequence DESC
+          LIMIT 1`,
+      )
+      .get(ownerTurnId) as
+      | { turnId: string; chatKey: string; messageId: string }
+      | undefined) || null
+  );
+}
+
+export function markJoinedChatMessagesProcessed(
+  agentDir: string,
+  ownerTurnIdValue: string,
+  input: {
+    processedAt?: string;
+    deliveryKind: "outbox_final" | "outbox_error";
+    outboxId: string;
+  },
+) {
+  const ownerTurnId = requiredText(ownerTurnIdValue, "chat_turn_id_required");
+  const deliveryKind = requiredText(
+    input.deliveryKind,
+    "chat_delivery_kind_required",
+  );
+  const outboxId = requiredText(input.outboxId, "chat_outbox_id_required");
+  const timestamp = safeString(input.processedAt).trim() || nowIso();
+  const db = openChatDatabase(agentDir);
+  return db
+    .transaction(() => {
+      const turns = db
+        .prepare(
+          `UPDATE inbox_jobs
+           SET admission_json = json_set(
+                 admission_json,
+                 '$.settledOutboxId', COALESCE(
+                   json_extract(admission_json, '$.settledOutboxId'), ?
+                 )
+               ),
+               updated_at = ?
+           WHERE json_extract(admission_json, '$.joinedTurnId') = ?
+             AND state IN ('running', 'terminal')
+             AND (terminal_kind IS NULL OR terminal_kind = 'completed')`,
+        )
+        .run(outboxId, timestamp, ownerTurnId);
+      db.prepare(
+        `UPDATE messages
+         SET processed_at = COALESCE(processed_at, ?),
+             delivery_kind = COALESCE(delivery_kind, ?),
+             disposition = 'actionable',
+             record_json = json_set(
+               record_json,
+               '$.processedAt', COALESCE(json_extract(record_json, '$.processedAt'), ?),
+               '$.deliveryKind', COALESCE(json_extract(record_json, '$.deliveryKind'), ?),
+               '$.disposition', 'actionable'
+             ),
+             updated_at = ?
+         WHERE id IN (
+           SELECT inbound_message_id FROM inbox_jobs
+            WHERE json_extract(admission_json, '$.joinedTurnId') = ?
+              AND state IN ('running', 'terminal')
+              AND (terminal_kind IS NULL OR terminal_kind = 'completed')
+         )`,
+      ).run(
+        timestamp,
+        deliveryKind,
+        timestamp,
+        deliveryKind,
+        timestamp,
+        ownerTurnId,
+      );
+      return Number(turns.changes || 0);
     })
     .immediate();
 }

@@ -72,6 +72,7 @@ import {
   markChatMessageAcceptedWithFence,
   openChatDatabase,
   readChatSessionBinding,
+  readLatestJoinedChatPresentation,
   writeChatSessionBinding,
   writeChatSessionBindingWithFence,
 } from "./database.js";
@@ -361,6 +362,8 @@ export class ChatController {
   activeWorkingIndicators: WorkingIndicator[] = [];
   workingIndicatorTick = 0;
   currentTurn: ChatTurnMeta | null = null;
+  private presentationIncomingMessageId = "";
+  private presentationReplyToMessageId = "";
   compactionTurn: ChatTurnMeta | null = null;
   compactionWorkingIndicators: WorkingIndicator[] = [];
   lastCompactionIndicatorAt = 0;
@@ -480,9 +483,15 @@ export class ChatController {
     }
     if (connected && options.recoverTerminals !== false) {
       const reservedTurn = this.currentTurn;
+      const reservedPresentationIncomingMessageId =
+        this.presentationIncomingMessageId;
+      const reservedPresentationReplyToMessageId =
+        this.presentationReplyToMessageId;
       const reservedAwaitingTurnSettle = this.awaitingTurnSettle;
       if (reservedTurn) {
         this.currentTurn = null;
+        this.presentationIncomingMessageId = "";
+        this.presentationReplyToMessageId = "";
         this.awaitingTurnSettle = false;
       }
       try {
@@ -490,6 +499,10 @@ export class ChatController {
       } finally {
         if (reservedTurn) {
           this.currentTurn = reservedTurn;
+          this.presentationIncomingMessageId =
+            reservedPresentationIncomingMessageId;
+          this.presentationReplyToMessageId =
+            reservedPresentationReplyToMessageId;
           this.awaitingTurnSettle = reservedAwaitingTurnSettle;
         }
       }
@@ -503,6 +516,8 @@ export class ChatController {
     void this.clearCompactionWorkingReaction().catch(() => {});
     void this.clearAllWaitingReactions().catch(() => {});
     this.currentTurn = null;
+    this.presentationIncomingMessageId = "";
+    this.presentationReplyToMessageId = "";
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
@@ -541,6 +556,8 @@ export class ChatController {
     await this.clearCompactionWorkingReaction().catch(() => {});
     await this.clearAllWaitingReactions().catch(() => {});
     this.currentTurn = null;
+    this.presentationIncomingMessageId = "";
+    this.presentationReplyToMessageId = "";
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
@@ -565,6 +582,14 @@ export class ChatController {
 
   private currentIncomingMessageId() {
     return safeString(this.currentTurn?.incomingMessageId || "").trim();
+  }
+
+  private currentPresentationIncomingMessageId() {
+    return safeString(
+      this.presentationIncomingMessageId ||
+        this.currentTurn?.incomingMessageId ||
+        "",
+    ).trim();
   }
 
   private pendingIncomingMessageId(_requestTag: string) {
@@ -708,7 +733,9 @@ export class ChatController {
 
   private currentReplyToMessageId() {
     return safeString(
-      this.currentTurn?.replyToMessageId ||
+      this.presentationReplyToMessageId ||
+        this.presentationIncomingMessageId ||
+        this.currentTurn?.replyToMessageId ||
         this.currentTurn?.incomingMessageId ||
         "",
     ).trim();
@@ -858,7 +885,32 @@ export class ChatController {
       outboxTurnFence: input.outboxTurnFence,
       workingNoticeSent: false,
     };
+    const joinedPresentation = input.outboxTurnFence?.turnId
+      ? readLatestJoinedChatPresentation(
+          this.agentDir,
+          input.outboxTurnFence.turnId,
+        )
+      : null;
+    const joinedMessageId =
+      joinedPresentation?.chatKey === this.chatKey
+        ? safeString(joinedPresentation.messageId).trim()
+        : "";
+    this.presentationIncomingMessageId =
+      joinedMessageId || nextIncomingMessageId || "";
+    this.presentationReplyToMessageId =
+      joinedMessageId || nextReplyToMessageId || nextIncomingMessageId || "";
     this.backendAcceptedIncomingMessageId = "";
+  }
+
+  private setJoinedPresentation(input: {
+    incomingMessageId?: string;
+    replyToMessageId?: string;
+  }) {
+    const incomingMessageId = safeString(input.incomingMessageId).trim();
+    if (!incomingMessageId) return;
+    this.presentationIncomingMessageId = incomingMessageId;
+    this.presentationReplyToMessageId =
+      safeString(input.replyToMessageId).trim() || incomingMessageId;
   }
 
   private async prepareTurnPrompt(
@@ -951,6 +1003,8 @@ export class ChatController {
       this.deferredWorkingReactionRequestTags.delete(requestTag);
     }
     this.currentTurn = null;
+    this.presentationIncomingMessageId = "";
+    this.presentationReplyToMessageId = "";
     this.backendAcceptedIncomingMessageId = "";
     this.latestAssistantSummaryText = "";
   }
@@ -1020,7 +1074,7 @@ export class ChatController {
       platform: parsed?.platform || "",
       botId: parsed?.botId || "",
       chatId: parsed?.chatId || "",
-      messageId: this.currentIncomingMessageId() || undefined,
+      messageId: this.currentPresentationIncomingMessageId() || undefined,
       replyToMessageId: this.currentReplyToMessageId() || undefined,
       tick: this.workingIndicatorTick,
       todoNoticeText: this.latestTodoNoticeText || undefined,
@@ -2021,7 +2075,7 @@ export class ChatController {
       if (this.stagedDelivery === pending) this.stagedDelivery = null;
       if (processingTurn && this.currentTurn === processingTurn) {
         await this.clearWorkingReaction().catch(() => {});
-        if (this.currentTurn === processingTurn) this.currentTurn = null;
+        if (this.currentTurn === processingTurn) this.clearCurrentTurn();
       }
       return chatDeliveryOutcome([], { accepted: false });
     }
@@ -2039,7 +2093,7 @@ export class ChatController {
     if (this.stagedDelivery === pending) this.stagedDelivery = null;
     if (processingTurn && this.currentTurn === processingTurn) {
       await this.clearWorkingReaction().catch(() => {});
-      if (this.currentTurn === processingTurn) this.currentTurn = null;
+      if (this.currentTurn === processingTurn) this.clearCurrentTurn();
     }
     return outcome;
   }
@@ -2067,7 +2121,7 @@ export class ChatController {
     }
     if (!this.currentTurn || this.currentTurn === settledTurn) {
       await this.clearWorkingReaction().catch(() => {});
-      if (this.currentTurn === settledTurn) this.currentTurn = null;
+      if (this.currentTurn === settledTurn) this.clearCurrentTurn();
     }
   }
 
@@ -2085,6 +2139,7 @@ export class ChatController {
     terminalTurn?: RinChatDeliveryContext;
     terminalRequestTag?: string;
     terminalRecordId?: string;
+    joinedOwnerTurnId?: string;
   }) {
     const linkSession =
       input.bindSession !== false && this.linkDeliveriesToSession;
@@ -2134,6 +2189,17 @@ export class ChatController {
             : undefined,
           bindSession,
         },
+        ...(safeString(input.joinedOwnerTurnId).trim()
+          ? {
+              markJoinedProcessed: {
+                ownerTurnId: safeString(input.joinedOwnerTurnId).trim(),
+                deliveryKind:
+                  deliveryKind === "error"
+                    ? ("outbox_error" as const)
+                    : ("outbox_final" as const),
+              },
+            }
+          : {}),
       },
       {
         id,
@@ -2717,6 +2783,8 @@ export class ChatController {
     await this.driver.shutdownSession();
     await this.clearAllWaitingReactions().catch(() => {});
     this.currentTurn = null;
+    this.presentationIncomingMessageId = "";
+    this.presentationReplyToMessageId = "";
     this.compactionTurn = null;
     this.compactionWorkingIndicators = [];
     this.activeCommandTurnInput = null;
@@ -3165,6 +3233,32 @@ export class ChatController {
         if (this.currentTurn && !preserveCurrentTurn) {
           this.currentTurn.requestTag = result.requestTag || requestTag;
         }
+        const effectiveOutcome =
+          result.outcome === "rejoined"
+            ? result.originalOutcome
+            : result.outcome;
+        if (preserveCurrentTurn && effectiveOutcome === "nonterminal") {
+          const ownerTurnId = safeString(
+            this.currentTurn?.outboxTurnFence?.turnId,
+          ).trim();
+          if (input.outboxTurnFence && ownerTurnId) {
+            const accepted = markChatMessageAcceptedWithFence(
+              this.agentDir,
+              input.outboxTurnFence,
+              {
+                acceptedAt: new Date().toISOString(),
+                sessionFile:
+                  result.sessionFile || this.driver.currentSessionFile(),
+                joinedTurnId: ownerTurnId,
+              },
+            );
+            if (!accepted) throw new Error("chat_turn_fence_lost");
+          }
+          this.setJoinedPresentation(input);
+          this.backendAcceptedIncomingMessageId = safeString(
+            input.incomingMessageId,
+          ).trim();
+        }
         if (deliverFinal && this.currentTurn && !result.superseded) {
           if (
             this.currentTurn.outboxTurnFence &&
@@ -3195,8 +3289,8 @@ export class ChatController {
         if (isRinFrontendTurnCancelledError(error)) throw error;
         throw error;
       } finally {
-        await this.clearWorkingReactionFor(input.incomingMessageId);
         if (!preserveCurrentTurn) {
+          await this.clearWorkingReactionFor(input.incomingMessageId);
           this.clearCurrentTurnFor(input.incomingMessageId);
         }
         this.awaitingTurnSettle = false;
@@ -3229,31 +3323,38 @@ export class ChatController {
     }
     const settledTurn = this.currentTurn;
     const deliveryTarget = this.currentDeliveryTarget(settledTurn);
+    const replyToMessageId =
+      this.currentReplyToMessageId() || deliveryTarget.replyToMessageId;
+    const joinedOwnerTurnId = safeString(
+      settledTurn.outboxTurnFence?.turnId,
+    ).trim();
     const resultParts = assistantDeliveryParts(event.finalText, event.result);
     if (safeString(event.finalText).trim() || resultParts.length) {
       await this.deliverAssistantReply({
         text: event.finalText,
         parts: resultParts.length ? resultParts : undefined,
         idempotencyKey: event.deliveryIdempotencyKey,
-        replyToMessageId: deliveryTarget.replyToMessageId,
+        replyToMessageId,
         incomingMessageId: deliveryTarget.incomingMessageId,
         outboxTurnFence: deliveryTarget.outboxTurnFence,
         sessionFile: event.sessionFile || this.currentSessionFile(),
         terminalTurn: event.chatDeliveryContext,
         terminalRequestTag: settledTurn?.requestTag,
         terminalRecordId: event.terminalRecord?.terminalId,
+        joinedOwnerTurnId,
         clearProcessing: true,
       });
     } else if (event.chatDeliveryContext) {
       await this.deliverAssistantReply({
         text: "Rin completed this turn without a text response.",
-        replyToMessageId: deliveryTarget.replyToMessageId,
+        replyToMessageId,
         incomingMessageId: deliveryTarget.incomingMessageId,
         outboxTurnFence: deliveryTarget.outboxTurnFence,
         sessionFile: event.sessionFile || this.currentSessionFile(),
         terminalTurn: event.chatDeliveryContext,
         terminalRequestTag: settledTurn?.requestTag,
         terminalRecordId: event.terminalRecord?.terminalId,
+        joinedOwnerTurnId,
         clearProcessing: true,
         deliveryKind: "final",
       });
@@ -3293,13 +3394,15 @@ export class ChatController {
     const deliveryTarget = this.currentDeliveryTarget(settledTurn);
     await this.deliverAssistantReply({
       text: errorMessage,
-      replyToMessageId: deliveryTarget.replyToMessageId,
+      replyToMessageId:
+        this.currentReplyToMessageId() || deliveryTarget.replyToMessageId,
       incomingMessageId: deliveryTarget.incomingMessageId,
       outboxTurnFence: deliveryTarget.outboxTurnFence,
       sessionFile: event.sessionFile || this.currentSessionFile(),
       terminalTurn: event.chatDeliveryContext,
       terminalRequestTag: settledTurn?.requestTag,
       terminalRecordId: event.terminalRecord?.terminalId,
+      joinedOwnerTurnId: safeString(settledTurn.outboxTurnFence?.turnId).trim(),
       clearProcessing: true,
       deliveryKind: "error",
     });

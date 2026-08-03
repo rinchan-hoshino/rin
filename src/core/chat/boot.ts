@@ -12,6 +12,7 @@ import {
 import { createRinI18n } from "../i18n.js";
 import { RIN_NON_INTERACTIVE_COMMAND_NAMES } from "../rin-frontend-sdk/index.js";
 import { markProcessedChatMessage, safeString } from "./chat-helpers.js";
+import { markJoinedChatMessagesProcessed } from "./database.js";
 import {
   getChatOutboxDispatchPromise,
   getChatTransportReadiness,
@@ -435,13 +436,24 @@ function applyPostDelivery(agentDir: string, item: ChatOutboxItem) {
       processedAt: new Date().toISOString(),
     });
   }
+  const joined = item.postDelivery?.markJoinedProcessed;
+  if (joined?.ownerTurnId) {
+    markJoinedChatMessagesProcessed(agentDir, joined.ownerTurnId, {
+      deliveryKind: joined.deliveryKind,
+      outboxId: item.id,
+    });
+  }
   markChatOutboxPostDeliveryApplied(agentDir, item.id);
 }
 
 export function reconcileCommittedChatOutboxProcessing(agentDir: string) {
   let reconciled = 0;
   for (const item of listCommittedChatOutboxItems(agentDir)) {
-    if (!item.postDelivery?.markProcessed) continue;
+    if (
+      !item.postDelivery?.markProcessed &&
+      !item.postDelivery?.markJoinedProcessed
+    )
+      continue;
     applyPostDelivery(agentDir, item);
     reconciled += 1;
   }

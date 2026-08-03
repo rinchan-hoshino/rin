@@ -83,6 +83,10 @@ export type ChatOutboxPostDelivery = {
     sessionFile?: string;
     bindSession?: boolean;
   };
+  markJoinedProcessed?: {
+    ownerTurnId: string;
+    deliveryKind: "outbox_final" | "outbox_error";
+  };
 };
 
 export type ChatOutboxItemStatus =
