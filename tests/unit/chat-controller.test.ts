@@ -4101,6 +4101,54 @@ test("chat controller keeps typing heartbeat frequent while throttling editable 
   ]);
 });
 
+test("chat controller establishes typing before showing editable Working", async () => {
+  const controller = await createController("discord/1:2");
+  const calls: string[] = [];
+  let releaseTyping!: () => void;
+  const typingAccepted = new Promise<void>((resolve) => {
+    releaseTyping = resolve;
+  });
+  controller.app.bots[0].platform = "discord";
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "typing",
+      async tick() {
+        calls.push("typing:start");
+        await typingAccepted;
+        calls.push("typing:accepted");
+        return true;
+      },
+    },
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick() {
+        calls.push("working:visible");
+        return true;
+      },
+    },
+  ];
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-typing-before-working",
+    workingNoticeSent: false,
+  };
+  controller.driver.isWorking = () => true;
+
+  const poll = controller.pollTyping();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["typing:start"]);
+
+  releaseTyping();
+  assert.equal(await poll, true);
+  assert.deepEqual(calls, [
+    "typing:start",
+    "typing:accepted",
+    "working:visible",
+  ]);
+});
+
 test("chat controller clears typing and working reactions after canonical completion", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
@@ -4437,7 +4485,7 @@ test("chat controller logs failed discord typing without changing its cadence", 
   }
 });
 
-test("chat controller starts typing immediately after creating editable progress", async () => {
+test("chat controller establishes typing while creating editable progress", async () => {
   const controller = await createController("discord/bot-1:channel-1");
   let typingTicks = 0;
   let editableTicks = 0;
@@ -4471,12 +4519,12 @@ test("chat controller starts typing immediately after creating editable progress
   await controller.beginVisibleProcessingTurn({
     incomingMessageId: "m-discord-start",
   });
+  assert.equal(typingTicks, 1);
   assert.equal(editableTicks, 1);
-  assert.equal(typingTicks, 0);
 
   controller.driver.frontendState.turnActive = true;
   controller.driver.frontendState.working = true;
-  assert.equal(await controller.pollTyping(), true);
+  assert.equal(await controller.pollTyping(), false);
   assert.equal(typingTicks, 1);
   assert.equal(editableTicks, 1);
 });
