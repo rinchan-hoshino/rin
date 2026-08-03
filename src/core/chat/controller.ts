@@ -2014,13 +2014,14 @@ export class ChatController {
       terminalRecordId?: string;
     } = {},
   ) {
+    const processingTurn = clearProcessing ? this.currentTurn : null;
     const pending = this.stagedDelivery;
     if (!pending) return chatDeliveryOutcome([], { accepted: false });
     if (!this.affectChatBinding && !this.canDeliverReplies()) {
-      this.stagedDelivery = null;
-      if (clearProcessing) {
+      if (this.stagedDelivery === pending) this.stagedDelivery = null;
+      if (processingTurn && this.currentTurn === processingTurn) {
         await this.clearWorkingReaction().catch(() => {});
-        this.currentTurn = null;
+        if (this.currentTurn === processingTurn) this.currentTurn = null;
       }
       return chatDeliveryOutcome([], { accepted: false });
     }
@@ -2035,10 +2036,10 @@ export class ChatController {
       waitUntilDeliverySettled: true,
       ...deliveryOptions,
     });
-    this.stagedDelivery = null;
-    if (clearProcessing) {
+    if (this.stagedDelivery === pending) this.stagedDelivery = null;
+    if (processingTurn && this.currentTurn === processingTurn) {
       await this.clearWorkingReaction().catch(() => {});
-      this.currentTurn = null;
+      if (this.currentTurn === processingTurn) this.currentTurn = null;
     }
     return outcome;
   }
@@ -2048,6 +2049,7 @@ export class ChatController {
     sessionFile?: string;
     outboxTurnFence?: ChatOutboxTurnFence;
   }) {
+    const settledTurn = this.currentTurn;
     const incomingMessageId = safeString(input.incomingMessageId).trim();
     const fence =
       input.outboxTurnFence ||
@@ -2063,8 +2065,10 @@ export class ChatController {
     } else {
       this.markProcessedMessage(incomingMessageId);
     }
-    await this.clearWorkingReaction().catch(() => {});
-    this.currentTurn = null;
+    if (!this.currentTurn || this.currentTurn === settledTurn) {
+      await this.clearWorkingReaction().catch(() => {});
+      if (this.currentTurn === settledTurn) this.currentTurn = null;
+    }
   }
 
   private async deliverAssistantReply(input: {
@@ -3223,7 +3227,8 @@ export class ChatController {
         "complete",
       ) as typeof event;
     }
-    const deliveryTarget = this.currentDeliveryTarget(this.currentTurn);
+    const settledTurn = this.currentTurn;
+    const deliveryTarget = this.currentDeliveryTarget(settledTurn);
     const resultParts = assistantDeliveryParts(event.finalText, event.result);
     if (safeString(event.finalText).trim() || resultParts.length) {
       await this.deliverAssistantReply({
@@ -3235,7 +3240,7 @@ export class ChatController {
         outboxTurnFence: deliveryTarget.outboxTurnFence,
         sessionFile: event.sessionFile || this.currentSessionFile(),
         terminalTurn: event.chatDeliveryContext,
-        terminalRequestTag: this.currentTurn?.requestTag,
+        terminalRequestTag: settledTurn?.requestTag,
         terminalRecordId: event.terminalRecord?.terminalId,
         clearProcessing: true,
       });
@@ -3247,7 +3252,7 @@ export class ChatController {
         outboxTurnFence: deliveryTarget.outboxTurnFence,
         sessionFile: event.sessionFile || this.currentSessionFile(),
         terminalTurn: event.chatDeliveryContext,
-        terminalRequestTag: this.currentTurn?.requestTag,
+        terminalRequestTag: settledTurn?.requestTag,
         terminalRecordId: event.terminalRecord?.terminalId,
         clearProcessing: true,
         deliveryKind: "final",
@@ -3259,10 +3264,12 @@ export class ChatController {
         sessionFile: event.sessionFile || this.currentSessionFile(),
       });
     }
-    this.awaitingTurnSettle = false;
-    this.clearCurrentTurn();
-    this.saveState();
-    await this.flushPendingPassiveNotices(false);
+    if (!this.currentTurn || this.currentTurn === settledTurn) {
+      this.awaitingTurnSettle = false;
+      if (this.currentTurn === settledTurn) this.clearCurrentTurn();
+      this.saveState();
+      await this.flushPendingPassiveNotices(false);
+    }
   }
 
   private async settleProjectedTurnError(event: {
@@ -3282,7 +3289,8 @@ export class ChatController {
     }
     const errorMessage = safeString(event.error).trim() || "rpc_turn_failed";
     if (errorMessage === "chat_turn_aborted") return;
-    const deliveryTarget = this.currentDeliveryTarget(this.currentTurn);
+    const settledTurn = this.currentTurn;
+    const deliveryTarget = this.currentDeliveryTarget(settledTurn);
     await this.deliverAssistantReply({
       text: errorMessage,
       replyToMessageId: deliveryTarget.replyToMessageId,
@@ -3290,15 +3298,17 @@ export class ChatController {
       outboxTurnFence: deliveryTarget.outboxTurnFence,
       sessionFile: event.sessionFile || this.currentSessionFile(),
       terminalTurn: event.chatDeliveryContext,
-      terminalRequestTag: this.currentTurn?.requestTag,
+      terminalRequestTag: settledTurn?.requestTag,
       terminalRecordId: event.terminalRecord?.terminalId,
       clearProcessing: true,
       deliveryKind: "error",
     });
-    this.awaitingTurnSettle = false;
-    this.clearCurrentTurn();
-    this.saveState();
-    await this.flushPendingPassiveNotices(false);
+    if (!this.currentTurn || this.currentTurn === settledTurn) {
+      this.awaitingTurnSettle = false;
+      if (this.currentTurn === settledTurn) this.clearCurrentTurn();
+      this.saveState();
+      await this.flushPendingPassiveNotices(false);
+    }
   }
 
   async housekeep() {

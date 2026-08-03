@@ -6677,6 +6677,162 @@ test("chat controller does not persist transient processing state to chat state.
   assert.equal(deliveryText(controller.stagedDelivery), "hello");
 });
 
+test(
+  "a settling terminal cannot clear or unquote a newer turn",
+  { timeout: 5_000 },
+  async () => {
+    const controller = await createController("telegram/1:2");
+    for (const messageId of ["m-old-terminal", "m-new-turn"]) {
+      saveChatMessage(controller.agentDir, {
+        chatKey: controller.chatKey,
+        platform: "telegram",
+        botId: "1",
+        chatId: "2",
+        messageId,
+        role: "user",
+        receivedAt: new Date().toISOString(),
+        text: messageId,
+      });
+    }
+    const deliveries: any[] = [];
+    let announceOldTerminalStarted!: () => void;
+    const oldTerminalStarted = new Promise<void>((resolve) => {
+      announceOldTerminalStarted = resolve;
+    });
+    let releaseOldTerminal!: () => void;
+    const oldTerminalMayFinish = new Promise<void>((resolve) => {
+      releaseOldTerminal = resolve;
+    });
+    controller.app.bots[0].sendMessage = async (
+      chatId: string,
+      content: any,
+      options: any,
+    ) => {
+      deliveries.push({ chatId, content, options });
+      if (deliveries.length === 1) {
+        announceOldTerminalStarted();
+        await oldTerminalMayFinish;
+      }
+      return [`sent-${deliveries.length}`];
+    };
+    controller.currentTurn = {
+      startedAt: Date.now(),
+      incomingMessageId: "m-old-terminal",
+      replyToMessageId: "m-old-terminal",
+      requestTag: "request-old-terminal",
+      workingNoticeSent: false,
+    };
+    controller.awaitingTurnSettle = true;
+
+    const settling = controller.settleProjectedTurnComplete({
+      finalText: "old final",
+      sessionFile: "/tmp/terminal-race.jsonl",
+    });
+    await oldTerminalStarted;
+    const newerTurn = {
+      startedAt: Date.now(),
+      incomingMessageId: "m-new-turn",
+      replyToMessageId: "m-new-turn",
+      requestTag: "request-new-turn",
+      workingNoticeSent: false,
+    };
+    controller.currentTurn = newerTurn;
+    controller.awaitingTurnSettle = true;
+    await controller.deliverAssistantInterim("new progress");
+    assert.equal(deliveries[1].content[0].type, "quote");
+    assert.equal(deliveries[1].content[0].attrs.id, "m-new-turn");
+
+    releaseOldTerminal();
+    await settling;
+    assert.equal(controller.currentTurn, newerTurn);
+    assert.equal(controller.awaitingTurnSettle, true);
+  },
+);
+
+test(
+  "old indicator cleanup cannot consume a newer turn or its Working owner",
+  { timeout: 5_000 },
+  async () => {
+    const controller = await createController("telegram/1:2");
+    const deliveries: any[] = [];
+    controller.app.bots[0].sendMessage = async (
+      chatId: string,
+      content: any,
+      options: any,
+    ) => {
+      deliveries.push({ chatId, content, options });
+      return [`sent-${deliveries.length}`];
+    };
+    let announceOldIndicatorEnd!: () => void;
+    const oldIndicatorEndStarted = new Promise<void>((resolve) => {
+      announceOldIndicatorEnd = resolve;
+    });
+    let releaseOldIndicatorEnd!: () => void;
+    const oldIndicatorMayEnd = new Promise<void>((resolve) => {
+      releaseOldIndicatorEnd = resolve;
+    });
+    const oldIndicator = {
+      type: "polling",
+      presentation: "editable-message",
+      async end() {
+        announceOldIndicatorEnd();
+        await oldIndicatorMayEnd;
+        return true;
+      },
+    };
+    let newIndicatorEnds = 0;
+    const newIndicator = {
+      type: "polling",
+      presentation: "editable-message",
+      async end() {
+        newIndicatorEnds += 1;
+        return true;
+      },
+    };
+    const oldTurn = {
+      startedAt: Date.now(),
+      incomingMessageId: "m-old-indicator",
+      replyToMessageId: "m-old-indicator",
+      requestTag: "request-old-indicator",
+      workingNoticeSent: false,
+    };
+    const newerTurn = {
+      startedAt: Date.now(),
+      incomingMessageId: "m-new-indicator",
+      replyToMessageId: "m-new-indicator",
+      requestTag: "request-new-indicator",
+      workingNoticeSent: false,
+    };
+    controller.currentTurn = oldTurn;
+    controller.awaitingTurnSettle = true;
+    controller.activeWorkingIndicators = [oldIndicator];
+
+    const settlingOld = controller.settleProjectedTurnComplete({
+      finalText: "old final",
+      sessionFile: "/tmp/indicator-race.jsonl",
+    });
+    await oldIndicatorEndStarted;
+    controller.currentTurn = newerTurn;
+    controller.awaitingTurnSettle = true;
+    controller.activeWorkingIndicators = [newIndicator];
+    releaseOldIndicatorEnd();
+    await settlingOld;
+
+    assert.equal(controller.currentTurn, newerTurn);
+    assert.equal(controller.awaitingTurnSettle, true);
+    assert.deepEqual(controller.activeWorkingIndicators, [newIndicator]);
+    assert.equal(newIndicatorEnds, 0);
+
+    await controller.settleProjectedTurnComplete({
+      finalText: "new final",
+      sessionFile: "/tmp/indicator-race.jsonl",
+    });
+    assert.equal(controller.currentTurn, null);
+    assert.deepEqual(controller.activeWorkingIndicators, []);
+    assert.equal(newIndicatorEnds, 1);
+  },
+);
+
 test("chat controller does not resend an already delivered final after restart recovery", async () => {
   const controller = await createController("telegram/1:2");
   let sendCount = 0;
