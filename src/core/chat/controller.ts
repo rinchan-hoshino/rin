@@ -1053,6 +1053,16 @@ export class ChatController {
     );
   }
 
+  ownsAuthoritativeTerminalProjection(terminal: Record<string, unknown>) {
+    const terminalRequestTag = safeString(terminal?.requestTag).trim();
+    const activeRequestTag = safeString(this.currentTurn?.requestTag).trim();
+    return Boolean(
+      terminalRequestTag &&
+      activeRequestTag &&
+      terminalRequestTag === activeRequestTag,
+    );
+  }
+
   ownsInboundMessage(messageId?: string) {
     return (
       this.claimsInboundMessage(messageId) ||
@@ -1359,6 +1369,27 @@ export class ChatController {
         ? this.pollWorkingIndicators(visibleIndicators, context, now)
         : Promise.resolve([]),
     ]);
+    const editableWorkingPublished = visibleResults.some(
+      (result, index) =>
+        Boolean(result) &&
+        workingIndicatorPresentation(visibleIndicators[index]) ===
+          "editable-message",
+    );
+    if (
+      editableWorkingPublished &&
+      typingIndicators.length &&
+      (!typingDue || typingResults.some(Boolean))
+    ) {
+      const reassertedAt = Date.now();
+      this.lastCompactionTypingIndicatorAt = reassertedAt;
+      typingResults.push(
+        ...(await this.pollWorkingIndicators(
+          typingIndicators,
+          context,
+          reassertedAt,
+        )),
+      );
+    }
     if (visibleDue) this.compactionIndicatorTick += 1;
     return [...typingResults, ...visibleResults].some(Boolean);
   }
@@ -1386,12 +1417,17 @@ export class ChatController {
     const now = Date.now();
     if (typingIndicators.length) this.lastTypingIndicatorAt = now;
     this.lastWorkingIndicatorAt = now;
-    const [, result] = await Promise.all([
+    const [typingResults, result] = await Promise.all([
       typingIndicators.length
         ? this.pollWorkingIndicators(typingIndicators, context, now)
         : Promise.resolve([]),
       this.callWorkingIndicator(editable, "tick", context),
     ]);
+    if (result && typingIndicators.length && typingResults.some(Boolean)) {
+      const reassertedAt = Date.now();
+      this.lastTypingIndicatorAt = reassertedAt;
+      await this.pollWorkingIndicators(typingIndicators, context, reassertedAt);
+    }
     this.workingIndicatorTick += 1;
     return Boolean(result);
   }
@@ -1584,6 +1620,27 @@ export class ChatController {
         ? this.pollWorkingIndicators(visibleIndicators, context, now)
         : Promise.resolve([]),
     ]);
+    const editableWorkingPublished = visibleResults.some(
+      (result, index) =>
+        Boolean(result) &&
+        workingIndicatorPresentation(visibleIndicators[index]) ===
+          "editable-message",
+    );
+    if (
+      editableWorkingPublished &&
+      typingIndicators.length &&
+      (!typingDue || typingResults.some(Boolean))
+    ) {
+      const reassertedAt = Date.now();
+      this.lastTypingIndicatorAt = reassertedAt;
+      typingResults.push(
+        ...(await this.pollWorkingIndicators(
+          typingIndicators,
+          context,
+          reassertedAt,
+        )),
+      );
+    }
     if (visibleDue) this.workingIndicatorTick += 1;
     return [...typingResults, ...visibleResults].some(Boolean);
   }

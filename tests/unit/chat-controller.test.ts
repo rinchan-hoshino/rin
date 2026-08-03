@@ -4239,6 +4239,7 @@ test("chat controller keeps typing heartbeat frequent while throttling editable 
   assert.deepEqual(calls, [
     ["typing", 0],
     ["edit", 0],
+    ["typing", 0],
   ]);
 
   controller.lastTypingIndicatorAt -= 9_000;
@@ -4247,6 +4248,7 @@ test("chat controller keeps typing heartbeat frequent while throttling editable 
   assert.deepEqual(calls, [
     ["typing", 0],
     ["edit", 0],
+    ["typing", 0],
     ["typing", 1],
   ]);
 
@@ -4256,9 +4258,11 @@ test("chat controller keeps typing heartbeat frequent while throttling editable 
   assert.deepEqual(calls, [
     ["typing", 0],
     ["edit", 0],
+    ["typing", 0],
     ["typing", 1],
     ["typing", 1],
     ["edit", 1],
+    ["typing", 1],
   ]);
 });
 
@@ -4306,6 +4310,8 @@ test("chat controller starts typing and editable Working concurrently", async ()
   assert.deepEqual(calls, [
     "typing:start",
     "working:visible",
+    "typing:accepted",
+    "typing:start",
     "typing:accepted",
   ]);
 });
@@ -4573,6 +4579,29 @@ test("chat controller uses discord typing and reaction capabilities together", a
   ]);
 });
 
+test("chat controller routes an exact active terminal through its live presentation owner", async () => {
+  const controller = await createController(
+    "discord/guild:terminal-live-owner",
+  );
+  (controller as any).currentTurn = {
+    requestTag: "chat-inbox-live-terminal",
+  };
+
+  assert.equal(
+    controller.ownsAuthoritativeTerminalProjection({
+      requestTag: "chat-inbox-live-terminal",
+    }),
+    true,
+  );
+  assert.equal(
+    controller.ownsAuthoritativeTerminalProjection({
+      requestTag: "chat-inbox-another-terminal",
+    }),
+    false,
+  );
+  assert.equal(controller.ownsAuthoritativeTerminalProjection({}), false);
+});
+
 test("chat controller logs failed discord typing without changing its cadence", async () => {
   const warnings = [];
   const controller = await createController("discord/bot-1:channel-1", {
@@ -4690,11 +4719,12 @@ test("chat controller establishes typing while creating editable progress", asyn
   assert.equal(editableTicks, 1);
   releaseTyping();
   await presentation;
+  assert.equal(typingTicks, 2);
 
   controller.driver.frontendState.turnActive = true;
   controller.driver.frontendState.working = true;
   assert.equal(await controller.pollTyping(), false);
-  assert.equal(typingTicks, 1);
+  assert.equal(typingTicks, 2);
   assert.equal(editableTicks, 1);
 });
 

@@ -672,6 +672,15 @@ export async function startChatBridge(
           terminalProjectionInFlight.add(terminalId);
           scheduled += 1;
           void (async () => {
+            const activeController = controllers.get(chatKey);
+            if (
+              activeController?.ownsAuthoritativeTerminalProjection(terminal)
+            ) {
+              await activeController.driver.projectAuthoritativeTerminal(
+                terminal,
+              );
+              return;
+            }
             const controllerKey = `terminal-reconcile:${terminalId}`;
             const controller = getDetachedController(controllerKey, {
               chatKey,
