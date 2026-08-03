@@ -4101,7 +4101,7 @@ test("chat controller keeps typing heartbeat frequent while throttling editable 
   ]);
 });
 
-test("chat controller establishes typing before showing editable Working", async () => {
+test("chat controller starts typing and editable Working concurrently", async () => {
   const controller = await createController("discord/1:2");
   const calls: string[] = [];
   let releaseTyping!: () => void;
@@ -4138,14 +4138,14 @@ test("chat controller establishes typing before showing editable Working", async
 
   const poll = controller.pollTyping();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(calls, ["typing:start"]);
+  assert.deepEqual(calls, ["typing:start", "working:visible"]);
 
   releaseTyping();
   assert.equal(await poll, true);
   assert.deepEqual(calls, [
     "typing:start",
-    "typing:accepted",
     "working:visible",
+    "typing:accepted",
   ]);
 });
 
@@ -4489,6 +4489,10 @@ test("chat controller establishes typing while creating editable progress", asyn
   const controller = await createController("discord/bot-1:channel-1");
   let typingTicks = 0;
   let editableTicks = 0;
+  let releaseTyping!: () => void;
+  const typingMayFinish = new Promise<void>((resolve) => {
+    releaseTyping = resolve;
+  });
   controller.app = {
     bots: [
       {
@@ -4508,6 +4512,7 @@ test("chat controller establishes typing while creating editable progress", asyn
             presentation: "typing",
             async tick() {
               typingTicks += 1;
+              await typingMayFinish;
               return true;
             },
           },
@@ -4516,11 +4521,14 @@ test("chat controller establishes typing while creating editable progress", asyn
     ],
   };
 
-  await controller.beginVisibleProcessingTurn({
+  const presentation = controller.beginVisibleProcessingTurn({
     incomingMessageId: "m-discord-start",
   });
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(typingTicks, 1);
   assert.equal(editableTicks, 1);
+  releaseTyping();
+  await presentation;
 
   controller.driver.frontendState.turnActive = true;
   controller.driver.frontendState.working = true;

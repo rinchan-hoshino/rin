@@ -1297,12 +1297,14 @@ export class ChatController {
     }
     if (typingDue) this.lastCompactionTypingIndicatorAt = now;
     if (visibleDue) this.lastCompactionIndicatorAt = now;
-    const typingResults = typingDue
-      ? await this.pollWorkingIndicators(typingIndicators, context, now)
-      : [];
-    const visibleResults = visibleDue
-      ? await this.pollWorkingIndicators(visibleIndicators, context, now)
-      : [];
+    const [typingResults, visibleResults] = await Promise.all([
+      typingDue
+        ? this.pollWorkingIndicators(typingIndicators, context, now)
+        : Promise.resolve([]),
+      visibleDue
+        ? this.pollWorkingIndicators(visibleIndicators, context, now)
+        : Promise.resolve([]),
+    ]);
     if (visibleDue) this.compactionIndicatorTick += 1;
     return [...typingResults, ...visibleResults].some(Boolean);
   }
@@ -1327,13 +1329,15 @@ export class ChatController {
       indicators,
       "polling",
     );
-    if (typingIndicators.length) {
-      const now = Date.now();
-      this.lastTypingIndicatorAt = now;
-      await this.pollWorkingIndicators(typingIndicators, context, now);
-    }
-    const result = await this.callWorkingIndicator(editable, "tick", context);
-    this.lastWorkingIndicatorAt = Date.now();
+    const now = Date.now();
+    if (typingIndicators.length) this.lastTypingIndicatorAt = now;
+    this.lastWorkingIndicatorAt = now;
+    const [, result] = await Promise.all([
+      typingIndicators.length
+        ? this.pollWorkingIndicators(typingIndicators, context, now)
+        : Promise.resolve([]),
+      this.callWorkingIndicator(editable, "tick", context),
+    ]);
     this.workingIndicatorTick += 1;
     return Boolean(result);
   }
@@ -1354,8 +1358,8 @@ export class ChatController {
       return;
     }
     if (editableStarted) {
-      // Typing was established before the editable Working notice; subsequent
-      // heartbeats and message refreshes use the normal chat polling path.
+      // Typing and editable Working started in the same presentation phase;
+      // subsequent heartbeats and refreshes use the normal polling path.
       return;
     }
     const marker = this.startWorkingMarker(indicators).catch(() => false);
@@ -1518,12 +1522,14 @@ export class ChatController {
     }
     if (typingDue) this.lastTypingIndicatorAt = now;
     if (visibleDue) this.lastWorkingIndicatorAt = now;
-    const typingResults = typingDue
-      ? await this.pollWorkingIndicators(typingIndicators, context, now)
-      : [];
-    const visibleResults = visibleDue
-      ? await this.pollWorkingIndicators(visibleIndicators, context, now)
-      : [];
+    const [typingResults, visibleResults] = await Promise.all([
+      typingDue
+        ? this.pollWorkingIndicators(typingIndicators, context, now)
+        : Promise.resolve([]),
+      visibleDue
+        ? this.pollWorkingIndicators(visibleIndicators, context, now)
+        : Promise.resolve([]),
+    ]);
     if (visibleDue) this.workingIndicatorTick += 1;
     return [...typingResults, ...visibleResults].some(Boolean);
   }
