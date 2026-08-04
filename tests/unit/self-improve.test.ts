@@ -46,6 +46,11 @@ const selfImproveIndex = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "self-improve", "index.js"))
     .href
 );
+const providerContext = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-lib", "provider-context.js"),
+  ).href
+);
 const maintainer = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "self-improve", "maintainer.js"),
@@ -70,42 +75,31 @@ function queuePath(root) {
   return selfImprovePaths.maintenanceQueuePath(root);
 }
 
-function assistantFinal(text = "done") {
-  return { role: "assistant", content: [{ type: "text", text }] };
-}
-
-function assistantToolMessage(text = "I will check") {
-  return {
-    role: "assistant",
-    content: [
-      { type: "text", text },
-      { type: "toolCall", name: "bash" },
-    ],
-  };
-}
-
 function userFrontend() {
   return { kind: "chat", key: "telegram/1:2" };
 }
 
-async function writeSessionWithAssistantFinals(sessionFile, count) {
-  const entries = [];
-  let parentId = null;
-  for (let i = 0; i < count; i += 1) {
-    const id = `assistant-${i + 1}`;
-    entries.push({
-      type: "message",
-      id,
-      parentId,
-      message: assistantFinal(`done ${i + 1}`),
-    });
-    parentId = id;
-  }
-  await fs.writeFile(
-    sessionFile,
-    `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
-    "utf8",
-  );
+function contextThatPrunes(oldOutput = "old output") {
+  return [
+    { role: "user", content: "turn 1" },
+    { role: "toolResult", content: oldOutput },
+    { role: "assistant", content: "done 1" },
+    { role: "user", content: "turn 2" },
+    { role: "toolResult", content: "recent output 2" },
+    { role: "assistant", content: "done 2" },
+    { role: "user", content: "turn 3" },
+    { role: "toolResult", content: "recent output 3" },
+    { role: "assistant", content: "done 3" },
+    { role: "user", content: "turn 4" },
+    { role: "toolResult", content: "recent output 4" },
+    { role: "assistant", content: "done 4" },
+    { role: "user", content: "turn 5" },
+    { role: "toolResult", content: "recent output 5" },
+    { role: "assistant", content: "tail padding 1" },
+    { role: "assistant", content: "tail padding 2" },
+    { role: "assistant", content: "tail padding 3" },
+    { role: "assistant", content: "tail padding 4" },
+  ];
 }
 
 function historyPath(root) {
@@ -331,514 +325,248 @@ test("processing normalizes revised full-slot content and enforces limits", asyn
   );
 });
 
-test("automatic self-improve handlers persist periodic reviews for the daemon", async () => {
+test("self-improve observes a pending context prune before running review", async () => {
   await withTempRoot(async (root) => {
     const calls = [];
-    const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
+    const sessionFile = path.join(root, "session.jsonl");
+    await fs.writeFile(sessionFile, "", "utf8");
+    const mod = selfImproveIndex.default({
       async runSelfImproveMaintenanceJobNow(job) {
         calls.push(job);
         return { status: "completed" };
       },
     });
-    const messageEnd = definition.hooks.message_end[0];
-    const managedSessionFile = path.join(
-      root,
-      "sessions",
-      "managed",
-      "task",
-      "cron_demo.jsonl",
+    const hook = mod.hooks.context?.[0];
+    assert.equal(typeof hook, "function");
+
+    await hook(
+      { type: "context", messages: contextThatPrunes() },
+      {
+        agentDir: root,
+        cwd: root,
+        sessionId: "session-prune",
+        sessionFile,
+        frontend: userFrontend(),
+        promptContext: { source: "chat-bridge", selfImproveEligible: true },
+        sessionManager: {
+          getSessionFile: () => sessionFile,
+          isPersisted: () => true,
+        },
+      },
     );
-    await fs.mkdir(path.dirname(managedSessionFile), { recursive: true });
-    await fs.writeFile(managedSessionFile, "", "utf8");
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].trigger, "self_improve:context_prune_review");
+  });
+});
+
+test("self-improve no longer exposes a turn-count review hook", () => {
+  const definition = selfImproveIndex.default({
+    sendMessage() {},
+    getThinkingLevel() {
+      return "medium";
+    },
+  });
+
+  assert.equal(definition.hooks.message_end, undefined);
+  assert.equal(typeof definition.hooks.context?.[0], "function");
+});
+
+test("self-improve does not run when provider context needs no pruning", async () => {
+  await withTempRoot(async (root) => {
+    const calls = [];
+    const sessionFile = path.join(root, "session.jsonl");
+    await fs.writeFile(sessionFile, "", "utf8");
+    const definition = selfImproveIndex.default({
+      async runSelfImproveMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
+      },
+    });
+    const context = definition.hooks.context[0];
+
+    await context(
+      {
+        type: "context",
+        messages: [
+          { role: "user", content: "turn 1" },
+          { role: "toolResult", content: "still recent" },
+        ],
+      },
+      {
+        agentDir: root,
+        cwd: root,
+        frontend: userFrontend(),
+        promptContext: { source: "chat-bridge", selfImproveEligible: true },
+        sessionManager: {
+          getSessionId: () => "no-prune-session",
+          getSessionFile: () => sessionFile,
+          isPersisted: () => true,
+        },
+      },
+    );
+
+    assert.equal(calls.length, 0);
+  });
+});
+
+test("self-improve deduplicates one pruning boundary and runs again for a new boundary", async () => {
+  await withTempRoot(async (root) => {
+    const calls = [];
+    const sessionFile = path.join(root, "session.jsonl");
+    await fs.writeFile(sessionFile, "", "utf8");
+    const definition = selfImproveIndex.default({
+      async runSelfImproveMaintenanceJobNow(job) {
+        calls.push(job);
+        return { status: "completed" };
+      },
+    });
+    const context = definition.hooks.context[0];
     const ctx = {
       agentDir: root,
+      cwd: root,
       frontend: userFrontend(),
       promptContext: { source: "chat-bridge", selfImproveEligible: true },
       sessionManager: {
-        getSessionId: () => "managed-task-session-test",
-        getSessionFile: () => managedSessionFile,
-        getLeafId: () => "leaf-managed-task",
+        getSessionId: () => "dedupe-prune-session",
+        getSessionFile: () => sessionFile,
         isPersisted: () => true,
       },
     };
 
-    for (let i = 0; i < 5; i += 1) {
-      await messageEnd({ message: { role: "user" } }, ctx);
-      await messageEnd({ message: assistantFinal() }, ctx);
-    }
+    await context(
+      { type: "context", messages: contextThatPrunes("first") },
+      ctx,
+    );
+    await context(
+      { type: "context", messages: contextThatPrunes("first") },
+      ctx,
+    );
+    await context(
+      { type: "context", messages: contextThatPrunes("changed") },
+      ctx,
+    );
 
-    assert.equal(calls.length, 0);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].sessionFile, managedSessionFile);
-    assert.equal(queue[0].snapshotKey, "review:5");
-    assert.equal(queue[0].trigger, "self_improve:periodic_review");
+    assert.equal(calls.length, 2);
+    assert.notEqual(calls[0].snapshotKey, calls[1].snapshotKey);
   });
 });
 
-test("automatic self-improve review interval is configurable", async () => {
+test("failed pre-prune self-improve does not block the unchanged pruning result", async () => {
   await withTempRoot(async (root) => {
-    await fs.writeFile(
-      path.join(root, "settings.json"),
-      JSON.stringify({ selfImprove: { reviewEveryTurns: 3 } }),
-      "utf8",
-    );
-    const calls = [];
+    const sessionFile = path.join(root, "session.jsonl");
+    await fs.writeFile(sessionFile, "", "utf8");
     const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
+      async runSelfImproveMaintenanceJobNow() {
+        throw new Error("distillation failed");
       },
+    });
+    const context = definition.hooks.context[0];
+    const messages = contextThatPrunes();
+
+    await assert.doesNotReject(() =>
+      context(
+        { type: "context", messages },
+        {
+          agentDir: root,
+          cwd: root,
+          frontend: userFrontend(),
+          promptContext: { source: "chat-bridge", selfImproveEligible: true },
+          sessionManager: {
+            getSessionId: () => "failed-prune-session",
+            getSessionFile: () => sessionFile,
+            isPersisted: () => true,
+          },
+        },
+      ),
+    );
+
+    const pruned = providerContext.buildProviderBoundContextMessages(messages);
+    assert.equal(pruned[1].content, "old tool result omitted");
+  });
+});
+
+test("failed pre-prune detection does not reach maintenance or block provider pruning", async () => {
+  await withTempRoot(async (root) => {
+    let maintenanceCalls = 0;
+    const sessionFile = path.join(root, "session.jsonl");
+    await fs.writeFile(sessionFile, "", "utf8");
+    const definition = selfImproveIndex.default({
+      buildProviderBoundContextEvent() {
+        throw new Error("prune detection failed");
+      },
+      async runSelfImproveMaintenanceJobNow() {
+        maintenanceCalls += 1;
+        return { status: "completed" };
+      },
+    });
+    const context = definition.hooks.context[0];
+    const messages = contextThatPrunes();
+
+    await assert.doesNotReject(() =>
+      context(
+        { type: "context", messages },
+        {
+          agentDir: root,
+          cwd: root,
+          frontend: userFrontend(),
+          promptContext: { source: "chat-bridge", selfImproveEligible: true },
+          sessionManager: {
+            getSessionId: () => "failed-detection-session",
+            getSessionFile: () => sessionFile,
+            isPersisted: () => true,
+          },
+        },
+      ),
+    );
+
+    assert.equal(maintenanceCalls, 0);
+    const pruned = providerContext.buildProviderBoundContextMessages(messages);
+    assert.equal(pruned[1].content, "old tool result omitted");
+  });
+});
+
+test("pre-prune self-improve keeps the existing explicit producer eligibility boundary", async () => {
+  await withTempRoot(async (root) => {
+    const calls = [];
+    const sessionFile = path.join(root, "session.jsonl");
+    await fs.writeFile(sessionFile, "", "utf8");
+    const definition = selfImproveIndex.default({
       async runSelfImproveMaintenanceJobNow(job) {
         calls.push(job);
         return { status: "completed" };
       },
     });
-    const messageEnd = definition.hooks.message_end[0];
-    const sessionFile = path.join(root, "sessions", "configurable.jsonl");
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "", "utf8");
-    const ctx = {
+    const context = definition.hooks.context[0];
+    const base = {
       agentDir: root,
+      cwd: root,
       frontend: userFrontend(),
-      promptContext: { source: "chat-bridge", selfImproveEligible: true },
       sessionManager: {
-        getSessionId: () => "configurable-review-session-test",
+        getSessionId: () => "eligibility-prune-session",
         getSessionFile: () => sessionFile,
-        getLeafId: () => "leaf-configurable",
         isPersisted: () => true,
       },
     };
 
-    for (let i = 0; i < 3; i += 1) {
-      await messageEnd({ message: { role: "user" } }, ctx);
-      await messageEnd({ message: assistantFinal() }, ctx);
-    }
-
-    assert.equal(calls.length, 0);
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].snapshotKey, "review:3");
-  });
-});
-
-test("automatic self-improve review counts agent final messages, not user turns", async () => {
-  await withTempRoot(async (root) => {
-    const calls = [];
-    const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
+    await context(
+      { type: "context", messages: contextThatPrunes("ineligible") },
+      {
+        ...base,
+        promptContext: { source: "scheduled-task" },
       },
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    const messageEnd = definition.hooks.message_end[0];
-    const sessionFile = path.join(
-      root,
-      "sessions",
-      "final-message-count.jsonl",
     );
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "", "utf8");
-    const ctx = {
-      agentDir: root,
-      frontend: userFrontend(),
-      promptContext: { source: "chat-bridge", selfImproveEligible: true },
-      sessionManager: {
-        getSessionId: () => "final-message-count-session-test",
-        getSessionFile: () => sessionFile,
-        getLeafId: () => "leaf-final-message-count",
-        isPersisted: () => true,
-      },
-    };
-
-    for (let i = 0; i < 5; i += 1) {
-      await messageEnd({ message: { role: "user" } }, ctx);
-    }
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
-
-    for (let i = 0; i < 5; i += 1) {
-      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
-    }
-
-    assert.equal(calls.length, 0);
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].snapshotKey, "review:5");
-  });
-});
-
-test("automatic self-improve review reuses chat final-message detection for tool-call messages", async () => {
-  await withTempRoot(async (root) => {
-    const calls = [];
-    const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    const messageEnd = definition.hooks.message_end[0];
-    const sessionFile = path.join(
-      root,
-      "sessions",
-      "tool-message-ignored.jsonl",
-    );
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "", "utf8");
-    const ctx = {
-      agentDir: root,
-      frontend: userFrontend(),
-      promptContext: { source: "chat-bridge", selfImproveEligible: true },
-      sessionManager: {
-        getSessionId: () => "tool-message-ignored-review-session-test",
-        getSessionFile: () => sessionFile,
-        getLeafId: () => "leaf-tool-message-ignored",
-        isPersisted: () => true,
-      },
-    };
-
-    for (let i = 0; i < 12; i += 1) {
-      await messageEnd(
-        { message: assistantToolMessage(`checking ${i + 1}`) },
-        ctx,
-      );
-    }
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
-
-    for (let i = 0; i < 5; i += 1) {
-      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
-    }
-
-    assert.equal(calls.length, 0);
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].snapshotKey, "review:5");
-  });
-});
-
-test("automatic self-improve review records its watermark before queue persistence", async () => {
-  await withTempRoot(async (root) => {
-    const definition = selfImproveIndex.default({});
-    const messageEnd = definition.hooks.message_end[0];
-    const sessionFile = path.join(
-      root,
-      "sessions",
-      "watermark-before-await.jsonl",
-    );
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await writeSessionWithAssistantFinals(sessionFile, 5);
-    const ctx = (leafId) => ({
-      agentDir: root,
-      frontend: userFrontend(),
-      promptContext: { source: "chat-bridge", selfImproveEligible: true },
-      sessionManager: {
-        getSessionId: () => "watermark-before-await-session-test",
-        getSessionFile: () => sessionFile,
-        getLeafId: () => leafId,
-        isPersisted: () => true,
-      },
-    });
-
-    const first = messageEnd(
-      { message: assistantFinal("done 5") },
-      ctx("assistant-5"),
-    );
-    await writeSessionWithAssistantFinals(sessionFile, 6);
-    await messageEnd({ message: assistantFinal("done 6") }, ctx("assistant-6"));
-    await first;
-
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].snapshotKey, "review:5");
-  });
-});
-
-test("automatic self-improve review resumes from persisted session count after restart", async () => {
-  await withTempRoot(async (root) => {
-    const sessionFile = path.join(root, "sessions", "persisted-count.jsonl");
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await writeSessionWithAssistantFinals(sessionFile, 6);
-
-    const createContext = (sessionId, leafId) => ({
-      agentDir: root,
-      frontend: userFrontend(),
-      promptContext: { source: "chat-bridge", selfImproveEligible: true },
-      sessionManager: {
-        getSessionId: () => sessionId,
-        getSessionFile: () => sessionFile,
-        getLeafId: () => leafId,
-        isPersisted: () => true,
-      },
-    });
-
-    const calls = [];
-    const firstDefinition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    await firstDefinition.hooks.message_end[0](
-      { message: assistantFinal("done 6") },
-      createContext("persisted-count-session-test", "assistant-6"),
-    );
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
-
-    await writeSessionWithAssistantFinals(sessionFile, 10);
-    const restartedDefinition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    await restartedDefinition.hooks.message_end[0](
-      { message: assistantFinal("done 10") },
-      createContext("persisted-count-session-test-restarted", "assistant-10"),
-    );
-
-    assert.equal(calls.length, 0);
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].snapshotKey, "review:10");
-  });
-});
-
-test("automatic self-improve review ignores the never-shipped nested interval path", async () => {
-  await withTempRoot(async (root) => {
-    await fs.writeFile(
-      path.join(root, "settings.json"),
-      JSON.stringify({ selfImprove: { review: { everyTurns: 3 } } }),
-      "utf8",
-    );
-    const calls = [];
-    const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    const messageEnd = definition.hooks.message_end[0];
-    const sessionFile = path.join(root, "sessions", "nested-ignored.jsonl");
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "", "utf8");
-    const ctx = {
-      agentDir: root,
-      frontend: userFrontend(),
-      promptContext: { source: "chat-bridge", selfImproveEligible: true },
-      sessionManager: {
-        getSessionId: () => "nested-ignored-review-session-test",
-        getSessionFile: () => sessionFile,
-        getLeafId: () => "leaf-nested-ignored",
-        isPersisted: () => true,
-      },
-    };
-
-    for (let i = 0; i < 3; i += 1) {
-      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
-    }
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
-
-    for (let i = 0; i < 2; i += 1) {
-      await messageEnd({ message: assistantFinal(`done ${i + 4}`) }, ctx);
-    }
-
-    assert.equal(calls.length, 0);
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].snapshotKey, "review:5");
-  });
-});
-
-test("automatic self-improve requires explicit eligible producer", async () => {
-  await withTempRoot(async (root) => {
-    const calls = [];
-    const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    const messageEnd = definition.hooks.message_end[0];
-    const shutdown = definition.hooks.session_shutdown[0];
-    const sessionFile = path.join(root, "sessions", "background-child.jsonl");
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "", "utf8");
-    const ctx = {
-      agentDir: root,
-      sessionManager: {
-        getSessionId: () => "background-child-session-test",
-        getSessionFile: () => sessionFile,
-        getLeafId: () => "leaf-background-child",
-        isPersisted: () => true,
-      },
-    };
-
-    for (let i = 0; i < 5; i += 1) {
-      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
-    }
-    await shutdown({}, ctx);
-
-    assert.equal(calls.length, 0);
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
-  });
-});
-
-test("automatic self-improve allows scheduled-task turns delivered through chat", async () => {
-  await withTempRoot(async (root) => {
-    const calls = [];
-    const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    const messageEnd = definition.hooks.message_end[0];
-    const shutdown = definition.hooks.session_shutdown[0];
-    const sessionFile = path.join(root, "sessions", "scheduled-chat.jsonl");
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "", "utf8");
-    const ctx = {
-      agentDir: root,
-      frontend: userFrontend(),
-      promptContext: { source: "scheduled-task", selfImproveEligible: true },
-      sessionManager: {
-        __rinLastPromptContext: {
-          taskContextKind: "scheduled-task",
+    await context(
+      { type: "context", messages: contextThatPrunes("eligible") },
+      {
+        ...base,
+        promptContext: {
+          source: "scheduled-task",
           selfImproveEligible: true,
         },
-        getSessionId: () => "scheduled-chat-session-test",
-        getSessionFile: () => sessionFile,
-        getLeafId: () => "leaf-scheduled-chat",
-        isPersisted: () => true,
       },
-    };
-
-    for (let i = 0; i < 5; i += 1) {
-      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
-    }
-    await shutdown({}, ctx);
-
-    assert.equal(calls.length, 0);
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 2);
-    assert.equal(queue[0].trigger, "self_improve:periodic_review");
-    assert.equal(queue[0].snapshotKey, "review:5");
-    assert.equal(queue[1].trigger, "self_improve:session_shutdown_review");
-  });
-});
-
-test("automatic self-improve allows scheduled-task source with explicit eligibility", async () => {
-  await withTempRoot(async (root) => {
-    const calls = [];
-    const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    const messageEnd = definition.hooks.message_end[0];
-    const sessionFile = path.join(root, "sessions", "scheduled-source.jsonl");
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "", "utf8");
-    const ctx = {
-      agentDir: root,
-      frontend: userFrontend(),
-      promptContext: { source: "scheduled-task", selfImproveEligible: true },
-      sessionManager: {
-        __rinLastPromptSource: "scheduled-task",
-        getSessionId: () => "scheduled-source-session-test",
-        getSessionFile: () => sessionFile,
-        getLeafId: () => "leaf-scheduled-source",
-        isPersisted: () => true,
-      },
-    };
-
-    for (let i = 0; i < 5; i += 1) {
-      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
-    }
-
-    assert.equal(calls.length, 0);
-    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].trigger, "self_improve:periodic_review");
-  });
-});
-
-test("automatic self-improve ignores scheduled-task source without explicit eligibility", async () => {
-  await withTempRoot(async (root) => {
-    const calls = [];
-    const definition = selfImproveIndex.default({
-      sendMessage() {},
-      getThinkingLevel() {
-        return "medium";
-      },
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    const messageEnd = definition.hooks.message_end[0];
-    const sessionFile = path.join(
-      root,
-      "sessions",
-      "scheduled-source-no-eligibility.jsonl",
     );
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "", "utf8");
-    const ctx = {
-      agentDir: root,
-      frontend: userFrontend(),
-      sessionManager: {
-        __rinLastPromptSource: "scheduled-task",
-        getSessionId: () => "scheduled-source-no-eligibility-session-test",
-        getSessionFile: () => sessionFile,
-        getLeafId: () => "leaf-scheduled-source-no-eligibility",
-        isPersisted: () => true,
-      },
-    };
-
-    for (let i = 0; i < 5; i += 1) {
-      await messageEnd({ message: assistantFinal(`done ${i + 1}`) }, ctx);
-    }
-
-    assert.equal(calls.length, 0);
-    await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
+    assert.equal(calls.length, 1);
   });
 });
 
@@ -931,13 +659,16 @@ test("automatic self-improve handlers require persisted sessions", async () => {
         return "medium";
       },
     });
-    const messageEnd = definition.hooks.message_end[0];
+    const context = definition.hooks.context[0];
     const shutdown = definition.hooks.session_shutdown[0];
     const sessionFile = path.join(root, "sessions", "short-lived.jsonl");
     await fs.mkdir(path.dirname(sessionFile), { recursive: true });
     await fs.writeFile(sessionFile, "", "utf8");
     const ctx = {
       agentDir: root,
+      cwd: root,
+      frontend: userFrontend(),
+      promptContext: { source: "chat-bridge", selfImproveEligible: true },
       sessionManager: {
         getSessionId: () => "non-persisted-session-test",
         getSessionFile: () => sessionFile,
@@ -946,10 +677,7 @@ test("automatic self-improve handlers require persisted sessions", async () => {
       },
     };
 
-    for (let i = 0; i < 5; i += 1) {
-      await messageEnd({ message: { role: "user" } }, ctx);
-      await messageEnd({ message: assistantFinal() }, ctx);
-    }
+    await context({ type: "context", messages: contextThatPrunes() }, ctx);
     await shutdown({}, ctx);
 
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);

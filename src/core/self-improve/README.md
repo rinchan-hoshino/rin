@@ -11,7 +11,7 @@ This module owns distilled guidance that changes future agent behavior:
 - always-on prompt baselines under `~/.rin/self_improve/prompts`
 - agent-managed reusable skills under `~/.rin/self_improve/skills`
 - onboarding for resident self-improve prompts
-- periodic and session-shutdown self-improve review; periodic review defaults to every 5 real agent final messages and is configurable via `settings.json -> selfImprove.reviewEveryTurns`; user steering inputs and assistant tool-call-only/interim messages do not count
+- context-prune and session-shutdown self-improve review; when an eligible user session is about to omit old tool output from provider-bound context, self-improve review is attempted first, deduplicated per pruning boundary, and failures do not block the unchanged pruning path
 
 It does not own original session-history recall. Original evidence and retrieval belong to the `memory` module.
 

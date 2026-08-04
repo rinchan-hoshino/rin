@@ -24,6 +24,21 @@ function pruningTailPadding(count: number) {
   }));
 }
 
+test("self-improve observes context before the unchanged provider pruning capability", () => {
+  const definitions = runtimeMod.createRinCapabilityDefinitions({
+    cwd: rootDir,
+    agentDir: rootDir,
+  });
+  const contextCapabilities = definitions
+    .filter((definition) => definition.hooks?.context?.length)
+    .map((definition) => definition.name);
+
+  assert.deepEqual(contextCapabilities.slice(-2), [
+    "self_improve",
+    "rin_provider_bound_context",
+  ]);
+});
+
 test("getManagedSkillPaths includes agent memory skills and builtin skills", () => {
   const paths = runtimeMod.getManagedSkillPaths("/tmp/rin-home");
   assert.deepEqual(paths, [
