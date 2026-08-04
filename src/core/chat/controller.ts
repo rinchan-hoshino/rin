@@ -1394,101 +1394,19 @@ export class ChatController {
     return [...typingResults, ...visibleResults].some(Boolean);
   }
 
-  private async startEditableWorkingNotice(
-    indicators = this.getWorkingIndicators(),
-  ) {
-    if (!this.canDeliverReplies()) return false;
-    const selected = selectWorkingIndicatorsForKind(indicators, "polling");
-    const editable = selected.find(
-      (indicator) =>
-        workingIndicatorPresentation(indicator) === "editable-message",
-    );
-    if (!editable) return false;
-    this.activeWorkingIndicators = selected;
-    const context = this.workingIndicatorContext({
-      event: "tick",
-      tick: 0,
-      workingStarted: true,
-    });
-    const typingIndicators = selectTypingIndicatorsForKind(
-      indicators,
-      "polling",
-    );
-    const now = Date.now();
-    if (typingIndicators.length) this.lastTypingIndicatorAt = now;
-    this.lastWorkingIndicatorAt = now;
-    const [typingResults, result] = await Promise.all([
-      typingIndicators.length
-        ? this.pollWorkingIndicators(typingIndicators, context, now)
-        : Promise.resolve([]),
-      this.callWorkingIndicator(editable, "tick", context),
-    ]);
-    if (result && typingIndicators.length && typingResults.some(Boolean)) {
-      const reassertedAt = Date.now();
-      this.lastTypingIndicatorAt = reassertedAt;
-      await this.pollWorkingIndicators(typingIndicators, context, reassertedAt);
+  private async startBackendWorkingMarker() {
+    const turn = this.currentTurn;
+    if (
+      !turn ||
+      turn.workingNoticeSent ||
+      !this.getWorkingIndicatorPolicy().marker
+    ) {
+      return false;
     }
-    this.workingIndicatorTick += 1;
-    return Boolean(result);
-  }
-
-  private async presentVisibleProcessingTurn(
-    input: {
-      incomingMessageId?: string;
-      replyToMessageId?: string;
-    },
-    turnGeneration: number,
-  ) {
-    const indicators = this.getWorkingIndicators();
-    const editableStarted = await this.startEditableWorkingNotice(
-      indicators,
-    ).catch(() => false);
-    if (this.turnAbortGeneration !== turnGeneration) {
-      await this.endWorkingIndicatorsForTurn(indicators, input);
-      return;
-    }
-    if (editableStarted) {
-      // Typing and editable Working started in the same presentation phase;
-      // subsequent heartbeats and refreshes use the normal polling path.
-      return;
-    }
-    const marker = this.startWorkingMarker(indicators).catch(() => false);
-    const poll = this.pollTyping().catch(() => false);
-    const presentation = Promise.all([marker, poll]).then(async () => {
-      if (this.turnAbortGeneration !== turnGeneration) {
-        await this.endWorkingIndicatorsForTurn(indicators, input);
-      }
-    });
-    await Promise.race([
-      presentation,
-      new Promise((resolve) => setImmediate(resolve)),
-    ]);
-  }
-
-  private async beginVisibleProcessingTurn(input: {
-    incomingMessageId?: string;
-    replyToMessageId?: string;
-    requestTag?: string;
-    outboxTurnFence?: ChatOutboxTurnFence;
-  }) {
-    const turnGeneration = this.turnAbortGeneration;
-    const previousIncomingMessageId = this.currentIncomingMessageId();
-    const nextIncomingMessageId = safeString(
-      input.incomingMessageId || "",
-    ).trim();
-    const previousWorkingCleanup =
-      previousIncomingMessageId &&
-      nextIncomingMessageId &&
-      previousIncomingMessageId !== nextIncomingMessageId
-        ? this.clearWorkingReaction().catch(() => false)
-        : Promise.resolve(false);
-    // Move the display/outbox target before transport cleanup can yield.
-    this.setCurrentTurn(input);
-    this.awaitingTurnSettle = true;
-    await Promise.all([
-      previousWorkingCleanup,
-      this.presentVisibleProcessingTurn(input, turnGeneration),
-    ]);
+    turn.workingNoticeSent = true;
+    const started = await this.startWorkingMarker(this.getWorkingIndicators());
+    if (!started && this.currentTurn === turn) turn.workingNoticeSent = false;
+    return started;
   }
 
   private currentDeliveryTarget(input: {
@@ -3500,7 +3418,12 @@ export class ChatController {
       case "frontend_status":
         return;
       case "working_state": {
-        void this.pollTyping().catch(() => false);
+        void Promise.all([
+          event.working
+            ? this.startBackendWorkingMarker()
+            : Promise.resolve(false),
+          this.pollTyping(),
+        ]).catch(() => false);
         return;
       }
       case "turn_accepted": {

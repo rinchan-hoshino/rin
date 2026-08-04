@@ -4675,7 +4675,7 @@ test("chat controller logs failed discord typing without changing its cadence", 
   }
 });
 
-test("chat controller establishes typing while creating editable progress", async () => {
+test("chat controller establishes typing and editable progress from backend Working", async () => {
   const controller = await createController("discord/bot-1:channel-1");
   let typingTicks = 0;
   let editableTicks = 0;
@@ -4711,18 +4711,25 @@ test("chat controller establishes typing while creating editable progress", asyn
     ],
   };
 
-  const presentation = controller.beginVisibleProcessingTurn({
+  controller.currentTurn = {
+    startedAt: Date.now(),
     incomingMessageId: "m-discord-start",
+    replyToMessageId: "m-discord-start",
+    workingNoticeSent: false,
+  };
+  controller.awaitingTurnSettle = true;
+  controller.driver.isWorking = () => true;
+
+  await controller.handleFrontendEvent({
+    type: "working_state",
+    working: true,
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(typingTicks, 1);
   assert.equal(editableTicks, 1);
   releaseTyping();
-  await presentation;
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(typingTicks, 2);
-
-  controller.driver.frontendState.turnActive = true;
-  controller.driver.frontendState.working = true;
   assert.equal(await controller.pollTyping(), false);
   assert.equal(typingTicks, 2);
   assert.equal(editableTicks, 1);
@@ -5174,10 +5181,6 @@ test("chat controller keeps Working absent while a cold connection later fails",
 
 test("chat controller clears a primed reply identity when connect fails", async () => {
   const controller = await createController("discord/bot-1:channel-1");
-  let visibleStarts = 0;
-  controller.beginVisibleProcessingTurn = async () => {
-    visibleStarts += 1;
-  };
   controller.connect = async () => {
     throw new Error("connect failed");
   };
@@ -5193,7 +5196,6 @@ test("chat controller clears a primed reply identity when connect fails", async 
     /connect failed/,
   );
 
-  assert.equal(visibleStarts, 0);
   assert.equal(controller.currentTurn, null);
   assert.equal(controller.awaitingTurnSettle, false);
 });
@@ -5629,7 +5631,7 @@ test("chat controller does not emit growing final-answer prefixes as interim rep
   ]);
 });
 
-test("chat controller uses no implicit Working notice for onebot private chats", async () => {
+test("chat controller does not invent a onebot private notice without an explicit marker", async () => {
   const controller = await createController("onebot/1:private:2");
   const deliveries = [];
   controller.sendWorkingNotice = async function () {
@@ -5692,6 +5694,56 @@ test("chat controller sends no onebot Working notice when polls overlap", async 
   releaseDelivery();
   assert.deepEqual(await Promise.all([firstPoll, secondPoll]), [false, false]);
   assert.equal(controller.currentTurn.workingNoticeSent, false);
+});
+
+test("chat controller starts one explicit onebot private marker from backend Working", async () => {
+  const controller = await createController("onebot/1:private:2");
+  const starts = [];
+  controller.app.bots[0].platform = "onebot";
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "marker",
+      presentation: "text-marker",
+      async start(context) {
+        starts.push({
+          chatId: context.chatId,
+          messageId: context.messageId,
+        });
+        return true;
+      },
+    },
+  ];
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-private-working",
+    replyToMessageId: "m-private-working",
+    workingNoticeSent: false,
+  };
+  controller.awaitingTurnSettle = true;
+  controller.driver.isWorking = () => true;
+
+  assert.deepEqual(starts, []);
+  await controller.handleFrontendEvent({
+    type: "working_state",
+    working: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(starts, []);
+
+  await controller.handleFrontendEvent({
+    type: "working_state",
+    working: true,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await controller.handleFrontendEvent({
+    type: "working_state",
+    working: true,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(starts, [
+    { chatId: "private:2", messageId: "m-private-working" },
+  ]);
 });
 
 test("chat controller ignores dynamic onebot private working actions without explicit marker", async () => {
