@@ -3767,6 +3767,117 @@ test("chat controller settles remote Pi steering without taking or delivering it
   assert.equal(controller.currentTurn, null);
 });
 
+test("chat controller adopts a backend-accepted pending presentation before interim output", async () => {
+  const controller = await createController("discord/1:pending-presentation");
+  const accepted = [];
+  const contexts = [];
+  const interimDeliveries = [];
+  controller.markAcceptedMessage = async (messageId) => {
+    accepted.push(messageId);
+  };
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick(context) {
+        contexts.push({ event: "tick", ...context });
+        return true;
+      },
+      async end(context) {
+        contexts.push({ event: "end", ...context });
+        return true;
+      },
+    },
+  ];
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-old-owner",
+    replyToMessageId: "m-old-owner",
+    requestTag: "request-old-owner",
+    outboxTurnFence: {
+      agentDir: controller.agentDir,
+      turnId: "turn-old-owner",
+      chatKey: controller.chatKey,
+      messageId: "m-old-owner",
+      ownerEpoch: "owner-old",
+      attempt: 1,
+    },
+    workingNoticeSent: true,
+  };
+  controller.presentationIncomingMessageId = "m-old-owner";
+  controller.presentationReplyToMessageId = "m-old-owner";
+  controller.activeWorkingIndicators =
+    controller.app.bots[0].getWorkingIndicators();
+  controller.awaitingTurnSettle = true;
+  controller.driver.isWorking = () => true;
+  controller.canDeliverReplies = () => true;
+  controller.shouldSuppressQuietDelivery = () => false;
+  controller.enqueueAndDrainDelivery = async (payload) => {
+    interimDeliveries.push(payload);
+    return { accepted: true, delivered: true, settled: true };
+  };
+  controller.pendingTurnPresentations.set("request-new-owner", {
+    incomingMessageId: "m-new-owner",
+    replyToMessageId: "m-new-owner",
+    requestTag: "request-new-owner",
+    outboxTurnFence: {
+      agentDir: controller.agentDir,
+      turnId: "turn-new-owner",
+      chatKey: controller.chatKey,
+      messageId: "m-new-owner",
+      ownerEpoch: "owner-new",
+      attempt: 1,
+    },
+    backendAccepted: false,
+  });
+
+  await controller.handleFrontendEvent({
+    type: "turn_accepted",
+    requestTag: "request-new-owner",
+    sessionFile: "/tmp/pending-presentation.jsonl",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(controller.currentTurn.incomingMessageId, "m-old-owner");
+  assert.equal(controller.presentationIncomingMessageId, "m-new-owner");
+  assert.equal(controller.presentationReplyToMessageId, "m-new-owner");
+  assert.equal(controller.backendAcceptedIncomingMessageId, "m-new-owner");
+  assert.deepEqual(accepted, ["m-new-owner"]);
+  assert.equal(contexts[0].event, "end");
+  assert.equal(contexts[0].messageId, "m-old-owner");
+
+  await controller.handleFrontendEvent({
+    type: "assistant_interim",
+    text: "New owner interim",
+    requestTag: "request-new-owner",
+  });
+
+  assert.equal(interimDeliveries.length, 1);
+  assert.equal(interimDeliveries[0].deliveryKind, "interim");
+  assert.equal(interimDeliveries[0].parts[0].id, "m-new-owner");
+  assert.deepEqual(accepted, ["m-new-owner", "m-new-owner"]);
+  assert.equal(controller.currentTurn.incomingMessageId, "m-old-owner");
+  assert.equal(controller.currentTurn.outboxTurnFence.turnId, "turn-old-owner");
+  assert.deepEqual(
+    controller.currentDeliveryTarget({
+      incomingMessageId: "m-old-owner",
+      replyToMessageId: "m-old-owner",
+    }),
+    {
+      incomingMessageId: "m-new-owner",
+      replyToMessageId: "m-new-owner",
+      outboxTurnFence: {
+        agentDir: controller.agentDir,
+        turnId: "turn-old-owner",
+        chatKey: controller.chatKey,
+        messageId: "m-old-owner",
+        ownerEpoch: "owner-old",
+        attempt: 1,
+      },
+    },
+  );
+});
+
 test("nonterminal input durably joins the terminal owner and takes presentation ownership", async () => {
   const controller = await createController("telegram/1:2");
   const ownerInbound = enqueueChatInboxItem(controller.agentDir, {
@@ -3830,12 +3941,24 @@ test("nonterminal input durably joins the terminal owner and takes presentation 
     images: [],
     frontendReady: true,
   });
-  controller.driver.runTurn = async () => ({
-    outcome: "nonterminal",
-    superseded: true,
-    requestTag: "request-joined-input",
-    sessionFile: "/tmp/joined-input.jsonl",
-  });
+  controller.driver.runTurn = async () => {
+    await controller.handleFrontendEvent({
+      type: "turn_accepted",
+      requestTag: "request-joined-input",
+      sessionFile: "/tmp/joined-input.jsonl",
+    });
+    await controller.handleFrontendEvent({
+      type: "assistant_interim",
+      requestTag: "request-joined-input",
+      text: "response to second request",
+    });
+    return {
+      outcome: "nonterminal",
+      superseded: true,
+      requestTag: "request-joined-input",
+      sessionFile: "/tmp/joined-input.jsonl",
+    };
+  };
   const enqueueAndDrainDelivery =
     controller.enqueueAndDrainDelivery.bind(controller);
   const interimPayloads: any[] = [];
@@ -3849,6 +3972,7 @@ test("nonterminal input durably joins the terminal owner and takes presentation 
     attachments: [],
     incomingMessageId: joinedClaim.messageId,
     replyToMessageId: joinedClaim.messageId,
+    requestTag: "request-joined-input",
     outboxTurnFence: joinedFence,
   });
 
@@ -3869,7 +3993,6 @@ test("nonterminal input durably joins the terminal owner and takes presentation 
     ownerClaim.itemId,
   );
 
-  await controller.deliverAssistantInterim("response to second request");
   assert.equal(interimPayloads[0].parts[0].type, "quote");
   assert.equal(interimPayloads[0].parts[0].id, joinedClaim.messageId);
   assert.equal(

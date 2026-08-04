@@ -143,6 +143,10 @@ type ChatTurnTarget = {
   outboxTurnFence?: ChatOutboxTurnFence;
 };
 
+type PendingTurnPresentation = ChatTurnTarget & {
+  backendAccepted: boolean;
+};
+
 type ChatTurnMeta = ChatTurnTarget & {
   workingNoticeSent?: boolean;
   startedAt: number;
@@ -371,6 +375,7 @@ export class ChatController {
   compactionIndicatorTick = 0;
   activeCommandTurnInput: ChatTurnTarget | null = null;
   backendAcceptedIncomingMessageId = "";
+  private pendingTurnPresentations = new Map<string, PendingTurnPresentation>();
   stagedDelivery: ChatAssistantDelivery | null = null;
   pendingPassiveNotices: string[] = [];
   latestTodoNoticeText = "";
@@ -529,6 +534,7 @@ export class ChatController {
     this.turnAbortRequested = false;
     this.turnAbortGeneration += 1;
     this.intentionallyAbortedTurnGenerations.clear();
+    this.pendingTurnPresentations.clear();
     this.driver.dispose();
   }
 
@@ -564,6 +570,7 @@ export class ChatController {
     this.startedReactionRequestTags.clear();
     this.deferredWorkingReactionRequestTags.clear();
     this.backendAcceptedIncomingMessageId = "";
+    this.pendingTurnPresentations.clear();
     this.saveState();
   }
 
@@ -592,8 +599,12 @@ export class ChatController {
     ).trim();
   }
 
-  private pendingIncomingMessageId(_requestTag: string) {
-    return this.currentIncomingMessageId();
+  private pendingIncomingMessageId(requestTag: string) {
+    return (
+      safeString(
+        this.pendingTurnPresentations.get(requestTag)?.incomingMessageId,
+      ).trim() || this.currentPresentationIncomingMessageId()
+    );
   }
 
   private async showWaitingReaction(requestTagValue: string) {
@@ -843,7 +854,8 @@ export class ChatController {
     const actual = safeString(requestTag).trim();
     if (!actual) return true;
     const expected = safeString(this.currentTurn.requestTag).trim();
-    return Boolean(expected && expected === actual);
+    if (expected && expected === actual) return true;
+    return Boolean(this.pendingTurnPresentations.get(actual)?.backendAccepted);
   }
 
   claimsInboundMessage(messageId?: string) {
@@ -911,6 +923,48 @@ export class ChatController {
     this.presentationIncomingMessageId = incomingMessageId;
     this.presentationReplyToMessageId =
       safeString(input.replyToMessageId).trim() || incomingMessageId;
+  }
+
+  private async adoptBackendAcceptedPendingPresentation(requestTag: string) {
+    const pending = this.pendingTurnPresentations.get(requestTag);
+    if (!pending || pending.backendAccepted) return pending;
+    const previousIncomingMessageId = this.currentIncomingMessageId();
+    const previousReplyToMessageId = this.currentReplyToMessageId();
+    const previousWorkingIndicators = this.activeWorkingIndicators.length
+      ? [...this.activeWorkingIndicators]
+      : this.getWorkingIndicators();
+    this.setJoinedPresentation(pending);
+    this.backendAcceptedIncomingMessageId = safeString(
+      pending.incomingMessageId,
+    ).trim();
+    pending.backendAccepted = true;
+    await this.markAcceptedMessage(pending.incomingMessageId);
+    if (
+      previousIncomingMessageId &&
+      previousIncomingMessageId !== pending.incomingMessageId
+    ) {
+      const hasEndIndicator =
+        selectWorkingIndicatorsForEnd(previousWorkingIndicators).length > 0;
+      const cleared = await this.endWorkingIndicatorsForTurn(
+        previousWorkingIndicators,
+        {
+          incomingMessageId: previousIncomingMessageId,
+          replyToMessageId: previousReplyToMessageId,
+        },
+      );
+      this.activeWorkingIndicators = [];
+      this.lastWorkingIndicatorAt = 0;
+      this.lastTypingIndicatorAt = 0;
+      this.workingIndicatorTick = 0;
+      this.latestAssistantSummaryText = "";
+      this.latestTodoNoticeText = "";
+      if (hasEndIndicator && !cleared) {
+        this.logger.warn(
+          `chat previous presentation cleanup failed chatKey=${this.chatKey} messageId=${previousIncomingMessageId}`,
+        );
+      }
+    }
+    return pending;
   }
 
   private async prepareTurnPrompt(
@@ -1416,6 +1470,8 @@ export class ChatController {
   }) {
     return {
       incomingMessageId:
+        this.backendAcceptedIncomingMessageId ||
+        this.presentationIncomingMessageId ||
         this.currentIncomingMessageId() ||
         safeString(input.incomingMessageId || "").trim() ||
         undefined,
@@ -1720,6 +1776,9 @@ export class ChatController {
     return [
       this.currentTurn?.outboxTurnFence,
       this.activeCommandTurnInput?.outboxTurnFence,
+      ...Array.from(this.pendingTurnPresentations.values()).map(
+        (pending) => pending.outboxTurnFence,
+      ),
       getActiveChatOutboxTurnFence(),
     ].find(
       (fence) =>
@@ -2195,8 +2254,10 @@ export class ChatController {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
     if (!this.canDeliverReplies()) return true;
-    const incomingMessageId = this.currentIncomingMessageId();
-    const replyToMessageId = this.currentReplyToMessageId();
+    const deliveryTarget = this.currentDeliveryTarget({});
+    const incomingMessageId = deliveryTarget.incomingMessageId;
+    const replyToMessageId =
+      deliveryTarget.replyToMessageId || this.currentReplyToMessageId();
     try {
       await this.enqueueAndDrainDelivery(
         {
@@ -3144,6 +3205,16 @@ export class ChatController {
           input.incomingMessageId,
           input.outboxTurnFence,
         );
+      const pendingPresentation: PendingTurnPresentation = {
+        incomingMessageId: input.incomingMessageId,
+        replyToMessageId: input.replyToMessageId,
+        requestTag,
+        outboxTurnFence: input.outboxTurnFence,
+        backendAccepted: false,
+      };
+      if (requestTag) {
+        this.pendingTurnPresentations.set(requestTag, pendingPresentation);
+      }
       if (this.currentTurn && !preserveCurrentTurn)
         this.currentTurn.requestTag = requestTag || undefined;
       try {
@@ -3264,6 +3335,12 @@ export class ChatController {
         if (isRinFrontendTurnCancelledError(error)) throw error;
         throw error;
       } finally {
+        if (
+          requestTag &&
+          this.pendingTurnPresentations.get(requestTag) === pendingPresentation
+        ) {
+          this.pendingTurnPresentations.delete(requestTag);
+        }
         if (!preserveCurrentTurn) {
           await this.clearWorkingReactionFor(input.incomingMessageId);
           this.clearCurrentTurnFor(input.incomingMessageId);
@@ -3407,10 +3484,27 @@ export class ChatController {
     if (!event || typeof event !== "object") return;
     const activeRequestTag = safeString(this.currentTurn?.requestTag).trim();
     const eventRequestTag = safeString(event.requestTag).trim();
+    const pendingPresentation =
+      this.pendingTurnPresentations.get(eventRequestTag);
+    const pendingPresentationReplacesCurrent = Boolean(
+      pendingPresentation &&
+      (!this.currentTurn ||
+        activeRequestTag !== eventRequestTag ||
+        this.currentIncomingMessageId() !==
+          safeString(pendingPresentation.incomingMessageId).trim()),
+    );
+    if (
+      event.type === "turn_accepted" &&
+      eventRequestTag &&
+      pendingPresentationReplacesCurrent
+    ) {
+      await this.adoptBackendAcceptedPendingPresentation(eventRequestTag);
+    }
     if (
       activeRequestTag &&
       eventRequestTag &&
-      activeRequestTag !== eventRequestTag
+      activeRequestTag !== eventRequestTag &&
+      !this.acceptsScopedTurnEvent(eventRequestTag)
     ) {
       return;
     }
@@ -3431,13 +3525,18 @@ export class ChatController {
           this.currentTurn?.requestTag,
         ).trim();
         const acceptedRequestTag = safeString(event.requestTag).trim();
+        const acceptedPendingPresentation =
+          this.pendingTurnPresentations.get(
+            acceptedRequestTag,
+          )?.backendAccepted;
         if (
           this.currentTurn?.outboxTurnFence &&
+          !acceptedPendingPresentation &&
           (!acceptedRequestTag || acceptedRequestTag !== expectedRequestTag)
         ) {
           return;
         }
-        const turn = this.currentTurn;
+        const turn = acceptedPendingPresentation ? null : this.currentTurn;
         if (
           turn &&
           !turn.startupTimingLogged &&
@@ -3458,8 +3557,11 @@ export class ChatController {
             `chat turn startup chatKey=${this.chatKey} messageId=${this.currentIncomingMessageId() || "unknown"} receivedToRunMs=${receivedToRunMs} connectMs=${connectMs} runToAcceptedMs=${runToAcceptedMs} receivedToAcceptedMs=${Math.max(0, acceptedAt - turn.receivedAtMs)}`,
           );
         }
-        this.backendAcceptedIncomingMessageId = this.currentIncomingMessageId();
-        this.markAcceptedMessage(this.backendAcceptedIncomingMessageId);
+        if (!acceptedPendingPresentation) {
+          this.backendAcceptedIncomingMessageId =
+            this.currentIncomingMessageId();
+          this.markAcceptedMessage(this.backendAcceptedIncomingMessageId);
+        }
         return;
       }
       case "turn_waiting":
