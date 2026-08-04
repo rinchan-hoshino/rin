@@ -202,6 +202,7 @@ test("session fork compat can mark temporary cache-equivalent forks to skip rout
       persist: false,
       preserveSourceSessionId: true,
       disableRoutineCompaction: true,
+      protectSourceWindowTurns: 4,
     },
   );
 
@@ -209,6 +210,10 @@ test("session fork compat can mark temporary cache-equivalent forks to skip rout
   assert.equal(
     fork[sessionFork.EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY],
     true,
+  );
+  assert.equal(
+    fork[sessionFork.EPHEMERAL_FORK_PROTECT_SOURCE_WINDOW_TURNS_KEY],
+    4,
   );
 });
 

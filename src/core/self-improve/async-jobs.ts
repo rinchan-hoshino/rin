@@ -102,6 +102,32 @@ async function ensureStateDir(agentDir: string) {
   await fs.mkdir(selfImproveStateDir(agentDir), { recursive: true });
 }
 
+async function withQueueMutationLock<T>(
+  agentDir: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  await ensureStateDir(agentDir);
+  const queueFile = maintenanceQueuePath(agentDir);
+  const release = await lockfile.lock(selfImproveStateDir(agentDir), {
+    realpath: false,
+    lockfilePath: `${queueFile}.enqueue-lock`,
+    stale: 60_000,
+    update: 10_000,
+    retries: {
+      retries: 100,
+      factor: 1.2,
+      minTimeout: 5,
+      maxTimeout: 50,
+      randomize: true,
+    },
+  });
+  try {
+    return await action();
+  } finally {
+    await release();
+  }
+}
+
 async function loadQueue(agentDir: string): Promise<MaintenanceJob[]> {
   const parsed = readJsonFile<unknown>(maintenanceQueuePath(agentDir), []);
   return asArray<Record<string, unknown>>(parsed)
@@ -155,6 +181,26 @@ function sameJob(a: Partial<MaintenanceJob>, b: Partial<MaintenanceJob>) {
   return true;
 }
 
+async function maintenanceHistoryContainsJob(job: MaintenanceJob) {
+  if (!safeString(job.snapshotKey).trim()) return false;
+  try {
+    const text = await fs.readFile(
+      maintenanceHistoryPath(job.agentDir),
+      "utf8",
+    );
+    for (const line of text.split(/\r?\n/g)) {
+      if (!line.trim()) continue;
+      try {
+        const record = JSON.parse(line);
+        if (sameJob({ ...record, agentDir: job.agentDir }, job)) return true;
+      } catch {}
+    }
+  } catch (error: any) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  return false;
+}
+
 function defaultTrigger(_kind: MaintenanceJob["kind"]) {
   return "self_improve:review";
 }
@@ -193,30 +239,35 @@ async function enqueueMaintenanceJob(
   input: Omit<MaintenanceJob, "id" | "createdAt" | "updatedAt">,
 ) {
   const nextJob = createMaintenanceJob(input);
-  const jobs = await loadQueue(nextJob.agentDir);
-  const existing = jobs.find((job) => sameJob(job, nextJob));
-  if (existing && !existing.executionStartedAt) {
-    existing.updatedAt = nextJob.updatedAt;
-    existing.kind = nextJob.kind;
-    existing.trigger = nextJob.trigger;
-    existing.leafId = nextJob.leafId;
-    existing.snapshotKey = nextJob.snapshotKey;
-    existing.additionalExtensionPaths = nextJob.additionalExtensionPaths;
-    existing.attempts = undefined;
-    existing.lastError = undefined;
-    existing.lastAttemptAt = undefined;
-  } else if (!existing) {
-    jobs.push(nextJob);
-  }
-  await saveQueue(nextJob.agentDir, jobs);
+  await withQueueMutationLock(nextJob.agentDir, async () => {
+    if (await maintenanceHistoryContainsJob(nextJob)) return;
+    const jobs = await loadQueue(nextJob.agentDir);
+    const existing = jobs.find((job) => sameJob(job, nextJob));
+    if (existing && !existing.executionStartedAt) {
+      existing.updatedAt = nextJob.updatedAt;
+      existing.kind = nextJob.kind;
+      existing.trigger = nextJob.trigger;
+      existing.leafId = nextJob.leafId;
+      existing.snapshotKey = nextJob.snapshotKey;
+      existing.additionalExtensionPaths = nextJob.additionalExtensionPaths;
+      existing.attempts = undefined;
+      existing.lastError = undefined;
+      existing.lastAttemptAt = undefined;
+    } else if (!existing) {
+      jobs.push(nextJob);
+    }
+    await saveQueue(nextJob.agentDir, jobs);
+  });
 }
 
 async function requeueMaintenanceJob(job: MaintenanceJob) {
-  const jobs = await loadQueue(job.agentDir);
-  const existingIndex = jobs.findIndex((entry) => entry.id === job.id);
-  if (existingIndex >= 0) jobs[existingIndex] = job;
-  else jobs.unshift(job);
-  await saveQueue(job.agentDir, jobs);
+  await withQueueMutationLock(job.agentDir, async () => {
+    const jobs = await loadQueue(job.agentDir);
+    const existingIndex = jobs.findIndex((entry) => entry.id === job.id);
+    if (existingIndex >= 0) jobs[existingIndex] = job;
+    else if (!jobs.some((entry) => sameJob(entry, job))) jobs.unshift(job);
+    await saveQueue(job.agentDir, jobs);
+  });
 }
 
 export async function enqueueSelfImproveMaintenanceJob(
@@ -428,21 +479,23 @@ async function removeMatchingJobs(
   target: MaintenanceJob,
   deleteEmptyQueue = false,
 ) {
-  const jobs = await loadQueue(agentDir);
-  const remaining = jobs.filter((job) => !sameJob(job, target));
-  if (remaining.length === jobs.length) return;
-  if (deleteEmptyQueue && remaining.length === 0) {
-    const queuePath = maintenanceQueuePath(agentDir);
-    await fs.rm(queuePath, { force: true });
-    const directoryHandle = await fs.open(path.dirname(queuePath), "r");
-    try {
-      await directoryHandle.sync();
-    } finally {
-      await directoryHandle.close();
+  await withQueueMutationLock(agentDir, async () => {
+    const jobs = await loadQueue(agentDir);
+    const remaining = jobs.filter((job) => !sameJob(job, target));
+    if (remaining.length === jobs.length) return;
+    if (deleteEmptyQueue && remaining.length === 0) {
+      const queuePath = maintenanceQueuePath(agentDir);
+      await fs.rm(queuePath, { force: true });
+      const directoryHandle = await fs.open(path.dirname(queuePath), "r");
+      try {
+        await directoryHandle.sync();
+      } finally {
+        await directoryHandle.close();
+      }
+      return;
     }
-    return;
-  }
-  await saveQueue(agentDir, remaining);
+    await saveQueue(agentDir, remaining);
+  });
 }
 
 function normalizeAuditReference(
@@ -869,6 +922,21 @@ export async function runSelfImproveMaintenanceJobNow(
   }
 }
 
+async function claimNextQueuedJob(agentDir: string) {
+  return await withQueueMutationLock(agentDir, async () => {
+    const jobs = await loadQueue(agentDir);
+    const job = jobs[0];
+    if (!job) return undefined;
+    const interruptedAt = persistedExecutionStartedAt(job);
+    if (interruptedAt) return { job, interruptedAt };
+    const startedAt = nowIso();
+    job.executionStartedAt = startedAt;
+    job.updatedAt = nowIso();
+    await saveQueue(agentDir, jobs);
+    return { job, startedAt };
+  });
+}
+
 export async function processQueuedSelfImproveJobs(agentDir: string) {
   const resolvedAgentDir = resolveAgentDir(agentDir);
   if (!resolvedAgentDir) return { skipped: "no-agent-dir" };
@@ -878,19 +946,15 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
   let failed = 0;
   try {
     while (true) {
-      const jobs = await loadQueue(resolvedAgentDir);
-      const job = jobs[0];
-      if (!job) break;
-      const interruptedAt = persistedExecutionStartedAt(job);
+      const claimed = await claimNextQueuedJob(resolvedAgentDir);
+      if (!claimed) break;
+      const { job, interruptedAt } = claimed;
       if (interruptedAt) {
         await finalizeInterruptedJob(resolvedAgentDir, job, interruptedAt);
         failed += 1;
         continue;
       }
-      const startedAt = nowIso();
-      job.executionStartedAt = startedAt;
-      job.updatedAt = nowIso();
-      await saveQueue(resolvedAgentDir, jobs);
+      const startedAt = claimed.startedAt as string;
       await writeWorkerLock(resolvedAgentDir, job);
       let result: any;
       try {

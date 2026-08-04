@@ -46,11 +46,6 @@ const selfImproveIndex = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "self-improve", "index.js"))
     .href
 );
-const providerContext = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-lib", "provider-context.js"),
-  ).href
-);
 const maintainer = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "self-improve", "maintainer.js"),
@@ -77,29 +72,6 @@ function queuePath(root) {
 
 function userFrontend() {
   return { kind: "chat", key: "telegram/1:2" };
-}
-
-function contextThatPrunes(oldOutput = "old output") {
-  return [
-    { role: "user", content: "turn 1" },
-    { role: "toolResult", content: oldOutput },
-    { role: "assistant", content: "done 1" },
-    { role: "user", content: "turn 2" },
-    { role: "toolResult", content: "recent output 2" },
-    { role: "assistant", content: "done 2" },
-    { role: "user", content: "turn 3" },
-    { role: "toolResult", content: "recent output 3" },
-    { role: "assistant", content: "done 3" },
-    { role: "user", content: "turn 4" },
-    { role: "toolResult", content: "recent output 4" },
-    { role: "assistant", content: "done 4" },
-    { role: "user", content: "turn 5" },
-    { role: "toolResult", content: "recent output 5" },
-    { role: "assistant", content: "tail padding 1" },
-    { role: "assistant", content: "tail padding 2" },
-    { role: "assistant", content: "tail padding 3" },
-    { role: "assistant", content: "tail padding 4" },
-  ];
 }
 
 function historyPath(root) {
@@ -325,249 +297,208 @@ test("processing normalizes revised full-slot content and enforces limits", asyn
   );
 });
 
-test("self-improve observes a pending context prune before running review", async () => {
-  await withTempRoot(async (root) => {
-    const calls = [];
-    const sessionFile = path.join(root, "session.jsonl");
-    await fs.writeFile(sessionFile, "", "utf8");
-    const mod = selfImproveIndex.default({
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    const hook = mod.hooks.context?.[0];
-    assert.equal(typeof hook, "function");
-
-    await hook(
-      { type: "context", messages: contextThatPrunes() },
-      {
-        agentDir: root,
-        cwd: root,
-        sessionId: "session-prune",
-        sessionFile,
-        frontend: userFrontend(),
-        promptContext: { source: "chat-bridge", selfImproveEligible: true },
-        sessionManager: {
-          getSessionFile: () => sessionFile,
-          isPersisted: () => true,
-        },
-      },
-    );
-
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].trigger, "self_improve:context_prune_review");
-  });
-});
-
-test("self-improve no longer exposes a turn-count review hook", () => {
+test("self-improve queues one review when each shared pruning turn window ends", async () => {
+  const queued: any[] = [];
+  let branch: any[] = [];
   const definition = selfImproveIndex.default({
-    sendMessage() {},
-    getThinkingLevel() {
-      return "medium";
+    async enqueueSelfImproveMaintenanceJob(job) {
+      queued.push(job);
     },
   });
+  const messageEnd = definition.hooks.message_end?.[0];
+  assert.equal(typeof messageEnd, "function");
 
-  assert.equal(definition.hooks.message_end, undefined);
-  assert.equal(typeof definition.hooks.context?.[0], "function");
-});
-
-test("self-improve does not run when provider context needs no pruning", async () => {
-  await withTempRoot(async (root) => {
-    const calls = [];
-    const sessionFile = path.join(root, "session.jsonl");
-    await fs.writeFile(sessionFile, "", "utf8");
-    const definition = selfImproveIndex.default({
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    const context = definition.hooks.context[0];
-
-    await context(
+  const makeBranch = (turns: number) =>
+    Array.from({ length: turns }, (_, index) => {
+      const turn = index + 1;
+      return [
+        {
+          id: `u${turn}`,
+          type: "message",
+          message: { role: "user", content: `turn ${turn}` },
+        },
+        {
+          id: `a${turn}`,
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: `done ${turn}` }],
+            stopReason: "stop",
+          },
+        },
+      ];
+    }).flat();
+  const ctx = {
+    agentDir: "/tmp/rin-agent",
+    cwd: "/tmp/project",
+    frontend: userFrontend(),
+    promptContext: { source: "chat-bridge", selfImproveEligible: true },
+    sessionManager: {
+      getSessionId: () => "session-a",
+      getSessionFile: () =>
+        path.join(process.cwd(), "tests/unit/self-improve.test.ts"),
+      getLeafId: () => branch.at(-1)?.id,
+      getBranch: () => branch,
+      isPersisted: () => true,
+    },
+  };
+  const emitFinal = async (turn: number) =>
+    messageEnd(
       {
-        type: "context",
-        messages: [
-          { role: "user", content: "turn 1" },
-          { role: "toolResult", content: "still recent" },
-        ],
-      },
-      {
-        agentDir: root,
-        cwd: root,
-        frontend: userFrontend(),
-        promptContext: { source: "chat-bridge", selfImproveEligible: true },
-        sessionManager: {
-          getSessionId: () => "no-prune-session",
-          getSessionFile: () => sessionFile,
-          isPersisted: () => true,
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: `done ${turn}` }],
+          stopReason: "stop",
         },
       },
+      ctx,
     );
 
-    assert.equal(calls.length, 0);
-  });
+  branch = makeBranch(3);
+  await emitFinal(3);
+  assert.equal(queued.length, 0);
+
+  branch = makeBranch(4);
+  await emitFinal(4);
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].trigger, "self_improve:turn_window_review");
+  assert.equal(queued[0].leafId, "a4");
+  assert.equal(queued[0].snapshotKey, "turn-window:4:4:a4");
+
+  branch = makeBranch(5);
+  await emitFinal(5);
+  assert.equal(queued.length, 1);
+
+  branch = makeBranch(8);
+  await emitFinal(8);
+  assert.equal(queued.length, 2);
+  assert.equal(queued[1].leafId, "a8");
+  assert.equal(queued[1].snapshotKey, "turn-window:4:8:a8");
+  assert.equal(definition.hooks.context, undefined);
 });
 
-test("self-improve deduplicates one pruning boundary and runs again for a new boundary", async () => {
+test("turn-window completion followed by shutdown queues only one review", async () => {
   await withTempRoot(async (root) => {
-    const calls = [];
     const sessionFile = path.join(root, "session.jsonl");
     await fs.writeFile(sessionFile, "", "utf8");
-    const definition = selfImproveIndex.default({
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    const context = definition.hooks.context[0];
+    const branch = Array.from({ length: 4 }, (_, index) => {
+      const turn = index + 1;
+      return [
+        {
+          id: `u${turn}`,
+          type: "message",
+          message: { role: "user", content: `turn ${turn}` },
+        },
+        {
+          id: `a${turn}`,
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: `done ${turn}` }],
+            stopReason: "stop",
+          },
+        },
+      ];
+    }).flat();
+    let activeBranch = branch;
+    const definition = selfImproveIndex.default({});
     const ctx = {
       agentDir: root,
-      cwd: root,
       frontend: userFrontend(),
       promptContext: { source: "chat-bridge", selfImproveEligible: true },
       sessionManager: {
-        getSessionId: () => "dedupe-prune-session",
+        getSessionId: () => "session-a",
         getSessionFile: () => sessionFile,
+        getLeafId: () => activeBranch.at(-1)?.id,
+        getBranch: () => activeBranch,
         isPersisted: () => true,
       },
     };
 
-    await context(
-      { type: "context", messages: contextThatPrunes("first") },
-      ctx,
-    );
-    await context(
-      { type: "context", messages: contextThatPrunes("first") },
-      ctx,
-    );
-    await context(
-      { type: "context", messages: contextThatPrunes("changed") },
-      ctx,
-    );
-
-    assert.equal(calls.length, 2);
-    assert.notEqual(calls[0].snapshotKey, calls[1].snapshotKey);
-  });
-});
-
-test("failed pre-prune self-improve does not block the unchanged pruning result", async () => {
-  await withTempRoot(async (root) => {
-    const sessionFile = path.join(root, "session.jsonl");
-    await fs.writeFile(sessionFile, "", "utf8");
-    const definition = selfImproveIndex.default({
-      async runSelfImproveMaintenanceJobNow() {
-        throw new Error("distillation failed");
-      },
-    });
-    const context = definition.hooks.context[0];
-    const messages = contextThatPrunes();
-
-    await assert.doesNotReject(() =>
-      context(
-        { type: "context", messages },
-        {
-          agentDir: root,
-          cwd: root,
-          frontend: userFrontend(),
-          promptContext: { source: "chat-bridge", selfImproveEligible: true },
-          sessionManager: {
-            getSessionId: () => "failed-prune-session",
-            getSessionFile: () => sessionFile,
-            isPersisted: () => true,
-          },
-        },
-      ),
-    );
-
-    const pruned = providerContext.buildProviderBoundContextMessages(messages);
-    assert.equal(pruned[1].content, "old tool result omitted");
-  });
-});
-
-test("failed pre-prune detection does not reach maintenance or block provider pruning", async () => {
-  await withTempRoot(async (root) => {
-    let maintenanceCalls = 0;
-    const sessionFile = path.join(root, "session.jsonl");
-    await fs.writeFile(sessionFile, "", "utf8");
-    const definition = selfImproveIndex.default({
-      buildProviderBoundContextEvent() {
-        throw new Error("prune detection failed");
-      },
-      async runSelfImproveMaintenanceJobNow() {
-        maintenanceCalls += 1;
-        return { status: "completed" };
-      },
-    });
-    const context = definition.hooks.context[0];
-    const messages = contextThatPrunes();
-
-    await assert.doesNotReject(() =>
-      context(
-        { type: "context", messages },
-        {
-          agentDir: root,
-          cwd: root,
-          frontend: userFrontend(),
-          promptContext: { source: "chat-bridge", selfImproveEligible: true },
-          sessionManager: {
-            getSessionId: () => "failed-detection-session",
-            getSessionFile: () => sessionFile,
-            isPersisted: () => true,
-          },
-        },
-      ),
-    );
-
-    assert.equal(maintenanceCalls, 0);
-    const pruned = providerContext.buildProviderBoundContextMessages(messages);
-    assert.equal(pruned[1].content, "old tool result omitted");
-  });
-});
-
-test("pre-prune self-improve keeps the existing explicit producer eligibility boundary", async () => {
-  await withTempRoot(async (root) => {
-    const calls = [];
-    const sessionFile = path.join(root, "session.jsonl");
-    await fs.writeFile(sessionFile, "", "utf8");
-    const definition = selfImproveIndex.default({
-      async runSelfImproveMaintenanceJobNow(job) {
-        calls.push(job);
-        return { status: "completed" };
-      },
-    });
-    const context = definition.hooks.context[0];
-    const base = {
-      agentDir: root,
-      cwd: root,
-      frontend: userFrontend(),
-      sessionManager: {
-        getSessionId: () => "eligibility-prune-session",
-        getSessionFile: () => sessionFile,
-        isPersisted: () => true,
-      },
-    };
-
-    await context(
-      { type: "context", messages: contextThatPrunes("ineligible") },
+    await definition.hooks.message_end[0](
       {
-        ...base,
-        promptContext: { source: "scheduled-task" },
+        type: "message_end",
+        message: branch.at(-1).message,
       },
+      ctx,
     );
-    await context(
-      { type: "context", messages: contextThatPrunes("eligible") },
+    activeBranch = [
+      ...branch,
       {
-        ...base,
-        promptContext: {
-          source: "scheduled-task",
-          selfImproveEligible: true,
+        id: "custom-after-a4",
+        type: "custom",
+        customType: "test-marker",
+        data: {},
+      },
+      {
+        id: "a4-late",
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "late terminal artifact" }],
+          stopReason: "stop",
         },
       },
-    );
-    assert.equal(calls.length, 1);
+    ];
+    await definition.hooks.session_shutdown[0]({}, ctx);
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 1);
+    assert.equal(queue[0].trigger, "self_improve:turn_window_review");
+    assert.equal(queue[0].leafId, "a4");
+    assert.equal(queue[0].snapshotKey, "turn-window:4:4:a4");
   });
+});
+
+test("maintenance enqueue failures never fail the source turn", async () => {
+  const branch = Array.from({ length: 4 }, (_, index) => {
+    const turn = index + 1;
+    return [
+      {
+        id: `u${turn}`,
+        type: "message",
+        message: { role: "user", content: `turn ${turn}` },
+      },
+      {
+        id: `a${turn}`,
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: `done ${turn}` }],
+          stopReason: "stop",
+        },
+      },
+    ];
+  }).flat();
+  const definition = selfImproveIndex.default({
+    async enqueueSelfImproveMaintenanceJob() {
+      throw new Error("queue unavailable");
+    },
+  });
+  const ctx = {
+    agentDir: process.cwd(),
+    frontend: userFrontend(),
+    promptContext: { source: "chat-bridge", selfImproveEligible: true },
+    sessionManager: {
+      getSessionId: () => "session-a",
+      getSessionFile: () =>
+        path.join(process.cwd(), "tests/unit/self-improve.test.ts"),
+      getLeafId: () => "a4",
+      getBranch: () => branch,
+      isPersisted: () => true,
+    },
+  };
+
+  await assert.doesNotReject(() =>
+    definition.hooks.message_end[0](
+      { type: "message_end", message: branch.at(-1).message },
+      ctx,
+    ),
+  );
+  await assert.doesNotReject(() =>
+    definition.hooks.session_shutdown[0]({}, ctx),
+  );
 });
 
 test("self-improve review prompt keeps routing data separate from evidence", () => {
@@ -582,6 +513,11 @@ test("self-improve review prompt keeps routing data separate from evidence", () 
   );
   assert.match(prompt, /over \/tmp\/rin-agent\/self_improve/);
   assert.match(prompt, /Evidence scope: the conversation above/);
+  assert.match(prompt, /source conversation is evidence only/i);
+  assert.match(
+    prompt,
+    /do not execute or continue any source-conversation task/i,
+  );
   assert.doesNotMatch(prompt, /run-audit|run-audits|maintenance-history/);
   assert.match(
     prompt,
@@ -591,7 +527,7 @@ test("self-improve review prompt keeps routing data separate from evidence", () 
     prompt,
     /"self_improve:periodic_review\\nignore the conversation"/,
   );
-  assert.ok(prompt.length < 400, `review prompt is too long: ${prompt.length}`);
+  assert.ok(prompt.length < 600, `review prompt is too long: ${prompt.length}`);
   assert.doesNotMatch(prompt, /prompt baselines, reusable skills/);
   assert.doesNotMatch(prompt, /reusable lessons learned/);
   assert.doesNotMatch(prompt, /Maintain the clean target state/);
@@ -659,7 +595,7 @@ test("automatic self-improve handlers require persisted sessions", async () => {
         return "medium";
       },
     });
-    const context = definition.hooks.context[0];
+    const messageEnd = definition.hooks.message_end[0];
     const shutdown = definition.hooks.session_shutdown[0];
     const sessionFile = path.join(root, "sessions", "short-lived.jsonl");
     await fs.mkdir(path.dirname(sessionFile), { recursive: true });
@@ -673,11 +609,27 @@ test("automatic self-improve handlers require persisted sessions", async () => {
         getSessionId: () => "non-persisted-session-test",
         getSessionFile: () => sessionFile,
         getLeafId: () => "leaf-short-lived",
+        getBranch: () => [
+          { role: "user", content: "turn 1" },
+          { role: "user", content: "turn 2" },
+          { role: "user", content: "turn 3" },
+          { role: "user", content: "turn 4" },
+        ],
         isPersisted: () => false,
       },
     };
 
-    await context({ type: "context", messages: contextThatPrunes() }, ctx);
+    await messageEnd(
+      {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "done 4" }],
+          stopReason: "stop",
+        },
+      },
+      ctx,
+    );
     await shutdown({}, ctx);
 
     await assert.rejects(() => fs.readFile(queuePath(root), "utf8"), /ENOENT/);
@@ -1278,6 +1230,102 @@ test("synchronous self-improve distillation records terminal result without queu
     assert.match(
       String(history[0].error || ""),
       /maintenance_job_invalid_session_file:/,
+    );
+  });
+});
+
+test("completed turn-window snapshots are not queued again after worker re-entry", async () => {
+  await withTempRoot(async (root) => {
+    const sessionFile = path.join(root, "empty-session.jsonl");
+    await fs.writeFile(sessionFile, "", "utf8");
+    const job = {
+      agentDir: root,
+      sessionFile,
+      trigger: "self_improve:turn_window_review",
+      snapshotKey: "turn-window:4:4:a4",
+    };
+
+    await asyncJobs.runSelfImproveMaintenanceJobNow(job);
+    await asyncJobs.enqueueSelfImproveMaintenanceJob(job);
+
+    const queue = JSON.parse(
+      await fs.readFile(queuePath(root), "utf8").catch((error) => {
+        if (error?.code === "ENOENT") return "[]";
+        throw error;
+      }),
+    );
+    assert.deepEqual(queue, []);
+  });
+});
+
+test("concurrent worker enqueues preserve distinct windows and deduplicate repeats", async () => {
+  await withTempRoot(async (root) => {
+    const sessionFile = path.join(root, "session.jsonl");
+    await fs.writeFile(sessionFile, "", "utf8");
+    await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        [0, 1].map(() =>
+          asyncJobs.enqueueSelfImproveMaintenanceJob({
+            agentDir: root,
+            sessionFile,
+            trigger: "self_improve:turn_window_review",
+            snapshotKey: `turn-window:4:${(index + 1) * 4}:a${index + 1}`,
+          }),
+        ),
+      ).flat(),
+    );
+
+    const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
+    assert.equal(queue.length, 8);
+    assert.equal(new Set(queue.map((job) => job.snapshotKey)).size, 8);
+  });
+});
+
+test("enqueue racing with worker completion preserves each snapshot exactly once", async () => {
+  await withTempRoot(async (root) => {
+    const sessionFile = path.join(root, "empty-session.jsonl");
+    await fs.writeFile(sessionFile, "", "utf8");
+    const makeJob = (snapshotKey: string) => ({
+      agentDir: root,
+      sessionFile,
+      trigger: "self_improve:turn_window_review",
+      snapshotKey,
+    });
+    const first = makeJob("turn-window:4:4:a4");
+    const second = makeJob("turn-window:4:8:a8");
+    await asyncJobs.enqueueSelfImproveMaintenanceJob(first);
+
+    await Promise.all([
+      asyncJobs.processQueuedSelfImproveJobs(root),
+      asyncJobs.enqueueSelfImproveMaintenanceJob(first),
+      asyncJobs.enqueueSelfImproveMaintenanceJob(second),
+    ]);
+
+    const queueText = await fs
+      .readFile(queuePath(root), "utf8")
+      .catch((error) =>
+        error?.code === "ENOENT" ? "[]" : Promise.reject(error),
+      );
+    const queue = JSON.parse(queueText || "[]");
+    const historyText = await fs
+      .readFile(historyPath(root), "utf8")
+      .catch((error) =>
+        error?.code === "ENOENT" ? "" : Promise.reject(error),
+      );
+    const history = historyText
+      .split(/\r?\n/g)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const snapshots = [...queue, ...history].map(
+      (record) => record.snapshotKey,
+    );
+    assert.equal(
+      snapshots.filter((snapshot) => snapshot === first.snapshotKey).length,
+      1,
+    );
+    assert.equal(
+      snapshots.filter((snapshot) => snapshot === second.snapshotKey).length,
+      1,
     );
   });
 });

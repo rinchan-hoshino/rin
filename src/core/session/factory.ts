@@ -27,6 +27,9 @@ export async function openBoundSession(options: {
   sessionFile?: string;
   sessionManager?: any;
   thinkingLevel?: any;
+  tools?: string[];
+  excludeTools?: string[];
+  customTools?: any[];
 }) {
   const { SessionManager } = await loadRinSessionManagerModule();
   const sessionDir = getRuntimeSessionDir(options.cwd, options.agentDir);
@@ -45,6 +48,9 @@ export async function openBoundSession(options: {
     disabledRinCapabilities: options.disabledRinCapabilities,
     sessionManager,
     thinkingLevel: options.thinkingLevel,
+    tools: options.tools,
+    excludeTools: options.excludeTools,
+    customTools: options.customTools,
   });
 }
 

@@ -13,6 +13,14 @@ const runtimeMod = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "runtime.js"))
     .href
 );
+const sessionForkMod = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "session", "fork.js")).href
+);
+const selfImproveMaintainerMod = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "self-improve", "maintainer.js"),
+  ).href
+);
 function waitForTimers() {
   return new Promise((resolve) => setTimeout(resolve, 30));
 }
@@ -24,7 +32,7 @@ function pruningTailPadding(count: number) {
   }));
 }
 
-test("self-improve observes context before the unchanged provider pruning capability", () => {
+test("provider-bound pruning is the sole builtin context-transform capability", () => {
   const definitions = runtimeMod.createRinCapabilityDefinitions({
     cwd: rootDir,
     agentDir: rootDir,
@@ -33,10 +41,52 @@ test("self-improve observes context before the unchanged provider pruning capabi
     .filter((definition) => definition.hooks?.context?.length)
     .map((definition) => definition.name);
 
-  assert.deepEqual(contextCapabilities.slice(-2), [
-    "self_improve",
+  assert.deepEqual(contextCapabilities.slice(-1), [
     "rin_provider_bound_context",
   ]);
+  assert.equal(contextCapabilities.includes("self_improve"), false);
+});
+
+test("self-improve forks preserve raw tool output throughout the active turn window", async () => {
+  const definitions = runtimeMod.createRinCapabilityDefinitions({
+    cwd: rootDir,
+    agentDir: rootDir,
+  });
+  const context = definitions.find(
+    (definition) => definition.name === "rin_provider_bound_context",
+  )?.hooks?.context?.[0];
+  assert.equal(typeof context, "function");
+  const openingToolResult = {
+    role: "toolResult",
+    content: "x".repeat(25_000),
+  };
+  const event = {
+    type: "context",
+    messages: [
+      { role: "user", content: "turn 1" },
+      openingToolResult,
+      ...pruningTailPadding(20),
+      { role: "assistant", content: "done 1" },
+      { role: "user", content: "turn 2" },
+      { role: "assistant", content: "done 2" },
+      { role: "user", content: "turn 3" },
+      { role: "assistant", content: "done 3" },
+      { role: "user", content: "turn 4" },
+      { role: "assistant", content: "done 4" },
+      { role: "user", content: "distill the completed source window" },
+    ],
+  };
+
+  const ordinarilyPruned = await context(event, { cwd: rootDir });
+  assert.equal(ordinarilyPruned.messages[1].content, "old tool result omitted");
+  const preserved = await context(event, {
+    cwd: rootDir,
+    sessionManager: {
+      [sessionForkMod.EPHEMERAL_FORK_PROTECT_SOURCE_WINDOW_TURNS_KEY]: 4,
+    },
+  });
+  assert.equal(preserved, undefined);
+  assert.equal(event.messages[1], openingToolResult);
 });
 
 test("getManagedSkillPaths includes agent memory skills and builtin skills", () => {
@@ -61,6 +111,48 @@ test("Rin core registers the private session note capability", () => {
     note.tools?.map((tool) => tool.name),
     ["note"],
   );
+});
+
+test("self-improve maintainer exposes only read and library-scoped mutation tools", async () => {
+  const agentDir = await fs.mkdtemp("/tmp/rin-self-improve-tools-");
+  const libraryRoot = path.join(agentDir, "self_improve");
+  await fs.mkdir(libraryRoot, { recursive: true });
+  const outsideFile = path.join(agentDir, "outside.txt");
+  const configured = await runtimeMod.createConfiguredAgentSession({
+    cwd: rootDir,
+    agentDir,
+    settingSources: [],
+    extensionPaths: [],
+    noExtensions: true,
+    noSkillDiscovery: true,
+    ...selfImproveMaintainerMod.createSelfImproveMaintainerToolOptions(
+      agentDir,
+    ),
+  });
+  try {
+    assert.deepEqual(configured.session.getActiveToolNames().sort(), [
+      "edit",
+      "read",
+      "write",
+    ]);
+    const write = configured.session.agent.state.tools.find(
+      (tool) => tool.name === "write",
+    );
+    assert.ok(write);
+    await assert.rejects(
+      () =>
+        write.execute(
+          "test-call",
+          { path: outsideFile, content: "forbidden" },
+          new AbortController().signal,
+        ),
+      /self_improve_mutation_outside_library/,
+    );
+  } finally {
+    await configured.session.abort().catch(() => undefined);
+    await configured.runtime.dispose();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
 });
 
 test("Rin delegates compaction generation to native Pi without file XML", async () => {

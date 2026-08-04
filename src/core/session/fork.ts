@@ -17,12 +17,16 @@ function normalizeLeafId(value: unknown) {
 export const EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY = Symbol.for(
   "rin.ephemeralFork.disableRoutineCompaction",
 );
+export const EPHEMERAL_FORK_PROTECT_SOURCE_WINDOW_TURNS_KEY = Symbol.for(
+  "rin.ephemeralFork.protectSourceWindowTurns",
+);
 
 type ForkSessionOptions = {
   persist?: boolean;
   leafId?: string;
   preserveSourceSessionId?: boolean;
   disableRoutineCompaction?: boolean;
+  protectSourceWindowTurns?: number;
 };
 
 function normalizeForkOptions(options: ForkSessionOptions = {}) {
@@ -65,6 +69,7 @@ function createEphemeralForkManager(
   leafId: string | undefined,
   preserveSourceSessionId: boolean,
   disableRoutineCompaction: boolean,
+  protectSourceWindowTurns: number,
 ) {
   if (
     typeof SessionManager?.open !== "function" ||
@@ -104,6 +109,10 @@ function createEphemeralForkManager(
   if (disableRoutineCompaction) {
     manager[EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY] = true;
   }
+  if (protectSourceWindowTurns > 0) {
+    manager[EPHEMERAL_FORK_PROTECT_SOURCE_WINDOW_TURNS_KEY] =
+      protectSourceWindowTurns;
+  }
   buildPiSessionManagerIndex(manager);
   return manager;
 }
@@ -130,7 +139,8 @@ export function forkSessionManagerCompat(
   if (
     capabilities.optionAware &&
     !normalizedOptions.preserveSourceSessionId &&
-    !normalizedOptions.disableRoutineCompaction
+    !normalizedOptions.disableRoutineCompaction &&
+    !normalizedOptions.protectSourceWindowTurns
   ) {
     return SessionManager.forkFrom(
       sourcePath,
@@ -155,5 +165,9 @@ export function forkSessionManagerCompat(
     normalizedOptions.leafId,
     normalizedOptions.preserveSourceSessionId,
     normalizedOptions.disableRoutineCompaction === true,
+    Number.isInteger(normalizedOptions.protectSourceWindowTurns) &&
+      Number(normalizedOptions.protectSourceWindowTurns) > 0
+      ? Number(normalizedOptions.protectSourceWindowTurns)
+      : 0,
   );
 }

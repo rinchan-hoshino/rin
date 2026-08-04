@@ -11,7 +11,7 @@ This module owns distilled guidance that changes future agent behavior:
 - always-on prompt baselines under `~/.rin/self_improve/prompts`
 - agent-managed reusable skills under `~/.rin/self_improve/skills`
 - onboarding for resident self-improve prompts
-- context-prune and session-shutdown self-improve review; when an eligible user session is about to omit old tool output from provider-bound context, self-improve review is attempted first, deduplicated per pruning boundary, and failures do not block the unchanged pruning path
+- turn-window and session-shutdown self-improve review; each full eligible user-turn window queues one daemon-owned review using the same window size as provider-bound pruning, pins the completed source leaf, and preserves every raw message and tool result in that window
 
 It does not own original session-history recall. Original evidence and retrieval belong to the `memory` module.
 

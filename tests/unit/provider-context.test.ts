@@ -100,6 +100,36 @@ test("provider-bound context keeps recent four user turns' tool results", () => 
   assert.equal(providerMessages[6], recentToolResult);
 });
 
+test("provider-bound context can preserve every raw message in the active turn window", () => {
+  const openingToolResult = {
+    role: "toolResult",
+    content: "x".repeat(25_000),
+  };
+  const messages = [
+    { role: "user", content: "turn 1" },
+    openingToolResult,
+    ...tailPadding(20),
+    { role: "assistant", content: "done 1" },
+    { role: "user", content: "turn 2" },
+    { role: "assistant", content: "done 2" },
+    { role: "user", content: "turn 3" },
+    { role: "assistant", content: "done 3" },
+    { role: "user", content: "turn 4" },
+    { role: "assistant", content: "done 4" },
+  ];
+
+  assert.equal(
+    providerContext.buildProviderBoundContextMessages(messages)[1].content,
+    "old tool result omitted",
+  );
+  assert.equal(
+    providerContext.buildProviderBoundContextMessages(messages, {
+      protectRecentTurnContents: true,
+    })[1],
+    openingToolResult,
+  );
+});
+
 for (const stopReason of ["error", "aborted"] as const) {
   test(`provider-bound context keeps ${stopReason} assistant tool calls and their tool results`, () => {
     const incompleteAssistant = {

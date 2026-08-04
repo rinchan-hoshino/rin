@@ -1,10 +1,9 @@
-import { pruneSessionContextMessages } from "./session-pruning.js";
+import {
+  pruneSessionContextMessages,
+  type SessionPruningOptions,
+} from "./session-pruning.js";
 
-type ProviderBoundContextOptions = {
-  protectRecentTurns?: number;
-  protectRecentMessages?: number;
-  cwd?: string;
-};
+type ProviderBoundContextOptions = SessionPruningOptions;
 
 type EstimateContextTokens = (messages: any[]) => any;
 

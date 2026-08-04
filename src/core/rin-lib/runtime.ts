@@ -28,7 +28,10 @@ import {
   createRinCapabilitySet,
 } from "./capability-session.js";
 import { compileSelfImproveSync } from "../self-improve/store.js";
-import { EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY } from "../session/fork.js";
+import {
+  EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY,
+  EPHEMERAL_FORK_PROTECT_SOURCE_WINDOW_TURNS_KEY,
+} from "../session/fork.js";
 import { buildSystemPromptSelfImprove } from "../self-improve/format.js";
 import {
   formatPromptContextSystemPromptBlock,
@@ -88,10 +91,21 @@ export function createRinCapabilityDefinitions(
       name: "rin_provider_bound_context",
       hooks: {
         context: [
-          (event: any, ctx: any) =>
-            buildProviderBoundContextEvent(event, {
+          (event: any, ctx: any) => {
+            const protectedSourceWindowTurns = Number(
+              ctx?.sessionManager?.[
+                EPHEMERAL_FORK_PROTECT_SOURCE_WINDOW_TURNS_KEY
+              ] || 0,
+            );
+            return buildProviderBoundContextEvent(event, {
               cwd: String(ctx?.cwd || options.cwd || process.cwd()),
-            }),
+              protectRecentTurns:
+                protectedSourceWindowTurns > 0
+                  ? protectedSourceWindowTurns + 1
+                  : undefined,
+              protectRecentTurnContents: protectedSourceWindowTurns > 0,
+            });
+          },
         ],
       },
     },
@@ -1205,6 +1219,7 @@ export async function createConfiguredAgentSession(
       sessionName?: string;
       modelRef?: string;
       thinkingLevel?: any;
+      customTools?: any[];
     } = {},
 ) {
   const agentRuntimeModule = await loadRinAgentRuntime();
@@ -1336,7 +1351,10 @@ export async function createConfiguredAgentSession(
       tools: options.tools,
       excludeTools: options.excludeTools,
       noTools: options.noTools,
-      customTools: rinCapabilities.getToolDefinitions(),
+      customTools: [
+        ...rinCapabilities.getToolDefinitions(),
+        ...(options.customTools || []),
+      ],
     });
     sessionRef.current = result.session;
     if (sessionManager?.[EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY]) {

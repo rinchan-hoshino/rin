@@ -8,6 +8,7 @@ import type { Model } from "@earendil-works/pi-ai";
 const HOME_DIR = os.homedir();
 
 import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
+import { RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS } from "../rin-lib/session-pruning.js";
 import { openBoundSession } from "../session/factory.js";
 import { forkSessionManagerCompat } from "../session/fork.js";
 import { readSessionMetadata } from "../session/metadata.js";
@@ -15,12 +16,21 @@ import { resolveAgentDir } from "./agent-dir.js";
 import { safeString } from "./core/utils.js";
 import { maintenanceLockPath } from "./paths.js";
 import { buildSelfImproveReviewPrompt } from "./prompt.js";
+import { createSelfImproveMutationTools } from "./restricted-tools.js";
 import {
   beginSelfImproveAuditObservation,
   completeSelfImproveAuditObservation,
 } from "./audit-observer.js";
 
 export { buildSelfImproveReviewPrompt };
+
+export function createSelfImproveMaintainerToolOptions(agentDir: string) {
+  return {
+    tools: ["read", "write", "edit"],
+    customTools: createSelfImproveMutationTools(agentDir),
+    disabledRinCapabilities: ["self_improve", "task", "chat", "todo", "note"],
+  };
+}
 
 type ExtensionCtxLike = {
   model?: Model<any> | null;
@@ -62,6 +72,10 @@ async function createForkedSessionManager(options: {
         // threshold-based compaction would add an extra model turn; keep
         // compaction for provider-error/context-overflow recovery.
         disableRoutineCompaction: true,
+        // The completed pruning window is the evidence boundary. Provider
+        // context preparation may omit older windows, but it must preserve
+        // every raw message and tool result in these recent turns.
+        protectSourceWindowTurns: RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS,
       },
     ),
   };
@@ -82,7 +96,7 @@ async function runForkedSessionPrompt(options: {
     cwd: fork.cwd,
     agentDir: options.agentDir,
     additionalExtensionPaths: options.additionalExtensionPaths,
-    disabledRinCapabilities: ["self_improve"],
+    ...createSelfImproveMaintainerToolOptions(options.agentDir),
     sessionManager: fork.sessionManager,
     // Keep the source session's model options so provider prefix caching
     // matches a normal appended turn on the same conversation.

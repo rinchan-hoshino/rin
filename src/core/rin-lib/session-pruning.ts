@@ -7,9 +7,10 @@ export const RIN_SESSION_PRUNING_PROTECT_RECENT_MESSAGES = 16;
 export const RIN_SESSION_PRUNING_MINIMUM_RECLAIM_TOKENS = 4096;
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT =
   "old tool result omitted";
-type SessionPruningOptions = {
+export type SessionPruningOptions = {
   protectRecentTurns?: number;
   protectRecentMessages?: number;
+  protectRecentTurnContents?: boolean;
   cwd?: string;
 };
 
@@ -209,6 +210,7 @@ function collectPerTurnPruneIndexes(
   currentPruneIndexes: Set<number>,
   protectRecentTurns: number,
   protectRecentMessages: number,
+  protectRecentTurnContents: boolean,
   protectedToolResultIds: Set<string>,
 ) {
   const ranges = collectTurnRanges(messages);
@@ -221,18 +223,20 @@ function collectPerTurnPruneIndexes(
     if (index < oldBoundary) indexes.add(index);
   }
 
-  for (const range of recentRanges) {
-    const candidateIndexes = indexesBetween(
-      range.start,
-      Math.max(range.start, range.end - protectRecentMessages),
-    );
-    for (const index of collectMessageTailPruneIndexes(
-      messages,
-      candidateIndexes,
-      protectedToolResultIds,
-      currentPruneIndexes,
-    )) {
-      indexes.add(index);
+  if (!protectRecentTurnContents) {
+    for (const range of recentRanges) {
+      const candidateIndexes = indexesBetween(
+        range.start,
+        Math.max(range.start, range.end - protectRecentMessages),
+      );
+      for (const index of collectMessageTailPruneIndexes(
+        messages,
+        candidateIndexes,
+        protectedToolResultIds,
+        currentPruneIndexes,
+      )) {
+        indexes.add(index);
+      }
     }
   }
   return indexes;
@@ -274,6 +278,7 @@ function createProviderBoundPrunePlan(
     currentPruneIndexes,
     protectRecentTurns,
     protectRecentMessages,
+    options.protectRecentTurnContents === true,
     protectedToolResultIds,
   );
   let changed = false;
