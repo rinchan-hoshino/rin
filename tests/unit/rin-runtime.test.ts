@@ -32,6 +32,22 @@ test("getManagedSkillPaths includes agent memory skills and builtin skills", () 
   ]);
 });
 
+test("Rin core registers the private session note capability", () => {
+  const definitions = runtimeMod.createRinCapabilityDefinitions({
+    cwd: "/tmp/rin-note-capability",
+    agentDir: "/tmp/rin-note-capability-agent",
+    getThinkingLevel: () => "medium",
+    sendMessage: () => {},
+  });
+
+  const note = definitions.find((definition) => definition.name === "note");
+  assert.ok(note);
+  assert.deepEqual(
+    note.tools?.map((tool) => tool.name),
+    ["note"],
+  );
+});
+
 test("Rin delegates compaction generation to native Pi without file XML", async () => {
   const nativeResult = {
     summary: "native summary",

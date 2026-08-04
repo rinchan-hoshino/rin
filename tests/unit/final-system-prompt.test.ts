@@ -155,6 +155,26 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     baseSystemPrompt.includes("Manage the current session todo checklist"),
     false,
   );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "Use note for model-only scratch work that should survive compaction within the current session",
+    ),
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "Use note read with Pi-native optional offset and limit",
+    ),
+  );
+  assert.equal(
+    baseSystemPrompt.includes("always provide both offset and limit"),
+    false,
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "Use write for full replacement, edit for exact unique non-overlapping replacements, and append to add exact text at the end",
+    ),
+  );
+  assert.equal(baseSystemPrompt.includes("/notes"), false);
   assert.equal(baseSystemPrompt.includes("Markdown rich-object syntax"), false);
   assert.equal(
     baseSystemPrompt.includes("Native at: [@name](at:<platform-user-id>)"),

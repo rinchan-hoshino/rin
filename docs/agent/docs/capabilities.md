@@ -13,6 +13,7 @@ Use this page as Rin's capability index. It tells agents what runtime surfaces e
 | Scheduled tasks                          | Reminders, delayed follow-ups, recurring checks, conditional automation, or work after the current turn                       | Rin Agent SDK `rin.tasks.*`                                 | `docs/agent-sdk.md`, `docs/scheduled-tasks.md`                 |
 | Chat bridge                              | Agent-owned chat adapter setup, outbound chat operations, stored chat inspection, identity/trust data, or detached chat turns | `settings.json -> chat`, Rin Agent SDK, chat message store  | `docs/chat-bridge.md`, `docs/rich-text-output-format.md`       |
 | Todo                                     | Current-branch execution checklist during multi-step work                                                                     | `todo` tool, `/todos`                                       | live tool schema                                               |
+| Note                                     | Model-only scratch work that must survive compaction within the current session branch                                        | `note` tool                                                 | live tool schema                                               |
 | Browser/computer/mobile/search operation | Web, desktop, mobile, or search work that needs the owner's current practice workflow                                         | live tool list, practice docs                               | `practices/README.md`                                          |
 | Background extensions                    | Trusted long-running async extensions or external event/memory providers                                                      | `settings.json -> rinExtensions.backgroundServices`         | `docs/builtin-extensions.md`                                   |
 | Initialization                           | Owner asks to initialize, reset, or establish preferences                                                                     | initialization prompt flow                                  | `docs/initialization.md`                                       |
@@ -45,6 +46,10 @@ Read `docs/memory-layering.md` before choosing a destination. Read `docs/self-im
 ## Core todo
 
 The core todo capability registers the `todo` tool and `/todos` command from Rin core. Use it for current-branch execution checklists when the live tool list includes `todo`.
+
+## Core note
+
+The core `note` tool gives the model a scratch text buffer scoped to the current session branch. Note snapshots are stored in session custom entries, so they survive compaction and follow branch reconstruction without becoming cross-session memory. `read`, `write`, and `edit` inherit Pi's public tool schemas, execution behavior, and results over virtual note storage—including optional read `offset`/`limit` and native edit diffs—while Rin owns the action wrapper and exact-text `append`. Rin does not provide a slash command or a dedicated user-facing note view; ordinary tool rendering remains unchanged.
 
 ## Chat bridge
 

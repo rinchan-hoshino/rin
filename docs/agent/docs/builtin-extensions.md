@@ -23,6 +23,7 @@ These capabilities are native Rin behavior rather than optional Pi extensions:
 - frozen session runtime: stable effective system prompt within a session until refresh or reload.
 - TUI input compatibility: Rin-owned compatibility handling for interactive input.
 - todo: `todo` tool and `/todos` command.
+- note: model-only session-branch scratch notes that survive compaction.
 - task: scheduled task workflows through the local Rin Agent SDK.
 - chat: agent-owned adapter setup, SDK/file workflows, stored-message lookup, and identity/trust data paths.
 - token usage: telemetry under `~/.rin/data/core/usage/usage.db` and the `rin usage` dashboard.
@@ -42,6 +43,10 @@ Rin core always provides todo support. It registers:
 - `/todos`: interactive TUI command for the current checklist.
 
 Todo state is checkpointed in Pi session custom entries and reconstructed from the current session branch, so forks and session branches can recover the matching checklist without relying on context-visible tool-result details or compaction summaries. In daemon/RPC chat turns, Rin may continue hidden work when a final answer appears while todo items remain incomplete; hidden continuations end when todos complete, when todo state stops changing, or after the continuation limit.
+
+## Core note
+
+Rin core registers the `note` tool for model-only scratch text. Its snapshots use session custom entries, preserving the selected branch across compaction without creating cross-session memory. Reads, whole-note writes, and edits reuse Pi's public schemas, execution, and results through virtual operations; read ranges remain Pi-native and optional, and edit diffs are returned unchanged. Rin adds only the note action wrapper and exact-text append. It has no slash command or dedicated user-facing display; standard tool-call rendering is not suppressed.
 
 ## Bundled foreground extensions
 

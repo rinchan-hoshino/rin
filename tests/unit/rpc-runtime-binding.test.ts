@@ -409,6 +409,12 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
     `expected wrapped tool result lines, got ${JSON.stringify(longToolResultLines)}`,
   );
 
+  const noteTool = session.getToolDefinition("note");
+  assert.ok(noteTool, "note should be available in the RPC frontend");
+  assert.equal(noteTool.renderCall, undefined);
+  assert.equal(noteTool.renderResult, undefined);
+  assert.equal(noteTool.renderShell, undefined);
+
   const todoTool = session.getToolDefinition("todo");
   assert.equal(todoTool.renderShell, undefined);
 
@@ -476,6 +482,7 @@ test("rpc zero-extension frontend provides Pi's custom entry renderer lookup", (
 
   assert.equal(session.extensionOptions.noExtensions, true);
   assert.ok(session.getToolDefinition("todo"));
+  assert.ok(session.getToolDefinition("note"));
   assert.ok(session.getToolDefinition("recall"));
   assert.equal(typeof session.extensionRunner.getEntryRenderer, "function");
   assert.equal(
