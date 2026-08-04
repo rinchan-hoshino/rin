@@ -548,6 +548,22 @@ test("local candidate releases keep pinned sources independent of moving main", 
   );
 });
 
+test("local nightly recovery resumes bootstrap without minting a metadata-ref release", () => {
+  const content = readLocalPublisher();
+  const sourceStart = content.indexOf("function releaseSourceChannel");
+  const sourceEnd = content.indexOf("function releaseCandidateChannel");
+  const sourceChannel = content.slice(sourceStart, sourceEnd);
+
+  assert.match(content, /function completedSourceRelease/);
+  assert.match(content, /changedFiles !== "release-manifest\.json"/);
+  assert.match(content, /headParent !== release\.ref/);
+  assert.ok(
+    sourceChannel.indexOf("completedSourceRelease(") <
+      sourceChannel.indexOf("plan-release.ts"),
+  );
+  assert.match(sourceChannel, /recovered: true/);
+});
+
 test("local release executor leaves dependency auditing to integration", () => {
   const content = readLocalPublisher();
   assert.doesNotMatch(content, /npm\(\["audit"/);

@@ -216,6 +216,36 @@ function ghReleaseExists(root, repository, tag) {
   return result.status === 0;
 }
 
+function completedSourceRelease(root, channel, manifest, head) {
+  if (channel !== "nightly") return null;
+  const release = manifest.nightly;
+  if (!trim(release?.version) || !trim(release?.ref)) return null;
+  const headParent = git(["rev-parse", "HEAD^"], { cwd: root, capture: true });
+  const changedFiles = git(["diff", "--name-only", `${release.ref}..${head}`], {
+    cwd: root,
+    capture: true,
+  });
+  if (headParent !== release.ref || changedFiles !== "release-manifest.json") {
+    return null;
+  }
+  const expectedMessage = `chore(release): publish nightly ${release.version}`;
+  const message = git(["log", "-1", "--pretty=%s", head], {
+    cwd: root,
+    capture: true,
+  });
+  const repository = repositorySlug(root);
+  const tag = `v${release.version}`;
+  if (
+    message !== expectedMessage ||
+    !release.assets?.["linux-x64"] ||
+    !remoteHasTag(root, tag) ||
+    !ghReleaseExists(root, repository, tag)
+  ) {
+    return null;
+  }
+  return release;
+}
+
 function publishGitHubBundle(
   root,
   repository,
@@ -351,6 +381,25 @@ function updateManifest(
 function releaseSourceChannel(root, channel, noPublish, tempRoot) {
   const manifest = readJson(path.join(root, "release-manifest.json"));
   const ref = git(["rev-parse", "HEAD"], { cwd: root, capture: true });
+  const completed = noPublish
+    ? null
+    : completedSourceRelease(root, channel, manifest, ref);
+  if (completed) {
+    const message = `chore(release): publish nightly ${completed.version}`;
+    publishBootstrap(
+      root,
+      git(["remote", "get-url", "origin"], { cwd: root, capture: true }),
+      message,
+      tempRoot,
+    );
+    return {
+      channel,
+      version: completed.version,
+      ref: completed.ref,
+      published: true,
+      recovered: true,
+    };
+  }
   const plan = JSON.parse(
     tsx(root, "plan-release.ts", ["--channel", channel, "--ref", ref], {
       capture: true,
