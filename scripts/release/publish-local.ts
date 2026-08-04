@@ -220,23 +220,48 @@ function completedSourceRelease(root, channel, manifest, head) {
   if (channel !== "nightly") return null;
   const release = manifest.nightly;
   if (!trim(release?.version) || !trim(release?.ref)) return null;
-  const headParent = git(["rev-parse", "HEAD^"], { cwd: root, capture: true });
-  const changedFiles = git(["diff", "--name-only", `${release.ref}..${head}`], {
+  const expectedMessage = `chore(release): publish nightly ${release.version}`;
+  const metadataCommit = git(
+    [
+      "log",
+      "-1",
+      "--format=%H",
+      "--fixed-strings",
+      `--grep=${expectedMessage}`,
+      head,
+    ],
+    { cwd: root, capture: true },
+  );
+  if (!metadataCommit) return null;
+  const metadataParent = git(["rev-parse", `${metadataCommit}^`], {
     cwd: root,
     capture: true,
   });
-  if (headParent !== release.ref || changedFiles !== "release-manifest.json") {
+  const metadataFiles = git(
+    ["diff", "--name-only", `${metadataParent}..${metadataCommit}`],
+    { cwd: root, capture: true },
+  );
+  const recoveryFiles = git(
+    ["diff", "--name-only", `${metadataCommit}..${head}`],
+    { cwd: root, capture: true },
+  )
+    .split("\n")
+    .filter(Boolean);
+  const releasePathOnly = recoveryFiles.every(
+    (file) =>
+      file.startsWith("scripts/release/") ||
+      file === "tests/e2e/release-scripts.test.ts",
+  );
+  if (
+    metadataParent !== release.ref ||
+    metadataFiles !== "release-manifest.json" ||
+    !releasePathOnly
+  ) {
     return null;
   }
-  const expectedMessage = `chore(release): publish nightly ${release.version}`;
-  const message = git(["log", "-1", "--pretty=%s", head], {
-    cwd: root,
-    capture: true,
-  });
   const repository = repositorySlug(root);
   const tag = `v${release.version}`;
   if (
-    message !== expectedMessage ||
     !release.assets?.["linux-x64"] ||
     !remoteHasTag(root, tag) ||
     !ghReleaseExists(root, repository, tag)
