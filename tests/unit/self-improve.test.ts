@@ -297,7 +297,7 @@ test("processing normalizes revised full-slot content and enforces limits", asyn
   );
 });
 
-test("self-improve queues one review when each shared pruning turn window ends", async () => {
+test("self-improve queues one review after Pi persists each shared turn window final", async () => {
   const queued: any[] = [];
   let branch: any[] = [];
   const definition = selfImproveIndex.default({
@@ -324,6 +324,8 @@ test("self-improve queues one review when each shared pruning turn window ends",
             role: "assistant",
             content: [{ type: "text", text: `done ${turn}` }],
             stopReason: "stop",
+            responseId: `response-${turn}`,
+            timestamp: turn,
           },
         },
       ];
@@ -342,36 +344,36 @@ test("self-improve queues one review when each shared pruning turn window ends",
       isPersisted: () => true,
     },
   };
-  const emitFinal = async (turn: number) =>
-    messageEnd(
-      {
-        type: "message_end",
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: `done ${turn}` }],
-          stopReason: "stop",
-        },
-      },
-      ctx,
-    );
+  const emitFinal = async (message: any) =>
+    messageEnd({ type: "message_end", message }, ctx);
+  const settleDeferredReview = () =>
+    new Promise<void>((resolve) => setImmediate(resolve));
 
   branch = makeBranch(3);
-  await emitFinal(3);
+  await emitFinal(branch.at(-1).message);
+  await settleDeferredReview();
   assert.equal(queued.length, 0);
 
-  branch = makeBranch(4);
-  await emitFinal(4);
+  const fourthTurnBranch = makeBranch(4);
+  const fourthFinal = fourthTurnBranch.at(-1).message;
+  branch = fourthTurnBranch.slice(0, -1);
+  await emitFinal(fourthFinal);
+  assert.equal(queued.length, 0, "message_end must not wait for persistence");
+  branch = makeBranch(5);
+  await settleDeferredReview();
   assert.equal(queued.length, 1);
   assert.equal(queued[0].trigger, "self_improve:turn_window_review");
   assert.equal(queued[0].leafId, "a4");
   assert.equal(queued[0].snapshotKey, "turn-window:4:4:a4");
 
   branch = makeBranch(5);
-  await emitFinal(5);
+  await emitFinal(branch.at(-1).message);
+  await settleDeferredReview();
   assert.equal(queued.length, 1);
 
   branch = makeBranch(8);
-  await emitFinal(8);
+  await emitFinal(branch.at(-1).message);
+  await settleDeferredReview();
   assert.equal(queued.length, 2);
   assert.equal(queued[1].leafId, "a8");
   assert.equal(queued[1].snapshotKey, "turn-window:4:8:a8");

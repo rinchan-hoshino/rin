@@ -137,29 +137,65 @@ function countUserTurns(branch: any[]) {
   }, 0);
 }
 
-function resolveCompletedTurnWindow(branch: any[]) {
-  const userTurns = countUserTurns(branch);
-  const windowTurns = RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS;
-  if (userTurns <= 0 || userTurns % windowTurns !== 0) return undefined;
-  let closingUserIndex = -1;
-  let countedUsers = 0;
-  for (let index = 0; index < branch.length; index += 1) {
-    if (sessionEntryMessage(branch[index])?.role !== "user") continue;
-    countedUsers += 1;
-    if (countedUsers === userTurns) closingUserIndex = index;
+function sameFinalMessage(candidate: any, expected: any) {
+  if (candidate === expected) return true;
+  const candidateResponseId = normalizedText(candidate?.responseId);
+  const expectedResponseId = normalizedText(expected?.responseId);
+  if (candidateResponseId && expectedResponseId) {
+    return candidateResponseId === expectedResponseId;
   }
-  let closingAssistantLeafId = "";
+  const candidateTimestamp = normalizedText(candidate?.timestamp);
+  const expectedTimestamp = normalizedText(expected?.timestamp);
+  if (!candidateTimestamp || candidateTimestamp !== expectedTimestamp) {
+    return false;
+  }
+  return (
+    normalizedText(candidate?.stopReason) ===
+      normalizedText(expected?.stopReason) &&
+    JSON.stringify(candidate?.content) === JSON.stringify(expected?.content)
+  );
+}
+
+function findClosingAssistantIndex(branch: any[], closingMessage?: any) {
+  if (closingMessage) {
+    for (let index = branch.length - 1; index >= 0; index -= 1) {
+      const message = sessionEntryMessage(branch[index]);
+      if (
+        isAssistantFinalMessage(message) &&
+        sameFinalMessage(message, closingMessage)
+      ) {
+        return index;
+      }
+    }
+    return -1;
+  }
+  let closingUserIndex = -1;
+  for (let index = branch.length - 1; index >= 0; index -= 1) {
+    if (sessionEntryMessage(branch[index])?.role !== "user") continue;
+    closingUserIndex = index;
+    break;
+  }
   for (let index = closingUserIndex + 1; index < branch.length; index += 1) {
-    const entry = branch[index];
-    if (
-      normalizedText(entry?.id) &&
-      isAssistantFinalMessage(sessionEntryMessage(entry))
-    ) {
-      closingAssistantLeafId = normalizedText(entry.id);
-      break;
+    if (isAssistantFinalMessage(sessionEntryMessage(branch[index]))) {
+      return index;
     }
   }
+  return -1;
+}
+
+function resolveCompletedTurnWindow(branch: any[], closingMessage?: any) {
+  const closingAssistantIndex = findClosingAssistantIndex(
+    branch,
+    closingMessage,
+  );
+  if (closingAssistantIndex < 0) return undefined;
+  const closingAssistantLeafId = normalizedText(
+    branch[closingAssistantIndex]?.id,
+  );
   if (!closingAssistantLeafId) return undefined;
+  const userTurns = countUserTurns(branch.slice(0, closingAssistantIndex + 1));
+  const windowTurns = RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS;
+  if (userTurns <= 0 || userTurns % windowTurns !== 0) return undefined;
   return {
     leafId: closingAssistantLeafId,
     trigger: SELF_IMPROVE_WINDOW_TRIGGER,
@@ -188,13 +224,19 @@ export default function selfImproveModule(
           if (!isAssistantFinalMessage(event?.message)) return;
           const meta = readSessionMetadata(ctx);
           if (!meta.sessionFile || !meta.sessionPersisted) return;
-          const completedWindow = resolveCompletedTurnWindow(
-            ctx?.sessionManager?.getBranch?.() || [],
-          );
-          if (!completedWindow) return;
-          await safelyEnqueueSelfImproveReview(enqueueJob, ctx, {
-            sessionFile: meta.sessionFile,
-            ...completedWindow,
+          const closingMessage = event.message;
+          setImmediate(() => {
+            try {
+              const completedWindow = resolveCompletedTurnWindow(
+                ctx?.sessionManager?.getBranch?.() || [],
+                closingMessage,
+              );
+              if (!completedWindow) return;
+              void safelyEnqueueSelfImproveReview(enqueueJob, ctx, {
+                sessionFile: meta.sessionFile,
+                ...completedWindow,
+              });
+            } catch {}
           });
         },
       ],
