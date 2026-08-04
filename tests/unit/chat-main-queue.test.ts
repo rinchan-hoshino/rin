@@ -38,7 +38,16 @@ test("chat main consumes inbound help messages through the inbox path only once"
         trusted: ["trusted"],
       });
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({
+        commandRows: [
+          { name: "help", description: "Show available commands" },
+          { name: "abort", description: "Abort the active turn" },
+          { name: "new", description: "Start a new session" },
+          { name: "compact", description: "Compact the current context" },
+          { name: "reload", description: "Reload extensions, skills, prompts, and themes" },
+          { name: "usage", description: "Show usage and quota status" },
+        ],
+      });
       let sentCount = 0;
       app.bots.push({
         platform: "telegram",
@@ -159,7 +168,7 @@ test("chat main lets an authorized /abort bypass a running same-chat turn", asyn
         abortCalls += 1;
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [{ name: "abort" }] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -255,7 +264,7 @@ test("chat send reports adapter dispatch as pending until delivery settles", asy
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const outboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js")).href);
-      const bridge = await mainMod.startChatBridge({ hosted: true });
+      const bridge = await mainMod.startChatBridge({ hosted: true, commandRows: [] });
       bridge.app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -393,7 +402,7 @@ test("telegram topic commands use the thread-scoped chat key", async () => {
         return { handled: true, text: "ok" };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [{ name: "usage" }] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -485,7 +494,7 @@ test("chat main ignores private help commands from untrusted senders", async () 
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       let sentCount = 0;
       app.bots.push({
         platform: "telegram",
@@ -600,6 +609,7 @@ test("chat startup does not restore inbox work before adapters are ready", async
       });
       const starting = mainMod.startChatBridge({
         hosted: true,
+        commandRows: [],
         chatAdapterProviders: [{
           key: "delayed",
           name: "Delayed",
@@ -703,7 +713,7 @@ test("chat main periodically reclaims expired coordination without terminalizing
         throw new Error("processing_fixture_not_ready");
       }
 
-      const bridge = await mainMod.startChatBridge();
+      const bridge = await mainMod.startChatBridge({ commandRows: [] });
       try {
         if (inbox.listRunningChatInboxItems(agentDir).length !== 9) {
           throw new Error("startup_recovered_unexpired_lease");
@@ -788,7 +798,7 @@ test("chat main records record-only chat messages without starting an agent turn
         return { retry: false };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -891,7 +901,7 @@ test("chat main records record-only chat commands without running command handle
         return { retry: false };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -1000,7 +1010,7 @@ test("chat main applies per-chat model options to inbound prompt inbox_jobs", as
         return { finalText: "ok" };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -1090,7 +1100,7 @@ test("chat runTurn lets explicit model options override per-chat defaults", asyn
         return { finalText: "ok" };
       };
 
-      const bridge = await mainMod.startChatBridge();
+      const bridge = await mainMod.startChatBridge({ commandRows: [] });
       await bridge.runTurn({
         chatKey: "telegram/1:2",
         text: "explicit override",
@@ -1174,7 +1184,7 @@ test("chat main silently drops the removed private /session command", async () =
         return { retry: false };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       let sentCount = 0;
       app.bots.push({
         platform: "telegram",
@@ -1271,7 +1281,7 @@ test("chat main reports unmatched slash commands in owner-only Lark groups", asy
         return { retry: false };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       let sentCount = 0;
       app.bots.push({
         platform: "lark",
@@ -1390,7 +1400,7 @@ test("chat main silently consumes unmatched group slash commands", async () => {
         return { retry: false };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -1481,7 +1491,7 @@ test("chat main lets trusted group commands run without owner-present checks or 
         return { handled: true, text: "ok" };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [{ name: "usage" }] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -1604,7 +1614,7 @@ test("chat main forwards command sender identity without reply session binding",
         sessionFile: repliedSessionFile,
       });
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [{ name: "new" }] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -1694,7 +1704,7 @@ test("chat main ignores removed /auth private commands from untrusted senders wi
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       let sentCount = 0;
       app.bots.push({
         platform: "telegram",
@@ -1833,7 +1843,7 @@ test("chat main does not retry a queued prompt while the controller is already h
         };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -1947,7 +1957,7 @@ test("chat main finalizes once after controller reinbox_jobs from canonical term
         return { finalText: "ordinary final", sessionFile: "/tmp/ordinary-final.jsonl" };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -2077,7 +2087,7 @@ test("chat main leaves daemon startup failure pending without an error outbox", 
         };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       let sentCount = 0;
       app.bots.push({
         platform: "telegram",
@@ -2314,6 +2324,7 @@ test("chat main fails closed for unverifiable actionable admissions", async () =
       };
       const bridgeOptions = {
         hosted: true,
+        commandRows: [],
         chatAdapterProviders: [{
           key: "legacy",
           name: "Legacy",
@@ -2479,7 +2490,7 @@ test("hosted chat bridge shutdown preserves active inbox_jobs for daemon recover
         disposeCalls += 1;
       };
 
-      const bridge = await mainMod.startChatBridge({ hosted: true });
+      const bridge = await mainMod.startChatBridge({ hosted: true, commandRows: [] });
       bridge.app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -2577,7 +2588,7 @@ test("hard Chat process death leaves the claimed inbox lifecycle active", async 
         runTurnCalls += 1;
         await new Promise(() => {});
       };
-      const bridge = await mainMod.startChatBridge({ hosted: true });
+      const bridge = await mainMod.startChatBridge({ hosted: true, commandRows: [] });
       bridge.app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -2632,7 +2643,7 @@ test("hard Chat process death leaves the claimed inbox lifecycle active", async 
         resumeTurnCalls += 1;
         throw new Error("uncommitted turn must use ordinary prompt RPC");
       };
-      const bridge = await mainMod.startChatBridge({ hosted: true });
+      const bridge = await mainMod.startChatBridge({ hosted: true, commandRows: [] });
       bridge.app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -2716,7 +2727,7 @@ test("chat main resumes a backend-accepted turn after restart without another pr
         internal: { async sendChatAction() {} },
       });
 
-      const first = await mainMod.startChatBridge({ hosted: true });
+      const first = await mainMod.startChatBridge({ hosted: true, commandRows: [] });
       first.app.bots.push(createBot());
       first.app.emit("message", {
         platform: "telegram",
@@ -2742,7 +2753,7 @@ test("chat main resumes a backend-accepted turn after restart without another pr
       }
       await first.stop();
 
-      const second = await mainMod.startChatBridge({ hosted: true });
+      const second = await mainMod.startChatBridge({ hosted: true, commandRows: [] });
       second.app.bots.push(createBot());
       await new Promise((resolve) => setTimeout(resolve, 1000));
       await second.stop();
@@ -2868,7 +2879,7 @@ test("chat startup honors terminal outbox ownership before orphan inbox recovery
         throw new Error("inbound_replayed_after_terminal_commit");
       };
 
-      const bridge = await mainMod.startChatBridge({ hosted: true });
+      const bridge = await mainMod.startChatBridge({ hosted: true, commandRows: [] });
       bridge.app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -2995,7 +3006,7 @@ test("chat main retries an uncommitted turn through ordinary prompt RPC", async 
         throw new Error("uncommitted turn must use ordinary prompt RPC");
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       let sentCount = 0;
       app.bots.push({
         platform: "telegram",
@@ -3126,7 +3137,7 @@ test("chat main passes quoted reply rich text through one normal prompt submissi
         return { retry: false };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -3253,7 +3264,7 @@ test("chat main omits quote rich text when quoting the latest assistant message"
         return { retry: false };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -3379,7 +3390,7 @@ test("chat main inlines own unsessioned quoted content into the prompt", async (
         return { retry: false };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -3505,7 +3516,7 @@ test("chat main keeps another sender's unsessioned quoted content lazy", async (
         return { retry: false };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",
@@ -3629,7 +3640,7 @@ test("chat main does not downgrade a quoted reply to a plain turn when linked se
         throw new Error("rin_timeout:select_session");
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",

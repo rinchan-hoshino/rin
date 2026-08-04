@@ -56,10 +56,16 @@ async function writeExtensionPackage(dir: string) {
   await fs.mkdir(path.join(dir, "dist"), { recursive: true });
   await fs.writeFile(
     path.join(dir, "dist", "index.js"),
-    `export default function extension(ctx) {
-      ctx.registerChatAdapter(() => ({ adapter: { start() {}, stop() {} }, bot: { platform: "x", selfId: "x", status: 1, sendMessage() {} } }), { key: "x" });
-      ctx.registerBackgroundService({ start() { return { stop() {} }; } });
-      ctx.registerTool({ name: "rin_extension_loader_tool", description: ctx.dataDir, parameters: { type: "object", properties: {} }, execute() { return { content: [{ type: "text", text: ctx.dataDir }] }; } });
+    `export default function extension(rin) {
+      if ("registerBackgroundService" in rin || "registerChatAdapter" in rin || "dataDir" in rin) {
+        throw new Error("daemon APIs leaked into the session extension API");
+      }
+      rin.registerCommand("rin_extension_loader_command", {
+        description: "Rin chat command",
+        chat: true,
+        handler: async () => {},
+      });
+      rin.registerTool({ name: "rin_extension_loader_tool", description: "Pi API preserved", parameters: { type: "object", properties: {} }, execute() { return { content: [] }; } });
     }\n`,
     "utf8",
   );
@@ -204,7 +210,7 @@ test("Rin AuthStorage adapts legacy OAuth callbacks to ModelRuntime interactions
   ]);
 });
 
-test("Rin DefaultResourceLoader gives foreground extensions the Rin SDK surface", async () => {
+test("Rin DefaultResourceLoader keeps daemon APIs out of the session API", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-ext-loader-"));
   const extensionDir = path.join(agentDir, "extension");
   try {
@@ -233,11 +239,23 @@ test("Rin DefaultResourceLoader gives foreground extensions the Rin SDK surface"
     const tool = tools.find(
       (item: any) => item.name === "rin_extension_loader_tool",
     );
-    assert.ok(tool);
-    assert.equal(tool.description, path.join(agentDir, "data"));
+    assert.equal(tool?.description, "Pi API preserved");
+    const command = result.extensions
+      .flatMap((extension: any) => Array.from(extension.commands.values()))
+      .find((item: any) => item.name === "rin_extension_loader_command") as any;
+    assert.equal(command?.chat, true);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
+});
+
+test("Rin public extension API exports an identity definition helper", async () => {
+  const api = await import(
+    pathToFileURL(path.join(rootDir, "dist", "core", "rin-extension-api.js"))
+      .href
+  );
+  const factory = () => undefined;
+  assert.equal(api.defineRinExtension(factory), factory);
 });
 
 test("Rin DefaultResourceLoader resolves import-only Pi SDK dependencies", async () => {

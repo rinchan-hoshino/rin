@@ -7,17 +7,13 @@ import { cloneJson, isJsonRecord } from "./json-utils.js";
 import { readJsonFile } from "./platform/fs.js";
 import { safeString } from "./text-utils.js";
 
-export type RinBackgroundExtensionConfig = {
+export type RinDaemonExtensionConfig = {
   name: string;
   packageName: string;
   version: string;
   config: Record<string, any>;
   optional?: boolean;
   modulePath?: string;
-};
-
-export type RinExtensionConfigOptions = {
-  cwd?: string;
 };
 
 export function readRuntimeSettings(agentDir: string): Record<string, any> {
@@ -32,9 +28,9 @@ export function getRinExtensionRoot(settings: unknown): Record<string, any> {
     : {};
 }
 
-function normalizeBackgroundExtensionConfig(
+function normalizeDaemonExtensionConfig(
   value: unknown,
-): RinBackgroundExtensionConfig | null {
+): RinDaemonExtensionConfig | null {
   if (!isJsonRecord(value)) return null;
   if (value.enabled === false) return null;
   const packageName = safeString(value.packageName).trim();
@@ -52,17 +48,14 @@ function normalizeBackgroundExtensionConfig(
   };
 }
 
-export function listRinBackgroundExtensionConfigs(
+export function listRinDaemonExtensionConfigs(
   settings: unknown,
-  options: RinExtensionConfigOptions = {},
-): RinBackgroundExtensionConfig[] {
+): RinDaemonExtensionConfig[] {
   const root = getRinExtensionRoot(settings);
-  const configured = Array.isArray(root.backgroundServices)
-    ? root.backgroundServices
-    : [];
+  const configured = Array.isArray(root.daemon) ? root.daemon : [];
   const configuredExtensions = configured
-    .map((entry) => normalizeBackgroundExtensionConfig(entry))
-    .filter((entry): entry is RinBackgroundExtensionConfig => Boolean(entry));
+    .map((entry) => normalizeDaemonExtensionConfig(entry))
+    .filter((entry): entry is RinDaemonExtensionConfig => Boolean(entry));
   return configuredExtensions;
 }
 

@@ -15,6 +15,7 @@ const helperModule = await import(
 );
 
 const {
+  canInvokeRuntimeSlashCommand,
   collectRuntimeSlashCommands,
   collectSlashCommands,
   dedupeSlashCommands,
@@ -34,6 +35,7 @@ test("catalog helpers normalize direct slash-command collectors consistently", (
           invocationName: "  inspect  ",
           description: "  Inspect chat state.  ",
           sourceInfo: { file: "extension-a" },
+          chat: true,
         },
         {
           name: "fallback-name",
@@ -52,11 +54,13 @@ test("catalog helpers normalize direct slash-command collectors consistently", (
         description: "Inspect chat state.",
         source: "extension",
         sourceInfo: { file: "extension-a" },
+        chat: true,
       },
       {
         name: "fallback-name",
         description: "Fallback when invocationName is missing.",
         source: "extension",
+        chat: false,
       },
     ],
   );
@@ -75,6 +79,7 @@ test("catalog helpers normalize direct slash-command collectors consistently", (
         description: "Rewrite the final reply.",
         source: "prompt",
         sourceInfo: { file: "prompt-a" },
+        chat: false,
       },
     ],
   );
@@ -97,6 +102,7 @@ test("catalog helpers normalize direct slash-command collectors consistently", (
         description: "Remove stale files.",
         source: "skill",
         sourceInfo: { file: "skill-a" },
+        chat: false,
       },
     ],
   );
@@ -113,6 +119,7 @@ test("catalog helpers normalize and dedupe slash commands", () => {
             invocationName: "  resume  ",
             description: "  Resume a session.  ",
             sourceInfo: { file: "extension-a" },
+            chat: true,
           },
           {
             name: "resume",
@@ -151,18 +158,21 @@ test("catalog helpers normalize and dedupe slash commands", () => {
       description: "Resume a session.",
       source: "extension",
       sourceInfo: { file: "extension-a" },
+      chat: true,
     },
     {
       name: "polish",
       description: "Rewrite the final reply.",
       source: "prompt",
       sourceInfo: { file: "prompt-a" },
+      chat: false,
     },
     {
       name: "skill:cleanup",
       description: "Remove stale files.",
       source: "skill",
       sourceInfo: { file: "skill-a" },
+      chat: false,
     },
   ]);
 
@@ -176,12 +186,23 @@ test("catalog helpers normalize and dedupe slash commands", () => {
   );
 });
 
+test("catalog helpers enforce explicit Chat command exposure", () => {
+  const commands = [
+    { name: "visible", source: "extension", description: "", chat: true },
+    { name: "hidden", source: "extension", description: "", chat: false },
+  ];
+  assert.equal(canInvokeRuntimeSlashCommand(commands, "visible", "chat"), true);
+  assert.equal(canInvokeRuntimeSlashCommand(commands, "hidden", "chat"), false);
+  assert.equal(canInvokeRuntimeSlashCommand(commands, "hidden", "tui"), true);
+});
+
 test("catalog helpers collect runtime slash commands in source order", () => {
   const commands = collectRuntimeSlashCommands({
     extensionCommands: [
       {
         invocationName: "  inspect  ",
         description: "  Inspect chat state.  ",
+        chat: true,
       },
     ],
   });
@@ -191,6 +212,7 @@ test("catalog helpers collect runtime slash commands in source order", () => {
     name: "inspect",
     description: "Inspect chat state.",
     source: "extension",
+    chat: true,
   });
   assert.equal(
     commands.some((command) => command.name === "model"),

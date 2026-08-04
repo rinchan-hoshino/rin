@@ -45,7 +45,7 @@ test("chat main carries sender metadata to the controller with the prompt body",
         return { retry: false };
       };
 
-      const { app } = await mainMod.startChatBridge();
+      const { app } = await mainMod.startChatBridge({ commandRows: [] });
       app.bots.push({
         platform: "telegram",
         selfId: "1",

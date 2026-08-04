@@ -79,20 +79,20 @@ test("daemon preserves command identity when a local command throws", async () =
   }
 });
 
-test("daemon shutdown stops hosted services before background extension wait", async () => {
+test("daemon shutdown stops hosted services before daemon extension wait", async () => {
   const daemonSource = await fs.readFile(
     path.join(rootDir, "src", "core", "rin-daemon", "daemon.ts"),
     "utf8",
   );
   const hostedStop = daemonSource.indexOf("options.onShutdown?.()");
-  const backgroundStop = daemonSource.indexOf(
-    "backgroundExtensionManager.stop",
+  const daemonExtensionStop = daemonSource.indexOf(
+    "daemonExtensionManager.stop",
   );
   assert.ok(hostedStop >= 0, "hosted shutdown hook missing");
-  assert.ok(backgroundStop >= 0, "background extension stop missing");
+  assert.ok(daemonExtensionStop >= 0, "daemon extension stop missing");
   assert.ok(
-    hostedStop < backgroundStop,
-    "chat/hosted shutdown must run before background extension wait",
+    hostedStop < daemonExtensionStop,
+    "chat/hosted shutdown must run before daemon extension wait",
   );
   const appSource = await fs.readFile(
     path.join(rootDir, "src", "app", "rin-daemon", "daemon.ts"),
@@ -103,7 +103,7 @@ test("daemon shutdown stops hosted services before background extension wait", a
     String.raw`const stopHostedServices = async \(\) => \{([\s\S]*?)\n {2}\};`,
   ).exec(appSource)?.[1];
   assert.ok(hostedBody, "stopHostedServices missing");
-  assert.equal(hostedBody.includes("backgroundExtensionManager"), false);
+  assert.equal(hostedBody.includes("daemonExtensionManager"), false);
 });
 
 test("daemon bounds a hosted shutdown hook that never settles", async () => {

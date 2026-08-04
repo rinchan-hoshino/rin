@@ -84,6 +84,7 @@ import {
   WAITING_REACTION_EMOJI,
 } from "./transport.js";
 import { resolveChatQuietModeEnabled } from "./settings.js";
+import { projectChatExtensionUiRequest } from "./extension-ui.js";
 
 const INTERMEDIATE_PREFIX = "... ";
 
@@ -376,6 +377,8 @@ export class ChatController {
   lastCompactionTypingIndicatorAt = 0;
   compactionIndicatorTick = 0;
   activeCommandTurnInput: ChatTurnTarget | null = null;
+  private collectingCommandUi = false;
+  private commandUiMessages: string[] = [];
   backendAcceptedIncomingMessageId = "";
   private pendingTurnPresentations = new Map<string, PendingTurnPresentation>();
   stagedDelivery: ChatAssistantDelivery | null = null;
@@ -3046,6 +3049,8 @@ export class ChatController {
         this.markAcceptedMessage(incomingMessageId);
       }
 
+      this.commandUiMessages = [];
+      this.collectingCommandUi = true;
       let data: any = await this.driver.runCommand(commandLine, {
         assumeConnected: frontendReady === true,
         assumeSessionReady:
@@ -3081,13 +3086,18 @@ export class ChatController {
       }
       this.saveState();
       data = this.localizeBuiltinCommandResult(commandName, data);
+      const text = [
+        safeString(data?.text || "").trim(),
+        ...this.commandUiMessages,
+      ]
+        .map((part) => safeString(part).trim())
+        .filter(Boolean)
+        .join("\n");
 
       if (commandName === "compact") {
-        const text = safeString(data?.text || "").trim();
         return text ? { ...data, text } : data;
       }
 
-      const text = safeString(data?.text || "").trim();
       const parts = Array.isArray(data?.parts)
         ? (data.parts.filter(Boolean) as ChatMessagePart[])
         : [];
@@ -3116,6 +3126,8 @@ export class ChatController {
       });
       throw error;
     } finally {
+      this.collectingCommandUi = false;
+      this.commandUiMessages = [];
       this.awaitingTurnSettle = false;
       if (interruptingActiveTurn) this.turnAbortRequested = false;
       await this.clearWorkingReaction().catch(() => {});
@@ -3540,6 +3552,22 @@ export class ChatController {
 
   private async handleFrontendEvent(event: any) {
     if (!event || typeof event !== "object") return;
+    if (event.type === "extension_ui_request") {
+      const projection = projectChatExtensionUiRequest(event);
+      if (projection.response) {
+        await this.client
+          .respondExtensionUi(projection.response)
+          .catch(() => {});
+      }
+      if (projection.text) {
+        if (this.collectingCommandUi) {
+          this.commandUiMessages.push(projection.text);
+        } else {
+          await this.deliverPassiveNotice(projection.text).catch(() => {});
+        }
+      }
+      return;
+    }
     const activeRequestTag = safeString(this.currentTurn?.requestTag).trim();
     const eventRequestTag = safeString(event.requestTag).trim();
     const pendingPresentation =

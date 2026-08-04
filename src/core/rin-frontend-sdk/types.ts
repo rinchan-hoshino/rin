@@ -87,6 +87,7 @@ export type RinTerminalRecord = {
 };
 
 export type RinFrontendBackendEvent =
+  | RinExtensionUiRequest
   | {
       type: "status";
       phase: RinFrontendStatusPhase;
@@ -184,6 +185,7 @@ export type RinFrontendCommandItem = {
   description?: string;
   category?: string;
   source?: string;
+  chat: boolean;
 };
 
 export type RinFrontendSessionItem = {

@@ -375,12 +375,12 @@ test("stage B removed browse alias does not load a tool", async () => {
   }
 });
 
-test("stage B background extension manager stays lightweight without configured background extensions", () => {
+test("stage B daemon extension manager stays lightweight without configured daemon extensions", () => {
   const script = `
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { RinBackgroundExtensionManager } from ${JSON.stringify(
+import { RinDaemonExtensionManager } from ${JSON.stringify(
     pathToFileURL(
       path.join(rootDir, "dist", "core", "rin-daemon", "extensions.js"),
     ).href,
@@ -390,7 +390,7 @@ const tmp = mkdtempSync(path.join(os.tmpdir(), "rin-bg-ext-light-"));
 const agentDir = path.join(tmp, "rin");
 mkdirSync(agentDir, { recursive: true });
 try {
-  const manager = new RinBackgroundExtensionManager({
+  const manager = new RinDaemonExtensionManager({
     cwd: tmp,
     agentDir,
     logger: { warn() {}, info() {}, error() {} },
@@ -414,7 +414,7 @@ try {
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
-test("stage B background extension manager contributes chat runtime adapters", async () => {
+test("stage B daemon extension manager contributes chat runtime adapters", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-background-chat-adapter-"),
   );
@@ -428,7 +428,13 @@ test("stage B background extension manager contributes chat runtime adapters", a
       "rin-background-chat-adapter-test",
       `import fs from "node:fs";
 const markerPath = ${JSON.stringify(markerPath)};
-export default function extension(rin) {
+export default function sessionExtension() {
+  throw new Error("the daemon must not execute the session extension factory");
+}
+export function rinDaemonExtension(rin) {
+  if ("registerTool" in rin || "registerCommand" in rin) {
+    throw new Error("Pi APIs leaked into the daemon extension API");
+  }
   rin.registerChatAdapter(({ app }) => ({
       adapter: {
         async start() {
@@ -465,7 +471,7 @@ export default function extension(rin) {
     });
 
     const warnings: string[] = [];
-    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+    const manager = new backgroundExtensions.RinDaemonExtensionManager({
       cwd: agentDir,
       agentDir,
       logger: { warn: (message: string) => warnings.push(String(message)) },
@@ -511,7 +517,7 @@ export default function extension(rin) {
   }
 });
 
-test("stage B background extension manager loads local pi packages from settings.packages", async () => {
+test("stage B daemon extension manager loads local pi packages from settings.packages", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-background-package-"),
   );
@@ -530,7 +536,7 @@ test("stage B background extension manager loads local pi packages from settings
       path.join(packageDir, "bridge.js"),
       `import fs from "node:fs";
 const markerPath = ${JSON.stringify(markerPath)};
-export default function extension(rin) {
+export function rinDaemonExtension(rin) {
   rin.registerChatAdapter(() => ({
     adapter: { async start() { fs.appendFileSync(markerPath, "package-start\\n"); }, async stop() {} },
     bot: { platform: "package-test", selfId: "bot-1", status: 1, async sendMessage() { return []; } },
@@ -544,7 +550,7 @@ export default function extension(rin) {
     });
 
     const warnings: string[] = [];
-    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+    const manager = new backgroundExtensions.RinDaemonExtensionManager({
       cwd: agentDir,
       agentDir,
       logger: { warn: (message: string) => warnings.push(String(message)) },
@@ -565,7 +571,7 @@ export default function extension(rin) {
   }
 });
 
-test("stage B background extension manager honors pi package extension filters", async () => {
+test("stage B daemon extension manager honors pi package extension filters", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-background-package-filter-"),
   );
@@ -576,14 +582,14 @@ test("stage B background extension manager honors pi package extension filters",
     await writeProviderPackage(
       packageDir,
       "rin-background-package-filter-test",
-      `export default function extension(rin) { rin.registerChatAdapter(() => ({ adapter: { start() {}, stop() {} }, bot: { platform: "filtered", selfId: "bot", status: 1, async sendMessage() { return []; } } }), { key: "filtered" }); }\n`,
+      `export function rinDaemonExtension(rin) { rin.registerChatAdapter(() => ({ adapter: { start() {}, stop() {} }, bot: { platform: "filtered", selfId: "bot", status: 1, async sendMessage() { return []; } } }), { key: "filtered" }); }\n`,
       { pi: { extensions: ["index.js"] } },
     );
     await writeJson(path.join(agentDir, "settings.json"), {
       packages: [{ source: packageDir, extensions: [] }],
     });
 
-    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+    const manager = new backgroundExtensions.RinDaemonExtensionManager({
       cwd: agentDir,
       agentDir,
       logger: { warn: () => {} },
@@ -597,7 +603,7 @@ test("stage B background extension manager honors pi package extension filters",
   }
 });
 
-test("stage B background extension manager loads auto-discovered pi extensions", async () => {
+test("stage B daemon extension manager loads auto-discovered pi extensions", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-background-auto-"),
   );
@@ -606,11 +612,11 @@ test("stage B background extension manager loads auto-discovered pi extensions",
     await fs.mkdir(extensionDir, { recursive: true });
     await fs.writeFile(
       path.join(extensionDir, "index.js"),
-      `export default function extension(rin) { rin.registerBackgroundService({ start() {} }); }\n`,
+      `export function rinDaemonExtension(rin) { rin.registerBackgroundService({ start() {} }); }\n`,
       "utf8",
     );
 
-    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+    const manager = new backgroundExtensions.RinDaemonExtensionManager({
       cwd: agentDir,
       agentDir,
       logger: { warn: () => {} },
@@ -627,7 +633,64 @@ test("stage B background extension manager loads auto-discovered pi extensions",
   }
 });
 
-test("stage B background extension manager exposes memory provider API for non-local originals", async () => {
+test("daemon extension registration rolls back partial contributions on failure", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-extension-rollback-"),
+  );
+  try {
+    const packageDir = path.join(agentDir, "rollback-extension");
+    const markerPath = path.join(agentDir, "rollback-marker.txt");
+    await writeProviderPackage(
+      packageDir,
+      "rollback-extension",
+      `import { appendFileSync } from "node:fs";
+export function rinDaemonExtension(rin) {
+  rin.registerChatAdapter(() => ({ adapter: {}, bot: {} }), { key: "partial" });
+  rin.registerBackgroundService({
+    start() {
+      appendFileSync(${JSON.stringify(markerPath)}, "start\\n");
+      return { stop() { appendFileSync(${JSON.stringify(markerPath)}, "stop\\n"); } };
+    },
+  });
+  rin.registerBackgroundService({
+    start() { throw new Error("service start failed"); },
+  });
+}\n`,
+    );
+    await fs.writeFile(
+      path.join(agentDir, "settings.json"),
+      JSON.stringify({
+        rinExtensions: {
+          daemon: [
+            {
+              packageName: "rollback-extension",
+              version: `file:${packageDir}`,
+            },
+          ],
+        },
+      }),
+      "utf8",
+    );
+    const warnings = [];
+    const manager = new backgroundExtensions.RinDaemonExtensionManager({
+      cwd: rootDir,
+      agentDir,
+      logger: { warn: (message) => warnings.push(String(message)) },
+    });
+
+    assert.deepEqual(await manager.start(), []);
+    assert.deepEqual(manager.getChatAdapterProviders(), []);
+    assert.equal(await fs.readFile(markerPath, "utf8"), "start\nstop\n");
+    assert.ok(
+      warnings.some((message) => message.includes("service start failed")),
+      JSON.stringify(warnings),
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("stage B daemon extension manager exposes memory provider API for non-local originals", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-background-memory-provider-"),
   );
@@ -640,7 +703,7 @@ test("stage B background extension manager exposes memory provider API for non-l
       packageDir,
       "rin-background-memory-provider-test",
       `import fs from "node:fs";
-export default function extension(rin) {
+export function rinDaemonExtension(rin) {
   rin.registerMemoryProvider({
     async search(request, ctx) {
       fs.appendFileSync(ctx.config.markerPath, "search:" + request.query + ":" + request.limit + "\\n");
@@ -666,7 +729,7 @@ export default function extension(rin) {
     );
     await writeJson(path.join(agentDir, "settings.json"), {
       rinExtensions: {
-        backgroundServices: [
+        daemon: [
           {
             name: "memory-provider",
             packageName: "rin-background-memory-provider-test",
@@ -677,7 +740,7 @@ export default function extension(rin) {
       },
     });
 
-    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+    const manager = new backgroundExtensions.RinDaemonExtensionManager({
       cwd: agentDir,
       agentDir,
       logger: { warn: () => {} },
@@ -734,7 +797,7 @@ export default function extension(rin) {
   }
 });
 
-test("stage B background scanner resolves import-only Pi SDK dependencies", async () => {
+test("stage B daemon extension scanner resolves import-only Pi SDK dependencies", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-background-import-only-"),
   );
@@ -751,8 +814,8 @@ test("stage B background scanner resolves import-only Pi SDK dependencies", asyn
     await fs.writeFile(
       path.join(packageDir, "index.ts"),
       `import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
-export default function extension(rin) {
-  rin.registerTool({ name: "ignored_foreground_tool", description: CONFIG_DIR_NAME });
+export function rinDaemonExtension() {
+  if (!CONFIG_DIR_NAME) throw new Error("missing Pi SDK import");
 }\n`,
       "utf8",
     );
@@ -761,7 +824,7 @@ export default function extension(rin) {
     });
 
     const warnings: string[] = [];
-    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+    const manager = new backgroundExtensions.RinDaemonExtensionManager({
       cwd: agentDir,
       agentDir,
       logger: { warn: (message: string) => warnings.push(String(message)) },
@@ -776,7 +839,7 @@ export default function extension(rin) {
   }
 });
 
-test("stage B background extension manager ignores direct extensions without background parts", async () => {
+test("stage B daemon extension manager ignores direct extensions without background parts", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-background-ignore-"),
   );
@@ -794,7 +857,7 @@ test("stage B background extension manager ignores direct extensions without bac
     });
 
     const warnings: string[] = [];
-    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+    const manager = new backgroundExtensions.RinDaemonExtensionManager({
       cwd: agentDir,
       agentDir,
       logger: { warn: (message: string) => warnings.push(String(message)) },
@@ -809,7 +872,7 @@ test("stage B background extension manager ignores direct extensions without bac
   }
 });
 
-test("stage B background extension manager starts async services and stops them", async () => {
+test("stage B daemon extension manager starts async services and stops them", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
   const packageDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-background-service-pkg-"),
@@ -820,7 +883,7 @@ test("stage B background extension manager starts async services and stops them"
       packageDir,
       "rin-background-service-test",
       `import fs from "node:fs";
-export default function extension(rin) {
+export function rinDaemonExtension(rin) {
   rin.registerBackgroundService({
     start(ctx) {
       fs.appendFileSync(ctx.config.markerPath, "start:" + ctx.name + "\\n");
@@ -839,7 +902,7 @@ export default function extension(rin) {
     );
     await writeJson(path.join(agentDir, "settings.json"), {
       rinExtensions: {
-        backgroundServices: [
+        daemon: [
           {
             name: "worker-a",
             packageName: "rin-background-service-test",
@@ -850,7 +913,7 @@ export default function extension(rin) {
       },
     });
 
-    const manager = new backgroundExtensions.RinBackgroundExtensionManager({
+    const manager = new backgroundExtensions.RinDaemonExtensionManager({
       cwd: agentDir,
       agentDir,
       logger: { warn: () => {} },

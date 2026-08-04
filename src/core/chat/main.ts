@@ -33,10 +33,12 @@ import {
 } from "./support.js";
 import {
   drainChatOutbox,
-  getChatCommandRows,
+  loadChatCommandRows,
   reconcileCommittedChatOutboxProcessing,
+  refreshChatCommandRows,
   syncDiscordCommands,
   syncTelegramCommands,
+  type ChatCommandRow,
 } from "./boot.js";
 import {
   elementsToText,
@@ -424,6 +426,8 @@ export async function startChatBridge(
     frontendClientFactory?: () => RinFrontendTurnClient;
     chatAdapterProviders?: ChatRuntimeExternalAdapterEntry[];
     settingsPath?: string;
+    /** Explicit catalog injection for hosted and test environments. */
+    commandRows?: ChatCommandRow[];
   } = {},
 ): Promise<ChatBridgeHandle> {
   const runtime = resolveRuntimeProfile();
@@ -563,9 +567,24 @@ export async function startChatBridge(
       void controller.housekeep().catch(() => {});
     }
   }, TYPING_POLL_INTERVAL_MS);
-  const commandRows = getChatCommandRows();
   const chatCommandResponses = readChatCommandResponses(runtime.agentDir);
   const frontendClientFactory = options.frontendClientFactory;
+  const commandRows =
+    options.commandRows ??
+    (await loadChatCommandRows(
+      frontendClientFactory?.() ?? new RinDaemonFrontendClient(),
+    ));
+  const refreshChatCommands = async () => {
+    if (options.commandRows) return;
+    await refreshChatCommandRows(
+      commandRows,
+      frontendClientFactory?.() ?? new RinDaemonFrontendClient(),
+    );
+    await Promise.all([
+      syncTelegramCommands(app, logger, commandRows),
+      syncDiscordCommands(app, logger, commandRows),
+    ]);
+  };
   const getIdentity = () => loadIdentity(dataDir);
   const getController = (chatKey: string) => {
     let controller = controllers.get(chatKey);
@@ -855,6 +874,13 @@ export async function startChatBridge(
         promptMeta,
         outboxTurnFence,
       );
+      if (command.name === "reload") {
+        await refreshChatCommands().catch((error: any) => {
+          logger.warn(
+            `chat command catalog refresh failed err=${safeString(error?.message || error)}`,
+          );
+        });
+      }
       return { disposition: "actionable" as const };
     } catch (error) {
       logger.warn(

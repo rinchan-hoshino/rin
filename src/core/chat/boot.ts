@@ -10,7 +10,6 @@ import {
   writeChatOutboxItem,
 } from "../rin-lib/chat-outbox.js";
 import { createRinI18n } from "../i18n.js";
-import { RIN_NON_INTERACTIVE_COMMAND_NAMES } from "../rin-frontend-sdk/index.js";
 import { markProcessedChatMessage, safeString } from "./chat-helpers.js";
 import { markJoinedChatMessagesProcessed } from "./database.js";
 import {
@@ -24,14 +23,55 @@ export type ChatCommandRow = {
   description?: string;
 };
 
+type ChatCommandCatalogClient = {
+  connect(): Promise<void>;
+  disconnect(): Promise<void>;
+  getCommands(): Promise<
+    ReadonlyArray<{
+      name: string;
+      description?: string;
+      chat?: boolean;
+    }>
+  >;
+};
+
 const chatOutboxDrainQueues = new Map<string, Promise<void>>();
 
-export function getChatCommandRows(): ChatCommandRow[] {
+export function getChatCommandRows(
+  commands: ReadonlyArray<{
+    name: string;
+    description?: string;
+    chat?: boolean;
+  }>,
+): ChatCommandRow[] {
   const descriptions = createRinI18n().chatCommandDescriptions;
-  return RIN_NON_INTERACTIVE_COMMAND_NAMES.map((name) => ({
-    name,
-    description: descriptions[name],
-  }));
+  return commands
+    .filter((command) => command.chat === true)
+    .map((command) => ({
+      name: command.name,
+      description: command.description || descriptions[command.name],
+    }));
+}
+
+export async function loadChatCommandRows(
+  client: ChatCommandCatalogClient,
+): Promise<ChatCommandRow[]> {
+  let connected = false;
+  try {
+    await client.connect();
+    connected = true;
+    return getChatCommandRows(await client.getCommands());
+  } finally {
+    if (connected) await client.disconnect();
+  }
+}
+
+export async function refreshChatCommandRows(
+  current: ChatCommandRow[],
+  client: ChatCommandCatalogClient,
+): Promise<void> {
+  const next = await loadChatCommandRows(client);
+  current.splice(0, current.length, ...next);
 }
 
 function normalizeTelegramCommandName(value: unknown) {

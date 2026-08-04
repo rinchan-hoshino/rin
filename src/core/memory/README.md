@@ -8,7 +8,7 @@ Public tool:
 
 Extension API:
 
-- Rin background extensions can call `ctx.registerMemoryProvider(provider, options)`
+- Rin daemon extensions export `rinDaemonExtension(rin)` and call `rin.registerMemoryProvider(provider, options)`
 - providers may implement `search`, `listRecent`, and `write`
 - `write` receives the same transcript archive entries produced by Rin's existing memory archival flow
 - provider results may use remote references such as `reference` or `url` instead of local transcript paths, so external systems do not need to expose local original-text storage

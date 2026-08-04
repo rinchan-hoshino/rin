@@ -8,9 +8,9 @@ import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import {
   ensureRuntimeImporter,
   getRinExtensionRuntimeRoot,
-  listRinBackgroundExtensionConfigs,
+  listRinDaemonExtensionConfigs,
   readRuntimeSettings,
-  type RinBackgroundExtensionConfig,
+  type RinDaemonExtensionConfig,
 } from "../rin-extension-settings.js";
 import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
 import { resolveRuntimePackageAliases } from "../rin-lib/jiti-aliases.js";
@@ -29,106 +29,20 @@ import type {
 import { ensureDir, stringifyJson } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
-
-export type RinBackgroundExtensionLogger = {
-  info?: (message: string) => void;
-  warn?: (message: string) => void;
-  error?: (message: string) => void;
-};
-
-export type RinDaemonMemorySearchRequest = {
-  readonly mode: "search" | "recent";
-  readonly query: string;
-  readonly limit: number;
-  readonly params: Record<string, any>;
-};
-
-export type RinDaemonMemoryProviderContext = {
-  readonly cwd: string;
-  readonly agentDir: string;
-  readonly dataDir: string;
-  readonly runtimeRoot: string;
-  readonly key: string;
-  readonly name: string;
-  readonly packageName: string;
-  readonly config: Record<string, any>;
-  readonly logger: RinBackgroundExtensionLogger;
-};
-
-export type RinDaemonMemoryProvider = {
-  search?: (
-    request: RinDaemonMemorySearchRequest,
-    context: RinDaemonMemoryProviderContext,
-  ) =>
-    | Promise<ExternalMemoryResult[] | { results?: ExternalMemoryResult[] }>
-    | ExternalMemoryResult[]
-    | { results?: ExternalMemoryResult[] };
-  listRecent?: (
-    request: RinDaemonMemorySearchRequest,
-    context: RinDaemonMemoryProviderContext,
-  ) =>
-    | Promise<ExternalMemoryResult[] | { results?: ExternalMemoryResult[] }>
-    | ExternalMemoryResult[]
-    | { results?: ExternalMemoryResult[] };
-  write?: (
-    entry: TranscriptArchiveEntry,
-    context: RinDaemonMemoryProviderContext,
-  ) => Promise<void> | void;
-};
-
-export type RinBackgroundExtensionContext = {
-  readonly cwd: string;
-  readonly agentDir: string;
-  readonly dataDir: string;
-  readonly runtimeRoot: string;
-  readonly name: string;
-  readonly packageName: string;
-  readonly config: Record<string, any>;
-  readonly signal: AbortSignal;
-  readonly logger: RinBackgroundExtensionLogger;
-  runAsync: (label: string, work: () => Promise<void> | void) => void;
-  registerChatAdapter: (
-    provider: ChatRuntimeExternalAdapterProvider,
-    options?: {
-      key?: string;
-      name?: string;
-      config?: Record<string, any>;
-    },
-  ) => void;
-  registerMemoryProvider: (
-    provider: RinDaemonMemoryProvider,
-    options?: {
-      key?: string;
-      name?: string;
-      config?: Record<string, any>;
-    },
-  ) => void;
-};
-
-type BackgroundServiceStop = { stop?: () => Promise<void> | void };
-
-type BackgroundServiceProvider = {
-  start?: (
-    context: RinBackgroundExtensionContext,
-  ) => Promise<void | BackgroundServiceStop> | void | BackgroundServiceStop;
-};
-
-type BackgroundServiceFactory = NonNullable<BackgroundServiceProvider["start"]>;
-
-type RinBackgroundExtensionApi = RinBackgroundExtensionContext & {
-  registerBackgroundService: (
-    provider: BackgroundServiceProvider | BackgroundServiceFactory,
-  ) => void;
-  on: (...args: unknown[]) => void;
-  registerTool: (...args: unknown[]) => void;
-  registerCommand: (...args: unknown[]) => void;
-  registerShortcut: (...args: unknown[]) => void;
-  registerFlag: (...args: unknown[]) => void;
-  registerProvider: (...args: unknown[]) => void;
-};
+import type {
+  RinBackgroundServiceContext,
+  RinBackgroundServiceFactory as BackgroundServiceFactory,
+  RinBackgroundServiceProvider as BackgroundServiceProvider,
+  RinBackgroundServiceStop as BackgroundServiceStop,
+  RinDaemonExtensionAPI,
+  RinDaemonMemoryProvider,
+  RinDaemonMemoryProviderContext,
+  RinDaemonMemorySearchRequest,
+  RinExtensionLogger,
+} from "../rin-extension-api.js";
 
 type RunningWorker = {
-  entry: RinBackgroundExtensionConfig;
+  entry: RinDaemonExtensionConfig;
   controller: AbortController;
   stop?: () => Promise<void> | void;
   tasks: Set<Promise<void>>;
@@ -140,7 +54,7 @@ type RinDaemonMemoryProviderEntry = {
   packageName: string;
   config: Record<string, any>;
   provider: RinDaemonMemoryProvider;
-  logger: RinBackgroundExtensionLogger;
+  logger: RinExtensionLogger;
 };
 
 function buildRuntimePackage(dependencies: Record<string, string>) {
@@ -158,7 +72,7 @@ function dependencyInstallPath(runtimeRoot: string, packageName: string) {
   return path.join(runtimeRoot, "node_modules", ...parts);
 }
 
-function shouldInstallBackgroundExtensionDependencies(
+function shouldInstallDaemonExtensionDependencies(
   runtimeRoot: string,
   dependencies: Record<string, string>,
 ) {
@@ -177,9 +91,9 @@ function shouldInstallBackgroundExtensionDependencies(
   );
 }
 
-export function ensureBackgroundExtensionDependencies(
+export function ensureDaemonExtensionDependencies(
   agentDir: string,
-  entries: RinBackgroundExtensionConfig[],
+  entries: RinDaemonExtensionConfig[],
 ) {
   const dependencies = Object.fromEntries(
     entries
@@ -188,9 +102,7 @@ export function ensureBackgroundExtensionDependencies(
       .sort(([a], [b]) => a.localeCompare(b)),
   );
   const runtimeRoot = getRinExtensionRuntimeRoot(agentDir);
-  if (
-    !shouldInstallBackgroundExtensionDependencies(runtimeRoot, dependencies)
-  ) {
+  if (!shouldInstallDaemonExtensionDependencies(runtimeRoot, dependencies)) {
     return runtimeRoot;
   }
   ensureDir(runtimeRoot);
@@ -209,26 +121,6 @@ export function ensureBackgroundExtensionDependencies(
     },
   );
   return runtimeRoot;
-}
-
-function pickBackgroundServiceProvider(
-  moduleValue: any,
-  options: { allowDefault?: boolean } = {},
-): BackgroundServiceProvider | null {
-  if (typeof moduleValue?.createBackgroundService === "function") {
-    const service = moduleValue.createBackgroundService();
-    if (typeof service?.start === "function") return service;
-  }
-  const candidates = [
-    options.allowDefault ? moduleValue?.rinBackgroundService : undefined,
-    options.allowDefault ? moduleValue?.backgroundServiceProvider : undefined,
-    options.allowDefault ? moduleValue : undefined,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate?.start === "function") return candidate;
-    if (typeof candidate === "function") return { start: candidate };
-  }
-  return null;
 }
 
 const requireFromHere = createRequire(import.meta.url);
@@ -265,7 +157,7 @@ function resolveJitiStaticPath() {
   }
 }
 
-async function importBackgroundExtensionPath(modulePath: string) {
+async function importDaemonExtensionPath(modulePath: string) {
   if (modulePath.endsWith(".ts")) {
     const { createJiti } = await import(
       pathToFileURL(resolveJitiStaticPath()).href
@@ -274,17 +166,17 @@ async function importBackgroundExtensionPath(modulePath: string) {
       moduleCache: false,
       alias: resolveRuntimePackageAliases({ includeDevDependencies: true }),
     });
-    return await jiti.import(modulePath, { default: true });
+    return await jiti.import(modulePath, { default: false });
   }
   return await import(pathToFileURL(modulePath).href);
 }
 
-async function importBackgroundExtensionModule(
+async function importDaemonExtensionModule(
   runtimeRoot: string,
-  entry: RinBackgroundExtensionConfig,
+  entry: RinDaemonExtensionConfig,
 ) {
   if (entry.modulePath)
-    return await importBackgroundExtensionPath(entry.modulePath);
+    return await importDaemonExtensionPath(entry.modulePath);
   const { packageName } = entry;
   try {
     const importerPath = ensureRuntimeImporter(
@@ -304,13 +196,21 @@ async function importBackgroundExtensionModule(
   }
 }
 
-function createBackgroundExtensionApi(
-  context: RinBackgroundExtensionContext,
+function createDaemonExtensionApi(
+  context: RinBackgroundServiceContext,
   services: BackgroundServiceProvider[],
-): RinBackgroundExtensionApi {
-  const noop = () => {};
+  registerChatAdapter: RinDaemonExtensionAPI["registerChatAdapter"],
+  registerMemoryProvider: RinDaemonExtensionAPI["registerMemoryProvider"],
+): RinDaemonExtensionAPI {
   return {
-    ...context,
+    cwd: context.cwd,
+    agentDir: context.agentDir,
+    dataDir: context.dataDir,
+    runtimeRoot: context.runtimeRoot,
+    name: context.name,
+    packageName: context.packageName,
+    config: context.config,
+    logger: context.logger,
     registerBackgroundService: (provider) => {
       if (typeof provider === "function") {
         services.push({ start: provider });
@@ -320,53 +220,38 @@ function createBackgroundExtensionApi(
       if (typeof provider.start !== "function") return;
       services.push(provider);
     },
-    registerChatAdapter: context.registerChatAdapter,
-    registerMemoryProvider: context.registerMemoryProvider,
-    on: noop,
-    registerTool: noop,
-    registerCommand: noop,
-    registerShortcut: noop,
-    registerFlag: noop,
-    registerProvider: noop,
+    registerChatAdapter,
+    registerMemoryProvider,
   };
 }
 
-async function collectBackgroundServicesFromModule(
+async function collectDaemonExtensionRegistrations(
   moduleValue: any,
-  context: RinBackgroundExtensionContext,
-  options: { allowDefault?: boolean } = {},
+  context: RinBackgroundServiceContext,
+  registerChatAdapter: RinDaemonExtensionAPI["registerChatAdapter"],
+  registerMemoryProvider: RinDaemonExtensionAPI["registerMemoryProvider"],
 ): Promise<{ services: BackgroundServiceProvider[]; handled: boolean }> {
-  const services: BackgroundServiceProvider[] = [];
-  const extensionFactory =
-    moduleValue?.createRinExtension ||
-    moduleValue?.rinExtension ||
-    (typeof moduleValue?.default === "function"
-      ? moduleValue.default
-      : undefined);
-  if (typeof extensionFactory === "function") {
-    const result = await extensionFactory(
-      createBackgroundExtensionApi(context, services),
-    );
-    if (result && typeof result === "object") {
-      if (typeof result.start === "function") {
-        services.push(result as BackgroundServiceProvider);
-      } else if (typeof result.stop === "function") {
-        services.push({ start: () => result as BackgroundServiceStop });
-      }
-    }
-    return { services, handled: true };
+  const extensionFactory = moduleValue?.rinDaemonExtension;
+  if (typeof extensionFactory !== "function") {
+    return { services: [], handled: false };
   }
-
-  const service = pickBackgroundServiceProvider(moduleValue, options);
-  if (service) return { services: [service], handled: true };
-  return { services, handled: false };
+  const services: BackgroundServiceProvider[] = [];
+  await extensionFactory(
+    createDaemonExtensionApi(
+      context,
+      services,
+      registerChatAdapter,
+      registerMemoryProvider,
+    ),
+  );
+  return { services, handled: true };
 }
 
 function createWorkerLogger(
-  base: RinBackgroundExtensionLogger | undefined,
-  entry: RinBackgroundExtensionConfig,
-): RinBackgroundExtensionLogger {
-  const prefix = `background-extension:${entry.name}`;
+  base: RinExtensionLogger | undefined,
+  entry: RinDaemonExtensionConfig,
+): RinExtensionLogger {
+  const prefix = `daemon-extension:${entry.name}`;
   return {
     info: (message) => base?.info?.(`${prefix}: ${message}`),
     warn: (message) => base?.warn?.(`${prefix}: ${message}`),
@@ -394,9 +279,9 @@ function nearestPackageRoot(startPath: string) {
   }
 }
 
-function backgroundEntryFromResolvedExtension(
+function daemonExtensionEntryFromResolvedExtension(
   entry: any,
-): RinBackgroundExtensionConfig | null {
+): RinDaemonExtensionConfig | null {
   if (!entry?.enabled) return null;
   const modulePath = safeString(entry.path).trim();
   if (!modulePath) return null;
@@ -425,10 +310,10 @@ function backgroundEntryFromResolvedExtension(
   };
 }
 
-async function listPiResolvedBackgroundExtensionConfigs(options: {
+async function listPiResolvedDaemonExtensionConfigs(options: {
   cwd: string;
   agentDir: string;
-}): Promise<RinBackgroundExtensionConfig[]> {
+}): Promise<RinDaemonExtensionConfig[]> {
   const agentRuntimeModule = await loadRinAgentRuntime();
   const { DefaultPackageManager, SettingsManager } = agentRuntimeModule as any;
   const settingsManager = SettingsManager.create(options.cwd, options.agentDir);
@@ -440,17 +325,17 @@ async function listPiResolvedBackgroundExtensionConfigs(options: {
   });
   const resolved = await packageManager.resolve();
   return (resolved.extensions || [])
-    .map((entry: any) => backgroundEntryFromResolvedExtension(entry))
+    .map((entry: any) => daemonExtensionEntryFromResolvedExtension(entry))
     .filter(
       (
-        entry: RinBackgroundExtensionConfig | null,
-      ): entry is RinBackgroundExtensionConfig => Boolean(entry),
+        entry: RinDaemonExtensionConfig | null,
+      ): entry is RinDaemonExtensionConfig => Boolean(entry),
     );
 }
 
-function listAutoDiscoveredBackgroundExtensionConfigs(options: {
+function listAutoDiscoveredDaemonExtensionConfigs(options: {
   cwd: string;
-}): RinBackgroundExtensionConfig[] {
+}): RinDaemonExtensionConfig[] {
   const extensionsDir = path.join(options.cwd, "extensions");
   let entries: fs.Dirent[] = [];
   try {
@@ -462,19 +347,16 @@ function listAutoDiscoveredBackgroundExtensionConfigs(options: {
     if (!entry.isDirectory()) return [];
     const modulePath = path.join(extensionsDir, entry.name, "index.js");
     if (!fs.existsSync(modulePath)) return [];
-    const backgroundEntry = backgroundEntryFromResolvedExtension({
+    const daemonExtensionEntry = daemonExtensionEntryFromResolvedExtension({
       enabled: true,
       path: modulePath,
       metadata: { source: "auto", baseDir: path.dirname(modulePath) },
     });
-    return backgroundEntry ? [backgroundEntry] : [];
+    return daemonExtensionEntry ? [daemonExtensionEntry] : [];
   });
 }
 
-function shouldResolvePiBackgroundExtensions(
-  settings: unknown,
-  agentDir: string,
-) {
+function shouldResolvePiDaemonExtensions(settings: unknown, agentDir: string) {
   const value = settings as any;
   if (Array.isArray(value?.extensions) && value.extensions.length > 0)
     return true;
@@ -482,9 +364,9 @@ function shouldResolvePiBackgroundExtensions(
   return fs.existsSync(path.join(agentDir, "extensions"));
 }
 
-function dedupeBackgroundEntries(entries: RinBackgroundExtensionConfig[]) {
+function dedupeDaemonExtensionEntries(entries: RinDaemonExtensionConfig[]) {
   const seen = new Set<string>();
-  const result: RinBackgroundExtensionConfig[] = [];
+  const result: RinDaemonExtensionConfig[] = [];
   for (const entry of entries) {
     const key = entry.modulePath
       ? `module:${path.resolve(entry.modulePath)}`
@@ -496,7 +378,7 @@ function dedupeBackgroundEntries(entries: RinBackgroundExtensionConfig[]) {
   return result;
 }
 
-export class RinBackgroundExtensionManager {
+export class RinDaemonExtensionManager {
   private readonly workers: RunningWorker[] = [];
   private readonly chatAdapters: ChatRuntimeExternalAdapterEntry[] = [];
   private readonly memoryProviders: RinDaemonMemoryProviderEntry[] = [];
@@ -505,7 +387,7 @@ export class RinBackgroundExtensionManager {
     private readonly options: {
       cwd: string;
       agentDir: string;
-      logger?: RinBackgroundExtensionLogger;
+      logger?: RinExtensionLogger;
     },
   ) {}
 
@@ -513,32 +395,27 @@ export class RinBackgroundExtensionManager {
     this.chatAdapters.length = 0;
     this.memoryProviders.length = 0;
     const runtimeSettings = readRuntimeSettings(this.options.agentDir);
-    const explicitEntries = listRinBackgroundExtensionConfigs(runtimeSettings, {
+    const explicitEntries = listRinDaemonExtensionConfigs(runtimeSettings);
+    const autoDiscoveredEntries = listAutoDiscoveredDaemonExtensionConfigs({
       cwd: this.options.cwd,
     });
-    const autoDiscoveredEntries = listAutoDiscoveredBackgroundExtensionConfigs({
-      cwd: this.options.cwd,
-    });
-    let piResolvedEntries: RinBackgroundExtensionConfig[] = [];
+    let piResolvedEntries: RinDaemonExtensionConfig[] = [];
     if (
-      shouldResolvePiBackgroundExtensions(
-        runtimeSettings,
-        this.options.agentDir,
-      )
+      shouldResolvePiDaemonExtensions(runtimeSettings, this.options.agentDir)
     ) {
       try {
-        piResolvedEntries = await listPiResolvedBackgroundExtensionConfigs(
+        piResolvedEntries = await listPiResolvedDaemonExtensionConfigs(
           this.options,
         );
       } catch (error: any) {
         this.options.logger?.warn?.(
-          `background extension package resolution failed err=${safeString(
+          `daemon extension package resolution failed err=${safeString(
             error?.message || error,
           )}`,
         );
       }
     }
-    const entries = dedupeBackgroundEntries([
+    const entries = dedupeDaemonExtensionEntries([
       ...explicitEntries,
       ...autoDiscoveredEntries,
       ...piResolvedEntries,
@@ -546,13 +423,13 @@ export class RinBackgroundExtensionManager {
     if (!entries.length) return [];
     let runtimeRoot: string;
     try {
-      runtimeRoot = ensureBackgroundExtensionDependencies(
+      runtimeRoot = ensureDaemonExtensionDependencies(
         this.options.agentDir,
         entries,
       );
     } catch (error: any) {
       this.options.logger?.warn?.(
-        `background extension dependency install failed err=${safeString(
+        `daemon extension dependency install failed err=${safeString(
           error?.stderr || error?.stdout || error?.message || error,
         )}`,
       );
@@ -560,16 +437,19 @@ export class RinBackgroundExtensionManager {
     }
     const started: Array<{ name: string; packageName: string }> = [];
     for (const entry of entries) {
+      const beforeChatAdapterCount = this.chatAdapters.length;
+      const beforeMemoryProviderCount = this.memoryProviders.length;
+      const controller = new AbortController();
+      const tasks = new Set<Promise<void>>();
+      const stopHandlers: Array<() => Promise<void> | void> = [];
       try {
-        const moduleValue = await importBackgroundExtensionModule(
+        const moduleValue = await importDaemonExtensionModule(
           runtimeRoot,
           entry,
         );
-        const controller = new AbortController();
-        const tasks = new Set<Promise<void>>();
         const running: RunningWorker = { entry, controller, tasks };
         const logger = createWorkerLogger(this.options.logger, entry);
-        const context: RinBackgroundExtensionContext = {
+        const context: RinBackgroundServiceContext = {
           cwd: this.options.cwd,
           agentDir: this.options.agentDir,
           dataDir: path.join(this.options.agentDir, "data"),
@@ -592,18 +472,21 @@ export class RinBackgroundExtensionManager {
               .finally(() => tasks.delete(task));
             tasks.add(task);
           },
-          registerChatAdapter: (provider, options = {}) => {
+        };
+        const registerChatAdapter: RinDaemonExtensionAPI["registerChatAdapter"] =
+          (provider, options = {}) => {
             const key = safeString(options.key).trim() || entry.name;
             const name = safeString(options.name).trim() || key;
             this.chatAdapters.push({
               key,
               name,
               packageName: entry.packageName,
-              config: options.config || entry.config,
-              provider,
+              config: (options.config || entry.config) as Record<string, any>,
+              provider: provider as ChatRuntimeExternalAdapterProvider,
             });
-          },
-          registerMemoryProvider: (provider, options = {}) => {
+          };
+        const registerMemoryProvider: RinDaemonExtensionAPI["registerMemoryProvider"] =
+          (provider, options = {}) => {
             if (
               !provider ||
               (typeof provider.search !== "function" &&
@@ -618,23 +501,19 @@ export class RinBackgroundExtensionManager {
               key,
               name,
               packageName: entry.packageName,
-              config: options.config || entry.config,
+              config: (options.config || entry.config) as Record<string, any>,
               provider,
               logger,
             });
-          },
-        };
-        const beforeChatAdapterCount = this.chatAdapters.length;
-        const beforeMemoryProviderCount = this.memoryProviders.length;
-        const { services, handled } = await collectBackgroundServicesFromModule(
+          };
+        const { services, handled } = await collectDaemonExtensionRegistrations(
           moduleValue,
           context,
-          { allowDefault: !entry.optional },
+          registerChatAdapter,
+          registerMemoryProvider,
         );
         if (!handled && entry.optional) continue;
-        if (!handled)
-          throw new Error("background_extension_entrypoint_missing");
-        const stopHandlers: Array<() => Promise<void> | void> = [];
+        if (!handled) throw new Error("daemon_extension_entrypoint_missing");
         for (const service of services) {
           const result = await service.start?.(context);
           if (result && typeof result === "object" && result.stop) {
@@ -655,8 +534,22 @@ export class RinBackgroundExtensionManager {
           started.push({ name: entry.name, packageName: entry.packageName });
         }
       } catch (error: any) {
+        this.chatAdapters.length = beforeChatAdapterCount;
+        this.memoryProviders.length = beforeMemoryProviderCount;
+        controller.abort();
+        for (const stop of [...stopHandlers].reverse()) {
+          try {
+            await stop();
+          } catch {}
+        }
+        if (tasks.size > 0) {
+          await Promise.race([
+            Promise.allSettled([...tasks]),
+            sleep(1_000),
+          ]).catch(() => {});
+        }
         this.options.logger?.warn?.(
-          `background extension init failed name=${entry.name} package=${entry.packageName} err=${safeString(
+          `daemon extension init failed name=${entry.name} package=${entry.packageName} err=${safeString(
             error?.message || error,
           )}`,
         );
@@ -770,7 +663,7 @@ export class RinBackgroundExtensionManager {
           await worker.stop?.();
         } catch (error: any) {
           this.options.logger?.warn?.(
-            `background extension stop failed name=${worker.entry.name} err=${safeString(
+            `daemon extension stop failed name=${worker.entry.name} err=${safeString(
               error?.message || error,
             )}`,
           );

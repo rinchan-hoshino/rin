@@ -480,8 +480,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   pi_prompt_shape_changed: () =>
     "Rin stopped because Pi's system prompt structure changed and Rin could not apply its prompt overlay safely.",
 
-  background_extension_entrypoint_missing: () =>
-    "Background extension is missing a Rin extension entry point. Export a Rin extension factory or background service.",
+  daemon_extension_entrypoint_missing: () =>
+    'Daemon extension entry point is missing. Export the named "rinDaemonExtension" factory.',
 
   rin_agent_sdk_task_id_required: () =>
     "Agent SDK task operation needs a task id. Provide the task id.",

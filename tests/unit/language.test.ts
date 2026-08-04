@@ -57,8 +57,8 @@ test("installer copy factories keep instances isolated", () => {
   assert.equal(second.installSafetyBoundaryLines[0], "Rin safety boundary:");
 });
 
-test("chat command descriptions use the fixed English catalog", () => {
-  const rows = chatBoot.getChatCommandRows();
+test("chat command projection falls back to the fixed English catalog", () => {
+  const rows = chatBoot.getChatCommandRows([{ name: "new", chat: true }]);
   assert.equal(
     rows.find((row) => row.name === "new")?.description,
     "Start a new session",

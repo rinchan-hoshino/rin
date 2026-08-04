@@ -312,6 +312,12 @@ export function createRinFrontendBackendEventTranslator(
       }
 
       if (payload.type === "extension_ui_request") {
+        const method = safeString(payload.method).trim();
+        if (
+          ["select", "confirm", "input", "editor", "notify"].includes(method)
+        ) {
+          return [{ ...payload, type: "extension_ui_request", method }];
+        }
         return [];
       }
 

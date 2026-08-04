@@ -46,7 +46,7 @@ import {
   normalizeSessionRef as sessionSelectorFromCommand,
 } from "../session/ref.js";
 import { startQueuedMemoryWorkerSupervisor } from "../self-improve/async-jobs.js";
-import { RinBackgroundExtensionManager } from "./extensions.js";
+import { RinDaemonExtensionManager } from "./extensions.js";
 import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
 import { ConnectionState, WorkerPool } from "./worker-pool.js";
 import {
@@ -113,8 +113,7 @@ export async function startDaemon(
       | undefined;
     onShutdown?: () => Promise<void> | void;
     registerLocalFrontendConnector?: (connector: RpcSocketConnector) => void;
-    backgroundExtensionManager?: RinBackgroundExtensionManager;
-    daemonExtensionManager?: RinBackgroundExtensionManager;
+    daemonExtensionManager?: RinDaemonExtensionManager;
     instanceLock?: DaemonInstanceLock;
     workerGcIdleMs?: number;
     workerSweepIntervalMs?: number;
@@ -176,16 +175,15 @@ export async function startDaemon(
     runtime.agentDir,
   );
 
-  const backgroundExtensionManager =
-    options.backgroundExtensionManager ||
+  const daemonExtensionManager =
     options.daemonExtensionManager ||
-    new RinBackgroundExtensionManager({
+    new RinDaemonExtensionManager({
       cwd: runtime.cwd,
       agentDir: runtime.agentDir,
       logger: console,
     });
-  if (!options.backgroundExtensionManager && !options.daemonExtensionManager) {
-    await backgroundExtensionManager.start();
+  if (!options.daemonExtensionManager) {
+    await daemonExtensionManager.start();
   }
 
   for (const candidate of [socketPath, bridgeSocketPath]) {
@@ -272,13 +270,13 @@ export async function startDaemon(
     }),
     memory_search_external: async (command) => ({
       data: {
-        results: await backgroundExtensionManager.recallProviders(
+        results: await daemonExtensionManager.recallProviders(
           command.payload || {},
         ),
       },
     }),
     memory_write_external: async (command) => ({
-      data: await backgroundExtensionManager.writeMemoryProviders(
+      data: await daemonExtensionManager.writeMemoryProviders(
         command.payload || {},
       ),
     }),
@@ -799,7 +797,7 @@ export async function startDaemon(
       ]);
     };
     await settleBeforeShutdownDeadline(() => options.onShutdown?.());
-    await settleBeforeShutdownDeadline(() => backgroundExtensionManager.stop());
+    await settleBeforeShutdownDeadline(() => daemonExtensionManager.stop());
     await workerPool.shutdown(Math.max(0, shutdownDeadline - Date.now()));
     closeDaemonTurnLedger(runtime.agentDir);
     for (const socket of Array.from(activeSockets)) {

@@ -91,6 +91,27 @@ test("frontend backend event translator exposes status as a shared frontend even
   );
 });
 
+test("shared frontend translation exposes extension UI requests", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "extension_ui_request",
+      id: "ui-1",
+      method: "confirm",
+      message: "Continue?",
+    }),
+    [
+      {
+        type: "extension_ui_request",
+        id: "ui-1",
+        method: "confirm",
+        message: "Continue?",
+      },
+    ],
+  );
+});
+
 test("shared frontend translation ignores TUI visibility preferences", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 

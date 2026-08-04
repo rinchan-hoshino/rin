@@ -23,6 +23,30 @@ const { RpcInteractiveSession } = await import(
     .href
 );
 
+test("rpc client attaches frontend identity to command invocations", async () => {
+  const identity = {
+    kind: "chat",
+    key: "discord:bot:channel",
+  };
+  const client = new RinDaemonFrontendClient({
+    socketPath: "/tmp/fake.sock",
+    frontendIdentity: identity,
+  });
+  let request;
+  client.request = async (value) => {
+    request = value;
+    return { handled: true };
+  };
+
+  await client.runCommand("/visible");
+
+  assert.deepEqual(request, {
+    type: "run_command",
+    commandLine: "/visible",
+    frontendIdentity: identity,
+  });
+});
+
 test("rpc client ignores stale socket disconnect after reconnect", () => {
   const client = new RinDaemonFrontendClient("/tmp/fake.sock");
   const seen = [];

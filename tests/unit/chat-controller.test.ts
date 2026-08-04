@@ -1494,6 +1494,44 @@ test("chat controller /new clears the old binding when the logical session has n
   );
 });
 
+test("chat controller renders extension command notifications", async () => {
+  const controller = await createController();
+  controller.session = {
+    async runCommand() {
+      await controller.handleFrontendEvent({
+        type: "extension_ui_request",
+        method: "notify",
+        message: "Extension completed",
+      });
+      return { handled: true };
+    },
+  };
+
+  const result = await controller.runCommand("/hello");
+
+  assert.equal(result.text, "Extension completed");
+});
+
+test("chat controller cancels unsupported extension dialogs", async () => {
+  const controller = await createController();
+  controller.session = {};
+  const responses = [];
+  controller.client.respondExtensionUi = async (response) => {
+    responses.push(response);
+  };
+
+  await controller.handleFrontendEvent({
+    type: "extension_ui_request",
+    id: "ui-1",
+    method: "confirm",
+    message: "Continue?",
+  });
+
+  assert.deepEqual(responses, [
+    { type: "extension_ui_response", id: "ui-1", cancelled: true },
+  ]);
+});
+
 test("chat controller does not send working notices before deterministic non-compact command acknowledgements", async () => {
   for (const [command, expectedText] of [
     ["/new", "Started a new session."],

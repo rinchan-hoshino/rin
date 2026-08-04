@@ -4,14 +4,11 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { extensionDataPath } from "../data-layout.js";
 import { resolveRuntimePackageAliases } from "./jiti-aliases.js";
 
 function text(value: unknown) {
   return typeof value === "string" ? value : value == null ? "" : String(value);
 }
-
-function noop() {}
 
 function expandPath(value: string) {
   const normalized = text(value).trim();
@@ -120,24 +117,6 @@ function resolveExtensionEntries(inputPath: string): string[] {
   });
 }
 
-function addRinExtensionApi(
-  piApi: any,
-  options: { cwd: string; agentDir: string },
-) {
-  return Object.assign(piApi, {
-    agentDir: options.agentDir,
-    dataDir: path.join(options.agentDir, "data"),
-    runtimeRoot: extensionDataPath(options.agentDir, "runtime"),
-    config: {},
-    logger: { info: noop, warn: noop, error: noop },
-    heartbeat: { appendInfo: () => ({ entry: undefined, filePath: "" }) },
-    runAsync: noop,
-    registerBackgroundService: noop,
-    registerChatAdapter: noop,
-    registerMemoryProvider: noop,
-  });
-}
-
 async function loadRinExtension(
   extensionPath: string,
   options: { cwd: string; agentDir: string },
@@ -154,7 +133,7 @@ async function loadRinExtension(
   if (typeof factory !== "function") return undefined;
   const { loadPiExtensionFromFactory } = await import("../pi/private-api.js");
   return await loadPiExtensionFromFactory(
-    (piApi: any) => factory(addRinExtensionApi(piApi, options)),
+    (piApi: any) => factory(piApi),
     options.cwd,
     eventBus,
     runtime,

@@ -6,6 +6,7 @@ type SlashCommandEntry = {
   description: string;
   source: string;
   sourceInfo?: unknown;
+  chat: boolean;
 };
 
 type SlashCommandSourceGroup = {
@@ -52,6 +53,7 @@ type SlashCommandCollectorSpec<T> = {
   getName: (value: T) => unknown;
   getDescription?: (value: T) => unknown;
   getSourceInfo?: (value: T) => unknown;
+  getChat?: (value: T) => unknown;
 };
 
 function trimText(value: unknown) {
@@ -87,6 +89,7 @@ function collectSlashCommandsForSource<T>(
       name,
       description: trimText(spec.getDescription?.(value)),
       source,
+      chat: spec.getChat?.(value) === true,
     };
     const sourceInfo = spec.getSourceInfo?.(value);
     if (sourceInfo !== undefined) entry.sourceInfo = sourceInfo;
@@ -112,11 +115,24 @@ export function dedupeSlashCommands(commands: SlashCommandEntry[]) {
   return deduped;
 }
 
+export function canInvokeRuntimeSlashCommand(
+  commands: ReadonlyArray<{ name: string; chat?: boolean }>,
+  commandName: string,
+  frontendKind: string,
+): boolean {
+  if (frontendKind !== "chat") return true;
+  const normalizedName = trimText(commandName);
+  return commands.some(
+    (command) => command.name === normalizedName && command.chat === true,
+  );
+}
+
 export function getBuiltinSlashCommands() {
   return collectSlashCommandsForSource<any>(BUILTIN_SLASH_COMMANDS, {
     source: "builtin",
     getName: (command) => command?.name,
     getDescription: (command) => command?.description,
+    getChat: (command) => command?.chat,
   });
 }
 
@@ -126,6 +142,7 @@ export function getExtensionSlashCommands(commands: unknown[], source: string) {
     getName: (command) => command?.invocationName ?? command?.name,
     getDescription: (command) => command?.description,
     getSourceInfo: (command) => command?.sourceInfo,
+    getChat: (command) => command?.chat,
   });
 }
 

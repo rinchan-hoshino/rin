@@ -8,15 +8,38 @@ export type BuiltinSlashCommand = {
   description: string;
   origin?: BuiltinSlashCommandOrigin;
   genericPromptRoute?: BuiltinSlashCommandGenericPromptRoute;
+  chat?: boolean;
 };
 
+const PI_CHAT_BUILTIN_COMMAND_NAMES = new Set([
+  "changelog",
+  "compact",
+  "model",
+  "new",
+  "reload",
+  "resume",
+  "session",
+]);
+
 export const RIN_BUILTIN_SLASH_COMMANDS = [
-  { name: "abort", description: "Abort the current operation", origin: "rin" },
+  {
+    name: "help",
+    description: "Show available commands",
+    origin: "rin",
+    chat: true,
+  },
+  {
+    name: "abort",
+    description: "Abort the current operation",
+    origin: "rin",
+    chat: true,
+  },
   {
     name: "usage",
     description: "Show compact quota and usage status",
     origin: "rin",
     genericPromptRoute: "run_command",
+    chat: true,
   },
 ] satisfies BuiltinSlashCommand[];
 
@@ -35,6 +58,7 @@ function composeBuiltinSlashCommands(
       ...item,
       description: rinizePiCommandDescription(String(item.description || "")),
       origin: "pi" as const,
+      chat: PI_CHAT_BUILTIN_COMMAND_NAMES.has(item.name),
     })),
     ...rinCommands,
   ]) {

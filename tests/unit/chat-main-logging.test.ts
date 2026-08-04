@@ -33,7 +33,7 @@ test("chat bridge treats missing runtime adapters as a quiet idle state", async 
     };
 
     const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
-    const bridge = await mainMod.startChatBridge();
+    const bridge = await mainMod.startChatBridge({ commandRows: [] });
     await bridge.stop();
     console.warn = originalWarn;
 

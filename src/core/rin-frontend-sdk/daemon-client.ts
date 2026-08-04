@@ -288,6 +288,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
         id: command.name,
         name: command.name,
         description: command.description,
+        chat: command.chat === true,
       }));
     }
     const data = this.getData(await this.send({ type: "get_commands" }));
@@ -302,6 +303,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
       category:
         typeof command.category === "string" ? command.category : undefined,
       source: typeof command.source === "string" ? command.source : undefined,
+      chat: command.chat === true,
     }));
   }
 
@@ -336,7 +338,13 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
   }
 
   async runCommand(commandLine: string) {
-    return await this.request({ type: "run_command", commandLine });
+    return await this.request({
+      type: "run_command",
+      commandLine,
+      ...(this.frontendIdentity
+        ? { frontendIdentity: this.frontendIdentity }
+        : {}),
+    });
   }
 
   async compact(

@@ -25,17 +25,67 @@ const messageStore = await import(
     .href
 );
 
-test("chat boot exposes the dedicated chat command registry", () => {
-  const rows = boot.getChatCommandRows();
-  assert.equal(rows[0].name, "help");
-  assert.deepEqual(
-    rows.map((row) => row.name),
-    ["help", "abort", "new", "compact", "reload", "usage"],
-  );
-  assert.ok(!rows.some((row) => row.name === "init"));
-  assert.ok(!rows.some((row) => row.name === "status"));
-  assert.ok(!rows.some((row) => row.name === "session"));
-  assert.ok(!rows.some((row) => row.name === "model"));
+test("chat boot projects chat-enabled commands from the runtime catalog", () => {
+  const rows = boot.getChatCommandRows([
+    {
+      name: "hello",
+      description: "Say hello",
+      source: "extension",
+      chat: true,
+    },
+    {
+      name: "terminal-only",
+      description: "TUI only",
+      source: "extension",
+      chat: false,
+    },
+    {
+      name: "usage",
+      description: "Show usage and quota status",
+      source: "builtin",
+      chat: true,
+    },
+  ]);
+  assert.deepEqual(rows, [
+    { name: "hello", description: "Say hello" },
+    { name: "usage", description: "Show usage and quota status" },
+  ]);
+});
+
+test("chat boot refreshes a live command projection after reload", async () => {
+  const current = [{ name: "old", description: "Old" }];
+  await boot.refreshChatCommandRows(current, {
+    async connect() {},
+    async getCommands() {
+      return [
+        { id: "new", name: "new", description: "New", chat: true },
+        { id: "hidden", name: "hidden", description: "Hidden", chat: false },
+      ];
+    },
+    async disconnect() {},
+  });
+  assert.deepEqual(current, [{ name: "new", description: "New" }]);
+});
+
+test("chat boot loads its command projection from the daemon catalog", async () => {
+  const calls: string[] = [];
+  const rows = await boot.loadChatCommandRows({
+    async connect() {
+      calls.push("connect");
+    },
+    async getCommands() {
+      calls.push("getCommands");
+      return [
+        { id: "visible", name: "visible", description: "Visible", chat: true },
+        { id: "hidden", name: "hidden", description: "Hidden", chat: false },
+      ];
+    },
+    async disconnect() {
+      calls.push("disconnect");
+    },
+  });
+  assert.deepEqual(rows, [{ name: "visible", description: "Visible" }]);
+  assert.deepEqual(calls, ["connect", "getCommands", "disconnect"]);
 });
 
 async function withTempDir(fn) {
@@ -61,8 +111,17 @@ async function waitFor(assertion, timeoutMs = 1000) {
   if (lastError) throw lastError;
 }
 
-test("chat boot command descriptions use the fixed English catalog", () => {
-  const rows = boot.getChatCommandRows();
+const chatBuiltinCatalog = [
+  { name: "help", chat: true },
+  { name: "abort", chat: true },
+  { name: "new", chat: true },
+  { name: "compact", chat: true },
+  { name: "reload", chat: true },
+  { name: "usage", chat: true },
+];
+
+test("chat boot falls back to English descriptions for catalog rows", () => {
+  const rows = boot.getChatCommandRows(chatBuiltinCatalog);
   assert.deepEqual(
     rows.map((row) => row.description),
     [
@@ -87,7 +146,7 @@ test("chat boot builds and syncs Discord application commands", async () => {
       },
     },
   };
-  const rows = boot.getChatCommandRows();
+  const rows = boot.getChatCommandRows(chatBuiltinCatalog);
   const expectedPayload = [
     {
       name: "help",
@@ -192,7 +251,7 @@ test("chat boot clears common telegram scopes before syncing default commands", 
     },
   };
 
-  const rows = boot.getChatCommandRows();
+  const rows = boot.getChatCommandRows(chatBuiltinCatalog);
   const expectedPayload = [
     { command: "help", description: "Show available commands" },
     { command: "abort", description: "Abort current operation" },

@@ -15,6 +15,12 @@
     "rin-daemon": "dist/app/rin-daemon/daemon.js",
     "rin-install": "dist/app/rin-install/main.js"
   },
+  "exports": {
+    "./extension": {
+      "types": "./src/core/rin-extension-api.ts",
+      "import": "./dist/core/rin-extension-api.js"
+    }
+  },
   "scripts": {
     "build:core": "tsx scripts/build.ts --core",
     "build": "tsx scripts/build.ts",
@@ -30,8 +36,9 @@
     "release:bundle": "tsx scripts/release/build-platform-bundle.ts",
     "prepare": "tsx scripts/install-git-hooks.ts",
     "test": "npm run test:unit && npm run test:e2e",
+    "test:types": "tsc -p tests/typecheck/tsconfig.json",
     "test:release": "node --import tsx --test --test-concurrency=4 tests/unit/installer-modules.test.ts tests/unit/rin-cli.test.ts tests/unit/rpc-and-shared.test.ts tests/e2e/bootstrap-entrypoint.test.ts tests/e2e/install-to-tui-user-flow.test.ts tests/unit/release.test.ts tests/e2e/release-scripts.test.ts",
-    "test:unit": "npm run build && node --import tsx --test --test-concurrency=4 $(find tests/unit -name '*.test.ts' -print | sort)",
+    "test:unit": "npm run build && npm run test:types && node --import tsx --test --test-concurrency=4 $(find tests/unit -name '*.test.ts' -print | sort)",
     "test:e2e": "npm run build && node --import tsx --test --test-concurrency=2 $(find tests/e2e -name '*.test.ts' -print | sort)",
     "test:interactive": "npm run build && node --import tsx --test --test-concurrency=2 $(find tests/interactive -name '*.test.ts' -print | sort)",
     "test:manual:install-tui": "npm run build && node --import tsx tests/interactive/install-to-tui-manual.ts",

@@ -1962,8 +1962,26 @@ test(
         bindExtensions: async () => {},
         subscribe: () => () => {},
         extensionRunner: {
+          getRegisteredCommands() {
+            return [
+              {
+                name: "hello",
+                invocationName: "hello",
+                description: "Say hello",
+                chat: false,
+              },
+              {
+                name: "wave",
+                invocationName: "wave",
+                description: "Wave",
+                chat: true,
+              },
+            ];
+          },
           getCommand(name) {
-            return name === "hello" ? { invocationName: "hello" } : undefined;
+            return ["hello", "wave"].includes(name)
+              ? { invocationName: name }
+              : undefined;
           },
         },
         prompt: async (message) => {
@@ -2032,6 +2050,65 @@ test(
         .find((line) => line.type === "response" && line.id === "1");
       assert.equal(response.success, true);
       assert.deepEqual(response.data, { handled: true });
+
+      onData(
+        Buffer.from(
+          `${JSON.stringify({
+            id: "2",
+            type: "run_command",
+            commandLine: "/hello chat",
+            frontendIdentity: {
+              kind: "chat",
+              instanceId: "discord:bot",
+              chatKey: "discord:bot:channel",
+            },
+          })}\n`,
+        ),
+      );
+      await wait(20);
+
+      const chatResponse = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean)
+        .find((line) => line.type === "response" && line.id === "2");
+      assert.deepEqual(prompted, ["/hello world"]);
+      assert.equal(chatResponse.success, true);
+      assert.deepEqual(chatResponse.data, { handled: false });
+
+      onData(
+        Buffer.from(
+          `${JSON.stringify({
+            id: "3",
+            type: "run_command",
+            commandLine: "/wave chat",
+            frontendIdentity: {
+              kind: "chat",
+              instanceId: "discord:bot",
+              chatKey: "discord:bot:channel",
+            },
+          })}\n`,
+        ),
+      );
+      await wait(20);
+      const visibleChatResponse = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean)
+        .find((line) => line.type === "response" && line.id === "3");
+      assert.deepEqual(prompted, ["/hello world", "/wave chat"]);
+      assert.equal(visibleChatResponse.success, true);
+      assert.deepEqual(visibleChatResponse.data, { handled: true });
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -2137,7 +2214,7 @@ test(
 );
 
 test(
-  "rpc mode executes /usage through the daemon builtin command path",
+  "rpc mode executes /usage without an ExtensionRunner",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -2163,7 +2240,6 @@ test(
         agent: { waitForIdle: async () => {}, state: { messages: [] } },
         bindExtensions: async () => {},
         subscribe: () => () => {},
-        extensionRunner: { getCommand: () => undefined },
         prompt: async () => {
           throw new Error("builtin command should not re-enter prompt");
         },

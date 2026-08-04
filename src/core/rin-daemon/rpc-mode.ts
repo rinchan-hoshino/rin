@@ -38,6 +38,7 @@ import {
   RpcTurnCoordinator,
   type RpcTurnInterrupt,
 } from "./rpc-turn-coordinator.js";
+import { canInvokeRuntimeSlashCommand } from "./catalog-helpers.js";
 import {
   getCommandArgumentCompletions,
   getOAuthState,
@@ -2102,6 +2103,19 @@ export async function runCustomRpcMode(
               throw new Error(
                 "session replacement commands must be routed through the frontend",
               );
+            }
+            const frontendKind =
+              normalizeFrontendIdentity(command.frontendIdentity)?.kind ||
+              "rpc";
+            if (
+              commandName &&
+              !canInvokeRuntimeSlashCommand(
+                getSlashCommands(session),
+                commandName,
+                frontendKind,
+              )
+            ) {
+              return { handled: false };
             }
             const builtinResult = await runBuiltinCommand(
               runtime,

@@ -25,6 +25,7 @@ Do not add planning documents, todo files, or ad-hoc AGENTS-style instruction fi
 - `testing.md`: test bucket and validation rules.
 - `gui.md`: GUI shell and installer implementation boundaries.
 - `pi-integration.md`: governed Rin/Pi adapter seams for private Pi imports, session host helpers, and TUI patches.
+- `extensions.md`: Pi-compatible session extensions, Rin command metadata, and daemon extension lifecycles.
 - `persistence-write-and-archive.md`: write-reduction invariants, transcript-index experiments, and full-fidelity chat archive tiers.
 - `release-trains.md`: stable, beta, nightly, git, and hotfix channel contract.
 - `releasing.md`: operator workflow for publishing release trains.

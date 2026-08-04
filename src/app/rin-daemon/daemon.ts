@@ -16,7 +16,7 @@ import {
 import { defaultDaemonSocketPath } from "../../core/rin-lib/common.js";
 import { formatRuntimeErrorForUser } from "../../core/rin-lib/user-facing-errors.js";
 import { startDaemon } from "../../core/rin-daemon/daemon.js";
-import { RinBackgroundExtensionManager } from "../../core/rin-daemon/extensions.js";
+import { RinDaemonExtensionManager } from "../../core/rin-daemon/extensions.js";
 import { createWorkerCgroupIsolation } from "../../core/rin-daemon/worker-cgroup-isolation.js";
 import {
   acquireDaemonInstanceLock,
@@ -56,7 +56,7 @@ async function main() {
 
   const daemonSocketPath = process.argv[2] || defaultDaemonSocketPath();
   let daemonLock: DaemonInstanceLock | null = null;
-  let backgroundExtensionManager: RinBackgroundExtensionManager | null = null;
+  let daemonExtensionManager: RinDaemonExtensionManager | null = null;
   const hostedChatService = createHostedChatService({ logger: console });
 
   const stopHostedServices = async () => {
@@ -65,7 +65,7 @@ async function main() {
 
   const stopAllServices = async () => {
     await stopHostedServices();
-    await backgroundExtensionManager?.stop().catch(() => {});
+    await daemonExtensionManager?.stop().catch(() => {});
   };
 
   const getSettingsManager = async () => {
@@ -83,17 +83,16 @@ async function main() {
       socketPath: daemonSocketPath,
     });
 
-    backgroundExtensionManager = new RinBackgroundExtensionManager({
+    daemonExtensionManager = new RinDaemonExtensionManager({
       cwd: runtime.cwd,
       agentDir: runtime.agentDir,
       logger: console,
     });
     void hostedChatService.start(async () => {
-      await backgroundExtensionManager!.start();
+      await daemonExtensionManager!.start();
       return await startChatBridge({
         hosted: true,
-        chatAdapterProviders:
-          backgroundExtensionManager!.getChatAdapterProviders(),
+        chatAdapterProviders: daemonExtensionManager!.getChatAdapterProviders(),
         frontendClientFactory: () =>
           new RinDaemonFrontendClient({
             socketPath: "inprocess://rin-daemon",
@@ -104,7 +103,7 @@ async function main() {
     const getHostedChatBridge = async () => await hostedChatService.getBridge();
 
     await startDaemon({
-      backgroundExtensionManager,
+      daemonExtensionManager,
       instanceLock: daemonLock,
       socketPath: daemonSocketPath,
       workerPath,

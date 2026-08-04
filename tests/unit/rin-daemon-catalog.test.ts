@@ -57,14 +57,19 @@ test("daemon catalog lists builtin and extension commands without session worker
   });
 });
 
-test("daemon catalog honors command-level extension resource options", async () => {
+test("daemon catalog preserves Rin command metadata from Pi registration", async () => {
   await withTestAgentDir(async (agentDir) => {
     const extensionPath = path.join(agentDir, "catalog-extension.ts");
     await fs.writeFile(
       extensionPath,
-      `export default function(pi: any) {
-        pi.registerCommand("catalog-ext", {
-          description: "catalog extension command",
+      `export default function(rin: any) {
+        rin.registerCommand("catalog-chat", {
+          description: "chat extension command",
+          chat: true,
+          handler: async () => {},
+        });
+        rin.registerCommand("catalog-tui", {
+          description: "tui extension command",
           handler: async () => {},
         });
       }\n`,
@@ -75,9 +80,14 @@ test("daemon catalog honors command-level extension resource options", async () 
       agentDir,
       additionalExtensionPaths: [extensionPath],
     });
-    assert.equal(
-      commands.find((item) => item.name === "catalog-ext")?.description,
-      "catalog extension command",
+    assert.deepEqual(
+      commands
+        .filter((item) => item.name.startsWith("catalog-"))
+        .map((item) => ({ name: item.name, chat: item.chat })),
+      [
+        { name: "catalog-chat", chat: true },
+        { name: "catalog-tui", chat: false },
+      ],
     );
   });
 });

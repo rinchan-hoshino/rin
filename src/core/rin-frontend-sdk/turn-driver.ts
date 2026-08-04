@@ -1199,6 +1199,7 @@ export class RinFrontendTurnDriver {
       type: "run_command",
       commandLine,
       sessionFile: wanted,
+      frontendIdentity: this.frontendIdentity,
     });
   }
 
