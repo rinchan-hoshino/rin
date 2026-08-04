@@ -25,9 +25,11 @@ const { lookupReplySession } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js"))
     .href
 );
-const { openChatDatabase, readChatState } = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
-);
+const { openChatDatabase, readChatSessionBinding, readChatState } =
+  await import(
+    pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js"))
+      .href
+  );
 const {
   claimChatInboxItem,
   completeClaimedChatInboxItem,
@@ -3675,7 +3677,16 @@ test("chat controller leaves prompt-versus-steer admission to Pi", async () => {
   });
   controller.driver.runTurn = async (input) => {
     submissions.push(input);
-    return { outcome: "nonterminal", superseded: true };
+    await input.commitNonterminalAcceptance?.({
+      requestTag: input.requestTag,
+      sessionFile: controller.currentSessionFile(),
+    });
+    return {
+      outcome: "nonterminal",
+      superseded: true,
+      requestTag: input.requestTag,
+      sessionFile: controller.currentSessionFile(),
+    };
   };
 
   const result = await controller.runTurn({
@@ -3772,8 +3783,9 @@ test("chat controller adopts a backend-accepted pending presentation before inte
   const accepted = [];
   const contexts = [];
   const interimDeliveries = [];
-  controller.markAcceptedMessage = async (messageId) => {
+  controller.markAcceptedMessage = (messageId) => {
     accepted.push(messageId);
+    return true;
   };
   controller.app.bots[0].getWorkingIndicators = () => [
     {
@@ -3829,6 +3841,8 @@ test("chat controller adopts a backend-accepted pending presentation before inte
       attempt: 1,
     },
     backendAccepted: false,
+    joinedOwnerTurnId: "turn-old-owner",
+    sessionFile: "/tmp/chat-session.jsonl",
   });
 
   await controller.handleFrontendEvent({
@@ -3941,11 +3955,37 @@ test("nonterminal input durably joins the terminal owner and takes presentation 
     images: [],
     frontendReady: true,
   });
-  controller.driver.runTurn = async () => {
+  const absoluteSessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "joined-input.jsonl",
+  );
+  controller.driver.currentSessionFile = () => absoluteSessionFile;
+  let driverAdmissions = 0;
+  controller.driver.runTurn = async (input: any) => {
+    driverAdmissions += 1;
+    assert.equal(
+      controller.pendingTurnPresentations.get("request-joined-input")
+        ?.joinedOwnerTurnId,
+      ownerClaim.itemId,
+    );
+    const currentSessionFile = controller.driver.currentSessionFile;
+    controller.driver.currentSessionFile = () =>
+      path.join(controller.agentDir, "sessions", "mutable-other.jsonl");
+    try {
+      await input.commitNonterminalAcceptance?.({
+        requestTag: "request-joined-input",
+        sessionFile: absoluteSessionFile,
+      });
+    } finally {
+      controller.driver.currentSessionFile = currentSessionFile;
+    }
     await controller.handleFrontendEvent({
       type: "turn_accepted",
       requestTag: "request-joined-input",
-      sessionFile: "/tmp/joined-input.jsonl",
+      sessionFile: absoluteSessionFile,
     });
     await controller.handleFrontendEvent({
       type: "assistant_interim",
@@ -3953,10 +3993,12 @@ test("nonterminal input durably joins the terminal owner and takes presentation 
       text: "response to second request",
     });
     return {
-      outcome: "nonterminal",
+      outcome: driverAdmissions === 1 ? "nonterminal" : "rejoined",
+      originalOutcome:
+        driverAdmissions === 1 ? undefined : ("nonterminal" as const),
       superseded: true,
       requestTag: "request-joined-input",
-      sessionFile: "/tmp/joined-input.jsonl",
+      sessionFile: absoluteSessionFile,
     };
   };
   const enqueueAndDrainDelivery =
@@ -3967,16 +4009,54 @@ test("nonterminal input durably joins the terminal owner and takes presentation 
     return { accepted: true, settled: true, messageIds: ["sent-interim"] };
   };
 
-  await controller.runTurn({
+  const joinedTurnInput = {
     text: "second request",
     attachments: [],
     incomingMessageId: joinedClaim.messageId,
     replyToMessageId: joinedClaim.messageId,
     requestTag: "request-joined-input",
     outboxTurnFence: joinedFence,
-  });
-
+  };
   const db = openChatDatabase(controller.agentDir);
+  const controllerSessionBeforeFailure = controller.state.sessionFile;
+  const bindingBeforeFailure = readChatSessionBinding(
+    controller.agentDir,
+    controller.chatKey,
+  );
+  db.exec(`CREATE TRIGGER fail_joined_acceptance_once
+    BEFORE UPDATE OF accepted_at ON messages
+    WHEN NEW.message_id = 'm-joined-input'
+    BEGIN
+      SELECT RAISE(ABORT, 'simulated_acceptance_commit_crash');
+    END`);
+  await assert.rejects(
+    controller.runTurn(joinedTurnInput),
+    /simulated_acceptance_commit_crash/,
+  );
+  assert.equal(controller.currentIncomingMessageId(), ownerClaim.messageId);
+  assert.equal(controller.backendAcceptedIncomingMessageId, "");
+  assert.equal(controller.state.sessionFile, controllerSessionBeforeFailure);
+  assert.equal(
+    readChatSessionBinding(controller.agentDir, controller.chatKey),
+    bindingBeforeFailure,
+  );
+  assert.deepEqual(
+    db
+      .prepare(
+        `SELECT messages.accepted_at,
+                json_extract(inbox_jobs.admission_json, '$.joinedTurnId') AS joined_turn_id
+           FROM inbox_jobs
+           JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+          WHERE inbox_jobs.turn_id = ?`,
+      )
+      .get(joinedClaim.itemId),
+    { accepted_at: null, joined_turn_id: null },
+  );
+  db.exec(`DROP TRIGGER fail_joined_acceptance_once`);
+
+  await controller.runTurn(joinedTurnInput);
+  assert.equal(driverAdmissions, 2);
+
   const joined = db
     .prepare(
       `SELECT messages.accepted_at,

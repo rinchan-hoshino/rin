@@ -1413,6 +1413,11 @@ export class RinFrontendTurnDriver {
       assumeSessionReady?: boolean;
       piStartupOptions?: RinPiPassthroughOptions["piStartupOptions"];
       disabledRinCapabilities?: string[];
+      commitNonterminalAcceptance?: (input: {
+        requestTag: string;
+        sessionId?: string;
+        sessionFile: string;
+      }) => Promise<void>;
     } & RinToolStartupOptions,
   ): Promise<RinFrontendTurnResult> {
     const turnInterruptionSeq = this.turnInterruptionSeq;
@@ -1562,20 +1567,30 @@ export class RinFrontendTurnDriver {
       }
       const ownsTerminal = effectiveOutcome === "terminalOwner";
       if (!ownsTerminal) {
+        const acceptedSessionId =
+          safeString(ready?.sessionId || this.currentSessionId()).trim() ||
+          undefined;
+        const acceptedSessionFile =
+          safeString(targetSessionFile).trim() || undefined;
         if (effectiveOutcome === "nonterminal") {
+          if (input.commitNonterminalAcceptance && !acceptedSessionFile) {
+            throw new Error("frontend_session_not_connected");
+          }
+          if (input.commitNonterminalAcceptance && acceptedSessionFile) {
+            await input.commitNonterminalAcceptance({
+              requestTag,
+              sessionId: acceptedSessionId,
+              sessionFile: acceptedSessionFile,
+            });
+          }
           this.emit({ type: "turn_accepted", requestTag });
         }
         return {
           ...observed,
           superseded: true,
           requestTag,
-          sessionId:
-            safeString(ready?.sessionId || this.currentSessionId()).trim() ||
-            undefined,
-          sessionFile:
-            safeString(
-              ready?.sessionFile || this.currentSessionFile(),
-            ).trim() || undefined,
+          sessionId: acceptedSessionId,
+          sessionFile: acceptedSessionFile,
         };
       }
       if (existingLiveTurn) {

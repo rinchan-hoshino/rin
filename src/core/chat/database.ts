@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import BetterSqlite3 from "better-sqlite3";
 
 import { chatDataPath } from "../data-layout.js";
+import { toStoredSessionFile } from "../session/ref.js";
 import { safeString } from "../text-utils.js";
 export const CHAT_DATABASE_SCHEMA_VERSION = 9;
 export const CHAT_ADMISSION_MODEL_VERSION = "1";
@@ -894,7 +895,8 @@ export function markChatMessageAcceptedWithFence(
     .transaction(() => {
       const timestamp = safeString(input.acceptedAt).trim() || nowIso();
       const updatedAt = nowIso();
-      const sessionFile = safeString(input.sessionFile).trim() || null;
+      const sessionFile =
+        toStoredSessionFile(agentDir, input.sessionFile) || null;
       const joinedTurnId = safeString(input.joinedTurnId).trim() || null;
       const turn = db
         .prepare(

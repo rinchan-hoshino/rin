@@ -1892,20 +1892,48 @@ test("frontend SDK settles Pi-native steering without taking terminal ownership"
     promptSource: "chat-bridge",
   });
   const events: any[] = [];
-  driver.subscribe((event: any) => events.push(event));
+  const acceptanceOrder: string[] = [];
+  let releaseAcceptance!: () => void;
+  const acceptanceGate = new Promise<void>((resolve) => {
+    releaseAcceptance = resolve;
+  });
+  driver.subscribe((event: any) => {
+    events.push(event);
+    if (event.type === "turn_accepted") acceptanceOrder.push("event");
+  });
 
   const pending = driver.runTurn({
     text: "restored job",
     requestTag: "nonterminal-input",
     streamingBehavior: "steer",
     promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+    commitNonterminalAcceptance: async (acceptance: any) => {
+      assert.equal(acceptance.requestTag, "nonterminal-input");
+      assert.equal(acceptance.sessionFile, "/tmp/frontend-chat.jsonl");
+      acceptanceOrder.push("commit-start");
+      await acceptanceGate;
+      acceptanceOrder.push("commit");
+    },
   });
   await waitUntil(
     () => client.calls.some((call: any) => call.type === "prompt"),
     "ordinary submission did not reach backend",
   );
+  let settled = false;
+  const observed = pending.then((result: any) => {
+    settled = true;
+    return result;
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  assert.deepEqual(acceptanceOrder, ["commit-start"]);
+  assert.equal(
+    events.some((event) => event.type === "turn_accepted"),
+    false,
+  );
+  releaseAcceptance();
   const result = await withTimeout(
-    pending,
+    observed,
     250,
     "Pi-native steering admission did not settle",
   );
@@ -1916,9 +1944,74 @@ test("frontend SDK settles Pi-native steering without taking terminal ownership"
     { type: "frontend_status", phase: "sending" },
     { type: "turn_accepted", requestTag: "nonterminal-input" },
   ]);
+  assert.deepEqual(acceptanceOrder, ["commit-start", "commit", "event"]);
   const promptCall = client.calls.find((call: any) => call.type === "prompt");
   assert.equal(promptCall.text, "restored job");
   assert.equal(promptCall.options.streamingBehavior, "steer");
+});
+
+test("frontend SDK retries an uncommitted nonterminal acceptance as a native rejoin", async () => {
+  const client = createFrontendClient();
+  let submission = 0;
+  client.getState = async () => ({
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: true,
+    turnActive: true,
+    requestTag: "backend-terminal-owner",
+  });
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    submission += 1;
+    return submission === 1
+      ? { outcome: "nonterminal", requestTag: options.requestTag }
+      : {
+          outcome: "rejoined",
+          originalOutcome: "nonterminal",
+          requestTag: options.requestTag,
+        };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const events: any[] = [];
+  driver.subscribe((event: any) => events.push(event));
+
+  await assert.rejects(
+    driver.runTurn({
+      text: "joined input",
+      requestTag: "stable-nonterminal-input",
+      commitNonterminalAcceptance: async () => {
+        throw new Error("simulated_acceptance_commit_crash");
+      },
+    }),
+    /simulated_acceptance_commit_crash/,
+  );
+  assert.equal(
+    events.some((event) => event.type === "turn_accepted"),
+    false,
+  );
+
+  let committed = 0;
+  const result = await driver.runTurn({
+    text: "joined input",
+    requestTag: "stable-nonterminal-input",
+    commitNonterminalAcceptance: async () => {
+      committed += 1;
+    },
+  });
+  assert.equal(result.outcome, "rejoined");
+  assert.equal(result.originalOutcome, "nonterminal");
+  assert.equal(committed, 1);
+  assert.equal(
+    events.filter((event) => event.type === "turn_accepted").length,
+    1,
+  );
+  assert.equal(
+    client.calls.filter((call: any) => call.type === "prompt").length,
+    2,
+  );
 });
 
 test("frontend SDK rejects a missing Pi admission instead of assuming prompt", async () => {

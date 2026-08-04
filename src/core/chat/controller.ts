@@ -145,6 +145,8 @@ type ChatTurnTarget = {
 
 type PendingTurnPresentation = ChatTurnTarget & {
   backendAccepted: boolean;
+  joinedOwnerTurnId?: string;
+  sessionFile?: string;
 };
 
 type ChatTurnMeta = ChatTurnTarget & {
@@ -925,20 +927,48 @@ export class ChatController {
       safeString(input.replyToMessageId).trim() || incomingMessageId;
   }
 
-  private async adoptBackendAcceptedPendingPresentation(requestTag: string) {
+  private async adoptBackendAcceptedPendingPresentation(
+    requestTag: string,
+    input: { sessionFile?: string } = {},
+  ) {
     const pending = this.pendingTurnPresentations.get(requestTag);
     if (!pending || pending.backendAccepted) return pending;
+    const sessionFile =
+      safeString(input.sessionFile).trim() ||
+      safeString(pending.sessionFile).trim();
+    if (
+      pending.outboxTurnFence &&
+      (!sessionFile ||
+        (input.sessionFile &&
+          pending.sessionFile &&
+          !sameSessionFile(
+            this.agentDir,
+            input.sessionFile,
+            pending.sessionFile,
+          )))
+    ) {
+      throw new Error("chat_turn_fence_lost");
+    }
     const previousIncomingMessageId = this.currentIncomingMessageId();
     const previousReplyToMessageId = this.currentReplyToMessageId();
     const previousWorkingIndicators = this.activeWorkingIndicators.length
       ? [...this.activeWorkingIndicators]
       : this.getWorkingIndicators();
+    const ownerTurnId = safeString(pending.joinedOwnerTurnId).trim();
+    const accepted = sessionFile
+      ? this.markAcceptedMessage(pending.incomingMessageId, {
+          sessionFile,
+          joinedTurnId: ownerTurnId || undefined,
+        })
+      : undefined;
+    if (pending.outboxTurnFence && (!ownerTurnId || accepted !== true)) {
+      throw new Error("chat_turn_fence_lost");
+    }
     this.setJoinedPresentation(pending);
     this.backendAcceptedIncomingMessageId = safeString(
       pending.incomingMessageId,
     ).trim();
     pending.backendAccepted = true;
-    await this.markAcceptedMessage(pending.incomingMessageId);
     if (
       previousIncomingMessageId &&
       previousIncomingMessageId !== pending.incomingMessageId
@@ -1804,27 +1834,37 @@ export class ChatController {
     );
   }
 
-  private markAcceptedMessage(messageId?: string) {
+  private markAcceptedMessage(
+    messageId?: string,
+    input: { sessionFile?: string; joinedTurnId?: string } = {},
+  ) {
     if (!this.affectChatBinding) return;
     const nextMessageId = safeString(messageId || "").trim();
     if (!nextMessageId) return;
     const acceptedAt = nowIso();
-    const sessionFile = this.currentSessionFile();
+    const sessionFile =
+      safeString(input.sessionFile).trim() || this.currentSessionFile();
     if (!sessionFile) return;
-    const storedSessionFile = this.updateStoredSessionFile(sessionFile);
-    this.saveState();
+    const storedSessionFile =
+      toStoredSessionFile(this.agentDir, sessionFile) || sessionFile;
     const fence = this.turnFenceForInboundMessage(nextMessageId);
     if (fence) {
-      return markChatMessageAcceptedWithFence(this.agentDir, fence, {
-        sessionFile: storedSessionFile || sessionFile,
+      const accepted = markChatMessageAcceptedWithFence(this.agentDir, fence, {
+        sessionFile: storedSessionFile,
+        acceptedAt,
+        joinedTurnId: input.joinedTurnId,
+      });
+      if (!accepted) return false;
+    } else {
+      if (this.hasManagedTurnForInboundMessage(nextMessageId)) return false;
+      markProcessedChatMessage(this.agentDir, this.chatKey, nextMessageId, {
+        sessionFile: storedSessionFile,
         acceptedAt,
       });
     }
-    if (this.hasManagedTurnForInboundMessage(nextMessageId)) return false;
-    markProcessedChatMessage(this.agentDir, this.chatKey, nextMessageId, {
-      sessionFile: storedSessionFile || sessionFile,
-      acceptedAt,
-    });
+    this.updateStoredSessionFile(storedSessionFile);
+    this.saveState();
+    return true;
   }
 
   private markProcessedMessage(messageId?: string, bindSession = true) {
@@ -3211,6 +3251,10 @@ export class ChatController {
         requestTag,
         outboxTurnFence: input.outboxTurnFence,
         backendAccepted: false,
+        joinedOwnerTurnId: preserveCurrentTurn
+          ? currentTurnBeforeSubmission?.outboxTurnFence?.turnId
+          : undefined,
+        sessionFile: this.driver.currentSessionFile(),
       };
       if (requestTag) {
         this.pendingTurnPresentations.set(requestTag, pendingPresentation);
@@ -3262,6 +3306,34 @@ export class ChatController {
           promptContext: input.promptMeta,
           source: "chat-bridge",
           requestTag,
+          commitNonterminalAcceptance:
+            preserveCurrentTurn &&
+            pendingPresentation.outboxTurnFence &&
+            pendingPresentation.joinedOwnerTurnId
+              ? async (acceptance) => {
+                  if (acceptance.requestTag !== requestTag) {
+                    throw new Error("chat_turn_fence_lost");
+                  }
+                  if (
+                    !pendingPresentation.sessionFile ||
+                    !sameSessionFile(
+                      this.agentDir,
+                      acceptance.sessionFile,
+                      pendingPresentation.sessionFile,
+                    )
+                  ) {
+                    throw new Error("chat_turn_fence_lost");
+                  }
+                  const acceptedPresentation =
+                    await this.adoptBackendAcceptedPendingPresentation(
+                      requestTag,
+                      { sessionFile: acceptance.sessionFile },
+                    );
+                  if (!acceptedPresentation?.backendAccepted) {
+                    throw new Error("chat_turn_fence_lost");
+                  }
+                }
+              : undefined,
         });
         this.assertRestoredTurnStayedOnSession(
           restoreSessionFile,
@@ -3283,27 +3355,13 @@ export class ChatController {
           result.outcome === "rejoined"
             ? result.originalOutcome
             : result.outcome;
-        if (preserveCurrentTurn && effectiveOutcome === "nonterminal") {
-          const ownerTurnId = safeString(
-            this.currentTurn?.outboxTurnFence?.turnId,
-          ).trim();
-          if (input.outboxTurnFence && ownerTurnId) {
-            const accepted = markChatMessageAcceptedWithFence(
-              this.agentDir,
-              input.outboxTurnFence,
-              {
-                acceptedAt: new Date().toISOString(),
-                sessionFile:
-                  result.sessionFile || this.driver.currentSessionFile(),
-                joinedTurnId: ownerTurnId,
-              },
-            );
-            if (!accepted) throw new Error("chat_turn_fence_lost");
-          }
-          this.setJoinedPresentation(input);
-          this.backendAcceptedIncomingMessageId = safeString(
-            input.incomingMessageId,
-          ).trim();
+        if (
+          preserveCurrentTurn &&
+          effectiveOutcome === "nonterminal" &&
+          pendingPresentation.outboxTurnFence &&
+          !pendingPresentation.backendAccepted
+        ) {
+          throw new Error("chat_turn_fence_lost");
         }
         if (deliverFinal && this.currentTurn && !result.superseded) {
           if (

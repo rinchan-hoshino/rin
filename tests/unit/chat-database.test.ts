@@ -1002,9 +1002,39 @@ test("chat database fences acceptance and session binding updates", async () => 
       chatDatabase.readChatSessionBinding(agentDir, chatKey),
       "current.jsonl",
     );
+    db.exec(`CREATE TEMP TRIGGER fail_fenced_message_acceptance
+      BEFORE UPDATE OF accepted_at ON messages
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated_acceptance_commit_crash');
+      END`);
+    assert.throws(
+      () =>
+        chatDatabase.markChatMessageAcceptedWithFence(agentDir, currentFence, {
+          sessionFile: "managed/chat/accepted.jsonl",
+          joinedTurnId: "owner-turn",
+        }),
+      /simulated_acceptance_commit_crash/,
+    );
+    assert.deepEqual(
+      db
+        .prepare(
+          `SELECT execution_session_file,
+                  json_extract(admission_json, '$.joinedTurnId') AS joined_turn_id
+             FROM inbox_jobs WHERE turn_id = ?`,
+        )
+        .get("fenced-turn"),
+      { execution_session_file: null, joined_turn_id: null },
+    );
+    assert.equal(
+      db
+        .prepare(`SELECT accepted_at FROM messages WHERE id = ?`)
+        .get("fenced-message").accepted_at,
+      null,
+    );
+    db.exec(`DROP TRIGGER fail_fenced_message_acceptance`);
     assert.equal(
       chatDatabase.markChatMessageAcceptedWithFence(agentDir, currentFence, {
-        sessionFile: "accepted.jsonl",
+        sessionFile: "managed/chat/accepted.jsonl",
       }),
       true,
     );
@@ -1014,7 +1044,29 @@ test("chat database fences acceptance and session binding updates", async () => 
           `SELECT execution_session_file FROM inbox_jobs WHERE turn_id = ?`,
         )
         .get("fenced-turn").execution_session_file,
-      "accepted.jsonl",
+      "managed/chat/accepted.jsonl",
+    );
+    assert.equal(
+      chatDatabase.markChatMessageAcceptedWithFence(agentDir, currentFence, {
+        sessionFile: path.join(
+          agentDir,
+          "sessions",
+          "managed",
+          "chat",
+          "accepted.jsonl",
+        ),
+        joinedTurnId: "owner-turn",
+      }),
+      true,
+    );
+    assert.equal(
+      db
+        .prepare(
+          `SELECT json_extract(admission_json, '$.joinedTurnId') AS joined_turn_id
+             FROM inbox_jobs WHERE turn_id = ?`,
+        )
+        .get("fenced-turn").joined_turn_id,
+      "owner-turn",
     );
     assert.equal(
       chatDatabase.markChatMessageAcceptedWithFence(agentDir, currentFence, {
