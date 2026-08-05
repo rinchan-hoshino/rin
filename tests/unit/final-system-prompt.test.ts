@@ -141,7 +141,16 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     ),
   );
   assert.ok(
+    baseSystemPrompt.includes(
+      "After compaction, use the current-branch snapshot re-injected by the trusted Rin runtime",
+    ),
+  );
+  assert.ok(
+    baseSystemPrompt.includes("never reconstruct it from the prose summary"),
+  );
+  assert.equal(
     baseSystemPrompt.includes("After compaction, read it before continuing"),
+    false,
   );
   assert.ok(
     baseSystemPrompt.includes("Clear it before starting a new unrelated task"),
@@ -157,7 +166,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.ok(
     baseSystemPrompt.includes(
-      "Use note for model-only scratch work that should survive compaction within the current session",
+      "Use note for model-only scratch work that survives compaction, so keep it concise",
     ),
   );
   assert.ok(

@@ -44,6 +44,7 @@ import {
   estimateProviderBoundContextTokens,
 } from "./provider-context.js";
 import { applyRinSystemPromptOverlay } from "./system-prompt-overlay.js";
+import { injectPostCompactionState } from "./post-compaction-state.js";
 import {
   bindPiSessionAutoCompactor,
   bindPiSessionCompactionChecker,
@@ -91,13 +92,14 @@ export function createRinCapabilityDefinitions(
       name: "rin_provider_bound_context",
       hooks: {
         context: [
-          (event: any, ctx: any) => {
+          async (event: any, ctx: any) => {
+            if (!Array.isArray(event?.messages)) return undefined;
             const protectedSourceWindowTurns = Number(
               ctx?.sessionManager?.[
                 EPHEMERAL_FORK_PROTECT_SOURCE_WINDOW_TURNS_KEY
               ] || 0,
             );
-            return buildProviderBoundContextEvent(event, {
+            const providerEvent = buildProviderBoundContextEvent(event, {
               cwd: String(ctx?.cwd || options.cwd || process.cwd()),
               protectRecentTurns:
                 protectedSourceWindowTurns > 0
@@ -105,6 +107,11 @@ export function createRinCapabilityDefinitions(
                   : undefined,
               protectRecentTurnContents: protectedSourceWindowTurns > 0,
             });
+            const injection = await injectPostCompactionState(
+              providerEvent ?? { messages: event.messages },
+              ctx?.sessionManager,
+            );
+            return injection ?? providerEvent;
           },
         ],
       },

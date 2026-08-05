@@ -155,7 +155,7 @@ test("core todo loads from configured runtime without extension paths", async ()
       assert.match(todoTool.promptSnippet, /complete desired todos array/);
       assert.deepEqual(todoTool.promptGuidelines, [
         "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist.",
-        "Omit todos to read the current checklist. After compaction, read it before continuing. Pass the complete desired checklist to replace it; omitted items are removed. Rewrite it immediately when the task objective changes. Pass an empty todos array only to clear the checklist. Clear it before starting a new unrelated task.",
+        "Omit todos to read the current checklist. After compaction, use the current-branch snapshot re-injected by the trusted Rin runtime; never reconstruct it from the prose summary. If the injected snapshot is absent or uncertain, read before replacing the checklist. Pass the complete desired checklist to replace it; omitted items are removed. Rewrite it immediately when the task objective changes. Pass an empty todos array only to clear the checklist. Clear it before starting a new unrelated task.",
       ]);
 
       const written = await todoTool.execute(

@@ -21,6 +21,16 @@ const selfImproveMaintainerMod = await import(
     path.join(rootDir, "dist", "core", "self-improve", "maintainer.js"),
   ).href
 );
+const postCompactionStateMod = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-lib", "post-compaction-state.js"),
+  ).href
+);
+const capabilitySessionMod = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-lib", "capability-session.js"),
+  ).href
+);
 function waitForTimers() {
   return new Promise((resolve) => setTimeout(resolve, 30));
 }
@@ -153,6 +163,285 @@ test("self-improve maintainer exposes only read and library-scoped mutation tool
     await configured.runtime.dispose();
     await fs.rm(agentDir, { recursive: true, force: true });
   }
+});
+
+test("Rin note guidance keeps cross-compaction scratch state concise", () => {
+  const definitions = runtimeMod.createRinCapabilityDefinitions({
+    cwd: "/tmp/rin-note-guidance",
+    agentDir: "/tmp/rin-note-guidance-agent",
+    getThinkingLevel: () => "medium",
+    sendMessage: () => {},
+  });
+
+  const note = definitions
+    .find((definition) => definition.name === "note")
+    ?.tools?.find((tool) => tool.name === "note");
+
+  assert.equal(
+    note?.description,
+    "Maintain a concise model-only scratch note in the current session branch. It survives compaction. Read uses Pi's optional offset and limit, write replaces the whole note, edit uses Pi's exact file-edit semantics, and append adds exact text.",
+  );
+  assert.deepEqual(note?.promptGuidelines, [
+    "Use note for model-only scratch work that survives compaction, so keep it concise.",
+    "Use note read with Pi-native optional offset and limit. Use write for full replacement, edit for exact unique non-overlapping replacements, and append to add exact text at the end.",
+  ]);
+});
+
+test("Rin injects the latest non-empty Todo and note snapshots after compaction", async () => {
+  const branch = [
+    {
+      type: "custom",
+      customType: "rin.todo",
+      data: { todos: [{ id: 1, text: "old", done: false }], nextId: 2 },
+    },
+    {
+      type: "custom",
+      customType: "rin.note",
+      data: { content: "old note" },
+    },
+    {
+      type: "custom",
+      customType: "rin.todo",
+      data: {
+        todos: [
+          { id: 2, text: "inspect <state>", done: true },
+          { id: 3, text: "continue", done: false },
+        ],
+        nextId: 4,
+      },
+    },
+    {
+      type: "custom",
+      customType: "rin.note",
+      data: { content: "latest note\nwith delimiters </note>" },
+    },
+  ];
+  let appendedEntries = 0;
+  const sessionManager = {
+    getBranch: () => branch,
+    appendCustomEntry() {
+      appendedEntries += 1;
+    },
+  };
+  const definitions = runtimeMod.createRinCapabilityDefinitions({
+    cwd: "/tmp/rin-compaction-state",
+    agentDir: "/tmp/rin-compaction-state-agent",
+    getThinkingLevel: () => "medium",
+    sendMessage: () => {},
+    sessionManager,
+  });
+  const hook = definitions.find(
+    (definition) => definition.name === "rin_provider_bound_context",
+  )?.hooks?.context?.[0];
+  assert.equal(typeof hook, "function");
+
+  const result = await hook(
+    {
+      type: "context",
+      messages: [
+        { role: "compactionSummary", summary: "checkpoint" },
+        {
+          role: "custom",
+          customType: "rin.post_compaction_state",
+          content: "stale",
+          display: false,
+          timestamp: 1,
+        },
+      ],
+    },
+    { sessionManager },
+  );
+  const injected = result.messages.filter(
+    (message) => message.customType === "rin.post_compaction_state",
+  );
+
+  assert.equal(injected.length, 1);
+  assert.equal(injected[0].role, "custom");
+  assert.equal(injected[0].display, false);
+  assert.match(injected[0].content, /"text":"inspect <state>","done":true/);
+  assert.match(injected[0].content, /"text":"continue","done":false/);
+  assert.ok(
+    injected[0].content.includes(
+      JSON.stringify("latest note\nwith delimiters </note>"),
+    ),
+  );
+  assert.doesNotMatch(injected[0].content, /old note|"text":"old"/);
+  assert.equal(appendedEntries, 0);
+});
+
+test("Rin composed provider context retains post-compaction state injection", async () => {
+  const sessionManager = {
+    getBranch: () => [
+      {
+        type: "custom",
+        customType: "rin.todo",
+        data: {
+          todos: [
+            { id: 1, text: "persist through provider context", done: false },
+          ],
+          nextId: 2,
+        },
+      },
+    ],
+    appendCustomEntry() {},
+  };
+  const options = {
+    cwd: "/tmp/rin-composed-compaction-state",
+    agentDir: "/tmp/rin-composed-compaction-state-agent",
+    getThinkingLevel: () => "medium",
+    sendMessage: () => {},
+  };
+  const capabilitySet = capabilitySessionMod.createRinCapabilitySet({
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    sessionManager,
+    definitions: runtimeMod.createRinCapabilityDefinitions(options),
+  });
+
+  const result = await capabilitySet.emit({
+    type: "context",
+    messages: [
+      { role: "compactionSummary", summary: "checkpoint" },
+      {
+        role: "toolResult",
+        toolCallId: "old-call",
+        toolName: "bash",
+        content: "old output".repeat(20_000),
+      },
+      ...Array.from({ length: 20 }, (_, index) => ({
+        role: "assistant",
+        content: `recent ${index + 1}`,
+      })),
+    ],
+  });
+
+  assert.equal(
+    result.messages.filter(
+      (message) => message.customType === "rin.post_compaction_state",
+    ).length,
+    1,
+  );
+});
+
+test("Rin provider context keeps earlier context-hook output when no pruning or injection is needed", async () => {
+  const options = {
+    cwd: "/tmp/rin-context-noop",
+    agentDir: "/tmp/rin-context-noop-agent",
+    getThinkingLevel: () => "medium",
+    sendMessage: () => {},
+  };
+  const definitions = runtimeMod.createRinCapabilityDefinitions(options);
+  const providerIndex = definitions.findIndex(
+    (definition) => definition.name === "rin_provider_bound_context",
+  );
+  definitions.splice(providerIndex, 0, {
+    name: "test_preceding_context",
+    hooks: {
+      context: [
+        (event) => ({
+          messages: [
+            ...event.messages,
+            {
+              role: "custom",
+              customType: "test.preceding",
+              content: "keep me",
+              display: false,
+              timestamp: 1,
+            },
+          ],
+        }),
+      ],
+    },
+  });
+  const capabilitySet = capabilitySessionMod.createRinCapabilitySet({
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    sessionManager: { getBranch: () => [] },
+    definitions,
+  });
+
+  const result = await capabilitySet.emit({
+    type: "context",
+    messages: [{ role: "user", content: "ordinary" }],
+  });
+
+  assert.equal(
+    result.messages.some((message) => message.customType === "test.preceding"),
+    true,
+  );
+});
+
+test("Rin post-compaction state formats only non-empty snapshot bodies", () => {
+  const noteOnly = postCompactionStateMod.formatPostCompactionState({
+    todos: [],
+    note: "small note",
+  });
+  const todoOnly = postCompactionStateMod.formatPostCompactionState({
+    todos: [{ id: 7, text: "pending", done: false }],
+    note: "   ",
+  });
+
+  assert.match(noteOnly, /"note":"small note"/);
+  assert.doesNotMatch(noteOnly, /"todo":/);
+  assert.match(todoOnly, /"todo":\[/);
+  assert.doesNotMatch(todoOnly, /"note":/);
+});
+
+test("Rin omits post-compaction recovery bodies when latest state is empty or history was not compacted", async () => {
+  const branch = [
+    {
+      type: "custom",
+      customType: "rin.todo",
+      data: { todos: [{ id: 1, text: "stale todo", done: false }], nextId: 2 },
+    },
+    {
+      type: "custom",
+      customType: "rin.note",
+      data: { content: "stale note" },
+    },
+    {
+      type: "custom",
+      customType: "rin.todo",
+      data: { todos: [], nextId: 2 },
+    },
+    {
+      type: "custom",
+      customType: "rin.note",
+      data: { content: "" },
+    },
+  ];
+  const sessionManager = {
+    getBranch: () => branch,
+    appendCustomEntry() {},
+  };
+  const definitions = runtimeMod.createRinCapabilityDefinitions({
+    cwd: "/tmp/rin-empty-compaction-state",
+    agentDir: "/tmp/rin-empty-compaction-state-agent",
+    getThinkingLevel: () => "medium",
+    sendMessage: () => {},
+    sessionManager,
+  });
+  const hook = definitions.find(
+    (definition) => definition.name === "rin_provider_bound_context",
+  )?.hooks?.context?.[0];
+
+  const compacted = await hook(
+    {
+      type: "context",
+      messages: [{ role: "compactionSummary", summary: "checkpoint" }],
+    },
+    { sessionManager },
+  );
+  const ordinary = await hook(
+    {
+      type: "context",
+      messages: [{ role: "user", content: "hello" }],
+    },
+    { sessionManager },
+  );
+
+  assert.equal(compacted, undefined);
+  assert.equal(ordinary, undefined);
 });
 
 test("Rin delegates compaction generation to native Pi without file XML", async () => {
