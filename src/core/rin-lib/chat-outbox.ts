@@ -1,7 +1,10 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
 
-import { openChatDatabase } from "../chat/database.js";
+import {
+  CHAT_TERMINAL_OUTBOX_ID_GLOB,
+  openChatDatabase,
+} from "../chat/database.js";
 import { validateChatOutboxPayloadParts } from "../chat/outbox-payload-validation.js";
 import { safeString } from "../text-utils.js";
 import {
@@ -323,9 +326,15 @@ export function hasCommittedTerminalChatOutbox(
          JOIN outbox ON outbox.turn_id = inbox_jobs.turn_id
          WHERE inbox_jobs.chat_key = ? AND messages.message_id = ?
            AND inbox_jobs.state = 'terminal'
+           AND (outbox.outbox_id GLOB ?
+                OR outbox.post_delivery_json IS NOT NULL)
          LIMIT 1`,
       )
-      .get(safeString(chatKey).trim(), safeString(messageId).trim()),
+      .get(
+        safeString(chatKey).trim(),
+        safeString(messageId).trim(),
+        CHAT_TERMINAL_OUTBOX_ID_GLOB,
+      ),
   );
 }
 
@@ -339,11 +348,11 @@ export function isCommittedTerminalChatOutboxItem(
         `SELECT 1
          FROM outbox
          WHERE outbox.outbox_id = ?
-           AND (outbox.delivery_kind IN ('final', 'error', 'command_ack')
+           AND (outbox.outbox_id GLOB ?
                 OR outbox.post_delivery_json IS NOT NULL)
          LIMIT 1`,
       )
-      .get(safeString(outboxId).trim()),
+      .get(safeString(outboxId).trim(), CHAT_TERMINAL_OUTBOX_ID_GLOB),
   );
 }
 
@@ -526,16 +535,14 @@ function validateAuthoritativeTerminalTurn(
   return turn;
 }
 
-function terminalTurnForPostDelivery(
+function settlingTurnForPostDelivery(
   db: ReturnType<typeof openChatDatabase>,
   agentDir: string,
-  deliveryKind: ChatOutboxDeliveryKind,
   postDelivery?: ChatOutboxPostDelivery,
   explicitFence?: ChatOutboxTurnFence,
 ) {
-  const mark = postDelivery?.markProcessed;
-  if (!["final", "error", "command_ack"].includes(deliveryKind) && !mark)
-    return null;
+  if (!postDelivery) return null;
+  const mark = postDelivery.markProcessed;
   const fence = explicitFence || activeTurnFence.getStore();
   if (!fence) return null;
   if (
@@ -640,11 +647,16 @@ export function enqueueChatOutboxPayload(
     sanitizeIdPart(options.id) ||
     (idempotencyKey ? stableOutboxIdForKey(idempotencyKey) : createOutboxId());
   const terminalRecordId = safeString(options.terminalRecordId).trim();
+  const terminalOutboxId = terminalRecordId ? `chat-${terminalRecordId}` : "";
+  const usesCanonicalTerminalNamespace =
+    id.startsWith("chat-terminal-") && id.length > "chat-terminal-".length;
   if (
-    options.terminalTurn &&
-    (!terminalRecordId ||
-      id !== `chat-${terminalRecordId}` ||
-      idempotencyKey !== id)
+    options.terminalTurn
+      ? !terminalRecordId.startsWith("terminal-") ||
+        terminalRecordId.length <= "terminal-".length ||
+        id !== terminalOutboxId ||
+        idempotencyKey !== id
+      : usesCanonicalTerminalNamespace
   ) {
     throw new Error("chat_terminal_record_missing");
   }
@@ -668,10 +680,9 @@ export function enqueueChatOutboxPayload(
             options.terminalTurn,
             normalizedPayload.chatKey,
           )
-        : terminalTurnForPostDelivery(
+        : settlingTurnForPostDelivery(
             db,
             agentDir,
-            deliveryKind,
             options.postDelivery,
             contextualFence,
           );
@@ -687,10 +698,12 @@ export function enqueueChatOutboxPayload(
         ? (db
             .prepare(
               `SELECT outbox_id FROM outbox
-               WHERE turn_id = ? AND outbox_id LIKE 'chat-terminal-%'
+               WHERE turn_id = ? AND outbox_id GLOB ?
                LIMIT 1`,
             )
-            .get(desiredTurnId) as { outbox_id?: string } | undefined)
+            .get(desiredTurnId, CHAT_TERMINAL_OUTBOX_ID_GLOB) as
+            | { outbox_id?: string }
+            | undefined)
         : undefined;
       if (
         safeString(existingAuthoritativeTerminal?.outbox_id) &&
@@ -859,7 +872,12 @@ export function enqueueChatOutboxPayload(
           .get(idempotencyKey) as any;
         if (sameKey) return adoptExisting(sameKey);
       }
-      if (turn && desiredTurnId && deliveryKind !== "interim") {
+      if (
+        !options.terminalTurn &&
+        turn &&
+        desiredTurnId &&
+        deliveryKind !== "interim"
+      ) {
         const legacyTerminal = db
           .prepare(
             `SELECT * FROM outbox

@@ -7,8 +7,12 @@ import BetterSqlite3 from "better-sqlite3";
 import { chatDataPath } from "../data-layout.js";
 import { toStoredSessionFile } from "../session/ref.js";
 import { safeString } from "../text-utils.js";
-export const CHAT_DATABASE_SCHEMA_VERSION = 9;
+export const CHAT_DATABASE_SCHEMA_VERSION = 10;
 export const CHAT_ADMISSION_MODEL_VERSION = "1";
+export const CHAT_TERMINAL_OUTBOX_ID_GLOB = "chat-terminal-?*";
+export const CHAT_OUTBOX_SETTLEMENT_PREDICATE_SQL = `turn_id IS NOT NULL
+        AND (outbox_id GLOB '${CHAT_TERMINAL_OUTBOX_ID_GLOB}'
+             OR post_delivery_json IS NOT NULL)`;
 
 const databaseCache = new Map<string, BetterSqlite3.Database>();
 
@@ -353,9 +357,7 @@ function initializeChatDatabase(
 
     CREATE UNIQUE INDEX IF NOT EXISTS outbox_turn_terminal_idx
       ON outbox(turn_id)
-      WHERE turn_id IS NOT NULL
-        AND (delivery_kind IN ('final', 'error', 'command_ack')
-             OR post_delivery_json IS NOT NULL);
+      WHERE ${CHAT_OUTBOX_SETTLEMENT_PREDICATE_SQL};
     CREATE INDEX IF NOT EXISTS outbox_sequence_idx
       ON outbox(sequence);
     CREATE INDEX IF NOT EXISTS outbox_drain_idx

@@ -77,6 +77,46 @@ function dropDurableAdmissionColumns(db) {
   `);
 }
 
+function recordSchemaVersion(db, version) {
+  db.prepare(
+    `UPDATE schema_meta SET value = ? WHERE key = 'schema_version'`,
+  ).run(String(version));
+  db.pragma(`user_version = ${version}`);
+  db.prepare(
+    `UPDATE schema_meta SET value = ? WHERE key = 'schema_fingerprint'`,
+  ).run(chatDatabase.chatDatabaseSchemaFingerprint(db));
+}
+
+function installVersion9TerminalOutboxIndex(db) {
+  db.exec(`
+    DROP INDEX outbox_turn_terminal_idx;
+    CREATE UNIQUE INDEX outbox_turn_terminal_idx
+      ON outbox(turn_id)
+      WHERE turn_id IS NOT NULL
+        AND (delivery_kind IN ('final', 'error', 'command_ack')
+             OR post_delivery_json IS NOT NULL);
+  `);
+  recordSchemaVersion(db, 9);
+}
+
+const CHAT_BUSINESS_TABLES = [
+  "chat_state",
+  "inbound_heads",
+  "messages",
+  "inbox_jobs",
+  "outbox",
+  "outbox_deliveries",
+];
+
+function snapshotChatBusinessRows(db) {
+  return Object.fromEntries(
+    CHAT_BUSINESS_TABLES.map((table) => [
+      table,
+      db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(),
+    ]),
+  );
+}
+
 test("chat database owns message, turn, outbox, delivery, and chat generation state", async () => {
   await withTempDir(async (agentDir) => {
     const db = chatDatabase.openChatDatabase(agentDir);
@@ -209,7 +249,7 @@ test("chat database cutover migrates v8 run ownership to interrupted delivery-on
       throw new Error(String((error as any)?.message || error));
     }
     const migrated = chatDatabase.openChatDatabase(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 9);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 10);
     assert.equal(
       migrated
         .prepare(
@@ -259,7 +299,7 @@ test("chat database cutover migrates v8 run ownership to interrupted delivery-on
         .get(queued.itemId).stripped_content,
       "preserved",
     );
-    const freshAgentDir = path.join(agentDir, "fresh-v9");
+    const freshAgentDir = path.join(agentDir, "fresh-v10");
     const fresh = chatDatabase.openChatDatabase(freshAgentDir);
     const schemaRows = (db) =>
       db
@@ -466,10 +506,10 @@ test("install consumes old admission rows only before recording the current mode
   });
 });
 
-test("chat database reopens the current version 9 delivery-only layout", async () => {
+test("chat database reopens the current version 10 delivery-only layout", async () => {
   await withTempDir(async (agentDir) => {
     const created = chatDatabase.openChatDatabase(agentDir);
-    assert.equal(created.pragma("user_version", { simple: true }), 9);
+    assert.equal(created.pragma("user_version", { simple: true }), 10);
     assert.deepEqual(
       created
         .prepare(`PRAGMA table_info(inbox_jobs)`)
@@ -497,12 +537,12 @@ test("chat database reopens the current version 9 delivery-only layout", async (
     chatDatabase.closeChatDatabase(agentDir);
 
     const reopened = chatDatabase.openChatDatabase(agentDir);
-    assert.equal(reopened.pragma("user_version", { simple: true }), 9);
+    assert.equal(reopened.pragma("user_version", { simple: true }), 10);
     assert.equal(
       reopened
         .prepare(`SELECT value FROM schema_meta WHERE key = 'schema_version'`)
         .get().value,
-      "9",
+      "10",
     );
     assert.equal(
       reopened
@@ -512,6 +552,343 @@ test("chat database reopens the current version 9 delivery-only layout", async (
         .get(),
       undefined,
     );
+  });
+});
+
+test("version 9 index migration preserves historical delivery evidence and admits the canonical terminal", async () => {
+  await withTempDir(async (agentDir) => {
+    const inbound = chatInbox.enqueueChatInboxItem(agentDir, {
+      chatKey: "discord/1:terminal-slot-migration",
+      messageId: "terminal-slot-migration",
+      session: {
+        platform: "discord",
+        selfId: "1",
+        channelId: "terminal-slot-migration",
+        messageId: "terminal-slot-migration",
+        content: "question",
+        stripped: { content: "question" },
+      },
+      elements: [{ type: "text", attrs: { content: "question" } }],
+    }).item;
+    const claim = chatInbox.claimChatInboxItem(agentDir, inbound.itemId);
+    const historicalOutboxId = "historical-nonterminal-error";
+    chatOutbox.enqueueChatOutboxPayload(
+      agentDir,
+      {
+        chatKey: claim.chatKey,
+        parts: [{ type: "text", text: "rin error: WebSocket error" }],
+      },
+      {
+        id: historicalOutboxId,
+        deliveryKind: "error",
+        turnFence: {
+          agentDir,
+          turnId: claim.itemId,
+          chatKey: claim.chatKey,
+          messageId: claim.messageId,
+          ownerEpoch: claim.ownerEpoch,
+          attempt: claim.attemptCount,
+        },
+      },
+    );
+    const db = chatDatabase.openChatDatabase(agentDir);
+    const deliveredAt = "2026-08-05T06:14:18.216Z";
+    db.prepare(
+      `UPDATE outbox
+          SET state = 'delivered', attempts = 1,
+              delivery_result_json = '["historical-provider-message"]',
+              delivered_at = ?, updated_at = ?
+        WHERE outbox_id = ?`,
+    ).run(deliveredAt, deliveredAt, historicalOutboxId);
+    db.prepare(
+      `UPDATE outbox_deliveries
+          SET state = 'delivered', attempt = 1,
+              provider_message_id = 'historical-provider-message',
+              delivered_at = ?, updated_at = ?
+        WHERE outbox_id = ?`,
+    ).run(deliveredAt, deliveredAt, historicalOutboxId);
+    const historicalOutbox = db
+      .prepare(`SELECT * FROM outbox WHERE outbox_id = ?`)
+      .get(historicalOutboxId);
+    const historicalDeliveries = db
+      .prepare(
+        `SELECT * FROM outbox_deliveries
+          WHERE outbox_id = ? ORDER BY delivery_id`,
+      )
+      .all(historicalOutboxId);
+    installVersion9TerminalOutboxIndex(db);
+    chatDatabase.closeChatDatabase(agentDir);
+
+    assert.deepEqual(
+      chatDatabase.preflightChatDatabaseMigrationForInstall(agentDir),
+      {
+        path: chatDatabase.chatDatabasePath(agentDir),
+        fromVersion: 9,
+        toVersion: 10,
+      },
+    );
+    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 10);
+    const indexSql = migrated
+      .prepare(
+        `SELECT sql FROM sqlite_master
+          WHERE type = 'index' AND name = 'outbox_turn_terminal_idx'`,
+      )
+      .get().sql;
+    assert.match(indexSql, /outbox_id GLOB 'chat-terminal-\?\*'/);
+    assert.match(indexSql, /post_delivery_json IS NOT NULL/);
+    assert.doesNotMatch(indexSql, /delivery_kind IN/);
+    assert.deepEqual(
+      migrated
+        .prepare(`SELECT * FROM outbox WHERE outbox_id = ?`)
+        .get(historicalOutboxId),
+      historicalOutbox,
+    );
+    assert.deepEqual(
+      migrated
+        .prepare(
+          `SELECT * FROM outbox_deliveries
+            WHERE outbox_id = ? ORDER BY delivery_id`,
+        )
+        .all(historicalOutboxId),
+      historicalDeliveries,
+    );
+
+    const terminalRecordId = "terminal-slot-migration";
+    const terminalOutboxId = `chat-${terminalRecordId}`;
+    assert.equal(
+      chatOutbox.enqueueChatOutboxPayload(
+        agentDir,
+        {
+          chatKey: claim.chatKey,
+          parts: [{ type: "text", text: "authoritative answer" }],
+        },
+        {
+          id: terminalOutboxId,
+          idempotencyKey: terminalOutboxId,
+          deliveryKind: "final",
+          terminalRecordId,
+          terminalTurn: {
+            turnId: claim.itemId,
+            chatKey: claim.chatKey,
+            messageId: claim.messageId,
+          },
+          postDelivery: {
+            markProcessed: {
+              chatKey: claim.chatKey,
+              messageId: claim.messageId,
+            },
+          },
+        },
+      ),
+      terminalOutboxId,
+    );
+    assert.equal(
+      migrated
+        .prepare(`SELECT COUNT(*) AS count FROM outbox WHERE turn_id = ?`)
+        .get(claim.itemId).count,
+      2,
+    );
+    assert.deepEqual(
+      migrated
+        .prepare(`SELECT * FROM outbox WHERE outbox_id = ?`)
+        .get(historicalOutboxId),
+      historicalOutbox,
+    );
+    chatDatabase.closeChatDatabase(agentDir);
+
+    const reopened = chatDatabase.migrateChatDatabaseForInstall(agentDir);
+    assert.equal(reopened.pragma("user_version", { simple: true }), 10);
+    assert.deepEqual(
+      reopened
+        .prepare(`SELECT * FROM outbox WHERE outbox_id = ?`)
+        .get(historicalOutboxId),
+      historicalOutbox,
+    );
+    assert.deepEqual(
+      reopened
+        .prepare(
+          `SELECT * FROM outbox_deliveries
+            WHERE outbox_id = ? ORDER BY delivery_id`,
+        )
+        .all(historicalOutboxId),
+      historicalDeliveries,
+    );
+  });
+});
+
+test("version 9 terminal index migration rolls back atomically on canonical conflicts", async () => {
+  await withTempDir(async (agentDir) => {
+    const inbound = chatInbox.enqueueChatInboxItem(agentDir, {
+      chatKey: "discord/1:terminal-slot-rollback",
+      messageId: "terminal-slot-rollback",
+      session: {
+        platform: "discord",
+        selfId: "1",
+        channelId: "terminal-slot-rollback",
+        messageId: "terminal-slot-rollback",
+        content: "question",
+        stripped: { content: "question" },
+      },
+      elements: [{ type: "text", attrs: { content: "question" } }],
+    }).item;
+    const db = chatDatabase.openChatDatabase(agentDir);
+    installVersion9TerminalOutboxIndex(db);
+    const timestamp = "2026-08-05T00:00:00.000Z";
+    const insert = db.prepare(
+      `INSERT INTO outbox (
+         outbox_id, turn_id, chat_key, delivery_kind, state, payload_json,
+         sequence, created_at, updated_at
+       ) VALUES (?, ?, ?, 'generic', 'delivered', ?, ?, ?, ?)`,
+    );
+    insert.run(
+      "chat-terminal-conflict-one",
+      inbound.itemId,
+      inbound.chatKey,
+      JSON.stringify({
+        chatKey: inbound.chatKey,
+        parts: [{ type: "text", text: "one" }],
+        createdAt: timestamp,
+      }),
+      100,
+      timestamp,
+      timestamp,
+    );
+    insert.run(
+      "chat-terminal-conflict-two",
+      inbound.itemId,
+      inbound.chatKey,
+      JSON.stringify({
+        chatKey: inbound.chatKey,
+        parts: [{ type: "text", text: "two" }],
+        createdAt: timestamp,
+      }),
+      101,
+      timestamp,
+      timestamp,
+    );
+    chatDatabase.closeChatDatabase(agentDir);
+
+    assert.throws(
+      () => chatDatabase.migrateChatDatabaseForInstall(agentDir),
+      /UNIQUE constraint failed: outbox.turn_id/,
+    );
+    const BetterSqlite3 = (await import("better-sqlite3")).default;
+    const rolledBack = new BetterSqlite3(
+      chatDatabase.chatDatabasePath(agentDir),
+    );
+    try {
+      assert.equal(rolledBack.pragma("user_version", { simple: true }), 9);
+      assert.equal(
+        rolledBack
+          .prepare(`SELECT value FROM schema_meta WHERE key = 'schema_version'`)
+          .get().value,
+        "9",
+      );
+      assert.match(
+        rolledBack
+          .prepare(
+            `SELECT sql FROM sqlite_master
+              WHERE type = 'index' AND name = 'outbox_turn_terminal_idx'`,
+          )
+          .get().sql,
+        /delivery_kind IN/,
+      );
+      assert.equal(
+        rolledBack
+          .prepare(`SELECT COUNT(*) AS count FROM outbox WHERE turn_id = ?`)
+          .get(inbound.itemId).count,
+        2,
+      );
+      assert.equal(
+        rolledBack
+          .prepare(
+            `SELECT value FROM schema_meta WHERE key = 'schema_fingerprint'`,
+          )
+          .get().value,
+        chatDatabase.chatDatabaseSchemaFingerprint(rolledBack),
+      );
+    } finally {
+      rolledBack.close();
+    }
+  });
+});
+
+test("version 9 terminal index migration rolls back atomically on foreign key mismatch", async () => {
+  await withTempDir(async (agentDir) => {
+    const db = chatDatabase.openChatDatabase(agentDir);
+    installVersion9TerminalOutboxIndex(db);
+    const timestamp = "2026-08-05T00:00:00.000Z";
+    db.prepare(
+      `INSERT INTO inbound_heads (
+         platform, bot_id, chat_key, chat_id, message_id,
+         platform_timestamp, received_at, provider_cursor,
+         sequence, updated_at
+       ) VALUES ('onebot', 'bot-1', 'onebot/bot-1:private:owner',
+                 'private:owner', 'legacy-head', 1, ?, '1', 1, ?)`,
+    ).run(timestamp, timestamp);
+    db.pragma("foreign_keys = OFF");
+    db.prepare(
+      `INSERT INTO outbox (
+         outbox_id, turn_id, chat_key, delivery_kind, state, payload_json,
+         sequence, created_at, updated_at
+       ) VALUES (?, ?, ?, 'generic', 'delivered', ?, ?, ?, ?)`,
+    ).run(
+      "foreign-key-orphan-outbox",
+      "missing-turn",
+      "discord/1:foreign-key-rollback",
+      JSON.stringify({
+        chatKey: "discord/1:foreign-key-rollback",
+        parts: [{ type: "text", text: "historical" }],
+        createdAt: timestamp,
+      }),
+      100,
+      timestamp,
+      timestamp,
+    );
+    const businessRowsBefore = snapshotChatBusinessRows(db);
+    const schemaMetaBefore = db
+      .prepare(`SELECT * FROM schema_meta ORDER BY key`)
+      .all();
+    const terminalIndexSqlBefore = db
+      .prepare(
+        `SELECT sql FROM sqlite_master
+          WHERE type = 'index' AND name = 'outbox_turn_terminal_idx'`,
+      )
+      .get().sql;
+    chatDatabase.closeChatDatabase(agentDir);
+
+    assert.throws(
+      () => chatDatabase.migrateChatDatabaseForInstall(agentDir),
+      /chat_database_foreign_key_mismatch/,
+    );
+    const BetterSqlite3 = (await import("better-sqlite3")).default;
+    const rolledBack = new BetterSqlite3(
+      chatDatabase.chatDatabasePath(agentDir),
+    );
+    try {
+      assert.equal(rolledBack.pragma("user_version", { simple: true }), 9);
+      assert.deepEqual(
+        rolledBack.prepare(`SELECT * FROM schema_meta ORDER BY key`).all(),
+        schemaMetaBefore,
+      );
+      assert.equal(
+        rolledBack
+          .prepare(
+            `SELECT sql FROM sqlite_master
+              WHERE type = 'index' AND name = 'outbox_turn_terminal_idx'`,
+          )
+          .get().sql,
+        terminalIndexSqlBefore,
+      );
+      assert.deepEqual(
+        snapshotChatBusinessRows(rolledBack),
+        businessRowsBefore,
+      );
+      assert.equal(rolledBack.pragma("foreign_key_check").length, 1);
+    } finally {
+      rolledBack.close();
+    }
   });
 });
 
@@ -609,12 +986,12 @@ test("chat database migrates the version 1 terminal outbox index", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 9);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 10);
     assert.equal(
       migrated
         .prepare(`SELECT value FROM schema_meta WHERE key = 'schema_version'`)
         .get().value,
-      "9",
+      "10",
     );
     const indexSql = migrated
       .prepare(
@@ -622,11 +999,9 @@ test("chat database migrates the version 1 terminal outbox index", async () => {
          WHERE type = 'index' AND name = 'outbox_turn_terminal_idx'`,
       )
       .get().sql;
-    assert.match(
-      indexSql,
-      /delivery_kind IN \('final', 'error', 'command_ack'\)/,
-    );
+    assert.match(indexSql, /outbox_id GLOB 'chat-terminal-\?\*'/);
     assert.match(indexSql, /post_delivery_json IS NOT NULL/);
+    assert.doesNotMatch(indexSql, /delivery_kind IN/);
   });
 });
 
@@ -663,7 +1038,7 @@ test("chat database migrates version 2 session binding authority", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 9);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 10);
     assert.ok(
       migrated
         .prepare(`PRAGMA table_info(chat_state)`)
@@ -704,7 +1079,7 @@ test("chat database migrates version 3 dispatch evidence", async () => {
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 9);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 10);
     assert.ok(
       migrated
         .prepare(`PRAGMA table_info(outbox)`)
@@ -744,7 +1119,7 @@ test("chat database migrates version 4 inbound recovery lease state", async () =
     chatDatabase.closeChatDatabase(agentDir);
 
     const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 9);
+    assert.equal(migrated.pragma("user_version", { simple: true }), 10);
     const columns = new Set(
       migrated
         .prepare(`PRAGMA table_info(inbound_heads)`)
@@ -810,7 +1185,7 @@ test("chat database serializes concurrent cold initialization", async () => {
       ),
     );
     const db = chatDatabase.openChatDatabase(agentDir);
-    assert.equal(db.pragma("user_version", { simple: true }), 9);
+    assert.equal(db.pragma("user_version", { simple: true }), 10);
     assert.deepEqual(
       db
         .prepare(`SELECT key FROM schema_meta ORDER BY key`)

@@ -9,6 +9,8 @@ import { safeString } from "../text-utils.js";
 import {
   CHAT_ADMISSION_MODEL_VERSION,
   CHAT_DATABASE_SCHEMA_VERSION,
+  CHAT_OUTBOX_SETTLEMENT_PREDICATE_SQL,
+  CHAT_TERMINAL_OUTBOX_ID_GLOB,
   chatDatabasePath,
   chatDatabaseSchemaFingerprint,
   closeChatDatabase,
@@ -47,6 +49,16 @@ function tableHasColumn(
   );
 }
 
+function recordCurrentSchemaVersion(db: BetterSqlite3.Database) {
+  db.prepare(
+    `UPDATE schema_meta SET value = ? WHERE key = 'schema_version'`,
+  ).run(String(CHAT_DATABASE_SCHEMA_VERSION));
+  db.prepare(
+    `UPDATE schema_meta SET value = ? WHERE key = 'schema_fingerprint'`,
+  ).run(chatDatabaseSchemaFingerprint(db));
+  db.pragma(`user_version = ${CHAT_DATABASE_SCHEMA_VERSION}`);
+}
+
 function finishSchemaUpgrade(
   db: BetterSqlite3.Database,
   tableName: "turns" | "inbox_jobs" = "turns",
@@ -69,13 +81,7 @@ function finishSchemaUpgrade(
       row.admission_json,
     );
   }
-  db.prepare(
-    `UPDATE schema_meta SET value = ? WHERE key = 'schema_version'`,
-  ).run(String(CHAT_DATABASE_SCHEMA_VERSION));
-  db.prepare(
-    `UPDATE schema_meta SET value = ? WHERE key = 'schema_fingerprint'`,
-  ).run(chatDatabaseSchemaFingerprint(db));
-  db.pragma(`user_version = ${CHAT_DATABASE_SCHEMA_VERSION}`);
+  recordCurrentSchemaVersion(db);
 }
 
 function interruptUnfencedLegacyTurnsForCanonicalUpgrade(
@@ -528,9 +534,7 @@ function rebuildChatDeliveryTablesV9(db: BetterSqlite3.Database) {
       ON inbox_jobs(chat_key, generation, state, sequence);
     CREATE UNIQUE INDEX outbox_turn_terminal_idx
       ON outbox(turn_id)
-      WHERE turn_id IS NOT NULL
-        AND (delivery_kind IN ('final', 'error', 'command_ack')
-             OR post_delivery_json IS NOT NULL);
+      WHERE ${CHAT_OUTBOX_SETTLEMENT_PREDICATE_SQL};
     CREATE INDEX outbox_sequence_idx ON outbox(sequence);
     CREATE INDEX outbox_drain_idx ON outbox(state, next_attempt_at, sequence);
     CREATE INDEX outbox_delivered_cleanup_idx
@@ -544,6 +548,15 @@ function rebuildChatDeliveryTablesV9(db: BetterSqlite3.Database) {
         AND state IN ('queued', 'sending', 'delivered');
     CREATE INDEX outbox_deliveries_claim_idx
       ON outbox_deliveries(state, next_attempt_at, lease_until, outbox_id, destination, fragment_index);
+  `);
+}
+
+function upgradeTerminalOutboxSettlementIndexV10(db: BetterSqlite3.Database) {
+  db.exec(`
+    DROP INDEX outbox_turn_terminal_idx;
+    CREATE UNIQUE INDEX outbox_turn_terminal_idx
+      ON outbox(turn_id)
+      WHERE ${CHAT_OUTBOX_SETTLEMENT_PREDICATE_SQL};
   `);
 }
 
@@ -567,6 +580,11 @@ function upgradeRecordedChatDatabase(
   }
 
   validateRecordedChatDatabaseSchema(db, currentVersion);
+  if (currentVersion === 9) {
+    upgradeTerminalOutboxSettlementIndexV10(db);
+    recordCurrentSchemaVersion(db);
+    return;
+  }
   const inboundRecoveryLeaseUpgradeSql = `
     ALTER TABLE inbound_heads ADD COLUMN recovery_failure_count INTEGER NOT NULL DEFAULT 0
       CHECK (recovery_failure_count >= 0);
@@ -663,9 +681,7 @@ function upgradeRecordedChatDatabase(
         DROP INDEX outbox_turn_terminal_idx;
         CREATE UNIQUE INDEX outbox_turn_terminal_idx
           ON outbox(turn_id)
-          WHERE turn_id IS NOT NULL
-            AND (delivery_kind IN ('final', 'error', 'command_ack')
-                 OR post_delivery_json IS NOT NULL);
+          WHERE ${CHAT_OUTBOX_SETTLEMENT_PREDICATE_SQL};
         ALTER TABLE chat_state ADD COLUMN session_file TEXT;
         ALTER TABLE chat_state ADD COLUMN legacy_session_imported INTEGER NOT NULL DEFAULT 0
           CHECK (legacy_session_imported IN (0, 1));
@@ -878,11 +894,10 @@ function terminalOutboxKindForInstall(
     .prepare(
       `SELECT delivery_kind FROM outbox
         WHERE turn_id = ?
-          AND (delivery_kind IN ('final', 'error', 'command_ack')
-               OR post_delivery_json IS NOT NULL)
+          AND (outbox_id GLOB ? OR post_delivery_json IS NOT NULL)
         LIMIT 1`,
     )
-    .get(turnId) as any;
+    .get(turnId, CHAT_TERMINAL_OUTBOX_ID_GLOB) as any;
   const deliveryKind = safeString(row?.delivery_kind).trim();
   if (deliveryKind === "final") return "outbox_final";
   if (deliveryKind === "error") return "outbox_error";
@@ -1318,14 +1333,14 @@ export function migrateChatDatabaseForInstall(
         if (options.runtimeQuiesced === true) {
           releaseCurrentClaimsForInstall(migrationDb);
         }
+        const foreignKeyViolations = migrationDb.pragma(
+          "foreign_key_check",
+        ) as any[];
+        if (foreignKeyViolations.length > 0) {
+          throw new Error("chat_database_foreign_key_mismatch");
+        }
       })
       .exclusive();
-    const foreignKeyViolations = migrationDb.pragma(
-      "foreign_key_check",
-    ) as any[];
-    if (foreignKeyViolations.length > 0) {
-      throw new Error("chat_database_foreign_key_mismatch");
-    }
     migrationDb.pragma("foreign_keys = ON");
   } finally {
     migrationDb.close();

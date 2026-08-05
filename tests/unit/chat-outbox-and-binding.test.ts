@@ -132,6 +132,185 @@ test("nonterminal notices preserve the terminal outbox slot", async () => {
   });
 });
 
+test("turn-scoped nonterminal error preserves authoritative terminal ownership", async () => {
+  await withTempDir(async (dir) => {
+    const inbound = inbox.enqueueChatInboxItem(dir, {
+      chatKey: "telegram/777:1",
+      messageId: "nonterminal-error-owner",
+      session: {
+        platform: "telegram",
+        selfId: "777",
+        channelId: "1",
+        messageId: "nonterminal-error-owner",
+        content: "question",
+      },
+      elements: [{ type: "text", attrs: { content: "question" } }],
+    }).item;
+    const claim = inbox.claimChatInboxItem(dir, inbound.itemId);
+    const turnFence = {
+      agentDir: dir,
+      turnId: claim.itemId,
+      chatKey: claim.chatKey,
+      messageId: claim.messageId,
+      ownerEpoch: claim.ownerEpoch,
+      attempt: claim.attemptCount,
+    };
+    const noticeId = outbox.enqueueChatOutboxPayload(
+      dir,
+      payload("retryable provider error"),
+      {
+        id: "turn-scoped-nonterminal-error",
+        deliveryKind: "error",
+        turnFence,
+      },
+    );
+
+    assert.equal(inbox.getChatInboxItem(dir, inbound.itemId).state, "running");
+    assert.equal(
+      outbox.isCommittedTerminalChatOutboxItem(dir, noticeId),
+      false,
+    );
+
+    const terminalRecordId = "terminal-slot-authority";
+    const terminalOutboxId = `chat-${terminalRecordId}`;
+    assert.equal(
+      outbox.enqueueChatOutboxPayload(dir, payload("authoritative answer"), {
+        id: terminalOutboxId,
+        idempotencyKey: terminalOutboxId,
+        deliveryKind: "final",
+        terminalRecordId,
+        terminalTurn: {
+          turnId: claim.itemId,
+          chatKey: claim.chatKey,
+          messageId: claim.messageId,
+        },
+        postDelivery: {
+          markProcessed: {
+            chatKey: claim.chatKey,
+            messageId: claim.messageId,
+          },
+        },
+      }),
+      terminalOutboxId,
+    );
+
+    assert.equal(
+      outbox.isCommittedTerminalChatOutboxItem(dir, terminalOutboxId),
+      true,
+    );
+    assert.deepEqual(
+      database
+        .openChatDatabase(dir)
+        .prepare(
+          `SELECT outbox_id, delivery_kind
+             FROM outbox
+            WHERE turn_id = ?
+            ORDER BY sequence`,
+        )
+        .all(claim.itemId),
+      [
+        {
+          outbox_id: noticeId,
+          delivery_kind: "error",
+        },
+        {
+          outbox_id: terminalOutboxId,
+          delivery_kind: "final",
+        },
+      ],
+    );
+  });
+});
+
+test("canonical terminal outbox namespace requires daemon terminal identity", async () => {
+  await withTempDir(async (dir) => {
+    assert.throws(
+      () =>
+        outbox.enqueueChatOutboxPayload(dir, payload("forged terminal"), {
+          id: "chat-terminal-forged",
+          idempotencyKey: "chat-terminal-forged",
+          deliveryKind: "generic",
+        }),
+      /chat_terminal_record_missing/,
+    );
+
+    const inbound = inbox.enqueueChatInboxItem(dir, {
+      chatKey: "telegram/777:1",
+      messageId: "canonical-namespace-owner",
+      session: {
+        platform: "telegram",
+        selfId: "777",
+        channelId: "1",
+        messageId: "canonical-namespace-owner",
+        content: "question",
+      },
+      elements: [{ type: "text", attrs: { content: "question" } }],
+    }).item;
+    const claim = inbox.claimChatInboxItem(dir, inbound.itemId);
+    const turnFence = {
+      agentDir: dir,
+      turnId: claim.itemId,
+      chatKey: claim.chatKey,
+      messageId: claim.messageId,
+      ownerEpoch: claim.ownerEpoch,
+      attempt: claim.attemptCount,
+    };
+
+    assert.throws(
+      () =>
+        outbox.enqueueChatOutboxPayload(dir, payload("bad terminal record"), {
+          id: "chat-record-without-terminal-prefix",
+          idempotencyKey: "chat-record-without-terminal-prefix",
+          deliveryKind: "final",
+          terminalRecordId: "record-without-terminal-prefix",
+          terminalTurn: {
+            turnId: claim.itemId,
+            chatKey: claim.chatKey,
+            messageId: claim.messageId,
+          },
+        }),
+      /chat_terminal_record_missing/,
+    );
+
+    const caseVariantId = outbox.enqueueChatOutboxPayload(
+      dir,
+      payload("case variant notice"),
+      {
+        id: "CHAT-TERMINAL-case-variant",
+        deliveryKind: "generic",
+        turnFence,
+      },
+    );
+    assert.equal(
+      outbox.isCommittedTerminalChatOutboxItem(dir, caseVariantId),
+      false,
+    );
+
+    const terminalRecordId = "terminal-case-sensitive-owner";
+    const terminalOutboxId = `chat-${terminalRecordId}`;
+    assert.equal(
+      outbox.enqueueChatOutboxPayload(dir, payload("canonical final"), {
+        id: terminalOutboxId,
+        idempotencyKey: terminalOutboxId,
+        deliveryKind: "final",
+        terminalRecordId,
+        terminalTurn: {
+          turnId: claim.itemId,
+          chatKey: claim.chatKey,
+          messageId: claim.messageId,
+        },
+        postDelivery: {
+          markProcessed: {
+            chatKey: claim.chatKey,
+            messageId: claim.messageId,
+          },
+        },
+      }),
+      terminalOutboxId,
+    );
+  });
+});
+
 test("chat outbox persists only in chat.sqlite and requires structured parts", async () => {
   await withTempDir(async (dir) => {
     assert.throws(
@@ -1208,7 +1387,7 @@ test("expired pre-dispatch outbox work is retried instead of falsely delivered",
   });
 });
 
-test("committed terminal outbox remains unclaimed while its adapter is unavailable", async () => {
+test("only settling terminal outbox survives until its adapter is available", async () => {
   await withTempDir(async (dir) => {
     const inbound = inbox.enqueueChatInboxItem(dir, {
       chatKey: "telegram/777:1",
@@ -1290,30 +1469,41 @@ test("committed terminal outbox remains unclaimed while its adapter is unavailab
         return [`provider-final-${sends}`];
       },
     });
-    for (const durableId of [finalId, unlinkedFinalId]) {
-      await boot.drainChatOutbox(
-        app,
-        dir,
-        h(),
-        { warn() {} },
-        {
-          itemId: durableId,
-        },
-      );
-      await boot.drainChatOutbox(
-        app,
-        dir,
-        h(),
-        { warn() {} },
-        {
-          itemId: durableId,
-        },
-      );
-      const delivered = outbox.readChatOutboxItemById(dir, durableId).item;
-      assert.equal(delivered.status, "delivered");
-      assert.equal(delivered.attempts, 1);
-    }
-    assert.equal(sends, 2);
+    await boot.drainChatOutbox(
+      app,
+      dir,
+      h(),
+      { warn() {} },
+      {
+        itemId: finalId,
+      },
+    );
+    await boot.drainChatOutbox(
+      app,
+      dir,
+      h(),
+      { warn() {} },
+      {
+        itemId: finalId,
+      },
+    );
+    const delivered = outbox.readChatOutboxItemById(dir, finalId).item;
+    assert.equal(delivered.status, "delivered");
+    assert.equal(delivered.attempts, 1);
+
+    await boot.drainChatOutbox(
+      app,
+      dir,
+      h(),
+      { warn() {} },
+      {
+        itemId: unlinkedFinalId,
+      },
+    );
+    const expired = outbox.readChatOutboxItemById(dir, unlinkedFinalId).item;
+    assert.equal(expired.status, "failed");
+    assert.equal(expired.failureKind, "expired");
+    assert.equal(sends, 1);
   });
 });
 
