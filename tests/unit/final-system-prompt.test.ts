@@ -720,7 +720,7 @@ test("system prompt stays frozen until reload", async (t) => {
   );
 
   await session.reload();
-  const reloadedPrompt = runtimeMod.ensureSessionBaseSystemPrompt(session);
+  const reloadedPrompt = String(session._baseSystemPrompt || "");
   assert.ok(
     reloadedPrompt.includes("Updated preference after materialization."),
   );
@@ -789,12 +789,25 @@ test("persisted system prompt restores across resume and refreshes on reload", a
   assert.equal(resumedPrompt.includes("Updated method after resume."), false);
 
   await resumedRuntime.session.reload();
-  const reloadedPrompt = runtimeMod.ensureSessionBaseSystemPrompt(
-    resumedRuntime.session,
-  );
+  const reloadedPrompt = String(resumedRuntime.session._baseSystemPrompt || "");
   assert.notEqual(reloadedPrompt, firstPrompt);
   assert.ok(reloadedPrompt.includes("Updated method after resume."));
   await resumedRuntime.runtime.dispose();
+
+  const replacementManager = SessionManager.open(
+    sessionFile,
+    path.dirname(sessionFile),
+  );
+  const replacementRuntime = await runtimeMod.createConfiguredAgentSession({
+    cwd,
+    agentDir,
+    sessionManager: replacementManager,
+  });
+  const replacementPrompt = runtimeMod.ensureSessionBaseSystemPrompt(
+    replacementRuntime.session,
+  );
+  assert.equal(replacementPrompt, reloadedPrompt);
+  await replacementRuntime.runtime.dispose();
 });
 
 test("stored system prompt blocks participate in frozen prompts", async (t) => {

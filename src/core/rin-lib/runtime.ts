@@ -599,7 +599,9 @@ function applyRinPromptBuilder(session: any) {
   if (originalReload) {
     session.reload = async (...args: any[]) => {
       clearSessionBaseSystemPrompt(session, { ignorePersistedPrompt: true });
-      return await originalReload(...args);
+      const result = await originalReload(...args);
+      ensureSessionBaseSystemPrompt(session);
+      return result;
     };
   }
 
