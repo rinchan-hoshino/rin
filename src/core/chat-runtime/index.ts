@@ -53,11 +53,7 @@ import {
   MinecraftAdapter,
   SlackAdapter,
 } from "./adapters.js";
-import {
-  deleteInboundRecoveryHeads,
-  InboundRecoveryGate,
-  mergeInboundRecoverySessions,
-} from "./inbound-recovery.js";
+import { InboundRecoveryGate } from "./inbound-recovery.js";
 
 function toSnakeCase(value: string) {
   return safeString(value)
@@ -1615,7 +1611,6 @@ class OneBotAdapter {
   private loopPromise: Promise<void> | null = null;
   private stopped = false;
   private nextEchoId = 1;
-  private readonly inboundGate = new InboundRecoveryGate<any>();
   private readonly workingReactions = new Map<string, string>();
   private readonly pending = new Map<
     string,
@@ -1776,22 +1771,15 @@ class OneBotAdapter {
   private async runLoop() {
     while (!this.stopped) {
       try {
-        this.inboundGate.begin();
         await this.connect();
-        await this.recoverOneBotMessages(() => {
-          emitBotStatus(this.app, this.bot, 1);
-        });
+        emitBotStatus(this.app, this.bot, 1);
         await new Promise<void>((resolve) => {
           this.ws?.once("close", () => resolve());
         });
       } catch (error: any) {
         if (!this.stopped) {
           const detail =
-            safeString(error?.message || error).trim() || "catch_up_failed";
-          this.bot.inboundRecovery = {
-            status: "degraded",
-            failures: [detail],
-          };
+            safeString(error?.message || error).trim() || "connect_failed";
           this.logger.warn(`connect failed err=${detail}`);
         }
       } finally {
@@ -1881,98 +1869,9 @@ class OneBotAdapter {
       this.bot.selfId = selfId;
     }
     if (safeString(payload?.post_type).trim() === "message") {
-      if (this.inboundGate.buffer(this.oneBotInboundChatId(payload), payload)) {
-        return;
-      }
       const session = await this.buildSession(payload);
       if (session) this.app.emit("message", session);
     }
-  }
-
-  private oneBotInboundChatId(payload: any) {
-    const messageType = safeString(payload?.message_type).trim();
-    const userId = safeString(payload?.user_id).trim();
-    const groupId = safeString(payload?.group_id).trim();
-    return messageType === "group" ? groupId : `private:${userId}`;
-  }
-
-  private async releaseOneBotReadyChats(chatIds: string[]) {
-    const botId = safeString(this.bot?.selfId).trim();
-    const chats = chatIds.map((chatId) => ({
-      chatId,
-      chatKey: composeChatKeyForBot(this.app, "onebot", chatId, botId),
-    }));
-    for (const { chatKey } of chats) {
-      if (chatKey) this.app.beginInboundRecoveryChat(chatKey);
-    }
-    for (const { chatId, chatKey } of chats) {
-      await this.finishOneBotRecovery(chatId, []);
-      if (chatKey) this.app.completeInboundRecoveryChat(chatKey);
-    }
-  }
-
-  private async recoverOneBotMessages(onConfigured?: () => void) {
-    const agentDir = safeString(this.app?.agentDir).trim();
-    const botId = safeString(this.bot?.selfId).trim();
-    if (agentDir && botId) {
-      const deleted = deleteInboundRecoveryHeads(agentDir, "onebot", botId);
-      if (deleted > 0) {
-        this.logger?.info?.(
-          `discarded ${deleted} legacy OneBot inbound recovery head(s); OneBot v11 has no history action`,
-        );
-      }
-    }
-    this.bot.inboundRecovery = { status: "ready", mode: "live-only" };
-    await this.releaseOneBotReadyChats(this.inboundGate.configure([]));
-    onConfigured?.();
-  }
-
-  private async finishOneBotRecovery(chatId: string, recoveredPayloads: any[]) {
-    let recoveredSessions = (
-      await Promise.all(
-        recoveredPayloads.map((payload) => this.buildSession(payload)),
-      )
-    ).filter(Boolean);
-    for (;;) {
-      const bufferedPayloads = this.inboundGate.drain(chatId);
-      let bufferedSessionByPayload = new Map<any, any>();
-      const handledMessageIds = new Set<string>();
-      try {
-        const resolvedBufferedSessions = await Promise.all(
-          bufferedPayloads.map((payload) => this.buildSession(payload)),
-        );
-        bufferedSessionByPayload = new Map(
-          bufferedPayloads.map((payload, index) => [
-            payload,
-            resolvedBufferedSessions[index],
-          ]),
-        );
-        const bufferedSessions = resolvedBufferedSessions.filter(Boolean);
-        const sessions = mergeInboundRecoverySessions(
-          recoveredSessions,
-          bufferedSessions,
-        );
-        recoveredSessions = [];
-        for (const session of sessions) {
-          this.app.emit("message", session);
-          const messageId = safeString(session?.messageId).trim();
-          if (messageId) handledMessageIds.add(messageId);
-        }
-      } catch (error) {
-        this.inboundGate.prepend(
-          chatId,
-          bufferedPayloads.filter((payload) => {
-            const messageId = safeString(
-              bufferedSessionByPayload.get(payload)?.messageId,
-            ).trim();
-            return !messageId || !handledMessageIds.has(messageId);
-          }),
-        );
-        throw error;
-      }
-      if (!this.inboundGate.hasPending(chatId)) break;
-    }
-    this.inboundGate.open(chatId);
   }
 
   private callAction(action: string, params?: any) {

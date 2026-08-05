@@ -8,7 +8,7 @@ import WebSocket from "ws";
 import { EditableTextMessageGroup } from "./editable-text-message-group.js";
 import {
   applyInboundRecoveryResult,
-  deleteInboundRecoveryHeads,
+  deleteInboundRecoveryHead,
   InboundRecoveryGate,
   recoverInboundHeads,
 } from "./inbound-recovery.js";
@@ -868,7 +868,7 @@ export class DiscordAdapter {
           if (Number(error?.code ?? error?.rawError?.code) !== 10003) {
             throw error;
           }
-          this.handleChannelDelete({ id: head.chatId });
+          this.retireDeletedDiscordChannel(head.chatId);
           return [];
         }
       },
@@ -905,7 +905,7 @@ export class DiscordAdapter {
     const botId = safeString(this.bot?.selfId).trim();
     if (!channelId || !botId) return 0;
     const chatKey = composeChatKeyForBot(this.app, "discord", channelId, botId);
-    return deleteInboundRecoveryHeads(
+    return deleteInboundRecoveryHead(
       this.app.agentDir,
       "discord",
       botId,
@@ -913,16 +913,20 @@ export class DiscordAdapter {
     );
   }
 
-  private handleChannelDelete(channel: any) {
-    const channelId = safeString(channel?.id).trim();
-    if (!channelId) return;
-    this.deletedChannelIds.add(channelId);
-    const deleted = this.deleteDiscordInboundRecoveryHead(channelId);
+  private retireDeletedDiscordChannel(channelId: string) {
+    const normalized = safeString(channelId).trim();
+    if (!normalized) return;
+    this.deletedChannelIds.add(normalized);
+    const deleted = this.deleteDiscordInboundRecoveryHead(normalized);
     if (deleted > 0) {
       this.logger?.info?.(
-        `discarded inbound recovery head for deleted Discord channel ${channelId}`,
+        `discarded inbound recovery head for deleted Discord channel ${normalized}`,
       );
     }
+  }
+
+  private handleChannelDelete(channel: any) {
+    this.retireDeletedDiscordChannel(channel?.id);
   }
 
   private async finishDiscordRecovery(chatId: string, recovered: any[]) {

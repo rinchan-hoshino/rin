@@ -10,10 +10,6 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const runtime = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js"))
-    .href
-);
 const adapters = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "chat-runtime", "adapters.js"),
@@ -30,6 +26,11 @@ const inboundRecovery = await import(
 );
 const database = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
+);
+const databaseInstallMigration = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "chat", "database-install-migration.js"),
+  ).href
 );
 
 function logger(warnings: string[] = []) {
@@ -107,65 +108,38 @@ test("onebot v11 live messages do not create non-standard history checkpoints", 
   }
 });
 
-test("onebot v11 startup discards legacy recovery heads without calling history extensions", async () => {
+test("install migration discards legacy OneBot recovery heads only", async () => {
   const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-onebot-standard-startup-"),
+    path.join(os.tmpdir(), "rin-onebot-standard-install-"),
   );
   try {
-    const app = runtime.createChatRuntimeApp(agentDir);
-    runtime.instantiateBuiltInChatRuntimeAdapters(app, {
-      dataDir: path.join(agentDir, "data"),
-      settings: {},
-      adapterEntries: [
-        {
-          key: "onebot",
-          name: "OneBot",
-          config: { endpoint: "ws://127.0.0.1:3001", selfId: "bot-1" },
-        },
-      ],
-    });
-    const adapter = [...app.adapters][0] as any;
-    const seen: string[] = [];
-    app.on("message", (session: any) => seen.push(session.messageId));
     insertLegacyOneBotHead(agentDir);
     insertLegacyOneBotHead(agentDir, "bot-2", "456");
-    adapter.callAction = async (action: string) => {
-      assert.fail(
-        `OneBot v11 recovery must not call extension action ${action}`,
-      );
-    };
-    const live = {
-      post_type: "message",
-      message_type: "group",
-      self_id: "bot-1",
-      group_id: "123",
-      user_id: "owner-1",
-      message_id: "id-live",
-      message_seq: "2",
-      time: 2,
-      sender: { nickname: "Owner" },
-      raw_message: "live",
-      message: [{ type: "text", data: { text: "live" } }],
-    };
-    adapter.inboundGate.begin();
-    adapter.inboundGate.buffer("123", live);
-
-    await adapter.recoverOneBotMessages();
-
-    assert.deepEqual(seen, ["id-live"]);
-    assert.deepEqual(adapter.bot.inboundRecovery, {
-      status: "ready",
-      mode: "live-only",
+    saveInboundHead(agentDir, {
+      platform: "discord",
+      botId: "bot-discord",
+      chatId: "channel-1",
+      messageId: "100",
     });
+    database.closeChatDatabase(agentDir);
+
+    databaseInstallMigration.migrateChatDatabaseForInstall(agentDir, {
+      runtimeQuiesced: true,
+    });
+
     assert.deepEqual(
       inboundRecovery.listInboundRecoveryHeads(agentDir, "onebot", "bot-1"),
       [],
     );
     assert.deepEqual(
+      inboundRecovery.listInboundRecoveryHeads(agentDir, "onebot", "bot-2"),
+      [],
+    );
+    assert.deepEqual(
       inboundRecovery
-        .listInboundRecoveryHeads(agentDir, "onebot", "bot-2")
+        .listInboundRecoveryHeads(agentDir, "discord", "bot-discord")
         .map((head: any) => head.chatKey),
-      ["onebot/bot-2:456"],
+      ["discord/bot-discord:channel-1"],
     );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -249,6 +223,9 @@ test("discord startup treats API code 10003 as a terminal deleted channel", asyn
       },
     };
     adapter.inboundGate.begin();
+    adapter.handleChannelDelete = () => {
+      assert.fail("Unknown Channel must not synthesize ChannelDelete");
+    };
 
     await adapter.recoverDiscordMessages();
 

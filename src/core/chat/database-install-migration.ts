@@ -1132,6 +1132,12 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
     .immediate();
 }
 
+function discardUnsupportedOneBotRecoveryHeadsForInstall(
+  db: BetterSqlite3.Database,
+) {
+  db.prepare(`DELETE FROM inbound_heads WHERE platform = 'onebot'`).run();
+}
+
 function releaseCurrentClaimsForInstall(db: BetterSqlite3.Database) {
   const timestamp = nowIso();
   const hasRunId = tableHasColumn(db, "inbox_jobs", "run_id");
@@ -1295,6 +1301,7 @@ export function migrateChatDatabaseForInstall(
         if (needsInitialization || !legacyMigrationComplete) {
           migrateLegacyChatControlData(agentDir, migrationDb);
         }
+        discardUnsupportedOneBotRecoveryHeadsForInstall(migrationDb);
         const admissionModelVersion = safeString(
           (
             migrationDb
