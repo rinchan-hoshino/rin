@@ -251,15 +251,20 @@ test("chat snapshots inherited running jobs before adapters can claim new work",
 test("daemon restart preserves and resumes active durable turns", () => {
   const daemon = source("src/core/rin-daemon/daemon.ts");
   const workerPool = source("src/core/rin-daemon/worker-pool.ts");
-  const shutdownBlock = workerPool.slice(
-    workerPool.indexOf("async shutdown(graceMs: number)"),
-    workerPool.indexOf("private updateWorkerMetadata"),
+  const shutdownBlock = daemon.slice(
+    daemon.indexOf("const shutdown = async"),
+    daemon.indexOf('process.on("SIGINT", shutdown)'),
+  );
+  const destroyAllBlock = workerPool.slice(
+    workerPool.indexOf("destroyAll() {"),
+    workerPool.indexOf("beginShutdown() {"),
   );
 
   assert.doesNotMatch(daemon, /interruptActiveDaemonTurns/);
   assert.match(daemon, /await workerPool\.recoverActiveDaemonTurns\(\)/);
-  assert.match(shutdownBlock, /this\.beginShutdown\(\)/);
-  assert.match(shutdownBlock, /this\.destroyAll\(\)/);
+  assert.match(shutdownBlock, /workerPool\.destroyAll\(\)/);
+  assert.match(destroyAllBlock, /this\.beginShutdown\(\)/);
+  assert.doesNotMatch(workerPool, /shutdownGraceMs|shutdown\(graceMs/);
   assert.match(workerPool, /preserveActiveTurn/);
   assert.match(workerPool, /resume_interrupted_turn/);
 });

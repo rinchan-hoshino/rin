@@ -64,6 +64,8 @@ function writeLine(socket: RpcSocketLike, payload: unknown) {
   if (!socket.destroyed) socket.write(`${JSON.stringify(payload)}\n`);
 }
 
+const DAEMON_TEARDOWN_TIMEOUT_MS = 2_000;
+
 function legacyRestartStatePath(agentDir: string) {
   return path.join(agentDir, "data", "restart.json");
 }
@@ -117,7 +119,6 @@ export async function startDaemon(
     instanceLock?: DaemonInstanceLock;
     workerGcIdleMs?: number;
     workerSweepIntervalMs?: number;
-    shutdownGraceMs?: number;
     workerCgroupIsolation?: WorkerCgroupIsolation;
   } = {},
 ) {
@@ -773,21 +774,17 @@ export async function startDaemon(
   console.log(`rin daemon bridge listening on ${bridgeSocketPath}`);
 
   let shuttingDown = false;
-  const shutdownGraceMs = Math.max(
-    0,
-    Number(options.shutdownGraceMs ?? 85_000),
-  );
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
     selfImproveMaintenanceSupervisor.stop();
     cronScheduler.stop();
-    workerPool.beginShutdown();
-    const shutdownDeadline = Date.now() + shutdownGraceMs;
-    const settleBeforeShutdownDeadline = async (
+    workerPool.destroyAll();
+    const teardownDeadline = Date.now() + DAEMON_TEARDOWN_TIMEOUT_MS;
+    const settleLocalTeardown = async (
       task: () => unknown | Promise<unknown>,
     ) => {
-      const remainingMs = Math.max(0, shutdownDeadline - Date.now());
+      const remainingMs = Math.max(0, teardownDeadline - Date.now());
       if (remainingMs === 0) return;
       await Promise.race([
         Promise.resolve()
@@ -796,9 +793,8 @@ export async function startDaemon(
         new Promise<void>((resolve) => setTimeout(resolve, remainingMs)),
       ]);
     };
-    await settleBeforeShutdownDeadline(() => options.onShutdown?.());
-    await settleBeforeShutdownDeadline(() => daemonExtensionManager.stop());
-    await workerPool.shutdown(Math.max(0, shutdownDeadline - Date.now()));
+    await settleLocalTeardown(() => options.onShutdown?.());
+    await settleLocalTeardown(() => daemonExtensionManager.stop());
     closeDaemonTurnLedger(runtime.agentDir);
     for (const socket of Array.from(activeSockets)) {
       try {
@@ -828,7 +824,6 @@ export async function startDaemon(
 function parseDaemonCliArgs(argv: string[]) {
   let socketPath = "";
   let workerPath = "";
-  let shutdownGraceMs: number | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = String(argv[index] || "").trim();
     if (!arg) continue;
@@ -848,22 +843,11 @@ function parseDaemonCliArgs(argv: string[]) {
       workerPath = arg.slice("--worker=".length).trim() || workerPath;
       continue;
     }
-    if (arg === "--shutdown-grace-ms") {
-      shutdownGraceMs = Number(argv[++index]);
-      continue;
-    }
-    if (arg.startsWith("--shutdown-grace-ms=")) {
-      shutdownGraceMs = Number(arg.slice("--shutdown-grace-ms=".length));
-      continue;
-    }
     if (!arg.startsWith("-") && !socketPath) socketPath = arg;
   }
   return {
     socketPath: socketPath || undefined,
     workerPath: workerPath || undefined,
-    shutdownGraceMs: Number.isFinite(shutdownGraceMs)
-      ? shutdownGraceMs
-      : undefined,
   };
 }
 

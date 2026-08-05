@@ -106,7 +106,7 @@ test("daemon shutdown stops hosted services before daemon extension wait", async
   assert.equal(hostedBody.includes("daemonExtensionManager"), false);
 });
 
-test("daemon bounds a hosted shutdown hook that never settles", async () => {
+test("daemon bounds local teardown when a hosted shutdown hook never settles", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-daemon-hook-"));
   const socketPath = path.join(agentDir, "daemon.sock");
   const launcherPath = path.join(agentDir, "launcher.mjs");
@@ -116,7 +116,7 @@ test("daemon bounds a hosted shutdown hook that never settles", async () => {
   await fs.writeFile(
     launcherPath,
     `import { startDaemon } from ${JSON.stringify(daemonModuleUrl)};\n` +
-      `await startDaemon({ socketPath: ${JSON.stringify(socketPath)}, shutdownGraceMs: 250, onShutdown: async () => await new Promise(() => {}) });\n`,
+      `await startDaemon({ socketPath: ${JSON.stringify(socketPath)}, onShutdown: async () => await new Promise(() => {}) });\n`,
   );
   const child = spawn(process.execPath, [launcherPath], {
     cwd: rootDir,
@@ -135,12 +135,12 @@ test("daemon bounds a hosted shutdown hook that never settles", async () => {
     const result = await Promise.race([
       exited,
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("daemon_exit_timeout")), 1500),
+        setTimeout(() => reject(new Error("daemon_exit_timeout")), 3000),
       ),
     ]);
 
     assert.deepEqual(result, { code: 0, signal: null });
-    assert.ok(Date.now() - startedAt >= 200);
+    assert.ok(Date.now() - startedAt < 2500);
   } finally {
     try {
       child.kill("SIGKILL");

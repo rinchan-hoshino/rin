@@ -78,7 +78,7 @@ async function waitForLine(socket, predicate, timeoutMs = 5000) {
 
 async function withDaemon(workerScript, options, fn) {
   const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-daemon-grace-"),
+    path.join(os.tmpdir(), "rin-daemon-active-worker-stop-"),
   );
   await fs.writeFile(
     path.join(agentDir, "package.json"),
@@ -97,8 +97,6 @@ async function withDaemon(workerScript, options, fn) {
       socketPath,
       "--worker",
       workerPath,
-      "--shutdown-grace-ms",
-      String(options.shutdownGraceMs),
     ],
     {
       cwd: rootDir,
@@ -174,10 +172,10 @@ process.stdin.on("data", (chunk) => {
 });
 `;
 
-test("daemon waits for the current worker step to finish before exiting", async () => {
+test("daemon exits without waiting for the current worker step", async () => {
   await withDaemon(
     workerScript,
-    { stepMs: 400, shutdownGraceMs: 5000 },
+    { stepMs: 3000 },
     async ({ socketPath, child, stdoutRef, stderrRef }) => {
       const socket = net.createConnection(socketPath);
       await new Promise((resolve, reject) => {
@@ -190,7 +188,7 @@ test("daemon waits for the current worker step to finish before exiting", async 
         (payload) => payload?.type === "response" && payload?.id === "1",
       );
       socket.write(
-        `${JSON.stringify({ id: "2", type: "prompt", message: "hello", requestTag: "graceful-turn" })}\n`,
+        `${JSON.stringify({ id: "2", type: "prompt", message: "hello", requestTag: "shutdown-turn" })}\n`,
       );
       await waitForLine(socket, (payload) => payload?.type === "agent_start");
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -205,47 +203,9 @@ test("daemon waits for the current worker step to finish before exiting", async 
       const elapsedMs = Date.now() - startedAt;
 
       assert.deepEqual(result, { code: 0, signal: null });
-      assert.ok(elapsedMs >= 300, `elapsed=${elapsedMs}`);
-      assert.ok(elapsedMs < 3000, `elapsed=${elapsedMs}`);
+      assert.ok(elapsedMs < 1500, `elapsed=${elapsedMs}`);
       assert.match(stdoutRef(), /rin daemon listening/);
       assert.equal(stderrRef(), "");
-    },
-  );
-});
-
-test("daemon stops waiting once the graceful shutdown timeout is reached", async () => {
-  await withDaemon(
-    workerScript,
-    { stepMs: 3000, shutdownGraceMs: 250 },
-    async ({ socketPath, child }) => {
-      const socket = net.createConnection(socketPath);
-      await new Promise((resolve, reject) => {
-        socket.once("connect", resolve);
-        socket.once("error", reject);
-      });
-      socket.write(`${JSON.stringify({ id: "1", type: "new_session" })}\n`);
-      await waitForLine(
-        socket,
-        (payload) => payload?.type === "response" && payload?.id === "1",
-      );
-      socket.write(
-        `${JSON.stringify({ id: "2", type: "prompt", message: "hello", requestTag: "timeout-turn" })}\n`,
-      );
-      await waitForLine(socket, (payload) => payload?.type === "agent_start");
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
-      const startedAt = Date.now();
-      const exited = new Promise((resolve, reject) => {
-        child.once("exit", (code, signal) => resolve({ code, signal }));
-        child.once("error", reject);
-      });
-      child.kill("SIGTERM");
-      const result = await exited;
-      const elapsedMs = Date.now() - startedAt;
-
-      assert.deepEqual(result, { code: 0, signal: null });
-      assert.ok(elapsedMs >= 200, `elapsed=${elapsedMs}`);
-      assert.ok(elapsedMs < 1500, `elapsed=${elapsedMs}`);
     },
   );
 });

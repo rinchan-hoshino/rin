@@ -52,12 +52,7 @@ test("Windows daemon lock paths normalize native namespace forms", () => {
 function spawnDaemon(agentDir: string, socketPath: string) {
   const child = spawn(
     process.execPath,
-    [
-      path.join(rootDir, "dist", "core", "rin-daemon", "daemon.js"),
-      socketPath,
-      "--shutdown-grace-ms",
-      "200",
-    ],
+    [path.join(rootDir, "dist", "core", "rin-daemon", "daemon.js"), socketPath],
     {
       cwd: rootDir,
       env: {

@@ -4,7 +4,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { sleep } from "../platform/process.js";
 import type { RpcSocketLike } from "../platform/rpc-socket.js";
 import {
   beginDaemonTurn,
@@ -1090,22 +1089,6 @@ export class WorkerPool {
       return worker;
     }).catch(() => {});
     return worker;
-  }
-
-  async shutdown(graceMs: number) {
-    this.beginShutdown();
-    const deadline = Date.now() + Math.max(0, graceMs);
-    while (this.workers.size > 0 && Date.now() < deadline) {
-      await sleep(50);
-      for (const worker of Array.from(this.workers)) {
-        this.maybeReleaseWorker(worker);
-      }
-    }
-    this.destroyAll();
-    const forcedExitDeadline = Date.now() + 1_000;
-    while (this.workers.size > 0 && Date.now() < forcedExitDeadline) {
-      await sleep(50);
-    }
   }
 
   private establishPiPromptLifecycle(

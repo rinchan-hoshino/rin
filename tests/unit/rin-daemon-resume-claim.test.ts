@@ -128,8 +128,6 @@ function spawnDaemon(agentDir, socketPath, workerPath) {
       socketPath,
       "--worker",
       workerPath,
-      "--shutdown-grace-ms",
-      "200",
     ],
     {
       cwd: rootDir,
