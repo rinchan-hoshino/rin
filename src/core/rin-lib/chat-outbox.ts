@@ -146,7 +146,6 @@ export type EnqueueChatOutboxOptions = {
   turnFence?: ChatOutboxTurnFence;
   terminalTurn?: ChatTerminalTurn;
   terminalRecordId?: string;
-  nonTerminalError?: boolean;
 };
 
 export type ChatTerminalTurn = {
@@ -663,27 +662,19 @@ export function enqueueChatOutboxPayload(
             normalizedPayload.chatKey,
           )
         : null;
-      if (
-        options.nonTerminalError &&
-        (deliveryKind !== "error" || options.postDelivery || !options.turnFence)
-      ) {
-        throw new Error("chat_outbox_invalid_nonterminal_error");
-      }
-      const turn = options.nonTerminalError
-        ? null
-        : options.terminalTurn
-          ? validateAuthoritativeTerminalTurn(
-              db,
-              options.terminalTurn,
-              normalizedPayload.chatKey,
-            )
-          : terminalTurnForPostDelivery(
-              db,
-              agentDir,
-              deliveryKind,
-              options.postDelivery,
-              contextualFence,
-            );
+      const turn = options.terminalTurn
+        ? validateAuthoritativeTerminalTurn(
+            db,
+            options.terminalTurn,
+            normalizedPayload.chatKey,
+          )
+        : terminalTurnForPostDelivery(
+            db,
+            agentDir,
+            deliveryKind,
+            options.postDelivery,
+            contextualFence,
+          );
       const desiredTurnId = fencedTurn?.turn_id || turn?.turn_id || "";
       // `completed` settles Chat admission transport, not backend lifecycle truth.
       const projectsAuthoritativeTerminalOverCompletedTransport = Boolean(

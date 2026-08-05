@@ -78,32 +78,16 @@ function h() {
   };
 }
 
-test("nonterminal error outbox requires and preserves a durable turn fence", async () => {
+test("nonterminal notices preserve the terminal outbox slot", async () => {
   await withTempDir(async (dir) => {
-    assert.throws(
-      () =>
-        outbox.enqueueChatOutboxPayload(dir, payload("tool warning"), {
-          deliveryKind: "error",
-          nonTerminalError: true,
-        }),
-      /chat_outbox_invalid_nonterminal_error/,
-    );
-    assert.equal(
-      database
-        .openChatDatabase(dir)
-        .prepare(`SELECT COUNT(*) AS count FROM outbox`)
-        .get().count,
-      0,
-    );
-
     const inbound = inbox.enqueueChatInboxItem(dir, {
       chatKey: "telegram/777:1",
-      messageId: "nonterminal-error-owner",
+      messageId: "nonterminal-notice-owner",
       session: {
         platform: "telegram",
         selfId: "777",
         channelId: "1",
-        messageId: "nonterminal-error-owner",
+        messageId: "nonterminal-notice-owner",
         content: "question",
       },
       elements: [{ type: "text", attrs: { content: "question" } }],
@@ -119,26 +103,31 @@ test("nonterminal error outbox requires and preserves a durable turn fence", asy
     };
 
     outbox.enqueueChatOutboxPayload(dir, payload("tool warning"), {
-      deliveryKind: "error",
-      nonTerminalError: true,
+      deliveryKind: "passive_notice",
       turnFence,
+    });
+    outbox.enqueueChatOutboxPayload(dir, payload("answer"), {
+      deliveryKind: "final",
+      turnFence,
+      postDelivery: {
+        markProcessed: {
+          chatKey: claim.chatKey,
+          messageId: claim.messageId,
+        },
+      },
     });
 
     assert.deepEqual(
       database
         .openChatDatabase(dir)
         .prepare(
-          `SELECT outbox.turn_id, outbox.delivery_kind, inbox_jobs.state,
-                  inbox_jobs.terminal_kind
-           FROM outbox JOIN inbox_jobs ON inbox_jobs.turn_id = outbox.turn_id`,
+          `SELECT delivery_kind
+           FROM outbox
+           WHERE turn_id = ?
+           ORDER BY sequence`,
         )
-        .get(),
-      {
-        turn_id: claim.itemId,
-        delivery_kind: "error",
-        state: "running",
-        terminal_kind: null,
-      },
+        .all(claim.itemId),
+      [{ delivery_kind: "passive_notice" }, { delivery_kind: "final" }],
     );
   });
 });

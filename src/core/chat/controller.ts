@@ -2002,7 +2002,6 @@ export class ChatController {
       waitForDeliveryMs?: number;
       waitUntilDeliverySettled?: boolean;
       turnFence?: ChatOutboxTurnFence;
-      nonTerminalError?: boolean;
       terminalTurn?: RinChatDeliveryContext;
       terminalRequestTag?: string;
       terminalRecordId?: string;
@@ -2427,9 +2426,9 @@ export class ChatController {
         ]),
       )
       .digest("hex")}`;
-    await this.sendErrorNoticeNow(
+    await this.sendPassiveNoticeNow(
       `rin error: frontend event handling failed (${failure.stage}/${eventType}): ${errorText}`,
-      { idempotencyKey, nonTerminalError: true },
+      { idempotencyKey },
     );
   }
 
@@ -2438,7 +2437,6 @@ export class ChatController {
     options: {
       idempotencyKey?: string;
       turnFence?: ChatOutboxTurnFence;
-      nonTerminalError?: boolean;
     } = {},
   ) {
     const trimmed = safeString(text).trim();
@@ -2632,7 +2630,6 @@ export class ChatController {
     };
     const errorDeliveryOptions = {
       turnFence,
-      nonTerminalError: true,
       idempotencyKey: errorIdempotencyKey,
     };
 
@@ -2642,8 +2639,8 @@ export class ChatController {
       // An empty Todo snapshot has no durable delivery to fence. Do not let it
       // mutate or refresh presentation state; final settlement clears Working.
       if (!error) return true;
-      const errorDelivered = await this.sendErrorNoticeNow(
-        error,
+      const errorDelivered = await this.sendPassiveNoticeNow(
+        `rin error: ${error}`,
         errorDeliveryOptions,
       );
       if (errorDelivered) commitTodoDisplayState([errorIdempotencyKey]);
@@ -2686,7 +2683,7 @@ export class ChatController {
       })();
     }
     const errorDelivery = error
-      ? this.sendErrorNoticeNow(error, errorDeliveryOptions)
+      ? this.sendPassiveNoticeNow(`rin error: ${error}`, errorDeliveryOptions)
       : Promise.resolve(true);
     const [todoDelivered, errorDelivered] = await Promise.all([
       todoDelivery,
@@ -3701,7 +3698,7 @@ export class ChatController {
           return;
         }
         if (event.level === "error" && event.deferDuringTurn === false) {
-          await this.sendErrorNoticeNow(event.text, { nonTerminalError: true });
+          await this.sendPassiveNoticeNow(`rin error: ${event.text}`);
           return;
         }
         if (event.deferDuringTurn === false) {

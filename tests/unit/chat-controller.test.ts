@@ -2147,7 +2147,7 @@ test("chat controller delivers immediate passive errors as non-terminal errors",
   assert.deepEqual(deliveries, [
     {
       text: "rin error: Compaction failed: summary backend unavailable",
-      kind: "error",
+      kind: "passive_notice",
     },
   ]);
   assert.deepEqual(
@@ -2495,7 +2495,7 @@ test("chat controller restores fallback revision from a Todo error", async () =>
     .all(claim.itemId);
   assert.deepEqual(
     rows.map((row) => row.delivery_kind),
-    ["passive_notice", "error", "passive_notice"],
+    ["passive_notice", "passive_notice", "passive_notice"],
   );
   assert.deepEqual(
     rows.map((row) => JSON.parse(row.idempotency_key)[4]),
@@ -2664,7 +2664,7 @@ test("chat controller binds an empty-state Todo error without refreshing Working
   assert.equal(controller.latestTodoNoticeText, "");
   assert.deepEqual(contexts, []);
   assert.deepEqual(deliveries, [
-    { text: "rin error: invalid todo list", kind: "error" },
+    { text: "rin error: invalid todo list", kind: "passive_notice" },
   ]);
 });
 
@@ -2813,7 +2813,7 @@ test("chat controller keeps todo errors outside editable progress", async () => 
     },
     {
       text: "rin error: failed to persist todo state",
-      kind: "error",
+      kind: "passive_notice",
       coalesce: false,
     },
   ]);
@@ -2824,7 +2824,7 @@ test("chat controller keeps todo errors outside editable progress", async () => 
       .all(),
     [
       { delivery_kind: "passive_notice", turn_id: claim.itemId },
-      { delivery_kind: "error", turn_id: claim.itemId },
+      { delivery_kind: "passive_notice", turn_id: claim.itemId },
     ],
   );
   assert.deepEqual(
@@ -2855,7 +2855,7 @@ test("chat controller attempts independent todo errors when progress delivery fa
     });
 
     assert.equal(delivered, false);
-    assert.deepEqual(attempts.sort(), ["error", "passive_notice"]);
+    assert.deepEqual(attempts, ["passive_notice", "passive_notice"]);
   }
 });
 
