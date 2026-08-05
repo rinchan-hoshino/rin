@@ -153,7 +153,7 @@ test("180k archived messages do not enter inbox or recovery control paths", asyn
     assert.equal(pending.length, 1);
     assert.equal(claim.messageId, "180001");
     assert.equal(heads.length, 1);
-    assert.equal(heads[0].messageId, "180001");
+    assert.equal(heads[0].messageId, "180000");
     assert.equal(activeOutbox.length, 1);
     assert.equal(activeOutbox[0].item.id, newOutboxId);
     assert.equal(activeOutbox[0].item.sequence, 180001);

@@ -295,7 +295,7 @@ test("onebot group sessions preserve both group card and account nickname", asyn
   assert.equal(stored.session?.author?.accountNickname, undefined);
 });
 
-test("onebot runtime catches up native history before buffered live messages", async () => {
+test("onebot v11 runtime releases buffered live messages without history extensions", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-onebot-recovery-"),
   );
@@ -344,20 +344,12 @@ test("onebot runtime catches up native history before buffered live messages", a
       raw_message: text,
       message: [{ type: "text", data: { text } }],
     });
-    const head = payload("id-100", "100", 1, "head");
-    const missed = payload("id-200", "200", 2, "missed");
     const duplicateLive = payload("id-300", "300", 3, "live copy");
     const newestLive = payload("id-400", "400", 3, "newest");
-    adapter.callAction = async (action: string, params: any) => {
-      assert.equal(action, "get_group_msg_history");
-      assert.equal(params.group_id, 123);
-      assert.equal(params.count, 100);
-      assert.equal(params.reverse_order, false);
-      if (params.message_seq === 100) {
-        return { messages: [head, missed, duplicateLive] };
-      }
-      assert.equal(params.message_seq, 300);
-      return { messages: [duplicateLive] };
+    adapter.callAction = async (action: string) => {
+      assert.fail(
+        `OneBot v11 recovery must not call extension action ${action}`,
+      );
     };
     adapter.inboundGate.begin();
     adapter.inboundGate.buffer("123", duplicateLive);
@@ -365,15 +357,18 @@ test("onebot runtime catches up native history before buffered live messages", a
 
     await adapter.recoverOneBotMessages();
 
-    assert.deepEqual(seen, ["id-200", "id-300", "id-400"]);
-    assert.deepEqual(adapter.bot.inboundRecovery, { status: "ready" });
+    assert.deepEqual(seen, ["id-300", "id-400"]);
+    assert.deepEqual(adapter.bot.inboundRecovery, {
+      status: "ready",
+      mode: "live-only",
+    });
     assert.equal(adapter.inboundGate.isBuffering(), false);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
 
-test("onebot runtime releases unrelated chats while one history fetch is still pending", async () => {
+test("onebot v11 runtime releases all buffered chats without history waiting", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-onebot-isolated-recovery-"),
   );
@@ -417,21 +412,13 @@ test("onebot runtime releases unrelated chats while one history fetch is still p
       raw_message: messageId,
       message: [{ type: "text", data: { text: messageId } }],
     });
-    const head = payload("id-100", "100", "123", 1);
-    const recovered = payload("id-200", "200", "123", 2);
     const slowLive = payload("id-300", "300", "123", 3);
     const fastLive = payload("id-400", "400", "999", 4);
     const fastFollowUp = payload("id-500", "500", "999", 5);
-    let releaseHistory = () => {};
-    const historyPending = new Promise((resolve) => {
-      releaseHistory = resolve;
-    });
-    adapter.callAction = async (_action, params) => {
-      if (params.message_seq === 100) {
-        await historyPending;
-        return { messages: [head, recovered] };
-      }
-      return { messages: [recovered] };
+    adapter.callAction = async (action) => {
+      assert.fail(
+        `OneBot v11 recovery must not call extension action ${action}`,
+      );
     };
     let releaseHandoff = () => {};
     let handoffStarted = () => {};
@@ -466,17 +453,15 @@ test("onebot runtime releases unrelated chats while one history fetch is still p
     }
     assert.equal(configured, true);
     assert.deepEqual(adapter.bot.inboundRecovery, {
-      status: "recovering",
-      pending: ["onebot/bot-1:123"],
+      status: "ready",
+      mode: "live-only",
     });
-    assert.deepEqual(seen, ["id-400", "id-500"]);
-    assert.equal(app.isInboundRecoveryChat("onebot/bot-1:123"), true);
+    assert.deepEqual(seen, ["id-300", "id-400", "id-500"]);
+    assert.equal(app.isInboundRecoveryChat("onebot/bot-1:123"), false);
     assert.equal(app.isInboundRecoveryChat("onebot/bot-1:999"), false);
 
-    releaseHistory();
     await recovering;
-    assert.deepEqual(seen, ["id-400", "id-500", "id-200", "id-300"]);
-    assert.equal(app.isInboundRecoveryChat("onebot/bot-1:123"), false);
+    assert.deepEqual(seen, ["id-300", "id-400", "id-500"]);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

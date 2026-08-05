@@ -8,6 +8,7 @@ import WebSocket from "ws";
 import { EditableTextMessageGroup } from "./editable-text-message-group.js";
 import {
   applyInboundRecoveryResult,
+  deleteInboundRecoveryHeads,
   InboundRecoveryGate,
   recoverInboundHeads,
 } from "./inbound-recovery.js";
@@ -575,6 +576,7 @@ export class DiscordAdapter {
   private readonly cacheDir: string;
   private readonly editableWorking: EditableTextMessageGroup;
   private readonly inboundGate = new InboundRecoveryGate<any>();
+  private readonly deletedChannelIds = new Set<string>();
   private client: any = null;
   private restRequest: ReturnType<
     typeof createDiscordRestRequestStrategy
@@ -810,8 +812,22 @@ export class DiscordAdapter {
     return safeString(message?.channelId || message?.channel?.id).trim();
   }
 
+  private async handleMessageUnlessDeleted(message: any) {
+    const channelId = this.discordInboundChatId(message);
+    if (this.deletedChannelIds.has(channelId)) return;
+    try {
+      await this.handleMessage(message);
+    } finally {
+      if (this.deletedChannelIds.has(channelId)) {
+        this.deleteDiscordInboundRecoveryHead(channelId);
+      }
+    }
+  }
+
   private async releaseDiscordIngress(messages: any[]) {
-    for (const message of messages) await this.handleMessage(message);
+    for (const message of messages) {
+      await this.handleMessageUnlessDeleted(message);
+    }
   }
 
   private async releaseDiscordReadyChats(chatIds: string[]) {
@@ -842,11 +858,19 @@ export class DiscordAdapter {
       "discord",
       botId,
       async (head) => {
-        const channel = await this.fetchChannel(head.chatId);
-        if (!channel?.messages?.fetch) {
-          throw new Error("Discord message history is unavailable");
+        try {
+          const channel = await this.fetchChannel(head.chatId);
+          if (!channel?.messages?.fetch) {
+            throw new Error("Discord message history is unavailable");
+          }
+          return await this.fetchDiscordMessagesAfter(channel, head.messageId);
+        } catch (error: any) {
+          if (Number(error?.code ?? error?.rawError?.code) !== 10003) {
+            throw error;
+          }
+          this.handleChannelDelete({ id: head.chatId });
+          return [];
         }
-        return await this.fetchDiscordMessagesAfter(channel, head.messageId);
       },
       {
         concurrency: 4,
@@ -877,6 +901,30 @@ export class DiscordAdapter {
     applyInboundRecoveryResult(this.bot, this.logger, result);
   }
 
+  private deleteDiscordInboundRecoveryHead(channelId: string) {
+    const botId = safeString(this.bot?.selfId).trim();
+    if (!channelId || !botId) return 0;
+    const chatKey = composeChatKeyForBot(this.app, "discord", channelId, botId);
+    return deleteInboundRecoveryHeads(
+      this.app.agentDir,
+      "discord",
+      botId,
+      chatKey,
+    );
+  }
+
+  private handleChannelDelete(channel: any) {
+    const channelId = safeString(channel?.id).trim();
+    if (!channelId) return;
+    this.deletedChannelIds.add(channelId);
+    const deleted = this.deleteDiscordInboundRecoveryHead(channelId);
+    if (deleted > 0) {
+      this.logger?.info?.(
+        `discarded inbound recovery head for deleted Discord channel ${channelId}`,
+      );
+    }
+  }
+
   private async finishDiscordRecovery(chatId: string, recovered: any[]) {
     let nextRecovered = recovered;
     for (;;) {
@@ -890,7 +938,7 @@ export class DiscordAdapter {
       const handledMessageIds = new Set<string>();
       try {
         for (const message of messages) {
-          await this.handleMessage(message);
+          await this.handleMessageUnlessDeleted(message);
           handledMessages.add(message);
           const messageId = safeString(message?.id).trim();
           if (messageId) handledMessageIds.add(messageId);
@@ -960,11 +1008,21 @@ export class DiscordAdapter {
       ) {
         return;
       }
-      void this.handleMessage(message).catch((error: any) => {
+      void this.handleMessageUnlessDeleted(message).catch((error: any) => {
         this.logger?.warn?.(
           `message handling failed err=${safeString(error?.message || error)}`,
         );
       });
+    });
+
+    this.client.on(Discord.Events.ChannelDelete, (channel: any) => {
+      try {
+        this.handleChannelDelete(channel);
+      } catch (error: any) {
+        this.logger?.warn?.(
+          `Discord channel deletion cleanup failed err=${safeString(error?.message || error)}`,
+        );
+      }
     });
 
     this.client.on(Discord.Events.InteractionCreate, (interaction: any) => {

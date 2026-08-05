@@ -54,10 +54,9 @@ import {
   SlackAdapter,
 } from "./adapters.js";
 import {
-  applyInboundRecoveryResult,
+  deleteInboundRecoveryHeads,
   InboundRecoveryGate,
   mergeInboundRecoverySessions,
-  recoverInboundHeads,
 } from "./inbound-recovery.js";
 
 function toSnakeCase(value: string) {
@@ -1890,56 +1889,6 @@ class OneBotAdapter {
     }
   }
 
-  private async fetchOneBotMessagesAfter(head: {
-    chatKey: string;
-    chatId: string;
-    messageId: string;
-    providerCursor?: string;
-  }) {
-    const recovered: any[] = [];
-    let cursor = safeString(head.providerCursor || head.messageId).trim();
-    for (;;) {
-      const isPrivate = head.chatId.startsWith("private:");
-      const targetId = Number(head.chatId.replace(/^private:/, "").trim());
-      const action = isPrivate
-        ? "get_friend_msg_history"
-        : "get_group_msg_history";
-      const response = await this.callAction(
-        action,
-        compactObject({
-          ...(isPrivate ? { user_id: targetId } : { group_id: targetId }),
-          message_seq:
-            /^\d+$/.test(cursor) && Number.isSafeInteger(Number(cursor))
-              ? Number(cursor)
-              : cursor,
-          count: 100,
-          reverse_order: false,
-        }),
-      );
-      const page = Array.isArray(response?.messages) ? response.messages : [];
-      const cursorIndex = page.findIndex(
-        (message: any) =>
-          safeString(message?.message_seq || message?.message_id).trim() ===
-          cursor,
-      );
-      if (cursorIndex < 0) {
-        throw new Error(
-          `OneBot message history did not return recovery cursor ${cursor}`,
-        );
-      }
-      const newer = page.slice(cursorIndex + 1);
-      recovered.push(...newer);
-      const nextCursor = safeString(
-        page.at(-1)?.message_seq || page.at(-1)?.message_id,
-      ).trim();
-      if (!newer.length || !nextCursor || nextCursor === cursor) {
-        break;
-      }
-      cursor = nextCursor;
-    }
-    return recovered;
-  }
-
   private oneBotInboundChatId(payload: any) {
     const messageType = safeString(payload?.message_type).trim();
     const userId = safeString(payload?.user_id).trim();
@@ -1965,43 +1914,17 @@ class OneBotAdapter {
   private async recoverOneBotMessages(onConfigured?: () => void) {
     const agentDir = safeString(this.app?.agentDir).trim();
     const botId = safeString(this.bot?.selfId).trim();
-    if (!agentDir || !botId) {
-      await this.releaseOneBotReadyChats(this.inboundGate.configure([]));
-      onConfigured?.();
-      return;
+    if (agentDir && botId) {
+      const deleted = deleteInboundRecoveryHeads(agentDir, "onebot", botId);
+      if (deleted > 0) {
+        this.logger?.info?.(
+          `discarded ${deleted} legacy OneBot inbound recovery head(s); OneBot v11 has no history action`,
+        );
+      }
     }
-    const result = await recoverInboundHeads(
-      agentDir,
-      "onebot",
-      botId,
-      async (head) => await this.fetchOneBotMessagesAfter(head),
-      {
-        concurrency: 4,
-        onHeads: async (heads) => {
-          for (const head of heads) {
-            this.app.beginInboundRecoveryChat(head.chatKey);
-          }
-          this.bot.inboundRecovery = heads.length
-            ? {
-                status: "recovering",
-                pending: heads.map((head) => head.chatKey),
-              }
-            : { status: "ready" };
-          await this.releaseOneBotReadyChats(
-            this.inboundGate.configure(heads.map((head) => head.chatId)),
-          );
-          onConfigured?.();
-        },
-        onHeadSettled: async (outcome) => {
-          await this.finishOneBotRecovery(
-            outcome.head.chatId,
-            outcome.recovered,
-          );
-          this.app.completeInboundRecoveryChat(outcome.head.chatKey);
-        },
-      },
-    );
-    applyInboundRecoveryResult(this.bot, this.logger, result);
+    this.bot.inboundRecovery = { status: "ready", mode: "live-only" };
+    await this.releaseOneBotReadyChats(this.inboundGate.configure([]));
+    onConfigured?.();
   }
 
   private async finishOneBotRecovery(chatId: string, recoveredPayloads: any[]) {

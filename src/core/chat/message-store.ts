@@ -444,6 +444,7 @@ function updateInboundHeadInDatabase(
   sequence: number,
 ) {
   if (record.role !== "user") return;
+  if (safeString(record.platform).trim() === "onebot") return;
   const botId = safeString(record.botId).trim();
   if (!botId) return;
   db.prepare(

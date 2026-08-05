@@ -210,6 +210,30 @@ export function listInboundRecoveryHeads(
     .filter((item): item is InboundRecoveryHead => Boolean(item));
 }
 
+export function deleteInboundRecoveryHeads(
+  agentDir: string,
+  platform: string,
+  botId: string,
+  chatKey?: string,
+) {
+  const nextPlatform = safeString(platform).trim();
+  const nextBotId = safeString(botId).trim();
+  const nextChatKey = safeString(chatKey).trim();
+  if (!nextPlatform || !nextBotId) return 0;
+  const db = openChatDatabase(agentDir);
+  const result = nextChatKey
+    ? db
+        .prepare(
+          `DELETE FROM inbound_heads
+           WHERE platform = ? AND bot_id = ? AND chat_key = ?`,
+        )
+        .run(nextPlatform, nextBotId, nextChatKey)
+    : db
+        .prepare(`DELETE FROM inbound_heads WHERE platform = ? AND bot_id = ?`)
+        .run(nextPlatform, nextBotId);
+  return Number(result.changes || 0);
+}
+
 function normalizedRecoveryPolicy(
   input: Partial<InboundRecoveryLeasePolicy> = {},
 ): InboundRecoveryLeasePolicy {
