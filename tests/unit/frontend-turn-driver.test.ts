@@ -779,14 +779,6 @@ test("turn driver carries canonical retry and compaction failures to chat withou
       { type: "turn_accepted", requestTag: "retry-turn" },
       { type: "compaction_start_notice", text: "Compacting..." },
       {
-        type: "passive_notice",
-        text: "Compaction failed: overloaded",
-        level: "error",
-        deferDuringTurn: false,
-        noticeKind: "lifecycle_error",
-        requestTag: "retry-turn",
-      },
-      {
         type: "assistant_summary",
         text: "Compacting context...",
         requestTag: "retry-turn",

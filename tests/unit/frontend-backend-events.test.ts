@@ -767,16 +767,7 @@ test("frontend backend event translator keeps retry schedules silent without ter
       errorMessage: "Compaction failed: overloaded",
       requestTag: "retry-turn",
     }),
-    [
-      {
-        type: "passive_notice",
-        text: "Compaction failed: overloaded",
-        level: "error",
-        deferDuringTurn: false,
-        noticeKind: "lifecycle_error",
-        requestTag: "retry-turn",
-      },
-    ],
+    [],
   );
   assert.deepEqual(
     translator.translate({

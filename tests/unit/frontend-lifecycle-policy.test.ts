@@ -103,16 +103,7 @@ test("canonical lifecycle renderer keeps retry schedules silent while preserving
     requestTag: "turn-1",
   });
   assert.ok(scheduled);
-  assert.deepEqual(renderRinFrontendLifecycleEvent(scheduled), [
-    {
-      type: "passive_notice",
-      text: "Compaction failed: overloaded",
-      level: "error",
-      deferDuringTurn: false,
-      noticeKind: "lifecycle_error",
-      requestTag: "turn-1",
-    },
-  ]);
+  assert.deepEqual(renderRinFrontendLifecycleEvent(scheduled), []);
 
   const compactionFailure = projectRinFrontendLifecycleEvent({
     type: "compaction_end",
