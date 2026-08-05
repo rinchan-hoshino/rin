@@ -994,13 +994,14 @@ export function readLatestJoinedChatPresentation(
   );
 }
 
-export function markJoinedChatMessagesProcessed(
+export function markTerminalOwnerAndJoinedChatMessagesProcessed(
   agentDir: string,
   ownerTurnIdValue: string,
   input: {
     processedAt?: string;
     deliveryKind: "outbox_final" | "outbox_error";
     outboxId: string;
+    deferProcessedMessage?: { chatKey: string; messageId: string };
   },
 ) {
   const ownerTurnId = requiredText(ownerTurnIdValue, "chat_turn_id_required");
@@ -1009,52 +1010,181 @@ export function markJoinedChatMessagesProcessed(
     "chat_delivery_kind_required",
   );
   const outboxId = requiredText(input.outboxId, "chat_outbox_id_required");
+  const outboxDeliveryKind =
+    deliveryKind === "outbox_error" ? "error" : "final";
+  const deferredChatKey =
+    safeString(input.deferProcessedMessage?.chatKey).trim() || null;
+  const deferredMessageId =
+    safeString(input.deferProcessedMessage?.messageId).trim() || null;
+  if (Boolean(deferredChatKey) !== Boolean(deferredMessageId)) {
+    return { matched: false, processedMessages: 0 };
+  }
   const timestamp = safeString(input.processedAt).trim() || nowIso();
   const db = openChatDatabase(agentDir);
   return db
     .transaction(() => {
-      const turns = db
+      const committedTerminal = db
         .prepare(
-          `UPDATE inbox_jobs
-           SET admission_json = json_set(
-                 admission_json,
-                 '$.settledOutboxId', COALESCE(
-                   json_extract(admission_json, '$.settledOutboxId'), ?
-                 )
-               ),
-               updated_at = ?
-           WHERE json_extract(admission_json, '$.joinedTurnId') = ?
-             AND state IN ('running', 'terminal')
-             AND (terminal_kind IS NULL OR terminal_kind = 'completed')`,
+          `SELECT 1
+             FROM outbox
+             JOIN inbox_jobs AS owner ON owner.turn_id = outbox.turn_id
+            WHERE outbox.outbox_id = ?
+              AND outbox.turn_id = ?
+              AND outbox.outbox_id GLOB ?
+              AND outbox.delivery_kind = ?
+              AND (
+                outbox.state = 'delivered'
+                OR (outbox.state = 'failed' AND outbox.failure_kind = 'partial')
+              )
+              AND json_extract(
+                    outbox.post_delivery_json,
+                    '$.markJoinedProcessed.ownerTurnId'
+                  ) = ?
+              AND json_extract(
+                    outbox.post_delivery_json,
+                    '$.markJoinedProcessed.deliveryKind'
+                  ) = ?
+              AND NOT EXISTS (
+                    SELECT 1
+                      FROM inbox_jobs AS joined
+                     WHERE json_extract(
+                             joined.admission_json,
+                             '$.joinedTurnId'
+                           ) = ?
+                       AND joined.state IN ('running', 'terminal')
+                       AND (
+                         joined.terminal_kind IS NULL
+                         OR joined.terminal_kind = 'completed'
+                       )
+                       AND json_extract(
+                             joined.admission_json,
+                             '$.settledOutboxId'
+                           ) IS NOT NULL
+                       AND json_extract(
+                             joined.admission_json,
+                             '$.settledOutboxId'
+                           ) <> ?
+                  )
+              AND owner.state = 'terminal'
+              AND owner.terminal_kind = ?`,
         )
-        .run(outboxId, timestamp, ownerTurnId);
+        .get(
+          outboxId,
+          ownerTurnId,
+          CHAT_TERMINAL_OUTBOX_ID_GLOB,
+          outboxDeliveryKind,
+          ownerTurnId,
+          deliveryKind,
+          ownerTurnId,
+          outboxId,
+          deliveryKind,
+        );
+      if (!committedTerminal) {
+        return { matched: false, processedMessages: 0 };
+      }
+      if (
+        deferredChatKey &&
+        !db
+          .prepare(
+            `SELECT 1
+               FROM inbox_jobs AS target
+               JOIN messages AS target_message
+                 ON target_message.id = target.inbound_message_id
+              WHERE target_message.chat_key = ?
+                AND target_message.message_id = ?
+                AND (
+                  (
+                    target.turn_id = ?
+                    AND target.state = 'terminal'
+                    AND target.terminal_kind = ?
+                  )
+                  OR (
+                    json_extract(
+                      target.admission_json,
+                      '$.joinedTurnId'
+                    ) = ?
+                    AND target.state IN ('running', 'terminal')
+                    AND (
+                      target.terminal_kind IS NULL
+                      OR target.terminal_kind = 'completed'
+                    )
+                  )
+                )`,
+          )
+          .get(
+            deferredChatKey,
+            deferredMessageId,
+            ownerTurnId,
+            deliveryKind,
+            ownerTurnId,
+          )
+      ) {
+        return { matched: false, processedMessages: 0 };
+      }
+
       db.prepare(
-        `UPDATE messages
-         SET processed_at = COALESCE(processed_at, ?),
-             delivery_kind = COALESCE(delivery_kind, ?),
-             disposition = 'actionable',
-             record_json = json_set(
-               record_json,
-               '$.processedAt', COALESCE(json_extract(record_json, '$.processedAt'), ?),
-               '$.deliveryKind', COALESCE(json_extract(record_json, '$.deliveryKind'), ?),
-               '$.disposition', 'actionable'
+        `UPDATE inbox_jobs
+         SET admission_json = json_set(
+               admission_json,
+               '$.settledOutboxId', ?
              ),
              updated_at = ?
-         WHERE id IN (
-           SELECT inbound_message_id FROM inbox_jobs
-            WHERE json_extract(admission_json, '$.joinedTurnId') = ?
-              AND state IN ('running', 'terminal')
-              AND (terminal_kind IS NULL OR terminal_kind = 'completed')
-         )`,
-      ).run(
-        timestamp,
-        deliveryKind,
-        timestamp,
-        deliveryKind,
-        timestamp,
-        ownerTurnId,
-      );
-      return Number(turns.changes || 0);
+         WHERE json_extract(admission_json, '$.joinedTurnId') = ?
+           AND json_extract(admission_json, '$.settledOutboxId') IS NULL
+           AND state IN ('running', 'terminal')
+           AND (terminal_kind IS NULL OR terminal_kind = 'completed')`,
+      ).run(outboxId, timestamp, ownerTurnId);
+      const messages = db
+        .prepare(
+          `UPDATE messages
+           SET processed_at = COALESCE(processed_at, ?),
+               delivery_kind = COALESCE(delivery_kind, ?),
+               disposition = 'actionable',
+               record_json = json_set(
+                 record_json,
+                 '$.processedAt', COALESCE(json_extract(record_json, '$.processedAt'), ?),
+                 '$.deliveryKind', COALESCE(json_extract(record_json, '$.deliveryKind'), ?),
+                 '$.disposition', 'actionable'
+               ),
+               updated_at = ?
+           WHERE id IN (
+             SELECT inbound_message_id
+               FROM inbox_jobs
+              WHERE (
+                      turn_id = ?
+                      AND state = 'terminal'
+                      AND terminal_kind = ?
+                    )
+                 OR (
+                      json_extract(admission_json, '$.joinedTurnId') = ?
+                      AND state IN ('running', 'terminal')
+                      AND (terminal_kind IS NULL OR terminal_kind = 'completed')
+                    )
+           )
+             AND processed_at IS NULL
+             AND (
+               ? IS NULL
+               OR chat_key <> ?
+               OR message_id <> ?
+             )`,
+        )
+        .run(
+          timestamp,
+          deliveryKind,
+          timestamp,
+          deliveryKind,
+          timestamp,
+          ownerTurnId,
+          deliveryKind,
+          ownerTurnId,
+          deferredChatKey,
+          deferredChatKey,
+          deferredMessageId,
+        );
+      return {
+        matched: true,
+        processedMessages: Number(messages.changes || 0),
+      };
     })
     .immediate();
 }

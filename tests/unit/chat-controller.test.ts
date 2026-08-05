@@ -4155,18 +4155,361 @@ test("nonterminal input durably joins the terminal owner and takes presentation 
   });
   assert.equal(finalDeliveries[0].content[0].type, "quote");
   assert.equal(finalDeliveries[0].content[0].attrs.id, joinedClaim.messageId);
-  const processed = db
+
+  const legacyFixtureDb = openChatDatabase(controller.agentDir);
+  const preservedJoinedUpdatedAt = "2001-02-03T04:05:06.000Z";
+  legacyFixtureDb
     .prepare(
-      `SELECT messages.processed_at, messages.delivery_kind,
+      `UPDATE messages
+          SET delivery_kind = NULL,
+              record_json = json_remove(record_json, '$.deliveryKind'),
+              updated_at = ?
+        WHERE id = ?`,
+    )
+    .run(preservedJoinedUpdatedAt, joinedClaim.itemId);
+  const joinedBeforeReplay = legacyFixtureDb
+    .prepare(
+      `SELECT processed_at, delivery_kind, disposition, updated_at
+         FROM messages WHERE id = ?`,
+    )
+    .get(joinedClaim.itemId);
+  assert.ok(joinedBeforeReplay.processed_at);
+  assert.equal(joinedBeforeReplay.delivery_kind, null);
+  assert.equal(joinedBeforeReplay.disposition, "actionable");
+  assert.equal(joinedBeforeReplay.updated_at, preservedJoinedUpdatedAt);
+  legacyFixtureDb
+    .prepare(
+      `UPDATE messages
+          SET processed_at = NULL,
+              delivery_kind = NULL,
+              record_json = json_remove(
+                record_json,
+                '$.processedAt',
+                '$.deliveryKind'
+              )
+        WHERE id = ?`,
+    )
+    .run(ownerClaim.itemId);
+  const canonicalOutbox = legacyFixtureDb
+    .prepare(
+      `SELECT post_delivery_json, post_delivery_applied_at
+         FROM outbox WHERE outbox_id = ?`,
+    )
+    .get("chat-terminal-joined-owner");
+  assert.ok(canonicalOutbox.post_delivery_applied_at);
+  const genericAppliedPostDelivery = JSON.parse(
+    canonicalOutbox.post_delivery_json,
+  );
+  delete genericAppliedPostDelivery.markJoinedProcessed;
+  legacyFixtureDb
+    .prepare(`UPDATE outbox SET post_delivery_json = ? WHERE outbox_id = ?`)
+    .run(
+      JSON.stringify(genericAppliedPostDelivery),
+      "chat-terminal-joined-owner",
+    );
+
+  const recoveredController = createRecoveredController(controller);
+  let duplicateSends = 0;
+  recoveredController.app.bots[0].sendMessage = async () => {
+    duplicateSends += 1;
+    return ["duplicate-final"];
+  };
+  const acknowledgements: Array<{ requestTag: string; terminalId: string }> =
+    [];
+  recoveredController.driver.acknowledgeTerminal = async (
+    requestTag: string,
+    terminalId: string,
+  ) => {
+    acknowledgements.push({ requestTag, terminalId });
+  };
+  const authoritativeTerminal = {
+    type: "rpc_turn_event",
+    event: "complete",
+    finalText: "aggregate final",
+    requestTag: "request-terminal-owner",
+    chatDeliveryContext: {
+      chatKey: controller.chatKey,
+      turnId: ownerClaim.itemId,
+      messageId: ownerClaim.messageId,
+    },
+    terminalRecord: {
+      terminalId: "terminal-joined-owner",
+      state: "complete",
+    },
+  };
+  await recoveredController.driver.projectAuthoritativeTerminal(
+    authoritativeTerminal,
+  );
+  assert.equal(duplicateSends, 0);
+  assert.deepEqual(acknowledgements, []);
+  const missingMarkerDb = openChatDatabase(controller.agentDir);
+  assert.equal(
+    missingMarkerDb
+      .prepare(`SELECT processed_at FROM messages WHERE id = ?`)
+      .get(ownerClaim.itemId).processed_at,
+    null,
+  );
+
+  missingMarkerDb
+    .prepare(`UPDATE outbox SET post_delivery_json = ? WHERE outbox_id = ?`)
+    .run(canonicalOutbox.post_delivery_json, "chat-terminal-joined-owner");
+  missingMarkerDb
+    .prepare(
+      `UPDATE inbox_jobs
+          SET admission_json = json_set(
+                admission_json,
+                '$.settledOutboxId',
+                'chat-terminal-conflict'
+              )
+        WHERE turn_id = ?`,
+    )
+    .run(joinedClaim.itemId);
+  await recoveredController.driver.projectAuthoritativeTerminal(
+    authoritativeTerminal,
+  );
+  assert.equal(duplicateSends, 0);
+  assert.deepEqual(acknowledgements, []);
+  const conflictingDb = openChatDatabase(controller.agentDir);
+  assert.equal(
+    conflictingDb
+      .prepare(`SELECT processed_at FROM messages WHERE id = ?`)
+      .get(ownerClaim.itemId).processed_at,
+    null,
+  );
+  assert.equal(
+    conflictingDb
+      .prepare(
+        `SELECT post_delivery_applied_at FROM outbox WHERE outbox_id = ?`,
+      )
+      .get("chat-terminal-joined-owner").post_delivery_applied_at,
+    canonicalOutbox.post_delivery_applied_at,
+  );
+  conflictingDb
+    .prepare(
+      `UPDATE inbox_jobs
+          SET admission_json = json_remove(
+                admission_json,
+                '$.settledOutboxId'
+              )
+        WHERE turn_id = ?`,
+    )
+    .run(joinedClaim.itemId);
+  await recoveredController.driver.projectAuthoritativeTerminal(
+    authoritativeTerminal,
+  );
+
+  assert.equal(duplicateSends, 0);
+  assert.deepEqual(acknowledgements, [
+    {
+      requestTag: "request-terminal-owner",
+      terminalId: "terminal-joined-owner",
+    },
+  ]);
+  const appliedRepairDb = openChatDatabase(controller.agentDir);
+  const appliedRepair = appliedRepairDb
+    .prepare(
+      `SELECT inbox_jobs.turn_id, messages.processed_at,
+              messages.delivery_kind, messages.updated_at,
               json_extract(inbox_jobs.admission_json, '$.settledOutboxId') AS outbox_id
          FROM inbox_jobs
          JOIN messages ON messages.id = inbox_jobs.inbound_message_id
-        WHERE inbox_jobs.turn_id = ?`,
+        WHERE inbox_jobs.turn_id IN (?, ?)
+        ORDER BY inbox_jobs.turn_id`,
     )
-    .get(joinedClaim.itemId);
-  assert.ok(processed.processed_at);
-  assert.equal(processed.delivery_kind, "outbox_final");
-  assert.equal(processed.outbox_id, "chat-terminal-joined-owner");
+    .all(ownerClaim.itemId, joinedClaim.itemId);
+  const appliedRepairOwner = appliedRepair.find(
+    (row) => row.turn_id === ownerClaim.itemId,
+  );
+  assert.ok(appliedRepairOwner.processed_at);
+  assert.equal(appliedRepairOwner.delivery_kind, "outbox_final");
+  const appliedRepairJoined = appliedRepair.find(
+    (row) => row.turn_id === joinedClaim.itemId,
+  );
+  assert.equal(appliedRepairJoined.delivery_kind, null);
+  assert.equal(appliedRepairJoined.outbox_id, "chat-terminal-joined-owner");
+  assert.equal(
+    appliedRepairJoined.processed_at,
+    joinedBeforeReplay.processed_at,
+  );
+  assert.equal(appliedRepairJoined.updated_at, joinedBeforeReplay.updated_at);
+
+  const mismatchedPostDelivery = JSON.parse(canonicalOutbox.post_delivery_json);
+  mismatchedPostDelivery.markJoinedProcessed.ownerTurnId = "wrong-owner-turn";
+  appliedRepairDb
+    .prepare(
+      `UPDATE messages
+          SET processed_at = NULL,
+              delivery_kind = NULL,
+              session_file = NULL,
+              record_json = json_remove(
+                record_json,
+                '$.processedAt',
+                '$.deliveryKind',
+                '$.sessionFile'
+              )
+        WHERE id IN (?, ?)`,
+    )
+    .run(ownerClaim.itemId, joinedClaim.itemId);
+  appliedRepairDb
+    .prepare(
+      `UPDATE inbox_jobs
+          SET admission_json = json_remove(
+                admission_json,
+                '$.settledOutboxId'
+              )
+        WHERE turn_id = ?`,
+    )
+    .run(joinedClaim.itemId);
+  appliedRepairDb
+    .prepare(
+      `UPDATE outbox
+          SET post_delivery_json = ?, post_delivery_applied_at = NULL
+        WHERE outbox_id = ?`,
+    )
+    .run(JSON.stringify(mismatchedPostDelivery), "chat-terminal-joined-owner");
+
+  const unappliedController = createRecoveredController(controller);
+  unappliedController.app.bots[0].sendMessage = async () => {
+    duplicateSends += 1;
+    return ["duplicate-final"];
+  };
+  const unappliedAcknowledgements: Array<{
+    requestTag: string;
+    terminalId: string;
+  }> = [];
+  unappliedController.driver.acknowledgeTerminal = async (
+    requestTag: string,
+    terminalId: string,
+  ) => {
+    unappliedAcknowledgements.push({ requestTag, terminalId });
+  };
+  await unappliedController.driver.projectAuthoritativeTerminal(
+    authoritativeTerminal,
+  );
+  assert.equal(duplicateSends, 0);
+  assert.deepEqual(unappliedAcknowledgements, []);
+  const rejectedDb = openChatDatabase(controller.agentDir);
+  assert.equal(
+    rejectedDb
+      .prepare(
+        `SELECT post_delivery_applied_at FROM outbox WHERE outbox_id = ?`,
+      )
+      .get("chat-terminal-joined-owner").post_delivery_applied_at,
+    null,
+  );
+  assert.deepEqual(
+    rejectedDb
+      .prepare(
+        `SELECT id, processed_at, session_file
+           FROM messages WHERE id IN (?, ?) ORDER BY id`,
+      )
+      .all(ownerClaim.itemId, joinedClaim.itemId),
+    [
+      { id: joinedClaim.itemId, processed_at: null, session_file: null },
+      { id: ownerClaim.itemId, processed_at: null, session_file: null },
+    ].sort((left, right) => left.id.localeCompare(right.id)),
+  );
+
+  rejectedDb
+    .prepare(`UPDATE outbox SET post_delivery_json = ? WHERE outbox_id = ?`)
+    .run(canonicalOutbox.post_delivery_json, "chat-terminal-joined-owner");
+  rejectedDb
+    .prepare(
+      `CREATE TRIGGER force_generic_post_delivery_failure
+       BEFORE UPDATE OF session_file ON messages
+       WHEN NEW.session_file IS NOT OLD.session_file
+       BEGIN
+         SELECT RAISE(ABORT, 'forced_generic_post_delivery_failure');
+       END`,
+    )
+    .run();
+  await unappliedController.driver.projectAuthoritativeTerminal(
+    authoritativeTerminal,
+  );
+
+  assert.equal(duplicateSends, 0);
+  assert.deepEqual(unappliedAcknowledgements, []);
+  const interruptedDb = openChatDatabase(controller.agentDir);
+  assert.equal(
+    interruptedDb
+      .prepare(
+        `SELECT post_delivery_applied_at FROM outbox WHERE outbox_id = ?`,
+      )
+      .get("chat-terminal-joined-owner").post_delivery_applied_at,
+    null,
+  );
+  const interruptedMessages = interruptedDb
+    .prepare(
+      `SELECT inbox_jobs.turn_id, messages.processed_at, messages.session_file
+         FROM inbox_jobs
+         JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+        WHERE inbox_jobs.turn_id IN (?, ?)`,
+    )
+    .all(ownerClaim.itemId, joinedClaim.itemId);
+  assert.ok(
+    interruptedMessages.find((row) => row.turn_id === ownerClaim.itemId)
+      .processed_at,
+  );
+  const interruptedJoined = interruptedMessages.find(
+    (row) => row.turn_id === joinedClaim.itemId,
+  );
+  assert.equal(interruptedJoined.processed_at, null);
+  assert.equal(interruptedJoined.session_file, null);
+  interruptedDb
+    .prepare(`DROP TRIGGER force_generic_post_delivery_failure`)
+    .run();
+
+  await unappliedController.driver.projectAuthoritativeTerminal(
+    authoritativeTerminal,
+  );
+
+  assert.equal(duplicateSends, 0);
+  assert.deepEqual(unappliedAcknowledgements, [
+    {
+      requestTag: "request-terminal-owner",
+      terminalId: "terminal-joined-owner",
+    },
+  ]);
+  const recoveredDb = openChatDatabase(controller.agentDir);
+  assert.equal(
+    recoveredDb
+      .prepare(
+        `SELECT COUNT(*) AS count FROM outbox
+          WHERE turn_id = ? AND outbox_id = ?`,
+      )
+      .get(ownerClaim.itemId, "chat-terminal-joined-owner").count,
+    1,
+  );
+  const processed = recoveredDb
+    .prepare(
+      `SELECT inbox_jobs.turn_id, messages.processed_at,
+              messages.delivery_kind, messages.session_file,
+              json_extract(inbox_jobs.admission_json, '$.settledOutboxId') AS outbox_id
+         FROM inbox_jobs
+         JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+        WHERE inbox_jobs.turn_id IN (?, ?)
+        ORDER BY inbox_jobs.turn_id`,
+    )
+    .all(ownerClaim.itemId, joinedClaim.itemId);
+  assert.equal(processed.length, 2);
+  for (const row of processed) assert.ok(row.processed_at);
+  const processedOwner = processed.find(
+    (row) => row.turn_id === ownerClaim.itemId,
+  );
+  assert.equal(processedOwner.delivery_kind, "outbox_final");
+  const processedJoined = processed.find(
+    (row) => row.turn_id === joinedClaim.itemId,
+  );
+  assert.equal(processedJoined.delivery_kind, "outbox_final");
+  assert.equal(processedJoined.outbox_id, "chat-terminal-joined-owner");
+  assert.equal(processedJoined.session_file, "managed/chat/joined-input.jsonl");
+  assert.ok(
+    recoveredDb
+      .prepare(
+        `SELECT post_delivery_applied_at FROM outbox WHERE outbox_id = ?`,
+      )
+      .get("chat-terminal-joined-owner").post_delivery_applied_at,
+  );
 });
 
 test("chat controller stages raw non-transient command errors for the outbox", async () => {

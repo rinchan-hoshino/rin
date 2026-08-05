@@ -64,7 +64,7 @@ import {
   type ChatMessagePart,
   type ChatOutboxTurnFence,
 } from "../rin-lib/chat-outbox.js";
-import { drainChatOutbox } from "./boot.js";
+import { applyPostDelivery, drainChatOutbox } from "./boot.js";
 import { assistantDeliveryParts } from "./terminal-delivery.js";
 import {
   advanceChatGeneration,
@@ -2048,6 +2048,26 @@ export class ChatController {
         terminalTurn: options.terminalTurn,
         terminalRecordId,
       });
+      const terminalOutbox = readChatOutboxItemById(
+        this.agentDir,
+        outboxId,
+      )?.item;
+      if (!terminalOutbox) throw new Error("chat_terminal_delivery_mismatch");
+      const terminalPostDelivery = terminalOutbox.postDelivery;
+      if (
+        (terminalOutbox.status === "delivered" ||
+          (terminalOutbox.status === "failed" &&
+            terminalOutbox.failureKind === "partial")) &&
+        (!terminalPostDelivery?.markJoinedProcessed ||
+          !safeString(terminalPostDelivery.markProcessed?.messageId).trim() ||
+          !safeString(
+            terminalPostDelivery.markProcessed?.chatKey ||
+              terminalOutbox.payload?.chatKey,
+          ).trim() ||
+          !applyPostDelivery(this.agentDir, terminalOutbox))
+      ) {
+        throw new Error("chat_terminal_delivery_mismatch");
+      }
       try {
         await this.driver.acknowledgeTerminal(
           terminalRequestTag,

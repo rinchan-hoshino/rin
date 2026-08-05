@@ -10,8 +10,12 @@ import {
   writeChatOutboxItem,
 } from "../rin-lib/chat-outbox.js";
 import { createRinI18n } from "../i18n.js";
-import { markProcessedChatMessage, safeString } from "./chat-helpers.js";
-import { markJoinedChatMessagesProcessed } from "./database.js";
+import {
+  isInboundChatMessageProcessed,
+  markProcessedChatMessage,
+  safeString,
+} from "./chat-helpers.js";
+import { markTerminalOwnerAndJoinedChatMessagesProcessed } from "./database.js";
 import {
   getChatOutboxDispatchPromise,
   getChatTransportReadiness,
@@ -457,13 +461,38 @@ function warnChatOutboxDeliveryUnconfirmed(
   );
 }
 
-function applyPostDelivery(agentDir: string, item: ChatOutboxItem) {
+export function applyPostDelivery(agentDir: string, item: ChatOutboxItem) {
+  const joined = item.postDelivery?.markJoinedProcessed;
   const markProcessed = item.postDelivery?.markProcessed;
   const messageId = safeString(markProcessed?.messageId).trim();
   const chatKey = safeString(
     markProcessed?.chatKey || item.payload?.chatKey,
   ).trim();
-  if (messageId && chatKey) {
+  const deferredProcessedMessage =
+    messageId && chatKey ? { chatKey, messageId } : undefined;
+  const settleJoined = (deferGenericMessage = false) => {
+    if (!joined) return true;
+    return markTerminalOwnerAndJoinedChatMessagesProcessed(
+      agentDir,
+      joined.ownerTurnId,
+      {
+        deliveryKind: joined.deliveryKind,
+        outboxId: item.id,
+        ...(deferGenericMessage && deferredProcessedMessage
+          ? { deferProcessedMessage: deferredProcessedMessage }
+          : {}),
+      },
+    ).matched;
+  };
+  if (item.postDeliveryAppliedAt) return settleJoined();
+
+  const messageWasProcessed = Boolean(
+    messageId &&
+    chatKey &&
+    isInboundChatMessageProcessed(agentDir, chatKey, messageId),
+  );
+  if (!settleJoined(true)) return false;
+  if (messageId && chatKey && !messageWasProcessed) {
     const bindSession = markProcessed?.bindSession !== false;
     markProcessedChatMessage(agentDir, chatKey, messageId, {
       ...(bindSession
@@ -472,18 +501,12 @@ function applyPostDelivery(agentDir: string, item: ChatOutboxItem) {
               markProcessed?.sessionFile || item.payload?.sessionFile,
           }
         : {}),
+      ...(joined?.deliveryKind ? { deliveryKind: joined.deliveryKind } : {}),
       acceptedAt: new Date().toISOString(),
       processedAt: new Date().toISOString(),
     });
   }
-  const joined = item.postDelivery?.markJoinedProcessed;
-  if (joined?.ownerTurnId) {
-    markJoinedChatMessagesProcessed(agentDir, joined.ownerTurnId, {
-      deliveryKind: joined.deliveryKind,
-      outboxId: item.id,
-    });
-  }
-  markChatOutboxPostDeliveryApplied(agentDir, item.id);
+  return markChatOutboxPostDeliveryApplied(agentDir, item.id);
 }
 
 export function reconcileCommittedChatOutboxProcessing(agentDir: string) {
@@ -494,8 +517,7 @@ export function reconcileCommittedChatOutboxProcessing(agentDir: string) {
       !item.postDelivery?.markJoinedProcessed
     )
       continue;
-    applyPostDelivery(agentDir, item);
-    reconciled += 1;
+    if (applyPostDelivery(agentDir, item)) reconciled += 1;
   }
   return reconciled;
 }

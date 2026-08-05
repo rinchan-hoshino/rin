@@ -612,6 +612,7 @@ export async function startChatBridge(
       affectChatBinding?: boolean;
       linkDeliveriesToSession?: boolean;
       frontendIdentity?: RinFrontendIdentity;
+      useChatFrontendIdentity?: boolean;
     },
   ) => {
     const controllerChatKey =
@@ -619,12 +620,15 @@ export async function startChatBridge(
     const affectChatBinding = detachedOptions?.affectChatBinding !== false;
     const linkDeliveriesToSession =
       detachedOptions?.linkDeliveriesToSession ?? affectChatBinding;
+    const useChatFrontendIdentity =
+      detachedOptions?.useChatFrontendIdentity ??
+      Boolean(detachedOptions?.chatKey);
     const signature = JSON.stringify({
       controllerChatKey,
       affectChatBinding,
       linkDeliveriesToSession,
       frontendIdentity: detachedOptions?.frontendIdentity || null,
-      useChatFrontendIdentity: Boolean(detachedOptions?.chatKey),
+      useChatFrontendIdentity,
     });
     const signatureId = crypto
       .createHash("sha256")
@@ -665,7 +669,7 @@ export async function startChatBridge(
         sleepAfterIdleMs: DETACHED_CONTROLLER_SLEEP_IDLE_MS,
         commandResponses: chatCommandResponses,
         frontendIdentity: detachedOptions?.frontendIdentity,
-        useChatFrontendIdentity: Boolean(detachedOptions?.chatKey),
+        useChatFrontendIdentity,
       });
       detachedControllers.set(controllerKey, controller);
       detachedControllerSignatures.set(controllerKey, signature);
@@ -710,9 +714,13 @@ export async function startChatBridge(
             const controller = getDetachedController(controllerKey, {
               chatKey,
               affectChatBinding: false,
+              useChatFrontendIdentity: false,
             });
             try {
-              await controller.connect({ recoverTerminals: false });
+              await controller.connect({
+                restoreSession: false,
+                recoverTerminals: false,
+              });
               await controller.driver.projectAuthoritativeTerminal(terminal);
             } finally {
               controller.dispose();
