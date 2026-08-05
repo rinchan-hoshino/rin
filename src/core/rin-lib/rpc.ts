@@ -41,6 +41,12 @@ export const RIN_BUILTIN_SLASH_COMMANDS = [
     genericPromptRoute: "run_command",
     chat: true,
   },
+  {
+    name: "status",
+    description: "Show this chat session status",
+    origin: "rin",
+    chat: true,
+  },
 ] satisfies BuiltinSlashCommand[];
 
 function rinizePiCommandDescription(description: string) {

@@ -46,6 +46,7 @@ test("chat main consumes inbound help messages through the inbox path only once"
           { name: "compact", description: "Compact the current context" },
           { name: "reload", description: "Reload extensions, skills, prompts, and themes" },
           { name: "usage", description: "Show usage and quota status" },
+          { name: "status", description: "Show this chat session status" },
         ],
       });
       let sentCount = 0;
@@ -98,9 +99,9 @@ test("chat main consumes inbound help messages through the inbox path only once"
         terminal[0].state !== "terminal" ||
         !text.includes("/help — Show available commands") ||
         !text.includes("/usage — Show usage and quota status") ||
+        !text.includes("/status — Show this chat session status") ||
         text.includes("/model —") ||
-        text.includes("/session —") ||
-        text.includes("/status —")
+        text.includes("/session —")
       ) {
         throw new Error(JSON.stringify({
           sentCount,
@@ -122,6 +123,128 @@ test("chat main consumes inbound help messages through the inbox path only once"
           RIN_DIR: agentDir,
         },
         timeout: 15000,
+      },
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("chat main answers /status locally while the same chat turn is running", async () => {
+  const tempRoot = "/home/rin/tmp";
+  await fs.mkdir(tempRoot, { recursive: true });
+  const agentDir = await fs.mkdtemp(
+    path.join(tempRoot, "rin-chat-main-status-bypass-"),
+  );
+  const runtimeDir = path.join(agentDir, "runtime");
+  await fs.mkdir(runtimeDir, { recursive: true });
+  try {
+    const script = `
+      import path from "node:path";
+      import { pathToFileURL } from "node:url";
+
+      const rootDir = process.env.RIN_REPO_ROOT;
+      const agentDir = process.env.RIN_DIR;
+      const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
+      const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
+      const inboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
+      const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
+      const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+
+      supportMod.saveIdentity(path.join(agentDir, "data"), {
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
+      });
+
+      let runTurnCalls = 0;
+      let runCommandCalls = 0;
+      controllerMod.ChatController.prototype.runTurn = async function () {
+        runTurnCalls += 1;
+        await new Promise(() => {});
+      };
+      controllerMod.ChatController.prototype.hasActiveTurn = function () {
+        return runTurnCalls > 0;
+      };
+      controllerMod.ChatController.prototype.runCommand = async function () {
+        runCommandCalls += 1;
+        throw new Error("status must not enter the session command driver");
+      };
+
+      const { app } = await mainMod.startChatBridge({
+        commandRows: [{ name: "status", description: "Show this chat session status" }],
+      });
+      app.bots.push({
+        platform: "telegram",
+        selfId: "1",
+        async sendMessage() {
+          return ["assistant-status"];
+        },
+        internal: {
+          async sendChatAction() {},
+        },
+      });
+
+      const makeMessage = (messageId, content) => ({
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        userId: "owner-1",
+        messageId,
+        isDirect: true,
+        content,
+        stripped: { content },
+        elements: [h.createChatRuntimeH().text(content)],
+      });
+
+      app.emit("message", makeMessage("m-active", "start long turn"));
+      const activeDeadline = Date.now() + 5000;
+      while (Date.now() < activeDeadline && runTurnCalls < 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (runTurnCalls !== 1) throw new Error("turn-not-started");
+
+      app.emit("message", makeMessage("m-status", "/status"));
+      const statusDeadline = Date.now() + 8000;
+      let statusItem;
+      let text = "";
+      while (Date.now() < statusDeadline) {
+        statusItem = inboxMod
+          .listChatInboxItems(agentDir, ["pending", "running", "terminal", "failed"])
+          .find((item) => item.messageId === "m-status");
+        text = storeMod
+          .listChatMessages(agentDir)
+          .find(
+              (item) =>
+                item.role === "assistant" &&
+                item.text.startsWith("Current session:"),
+            )?.text || "";
+        if (statusItem?.state === "terminal" && text) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      if (
+        statusItem?.state !== "terminal" ||
+        runCommandCalls !== 0 ||
+        text !== "Current session: unavailable"
+      ) {
+        throw new Error(JSON.stringify({ statusItem, runCommandCalls, text }));
+      }
+      process.exit(0);
+    `;
+
+    await execFileAsync(
+      process.execPath,
+      ["--input-type=module", "-e", script],
+      {
+        cwd: rootDir,
+        env: {
+          ...process.env,
+          RIN_REPO_ROOT: rootDir,
+          RIN_DIR: agentDir,
+          XDG_RUNTIME_DIR: runtimeDir,
+        },
+        timeout: 20000,
       },
     );
   } finally {

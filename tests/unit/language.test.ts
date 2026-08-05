@@ -58,10 +58,17 @@ test("installer copy factories keep instances isolated", () => {
 });
 
 test("chat command projection falls back to the fixed English catalog", () => {
-  const rows = chatBoot.getChatCommandRows([{ name: "new", chat: true }]);
+  const rows = chatBoot.getChatCommandRows([
+    { name: "new", chat: true },
+    { name: "status", chat: true },
+  ]);
   assert.equal(
     rows.find((row) => row.name === "new")?.description,
     "Start a new session",
+  );
+  assert.equal(
+    rows.find((row) => row.name === "status")?.description,
+    "Show this chat session status",
   );
 });
 

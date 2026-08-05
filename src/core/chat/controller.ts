@@ -879,6 +879,13 @@ export class ChatController {
     return this.awaitingTurnSettle || this.driver.hasActiveTurn();
   }
 
+  getChatSessionStatusSnapshot() {
+    return {
+      sessionFile: this.currentSessionFile(),
+      localTurnActive: this.hasActiveTurn(),
+    };
+  }
+
   private setCurrentTurn(input: {
     incomingMessageId?: string;
     replyToMessageId?: string;

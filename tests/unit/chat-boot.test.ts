@@ -118,6 +118,7 @@ const chatBuiltinCatalog = [
   { name: "compact", chat: true },
   { name: "reload", chat: true },
   { name: "usage", chat: true },
+  { name: "status", chat: true },
 ];
 
 test("chat boot falls back to English descriptions for catalog rows", () => {
@@ -131,6 +132,7 @@ test("chat boot falls back to English descriptions for catalog rows", () => {
       "Compact the current session",
       "Reload extensions, prompts, skills, and themes",
       "Show usage and quota status",
+      "Show this chat session status",
     ],
   );
 });
@@ -191,6 +193,14 @@ test("chat boot builds and syncs Discord application commands", async () => {
     {
       name: "usage",
       description: "Show usage and quota status",
+      type: 1,
+      options: [
+        { name: "input", description: "Arguments", type: 3, required: false },
+      ],
+    },
+    {
+      name: "status",
+      description: "Show this chat session status",
       type: 1,
       options: [
         { name: "input", description: "Arguments", type: 3, required: false },
@@ -262,6 +272,7 @@ test("chat boot clears common telegram scopes before syncing default commands", 
       description: "Reload extensions, prompts, skills, and themes",
     },
     { command: "usage", description: "Show usage and quota status" },
+    { command: "status", description: "Show this chat session status" },
   ];
 
   assert.deepEqual(boot.buildTelegramCommandPayload(rows), expectedPayload);

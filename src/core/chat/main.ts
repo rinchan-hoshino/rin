@@ -70,6 +70,7 @@ import { withoutChatQuoteNodes } from "./rich-text.js";
 import { buildChatMessageRecordKey } from "./message-store.js";
 import { ChatController, loadChatSettings } from "./controller.js";
 import { readChatCommandResponses } from "./command-responses.js";
+import { queryChatSessionStatus, renderChatSessionStatus } from "./status.js";
 import {
   resolveChatModelOptions,
   resolveChatTurnPolicyMode,
@@ -277,6 +278,11 @@ function getCommandTargets(session: any) {
 type ParsedInboundCommand = { name: string; argsText: string };
 
 const REMOVED_CHAT_COMMAND_NAMES = new Set(["session"]);
+const ACTIVE_CHAT_KEY_PRIORITY_COMMAND_NAMES = new Set([
+  "abort",
+  "new",
+  "status",
+]);
 
 type InboundCommandRequest = {
   commandLike: boolean;
@@ -799,6 +805,36 @@ export async function startChatBridge(
     return {};
   };
 
+  const sendLocalCommandReply = async (
+    commandName: string,
+    text: string,
+    chatKey: string,
+    messageId: string,
+  ) => {
+    await enqueueAndDrainOutbox(
+      {
+        createdAt: nowIso(),
+        chatKey,
+        parts: withChatQuotePart([{ type: "text", text }], messageId),
+      },
+      "command_ack",
+      {
+        idempotencyKey: messageId
+          ? JSON.stringify([`${commandName}_command`, chatKey, messageId])
+          : undefined,
+        postDelivery: messageId
+          ? {
+              markProcessed: {
+                chatKey,
+                messageId,
+                bindSession: false,
+              },
+            }
+          : undefined,
+      },
+    );
+  };
+
   const buildCommandPromptMeta = (
     session: any,
     trust: string,
@@ -834,35 +870,26 @@ export async function startChatBridge(
         (entry) =>
           `/${entry.name}${entry.description ? ` — ${entry.description}` : ""}`,
       );
-      await enqueueAndDrainOutbox(
-        {
-          createdAt: nowIso(),
-          chatKey,
-          parts: withChatQuotePart(
-            [{ type: "text", text: lines.join("\n") }],
-            messageId,
-          ),
-        },
-        "command_ack",
-        {
-          idempotencyKey: messageId
-            ? JSON.stringify(["help_command", chatKey, messageId])
-            : undefined,
-          postDelivery: messageId
-            ? {
-                markProcessed: {
-                  chatKey,
-                  messageId,
-                  bindSession: false,
-                },
-              }
-            : undefined,
-        },
-      );
+      await sendLocalCommandReply("help", lines.join("\n"), chatKey, messageId);
       return {};
     }
 
     const controller = getController(chatKey);
+    if (command.name === "status") {
+      const snapshot = controller.getChatSessionStatusSnapshot();
+      const status = await queryChatSessionStatus({
+        agentDir: runtime.agentDir,
+        sessionFile: snapshot.sessionFile,
+        localTurnActive: snapshot.localTurnActive,
+      });
+      await sendLocalCommandReply(
+        "status",
+        renderChatSessionStatus(status),
+        chatKey,
+        messageId,
+      );
+      return {};
+    }
 
     const text = `/${command.name}${command.argsText ? ` ${command.argsText}` : ""}`;
     try {
@@ -1412,7 +1439,9 @@ export async function startChatBridge(
           ? (envelope.admission.decision.command as any)
           : undefined;
       if (frozenCommand) {
-        return ["abort", "new"].includes(safeString(frozenCommand.name).trim());
+        return ACTIVE_CHAT_KEY_PRIORITY_COMMAND_NAMES.has(
+          safeString(frozenCommand.name).trim(),
+        );
       }
       const queuedSession = restoreChatInboxSession(
         envelope,
@@ -1426,7 +1455,9 @@ export async function startChatBridge(
         elementsToCommandText(restoreChatInboxElements(envelope)),
         commandRows,
       );
-      return ["abort", "new"].includes(commandRequest.command?.name || "");
+      return ACTIVE_CHAT_KEY_PRIORITY_COMMAND_NAMES.has(
+        commandRequest.command?.name || "",
+      );
     },
     canClaimDuringActiveChatKeyWorker: (envelope) => {
       const admitted = resolveDurableChatAdmission(envelope.admission, {
@@ -1437,7 +1468,7 @@ export async function startChatBridge(
         return (
           admitted.kind === "turn" ||
           (admitted.kind === "command" &&
-            ["abort", "new"].includes(admitted.command.name))
+            ACTIVE_CHAT_KEY_PRIORITY_COMMAND_NAMES.has(admitted.command.name))
         );
       }
 
@@ -1458,7 +1489,8 @@ export async function startChatBridge(
       );
       const commandName = commandRequest.command?.name || "";
       if (!commandName) return true;
-      if (!["abort", "new"].includes(commandName)) return false;
+      if (!ACTIVE_CHAT_KEY_PRIORITY_COMMAND_NAMES.has(commandName))
+        return false;
       return canRunCommand(
         trustOf(
           getIdentity(),
