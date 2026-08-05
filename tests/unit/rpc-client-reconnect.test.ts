@@ -104,6 +104,56 @@ test("rpc client identifies an in-flight command when its transport disconnects"
   );
 });
 
+test("rpc client keeps prompt admission pending without a local deadline", async () => {
+  const { clientSocket, serverSocket } = createConnectedRpcSocketPair();
+  let commandId = "";
+  let releaseReceived!: () => void;
+  const received = new Promise<void>((resolve) => {
+    releaseReceived = resolve;
+  });
+  let buffer = "";
+  serverSocket.on("data", (chunk) => {
+    buffer += String(chunk);
+    const idx = buffer.indexOf("\n");
+    if (idx < 0) return;
+    const payload = JSON.parse(buffer.slice(0, idx));
+    commandId = String(payload.id || "");
+    releaseReceived();
+  });
+  const client = new RinDaemonFrontendClient({
+    socketPath: "inprocess://prompt-without-deadline",
+    connectSocket: async () => clientSocket,
+  });
+
+  await client.connect();
+  const prompt = client.prompt("join the active turn", {
+    requestTag: "prompt-without-deadline",
+  });
+  await received;
+
+  let assertionError: unknown;
+  try {
+    const pending = Array.from(client.pending.values());
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0]?.timer, undefined);
+  } catch (error) {
+    assertionError = error;
+  }
+
+  serverSocket.write(
+    `${JSON.stringify({
+      type: "response",
+      id: commandId,
+      command: "prompt",
+      success: true,
+      data: { accepted: true, role: "nonterminal" },
+    })}\n`,
+  );
+  await prompt;
+  await client.disconnect();
+  if (assertionError) throw assertionError;
+});
+
 test("rpc client retries after a socket connect attempt stalls", async () => {
   let attempts = 0;
   class StalledSocket extends EventEmitter {

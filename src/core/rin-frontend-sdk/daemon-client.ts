@@ -530,7 +530,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
         : `req_${++this.requestId}`;
     return await new Promise<RinRpcResponse>((resolve, reject) => {
       const timer =
-        commandType === "await_turn_terminal"
+        commandType === "await_turn_terminal" || commandType === "prompt"
           ? undefined
           : setTimeout(() => {
               this.pending.delete(id);
