@@ -100,34 +100,22 @@ test("provider-bound context keeps recent four user turns' tool results", () => 
   assert.equal(providerMessages[6], recentToolResult);
 });
 
-test("provider-bound context can preserve every raw message in the active turn window", () => {
+test("provider-bound context preserves every tool result inside one arbitrarily long user turn", () => {
   const openingToolResult = {
     role: "toolResult",
     content: "x".repeat(25_000),
   };
   const messages = [
-    { role: "user", content: "turn 1" },
+    { role: "user", content: "one long turn" },
     openingToolResult,
-    ...tailPadding(20),
-    { role: "assistant", content: "done 1" },
-    { role: "user", content: "turn 2" },
-    { role: "assistant", content: "done 2" },
-    { role: "user", content: "turn 3" },
-    { role: "assistant", content: "done 3" },
-    { role: "user", content: "turn 4" },
-    { role: "assistant", content: "done 4" },
+    ...tailPadding(64),
   ];
 
   assert.equal(
-    providerContext.buildProviderBoundContextMessages(messages)[1].content,
-    "old tool result omitted",
+    providerContext.buildProviderBoundContextMessages(messages),
+    messages,
   );
-  assert.equal(
-    providerContext.buildProviderBoundContextMessages(messages, {
-      protectRecentTurnContents: true,
-    })[1],
-    openingToolResult,
-  );
+  assert.equal(messages[1], openingToolResult);
 });
 
 for (const stopReason of ["error", "aborted"] as const) {
@@ -203,32 +191,6 @@ test("provider-bound context keeps orphan tool results", () => {
 
   assert.equal(providerMessages, messages);
   assert.equal(messages.includes(orphan), true);
-});
-
-test("provider-bound context forwards recent message protection options", () => {
-  const oldToolResult = {
-    role: "toolResult",
-    content: "x".repeat(25_000),
-  };
-  const messages = [
-    { role: "user", content: "one long turn" },
-    oldToolResult,
-    ...Array.from({ length: 16 }, (_, index) => ({
-      role: "assistant",
-      content: `recent ${index + 1}`,
-    })),
-  ];
-
-  assert.equal(
-    providerContext.buildProviderBoundContextMessages(messages, {
-      protectRecentMessages: 17,
-    }),
-    messages,
-  );
-  assert.equal(
-    providerContext.buildProviderBoundContextMessages(messages)[1].content,
-    "old tool result omitted",
-  );
 });
 
 test("provider-bound context policy owns token estimates", () => {

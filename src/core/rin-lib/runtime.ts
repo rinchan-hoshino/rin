@@ -105,7 +105,6 @@ export function createRinCapabilityDefinitions(
                 protectedSourceWindowTurns > 0
                   ? protectedSourceWindowTurns + 1
                   : undefined,
-              protectRecentTurnContents: protectedSourceWindowTurns > 0,
             });
             const injection = await injectPostCompactionState(
               providerEvent ?? { messages: event.messages },
