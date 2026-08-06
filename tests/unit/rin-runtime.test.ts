@@ -42,7 +42,7 @@ function pruningTailPadding(count: number) {
   }));
 }
 
-test("self-improve observes context before the sole provider-bound transformer", () => {
+test("provider-bound pruning is the sole builtin context-transform capability", () => {
   const definitions = runtimeMod.createRinCapabilityDefinitions({
     cwd: rootDir,
     agentDir: rootDir,
@@ -51,56 +51,10 @@ test("self-improve observes context before the sole provider-bound transformer",
     .filter((definition) => definition.hooks?.context?.length)
     .map((definition) => definition.name);
 
-  assert.deepEqual(contextCapabilities, [
-    "self_improve",
+  assert.deepEqual(contextCapabilities.slice(-1), [
     "rin_provider_bound_context",
   ]);
-});
-
-test("self-improve forks preserve the complete prefix from the previous pruning boundary", async () => {
-  const definitions = runtimeMod.createRinCapabilityDefinitions({
-    cwd: rootDir,
-    agentDir: rootDir,
-  });
-  const context = definitions.find(
-    (definition) => definition.name === "rin_provider_bound_context",
-  )?.hooks?.context?.[0];
-  assert.equal(typeof context, "function");
-  const openingToolResult = {
-    role: "toolResult",
-    content: "x".repeat(25_000),
-  };
-  const event = {
-    type: "context",
-    messages: [
-      { role: "user", content: "turn 1" },
-      openingToolResult,
-      ...pruningTailPadding(119),
-      { role: "assistant", content: "done 1" },
-      { role: "user", content: "turn 2" },
-      { role: "assistant", content: "done 2" },
-      { role: "user", content: "turn 3" },
-      { role: "assistant", content: "done 3" },
-      { role: "user", content: "turn 4" },
-      { role: "assistant", content: "done 4" },
-      { role: "user", content: "distill the completed source window" },
-    ],
-  };
-
-  const ordinarilyPruned = await context(event, { cwd: rootDir });
-  assert.equal(ordinarilyPruned.messages[1].content, "old tool result omitted");
-  const preserved = await context(event, {
-    cwd: rootDir,
-    sessionManager: {
-      [sessionForkMod.EPHEMERAL_FORK_SOURCE_CONTEXT_KEY]: {
-        pruningBoundary: 0,
-        nextPruningBoundary: 32,
-        messageCount: 129,
-      },
-    },
-  });
-  assert.equal(preserved, undefined);
-  assert.equal(event.messages[1], openingToolResult);
+  assert.equal(contextCapabilities.includes("self_improve"), false);
 });
 
 test("getManagedSkillPaths includes agent memory skills and builtin skills", () => {

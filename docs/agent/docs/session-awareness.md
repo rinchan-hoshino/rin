@@ -147,9 +147,9 @@ Use platform metadata for sender identity, rich quote nodes for reply semantics,
 
 Use `docs/runtime-layout.md` to identify the active installed runtime, target user, manifest, service, and `app/current/` before update, rollback, restart, or installed-file inspection.
 
-### Exact recovery of omitted tool results
+### Exact recovery of omitted tool history
 
-`old tool result omitted` is a provider-bound context marker, not a transcript mutation. When exact earlier output matters, use the tool result's structural `toolCallId` to stream the authoritative persistent session JSONL. This is an on-demand recovery path; do not add the procedure to the resident system prompt.
+`old tool input omitted` and `old tool result omitted` are provider-bound context markers, not transcript mutations. When exact earlier arguments or output matter, use the exchange's structural `toolCallId` to stream the authoritative persistent session JSONL: arguments remain on the matching assistant `toolCall` part and output remains on the matching tool-result message. This is an on-demand recovery path; do not add the procedure to the resident system prompt.
 
 ```bash
 : "${PI_SESSION_FILE:?persistent session required}"

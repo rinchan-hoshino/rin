@@ -28,10 +28,7 @@ import {
   createRinCapabilitySet,
 } from "./capability-session.js";
 import { compileSelfImproveSync } from "../self-improve/store.js";
-import {
-  EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY,
-  EPHEMERAL_FORK_SOURCE_CONTEXT_KEY,
-} from "../session/fork.js";
+import { EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY } from "../session/fork.js";
 import { buildSystemPromptSelfImprove } from "../self-improve/format.js";
 import {
   formatPromptContextSystemPromptBlock,
@@ -94,11 +91,8 @@ export function createRinCapabilityDefinitions(
         context: [
           async (event: any, ctx: any) => {
             if (!Array.isArray(event?.messages)) return undefined;
-            const sourceContext =
-              ctx?.sessionManager?.[EPHEMERAL_FORK_SOURCE_CONTEXT_KEY];
             const providerEvent = buildProviderBoundContextEvent(event, {
               cwd: String(ctx?.cwd || options.cwd || process.cwd()),
-              protectFromMessageIndex: sourceContext?.pruningBoundary,
             });
             const injection = await injectPostCompactionState(
               providerEvent ?? { messages: event.messages },
@@ -1222,6 +1216,7 @@ export async function createConfiguredAgentSession(
       modelRef?: string;
       thinkingLevel?: any;
       customTools?: any[];
+      selfImproveTurnWindowTurns?: number;
     } = {},
 ) {
   const agentRuntimeModule = await loadRinAgentRuntime();
@@ -1340,6 +1335,9 @@ export async function createConfiguredAgentSession(
         },
         compactWithPiNative: (event) =>
           runPiNativeCompactionWithoutFileSummary(sessionRef.current, event),
+        selfImproveTurnWindowTurns:
+          options.selfImproveTurnWindowTurns ??
+          services.settingsManager?.settings?.selfImprove?.turnWindowTurns,
       }),
     });
 

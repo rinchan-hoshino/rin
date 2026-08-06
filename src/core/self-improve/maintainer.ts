@@ -8,7 +8,6 @@ import type { Model } from "@earendil-works/pi-ai";
 const HOME_DIR = os.homedir();
 
 import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
-import type { SessionSourceContext } from "../rin-lib/session-pruning.js";
 import { openBoundSession } from "../session/factory.js";
 import { forkSessionManagerCompat } from "../session/fork.js";
 import { readSessionMetadata } from "../session/metadata.js";
@@ -39,7 +38,6 @@ type ExtensionCtxLike = {
 async function createForkedSessionManager(options: {
   sessionFile: string;
   leafId?: string;
-  sourceContext?: SessionSourceContext;
 }) {
   const session = readSessionMetadata(options);
   const sessionFile = session.sessionFile
@@ -73,10 +71,6 @@ async function createForkedSessionManager(options: {
         // threshold-based compaction would add an extra model turn; keep
         // compaction for provider-error/context-overflow recovery.
         disableRoutineCompaction: true,
-        // The source prefix immediately before pruning is the evidence boundary.
-        // Reapply the previous pruning boundary so the fork sees exactly the
-        // same provider prefix that existed before the new boundary.
-        sourceContext: options.sourceContext,
       },
     ),
   };
@@ -86,14 +80,12 @@ async function runForkedSessionPrompt(options: {
   agentDir: string;
   sessionFile: string;
   leafId?: string;
-  sourceContext?: SessionSourceContext;
   prompt: string;
   additionalExtensionPaths?: string[];
 }) {
   const fork = await createForkedSessionManager({
     sessionFile: options.sessionFile,
     leafId: options.leafId,
-    sourceContext: options.sourceContext,
   });
   const { session, runtime } = await openBoundSession({
     cwd: fork.cwd,
@@ -142,7 +134,6 @@ async function runForkedSessionSelfImproveReview(options: {
   sessionFile: string;
   leafId?: string;
   snapshotKey?: string;
-  sourceContext?: SessionSourceContext;
   trigger?: string;
   additionalExtensionPaths?: string[];
 }) {
@@ -155,7 +146,6 @@ async function runForkedSessionSelfImproveReview(options: {
       sessionFile: options.sessionFile,
       leafId: options.leafId,
       snapshotKey: options.snapshotKey,
-      sourceContext: options.sourceContext,
       trigger: options.trigger,
     },
   });
@@ -166,11 +156,9 @@ async function runForkedSessionSelfImproveReview(options: {
       agentDir: options.agentDir,
       sessionFile: options.sessionFile,
       leafId: options.leafId,
-      sourceContext: options.sourceContext,
       prompt: buildSelfImproveReviewPrompt(
         safeString(options.trigger).trim(),
         options.agentDir,
-        options.sourceContext,
       ),
       additionalExtensionPaths: options.additionalExtensionPaths,
     });
@@ -231,7 +219,6 @@ export async function runMaintainerUnderMaintenanceLock(
     sessionFile?: string;
     leafId?: string;
     trigger?: string;
-    sourceContext?: SessionSourceContext;
     additionalExtensionPaths?: string[];
     runId?: string;
     startedAt?: string;
@@ -255,7 +242,6 @@ export async function runMaintainerUnderMaintenanceLock(
     sessionFile,
     leafId,
     snapshotKey: safeString(opts.snapshotKey).trim() || undefined,
-    sourceContext: opts.sourceContext,
     trigger,
     additionalExtensionPaths: opts.additionalExtensionPaths,
   });

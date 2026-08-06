@@ -202,11 +202,6 @@ test("session fork compat can mark temporary cache-equivalent forks to skip rout
       persist: false,
       preserveSourceSessionId: true,
       disableRoutineCompaction: true,
-      sourceContext: {
-        pruningBoundary: 32,
-        nextPruningBoundary: 64,
-        messageCount: 160,
-      },
     },
   );
 
@@ -215,11 +210,6 @@ test("session fork compat can mark temporary cache-equivalent forks to skip rout
     fork[sessionFork.EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY],
     true,
   );
-  assert.deepEqual(fork[sessionFork.EPHEMERAL_FORK_SOURCE_CONTEXT_KEY], {
-    pruningBoundary: 32,
-    nextPruningBoundary: 64,
-    messageCount: 160,
-  });
 });
 
 test("session fork compat can preserve source session id for temporary cache-equivalent forks", () => {

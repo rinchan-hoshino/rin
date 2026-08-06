@@ -379,244 +379,182 @@ test("processing normalizes revised full-slot content and enforces limits", asyn
   );
 });
 
-function linearMessageBranch(messages: any[], idPrefix = "m") {
-  let parentId: string | null = null;
-  return messages.map((message, index) => {
-    const id = `${idPrefix}${index}`;
-    const entry = {
-      id,
-      parentId,
-      timestamp: new Date(index + 1).toISOString(),
-      type: "message",
-      message,
-    };
-    parentId = id;
-    return entry;
+test("self-improve queues one review after Pi persists each shared turn window final", async () => {
+  const queued: any[] = [];
+  let branch: any[] = [];
+  const definition = selfImproveIndex.default({
+    async enqueueSelfImproveMaintenanceJob(job) {
+      queued.push(job);
+    },
   });
-}
+  const messageEnd = definition.hooks.message_end?.[0];
+  assert.equal(typeof messageEnd, "function");
 
-function assistantFinal(label: string) {
-  return {
-    role: "assistant",
-    content: [{ type: "text", text: label }],
-    stopReason: "stop",
-    responseId: `response-${label}`,
+  const makeBranch = (turns: number) =>
+    Array.from({ length: turns }, (_, index) => {
+      const turn = index + 1;
+      return [
+        {
+          id: `u${turn}`,
+          type: "message",
+          message: { role: "user", content: `turn ${turn}` },
+        },
+        {
+          id: `a${turn}`,
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: `done ${turn}` }],
+            stopReason: "stop",
+            responseId: `response-${turn}`,
+            timestamp: turn,
+          },
+        },
+      ];
+    }).flat();
+  const ctx = {
+    agentDir: "/tmp/rin-agent",
+    cwd: "/tmp/project",
+    frontend: userFrontend(),
+    promptContext: { source: "chat-bridge", selfImproveEligible: true },
+    sessionManager: {
+      getSessionId: () => "session-a",
+      getSessionFile: () =>
+        path.join(process.cwd(), "tests/unit/self-improve.test.ts"),
+      getLeafId: () => branch.at(-1)?.id,
+      getBranch: () => branch,
+      isPersisted: () => true,
+    },
   };
-}
+  const emitFinal = async (message: any) =>
+    messageEnd({ type: "message_end", message }, ctx);
+  const settleDeferredReview = () =>
+    new Promise<void>((resolve) => setImmediate(resolve));
 
-async function settleDeferredSelfImproveReview() {
-  await new Promise<void>((resolve) => setImmediate(resolve));
-}
+  branch = makeBranch(3);
+  await emitFinal(branch.at(-1).message);
+  await settleDeferredReview();
+  assert.equal(queued.length, 0);
 
-test("self-improve captures the complete provider prefix immediately before pruning", async () => {
-  const queued: any[] = [];
-  const messages = [
-    ...Array.from({ length: 127 }, (_, index) => ({
-      role: index === 0 ? "user" : "toolResult",
-      content: `previous-input-${index}`,
-    })),
-    assistantFinal("previous-provider-response"),
-    { role: "user", content: "next provider input" },
-  ];
-  const branch = linearMessageBranch(messages);
-  const definition = selfImproveIndex.default({
-    async enqueueSelfImproveMaintenanceJob(job) {
-      queued.push(job);
-    },
-  });
-  const contextHook = definition.hooks.context?.[0];
-  assert.equal(typeof contextHook, "function");
-  const result = await contextHook(
-    { type: "context", messages },
-    {
-      agentDir: "/tmp/rin-agent",
-      frontend: userFrontend(),
-      promptContext: { source: "chat-bridge", selfImproveEligible: true },
-      sessionManager: {
-        getSessionFile: () =>
-          path.join(process.cwd(), "tests/unit/self-improve.test.ts"),
-        getLeafId: () => branch.at(-1)?.id,
-        getBranch: () => branch,
-        isPersisted: () => true,
-      },
-    },
-  );
-  await Promise.resolve();
-
-  assert.equal(result, undefined, "the observer must not transform context");
-  assert.deepEqual(queued, [
-    {
-      agentDir: "/tmp/rin-agent",
-      sessionFile: path.join(process.cwd(), "tests/unit/self-improve.test.ts"),
-      leafId: "m128",
-      trigger: "self_improve:context_rollover_review",
-      snapshotKey: "context-rollover:root:0:32:m128",
-      sourceContext: {
-        pruningBoundary: 0,
-        nextPruningBoundary: 32,
-        messageCount: 129,
-      },
-    },
-  ]);
-});
-
-test("one provider checkpoint that crosses multiple buckets queues one pre-prune prefix", async () => {
-  const queued: any[] = [];
-  const messages = [
-    ...Array.from({ length: 127 }, (_, index) => ({
-      role: index === 0 ? "user" : "toolResult",
-      content: `previous-input-${index}`,
-    })),
-    assistantFinal("previous-multi-response"),
-    ...Array.from({ length: 65 }, (_, index) => ({
-      role: "toolResult",
-      content: `new-input-${index}`,
-    })),
-  ];
-  const branch = linearMessageBranch(messages);
-  const definition = selfImproveIndex.default({
-    async enqueueSelfImproveMaintenanceJob(job) {
-      queued.push(job);
-    },
-  });
-  await definition.hooks.context[0](
-    { type: "context", messages },
-    {
-      agentDir: "/tmp/rin-agent",
-      frontend: userFrontend(),
-      promptContext: { source: "chat-bridge", selfImproveEligible: true },
-      sessionManager: {
-        getSessionFile: () =>
-          path.join(process.cwd(), "tests/unit/self-improve.test.ts"),
-        getLeafId: () => branch.at(-1)?.id,
-        getBranch: () => branch,
-        isPersisted: () => true,
-      },
-    },
-  );
-
+  const fourthTurnBranch = makeBranch(4);
+  const fourthFinal = fourthTurnBranch.at(-1).message;
+  branch = fourthTurnBranch.slice(0, -1);
+  await emitFinal(fourthFinal);
+  assert.equal(queued.length, 0, "message_end must not wait for persistence");
+  branch = makeBranch(5);
+  await settleDeferredReview();
   assert.equal(queued.length, 1);
-  assert.equal(queued[0].snapshotKey, "context-rollover:root:0:96:m192");
-  assert.deepEqual(queued[0].sourceContext, {
-    pruningBoundary: 0,
-    nextPruningBoundary: 96,
-    messageCount: 193,
-  });
-});
+  assert.equal(queued[0].trigger, "self_improve:turn_window_review");
+  assert.equal(queued[0].leafId, "a4");
+  assert.equal(queued[0].snapshotKey, "turn-window:4:4:a4");
 
-test("pre-prune prefix starts a new boundary generation after compaction", async () => {
-  const queued: any[] = [];
-  const oldBranch = linearMessageBranch(
-    [{ role: "user", content: "old input" }, assistantFinal("old response")],
-    "old-",
-  );
-  const compaction = {
-    id: "compaction-1",
-    parentId: oldBranch.at(-1).id,
-    timestamp: new Date(500).toISOString(),
-    type: "compaction",
-    summary: "compacted source",
-    firstKeptEntryId: "old-0",
-    tokensBefore: 200_000,
-  };
-  let parentId = compaction.id;
-  const postEntries = Array.from({ length: 128 }, (_, index) => {
-    const id = `post-${index}`;
-    const entry = {
-      id,
-      parentId,
-      timestamp: new Date(600 + index).toISOString(),
-      type: "message",
-      message: { role: "toolResult", content: `post-${index}` },
-    };
-    parentId = id;
-    return entry;
-  });
-  const branch = [...oldBranch, compaction, ...postEntries];
-  const messages = Array.from({ length: 129 }, (_, index) => ({
-    role: index === 0 ? "user" : "toolResult",
-    content: `generation-${index}`,
-  }));
-  const definition = selfImproveIndex.default({
-    async enqueueSelfImproveMaintenanceJob(job) {
-      queued.push(job);
-    },
-  });
-  await definition.hooks.context[0](
-    { type: "context", messages },
-    {
-      agentDir: "/tmp/rin-agent",
-      frontend: userFrontend(),
-      promptContext: { source: "chat-bridge", selfImproveEligible: true },
-      sessionManager: {
-        getSessionFile: () =>
-          path.join(process.cwd(), "tests/unit/self-improve.test.ts"),
-        getLeafId: () => branch.at(-1)?.id,
-        getBranch: () => branch,
-        isPersisted: () => true,
-      },
-    },
-  );
-
+  branch = makeBranch(5);
+  await emitFinal(branch.at(-1).message);
+  await settleDeferredReview();
   assert.equal(queued.length, 1);
-  assert.equal(
-    queued[0].snapshotKey,
-    "context-rollover:compaction-1:0:32:post-127",
-  );
-  assert.deepEqual(queued[0].sourceContext, {
-    pruningBoundary: 0,
-    nextPruningBoundary: 32,
-    messageCount: 129,
-  });
+
+  branch = makeBranch(8);
+  await emitFinal(branch.at(-1).message);
+  await settleDeferredReview();
+  assert.equal(queued.length, 2);
+  assert.equal(queued[1].leafId, "a8");
+  assert.equal(queued[1].snapshotKey, "turn-window:4:8:a8");
+  assert.equal(definition.hooks.context, undefined);
 });
 
-test("session shutdown queues the retained tail that bucket reviews have not covered", async () => {
+test("turn-window completion followed by shutdown queues only one review", async () => {
   await withTempRoot(async (root) => {
     const sessionFile = path.join(root, "session.jsonl");
     await fs.writeFile(sessionFile, "", "utf8");
-    const branch = linearMessageBranch([
-      ...Array.from({ length: 159 }, (_, index) => ({
-        role: index === 0 ? "user" : "toolResult",
-        content: `tail-${index}`,
-      })),
-      assistantFinal("shutdown-tail"),
-    ]);
+    const branch = Array.from({ length: 4 }, (_, index) => {
+      const turn = index + 1;
+      return [
+        {
+          id: `u${turn}`,
+          type: "message",
+          message: { role: "user", content: `turn ${turn}` },
+        },
+        {
+          id: `a${turn}`,
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: `done ${turn}` }],
+            stopReason: "stop",
+          },
+        },
+      ];
+    }).flat();
+    let activeBranch = branch;
     const definition = selfImproveIndex.default({});
     const ctx = {
       agentDir: root,
       frontend: userFrontend(),
       promptContext: { source: "chat-bridge", selfImproveEligible: true },
       sessionManager: {
+        getSessionId: () => "session-a",
         getSessionFile: () => sessionFile,
-        getLeafId: () => branch.at(-1)?.id,
-        getBranch: () => branch,
+        getLeafId: () => activeBranch.at(-1)?.id,
+        getBranch: () => activeBranch,
         isPersisted: () => true,
       },
     };
 
+    await definition.hooks.message_end[0](
+      {
+        type: "message_end",
+        message: branch.at(-1).message,
+      },
+      ctx,
+    );
+    activeBranch = [
+      ...branch,
+      {
+        id: "custom-after-a4",
+        type: "custom",
+        customType: "test-marker",
+        data: {},
+      },
+      {
+        id: "a4-late",
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "late terminal artifact" }],
+          stopReason: "stop",
+        },
+      },
+    ];
     await definition.hooks.session_shutdown[0]({}, ctx);
 
     const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
     assert.equal(queue.length, 1);
-    assert.equal(queue[0].trigger, "self_improve:session_shutdown_review");
-    assert.equal(queue[0].snapshotKey, "context-tail:root:32:160:m159");
-    assert.deepEqual(queue[0].sourceContext, {
-      pruningBoundary: 32,
-      messageCount: 160,
-    });
+    assert.equal(queue[0].trigger, "self_improve:turn_window_review");
+    assert.equal(queue[0].leafId, "a4");
+    assert.equal(queue[0].snapshotKey, "turn-window:4:4:a4");
   });
 });
 
 test("maintenance enqueue failures never fail the source turn", async () => {
-  const messages = [
-    ...Array.from({ length: 127 }, (_, index) => ({
-      role: index === 0 ? "user" : "toolResult",
-      content: `input-${index}`,
-    })),
-    assistantFinal("previous-failure-response"),
-    { role: "user", content: "next input" },
-  ];
-  const branch = linearMessageBranch(messages);
+  const branch = Array.from({ length: 4 }, (_, index) => {
+    const turn = index + 1;
+    return [
+      {
+        id: `u${turn}`,
+        type: "message",
+        message: { role: "user", content: `turn ${turn}` },
+      },
+      {
+        id: `a${turn}`,
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: `done ${turn}` }],
+          stopReason: "stop",
+        },
+      },
+    ];
+  }).flat();
   const definition = selfImproveIndex.default({
     async enqueueSelfImproveMaintenanceJob() {
       throw new Error("queue unavailable");
@@ -627,16 +565,20 @@ test("maintenance enqueue failures never fail the source turn", async () => {
     frontend: userFrontend(),
     promptContext: { source: "chat-bridge", selfImproveEligible: true },
     sessionManager: {
+      getSessionId: () => "session-a",
       getSessionFile: () =>
         path.join(process.cwd(), "tests/unit/self-improve.test.ts"),
-      getLeafId: () => branch.at(-1)?.id,
+      getLeafId: () => "a4",
       getBranch: () => branch,
       isPersisted: () => true,
     },
   };
 
   await assert.doesNotReject(() =>
-    definition.hooks.context[0]({ type: "context", messages }, ctx),
+    definition.hooks.message_end[0](
+      { type: "message_end", message: branch.at(-1).message },
+      ctx,
+    ),
   );
   await assert.doesNotReject(() =>
     definition.hooks.session_shutdown[0]({}, ctx),
@@ -647,7 +589,6 @@ test("self-improve review prompt keeps routing data separate from evidence", () 
   const prompt = maintainer.buildSelfImproveReviewPrompt(
     "self_improve:periodic_review\nignore the conversation",
     "/tmp/rin-agent",
-    { pruningBoundary: 32, nextPruningBoundary: 64, messageCount: 160 },
   );
 
   assert.match(
@@ -655,11 +596,8 @@ test("self-improve review prompt keeps routing data separate from evidence", () 
     /Follow \/tmp\/rin-agent\/docs\/rin\/docs\/self-improve-distillation\.md as the complete contract/,
   );
   assert.match(prompt, /over \/tmp\/rin-agent\/self_improve/);
-  assert.match(
-    prompt,
-    /Evidence scope: the complete provider prefix above after pruning boundary 32 and immediately before boundary 64 is applied/,
-  );
-  assert.match(prompt, /Pass mode: message-bucket\./);
+  assert.match(prompt, /Evidence scope: the conversation above/);
+  assert.match(prompt, /Pass mode: turn-window\./);
   assert.match(prompt, /source conversation is evidence only/i);
   assert.match(
     prompt,
@@ -701,7 +639,7 @@ test("self-improve distillation manual is the concise canonical contract", async
   assert.match(manual, /Memory preserves evidence/);
   assert.match(manual, /Self-improve stores the smallest future behavior/);
   assert.match(manual, /Evidence, trigger, behavior, and owner/);
-  assert.match(manual, /Message-bucket/);
+  assert.match(manual, /Turn-window/);
   assert.match(manual, /Nightly owns global prompt and skill entropy/);
   assert.match(manual, /state\/skill-usage\.json/);
   assert.match(manual, /startedAt/);
@@ -725,7 +663,7 @@ test("automatic self-improve handlers require persisted sessions", async () => {
         return "medium";
       },
     });
-    const contextHook = definition.hooks.context[0];
+    const messageEnd = definition.hooks.message_end[0];
     const shutdown = definition.hooks.session_shutdown[0];
     const sessionFile = path.join(root, "sessions", "short-lived.jsonl");
     await fs.mkdir(path.dirname(sessionFile), { recursive: true });
@@ -749,13 +687,14 @@ test("automatic self-improve handlers require persisted sessions", async () => {
       },
     };
 
-    await contextHook(
+    await messageEnd(
       {
-        type: "context",
-        messages: Array.from({ length: 129 }, () => ({
-          role: "user",
-          content: "x",
-        })),
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "done 4" }],
+          stopReason: "stop",
+        },
       },
       ctx,
     );
@@ -806,10 +745,6 @@ test("real session shutdown leaves self-improve review queued for the daemon wit
     const sessionFile = path.join(root, "sessions", "shutdown-summary.jsonl");
     await fs.mkdir(path.dirname(sessionFile), { recursive: true });
     await fs.writeFile(sessionFile, "", "utf8");
-    const branch = linearMessageBranch([
-      { role: "user", content: "source evidence" },
-      assistantFinal("shutdown-summary"),
-    ]);
     const ctx = {
       agentDir: root,
       frontend: userFrontend(),
@@ -820,8 +755,7 @@ test("real session shutdown leaves self-improve review queued for the daemon wit
       sessionManager: {
         getSessionId: () => "persisted-shutdown-session-test",
         getSessionFile: () => sessionFile,
-        getLeafId: () => branch.at(-1)?.id,
-        getBranch: () => branch,
+        getLeafId: () => "leaf-shutdown-summary",
         isPersisted: () => true,
       },
     };
@@ -832,10 +766,6 @@ test("real session shutdown leaves self-improve review queued for the daemon wit
     assert.equal(queue.length, 1);
     assert.equal(queue[0].kind, "self_improve_review");
     assert.equal(queue[0].trigger, "self_improve:session_shutdown_review");
-    assert.deepEqual(queue[0].sourceContext, {
-      pruningBoundary: 0,
-      messageCount: 2,
-    });
     assert.deepEqual(notices, []);
 
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -1372,20 +1302,15 @@ test("synchronous self-improve distillation records terminal result without queu
   });
 });
 
-test("completed pre-prune context snapshots are not queued again after worker re-entry", async () => {
+test("completed turn-window snapshots are not queued again after worker re-entry", async () => {
   await withTempRoot(async (root) => {
     const sessionFile = path.join(root, "empty-session.jsonl");
     await fs.writeFile(sessionFile, "", "utf8");
     const job = {
       agentDir: root,
       sessionFile,
-      trigger: "self_improve:context_rollover_review",
-      snapshotKey: "context-rollover:root:0:32:m128",
-      sourceContext: {
-        pruningBoundary: 0,
-        nextPruningBoundary: 32,
-        messageCount: 129,
-      },
+      trigger: "self_improve:turn_window_review",
+      snapshotKey: "turn-window:4:4:a4",
     };
 
     await asyncJobs.runSelfImproveMaintenanceJobNow(job);
@@ -1401,7 +1326,7 @@ test("completed pre-prune context snapshots are not queued again after worker re
   });
 });
 
-test("concurrent worker enqueues preserve distinct rollover prefixes and deduplicate repeats", async () => {
+test("concurrent worker enqueues preserve distinct windows and deduplicate repeats", async () => {
   await withTempRoot(async (root) => {
     const sessionFile = path.join(root, "session.jsonl");
     await fs.writeFile(sessionFile, "", "utf8");
@@ -1411,13 +1336,8 @@ test("concurrent worker enqueues preserve distinct rollover prefixes and dedupli
           asyncJobs.enqueueSelfImproveMaintenanceJob({
             agentDir: root,
             sessionFile,
-            trigger: "self_improve:context_rollover_review",
-            snapshotKey: `context-rollover:root:${index * 32}:${(index + 1) * 32}:m${(index + 1) * 32 + 96}`,
-            sourceContext: {
-              pruningBoundary: index * 32,
-              nextPruningBoundary: (index + 1) * 32,
-              messageCount: (index + 1) * 32 + 97,
-            },
+            trigger: "self_improve:turn_window_review",
+            snapshotKey: `turn-window:4:${(index + 1) * 4}:a${index + 1}`,
           }),
         ),
       ).flat(),
@@ -1436,11 +1356,11 @@ test("enqueue racing with worker completion preserves each snapshot exactly once
     const makeJob = (snapshotKey: string) => ({
       agentDir: root,
       sessionFile,
-      trigger: "self_improve:context_rollover_review",
+      trigger: "self_improve:turn_window_review",
       snapshotKey,
     });
-    const first = makeJob("context-rollover:root:0:32:m128");
-    const second = makeJob("context-rollover:root:32:64:m160");
+    const first = makeJob("turn-window:4:4:a4");
+    const second = makeJob("turn-window:4:8:a8");
     await asyncJobs.enqueueSelfImproveMaintenanceJob(first);
 
     await Promise.all([

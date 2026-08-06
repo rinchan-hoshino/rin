@@ -3,19 +3,60 @@ import { isPiCompactSkillReadCall } from "../pi/private-api.js";
 
 export const RIN_SESSION_PRUNING_MESSAGE_BUCKET_SIZE = 32;
 export const RIN_SESSION_PRUNING_RETAINED_BUCKETS = 4;
+export const RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT = "old tool input omitted";
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT =
   "old tool result omitted";
-export type SessionSourceContext = {
+
+export type ToolHistoryExchange = {
+  toolName: string;
+  toolCallId: string;
+  callMessageIndex: number;
+  callPartIndex: number;
+  call: any;
+  resultMessageIndex: number;
+  result: any;
+};
+
+export type ToolHistoryPolicyContext = {
+  cwd: string;
   pruningBoundary: number;
-  messageCount: number;
-  nextPruningBoundary?: number;
+};
+
+export type ToolHistoryProtection = {
+  call?: boolean;
+  result?: boolean;
+};
+
+export type ToolHistoryPolicy = {
+  protect?: (
+    exchange: ToolHistoryExchange,
+    context: ToolHistoryPolicyContext,
+  ) => ToolHistoryProtection | undefined;
+  compactCallArguments?: (
+    argumentsValue: any,
+    exchange: ToolHistoryExchange,
+    context: ToolHistoryPolicyContext,
+  ) => any;
+  compactResultContent?: (
+    content: any,
+    exchange: ToolHistoryExchange,
+    context: ToolHistoryPolicyContext,
+  ) => any;
 };
 
 export type SessionPruningOptions = {
   messageBucketSize?: number;
   retainedBuckets?: number;
-  protectFromMessageIndex?: number;
   cwd?: string;
+  toolHistoryPolicies?: Record<string, ToolHistoryPolicy>;
+};
+
+type ToolCallLocation = {
+  toolName: string;
+  toolCallId: string;
+  messageIndex: number;
+  partIndex: number;
+  part: any;
 };
 
 function normalizePositiveInteger(value: unknown, fallback: number) {
@@ -35,41 +76,12 @@ export function normalizeRetainedMessageBuckets(value: unknown) {
   return normalizePositiveInteger(value, RIN_SESSION_PRUNING_RETAINED_BUCKETS);
 }
 
-export function normalizeProtectedMessageStart(value: unknown) {
-  const index = Number(value);
-  if (!Number.isInteger(index) || index < 0) return undefined;
-  return index;
+function normalizedToolName(value: unknown) {
+  return String(value || "").trim();
 }
 
-export function normalizeSessionSourceContext(
-  value: unknown,
-): SessionSourceContext | undefined {
-  const context = value && typeof value === "object" ? (value as any) : {};
-  const pruningBoundary = normalizeProtectedMessageStart(
-    context.pruningBoundary,
-  );
-  const messageCount = Number(context.messageCount);
-  const hasNextBoundary = context.nextPruningBoundary !== undefined;
-  const nextPruningBoundary = hasNextBoundary
-    ? normalizeProtectedMessageStart(context.nextPruningBoundary)
-    : undefined;
-  if (
-    pruningBoundary === undefined ||
-    !Number.isInteger(messageCount) ||
-    messageCount <= 0 ||
-    pruningBoundary >= messageCount ||
-    (hasNextBoundary &&
-      (nextPruningBoundary === undefined ||
-        nextPruningBoundary <= pruningBoundary ||
-        nextPruningBoundary >= messageCount))
-  ) {
-    return undefined;
-  }
-  return {
-    pruningBoundary,
-    messageCount,
-    ...(nextPruningBoundary === undefined ? {} : { nextPruningBoundary }),
-  };
+function toolCallId(value: unknown) {
+  return String(value || "").trim();
 }
 
 function isToolResultMessage(message: any) {
@@ -77,32 +89,122 @@ function isToolResultMessage(message: any) {
   return role === "toolResult" || role === "tool_result";
 }
 
-function toolCallId(value: unknown) {
-  return String(value || "").trim();
-}
-
-function collectProtectedToolResultIds(messages: any[], cwd: string) {
-  const protectedIds = new Set<string>();
-  for (const message of messages) {
-    if (String(message?.role || "").trim() !== "assistant") continue;
-    for (const part of extractToolCallParts(message?.content)) {
-      if (String(part?.name || part?.toolName || "").trim() !== "read") {
-        continue;
+function collectToolCalls(messages: any[]) {
+  const calls = new Map<string, ToolCallLocation>();
+  messages.forEach((message, messageIndex) => {
+    if (String(message?.role || "").trim() !== "assistant") return;
+    const parts = Array.isArray(message?.content) ? message.content : [];
+    parts.forEach((part: any, partIndex: number) => {
+      if (
+        String(part?.type || "")
+          .trim()
+          .toLowerCase() !== "toolcall"
+      ) {
+        return;
       }
-      if (!isPiCompactSkillReadCall(part?.arguments, cwd)) continue;
-      const id = toolCallId(part?.id);
-      if (id) protectedIds.add(id);
-    }
-  }
-  return protectedIds;
+      const id = toolCallId(part?.id ?? part?.toolCallId);
+      if (!id || calls.has(id)) return;
+      calls.set(id, {
+        toolName: normalizedToolName(part?.name ?? part?.toolName),
+        toolCallId: id,
+        messageIndex,
+        partIndex,
+        part,
+      });
+    });
+  });
+  return calls;
 }
 
-function isProtectedToolResult(
-  message: any,
-  protectedToolResultIds: Set<string>,
+function collectToolExchanges(messages: any[]) {
+  const calls = collectToolCalls(messages);
+  const exchanges = new Map<string, ToolHistoryExchange>();
+  messages.forEach((message, resultMessageIndex) => {
+    if (!isToolResultMessage(message)) return;
+    const id = toolCallId(message?.toolCallId);
+    const call = calls.get(id);
+    if (!id || !call || exchanges.has(id)) return;
+    exchanges.set(id, {
+      toolName:
+        call.toolName || normalizedToolName(message?.toolName) || "unknown",
+      toolCallId: id,
+      callMessageIndex: call.messageIndex,
+      callPartIndex: call.partIndex,
+      call: call.part,
+      resultMessageIndex,
+      result: message,
+    });
+  });
+  return exchanges;
+}
+
+function writeHistoryPolicy(): ToolHistoryPolicy {
+  return {
+    protect: (exchange) =>
+      exchange.result?.isError ? { call: true, result: true } : undefined,
+    compactCallArguments: (value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return value;
+      }
+      if (value.content === RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT)
+        return value;
+      if (typeof value.content !== "string") return value;
+      return {
+        ...value,
+        content: RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
+      };
+    },
+  };
+}
+
+function editHistoryPolicy(): ToolHistoryPolicy {
+  return {
+    protect: (exchange) =>
+      exchange.result?.isError ? { call: true, result: true } : undefined,
+    compactCallArguments: (value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return value;
+      }
+      if (!Array.isArray(value.edits) || value.edits.length === 0) return value;
+      if (
+        value.edits.length === 1 &&
+        value.edits[0]?.oldText === RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT &&
+        value.edits[0]?.newText === RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT
+      ) {
+        return value;
+      }
+      return {
+        ...value,
+        edits: [
+          {
+            oldText: RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
+            newText: RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
+          },
+        ],
+      };
+    },
+  };
+}
+
+const BUILTIN_TOOL_HISTORY_POLICIES: Record<string, ToolHistoryPolicy> = {
+  read: {
+    protect: (exchange, context) =>
+      isPiCompactSkillReadCall(exchange.call?.arguments, context.cwd)
+        ? { call: true, result: true }
+        : undefined,
+  },
+  write: writeHistoryPolicy(),
+  edit: editHistoryPolicy(),
+};
+
+function resolveToolHistoryPolicy(
+  toolName: string,
+  overrides: Record<string, ToolHistoryPolicy> | undefined,
 ) {
-  const id = toolCallId(message?.toolCallId);
-  return Boolean(id && protectedToolResultIds.has(id));
+  return {
+    ...(BUILTIN_TOOL_HISTORY_POLICIES[toolName] || {}),
+    ...(overrides?.[toolName] || {}),
+  } satisfies ToolHistoryPolicy;
 }
 
 export function findProtectedMessageBucketStart(
@@ -113,10 +215,6 @@ export function findProtectedMessageBucketStart(
   if (messages.length === 0) return 0;
   const bucketSize = normalizeMessageBucketSize(messageBucketSize);
   const retainedBucketCount = normalizeRetainedMessageBuckets(retainedBuckets);
-  // Absolute indices make bucket ordinals stable within one provider-context
-  // generation. The boundary advances only when a new bucket begins; it never
-  // slides with the tail length. Compaction or branch replacement already
-  // creates a new provider prefix and therefore a new generation.
   const currentBucketOrdinal = Math.floor((messages.length - 1) / bucketSize);
   const oldestRetainedBucketOrdinal = Math.max(
     0,
@@ -146,41 +244,111 @@ function omittedContentFor(content: any) {
   return RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT;
 }
 
+function sameJsonValue(left: any, right: any) {
+  if (left === right) return true;
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
 export function pruneSessionContextMessages(
   messages: any[],
   options: SessionPruningOptions = {},
 ) {
   const input = Array.isArray(messages) ? messages : [];
-  const bucketProtectedStart = findProtectedMessageBucketStart(
+  const protectedStart = findProtectedMessageBucketStart(
     input,
     normalizeMessageBucketSize(options.messageBucketSize),
     normalizeRetainedMessageBuckets(options.retainedBuckets),
   );
-  const protectedStart = Math.min(
-    bucketProtectedStart,
-    normalizeProtectedMessageStart(options.protectFromMessageIndex) ??
-      bucketProtectedStart,
-  );
-  const protectedToolResultIds = collectProtectedToolResultIds(
-    input,
-    String(options.cwd || process.cwd()),
-  );
+  const context: ToolHistoryPolicyContext = {
+    cwd: String(options.cwd || process.cwd()),
+    pruningBoundary: protectedStart,
+  };
+  const exchanges = collectToolExchanges(input);
+  const callArguments = new Map<string, any>();
+  const resultContent = new Map<string, any>();
+  const protectedResults = new Set<string>();
+
+  for (const exchange of exchanges.values()) {
+    if (
+      exchange.callMessageIndex >= protectedStart ||
+      exchange.resultMessageIndex >= protectedStart
+    ) {
+      continue;
+    }
+    const policy = resolveToolHistoryPolicy(
+      exchange.toolName,
+      options.toolHistoryPolicies,
+    );
+    const protection = policy.protect?.(exchange, context) || {};
+    if (protection.result) protectedResults.add(exchange.toolCallId);
+    if (!protection.call && policy.compactCallArguments) {
+      const currentArguments = exchange.call?.arguments;
+      const compacted = policy.compactCallArguments(
+        currentArguments,
+        exchange,
+        context,
+      );
+      if (!sameJsonValue(compacted, currentArguments)) {
+        callArguments.set(exchange.toolCallId, compacted);
+      }
+    }
+    if (!protection.result && policy.compactResultContent) {
+      const compacted = policy.compactResultContent(
+        exchange.result?.content,
+        exchange,
+        context,
+      );
+      if (!sameJsonValue(compacted, exchange.result?.content)) {
+        resultContent.set(exchange.toolCallId, compacted);
+      }
+    }
+  }
+
   let changed = false;
   const pruned = input.map((message, index) => {
-    if (index >= protectedStart || !isToolResultMessage(message)) {
+    if (index >= protectedStart) return message;
+    if (String(message?.role || "").trim() === "assistant") {
+      if (!Array.isArray(message?.content) || callArguments.size === 0) {
+        return message;
+      }
+      let contentChanged = false;
+      const content = message.content.map((part: any) => {
+        if (
+          String(part?.type || "")
+            .trim()
+            .toLowerCase() !== "toolcall"
+        ) {
+          return part;
+        }
+        const replacement = callArguments.get(
+          toolCallId(part?.id ?? part?.toolCallId),
+        );
+        if (replacement === undefined) return part;
+        contentChanged = true;
+        return { ...part, arguments: replacement };
+      });
+      if (!contentChanged) return message;
+      changed = true;
+      return { ...message, content };
+    }
+    if (!isToolResultMessage(message)) return message;
+    const id = toolCallId(message?.toolCallId);
+    if (protectedResults.has(id)) return message;
+    const customContent = resultContent.get(id);
+    const content =
+      customContent === undefined
+        ? omittedContentFor(message?.content)
+        : customContent;
+    if (isAlreadyOmitted(message?.content) && customContent === undefined) {
       return message;
     }
-    if (
-      isProtectedToolResult(message, protectedToolResultIds) ||
-      isAlreadyOmitted(message?.content)
-    ) {
-      return message;
-    }
+    if (sameJsonValue(content, message?.content)) return message;
     changed = true;
-    return {
-      ...message,
-      content: omittedContentFor(message?.content),
-    };
+    return { ...message, content };
   });
   return changed ? pruned : input;
 }
