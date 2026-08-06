@@ -164,6 +164,7 @@ test("self-improve skill usage stats detect and record read skill files", async 
       timestamp: "2026-05-27T00:01:00.000Z",
     });
     const stats = skillUsage.readSkillUsageStats(root);
+    assert.equal(stats.startedAt, "2026-05-27T00:00:00.000Z");
     assert.equal(stats.skills["demo-skill"].count, 2);
     assert.equal(
       stats.skills["demo-skill"].firstUsedAt,
@@ -175,6 +176,87 @@ test("self-improve skill usage stats detect and record read skill files", async 
     );
     assert.equal(stats.skills["demo-skill"].lastSessionId, "session-2");
     assert.equal(stats.skills["demo-skill"].lastPath, skillPath);
+  });
+});
+
+test("self-improve skill usage serializes concurrent writers", async () => {
+  await withTempRoot(async (root) => {
+    const originalNow = Date.now;
+    Date.now = () => 1785996000000;
+    try {
+      await Promise.all(
+        Array.from({ length: 24 }, (_, index) =>
+          skillUsage.recordSelfImproveSkillUsage({
+            agentDir: root,
+            skillName: index % 2 === 0 ? "skill-a" : "skill-b",
+            timestamp: `2026-08-06T08:00:${String(index).padStart(2, "0")}.000Z`,
+          }),
+        ),
+      );
+    } finally {
+      Date.now = originalNow;
+    }
+    const stats = skillUsage.readSkillUsageStats(root);
+    assert.equal(stats.skills["skill-a"].count, 12);
+    assert.equal(stats.skills["skill-b"].count, 12);
+  });
+});
+
+test("self-improve skill usage rebuilds a damaged aggregate from its event ledger", async () => {
+  await withTempRoot(async (root) => {
+    await skillUsage.recordSelfImproveSkillUsage({
+      agentDir: root,
+      skillName: "recoverable-skill",
+      timestamp: "2026-08-06T08:10:00.000Z",
+    });
+    await skillUsage.recordSelfImproveSkillUsage({
+      agentDir: root,
+      skillName: "recoverable-skill",
+      timestamp: "2026-08-06T08:11:00.000Z",
+    });
+    await fs.writeFile(skillUsage.skillUsageStatsPath(root), "{broken", "utf8");
+
+    const stats = skillUsage.readSkillUsageStats(root);
+    assert.equal(stats.startedAt, "2026-08-06T08:10:00.000Z");
+    assert.equal(stats.updatedAt, "2026-08-06T08:11:00.000Z");
+    assert.equal(stats.skills["recoverable-skill"].count, 2);
+    assert.match(
+      await fs.readFile(skillUsage.skillUsageEventsPath(root), "utf8"),
+      /recoverable-skill/,
+    );
+  });
+});
+
+test("self-improve skill usage preserves a legacy aggregate as the event-ledger baseline", async () => {
+  await withTempRoot(async (root) => {
+    const statsPath = skillUsage.skillUsageStatsPath(root);
+    await fs.mkdir(path.dirname(statsPath), { recursive: true });
+    await fs.writeFile(
+      statsPath,
+      `${JSON.stringify({
+        version: 1,
+        updatedAt: "2026-08-01T00:00:00.000Z",
+        skills: {
+          "legacy-skill": {
+            name: "legacy-skill",
+            count: 5,
+            firstUsedAt: "2026-07-01T00:00:00.000Z",
+            lastUsedAt: "2026-08-01T00:00:00.000Z",
+          },
+        },
+      })}\n`,
+      "utf8",
+    );
+    await skillUsage.recordSelfImproveSkillUsage({
+      agentDir: root,
+      skillName: "legacy-skill",
+      timestamp: "2026-08-06T08:20:00.000Z",
+    });
+    await fs.writeFile(statsPath, "{broken", "utf8");
+
+    const recovered = skillUsage.readSkillUsageStats(root);
+    assert.equal(recovered.startedAt, "2026-07-01T00:00:00.000Z");
+    assert.equal(recovered.skills["legacy-skill"].count, 6);
   });
 });
 
@@ -544,63 +626,33 @@ test("self-improve distillation manual is the concise canonical contract", async
     "utf8",
   );
 
-  assert.ok(manual.length < 15_000, `manual is too long: ${manual.length}`);
+  assert.ok(manual.length < 6_500, `manual is too long: ${manual.length}`);
   for (const heading of [
-    "## Evidence and candidate contract",
-    "## Pass modes and read budget",
-    "## Workflow",
-    "## Destination order",
-    "## Validation and output",
+    "## Candidate",
+    "## Pass modes",
+    "## One loop",
+    "## Owners",
+    "## Acceptance",
   ]) {
     assert.match(manual, new RegExp(heading));
   }
-  assert.doesNotMatch(manual, /## Prompt brief/);
-  assert.doesNotMatch(manual, /## Core rule/);
-  assert.doesNotMatch(manual, /## Success criteria/);
-  assert.doesNotMatch(manual, /## Evaluation checks/);
-
-  assert.match(
-    manual,
-    /Memory preserves original evidence and supports retrieval/,
-  );
-  assert.match(manual, /Self-improve stores distilled target-state guidance/);
-  assert.match(manual, /\*\*Evidence:\*\*/);
-  assert.match(manual, /\*\*Trigger:\*\*/);
-  assert.match(manual, /\*\*Target behavior:\*\*/);
-  assert.match(manual, /\*\*Owning surface:\*\*/);
-  assert.match(
-    manual,
-    /Extract candidates before reading self-improve artifacts/,
-  );
-  assert.match(manual, /Turn-window pass:/);
-  assert.match(manual, /Nightly-retrospective pass:/);
-  assert.match(
-    manual,
-    /Do not read every prompt baseline, skill body, memory index, short-term record, or usage file by default/,
-  );
-  assert.match(
-    manual,
-    /Any net growth requires evidence that no current owner can absorb the candidate/,
-  );
+  assert.match(manual, /Memory preserves evidence/);
+  assert.match(manual, /Self-improve stores the smallest future behavior/);
+  assert.match(manual, /Evidence, trigger, behavior, and owner/);
+  assert.match(manual, /Turn-window/);
+  assert.match(manual, /Nightly owns global prompt and skill entropy/);
+  assert.match(manual, /state\/skill-usage\.json/);
+  assert.match(manual, /startedAt/);
+  assert.match(manual, /Usage is a signal, never a deletion verdict/);
+  assert.match(manual, /fully absorbed by another owner|retired mechanism/);
   assert.match(manual, /before\/after bytes.*skill count/);
   assert.match(manual, /one-in-one-out/);
-  assert.match(
-    manual,
-    /exact owner wording, behavior keywords, old abstraction names, and likely synonyms/,
-  );
-  assert.match(manual, /delete or rewrite.*before considering new guidance/);
   assert.match(manual, /future-trigger replay/);
-  assert.match(manual, /wrong owner or behavior.*pass is not done/);
-  assert.match(manual, /Do not preserve a bad rule with patch-layer/);
   assert.match(manual, /user_profile.*stable facts only/);
-  assert.match(manual, /memory-index does not carry executable procedure/);
+  assert.match(manual, /memory-index.*provenance/);
   assert.match(manual, /short-term-memory\/records/);
   assert.match(manual, /skill-creator/);
-  assert.doesNotMatch(
-    manual,
-    /Run audit evidence|run-audits|maintenance-history/,
-  );
-  assert.match(manual, /one concise unchanged reason/);
+  assert.doesNotMatch(manual, /run-audits|maintenance-history/);
 });
 
 test("automatic self-improve handlers require persisted sessions", async () => {
