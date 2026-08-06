@@ -2362,6 +2362,7 @@ test("cron scheduler installs built-in daily memory and self-improve distillatio
       sleep.target.prompt,
       /Evidence scope: Rin session records from the previous 24 hours/,
     );
+    assert.match(sleep.target.prompt, /Pass mode: nightly-retrospective\./);
     assert.ok(
       sleep.target.prompt.length < 350,
       `sleep prompt is too long: ${sleep.target.prompt.length}`,

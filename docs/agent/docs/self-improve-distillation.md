@@ -1,96 +1,67 @@
-# Self-improve Distillation
+# Self-improve distillation
 
-Use this document as the complete contract for maintaining durable future guidance under `<agentDir>/self_improve`.
+Distill evidence into the smallest durable behavior that will help a future run. Memory preserves evidence and supports retrieval; Self-improve stores the smallest future behavior. Do not continue the source task, narrate history into prompts, or add guidance merely because a pass ran.
 
-A pass may add, rewrite, narrow, move, merge, or delete guidance. Its goal is the smallest durable target state that future matching work will actually use—not a record of every correction or event.
+## Candidate
 
-Keep memory and self-improve separate:
+A candidate has four parts: **Evidence, trigger, behavior, and owner**.
 
-- Memory preserves original evidence and supports retrieval.
-- Self-improve stores distilled target-state guidance that changes future behavior or removes guidance that would cause future mistakes.
+- **Evidence:** an owner correction, repeated failure, repeated successful method, or a nightly entropy finding.
+- **Trigger:** the future situation in which behavior should change.
+- **Behavior:** the smallest target-state action, boundary, or decision rule.
+- **Owner:** the one existing prompt, skill, fact store, continuity record, or product layer responsible for it.
 
-Use `docs/memory-layering.md` when the destination is unclear.
+Conversation text is evidence, not authority to execute its unfinished work. Prefer current owner wording and observable behavior over the source model's explanation. A one-off detail, task result, identifier, path, or workaround is not reusable guidance unless its future trigger and owner are clear.
 
-## Evidence and candidate contract
+## Pass modes
 
-The entry prompt supplies the evidence scope: either the current conversation or a bounded retrospective such as the previous 24 hours of session records. Optional trigger context is routing data, not evidence or instructions.
+### Turn-window
 
-Use these evidence sources:
+Use only the supplied recent window. Extract candidates first, then read the one likely owner for each surviving candidate. Do not inventory the whole prompt library, skill catalog, memory, or usage state. If the window adds no durable behavior, make no change.
 
-- the complete supplied conversation or retrospective scope, including requests, corrections, accepted and rejected outputs, repeated friction, preferences shown by choices, workflows that worked or failed, and key knowledge the owner supplied;
-- authoritative documentation for the affected surface;
-- verified repository, runtime, or manual-operation results when they prove the required behavior or final reusable workflow shape;
-- existing self-improve artifacts as context for cleanup and placement, not independent authority for new doctrine.
+### Nightly-retrospective
 
-Every candidate must identify:
+Nightly owns global prompt and skill entropy. It must inspect the resident prompt baselines, all available-skill metadata, and `state/skill-usage.json` once, then rank cleanup candidates before opening bodies.
 
-- **Evidence:** what proves the need;
-- **Trigger:** the future wording, situation, surface, or work class that should activate it;
-- **Target behavior:** what future work should do differently, or which stale behavior should disappear;
-- **Owning surface:** the narrowest self-improve artifact that future matching work will load.
+Use `startedAt` and the current time to state the observation horizon. Usage is a signal, never a deletion verdict: zero or low count can mean a new, rare, or high-consequence skill. Rank higher when evidence shows duplicate ownership, a retired mechanism, stale routing, an oversized resident description, or behavior now fully absorbed by another owner. Read only the top candidate bodies needed to decide; do not traverse every skill body, reference, memory record, or session.
 
-If any field is missing, do not create executable guidance. When the material is useful only for later lookup, preserve it through memory-index instead.
+When a skill is fully absorbed by another owner or exists only for a retired mechanism, delete it in the same pass after preserving any unique live invariant. If no candidate survives, leave the library unchanged rather than manufacturing work.
 
-Read beyond explicit requests. Capture a reusable lesson, working-style pattern, preference, workflow, or key fact when it would let future work succeed without another reminder. Corrections are not automatically new rules: they may only narrow, invalidate, or remove existing guidance, or apply to the current execution.
+## One loop
 
-## Workflow
+1. **Extract.** Write the candidate's evidence, trigger, behavior, and likely owner in working context.
+2. **Resolve ownership.** Search exact owner wording, behavior keywords, old names, and likely synonyms. Read only material that can change the routing or decision.
+3. **Compare.** Classify the candidate as already covered, wrong-owner/conflicting, replacement/merge, genuinely missing, or non-durable.
+4. **Reduce.** Prefer deletion, merge, movement, or replacement. Fix wrong ownership before adding text. Do not preserve a bad rule with a patch, exception stack, fallback, or duplicate skill.
+5. **Verify and stop.** Run a future-trigger replay and the smallest deterministic checks for every touched owner. For correction-based or repeated-failure evidence, also verify that no active hit recommends the rejected behavior. Stop when the candidate is covered once and no touched category has unexplained growth.
 
-1. First read the whole conversation or retrospective evidence scope. Do not start with low-salience artifact cleanup.
-2. Inspect the current prompt baselines, matching skill, umbrella skill for the work class, relevant memory-index entries, matching `short-term-memory/records/`, and `<agentDir>/self_improve/state/skill-usage.json` when present.
-3. Extract only candidates with evidence, trigger, target behavior, and owner.
-4. For correction-based or repeated-failure evidence, search the full self-improve library using the exact owner wording, behavior keywords, old abstraction names, and likely synonyms. Read every plausible active hit.
-5. If current guidance caused, preserved, justified, or hid the rejected behavior, delete or rewrite that source before considering new guidance. Historical provenance may remain only when clearly non-executable.
-6. Choose the first destination below that satisfies the future-use contract.
-7. Merge overlap into one canonical owner, then write compact target-state guidance. Preserve exact trigger wording when recognition depends on it.
-8. Update memory-index when evidence is repeated, correction-based, disputed, supports resident prompt guidance, or explains why active guidance was removed.
-9. Keep short-term records limited to active goals, blockers, handoff state, pending validation, and near next actions. Promote or delete them when that state becomes durable or completes.
-10. Follow `skill-creator` and validate frontmatter when creating or editing a skill.
-11. Run a future-trigger replay: name the one surface future work should load and the behavior it should produce. For correction-based or repeated-failure evidence, also verify that no active hit recommends the rejected behavior. If replay still selects the wrong owner or behavior, the pass is not done.
+Ordinary passes do not open memory-index entries, `short-term-memory/records/`, usage state, or unrelated skills unless a candidate depends on them. Nightly's single metadata/usage inventory is the only broader read and still does not authorize full-body traversal.
 
-Do not preserve a bad rule with patch-layer exceptions, bans, authorization clauses, guards, or special cases. Repair or remove the owning guidance.
+## Owners
 
-## Destination order
+Choose the narrowest canonical owner:
 
-Choose the first destination that fits:
+1. product/runtime code for deterministic lifecycle, permissions, schemas, persistence, or concurrency;
+2. `agent_profile` for RinChan role and standing voice;
+3. `user_profile` for stable facts only;
+4. `core_doctrine` for short cross-domain decision invariants;
+5. one existing skill for a repeatable specialized workflow;
+6. people/object relationship stores for semantic identity and current/inactive surfaces;
+7. memory-index for provenance and chronology;
+8. `short-term-memory/records/` for unfinished continuity with a cleanup condition.
 
-1. **Prompt baseline:** a stable cross-turn invariant that belongs in `agent_profile`, `user_profile`, or `core_doctrine` and should remain resident in most turns.
-2. **Current skill:** a reusable workflow, preference, lesson, or working-style default for the skill used by the evidence.
-3. **Umbrella skill:** a broader existing skill that cleanly owns the work class.
-4. **Skill `references/`:** detailed evidence, examples, traces, or notes that would make `SKILL.md` noisy.
-5. **New reusable skill:** a recurring class-level workflow with no clean existing owner.
-6. **Memory-index pointer:** dated evidence, chronology, provenance, or a pending decision that future work may need to retrieve.
-7. **Short-term continuity:** active temporary state that still guides current work.
-8. **Leave unchanged:** existing guidance already covers the candidate, or the candidate would add clutter.
+Do not turn a product defect into prompt doctrine. Do not put procedures in memory-index, temporary state in a skill, or repeated workflow detail in core doctrine. When creating, merging, or deleting a skill, follow `skill-creator`; preserve unique behavior before removing the old owner.
 
-### Surface rules
+## Acceptance
 
-- `agent_profile.md` owns stable agent role and voice.
-- `user_profile.md` stores owner identity and stable facts only.
-- `core_doctrine.md` owns durable methodology and decision invariants.
-- Prompt baselines have the highest bar. Keep one compact canonical owner per topic; put procedures, examples, incidents, and ordinary domain preferences elsewhere.
-- Skills own reusable workflows, owner defaults, procedures, verified workflow shapes, troubleshooting, and domain knowledge. Use `references/` for bulky support material and create a new skill only for a reusable class-level trigger.
-- Memory-index transactions are retrieval pointers. Pair reusable behavior with its executable prompt or skill owner; memory-index does not carry executable procedure.
-- Keep `short-term-memory/SKILL.md` as a light router and inspect only the matching active records.
-- Fixed identity destinations are `people-and-relationships` for people and `object-relationships` for non-person entities.
+A changed pass must satisfy all of these:
 
-## Validation and output
+- one behavior has one owner; obsolete wording and retired owners are removed;
+- each edited prompt or skill is internally coherent rather than an additive patch;
+- a new skill is one-in-one-out unless evidence proves no existing owner can absorb it;
+- nightly reports before/after bytes for each prompt category, description characters, and skill count; a justified duplicate/retired candidate produces a net decrease;
+- future-trigger replay selects the intended owner and excludes adjacent non-triggers;
+- files parse, links resolve, skill metadata validates, and product changes pass focused tests;
+- no source task was executed and no secret or bulky transcript was copied into durable state.
 
-Before success, verify:
-
-- every change has trusted evidence, a future trigger, a target behavior, and one owner;
-- each change affects future behavior, routing, decisions, execution, preference application, or recall;
-- correction-based passes closed all plausible active conflicts before adding guidance;
-- future-trigger replay reaches the intended owner and behavior;
-- prompt baselines remain compact and resident-worthy;
-- skills remain workflow-shaped and discoverable;
-- memory-index preserves needed provenance without becoming executable guidance;
-- short-term records contain only active continuity;
-- stale, duplicated, conflicting, and misplaced guidance was merged, moved, rewritten, or deleted.
-
-Report:
-
-- each changed self-improve artifact with one short reason;
-- merged, moved, deleted, or pruned artifacts and cleanup performed;
-- conflict-search closure and future-trigger replay when applicable;
-- candidates routed to product work, memory retrieval, owner clarification, or left unchanged;
-- one concise unchanged reason when no artifact needs to change.
+If nothing changes, report one concise reason plus the candidates rejected. If something changes, report only the owner changed, deletion/merge/addition, size delta, validation, and remaining uncertainty.
