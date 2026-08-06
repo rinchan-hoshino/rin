@@ -1642,7 +1642,7 @@ test("chat controller can deliver image-only builtin command parts", async () =>
   ]);
 });
 
-test("chat controller starts command reactions from backend Working state", async () => {
+test("chat controller suppresses ordinary Working for manual compaction", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];
   const reactions = [];
@@ -1703,19 +1703,15 @@ test("chat controller starts command reactions from backend Working state", asyn
   await commandStartedPromise;
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(controller.currentTurn?.incomingMessageId, "m-compact");
-  assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
-  assert.deepEqual(reactions, [["create", "2", "m-compact", "🤔"]]);
+  assert.deepEqual(actions, []);
+  assert.deepEqual(reactions, []);
 
   releaseCommand();
   await command;
 
   assert.equal(controller.currentTurn, null);
-
-  assert.deepEqual(reactions, [
-    ["create", "2", "m-compact", "🤔"],
-    ["delete", "2", "m-compact", "🤔", "1"],
-  ]);
+  assert.deepEqual(actions, []);
+  assert.deepEqual(reactions, []);
   assert.deepEqual(deliveries, []);
 });
 
@@ -3581,11 +3577,28 @@ test("chat controller suppresses /compact acknowledgement but keeps configured /
   }
 });
 
-test("chat controller marks /compact processed from compaction completion notice", async () => {
+test("chat controller completes manual /compact from its command response", async () => {
   const controller = await createController("telegram/1:2");
+  const actions = [];
+  const reactions = [];
+  const editableTicks = [];
   const deliveries = [];
-  controller.app.bots[0].sendMessage = async (chatId, content) => {
-    deliveries.push({ chatId, content });
+  controller.app.bots[0].workingIndicators = [
+    testPollingIndicator(actions, reactions),
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick() {
+        editableTicks.push("tick");
+        return true;
+      },
+      async end() {
+        return false;
+      },
+    },
+  ];
+  controller.app.bots[0].sendMessage = async (chatId, content, options) => {
+    deliveries.push({ chatId, content, options });
     return [`compact-${deliveries.length}`];
   };
 
@@ -3621,12 +3634,25 @@ test("chat controller marks /compact processed from compaction completion notice
     compact: async () => {
       await controller.handleClientEvent({
         type: "ui",
+        payload: { type: "backend_working_state", working: true },
+      });
+      await controller.handleClientEvent({
+        type: "ui",
         payload: { type: "compaction_start", reason: "manual" },
+      });
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: {
+          type: "compaction_end",
+          reason: "manual",
+          aborted: false,
+        },
       });
       await new Promise((resolve) => setImmediate(resolve));
       return {
         handled: true,
         text: "Compacted session.",
+        tokensBefore: 77625,
         sessionFile,
       };
     },
@@ -3637,66 +3663,125 @@ test("chat controller marks /compact processed from compaction completion notice
   };
 
   await controller.runCommand("/compact", "m-compact", "m-compact");
-  let stored = getChatMessage(
+  const stored = getChatMessage(
     controller.agentDir,
     controller.chatKey,
     "m-compact",
   );
   assert.ok(stored?.acceptedAt);
-  assert.equal(stored?.processedAt, undefined);
-
-  await controller.handleClientEvent({
-    type: "ui",
-    payload: {
-      type: "compaction_end",
-      reason: "manual",
-      aborted: false,
-      tokensBefore: 77625,
-    },
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  stored = getChatMessage(controller.agentDir, controller.chatKey, "m-compact");
   assert.ok(
     stored?.processedAt,
-    "completion notice delivery should mark the original /compact processed",
+    "the awaited compact response should mark the original /compact processed",
   );
-  assert.deepEqual(deliveries, [
-    {
-      chatId: "2",
-      content: [
-        {
-          type: "quote",
-          attrs: {
-            id: "m-compact",
+  assert.deepEqual(actions, []);
+  assert.deepEqual(reactions, []);
+  assert.deepEqual(editableTicks, []);
+  assert.deepEqual(
+    deliveries.map(({ chatId, content }) => ({ chatId, content })),
+    [
+      {
+        chatId: "2",
+        content: [
+          {
+            type: "quote",
+            attrs: {
+              id: "m-compact",
+            },
           },
-        },
-        {
-          type: "markdown",
-          attrs: {
-            content: "Compacting...",
+          {
+            type: "markdown",
+            attrs: {
+              content: "Compacting...",
+            },
           },
-        },
-      ],
-    },
-    {
-      chatId: "2",
-      content: [
-        {
-          type: "quote",
-          attrs: {
-            id: "m-compact",
+        ],
+      },
+      {
+        chatId: "2",
+        content: [
+          {
+            type: "quote",
+            attrs: {
+              id: "m-compact",
+            },
           },
-        },
-        {
-          type: "markdown",
-          attrs: {
-            content: "Compacted from 77,625 tokens",
+          {
+            type: "markdown",
+            attrs: {
+              content: "Compacted from 77,625 tokens",
+            },
           },
-        },
-      ],
-    },
-  ]);
+        ],
+      },
+    ],
+  );
+  assert.deepEqual(
+    deliveries.map(({ options }) => ({
+      deliveryKind: options?.deliveryKind,
+      coalesceWithWorkingMessage: options?.coalesceWithWorkingMessage,
+      exclusiveProgressMessage: options?.exclusiveProgressMessage,
+    })),
+    [
+      {
+        deliveryKind: "interim",
+        coalesceWithWorkingMessage: true,
+        exclusiveProgressMessage: true,
+      },
+      {
+        deliveryKind: "interim",
+        coalesceWithWorkingMessage: true,
+        exclusiveProgressMessage: true,
+      },
+    ],
+  );
+});
+
+test("chat controller rejoins concurrent manual compaction completion producers", async () => {
+  const controller = await createController("telegram/1:2");
+  controller.activeCommandTurnInput = {
+    commandName: "compact",
+    incomingMessageId: "m-compact",
+    replyToMessageId: "m-compact",
+  };
+  controller.compactionTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: "m-provider",
+    replyToMessageId: "m-compact",
+    ackIncomingMessageId: "m-compact",
+    ackReplyToMessageId: "m-compact",
+  };
+
+  let completionProjections = 0;
+  let releaseFirst = () => {};
+  let firstStarted = () => {};
+  const firstStartedPromise = new Promise((resolve) => {
+    firstStarted = resolve;
+  });
+  const releaseFirstPromise = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  controller.sendCompactionInterimNow = async () => {
+    completionProjections += 1;
+    if (completionProjections === 1) {
+      firstStarted();
+      await releaseFirstPromise;
+    }
+    return true;
+  };
+
+  const nativeEnd = controller.deliverCompactionEndNotice(
+    "Compacted from 77,625 tokens",
+  );
+  await firstStartedPromise;
+  const commandResponse = controller.deliverCompactionEndNotice(
+    "Compacted from 77,625 tokens",
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseFirst();
+  await Promise.all([nativeEnd, commandResponse]);
+
+  assert.equal(completionProjections, 1);
+  assert.equal(controller.compactionTurn, null);
 });
 
 test("chat controller leaves prompt-versus-steer admission to Pi", async () => {

@@ -141,6 +141,7 @@ type ChatTurnTarget = {
   text?: string;
   submittedText?: string;
   requestTag?: string;
+  commandName?: string;
   outboxTurnFence?: ChatOutboxTurnFence;
 };
 
@@ -165,6 +166,7 @@ type ChatAssistantDelivery = {
   deliveryKind?: "final" | "interim" | "passive_notice" | "error";
   parts: ChatMessagePart[];
   coalesceWithWorkingMessage?: boolean;
+  exclusiveProgressMessage?: boolean;
   sessionFile?: string;
   sessionBinding?: "conversation";
 };
@@ -372,6 +374,7 @@ export class ChatController {
   private presentationIncomingMessageId = "";
   private presentationReplyToMessageId = "";
   compactionTurn: ChatTurnMeta | null = null;
+  private compactionEndDelivery: Promise<boolean> | null = null;
   compactionWorkingIndicators: WorkingIndicator[] = [];
   lastCompactionIndicatorAt = 0;
   lastCompactionTypingIndicatorAt = 0;
@@ -1107,6 +1110,7 @@ export class ChatController {
     incomingMessageId?: string;
     replyToMessageId?: string;
     requestTag?: string;
+    commandName?: string;
     outboxTurnFence?: ChatOutboxTurnFence;
   }) {
     const outboxTurnFence =
@@ -1122,12 +1126,17 @@ export class ChatController {
           input.incomingMessageId,
           outboxTurnFence,
         ),
+      commandName: safeString(input.commandName).trim() || undefined,
       outboxTurnFence,
     };
   }
 
   private clearActiveCommandTurnInput() {
     this.activeCommandTurnInput = null;
+  }
+
+  private ownsManualCompactionPresentation() {
+    return this.activeCommandTurnInput?.commandName === "compact";
   }
 
   ownsOutboxTurnFence(fence?: ChatOutboxTurnFence) {
@@ -2375,6 +2384,7 @@ export class ChatController {
       waitUntilDeliverySettled?: boolean;
       requireDelivery?: boolean;
       coalesceWithWorkingMessage?: boolean;
+      exclusiveProgressMessage?: boolean;
       replyToMessageId?: string;
       turnFence?: ChatOutboxTurnFence;
     } = {},
@@ -2397,6 +2407,9 @@ export class ChatController {
           ),
           ...(options.coalesceWithWorkingMessage
             ? { coalesceWithWorkingMessage: true }
+            : {}),
+          ...(options.exclusiveProgressMessage
+            ? { exclusiveProgressMessage: true }
             : {}),
           ...this.currentConversationSessionPayload(),
         },
@@ -2738,9 +2751,12 @@ export class ChatController {
   }
 
   private async finishCompactionNotice() {
+    const resumeWorking = !this.ownsManualCompactionPresentation();
     await this.clearCompactionWorkingReaction().catch(() => false);
     this.compactionTurn = null;
-    await this.refreshEditableWorkingNotice().catch(() => false);
+    if (resumeWorking) {
+      await this.refreshEditableWorkingNotice().catch(() => false);
+    }
   }
 
   private compactionAckTarget() {
@@ -2755,6 +2771,21 @@ export class ChatController {
   }
 
   private async deliverCompactionEndNotice(text: string) {
+    const inFlight = this.compactionEndDelivery;
+    if (inFlight) return await inFlight;
+    const delivery = this.performCompactionEndNotice(text);
+    this.compactionEndDelivery = delivery;
+    try {
+      return await delivery;
+    } finally {
+      if (this.compactionEndDelivery === delivery) {
+        this.compactionEndDelivery = null;
+      }
+    }
+  }
+
+  private async performCompactionEndNotice(text: string) {
+    const manualCompaction = this.ownsManualCompactionPresentation();
     const ackTarget = this.compactionAckTarget();
     const coalesceReplyToMessageId = safeString(
       this.compactionTurn?.replyToMessageId || "",
@@ -2778,6 +2809,7 @@ export class ChatController {
               : {}),
           }
         : {}),
+      ...(manualCompaction ? { exclusiveProgressMessage: true } : {}),
       ...(ackTarget
         ? {
             postDelivery: {
@@ -2810,7 +2842,8 @@ export class ChatController {
     const coalesceReplyToMessageId =
       this.currentReplyToMessageId() || ackReplyToMessageId || undefined;
 
-    if (this.hasEditableWorkingIndicator()) {
+    const manualCompaction = this.ownsManualCompactionPresentation();
+    if (!manualCompaction && this.hasEditableWorkingIndicator()) {
       this.ensureVisibleCommandTurn();
       const incomingMessageId =
         this.currentIncomingMessageId() || ackIncomingMessageId;
@@ -2839,6 +2872,7 @@ export class ChatController {
           chatKey: this.chatKey,
           deliveryKind: "interim",
           coalesceWithWorkingMessage: true,
+          ...(manualCompaction ? { exclusiveProgressMessage: true } : {}),
           parts: withChatQuotePart(
             [{ type: "text", text: trimmed }],
             coalesceReplyToMessageId,
@@ -2848,6 +2882,7 @@ export class ChatController {
         {
           deliveryKind: "interim",
           coalesceWithWorkingMessage: true,
+          ...(manualCompaction ? { exclusiveProgressMessage: true } : {}),
           waitForDeliveryMs: 1000,
         },
       );
@@ -2861,12 +2896,14 @@ export class ChatController {
           ackIncomingMessageId: ackIncomingMessageId || undefined,
           ackReplyToMessageId: ackReplyToMessageId || undefined,
         };
-        const marker = this.startCompactionWorkingMarker().catch(() => false);
-        const poll = this.pollCompactionTyping().catch(() => false);
-        await Promise.race([
-          Promise.all([marker, poll]),
-          new Promise((resolve) => setImmediate(resolve)),
-        ]);
+        if (!manualCompaction) {
+          const marker = this.startCompactionWorkingMarker().catch(() => false);
+          const poll = this.pollCompactionTyping().catch(() => false);
+          await Promise.race([
+            Promise.all([marker, poll]),
+            new Promise((resolve) => setImmediate(resolve)),
+          ]);
+        }
       }
       return true;
     } catch {
@@ -3058,6 +3095,7 @@ export class ChatController {
     this.setActiveCommandTurnInput({
       incomingMessageId,
       replyToMessageId,
+      commandName,
       outboxTurnFence: outboxTurnFence || getActiveChatOutboxTurnFence(),
     });
     try {
@@ -3119,6 +3157,9 @@ export class ChatController {
         .join("\n");
 
       if (commandName === "compact") {
+        if (text && this.compactionTurn) {
+          await this.deliverCompactionEndNotice(text);
+        }
         return text ? { ...data, text } : data;
       }
 
@@ -3622,6 +3663,7 @@ export class ChatController {
       case "frontend_status":
         return;
       case "working_state": {
+        if (this.ownsManualCompactionPresentation()) return;
         void Promise.all([
           event.working
             ? this.startBackendWorkingMarker()

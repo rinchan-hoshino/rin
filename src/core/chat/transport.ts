@@ -711,6 +711,9 @@ export function sendOutboxPayload(
         ...(payload.coalesceWithWorkingMessage
           ? { coalesceWithWorkingMessage: true }
           : {}),
+        ...(payload.exclusiveProgressMessage
+          ? { exclusiveProgressMessage: true }
+          : {}),
         ...(outboxId ? { outboxId } : {}),
       });
       const providerDispatched = getChatDeliveryDispatchPromise(chatDelivery);

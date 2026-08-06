@@ -335,6 +335,7 @@ export class EditableTextMessageGroup {
     kind?: string;
     todoText?: string;
     todoTextChunks?: string[];
+    exclusive?: boolean;
     key?: string;
   }) {
     const chatId = safeString(input.chatId).trim();
@@ -367,6 +368,7 @@ export class EditableTextMessageGroup {
           : fallbackTodoText
             ? [fallbackTodoText]
             : [],
+        exclusive: input.exclusive,
         finalize,
       });
       const chunks = this.textChunks(composeEditableMessageText(sections));

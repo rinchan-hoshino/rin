@@ -1208,6 +1208,7 @@ class TelegramAdapter {
     replyToMessageId?: string;
     key?: string;
     kind?: string;
+    exclusive?: boolean;
   }) {
     return await this.editableWorking.updateText({
       chatId: safeString(input?.chatId).trim(),
@@ -1215,6 +1216,7 @@ class TelegramAdapter {
       replyToMessageId: safeString(input?.replyToMessageId).trim() || undefined,
       key: safeString(input?.key).trim() || undefined,
       kind: safeString(input?.kind).trim() || undefined,
+      exclusive: input?.exclusive === true,
     });
   }
 
@@ -1335,6 +1337,7 @@ class TelegramAdapter {
                 // progress artifact and are delivered as fresh messages.
                 // Non-coalesced passive notices stay isolated on the passive_notice key.
                 key: deliveryKey,
+                exclusive: options?.exclusiveProgressMessage === true,
                 kind:
                   deliveryKind === "passive_notice"
                     ? "todo"

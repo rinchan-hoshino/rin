@@ -1236,6 +1236,7 @@ export class DiscordAdapter {
               text,
               replyToMessageId: firstReply,
               finalize: false,
+              exclusive: options?.exclusiveProgressMessage === true,
               kind:
                 deliveryKind === "passive_notice"
                   ? "todo"
@@ -1940,6 +1941,7 @@ export class SlackAdapter {
               text,
               replyToMessageId,
               finalize: false,
+              exclusive: options?.exclusiveProgressMessage === true,
               kind:
                 deliveryKind === "passive_notice"
                   ? "todo"

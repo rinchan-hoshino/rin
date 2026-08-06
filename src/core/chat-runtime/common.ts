@@ -292,6 +292,7 @@ export function updateEditableMessageSections(input: {
   persisted?: Partial<EditableMessageSections> | null;
   fallbackWorkingTextChunks?: string[];
   fallbackTodoTextChunks?: string[];
+  exclusive?: boolean;
   finalize?: boolean;
 }): EditableMessageSections {
   const kind = safeString(input.kind).trim() || "working";
@@ -302,6 +303,13 @@ export function updateEditableMessageSections(input: {
   const existingTodo = normalizeTextChunks(persisted.todoTextChunks);
   const fallbackWorking = normalizeTextChunks(input.fallbackWorkingTextChunks);
   const fallbackTodo = normalizeTextChunks(input.fallbackTodoTextChunks);
+  if (input.exclusive) {
+    return {
+      workingTextChunks: [],
+      contentTextChunks: nextTextChunks,
+      todoTextChunks: [],
+    };
+  }
   const section =
     kind === "todo"
       ? "todo"

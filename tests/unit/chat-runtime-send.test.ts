@@ -567,6 +567,76 @@ test("discord lifecycle end preserves editable progress until a fresh final repl
   });
 });
 
+test("discord adapter edits exclusive progress in place without a Working section", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "discord-token" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    const messages = new Map<string, any>();
+    let nextId = 1;
+    const channel = {
+      send: async (payload: any) => {
+        const id = String(nextId++);
+        const message = {
+          id,
+          payload,
+          edit: async (nextPayload: any) => {
+            calls.push({ method: "edit", id, payload: nextPayload });
+            message.payload = nextPayload;
+            return message;
+          },
+        };
+        messages.set(id, message);
+        calls.push({ method: "send", id, payload });
+        return message;
+      },
+      messages: {
+        fetch: async (id: string) => messages.get(id),
+        delete: async (id: string) => {
+          calls.push({ method: "delete", id });
+          messages.delete(id);
+        },
+      },
+    };
+    adapter.client = { channels: { fetch: async () => channel } };
+
+    const start = await app.bots[0].sendMessage(
+      "C1",
+      [h.quote("m-owner"), h.text("Compacting...")],
+      {
+        deliveryKind: "interim",
+        coalesceWithWorkingMessage: true,
+        exclusiveProgressMessage: true,
+      },
+    );
+    const end = await app.bots[0].sendMessage(
+      "C1",
+      [h.quote("m-owner"), h.text("Compacted from 108,642 tokens")],
+      {
+        deliveryKind: "interim",
+        coalesceWithWorkingMessage: true,
+        exclusiveProgressMessage: true,
+      },
+    );
+
+    assert.deepEqual(start, ["1"]);
+    assert.deepEqual(end, ["1"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["send", "edit"],
+    );
+    assert.equal(calls[0].payload.content, "Compacting...");
+    assert.equal(calls[0].payload.reply?.messageReference, "m-owner");
+    assert.equal(calls[1].id, "1");
+    assert.equal(calls[1].payload.content, "Compacted from 108,642 tokens");
+  });
+});
+
 test("discord adapter keeps todo unchanged while compaction replaces interim content", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {

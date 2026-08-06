@@ -49,6 +49,7 @@ export type ChatOutboxPayload = {
   chatKey: string;
   deliveryKind?: ChatDeliveryKind;
   coalesceWithWorkingMessage?: boolean;
+  exclusiveProgressMessage?: boolean;
   sessionId?: string;
   sessionFile?: string;
   sessionBinding?: "conversation";
@@ -65,6 +66,7 @@ export type ChatOutboxPayloadInput =
       requestId?: string;
       deliveryKind?: ChatDeliveryKind;
       coalesceWithWorkingMessage?: boolean;
+      exclusiveProgressMessage?: boolean;
       sessionId?: string;
       sessionFile?: string;
       sessionBinding?: "conversation";
