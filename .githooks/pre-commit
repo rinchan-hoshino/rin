@@ -13,15 +13,19 @@ format_targets="$({
   git diff --cached --name-only --diff-filter=ACMR
 } | grep -E '^(src|tests|scripts|extensions|docs)/.*\.(ts|md|json|yml|yaml)$|^\.github/workflows/.*\.(yml|yaml)$|^(README\.md|package(-lock)?\.json|tsconfig.*\.json|eslint\.config\.ts)$' || true)"
 
-image_tag="rin-local-ci:latest"
-
-echo "rin local ci: building container image..."
-docker build -f .ci/local-ci/Dockerfile -t "$image_tag" .
-
 tree_id="$(git write-tree)"
-
-echo "rin local ci: running format, lint, test in container..."
+image_tag="rin-local-ci:staged-${tree_id}"
 archive_file="$(mktemp)"
-trap 'rm -f "$archive_file"' EXIT
-git archive --format=tar "$tree_id" >"$archive_file"
-docker run --rm --network none --memory 4g --memory-swap 4g -e FORMAT_TARGETS_SET=1 -e FORMAT_TARGETS="$format_targets" -i "$image_tag" <"$archive_file"
+cleanup() {
+  rm -f "$archive_file"
+}
+trap cleanup EXIT
+git archive --format=tar --mtime=1970-01-01T00:00:00Z \
+  "$tree_id" >"$archive_file"
+
+echo "rin local ci: building container image from staged tree..."
+scripts/test/build-test-image.sh "$archive_file" "$image_tag"
+image_id="$(docker image inspect --format '{{.Id}}' "$image_tag")"
+
+echo "rin local ci: running format, lint, test from staged tree..."
+docker run --rm --network none --memory 4g --memory-swap 4g -e FORMAT_TARGETS_SET=1 -e FORMAT_TARGETS="$format_targets" "$image_id"

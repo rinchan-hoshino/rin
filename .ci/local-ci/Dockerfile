@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim
+FROM node:22.19.0-bookworm-slim AS dependencies
 
 WORKDIR /opt/rin
 
@@ -8,11 +8,19 @@ RUN apt-get update \
 
 COPY package.json package-lock.json ./
 COPY scripts/install-git-hooks.ts ./scripts/install-git-hooks.ts
+# The test gate compiles the Electron host but never launches Electron itself.
+# Avoid downloading an unused ~300 MiB desktop runtime on dependency refreshes.
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN npm ci
 RUN mkdir -p /root/.cache/rin/node-toolchain \
   && npm pack npm@10.9.3 --pack-destination /root/.cache/rin/node-toolchain >/dev/null
 
-COPY .ci/local-ci/run-checks.sh /usr/local/bin/rin-local-ci-runner
-RUN chmod +x /usr/local/bin/rin-local-ci-runner
+FROM dependencies AS test-runner
 
-ENTRYPOINT ["/usr/local/bin/rin-local-ci-runner"]
+COPY --chown=node:node . /opt/rin/source
+RUN ln -s /opt/rin/node_modules /opt/rin/source/node_modules \
+  && chown -h node:node /opt/rin/source/node_modules
+
+USER node
+
+ENTRYPOINT ["/opt/rin/source/.ci/local-ci/run-checks.sh"]

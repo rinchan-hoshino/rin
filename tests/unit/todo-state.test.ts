@@ -1,18 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 
-const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "..",
-  "..",
-);
-const todoState = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "todo-state.js"))
-    .href
-);
+import { importBuiltModule } from "../support/import-built-module.js";
+
+const todoState = await importBuiltModule<
+  typeof import("../../src/core/rin-lib/todo-state.js")
+>("dist/core/rin-lib/todo-state.js");
 
 function todoEntry(todos: any[], nextId = 1) {
   return {
@@ -32,6 +28,56 @@ function todoResult(todos: any[], nextId = 1) {
     },
   };
 }
+
+test("todo state keeps retired continuation helpers out of its runtime surface", () => {
+  for (const retired of [
+    "continueTodoFinalIfNeeded",
+    "buildTodoFinalContinuationPrompt",
+    "TODO_FINAL_CONTINUATION_MAX_TURNS",
+  ]) {
+    assert.equal((todoState as Record<string, unknown>)[retired], undefined);
+  }
+});
+
+test("todo state normalizes item and empty checklist inputs", () => {
+  assert.equal(todoState.normalizeRinTodoItem(null), undefined);
+  assert.equal(
+    todoState.normalizeRinTodoItem({ id: 0, text: "invalid" }),
+    undefined,
+  );
+  assert.equal(
+    todoState.normalizeRinTodoItem({ id: 1, text: "   " }),
+    undefined,
+  );
+  assert.deepEqual(
+    todoState.normalizeRinTodoItems([
+      { id: 2, text: " second ", done: 1 },
+      { id: "bad", text: "ignored" },
+    ]),
+    [{ id: 2, text: "second", done: true }],
+  );
+  assert.equal(todoState.normalizeRinTodoItems({}), undefined);
+  assert.equal(todoState.formatRinTodoItemText({ text: " item " }), "item");
+  assert.equal(todoState.formatRinTodoChecklistContent([]), "No todos");
+  assert.equal(todoState.formatRinTodoChecklistMarkdownContent([]), "No todos");
+  assert.equal(
+    todoState.formatRinTodoChecklistCharacterContent([]),
+    "No todos",
+  );
+});
+
+test("todo state falls back to agent messages and rejects invalid next ids", () => {
+  const snapshot = todoState.readTodoSnapshotFromSession({
+    agent: {
+      state: {
+        messages: [todoEntry([{ id: 2, text: "second", done: false }], 0)],
+      },
+    },
+  });
+  assert.deepEqual(snapshot.todos, [{ id: 2, text: "second", done: false }]);
+  assert.equal(snapshot.nextId, undefined);
+  assert.deepEqual(todoState.readTodoSnapshotFromSession({}).todos, []);
+});
 
 test("todo state reads the latest branch-aware custom entry", () => {
   const session = {
@@ -60,9 +106,7 @@ test("todo state reads the latest branch-aware custom entry", () => {
 });
 
 test("todo state reads the latest todo from the active session-file branch", async () => {
-  const tempDir = await fs.mkdtemp(
-    path.join(process.env.TMPDIR || "/tmp", "rin-todo-state-"),
-  );
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-todo-state-"));
   const sessionFile = path.join(tempDir, "branch.jsonl");
   const entries = [
     {
@@ -131,7 +175,7 @@ test("todo state reads the latest todo from the active session-file branch", asy
 
 test("todo state retries an expected user leaf with an incomplete ancestor chain", async () => {
   const tempDir = await fs.mkdtemp(
-    path.join(process.env.TMPDIR || "/tmp", "rin-todo-ancestors-"),
+    path.join(os.tmpdir(), "rin-todo-ancestors-"),
   );
   const sessionFile = path.join(tempDir, "ancestors.jsonl");
   const user = {
@@ -188,16 +232,14 @@ test("todo state retries an expected user leaf with an incomplete ancestor chain
 test("todo state leaves unavailable session files distinguishable from empty todo", async () => {
   assert.equal(
     await todoState.readTodoSnapshotFromSessionFile(
-      path.join(process.env.TMPDIR || "/tmp", "missing-rin-session.jsonl"),
+      path.join(os.tmpdir(), "missing-rin-session.jsonl"),
     ),
     undefined,
   );
 });
 
 test("todo state treats a partially written JSONL tail as retryable", async () => {
-  const tempDir = await fs.mkdtemp(
-    path.join(process.env.TMPDIR || "/tmp", "rin-todo-partial-"),
-  );
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-todo-partial-"));
   const sessionFile = path.join(tempDir, "partial.jsonl");
   const todo = {
     type: "custom",
@@ -286,10 +328,4 @@ test("todo state keeps completed text plain in character-only chat fallback", ()
   ]);
 
   assert.equal(content, "⬜ Open item\n✅ Done item");
-});
-
-test("todo state does not expose hidden final-continuation helpers", () => {
-  assert.equal(todoState.continueTodoFinalIfNeeded, undefined);
-  assert.equal(todoState.buildTodoFinalContinuationPrompt, undefined);
-  assert.equal(todoState.TODO_FINAL_CONTINUATION_MAX_TURNS, undefined);
 });

@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
 );
@@ -170,6 +170,37 @@ test("turn result final text extractor returns empty string when no text message
     "",
   );
   assert.equal(turnResult.extractFinalTextFromTurnResult(undefined), "");
+});
+
+test("turn result supports direct text fallbacks and explicit tool-call extraction", () => {
+  assert.deepEqual(
+    turnResult.resolveTurnCompletion({ finalText: " direct " }),
+    {
+      finalText: "direct",
+      result: { messages: [{ type: "text", text: "direct" }] },
+    },
+  );
+  assert.deepEqual(turnResult.resolveTurnCompletion({ finalText: " " }), {
+    finalText: "",
+    result: { messages: [] },
+  });
+  assert.deepEqual(
+    turnResult.buildTurnResultFromAssistantMessage({ role: "user" }),
+    { messages: [] },
+  );
+  assert.deepEqual(
+    turnResult.buildTurnResultFromAssistantMessage(
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "preface" },
+          { type: "toolCall", id: "one", name: "read", arguments: {} },
+        ],
+      },
+      { allowToolCalls: true },
+    ),
+    { messages: [{ type: "text", text: "preface" }] },
+  );
 });
 
 test("turn completion resolver prefers canonical result text over payload finalText", () => {

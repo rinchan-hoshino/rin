@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
 );
@@ -19,6 +19,64 @@ const frontendIdentityMod = await import(
     ),
   ).href
 );
+
+test("frontend identity normalization requires a kind and accepts legacy id keys", () => {
+  assert.equal(
+    frontendIdentityMod.normalizeFrontendIdentity(undefined),
+    undefined,
+  );
+  assert.equal(
+    frontendIdentityMod.normalizeFrontendIdentity({ kind: " " }),
+    undefined,
+  );
+  assert.deepEqual(
+    frontendIdentityMod.normalizeFrontendIdentity({ kind: " tui " }),
+    { kind: "tui" },
+  );
+  assert.deepEqual(
+    frontendIdentityMod.normalizeFrontendIdentity({
+      kind: "chat",
+      key: " room ",
+    }),
+    { kind: "chat", key: "room" },
+  );
+  assert.deepEqual(
+    frontendIdentityMod.normalizeFrontendIdentity({ kind: "chat", id: 42 }),
+    { kind: "chat", key: "42" },
+  );
+});
+
+test("frontend identity factories normalize source and chat keys", () => {
+  assert.deepEqual(frontendIdentityMod.chatFrontendIdentity(" room "), {
+    kind: "chat",
+    key: "room",
+  });
+  assert.equal(frontendIdentityMod.chatFrontendIdentity(" "), undefined);
+  assert.deepEqual(frontendIdentityMod.sourceFrontendIdentity(" "), {
+    kind: "frontend",
+  });
+  assert.deepEqual(frontendIdentityMod.sourceFrontendIdentity(" api "), {
+    kind: "api",
+  });
+  assert.equal(
+    frontendIdentityMod.sameFrontendIdentity(
+      { kind: "chat", key: " room " },
+      { kind: "chat", id: "room" },
+    ),
+    true,
+  );
+  assert.equal(
+    frontendIdentityMod.sameFrontendIdentity(
+      { kind: "chat", key: "a" },
+      { kind: "chat", key: "b" },
+    ),
+    false,
+  );
+  assert.equal(
+    frontendIdentityMod.sameFrontendIdentity(undefined, { kind: "chat" }),
+    false,
+  );
+});
 
 test("TUI frontend identities never retain address keys", () => {
   assert.deepEqual(

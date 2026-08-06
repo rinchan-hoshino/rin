@@ -1,19 +1,13 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
+import test from "node:test";
 
-const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "..",
-  "..",
-);
-const mod = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-lib", "memory-task-config.js"),
-  ).href
-);
+import { importBuiltModule } from "../support/import-built-module.js";
 
-test("memory task config fixes recall-related thinking at low", () => {
-  assert.equal(mod.MEMORY_TASK_THINKING_LEVEL, "low");
+const config = await importBuiltModule<{
+  MEMORY_TASK_THINKING_LEVEL: string;
+}>("dist/core/rin-lib/memory-task-config.js");
+
+test("memory tasks keep their low thinking-level contract", () => {
+  assert.equal(config.MEMORY_TASK_THINKING_LEVEL, "low");
+  assert.deepEqual(Object.keys(config), ["MEMORY_TASK_THINKING_LEVEL"]);
 });

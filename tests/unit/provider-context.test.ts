@@ -1,18 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 
-const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "..",
-  "..",
-);
-const providerContext = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-lib", "provider-context.js"),
-  ).href
-);
+import { importBuiltModule } from "../support/import-built-module.js";
+
+const providerContext = await importBuiltModule<
+  typeof import("../../src/core/rin-lib/provider-context.js")
+>("dist/core/rin-lib/provider-context.js");
 
 function padding(count: number, start = 0) {
   return Array.from({ length: count }, (_, index) => ({
@@ -191,7 +184,104 @@ test("provider-bound context policy owns token estimates", () => {
   assert.equal(tokens, 10);
 });
 
+test("provider-bound context normalizes estimates and stale usage around compaction", () => {
+  assert.equal(providerContext.normalizeContextTokenEstimate(12), 12);
+  assert.equal(
+    providerContext.normalizeContextTokenEstimate({ tokens: "7" }),
+    7,
+  );
+  assert.equal(
+    providerContext.normalizeContextTokenEstimate({ tokens: Infinity }),
+    0,
+  );
+  assert.equal(providerContext.normalizeContextTokenEstimate(null), 0);
+  assert.equal(
+    providerContext.estimateProviderBoundContextTokens([], undefined),
+    0,
+  );
+  assert.equal(
+    providerContext.stripStaleAssistantUsageAfterCompaction(null as any),
+    null,
+  );
+
+  const unchanged = [{ role: "assistant", usage: { input: 1 }, timestamp: 1 }];
+  assert.equal(
+    providerContext.stripStaleAssistantUsageAfterCompaction(unchanged),
+    unchanged,
+  );
+  const before = {
+    role: "assistant",
+    usage: { input: 2 },
+    timestamp: "2026-07-26T00:00:00.000Z",
+  };
+  const sameTime = {
+    role: "assistant",
+    usage: { input: 3 },
+    timestamp: "2026-07-27T00:00:00.000Z",
+  };
+  const after = {
+    role: "assistant",
+    usage: { input: 4 },
+    timestamp: "2026-07-28T00:00:00.000Z",
+  };
+  const invalid = {
+    role: "assistant",
+    usage: { input: 5 },
+    timestamp: "not-a-date",
+  };
+  const noUsage = { role: "assistant", timestamp: 1 };
+  const user = { role: "user", usage: { input: 9 }, timestamp: 1 };
+  const summaryOld = {
+    role: "compactionSummary",
+    timestamp: "2026-07-26T12:00:00.000Z",
+  };
+  const summary = {
+    role: "compactionSummary",
+    timestamp: "2026-07-27T00:00:00.000Z",
+  };
+  const stripped = providerContext.stripStaleAssistantUsageAfterCompaction([
+    null,
+    { role: "assistant", usage: { input: 6 }, timestamp: Infinity },
+    { role: "assistant", usage: { input: 7 }, timestamp: {} },
+    before,
+    summaryOld,
+    sameTime,
+    after,
+    invalid,
+    noUsage,
+    user,
+    summary,
+  ]);
+  assert.equal(stripped[0], null);
+  assert.equal(stripped[1].usage.input, 6);
+  assert.equal(stripped[2].usage.input, 7);
+  assert.equal("usage" in stripped[3], false);
+  assert.equal("usage" in stripped[5], false);
+  assert.equal(stripped[6], after);
+  assert.equal(stripped[7], invalid);
+  assert.equal(stripped[8], noUsage);
+  assert.equal(stripped[9], user);
+
+  const afterOnly = [
+    summary,
+    {
+      role: "assistant",
+      usage: { input: 8 },
+      timestamp: "2026-07-28T00:00:00.000Z",
+    },
+  ];
+  assert.equal(
+    providerContext.stripStaleAssistantUsageAfterCompaction(afterOnly),
+    afterOnly,
+  );
+});
+
 test("provider-bound context event uses the same bucket policy surface", () => {
+  assert.equal(providerContext.buildProviderBoundContextEvent(null), undefined);
+  assert.equal(
+    providerContext.buildProviderBoundContextEvent({ messages: [] }),
+    undefined,
+  );
   const messages = [
     { role: "toolResult", content: "huge old output" },
     ...padding(4, 1),

@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-workdir="$(mktemp -d)"
-trap 'rm -rf "$workdir"' EXIT
-
-mkdir -p "$workdir/repo"
-tar -xf - -C "$workdir/repo"
-cd "$workdir/repo"
-ln -s /opt/rin/node_modules node_modules
+cd /opt/rin/source
 export PATH="/opt/rin/node_modules/.bin:$PATH"
 export RIN_INSTALL_TUI_CONTAINER_INNER=1
+export RIN_SYSTEM_TEST_CONTAINER_INNER=1
 
 if [[ "${FORMAT_TARGETS_SET:-}" == "1" ]]; then
   mapfile -t format_targets < <(printf '%s\n' "${FORMAT_TARGETS:-}" | sed '/^$/d')
@@ -23,7 +18,19 @@ else
 fi
 
 npm run lint
+npm run build
+npm run test:types:run
 
 ci_timeout="45m"
-echo "Running npm test with ${ci_timeout} timeout..."
-timeout --foreground "$ci_timeout" npm test
+echo "Running the complete test gate with ${ci_timeout} timeout..."
+timeout --foreground "$ci_timeout" bash -c '
+  npm run test:release:run &&
+  npm run test:architecture:run &&
+  npm run test:acceptance:run &&
+  npm run test:property:run &&
+  # Coverage ownership already executes every regression, integration, and
+  # system test once, either as a direct owner or in the combined behavior run.
+  # Characterization remains intentionally isolated from coverage.
+  npm run test:inner &&
+  npm run test:characterization:run
+'

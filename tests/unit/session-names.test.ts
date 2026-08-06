@@ -1,21 +1,35 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import test from "node:test";
 
-const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "../..",
-);
-const names = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "session", "names.js")).href
-);
-const listing = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "session", "listing.js"))
-    .href
-);
+import { importBuiltModule } from "../support/import-built-module.js";
+
+const names = await importBuiltModule<
+  typeof import("../../src/core/session/names.js")
+>("dist/core/session/names.js");
+
+test("session display names prefer rename, first message, then fallback", () => {
+  assert.equal(
+    names.resolveSessionDisplayName(
+      { currentName: " Renamed ", firstUserMessage: "Question" },
+      "fallback",
+    ),
+    "Renamed",
+  );
+  assert.equal(
+    names.resolveSessionDisplayName(
+      { currentName: " ", firstUserMessage: " Question " },
+      "fallback",
+    ),
+    "Question",
+  );
+  assert.equal(names.resolveSessionDisplayName(null, " fallback "), "fallback");
+  assert.equal(names.resolveSessionDisplayName(null), "");
+  assert.equal(names.normalizeSessionNameDetail(" "), "");
+  assert.equal(names.normalizeSessionNameDetail("abcd", 3), "ab…");
+});
 
 test("readSessionDisplayNameParts combines latest rename with first user message", async () => {
   const sessionDir = await fs.mkdtemp(
@@ -233,36 +247,4 @@ test("session display readers return empty parts for blank or missing paths", ()
     },
   );
   assert.equal(names.readFirstUserMessageFromSessionFile(""), "");
-});
-
-test("session display helpers keep name fallback rules consistent", () => {
-  assert.equal(
-    listing.getBoundSessionDisplayTitle({
-      name: " Renamed title ",
-      firstMessage: " First question ",
-      path: "/tmp/demo.jsonl",
-      modified: new Date("2026-04-19T00:00:00.000Z"),
-    }),
-    "Renamed title",
-  );
-  assert.equal(
-    listing.getBoundSessionDisplayTitle({
-      firstMessage: " First question ",
-      path: "/tmp/demo.jsonl",
-      modified: new Date("2026-04-19T00:00:00.000Z"),
-    }),
-    "First question",
-  );
-  assert.equal(
-    listing.getBoundSessionDisplayTitle({
-      path: "/tmp/demo.jsonl",
-      modified: new Date("2026-04-19T00:00:00.000Z"),
-    }),
-    "/tmp/demo.jsonl",
-  );
-  assert.equal(
-    listing.getBoundSessionDisplayTitle({ id: " legacy-session " }),
-    "legacy-session",
-  );
-  assert.equal(listing.getBoundSessionDisplayTitle({}), "Untitled session");
 });

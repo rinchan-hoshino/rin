@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
 );
@@ -789,6 +789,132 @@ test("frontend backend event translator keeps retry schedules silent without ter
       },
     ],
   );
+});
+
+test("frontend backend event translator covers wrapper, optional-status, and untagged branches", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "ui",
+      payload: {
+        type: "rpc_frontend_status",
+        phase: "unknown",
+        label: " ",
+        connected: "yes",
+        turnActive: null,
+        isStreaming: 1,
+      },
+    }),
+    [
+      {
+        type: "status",
+        phase: "idle",
+        label: undefined,
+        connected: undefined,
+        turnActive: undefined,
+        isStreaming: undefined,
+      },
+    ],
+  );
+  for (const phase of ["compacting", "idle"]) {
+    const [event] = translator.translate({
+      type: "rpc_frontend_status",
+      phase,
+    });
+    assert.equal(event?.type, "status");
+    if (event?.type === "status") assert.equal(event.phase, phase);
+  }
+  assert.deepEqual(translator.translate({ type: "extension_ui_request" }), []);
+  assert.deepEqual(
+    translator.translate({
+      type: "extension_ui_request",
+      payload: {
+        type: "rpc_frontend_status",
+        phase: "working",
+        label: "Working",
+        connected: false,
+        turnActive: true,
+        isStreaming: false,
+      },
+    }),
+    [
+      {
+        type: "status",
+        phase: "working",
+        label: "Working",
+        connected: false,
+        turnActive: true,
+        isStreaming: false,
+      },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({ type: "rpc_turn_event", event: "start" }),
+    [{ type: "turn_accepted", requestTag: undefined }],
+  );
+  assert.equal(
+    translator
+      .translate({ type: "rpc_turn_event", event: "complete" })
+      .some((event) => event.type === "turn_complete"),
+    true,
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "message_start",
+      message: { role: "assistant", content: [] },
+    }),
+    [],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: { type: "other", content: "ignored" },
+    }),
+    [],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "message_start",
+      message: { role: "user", content: [{ type: "text", text: "hello" }] },
+    }),
+    [{ type: "user_message_start", text: "hello" }],
+  );
+  assert.deepEqual(translator.translate({ type: "agent_start" }), [
+    { type: "turn_accepted" },
+  ]);
+  assert.deepEqual(translator.translate({ type: "tool_execution_start" }), [
+    { type: "turn_accepted" },
+  ]);
+  assert.deepEqual(
+    translator.translate({
+      type: "tool_execution_end",
+      toolName: "functions.todo",
+      toolCallId: "todo-untagged",
+      result: {
+        details: {
+          todos: [],
+          error: "owner error",
+        },
+      },
+    }),
+    [
+      { type: "turn_accepted" },
+      {
+        type: "passive_notice",
+        text: "Error: owner error",
+        level: "info",
+        deferDuringTurn: false,
+        noticeKind: "todo",
+        todoItems: [],
+        todoError: "owner error",
+        sourceEventId: "todo-untagged",
+      },
+    ],
+  );
+  translator.resetAssistantSegments();
+  assert.deepEqual(translator.translate(null), []);
 });
 
 test("frontend backend event translator leaves terminal commit dedupe to the driver", () => {

@@ -1,13 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 
-const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "..",
-  "..",
-);
+import { importBuiltModule } from "../support/import-built-module.js";
+
 const {
   areRinTurnTerminalOutcomesConsistent,
   classifyRinTurnMessage,
@@ -16,20 +11,14 @@ const {
   resolveRinTurnCompletionFromAssistantMessage,
   resolveRinTurnCompletionFromTurnResult,
   resolveRinSettledTurnTerminalOutcomeFromMessages,
+  resolveRinTerminalTurnCompletionFromMessages,
+  resolveRinTurnFailureMessage,
   resolveRinTurnTerminalOutcomeFromAssistantMessage,
   resolveRinTurnTerminalOutcomeFromMessages,
   resolveRinTurnTerminalOutcomeFromTurnResult,
-} = await import(
-  pathToFileURL(
-    path.join(
-      rootDir,
-      "dist",
-      "core",
-      "rin-frontend-sdk",
-      "turn-completion.js",
-    ),
-  ).href
-);
+} = await importBuiltModule<
+  typeof import("../../src/core/rin-frontend-sdk/turn-completion.js")
+>("dist/core/rin-frontend-sdk/turn-completion.js");
 
 test("Rin turn completion resolves explicit TurnResult payloads", () => {
   const { completion } = resolveRinTurnCompletionFromTurnResult({
@@ -967,6 +956,92 @@ test("Rin turn terminal outcome consistency compares canonical content without t
   assert.equal(areRinTurnTerminalOutcomesConsistent(text, absent), true);
   assert.equal(areRinTurnTerminalOutcomesConsistent(text, same), true);
   assert.equal(areRinTurnTerminalOutcomesConsistent(text, different), false);
+});
+
+test("Rin terminal compatibility and failure helpers preserve explicit errors", () => {
+  assert.equal(resolveRinTerminalTurnCompletionFromMessages([]), null);
+  assert.equal(
+    resolveRinTerminalTurnCompletionFromMessages([
+      { role: "assistant", content: [{ type: "text", text: "done" }] },
+    ])?.completion.finalText,
+    "done",
+  );
+
+  assert.equal(
+    resolveRinTurnFailureMessage({}, [
+      { role: "user" },
+      { role: "assistant", errorMessage: " explicit failure " },
+    ]),
+    "explicit failure",
+  );
+  assert.equal(
+    resolveRinTurnFailureMessage({}, [
+      { role: "assistant", stopReason: "aborted", content: [] },
+    ]),
+    "Agent turn was aborted.",
+  );
+  assert.equal(
+    resolveRinTurnFailureMessage({}, [
+      { role: "assistant", stopReason: "error", content: [] },
+    ]),
+    "Agent producer failed.",
+  );
+  assert.equal(
+    resolveRinTurnFailureMessage({}, [], {
+      retryFailureMessage: " retry exhausted ",
+    }),
+    "retry exhausted",
+  );
+  assert.equal(
+    resolveRinTurnFailureMessage(
+      { agent: { state: { errorMessage: " state failure " } } },
+      [],
+    ),
+    "state failure",
+  );
+  assert.equal(resolveRinTurnFailureMessage({}, []), "");
+});
+
+test("Rin terminal consistency covers errors and structured results", () => {
+  const completion = (text: string) => ({
+    kind: "complete" as const,
+    comparison: "structured" as const,
+    resolution: {
+      messages: [],
+      completion: {
+        finalText: text,
+        result: { messages: [{ type: "text", text }] },
+      },
+    },
+  });
+  const error = (message: string) => ({
+    kind: "error" as const,
+    error: message,
+    resolution: {
+      messages: [],
+      completion: { finalText: "", result: { messages: [] } },
+    },
+  });
+  assert.equal(
+    areRinTurnTerminalOutcomesConsistent(error("one"), completion("one")),
+    false,
+  );
+  assert.equal(
+    areRinTurnTerminalOutcomesConsistent(error(""), error("two")),
+    true,
+  );
+  assert.equal(
+    areRinTurnTerminalOutcomesConsistent(error("one"), error("two")),
+    false,
+  );
+  assert.equal(
+    areRinTurnTerminalOutcomesConsistent(completion("one"), completion("one")),
+    true,
+  );
+  assert.equal(
+    areRinTurnTerminalOutcomesConsistent(completion("one"), completion("two")),
+    false,
+  );
 });
 
 test("Rin turn terminal authority never promotes observed events over durable scope", () => {

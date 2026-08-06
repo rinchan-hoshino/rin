@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
 );
@@ -123,4 +123,23 @@ test("chat status distinguishes no session from an unavailable agent", async () 
     },
   );
   assert.deepEqual(unavailable, { session: "unavailable" });
+});
+
+test("chat status reads daemon activity and queries an unavailable sandbox daemon safely", async () => {
+  const available = await status.readChatSessionStatus(
+    {
+      agentDir,
+      sessionFile: storedSessionFile,
+      localTurnActive: false,
+    },
+    async () => activity({ turnActive: true }),
+  );
+  assert.deepEqual(available, { session: "working" });
+
+  const queried = await status.queryChatSessionStatus({
+    agentDir,
+    sessionFile: storedSessionFile,
+    localTurnActive: false,
+  });
+  assert.deepEqual(queried, { session: "unavailable" });
 });

@@ -1,0 +1,485 @@
+{
+  "schemaVersion": 1,
+  "thresholds": {
+    "lines": 90,
+    "functions": 90,
+    "branches": 85
+  },
+  "modules": [
+    {
+      "test": "tests/unit/chat-bridge-prompt-context.test.ts",
+      "source": "src/core/chat-bridge/prompt-context.ts",
+      "built": "dist/core/chat-bridge/prompt-context.js"
+    },
+    {
+      "test": "tests/unit/chat-key-worker.test.ts",
+      "source": "src/core/chat/chat-key-worker.ts",
+      "built": "dist/core/chat/chat-key-worker.js"
+    },
+    {
+      "test": "tests/unit/chat-date.test.ts",
+      "source": "src/core/chat/date.ts",
+      "built": "dist/core/chat/date.js"
+    },
+    {
+      "test": "tests/unit/chat-durable-admission.test.ts",
+      "source": "src/core/chat/durable-admission.ts",
+      "built": "dist/core/chat/durable-admission.js"
+    },
+    {
+      "test": "tests/unit/chat-file-utils.test.ts",
+      "source": "src/core/chat/file-utils.ts",
+      "built": "dist/core/chat/file-utils.js"
+    },
+    {
+      "test": "tests/unit/chat-capability.test.ts",
+      "source": "src/core/chat/index.ts",
+      "built": "dist/core/chat/index.js"
+    },
+    {
+      "test": "tests/unit/message-query.test.ts",
+      "source": "src/core/chat/message-query.ts",
+      "built": "dist/core/chat/message-query.js"
+    },
+    {
+      "test": "tests/unit/message-store-layout.test.ts",
+      "source": "src/core/chat/message-store-layout.ts",
+      "built": "dist/core/chat/message-store-layout.js"
+    },
+    {
+      "test": "tests/unit/chat-outbox-payload-validation.test.ts",
+      "source": "src/core/chat/outbox-payload-validation.ts",
+      "built": "dist/core/chat/outbox-payload-validation.js"
+    },
+    {
+      "test": "tests/unit/rich-text.test.ts",
+      "source": "src/core/chat/rich-text.ts",
+      "built": "dist/core/chat/rich-text.js"
+    },
+    {
+      "test": "tests/unit/chat-settings.test.ts",
+      "source": "src/core/chat/settings.ts",
+      "built": "dist/core/chat/settings.js"
+    },
+    {
+      "test": "tests/unit/chat-status.test.ts",
+      "source": "src/core/chat/status.ts",
+      "built": "dist/core/chat/status.js"
+    },
+    {
+      "test": "tests/unit/data-layout.test.ts",
+      "source": "src/core/data-layout.ts",
+      "built": "dist/core/data-layout.js"
+    },
+    {
+      "test": "tests/unit/i18n.test.ts",
+      "source": "src/core/i18n.ts",
+      "built": "dist/core/i18n.js"
+    },
+    {
+      "test": "tests/unit/json-utils.test.ts",
+      "source": "src/core/json-utils.ts",
+      "built": "dist/core/json-utils.js"
+    },
+    {
+      "test": "tests/unit/external-memory-results.test.ts",
+      "source": "src/core/memory/external-results.ts",
+      "built": "dist/core/memory/external-results.js"
+    },
+    {
+      "test": "tests/unit/memory-utils.test.ts",
+      "source": "src/core/memory/utils.ts",
+      "built": "dist/core/memory/utils.js"
+    },
+    {
+      "test": "tests/unit/message-content.test.ts",
+      "source": "src/core/message-content.ts",
+      "built": "dist/core/message-content.js"
+    },
+    {
+      "test": "tests/unit/model-thinking-levels.test.ts",
+      "source": "src/core/model-thinking-levels.ts",
+      "built": "dist/core/model-thinking-levels.js"
+    },
+    {
+      "test": "tests/unit/tool-continuation.test.ts",
+      "source": "src/core/pi/tool-continuation.ts",
+      "built": "dist/core/pi/tool-continuation.js"
+    },
+    {
+      "test": "tests/unit/rpc-socket.test.ts",
+      "source": "src/core/platform/rpc-socket.ts",
+      "built": "dist/core/platform/rpc-socket.js"
+    },
+    {
+      "test": "tests/unit/bundled-extensions.test.ts",
+      "source": "src/core/rin-bundled-extensions.ts",
+      "built": "dist/core/rin-bundled-extensions.js"
+    },
+    {
+      "test": "tests/unit/rin-daemon-catalog-helpers.test.ts",
+      "source": "src/core/rin-daemon/catalog-helpers.ts",
+      "built": "dist/core/rin-daemon/catalog-helpers.js"
+    },
+    {
+      "test": "tests/unit/cron-utils.test.ts",
+      "source": "src/core/rin-daemon/cron-utils.ts",
+      "built": "dist/core/rin-daemon/cron-utils.js"
+    },
+    {
+      "test": "tests/unit/running-workers.test.ts",
+      "source": "src/core/rin-daemon/running-workers.ts",
+      "built": "dist/core/rin-daemon/running-workers.js"
+    },
+    {
+      "test": "tests/unit/worker-cgroup-isolation-owner.test.ts",
+      "source": "src/core/rin-daemon/worker-cgroup-isolation.ts",
+      "built": "dist/core/rin-daemon/worker-cgroup-isolation.js"
+    },
+    {
+      "test": "tests/unit/rin-extension-api.test.ts",
+      "source": "src/core/rin-extension-api.ts",
+      "built": "dist/core/rin-extension-api.js"
+    },
+    {
+      "test": "tests/unit/rin-extension-settings.test.ts",
+      "source": "src/core/rin-extension-settings.ts",
+      "built": "dist/core/rin-extension-settings.js"
+    },
+    {
+      "test": "tests/unit/frontend-backend-events.test.ts",
+      "source": "src/core/rin-frontend-sdk/backend-events.ts",
+      "built": "dist/core/rin-frontend-sdk/backend-events.js"
+    },
+    {
+      "test": "tests/unit/frontend-command-dispatcher.test.ts",
+      "source": "src/core/rin-frontend-sdk/command-dispatcher.ts",
+      "built": "dist/core/rin-frontend-sdk/command-dispatcher.js"
+    },
+    {
+      "test": "tests/unit/frontend-command-responses.test.ts",
+      "source": "src/core/rin-frontend-sdk/command-responses.ts",
+      "built": "dist/core/rin-frontend-sdk/command-responses.js"
+    },
+    {
+      "test": "tests/unit/compaction-summary-format.test.ts",
+      "source": "src/core/rin-frontend-sdk/compaction-summary-format.ts",
+      "built": "dist/core/rin-frontend-sdk/compaction-summary-format.js"
+    },
+    {
+      "test": "tests/unit/frontend-entrypoint.test.ts",
+      "source": "src/core/rin-frontend-sdk/entrypoint.ts",
+      "built": "dist/core/rin-frontend-sdk/entrypoint.js"
+    },
+    {
+      "test": "tests/unit/frontend-identity.test.ts",
+      "source": "src/core/rin-frontend-sdk/frontend-identity.ts",
+      "built": "dist/core/rin-frontend-sdk/frontend-identity.js"
+    },
+    {
+      "test": "tests/unit/frontend-input-submission.test.ts",
+      "source": "src/core/rin-frontend-sdk/input-submission.ts",
+      "built": "dist/core/rin-frontend-sdk/input-submission.js"
+    },
+    {
+      "test": "tests/unit/frontend-lifecycle-errors.test.ts",
+      "source": "src/core/rin-frontend-sdk/lifecycle-errors.ts",
+      "built": "dist/core/rin-frontend-sdk/lifecycle-errors.js"
+    },
+    {
+      "test": "tests/unit/prompt-context.test.ts",
+      "source": "src/core/rin-frontend-sdk/prompt-context.ts",
+      "built": "dist/core/rin-frontend-sdk/prompt-context.js"
+    },
+    {
+      "test": "tests/unit/frontend-runtime-wrapper.test.ts",
+      "source": "src/core/rin-frontend-sdk/runtime-wrapper.ts",
+      "built": "dist/core/rin-frontend-sdk/runtime-wrapper.js"
+    },
+    {
+      "test": "tests/unit/session-helpers.test.ts",
+      "source": "src/core/rin-frontend-sdk/session-helpers.ts",
+      "built": "dist/core/rin-frontend-sdk/session-helpers.js"
+    },
+    {
+      "test": "tests/unit/rpc-state-utils.test.ts",
+      "source": "src/core/rin-frontend-sdk/state-utils.ts",
+      "built": "dist/core/rin-frontend-sdk/state-utils.js"
+    },
+    {
+      "test": "tests/unit/frontend-stats.test.ts",
+      "source": "src/core/rin-frontend-sdk/stats.ts",
+      "built": "dist/core/rin-frontend-sdk/stats.js"
+    },
+    {
+      "test": "tests/unit/turn-completion.test.ts",
+      "source": "src/core/rin-frontend-sdk/turn-completion.ts",
+      "built": "dist/core/rin-frontend-sdk/turn-completion.js"
+    },
+    {
+      "test": "tests/unit/desktop-host-launch.test.ts",
+      "source": "src/core/rin-gui/host-launch.ts",
+      "built": "dist/core/rin-gui/host-launch.js"
+    },
+    {
+      "test": "tests/unit/gui-web-assets.test.ts",
+      "source": "src/core/rin-gui/web-assets.ts",
+      "built": "dist/core/rin-gui/web-assets.js"
+    },
+    {
+      "test": "tests/unit/installer-candidate-loader.test.ts",
+      "source": "src/core/rin-install/candidate-loader.ts",
+      "built": "dist/core/rin-install/candidate-loader.js"
+    },
+    {
+      "test": "tests/unit/install-record.test.ts",
+      "source": "src/core/rin-install/install-record.ts",
+      "built": "dist/core/rin-install/install-record.js"
+    },
+    {
+      "test": "tests/unit/managed-service.test.ts",
+      "source": "src/core/rin-install/managed-service.ts",
+      "built": "dist/core/rin-install/managed-service.js"
+    },
+    {
+      "test": "tests/unit/runtime-dependency-prune.test.ts",
+      "source": "src/core/rin-install/runtime-dependency-prune.ts",
+      "built": "dist/core/rin-install/runtime-dependency-prune.js"
+    },
+    {
+      "test": "tests/unit/update-targets.test.ts",
+      "source": "src/core/rin-install/update-targets.ts",
+      "built": "dist/core/rin-install/update-targets.js"
+    },
+    {
+      "test": "tests/unit/context-token-estimator.test.ts",
+      "source": "src/core/rin-lib/context-token-estimator.ts",
+      "built": "dist/core/rin-lib/context-token-estimator.js"
+    },
+    {
+      "test": "tests/unit/interruption.test.ts",
+      "source": "src/core/rin-lib/interruption.ts",
+      "built": "dist/core/rin-lib/interruption.js"
+    },
+    {
+      "test": "tests/unit/jiti-aliases.test.ts",
+      "source": "src/core/rin-lib/jiti-aliases.ts",
+      "built": "dist/core/rin-lib/jiti-aliases.js"
+    },
+    {
+      "test": "tests/unit/memory-task-config.test.ts",
+      "source": "src/core/rin-lib/memory-task-config.ts",
+      "built": "dist/core/rin-lib/memory-task-config.js"
+    },
+    {
+      "test": "tests/unit/provider-context.test.ts",
+      "source": "src/core/rin-lib/provider-context.ts",
+      "built": "dist/core/rin-lib/provider-context.js"
+    },
+    {
+      "test": "tests/unit/rpc.test.ts",
+      "source": "src/core/rin-lib/rpc.ts",
+      "built": "dist/core/rin-lib/rpc.js"
+    },
+    {
+      "test": "tests/unit/session-pruning.test.ts",
+      "source": "src/core/rin-lib/session-pruning.ts",
+      "built": "dist/core/rin-lib/session-pruning.js"
+    },
+    {
+      "test": "tests/unit/system-prompt-overlay.test.ts",
+      "source": "src/core/rin-lib/system-prompt-overlay.ts",
+      "built": "dist/core/rin-lib/system-prompt-overlay.js"
+    },
+    {
+      "test": "tests/unit/todo-state.test.ts",
+      "source": "src/core/rin-lib/todo-state.ts",
+      "built": "dist/core/rin-lib/todo-state.js"
+    },
+    {
+      "test": "tests/unit/tool-options.test.ts",
+      "source": "src/core/rin-lib/tool-options.ts",
+      "built": "dist/core/rin-lib/tool-options.js"
+    },
+    {
+      "test": "tests/unit/user-facing-errors-owner.test.ts",
+      "source": "src/core/rin-lib/user-facing-errors.ts",
+      "built": "dist/core/rin-lib/user-facing-errors.js"
+    },
+    {
+      "test": "tests/unit/target-registry.test.ts",
+      "source": "src/core/rin-targets/registry.ts",
+      "built": "dist/core/rin-targets/registry.js"
+    },
+    {
+      "test": "tests/unit/target-store.test.ts",
+      "source": "src/core/rin-targets/store.ts",
+      "built": "dist/core/rin-targets/store.js"
+    },
+    {
+      "test": "tests/unit/tui-cli-options-owner.test.ts",
+      "source": "src/core/rin-tui/cli-options.ts",
+      "built": "dist/core/rin-tui/cli-options.js"
+    },
+    {
+      "test": "tests/unit/rpc-runtime-host.test.ts",
+      "source": "src/core/rin-tui/runtime-host.ts",
+      "built": "dist/core/rin-tui/runtime-host.js"
+    },
+    {
+      "test": "tests/unit/report-format.test.ts",
+      "source": "src/core/rin/report-format.ts",
+      "built": "dist/core/rin/report-format.js"
+    },
+    {
+      "test": "tests/unit/run-lite.test.ts",
+      "source": "src/core/rin/run-lite.ts",
+      "built": "dist/core/rin/run-lite.js"
+    },
+    {
+      "test": "tests/unit/tui-report.test.ts",
+      "source": "src/core/rin/tui-report.ts",
+      "built": "dist/core/rin/tui-report.js"
+    },
+    {
+      "test": "tests/unit/scheduled-task-options.test.ts",
+      "source": "src/core/scheduled-task-options.ts",
+      "built": "dist/core/scheduled-task-options.js"
+    },
+    {
+      "test": "tests/unit/self-improve-compile.test.ts",
+      "source": "src/core/self-improve/compile.ts",
+      "built": "dist/core/self-improve/compile.js"
+    },
+    {
+      "test": "tests/unit/self-improve-schema.test.ts",
+      "source": "src/core/self-improve/core/schema.ts",
+      "built": "dist/core/self-improve/core/schema.js"
+    },
+    {
+      "test": "tests/unit/self-improve-types.test.ts",
+      "source": "src/core/self-improve/core/types.ts",
+      "built": "dist/core/self-improve/core/types.js"
+    },
+    {
+      "test": "tests/unit/self-improve-utils.test.ts",
+      "source": "src/core/self-improve/core/utils.ts",
+      "built": "dist/core/self-improve/core/utils.js"
+    },
+    {
+      "test": "tests/unit/self-improve-docs.test.ts",
+      "source": "src/core/self-improve/docs.ts",
+      "built": "dist/core/self-improve/docs.js"
+    },
+    {
+      "test": "tests/unit/self-improve-format.test.ts",
+      "source": "src/core/self-improve/format.ts",
+      "built": "dist/core/self-improve/format.js"
+    },
+    {
+      "test": "tests/unit/self-improve-onboarding.test.ts",
+      "source": "src/core/self-improve/onboarding.ts",
+      "built": "dist/core/self-improve/onboarding.js"
+    },
+    {
+      "test": "tests/unit/self-improve-paths.test.ts",
+      "source": "src/core/self-improve/paths.ts",
+      "built": "dist/core/self-improve/paths.js"
+    },
+    {
+      "test": "tests/unit/self-improve-processing.test.ts",
+      "source": "src/core/self-improve/processing.ts",
+      "built": "dist/core/self-improve/processing.js"
+    },
+    {
+      "test": "tests/unit/self-improve-relevance.test.ts",
+      "source": "src/core/self-improve/relevance.ts",
+      "built": "dist/core/self-improve/relevance.js"
+    },
+    {
+      "test": "tests/unit/self-improve-restricted-tools.test.ts",
+      "source": "src/core/self-improve/restricted-tools.ts",
+      "built": "dist/core/self-improve/restricted-tools.js"
+    },
+    {
+      "test": "tests/unit/self-improve-skill-usage.test.ts",
+      "source": "src/core/self-improve/skill-usage.ts",
+      "built": "dist/core/self-improve/skill-usage.js"
+    },
+    {
+      "test": "tests/unit/session-fork.test.ts",
+      "source": "src/core/session/fork.ts",
+      "built": "dist/core/session/fork.js"
+    },
+    {
+      "test": "tests/unit/session-listing.test.ts",
+      "source": "src/core/session/listing.ts",
+      "built": "dist/core/session/listing.js"
+    },
+    {
+      "test": "tests/unit/managed-session-paths.test.ts",
+      "source": "src/core/session/managed-paths.ts",
+      "built": "dist/core/session/managed-paths.js"
+    },
+    {
+      "test": "tests/unit/session-metadata.test.ts",
+      "source": "src/core/session/metadata.ts",
+      "built": "dist/core/session/metadata.js"
+    },
+    {
+      "test": "tests/unit/session-names.test.ts",
+      "source": "src/core/session/names.ts",
+      "built": "dist/core/session/names.js"
+    },
+    {
+      "test": "tests/unit/session-ref.test.ts",
+      "source": "src/core/session/ref.ts",
+      "built": "dist/core/session/ref.js"
+    },
+    {
+      "test": "tests/unit/turn-message.test.ts",
+      "source": "src/core/session/turn-message.ts",
+      "built": "dist/core/session/turn-message.js"
+    },
+    {
+      "test": "tests/unit/turn-result.test.ts",
+      "source": "src/core/session/turn-result.ts",
+      "built": "dist/core/session/turn-result.js"
+    },
+    {
+      "test": "tests/unit/turn-scope.test.ts",
+      "source": "src/core/session/turn-scope.ts",
+      "built": "dist/core/session/turn-scope.js"
+    },
+    {
+      "test": "tests/unit/sidecar-common.test.ts",
+      "source": "src/core/sidecar/common.ts",
+      "built": "dist/core/sidecar/common.js"
+    },
+    {
+      "test": "tests/unit/task-capability.test.ts",
+      "source": "src/core/task/index.ts",
+      "built": "dist/core/task/index.js"
+    },
+    {
+      "test": "tests/unit/text-utils.test.ts",
+      "source": "src/core/text-utils.ts",
+      "built": "dist/core/text-utils.js"
+    },
+    {
+      "test": "tests/unit/time-utils.test.ts",
+      "source": "src/core/time-utils.ts",
+      "built": "dist/core/time-utils.js"
+    },
+    {
+      "test": "tests/unit/tui-runtime-env.test.ts",
+      "source": "src/core/tui-runtime-env.ts",
+      "built": "dist/core/tui-runtime-env.js"
+    },
+    {
+      "test": "tests/unit/usage-metrics.test.ts",
+      "source": "src/core/usage-metrics.ts",
+      "built": "dist/core/usage-metrics.js"
+    }
+  ]
+}

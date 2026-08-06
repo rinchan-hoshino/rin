@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "risks": [
+    {
+      "id": "sender-crash-after-adapter-boundary",
+      "consequence": "A restart can duplicate visible output or discard a delivery whose adapter call may already have happened.",
+      "schedule": "Eight deterministic crash-and-reopen cycles per scale unit, each mixing dispatch-started and undispatched items.",
+      "test": "tests/torture/chat-durability.torture.test.ts"
+    },
+    {
+      "id": "cross-process-sequence-contention",
+      "consequence": "Concurrent chat ingress can allocate duplicate or missing durable sequence numbers.",
+      "schedule": "Six competing processes allocate twenty sequences each per scale unit from one cold database.",
+      "test": "tests/torture/chat-durability.torture.test.ts"
+    }
+  ]
+}

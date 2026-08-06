@@ -1,15 +1,14 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import test from "node:test";
 
-const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "../..",
-);
-const sessionRef = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "session", "ref.js")).href
-);
+import { importBuiltModule } from "../support/import-built-module.js";
+
+const sessionRef = await importBuiltModule<
+  typeof import("../../src/core/session/ref.js")
+>("dist/core/session/ref.js");
 
 test("session ref helpers normalize shared command/state shapes and resolve consistently", () => {
   assert.deepEqual(
@@ -111,6 +110,58 @@ test("session ref helpers normalize shared command/state shapes and resolve cons
     () => sessionRef.requireSessionFile({ sessionId: "memory-only" }),
     /Session file is required/,
   );
+});
+
+test("session ref helpers reject empty values and require existing records", async () => {
+  assert.equal(sessionRef.normalizeSessionValue(undefined), undefined);
+  assert.equal(sessionRef.resolveSessionValue(" ", " fallback "), "fallback");
+  assert.equal(
+    sessionRef.toStoredSessionFile("/tmp/rin-agent", " "),
+    undefined,
+  );
+  assert.equal(
+    sessionRef.toStoredSessionFile("/tmp/rin-agent", "."),
+    undefined,
+  );
+  assert.equal(
+    sessionRef.resolveStoredSessionFile("/tmp/rin-agent", " "),
+    undefined,
+  );
+  assert.equal(
+    sessionRef.resolveStoredSessionFile("/tmp/rin-agent", "."),
+    undefined,
+  );
+  assert.deepEqual(sessionRef.normalizeSessionRef(null), {
+    sessionId: undefined,
+    sessionFile: undefined,
+  });
+  assert.equal(sessionRef.sessionRefMatches({}, {}), false);
+
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-session-ref-"));
+  const sessionFile = path.join(tempDir, "session.jsonl");
+  await fs.writeFile(sessionFile, "{}\n");
+  try {
+    assert.equal(sessionRef.sessionFileExists(sessionFile), true);
+    assert.equal(sessionRef.sessionFileExists(" "), false);
+    assert.equal(
+      sessionRef.requireExistingSessionFile(sessionFile),
+      sessionFile,
+    );
+    assert.throws(
+      () => sessionRef.requireExistingSessionFile(path.join(tempDir, "gone")),
+      /Session record is missing or expired: .*gone/,
+    );
+    assert.match(
+      sessionRef.missingSessionFileError(undefined).message,
+      /the selected session/,
+    );
+    assert.throws(
+      () => sessionRef.requireSessionFile(undefined, "choose a session"),
+      /choose a session/,
+    );
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("session ref helpers store session files relative to agent sessions dir and resolve them back", () => {

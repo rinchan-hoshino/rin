@@ -1,7 +1,11 @@
-import assert from "node:assert/strict";
 import test from "node:test";
+import assert from "node:assert/strict";
 
-const pruning = await import("../../dist/core/rin-lib/session-pruning.js");
+import { importBuiltModule } from "../support/import-built-module.js";
+
+const pruning = await importBuiltModule<
+  typeof import("../../src/core/rin-lib/session-pruning.js")
+>("dist/core/rin-lib/session-pruning.js");
 
 function padding(count: number, start = 0) {
   return Array.from({ length: count }, (_, index) => ({
@@ -9,6 +13,20 @@ function padding(count: number, start = 0) {
     content: `message-${start + index}`,
   }));
 }
+
+test("session pruning normalizes public bucket boundaries", () => {
+  assert.equal(pruning.normalizeMessageBucketSize(7.9), 7);
+  assert.equal(pruning.normalizeMessageBucketSize(0), 32);
+  assert.equal(pruning.normalizeMessageBucketSize(Infinity), 32);
+  assert.equal(pruning.normalizeRetainedMessageBuckets("3"), 3);
+  assert.equal(pruning.normalizeRetainedMessageBuckets(-1), 4);
+  assert.equal(pruning.findProtectedMessageBucketStart([], 0, 0), 0);
+  assert.equal(
+    pruning.findProtectedMessageBucketStart(padding(9), 2.9, "2" as any),
+    6,
+  );
+  assert.deepEqual(pruning.pruneSessionContextMessages(null as any), []);
+});
 
 test("session pruning defaults to four stable 32-message buckets", () => {
   assert.equal(pruning.RIN_SESSION_PRUNING_MESSAGE_BUCKET_SIZE, 32);
@@ -358,4 +376,235 @@ test("session pruning compacts old write and edit inputs with stable built-in fo
     pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
   );
   assert.equal(pruning.pruneSessionContextMessages(once), once);
+});
+
+test("session pruning protects failed built-in exchanges and ignores malformed history", () => {
+  const writeCall = {
+    type: "toolCall",
+    id: "call-write-error",
+    name: "write",
+    arguments: { path: "/tmp/a", content: "preserve me" },
+  };
+  const editCall = {
+    type: "TOOLCALL",
+    toolCallId: "call-edit-error",
+    toolName: "edit",
+    arguments: {
+      path: "/tmp/b",
+      edits: [{ oldText: "before", newText: "after" }],
+    },
+  };
+  const writeResult = {
+    role: "toolResult",
+    toolCallId: "call-write-error",
+    content: "write failed",
+    isError: true,
+  };
+  const editResult = {
+    role: "tool_result",
+    toolCallId: "call-edit-error",
+    content: "edit failed",
+    isError: true,
+  };
+  const messages = padding(129);
+  messages[0] = {
+    role: "assistant",
+    content: [
+      { type: "text", text: "not a call" },
+      writeCall,
+      { ...writeCall, arguments: { content: "duplicate" } },
+      editCall,
+      { type: "toolCall", id: "", name: "write", arguments: {} },
+    ],
+  };
+  messages[1] = writeResult;
+  messages[2] = editResult;
+  messages[3] = {
+    role: "toolResult",
+    toolCallId: "missing-call",
+    content: "orphan",
+  };
+  messages[4] = {
+    role: "toolResult",
+    toolCallId: "call-write-error",
+    content: "duplicate result",
+  };
+
+  const pruned = pruning.pruneSessionContextMessages(messages);
+
+  assert.equal(pruned[0], messages[0]);
+  assert.equal(pruned[1], writeResult);
+  assert.equal(pruned[2], editResult);
+  assert.equal(
+    pruned[3].content,
+    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
+  );
+  assert.equal(pruned[4], messages[4]);
+});
+
+test("session pruning leaves already compact or unsupported built-in inputs stable", () => {
+  const calls = [
+    {
+      type: "toolCall",
+      id: "write-array",
+      name: "write",
+      arguments: [],
+    },
+    {
+      type: "toolCall",
+      id: "write-omitted",
+      name: "write",
+      arguments: {
+        content: pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
+      },
+    },
+    {
+      type: "toolCall",
+      id: "write-non-string",
+      name: "write",
+      arguments: { content: 7 },
+    },
+    {
+      type: "toolCall",
+      id: "edit-missing",
+      name: "edit",
+      arguments: {},
+    },
+    {
+      type: "toolCall",
+      id: "edit-empty",
+      name: "edit",
+      arguments: { edits: [] },
+    },
+    {
+      type: "toolCall",
+      id: "edit-omitted",
+      name: "edit",
+      arguments: {
+        edits: [
+          {
+            oldText: pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
+            newText: pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT,
+          },
+        ],
+      },
+    },
+  ];
+  const messages = padding(129);
+  messages[0] = { role: "assistant", content: calls };
+  calls.forEach((call, index) => {
+    messages[index + 1] = {
+      role: "toolResult",
+      toolCallId: call.id,
+      content: `result-${index}`,
+    };
+  });
+
+  const pruned = pruning.pruneSessionContextMessages(messages);
+
+  assert.equal(pruned[0], messages[0]);
+  for (let index = 1; index <= calls.length; index += 1) {
+    assert.equal(
+      pruned[index].content,
+      pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
+    );
+  }
+});
+
+test("session pruning composes custom call and result policies at old boundaries", () => {
+  const calls = [
+    ["compact", { value: "large" }],
+    ["protect-call", { value: "keep-call" }],
+    ["protect-result", { value: "compact-call" }],
+    ["same", { value: "same" }],
+  ].map(([id, argumentsValue]) => ({
+    type: "toolCall",
+    id,
+    name: "custom",
+    arguments: argumentsValue,
+  }));
+  const messages = padding(129);
+  messages[0] = { role: "assistant", content: calls };
+  calls.forEach((call, index) => {
+    messages[index + 1] = {
+      role: "toolResult",
+      toolCallId: call.id,
+      content: `result-${call.id}`,
+    };
+  });
+  const observedContexts: any[] = [];
+
+  const pruned = pruning.pruneSessionContextMessages(messages, {
+    cwd: "/workspace/owner",
+    toolHistoryPolicies: {
+      custom: {
+        protect(exchange, policyContext) {
+          observedContexts.push(policyContext);
+          if (exchange.toolCallId === "protect-call") return { call: true };
+          if (exchange.toolCallId === "protect-result") {
+            return { result: true };
+          }
+          return undefined;
+        },
+        compactCallArguments(value, exchange) {
+          if (exchange.toolCallId === "same") return value;
+          return { compacted: exchange.toolCallId };
+        },
+        compactResultContent(content, exchange) {
+          if (exchange.toolCallId === "same") return content;
+          return `compact-result-${exchange.toolCallId}`;
+        },
+      },
+    },
+  });
+
+  assert.ok(
+    observedContexts.every(
+      (policyContext) =>
+        policyContext.cwd === "/workspace/owner" &&
+        policyContext.pruningBoundary === 32,
+    ),
+  );
+  assert.deepEqual(pruned[0].content[0].arguments, { compacted: "compact" });
+  assert.equal(pruned[1].content, "compact-result-compact");
+  assert.equal(pruned[0].content[1], calls[1]);
+  assert.equal(pruned[2].content, "compact-result-protect-call");
+  assert.deepEqual(pruned[0].content[2].arguments, {
+    compacted: "protect-result",
+  });
+  assert.equal(pruned[3], messages[3]);
+  assert.equal(pruned[0].content[3], calls[3]);
+  assert.equal(
+    pruned[4].content,
+    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
+  );
+
+  const retained = padding(129);
+  retained[0] = {
+    role: "assistant",
+    content: [
+      {
+        type: "toolCall",
+        id: "retained-result",
+        name: "custom",
+        arguments: { value: "unchanged" },
+      },
+    ],
+  };
+  retained[32] = {
+    role: "toolResult",
+    toolCallId: "retained-result",
+    content: "retained output",
+  };
+  assert.equal(
+    pruning.pruneSessionContextMessages(retained, {
+      toolHistoryPolicies: {
+        custom: {
+          compactCallArguments: () => ({ compacted: true }),
+          compactResultContent: () => "compacted output",
+        },
+      },
+    }),
+    retained,
+  );
 });

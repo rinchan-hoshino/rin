@@ -1,18 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
 );
-const { createChatKeyWorkerPool } = await import(
+const workerModule = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "chat", "chat-key-worker.js"),
   ).href
 );
+const { createChatKeyWorkerPool } = workerModule;
 
 async function waitUntil(predicate: () => boolean, message: string) {
   const deadline = Date.now() + 1000;
@@ -191,6 +192,41 @@ test("chat key worker treats undefined prepare rejection as an error", async () 
     "bad-prepare-start",
     "bad-prepare-error:telegram/1:undefined-error:undefined",
   ]);
+});
+
+test("chat key worker logs task failures and retires the fallback-key worker", async () => {
+  const warnings: string[] = [];
+  const pool = createChatKeyWorkerPool<string>({
+    prepare: async () => ({
+      run: async () => {
+        throw new Error("run failed");
+      },
+    }),
+    logger: {
+      warn(message) {
+        warnings.push(String(message));
+      },
+    },
+  });
+
+  pool.enqueue(" ", "payload");
+  assert.equal(pool.hasWorker(""), true);
+  await waitUntil(
+    () => warnings.length === 1 && !pool.hasWorker(""),
+    "failed task did not retire its worker",
+  );
+  assert.match(warnings[0], /chatKey=unknown err=run failed/);
+});
+
+test("chat key worker wait helper exits for predicates and settled tasks", async () => {
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await workerModule.waitUntil(() => true, pending);
+  release();
+
+  await workerModule.waitUntil(() => false, Promise.resolve());
 });
 
 test("chat key worker requests another inbox drain after a chat becomes idle", async () => {

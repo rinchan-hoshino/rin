@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
 );
@@ -104,6 +104,122 @@ test("durable admission resolves only integrity-verified message submissions", (
         submissionIntegrity: "valid",
       },
       { chatKey: turn.chatKey, messageId: "different-message" },
+    ),
+    { kind: "interrupted_unknown", reason: "unsupported_admission" },
+  );
+});
+
+test("durable admission covers clean unclassified and record-only decision variants", () => {
+  assert.deepEqual(
+    admission.resolveDurableChatAdmission({ state: "unclassified" }, turn),
+    { kind: "unclassified" },
+  );
+  assert.equal(
+    admission.durableAdmissionMatchesTurn(
+      {
+        state: "record_only",
+        decision: { version: 2, kind: "record_only_chat" } as any,
+      },
+      turn,
+    ),
+    false,
+  );
+  assert.equal(
+    admission.durableAdmissionMatchesTurn(
+      {
+        state: "record_only",
+        decision: { version: 1, kind: "record_only_chat" },
+        submission: frozen,
+      },
+      turn,
+    ),
+    false,
+  );
+  for (const decision of [
+    { version: 1, kind: "policy_rejected", decision: { allow: false } },
+    { version: 1, kind: "removed_command", name: "removed" },
+  ] as any[]) {
+    assert.equal(
+      admission.durableAdmissionMatchesTurn(
+        { state: "record_only", decision },
+        turn,
+      ),
+      true,
+    );
+  }
+  assert.equal(
+    admission.durableAdmissionMatchesTurn(
+      {
+        state: "record_only",
+        decision: { version: 1, kind: "removed_command", name: " removed " },
+      } as any,
+      turn,
+    ),
+    false,
+  );
+});
+
+test("durable admission rejects unsupported payload placement and missing submissions", () => {
+  assert.deepEqual(
+    admission.resolveDurableChatAdmission(
+      {
+        state: "actionable",
+        decision: {
+          version: 1,
+          kind: "unmatched_command",
+          chatKey: turn.chatKey,
+          messageId: turn.messageId,
+          name: " ",
+          trust: "OWNER",
+          respond: true,
+        },
+        decisionIntegrity: "valid",
+      },
+      turn,
+    ),
+    { kind: "interrupted_unknown", reason: "unsupported_admission" },
+  );
+  assert.deepEqual(
+    admission.resolveDurableChatAdmission(
+      {
+        state: "actionable",
+        decision: messageDecision,
+        decisionIntegrity: "valid",
+        submission: { ...frozen, attachments: "invalid" },
+        submissionIntegrity: "valid",
+      },
+      turn,
+    ),
+    { kind: "interrupted_unknown", reason: "missing_frozen_submission" },
+  );
+  assert.deepEqual(
+    admission.resolveDurableChatAdmission(
+      {
+        state: "actionable",
+        decision: {
+          version: 1,
+          kind: "command",
+          chatKey: turn.chatKey,
+          messageId: turn.messageId,
+          command: { name: "new", argsText: "" },
+          trust: "OWNER",
+          promptMeta: { chatKey: turn.chatKey, identity: "OWNER" },
+        },
+        decisionIntegrity: "valid",
+        submission: frozen,
+      },
+      turn,
+    ),
+    { kind: "interrupted_unknown", reason: "unsupported_admission" },
+  );
+  assert.deepEqual(
+    admission.resolveDurableChatAdmission(
+      {
+        state: "actionable",
+        decision: { version: 1, kind: "future" } as any,
+        decisionIntegrity: "valid",
+      },
+      turn,
     ),
     { kind: "interrupted_unknown", reason: "unsupported_admission" },
   );

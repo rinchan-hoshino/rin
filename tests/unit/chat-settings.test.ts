@@ -1,19 +1,11 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
+import test from "node:test";
 
-const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "..",
-  "..",
-);
-const chatSettings = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "settings.js")).href
-);
-const support = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href
-);
+import { importBuiltModule } from "../support/import-built-module.js";
+
+const chatSettings = await importBuiltModule<
+  typeof import("../../src/core/chat/settings.js")
+>("dist/core/chat/settings.js");
 
 test("chat settings normalization can force a writable chat object", () => {
   const normalized = chatSettings.normalizeStoredChatSettings(
@@ -147,14 +139,4 @@ test("chat model options resolve from per-chat entries only", () => {
     chatSettings.resolveChatModelOptions(settings, "telegram/123:999"),
     {},
   );
-});
-
-test("chat support ignores removed legacy adapter settings keys", () => {
-  const config = support.buildChatConfigFromSettings({
-    koishi: {
-      telegram: { token: "legacy-token" },
-    },
-  });
-
-  assert.equal(config.plugins["adapter-telegram"], undefined);
 });

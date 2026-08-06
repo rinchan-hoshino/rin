@@ -1,48 +1,71 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
+import test from "node:test";
 
-const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "..",
-  "..",
-);
-const dispatcher = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
-  ).href
-);
+import { importBuiltModule } from "../support/import-built-module.js";
 
-test("frontend command dispatcher owns session command classification", () => {
-  assert.equal(dispatcher.classifyRinFrontendCommand("/new").kind, "frontend");
-  assert.equal(
-    dispatcher.classifyRinFrontendCommand("/compact keep names").kind,
-    "frontend",
-  );
-  assert.equal(
-    dispatcher.classifyRinFrontendCommand("/resume abc").kind,
-    "frontend",
-  );
-  assert.equal(dispatcher.classifyRinFrontendCommand("/todos").kind, "none");
-  assert.equal(dispatcher.classifyRinFrontendCommand("/usage").kind, "daemon");
-  assert.equal(dispatcher.classifyRinFrontendCommand("/unknown").kind, "none");
-  assert.equal(
-    dispatcher.classifyRinFrontendCommand("/local", [
-      { name: "local", source: "extension" },
-    ]).kind,
-    "daemon",
-  );
+type Route = { kind: "none" | "frontend" | "daemon"; name: string };
+const dispatcher = await importBuiltModule<{
+  RIN_NON_INTERACTIVE_COMMAND_NAMES: readonly string[];
+  getRinFrontendSessionCommandSpec(line: string): { name: string } | undefined;
+  isFrontendSessionCommandLine(line: string): boolean;
+  isRinNonInteractiveCommandExposed(name: unknown): boolean;
+  getRinNonInteractiveCommandInteractionPolicy(
+    name: unknown,
+  ): Record<string, unknown>;
+  classifyRinFrontendCommand(
+    line: string,
+    catalog?: Array<Record<string, unknown>>,
+  ): Route;
+}>("dist/core/rin-frontend-sdk/command-dispatcher.js");
+
+test("frontend dispatcher recognizes only complete session commands", () => {
+  for (const [line, name] of [
+    ["/abort", "abort"],
+    [" /new ", "new"],
+    ["/compact keep names", "compact"],
+    ["/resume abc", "resume"],
+  ]) {
+    assert.equal(dispatcher.getRinFrontendSessionCommandSpec(line)?.name, name);
+    assert.equal(dispatcher.isFrontendSessionCommandLine(line), true);
+    assert.deepEqual(dispatcher.classifyRinFrontendCommand(line), {
+      kind: "frontend",
+      name,
+    });
+  }
+  for (const line of ["", "/resume", "/resume   ", "/abort now", "/unknown"]) {
+    assert.equal(dispatcher.getRinFrontendSessionCommandSpec(line), undefined);
+    assert.equal(dispatcher.isFrontendSessionCommandLine(line), false);
+  }
 });
 
-test("non-interactive command exposure and degraded interaction policy live in frontend SDK", () => {
-  assert.equal(dispatcher.isRinNonInteractiveCommandExposed("new"), true);
-  assert.equal(dispatcher.isRinNonInteractiveCommandExposed("resume"), false);
-  assert.equal(dispatcher.isRinNonInteractiveCommandExposed("todos"), false);
-  assert.equal(dispatcher.isRinNonInteractiveCommandExposed("status"), false);
-  assert.equal(dispatcher.isRinNonInteractiveCommandExposed("model"), false);
-  assert.equal(dispatcher.isRinNonInteractiveCommandExposed("session"), false);
-  assert.equal(dispatcher.isRinNonInteractiveCommandExposed("usage"), true);
+test("frontend dispatcher separates builtins, extensions, and unknown commands", () => {
+  assert.deepEqual(dispatcher.classifyRinFrontendCommand(""), {
+    kind: "none",
+    name: "",
+  });
+  assert.deepEqual(dispatcher.classifyRinFrontendCommand("/usage"), {
+    kind: "daemon",
+    name: "usage",
+  });
+  assert.deepEqual(
+    dispatcher.classifyRinFrontendCommand("/local", [
+      { name: " local ", source: " extension " },
+      { name: "ignored", source: "builtin" },
+      {},
+    ]),
+    { kind: "daemon", name: "local" },
+  );
+  assert.deepEqual(dispatcher.classifyRinFrontendCommand("/other", []), {
+    kind: "none",
+    name: "other",
+  });
+  assert.deepEqual(dispatcher.classifyRinFrontendCommand("/todos"), {
+    kind: "none",
+    name: "todos",
+  });
+});
+
+test("non-interactive exposure and active-turn policy require exact controls", () => {
   assert.deepEqual(dispatcher.RIN_NON_INTERACTIVE_COMMAND_NAMES, [
     "help",
     "abort",
@@ -51,6 +74,12 @@ test("non-interactive command exposure and degraded interaction policy live in f
     "reload",
     "usage",
   ]);
+  for (const name of ["new", "/new", "usage"]) {
+    assert.equal(dispatcher.isRinNonInteractiveCommandExposed(name), true);
+  }
+  for (const name of ["resume", "todos", "status", null]) {
+    assert.equal(dispatcher.isRinNonInteractiveCommandExposed(name), false);
+  }
   assert.deepEqual(
     dispatcher.getRinNonInteractiveCommandInteractionPolicy("abort"),
     {
@@ -60,7 +89,7 @@ test("non-interactive command exposure and degraded interaction policy live in f
     },
   );
   assert.deepEqual(
-    dispatcher.getRinNonInteractiveCommandInteractionPolicy("new"),
+    dispatcher.getRinNonInteractiveCommandInteractionPolicy("/new"),
     {
       skipSessionRecovery: true,
       acceptInboundBeforeExecution: true,
@@ -76,7 +105,7 @@ test("non-interactive command exposure and degraded interaction policy live in f
     },
   );
   assert.deepEqual(
-    dispatcher.getRinNonInteractiveCommandInteractionPolicy("usage"),
+    dispatcher.getRinNonInteractiveCommandInteractionPolicy("/new with args"),
     {
       skipSessionRecovery: false,
       acceptInboundBeforeExecution: false,
@@ -84,7 +113,7 @@ test("non-interactive command exposure and degraded interaction policy live in f
     },
   );
   assert.deepEqual(
-    dispatcher.getRinNonInteractiveCommandInteractionPolicy("/new with args"),
+    dispatcher.getRinNonInteractiveCommandInteractionPolicy("usage"),
     {
       skipSessionRecovery: false,
       acceptInboundBeforeExecution: false,

@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
 );
@@ -122,6 +122,83 @@ test("cron utils stop disabled or exhausted tasks before computing the next run"
         termination: { stopAt: "2026-03-31T12:00:00.000Z" },
       },
       Date.parse("2026-03-31T12:00:01.000Z"),
+    ),
+    undefined,
+  );
+  assert.equal(
+    cronUtils.computeNextRunAt(
+      { ...baseTask, completedAt: "2026-03-31T11:00:00.000Z" },
+      Date.parse("2026-03-31T12:00:01.000Z"),
+    ),
+    undefined,
+  );
+  assert.match(
+    cronUtils.computeNextRunAt(
+      { ...baseTask, termination: { stopAt: "invalid" } },
+      Date.parse("2026-03-31T12:00:01.000Z"),
+    ),
+    /^2026-03-31T12:01:00\.000Z$/,
+  );
+});
+
+test("cron utils derive stable storage paths and run identifiers", (t) => {
+  t.mock.method(Date, "now", () => 1_713_436_800_000);
+  t.mock.method(Math, "random", () => 0.5);
+
+  assert.match(cronUtils.cronRoot("/tmp/agent"), /scheduler$/);
+  assert.match(
+    cronUtils.cronTasksPath("/tmp/agent"),
+    /scheduler\/tasks\.json$/,
+  );
+  assert.match(cronUtils.createCronTaskId(), /^cron_[a-z0-9]+[a-z0-9]{6}$/);
+  assert.equal(
+    cronUtils.cronTaskRunId({
+      id: "task-1",
+      runCount: 2,
+      lastStartedAt: " 2026-03-31T12:00:00.000Z ",
+    }),
+    "task-1:2:2026-03-31T12:00:00.000Z",
+  );
+  assert.throws(
+    () => cronUtils.cronTaskRunId({ id: "task-1", runCount: 2 }),
+    /cron_tasks_file_invalid/,
+  );
+});
+
+test("cron utils reject malformed fields and exhausted one-shot triggers", () => {
+  for (const field of ["", "x", "5-1", "-1", "60", "1/a"]) {
+    assert.throws(
+      () => cronUtils.formatCronField(field, 0, 59),
+      /cron_invalid_expression/,
+      field,
+    );
+  }
+  assert.throws(
+    () => cronUtils.nextCronAt("* * *", Date.now()),
+    /cron_invalid_expression/,
+  );
+
+  const task = {
+    id: "once",
+    createdAt: "",
+    updatedAt: "",
+    enabled: true,
+    cwd: "",
+    chatKey: undefined,
+    trigger: { runAt: "2026-03-31T12:00:00.000Z" },
+    session: { mode: "dedicated" },
+    target: { kind: "shell_command", command: "echo hi" },
+    runCount: 0,
+    running: false,
+  };
+  assert.equal(
+    cronUtils.computeNextRunAt(task, Date.parse("2026-03-31T12:00:00.000Z")),
+    undefined,
+  );
+  assert.equal(
+    cronUtils.computeNextRunAt(
+      { ...task, trigger: { runAt: "invalid" } },
+      Date.parse("2026-03-31T11:00:00.000Z"),
     ),
     undefined,
   );

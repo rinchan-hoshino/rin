@@ -1,0 +1,1160 @@
+{
+  "schemaVersion": 1,
+  "thresholds": {
+    "lines": 90,
+    "functions": 90,
+    "branches": 85
+  },
+  "modules": [
+    {
+      "source": "src/app/rin-daemon/daemon.ts",
+      "built": "dist/app/rin-daemon/daemon.js",
+      "suite": "system",
+      "tests": ["tests/system/app-daemon-entrypoint-owner.test.ts"]
+    },
+    {
+      "source": "src/app/rin-daemon/hosted-chat-service.ts",
+      "built": "dist/app/rin-daemon/hosted-chat-service.js",
+      "suite": "system",
+      "tests": ["tests/system/hosted-chat-service.test.ts"]
+    },
+    {
+      "source": "src/app/rin-daemon/worker.ts",
+      "built": "dist/app/rin-daemon/worker.js",
+      "suite": "system",
+      "tests": ["tests/system/daemon-worker-entrypoint-owner.test.ts"]
+    },
+    {
+      "source": "src/app/rin-desktop-host/main.ts",
+      "built": "dist/app/rin-desktop-host/main.js",
+      "suite": "system",
+      "tests": ["tests/system/desktop-host-entrypoint-owner.test.ts"]
+    },
+    {
+      "source": "src/app/rin-gui/main.ts",
+      "built": "dist/app/rin-gui/main.js",
+      "suite": "system",
+      "tests": ["tests/system/gui-entrypoint-owner.test.ts"]
+    },
+    {
+      "source": "src/app/rin-install/chat-migrations.ts",
+      "built": "dist/app/rin-install/chat-migrations.js",
+      "suite": "system",
+      "tests": ["tests/system/chat-migrations-entrypoint-owner.test.ts"]
+    },
+    {
+      "source": "src/app/rin-install/main.ts",
+      "built": "dist/app/rin-install/main.js",
+      "suite": "system",
+      "tests": ["tests/system/installer-entrypoint-owner.test.ts"]
+    },
+    {
+      "source": "src/app/rin-install/memory-migrations.ts",
+      "built": "dist/app/rin-install/memory-migrations.js",
+      "suite": "system",
+      "tests": [
+        "tests/system/installer-core-owner.test.ts",
+        "tests/system/install-migration-entrypoints-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/app/rin-install/update-fence-check.ts",
+      "built": "dist/app/rin-install/update-fence-check.js",
+      "suite": "system",
+      "tests": ["tests/system/update-fence-check-owner.test.ts"]
+    },
+    {
+      "source": "src/app/rin-install/update-job.ts",
+      "built": "dist/app/rin-install/update-job.js",
+      "suite": "system",
+      "tests": ["tests/system/update-job-entrypoint-owner.test.ts"]
+    },
+    {
+      "source": "src/app/rin-tui/main.ts",
+      "built": "dist/app/rin-tui/main.js",
+      "suite": "system",
+      "tests": ["tests/system/install-to-tui-user-flow.test.ts"]
+    },
+    {
+      "source": "src/app/rin/main.ts",
+      "built": "dist/app/rin/main.js",
+      "suite": "system",
+      "tests": ["tests/system/rin-cli-entrypoint-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat-bridge/adapters.ts",
+      "built": "dist/core/chat-bridge/adapters.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-bridge-adapters.test.ts"]
+    },
+    {
+      "source": "src/core/chat-bridge/eval.ts",
+      "built": "dist/core/chat-bridge/eval.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-bridge-eval-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat-bridge/runtime.ts",
+      "built": "dist/core/chat-bridge/runtime.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-bridge-runtime-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat-runtime/adapters.ts",
+      "built": "dist/core/chat-runtime/adapters.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-runtime-adapters-owner.test.ts"],
+      "preloads": [
+        "tests/support/register-chat-runtime-adapters-owner-fixture.ts"
+      ]
+    },
+    {
+      "source": "src/core/chat-runtime/common.ts",
+      "built": "dist/core/chat-runtime/common.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-runtime-common-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat-runtime/editable-text-message-group.ts",
+      "built": "dist/core/chat-runtime/editable-text-message-group.js",
+      "suite": "integration",
+      "tests": ["tests/integration/editable-text-message-group-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat-runtime/inbound-recovery.ts",
+      "built": "dist/core/chat-runtime/inbound-recovery.js",
+      "suite": "integration",
+      "tests": ["tests/integration/inbound-recovery-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat-runtime/index.ts",
+      "built": "dist/core/chat-runtime/index.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-runtime-index-owner.test.ts"],
+      "preloads": ["tests/support/register-chat-runtime-index-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/chat/archive-prototype.ts",
+      "built": "dist/core/chat/archive-prototype.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-archive-prototype.test.ts"]
+    },
+    {
+      "source": "src/core/chat/boot.ts",
+      "built": "dist/core/chat/boot.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-boot-owner.test.ts",
+        "tests/integration/chat-boot-current-main.test.ts"
+      ],
+      "preloads": ["tests/support/register-chat-boot-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/chat/chat-helpers.ts",
+      "built": "dist/core/chat/chat-helpers.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-helpers-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat/chat-key-migration.ts",
+      "built": "dist/core/chat/chat-key-migration.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-key-migration-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat/chat-key-record-resolution.ts",
+      "built": "dist/core/chat/chat-key-record-resolution.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-key-migration-recovery.test.ts"]
+    },
+    {
+      "source": "src/core/chat/chat-log.ts",
+      "built": "dist/core/chat/chat-log.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-log.test.ts",
+        "tests/integration/chat-local-date.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/chat/command-responses.ts",
+      "built": "dist/core/chat/command-responses.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-command-responses.test.ts"]
+    },
+    {
+      "source": "src/core/chat/controller.ts",
+      "built": "dist/core/chat/controller.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-controller.test.ts"],
+      "preloads": ["tests/support/register-chat-controller-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/chat/database-install-migration.ts",
+      "built": "dist/core/chat/database-install-migration.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-database.test.ts",
+        "tests/integration/chat-database-owner-branches.test.ts"
+      ],
+      "preloads": ["tests/support/register-chat-database-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/chat/database.ts",
+      "built": "dist/core/chat/database.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-database.test.ts",
+        "tests/integration/chat-database-owner-branches.test.ts"
+      ],
+      "preloads": ["tests/support/register-chat-database-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/chat/decision.ts",
+      "built": "dist/core/chat/decision.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-decision-current-main-owner.test.ts",
+        "tests/integration/chat-decision-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/chat/extension-ui.ts",
+      "built": "dist/core/chat/extension-ui.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-extension-ui.test.ts"]
+    },
+    {
+      "source": "src/core/chat/inbound-normalization.ts",
+      "built": "dist/core/chat/inbound-normalization.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-inbound-normalization.test.ts"]
+    },
+    {
+      "source": "src/core/chat/inbox-drain.ts",
+      "built": "dist/core/chat/inbox-drain.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-inbox-current-main-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat/inbox.ts",
+      "built": "dist/core/chat/inbox.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-inbox-current-main-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat/install-migration.ts",
+      "built": "dist/core/chat/install-migration.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-install-migration-owner.test.ts",
+        "tests/integration/chat-key-migration-recovery.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/chat/legacy-migration.ts",
+      "built": "dist/core/chat/legacy-migration.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-legacy-migration.test.ts",
+        "tests/integration/chat-legacy-migration-owner-branches.test.ts",
+        "tests/integration/chat-key-migration-recovery.test.ts",
+        "tests/integration/chat-database.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/chat/main.ts",
+      "built": "dist/core/chat/main.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-main-queue.test.ts"]
+    },
+    {
+      "source": "src/core/chat/message-store.ts",
+      "built": "dist/core/chat/message-store.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-message-store-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat/runtime-config.ts",
+      "built": "dist/core/chat/runtime-config.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-bridge-adapters.test.ts"]
+    },
+    {
+      "source": "src/core/chat/support.ts",
+      "built": "dist/core/chat/support.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-support-owner.test.ts"]
+    },
+    {
+      "source": "src/core/chat/terminal-delivery.ts",
+      "built": "dist/core/chat/terminal-delivery.js",
+      "suite": "integration",
+      "tests": ["tests/integration/terminal-delivery.test.ts"]
+    },
+    {
+      "source": "src/core/chat/terminal-reconciler.ts",
+      "built": "dist/core/chat/terminal-reconciler.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-terminal-reconciler.test.ts"]
+    },
+    {
+      "source": "src/core/chat/transport.ts",
+      "built": "dist/core/chat/transport.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-transport-owner.test.ts"]
+    },
+    {
+      "source": "src/core/docs/practices-sync.ts",
+      "built": "dist/core/docs/practices-sync.js",
+      "suite": "integration",
+      "tests": ["tests/integration/practices-sync.test.ts"]
+    },
+    {
+      "source": "src/core/http/transport.ts",
+      "built": "dist/core/http/transport.js",
+      "suite": "integration",
+      "tests": ["tests/integration/http-transport.test.ts"]
+    },
+    {
+      "source": "src/core/memory/external.ts",
+      "built": "dist/core/memory/external.js",
+      "suite": "integration",
+      "tests": ["tests/integration/external-memory-owner.test.ts"]
+    },
+    {
+      "source": "src/core/memory/index.ts",
+      "built": "dist/core/memory/index.js",
+      "suite": "integration",
+      "tests": ["tests/integration/memory-index-owner.test.ts"],
+      "preloads": ["tests/support/register-memory-index-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/memory/install-migration.ts",
+      "built": "dist/core/memory/install-migration.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-install-migration-owner.test.ts",
+        "tests/integration/memory.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/memory/transcript-archive.ts",
+      "built": "dist/core/memory/transcript-archive.js",
+      "suite": "integration",
+      "tests": ["tests/integration/transcript-archive-owner.test.ts"]
+    },
+    {
+      "source": "src/core/memory/transcript-search.ts",
+      "built": "dist/core/memory/transcript-search.js",
+      "suite": "integration",
+      "tests": ["tests/integration/transcript-search-owner.test.ts"],
+      "preloads": ["tests/support/register-transcript-search-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/memory/transcript-types.ts",
+      "built": "dist/core/memory/transcript-types.js",
+      "suite": "integration",
+      "tests": ["tests/integration/type-contracts.test.ts"]
+    },
+    {
+      "source": "src/core/memory/transcripts.ts",
+      "built": "dist/core/memory/transcripts.js",
+      "suite": "integration",
+      "tests": ["tests/integration/final-system-prompt.test.ts"]
+    },
+    {
+      "source": "src/core/pi/internal-extension-bridge.ts",
+      "built": "dist/core/pi/internal-extension-bridge.js",
+      "suite": "integration",
+      "tests": ["tests/integration/pi-internal-extension-bridge-owner.test.ts"]
+    },
+    {
+      "source": "src/core/pi/private-api.ts",
+      "built": "dist/core/pi/private-api.js",
+      "suite": "integration",
+      "tests": ["tests/integration/pi-private-api.test.ts"]
+    },
+    {
+      "source": "src/core/pi/render-utils.ts",
+      "built": "dist/core/pi/render-utils.js",
+      "suite": "integration",
+      "tests": ["tests/integration/pi-render-utils-owner.test.ts"]
+    },
+    {
+      "source": "src/core/pi/session-host.ts",
+      "built": "dist/core/pi/session-host.js",
+      "suite": "integration",
+      "tests": ["tests/integration/pi-session-host-owner.test.ts"]
+    },
+    {
+      "source": "src/core/pi/tui-patches/index.ts",
+      "built": "dist/core/pi/tui-patches/index.js",
+      "suite": "integration",
+      "tests": ["tests/integration/tui-patches-owner.test.ts"],
+      "preloads": ["tests/support/register-tui-patches-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/platform/fs.ts",
+      "built": "dist/core/platform/fs.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/platform.test.ts",
+        "tests/integration/platform-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/platform/process.ts",
+      "built": "dist/core/platform/process.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/platform.test.ts",
+        "tests/integration/platform-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-agent-sdk/index.ts",
+      "built": "dist/core/rin-agent-sdk/index.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-agent-sdk-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-builtin-extension-controls.ts",
+      "built": "dist/core/rin-builtin-extension-controls.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/rin-builtin-extension-controls-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-daemon/catalog.ts",
+      "built": "dist/core/rin-daemon/catalog.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-daemon-catalog.test.ts"]
+    },
+    {
+      "source": "src/core/rin-daemon/client.ts",
+      "built": "dist/core/rin-daemon/client.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/rin-daemon-client-owner.test.ts",
+        "tests/integration/rin-daemon-client.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-daemon/cron-condition.ts",
+      "built": "dist/core/rin-daemon/cron-condition.js",
+      "suite": "integration",
+      "tests": ["tests/integration/cron-condition-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-daemon/cron-execution.ts",
+      "built": "dist/core/rin-daemon/cron-execution.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/cron-execution.test.ts",
+        "tests/integration/cron-execution-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-daemon/cron.ts",
+      "built": "dist/core/rin-daemon/cron.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/cron-owner.test.ts",
+        "tests/integration/cron-execution.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-daemon/daemon.ts",
+      "built": "dist/core/rin-daemon/daemon.js",
+      "suite": "system",
+      "tests": ["tests/system/daemon-core-entrypoint-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-daemon/extensions.ts",
+      "built": "dist/core/rin-daemon/extensions.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-daemon-extensions-owner.test.ts"],
+      "preloads": ["tests/support/register-daemon-extensions-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin-daemon/lock.ts",
+      "built": "dist/core/rin-daemon/lock.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-daemon-lock-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-daemon/rpc-mode.ts",
+      "built": "dist/core/rin-daemon/rpc-mode.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rpc-mode-owner-wrapper.test.ts"],
+      "preloads": ["tests/support/register-rpc-mode-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin-daemon/rpc-turn-coordinator.ts",
+      "built": "dist/core/rin-daemon/rpc-turn-coordinator.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/rpc-turn-coordinator-owner.test.ts",
+        "tests/integration/rpc-mode-current-main-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-daemon/turn-ledger.ts",
+      "built": "dist/core/rin-daemon/turn-ledger.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/daemon-turn-ledger.test.ts",
+        "tests/integration/chat-controller.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-daemon/worker-helpers.ts",
+      "built": "dist/core/rin-daemon/worker-helpers.js",
+      "suite": "integration",
+      "tests": ["tests/integration/worker-helpers-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-daemon/worker-pool.ts",
+      "built": "dist/core/rin-daemon/worker-pool.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/worker-pool-owner.test.ts",
+        "tests/integration/daemon-worker-pool.test.ts"
+      ],
+      "preloads": ["tests/support/register-worker-pool-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin-daemon/worker.ts",
+      "built": "dist/core/rin-daemon/worker.js",
+      "suite": "system",
+      "tests": ["tests/system/daemon-worker-core-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-frontend-sdk/daemon-client.ts",
+      "built": "dist/core/rin-frontend-sdk/daemon-client.js",
+      "suite": "integration",
+      "tests": ["tests/integration/frontend-daemon-client-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-frontend-sdk/frontend-lifecycle.ts",
+      "built": "dist/core/rin-frontend-sdk/frontend-lifecycle.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/frontend-lifecycle-policy.test.ts",
+        "tests/integration/frontend-turn-driver.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-frontend-sdk/frontend-surface.ts",
+      "built": "dist/core/rin-frontend-sdk/frontend-surface.js",
+      "suite": "integration",
+      "tests": ["tests/integration/type-contracts.test.ts"]
+    },
+    {
+      "source": "src/core/rin-frontend-sdk/index.ts",
+      "built": "dist/core/rin-frontend-sdk/index.js",
+      "suite": "integration",
+      "tests": ["tests/integration/frontend-sdk-index.test.ts"]
+    },
+    {
+      "source": "src/core/rin-frontend-sdk/model-registry.ts",
+      "built": "dist/core/rin-frontend-sdk/model-registry.js",
+      "suite": "integration",
+      "tests": ["tests/integration/model-registry-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-frontend-sdk/model-settings.ts",
+      "built": "dist/core/rin-frontend-sdk/model-settings.js",
+      "suite": "integration",
+      "tests": ["tests/integration/model-settings-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-frontend-sdk/rpc-auth.ts",
+      "built": "dist/core/rin-frontend-sdk/rpc-auth.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/rpc-auth-owner.test.ts",
+        "tests/integration/rpc-auth.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-frontend-sdk/rpc-session-events.ts",
+      "built": "dist/core/rin-frontend-sdk/rpc-session-events.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rpc-events.test.ts"]
+    },
+    {
+      "source": "src/core/rin-frontend-sdk/turn-driver.ts",
+      "built": "dist/core/rin-frontend-sdk/turn-driver.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/frontend-turn-driver.test.ts",
+        "tests/integration/frontend-turn-driver-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-frontend-sdk/types.ts",
+      "built": "dist/core/rin-frontend-sdk/types.js",
+      "suite": "integration",
+      "tests": ["tests/integration/type-contracts.test.ts"]
+    },
+    {
+      "source": "src/core/rin-gui/main.ts",
+      "built": "dist/core/rin-gui/main.js",
+      "suite": "system",
+      "tests": ["tests/system/gui-core-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-gui/native-desktop.ts",
+      "built": "dist/core/rin-gui/native-desktop.js",
+      "suite": "integration",
+      "tests": ["tests/integration/native-desktop-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-install/apply-plan.ts",
+      "built": "dist/core/rin-install/apply-plan.js",
+      "suite": "integration",
+      "tests": ["tests/integration/installer-apply-plan-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-install/common.ts",
+      "built": "dist/core/rin-install/common.js",
+      "suite": "integration",
+      "tests": ["tests/integration/installer-common-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-install/daemon-update-fence.ts",
+      "built": "dist/core/rin-install/daemon-update-fence.js",
+      "suite": "integration",
+      "tests": ["tests/integration/installer-daemon-update-fence.test.ts"],
+      "preloads": [
+        "tests/support/register-daemon-update-fence-owner-fixture.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-install/deployment-targets.ts",
+      "built": "dist/core/rin-install/deployment-targets.js",
+      "suite": "integration",
+      "tests": ["tests/integration/installer-deployment-targets-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-install/execution-context.ts",
+      "built": "dist/core/rin-install/execution-context.js",
+      "suite": "integration",
+      "tests": ["tests/integration/installer-execution-context-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-install/finalize.ts",
+      "built": "dist/core/rin-install/finalize.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/installer-finalize-current-main-owner.test.ts",
+        "tests/integration/installer-finalize-owner.test.ts"
+      ],
+      "preloads": ["tests/support/register-finalize-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin-install/fs-utils.ts",
+      "built": "dist/core/rin-install/fs-utils.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/installer-fs-utils-current-main-owner.test.ts",
+        "tests/integration/installer-fs-utils-owner.test.ts"
+      ],
+      "preloads": ["tests/support/register-fs-utils-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin-install/gui.ts",
+      "built": "dist/core/rin-install/gui.js",
+      "suite": "integration",
+      "tests": ["tests/integration/installer-gui-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-install/i18n.ts",
+      "built": "dist/core/rin-install/i18n.js",
+      "suite": "integration",
+      "tests": ["tests/integration/installer-i18n-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-install/interactive.ts",
+      "built": "dist/core/rin-install/interactive.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/installer-interactive-current-main-owner.test.ts",
+        "tests/integration/installer-interactive-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-install/legacy-service-hold.ts",
+      "built": "dist/core/rin-install/legacy-service-hold.js",
+      "suite": "integration",
+      "tests": ["tests/integration/managed-systemd-restart.test.ts"],
+      "preloads": [
+        "tests/support/register-legacy-service-hold-owner-fixture.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-install/main.ts",
+      "built": "dist/core/rin-install/main.js",
+      "suite": "system",
+      "tests": ["tests/system/installer-core-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-install/paths.ts",
+      "built": "dist/core/rin-install/paths.js",
+      "suite": "integration",
+      "tests": ["tests/integration/installer-paths.test.ts"]
+    },
+    {
+      "source": "src/core/rin-install/persist.ts",
+      "built": "dist/core/rin-install/persist.js",
+      "suite": "integration",
+      "tests": ["tests/integration/installer-persist-owner.test.ts"],
+      "preloads": ["tests/support/register-persist-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin-install/pi-tools.ts",
+      "built": "dist/core/rin-install/pi-tools.js",
+      "suite": "integration",
+      "tests": ["tests/integration/pi-tools.test.ts"]
+    },
+    {
+      "source": "src/core/rin-install/progress.ts",
+      "built": "dist/core/rin-install/progress.js",
+      "suite": "integration",
+      "tests": ["tests/integration/installer-progress-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-install/provider-auth.ts",
+      "built": "dist/core/rin-install/provider-auth.js",
+      "suite": "integration",
+      "tests": ["tests/integration/provider-auth-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-install/quick-run.ts",
+      "built": "dist/core/rin-install/quick-run.js",
+      "suite": "integration",
+      "tests": ["tests/integration/installer-quick-run-owner.test.ts"],
+      "preloads": ["tests/support/register-quick-run-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin-install/service.ts",
+      "built": "dist/core/rin-install/service.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/installer-service-owner.test.ts",
+        "tests/integration/managed-systemd-restart.test.ts"
+      ],
+      "preloads": [
+        "tests/support/register-service-owner-fixture.ts",
+        "tests/support/register-legacy-service-hold-owner-fixture.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-install/update-workflow.ts",
+      "built": "dist/core/rin-install/update-workflow.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/update-workflow.test.ts",
+        "tests/integration/update-workflow-main-contract.test.ts"
+      ],
+      "preloads": ["tests/support/register-update-workflow-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin-install/updater.ts",
+      "built": "dist/core/rin-install/updater.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/installer-updater-owner.test.ts",
+        "tests/integration/updater-current-main-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-install/users.ts",
+      "built": "dist/core/rin-install/users.js",
+      "suite": "integration",
+      "tests": ["tests/integration/installer-users-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/agent-runtime.ts",
+      "built": "dist/core/rin-lib/agent-runtime.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-agent-runtime-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/capability-session.ts",
+      "built": "dist/core/rin-lib/capability-session.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/rin-capability-session-owner.test.ts",
+        "tests/integration/rin-cli-capability-current-main-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-lib/capability-types.ts",
+      "built": "dist/core/rin-lib/capability-types.js",
+      "suite": "integration",
+      "tests": ["tests/integration/type-contracts.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/changelog.ts",
+      "built": "dist/core/rin-lib/changelog.js",
+      "suite": "integration",
+      "tests": ["tests/integration/changelog.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/chat-outbox.ts",
+      "built": "dist/core/rin-lib/chat-outbox.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-outbox-and-binding.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/common.ts",
+      "built": "dist/core/rin-lib/common.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-lib-common-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/extension-loader.ts",
+      "built": "dist/core/rin-lib/extension-loader.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-extension-loader-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/loader.ts",
+      "built": "dist/core/rin-lib/loader.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-lib-loader-owner.test.ts"],
+      "preloads": ["tests/support/register-rin-lib-loader-owner-fixture.ts"],
+      "node22DynamicImportUncoveredBranches": 6
+    },
+    {
+      "source": "src/core/rin-lib/note.ts",
+      "built": "dist/core/rin-lib/note.js",
+      "suite": "integration",
+      "tests": ["tests/integration/note-tool.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/pi-passthrough.ts",
+      "built": "dist/core/rin-lib/pi-passthrough.js",
+      "suite": "integration",
+      "tests": ["tests/integration/type-contracts.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/post-compaction-state.ts",
+      "built": "dist/core/rin-lib/post-compaction-state.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-runtime-current-main.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/profile.ts",
+      "built": "dist/core/rin-lib/profile.js",
+      "suite": "integration",
+      "tests": ["tests/integration/runtime-profile.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/release.ts",
+      "built": "dist/core/rin-lib/release.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-release-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/rpc-types.ts",
+      "built": "dist/core/rin-lib/rpc-types.js",
+      "suite": "integration",
+      "tests": ["tests/integration/type-contracts.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/runtime.ts",
+      "built": "dist/core/rin-lib/runtime.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/rin-runtime-owner.test.ts",
+        "tests/integration/final-system-prompt.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin-lib/system.ts",
+      "built": "dist/core/rin-lib/system.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-lib-system-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/todo.ts",
+      "built": "dist/core/rin-lib/todo.js",
+      "suite": "integration",
+      "tests": ["tests/integration/todo-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/update-notices.ts",
+      "built": "dist/core/rin-lib/update-notices.js",
+      "suite": "integration",
+      "tests": ["tests/integration/update-notices-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-targets/runner.ts",
+      "built": "dist/core/rin-targets/runner.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-target-runner-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-tui/events.ts",
+      "built": "dist/core/rin-tui/events.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rpc-events.test.ts"]
+    },
+    {
+      "source": "src/core/rin-tui/launcher.ts",
+      "built": "dist/core/rin-tui/launcher.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-tui-launcher-owner.test.ts"],
+      "preloads": ["tests/support/register-tui-launcher-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin-tui/main.ts",
+      "built": "dist/core/rin-tui/main.js",
+      "suite": "system",
+      "tests": ["tests/system/tui-core-entrypoint-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-tui/runtime.ts",
+      "built": "dist/core/rin-tui/runtime.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-tui-runtime-owner.test.ts"],
+      "preloads": ["tests/support/register-rin-tui-runtime-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin/control.ts",
+      "built": "dist/core/rin/control.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-control-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/docs.ts",
+      "built": "dist/core/rin/docs.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-docs-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/doctor.ts",
+      "built": "dist/core/rin/doctor.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-doctor-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/interactive-list.ts",
+      "built": "dist/core/rin/interactive-list.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-interactive-list-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/launch.ts",
+      "built": "dist/core/rin/launch.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-launch-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/main.ts",
+      "built": "dist/core/rin/main.js",
+      "suite": "system",
+      "tests": ["tests/system/rin-core-cli-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/managed-runtime-service.ts",
+      "built": "dist/core/rin/managed-runtime-service.js",
+      "suite": "integration",
+      "tests": ["tests/integration/managed-runtime-service-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/memory-index.ts",
+      "built": "dist/core/rin/memory-index.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-memory-index-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/run.ts",
+      "built": "dist/core/rin/run.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-run-owner.test.ts"],
+      "preloads": ["tests/support/register-rin-run-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin/self-improve.ts",
+      "built": "dist/core/rin/self-improve.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/rin-cli-current-main-owner.test.ts",
+        "tests/integration/rin-self-improve-cli-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/rin/shared-lite.ts",
+      "built": "dist/core/rin/shared-lite.js",
+      "suite": "integration",
+      "tests": ["tests/integration/shared-lite-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/shared.ts",
+      "built": "dist/core/rin/shared.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-shared-owner.test.ts"],
+      "preloads": ["tests/support/register-rin-shared-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin/status.ts",
+      "built": "dist/core/rin/status.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-status-owner.test.ts"],
+      "preloads": ["tests/support/register-rin-status-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin/targets.ts",
+      "built": "dist/core/rin/targets.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-targets-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/tasks.ts",
+      "built": "dist/core/rin/tasks.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-tasks-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/update-job.ts",
+      "built": "dist/core/rin/update-job.js",
+      "suite": "integration",
+      "tests": ["tests/integration/update-job.test.ts"]
+    },
+    {
+      "source": "src/core/rin/usage-chart.ts",
+      "built": "dist/core/rin/usage-chart.js",
+      "suite": "integration",
+      "tests": ["tests/integration/usage-chart-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/usage.ts",
+      "built": "dist/core/rin/usage.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-usage-owner.test.ts"],
+      "preloads": ["tests/support/register-usage-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin/versions.ts",
+      "built": "dist/core/rin/versions.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-versions-owner.test.ts"]
+    },
+    {
+      "source": "src/core/self-improve/agent-dir.ts",
+      "built": "dist/core/self-improve/agent-dir.js",
+      "suite": "integration",
+      "tests": ["tests/integration/self-improve-agent-dir.test.ts"]
+    },
+    {
+      "source": "src/core/self-improve/async-jobs.ts",
+      "built": "dist/core/self-improve/async-jobs.js",
+      "suite": "integration",
+      "tests": ["tests/integration/self-improve-async-jobs-owner.test.ts"],
+      "preloads": ["tests/support/register-async-jobs-private-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/self-improve/audit-observer.ts",
+      "built": "dist/core/self-improve/audit-observer.js",
+      "suite": "integration",
+      "tests": ["tests/integration/audit-observer-current-owner.test.ts"],
+      "preloads": ["tests/support/register-audit-observer-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/self-improve/constants.ts",
+      "built": "dist/core/self-improve/constants.js",
+      "suite": "integration",
+      "tests": ["tests/integration/self-improve-fixed-window.test.ts"]
+    },
+    {
+      "source": "src/core/self-improve/core/index.ts",
+      "built": "dist/core/self-improve/core/index.js",
+      "suite": "integration",
+      "tests": ["tests/integration/self-improve-core-index-owner.test.ts"]
+    },
+    {
+      "source": "src/core/self-improve/index.ts",
+      "built": "dist/core/self-improve/index.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/self-improve.test.ts",
+        "tests/integration/self-improve-index-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/self-improve/maintainer.ts",
+      "built": "dist/core/self-improve/maintainer.js",
+      "suite": "integration",
+      "tests": ["tests/integration/self-improve-maintainer-owner.test.ts"]
+    },
+    {
+      "source": "src/core/self-improve/prompt.ts",
+      "built": "dist/core/self-improve/prompt.js",
+      "suite": "integration",
+      "tests": ["tests/integration/self-improve-prompt-owner.test.ts"]
+    },
+    {
+      "source": "src/core/self-improve/run-audit.ts",
+      "built": "dist/core/self-improve/run-audit.js",
+      "suite": "integration",
+      "tests": ["tests/integration/self-improve-audit-observer-owner.test.ts"]
+    },
+    {
+      "source": "src/core/self-improve/store.ts",
+      "built": "dist/core/self-improve/store.js",
+      "suite": "integration",
+      "tests": ["tests/integration/self-improve-store-owner.test.ts"]
+    },
+    {
+      "source": "src/core/self-improve/worker.ts",
+      "built": "dist/core/self-improve/worker.js",
+      "suite": "system",
+      "tests": ["tests/system/self-improve-worker-owner.test.ts"]
+    },
+    {
+      "source": "src/core/session/catalog.ts",
+      "built": "dist/core/session/catalog.js",
+      "suite": "integration",
+      "tests": ["tests/integration/session-catalog-owner.test.ts"]
+    },
+    {
+      "source": "src/core/session/factory.ts",
+      "built": "dist/core/session/factory.js",
+      "suite": "integration",
+      "tests": ["tests/integration/session-factory-owner.test.ts"]
+    },
+    {
+      "source": "src/core/session/paged-listing.ts",
+      "built": "dist/core/session/paged-listing.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/session-paged-listing-owner.test.ts",
+        "tests/integration/session-paged-listing-fallback-owner.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/session/runner.ts",
+      "built": "dist/core/session/runner.js",
+      "suite": "integration",
+      "tests": ["tests/integration/session-runner-owner.test.ts"]
+    },
+    {
+      "source": "src/core/token-usage/index.ts",
+      "built": "dist/core/token-usage/index.js",
+      "suite": "integration",
+      "tests": ["tests/integration/token-usage-index-owner.test.ts"]
+    },
+    {
+      "source": "src/core/token-usage/store.ts",
+      "built": "dist/core/token-usage/store.js",
+      "suite": "integration",
+      "tests": ["tests/integration/token-usage-store.test.ts"]
+    }
+  ]
+}

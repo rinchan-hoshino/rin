@@ -1,14 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { importBuiltModule } from "../support/import-built-module.js";
 
-const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "../..",
-);
-const sessionFork = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "session", "fork.js")).href
+const sessionFork = await importBuiltModule<Record<string, any>>(
+  "dist/core/session/fork.js",
 );
 
 test("session fork compat uses native option-aware fork APIs when available", () => {

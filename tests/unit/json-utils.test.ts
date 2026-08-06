@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
 const jsonUtils = await import(
@@ -44,4 +44,13 @@ test("json utils object helpers preserve object guards", () => {
   assert.equal(jsonUtils.isJsonRecord({ demo: true }), true);
   assert.equal(jsonUtils.isJsonRecord([]), false);
   assert.equal(jsonUtils.isJsonRecord(null), false);
+});
+
+test("json utils array guard preserves arrays and rejects other values", () => {
+  const values = [{ id: 1 }];
+
+  assert.equal(jsonUtils.asArray(values), values);
+  assert.deepEqual(jsonUtils.asArray({ id: 1 }), []);
+  assert.deepEqual(jsonUtils.asArray(null), []);
+  assert.deepEqual(jsonUtils.asArray("value"), []);
 });

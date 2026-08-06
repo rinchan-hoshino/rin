@@ -1,5 +1,6 @@
 dist/
 .test-dist/
+coverage/
 node_modules/
 third_party/
 upstream/

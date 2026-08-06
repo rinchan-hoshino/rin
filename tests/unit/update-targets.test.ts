@@ -3,17 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { importBuiltModule } from "../support/import-built-module.js";
 
-const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "..",
-  "..",
-);
-const updateTargets = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-install", "update-targets.js"),
-  ).href
+const updateTargets = await importBuiltModule<Record<string, any>>(
+  "dist/core/rin-install/update-targets.js",
 );
 
 async function withTempDir(fn) {

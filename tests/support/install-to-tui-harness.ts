@@ -4,15 +4,21 @@ import os from "node:os";
 import path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import stripAnsi from "strip-ansi";
+
+import { createTestSandbox } from "./test-sandbox.js";
 
 const execFileAsync = promisify(execFile);
 
 export const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
 );
+const CONTAINER_SOURCE_ROOT = "/source/rin";
+const CONTAINER_ROOT = "/workspace/rin";
+const CONTAINER_COVERAGE_ROOT = "/coverage";
 
 const fsUtils = await import(
   pathToFileURL(
@@ -24,10 +30,15 @@ const persist = await import(
     .href
 );
 export const INNER_CONTAINER_ENV = "RIN_INSTALL_TUI_CONTAINER_INNER";
-export const DEFAULT_CONTAINER_IMAGE = `node:${process.versions.node.split(".")[0]}-bookworm-slim`;
+export const LOCAL_CI_CONTAINER_ENV = "RIN_SYSTEM_TEST_CONTAINER_INNER";
+export const DEFAULT_CONTAINER_IMAGE = "rin-local-ci:latest";
+
+export function isLocalCiContainerRun() {
+  return process.env[LOCAL_CI_CONTAINER_ENV] === "1";
+}
 
 export function isInnerContainerRun() {
-  return process.env[INNER_CONTAINER_ENV] === "1";
+  return process.env[INNER_CONTAINER_ENV] === "1" || isLocalCiContainerRun();
 }
 
 async function removeDirRobust(dir: string, attempts = 10) {
@@ -62,7 +73,15 @@ export async function commandExists(name: string) {
 
 export async function findContainerRuntime() {
   for (const name of ["docker", "podman"]) {
-    if (await commandExists(name)) return name;
+    try {
+      await execFileAsync(name, ["info"], {
+        env: process.env,
+        maxBuffer: 2 * 1024 * 1024,
+      });
+      return name;
+    } catch {
+      continue;
+    }
   }
   return "";
 }
@@ -101,7 +120,7 @@ async function waitForPtyExit(
   exitPromise: Promise<PtyCommandResult>,
   timeoutMs: number,
 ) {
-  let timer: NodeJS.Timeout | undefined;
+  let timer: number | NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
       exitPromise,
@@ -212,6 +231,7 @@ export function buildInstallToTuiContainerArgs(options: {
   image?: string;
   interactive?: boolean;
   innerArgs?: string[];
+  coverageDir?: string;
 }) {
   const image = options.image || DEFAULT_CONTAINER_IMAGE;
   const innerCommand =
@@ -223,54 +243,104 @@ export function buildInstallToTuiContainerArgs(options: {
           "--test",
           "--test-reporter",
           "tap",
-          "tests/e2e/install-to-tui-user-flow.test.ts",
+          "tests/system/install-to-tui-user-flow.test.ts",
         ]
       : [
           "node",
           "--import",
           "tsx",
-          "tests/interactive/install-to-tui-manual.ts",
+          "tests/system/install-to-tui-manual.ts",
           "--inner",
           ...(options.innerArgs || []),
         ];
 
+  const innerInvocation = innerCommand.map(shellQuote).join(" ");
+  const unprivilegedInvocation = `setpriv --reuid=1000 --regid=1000 --init-groups -- ${innerInvocation}`;
+  const executeInner = options.coverageDir
+    ? `${unprivilegedInvocation}; status=$?; chmod -R a+rwX ${shellQuote(CONTAINER_COVERAGE_ROOT)}; exit $status`
+    : `exec ${unprivilegedInvocation}`;
+  const innerScript = [
+    `rm -rf ${shellQuote(CONTAINER_ROOT)} && mkdir -p ${shellQuote(CONTAINER_ROOT)}`,
+    `tar --exclude='./node_modules' --exclude='./coverage' --exclude='./.git' -C ${shellQuote(CONTAINER_SOURCE_ROOT)} -cf - . | tar -C ${shellQuote(CONTAINER_ROOT)} -xf -`,
+    `ln -s /opt/rin/node_modules ${shellQuote(path.posix.join(CONTAINER_ROOT, "node_modules"))}`,
+    `cd ${shellQuote(CONTAINER_ROOT)}`,
+    executeInner,
+  ].join(" && ");
+  const coverageArgs = options.coverageDir
+    ? [
+        "--mount",
+        `type=bind,source=${path.resolve(options.coverageDir)},target=${CONTAINER_COVERAGE_ROOT}`,
+        "-e",
+        `NODE_V8_COVERAGE=${CONTAINER_COVERAGE_ROOT}`,
+      ]
+    : [];
+
   return [
     "run",
     "--rm",
+    "--pull=never",
     ...(options.interactive ? ["-it"] : []),
     "--network",
     "none",
     "--read-only",
     "--security-opt",
     "no-new-privileges",
+    "--user",
+    "0:0",
     "--tmpfs",
     "/tmp:exec,mode=1777",
     "--tmpfs",
     "/run:exec,mode=755",
+    "--tmpfs",
+    "/workspace:exec,mode=777",
     "--mount",
-    `type=bind,source=${rootDir},target=${rootDir},readonly`,
+    `type=bind,source=${rootDir},target=${CONTAINER_SOURCE_ROOT},readonly`,
+    ...coverageArgs,
     "-w",
-    rootDir,
+    "/workspace",
     "-e",
     `${INNER_CONTAINER_ENV}=1`,
     "-e",
     "NO_COLOR=1",
+    "--entrypoint",
+    "/bin/sh",
     image,
-    ...innerCommand,
+    "-lc",
+    innerScript,
   ];
 }
 
-export async function runInstallToTuiSmokeInContainer(options: {
-  failOnUnavailableRuntime: boolean;
-}) {
+async function rewriteContainerCoveragePaths(
+  coverageDir: string,
+  previousFiles: Set<string>,
+) {
+  const containerPrefix = "file:///workspace/rin/";
+  const hostPrefix = pathToFileURL(`${rootDir}${path.sep}`).href;
+  for (const name of await fs.readdir(coverageDir)) {
+    if (previousFiles.has(name) || !name.endsWith(".json")) continue;
+    const filePath = path.join(coverageDir, name);
+    const raw = await fs.readFile(filePath, "utf8");
+    const rewritten = raw
+      .replaceAll(containerPrefix, hostPrefix)
+      .replace(
+        /file:\/\/\/[^"\\]*\/rin-install-tui-e2e-[^/"\\]+\/install\/app\/releases\/[^/"\\]+\/dist\//g,
+        `${hostPrefix}dist/`,
+      );
+    if (rewritten !== raw) await fs.writeFile(filePath, rewritten, "utf8");
+  }
+}
+
+export async function runInstallToTuiSmokeInContainer(
+  options: { failOnUnavailableRuntime: boolean } = {
+    failOnUnavailableRuntime: true,
+  },
+) {
   const runtime = await findContainerRuntime();
   if (!runtime) {
-    if (options.failOnUnavailableRuntime) {
-      assert.fail("missing docker or podman for isolated install-to-TUI smoke");
-    }
-    return {
-      skipped: "missing docker or podman for isolated install-to-TUI smoke",
-    };
+    const message =
+      "missing docker or podman for isolated install-to-TUI smoke";
+    if (options.failOnUnavailableRuntime) assert.fail(message);
+    return { skipped: `runtime-unavailable: ${message}` };
   }
 
   try {
@@ -290,15 +360,40 @@ export async function runInstallToTuiSmokeInContainer(options: {
     };
   }
 
-  const result = await execFileAsync(
-    runtime,
-    buildInstallToTuiContainerArgs({ mode: "smoke-test" }),
-    {
-      cwd: rootDir,
-      env: process.env,
-      maxBuffer: 10 * 1024 * 1024,
-    },
+  const coverageDir = process.env.NODE_V8_COVERAGE
+    ? path.resolve(process.env.NODE_V8_COVERAGE)
+    : "";
+  if (coverageDir) {
+    await fs.mkdir(coverageDir, { recursive: true });
+    await fs.chmod(coverageDir, 0o777);
+  }
+  const previousCoverageFiles = new Set(
+    coverageDir ? await fs.readdir(coverageDir) : [],
   );
+
+  let result: Awaited<ReturnType<typeof execFileAsync>>;
+  try {
+    result = await execFileAsync(
+      runtime,
+      buildInstallToTuiContainerArgs({
+        mode: "smoke-test",
+        coverageDir: coverageDir || undefined,
+      }),
+      {
+        cwd: rootDir,
+        env: process.env,
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
+  } catch (error) {
+    if (coverageDir) {
+      await rewriteContainerCoveragePaths(coverageDir, previousCoverageFiles);
+    }
+    throw error;
+  }
+  if (coverageDir) {
+    await rewriteContainerCoveragePaths(coverageDir, previousCoverageFiles);
+  }
   const stdout = String(result.stdout || "");
   assert.match(stdout, /# pass 1/);
   return { stdout };
@@ -345,10 +440,11 @@ export async function runManualHarnessContainer(options: {
 }
 
 export async function setupIsolatedInstalledRuntime(tempDir: string) {
-  const home = path.join(tempDir, "home");
+  const sandbox = await createTestSandbox(tempDir, {
+    TERM: "xterm-256color",
+  });
+  const { home, agentDir, runtimeDir } = sandbox;
   const installDir = path.join(tempDir, "install");
-  const agentDir = path.join(tempDir, "agent");
-  const runtimeDir = path.join(tempDir, "runtime");
   const currentUser = os.userInfo().username || "rin";
   const userRecord = {
     name: currentUser,
@@ -358,8 +454,6 @@ export async function setupIsolatedInstalledRuntime(tempDir: string) {
     shell: "/bin/sh",
   };
 
-  await fs.mkdir(agentDir, { recursive: true });
-  await fs.mkdir(runtimeDir, { recursive: true });
   const managedNodeSourceRoot = path.join(tempDir, "managed-node-source");
 
   const release = {
@@ -439,16 +533,7 @@ export async function setupIsolatedInstalledRuntime(tempDir: string) {
     "utf8",
   );
 
-  const env = {
-    ...process.env,
-    HOME: home,
-    XDG_CACHE_HOME: path.join(home, ".cache"),
-    XDG_RUNTIME_DIR: runtimeDir,
-    DBUS_SESSION_BUS_ADDRESS: `unix:path=${path.join(runtimeDir, "bus")}`,
-    RIN_DIR: agentDir,
-    NO_COLOR: "1",
-    TERM: "xterm-256color",
-  };
+  const env = sandbox.env;
 
   return {
     home,
@@ -511,6 +596,24 @@ export async function waitForDoctorSocket(
     await new Promise((resolve) => setTimeout(resolve, 150));
   }
   throw new Error(`timed_out_waiting_for_socket_${expected}:\n${lastOutput}`);
+}
+
+async function stopPtyChild(
+  child: ReturnType<typeof spawn>,
+  exitPromise: Promise<unknown>,
+) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill("SIGTERM");
+  await Promise.race([
+    exitPromise,
+    new Promise<void>((resolve) => setTimeout(resolve, 500)),
+  ]).catch(() => undefined);
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill("SIGKILL");
+  await Promise.race([
+    exitPromise,
+    new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+  ]).catch(() => undefined);
 }
 
 async function stopDaemon(
@@ -585,6 +688,12 @@ export async function withInstalledDaemon(
   } finally {
     await stopDaemon(active.daemon, active.daemonExit);
   }
+}
+
+export async function remapInstalledRuntimeCoverage() {
+  const coverageDir = process.env.NODE_V8_COVERAGE;
+  if (!coverageDir) return;
+  await rewriteContainerCoveragePaths(path.resolve(coverageDir), new Set());
 }
 
 export async function assertInstalledRuntimeSmoke() {
@@ -664,6 +773,79 @@ export async function assertInstalledRuntimeSmoke() {
   });
 }
 
+async function waitForVisiblePtyText(
+  command: ReturnType<typeof startPtyCommand>,
+  pattern: RegExp,
+  timeoutMs: number,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const visible = stripAnsi(command.getOutput());
+    if (pattern.test(visible)) return visible;
+    if (command.child.exitCode !== null || command.child.signalCode !== null) {
+      throw new Error(`ui_process_exited_before_text:${pattern}:${visible}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(
+    `ui_visible_text_timeout:${pattern}:${stripAnsi(command.getOutput())}`,
+  );
+}
+
+export async function runUiOnlyTuiJourney() {
+  if (process.platform !== "linux") {
+    throw new Error("ui-only TUI journey currently requires linux");
+  }
+  if (!(await commandExists("script"))) {
+    throw new Error("ui-only TUI journey requires util-linux script");
+  }
+
+  let result:
+    | {
+        startupScreen: string;
+        hotkeysScreen: string;
+        finalScreen: string;
+        exit: PtyCommandResult;
+      }
+    | undefined;
+  await withIsolatedTempDir(async (tempDir) => {
+    const flow = await setupIsolatedInstalledRuntime(tempDir);
+    await withInstalledDaemon(flow, async () => {
+      const command = startPtyCommand(
+        `stty cols 120 rows 40; exec ${shellQuote(flow.rinPath)}`,
+        flow.env,
+      );
+      let exit: PtyCommandResult | undefined;
+      try {
+        const startupScreen = await waitForVisiblePtyText(
+          command,
+          /Rin can explain its own features/,
+          15_000,
+        );
+        command.child.stdin.write("/hotkeys\r");
+        const hotkeysScreen = await waitForVisiblePtyText(
+          command,
+          /Keyboard Shortcuts/,
+          8_000,
+        );
+        command.child.stdin.write("/quit\r");
+        exit = await waitForPtyExit(command.exitPromise, 8_000);
+        if (!exit) throw new Error("ui_quit_timeout");
+        result = {
+          startupScreen,
+          hotkeysScreen,
+          finalScreen: stripAnsi(command.getOutput()),
+          exit,
+        };
+      } finally {
+        if (!exit) await stopPtyCommand(command);
+      }
+    });
+  });
+  if (!result) throw new Error("ui_journey_result_missing");
+  return result;
+}
+
 export async function runManualInnerSession(options: { scripted?: boolean }) {
   if (process.platform !== "linux") {
     throw new Error("install-to-TUI manual harness currently requires linux");
@@ -685,25 +867,82 @@ export async function runManualInnerSession(options: { scripted?: boolean }) {
 
     await withInstalledDaemon(flow, async () => {
       if (options.scripted) {
+        const installedNodePath = path.join(
+          flow.installDir,
+          "runtime",
+          "node",
+          "current",
+          "bin",
+          "node",
+        );
         const child = spawn(
           "script",
-          ["-qfec", shellQuote(flow.rinPath), "/dev/null"],
+          [
+            "-qfec",
+            `stty cols 120 rows 40; exec ${shellQuote(installedNodePath)} ${shellQuote(flow.tuiPath)}`,
+            "/dev/null",
+          ],
           {
             cwd: rootDir,
             env: flow.env,
-            stdio: ["pipe", "inherit", "inherit"],
+            stdio: ["pipe", "pipe", "pipe"],
           },
         );
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        child.stdin.write("\u0003");
-        child.stdin.end();
-        await new Promise<void>((resolve, reject) => {
-          child.once("error", reject);
-          child.once("exit", (code, signal) => {
-            if (signal || code === 0 || code === 1 || code === 130) resolve();
-            else reject(new Error(`manual_scripted_tui_exit:${code}`));
-          });
+        let output = "";
+        child.stdout.on("data", (chunk) => {
+          output += String(chunk);
         });
+        child.stderr.on("data", (chunk) => {
+          output += String(chunk);
+        });
+        const exitPromise = new Promise<{
+          code: number | null;
+          signal: NodeJS.Signals | null;
+        }>((resolve, reject) => {
+          child.once("error", reject);
+          child.once("exit", (code, signal) => resolve({ code, signal }));
+        });
+        try {
+          const renderDeadline = Date.now() + 8000;
+          while (
+            Date.now() < renderDeadline &&
+            !(output.length > 20 && output.includes("\u001b["))
+          ) {
+            if (child.exitCode !== null) break;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          if (
+            child.exitCode !== null ||
+            output.length <= 20 ||
+            !output.includes("\u001b[")
+          ) {
+            throw new Error(
+              `manual_scripted_tui_no_render:${JSON.stringify(output)}`,
+            );
+          }
+          child.stdin.write("\u0003");
+          child.stdin.end();
+          const exitResult = await Promise.race([
+            exitPromise,
+            new Promise<never>((_, reject) =>
+              setTimeout(
+                () => reject(new Error("manual_scripted_tui_exit_timeout")),
+                8000,
+              ),
+            ),
+          ]);
+          if (
+            exitResult.signal !== "SIGINT" &&
+            exitResult.code !== 0 &&
+            exitResult.code !== 130
+          ) {
+            throw new Error(
+              `manual_scripted_tui_exit:${exitResult.code}:${exitResult.signal || "none"}:${JSON.stringify(output)}`,
+            );
+          }
+        } finally {
+          await stopPtyChild(child, exitPromise);
+        }
         return;
       }
 

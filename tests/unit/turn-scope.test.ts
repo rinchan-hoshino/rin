@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
 );
@@ -72,15 +72,76 @@ test("turn scope returns only messages after the captured baseline leaf", () => 
   ]);
 });
 
-test("turn scope rejects a malformed manager leaf even on an empty branch", () => {
-  const session = {
-    sessionManager: {
-      getBranch: () => [],
-      getLeafId: () => 42,
+test("turn scope rejects unavailable and inconsistent initial branch cursors", () => {
+  for (const session of [
+    null,
+    {},
+    { sessionManager: {} },
+    { sessionManager: { getBranch: () => [], getLeafId: undefined } },
+    { sessionManager: { getBranch: () => null, getLeafId: () => null } },
+    { sessionManager: { getBranch: () => [], getLeafId: () => 42 } },
+    { sessionManager: { getBranch: () => [], getLeafId: () => "orphan" } },
+    {
+      sessionManager: {
+        getBranch: () => [{ type: "message" }],
+        getLeafId: () => "leaf",
+      },
     },
-  };
+    {
+      sessionManager: {
+        getBranch: () => [{ id: "branch-leaf", type: "message" }],
+        getLeafId: () => "other-leaf",
+      },
+    },
+  ]) {
+    assert.throws(() => captureTurnScope(session), /cursor is unavailable/);
+  }
+});
 
-  assert.throws(() => captureTurnScope(session), /cursor is unavailable/);
+test("turn scope rejects invalid branch ownership while reading", () => {
+  const manager = managerFor([]);
+  const session = { sessionManager: manager };
+  const emptyScope = captureTurnScope(session);
+
+  const originalGetBranch = manager.getBranch;
+  const originalGetLeafId = manager.getLeafId;
+  (manager as any).getBranch = () => null;
+  assert.throws(
+    () => readTurnMessages(session, emptyScope),
+    /branch ownership changed/,
+  );
+  (manager as any).getBranch = originalGetBranch;
+  (manager as any).getLeafId = undefined;
+  assert.throws(
+    () => readTurnMessages(session, emptyScope),
+    /branch ownership changed/,
+  );
+  (manager as any).getLeafId = () => 42;
+  assert.throws(
+    () => readTurnMessages(session, emptyScope),
+    /branch ownership changed/,
+  );
+  (manager as any).getLeafId = () => "orphan";
+  assert.throws(
+    () => readTurnMessages(session, emptyScope),
+    /branch ownership changed/,
+  );
+
+  manager.replace([{ type: "message", message: null }]);
+  (manager as any).getLeafId = () => "leaf";
+  assert.throws(
+    () => readTurnMessages(session, emptyScope),
+    /branch ownership changed/,
+  );
+  manager.replace([{ id: "leaf", type: "message", message: null }]);
+  (manager as any).getLeafId = () => "other";
+  assert.throws(
+    () => readTurnMessages(session, emptyScope),
+    /branch ownership changed/,
+  );
+
+  (manager as any).getBranch = originalGetBranch;
+  (manager as any).getLeafId = originalGetLeafId;
 });
 
 test("turn scope rejects session-manager replacement and baseline loss", () => {

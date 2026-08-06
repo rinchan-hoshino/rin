@@ -1,59 +1,109 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
+import test from "node:test";
 
-const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "..",
-  "..",
-);
-const sdk = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
-  ).href
-);
-const chatResponses = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat", "command-responses.js"),
-  ).href
-);
+import { importBuiltModule } from "../support/import-built-module.js";
 
-test("frontend SDK owns shared command parsing and builtin response text", () => {
-  assert.equal(sdk.frontendCommandNameFromLine("/compact now"), "compact");
-  assert.equal(sdk.frontendCommandNameFromLine("plain text"), "");
-  assert.deepEqual(sdk.parseFrontendCompactCommand("/compact keep facts"), {
+const responsesModule = await importBuiltModule<
+  typeof import("../../src/core/rin-frontend-sdk/command-responses.js")
+>("dist/core/rin-frontend-sdk/command-responses.js");
+
+test("frontend command responses parse builtin command lines", () => {
+  assert.equal(
+    responsesModule.frontendCommandNameFromLine("/compact now"),
+    "compact",
+  );
+  assert.equal(responsesModule.frontendCommandNameFromLine("plain text"), "");
+  assert.equal(responsesModule.frontendCommandNameFromLine("/"), "");
+  assert.deepEqual(responsesModule.parseFrontendCompactCommand("/compact"), {
     compact: true,
-    customInstructions: "keep facts",
+    customInstructions: undefined,
   });
-  assert.deepEqual(sdk.parseFrontendCompactCommand("/status"), {
+  assert.deepEqual(
+    responsesModule.parseFrontendCompactCommand("/compact keep facts"),
+    { compact: true, customInstructions: "keep facts" },
+  );
+  assert.deepEqual(responsesModule.parseFrontendCompactCommand("/status"), {
     compact: false,
     customInstructions: undefined,
   });
-  assert.equal(sdk.isFrontendAbortCommand("/abort"), true);
-  assert.equal(sdk.isFrontendNewSessionCommand("/new"), true);
+  assert.equal(responsesModule.isFrontendAbortCommand("/abort"), true);
+  assert.equal(responsesModule.isFrontendAbortCommand("/abort later"), false);
+  assert.equal(responsesModule.isFrontendNewSessionCommand("/new"), true);
+  assert.equal(responsesModule.isFrontendNewSessionCommand(" /new "), true);
+});
 
+test("frontend command responses normalize configured text", () => {
   assert.equal(
-    sdk.formatCompactionSummaryTitle(108642),
-    "Compacted from 108,642 tokens",
+    responsesModule.resolveRinFrontendCommandResponses(undefined).new,
+    "Started a new session.",
   );
-  assert.equal(sdk.formatCompactionExpandHint(), "");
-  assert.equal(
-    sdk.formatCompactionExpandHint({ expandKeyText: "ctrl+o" }),
-    "(ctrl+o to expand)",
-  );
+  const responses = responsesModule.resolveRinFrontendCommandResponses({
+    compact: "done",
+    reload: "loaded",
+    new: "   ",
+  });
+  assert.equal(responses.compact, "done");
+  assert.equal(responses.reload, "loaded");
+  assert.equal(responses.new, "Started a new session.");
+});
 
-  const responses = sdk.resolveRinFrontendCommandResponses({
+test("frontend command responses render abort, session, and reload states", () => {
+  const responses = responsesModule.resolveRinFrontendCommandResponses();
+  assert.deepEqual(
+    responsesModule.applyFrontendBuiltinCommandText("abort", null),
+    { text: "Aborted current operation." },
+  );
+  assert.equal(
+    responsesModule.applyFrontendBuiltinCommandText("new", {}, responses).text,
+    "Started a new session.",
+  );
+  assert.equal(
+    responsesModule.applyFrontendBuiltinCommandText(
+      "new",
+      { cancelled: true },
+      responses,
+    ).text,
+    "Session switch cancelled.",
+  );
+  assert.equal(
+    responsesModule.applyFrontendBuiltinCommandText(
+      "compact",
+      { compactionBusy: true, text: "Already running" },
+      responses,
+    ).text,
+    "Already running",
+  );
+  assert.equal(
+    responsesModule.applyFrontendBuiltinCommandText(
+      "reload",
+      { text: "native reload" },
+      responses,
+    ).text,
+    "native reload",
+  );
+  assert.equal(
+    responsesModule.applyFrontendBuiltinCommandText(
+      "reload",
+      { text: "native reload" },
+      responses,
+      { preferConfiguredText: true },
+    ).text,
+    "Reloaded extensions, prompts, skills, and themes.",
+  );
+});
+
+test("frontend command responses render builtin completion states", () => {
+  const responses = responsesModule.resolveRinFrontendCommandResponses({
     compact: "done",
     reload: "loaded",
   });
   assert.equal(
-    sdk.applyFrontendBuiltinCommandText("compact", {}, responses).text,
+    responsesModule.applyFrontendBuiltinCommandText("compact", {}, responses)
+      .text,
     "done",
   );
   assert.equal(
-    sdk.applyFrontendBuiltinCommandText(
+    responsesModule.applyFrontendBuiltinCommandText(
       "compact",
       { text: "native compact summary must not leak", tokensBefore: 108642 },
       responses,
@@ -61,16 +111,7 @@ test("frontend SDK owns shared command parsing and builtin response text", () =>
     "[compaction]\n\nCompacted from 108,642 tokens",
   );
   assert.equal(
-    sdk.applyFrontendBuiltinCommandText(
-      "compact",
-      { text: "native compact summary must not leak", tokensBefore: 108642 },
-      responses,
-      { preferConfiguredText: true },
-    ).text,
-    "[compaction]\n\nCompacted from 108,642 tokens",
-  );
-  assert.equal(
-    sdk.applyFrontendBuiltinCommandText(
+    responsesModule.applyFrontendBuiltinCommandText(
       "compact",
       { tokensBefore: 108642 },
       responses,
@@ -79,107 +120,45 @@ test("frontend SDK owns shared command parsing and builtin response text", () =>
     "[compaction]\n\nCompacted from 108,642 tokens (ctrl+o to expand)",
   );
   assert.equal(
-    sdk.applyFrontendBuiltinCommandText(
+    responsesModule.applyFrontendBuiltinCommandText(
       "compact",
       { compactionBusy: true },
       responses,
     ).text,
     "Compaction already in progress.",
   );
-  const localizedResponses = sdk.resolveRinFrontendCommandResponses({
+  const localized = responsesModule.resolveRinFrontendCommandResponses({
     compactionBusy: "Already compacting.",
     compactionSummaryLine: "Shrunk {tokens}.",
     compactionSummaryText: "COMPACT: {summary}",
   });
   assert.equal(
-    sdk.applyFrontendBuiltinCommandText(
+    responsesModule.applyFrontendBuiltinCommandText(
       "compact",
       { compactionBusy: true },
-      localizedResponses,
+      localized,
     ).text,
     "Already compacting.",
   );
   assert.equal(
-    sdk.applyFrontendBuiltinCommandText(
+    responsesModule.applyFrontendBuiltinCommandText(
       "compact",
       { tokensBefore: 108642 },
-      localizedResponses,
+      localized,
     ).text,
     "COMPACT: Shrunk 108,642.",
   );
   assert.equal(
-    sdk.applyFrontendBuiltinCommandText("reload", {}, responses).text,
+    responsesModule.applyFrontendBuiltinCommandText("reload", {}, responses)
+      .text,
     "loaded",
   );
-});
-
-test("chat command responses share frontend SDK shape with chat-specific wrapper chrome", () => {
-  assert.equal(
-    chatResponses.DEFAULT_CHAT_COMMAND_RESPONSES.compactionSummaryLine,
-    sdk.DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES.compactionSummaryLine,
-  );
-  assert.equal(
-    chatResponses.DEFAULT_CHAT_COMMAND_RESPONSES.compactionSummaryText,
-    "{summary}",
-  );
   assert.deepEqual(
-    Object.keys(chatResponses.DEFAULT_CHAT_COMMAND_RESPONSES).sort(),
-    Object.keys(sdk.DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES).sort(),
+    responsesModule.applyFrontendBuiltinCommandText(
+      "unknown",
+      { native: true },
+      responses,
+    ),
+    { native: true },
   );
-  assert.equal(
-    chatResponses.resolveChatCommandResponses({ new: "fresh" }).new,
-    "fresh",
-  );
-});
-
-function listSourceFiles(dir) {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const file = path.join(dir, entry.name);
-    if (entry.isDirectory()) return listSourceFiles(file);
-    return entry.isFile() && entry.name.endsWith(".ts") ? [file] : [];
-  });
-}
-
-function importOffenders(dir, pattern) {
-  return listSourceFiles(dir).flatMap((file) => {
-    const text = fs.readFileSync(file, "utf8");
-    return pattern.test(text) ? [path.relative(rootDir, file)] : [];
-  });
-}
-
-test("frontend SDK owns shared frontend implementations without chat or TUI imports", () => {
-  const sdkDir = path.join(rootDir, "src", "core", "rin-frontend-sdk");
-  assert.deepEqual(
-    importOffenders(sdkDir, /from "\.\.\/(?:chat|rin-tui)\b/),
-    [],
-  );
-});
-
-test("chat does not depend on TUI implementation modules", () => {
-  const chatDir = path.join(rootDir, "src", "core", "chat");
-  assert.deepEqual(importOffenders(chatDir, /from "\.\.\/rin-tui\b/), []);
-});
-
-test("TUI shared runtime code does not import chat implementation modules", () => {
-  const tuiDir = path.join(rootDir, "src", "core", "rin-tui");
-  assert.deepEqual(importOffenders(tuiDir, /from "\.\.\/chat\b/), []);
-});
-
-test("old TUI shared frontend module paths do not exist", () => {
-  const removedSharedFiles = [
-    "frontend-surface.ts",
-    "model-settings.ts",
-    "rpc-auth.ts",
-    "rpc-client.ts",
-    "rpc-model-registry.ts",
-    "session-helpers.ts",
-    "state-utils.ts",
-    "stats.ts",
-  ];
-  const offenders = removedSharedFiles.flatMap((name) => {
-    const relative = path.join("src", "core", "rin-tui", name);
-    return fs.existsSync(path.join(rootDir, relative)) ? [relative] : [];
-  });
-
-  assert.deepEqual(offenders, []);
 });

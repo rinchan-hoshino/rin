@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
 const chatDate = await import(
@@ -45,6 +45,17 @@ test("normalizeLocalDateOnly rejects invalid text before using date-like fallbac
     chatDate.normalizeLocalDateOnly(new Date("invalid"), fallback),
     "2026-04-24",
   );
+});
+
+test("local date UTC bounds cover valid days and reject invalid fallbacks", () => {
+  assert.deepEqual(chatDate.localDateUtcBounds("2026-04-23"), {
+    start: new Date(2026, 3, 23).toISOString(),
+    end: new Date(2026, 3, 24).toISOString(),
+  });
+  assert.equal(chatDate.localDateUtcBounds("invalid"), null);
+  assert.equal(chatDate.normalizeLocalDateOnly(Infinity), "");
+  assert.equal(chatDate.normalizeLocalDateOnly({}, null), "");
+  assert.match(chatDate.formatLocalDateOnly(), /^\d{4}-\d{2}-\d{2}$/);
 });
 
 test("normalizeLocalDateOnly accepts Date and finite timestamp inputs", () => {
