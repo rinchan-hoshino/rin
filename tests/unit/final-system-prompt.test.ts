@@ -166,8 +166,14 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.ok(
     baseSystemPrompt.includes(
-      "Use note for model-only scratch work that survives compaction, so keep it concise",
+      "Use note only for concise, verified facts that must survive compaction; keep plans, pending actions, and checklists in todo",
     ),
+  );
+  assert.equal(
+    baseSystemPrompt.includes(
+      "Use note for model-only scratch work that survives compaction",
+    ),
+    false,
   );
   assert.ok(
     baseSystemPrompt.includes(

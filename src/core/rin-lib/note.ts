@@ -143,10 +143,11 @@ export default function noteCapability(): RinCapabilityDefinition {
     name: "note",
     label: "note",
     description:
-      "Maintain a concise model-only scratch note in the current session branch. It survives compaction. Read uses Pi's optional offset and limit, write replaces the whole note, edit uses Pi's exact file-edit semantics, and append adds exact text.",
-    promptSnippet: "Read or mutate the current session-branch scratch note.",
+      "Maintain concise model-only factual continuity in the current session branch. It survives compaction. Store verified facts only; keep plans and pending actions in todo. Read uses Pi's optional offset and limit, write replaces the whole note, edit uses Pi's exact file-edit semantics, and append adds exact text.",
+    promptSnippet:
+      "Read or mutate factual continuity for the current session branch.",
     promptGuidelines: [
-      "Use note for model-only scratch work that survives compaction, so keep it concise.",
+      "Use note only for concise, verified facts that must survive compaction; keep plans, pending actions, and checklists in todo.",
       "Use note read with Pi-native optional offset and limit. Use write for full replacement, edit for exact unique non-overlapping replacements, and append to add exact text at the end.",
     ],
     parameters: NoteParams,

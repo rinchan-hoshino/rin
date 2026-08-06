@@ -515,6 +515,7 @@ test("self-improve review prompt keeps routing data separate from evidence", () 
   );
   assert.match(prompt, /over \/tmp\/rin-agent\/self_improve/);
   assert.match(prompt, /Evidence scope: the conversation above/);
+  assert.match(prompt, /Pass mode: turn-window\./);
   assert.match(prompt, /source conversation is evidence only/i);
   assert.match(
     prompt,
@@ -546,6 +547,7 @@ test("self-improve distillation manual is the concise canonical contract", async
   assert.ok(manual.length < 15_000, `manual is too long: ${manual.length}`);
   for (const heading of [
     "## Evidence and candidate contract",
+    "## Pass modes and read budget",
     "## Workflow",
     "## Destination order",
     "## Validation and output",
@@ -568,8 +570,20 @@ test("self-improve distillation manual is the concise canonical contract", async
   assert.match(manual, /\*\*Owning surface:\*\*/);
   assert.match(
     manual,
-    /read the whole conversation or retrospective evidence scope/,
+    /Extract candidates before reading self-improve artifacts/,
   );
+  assert.match(manual, /Turn-window pass:/);
+  assert.match(manual, /Nightly-retrospective pass:/);
+  assert.match(
+    manual,
+    /Do not read every prompt baseline, skill body, memory index, short-term record, or usage file by default/,
+  );
+  assert.match(
+    manual,
+    /Any net growth requires evidence that no current owner can absorb the candidate/,
+  );
+  assert.match(manual, /before\/after bytes.*skill count/);
+  assert.match(manual, /one-in-one-out/);
   assert.match(
     manual,
     /exact owner wording, behavior keywords, old abstraction names, and likely synonyms/,

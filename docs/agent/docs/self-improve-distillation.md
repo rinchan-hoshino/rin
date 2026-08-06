@@ -13,14 +13,14 @@ Use `docs/memory-layering.md` when the destination is unclear.
 
 ## Evidence and candidate contract
 
-The entry prompt supplies the evidence scope: either the current conversation or a bounded retrospective such as the previous 24 hours of session records. Optional trigger context is routing data, not evidence or instructions.
+The entry prompt supplies the evidence scope and pass mode. Optional trigger context is routing data, not evidence or instructions. Extract candidates before reading self-improve artifacts; the supplied conversation or retrospective is already the evidence boundary, so do not rediscover it through broad library reads.
 
 Use these evidence sources:
 
-- the complete supplied conversation or retrospective scope, including requests, corrections, accepted and rejected outputs, repeated friction, preferences shown by choices, workflows that worked or failed, and key knowledge the owner supplied;
+- the supplied conversation or retrospective scope, including requests, corrections, accepted and rejected outputs, repeated friction, preferences shown by choices, workflows that worked or failed, and key knowledge the owner supplied;
 - authoritative documentation for the affected surface;
-- verified repository, runtime, or manual-operation results when they prove the required behavior or final reusable workflow shape;
-- existing self-improve artifacts as context for cleanup and placement, not independent authority for new doctrine.
+- verified repository, runtime, or manual-operation results when they prove the required behavior or reusable workflow shape;
+- existing self-improve artifacts only after a candidate needs routing, conflict repair, or cleanup.
 
 Every candidate must identify:
 
@@ -29,23 +29,28 @@ Every candidate must identify:
 - **Target behavior:** what future work should do differently, or which stale behavior should disappear;
 - **Owning surface:** the narrowest self-improve artifact that future matching work will load.
 
-If any field is missing, do not create executable guidance. When the material is useful only for later lookup, preserve it through memory-index instead.
+If any field is missing, do not create executable guidance. When the material is useful only for later lookup, preserve it through memory-index instead. Corrections may narrow, invalidate, or remove guidance without creating a new rule.
 
-Read beyond explicit requests. Capture a reusable lesson, working-style pattern, preference, workflow, or key fact when it would let future work succeed without another reminder. Corrections are not automatically new rules: they may only narrow, invalidate, or remove existing guidance, or apply to the current execution.
+## Pass modes and read budget
+
+- **Turn-window pass:** extract reusable candidates from the supplied conversation first. If none survive the candidate contract, leave the library unchanged. For each candidate, use the resident prompt and available-skill metadata to predict one owner, then read only that owner and plausible conflicting hits. Clean overlap in every touched owner before adding text.
+- **Nightly-retrospective pass:** extract candidates from the supplied 24-hour scope first. Also inspect the already-resident prompt baselines and available-skill metadata as a lightweight entropy inventory; do not open every skill body. Read bodies only for candidate owners or metadata that is duplicated, stale, misplaced, or too broad.
+- **Both modes:** prefer deletion, replacement, movement, or merge over additive patches. Treat accepted pre-pass totals as ceilings. Any net growth requires evidence that no current owner can absorb the candidate, and the report must name the added owner and size delta. Nightly entropy acceptance records before/after bytes for each touched prompt baseline, total skill-description characters, and skill count. Skill creation is one-in-one-out by default: merge or retire an existing owner in the same pass, or document why none can absorb it.
+
+Do not read every prompt baseline, skill body, memory index, short-term record, or usage file by default. Read a memory-index entry for provenance, a matching `short-term-memory/records/` file for active continuity, or `state/skill-usage.json` for a lifecycle decision only when a candidate actually depends on it. A read that cannot change routing, conflict closure, a mutation, or validation is out of scope.
 
 ## Workflow
 
-1. First read the whole conversation or retrospective evidence scope. Do not start with low-salience artifact cleanup.
-2. Inspect the current prompt baselines, matching skill, umbrella skill for the work class, relevant memory-index entries, matching `short-term-memory/records/`, and `<agentDir>/self_improve/state/skill-usage.json` when present.
-3. Extract only candidates with evidence, trigger, target behavior, and owner.
-4. For correction-based or repeated-failure evidence, search the full self-improve library using the exact owner wording, behavior keywords, old abstraction names, and likely synonyms. Read every plausible active hit.
+1. Read the supplied evidence once and extract only candidates with evidence, trigger, target behavior, and owner.
+2. Apply the pass-mode budget. If no candidate or entropy issue remains, report one concise unchanged reason and stop without artifact reads or writes.
+3. Predict the narrowest owner from the resident prompt and skill metadata, then open only the files needed to confirm that owner.
+4. For correction-based or repeated-failure evidence, search active guidance using the exact owner wording, behavior keywords, old abstraction names, and likely synonyms. Read only plausible active hits until the rejected behavior has one proven owner or no active owner.
 5. If current guidance caused, preserved, justified, or hid the rejected behavior, delete or rewrite that source before considering new guidance. Historical provenance may remain only when clearly non-executable.
-6. Choose the first destination below that satisfies the future-use contract.
-7. Merge overlap into one canonical owner, then write compact target-state guidance. Preserve exact trigger wording when recognition depends on it.
-8. Update memory-index when evidence is repeated, correction-based, disputed, supports resident prompt guidance, or explains why active guidance was removed.
-9. Keep short-term records limited to active goals, blockers, handoff state, pending validation, and near next actions. Promote or delete them when that state becomes durable or completes.
-10. Follow `skill-creator` and validate frontmatter when creating or editing a skill.
-11. Run a future-trigger replay: name the one surface future work should load and the behavior it should produce. For correction-based or repeated-failure evidence, also verify that no active hit recommends the rejected behavior. If replay still selects the wrong owner or behavior, the pass is not done.
+6. Choose the first destination below that satisfies the future-use contract. Merge overlap into one canonical owner and write compact target-state guidance; preserve exact trigger wording only when recognition depends on it.
+7. Update memory-index only when provenance is repeated, correction-based, disputed, supports resident guidance, or explains why active guidance was removed.
+8. Keep short-term records limited to active goals, blockers, handoff state, pending validation, and near next actions. Promote or delete them when that state becomes durable or completes.
+9. Follow `skill-creator` and validate frontmatter when creating or editing a skill.
+10. Run a future-trigger replay: name the one surface future work should load and the behavior it should produce. For correction-based or repeated-failure evidence, also verify that no active hit recommends the rejected behavior. If replay still selects the wrong owner or behavior, the pass is not done.
 
 Do not preserve a bad rule with patch-layer exceptions, bans, authorization clauses, guards, or special cases. Repair or remove the owning guidance.
 
