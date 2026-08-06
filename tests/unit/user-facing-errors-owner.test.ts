@@ -116,7 +116,6 @@ chat_terminal_recovery_invalid_event
 chat_terminal_recovery_invalid_payload
 chat_terminal_turn_mismatch
 chat_text_required
-chat_turn_aborted
 chat_turn_busy
 chat_turn_fence_lost
 chat_turn_id_required
@@ -385,7 +384,7 @@ web_fetch_invalid_url`
   .split(/\s+/);
 
 test("every owned runtime marker has a human-facing formatter", () => {
-  assert.equal(OWNED_MARKERS.length, 374);
+  assert.equal(OWNED_MARKERS.length, 373);
   assert.equal(new Set(OWNED_MARKERS).size, OWNED_MARKERS.length);
   for (const marker of OWNED_MARKERS) {
     assert.equal(errors.hasUserFacingRuntimeErrorMapping(marker), true, marker);

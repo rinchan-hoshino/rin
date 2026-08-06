@@ -614,13 +614,38 @@ test("frontend turn owner covers command and prompt boundary alternatives withou
         ),
       "long turn was not submitted",
     );
+    let interruptedSettled = false;
+    void interrupted.then(
+      () => {
+        interruptedSettled = true;
+      },
+      () => {
+        interruptedSettled = true;
+      },
+    );
     const replacement = await active.driver.runCommand("/new", {
       assumeConnected: true,
       managedSessionLeaf: "owner/replacement",
     });
     assert.equal(replacement.handled, true);
-    await assert.rejects(interrupted, /chat_turn_aborted/);
-    assert.ok(active.client.calls.some((call) => call.type === "abort"));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(interruptedSettled, false);
+    assert.ok(active.client.calls.some((call) => call.type === "newSession"));
+    await (active.driver as any).handleClientEvent({
+      type: "rpc_turn_event",
+      event: "error",
+      requestTag: "long-owner-turn",
+      error: "Request was aborted",
+      terminalRecord: {
+        terminalId: "terminal-long-owner-turn-aborted",
+        state: "error",
+        terminalAt: "2026-08-07T00:00:00.000Z",
+      },
+    });
+    await assert.rejects(
+      within(interrupted, "long-owner-turn-terminal"),
+      /Request was aborted/,
+    );
 
     const createdMissing = createDriver();
     const missingPath = path.join(session.directory, "created-later.jsonl");
@@ -747,7 +772,13 @@ test("frontend turn owner keeps session and terminal fallbacks deterministic", a
     return {};
   };
   noState.client.newSession = async () => ({ cancelled: true });
+  (noState.client as any).ensureSessionReady = undefined;
   await noState.driver.connect();
+  const readyWithoutState = await (noState.driver as any).ensureSessionReady();
+  assert.deepEqual(readyWithoutState, {
+    sessionId: undefined,
+    sessionFile: undefined,
+  });
   const newWithoutLeaf = await noState.driver.runCommand("/new", {
     assumeConnected: true,
   });
@@ -777,11 +808,38 @@ test("frontend turn owner keeps session and terminal fallbacks deterministic", a
     () => interrupt.client.calls.some((call) => call.type === "prompt"),
     "interrupt fallback prompt was not submitted",
   );
-  const interrupted = interrupt.driver.interruptActiveTurnLikeTui();
-  assert.equal(interrupted.sessionId, interrupt.client.sessionId);
+  let pendingSettled = false;
+  void pending.then(
+    () => {
+      pendingSettled = true;
+    },
+    () => {
+      pendingSettled = true;
+    },
+  );
+  const commandError = await interrupt.driver
+    .runCommand("/abort", { assumeConnected: true })
+    .then(
+      () => null,
+      (error: Error) => error,
+    );
+  assert.match(commandError?.message || "", /abort transport closed/);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(pendingSettled, false);
+  await (interrupt.driver as any).handleClientEvent({
+    type: "rpc_turn_event",
+    event: "error",
+    requestTag: "interrupt-fallback",
+    error: "Request was aborted",
+    terminalRecord: {
+      terminalId: "terminal-interrupt-fallback-aborted",
+      state: "error",
+      terminalAt: "2026-08-07T00:00:01.000Z",
+    },
+  });
   await assert.rejects(
-    within(pending, "interrupt-fallback"),
-    /chat_turn_aborted/,
+    within(pending, "interrupt-fallback-terminal"),
+    /Request was aborted/,
   );
 
   const terminal = createDriver();
@@ -977,10 +1035,9 @@ test("frontend turn owner covers listener error reporting and client fallback bo
     };
     assert.equal(driver.isSessionRecovering(), true);
     assert.equal(driver.isBackendWorking(), true);
-    assert.equal(
-      driver.inputSubmissionGate("", undefined).isAborted,
-      undefined,
-    );
+    const lifecycleGate = driver.inputSubmissionGate("", undefined);
+    assert.equal(typeof lifecycleGate.isAborted, "function");
+    assert.equal(lifecycleGate.isAborted(), false);
     const currentInterruptionSeq = (driver as any).turnInterruptionSeq;
     assert.equal(
       driver.inputSubmissionGate("", currentInterruptionSeq).isAborted(),
@@ -995,7 +1052,7 @@ test("frontend turn owner covers listener error reporting and client fallback bo
     );
     assert.throws(
       () => driver.throwIfTurnInterrupted(currentInterruptionSeq - 1),
-      /chat_turn_aborted/,
+      /rin_frontend_turn_cancelled/,
     );
     (driver as any).frontendState.isStreaming = false;
     (driver as any).frontendState.turnActive = false;

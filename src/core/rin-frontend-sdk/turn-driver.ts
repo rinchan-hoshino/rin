@@ -12,6 +12,7 @@ import {
   type RinFrontendCommandResponses,
 } from "./command-responses.js";
 import { getRinNonInteractiveCommandInteractionPolicy } from "./command-dispatcher.js";
+import { cloneJson } from "../json-utils.js";
 import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
 import {
@@ -30,9 +31,9 @@ import {
 import {
   createRinFrontendTurnCancelledError,
   isRinFrontendTurnCancelledError,
+  RIN_FRONTEND_TURN_CANCELLED,
 } from "./lifecycle-errors.js";
 import {
-  applyRinFrontendLifecycleEvent,
   executeRinFrontendInterruptIntent,
   projectRinFrontendLifecycleEvent,
 } from "./frontend-lifecycle.js";
@@ -92,6 +93,48 @@ export type RinFrontendTurnResult = {
     state: "complete" | "error" | "interrupted";
     terminalAt?: string;
   };
+};
+
+type RinFrontendIgnoredTerminal = {
+  requestTag: string;
+  terminalId: string;
+  event: "complete" | "error";
+  error: string;
+  finalText: string;
+  result?: unknown;
+  sessionId?: string;
+  sessionFile?: string;
+  chatDeliveryContext?: RinChatDeliveryContext;
+  terminalRecord?: RinFrontendTurnResult["terminalRecord"];
+};
+
+type RinFrontendBackendInterruption = {
+  state: "pending" | "committed" | "rolled_back";
+  epoch: number;
+  targets: Set<RinFrontendBackendInterruptionTarget>;
+};
+
+type RinFrontendBackendInterruptionTarget = {
+  requestTag: string;
+  committed: boolean;
+  pendingInterruptions: Set<RinFrontendBackendInterruption>;
+  activeTerminalHandlers: number;
+  rollbackProjectionPending: boolean;
+  reservedTerminal?: RinFrontendIgnoredTerminal;
+  bufferedTerminal?: RinFrontendIgnoredTerminal;
+};
+
+type RinFrontendPendingSubmissionSettlement = {
+  cancel: (error: Error) => void;
+  settleTerminal: (terminal: RinFrontendIgnoredTerminal) => void;
+};
+
+type RinFrontendLiveTurn = {
+  requestTag?: string;
+  chatDeliveryContext?: RinChatDeliveryContext;
+  promise: Promise<any>;
+  resolve: (value: any) => void;
+  reject: (error: Error) => void;
 };
 
 function isRecoverableConnectionError(error: unknown) {
@@ -238,13 +281,11 @@ export class RinFrontendTurnDriver {
   ) => void | Promise<void>;
   client: RinFrontendTurnClient | null = null;
   private frontendState: Record<string, any> = {};
-  liveTurn: {
-    requestTag?: string;
-    chatDeliveryContext?: RinChatDeliveryContext;
-    promise: Promise<any>;
-    resolve: (value: any) => void;
-    reject: (error: Error) => void;
-  } | null = null;
+  liveTurn: RinFrontendLiveTurn | null = null;
+  private readonly liveTurnsByRequestTag = new Map<
+    string,
+    RinFrontendLiveTurn
+  >();
   private readonly backendEventTranslator;
   latestAssistantText = "";
   frontendPhase: RinFrontendTurnPhase = "idle";
@@ -259,17 +300,32 @@ export class RinFrontendTurnDriver {
   private turnInterruptionSeq = 0;
   private ignoredTerminalRequestTags = new Set<string>();
   private readonly startedRequestTags = new Set<string>();
-  private readonly acknowledgedIgnoredTerminalRequestTags = new Set<string>();
-  private readonly ignoredTerminalAckTasks = new Map<string, Promise<void>>();
+  private readonly acknowledgedIgnoredTerminalIdentities = new Set<string>();
+  private readonly ignoredTerminalAckTasks = new Map<
+    string,
+    Promise<boolean>
+  >();
+  private readonly ignoredTerminalHandlingTasks = new Map<
+    string,
+    Promise<void>
+  >();
+  private readonly completedIgnoredTerminalIdentities = new Set<string>();
+  private lifecycleEpoch = 0;
   private readonly committedTerminalProjections = new Set<string>();
   private readonly terminalProjectionTasks = new Map<
     string,
     Promise<boolean>
   >();
+  private readonly retiredFrontendClients =
+    new WeakSet<RinFrontendTurnClient>();
   private pendingTurnCount = 0;
-  private readonly pendingSubmissionCancellations = new Map<
+  private readonly pendingSubmissionSettlements = new Map<
     string,
-    (error: Error) => void
+    RinFrontendPendingSubmissionSettlement
+  >();
+  private readonly backendInterruptionsByRequestTag = new Map<
+    string,
+    RinFrontendBackendInterruptionTarget
   >();
   private daemonShutdownDetached = false;
 
@@ -364,20 +420,31 @@ export class RinFrontendTurnDriver {
     return true;
   }
 
-  async connect(options: { restoreSessionFile?: string } = {}) {
+  async connect(
+    options: { restoreSessionFile?: string } = {},
+    connectionEpoch = this.lifecycleEpoch,
+  ) {
+    this.throwIfLifecycleEpochChanged(connectionEpoch);
     if (this.daemonShutdownDetached) return false;
     const client = this.client || this.clientFactory();
+    if (this.retiredFrontendClients.has(client)) return false;
     this.client = client;
     if (!client.isConnected()) {
       try {
         await client.connect();
       } catch (error) {
-        if (await this.disconnectSupersededClient(client)) return false;
+        const disconnected = await this.disconnectSupersededClient(client);
+        this.throwIfLifecycleEpochChanged(connectionEpoch);
+        if (disconnected) return false;
         throw error;
       }
-      if (await this.disconnectSupersededClient(client)) return false;
+      const disconnected = await this.disconnectSupersededClient(client);
+      this.throwIfLifecycleEpochChanged(connectionEpoch);
+      if (disconnected) return false;
+      const subscriptionEpoch = connectionEpoch;
       client.subscribe((event: RinFrontendEvent) => {
-        void this.handleClientEvent(event).catch((error) => {
+        void this.handleClientEvent(event, subscriptionEpoch).catch((error) => {
+          if (this.lifecycleEpoch !== subscriptionEpoch) return;
           this.reportEventHandlingError({
             stage: "client_event",
             error,
@@ -391,26 +458,48 @@ export class RinFrontendTurnDriver {
       options.restoreSessionFile || "",
     ).trim();
     if (wantedSessionFile) {
-      await this.selectSessionTarget(wantedSessionFile);
-      if (await this.disconnectSupersededClient(client)) return false;
+      this.throwIfLifecycleEpochChanged(connectionEpoch);
+      await this.selectSessionTarget(wantedSessionFile, connectionEpoch);
+      const disconnected = await this.disconnectSupersededClient(client);
+      this.throwIfLifecycleEpochChanged(connectionEpoch);
+      if (disconnected) return false;
       return true;
     }
-    await this.refreshFrontendState().catch(() => {});
-    if (await this.disconnectSupersededClient(client)) return false;
+    await this.refreshFrontendState(undefined, connectionEpoch).catch(() => {});
+    const disconnected = await this.disconnectSupersededClient(client);
+    this.throwIfLifecycleEpochChanged(connectionEpoch);
+    if (disconnected) return false;
     return true;
   }
 
   dispose() {
     const cancellation = createRinFrontendTurnCancelledError();
-    for (const reject of this.pendingSubmissionCancellations.values()) {
-      reject(cancellation);
+    this.lifecycleEpoch += 1;
+    for (const target of this.backendInterruptionsByRequestTag.values()) {
+      for (const interruption of target.pendingInterruptions) {
+        interruption.state = "rolled_back";
+      }
+      target.pendingInterruptions.clear();
+      target.bufferedTerminal = undefined;
     }
-    this.pendingSubmissionCancellations.clear();
+    this.backendInterruptionsByRequestTag.clear();
+    this.ignoredTerminalRequestTags.clear();
+    this.acknowledgedIgnoredTerminalIdentities.clear();
+    this.ignoredTerminalAckTasks.clear();
+    this.ignoredTerminalHandlingTasks.clear();
+    this.terminalProjectionTasks.clear();
+    this.committedTerminalProjections.clear();
+    for (const settlement of this.pendingSubmissionSettlements.values()) {
+      settlement.cancel(cancellation);
+    }
+    this.pendingSubmissionSettlements.clear();
     this.failLiveTurn(cancellation);
     this.resetAssistantSegmentTracking();
     this.startedRequestTags.clear();
+    this.completedIgnoredTerminalIdentities.clear();
     this.frontendPhase = "idle";
     const client = this.client;
+    if (client) this.retiredFrontendClients.add(client);
     this.client = null;
     this.frontendState = {};
     if (client?.disconnect) {
@@ -512,9 +601,14 @@ export class RinFrontendTurnDriver {
     return this.frontendState;
   }
 
-  private async refreshFrontendState(sessionFile?: string) {
+  private async refreshFrontendState(
+    sessionFile?: string,
+    refreshEpoch = this.lifecycleEpoch,
+  ) {
+    this.throwIfLifecycleEpochChanged(refreshEpoch);
     if (!this.client) return this.frontendState;
     const state = await this.getStateForSession(sessionFile);
+    this.throwIfLifecycleEpochChanged(refreshEpoch);
     return this.applyFrontendStateSnapshot(state);
   }
 
@@ -549,35 +643,106 @@ export class RinFrontendTurnDriver {
     });
   }
 
-  async projectAuthoritativeTerminal(payload: Record<string, unknown>) {
+  private handleSuppressedTerminalPayload(
+    backendPayload: any,
+    eventEpoch: number,
+  ): Promise<void> | null {
+    if (eventEpoch !== this.lifecycleEpoch) return Promise.resolve();
+    if (this.suppressedTerminalMissingExactIdentity(backendPayload)) {
+      return Promise.resolve();
+    }
+    const ignoredTerminal = this.consumeIgnoredTerminal(backendPayload);
+    if (!ignoredTerminal) return null;
+    const terminalIdentity = this.ignoredTerminalIdentity(ignoredTerminal);
+    if (this.completedIgnoredTerminalIdentities.has(terminalIdentity)) {
+      return (async () => {
+        const acknowledged =
+          await this.acknowledgeIgnoredTerminal(ignoredTerminal);
+        if (eventEpoch === this.lifecycleEpoch && acknowledged) {
+          this.rememberAcknowledgedCompletedTerminalIdentity(terminalIdentity);
+        }
+      })();
+    }
+    let handling = this.ignoredTerminalHandlingTasks.get(terminalIdentity);
+    if (!handling) {
+      const handlingEpoch = eventEpoch;
+      const handlingState = { acknowledged: false };
+      const trackedHandling = this.processIgnoredTerminal(
+        ignoredTerminal,
+        handlingState,
+        handlingEpoch,
+      ).finally(() => {
+        if (this.lifecycleEpoch === handlingEpoch) {
+          this.rememberCompletedIgnoredTerminalIdentity(
+            terminalIdentity,
+            handlingState.acknowledged,
+          );
+        }
+        if (
+          this.ignoredTerminalHandlingTasks.get(terminalIdentity) ===
+          trackedHandling
+        ) {
+          this.ignoredTerminalHandlingTasks.delete(terminalIdentity);
+        }
+      });
+      handling = trackedHandling;
+      this.ignoredTerminalHandlingTasks.set(terminalIdentity, handling);
+    }
+    return handling;
+  }
+
+  async projectAuthoritativeTerminal(
+    payload: Record<string, unknown>,
+    projectionEpoch = this.lifecycleEpoch,
+  ) {
+    if (projectionEpoch !== this.lifecycleEpoch) return false;
     const translated = this.backendEventTranslator.translate({
       type: "ui",
       payload,
     });
-    let projected = false;
-    for (const event of translated) {
-      if (event.type !== "turn_complete" && event.type !== "turn_error") {
-        continue;
-      }
-      await this.handleBackendEvent(event);
-      projected = true;
+    const terminalEvents = translated.filter(
+      (event) => event.type === "turn_complete" || event.type === "turn_error",
+    );
+    if (terminalEvents.length === 0) return false;
+    const suppressedTerminalHandling = this.handleSuppressedTerminalPayload(
+      payload,
+      projectionEpoch,
+    );
+    if (suppressedTerminalHandling) {
+      await suppressedTerminalHandling;
+      return projectionEpoch === this.lifecycleEpoch;
     }
-    return projected;
+    for (const event of terminalEvents) {
+      await this.handleBackendEvent(event, projectionEpoch);
+      if (projectionEpoch !== this.lifecycleEpoch) return false;
+    }
+    return true;
   }
 
   async recoverUnacknowledgedChatTerminals(chatKey: string) {
     if (!this.client) throw new Error("frontend_session_not_connected");
-    const response: any = await this.client.request({
-      type: "list_unacknowledged_chat_terminals",
-      chatKey,
-    });
-    const terminals = Array.isArray(response?.terminals)
-      ? response.terminals
-      : [];
-    for (const terminal of terminals) {
-      await this.projectAuthoritativeTerminal(terminal);
+    const recoveryEpoch = this.lifecycleEpoch;
+    try {
+      const response: any = await this.client.request({
+        type: "list_unacknowledged_chat_terminals",
+        chatKey,
+      });
+      if (recoveryEpoch !== this.lifecycleEpoch) {
+        throw createRinFrontendTurnCancelledError();
+      }
+      const terminals = Array.isArray(response?.terminals)
+        ? response.terminals
+        : [];
+      for (const terminal of terminals) {
+        await this.projectAuthoritativeTerminal(terminal, recoveryEpoch);
+        if (recoveryEpoch !== this.lifecycleEpoch) {
+          throw createRinFrontendTurnCancelledError();
+        }
+      }
+      return terminals.length;
+    } catch (error) {
+      this.rethrowLifecycleError(error, recoveryEpoch);
     }
-    return terminals.length;
   }
 
   private async applySessionName(sessionName?: string) {
@@ -599,6 +764,13 @@ export class RinFrontendTurnDriver {
     chatDeliveryContext?: RinChatDeliveryContext,
   ) {
     if (this.liveTurn) throw new Error("frontend_turn_already_running");
+    const normalizedRequestTag = safeString(requestTag).trim();
+    if (
+      normalizedRequestTag &&
+      this.liveTurnsByRequestTag.has(normalizedRequestTag)
+    ) {
+      throw new Error("frontend_turn_already_running");
+    }
     const backendAlreadyActive = Boolean(
       this.frontendState.turnActive || this.frontendState.isStreaming,
     );
@@ -607,7 +779,16 @@ export class RinFrontendTurnDriver {
     ).trim();
     let resolve!: (value: any) => void;
     let reject!: (error: Error) => void;
-    const liveTurn = {
+    const release = (liveTurn: RinFrontendLiveTurn) => {
+      if (this.liveTurn === liveTurn) this.liveTurn = null;
+      if (
+        normalizedRequestTag &&
+        this.liveTurnsByRequestTag.get(normalizedRequestTag) === liveTurn
+      ) {
+        this.liveTurnsByRequestTag.delete(normalizedRequestTag);
+      }
+    };
+    const liveTurn: RinFrontendLiveTurn = {
       requestTag,
       chatDeliveryContext,
       promise: new Promise<any>((nextResolve, nextReject) => {
@@ -615,19 +796,22 @@ export class RinFrontendTurnDriver {
         reject = nextReject;
       }),
       resolve: (value: any) => {
-        if (this.liveTurn === liveTurn) this.liveTurn = null;
+        release(liveTurn);
         resolve(value);
       },
       reject: (error: Error) => {
-        if (this.liveTurn === liveTurn) this.liveTurn = null;
+        release(liveTurn);
         reject(error);
       },
     };
     liveTurn.promise.catch(() => {});
     this.liveTurn = liveTurn;
+    if (normalizedRequestTag) {
+      this.liveTurnsByRequestTag.set(normalizedRequestTag, liveTurn);
+    }
     this.backendTurnRequestTag = backendAlreadyActive
       ? activeBackendRequestTag
-      : safeString(requestTag).trim();
+      : normalizedRequestTag;
     return liveTurn;
   }
 
@@ -644,41 +828,233 @@ export class RinFrontendTurnDriver {
     this.emit({ type: "frontend_status", phase: this.frontendPhase });
   }
 
-  private rejectLiveTurnAsAborted() {
-    const pendingRequestTags = [...this.pendingSubmissionCancellations.keys()];
-    const requestTag =
-      safeString(this.liveTurn?.requestTag).trim() ||
-      pendingRequestTags[0] ||
-      "";
-    for (const pendingRequestTag of pendingRequestTags) {
-      this.ignoredTerminalRequestTags.add(pendingRequestTag);
-      this.pendingSubmissionCancellations.get(pendingRequestTag)?.(
-        new Error("chat_turn_aborted"),
-      );
+  private trimIgnoredTerminalRequestTags() {
+    if (this.ignoredTerminalRequestTags.size <= 1024) return;
+    for (const requestTag of this.ignoredTerminalRequestTags) {
+      if (this.ignoredTerminalRequestTags.size <= 1024) return;
+      if (
+        this.backendInterruptionsByRequestTag.has(requestTag) ||
+        this.pendingSubmissionSettlements.has(requestTag) ||
+        this.liveTurnsByRequestTag.has(requestTag)
+      ) {
+        continue;
+      }
+      this.ignoredTerminalRequestTags.delete(requestTag);
     }
-    this.pendingSubmissionCancellations.clear();
-    if (requestTag) {
+  }
+
+  private forgetAcknowledgedIgnoredTerminalIdentity(terminalIdentity: string) {
+    this.acknowledgedIgnoredTerminalIdentities.delete(terminalIdentity);
+  }
+
+  private rememberAcknowledgedCompletedTerminalIdentity(
+    terminalIdentity: string,
+  ) {
+    if (!this.completedIgnoredTerminalIdentities.has(terminalIdentity)) return;
+    this.acknowledgedIgnoredTerminalIdentities.add(terminalIdentity);
+  }
+
+  private rememberCompletedIgnoredTerminalIdentity(
+    terminalIdentity: string,
+    acknowledged: boolean,
+  ) {
+    this.completedIgnoredTerminalIdentities.add(terminalIdentity);
+    if (acknowledged) {
+      this.rememberAcknowledgedCompletedTerminalIdentity(terminalIdentity);
+    }
+    while (this.completedIgnoredTerminalIdentities.size > 1024) {
+      const oldestIdentity = this.completedIgnoredTerminalIdentities
+        .values()
+        .next().value;
+      if (typeof oldestIdentity !== "string") return;
+      this.completedIgnoredTerminalIdentities.delete(oldestIdentity);
+      this.forgetAcknowledgedIgnoredTerminalIdentity(oldestIdentity);
+    }
+  }
+
+  private releaseBackendInterruptionTarget(
+    target: RinFrontendBackendInterruptionTarget,
+  ) {
+    if (
+      target.pendingInterruptions.size > 0 ||
+      target.activeTerminalHandlers > 0 ||
+      target.rollbackProjectionPending
+    ) {
+      return;
+    }
+    if (
+      this.backendInterruptionsByRequestTag.get(target.requestTag) !== target
+    ) {
+      return;
+    }
+    this.backendInterruptionsByRequestTag.delete(target.requestTag);
+    if (!target.committed && !target.reservedTerminal) {
+      this.ignoredTerminalRequestTags.delete(target.requestTag);
+    }
+  }
+
+  private takeBufferedInterruptionTerminal(
+    target: RinFrontendBackendInterruptionTarget,
+  ) {
+    const terminal = target.bufferedTerminal;
+    target.bufferedTerminal = undefined;
+    return terminal;
+  }
+
+  private prepareActiveTurnForBackendInterruption() {
+    const interruption: RinFrontendBackendInterruption = {
+      state: "pending",
+      epoch: this.lifecycleEpoch,
+      targets: new Set(),
+    };
+    const requestTags = new Set([
+      ...this.pendingSubmissionSettlements.keys(),
+      safeString(this.liveTurn?.requestTag).trim(),
+    ]);
+    requestTags.delete("");
+    for (const requestTag of requestTags) {
+      let target = this.backendInterruptionsByRequestTag.get(requestTag);
+      if (!target) {
+        target = {
+          requestTag,
+          committed: this.ignoredTerminalRequestTags.has(requestTag),
+          pendingInterruptions: new Set(),
+          activeTerminalHandlers: 0,
+          rollbackProjectionPending: false,
+        };
+        this.backendInterruptionsByRequestTag.set(requestTag, target);
+      }
       this.ignoredTerminalRequestTags.add(requestTag);
-      while (this.ignoredTerminalRequestTags.size > 1024) {
-        const oldest = this.ignoredTerminalRequestTags.values().next().value;
-        if (!oldest) break;
-        this.ignoredTerminalRequestTags.delete(oldest);
-        this.acknowledgedIgnoredTerminalRequestTags.delete(oldest);
+      target.pendingInterruptions.add(interruption);
+      interruption.targets.add(target);
+    }
+    this.trimIgnoredTerminalRequestTags();
+    return interruption;
+  }
+
+  private commitBackendInterruption(
+    interruption: RinFrontendBackendInterruption,
+    onCommitted?: () => void,
+  ) {
+    if (interruption.epoch !== this.lifecycleEpoch) {
+      interruption.state = "rolled_back";
+      return false;
+    }
+    interruption.state = "committed";
+    for (const target of interruption.targets) {
+      target.committed = true;
+      target.pendingInterruptions.delete(interruption);
+    }
+    this.turnInterruptionSeq += 1;
+    try {
+      onCommitted?.();
+    } finally {
+      if (interruption.epoch === this.lifecycleEpoch) {
+        for (const target of interruption.targets) {
+          const terminal = this.takeBufferedInterruptionTerminal(target);
+          if (terminal) this.settleIgnoredTerminal(terminal);
+          this.releaseBackendInterruptionTarget(target);
+        }
+        this.trimIgnoredTerminalRequestTags();
       }
     }
-    const session = this.abortedTurnSessionRef();
-    const lifecycleEvent = projectRinFrontendLifecycleEvent({
-      type: "frontend_turn_aborted",
-      error: "chat_turn_aborted",
-      requestTag,
-      ...session,
-    });
-    if (lifecycleEvent) {
-      applyRinFrontendLifecycleEvent(this.frontendState, lifecycleEvent);
+    return true;
+  }
+
+  private ignoredTerminalProjectionEvent(terminal: RinFrontendIgnoredTerminal) {
+    return terminal.event === "complete"
+      ? {
+          type: "turn_complete" as const,
+          finalText: terminal.finalText,
+          result: terminal.result,
+          sessionId: terminal.sessionId,
+          sessionFile: terminal.sessionFile,
+          requestTag: terminal.requestTag,
+          chatDeliveryContext: terminal.chatDeliveryContext,
+          terminalRecord: terminal.terminalRecord,
+        }
+      : {
+          type: "turn_error" as const,
+          error: terminal.error || "rpc_turn_failed",
+          sessionId: terminal.sessionId,
+          sessionFile: terminal.sessionFile,
+          requestTag: terminal.requestTag,
+          chatDeliveryContext: terminal.chatDeliveryContext,
+          terminalRecord: terminal.terminalRecord,
+        };
+  }
+
+  private async projectIgnoredTerminal(
+    terminal: RinFrontendIgnoredTerminal,
+    projectionEpoch = this.lifecycleEpoch,
+  ) {
+    if (projectionEpoch !== this.lifecycleEpoch) return;
+    await this.handleBackendEvent(
+      this.ignoredTerminalProjectionEvent(terminal),
+      projectionEpoch,
+    );
+  }
+
+  private startRollbackTerminalProjection(
+    target: RinFrontendBackendInterruptionTarget,
+    terminal: RinFrontendIgnoredTerminal,
+    projectionEpoch: number,
+  ) {
+    void (async () => {
+      try {
+        await this.projectIgnoredTerminal(terminal, projectionEpoch);
+      } catch (error) {
+        if (projectionEpoch !== this.lifecycleEpoch) return;
+        this.reportEventHandlingError({
+          stage: "terminal_listener",
+          error,
+          frontendEvent: this.ignoredTerminalProjectionEvent(terminal),
+        });
+      } finally {
+        if (projectionEpoch === this.lifecycleEpoch) {
+          target.rollbackProjectionPending = false;
+          this.releaseBackendInterruptionTarget(target);
+          this.trimIgnoredTerminalRequestTags();
+        }
+      }
+    })();
+  }
+
+  private async rollbackBackendInterruption(
+    interruption: RinFrontendBackendInterruption,
+  ) {
+    if (interruption.epoch !== this.lifecycleEpoch) {
+      interruption.state = "rolled_back";
+      return;
     }
-    this.clearAssistantInterimState();
-    this.setFrontendPhase("idle");
-    this.failLiveTurn(new Error("chat_turn_aborted"));
+    interruption.state = "rolled_back";
+    const terminalsToProject: Array<{
+      target: RinFrontendBackendInterruptionTarget;
+      terminal: RinFrontendIgnoredTerminal;
+    }> = [];
+    for (const target of interruption.targets) {
+      target.pendingInterruptions.delete(interruption);
+      if (target.committed) {
+        const terminal = this.takeBufferedInterruptionTerminal(target);
+        if (terminal) this.settleIgnoredTerminal(terminal);
+      } else if (target.pendingInterruptions.size === 0) {
+        const terminal = this.takeBufferedInterruptionTerminal(target);
+        if (terminal) {
+          target.rollbackProjectionPending = true;
+          terminalsToProject.push({ target, terminal });
+        }
+      }
+      this.releaseBackendInterruptionTarget(target);
+    }
+    this.trimIgnoredTerminalRequestTags();
+    for (const { target, terminal } of terminalsToProject) {
+      if (interruption.epoch !== this.lifecycleEpoch) return;
+      this.startRollbackTerminalProjection(
+        target,
+        terminal,
+        interruption.epoch,
+      );
+    }
   }
 
   private isTurnInterrupted(interruptionSeq: number) {
@@ -687,7 +1063,18 @@ export class RinFrontendTurnDriver {
 
   private throwIfTurnInterrupted(interruptionSeq: number) {
     if (!this.isTurnInterrupted(interruptionSeq)) return;
-    throw new Error("chat_turn_aborted");
+    throw createRinFrontendTurnCancelledError();
+  }
+
+  private throwIfLifecycleEpochChanged(originEpoch: number) {
+    if (originEpoch !== this.lifecycleEpoch) {
+      throw createRinFrontendTurnCancelledError();
+    }
+  }
+
+  private rethrowLifecycleError(error: unknown, originEpoch: number): never {
+    this.throwIfLifecycleEpochChanged(originEpoch);
+    throw error;
   }
 
   private isStreaming() {
@@ -700,15 +1087,19 @@ export class RinFrontendTurnDriver {
     return Boolean(this.frontendState.isCompacting);
   }
 
-  private inputSubmissionGate(sessionFile?: string, interruptionSeq?: number) {
+  private inputSubmissionGate(
+    sessionFile?: string,
+    interruptionSeq?: number,
+    gateEpoch = this.lifecycleEpoch,
+  ) {
     const hasInterruptionSeq = typeof interruptionSeq === "number";
     return {
       isCompacting: () => this.isCompacting(),
-      isAborted: hasInterruptionSeq
-        ? () => this.isTurnInterrupted(interruptionSeq)
-        : undefined,
-      abortErrorMessage: hasInterruptionSeq ? "chat_turn_aborted" : undefined,
-      refresh: () => this.refreshFrontendState(sessionFile),
+      isAborted: () =>
+        gateEpoch !== this.lifecycleEpoch ||
+        (hasInterruptionSeq && this.isTurnInterrupted(interruptionSeq)),
+      abortErrorMessage: RIN_FRONTEND_TURN_CANCELLED,
+      refresh: () => this.refreshFrontendState(sessionFile, gateEpoch),
     };
   }
 
@@ -735,25 +1126,6 @@ export class RinFrontendTurnDriver {
       return;
     }
     this.emit(event);
-  }
-
-  private abortedTurnSessionRef() {
-    return {
-      sessionId: this.currentSessionId() || undefined,
-      sessionFile: this.currentSessionFile() || undefined,
-    };
-  }
-
-  interruptActiveTurnLikeTui() {
-    const result = this.abortedTurnSessionRef();
-    this.turnInterruptionSeq += 1;
-    this.rejectLiveTurnAsAborted();
-    try {
-      void executeRinFrontendInterruptIntent(this.client, "stop_turn").catch(
-        () => {},
-      );
-    } catch {}
-    return result;
   }
 
   private resetAssistantSegmentTracking() {
@@ -792,52 +1164,222 @@ export class RinFrontendTurnDriver {
     return Boolean(this.client);
   }
 
-  private consumeIgnoredTerminal(payload: any) {
-    if (!payload || payload.type !== "rpc_turn_event") return null;
-    if (payload.event !== "complete" && payload.event !== "error") return null;
+  private suppressedTerminalMissingExactIdentity(payload: any) {
+    if (!payload || payload.type !== "rpc_turn_event") return false;
+    if (payload.event !== "complete" && payload.event !== "error") {
+      return false;
+    }
     const requestTag = safeString(payload.requestTag).trim();
     if (!requestTag || !this.ignoredTerminalRequestTags.has(requestTag)) {
+      return false;
+    }
+    return !safeString(payload.terminalRecord?.terminalId).trim();
+  }
+
+  private consumeIgnoredTerminal(
+    payload: any,
+  ): RinFrontendIgnoredTerminal | null {
+    if (!payload || payload.type !== "rpc_turn_event") return null;
+    if (payload.event !== "complete" && payload.event !== "error") return null;
+    const snapshot = cloneJson(payload);
+    const requestTag = safeString(snapshot.requestTag).trim();
+    const terminalId = safeString(snapshot.terminalRecord?.terminalId).trim();
+    if (!requestTag || !terminalId) return null;
+    const terminal: RinFrontendIgnoredTerminal = {
+      requestTag,
+      terminalId,
+      event: snapshot.event as "complete" | "error",
+      error: safeString(snapshot.error).trim(),
+      finalText: safeString(snapshot.finalText).trim(),
+      result: snapshot.result,
+      sessionId: safeString(snapshot.sessionId).trim() || undefined,
+      sessionFile: safeString(snapshot.sessionFile).trim() || undefined,
+      chatDeliveryContext: snapshot.chatDeliveryContext,
+      terminalRecord: snapshot.terminalRecord,
+    };
+    const terminalIdentity = this.ignoredTerminalIdentity(terminal);
+    if (
+      !this.ignoredTerminalRequestTags.has(requestTag) &&
+      !this.ignoredTerminalHandlingTasks.has(terminalIdentity) &&
+      !this.completedIgnoredTerminalIdentities.has(terminalIdentity)
+    ) {
       return null;
     }
-    return {
-      requestTag,
-      terminalId: safeString(payload.terminalRecord?.terminalId).trim(),
+    return terminal;
+  }
+
+  private ignoredTerminalError(terminal: RinFrontendIgnoredTerminal) {
+    const error = new Error(terminal.error || "rpc_turn_failed") as Error & {
+      sessionId?: string;
+      sessionFile?: string;
+      rinTurnTerminal?: boolean;
     };
+    error.sessionId = terminal.sessionId;
+    error.sessionFile = terminal.sessionFile;
+    error.rinTurnTerminal = true;
+    return error;
+  }
+
+  private ignoredTerminalResult(
+    terminal: RinFrontendIgnoredTerminal,
+  ): RinFrontendTurnResult {
+    return {
+      outcome: "terminalOwner",
+      finalText: terminal.finalText,
+      result: terminal.result,
+      sessionId: terminal.sessionId,
+      sessionFile: terminal.sessionFile,
+      requestTag: terminal.requestTag,
+      chatDeliveryContext: terminal.chatDeliveryContext,
+      terminalRecord: terminal.terminalRecord,
+    };
+  }
+
+  private settleIgnoredTerminal(terminal: RinFrontendIgnoredTerminal) {
+    const pendingSettlement = this.pendingSubmissionSettlements.get(
+      terminal.requestTag,
+    );
+    if (
+      pendingSettlement &&
+      this.pendingSubmissionSettlements.get(terminal.requestTag) ===
+        pendingSettlement
+    ) {
+      this.pendingSubmissionSettlements.delete(terminal.requestTag);
+    }
+    if (terminal.event === "complete") {
+      if (pendingSettlement) {
+        pendingSettlement.settleTerminal(terminal);
+      } else {
+        this.liveTurnForRequestTag(terminal.requestTag)?.resolve(
+          this.ignoredTerminalResult(terminal),
+        );
+      }
+      return;
+    }
+    const error = this.ignoredTerminalError(terminal);
+    if (pendingSettlement) {
+      pendingSettlement.cancel(error);
+    } else {
+      this.liveTurnForRequestTag(terminal.requestTag)?.reject(error);
+    }
+  }
+
+  private settlePendingSubmissionFromProjectedTerminal(
+    event: Extract<
+      RinFrontendTurnDriverEvent,
+      { type: "turn_complete" | "turn_error" }
+    >,
+  ) {
+    const requestTag = safeString(event.requestTag).trim();
+    if (!requestTag || !this.pendingSubmissionSettlements.has(requestTag)) {
+      return false;
+    }
+    const terminalId = safeString(event.terminalRecord?.terminalId).trim();
+    if (!terminalId) return true;
+    const terminalBase = {
+      requestTag,
+      terminalId,
+      sessionId: event.sessionId,
+      sessionFile: event.sessionFile,
+      chatDeliveryContext: event.chatDeliveryContext,
+      terminalRecord: event.terminalRecord,
+    };
+    this.settleIgnoredTerminal(
+      event.type === "turn_complete"
+        ? {
+            ...terminalBase,
+            event: "complete",
+            error: "",
+            finalText: event.finalText,
+            result: event.result,
+          }
+        : {
+            ...terminalBase,
+            event: "error",
+            error: event.error,
+            finalText: "",
+          },
+    );
+    return true;
+  }
+
+  private ignoredTerminalIdentity(terminal: {
+    requestTag: string;
+    terminalId: string;
+  }) {
+    return JSON.stringify([terminal.requestTag, terminal.terminalId]);
   }
 
   private async acknowledgeIgnoredTerminal(terminal: {
     requestTag: string;
     terminalId: string;
   }) {
-    if (!terminal.terminalId) {
-      this.ignoredTerminalRequestTags.delete(terminal.requestTag);
-      this.acknowledgedIgnoredTerminalRequestTags.delete(terminal.requestTag);
-      return;
+    if (!terminal.terminalId) return false;
+    const terminalIdentity = this.ignoredTerminalIdentity(terminal);
+    if (this.acknowledgedIgnoredTerminalIdentities.has(terminalIdentity)) {
+      return true;
     }
-    if (this.acknowledgedIgnoredTerminalRequestTags.has(terminal.requestTag)) {
-      return;
-    }
-    let task = this.ignoredTerminalAckTasks.get(terminal.requestTag);
+    let task = this.ignoredTerminalAckTasks.get(terminalIdentity);
     if (!task) {
+      const acknowledgementEpoch = this.lifecycleEpoch;
       const acknowledgement = this.acknowledgeTerminal(
         terminal.requestTag,
         terminal.terminalId,
       )
-        .then(() => {
-          this.acknowledgedIgnoredTerminalRequestTags.add(terminal.requestTag);
-        })
+        .then(() => this.lifecycleEpoch === acknowledgementEpoch)
+        .catch(() => false)
         .finally(() => {
           if (
-            this.ignoredTerminalAckTasks.get(terminal.requestTag) ===
+            this.ignoredTerminalAckTasks.get(terminalIdentity) ===
             acknowledgement
           ) {
-            this.ignoredTerminalAckTasks.delete(terminal.requestTag);
+            this.ignoredTerminalAckTasks.delete(terminalIdentity);
           }
         });
       task = acknowledgement;
-      this.ignoredTerminalAckTasks.set(terminal.requestTag, task);
+      this.ignoredTerminalAckTasks.set(terminalIdentity, task);
     }
-    await task.catch(() => {});
+    return await task;
+  }
+
+  private async processIgnoredTerminal(
+    ignoredTerminal: RinFrontendIgnoredTerminal,
+    handlingState: { acknowledged: boolean },
+    handlingEpoch = this.lifecycleEpoch,
+  ) {
+    const target = this.backendInterruptionsByRequestTag.get(
+      ignoredTerminal.requestTag,
+    );
+    let ownsTargetEnvelope = true;
+    if (target) {
+      target.activeTerminalHandlers += 1;
+      target.reservedTerminal ||= ignoredTerminal;
+      ownsTargetEnvelope =
+        this.ignoredTerminalIdentity(target.reservedTerminal) ===
+        this.ignoredTerminalIdentity(ignoredTerminal);
+    }
+    try {
+      handlingState.acknowledged =
+        await this.acknowledgeIgnoredTerminal(ignoredTerminal);
+      if (this.lifecycleEpoch !== handlingEpoch) return;
+      if (target && !ownsTargetEnvelope) return;
+      if (!target || target.committed) {
+        this.settleIgnoredTerminal(ignoredTerminal);
+      } else if (target.pendingInterruptions.size > 0) {
+        target.bufferedTerminal ||= ignoredTerminal;
+      } else {
+        await this.projectIgnoredTerminal(ignoredTerminal, handlingEpoch);
+      }
+    } finally {
+      if (target && handlingEpoch === this.lifecycleEpoch) {
+        target.activeTerminalHandlers = Math.max(
+          0,
+          target.activeTerminalHandlers - 1,
+        );
+        this.releaseBackendInterruptionTarget(target);
+        this.trimIgnoredTerminalRequestTags();
+      }
+    }
   }
 
   private terminalRpcTurnPayloadMatchesCurrentSession(payload: any) {
@@ -905,6 +1447,7 @@ export class RinFrontendTurnDriver {
     }
     const recovery = this.liveTurnRecoveryContext;
     const requestTag = safeString(this.liveTurn.requestTag).trim();
+    const recoveryEpoch = this.lifecycleEpoch;
     if (!requestTag) {
       this.failLiveTurn(new Error("frontend_turn_interrupted"));
       this.liveTurnRecoveryContext = null;
@@ -922,7 +1465,7 @@ export class RinFrontendTurnDriver {
               ? { sessionFile: recovery.sessionFile }
               : {}),
           });
-          await this.handleClientEvent(payload);
+          await this.handleClientEvent(payload, recoveryEpoch);
           return;
         } catch (error) {
           if (!isRecoverableConnectionError(error)) {
@@ -946,20 +1489,31 @@ export class RinFrontendTurnDriver {
     await this.disconnectedTurnRecovery;
   }
 
-  private async selectSessionTarget(sessionFile?: string) {
+  private async selectSessionTarget(
+    sessionFile?: string,
+    selectionEpoch = this.lifecycleEpoch,
+  ) {
+    this.throwIfLifecycleEpochChanged(selectionEpoch);
     const wanted = safeString(sessionFile || "").trim();
     if (!wanted) return { changed: false };
     if (!this.client) throw new Error("frontend_session_not_connected");
-    const before = this.currentSessionFile();
-    await this.client.resumeSession(wanted, {
-      frontendIdentity: this.frontendIdentity,
-    });
-    await this.refreshFrontendState(wanted).catch(() => {});
-    return {
-      changed: before !== wanted,
-      sessionId: this.currentSessionId() || undefined,
-      sessionFile: this.currentSessionFile() || wanted,
-    };
+    const client = this.client;
+    try {
+      const before = this.currentSessionFile();
+      await client.resumeSession(wanted, {
+        frontendIdentity: this.frontendIdentity,
+      });
+      this.throwIfLifecycleEpochChanged(selectionEpoch);
+      await this.refreshFrontendState(wanted, selectionEpoch).catch(() => {});
+      this.throwIfLifecycleEpochChanged(selectionEpoch);
+      return {
+        changed: before !== wanted,
+        sessionId: this.currentSessionId() || undefined,
+        sessionFile: this.currentSessionFile() || wanted,
+      };
+    } catch (error) {
+      this.rethrowLifecycleError(error, selectionEpoch);
+    }
   }
 
   async resumeSessionFile(sessionFile: string) {
@@ -976,49 +1530,75 @@ export class RinFrontendTurnDriver {
       Pick<RinPiPassthroughOptions, "piStartupOptions"> & {
         disabledRinCapabilities?: string[];
       },
+    readinessEpoch = this.lifecycleEpoch,
   ) {
+    if (readinessEpoch !== this.lifecycleEpoch) {
+      throw createRinFrontendTurnCancelledError();
+    }
     if (!this.client) throw new Error("frontend_session_not_connected");
-    if (this.client.ensureSessionReady) {
-      const ready = await this.client.ensureSessionReady(
-        restoreSessionFile,
-        managedSessionLeaf,
-        toolOptions,
-      );
-      this.applyFrontendStateSnapshot(ready);
-      return ready;
-    }
+    const client = this.client;
+    try {
+      if (client.ensureSessionReady) {
+        const ready = await client.ensureSessionReady(
+          restoreSessionFile,
+          managedSessionLeaf,
+          toolOptions,
+        );
+        if (readinessEpoch !== this.lifecycleEpoch) {
+          throw createRinFrontendTurnCancelledError();
+        }
+        this.applyFrontendStateSnapshot(ready);
+        return ready;
+      }
 
-    const wanted = safeString(restoreSessionFile || "").trim();
-    const managedLeaf = safeString(managedSessionLeaf || "").trim();
-    await this.refreshFrontendState(wanted).catch(() => {});
-    if (managedLeaf && !wanted) {
-      const serializedToolOptions = serializeRinToolStartupOptions(toolOptions);
-      const resourceOptions = {
-        ...(hasRinToolStartupOptions(serializedToolOptions)
-          ? serializedToolOptions
-          : {}),
-        ...(toolOptions?.piStartupOptions !== undefined
-          ? { piStartupOptions: toolOptions.piStartupOptions }
-          : {}),
-        ...(toolOptions?.disabledRinCapabilities !== undefined
-          ? { disabledRinCapabilities: toolOptions.disabledRinCapabilities }
-          : {}),
+      const wanted = safeString(restoreSessionFile || "").trim();
+      const managedLeaf = safeString(managedSessionLeaf || "").trim();
+      await this.refreshFrontendState(wanted, readinessEpoch).catch(() => {});
+      if (readinessEpoch !== this.lifecycleEpoch) {
+        throw createRinFrontendTurnCancelledError();
+      }
+      if (managedLeaf && !wanted) {
+        const serializedToolOptions =
+          serializeRinToolStartupOptions(toolOptions);
+        const resourceOptions = {
+          ...(hasRinToolStartupOptions(serializedToolOptions)
+            ? serializedToolOptions
+            : {}),
+          ...(toolOptions?.piStartupOptions !== undefined
+            ? { piStartupOptions: toolOptions.piStartupOptions }
+            : {}),
+          ...(toolOptions?.disabledRinCapabilities !== undefined
+            ? { disabledRinCapabilities: toolOptions.disabledRinCapabilities }
+            : {}),
+        };
+        const value = await client.newSession({
+          managedSessionLeaf: managedLeaf,
+          frontendIdentity: this.frontendIdentity,
+          ...(Object.keys(resourceOptions).length > 0
+            ? { resourceOptions }
+            : {}),
+        });
+        if (readinessEpoch !== this.lifecycleEpoch) {
+          throw createRinFrontendTurnCancelledError();
+        }
+        if (value?.cancelled) throw new Error("rin_new_session_cancelled");
+        this.replaceFrontendSessionRefFrom(value);
+        await this.refreshFrontendState(undefined, readinessEpoch).catch(
+          () => {},
+        );
+      } else if (wanted) {
+        await this.selectSessionTarget(wanted, readinessEpoch);
+      }
+      if (readinessEpoch !== this.lifecycleEpoch) {
+        throw createRinFrontendTurnCancelledError();
+      }
+      return {
+        sessionId: this.currentSessionId() || undefined,
+        sessionFile: this.currentSessionFile() || undefined,
       };
-      const value = await this.client.newSession({
-        managedSessionLeaf: managedLeaf,
-        frontendIdentity: this.frontendIdentity,
-        ...(Object.keys(resourceOptions).length > 0 ? { resourceOptions } : {}),
-      });
-      if (value?.cancelled) throw new Error("rin_new_session_cancelled");
-      this.replaceFrontendSessionRefFrom(value);
-      await this.refreshFrontendState().catch(() => {});
-    } else if (wanted) {
-      await this.selectSessionTarget(wanted);
+    } catch (error) {
+      this.rethrowLifecycleError(error, readinessEpoch);
     }
-    return {
-      sessionId: this.currentSessionId() || undefined,
-      sessionFile: this.currentSessionFile() || undefined,
-    };
   }
 
   private async applyTurnToolOptions(
@@ -1057,8 +1637,10 @@ export class RinFrontendTurnDriver {
       restoreSessionFile?: string;
       sessionFile?: string;
       managedSessionLeaf?: string;
+      onActiveTurnInterruptionCommitted?: () => void;
     } = {},
   ) {
+    const commandEpoch = this.lifecycleEpoch;
     const commandName = frontendCommandNameFromLine(commandLine);
     const compactCommand = parseFrontendCompactCommand(commandLine);
     const skipSessionRecovery = options.skipSessionRecovery === true;
@@ -1071,35 +1653,110 @@ export class RinFrontendTurnDriver {
     ).trim();
     const interactionPolicy =
       getRinNonInteractiveCommandInteractionPolicy(commandLine);
-    if (this.isTurnActive()) {
-      if (interactionPolicy.activeTurnHandling === "abort") {
-        return {
-          handled: true,
-          text: this.commandResponses.abort,
-          ...this.interruptActiveTurnLikeTui(),
-        };
-      }
-      if (interactionPolicy.activeTurnHandling === "interrupt_then_run") {
-        this.interruptActiveTurnLikeTui();
-      }
-    }
+    const interruptsActiveTurn =
+      this.isTurnActive() &&
+      (interactionPolicy.activeTurnHandling === "abort" ||
+        interactionPolicy.activeTurnHandling === "interrupt_then_run");
     if (options.assumeConnected) {
       if (!this.client?.isConnected())
         throw new Error("frontend_session_not_connected");
     } else {
-      await this.connect();
+      try {
+        await this.connect({}, commandEpoch);
+      } catch (error) {
+        if (this.lifecycleEpoch !== commandEpoch) {
+          throw createRinFrontendTurnCancelledError();
+        }
+        throw error;
+      }
+    }
+    if (this.lifecycleEpoch !== commandEpoch) {
+      throw createRinFrontendTurnCancelledError();
     }
     if (!this.client) throw new Error("frontend_session_not_connected");
+    if (interactionPolicy.activeTurnHandling === "abort") {
+      const interruption = interruptsActiveTurn
+        ? this.prepareActiveTurnForBackendInterruption()
+        : null;
+      try {
+        await executeRinFrontendInterruptIntent(this.client, "stop_turn");
+      } catch (error) {
+        if (interruption) {
+          await this.rollbackBackendInterruption(interruption);
+        }
+        if (this.lifecycleEpoch !== commandEpoch) {
+          throw createRinFrontendTurnCancelledError();
+        }
+        throw error;
+      }
+      if (this.lifecycleEpoch !== commandEpoch) {
+        throw createRinFrontendTurnCancelledError();
+      }
+      if (
+        interruption &&
+        !this.commitBackendInterruption(
+          interruption,
+          options.onActiveTurnInterruptionCommitted,
+        )
+      ) {
+        throw createRinFrontendTurnCancelledError();
+      }
+      await this.refreshFrontendState(undefined, commandEpoch).catch(() => {});
+      if (this.lifecycleEpoch !== commandEpoch) {
+        throw createRinFrontendTurnCancelledError();
+      }
+      return {
+        handled: true,
+        text: this.commandResponses.abort,
+        sessionId: this.currentSessionId() || undefined,
+        sessionFile: this.currentSessionFile() || undefined,
+      };
+    }
     if (isFrontendNewSessionCommand(commandLine)) {
       if (sessionFile && !managedSessionLeaf) {
         throw new Error("new_session_session_file_unsupported");
       }
-      const value: RinNewSessionResult = await this.client.newSession({
-        ...(managedSessionLeaf ? { managedSessionLeaf } : {}),
-        frontendIdentity: this.frontendIdentity,
-      });
+      const interruption = interruptsActiveTurn
+        ? this.prepareActiveTurnForBackendInterruption()
+        : null;
+      let value: RinNewSessionResult;
+      try {
+        value = await this.client.newSession({
+          ...(managedSessionLeaf ? { managedSessionLeaf } : {}),
+          frontendIdentity: this.frontendIdentity,
+        });
+      } catch (error) {
+        if (interruption) {
+          await this.rollbackBackendInterruption(interruption);
+        }
+        if (this.lifecycleEpoch !== commandEpoch) {
+          throw createRinFrontendTurnCancelledError();
+        }
+        throw error;
+      }
+      if (this.lifecycleEpoch !== commandEpoch) {
+        throw createRinFrontendTurnCancelledError();
+      }
+      if (interruption) {
+        if (value?.cancelled) {
+          await this.rollbackBackendInterruption(interruption);
+        } else if (
+          !this.commitBackendInterruption(
+            interruption,
+            options.onActiveTurnInterruptionCommitted,
+          )
+        ) {
+          throw createRinFrontendTurnCancelledError();
+        }
+      }
+      if (this.lifecycleEpoch !== commandEpoch) {
+        throw createRinFrontendTurnCancelledError();
+      }
       if (!value?.cancelled) this.replaceFrontendSessionRefFrom(value);
-      await this.refreshFrontendState().catch(() => {});
+      await this.refreshFrontendState(undefined, commandEpoch).catch(() => {});
+      if (this.lifecycleEpoch !== commandEpoch) {
+        throw createRinFrontendTurnCancelledError();
+      }
       return {
         handled: true,
         cancelled: Boolean(value?.cancelled),
@@ -1148,6 +1805,8 @@ export class RinFrontendTurnDriver {
         ? await this.ensureSessionReady(
             sessionFile || restoreSessionFile,
             managedSessionLeaf,
+            undefined,
+            commandEpoch,
           )
         : undefined;
     const targetSessionFile = this.sessionFileFromReady(
@@ -1158,13 +1817,25 @@ export class RinFrontendTurnDriver {
       sessionFile || restoreSessionFile,
       targetSessionFile,
     );
-    const data: any = compactCommand.compact
-      ? await this.client.compact(compactCommand.customInstructions, {
-          sessionFile: targetSessionFile || undefined,
-        })
-      : await this.runCommandForSession(commandLine, targetSessionFile);
-    if (interactionPolicy.activeTurnHandling === "abort") {
-      this.rejectLiveTurnAsAborted();
+    let data: any;
+    try {
+      data = compactCommand.compact
+        ? await this.client.compact(compactCommand.customInstructions, {
+            sessionFile: targetSessionFile || undefined,
+          })
+        : await this.runCommandForSession(
+            commandLine,
+            targetSessionFile,
+            commandEpoch,
+          );
+    } catch (error) {
+      if (this.lifecycleEpoch !== commandEpoch) {
+        throw createRinFrontendTurnCancelledError();
+      }
+      throw error;
+    }
+    if (this.lifecycleEpoch !== commandEpoch) {
+      throw createRinFrontendTurnCancelledError();
     }
     const normalizedData = applyFrontendBuiltinCommandText(
       commandName,
@@ -1191,16 +1862,33 @@ export class RinFrontendTurnDriver {
   private async runCommandForSession(
     commandLine: string,
     sessionFile?: string,
+    commandEpoch = this.lifecycleEpoch,
   ) {
+    if (commandEpoch !== this.lifecycleEpoch) {
+      throw createRinFrontendTurnCancelledError();
+    }
     if (!this.client) throw new Error("frontend_session_not_connected");
+    const client = this.client;
     const wanted = safeString(sessionFile || "").trim();
-    if (!wanted) return await this.client.runCommand(commandLine);
-    return await this.client.request({
-      type: "run_command",
-      commandLine,
-      sessionFile: wanted,
-      frontendIdentity: this.frontendIdentity,
-    });
+    try {
+      const result = !wanted
+        ? await client.runCommand(commandLine)
+        : await client.request({
+            type: "run_command",
+            commandLine,
+            sessionFile: wanted,
+            frontendIdentity: this.frontendIdentity,
+          });
+      if (commandEpoch !== this.lifecycleEpoch) {
+        throw createRinFrontendTurnCancelledError();
+      }
+      return result;
+    } catch (error) {
+      if (commandEpoch !== this.lifecycleEpoch) {
+        throw createRinFrontendTurnCancelledError();
+      }
+      throw error;
+    }
   }
 
   private async resetModelOptionsFromSettings(sessionFile?: string) {
@@ -1493,13 +2181,34 @@ export class RinFrontendTurnDriver {
       const existingLiveTurn = this.liveTurn;
       this.setFrontendPhase("sending");
       let submission: unknown;
-      let rejectSubmission!: (error: Error) => void;
-      const submissionCancellation = new Promise<never>((_resolve, reject) => {
-        rejectSubmission = reject;
+      let resolveSubmissionSettlement!: (
+        settlement:
+          | { kind: "cancelled"; error: Error }
+          | { kind: "terminal"; terminal: RinFrontendIgnoredTerminal },
+      ) => void;
+      const submissionSettlement = new Promise<
+        | { kind: "cancelled"; error: Error }
+        | { kind: "terminal"; terminal: RinFrontendIgnoredTerminal }
+      >((resolve) => {
+        resolveSubmissionSettlement = resolve;
       });
-      this.pendingSubmissionCancellations.set(requestTag, rejectSubmission);
+      const pendingSettlement: RinFrontendPendingSubmissionSettlement = {
+        cancel: (error) =>
+          resolveSubmissionSettlement({ kind: "cancelled", error }),
+        settleTerminal: (terminal) =>
+          resolveSubmissionSettlement({ kind: "terminal", terminal }),
+      };
+      this.pendingSubmissionSettlements.set(requestTag, pendingSettlement);
+      const releasePendingSubmissionSettlement = () => {
+        if (
+          this.pendingSubmissionSettlements.get(requestTag) ===
+          pendingSettlement
+        ) {
+          this.pendingSubmissionSettlements.delete(requestTag);
+        }
+      };
       try {
-        submission = await Promise.race([
+        const settledSubmission = await Promise.race([
           submitNativeFrontendPromptTurn(this.client!, {
             text,
             images,
@@ -1511,9 +2220,19 @@ export class RinFrontendTurnDriver {
             promptContext: input.promptContext,
             sessionFile: targetSessionFile,
             gate: inputGate,
-          }),
-          submissionCancellation,
+          }).then((value) => ({ kind: "submission" as const, value })),
+          submissionSettlement,
         ]);
+        if (settledSubmission.kind === "cancelled") {
+          throw settledSubmission.error;
+        }
+        if (settledSubmission.kind === "terminal") {
+          if (settledSubmission.terminal.event === "error") {
+            throw this.ignoredTerminalError(settledSubmission.terminal);
+          }
+          return this.ignoredTerminalResult(settledSubmission.terminal);
+        }
+        submission = settledSubmission.value;
       } catch (error) {
         const code = safeString(
           (error as any)?.code || (error as any)?.message || error,
@@ -1531,6 +2250,7 @@ export class RinFrontendTurnDriver {
           code.startsWith("rin_disconnected") &&
           this.daemonShutdownDetached
         ) {
+          if (!this.liveTurn) releasePendingSubmissionSettlement();
           const detachedTurn =
             this.liveTurn ||
             this.startLiveTurn(requestTag, input.chatDeliveryContext);
@@ -1539,18 +2259,14 @@ export class RinFrontendTurnDriver {
         if (existingLiveTurn) {
           await existingLiveTurn.promise.catch(() => {});
         }
+        releasePendingSubmissionSettlement();
         return await this.resumeTurn({
           requestTag,
           sessionFile: targetSessionFile,
           chatDeliveryContext: input.chatDeliveryContext,
         });
       } finally {
-        if (
-          this.pendingSubmissionCancellations.get(requestTag) ===
-          rejectSubmission
-        ) {
-          this.pendingSubmissionCancellations.delete(requestTag);
-        }
+        releasePendingSubmissionSettlement();
       }
       if (
         (submission as any)?.queued === true &&
@@ -1632,13 +2348,14 @@ export class RinFrontendTurnDriver {
         sessionFile: safeString(input.sessionFile).trim() || undefined,
       };
       try {
+        const terminalWaitEpoch = this.lifecycleEpoch;
         const event = await this.client.request<any>({
           type: "await_turn_terminal",
           sessionFile: safeString(input.sessionFile).trim() || undefined,
           requestTag,
         });
         if (this.liveTurn === liveTurn && event != null) {
-          await this.handleClientEvent(event);
+          await this.handleClientEvent(event, terminalWaitEpoch);
         }
       } catch (error) {
         if (isRecoverableConnectionError(error)) {
@@ -1672,6 +2389,17 @@ export class RinFrontendTurnDriver {
     }
   }
 
+  private rememberCommittedTerminalProjection(terminalIdentity: string) {
+    this.committedTerminalProjections.add(terminalIdentity);
+    while (this.committedTerminalProjections.size > 1024) {
+      const oldestIdentity = this.committedTerminalProjections
+        .values()
+        .next().value;
+      if (typeof oldestIdentity !== "string") return;
+      this.committedTerminalProjections.delete(oldestIdentity);
+    }
+  }
+
   private terminalProjectionIdentity(
     event: Extract<
       RinFrontendTurnDriverEvent,
@@ -1682,14 +2410,10 @@ export class RinFrontendTurnDriver {
     return requestTag ? `request:${requestTag}` : "";
   }
 
-  private terminalOwnsLiveTurn(requestTag?: string) {
+  private liveTurnForRequestTag(requestTag?: string) {
     const terminalRequestTag = safeString(requestTag).trim();
-    return Boolean(
-      this.liveTurn &&
-      terminalRequestTag &&
-      (this.liveTurn.requestTag === terminalRequestTag ||
-        this.backendTurnRequestTag === terminalRequestTag),
-    );
+    if (!terminalRequestTag) return null;
+    return this.liveTurnsByRequestTag.get(terminalRequestTag) || null;
   }
 
   private async emitTerminalAfterCommit(
@@ -1697,7 +2421,9 @@ export class RinFrontendTurnDriver {
       RinFrontendTurnDriverEvent,
       { type: "turn_complete" | "turn_error" }
     >,
+    projectionEpoch = this.lifecycleEpoch,
   ) {
+    if (projectionEpoch !== this.lifecycleEpoch) return false;
     const terminalIdentity = this.terminalProjectionIdentity(event);
     if (!terminalIdentity) {
       this.reportEventHandlingError({
@@ -1715,17 +2441,22 @@ export class RinFrontendTurnDriver {
         const pendingListeners = new Set(this.listeners);
         let attempt = 0;
         while (pendingListeners.size > 0) {
+          if (projectionEpoch !== this.lifecycleEpoch) return false;
           const failures: unknown[] = [];
           await Promise.all(
             Array.from(pendingListeners, async (listener) => {
+              if (projectionEpoch !== this.lifecycleEpoch) return;
               try {
                 await listener(event);
-                pendingListeners.delete(listener);
+                if (projectionEpoch === this.lifecycleEpoch) {
+                  pendingListeners.delete(listener);
+                }
               } catch (error) {
                 failures.push(error);
               }
             }),
           );
+          if (projectionEpoch !== this.lifecycleEpoch) return false;
           if (failures.length === 0) return true;
           attempt += 1;
           for (const failure of failures) {
@@ -1740,14 +2471,16 @@ export class RinFrontendTurnDriver {
             setTimeout(resolve, Math.min(2_000, 100 * 2 ** (attempt - 1))),
           );
         }
-        return true;
+        return projectionEpoch === this.lifecycleEpoch;
       })();
       this.terminalProjectionTasks.set(terminalIdentity, projection);
     }
 
     try {
-      if (!(await projection)) return false;
-      this.committedTerminalProjections.add(terminalIdentity);
+      if (!(await projection) || projectionEpoch !== this.lifecycleEpoch) {
+        return false;
+      }
+      this.rememberCommittedTerminalProjection(terminalIdentity);
       return true;
     } finally {
       if (this.terminalProjectionTasks.get(terminalIdentity) === projection) {
@@ -1756,20 +2489,24 @@ export class RinFrontendTurnDriver {
     }
   }
 
-  async handleClientEvent(event: any) {
+  async handleClientEvent(event: any, eventEpoch = this.lifecycleEpoch) {
+    if (eventEpoch !== this.lifecycleEpoch) return;
     if (!event || typeof event !== "object") return;
     if (event.type === "ui" && event.name === "connection_lost") {
       if (this.liveTurn) void this.interruptLiveTurnAfterDisconnect();
       return;
     }
     const backendPayload = event.type === "ui" ? event.payload : event;
+    const suppressedTerminalHandling = this.handleSuppressedTerminalPayload(
+      backendPayload,
+      eventEpoch,
+    );
+    if (suppressedTerminalHandling) {
+      await suppressedTerminalHandling;
+      return;
+    }
     if (event.type === "ui") {
       const payload: any = event.payload;
-      const ignoredTerminal = this.consumeIgnoredTerminal(payload);
-      if (ignoredTerminal) {
-        await this.acknowledgeIgnoredTerminal(ignoredTerminal);
-        return;
-      }
       if (!this.terminalRpcTurnPayloadMatchesCurrentSession(payload)) return;
       if (payload?.working === false) {
         this.applyBackendWorkingState(false);
@@ -1860,6 +2597,7 @@ export class RinFrontendTurnDriver {
             );
           },
         });
+        if (eventEpoch !== this.lifecycleEpoch) return;
         if (
           payload.type === "queue_update" &&
           Array.isArray(payload.steering) &&
@@ -1878,14 +2616,20 @@ export class RinFrontendTurnDriver {
         ? [event.payload as RinFrontendBackendEvent]
         : this.backendEventTranslator.translate(event);
     for (const backendEvent of backendEvents) {
-      await this.handleBackendEvent(backendEvent);
+      if (eventEpoch !== this.lifecycleEpoch) return;
+      await this.handleBackendEvent(backendEvent, eventEpoch);
     }
+    if (eventEpoch !== this.lifecycleEpoch) return;
     if (backendPayload?.working === true) {
       this.applyBackendWorkingState(true);
     }
   }
 
-  private async handleBackendEvent(event: RinFrontendBackendEvent) {
+  private async handleBackendEvent(
+    event: RinFrontendBackendEvent,
+    eventEpoch = this.lifecycleEpoch,
+  ) {
+    if (eventEpoch !== this.lifecycleEpoch) return;
     switch (event.type) {
       case "status":
         if (
@@ -2003,18 +2747,22 @@ export class RinFrontendTurnDriver {
             ? { terminalRecord: event.terminalRecord }
             : {}),
         };
-        if (!(await this.emitTerminalAfterCommit(terminalEvent))) return;
-        if (this.terminalOwnsLiveTurn(terminalEvent.requestTag)) {
-          this.liveTurn.resolve({
-            finalText,
-            result: event.result,
-            sessionId: event.sessionId,
-            sessionFile: event.sessionFile,
-            requestTag: terminalEvent.requestTag,
-            chatDeliveryContext: event.chatDeliveryContext,
-            terminalRecord: event.terminalRecord,
-          });
+        if (!(await this.emitTerminalAfterCommit(terminalEvent, eventEpoch))) {
+          return;
         }
+        if (eventEpoch !== this.lifecycleEpoch) return;
+        if (this.settlePendingSubmissionFromProjectedTerminal(terminalEvent)) {
+          return;
+        }
+        this.liveTurnForRequestTag(terminalEvent.requestTag)?.resolve({
+          finalText,
+          result: event.result,
+          sessionId: event.sessionId,
+          sessionFile: event.sessionFile,
+          requestTag: terminalEvent.requestTag,
+          chatDeliveryContext: event.chatDeliveryContext,
+          terminalRecord: event.terminalRecord,
+        });
         return;
       }
       case "turn_error": {
@@ -2040,8 +2788,17 @@ export class RinFrontendTurnDriver {
             ? { terminalRecord: event.terminalRecord }
             : {}),
         };
-        if (!(await this.emitTerminalAfterCommit(terminalEvent))) return;
-        if (!this.terminalOwnsLiveTurn(terminalEvent.requestTag)) return;
+        if (!(await this.emitTerminalAfterCommit(terminalEvent, eventEpoch))) {
+          return;
+        }
+        if (eventEpoch !== this.lifecycleEpoch) return;
+        if (this.settlePendingSubmissionFromProjectedTerminal(terminalEvent)) {
+          return;
+        }
+        const exactLiveTurn = this.liveTurnForRequestTag(
+          terminalEvent.requestTag,
+        );
+        if (!exactLiveTurn) return;
         const error = new Error(event.error) as Error & {
           sessionId?: string;
           sessionFile?: string;
@@ -2050,7 +2807,7 @@ export class RinFrontendTurnDriver {
         error.sessionId = event.sessionId;
         error.sessionFile = event.sessionFile;
         error.rinTurnTerminal = true;
-        this.failLiveTurn(error);
+        exactLiveTurn.reject(error);
         return;
       }
     }

@@ -91,13 +91,11 @@ test("chat error formatter prefixes terse Rin errors", () => {
   assert.deepEqual(
     [
       "frontend session terminated",
-      "chat_turn_aborted",
       "rin_turn_result_invariant_failed",
       "provider response headers timed out after 300000ms",
     ].map((message) => formatRuntimeErrorForChat(message)),
     [
       "rin error: frontend session terminated",
-      "rin error: chat turn aborted",
       "rin error: turn result invariant failed",
       "rin error: provider response headers timed out after 300000ms",
     ],

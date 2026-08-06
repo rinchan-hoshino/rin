@@ -101,7 +101,7 @@ export type RinFrontendLifecycleEvent =
     })
   | (LifecycleEventBase & {
       kind: "turn_terminal";
-      outcome: "error" | "aborted";
+      outcome: "error";
       error: string;
       sessionId?: string;
       sessionFile?: string;
@@ -329,15 +329,6 @@ export function projectRinFrontendLifecycleEvent(
         };
       }
       return null;
-    case "frontend_turn_aborted":
-      return {
-        kind: "turn_terminal",
-        outcome: "aborted",
-        error: safeString(payload.error).trim() || "chat_turn_aborted",
-        sessionId: optionalText(payload.sessionId),
-        sessionFile: optionalText(payload.sessionFile),
-        ...requestTag,
-      };
     default:
       return null;
   }

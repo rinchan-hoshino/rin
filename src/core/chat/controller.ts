@@ -13,7 +13,10 @@ import {
   type RinFrontendTurnClient,
   type RinChatDeliveryContext,
 } from "../rin-frontend-sdk/index.js";
-import { isRinFrontendTurnCancelledError } from "../rin-frontend-sdk/lifecycle-errors.js";
+import {
+  createRinFrontendTurnCancelledError,
+  isRinFrontendTurnCancelledError,
+} from "../rin-frontend-sdk/lifecycle-errors.js";
 import {
   injectPromptContextHeader,
   type PromptContextMeta,
@@ -3029,51 +3032,11 @@ export class ChatController {
     const commandPolicy =
       getRinNonInteractiveCommandInteractionPolicy(commandLine);
     const hadActiveTurn = this.hasActiveTurn();
-    const abortingActiveTurn =
-      commandPolicy.activeTurnHandling === "abort" && hadActiveTurn;
     const interruptingActiveTurn =
-      commandPolicy.activeTurnHandling === "interrupt_then_run" &&
-      hadActiveTurn;
-    if (abortingActiveTurn) {
-      this.lastActivityAt = Date.now();
-      try {
-        this.noteIntentionalTurnAbort();
-        this.turnAbortGeneration += 1;
-        this.turnAbortRequested = true;
-        const data: any = {
-          ...this.driver.interruptActiveTurnLikeTui(),
-          text: this.getCommandResponses().abort,
-        };
-        this.updateStoredSessionFile(
-          data?.sessionFile,
-          this.driver.currentSessionFile(),
-        );
-        this.saveState();
-        const text = safeString(data?.text || "").trim();
-        if (!text) throw new Error("chat_command_text_missing");
-        await this.deliverAssistantReply({
-          text,
-          replyToMessageId: replyToMessageId || undefined,
-          incomingMessageId,
-          sessionFile: data?.sessionFile,
-          clearProcessing: true,
-          bindSession: false,
-        });
-        return {
-          handled: true,
-          text,
-          sessionId: data?.sessionId,
-          sessionFile: this.currentSessionFile() || data?.sessionFile,
-        };
-      } finally {
-        this.awaitingTurnSettle = false;
-        this.turnAbortRequested = false;
-        await this.clearWorkingReaction().catch(() => {});
-        this.clearCurrentTurn();
-        this.stagedDelivery = null;
-        this.saveState();
-      }
-    }
+      hadActiveTurn &&
+      (commandPolicy.activeTurnHandling === "abort" ||
+        commandPolicy.activeTurnHandling === "interrupt_then_run");
+    let activeTurnInterruptionCommitted = false;
     const skipSessionRecovery = commandPolicy.skipSessionRecovery;
     // Slash commands are controls; reply-bound session files belong to prompt inbox_jobs only.
     const explicitSessionFile = "";
@@ -3087,11 +3050,6 @@ export class ChatController {
           ? this.managedSessionLeafForFreshChat()
           : undefined;
     this.lastActivityAt = Date.now();
-    if (interruptingActiveTurn) {
-      this.noteIntentionalTurnAbort();
-      this.turnAbortGeneration += 1;
-      this.turnAbortRequested = true;
-    }
     this.setActiveCommandTurnInput({
       incomingMessageId,
       replyToMessageId,
@@ -3099,10 +3057,6 @@ export class ChatController {
       outboxTurnFence: outboxTurnFence || getActiveChatOutboxTurnFence(),
     });
     try {
-      if (interruptingActiveTurn) {
-        await this.connect({ restoreSession: true });
-        this.driver.interruptActiveTurnLikeTui();
-      }
       const frontendReady = await this.connect({
         restoreSession: !skipSessionRecovery,
       });
@@ -3126,6 +3080,15 @@ export class ChatController {
         restoreSessionFile,
         sessionFile: explicitSessionFile,
         managedSessionLeaf,
+        onActiveTurnInterruptionCommitted: interruptingActiveTurn
+          ? () => {
+              if (activeTurnInterruptionCommitted) return;
+              this.noteIntentionalTurnAbort();
+              this.turnAbortGeneration += 1;
+              this.turnAbortRequested = true;
+              activeTurnInterruptionCommitted = true;
+            }
+          : undefined,
       });
       const nextSessionFile =
         commandName === "new"
@@ -3193,14 +3156,14 @@ export class ChatController {
     } finally {
       this.collectingCommandUi = false;
       this.commandUiMessages = [];
-      this.awaitingTurnSettle = false;
-      if (interruptingActiveTurn) this.turnAbortRequested = false;
-      await this.clearWorkingReaction().catch(() => {});
-      this.clearCurrentTurn();
-      if (interruptingActiveTurn) {
+      if (!interruptingActiveTurn || activeTurnInterruptionCommitted) {
+        this.awaitingTurnSettle = false;
+        if (interruptingActiveTurn) this.turnAbortRequested = false;
+        await this.clearWorkingReaction().catch(() => {});
+        this.clearCurrentTurn();
+        this.stagedDelivery = null;
       }
       this.clearActiveCommandTurnInput();
-      this.stagedDelivery = null;
       this.saveState();
     }
   }
@@ -3340,7 +3303,7 @@ export class ChatController {
         this.currentTurn.requestTag = requestTag || undefined;
       try {
         if (this.turnAbortGeneration !== turnAbortGeneration) {
-          throw new Error("chat_turn_aborted");
+          throw createRinFrontendTurnCancelledError();
         }
         const submittedText = formatPromptForChatContext(
           text,
@@ -3412,6 +3375,14 @@ export class ChatController {
                 }
               : undefined,
         });
+        if (this.consumeIntentionalTurnAbort(turnAbortGeneration)) {
+          return {
+            finalText: "",
+            sessionId: this.currentSessionId() || undefined,
+            sessionFile: this.currentSessionFile(),
+            superseded: true,
+          };
+        }
         this.assertRestoredTurnStayedOnSession(
           restoreSessionFile,
           result.sessionFile || this.driver.currentSessionFile(),
@@ -3466,6 +3437,14 @@ export class ChatController {
           superseded: result.superseded,
         };
       } catch (error) {
+        if (this.consumeIntentionalTurnAbort(turnAbortGeneration)) {
+          return {
+            finalText: "",
+            sessionId: this.currentSessionId() || undefined,
+            sessionFile: this.currentSessionFile(),
+            superseded: true,
+          };
+        }
         if ((error as any)?.rinTurnTerminal) throw error;
         if (isRinFrontendTurnCancelledError(error)) throw error;
         throw error;
@@ -3480,6 +3459,7 @@ export class ChatController {
           await this.clearWorkingReactionFor(input.incomingMessageId);
           this.clearCurrentTurnFor(input.incomingMessageId);
         }
+        this.intentionallyAbortedTurnGenerations.delete(turnAbortGeneration);
         this.awaitingTurnSettle = false;
         this.turnAbortRequested = false;
         this.stagedDelivery = null;
@@ -3576,7 +3556,6 @@ export class ChatController {
       event = this.authoritativeTerminalEvent(event, "error") as typeof event;
     }
     const errorMessage = safeString(event.error).trim() || "rpc_turn_failed";
-    if (errorMessage === "chat_turn_aborted") return;
     const settledTurn = this.currentTurn;
     const deliveryTarget = this.currentDeliveryTarget(settledTurn);
     await this.deliverAssistantReply({

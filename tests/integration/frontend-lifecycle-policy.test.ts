@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  applyRinFrontendLifecycleEvent,
   createRinFrontendLifecycleState,
   executeRinFrontendInterruptIntent,
   projectRinFrontendLifecycleEvent,
@@ -153,6 +152,21 @@ test("canonical lifecycle renderer owns complete and error terminal projection",
   });
   assert.ok(invalidTerminalRecord);
   assert.equal(invalidTerminalRecord.terminalRecord, undefined);
+  const validTerminalRecord = projectRinFrontendLifecycleEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    terminalRecord: {
+      terminalId: "terminal-turn-3",
+      state: "complete",
+      terminalAt: "2026-08-07T00:45:00.000Z",
+    },
+  });
+  assert.ok(validTerminalRecord);
+  assert.deepEqual(validTerminalRecord.terminalRecord, {
+    terminalId: "terminal-turn-3",
+    state: "complete",
+    terminalAt: "2026-08-07T00:45:00.000Z",
+  });
   assert.deepEqual(renderRinFrontendLifecycleEvent(complete), [
     {
       type: "assistant_final",
@@ -227,29 +241,15 @@ test("canonical lifecycle renders manual and automatic compaction cancellation",
   );
 });
 
-test("canonical lifecycle represents aborted terminals and normalizes fallback errors", () => {
-  const state = createRinFrontendLifecycleState({
-    turnActive: true,
-    isStreaming: true,
-  });
-  const aborted = projectRinFrontendLifecycleEvent({
-    type: "frontend_turn_aborted",
-    error: "   ",
-    requestTag: "turn-abort",
-  });
-  assert.ok(aborted);
-  applyRinFrontendLifecycleEvent(state, aborted);
-  assert.equal(state.turnActive, false);
-  assert.equal(state.isStreaming, false);
-  assert.deepEqual(renderRinFrontendLifecycleEvent(aborted), [
-    {
-      type: "turn_error",
-      error: "chat_turn_aborted",
-      sessionId: undefined,
-      sessionFile: undefined,
+test("canonical lifecycle normalizes fallback terminal errors", () => {
+  assert.equal(
+    projectRinFrontendLifecycleEvent({
+      type: "frontend_turn_aborted",
+      error: "legacy abort event",
       requestTag: "turn-abort",
-    },
-  ]);
+    }),
+    null,
+  );
 
   const agentStopped = projectRinFrontendLifecycleEvent({
     type: "agent_end",

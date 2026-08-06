@@ -292,7 +292,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat adapter accepted the send request but returned no delivered message. Check the adapter connection.",
   chat_text_required: () =>
     "Chat handling failed because the incoming text is empty. Send a non-empty message.",
-  chat_turn_aborted: () => "The chat turn was aborted.",
   chat_turn_busy: () => "This chat is still processing another turn.",
   frontend_turn_busy: () => "This session is still processing another turn.",
   frontend_turn_interrupted: () => "The active turn was interrupted.",

@@ -1601,6 +1601,134 @@ test("chat controller does not send working notices before deterministic non-com
   }
 });
 
+test("chat controller delegates active /abort to the canonical frontend command owner", async () => {
+  const controller = await createController();
+  const backendCommands = [];
+  const deliveries = [];
+  controller.hasActiveTurn = () => true;
+  controller.connect = async () => true;
+  controller.driver.runCommand = async (commandLine, options) => {
+    backendCommands.push(commandLine);
+    options?.onActiveTurnInterruptionCommitted?.();
+    return {
+      handled: true,
+      text: "Aborted current operation.",
+      sessionFile: controller.driver.currentSessionFile(),
+    };
+  };
+  controller.driver.interruptActiveTurnLikeTui = () => {
+    assert.fail("Chat must not own a TUI-like interruption path");
+  };
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(deliveryText(this.stagedDelivery));
+    this.stagedDelivery = null;
+  };
+
+  await controller.runCommand("/abort", "m-abort", "m-abort");
+
+  assert.deepEqual(backendCommands, ["/abort"]);
+  assert.deepEqual(deliveries, ["Aborted current operation."]);
+});
+
+test("chat controller suppresses an old successful complete after committed /abort", async () => {
+  const controller = await createController();
+  const deliveries = [];
+  let resolveOldTurn;
+  let oldDriverTurnStarted = false;
+  const oldDriverTurn = new Promise((resolve) => {
+    resolveOldTurn = resolve;
+  });
+  controller.currentTurn = {
+    incomingMessageId: "m-old",
+    replyToMessageId: "m-old",
+    requestTag: "request-old-complete",
+  };
+  controller.awaitingTurnSettle = true;
+  controller.connect = async () => true;
+  controller.prepareTurnPrompt = async () => ({
+    text: "old prompt",
+    images: [],
+    frontendReady: true,
+  });
+  controller.driver.runTurn = async () => {
+    oldDriverTurnStarted = true;
+    return await oldDriverTurn;
+  };
+  controller.driver.runCommand = async (_commandLine, options) => {
+    options?.onActiveTurnInterruptionCommitted?.();
+    resolveOldTurn({
+      outcome: "terminalOwner",
+      superseded: false,
+      finalText: "old successful final",
+      result: {
+        parts: [{ type: "text", text: "old successful final" }],
+      },
+      requestTag: "request-old-complete",
+      sessionFile: controller.driver.currentSessionFile(),
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    return {
+      handled: true,
+      text: "Aborted current operation.",
+      sessionFile: controller.driver.currentSessionFile(),
+    };
+  };
+  controller.deliverAssistantReply = async (delivery) => {
+    deliveries.push(delivery.text);
+  };
+
+  const oldTurn = controller.runTurn({
+    text: "old prompt",
+    attachments: [],
+    incomingMessageId: "m-old",
+    replyToMessageId: "m-old",
+    requestTag: "request-old-complete",
+  });
+  await waitUntil(
+    () => oldDriverTurnStarted,
+    "old frontend turn did not start",
+  );
+  const command = controller.runCommand("/abort", "m-abort", "m-abort");
+  const [oldResult] = await Promise.all([oldTurn, command]);
+
+  assert.equal(oldResult.superseded, true);
+  assert.equal(oldResult.finalText, "");
+  assert.deepEqual(deliveries, ["Aborted current operation."]);
+});
+
+test("chat controller preserves the active turn when backend /abort fails", async () => {
+  const controller = await createController();
+  const activeTurn = {
+    incomingMessageId: "m-active",
+    replyToMessageId: "m-active",
+    requestTag: "request-active",
+  };
+  controller.currentTurn = activeTurn;
+  controller.awaitingTurnSettle = true;
+  controller.hasActiveTurn = () => true;
+  controller.connect = async () => true;
+  controller.driver.runCommand = async () => {
+    throw new Error("backend abort rejected");
+  };
+  controller.deliverAssistantReply = async () => {};
+  let workingClears = 0;
+  controller.clearWorkingReaction = async () => {
+    workingClears += 1;
+  };
+  const abortGeneration = controller.turnAbortGeneration;
+
+  await assert.rejects(
+    controller.runCommand("/abort", "m-abort", "m-abort"),
+    /backend abort rejected/,
+  );
+
+  assert.equal(controller.currentTurn, activeTurn);
+  assert.equal(controller.awaitingTurnSettle, true);
+  assert.equal(controller.turnAbortGeneration, abortGeneration);
+  assert.equal(controller.intentionallyAbortedTurnGenerations.size, 0);
+  assert.equal(workingClears, 0);
+});
+
 test("chat controller can deliver image-only builtin command parts", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
@@ -3510,6 +3638,50 @@ test("chat controller rethrows lifecycle cancellation without delivering an erro
     "m-request-aborted",
   );
   assert.equal(stored?.processedAt, undefined);
+});
+
+test("chat controller does not duplicate a projected pending rollback terminal error", async () => {
+  const controller = await createController();
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
+    deliveries.push({
+      text: nodes
+        .map((node) => node?.attrs?.content || "")
+        .filter(Boolean)
+        .join(" "),
+      options,
+    });
+    return [`m-terminal-error-${deliveries.length}`];
+  };
+  controller.driver.runTurn = async (input) => {
+    await controller.handleSessionEvent({
+      type: "agent_start",
+      requestTag: input.requestTag,
+    });
+    await controller.handleFrontendEvent({
+      type: "turn_error",
+      requestTag: input.requestTag,
+      error: "pending rollback terminal error",
+    });
+    const error = new Error("pending rollback terminal error");
+    error.rinTurnTerminal = true;
+    throw error;
+  };
+
+  const error = await controller
+    .runTurn({
+      text: "pending rollback",
+      attachments: [],
+      incomingMessageId: "m-pending-rollback-error",
+    })
+    .then(
+      () => null,
+      (failure) => failure,
+    );
+
+  assert.equal(error?.rinTurnTerminal, true);
+  assert.equal(deliveries.length, 1);
+  assert.match(deliveries[0]?.text || "", /pending rollback terminal error/);
 });
 
 test("chat controller suppresses /compact acknowledgement but keeps configured /reload response", async () => {

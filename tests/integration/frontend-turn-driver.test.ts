@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -1325,6 +1327,102 @@ test("frontend SDK daemon shutdown detach closes a connection that finishes late
   assert.equal(disconnectCount, 2);
 });
 
+test("frontend SDK daemon shutdown detach absorbs a connection rejection that finishes late", async () => {
+  const client = createFrontendClient();
+  const originalDisconnect = client.disconnect;
+  let rejectConnect!: (error: Error) => void;
+  let connectStarted = false;
+  let disconnectCount = 0;
+  client.connect = async () => {
+    connectStarted = true;
+    await new Promise<never>((_resolve, reject) => {
+      rejectConnect = reject;
+    });
+  };
+  client.disconnect = async () => {
+    disconnectCount += 1;
+    await originalDisconnect.call(client);
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const connecting = driver.connect();
+  await waitUntil(() => connectStarted, "connect did not start");
+  await driver.detachForDaemonShutdown();
+  rejectConnect(new Error("late connect rejection"));
+
+  assert.equal(await connecting, false);
+  assert.equal(client.isConnected(), false);
+  assert.equal(disconnectCount, 2);
+});
+
+test("frontend SDK disposal maps a late connection success to lifecycle cancellation", async () => {
+  const client = createFrontendClient();
+  const originalConnect = client.connect;
+  let releaseConnect!: () => void;
+  const connectGate = new Promise<void>((resolve) => {
+    releaseConnect = resolve;
+  });
+  let connectStarted = false;
+  client.connect = async () => {
+    connectStarted = true;
+    await connectGate;
+    await originalConnect.call(client);
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const connecting = driver.connect().then(
+    () => null,
+    (error: Error) => error,
+  );
+  await waitUntil(() => connectStarted, "connect did not start");
+  driver.dispose();
+  releaseConnect();
+
+  const error = await connecting;
+  assert.equal(error?.message, "rin_frontend_turn_cancelled");
+  assert.equal(client.isConnected(), false);
+});
+
+test("frontend SDK retires a client while its old connection is still pending", async () => {
+  const client = createFrontendClient();
+  const originalConnect = client.connect;
+  let releaseFirstConnect!: () => void;
+  const firstConnectGate = new Promise<void>((resolve) => {
+    releaseFirstConnect = resolve;
+  });
+  let connectCalls = 0;
+  client.connect = async () => {
+    connectCalls += 1;
+    if (connectCalls === 1) await firstConnectGate;
+    await originalConnect.call(client);
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const staleConnection = driver.connect().then(
+    () => null,
+    (error: Error) => error,
+  );
+  await waitUntil(() => connectCalls === 1, "first connection did not start");
+  driver.dispose();
+  const reusedConnection = await driver.connect();
+  releaseFirstConnect();
+  const staleError = await staleConnection;
+
+  assert.equal(reusedConnection, false);
+  assert.equal(connectCalls, 1);
+  assert.equal(staleError?.message, "rin_frontend_turn_cancelled");
+  assert.equal(client.isConnected(), false);
+});
+
 test("frontend SDK daemon shutdown detach stops a session restore continuation", async () => {
   const client = createFrontendClient();
   const originalResumeSession = client.resumeSession;
@@ -1360,6 +1458,290 @@ test("frontend SDK daemon shutdown detach stops a session restore continuation",
   );
 });
 
+test("frontend SDK disposal fences session restore state after connection reuse", async () => {
+  const client = createFrontendClient();
+  const originalResumeSession = client.resumeSession;
+  let releaseRestore!: () => void;
+  const restoreGate = new Promise<void>((resolve) => {
+    releaseRestore = resolve;
+  });
+  let restoreStarted = false;
+  let firstRestore = true;
+  client.resumeSession = async (...args) => {
+    if (firstRestore) {
+      firstRestore = false;
+      restoreStarted = true;
+      await restoreGate;
+    }
+    return await originalResumeSession.apply(client, args);
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+
+  const restoring = driver
+    .connect({
+      restoreSessionFile: "/tmp/stale-restored-session.jsonl",
+    })
+    .then(
+      () => null,
+      (error: Error) => error,
+    );
+  await waitUntil(() => restoreStarted, "session restore did not start");
+  driver.dispose();
+  const reconnected = await driver.connect();
+  const reusedClient = (driver as any).client;
+  (driver as any).frontendState = {
+    sessionId: "new-epoch-session",
+    sessionFile: "/tmp/new-epoch-session.jsonl",
+  };
+  releaseRestore();
+  const restoreError = await restoring;
+
+  assert.equal(restoreError?.message, "rin_frontend_turn_cancelled");
+  assert.equal(reconnected, false);
+  assert.equal(reusedClient, null);
+  assert.equal(driver.currentSessionId(), "new-epoch-session");
+  assert.equal(driver.currentSessionFile(), "/tmp/new-epoch-session.jsonl");
+});
+
+test("frontend SDK maps a stale successful public session selection to lifecycle cancellation", async (t) => {
+  const sessionDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-stale-session-selection-"),
+  );
+  t.after(() => fs.rmSync(sessionDir, { recursive: true, force: true }));
+  const sessionFile = path.join(sessionDir, "session.jsonl");
+  fs.writeFileSync(sessionFile, "");
+
+  const client = createFrontendClient();
+  const originalResumeSession = client.resumeSession;
+  let releaseSelection!: () => void;
+  const selectionGate = new Promise<void>((resolve) => {
+    releaseSelection = resolve;
+  });
+  let selectionStarted = false;
+  client.resumeSession = async (...args) => {
+    selectionStarted = true;
+    await selectionGate;
+    return await originalResumeSession.apply(client, args);
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+
+  const selecting = driver.resumeSessionFile(sessionFile).then(
+    () => null,
+    (error: Error) => error,
+  );
+  await waitUntil(() => selectionStarted, "session selection did not start");
+  driver.dispose();
+  releaseSelection();
+
+  const error = await selecting;
+  assert.equal(error?.message, "rin_frontend_turn_cancelled");
+});
+
+test("frontend SDK retires a client until every concurrent restore finishes", async () => {
+  const client = createFrontendClient();
+  const originalResumeSession = client.resumeSession;
+  let releaseFirstRestore!: () => void;
+  const firstRestoreGate = new Promise<void>((resolve) => {
+    releaseFirstRestore = resolve;
+  });
+  let releaseSecondRestore!: () => void;
+  const secondRestoreGate = new Promise<void>((resolve) => {
+    releaseSecondRestore = resolve;
+  });
+  let restoreCalls = 0;
+  client.resumeSession = async (...args) => {
+    const restoreIndex = ++restoreCalls;
+    if (restoreIndex === 1) await firstRestoreGate;
+    if (restoreIndex === 2) await secondRestoreGate;
+    return await originalResumeSession.apply(client, args);
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+
+  const firstRestore = driver.connect({
+    restoreSessionFile: "/tmp/concurrent-first-restore.jsonl",
+  });
+  await waitUntil(() => restoreCalls === 1, "first restore did not start");
+  const secondRestore = driver
+    .connect({
+      restoreSessionFile: "/tmp/concurrent-second-restore.jsonl",
+    })
+    .then(
+      () => null,
+      (error: Error) => error,
+    );
+  await waitUntil(() => restoreCalls === 2, "second restore did not start");
+  releaseFirstRestore();
+  assert.equal(await firstRestore, true);
+
+  driver.dispose();
+  const reconnected = await driver.connect();
+  const reusedClient = (driver as any).client;
+  (driver as any).frontendState = {
+    sessionId: "concurrent-new-epoch-session",
+    sessionFile: "/tmp/concurrent-new-epoch-session.jsonl",
+  };
+  releaseSecondRestore();
+  const secondRestoreError = await secondRestore;
+  assert.equal(secondRestoreError?.message, "rin_frontend_turn_cancelled");
+  await (driver as any).refreshFrontendState();
+
+  assert.equal(reconnected, false);
+  assert.equal(reusedClient, null);
+  assert.equal(driver.currentSessionId(), "concurrent-new-epoch-session");
+  assert.equal(
+    driver.currentSessionFile(),
+    "/tmp/concurrent-new-epoch-session.jsonl",
+  );
+});
+
+test("frontend SDK maps a stale restore rejection to lifecycle cancellation", async () => {
+  const client = createFrontendClient();
+  let rejectRestore!: (error: Error) => void;
+  const restoreOutcome = new Promise<never>((_resolve, reject) => {
+    rejectRestore = reject;
+  });
+  let restoreStarted = false;
+  client.resumeSession = async (sessionFile: string) => {
+    client.calls.push({ type: "resumeSession", sessionFile });
+    restoreStarted = true;
+    await restoreOutcome;
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const restoring = driver
+    .connect({ restoreSessionFile: "/tmp/stale-rejected-restore.jsonl" })
+    .then(
+      () => null,
+      (error: Error) => error,
+    );
+  await waitUntil(() => restoreStarted, "session restore did not start");
+  driver.dispose();
+  rejectRestore(new Error("old restore backend failure"));
+
+  const error = await restoring;
+  assert.equal(error?.message, "rin_frontend_turn_cancelled");
+});
+
+test("frontend SDK maps a stale direct readiness rejection to lifecycle cancellation", async () => {
+  const client = createFrontendClient();
+  let rejectReadiness!: (error: Error) => void;
+  const readinessOutcome = new Promise<never>((_resolve, reject) => {
+    rejectReadiness = reject;
+  });
+  let readinessStarted = false;
+  (client as any).ensureSessionReady = async () => {
+    readinessStarted = true;
+    await readinessOutcome;
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const turn = driver.runTurn({ text: "stale direct readiness" }).then(
+    () => null,
+    (error: Error) => error,
+  );
+  await waitUntil(() => readinessStarted, "direct readiness did not start");
+  driver.dispose();
+  const reconnected = await driver.connect();
+  rejectReadiness(new Error("old direct readiness failure"));
+
+  const error = await turn;
+  assert.equal(reconnected, false);
+  assert.equal(error?.message, "rin_frontend_turn_cancelled");
+});
+
+test("frontend SDK maps a stale fallback new-session rejection to lifecycle cancellation", async () => {
+  const client = createFrontendClient();
+  let rejectNewSession!: (error: Error) => void;
+  const newSessionOutcome = new Promise<never>((_resolve, reject) => {
+    rejectNewSession = reject;
+  });
+  let newSessionStarted = false;
+  client.newSession = async (options: any = {}) => {
+    client.calls.push({ type: "newSession", options });
+    newSessionStarted = true;
+    await newSessionOutcome;
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const turn = driver
+    .runTurn({
+      text: "stale fallback new session",
+      managedSessionLeaf: "chat",
+    })
+    .then(
+      () => null,
+      (error: Error) => error,
+    );
+  await waitUntil(
+    () => newSessionStarted,
+    "fallback new session did not start",
+  );
+  driver.dispose();
+  const reconnected = await driver.connect();
+  rejectNewSession(new Error("old fallback new-session failure"));
+
+  const error = await turn;
+  assert.equal(reconnected, false);
+  assert.equal(error?.message, "rin_frontend_turn_cancelled");
+});
+
+test("frontend SDK maps a stale command readiness selection rejection to lifecycle cancellation", async () => {
+  const client = createFrontendClient();
+  let rejectSelection!: (error: Error) => void;
+  const selectionOutcome = new Promise<never>((_resolve, reject) => {
+    rejectSelection = reject;
+  });
+  let selectionStarted = false;
+  client.resumeSession = async (sessionFile: string) => {
+    client.calls.push({ type: "resumeSession", sessionFile });
+    selectionStarted = true;
+    await selectionOutcome;
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const command = driver
+    .runCommand("/compact", {
+      restoreSessionFile: "/tmp/stale-command-selection.jsonl",
+    })
+    .then(
+      () => null,
+      (error: Error) => error,
+    );
+  await waitUntil(
+    () => selectionStarted,
+    "command readiness selection did not start",
+  );
+  driver.dispose();
+  rejectSelection(new Error("old command selection failure"));
+
+  const error = await command;
+  assert.equal(error?.message, "rin_frontend_turn_cancelled");
+});
+
 test("frontend SDK shutdown session follows TUI shutdown without lifecycle cancellation", async () => {
   const client = createFrontendClient();
   let promptStarted = false;
@@ -1393,7 +1775,7 @@ test("frontend SDK shutdown session follows TUI shutdown without lifecycle cance
   assert.equal(settled, false);
 });
 
-test("frontend SDK retries one suppressed-terminal ACK without duplicate projection", async () => {
+test("frontend SDK /abort settles the active turn only from the canonical backend terminal", async () => {
   const client = createFrontendClient();
   let ackAttempts = 0;
   let finishRetryAck: (() => void) | null = null;
@@ -1414,11 +1796,17 @@ test("frontend SDK retries one suppressed-terminal ACK without duplicate project
     promptStarted = true;
     await new Promise(() => {});
   };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+  };
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
     promptSource: "chat-bridge",
   });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
 
+  let activeTurnSettled = false;
   const activeTurn = driver.runTurn({
     text: "abort me",
     chatDeliveryContext: {
@@ -1429,13 +1817,35 @@ test("frontend SDK retries one suppressed-terminal ACK without duplicate project
       attempt: 1,
     },
   });
-  activeTurn.catch(() => {});
+  void activeTurn.then(
+    () => {
+      activeTurnSettled = true;
+    },
+    () => {
+      activeTurnSettled = true;
+    },
+  );
   await waitUntil(() => promptStarted, "active turn did not start");
   const requestTag = client.calls.find((call: any) => call.type === "prompt")
     .options.requestTag;
 
-  driver.interruptActiveTurnLikeTui();
-  await assert.rejects(activeTurn, /chat_turn_aborted/);
+  const commandResult = await driver.runCommand("/abort");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(commandResult.text, "Aborted current operation.");
+  assert.deepEqual(
+    client.calls.filter((call: any) => call.type === "abort"),
+    [{ type: "abort" }],
+  );
+  assert.equal(
+    activeTurnSettled,
+    false,
+    "the frontend must not settle an accepted turn before the backend terminal",
+  );
+  assert.equal(
+    projected.some((event) => event.type === "turn_error"),
+    false,
+  );
+
   const terminalEvent = {
     type: "rpc_turn_event",
     event: "error",
@@ -1448,7 +1858,13 @@ test("frontend SDK retries one suppressed-terminal ACK without duplicate project
     },
   };
   await emitDriverEvent(driver, terminalEvent);
+  await assert.rejects(activeTurn, /Request was aborted/);
   assert.equal(ackAttempts, 1);
+  assert.equal(
+    projected.some((event) => event.type === "turn_error"),
+    false,
+    "the command acknowledgement owns intentional-abort presentation",
+  );
 
   const retryOne = emitDriverEvent(driver, terminalEvent);
   await waitUntil(() => ackAttempts === 2, "terminal ACK retry did not start");
@@ -1475,17 +1891,2466 @@ test("frontend SDK retries one suppressed-terminal ACK without duplicate project
   });
 });
 
-test("frontend SDK /new interrupts an active turn before creating the new session", async () => {
+test("frontend SDK restores ordinary terminal handling when backend /abort fails", async () => {
   const client = createFrontendClient();
-  let promptStarted = false;
-  let abortCalls = 0;
+  let requestTag = "";
   client.prompt = async (text: string, options: any = {}) => {
     client.calls.push({ type: "prompt", text, options });
-    promptStarted = true;
+    requestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag };
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await client.emit({
+      type: "ui",
+      payload: {
+        type: "rpc_turn_event",
+        event: "complete",
+        requestTag,
+        finalText: "completed after rejected abort",
+        sessionFile: "/tmp/frontend-chat.jsonl",
+        sessionId: "frontend-session",
+        terminalRecord: {
+          terminalId: "terminal-rejected-abort-complete",
+          state: "complete",
+          terminalAt: "2026-08-06T09:05:00.000Z",
+        },
+      },
+    });
+    throw new Error("backend abort rejected");
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+
+  const activeTurn = driver.runTurn({ text: "keep running" });
+  await waitUntil(
+    () => Boolean(requestTag && driver.liveTurn),
+    "active turn did not start",
+  );
+
+  const interruptionSeq = (driver as any).turnInterruptionSeq;
+  await assert.rejects(driver.runCommand("/abort"), /backend abort rejected/);
+  assert.equal((driver as any).turnInterruptionSeq, interruptionSeq);
+  assert.equal((await activeTurn).finalText, "completed after rejected abort");
+  await waitUntil(
+    () => !(driver as any).backendInterruptionsByRequestTag.has(requestTag),
+    "rollback target did not release after terminal handling",
+  );
+  assert.equal(
+    projected.some(
+      (event) =>
+        event.type === "turn_complete" && event.requestTag === requestTag,
+    ),
+    true,
+    `a rejected backend abort must not suppress the old terminal: ${JSON.stringify(projected)}`,
+  );
+});
+
+test("frontend SDK commits intentional abort presentation before settling a buffered terminal", async () => {
+  const client = createFrontendClient();
+  let requestTag = "";
+  let releaseAbort!: () => void;
+  const abortRelease = new Promise<void>((resolve) => {
+    releaseAbort = resolve;
+  });
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    requestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag };
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await abortRelease;
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  let activeTurnSettled = false;
+  const activeTurn = driver.runTurn({ text: "buffer my abort terminal" });
+  void activeTurn
+    .finally(() => {
+      activeTurnSettled = true;
+    })
+    .catch(() => {});
+  await waitUntil(
+    () => Boolean(requestTag && driver.liveTurn),
+    "active turn did not start",
+  );
+
+  let callbackSawSettled: boolean | undefined;
+  const command = driver.runCommand("/abort", {
+    onActiveTurnInterruptionCommitted: () => {
+      callbackSawSettled = activeTurnSettled;
+    },
+  });
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "abort"),
+    "backend abort did not start",
+  );
+  const interruptionTarget = (
+    driver as any
+  ).backendInterruptionsByRequestTag.get(requestTag);
+  assert.ok(interruptionTarget, "backend interruption was not prepared");
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "error",
+    requestTag,
+    error: "Request was aborted",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord: {
+      terminalId: "terminal-buffered-abort-error",
+      state: "error",
+      terminalAt: "2026-08-06T09:05:30.000Z",
+    },
+  });
+  assert.equal(
+    interruptionTarget.bufferedTerminal?.requestTag,
+    requestTag,
+    "the terminal must remain buffered until backend commit",
+  );
+  assert.equal(activeTurnSettled, false);
+
+  releaseAbort();
+  await command;
+  assert.equal(callbackSawSettled, false);
+  await assert.rejects(activeTurn, /Request was aborted/);
+});
+
+test("frontend SDK keeps a successful overlapping interruption committed when the first command rolls back during terminal ACK", async () => {
+  const client = createFrontendClient();
+  let requestTag = "";
+  let rejectAbort!: (error: Error) => void;
+  const abortOutcome = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  let resolveNewSession!: (value: any) => void;
+  const newSessionOutcome = new Promise<any>((resolve) => {
+    resolveNewSession = resolve;
+  });
+  let releaseAck!: () => void;
+  const ackOutcome = new Promise<void>((resolve) => {
+    releaseAck = resolve;
+  });
+  let ackStarted = false;
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    requestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag };
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await abortOutcome;
+  };
+  client.newSession = async (options: any = {}) => {
+    client.calls.push({ type: "newSession", options });
+    return await newSessionOutcome;
+  };
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type !== "ack_turn_terminal") return { ok: true };
+    ackStarted = true;
+    await ackOutcome;
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+
+  const activeTurn = driver.runTurn({ text: "overlapping interruption" });
+  void activeTurn.catch(() => {});
+  await waitUntil(
+    () => Boolean(requestTag && driver.liveTurn),
+    "active turn did not start",
+  );
+
+  const abortCommand = driver.runCommand("/abort");
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "abort"),
+    "backend abort did not start",
+  );
+  const newCommand = driver.runCommand("/new", {
+    managedSessionLeaf: "chat",
+  });
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "newSession"),
+    "backend new_session did not start",
+  );
+
+  const terminalDelivery = emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "error",
+    requestTag,
+    error: "Request was aborted",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord: {
+      terminalId: "terminal-overlapping-command-error",
+      state: "error",
+      terminalAt: "2026-08-06T09:05:45.000Z",
+    },
+  });
+  await waitUntil(() => ackStarted, "terminal ACK did not start");
+
+  resolveNewSession({
+    cancelled: false,
+    sessionFile: "/tmp/frontend-managed.jsonl",
+    sessionId: "frontend-session",
+  });
+  assert.equal((await newCommand).text, "Started a new session.");
+  rejectAbort(new Error("backend abort rejected"));
+  await assert.rejects(abortCommand, /backend abort rejected/);
+
+  releaseAck();
+  await terminalDelivery;
+  await assert.rejects(activeTurn, /Request was aborted/);
+  assert.equal(
+    projected.some(
+      (event) => event.type === "turn_error" && event.requestTag === requestTag,
+    ),
+    false,
+    "one successful overlapping backend interruption must retain suppression",
+  );
+  assert.equal((driver as any).turnInterruptionSeq, 1);
+  assert.equal(
+    client.calls.filter(
+      (call: any) =>
+        call.type === "request" &&
+        call.command?.type === "ack_turn_terminal" &&
+        call.command?.requestTag === requestTag,
+    ).length,
+    1,
+  );
+});
+
+test("frontend SDK reserves the first conflicting terminal before ACK", async () => {
+  const client = createFrontendClient();
+  let releaseFirstAck!: () => void;
+  const firstAckGate = new Promise<void>((resolve) => {
+    releaseFirstAck = resolve;
+  });
+  let firstAckStarted = false;
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (
+      command?.type === "ack_turn_terminal" &&
+      command.terminalId === "terminal-delayed-first-envelope"
+    ) {
+      firstAckStarted = true;
+      await firstAckGate;
+    }
+    return { ok: true };
+  };
+  let releaseAbort!: () => void;
+  const abortGate = new Promise<void>((resolve) => {
+    releaseAbort = resolve;
+  });
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await abortGate;
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+  const requestTag = "delayed-first-envelope-request";
+  const liveTurn = (driver as any).startLiveTurn(requestTag);
+  const command = driver.runCommand("/abort");
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "abort"),
+    "backend abort did not start",
+  );
+
+  const firstHandling = driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "first authoritative envelope",
+    terminalRecord: {
+      terminalId: "terminal-delayed-first-envelope",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:06.100Z",
+    },
+  });
+  await waitUntil(() => firstAckStarted, "first terminal ACK did not start");
+  await driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "later conflicting envelope",
+    terminalRecord: {
+      terminalId: "terminal-fast-second-envelope",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:06.200Z",
+    },
+  });
+  releaseAbort();
+  await command;
+  releaseFirstAck();
+  await firstHandling;
+
+  assert.equal(
+    (await liveTurn.promise).finalText,
+    "first authoritative envelope",
+  );
+});
+
+test("frontend SDK snapshots the first terminal envelope before delayed ACK", async () => {
+  const client = createFrontendClient();
+  let releaseAck!: () => void;
+  const ackGate = new Promise<void>((resolve) => {
+    releaseAck = resolve;
+  });
+  let ackStarted = false;
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (
+      command?.type === "ack_turn_terminal" &&
+      command.terminalId === "terminal-immutable-envelope"
+    ) {
+      ackStarted = true;
+      await ackGate;
+    }
+    return { ok: true };
+  };
+  let releaseAbort!: () => void;
+  const abortGate = new Promise<void>((resolve) => {
+    releaseAbort = resolve;
+  });
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await abortGate;
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+  const requestTag = "immutable-envelope-request";
+  const liveTurn = (driver as any).startLiveTurn(requestTag);
+  const command = driver.runCommand("/abort");
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "abort"),
+    "backend abort did not start",
+  );
+
+  const payload: any = {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "immutable envelope final",
+    sessionId: "session-immutable-envelope",
+    sessionFile: "/tmp/session-immutable-envelope.jsonl",
+    result: { messages: [{ text: "original result" }] },
+    chatDeliveryContext: {
+      turnId: "original-turn",
+      replyToMessageId: "original-reply",
+    },
+    terminalRecord: {
+      terminalId: "terminal-immutable-envelope",
+      state: "complete",
+      terminalAt: "2026-08-07T00:30:00.000Z",
+      metadata: { source: "original terminal" },
+    },
+  };
+  const handling = driver.handleClientEvent(payload);
+  await waitUntil(() => ackStarted, "terminal ACK did not start");
+  payload.result.messages[0].text = "mutated result";
+  payload.chatDeliveryContext.turnId = "mutated-turn";
+  payload.chatDeliveryContext.replyToMessageId = "mutated-reply";
+  payload.terminalRecord.state = "error";
+  payload.terminalRecord.metadata.source = "mutated terminal";
+
+  releaseAbort();
+  await command;
+  releaseAck();
+  await handling;
+  const completion = await liveTurn.promise;
+
+  assert.equal(completion.result.messages[0].text, "original result");
+  assert.equal(completion.sessionId, "session-immutable-envelope");
+  assert.equal(completion.sessionFile, "/tmp/session-immutable-envelope.jsonl");
+  assert.equal(completion.chatDeliveryContext.turnId, "original-turn");
+  assert.equal(
+    completion.chatDeliveryContext.replyToMessageId,
+    "original-reply",
+  );
+  assert.equal(completion.terminalRecord.state, "complete");
+  assert.equal(completion.terminalRecord.metadata.source, "original terminal");
+});
+
+test("frontend SDK keeps the first reserved terminal when rollback crosses delayed ACK", async () => {
+  const client = createFrontendClient();
+  let releaseFirstAck!: () => void;
+  const firstAckGate = new Promise<void>((resolve) => {
+    releaseFirstAck = resolve;
+  });
+  let firstAckStarted = false;
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (
+      command?.type === "ack_turn_terminal" &&
+      command.terminalId === "terminal-rollback-delayed-first"
+    ) {
+      firstAckStarted = true;
+      await firstAckGate;
+    }
+    return { ok: true };
+  };
+  let rejectAbort!: (error: Error) => void;
+  const abortOutcome = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await abortOutcome;
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+  await driver.connect();
+  const requestTag = "rollback-delayed-first-envelope-request";
+  const liveTurn = (driver as any).startLiveTurn(requestTag);
+  const command = driver.runCommand("/abort");
+  const commandFailure = assert.rejects(command, /backend abort rejected/);
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "abort"),
+    "backend abort did not start",
+  );
+
+  const firstHandling = driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "first rollback envelope",
+    terminalRecord: {
+      terminalId: "terminal-rollback-delayed-first",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:06.300Z",
+    },
+  });
+  await waitUntil(() => firstAckStarted, "first terminal ACK did not start");
+  rejectAbort(new Error("backend abort rejected"));
+  await commandFailure;
+
+  await driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "later rollback conflict",
+    terminalRecord: {
+      terminalId: "terminal-rollback-fast-conflict",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:06.400Z",
+    },
+  });
+  assert.equal(
+    projected.some(
+      (event) =>
+        event.type === "turn_complete" && event.requestTag === requestTag,
+    ),
+    false,
+    "a conflicting terminal cannot project before the reserved envelope",
+  );
+
+  releaseFirstAck();
+  await firstHandling;
+  assert.equal((await liveTurn.promise).finalText, "first rollback envelope");
+  assert.deepEqual(
+    projected
+      .filter(
+        (event) =>
+          event.type === "turn_complete" && event.requestTag === requestTag,
+      )
+      .map((event) => event.finalText),
+    ["first rollback envelope"],
+  );
+
+  await driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "post-release rollback conflict",
+    sessionFile: "/tmp/conflicting-session.jsonl",
+    sessionId: "conflicting-session",
+    terminalRecord: {
+      terminalId: "terminal-rollback-post-release-conflict",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:06.450Z",
+    },
+  });
+  assert.equal(driver.latestAssistantText, "first rollback envelope");
+  assert.deepEqual(
+    projected
+      .filter(
+        (event) =>
+          event.type === "turn_complete" && event.requestTag === requestTag,
+      )
+      .map((event) => event.finalText),
+    ["first rollback envelope"],
+  );
+});
+
+test("frontend SDK retains an exact successful ACK through buffered rollback projection", async () => {
+  const client = createFrontendClient();
+  const requestTag = "buffered-rollback-ack-retention-request";
+  const terminal = {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "buffered rollback ACK final",
+    terminalRecord: {
+      terminalId: "terminal-buffered-rollback-ack-retention",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:06.500Z",
+    },
+  };
+  let ackAttempts = 0;
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type === "ack_turn_terminal") ackAttempts += 1;
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await driver.handleClientEvent(terminal);
+    throw new Error("buffered rollback abort rejected");
+  };
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+  await driver.connect();
+  const liveTurn = (driver as any).startLiveTurn(requestTag);
+
+  await assert.rejects(
+    driver.runCommand("/abort"),
+    /buffered rollback abort rejected/,
+  );
+  assert.equal((await liveTurn.promise).finalText, terminal.finalText);
+  assert.equal(ackAttempts, 1);
+
+  await driver.handleClientEvent(terminal);
+  assert.equal(ackAttempts, 1, "an exact successful ACK must not be retried");
+  assert.equal(
+    projected.filter(
+      (event) =>
+        event.type === "turn_complete" && event.requestTag === requestTag,
+    ).length,
+    1,
+  );
+});
+
+test("frontend SDK keeps the first immutable terminal across pushed and direct duplicates", async () => {
+  const client = createFrontendClient();
+  let requestTag = "";
+  let releaseAbort!: () => void;
+  const abortOutcome = new Promise<void>((resolve) => {
+    releaseAbort = resolve;
+  });
+  let releaseAck!: () => void;
+  const ackOutcome = new Promise<void>((resolve) => {
+    releaseAck = resolve;
+  });
+  let ackStarted = false;
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    requestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag };
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await abortOutcome;
+  };
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type !== "ack_turn_terminal") return { ok: true };
+    ackStarted = true;
+    await ackOutcome;
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const activeTurn = driver.runTurn({ text: "immutable duplicate terminal" });
+  void activeTurn.catch(() => {});
+  await waitUntil(
+    () => Boolean(requestTag && driver.liveTurn),
+    "active turn did not start",
+  );
+  const command = driver.runCommand("/abort");
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "abort"),
+    "backend abort did not start",
+  );
+
+  const terminalRecord = {
+    terminalId: "terminal-pushed-direct-immutable",
+    state: "error",
+    terminalAt: "2026-08-06T09:05:50.000Z",
+  };
+  const pushedDelivery = driver.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "rpc_turn_event",
+      event: "error",
+      requestTag,
+      error: "first immutable error",
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      sessionId: "frontend-session",
+      terminalRecord,
+    },
+  });
+  const directDelivery = driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "error",
+    requestTag,
+    error: "conflicting duplicate error",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord,
+  });
+  await waitUntil(() => ackStarted, "terminal ACK did not start");
+  releaseAck();
+  await Promise.all([pushedDelivery, directDelivery]);
+
+  releaseAbort();
+  await command;
+  await assert.rejects(activeTurn, /first immutable error/);
+  assert.equal(
+    client.calls.filter(
+      (call: any) =>
+        call.type === "request" &&
+        call.command?.type === "ack_turn_terminal" &&
+        call.command?.requestTag === requestTag,
+    ).length,
+    1,
+  );
+});
+
+test("frontend SDK coalesces pushed and direct terminal delivery when all overlapping commands roll back", async () => {
+  const client = createFrontendClient();
+  let requestTag = "";
+  let rejectAbort!: (error: Error) => void;
+  const abortOutcome = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  let rejectNewSession!: (error: Error) => void;
+  const newSessionOutcome = new Promise<never>((_resolve, reject) => {
+    rejectNewSession = reject;
+  });
+  let releaseAck!: () => void;
+  const ackOutcome = new Promise<void>((resolve) => {
+    releaseAck = resolve;
+  });
+  let ackStarted = false;
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    requestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag };
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await abortOutcome;
+  };
+  client.newSession = async (options: any = {}) => {
+    client.calls.push({ type: "newSession", options });
+    await newSessionOutcome;
+  };
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type !== "ack_turn_terminal") return { ok: true };
+    ackStarted = true;
+    await ackOutcome;
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+
+  const activeTurn = driver.runTurn({ text: "all interruptions roll back" });
+  void activeTurn.catch(() => {});
+  await waitUntil(
+    () => Boolean(requestTag && driver.liveTurn),
+    "active turn did not start",
+  );
+  const abortCommand = driver.runCommand("/abort");
+  const abortFailure = assert.rejects(abortCommand, /abort rollback/);
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "abort"),
+    "backend abort did not start",
+  );
+  const newCommand = driver.runCommand("/new", {
+    managedSessionLeaf: "chat",
+  });
+  const newFailure = assert.rejects(newCommand, /new rollback/);
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "newSession"),
+    "backend new_session did not start",
+  );
+
+  const terminal = {
+    type: "rpc_turn_event",
+    event: "error",
+    requestTag,
+    error: "ordinary terminal after rollback",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord: {
+      terminalId: "terminal-all-overlapping-rollback",
+      state: "error",
+      terminalAt: "2026-08-06T09:05:55.000Z",
+    },
+  };
+  const pushedDelivery = driver.handleClientEvent({
+    type: "ui",
+    payload: terminal,
+  });
+  const directDelivery = driver.handleClientEvent(terminal);
+  await waitUntil(() => ackStarted, "terminal ACK did not start");
+  const interruptionTarget = (
+    driver as any
+  ).backendInterruptionsByRequestTag.get(requestTag);
+  assert.equal(
+    interruptionTarget?.activeTerminalHandlers,
+    1,
+    "one immutable terminal must have one active handler",
+  );
+
+  rejectAbort(new Error("abort rollback"));
+  rejectNewSession(new Error("new rollback"));
+  await Promise.all([abortFailure, newFailure]);
+  releaseAck();
+  await Promise.all([pushedDelivery, directDelivery]);
+  await assert.rejects(activeTurn, /ordinary terminal after rollback/);
+  assert.equal(
+    projected.filter(
+      (event) => event.type === "turn_error" && event.requestTag === requestTag,
+    ).length,
+    1,
+  );
+  assert.equal(
+    client.calls.filter(
+      (call: any) =>
+        call.type === "request" &&
+        call.command?.type === "ack_turn_terminal" &&
+        call.command?.requestTag === requestTag,
+    ).length,
+    1,
+  );
+});
+
+test("frontend SDK keeps the first buffered terminal across sequential pushed and direct delivery before commit", async () => {
+  const client = createFrontendClient();
+  let requestTag = "";
+  let releaseAbort!: () => void;
+  const abortOutcome = new Promise<void>((resolve) => {
+    releaseAbort = resolve;
+  });
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    requestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag };
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await abortOutcome;
+  };
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const activeTurn = driver.runTurn({ text: "sequential commit duplicate" });
+  void activeTurn.catch(() => {});
+  await waitUntil(
+    () => Boolean(requestTag && driver.liveTurn),
+    "active turn did not start",
+  );
+  const command = driver.runCommand("/abort");
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "abort"),
+    "backend abort did not start",
+  );
+
+  const terminalRecord = {
+    terminalId: "terminal-sequential-commit",
+    state: "error",
+    terminalAt: "2026-08-06T09:06:00.000Z",
+  };
+  await driver.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "rpc_turn_event",
+      event: "error",
+      requestTag,
+      error: "first sequential error",
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      sessionId: "frontend-session",
+      terminalRecord,
+    },
+  });
+  await driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "error",
+    requestTag,
+    error: "later sequential error",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord,
+  });
+
+  releaseAbort();
+  await command;
+  await assert.rejects(activeTurn, /first sequential error/);
+});
+
+test("frontend SDK ignores a sequential direct duplicate after all interruption participants roll back", async () => {
+  const client = createFrontendClient();
+  let requestTag = "";
+  let rejectAbort!: (error: Error) => void;
+  const abortOutcome = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  let releaseAck!: () => void;
+  const ackOutcome = new Promise<void>((resolve) => {
+    releaseAck = resolve;
+  });
+  let ackStarted = false;
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    requestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag };
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await abortOutcome;
+  };
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type !== "ack_turn_terminal") return { ok: true };
+    ackStarted = true;
+    await ackOutcome;
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+
+  const activeTurn = driver.runTurn({ text: "sequential rollback duplicate" });
+  await waitUntil(
+    () => Boolean(requestTag && driver.liveTurn),
+    "active turn did not start",
+  );
+  const abortCommand = driver.runCommand("/abort");
+  const abortFailure = assert.rejects(abortCommand, /abort rollback/);
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "abort"),
+    "backend abort did not start",
+  );
+
+  const terminalRecord = {
+    terminalId: "terminal-sequential-rollback",
+    state: "complete",
+    terminalAt: "2026-08-06T09:06:05.000Z",
+  };
+  const pushedDelivery = driver.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag,
+      finalText: "first sequential final",
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      sessionId: "frontend-session",
+      terminalRecord,
+    },
+  });
+  await waitUntil(() => ackStarted, "terminal ACK did not start");
+  rejectAbort(new Error("abort rollback"));
+  await abortFailure;
+  releaseAck();
+  await pushedDelivery;
+  assert.equal((await activeTurn).finalText, "first sequential final");
+  assert.equal(driver.latestAssistantText, "first sequential final");
+
+  await driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "later sequential final",
+    sessionFile: "/tmp/conflicting-session.jsonl",
+    sessionId: "conflicting-session",
+    terminalRecord,
+  });
+  assert.equal(driver.latestAssistantText, "first sequential final");
+  assert.equal(
+    projected.filter(
+      (event) =>
+        event.type === "turn_complete" && event.requestTag === requestTag,
+    ).length,
+    1,
+  );
+});
+
+test("frontend SDK fences a terminal after rollback projection fails post-mutation", async () => {
+  const client = createFrontendClient();
+  let requestTag = "";
+  let rejectAbort!: (error: Error) => void;
+  const abortOutcome = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  let releaseAck!: () => void;
+  const ackOutcome = new Promise<void>((resolve) => {
+    releaseAck = resolve;
+  });
+  let ackStarted = false;
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    requestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag };
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await abortOutcome;
+  };
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type !== "ack_turn_terminal") return { ok: true };
+    ackStarted = true;
+    await ackOutcome;
+    return { ok: true };
+  };
+  const failures: any[] = [];
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+    onEventHandlingError: (failure: any) => failures.push(failure),
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+  let stateMutations = 0;
+  const originalUpdateFrontendStateFrom = (
+    driver as any
+  ).updateFrontendStateFrom.bind(driver);
+  (driver as any).updateFrontendStateFrom = (event: any) => {
+    if (event?.type === "turn_complete" || event?.type === "turn_error") {
+      stateMutations += 1;
+    }
+    return originalUpdateFrontendStateFrom(event);
+  };
+  let projectionAttempts = 0;
+  const originalProjectIgnoredTerminal = (
+    driver as any
+  ).projectIgnoredTerminal.bind(driver);
+  (driver as any).projectIgnoredTerminal = async (terminal: any) => {
+    projectionAttempts += 1;
+    await originalProjectIgnoredTerminal(terminal);
+    throw new Error("projection failed after terminal mutation");
+  };
+
+  const activeTurn = driver.runTurn({ text: "post-mutation failure fence" });
+  await waitUntil(
+    () => Boolean(requestTag && driver.liveTurn),
+    "active turn did not start",
+  );
+  const command = driver.runCommand("/abort");
+  const commandFailure = assert.rejects(command, /backend abort failed/);
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "abort"),
+    "backend abort did not start",
+  );
+
+  const terminalRecord = {
+    terminalId: "terminal-post-mutation-projection-failure",
+    state: "complete",
+    terminalAt: "2026-08-06T09:06:06.000Z",
+  };
+  const terminalHandling = emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "first projected final",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord,
+  });
+  await waitUntil(() => ackStarted, "terminal ACK did not start");
+  rejectAbort(new Error("backend abort failed"));
+  await commandFailure;
+  releaseAck();
+  await assert.rejects(
+    terminalHandling,
+    /projection failed after terminal mutation/,
+  );
+  assert.equal((await activeTurn).finalText, "first projected final");
+
+  await driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "later conflicting final",
+    sessionFile: "/tmp/conflicting-session.jsonl",
+    sessionId: "conflicting-session",
+    terminalRecord,
+  });
+
+  assert.equal(projectionAttempts, 1);
+  assert.equal(stateMutations, 1);
+  assert.equal(driver.latestAssistantText, "first projected final");
+  assert.equal(
+    projected.filter(
+      (event) =>
+        event.type === "turn_complete" && event.requestTag === requestTag,
+    ).length,
+    1,
+  );
+  assert.equal(failures.length, 0);
+});
+
+test("frontend SDK starts every rollback projection before returning the backend failure", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+  const firstRequestTag = "parallel-rollback-first-target";
+  const secondRequestTag = "parallel-rollback-second-target";
+  (driver as any).pendingSubmissionSettlements.set(firstRequestTag, {
+    cancel() {},
+    settleTerminal() {},
+  });
+  const liveTurn = (driver as any).startLiveTurn(secondRequestTag);
+  let releaseFirstProjection!: () => void;
+  const firstProjectionGate = new Promise<void>((resolve) => {
+    releaseFirstProjection = resolve;
+  });
+  let firstProjectionStarted = false;
+  let markSecondProjectionStarted!: () => void;
+  const secondProjectionStarted = new Promise<void>((resolve) => {
+    markSecondProjectionStarted = resolve;
+  });
+  const originalProjectIgnoredTerminal = (
+    driver as any
+  ).projectIgnoredTerminal.bind(driver);
+  (driver as any).projectIgnoredTerminal = async (terminal: any) => {
+    if (terminal.requestTag === firstRequestTag) {
+      firstProjectionStarted = true;
+      await firstProjectionGate;
+    } else if (terminal.requestTag === secondRequestTag) {
+      markSecondProjectionStarted();
+    }
+    await originalProjectIgnoredTerminal(terminal);
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    for (const target of (
+      driver as any
+    ).backendInterruptionsByRequestTag.values()) {
+      target.bufferedTerminal = {
+        requestTag: target.requestTag,
+        terminalId: `terminal-${target.requestTag}`,
+        event: "complete",
+        error: "",
+        finalText: `final ${target.requestTag}`,
+        terminalRecord: {
+          terminalId: `terminal-${target.requestTag}`,
+          state: "complete",
+          terminalAt: "2026-08-06T09:06:06.475Z",
+        },
+      };
+    }
+    throw new Error("parallel rollback backend failure");
+  };
+
+  const commandOutcome = driver.runCommand("/abort").then(
+    () => null,
+    (error: Error) => error,
+  );
+  await waitUntil(
+    () => firstProjectionStarted,
+    "first rollback projection did not start",
+  );
+  const earlyOutcome = await Promise.race([
+    Promise.all([secondProjectionStarted, commandOutcome]).then(
+      ([, error]) => error,
+    ),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 100)),
+  ]);
+
+  releaseFirstProjection();
+  const finalOutcome = await commandOutcome;
+  assert.equal((await liveTurn.promise).finalText, `final ${secondRequestTag}`);
+  assert.match(
+    finalOutcome?.message || "",
+    /parallel rollback backend failure/,
+  );
+  assert.match(
+    earlyOutcome?.message || "",
+    /parallel rollback backend failure/,
+    "one blocked target cannot delay later rollback attempts or the backend error",
+  );
+});
+
+test("frontend SDK rollback projects every target and preserves the backend command failure", async () => {
+  const client = createFrontendClient();
+  const failures: any[] = [];
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+    onEventHandlingError: (failure: any) => failures.push(failure),
+  });
+  await driver.connect();
+  const pendingRequestTag = "rollback-pending-target";
+  const liveRequestTag = "rollback-live-target";
+  (driver as any).pendingSubmissionSettlements.set(pendingRequestTag, {
+    cancel() {},
+    settleTerminal() {},
+  });
+  const liveTurn = (driver as any).startLiveTurn(liveRequestTag);
+  const projectedRequestTags: string[] = [];
+  const originalProjectIgnoredTerminal = (
+    driver as any
+  ).projectIgnoredTerminal.bind(driver);
+  (driver as any).projectIgnoredTerminal = async (terminal: any) => {
+    projectedRequestTags.push(terminal.requestTag);
+    if (terminal.requestTag === pendingRequestTag) {
+      throw new Error("first rollback projection failed");
+    }
+    await originalProjectIgnoredTerminal(terminal);
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    for (const target of (
+      driver as any
+    ).backendInterruptionsByRequestTag.values()) {
+      target.bufferedTerminal = {
+        requestTag: target.requestTag,
+        terminalId: `terminal-${target.requestTag}`,
+        event: "complete",
+        error: "",
+        finalText: `final ${target.requestTag}`,
+        sessionFile: "/tmp/frontend-chat.jsonl",
+        sessionId: "frontend-session",
+        terminalRecord: {
+          terminalId: `terminal-${target.requestTag}`,
+          state: "complete",
+          terminalAt: "2026-08-06T09:06:06.500Z",
+        },
+      };
+    }
+    throw new Error("original backend command failure");
+  };
+
+  const commandError = await driver.runCommand("/abort").then(
+    () => null,
+    (error: Error) => error,
+  );
+
+  assert.match(commandError?.message || "", /original backend command failure/);
+  assert.deepEqual(projectedRequestTags, [pendingRequestTag, liveRequestTag]);
+  assert.equal((await liveTurn.promise).finalText, `final ${liveRequestTag}`);
+  assert.equal(failures.length, 1);
+  assert.match(
+    String(failures[0]?.error?.message || ""),
+    /first rollback projection failed/,
+  );
+});
+
+for (const terminalEvent of ["complete", "error"] as const) {
+  test(`frontend SDK rollback settles a pending submission from its exact ${terminalEvent} terminal`, async () => {
+    const client = createFrontendClient();
+    let requestTag = "";
+    let rejectAbort!: (error: Error) => void;
+    const abortOutcome = new Promise<never>((_resolve, reject) => {
+      rejectAbort = reject;
+    });
+    client.prompt = async (text: string, options: any = {}) => {
+      client.calls.push({ type: "prompt", text, options });
+      requestTag = options.requestTag || "";
+      await new Promise(() => {});
+    };
+    client.abort = async () => {
+      client.calls.push({ type: "abort" });
+      await abortOutcome;
+    };
+    const driver = new RinFrontendTurnDriver({
+      clientFactory: () => client,
+      promptSource: "chat-bridge",
+    });
+    const projected: any[] = [];
+    driver.subscribe((event: any) => projected.push(event));
+
+    const oldTurn = driver.runTurn({
+      text: `pending ${terminalEvent} rollback`,
+    });
+    const oldOutcome = oldTurn.then(
+      (value: any) => ({ value, error: null }),
+      (error: Error) => ({ value: null, error }),
+    );
+    await waitUntil(
+      () =>
+        Boolean(
+          requestTag &&
+          (driver as any).pendingSubmissionSettlements.has(requestTag),
+        ),
+      "pending submission did not start",
+    );
+    assert.equal(driver.liveTurn, null);
+
+    const command = driver.runCommand("/abort");
+    await waitUntil(
+      () => client.calls.some((call: any) => call.type === "abort"),
+      "backend abort did not start",
+    );
+    await emitDriverEvent(driver, {
+      type: "rpc_turn_event",
+      event: terminalEvent,
+      requestTag,
+      ...(terminalEvent === "complete"
+        ? { finalText: "pending rollback final" }
+        : { error: "pending rollback terminal error" }),
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      sessionId: "frontend-session",
+      terminalRecord: {
+        terminalId: `terminal-pending-rollback-${terminalEvent}`,
+        state: terminalEvent,
+        terminalAt: "2026-08-06T09:06:06.750Z",
+      },
+    });
+    rejectAbort(new Error("pending rollback backend failure"));
+    await assert.rejects(command, /pending rollback backend failure/);
+
+    const settlement = await Promise.race([
+      oldOutcome,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error("pending submission waiter did not settle")),
+          100,
+        ),
+      ),
+    ]);
+    if (terminalEvent === "complete") {
+      assert.equal(settlement.error, null);
+      assert.equal(settlement.value.finalText, "pending rollback final");
+    } else {
+      assert.equal(settlement.value, null);
+      assert.match(
+        settlement.error?.message || "",
+        /pending rollback terminal error/,
+      );
+      assert.equal((settlement.error as any)?.rinTurnTerminal, true);
+    }
+    assert.equal(
+      projected.filter(
+        (event) =>
+          event.requestTag === requestTag &&
+          (event.type === "turn_complete" || event.type === "turn_error"),
+      ).length,
+      1,
+    );
+    assert.equal(
+      (driver as any).pendingSubmissionSettlements.has(requestTag),
+      false,
+    );
+    assert.equal(driver.liveTurn, null);
+  });
+}
+
+test("frontend SDK fails closed on a suppressed terminal without an exact terminal id", async () => {
+  const client = createFrontendClient();
+  let requestTag = "";
+  let releaseAbort!: () => void;
+  const abortOutcome = new Promise<void>((resolve) => {
+    releaseAbort = resolve;
+  });
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    requestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag };
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await abortOutcome;
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+
+  const activeTurn = driver.runTurn({ text: "missing exact terminal id" });
+  await waitUntil(
+    () => Boolean(requestTag && driver.liveTurn),
+    "active turn did not start",
+  );
+  const command = driver.runCommand("/abort");
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "abort"),
+    "backend abort did not start",
+  );
+
+  await driver.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag,
+      finalText: "malformed final",
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      sessionId: "frontend-session",
+      terminalRecord: {
+        state: "complete",
+        terminalAt: "2026-08-06T09:06:07.000Z",
+      },
+    },
+  });
+  releaseAbort();
+  await command;
+  const suppressionRetained = (driver as any).ignoredTerminalRequestTags.has(
+    requestTag,
+  );
+
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "exact final",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord: {
+      terminalId: "terminal-after-missing-id",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:08.000Z",
+    },
+  });
+
+  assert.equal(suppressionRetained, true);
+  assert.equal((await activeTurn).finalText, "exact final");
+  assert.equal(
+    client.calls.some(
+      (call: any) =>
+        call.type === "request" &&
+        call.command?.type === "ack_turn_terminal" &&
+        !call.command?.terminalId,
+    ),
+    false,
+  );
+  assert.equal(
+    projected.some(
+      (event) =>
+        (event.type === "turn_complete" || event.type === "turn_error") &&
+        event.requestTag === requestTag,
+    ),
+    false,
+  );
+});
+
+for (const backendOutcome of ["complete", "error"] as const) {
+  test(`frontend SDK disposal fences generic command backend ${backendOutcome}`, async () => {
+    const client = createFrontendClient();
+    client.getState = async () => ({});
+    let releaseBackend!: () => void;
+    const backendGate = new Promise<void>((resolve) => {
+      releaseBackend = resolve;
+    });
+    let backendStarted = false;
+    client.runCommand = async (commandLine: string) => {
+      client.calls.push({ type: "runCommand", commandLine });
+      backendStarted = true;
+      await backendGate;
+      if (backendOutcome === "error") {
+        throw new Error("late generic command failure");
+      }
+      return {
+        handled: true,
+        text: "stale generic command result",
+        sessionId: "stale-command-session",
+        sessionFile: "/tmp/stale-command-session.jsonl",
+      };
+    };
+    const driver = new RinFrontendTurnDriver({
+      clientFactory: () => client,
+      promptSource: "chat-bridge",
+    });
+    await driver.connect();
+
+    const command = driver.runCommand("/reload", {
+      assumeConnected: true,
+      assumeSessionReady: true,
+      skipSessionRecovery: true,
+    });
+    await waitUntil(() => backendStarted, "generic command did not start");
+    driver.dispose();
+    const reconnected = await driver.connect();
+    (driver as any).frontendState = {
+      sessionId: "new-epoch-session",
+      sessionFile: "/tmp/new-epoch-session.jsonl",
+    };
+    releaseBackend();
+    const commandError = await command.then(
+      () => null,
+      (error: Error) => error,
+    );
+
+    assert.equal(reconnected, false);
+    assert.match(commandError?.message || "", /rin_frontend_turn_cancelled/);
+    assert.doesNotMatch(
+      commandError?.message || "",
+      /late generic command failure/,
+    );
+    assert.equal(driver.currentSessionId(), "new-epoch-session");
+    assert.equal(driver.currentSessionFile(), "/tmp/new-epoch-session.jsonl");
+  });
+}
+
+test("frontend SDK disposal fences a command that began before connection reuse", async () => {
+  const client = createFrontendClient();
+  const originalConnect = client.connect;
+  let connectCount = 0;
+  let releaseFirstConnect!: () => void;
+  const firstConnectGate = new Promise<void>((resolve) => {
+    releaseFirstConnect = resolve;
+  });
+  client.connect = async () => {
+    connectCount += 1;
+    if (connectCount === 1) await firstConnectGate;
+    await originalConnect.call(client);
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const command = driver.runCommand("/abort");
+  await waitUntil(
+    () => connectCount === 1,
+    "old command connect did not start",
+  );
+  driver.dispose();
+  await driver.connect();
+  releaseFirstConnect();
+  const commandError = await command.then(
+    () => null,
+    (error: Error) => error,
+  );
+
+  assert.match(commandError?.message || "", /rin_frontend_turn_cancelled/);
+  assert.equal(
+    client.calls.filter((call: any) => call.type === "abort").length,
+    0,
+  );
+});
+
+for (const commandName of ["/abort", "/new", "/compact"] as const) {
+  test(`frontend SDK disposal fences ${commandName} backend rejection`, async () => {
+    const client = createFrontendClient();
+    let rejectBackend!: (error: Error) => void;
+    const backendOutcome = new Promise<never>((_resolve, reject) => {
+      rejectBackend = reject;
+    });
+    let backendStarted = false;
+    client.abort = async () => {
+      client.calls.push({ type: "abort" });
+      backendStarted = true;
+      await backendOutcome;
+    };
+    client.newSession = async (options: any = {}) => {
+      client.calls.push({ type: "newSession", options });
+      backendStarted = true;
+      await backendOutcome;
+    };
+    client.compact = async (customInstructions?: string) => {
+      client.calls.push({ type: "compact", customInstructions });
+      backendStarted = true;
+      await backendOutcome;
+    };
+    const driver = new RinFrontendTurnDriver({
+      clientFactory: () => client,
+      promptSource: "chat-bridge",
+    });
+    await driver.connect();
+    const requestTag = `dispose-during-${commandName.slice(1)}-rejection`;
+    const liveTurn = (driver as any).startLiveTurn(requestTag);
+    const liveTurnCancellation = assert.rejects(
+      liveTurn.promise,
+      /rin_frontend_turn_cancelled/,
+    );
+
+    const command = driver.runCommand(
+      commandName,
+      commandName === "/new"
+        ? { assumeConnected: true, managedSessionLeaf: "chat" }
+        : { assumeConnected: true },
+    );
+    await waitUntil(() => backendStarted, "backend command did not start");
+    driver.dispose();
+    const reconnected = await driver.connect();
+    rejectBackend(new Error("late backend rejection"));
+    const commandError = await command.then(
+      () => null,
+      (error: Error) => error,
+    );
+    await liveTurnCancellation;
+
+    assert.equal(reconnected, false);
+    assert.match(commandError?.message || "", /rin_frontend_turn_cancelled/);
+    assert.doesNotMatch(commandError?.message || "", /late backend rejection/);
+  });
+}
+
+for (const commandName of ["/abort", "/new"] as const) {
+  test(`frontend SDK disposal fences ${commandName} while frontend state refresh is pending`, async () => {
+    const client = createFrontendClient();
+    let blockRefresh = false;
+    let releaseRefresh!: () => void;
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let refreshStarted!: () => void;
+    const refreshStart = new Promise<void>((resolve) => {
+      refreshStarted = resolve;
+    });
+    client.getState = async () => {
+      if (!blockRefresh) {
+        return {
+          sessionId: "frontend-session",
+          sessionFile: "/tmp/frontend-chat.jsonl",
+        };
+      }
+      refreshStarted();
+      await refreshGate;
+      return {
+        sessionId: "late-refresh-session",
+        sessionFile: "/tmp/late-refresh.jsonl",
+      };
+    };
+    client.newSession = async (options: any = {}) => {
+      client.calls.push({ type: "newSession", options });
+      return {
+        sessionId: "new-session",
+        sessionFile: "/tmp/new-session.jsonl",
+      };
+    };
+    const driver = new RinFrontendTurnDriver({
+      clientFactory: () => client,
+      promptSource: "chat-bridge",
+    });
+    await driver.connect();
+    const requestTag = `dispose-during-${commandName.slice(1)}-refresh`;
+    const liveTurn = (driver as any).startLiveTurn(requestTag);
+    const liveTurnCancellation = assert.rejects(
+      liveTurn.promise,
+      /rin_frontend_turn_cancelled/,
+    );
+    blockRefresh = true;
+
+    const command = driver.runCommand(
+      commandName,
+      commandName === "/new"
+        ? { assumeConnected: true, managedSessionLeaf: "chat" }
+        : { assumeConnected: true },
+    );
+    await refreshStart;
+    driver.dispose();
+    (driver as any).frontendState = {
+      sessionId: "disposed-session",
+      sessionFile: "/tmp/disposed-session.jsonl",
+    };
+    releaseRefresh();
+    const commandError = await command.then(
+      () => null,
+      (error: Error) => error,
+    );
+    await liveTurnCancellation;
+
+    assert.match(commandError?.message || "", /rin_frontend_turn_cancelled/);
+    assert.equal(driver.currentSessionId(), "disposed-session");
+    assert.equal(driver.currentSessionFile(), "/tmp/disposed-session.jsonl");
+  });
+}
+
+test("frontend SDK disposal in /new commit callback fences session replacement", async () => {
+  const client = createFrontendClient();
+  client.newSession = async (options: any = {}) => {
+    client.calls.push({ type: "newSession", options });
+    return {
+      sessionId: "stale-new-session",
+      sessionFile: "/tmp/stale-new-session.jsonl",
+    };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+  const liveTurn = (driver as any).startLiveTurn(
+    "dispose-inside-new-commit-callback",
+  );
+  const liveTurnCancellation = assert.rejects(
+    liveTurn.promise,
+    /rin_frontend_turn_cancelled/,
+  );
+  let committedCallbacks = 0;
+
+  const command = driver.runCommand("/new", {
+    assumeConnected: true,
+    managedSessionLeaf: "chat",
+    onActiveTurnInterruptionCommitted: () => {
+      committedCallbacks += 1;
+      driver.dispose();
+      (driver as any).frontendState = {
+        sessionId: "new-epoch-session",
+        sessionFile: "/tmp/new-epoch-session.jsonl",
+      };
+    },
+  });
+  const commandError = await command.then(
+    () => null,
+    (error: Error) => error,
+  );
+  await liveTurnCancellation;
+
+  assert.equal(committedCallbacks, 1);
+  assert.match(commandError?.message || "", /rin_frontend_turn_cancelled/);
+  assert.equal(driver.currentSessionId(), "new-epoch-session");
+  assert.equal(driver.currentSessionFile(), "/tmp/new-epoch-session.jsonl");
+});
+
+test("frontend SDK disposal fences an ordinary terminal projection task", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+  const requestTag = "dispose-during-ordinary-terminal-projection";
+  const liveTurn = (driver as any).startLiveTurn(requestTag);
+  const liveTurnCancellation = assert.rejects(
+    liveTurn.promise,
+    /rin_frontend_turn_cancelled/,
+  );
+  let releaseProjection!: () => void;
+  const projectionGate = new Promise<void>((resolve) => {
+    releaseProjection = resolve;
+  });
+  let projectionStarted!: () => void;
+  const projectionStart = new Promise<void>((resolve) => {
+    projectionStarted = resolve;
+  });
+  driver.subscribe(async (event: any) => {
+    if (event.type !== "turn_complete" || event.requestTag !== requestTag) {
+      return;
+    }
+    projectionStarted();
+    await projectionGate;
+  });
+
+  const handling = driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "ordinary dispose race final",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord: {
+      terminalId: "terminal-dispose-ordinary-projection",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:08.500Z",
+    },
+  });
+  await projectionStart;
+  assert.equal((driver as any).terminalProjectionTasks.size, 1);
+
+  driver.dispose();
+  const tasksClearedAtDispose =
+    (driver as any).terminalProjectionTasks.size === 0;
+  releaseProjection();
+  await handling;
+  await liveTurnCancellation;
+
+  assert.equal(tasksClearedAtDispose, true);
+  assert.equal((driver as any).terminalProjectionTasks.size, 0);
+  assert.equal((driver as any).committedTerminalProjections.size, 0);
+});
+
+test("frontend SDK disposal fences rollback before terminal projection", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+  await driver.connect();
+  const requestTag = "dispose-before-rollback-terminal-projection";
+  const liveTurn = (driver as any).startLiveTurn(requestTag);
+  const liveTurnCancellation = assert.rejects(
+    liveTurn.promise,
+    /rin_frontend_turn_cancelled/,
+  );
+  let releaseProjection!: () => void;
+  const projectionGate = new Promise<void>((resolve) => {
+    releaseProjection = resolve;
+  });
+  let projectionStarted!: () => void;
+  const projectionStart = new Promise<void>((resolve) => {
+    projectionStarted = resolve;
+  });
+  const originalProjectIgnoredTerminal = (
+    driver as any
+  ).projectIgnoredTerminal.bind(driver);
+  (driver as any).projectIgnoredTerminal = async (
+    terminal: any,
+    projectionEpoch?: number,
+  ) => {
+    projectionStarted();
+    await projectionGate;
+    await originalProjectIgnoredTerminal(terminal, projectionEpoch);
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    const target = (driver as any).backendInterruptionsByRequestTag.get(
+      requestTag,
+    );
+    target.bufferedTerminal = {
+      requestTag,
+      terminalId: "terminal-dispose-rollback-projection",
+      event: "complete",
+      error: "",
+      finalText: "late rollback final",
+      sessionFile: "/tmp/late-rollback.jsonl",
+      sessionId: "late-rollback-session",
+      terminalRecord: {
+        terminalId: "terminal-dispose-rollback-projection",
+        state: "complete",
+        terminalAt: "2026-08-06T09:06:08.750Z",
+      },
+    };
+    throw new Error("rollback backend command failure");
+  };
+
+  const command = driver.runCommand("/abort");
+  await projectionStart;
+  driver.dispose();
+  (driver as any).frontendState = {
+    sessionId: "disposed-session",
+    sessionFile: "/tmp/disposed-session.jsonl",
+  };
+  driver.latestAssistantText = "disposed final sentinel";
+  releaseProjection();
+  const commandError = await command.then(
+    () => null,
+    (error: Error) => error,
+  );
+  await liveTurnCancellation;
+
+  assert.match(commandError?.message || "", /rin_frontend_turn_cancelled/);
+  assert.doesNotMatch(
+    commandError?.message || "",
+    /rollback backend command failure/,
+  );
+  assert.equal(driver.currentSessionId(), "disposed-session");
+  assert.equal(driver.currentSessionFile(), "/tmp/disposed-session.jsonl");
+  assert.equal(driver.latestAssistantText, "disposed final sentinel");
+  assert.equal(
+    projected.some(
+      (event) => event.type === "turn_complete" || event.type === "turn_error",
+    ),
+    false,
+  );
+  assert.equal((driver as any).terminalProjectionTasks.size, 0);
+  assert.equal((driver as any).committedTerminalProjections.size, 0);
+});
+
+test("frontend SDK disposal fences stale terminal cleanup from reused epoch state", async () => {
+  const client = createFrontendClient();
+  let releaseAck!: () => void;
+  const ackOutcome = new Promise<void>((resolve) => {
+    releaseAck = resolve;
+  });
+  let ackStarted = false;
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type !== "ack_turn_terminal") return { ok: true };
+    ackStarted = true;
+    await ackOutcome;
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+  const requestTag = "dispose-old-ack-before-reuse";
+  const liveTurn = (driver as any).startLiveTurn(requestTag);
+  const liveTurnCancellation = assert.rejects(
+    liveTurn.promise,
+    /rin_frontend_turn_cancelled/,
+  );
+  (driver as any).prepareActiveTurnForBackendInterruption();
+
+  const handling = driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "old epoch terminal",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord: {
+      terminalId: "terminal-old-ack-before-reuse",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:08.875Z",
+    },
+  });
+  await waitUntil(() => ackStarted, "terminal ACK did not start");
+  driver.dispose();
+  await driver.connect();
+
+  const retainedTag = "new-epoch-suppression-0000";
+  for (let index = 0; index < 1025; index += 1) {
+    (driver as any).ignoredTerminalRequestTags.add(
+      `new-epoch-suppression-${String(index).padStart(4, "0")}`,
+    );
+  }
+  const retainedIdentity = JSON.stringify([
+    retainedTag,
+    "terminal-new-epoch-retained",
+  ]);
+  (driver as any).acknowledgedIgnoredTerminalIdentities.add(retainedIdentity);
+  releaseAck();
+  await handling;
+  await liveTurnCancellation;
+
+  assert.equal((driver as any).ignoredTerminalRequestTags.size, 1025);
+  assert.equal(
+    (driver as any).ignoredTerminalRequestTags.has(retainedTag),
+    true,
+  );
+  assert.equal(
+    (driver as any).acknowledgedIgnoredTerminalIdentities.has(retainedIdentity),
+    true,
+  );
+});
+
+test("frontend SDK disposal fences a terminal handler blocked in ACK", async () => {
+  const client = createFrontendClient();
+  let releaseAck!: () => void;
+  const ackOutcome = new Promise<void>((resolve) => {
+    releaseAck = resolve;
+  });
+  let ackStarted = false;
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type !== "ack_turn_terminal") return { ok: true };
+    ackStarted = true;
+    await ackOutcome;
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+  const requestTag = "dispose-during-terminal-ack";
+  (driver as any).ignoredTerminalRequestTags.add(requestTag);
+
+  const handling = driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "dispose race final",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord: {
+      terminalId: "terminal-dispose-during-ack",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:09.000Z",
+    },
+  });
+  await waitUntil(() => ackStarted, "terminal ACK did not start");
+  driver.dispose();
+  releaseAck();
+  await handling;
+
+  assert.equal((driver as any).completedIgnoredTerminalIdentities.size, 0);
+  assert.equal((driver as any).ignoredTerminalHandlingTasks.size, 0);
+});
+
+test("frontend SDK disposal fences late ACK and backend interruption commit", async () => {
+  const client = createFrontendClient();
+  let releaseAbort!: () => void;
+  const abortOutcome = new Promise<void>((resolve) => {
+    releaseAbort = resolve;
+  });
+  let releaseAck!: () => void;
+  const ackOutcome = new Promise<void>((resolve) => {
+    releaseAck = resolve;
+  });
+  let abortStarted = false;
+  let ackStarted = false;
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    abortStarted = true;
+    await abortOutcome;
+  };
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type !== "ack_turn_terminal") return { ok: true };
+    ackStarted = true;
+    await ackOutcome;
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+  await driver.connect();
+  const requestTag = "dispose-pending-backend-interruption";
+  const liveTurn = (driver as any).startLiveTurn(requestTag);
+  const liveTurnCancellation = assert.rejects(
+    liveTurn.promise,
+    /rin_frontend_turn_cancelled/,
+  );
+  let committedCallbacks = 0;
+  const interruptionSeq = (driver as any).turnInterruptionSeq;
+  const command = driver.runCommand("/abort", {
+    onActiveTurnInterruptionCommitted: () => {
+      committedCallbacks += 1;
+    },
+  });
+  await waitUntil(() => abortStarted, "backend abort did not start");
+
+  const handling = driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "late dispose final",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord: {
+      terminalId: "terminal-dispose-pending-backend-interruption",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:09.500Z",
+    },
+  });
+  await waitUntil(() => ackStarted, "terminal ACK did not start");
+
+  driver.dispose();
+  releaseAck();
+  releaseAbort();
+  await handling;
+  await liveTurnCancellation;
+  const commandError = await command.then(
+    () => null,
+    (error: Error) => error,
+  );
+
+  assert.match(commandError?.message || "", /rin_frontend_turn_cancelled/);
+  assert.equal((driver as any).turnInterruptionSeq, interruptionSeq);
+  assert.equal(committedCallbacks, 0);
+  assert.equal((driver as any).ignoredTerminalRequestTags.size, 0);
+  assert.equal((driver as any).acknowledgedIgnoredTerminalIdentities.size, 0);
+  assert.equal((driver as any).ignoredTerminalAckTasks.size, 0);
+  assert.equal((driver as any).ignoredTerminalHandlingTasks.size, 0);
+  assert.equal((driver as any).backendInterruptionsByRequestTag.size, 0);
+  assert.equal((driver as any).completedIgnoredTerminalIdentities.size, 0);
+  assert.equal(driver.latestAssistantText, "");
+  assert.equal(
+    projected.some(
+      (event) => event.type === "turn_complete" || event.type === "turn_error",
+    ),
+    false,
+  );
+});
+
+test("frontend SDK retains successful terminal ACKs by exact identity", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+  const requestTag = "exact-ack-retention-request";
+  (driver as any).ignoredTerminalRequestTags.add(requestTag);
+
+  for (const terminalId of [
+    "terminal-exact-ack-a",
+    "terminal-exact-ack-b",
+    "terminal-exact-ack-a",
+  ]) {
+    await emitDriverEvent(driver, {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag,
+      finalText: terminalId,
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      sessionId: "frontend-session",
+      terminalRecord: {
+        terminalId,
+        state: "complete",
+        terminalAt: "2026-08-06T09:06:09.250Z",
+      },
+    });
+  }
+
+  assert.deepEqual(
+    client.calls
+      .filter(
+        (call: any) =>
+          call.type === "request" && call.command?.type === "ack_turn_terminal",
+      )
+      .map((call: any) => call.command.terminalId),
+    ["terminal-exact-ack-a", "terminal-exact-ack-b"],
+  );
+});
+
+test("frontend SDK retains successful ACK identities only after exact handling completes", async () => {
+  const client = createFrontendClient();
+  let releaseAcks!: () => void;
+  const ackGate = new Promise<void>((resolve) => {
+    releaseAcks = resolve;
+  });
+  let acknowledgementsStarted = 0;
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type === "ack_turn_terminal") {
+      acknowledgementsStarted += 1;
+      await ackGate;
+    }
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+
+  const requestTags = Array.from(
+    { length: 1025 },
+    (_, index) => `ack-before-completion-${index}`,
+  );
+  for (const requestTag of requestTags) {
+    (driver as any).pendingSubmissionSettlements.set(requestTag, {
+      cancel() {},
+      settleTerminal() {},
+    });
+  }
+  const interruption = (
+    driver as any
+  ).prepareActiveTurnForBackendInterruption();
+  let releaseProjections!: () => void;
+  const projectionGate = new Promise<void>((resolve) => {
+    releaseProjections = resolve;
+  });
+  let projectionsStarted = 0;
+  (driver as any).projectIgnoredTerminal = async () => {
+    projectionsStarted += 1;
+    await projectionGate;
+  };
+
+  const handlings = requestTags.map((requestTag, index) =>
+    driver.handleClientEvent({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag,
+      finalText: `ack retention ${index}`,
+      terminalRecord: {
+        terminalId: `terminal-ack-before-completion-${index}`,
+        state: "complete",
+        terminalAt: "2026-08-06T09:06:09.750Z",
+      },
+    }),
+  );
+  await waitUntil(
+    () => acknowledgementsStarted === requestTags.length,
+    "terminal ACKs did not start",
+  );
+  await (driver as any).rollbackBackendInterruption(interruption);
+  releaseAcks();
+  await waitUntil(
+    () => projectionsStarted === requestTags.length,
+    "rollback projections did not start",
+  );
+
+  assert.equal(
+    (driver as any).acknowledgedIgnoredTerminalIdentities.size,
+    0,
+    "successful ACK retention must wait for exact handling completion",
+  );
+  assert.equal((driver as any).completedIgnoredTerminalIdentities.size, 0);
+
+  releaseProjections();
+  await Promise.all(handlings);
+  assert.equal((driver as any).completedIgnoredTerminalIdentities.size, 1024);
+  assert.equal(
+    (driver as any).acknowledgedIgnoredTerminalIdentities.size,
+    1024,
+  );
+  for (const identity of (driver as any)
+    .acknowledgedIgnoredTerminalIdentities) {
+    assert.equal(
+      (driver as any).completedIgnoredTerminalIdentities.has(identity),
+      true,
+    );
+  }
+});
+
+test("frontend SDK bounds committed terminal projection identities", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+
+  for (let index = 0; index < 1025; index += 1) {
+    await driver.projectAuthoritativeTerminal({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: `projection-retention-${index}`,
+      finalText: `projection ${index}`,
+      terminalRecord: {
+        terminalId: `terminal-projection-retention-${index}`,
+        state: "complete",
+        terminalAt: "2026-08-06T09:06:09.500Z",
+      },
+    });
+  }
+
+  assert.equal((driver as any).committedTerminalProjections.size, 1024);
+  assert.equal(
+    (driver as any).committedTerminalProjections.has(
+      "request:projection-retention-0",
+    ),
+    false,
+  );
+  assert.equal(
+    (driver as any).committedTerminalProjections.has(
+      "request:projection-retention-1024",
+    ),
+    true,
+  );
+});
+
+test("frontend SDK bounds completed terminal identities and clears them on dispose", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+
+  for (let index = 0; index < 1025; index += 1) {
+    const requestTag = `cleanup-request-${index}`;
+    (driver as any).ignoredTerminalRequestTags.add(requestTag);
+    await driver.handleClientEvent({
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag,
+      finalText: `cleanup final ${index}`,
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      sessionId: "frontend-session",
+      terminalRecord: {
+        terminalId: `cleanup-terminal-${index}`,
+        state: "complete",
+        terminalAt: "2026-08-06T09:06:10.000Z",
+      },
+    });
+  }
+
+  assert.equal((driver as any).completedIgnoredTerminalIdentities.size, 1024);
+  assert.equal(
+    (driver as any).completedIgnoredTerminalIdentities.has(
+      JSON.stringify(["cleanup-request-0", "cleanup-terminal-0"]),
+    ),
+    false,
+  );
+  assert.equal(
+    (driver as any).completedIgnoredTerminalIdentities.has(
+      JSON.stringify(["cleanup-request-1024", "cleanup-terminal-1024"]),
+    ),
+    true,
+  );
+  assert.equal(
+    (driver as any).acknowledgedIgnoredTerminalIdentities.size,
+    1024,
+  );
+  assert.equal(
+    (driver as any).acknowledgedIgnoredTerminalIdentities.has(
+      JSON.stringify(["cleanup-request-0", "cleanup-terminal-0"]),
+    ),
+    false,
+  );
+  assert.equal(
+    (driver as any).acknowledgedIgnoredTerminalIdentities.has(
+      JSON.stringify(["cleanup-request-1024", "cleanup-terminal-1024"]),
+    ),
+    true,
+  );
+
+  driver.dispose();
+  assert.equal((driver as any).completedIgnoredTerminalIdentities.size, 0);
+});
+
+test("frontend SDK preserves the old turn and Working when backend /new is cancelled", async () => {
+  const client = createFrontendClient();
+  let requestTag = "";
+  client.getState = async () => ({
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: false,
+    working: true,
+  });
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    requestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag };
+  };
+  client.newSession = async (options: any = {}) => {
+    client.calls.push({ type: "newSession", options });
+    return { cancelled: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+
+  const activeTurn = driver.runTurn({ text: "preserve cancelled new" });
+  await waitUntil(
+    () => Boolean(requestTag && driver.liveTurn),
+    "active turn did not start",
+  );
+  const oldLiveTurn = driver.liveTurn;
+  const interruptionSeq = (driver as any).turnInterruptionSeq;
+
+  const commandResult = await driver.runCommand("/new", {
+    managedSessionLeaf: "chat",
+  });
+  assert.equal(commandResult.cancelled, true);
+  assert.equal(driver.liveTurn, oldLiveTurn);
+  assert.equal((driver as any).turnInterruptionSeq, interruptionSeq);
+  assert.equal(driver.isWorking(), true);
+  assert.equal(
+    (driver as any).ignoredTerminalRequestTags.has(requestTag),
+    false,
+  );
+
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "completed after cancelled new",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord: {
+      terminalId: "terminal-cancelled-new-complete",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:15.000Z",
+    },
+  });
+  assert.equal((await activeTurn).finalText, "completed after cancelled new");
+  assert.equal(
+    projected.filter(
+      (event) =>
+        event.type === "turn_complete" && event.requestTag === requestTag,
+    ).length,
+    1,
+  );
+});
+
+test("frontend SDK preserves the old turn and Working when /abort disconnects", async () => {
+  const client = createFrontendClient();
+  let requestTag = "";
+  client.getState = async () => ({
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    isStreaming: false,
+    working: true,
+  });
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    requestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag };
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    throw new Error("rin_disconnected");
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+
+  const activeTurn = driver.runTurn({ text: "preserve disconnected abort" });
+  await waitUntil(
+    () => Boolean(requestTag && driver.liveTurn),
+    "active turn did not start",
+  );
+  const oldLiveTurn = driver.liveTurn;
+  const interruptionSeq = (driver as any).turnInterruptionSeq;
+
+  await assert.rejects(driver.runCommand("/abort"), /rin_disconnected/);
+  assert.equal(driver.liveTurn, oldLiveTurn);
+  assert.equal((driver as any).turnInterruptionSeq, interruptionSeq);
+  assert.equal(driver.isWorking(), true);
+  assert.equal(
+    (driver as any).ignoredTerminalRequestTags.has(requestTag),
+    false,
+  );
+
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "completed after disconnected abort",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord: {
+      terminalId: "terminal-disconnected-abort-complete",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:20.000Z",
+    },
+  });
+  assert.equal(
+    (await activeTurn).finalText,
+    "completed after disconnected abort",
+  );
+  assert.equal(
+    projected.filter(
+      (event) =>
+        event.type === "turn_complete" && event.requestTag === requestTag,
+    ).length,
+    1,
+  );
+});
+
+test("frontend SDK ignores a sequential conflicting complete after committed interruption", async () => {
+  const client = createFrontendClient();
+  let requestTag = "";
+  let releaseAbort!: () => void;
+  const abortOutcome = new Promise<void>((resolve) => {
+    releaseAbort = resolve;
+  });
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    requestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag };
+  };
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    await abortOutcome;
+  };
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+
+  const activeTurn = driver.runTurn({ text: "committed complete duplicate" });
+  await waitUntil(
+    () => Boolean(requestTag && driver.liveTurn),
+    "active turn did not start",
+  );
+  const command = driver.runCommand("/abort");
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "abort"),
+    "backend abort did not start",
+  );
+
+  const terminalRecord = {
+    terminalId: "terminal-committed-sequential-complete",
+    state: "complete",
+    terminalAt: "2026-08-06T09:06:25.000Z",
+  };
+  await driver.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag,
+      finalText: "first committed final",
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      sessionId: "frontend-session",
+      terminalRecord,
+    },
+  });
+  releaseAbort();
+  await command;
+  assert.equal((await activeTurn).finalText, "first committed final");
+  assert.equal(driver.latestAssistantText, "first committed final");
+  const sessionFile = driver.currentSessionFile();
+
+  await driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "later committed final",
+    sessionFile: "/tmp/conflicting-session.jsonl",
+    sessionId: "conflicting-session",
+    terminalRecord,
+  });
+  assert.equal(driver.latestAssistantText, "first committed final");
+  assert.equal(driver.currentSessionFile(), sessionFile);
+  assert.equal(
+    projected.some(
+      (event) =>
+        event.type === "turn_complete" && event.requestTag === requestTag,
+    ),
+    false,
+  );
+});
+
+test("frontend SDK /new lets daemon new_session own active-turn interruption", async () => {
+  const client = createFrontendClient();
+  let requestTag = "";
+  let activeTurnSettled = false;
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    requestTag = options.requestTag || "";
     await new Promise(() => {});
   };
   client.abort = async () => {
-    abortCalls += 1;
     client.calls.push({ type: "abort" });
   };
   const driver = new RinFrontendTurnDriver({
@@ -1494,107 +4359,323 @@ test("frontend SDK /new interrupts an active turn before creating the new sessio
   });
 
   const activeTurn = driver.runTurn({ text: "still running" });
-  activeTurn.catch(() => {});
-  await waitUntil(() => promptStarted, "active turn did not start");
-
-  const result = await driver.runCommand("/new", {
-    managedSessionLeaf: "chat",
-  });
-
-  assert.equal(result.text, "Started a new session.");
-  assert.equal(abortCalls, 1);
-  await assert.rejects(
-    activeTurn,
-    /chat_turn_aborted/,
-    "the previous live turn should be settled as aborted",
+  void activeTurn.then(
+    () => {
+      activeTurnSettled = true;
+    },
+    () => {
+      activeTurnSettled = true;
+    },
   );
-  assert.deepEqual(
-    client.calls
-      .filter((call: any) => ["abort", "newSession"].includes(call.type))
-      .map((call: any) => call.type),
-    ["abort", "newSession"],
-  );
-});
-
-test("frontend SDK /new does not wait for backend abort before creating the new session", async () => {
-  const client = createFrontendClient();
-  let promptStarted = false;
-  let resolveAbort!: () => void;
-  const abortReady = new Promise<void>((resolve) => {
-    resolveAbort = resolve;
-  });
-  client.prompt = async (text: string, options: any = {}) => {
-    client.calls.push({ type: "prompt", text, options });
-    promptStarted = true;
-    await new Promise(() => {});
-  };
-  client.abort = async () => {
-    client.calls.push({ type: "abort:start" });
-    await abortReady;
-    client.calls.push({ type: "abort:end" });
-  };
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-
-  const activeTurn = driver.runTurn({ text: "still running" });
-  activeTurn.catch(() => {});
-  await waitUntil(() => promptStarted, "active turn did not start");
-
-  const result = await driver.runCommand("/new", {
-    managedSessionLeaf: "chat",
-  });
-
-  assert.equal(result.text, "Started a new session.");
-  await assert.rejects(activeTurn, /chat_turn_aborted/);
-  assert.deepEqual(
-    client.calls
-      .filter((call: any) =>
-        ["abort:start", "abort:end", "newSession"].includes(call.type),
-      )
-      .map((call: any) => call.type),
-    ["abort:start", "newSession"],
-  );
-
-  resolveAbort();
-  await new Promise((resolve) => setImmediate(resolve));
-});
-
-test("frontend SDK ignores stale terminal events from the aborted turn after /new", async () => {
-  const client = createFrontendClient();
-  let requestTag = "";
-  client.prompt = async (text: string, options: any = {}) => {
-    client.calls.push({ type: "prompt", text, options });
-    requestTag = options.requestTag || "";
-    await new Promise(() => {});
-  };
-  const driver = new RinFrontendTurnDriver({
-    clientFactory: () => client,
-    promptSource: "chat-bridge",
-  });
-
-  const activeTurn = driver.runTurn({ text: "old turn" });
-  activeTurn.catch(() => {});
-  await waitUntil(() => Boolean(requestTag), "active turn did not submit");
+  await waitUntil(() => Boolean(requestTag), "active turn did not start");
 
   const result = await driver.runCommand("/new", {
     managedSessionLeaf: "chat",
   });
   const newSessionFile = driver.currentSessionFile();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(result.text, "Started a new session.");
+  assert.equal(activeTurnSettled, false);
+  assert.deepEqual(
+    client.calls
+      .filter((call: any) => ["abort", "newSession"].includes(call.type))
+      .map((call: any) => call.type),
+    ["newSession"],
+  );
+
   await emitDriverEvent(driver, {
     type: "rpc_turn_event",
     event: "error",
     requestTag,
-    error: "chat_turn_aborted",
-    sessionFile: "/tmp/old-chat.jsonl",
-    sessionId: "old-session",
+    error: "Request was aborted",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord: {
+      terminalId: "terminal-new-session-abort",
+      state: "error",
+      terminalAt: "2026-08-06T08:48:00.000Z",
+    },
   });
 
-  assert.equal(result.text, "Started a new session.");
-  await assert.rejects(activeTurn, /chat_turn_aborted/);
+  await assert.rejects(activeTurn, /Request was aborted/);
   assert.equal(driver.currentSessionFile(), newSessionFile);
 });
+
+test("frontend SDK restores ordinary terminal handling when backend /new fails", async () => {
+  const client = createFrontendClient();
+  let requestTag = "";
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    requestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag };
+  };
+  client.newSession = async (options: any = {}) => {
+    client.calls.push({ type: "newSession", options });
+    throw new Error("backend new session rejected");
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+
+  const activeTurn = driver.runTurn({ text: "keep old session" });
+  await waitUntil(
+    () => Boolean(requestTag && driver.liveTurn),
+    "active turn did not start",
+  );
+
+  const interruptionSeq = (driver as any).turnInterruptionSeq;
+  await assert.rejects(
+    driver.runCommand("/new", { managedSessionLeaf: "chat" }),
+    /backend new session rejected/,
+  );
+  assert.equal((driver as any).turnInterruptionSeq, interruptionSeq);
+  assert.equal(
+    (driver as any).ignoredTerminalRequestTags.has(requestTag),
+    false,
+  );
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "completed after rejected new session",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord: {
+      terminalId: "terminal-rejected-new-complete",
+      state: "complete",
+      terminalAt: "2026-08-06T09:06:00.000Z",
+    },
+  });
+
+  assert.equal(
+    (await activeTurn).finalText,
+    "completed after rejected new session",
+  );
+  assert.equal(
+    projected.some(
+      (event) =>
+        event.type === "turn_complete" && event.requestTag === requestTag,
+    ),
+    true,
+    "a rejected backend new_session must not suppress the old terminal",
+  );
+});
+
+test("frontend SDK settles a pending old completion after the new-session turn starts", async () => {
+  const client = createFrontendClient();
+  let oldRequestTag = "";
+  let newRequestTag = "";
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    if (text === "old pending admission") {
+      oldRequestTag = options.requestTag || "";
+      await new Promise(() => {});
+    }
+    newRequestTag = options.requestTag || "";
+    return { outcome: "terminalOwner", requestTag: newRequestTag };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+
+  const oldTurn = driver.runTurn({ text: "old pending admission" });
+  await waitUntil(() => Boolean(oldRequestTag), "old admission did not start");
+  await driver.runCommand("/new", { managedSessionLeaf: "chat" });
+
+  const newTurn = driver.runTurn({ text: "new session turn" });
+  await waitUntil(
+    () =>
+      Boolean(newRequestTag && driver.liveTurn?.requestTag === newRequestTag),
+    "new-session turn did not become live",
+  );
+
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: oldRequestTag,
+    finalText: "old completion won the race",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "frontend-session",
+    terminalRecord: {
+      terminalId: "terminal-old-pending-complete",
+      state: "complete",
+      terminalAt: "2026-08-06T09:07:00.000Z",
+    },
+  });
+
+  const oldResult = await Promise.race([
+    oldTurn,
+    new Promise<never>((_resolve, reject) =>
+      setTimeout(
+        () => reject(new Error("old requestTag waiter did not settle")),
+        100,
+      ),
+    ),
+  ]);
+  assert.equal(oldResult.finalText, "old completion won the race");
+  assert.equal(
+    projected.some(
+      (event) =>
+        event.type === "turn_complete" && event.requestTag === oldRequestTag,
+    ),
+    false,
+  );
+
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag: newRequestTag,
+    finalText: "new session final",
+    sessionFile: "/tmp/frontend-managed.jsonl",
+    sessionId: "frontend-session",
+  });
+  assert.equal((await newTurn).finalText, "new session final");
+});
+
+for (const oldTerminalEvent of ["complete", "error"] as const) {
+  test(`frontend SDK fences a retried admitted old ${oldTerminalEvent} terminal from a newer public turn`, async () => {
+    const client = createFrontendClient();
+    let sessionFile = "/tmp/frontend-chat.jsonl";
+    let oldRequestTag = "";
+    let newRequestTag = "";
+    let reportStaleOldActive = false;
+    client.getState = async () => ({
+      sessionFile,
+      sessionId: "frontend-session",
+      isStreaming: reportStaleOldActive,
+      turnActive: reportStaleOldActive,
+      ...(reportStaleOldActive ? { requestTag: oldRequestTag } : {}),
+    });
+    client.newSession = async (options: any = {}) => {
+      client.calls.push({ type: "newSession", options });
+      sessionFile = "/tmp/frontend-managed.jsonl";
+      return { cancelled: false, sessionFile, sessionId: "frontend-session" };
+    };
+    client.prompt = async (text: string, options: any = {}) => {
+      client.calls.push({ type: "prompt", text, options });
+      if (text === "admitted old turn") {
+        oldRequestTag = options.requestTag || "";
+        return { outcome: "terminalOwner", requestTag: oldRequestTag };
+      }
+      newRequestTag = options.requestTag || "";
+      return { outcome: "terminalOwner", requestTag: newRequestTag };
+    };
+    const driver = new RinFrontendTurnDriver({
+      clientFactory: () => client,
+      promptSource: "chat-bridge",
+    });
+
+    const oldTurn = driver.runTurn({ text: "admitted old turn" });
+    const oldSettlement = oldTurn.then(
+      (value: any) => ({ kind: "complete" as const, value }),
+      (error: Error) => ({ kind: "error" as const, error }),
+    );
+    await waitUntil(
+      () =>
+        Boolean(
+          oldRequestTag &&
+          client.calls.some(
+            (call: any) =>
+              call.type === "request" &&
+              call.command?.type === "await_turn_terminal" &&
+              call.command?.requestTag === oldRequestTag,
+          ),
+        ),
+      "admitted old waiter did not start",
+    );
+    await driver.runCommand("/new", { managedSessionLeaf: "chat" });
+
+    const oldTerminal = {
+      type: "rpc_turn_event",
+      event: oldTerminalEvent,
+      requestTag: oldRequestTag,
+      ...(oldTerminalEvent === "complete"
+        ? { finalText: "exact old final" }
+        : { error: "exact old failure" }),
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      sessionId: "frontend-session",
+      terminalRecord: {
+        terminalId: `terminal-admitted-old-${oldTerminalEvent}`,
+        state: oldTerminalEvent,
+        terminalAt: "2026-08-06T09:08:00.000Z",
+      },
+    };
+    await emitDriverEvent(driver, oldTerminal);
+
+    const settledOld = await Promise.race([
+      oldSettlement,
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(
+          () =>
+            reject(new Error("admitted old requestTag waiter did not settle")),
+          100,
+        ),
+      ),
+    ]);
+    assert.equal(settledOld.kind, oldTerminalEvent);
+    if (settledOld.kind === "complete") {
+      assert.equal(settledOld.value.finalText, "exact old final");
+    } else {
+      assert.match(settledOld.error.message, /exact old failure/);
+    }
+
+    reportStaleOldActive = true;
+    const newTurn = driver.runTurn({ text: "new public turn" });
+    let newTurnSettled = false;
+    void newTurn.then(
+      () => {
+        newTurnSettled = true;
+      },
+      () => {
+        newTurnSettled = true;
+      },
+    );
+    await waitUntil(
+      () =>
+        Boolean(
+          newRequestTag &&
+          client.calls.some(
+            (call: any) =>
+              call.type === "request" &&
+              call.command?.type === "await_turn_terminal" &&
+              call.command?.requestTag === newRequestTag,
+          ),
+        ),
+      "new public waiter did not start",
+    );
+
+    await emitDriverEvent(driver, oldTerminal);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(
+      newTurnSettled,
+      false,
+      `retried old ${oldTerminalEvent} settled the newer public waiter`,
+    );
+
+    reportStaleOldActive = false;
+    await emitDriverEvent(driver, {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: newRequestTag,
+      finalText: "new public final",
+      sessionFile,
+      sessionId: "frontend-session",
+      terminalRecord: {
+        terminalId: "terminal-new-public-complete",
+        state: "complete",
+        terminalAt: "2026-08-06T09:09:00.000Z",
+      },
+    });
+    assert.equal((await newTurn).finalText, "new public final");
+  });
+}
 
 test("frontend SDK keeps non-reset commands from interrupting active turns", async () => {
   const client = createFrontendClient();
@@ -2263,6 +5344,63 @@ test("frontend SDK keeps ordinary input transport-pending until compaction ends"
   const result = await pending;
   assert.equal(result.outcome, "nonterminal");
   assert.equal(result.superseded, true);
+});
+
+test("frontend SDK disposal fences a stale compaction refresh before prompt", async () => {
+  const oldClient = createFrontendClient();
+  const newClient = createFrontendClient();
+  let factoryCalls = 0;
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => (factoryCalls++ === 0 ? oldClient : newClient),
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+  (driver as any).frontendState = {
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    sessionId: "old-session",
+    isStreaming: true,
+    turnActive: true,
+    isCompacting: true,
+  };
+
+  let releaseRefresh!: () => void;
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  let refreshStarted = false;
+  oldClient.getState = async () => {
+    refreshStarted = true;
+    await refreshGate;
+    return {
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      sessionId: "old-session",
+      isStreaming: false,
+      turnActive: false,
+      isCompacting: false,
+    };
+  };
+  oldClient.prompt = async (text: string, options: any = {}) => {
+    oldClient.calls.push({ type: "prompt", text, options });
+    return { outcome: "nonterminal" };
+  };
+
+  const pending = driver.runTurn({
+    text: "stale input after disposal",
+    assumeConnected: true,
+    assumeSessionReady: true,
+    promptContext: { source: "chat-bridge", chatKey: "telegram/1:2" },
+  });
+  await waitUntil(() => refreshStarted, "compaction refresh did not start");
+  driver.dispose();
+  await assert.rejects(pending, /rin_frontend_turn_cancelled/);
+  assert.equal(await driver.connect(), true);
+
+  releaseRefresh();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    oldClient.calls.some((call: any) => call.type === "prompt"),
+    false,
+  );
 });
 
 test("frontend SDK turn driver waits for standalone compaction before prompting", async () => {
@@ -2939,6 +6077,81 @@ test("frontend projects an authoritative terminal without current-session filter
   );
 });
 
+test("frontend recovery enters the shared terminal gate during backend interruption", async () => {
+  const client = createFrontendClient();
+  const requestTag = "recovery-interruption-gate-request";
+  let releaseAbort!: () => void;
+  const abortGate = new Promise<void>((resolve) => {
+    releaseAbort = resolve;
+  });
+  let abortStarted = false;
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+    abortStarted = true;
+    await abortGate;
+  };
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type === "list_unacknowledged_chat_terminals") {
+      return {
+        terminals: [
+          {
+            type: "rpc_turn_event",
+            event: "complete",
+            requestTag,
+            finalText: "recovered interrupted final",
+            chatDeliveryContext: {
+              turnId: "recovery-interruption-turn",
+              chatKey: "discord/1:2",
+              messageId: "recovery-interruption-message",
+            },
+            terminalRecord: {
+              terminalId: "terminal-recovery-interruption-gate",
+              state: "complete",
+              terminalAt: "2026-08-06T09:06:10.250Z",
+            },
+          },
+        ],
+      };
+    }
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+  await driver.connect();
+  const liveTurn = (driver as any).startLiveTurn(requestTag);
+  const command = driver.runCommand("/abort");
+  await waitUntil(() => abortStarted, "backend abort did not start");
+
+  assert.equal(
+    await driver.recoverUnacknowledgedChatTerminals("discord/1:2"),
+    1,
+  );
+  const projectedBeforeCommit = projected.some(
+    (event) =>
+      event.type === "turn_complete" && event.requestTag === requestTag,
+  );
+  const acknowledgementsBeforeCommit = client.calls.filter(
+    (call: any) =>
+      call.type === "request" &&
+      call.command?.type === "ack_turn_terminal" &&
+      call.command.requestTag === requestTag,
+  ).length;
+
+  releaseAbort();
+  await command;
+  assert.equal(
+    (await liveTurn.promise).finalText,
+    "recovered interrupted final",
+  );
+  assert.equal(projectedBeforeCommit, false);
+  assert.equal(acknowledgementsBeforeCommit, 1);
+});
+
 test("frontend replays one durable terminal record and acknowledges it explicitly", async () => {
   const driver: any = createDriver();
   const seen: any[] = [];
@@ -2995,6 +6208,98 @@ test("frontend replays one durable terminal record and acknowledges it explicitl
     ),
     true,
   );
+});
+
+test("frontend recovery cancels when unacknowledged listing crosses disposal", async () => {
+  const client = createFrontendClient();
+  let releaseListing!: () => void;
+  const listingGate = new Promise<void>((resolve) => {
+    releaseListing = resolve;
+  });
+  let listingStarted = false;
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type === "list_unacknowledged_chat_terminals") {
+      listingStarted = true;
+      await listingGate;
+      return {
+        terminals: [
+          {
+            type: "rpc_turn_event",
+            event: "complete",
+            requestTag: "stale-recovery-request",
+            finalText: "stale recovery final",
+            terminalRecord: {
+              terminalId: "terminal-stale-recovery",
+              state: "complete",
+              terminalAt: "2026-08-06T09:06:10.000Z",
+            },
+          },
+        ],
+      };
+    }
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const projected: any[] = [];
+  driver.subscribe((event: any) => projected.push(event));
+  await driver.connect();
+
+  const recovery = driver.recoverUnacknowledgedChatTerminals("discord/1:2");
+  await waitUntil(() => listingStarted, "terminal listing did not start");
+  driver.dispose();
+  await driver.connect();
+  releaseListing();
+  const recoveryError = await recovery.then(
+    () => null,
+    (error: Error) => error,
+  );
+
+  assert.match(recoveryError?.message || "", /rin_frontend_turn_cancelled/);
+  assert.equal(
+    projected.some(
+      (event) => event.type === "turn_complete" || event.type === "turn_error",
+    ),
+    false,
+  );
+});
+
+test("frontend recovery maps a stale listing rejection to lifecycle cancellation", async () => {
+  const client = createFrontendClient();
+  let rejectListing!: (error: Error) => void;
+  const listingOutcome = new Promise<never>((_resolve, reject) => {
+    rejectListing = reject;
+  });
+  let listingStarted = false;
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command?.type === "list_unacknowledged_chat_terminals") {
+      listingStarted = true;
+      await listingOutcome;
+    }
+    return { ok: true };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+
+  const recovery = driver
+    .recoverUnacknowledgedChatTerminals("discord/1:2")
+    .then(
+      () => null,
+      (error: Error) => error,
+    );
+  await waitUntil(() => listingStarted, "terminal listing did not start");
+  driver.dispose();
+  rejectListing(new Error("old terminal listing failure"));
+
+  const error = await recovery;
+  assert.equal(error?.message, "rin_frontend_turn_cancelled");
 });
 
 test("terminal reconnect stops on permanent ledger failure instead of retrying forever", async () => {
