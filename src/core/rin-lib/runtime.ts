@@ -30,7 +30,7 @@ import {
 import { compileSelfImproveSync } from "../self-improve/store.js";
 import {
   EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY,
-  EPHEMERAL_FORK_PROTECT_SOURCE_WINDOW_TURNS_KEY,
+  EPHEMERAL_FORK_SOURCE_CONTEXT_KEY,
 } from "../session/fork.js";
 import { buildSystemPromptSelfImprove } from "../self-improve/format.js";
 import {
@@ -94,17 +94,11 @@ export function createRinCapabilityDefinitions(
         context: [
           async (event: any, ctx: any) => {
             if (!Array.isArray(event?.messages)) return undefined;
-            const protectedSourceWindowTurns = Number(
-              ctx?.sessionManager?.[
-                EPHEMERAL_FORK_PROTECT_SOURCE_WINDOW_TURNS_KEY
-              ] || 0,
-            );
+            const sourceContext =
+              ctx?.sessionManager?.[EPHEMERAL_FORK_SOURCE_CONTEXT_KEY];
             const providerEvent = buildProviderBoundContextEvent(event, {
               cwd: String(ctx?.cwd || options.cwd || process.cwd()),
-              protectRecentTurns:
-                protectedSourceWindowTurns > 0
-                  ? protectedSourceWindowTurns + 1
-                  : undefined,
+              protectFromMessageIndex: sourceContext?.pruningBoundary,
             });
             const injection = await injectPostCompactionState(
               providerEvent ?? { messages: event.messages },

@@ -1,11 +1,17 @@
 import { existsSync } from "node:fs";
 
+import { buildSessionContext } from "@earendil-works/pi-coding-agent";
+
 import type {
   RinCapabilityDefinition,
   RinCapabilityOptions,
 } from "../rin-lib/capability-types.js";
-import { isAssistantFinalMessage } from "../message-content.js";
-import { SELF_IMPROVE_TURN_WINDOW_TURNS } from "./constants.js";
+import {
+  findProtectedMessageBucketStart,
+  RIN_SESSION_PRUNING_MESSAGE_BUCKET_SIZE,
+  RIN_SESSION_PRUNING_RETAINED_BUCKETS,
+  type SessionSourceContext,
+} from "../rin-lib/session-pruning.js";
 import { enqueueSelfImproveMaintenanceJob } from "./async-jobs.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { recordSelfImproveSkillReadEvent } from "./skill-usage.js";
@@ -16,7 +22,8 @@ const SELF_IMPROVE_FRONTEND_KINDS = new Set([
   "scheduled-task",
   "tui",
 ]);
-const SELF_IMPROVE_WINDOW_TRIGGER = "self_improve:turn_window_review";
+const SELF_IMPROVE_ROLLOVER_TRIGGER = "self_improve:context_rollover_review";
+const SELF_IMPROVE_SHUTDOWN_TRIGGER = "self_improve:session_shutdown_review";
 
 function shouldSkipAutomaticMaintenance(sessionFile: string) {
   return !existsSync(sessionFile);
@@ -86,6 +93,7 @@ type SelfImproveReviewOptions = {
   leafId?: string;
   trigger: string;
   snapshotKey?: string;
+  sourceContext?: SessionSourceContext;
 };
 
 type EnqueueMaintenanceJob = typeof enqueueSelfImproveMaintenanceJob;
@@ -102,6 +110,7 @@ function resolveReviewJob(ctx: any, opts: SelfImproveReviewOptions) {
     leafId: meta.leafId || undefined,
     trigger: opts.trigger,
     snapshotKey: opts.snapshotKey,
+    sourceContext: opts.sourceContext,
   };
 }
 
@@ -131,75 +140,112 @@ function sessionEntryMessage(entry: any) {
   return entry?.type === "message" ? entry.message : entry?.message || entry;
 }
 
-function countUserTurns(branch: any[]) {
-  return branch.reduce((count, entry) => {
-    return sessionEntryMessage(entry)?.role === "user" ? count + 1 : count;
-  }, 0);
-}
-
-function sameFinalMessage(candidate: any, expected: any) {
-  if (candidate === expected) return true;
-  const candidateResponseId = normalizedText(candidate?.responseId);
-  const expectedResponseId = normalizedText(expected?.responseId);
-  if (candidateResponseId && expectedResponseId) {
-    return candidateResponseId === expectedResponseId;
-  }
-  const candidateTimestamp = normalizedText(candidate?.timestamp);
-  const expectedTimestamp = normalizedText(expected?.timestamp);
-  if (!candidateTimestamp || candidateTimestamp !== expectedTimestamp) {
-    return false;
-  }
-  return (
-    normalizedText(candidate?.stopReason) ===
-      normalizedText(expected?.stopReason) &&
-    JSON.stringify(candidate?.content) === JSON.stringify(expected?.content)
-  );
-}
-
-function findClosingAssistantIndex(branch: any[], closingMessage?: any) {
-  if (closingMessage) {
-    for (let index = branch.length - 1; index >= 0; index -= 1) {
-      const message = sessionEntryMessage(branch[index]);
-      if (
-        isAssistantFinalMessage(message) &&
-        sameFinalMessage(message, closingMessage)
-      ) {
-        return index;
-      }
+function providerGenerationKey(branch: any[], throughIndex: number) {
+  for (let index = throughIndex; index >= 0; index -= 1) {
+    const entry = branch[index];
+    if (entry?.type !== "compaction" && entry?.type !== "branch_summary") {
+      continue;
     }
-    return -1;
+    const id = normalizedText(entry?.id);
+    if (id) return id;
   }
-  let closingUserIndex = -1;
-  for (let index = branch.length - 1; index >= 0; index -= 1) {
-    if (sessionEntryMessage(branch[index])?.role !== "user") continue;
-    closingUserIndex = index;
-    break;
-  }
-  for (let index = closingUserIndex + 1; index < branch.length; index += 1) {
-    if (isAssistantFinalMessage(sessionEntryMessage(branch[index]))) {
-      return index;
-    }
-  }
-  return -1;
+  return "root";
 }
 
-function resolveCompletedTurnWindow(branch: any[], closingMessage?: any) {
-  const closingAssistantIndex = findClosingAssistantIndex(
-    branch,
-    closingMessage,
+function calculatePruningBoundary(messages: any[]) {
+  return findProtectedMessageBucketStart(
+    messages,
+    RIN_SESSION_PRUNING_MESSAGE_BUCKET_SIZE,
+    RIN_SESSION_PRUNING_RETAINED_BUCKETS,
   );
-  if (closingAssistantIndex < 0) return undefined;
-  const closingAssistantLeafId = normalizedText(
-    branch[closingAssistantIndex]?.id,
-  );
-  if (!closingAssistantLeafId) return undefined;
-  const userTurns = countUserTurns(branch.slice(0, closingAssistantIndex + 1));
-  const windowTurns = SELF_IMPROVE_TURN_WINDOW_TURNS;
-  if (userTurns <= 0 || userTurns % windowTurns !== 0) return undefined;
+}
+
+type ProviderContextCheckpoint = {
+  leafId: string;
+  generationKey: string;
+  pruningBoundary: number;
+  messageCount: number;
+};
+
+function resolveProviderContextCheckpoint(branch: any[], entryIndex: number) {
+  const leafId = normalizedText(branch[entryIndex]?.id);
+  if (!leafId) return undefined;
+  const messages = buildSessionContext(branch as any[], leafId).messages;
   return {
-    leafId: closingAssistantLeafId,
-    trigger: SELF_IMPROVE_WINDOW_TRIGGER,
-    snapshotKey: `turn-window:${windowTurns}:${userTurns}:${closingAssistantLeafId}`,
+    leafId,
+    generationKey: providerGenerationKey(branch, entryIndex),
+    pruningBoundary: calculatePruningBoundary(messages),
+    messageCount: messages.length,
+  } satisfies ProviderContextCheckpoint;
+}
+
+function findPreviousProviderInputCheckpoint(
+  branch: any[],
+  currentLeafIndex: number,
+) {
+  for (let index = currentLeafIndex; index >= 0; index -= 1) {
+    if (sessionEntryMessage(branch[index])?.role !== "assistant") continue;
+    const parentId = normalizedText(branch[index]?.parentId);
+    if (!parentId) return undefined;
+    const parentIndex = branch.findIndex(
+      (entry) => normalizedText(entry?.id) === parentId,
+    );
+    if (parentIndex < 0) return undefined;
+    return resolveProviderContextCheckpoint(branch, parentIndex);
+  }
+  return undefined;
+}
+
+function resolvePrePruneContextReview(event: any, ctx: any) {
+  const messages = Array.isArray(event?.messages) ? event.messages : [];
+  if (messages.length === 0) return undefined;
+  const branch = ctx?.sessionManager?.getBranch?.() || [];
+  const leafId = normalizedText(ctx?.sessionManager?.getLeafId?.());
+  const currentLeafIndex = branch.findIndex(
+    (entry) => normalizedText(entry?.id) === leafId,
+  );
+  if (!leafId || currentLeafIndex < 0) return undefined;
+  const generationKey = providerGenerationKey(branch, currentLeafIndex);
+  const nextPruningBoundary = calculatePruningBoundary(messages);
+  const previous = findPreviousProviderInputCheckpoint(
+    branch,
+    currentLeafIndex,
+  );
+  const pruningBoundary =
+    previous?.generationKey === generationKey ? previous.pruningBoundary : 0;
+  if (nextPruningBoundary <= pruningBoundary) return undefined;
+  const sourceContext = {
+    pruningBoundary,
+    nextPruningBoundary,
+    messageCount: messages.length,
+  } satisfies SessionSourceContext;
+  return {
+    leafId,
+    trigger: SELF_IMPROVE_ROLLOVER_TRIGGER,
+    snapshotKey: `context-rollover:${generationKey}:${pruningBoundary}:${nextPruningBoundary}:${leafId}`,
+    sourceContext,
+  };
+}
+
+function resolveShutdownContextReview(branch: any[], requestedLeafId?: string) {
+  const leafId =
+    normalizedText(requestedLeafId) || normalizedText(branch.at(-1)?.id);
+  if (!leafId) return undefined;
+  const leafIndex = branch.findIndex(
+    (entry) => normalizedText(entry?.id) === leafId,
+  );
+  if (leafIndex < 0) return undefined;
+  const checkpoint = resolveProviderContextCheckpoint(branch, leafIndex);
+  if (!checkpoint || checkpoint.messageCount <= 0) return undefined;
+  const sourceContext = {
+    pruningBoundary: checkpoint.pruningBoundary,
+    messageCount: checkpoint.messageCount,
+  } satisfies SessionSourceContext;
+  return {
+    leafId: checkpoint.leafId,
+    trigger: SELF_IMPROVE_SHUTDOWN_TRIGGER,
+    snapshotKey: `context-tail:${checkpoint.generationKey}:${sourceContext.pruningBoundary}:${sourceContext.messageCount}:${checkpoint.leafId}`,
+    sourceContext,
   };
 }
 
@@ -218,26 +264,18 @@ export default function selfImproveModule(
     tools: [],
     hooks: {
       tool_execution_start: [recordSelfImproveSkillReadEvent],
-      message_end: [
+      context: [
         async (event, ctx) => {
           if (!isUserFrontendSelfImproveTrigger(event, ctx)) return;
-          if (!isAssistantFinalMessage(event?.message)) return;
           const meta = readSessionMetadata(ctx);
           if (!meta.sessionFile || !meta.sessionPersisted) return;
-          const closingMessage = event.message;
-          setImmediate(() => {
-            try {
-              const completedWindow = resolveCompletedTurnWindow(
-                ctx?.sessionManager?.getBranch?.() || [],
-                closingMessage,
-              );
-              if (!completedWindow) return;
-              void safelyEnqueueSelfImproveReview(enqueueJob, ctx, {
-                sessionFile: meta.sessionFile,
-                ...completedWindow,
-              });
-            } catch {}
+          const prePruneReview = resolvePrePruneContextReview(event, ctx);
+          if (!prePruneReview) return;
+          await safelyEnqueueSelfImproveReview(enqueueJob, ctx, {
+            sessionFile: meta.sessionFile,
+            ...prePruneReview,
           });
+          return undefined;
         },
       ],
       session_shutdown: [
@@ -246,15 +284,14 @@ export default function selfImproveModule(
           if (!isUserFrontendSelfImproveTrigger(event, ctx)) return;
           const meta = readSessionMetadata(ctx);
           if (!meta.sessionPersisted) return;
-          const completedWindow = resolveCompletedTurnWindow(
+          const shutdownTail = resolveShutdownContextReview(
             ctx?.sessionManager?.getBranch?.() || [],
+            meta.leafId,
           );
+          if (!shutdownTail) return;
           await safelyEnqueueSelfImproveReview(enqueueJob, ctx, {
             sessionFile: meta.sessionFile,
-            ...(completedWindow || {
-              leafId: meta.leafId,
-              trigger: "self_improve:session_shutdown_review",
-            }),
+            ...shutdownTail,
           });
         },
       ],

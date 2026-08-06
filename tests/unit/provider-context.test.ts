@@ -89,7 +89,7 @@ test("provider-bound context exposes custom bucket sizing through one policy sur
 
   const providerMessages = providerContext.buildProviderBoundContextMessages(
     messages,
-    { messageBucketSize: 2, retainMessageBuckets: 2 },
+    { messageBucketSize: 2, retainedBuckets: 2 },
   );
 
   assert.equal(providerMessages[0].content, "old tool result omitted");
@@ -185,7 +185,7 @@ test("provider-bound context policy owns token estimates", () => {
         ? 900
         : 10,
     }),
-    { messageBucketSize: 2, retainMessageBuckets: 2 },
+    { messageBucketSize: 2, retainedBuckets: 2 },
   );
 
   assert.equal(tokens, 10);
@@ -199,7 +199,7 @@ test("provider-bound context event uses the same bucket policy surface", () => {
 
   const result = providerContext.buildProviderBoundContextEvent(
     { messages },
-    { messageBucketSize: 2, retainMessageBuckets: 2 },
+    { messageBucketSize: 2, retainedBuckets: 2 },
   );
 
   assert.equal(result.messages[0].content, "old tool result omitted");

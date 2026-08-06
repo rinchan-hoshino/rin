@@ -42,7 +42,7 @@ function pruningTailPadding(count: number) {
   }));
 }
 
-test("provider-bound pruning is the sole builtin context-transform capability", () => {
+test("self-improve observes context before the sole provider-bound transformer", () => {
   const definitions = runtimeMod.createRinCapabilityDefinitions({
     cwd: rootDir,
     agentDir: rootDir,
@@ -51,13 +51,13 @@ test("provider-bound pruning is the sole builtin context-transform capability", 
     .filter((definition) => definition.hooks?.context?.length)
     .map((definition) => definition.name);
 
-  assert.deepEqual(contextCapabilities.slice(-1), [
+  assert.deepEqual(contextCapabilities, [
+    "self_improve",
     "rin_provider_bound_context",
   ]);
-  assert.equal(contextCapabilities.includes("self_improve"), false);
 });
 
-test("self-improve forks preserve raw tool output throughout the active turn window", async () => {
+test("self-improve forks preserve the complete prefix from the previous pruning boundary", async () => {
   const definitions = runtimeMod.createRinCapabilityDefinitions({
     cwd: rootDir,
     agentDir: rootDir,
@@ -92,7 +92,11 @@ test("self-improve forks preserve raw tool output throughout the active turn win
   const preserved = await context(event, {
     cwd: rootDir,
     sessionManager: {
-      [sessionForkMod.EPHEMERAL_FORK_PROTECT_SOURCE_WINDOW_TURNS_KEY]: 4,
+      [sessionForkMod.EPHEMERAL_FORK_SOURCE_CONTEXT_KEY]: {
+        pruningBoundary: 0,
+        nextPruningBoundary: 32,
+        messageCount: 129,
+      },
     },
   });
   assert.equal(preserved, undefined);

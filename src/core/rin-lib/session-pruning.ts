@@ -5,10 +5,16 @@ export const RIN_SESSION_PRUNING_MESSAGE_BUCKET_SIZE = 32;
 export const RIN_SESSION_PRUNING_RETAINED_BUCKETS = 4;
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT =
   "old tool result omitted";
+export type SessionSourceContext = {
+  pruningBoundary: number;
+  messageCount: number;
+  nextPruningBoundary?: number;
+};
+
 export type SessionPruningOptions = {
   messageBucketSize?: number;
-  retainMessageBuckets?: number;
-  protectRecentTurns?: number;
+  retainedBuckets?: number;
+  protectFromMessageIndex?: number;
   cwd?: string;
 };
 
@@ -29,14 +35,41 @@ export function normalizeRetainedMessageBuckets(value: unknown) {
   return normalizePositiveInteger(value, RIN_SESSION_PRUNING_RETAINED_BUCKETS);
 }
 
-function normalizeOptionalRecentTurns(value: unknown) {
-  const turns = Number(value);
-  if (!Number.isFinite(turns) || turns <= 0) return 0;
-  return Math.floor(turns);
+export function normalizeProtectedMessageStart(value: unknown) {
+  const index = Number(value);
+  if (!Number.isInteger(index) || index < 0) return undefined;
+  return index;
 }
 
-function isUserMessage(message: any) {
-  return String(message?.role || "").trim() === "user";
+export function normalizeSessionSourceContext(
+  value: unknown,
+): SessionSourceContext | undefined {
+  const context = value && typeof value === "object" ? (value as any) : {};
+  const pruningBoundary = normalizeProtectedMessageStart(
+    context.pruningBoundary,
+  );
+  const messageCount = Number(context.messageCount);
+  const hasNextBoundary = context.nextPruningBoundary !== undefined;
+  const nextPruningBoundary = hasNextBoundary
+    ? normalizeProtectedMessageStart(context.nextPruningBoundary)
+    : undefined;
+  if (
+    pruningBoundary === undefined ||
+    !Number.isInteger(messageCount) ||
+    messageCount <= 0 ||
+    pruningBoundary >= messageCount ||
+    (hasNextBoundary &&
+      (nextPruningBoundary === undefined ||
+        nextPruningBoundary <= pruningBoundary ||
+        nextPruningBoundary >= messageCount))
+  ) {
+    return undefined;
+  }
+  return {
+    pruningBoundary,
+    messageCount,
+    ...(nextPruningBoundary === undefined ? {} : { nextPruningBoundary }),
+  };
 }
 
 function isToolResultMessage(message: any) {
@@ -72,27 +105,14 @@ function isProtectedToolResult(
   return Boolean(id && protectedToolResultIds.has(id));
 }
 
-export function findProtectedTurnStart(
-  messages: any[],
-  protectRecentTurns: number,
-) {
-  let turns = 0;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (!isUserMessage(messages[index])) continue;
-    turns += 1;
-    if (turns >= protectRecentTurns) return index;
-  }
-  return 0;
-}
-
 export function findProtectedMessageBucketStart(
   messages: any[],
   messageBucketSize: number,
-  retainMessageBuckets: number,
+  retainedBuckets: number,
 ) {
   if (messages.length === 0) return 0;
   const bucketSize = normalizeMessageBucketSize(messageBucketSize);
-  const retainedBuckets = normalizeRetainedMessageBuckets(retainMessageBuckets);
+  const retainedBucketCount = normalizeRetainedMessageBuckets(retainedBuckets);
   // Absolute indices make bucket ordinals stable within one provider-context
   // generation. The boundary advances only when a new bucket begins; it never
   // slides with the tail length. Compaction or branch replacement already
@@ -100,7 +120,7 @@ export function findProtectedMessageBucketStart(
   const currentBucketOrdinal = Math.floor((messages.length - 1) / bucketSize);
   const oldestRetainedBucketOrdinal = Math.max(
     0,
-    currentBucketOrdinal - retainedBuckets + 1,
+    currentBucketOrdinal - retainedBucketCount + 1,
   );
   return oldestRetainedBucketOrdinal * bucketSize;
 }
@@ -134,15 +154,13 @@ export function pruneSessionContextMessages(
   const bucketProtectedStart = findProtectedMessageBucketStart(
     input,
     normalizeMessageBucketSize(options.messageBucketSize),
-    normalizeRetainedMessageBuckets(options.retainMessageBuckets),
+    normalizeRetainedMessageBuckets(options.retainedBuckets),
   );
-  const protectRecentTurns = normalizeOptionalRecentTurns(
-    options.protectRecentTurns,
+  const protectedStart = Math.min(
+    bucketProtectedStart,
+    normalizeProtectedMessageStart(options.protectFromMessageIndex) ??
+      bucketProtectedStart,
   );
-  const turnProtectedStart = protectRecentTurns
-    ? findProtectedTurnStart(input, protectRecentTurns)
-    : input.length;
-  const protectedStart = Math.min(bucketProtectedStart, turnProtectedStart);
   const protectedToolResultIds = collectProtectedToolResultIds(
     input,
     String(options.cwd || process.cwd()),

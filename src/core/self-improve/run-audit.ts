@@ -10,6 +10,10 @@ import {
   selfImproveSkillsDir,
   selfImproveStateDir,
 } from "./paths.js";
+import {
+  normalizeSessionSourceContext,
+  type SessionSourceContext,
+} from "../rin-lib/session-pruning.js";
 
 export type SelfImproveRunAuditPolicy = {
   maxOutputBytes: number;
@@ -26,6 +30,7 @@ export type SelfImproveRunAuditSource = {
   sessionFile?: string;
   leafId?: string;
   snapshotKey?: string;
+  sourceContext?: SessionSourceContext;
   trigger?: string;
 };
 
@@ -223,6 +228,7 @@ function sanitizeSource(
       sessionFile: bounded(source.sessionFile),
       leafId: bounded(source.leafId),
       snapshotKey: bounded(source.snapshotKey),
+      sourceContext: normalizeSessionSourceContext(source.sourceContext),
       trigger: bounded(source.trigger),
     },
     redacted,

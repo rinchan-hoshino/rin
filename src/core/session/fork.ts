@@ -3,6 +3,10 @@ import { randomUUID } from "node:crypto";
 import { asArray } from "../json-utils.js";
 import { buildPiSessionManagerIndex } from "../pi/session-host.js";
 import { nowIso } from "../time-utils.js";
+import {
+  normalizeSessionSourceContext,
+  type SessionSourceContext,
+} from "../rin-lib/session-pruning.js";
 
 type ForkCapabilities = {
   legacy: boolean;
@@ -17,8 +21,8 @@ function normalizeLeafId(value: unknown) {
 export const EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY = Symbol.for(
   "rin.ephemeralFork.disableRoutineCompaction",
 );
-export const EPHEMERAL_FORK_PROTECT_SOURCE_WINDOW_TURNS_KEY = Symbol.for(
-  "rin.ephemeralFork.protectSourceWindowTurns",
+export const EPHEMERAL_FORK_SOURCE_CONTEXT_KEY = Symbol.for(
+  "rin.ephemeralFork.sourceContext",
 );
 
 type ForkSessionOptions = {
@@ -26,7 +30,7 @@ type ForkSessionOptions = {
   leafId?: string;
   preserveSourceSessionId?: boolean;
   disableRoutineCompaction?: boolean;
-  protectSourceWindowTurns?: number;
+  sourceContext?: SessionSourceContext;
 };
 
 function normalizeForkOptions(options: ForkSessionOptions = {}) {
@@ -42,6 +46,9 @@ function normalizeForkOptions(options: ForkSessionOptions = {}) {
   if (options.disableRoutineCompaction === true) {
     normalized.disableRoutineCompaction = true;
   }
+  const sourceContext = normalizeSessionSourceContext(options.sourceContext);
+  if (sourceContext) normalized.sourceContext = sourceContext;
+  else delete normalized.sourceContext;
   return normalized;
 }
 
@@ -69,7 +76,7 @@ function createEphemeralForkManager(
   leafId: string | undefined,
   preserveSourceSessionId: boolean,
   disableRoutineCompaction: boolean,
-  protectSourceWindowTurns: number,
+  sourceContext: SessionSourceContext | undefined,
 ) {
   if (
     typeof SessionManager?.open !== "function" ||
@@ -109,9 +116,8 @@ function createEphemeralForkManager(
   if (disableRoutineCompaction) {
     manager[EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY] = true;
   }
-  if (protectSourceWindowTurns > 0) {
-    manager[EPHEMERAL_FORK_PROTECT_SOURCE_WINDOW_TURNS_KEY] =
-      protectSourceWindowTurns;
+  if (sourceContext) {
+    manager[EPHEMERAL_FORK_SOURCE_CONTEXT_KEY] = { ...sourceContext };
   }
   buildPiSessionManagerIndex(manager);
   return manager;
@@ -135,12 +141,15 @@ export function forkSessionManagerCompat(
   if (normalizedOptions.disableRoutineCompaction && normalizedOptions.persist) {
     throw new Error("session_fork_unsupported:disable_compaction_persisted");
   }
+  if (normalizedOptions.sourceContext && normalizedOptions.persist) {
+    throw new Error("session_fork_unsupported:source_context_persisted");
+  }
 
   if (
     capabilities.optionAware &&
     !normalizedOptions.preserveSourceSessionId &&
     !normalizedOptions.disableRoutineCompaction &&
-    !normalizedOptions.protectSourceWindowTurns
+    !normalizedOptions.sourceContext
   ) {
     return SessionManager.forkFrom(
       sourcePath,
@@ -165,9 +174,6 @@ export function forkSessionManagerCompat(
     normalizedOptions.leafId,
     normalizedOptions.preserveSourceSessionId,
     normalizedOptions.disableRoutineCompaction === true,
-    Number.isInteger(normalizedOptions.protectSourceWindowTurns) &&
-      Number(normalizedOptions.protectSourceWindowTurns) > 0
-      ? Number(normalizedOptions.protectSourceWindowTurns)
-      : 0,
+    normalizedOptions.sourceContext,
   );
 }

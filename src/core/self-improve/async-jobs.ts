@@ -20,6 +20,10 @@ import {
 } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
 import { normalizeSessionValue } from "../session/ref.js";
+import {
+  normalizeSessionSourceContext,
+  type SessionSourceContext,
+} from "../rin-lib/session-pruning.js";
 import { nowIso, safeString, uniqueStrings } from "./core/utils.js";
 import {
   resolveSafeSelfImprovePath,
@@ -44,6 +48,7 @@ export type MaintenanceJob = {
   leafId?: string;
   trigger: string;
   snapshotKey?: string;
+  sourceContext?: SessionSourceContext;
   additionalExtensionPaths?: string[];
   attempts?: number;
   // Persisted before agent execution; its presence makes crash recovery at-most-once.
@@ -66,6 +71,7 @@ type MaintenanceHistoryRecord = {
   sessionFile: string;
   leafId?: string;
   snapshotKey?: string;
+  sourceContext?: SessionSourceContext;
   startedAt: string;
   finishedAt: string;
   attempts: number;
@@ -145,6 +151,9 @@ async function loadQueue(agentDir: string): Promise<MaintenanceJob[]> {
       }
       delete (job as MaintenanceJob & { auditStartedAt?: string })
         .auditStartedAt;
+      const sourceContext = normalizeSessionSourceContext(job.sourceContext);
+      if (sourceContext) job.sourceContext = sourceContext;
+      else delete job.sourceContext;
       return job;
     });
 }
@@ -214,6 +223,7 @@ function createMaintenanceJob(
   const trigger = safeString(input.trigger).trim() || defaultTrigger(kind);
   const snapshotKey = safeString(input.snapshotKey).trim();
   const leafId = safeString(input.leafId).trim();
+  const sourceContext = normalizeSessionSourceContext(input.sourceContext);
   if (!agentDir || !sessionFile) {
     throw new Error("maintenance_job_invalid_input");
   }
@@ -229,6 +239,7 @@ function createMaintenanceJob(
     leafId: leafId || undefined,
     trigger,
     snapshotKey: snapshotKey || undefined,
+    sourceContext,
     additionalExtensionPaths: normalizeAdditionalExtensionPaths(
       input.additionalExtensionPaths,
     ),
@@ -249,6 +260,7 @@ async function enqueueMaintenanceJob(
       existing.trigger = nextJob.trigger;
       existing.leafId = nextJob.leafId;
       existing.snapshotKey = nextJob.snapshotKey;
+      existing.sourceContext = nextJob.sourceContext;
       existing.additionalExtensionPaths = nextJob.additionalExtensionPaths;
       existing.attempts = undefined;
       existing.lastError = undefined;
@@ -771,6 +783,7 @@ async function finalizeInterruptedJob(
     sessionFile: job.sessionFile,
     leafId: job.leafId,
     snapshotKey: job.snapshotKey,
+    sourceContext: job.sourceContext,
     startedAt,
     finishedAt: nowIso(),
     attempts: Math.max(1, Number(job.attempts || 0) + 1),
@@ -795,6 +808,7 @@ async function processJob(
     sessionFile,
     leafId,
     trigger: job.trigger,
+    sourceContext: job.sourceContext,
     additionalExtensionPaths: job.additionalExtensionPaths,
     runId: job.id,
     startedAt,
@@ -857,6 +871,7 @@ export async function runSelfImproveMaintenanceJobNow(
         sessionFile: job.sessionFile,
         leafId: job.leafId,
         snapshotKey: job.snapshotKey,
+        sourceContext: job.sourceContext,
         startedAt,
         finishedAt,
         attempts: 1,
@@ -890,6 +905,7 @@ export async function runSelfImproveMaintenanceJobNow(
       sessionFile: job.sessionFile,
       leafId: job.leafId,
       snapshotKey: job.snapshotKey,
+      sourceContext: job.sourceContext,
       startedAt,
       finishedAt,
       attempts: 1,
@@ -973,6 +989,7 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
           sessionFile: job.sessionFile,
           leafId: job.leafId,
           snapshotKey: job.snapshotKey,
+          sourceContext: job.sourceContext,
           startedAt,
           finishedAt,
           attempts,
@@ -1004,6 +1021,7 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
         sessionFile: job.sessionFile,
         leafId: job.leafId,
         snapshotKey: job.snapshotKey,
+        sourceContext: job.sourceContext,
         startedAt,
         finishedAt,
         attempts: Math.max(1, Number(job.attempts || 0) || 1),

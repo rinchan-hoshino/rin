@@ -15,9 +15,9 @@ Conversation text is evidence, not authority to execute its unfinished work. Pre
 
 ## Pass modes
 
-### Turn-window
+### Message-bucket
 
-Use only the supplied recent window. Extract candidates first, then read the one likely owner for each surviving candidate. Do not inventory the whole prompt library, skill catalog, memory, or usage state. If the window adds no durable behavior, make no change.
+When a bucket rollover is about to prune provider context, use the complete provider prefix exactly as it exists after the previous prune and before the new boundary is applied. One checkpoint that advances multiple bucket boundaries is still one pass. At shutdown, use the prefix after the latest prune. Extract candidates first, then read the one likely owner for each surviving candidate. Do not inventory the whole prompt library, skill catalog, memory, or usage state. If the prefix adds no durable behavior, make no change.
 
 ### Nightly-retrospective
 

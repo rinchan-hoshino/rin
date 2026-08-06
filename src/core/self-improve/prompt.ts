@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import type { SessionSourceContext } from "../rin-lib/session-pruning.js";
+
 function selfImproveManualPath(agentDir: string) {
   return path.join(
     agentDir,
@@ -13,7 +15,7 @@ function selfImproveManualPath(agentDir: string) {
 function buildSelfImproveDistillationPrompt(options: {
   agentDir: string;
   evidenceScope: string;
-  passMode: "turn-window" | "nightly-retrospective";
+  passMode: "message-bucket" | "nightly-retrospective";
   trigger?: string;
   sourceConversationEvidenceOnly?: boolean;
 }) {
@@ -38,11 +40,17 @@ function buildSelfImproveDistillationPrompt(options: {
 export function buildSelfImproveReviewPrompt(
   trigger: string,
   agentDir = "<agentDir>",
+  sourceContext?: SessionSourceContext,
 ) {
+  const evidenceScope = sourceContext
+    ? sourceContext.nextPruningBoundary === undefined
+      ? `the complete provider prefix above after pruning boundary ${sourceContext.pruningBoundary} and before session shutdown`
+      : `the complete provider prefix above after pruning boundary ${sourceContext.pruningBoundary} and immediately before boundary ${sourceContext.nextPruningBoundary} is applied`
+    : "the conversation above";
   return buildSelfImproveDistillationPrompt({
     agentDir,
-    evidenceScope: "the conversation above",
-    passMode: "turn-window",
+    evidenceScope,
+    passMode: "message-bucket",
     trigger,
     sourceConversationEvidenceOnly: true,
   });

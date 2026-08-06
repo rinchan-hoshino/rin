@@ -1,1 +1,0 @@
-export const SELF_IMPROVE_TURN_WINDOW_TURNS = 4;

@@ -146,7 +146,7 @@ test("session pruning supports small custom buckets for deterministic callers", 
 
   const result = pruning.pruneSessionContextMessages(messages, {
     messageBucketSize: 2,
-    retainMessageBuckets: 2,
+    retainedBuckets: 2,
   });
 
   assert.equal(
@@ -156,7 +156,7 @@ test("session pruning supports small custom buckets for deterministic callers", 
   assert.equal(result[2], secondResult);
 });
 
-test("session pruning can extend bucket protection for an ephemeral source-turn window", () => {
+test("session pruning can preserve the complete suffix after a previous pruning boundary", () => {
   const oldResult = { role: "toolResult", content: "old output" };
   const protectedResult = { role: "toolResult", content: "source evidence" };
   const messages = [
@@ -168,8 +168,8 @@ test("session pruning can extend bucket protection for an ephemeral source-turn 
 
   const result = pruning.pruneSessionContextMessages(messages, {
     messageBucketSize: 2,
-    retainMessageBuckets: 2,
-    protectRecentTurns: 1,
+    retainedBuckets: 2,
+    protectFromMessageIndex: 2,
   });
 
   assert.equal(
