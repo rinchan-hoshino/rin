@@ -5,7 +5,7 @@ import type {
   RinCapabilityOptions,
 } from "../rin-lib/capability-types.js";
 import { isAssistantFinalMessage } from "../message-content.js";
-import { RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS } from "../rin-lib/session-pruning.js";
+import { SELF_IMPROVE_TURN_WINDOW_TURNS } from "./constants.js";
 import { enqueueSelfImproveMaintenanceJob } from "./async-jobs.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { recordSelfImproveSkillReadEvent } from "./skill-usage.js";
@@ -194,7 +194,7 @@ function resolveCompletedTurnWindow(branch: any[], closingMessage?: any) {
   );
   if (!closingAssistantLeafId) return undefined;
   const userTurns = countUserTurns(branch.slice(0, closingAssistantIndex + 1));
-  const windowTurns = RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS;
+  const windowTurns = SELF_IMPROVE_TURN_WINDOW_TURNS;
   if (userTurns <= 0 || userTurns % windowTurns !== 0) return undefined;
   return {
     leafId: closingAssistantLeafId,

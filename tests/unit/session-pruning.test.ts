@@ -3,57 +3,116 @@ import test from "node:test";
 
 const pruning = await import("../../dist/core/rin-lib/session-pruning.js");
 
-function tailPadding(count: number) {
+function padding(count: number, start = 0) {
   return Array.from({ length: count }, (_, index) => ({
     role: "assistant",
-    content: `tail-${index + 1}`,
+    content: `message-${start + index}`,
   }));
 }
 
-test("session pruning omits old tool results while preserving the recent four turns", () => {
-  const oldResult = { role: "toolResult", content: "old output" };
-  const recentResults = Array.from({ length: 4 }, (_, index) => ({
+test("session pruning defaults to four stable 32-message buckets", () => {
+  assert.equal(pruning.RIN_SESSION_PRUNING_MESSAGE_BUCKET_SIZE, 32);
+  assert.equal(pruning.RIN_SESSION_PRUNING_RETAINED_BUCKETS, 4);
+
+  const openingResult = { role: "toolResult", content: "opening output" };
+  const messages = [openingResult, ...padding(127, 1)];
+
+  assert.equal(messages.length, 128);
+  assert.equal(pruning.pruneSessionContextMessages(messages), messages);
+  assert.equal(messages[0], openingResult);
+});
+
+test("session pruning omits the oldest bucket in one batch at the fifth-bucket rollover", () => {
+  const firstResult = { role: "toolResult", content: "bucket 1 start" };
+  const lastFirstBucketResult = {
     role: "toolResult",
-    content: `recent output ${index + 2}`,
-  }));
-  const messages = [
-    { role: "user", content: "turn 1" },
-    oldResult,
-    ...recentResults.flatMap((result, index) => [
-      { role: "user", content: `turn ${index + 2}` },
-      result,
-    ]),
-  ];
+    content: "bucket 1 end",
+  };
+  const firstRetainedResult = {
+    role: "toolResult",
+    content: "bucket 2 start",
+  };
+  const messages = padding(129);
+  messages[0] = firstResult;
+  messages[31] = lastFirstBucketResult;
+  messages[32] = firstRetainedResult;
 
   const result = pruning.pruneSessionContextMessages(messages);
 
   assert.notEqual(result, messages);
   assert.equal(
-    result[1].content,
+    result[0].content,
     pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
   );
-  for (const recentResult of recentResults) {
-    assert.equal(result[messages.indexOf(recentResult)], recentResult);
-  }
-  assert.equal(oldResult.content, "old output");
+  assert.equal(
+    result[31].content,
+    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
+  );
+  assert.equal(result[32], firstRetainedResult);
+  assert.equal(firstResult.content, "bucket 1 start");
 });
 
-test("session pruning is a no-op until more than four user turns exist", () => {
-  const messages = [
-    { role: "user", content: "turn 1" },
-    { role: "toolResult", content: "output 1" },
-    { role: "user", content: "turn 2" },
-    { role: "toolResult", content: "output 2" },
-    { role: "user", content: "turn 3" },
-    { role: "toolResult", content: "output 3" },
-    { role: "user", content: "turn 4" },
-    { role: "toolResult", content: "output 4" },
+test("session pruning keeps a stable boundary inside a bucket and advances only on rollover", () => {
+  const bucketOneResult = { role: "toolResult", content: "bucket 1" };
+  const bucketTwoResult = { role: "toolResult", content: "bucket 2" };
+  const at129 = padding(129);
+  at129[0] = bucketOneResult;
+  at129[32] = bucketTwoResult;
+  const at160 = [...at129, ...padding(31, 129)];
+  const at161 = [...at160, { role: "assistant", content: "message-160" }];
+
+  const result129 = pruning.pruneSessionContextMessages(at129);
+  const result160 = pruning.pruneSessionContextMessages(at160);
+  const result161 = pruning.pruneSessionContextMessages(at161);
+
+  assert.equal(
+    result129[0].content,
+    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
+  );
+  assert.equal(result129[32], bucketTwoResult);
+  assert.equal(
+    result160[0].content,
+    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
+  );
+  assert.equal(result160[32], bucketTwoResult);
+  assert.equal(
+    result161[32].content,
+    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
+  );
+});
+
+test("session pruning reconstructs the same generation deterministically and resets after compaction", () => {
+  const openingResult = { role: "toolResult", content: "opening output" };
+  const messages = [openingResult, ...padding(128, 1)];
+
+  const first = pruning.pruneSessionContextMessages(messages);
+  const reconstructed = pruning.pruneSessionContextMessages(
+    structuredClone(messages),
+  );
+
+  assert.deepEqual(reconstructed, first);
+  assert.equal(
+    reconstructed[0].content,
+    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
+  );
+
+  const newGenerationResult = {
+    role: "toolResult",
+    content: "post-compaction output",
+  };
+  const compactedMessages = [
+    { role: "compactionSummary", content: "summary" },
+    newGenerationResult,
+    ...padding(30, 2),
   ];
-
-  assert.equal(pruning.pruneSessionContextMessages(messages), messages);
+  assert.equal(
+    pruning.pruneSessionContextMessages(compactedMessages),
+    compactedMessages,
+  );
+  assert.equal(compactedMessages[1], newGenerationResult);
 });
 
-test("session pruning preserves every tool result inside one arbitrarily long user turn", () => {
+test("session pruning applies message depth even inside one arbitrarily long user turn", () => {
   const openingToolResult = {
     role: "toolResult",
     content: "x".repeat(25_000),
@@ -61,111 +120,115 @@ test("session pruning preserves every tool result inside one arbitrarily long us
   const messages = [
     { role: "user", content: "one long turn" },
     openingToolResult,
-    ...tailPadding(64),
-  ];
-
-  assert.equal(pruning.pruneSessionContextMessages(messages), messages);
-  assert.equal(messages[1], openingToolResult);
-});
-
-test("session pruning preserves every message in each of the recent four turns", () => {
-  const oldResult = { role: "toolResult", content: "old output" };
-  const recentResults = Array.from({ length: 4 }, (_, index) => ({
-    role: "toolResult",
-    content: `recent output ${index + 2}`.repeat(2_000),
-  }));
-  const messages = [
-    { role: "user", content: "turn 1" },
-    oldResult,
-    ...recentResults.flatMap((result, index) => [
-      { role: "user", content: `turn ${index + 2}` },
-      result,
-      ...tailPadding(24),
-    ]),
+    ...padding(127, 2),
   ];
 
   const result = pruning.pruneSessionContextMessages(messages);
 
+  assert.equal(messages.length, 129);
   assert.equal(
     result[1].content,
     pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
   );
-  for (const recentResult of recentResults) {
-    assert.equal(result[messages.indexOf(recentResult)], recentResult);
-  }
+  assert.equal(openingToolResult.content.length, 25_000);
 });
 
-test("session pruning supports a custom recent-turn window", () => {
-  const oldResult = { role: "toolResult", content: "old output" };
-  const recentResult = { role: "toolResult", content: "recent output" };
+test("session pruning supports small custom buckets for deterministic callers", () => {
+  const firstResult = { role: "toolResult", content: "bucket 1" };
+  const secondResult = { role: "toolResult", content: "bucket 2" };
   const messages = [
-    { role: "user", content: "turn 1" },
-    oldResult,
-    { role: "user", content: "turn 2" },
-    recentResult,
-    { role: "user", content: "turn 3" },
+    firstResult,
+    { role: "assistant", content: "message 2" },
+    secondResult,
+    { role: "assistant", content: "message 4" },
+    { role: "assistant", content: "message 5" },
   ];
 
   const result = pruning.pruneSessionContextMessages(messages, {
-    protectRecentTurns: 2,
+    messageBucketSize: 2,
+    retainMessageBuckets: 2,
   });
 
   assert.equal(
-    result[1].content,
+    result[0].content,
     pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
   );
-  assert.equal(result[3], recentResult);
+  assert.equal(result[2], secondResult);
 });
 
-test("session pruning handles snake-case tool-result roles outside the recent turns", () => {
-  const oldResult = { role: "tool_result", content: "old output" };
+test("session pruning can extend bucket protection for an ephemeral source-turn window", () => {
+  const oldResult = { role: "toolResult", content: "old output" };
+  const protectedResult = { role: "toolResult", content: "source evidence" };
   const messages = [
-    { role: "user", content: "turn 1" },
     oldResult,
-    { role: "user", content: "turn 2" },
-    { role: "user", content: "turn 3" },
-    { role: "user", content: "turn 4" },
-    { role: "user", content: "turn 5" },
+    { role: "user", content: "source turn" },
+    protectedResult,
+    ...padding(6, 3),
   ];
+
+  const result = pruning.pruneSessionContextMessages(messages, {
+    messageBucketSize: 2,
+    retainMessageBuckets: 2,
+    protectRecentTurns: 1,
+  });
+
+  assert.equal(
+    result[0].content,
+    pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
+  );
+  assert.equal(result[2], protectedResult);
+});
+
+test("session pruning handles snake-case tool-result roles outside retained buckets", () => {
+  const oldResult = { role: "tool_result", content: "old output" };
+  const messages = [oldResult, ...padding(128, 1)];
 
   const result = pruning.pruneSessionContextMessages(messages);
 
   assert.equal(
-    result[1].content,
+    result[0].content,
     pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
   );
 });
 
-test("session pruning does not omit rich user image content", () => {
+test("session pruning changes only old tool-result content", () => {
   const oldUserImage = { type: "image", data: "old-user-base64" };
+  const oldResult = {
+    role: "toolResult",
+    toolCallId: "call-old",
+    toolName: "read",
+    content: "old output",
+    isError: true,
+  };
   const messages = [
-    { role: "user", content: [{ type: "text", text: "turn 1" }, oldUserImage] },
-    { role: "assistant", content: "done 1" },
-    { role: "user", content: "turn 2" },
-    { role: "assistant", content: "done 2" },
-    { role: "user", content: "turn 3" },
-    { role: "assistant", content: "done 3" },
-    { role: "user", content: "turn 4" },
-    { role: "assistant", content: "done 4" },
-    { role: "user", content: "turn 5" },
+    { role: "user", content: [{ type: "text", text: "turn" }, oldUserImage] },
+    oldResult,
+    ...padding(127, 2),
   ];
 
-  assert.equal(pruning.pruneSessionContextMessages(messages), messages);
-  assert.equal(messages[0].content[1], oldUserImage);
+  const result = pruning.pruneSessionContextMessages(messages);
+
+  assert.equal(result.length, messages.length);
+  assert.equal(result[0], messages[0]);
+  assert.equal(result[0].content[1], oldUserImage);
+  assert.deepEqual({ ...result[1], content: oldResult.content }, oldResult);
+  assert.equal(result[1].role, oldResult.role);
+  assert.equal(result[1].toolCallId, oldResult.toolCallId);
+  assert.equal(result[1].toolName, oldResult.toolName);
+  assert.equal(result[1].isError, true);
 });
 
 test("session pruning keeps tool-result content shape stable and is idempotent", () => {
   const messages = [
-    { role: "user", content: "turn 1" },
-    { role: "toolResult", content: [{ type: "text", text: "old output" }] },
-    { role: "user", content: "turn 2" },
-    { role: "user", content: "turn 3" },
-    { role: "user", content: "turn 4" },
-    { role: "user", content: "turn 5" },
+    {
+      role: "toolResult",
+      content: [{ type: "text", text: "old output" }],
+    },
+    ...padding(128, 1),
   ];
 
   const once = pruning.pruneSessionContextMessages(messages);
-  assert.deepEqual(once[1].content, [
+  assert.deepEqual(once[0].content, [
     { type: "text", text: pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT },
   ]);
   assert.equal(pruning.pruneSessionContextMessages(once), once);
@@ -184,40 +247,34 @@ test("session pruning preserves old Pi-classified skill read results", () => {
     toolName: "read",
     content: "old read output",
   };
-  const messages = [
-    { role: "user", content: "turn 1" },
-    {
-      role: "assistant",
-      content: [
-        {
-          type: "toolCall",
-          id: "call-skill",
-          name: "read",
-          arguments: {
-            path: "/home/rin/.rin/self_improve/skills/demo/SKILL.md",
-          },
+  const messages = padding(129);
+  messages[0] = {
+    role: "assistant",
+    content: [
+      {
+        type: "toolCall",
+        id: "call-skill",
+        name: "read",
+        arguments: {
+          path: "/home/rin/.rin/self_improve/skills/demo/SKILL.md",
         },
-        {
-          type: "toolCall",
-          id: "call-readme",
-          name: "read",
-          arguments: { path: "/tmp/demo/README.md" },
-        },
-      ],
-    },
-    skillReadResult,
-    ordinaryReadResult,
-    { role: "user", content: "turn 2" },
-    { role: "user", content: "turn 3" },
-    { role: "user", content: "turn 4" },
-    { role: "user", content: "turn 5" },
-  ];
+      },
+      {
+        type: "toolCall",
+        id: "call-readme",
+        name: "read",
+        arguments: { path: "/tmp/demo/README.md" },
+      },
+    ],
+  };
+  messages[1] = skillReadResult;
+  messages[2] = ordinaryReadResult;
 
   const result = pruning.pruneSessionContextMessages(messages);
 
-  assert.equal(result[2], skillReadResult);
+  assert.equal(result[1], skillReadResult);
   assert.equal(
-    result[3].content,
+    result[2].content,
     pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT,
   );
   assert.equal(ordinaryReadResult.content, "old read output");

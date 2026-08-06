@@ -75,7 +75,7 @@ test("self-improve forks preserve raw tool output throughout the active turn win
     messages: [
       { role: "user", content: "turn 1" },
       openingToolResult,
-      ...pruningTailPadding(20),
+      ...pruningTailPadding(119),
       { role: "assistant", content: "done 1" },
       { role: "user", content: "turn 2" },
       { role: "assistant", content: "done 2" },
@@ -715,7 +715,7 @@ test("Rin percent compaction estimates error contexts from pruned provider conte
         messages: [
           { role: "user", content: "old" },
           { role: "toolResult", content: "huge old output" },
-          ...pruningTailPadding(8),
+          ...pruningTailPadding(119),
           { role: "user", content: "recent 1" },
           { role: "assistant", content: "ok" },
           { role: "user", content: "recent 2" },
@@ -778,7 +778,7 @@ test("Rin context usage reports the pruned provider-bound estimate", () => {
       { role: "assistant", content: "ok" },
       { role: "user", content: "recent 4" },
       { role: "assistant", content: "ok" },
-      ...pruningTailPadding(8),
+      ...pruningTailPadding(119),
     ],
     getContextUsage() {
       return { tokens: 900, contextWindow: 1000, percent: 90 };

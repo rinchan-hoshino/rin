@@ -1,19 +1,37 @@
 import { extractToolCallParts } from "../message-content.js";
 import { isPiCompactSkillReadCall } from "../pi/private-api.js";
 
-export const RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS = 4;
+export const RIN_SESSION_PRUNING_MESSAGE_BUCKET_SIZE = 32;
+export const RIN_SESSION_PRUNING_RETAINED_BUCKETS = 4;
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT =
   "old tool result omitted";
 export type SessionPruningOptions = {
+  messageBucketSize?: number;
+  retainMessageBuckets?: number;
   protectRecentTurns?: number;
   cwd?: string;
 };
 
-export function normalizeProtectRecentTurns(value: unknown) {
+function normalizePositiveInteger(value: unknown, fallback: number) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return fallback;
+  return Math.floor(number);
+}
+
+export function normalizeMessageBucketSize(value: unknown) {
+  return normalizePositiveInteger(
+    value,
+    RIN_SESSION_PRUNING_MESSAGE_BUCKET_SIZE,
+  );
+}
+
+export function normalizeRetainedMessageBuckets(value: unknown) {
+  return normalizePositiveInteger(value, RIN_SESSION_PRUNING_RETAINED_BUCKETS);
+}
+
+function normalizeOptionalRecentTurns(value: unknown) {
   const turns = Number(value);
-  if (!Number.isFinite(turns) || turns <= 0) {
-    return RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS;
-  }
+  if (!Number.isFinite(turns) || turns <= 0) return 0;
   return Math.floor(turns);
 }
 
@@ -54,7 +72,7 @@ function isProtectedToolResult(
   return Boolean(id && protectedToolResultIds.has(id));
 }
 
-export function findProtectedContextStart(
+export function findProtectedTurnStart(
   messages: any[],
   protectRecentTurns: number,
 ) {
@@ -65,6 +83,26 @@ export function findProtectedContextStart(
     if (turns >= protectRecentTurns) return index;
   }
   return 0;
+}
+
+export function findProtectedMessageBucketStart(
+  messages: any[],
+  messageBucketSize: number,
+  retainMessageBuckets: number,
+) {
+  if (messages.length === 0) return 0;
+  const bucketSize = normalizeMessageBucketSize(messageBucketSize);
+  const retainedBuckets = normalizeRetainedMessageBuckets(retainMessageBuckets);
+  // Absolute indices make bucket ordinals stable within one provider-context
+  // generation. The boundary advances only when a new bucket begins; it never
+  // slides with the tail length. Compaction or branch replacement already
+  // creates a new provider prefix and therefore a new generation.
+  const currentBucketOrdinal = Math.floor((messages.length - 1) / bucketSize);
+  const oldestRetainedBucketOrdinal = Math.max(
+    0,
+    currentBucketOrdinal - retainedBuckets + 1,
+  );
+  return oldestRetainedBucketOrdinal * bucketSize;
 }
 
 function isAlreadyOmitted(content: any) {
@@ -88,48 +126,43 @@ function omittedContentFor(content: any) {
   return RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT;
 }
 
-function createProviderBoundPrunePlan(
+export function pruneSessionContextMessages(
   messages: any[],
   options: SessionPruningOptions = {},
 ) {
   const input = Array.isArray(messages) ? messages : [];
-  const protectedStart = findProtectedContextStart(
+  const bucketProtectedStart = findProtectedMessageBucketStart(
     input,
-    normalizeProtectRecentTurns(options.protectRecentTurns),
+    normalizeMessageBucketSize(options.messageBucketSize),
+    normalizeRetainedMessageBuckets(options.retainMessageBuckets),
   );
-  const replacements = new Map<any, any>();
+  const protectRecentTurns = normalizeOptionalRecentTurns(
+    options.protectRecentTurns,
+  );
+  const turnProtectedStart = protectRecentTurns
+    ? findProtectedTurnStart(input, protectRecentTurns)
+    : input.length;
+  const protectedStart = Math.min(bucketProtectedStart, turnProtectedStart);
   const protectedToolResultIds = collectProtectedToolResultIds(
     input,
     String(options.cwd || process.cwd()),
   );
   let changed = false;
   const pruned = input.map((message, index) => {
-    if (index < protectedStart && isToolResultMessage(message)) {
-      if (isProtectedToolResult(message, protectedToolResultIds)) {
-        return message;
-      }
-      if (isAlreadyOmitted(message?.content)) return message;
-      const replacement = {
-        ...message,
-        content: omittedContentFor(message?.content),
-      };
-      replacements.set(message, replacement);
-      changed = true;
-      return replacement;
+    if (index >= protectedStart || !isToolResultMessage(message)) {
+      return message;
     }
-    return message;
+    if (
+      isProtectedToolResult(message, protectedToolResultIds) ||
+      isAlreadyOmitted(message?.content)
+    ) {
+      return message;
+    }
+    changed = true;
+    return {
+      ...message,
+      content: omittedContentFor(message?.content),
+    };
   });
-
-  return {
-    messages: changed ? pruned : input,
-    changed,
-    replacements,
-  };
-}
-
-export function pruneSessionContextMessages(
-  messages: any[],
-  options: SessionPruningOptions = {},
-) {
-  return createProviderBoundPrunePlan(messages, options).messages;
+  return changed ? pruned : input;
 }

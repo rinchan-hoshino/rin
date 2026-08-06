@@ -72,7 +72,7 @@ test("tui stats get context usage estimates the pruned provider-bound context", 
       { role: "assistant", content: "done 4" },
       { role: "user", content: "turn 5" },
       { role: "assistant", content: "done 5" },
-      ...Array.from({ length: 7 }, (_, index) => ({
+      ...Array.from({ length: 118 }, (_, index) => ({
         role: "assistant",
         content: `tail padding ${index + 1}`,
       })),
@@ -80,7 +80,7 @@ test("tui stats get context usage estimates the pruned provider-bound context", 
     [],
   );
 
-  assert.ok(usage.tokens < 100, `tokens=${usage.tokens}`);
+  assert.ok(usage.tokens < 1000, `tokens=${usage.tokens}`);
 });
 
 test("tui stats get context usage preserves post-compaction unknown state", () => {

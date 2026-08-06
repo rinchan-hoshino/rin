@@ -8,7 +8,7 @@ import type { Model } from "@earendil-works/pi-ai";
 const HOME_DIR = os.homedir();
 
 import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
-import { RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS } from "../rin-lib/session-pruning.js";
+import { SELF_IMPROVE_TURN_WINDOW_TURNS } from "./constants.js";
 import { openBoundSession } from "../session/factory.js";
 import { forkSessionManagerCompat } from "../session/fork.js";
 import { readSessionMetadata } from "../session/metadata.js";
@@ -75,7 +75,7 @@ async function createForkedSessionManager(options: {
         // The completed pruning window is the evidence boundary. Provider
         // context preparation may omit older windows, but it must preserve
         // every raw message and tool result in these recent turns.
-        protectSourceWindowTurns: RIN_SESSION_PRUNING_PROTECT_RECENT_TURNS,
+        protectSourceWindowTurns: SELF_IMPROVE_TURN_WINDOW_TURNS,
       },
     ),
   };

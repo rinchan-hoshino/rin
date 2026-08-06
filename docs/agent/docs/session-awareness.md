@@ -147,6 +147,46 @@ Use platform metadata for sender identity, rich quote nodes for reply semantics,
 
 Use `docs/runtime-layout.md` to identify the active installed runtime, target user, manifest, service, and `app/current/` before update, rollback, restart, or installed-file inspection.
 
+### Exact recovery of omitted tool results
+
+`old tool result omitted` is a provider-bound context marker, not a transcript mutation. When exact earlier output matters, use the tool result's structural `toolCallId` to stream the authoritative persistent session JSONL. This is an on-demand recovery path; do not add the procedure to the resident system prompt.
+
+```bash
+: "${PI_SESSION_FILE:?persistent session required}"
+TOOL_CALL_ID='replace-with-structural-id'
+node --input-type=module - "$PI_SESSION_FILE" "$TOOL_CALL_ID" <<'NODE'
+import fs from "node:fs";
+import readline from "node:readline";
+
+const [sessionFile, wantedId] = process.argv.slice(2);
+const lines = readline.createInterface({
+  input: fs.createReadStream(sessionFile, { encoding: "utf8" }),
+  crlfDelay: Infinity,
+});
+let found = false;
+for await (const line of lines) {
+  if (!line.trim()) continue;
+  const entry = JSON.parse(line);
+  const message = entry?.type === "message" ? entry.message : entry?.message;
+  const role = String(message?.role || "");
+  if (
+    (role === "toolResult" || role === "tool_result") &&
+    String(message?.toolCallId || "") === wantedId
+  ) {
+    const content = message.content;
+    process.stdout.write(
+      typeof content === "string" ? content : JSON.stringify(content),
+    );
+    found = true;
+    break;
+  }
+}
+if (!found) process.exitCode = 2;
+NODE
+```
+
+For an ephemeral session where `PI_SESSION_FILE` is unset, there is no persistent transcript recovery surface; do not claim exact recovery succeeded.
+
 ## Report contract
 
 Report session-aware findings in operational terms:

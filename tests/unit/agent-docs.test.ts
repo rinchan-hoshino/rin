@@ -80,6 +80,14 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(sessionAwareness, /Assign one owner to each write boundary/);
   assert.match(sessionAwareness, /docs\/non-interactive-cli\.md/);
   assert.match(sessionAwareness, /docs\/scheduled-tasks\.md/);
+  assert.match(sessionAwareness, /Exact recovery of omitted tool results/);
+  assert.match(sessionAwareness, /old tool result omitted/);
+  assert.match(sessionAwareness, /PI_SESSION_FILE/);
+  assert.match(sessionAwareness, /toolCallId/);
+  assert.match(
+    sessionAwareness,
+    /do not add the procedure to the resident system prompt/,
+  );
   assert.match(nonInteractiveCli, /--managed-session <leaf>/);
   assert.match(nonInteractiveCli, /sessions\/managed\/<leaf>/);
   assert.match(piOverrides, /## Override contract/);

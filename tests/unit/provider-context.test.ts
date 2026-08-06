@@ -14,10 +14,10 @@ const providerContext = await import(
   ).href
 );
 
-function tailPadding(count: number) {
+function padding(count: number, start = 0) {
   return Array.from({ length: count }, (_, index) => ({
     role: "assistant",
-    content: `tail padding ${index + 1}`,
+    content: `message ${start + index}`,
   }));
 }
 
@@ -50,76 +50,53 @@ test("provider-bound context leaves non-tool rich content unchanged", () => {
   assert.equal(providerMessages[2].content, toolResultContent);
 });
 
-test("provider-bound context policy omits old tool results", () => {
-  const messages = [
-    { role: "user", content: "turn 1" },
-    { role: "toolResult", content: "huge old output" },
-    { role: "assistant", content: "done 1" },
-    { role: "user", content: "turn 2" },
-    { role: "assistant", content: "done 2" },
-    { role: "user", content: "turn 3" },
-    { role: "assistant", content: "done 3" },
-    { role: "user", content: "turn 4" },
-    { role: "assistant", content: "done 4" },
-    { role: "user", content: "turn 5" },
-    { role: "assistant", content: "done 5" },
-    ...tailPadding(7),
-  ];
-
-  const providerMessages =
-    providerContext.buildProviderBoundContextMessages(messages);
-
-  assert.notEqual(providerMessages, messages);
-  assert.equal(providerMessages[1].content, "old tool result omitted");
-  assert.equal(messages[1].content, "huge old output");
-});
-
-test("provider-bound context keeps recent four user turns' tool results", () => {
-  const oldToolResult = { role: "toolResult", content: "old output" };
-  const recentToolResult = { role: "toolResult", content: "recent output" };
-  const messages = [
-    { role: "user", content: "turn 1" },
-    oldToolResult,
-    { role: "assistant", content: "done 1" },
-    { role: "user", content: "turn 2" },
-    { role: "assistant", content: "done 2" },
-    { role: "user", content: "turn 3" },
-    recentToolResult,
-    { role: "assistant", content: "done 3" },
-    { role: "user", content: "turn 4" },
-    { role: "assistant", content: "done 4" },
-    { role: "user", content: "turn 5" },
-    { role: "assistant", content: "done 5" },
-    ...tailPadding(6),
-  ];
-
-  const providerMessages =
-    providerContext.buildProviderBoundContextMessages(messages);
-
-  assert.equal(providerMessages[1].content, "old tool result omitted");
-  assert.equal(providerMessages[6], recentToolResult);
-});
-
-test("provider-bound context preserves every tool result inside one arbitrarily long user turn", () => {
+test("provider-bound context keeps the first four complete 32-message buckets", () => {
   const openingToolResult = {
     role: "toolResult",
     content: "x".repeat(25_000),
   };
-  const messages = [
-    { role: "user", content: "one long turn" },
-    openingToolResult,
-    ...tailPadding(64),
-  ];
+  const messages = [openingToolResult, ...padding(127, 1)];
 
   assert.equal(
     providerContext.buildProviderBoundContextMessages(messages),
     messages,
   );
-  assert.equal(messages[1], openingToolResult);
+  assert.equal(messages[0], openingToolResult);
+});
+
+test("provider-bound context omits old tool results at a stable bucket rollover", () => {
+  const oldToolResult = { role: "toolResult", content: "old output" };
+  const retainedToolResult = {
+    role: "toolResult",
+    content: "retained output",
+  };
+  const messages = padding(129);
+  messages[0] = oldToolResult;
+  messages[32] = retainedToolResult;
+
+  const providerMessages =
+    providerContext.buildProviderBoundContextMessages(messages);
+
+  assert.notEqual(providerMessages, messages);
+  assert.equal(providerMessages[0].content, "old tool result omitted");
+  assert.equal(providerMessages[32], retainedToolResult);
+  assert.equal(messages[0].content, "old output");
+});
+
+test("provider-bound context exposes custom bucket sizing through one policy surface", () => {
+  const oldToolResult = { role: "toolResult", content: "old output" };
+  const messages = [oldToolResult, ...padding(4, 1)];
+
+  const providerMessages = providerContext.buildProviderBoundContextMessages(
+    messages,
+    { messageBucketSize: 2, retainMessageBuckets: 2 },
+  );
+
+  assert.equal(providerMessages[0].content, "old tool result omitted");
 });
 
 for (const stopReason of ["error", "aborted"] as const) {
-  test(`provider-bound context keeps ${stopReason} assistant tool calls and their tool results`, () => {
+  test(`provider-bound context keeps ${stopReason} assistant tool calls and their recent tool results`, () => {
     const incompleteAssistant = {
       role: "assistant",
       stopReason,
@@ -174,7 +151,7 @@ test("provider-bound context keeps incomplete assistant messages without tool ca
   assert.equal(providerMessages, messages);
 });
 
-test("provider-bound context keeps orphan tool results", () => {
+test("provider-bound context keeps recent orphan tool results", () => {
   const orphan = {
     role: "toolResult",
     toolCallId: "call-missing",
@@ -195,18 +172,8 @@ test("provider-bound context keeps orphan tool results", () => {
 
 test("provider-bound context policy owns token estimates", () => {
   const messages = [
-    { role: "user", content: "turn 1" },
     { role: "toolResult", content: "huge old output" },
-    { role: "assistant", content: "done 1" },
-    { role: "user", content: "turn 2" },
-    { role: "assistant", content: "done 2" },
-    { role: "user", content: "turn 3" },
-    { role: "assistant", content: "done 3" },
-    { role: "user", content: "turn 4" },
-    { role: "assistant", content: "done 4" },
-    { role: "user", content: "turn 5" },
-    { role: "assistant", content: "done 5" },
-    ...tailPadding(7),
+    ...padding(4, 1),
   ];
 
   const tokens = providerContext.estimateProviderBoundContextTokens(
@@ -218,28 +185,22 @@ test("provider-bound context policy owns token estimates", () => {
         ? 900
         : 10,
     }),
+    { messageBucketSize: 2, retainMessageBuckets: 2 },
   );
 
   assert.equal(tokens, 10);
 });
 
-test("provider-bound context event uses the same policy surface", () => {
+test("provider-bound context event uses the same bucket policy surface", () => {
   const messages = [
-    { role: "user", content: "turn 1" },
     { role: "toolResult", content: "huge old output" },
-    { role: "assistant", content: "done 1" },
-    { role: "user", content: "turn 2" },
-    { role: "assistant", content: "done 2" },
-    { role: "user", content: "turn 3" },
-    { role: "assistant", content: "done 3" },
-    { role: "user", content: "turn 4" },
-    { role: "assistant", content: "done 4" },
-    { role: "user", content: "turn 5" },
-    { role: "assistant", content: "done 5" },
-    ...tailPadding(7),
+    ...padding(4, 1),
   ];
 
-  const result = providerContext.buildProviderBoundContextEvent({ messages });
+  const result = providerContext.buildProviderBoundContextEvent(
+    { messages },
+    { messageBucketSize: 2, retainMessageBuckets: 2 },
+  );
 
-  assert.equal(result.messages[1].content, "old tool result omitted");
+  assert.equal(result.messages[0].content, "old tool result omitted");
 });
