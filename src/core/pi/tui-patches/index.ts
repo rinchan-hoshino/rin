@@ -304,13 +304,22 @@ function renderWithRuntimeModeModelLabel(
   const originalThinkingLevel = state.thinkingLevel;
   const session = footer?.session;
   const originalModelRuntime = session?.modelRuntime;
-  if (!originalModelRuntime && session?.modelRegistry) {
+  const needsModelRuntimeShim =
+    session &&
+    (typeof originalModelRuntime?.isUsingOAuth !== "function" ||
+      typeof originalModelRuntime?.isUsingSubscription !== "function");
+  if (needsModelRuntimeShim) {
     session.modelRuntime = {
+      ...(originalModelRuntime || {}),
       isUsingOAuth(provider: string) {
         return Boolean(
+          originalModelRuntime?.isUsingOAuth?.(provider) ||
           session.modelRegistry?.isUsingOAuth?.({ provider }) ||
           session.modelRegistry?.isUsingOAuth?.(provider),
         );
+      },
+      isUsingSubscription(provider: string) {
+        return Boolean(originalModelRuntime?.isUsingSubscription?.(provider));
       },
     };
   }
@@ -328,7 +337,10 @@ function renderWithRuntimeModeModelLabel(
   } finally {
     state.model = originalModel;
     state.thinkingLevel = originalThinkingLevel;
-    if (!originalModelRuntime && session) delete session.modelRuntime;
+    if (needsModelRuntimeShim && session) {
+      if (originalModelRuntime) session.modelRuntime = originalModelRuntime;
+      else delete session.modelRuntime;
+    }
   }
 }
 

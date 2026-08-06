@@ -1309,6 +1309,7 @@ test("footer appends runtime mode to the model label before rendering", async ()
       getSessionName: () => undefined,
     },
     getContextUsage: () => ({ contextWindow: 200000, percent: 12.3 }),
+    modelRuntime: { isUsingOAuth: () => false },
     modelRegistry: { isUsingOAuth: () => false },
   };
   const footerData = {
@@ -1321,6 +1322,7 @@ test("footer appends runtime mode to the model label before rendering", async ()
   try {
     tuiRuntimeEnv.setRinTuiRuntimeRole("rpc-frontend");
     let lines = footer.render(60);
+    assert.equal(typeof session.modelRuntime.isUsingSubscription, "undefined");
     assert.match(lines.at(-1), /syncing/);
     assert.match(lines[0], /daemon/);
     assert.match(lines[0], /medium/);
@@ -1388,7 +1390,7 @@ async function runScrolledHistoricalToolUpdate(handleEvent) {
     setProgress() {},
   };
   themeModule.initTheme("dark", false);
-  const ui = new piTuiModule.TUI(terminal);
+  const ui = new piTuiModule.TuiMainScreen(terminal);
   const chatContainer = new piTuiModule.Container();
   const historicalTool = new codingAgentModule.ToolExecutionComponent(
     "bash",
@@ -1533,7 +1535,7 @@ test("ordinary output preserves a scrolled viewport and full redraws do not dupl
     },
     invalidate() {},
   };
-  const tui = new piTuiModule.TUI(terminal);
+  const tui = new piTuiModule.TuiMainScreen(terminal);
   tui.addChild(component);
 
   async function flushRender() {
