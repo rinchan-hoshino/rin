@@ -106,9 +106,12 @@ export async function readChatSessionStatus(
   }
 }
 
-export async function queryChatSessionStatus(input: ChatSessionStatusQuery) {
+export async function queryChatSessionStatus(
+  input: ChatSessionStatusQuery,
+  request: typeof requestDaemonCommand = requestDaemonCommand,
+) {
   return await readChatSessionStatus(input, async () => {
-    return await requestDaemonCommand(
+    return await request(
       {
         id: `chat_status_${process.pid}_${Date.now()}`,
         type: "daemon_activity",

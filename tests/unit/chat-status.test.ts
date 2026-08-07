@@ -136,10 +136,20 @@ test("chat status reads daemon activity and queries an unavailable sandbox daemo
   );
   assert.deepEqual(available, { session: "working" });
 
-  const queried = await status.queryChatSessionStatus({
-    agentDir,
-    sessionFile: storedSessionFile,
-    localTurnActive: false,
-  });
+  let requestCount = 0;
+  const queried = await status.queryChatSessionStatus(
+    {
+      agentDir,
+      sessionFile: storedSessionFile,
+      localTurnActive: false,
+    },
+    async (command: { type?: unknown }, options: { timeoutMs?: unknown }) => {
+      requestCount += 1;
+      assert.equal(command.type, "daemon_activity");
+      assert.equal(options.timeoutMs, 3_000);
+      throw new Error("sandbox daemon unavailable");
+    },
+  );
+  assert.equal(requestCount, 1);
   assert.deepEqual(queried, { session: "unavailable" });
 });
