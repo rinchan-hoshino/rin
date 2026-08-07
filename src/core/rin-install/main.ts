@@ -46,6 +46,8 @@ import {
   targetHomeForUser,
 } from "./users.js";
 import { defaultInstallDirForHome } from "./paths.js";
+import { activateLegacyUpdateHandoff } from "./update-job-auth.js";
+import { startUpdatePayload } from "./update-payload.js";
 import { runInstallerProgress } from "./progress.js";
 import { runQuickRun } from "./quick-run.js";
 import {
@@ -125,6 +127,12 @@ async function launchInstallerTui(options: {
 }
 
 export async function startInstaller(argv = process.argv.slice(2)) {
+  if (argv.includes("--update")) {
+    await startUpdatePayload(
+      activateLegacyUpdateHandoff(argv, readValueArg(argv, "--install-dir")),
+    );
+    return;
+  }
   const cli = parseInstallerCliArgs(argv);
   if (cli.applyPlanFile) {
     const resultPath = cli.applyResultFile;

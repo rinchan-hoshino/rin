@@ -33,6 +33,49 @@ export function forwardedUpdateJobEnvironment(
     : {};
 }
 
+export function activateLegacyUpdateHandoff(
+  argv: string[],
+  installDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+  parentPid = process.ppid,
+) {
+  const retired = () => {
+    throw new Error("rin_installer_update_entry_removed");
+  };
+  if (!argv.includes("--update") || !argv.includes("--preconfirmed")) {
+    return retired();
+  }
+  const jobDir = path.join(
+    String(installDir || "").trim(),
+    "data",
+    "core",
+    "updates",
+    "jobs",
+  );
+  let matches: Array<{ id: string; path: string }> = [];
+  try {
+    matches = fs
+      .readdirSync(jobDir)
+      .filter((name) => name.endsWith(".json"))
+      .flatMap((name) => {
+        const jobPath = path.join(jobDir, name);
+        const record = JSON.parse(fs.readFileSync(jobPath, "utf8"));
+        return record?.version === 1 &&
+          record?.status === "running" &&
+          record?.pid === parentPid &&
+          path.basename(jobPath) === `${record?.id}.json`
+          ? [{ id: record.id, path: jobPath }]
+          : [];
+      });
+  } catch {
+    return retired();
+  }
+  if (matches.length !== 1) return retired();
+  env[RIN_UPDATE_JOB_PATH_ENV] = matches[0].path;
+  env[RIN_UPDATE_JOB_ID_ENV] = matches[0].id;
+  return argv.filter((arg) => arg !== "--update");
+}
+
 export function assertAuthorizedUpdateJob(
   installDir: string,
   env: NodeJS.ProcessEnv = process.env,
