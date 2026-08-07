@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -141,20 +141,24 @@ test("daemon worker core consumes one-shot resource options and selects each ses
     assert.equal(result.stderr, "");
 
     const entrypoint = path.resolve("dist/core/rin-daemon/worker.js");
-    const direct = await execFileAsync(
-      process.execPath,
-      ["--import", "tsx", "--import", registerFixture, entrypoint],
-      { env: sandbox.env },
-    );
+    const executionEntrypoint = [
+      "--import",
+      "tsx",
+      "--import",
+      registerFixture,
+      entrypoint,
+      "--execution-plane",
+    ];
+    const direct = await execFileAsync(process.execPath, executionEntrypoint, {
+      env: sandbox.env,
+    });
     assert.equal(direct.stdout, "");
     assert.equal(direct.stderr, "");
     await assert.rejects(
       () =>
-        execFileAsync(
-          process.execPath,
-          ["--import", "tsx", "--import", registerFixture, entrypoint],
-          { env: { ...sandbox.env, RIN_TEST_WORKER_CORE_FAILURE: "error" } },
-        ),
+        execFileAsync(process.execPath, executionEntrypoint, {
+          env: { ...sandbox.env, RIN_TEST_WORKER_CORE_FAILURE: "error" },
+        }),
       (error: any) => {
         assert.equal(error.code, 1);
         assert.match(error.stderr, /owner worker failed/);
@@ -163,17 +167,97 @@ test("daemon worker core consumes one-shot resource options and selects each ses
     );
     await assert.rejects(
       () =>
-        execFileAsync(
-          process.execPath,
-          ["--import", "tsx", "--import", registerFixture, entrypoint],
-          { env: { ...sandbox.env, RIN_TEST_WORKER_CORE_FAILURE: "empty" } },
-        ),
+        execFileAsync(process.execPath, executionEntrypoint, {
+          env: { ...sandbox.env, RIN_TEST_WORKER_CORE_FAILURE: "empty" },
+        }),
       (error: any) => {
         assert.equal(error.code, 1);
         assert.match(error.stderr, /rin_worker_failed/);
         return true;
       },
     );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("daemon worker process keeps RPC in a supervisor and exits its execution child on shutdown", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-daemon-worker-supervisor-entry-"),
+  );
+  const sandbox = await createTestSandbox(root);
+  try {
+    const entrypoint = path.resolve("dist/core/rin-daemon/worker.js");
+    const resourceOptionsFile = path.join(root, "resource-options.json");
+    await fs.writeFile(
+      resourceOptionsFile,
+      JSON.stringify({
+        agentDir: sandbox.agentDir,
+        __rinInitialSession: { kind: "new" },
+        noExtensions: true,
+        noTools: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        noContextFiles: true,
+      }),
+      { mode: 0o600 },
+    );
+    const child = spawn(
+      process.execPath,
+      [entrypoint, "--resource-options-file", resourceOptionsFile],
+      {
+        cwd: path.resolve("."),
+        env: sandbox.env,
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    const exited = new Promise<{
+      code: number | null;
+      signal: NodeJS.Signals | null;
+    }>((resolve) => {
+      child.once("exit", (code, signal) => resolve({ code, signal }));
+    });
+    const responses: any[] = [];
+    let stdoutBuffer = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdoutBuffer += String(chunk);
+      while (stdoutBuffer.includes("\n")) {
+        const newline = stdoutBuffer.indexOf("\n");
+        const line = stdoutBuffer.slice(0, newline);
+        stdoutBuffer = stdoutBuffer.slice(newline + 1);
+        if (line) responses.push(JSON.parse(line));
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    const waitForResponse = async (id: string) => {
+      const deadline = Date.now() + 20_000;
+      while (Date.now() < deadline) {
+        const response = responses.find(
+          (candidate) => candidate.type === "response" && candidate.id === id,
+        );
+        if (response) return response;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      throw new Error(`worker response timeout:${id}:${stderr}`);
+    };
+
+    try {
+      child.stdin.write(
+        `${JSON.stringify({ id: "state", type: "get_state" })}\n`,
+      );
+      assert.equal((await waitForResponse("state")).success, true);
+      child.stdin.write(`${JSON.stringify({ id: "abort", type: "abort" })}\n`);
+      assert.equal((await waitForResponse("abort")).success, true);
+    } finally {
+      child.kill("SIGTERM");
+    }
+    const exit = await exited;
+    assert.deepEqual(exit, { code: 0, signal: null });
+    assert.equal(stderr, "");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

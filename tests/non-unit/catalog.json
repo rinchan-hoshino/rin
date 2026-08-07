@@ -520,6 +520,12 @@
       "preloads": ["tests/support/register-worker-pool-owner-fixture.ts"]
     },
     {
+      "source": "src/core/rin-daemon/worker-supervisor.ts",
+      "built": "dist/core/rin-daemon/worker-supervisor.js",
+      "suite": "integration",
+      "tests": ["tests/integration/session-worker-supervisor.test.ts"]
+    },
+    {
       "source": "src/core/rin-daemon/worker.ts",
       "built": "dist/core/rin-daemon/worker.js",
       "suite": "system",

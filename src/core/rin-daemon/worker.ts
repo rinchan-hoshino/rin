@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
 import { createConfiguredAgentSession } from "../rin-lib/runtime.js";
@@ -10,6 +10,7 @@ import {
 } from "../rin-lib/profile.js";
 import { getManagedSessionDir } from "../session/managed-paths.js";
 import { runCustomRpcMode } from "./rpc-mode.js";
+import { runWorkerSupervisor } from "./worker-supervisor.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 
 type InitialWorkerSession =
@@ -140,15 +141,37 @@ export async function startWorker(options: WorkerResourceOptions = {}) {
   });
 }
 
-async function main() {
-  await startWorker();
+function hasArg(argv: string[], name: string) {
+  return argv.some((value) => value === name);
+}
+
+export async function startWorkerProcess() {
+  const argv = process.argv.slice(2);
+  const resourceOptions = readWorkerResourceOptions(argv);
+  if (hasArg(argv, "--execution-plane")) {
+    await startWorker(resourceOptions);
+    return;
+  }
+  const shutdown = new AbortController();
+  const requestShutdown = () => shutdown.abort();
+  process.once("SIGTERM", requestShutdown);
+  process.once("SIGINT", requestShutdown);
+  try {
+    await runWorkerSupervisor(resourceOptions, {
+      executionPath: fileURLToPath(import.meta.url),
+      signal: shutdown.signal,
+    });
+  } finally {
+    process.off("SIGTERM", requestShutdown);
+    process.off("SIGINT", requestShutdown);
+  }
 }
 
 const isDirectEntry =
   process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isDirectEntry) {
-  main().catch((error: any) => {
+  startWorkerProcess().catch((error: any) => {
     const message = String(
       error && error.message ? error.message : error || "rin_worker_failed",
     );

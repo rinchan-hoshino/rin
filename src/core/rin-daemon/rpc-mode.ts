@@ -361,6 +361,27 @@ async function resumeInterruptedTurn(session: any) {
   await resumePiSessionTurn(session);
 }
 
+export async function abortInterruptedTurnAfterExecutionLoss(session: any) {
+  const messages = Array.isArray(session?.agent?.state?.messages)
+    ? session.agent.state.messages
+    : [];
+  if (!messages.length) {
+    await session.abort();
+    return;
+  }
+  const appendedInterruption = appendInterruptedToolResults(session);
+  const lastMessage = session.agent.state.messages.at(-1);
+  if (!appendedInterruption && lastMessage?.role === "assistant") {
+    return {
+      finalText: safeString(session.getLastAssistantText?.()),
+      result: { messages: [lastMessage] },
+    };
+  }
+  const continuation = resumePiSessionTurn(session);
+  await session.abort();
+  await continuation;
+}
+
 function clampSessionThinkingLevel(session: any, level: string) {
   const availableLevels = Array.isArray(session?.getAvailableThinkingLevels?.())
     ? session
@@ -1756,10 +1777,29 @@ export async function runCustomRpcMode(
       case "clear_queue":
         turnCoordinator.clearTrackedAdmissions();
         return done(id, type, session.clearQueue());
+      case "abort_interrupted_turn": {
+        const requestTag = rpcRequestTag(command.requestTag);
+        if (!requestTag) throw new Error("requestTag is required");
+        startTurnTask(
+          requestTag,
+          async () => await abortInterruptedTurnAfterExecutionLoss(session),
+          { forceTurnEvents: true },
+        );
+        await turnCoordinator.waitForIdle();
+        return done(id, type, {
+          sessionFile: session.sessionFile,
+          sessionId: session.sessionId,
+        });
+      }
       case "abort":
         return run(id, type, () =>
           turnCoordinator.runInterrupt(
             async () => {
+              output({
+                type: "rpc_control_event",
+                event: "abort_started",
+                id,
+              });
               const activeTurnToSettle = turnCoordinator.completion;
               try {
                 Promise.resolve(session.abortCompaction?.()).catch(() => {});

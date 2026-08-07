@@ -604,6 +604,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin-daemon/worker-supervisor.ts",
+      "built": "dist/core/rin-daemon/worker-supervisor.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin-daemon/worker.ts",
       "built": "dist/core/rin-daemon/worker.js",
       "ownerSuite": "system",

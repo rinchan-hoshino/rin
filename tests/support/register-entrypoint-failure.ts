@@ -21,7 +21,7 @@ const replacements: Record<string, string> = {
     }
   `,
   "dist/core/rin-daemon/worker.js": `
-    export async function startWorker() {
+    export async function startWorkerProcess() {
       const mode = process.env.RIN_TEST_ENTRYPOINT_FAILURE_MODE;
       if (mode === "resolve") return;
       if (mode === "empty") return await Promise.reject(undefined);

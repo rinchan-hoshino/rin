@@ -951,13 +951,9 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
     frontendIdentity: { kind: "chat", key: "telegram/1:2" },
   });
 
-  let observedAcceptances = 0;
   const result = await driver.runTurn({
     text: "hello",
     managedSessionLeaf: "telegram/1:2",
-    observeInputAcceptance: () => {
-      observedAcceptances += 1;
-    },
     promptContext: {
       source: "chat-bridge",
       selfImproveEligible: true,
@@ -970,7 +966,6 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
 
   assert.equal(result.finalText, "frontend final");
   assert.equal(result.sessionFile, "/tmp/frontend-managed.jsonl");
-  assert.equal(observedAcceptances, 1);
   assert.deepEqual(
     client.calls
       .filter((call: any) => ["newSession", "prompt"].includes(call.type))

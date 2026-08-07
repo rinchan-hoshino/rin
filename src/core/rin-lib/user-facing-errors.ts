@@ -696,6 +696,16 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rin_worker_oom: () => "Rin's background worker ran out of memory.",
   rin_worker_failed: () =>
     "Rin's background worker failed before the request finished.",
+  rin_execution_plane_exit: () =>
+    "Rin's session execution process exited before the request finished.",
+  rin_execution_plane_session_unknown: () =>
+    "Rin could not recover the blocked session because its durable session file is unknown.",
+  rin_execution_plane_startup_timeout: () =>
+    "Rin's session execution process did not become ready in time.",
+  rin_execution_plane_stdin_unavailable: () =>
+    "Rin could not send the request to the session execution process.",
+  rin_execution_plane_unavailable: () =>
+    "Rin's session execution process is unavailable.",
   rin_turn_ledger_agent_dir_required: () =>
     "Rin could not open its turn lifecycle ledger.",
   rin_turn_ledger_begin_conflict: () =>

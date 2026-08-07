@@ -389,9 +389,6 @@ export class ChatController {
   turnAbortRequested = false;
   turnAbortGeneration = 0;
   intentionallyAbortedTurnGenerations = new Set<number>();
-  private turnAdmissionTail: Promise<void> = Promise.resolve();
-  private turnAdmissionGeneration = 0;
-  private releaseCurrentTurnAdmission?: () => void;
   sleepAfterIdleMs = 0;
   lastActivityAt = Date.now();
   commandResponses?: ChatCommandResponses;
@@ -538,9 +535,6 @@ export class ChatController {
     this.turnAbortRequested = false;
     this.turnAbortGeneration += 1;
     this.intentionallyAbortedTurnGenerations.clear();
-    this.turnAdmissionGeneration += 1;
-    this.releaseCurrentTurnAdmission?.();
-    this.releaseCurrentTurnAdmission = undefined;
     this.pendingTurnPresentations.clear();
     this.driver.dispose();
   }
@@ -939,6 +933,20 @@ export class ChatController {
       safeString(input.replyToMessageId).trim() || incomingMessageId;
   }
 
+  private hasUnacceptedPendingPresentationReplacement() {
+    const currentMessageId = this.currentIncomingMessageId();
+    return Array.from(this.pendingTurnPresentations.values()).some(
+      (pending) => {
+        const pendingMessageId = safeString(pending.incomingMessageId).trim();
+        return Boolean(
+          !pending.backendAccepted &&
+          pendingMessageId &&
+          pendingMessageId !== currentMessageId,
+        );
+      },
+    );
+  }
+
   private async adoptBackendAcceptedPendingPresentation(
     requestTag: string,
     input: { sessionFile?: string } = {},
@@ -1001,11 +1009,18 @@ export class ChatController {
       this.workingIndicatorTick = 0;
       this.latestAssistantSummaryText = "";
       this.latestTodoNoticeText = "";
+      if (this.currentTurn) this.currentTurn.workingNoticeSent = false;
       if (hasEndIndicator && !cleared) {
         this.logger.warn(
           `chat previous presentation cleanup failed chatKey=${this.chatKey} messageId=${previousIncomingMessageId}`,
         );
       }
+    }
+    if (
+      this.driver.isWorking() &&
+      !this.hasUnacceptedPendingPresentationReplacement()
+    ) {
+      void this.pollTyping().catch(() => {});
     }
     return pending;
   }
@@ -1507,6 +1522,7 @@ export class ChatController {
     if (
       !turn ||
       turn.workingNoticeSent ||
+      this.hasUnacceptedPendingPresentationReplacement() ||
       !this.getWorkingIndicatorPolicy().marker
     ) {
       return false;
@@ -1559,6 +1575,7 @@ export class ChatController {
     if (
       !this.currentTurn ||
       !this.awaitingTurnSettle ||
+      this.hasUnacceptedPendingPresentationReplacement() ||
       !this.canDeliverReplies() ||
       this.shouldSuppressQuietDelivery("passive_notice") ||
       (!options.force && !this.shouldShowTypingIndicator())
@@ -1613,10 +1630,9 @@ export class ChatController {
       indicators,
       "polling",
     );
-    const visibleIndicators = selectVisibleWorkingIndicatorsForKind(
-      indicators,
-      "polling",
-    );
+    const visibleIndicators = this.hasUnacceptedPendingPresentationReplacement()
+      ? []
+      : selectVisibleWorkingIndicatorsForKind(indicators, "polling");
     const typingDue =
       typingIndicators.length > 0 &&
       this.isTypingHeartbeatDue(this.lastTypingIndicatorAt, now);
@@ -3220,39 +3236,6 @@ export class ChatController {
     })();
   }
 
-  private async runInTurnAdmissionOrder<T>(
-    run: (releaseAdmission: () => void) => Promise<T>,
-  ) {
-    const generation = this.turnAdmissionGeneration;
-    const previous = this.turnAdmissionTail;
-    let releaseQueuedAdmission!: () => void;
-    const queuedAdmission = new Promise<void>((resolve) => {
-      releaseQueuedAdmission = resolve;
-    });
-    this.turnAdmissionTail = previous.then(() => queuedAdmission);
-    await previous;
-
-    let released = false;
-    const releaseAdmission = () => {
-      if (released) return;
-      released = true;
-      if (this.releaseCurrentTurnAdmission === releaseAdmission) {
-        this.releaseCurrentTurnAdmission = undefined;
-      }
-      releaseQueuedAdmission();
-    };
-    if (generation !== this.turnAdmissionGeneration) {
-      releaseAdmission();
-      throw createRinFrontendTurnCancelledError();
-    }
-    this.releaseCurrentTurnAdmission = releaseAdmission;
-    try {
-      return await run(releaseAdmission);
-    } finally {
-      releaseAdmission();
-    }
-  }
-
   async runTurn(
     input: RinToolStartupOptions &
       Pick<RinPiPassthroughOptions, "piStartupOptions"> & {
@@ -3284,7 +3267,7 @@ export class ChatController {
       ) || undefined;
     this.rememberPromptChatType(input.promptMeta);
     this.lastActivityAt = Date.now();
-    return await this.runInTurnAdmissionOrder(async (releaseAdmission) => {
+    return await (async () => {
       const deliverFinal = input.deliverFinal !== false;
       const currentTurnBeforeSubmission = this.currentTurn;
       let preserveCurrentTurn = Boolean(
@@ -3378,7 +3361,6 @@ export class ChatController {
           promptContext: input.promptMeta,
           source: "chat-bridge",
           requestTag,
-          observeInputAcceptance: releaseAdmission,
           commitNonterminalAcceptance:
             preserveCurrentTurn &&
             pendingPresentation.outboxTurnFence &&
@@ -3498,7 +3480,7 @@ export class ChatController {
         this.stagedDelivery = null;
         this.saveState();
       }
-    });
+    })();
   }
 
   private async settleProjectedTurnComplete(event: {

@@ -4,11 +4,11 @@
  *
  * This file exists so app can point the shared core worker at the product shell.
  */
-import { startWorker } from "../../core/rin-daemon/worker.js";
+import { startWorkerProcess } from "../../core/rin-daemon/worker.js";
 import { formatRuntimeErrorForUser } from "../../core/rin-lib/user-facing-errors.js";
 
 async function main() {
-  await startWorker();
+  await startWorkerProcess();
 }
 
 main().catch((error: any) => {
