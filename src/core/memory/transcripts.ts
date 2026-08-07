@@ -25,3 +25,8 @@ export {
   repairTranscriptSearchIndex,
   searchTranscriptArchive,
 } from "./transcript-search.js";
+
+export {
+  loadRecentTranscriptSessionsAbortable,
+  searchTranscriptArchiveAbortable,
+} from "./transcript-search-task.js";

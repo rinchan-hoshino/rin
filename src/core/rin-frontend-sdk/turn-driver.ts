@@ -2101,6 +2101,7 @@ export class RinFrontendTurnDriver {
       assumeSessionReady?: boolean;
       piStartupOptions?: RinPiPassthroughOptions["piStartupOptions"];
       disabledRinCapabilities?: string[];
+      observeInputAcceptance?: () => void;
       commitNonterminalAcceptance?: (input: {
         requestTag: string;
         sessionId?: string;
@@ -2298,6 +2299,7 @@ export class RinFrontendTurnDriver {
           }
           this.emit({ type: "turn_accepted", requestTag });
         }
+        input.observeInputAcceptance?.();
         return {
           ...observed,
           superseded: true,
@@ -2306,6 +2308,7 @@ export class RinFrontendTurnDriver {
           sessionFile: acceptedSessionFile,
         };
       }
+      input.observeInputAcceptance?.();
       if (existingLiveTurn) {
         await existingLiveTurn.promise.catch(() => {});
       }

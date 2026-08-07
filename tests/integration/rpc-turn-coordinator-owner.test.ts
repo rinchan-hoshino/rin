@@ -10,9 +10,7 @@ test("coordinator keeps one owner through a continuation that starts after settl
   const turn = coordinator.openTurn("owner-tag");
   const admission = coordinator.admit({
     requestTag: "continuation-tag",
-    outcome: "terminalOwner",
-    text: "continue",
-    hasImages: false,
+    observedRole: "terminalOwner",
   });
   assert.equal(coordinator.isAdmissionPending("continuation-tag"), true);
 
@@ -25,8 +23,6 @@ test("coordinator keeps one owner through a continuation that starts after settl
 
   const match = coordinator.observeUserStart({
     requestTag: "",
-    text: "continue",
-    hasImages: false,
     message: { role: "user", content: [{ type: "text", text: "continue" }] },
   });
   assert.equal(match?.admission, admission);
@@ -63,33 +59,34 @@ test("coordinator lease commits exactly one immutable terminal", () => {
   coordinator.closeTurn(turn);
 });
 
-test("coordinator does not cross-match empty image and non-image admissions", () => {
+test("coordinator assigns untagged user starts by serialized admission order", () => {
   const coordinator = new RpcTurnCoordinator();
   const turn = coordinator.openTurn("owner-tag");
-  const imageAdmission = coordinator.admit({
-    requestTag: "image-tag",
-    outcome: "terminalOwner",
-    text: "",
-    hasImages: true,
+  const firstAdmission = coordinator.admit({
+    requestTag: "first-tag",
+    observedRole: "terminalOwner",
+  });
+  const secondAdmission = coordinator.admit({
+    requestTag: "second-tag",
+    observedRole: "terminalOwner",
   });
 
   assert.equal(
     coordinator.observeUserStart({
       requestTag: "",
-      text: "",
-      hasImages: false,
-      message: { role: "user", content: [] },
-    }),
-    undefined,
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "runtime-transformed first" }],
+      },
+    })?.admission,
+    firstAdmission,
   );
   assert.equal(
     coordinator.observeUserStart({
       requestTag: "",
-      text: "",
-      hasImages: true,
       message: { role: "user", content: [{ type: "image" }] },
     })?.admission,
-    imageAdmission,
+    secondAdmission,
   );
   coordinator.cancelActiveTurn();
   coordinator.closeTurn(turn);
@@ -175,21 +172,15 @@ test("coordinator interruption closes admissions and cancels every active wait",
   const turn = coordinator.openTurn("owner-tag");
   coordinator.admit({
     requestTag: "started-tag",
-    outcome: "terminalOwner",
-    text: "started",
-    hasImages: false,
+    observedRole: "terminalOwner",
   });
   coordinator.observeUserStart({
     requestTag: "started-tag",
-    text: "started",
-    hasImages: false,
     message: { role: "user", content: [{ type: "text", text: "started" }] },
   });
   coordinator.admit({
     requestTag: "pending-tag",
-    outcome: "terminalOwner",
-    text: "pending",
-    hasImages: false,
+    observedRole: "terminalOwner",
   });
 
   const continuationsSettled = turn.waitForContinuations();
@@ -199,9 +190,7 @@ test("coordinator interruption closes admissions and cancels every active wait",
       () =>
         coordinator.admit({
           requestTag: "blocked-tag",
-          outcome: "terminalOwner",
-          text: "blocked",
-          hasImages: false,
+          observedRole: "terminalOwner",
         }),
       /interruption is in progress/i,
     );

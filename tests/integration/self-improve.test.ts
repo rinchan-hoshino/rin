@@ -1268,6 +1268,16 @@ test("daemon-owned supervisor retries queued distillation after an active lock c
         JSON.parse(await fs.readFile(queuePath(root), "utf8")).length,
         0,
       );
+      while (Date.now() < deadline) {
+        try {
+          await fs.access(lockPath);
+        } catch (error: any) {
+          if (error?.code === "ENOENT") break;
+          throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await assert.rejects(() => fs.access(lockPath), /ENOENT/);
     } finally {
       supervisor.stop();
     }

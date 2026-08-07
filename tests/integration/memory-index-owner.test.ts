@@ -136,6 +136,35 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
   assert.equal(abortedResult.content[0].text, "recall_aborted");
   assert.equal(abortedResult.details.userText, "Recall failed: recall_aborted");
 
+  owner.__rinMemoryOwnerHoldSearch = true;
+  let markSearchStarted!: () => void;
+  const searchStarted = new Promise<void>((resolve) => {
+    markSearchStarted = resolve;
+  });
+  owner.__rinMemoryOwnerSearchStarted = markSearchStarted;
+  const midSearchAbort = new AbortController();
+  const interruptedSearch = memory.executeRecall(
+    { query: "slow owner search" },
+    {},
+    "off",
+    midSearchAbort.signal,
+  );
+  await Promise.race([
+    searchStarted,
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("abortable transcript search did not start")),
+        100,
+      ),
+    ),
+  ]);
+  midSearchAbort.abort();
+  const interruptedResult = await interruptedSearch;
+  assert.equal(interruptedResult.isError, true);
+  assert.equal(interruptedResult.content[0].text, "recall_aborted");
+  owner.__rinMemoryOwnerHoldSearch = false;
+  owner.__rinMemoryOwnerSearchStarted = undefined;
+
   owner.__rinMemoryOwnerFailure = "search";
   const failed = await memory.executeRecall({ query: "owner" }, {}, "off");
   assert.equal(failed.isError, true);

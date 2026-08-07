@@ -130,10 +130,17 @@ export class EditableTextMessageGroup {
         });
         return ids.length > 0;
       },
-      end: async (_context: any) => {
-        // Lifecycle end stops polling only. The adapter's fresh final-delivery
-        // path exclusively owns deletion of visible editable progress.
-        return false;
+      end: async (context: any) => {
+        // Normal lifecycle completion is finalized by the fresh delivery path.
+        // A presentation transfer changes the quote key, so that path can no
+        // longer retire the previous owner's progress message.
+        if (context?.endReason !== "presentation_transferred") return false;
+        const chatId = safeString(context?.chatId).trim();
+        if (!chatId) return false;
+        return await this.deleteProgress(
+          chatId,
+          safeString(context?.replyToMessageId).trim() || undefined,
+        );
       },
     };
   }

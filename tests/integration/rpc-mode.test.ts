@@ -4266,6 +4266,188 @@ test(
 );
 
 test(
+  "rpc mode keeps native request identity when runtime formats prompt context",
+  { concurrency: false },
+  async () => {
+    const stdinOn = process.stdin.on;
+    const stdoutWrite = process.stdout.write;
+    const handlers = new Map();
+    const lines: string[] = [];
+    const sessionSubscribers = new Set<(event: any) => unknown>();
+    const durableEntries: any[] = [];
+
+    process.stdin.on = function (event, handler) {
+      handlers.set(event, handler);
+      return this;
+    };
+    process.stdout.write = function (chunk) {
+      lines.push(String(chunk));
+      return true;
+    };
+
+    try {
+      const session = {
+        __testNativePreflight: true,
+        isStreaming: false,
+        isCompacting: false,
+        sessionFile: "/tmp/formatted-prompt-context-session.jsonl",
+        sessionId: "formatted-prompt-context-session",
+        agent: {
+          signal: undefined,
+          state: { isStreaming: false },
+          waitForIdle: async () => {},
+        },
+        bindExtensions: async () => {},
+        subscribe: (handler) => {
+          sessionSubscribers.add(handler);
+          return () => sessionSubscribers.delete(handler);
+        },
+        async prompt(message, options) {
+          options?.preflightResult?.(true);
+          const formattedUser = {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `runtime metadata: rin prompt context v1\n---\n${message}`,
+              },
+            ],
+          };
+          for (const handler of sessionSubscribers) {
+            await handler({ type: "agent_start" });
+            await handler({ type: "message_start", message: formattedUser });
+          }
+          this.sessionManager.appendMessage(formattedUser);
+
+          const finalMessage = {
+            role: "assistant",
+            content: [{ type: "text", text: "formatted-context final" }],
+            stopReason: "stop",
+          };
+          this.sessionManager.appendMessage(finalMessage);
+          for (const handler of sessionSubscribers) {
+            await handler({ type: "message_end", message: finalMessage });
+            await handler({ type: "agent_settled" });
+          }
+        },
+        steer: async () => {},
+        followUp: async () => {},
+        abort: async () => {},
+        modelRegistry: { getAvailable: async () => [] },
+        sessionManager: {
+          ...testSessionManager(() => session.messages),
+          getEntries: () => durableEntries,
+          getBranch: () =>
+            durableEntries.filter((entry) => entry.type === "message"),
+          getLeafId: () => durableEntries.at(-1)?.id ?? null,
+          appendMessage(message) {
+            const id = `message-${durableEntries.length}`;
+            durableEntries.push({
+              id,
+              parentId: durableEntries.at(-1)?.id ?? null,
+              type: "message",
+              message,
+            });
+            session.messages.push(message);
+            return id;
+          },
+          appendCustomEntry(customType, data) {
+            durableEntries.push({
+              id: `custom-${durableEntries.length}`,
+              parentId: durableEntries.at(-1)?.id ?? null,
+              type: "custom",
+              customType,
+              data,
+            });
+          },
+        },
+        messages: [],
+        getSessionStats: () => ({}),
+        getUserMessagesForForking: () => [],
+        getLastAssistantText: () => "formatted-context final",
+        setThinkingLevel: () => {},
+        cycleThinkingLevel: () => undefined,
+        setSteeringMode: () => {},
+        setFollowUpMode: () => {},
+        compact: async () => {},
+        setAutoCompactionEnabled: () => {},
+        setAutoRetryEnabled: () => {},
+        abortRetry: () => {},
+        executeBash: async () => {},
+        abortBash: () => {},
+        fork: async () => ({ cancelled: false, selectedText: "" }),
+        navigateTree: async () => ({ cancelled: false }),
+        exportToHtml: async () => "",
+        exportToJsonl: () => "",
+        importFromJsonl: async () => true,
+        newSession: async () => true,
+        switchSession: async () => true,
+        setModel: async () => {},
+        reload: async () => {},
+        setSessionName: () => {},
+      };
+
+      void runCustomRpcMode(session, {
+        SessionManager: {
+          listAll: async () => [],
+          list: async () => [],
+          open: () => ({ appendSessionInfo() {} }),
+        },
+        builtinSlashCommands: [],
+      });
+      await wait(0);
+
+      const onData = handlers.get("data");
+      assert.equal(typeof onData, "function");
+      onData(
+        Buffer.from(
+          `${JSON.stringify({
+            id: "formatted-context-turn",
+            type: "prompt",
+            message: "owner text",
+            requestTag: "formatted-context-tag",
+            promptContext: { source: "chat-bridge" },
+          })}\n`,
+        ),
+      );
+      await wait(50);
+
+      assert.deepEqual(
+        durableEntries.find(
+          (entry) =>
+            entry.customType === "rin_request_identity" &&
+            entry.data?.requestId === "formatted-context-tag",
+        )?.data,
+        {
+          requestId: "formatted-context-tag",
+          messageEntryId: "message-0",
+          observedRole: "terminalOwner",
+        },
+      );
+      const completions = parseRpcOutput(lines).filter(
+        (event) =>
+          event.type === "rpc_turn_event" && event.event === "complete",
+      );
+      assert.deepEqual(
+        completions.map((event) => ({
+          requestTag: event.requestTag,
+          finalText: event.finalText,
+        })),
+        [
+          {
+            requestTag: "formatted-context-tag",
+            finalText: "formatted-context final",
+          },
+        ],
+      );
+    } finally {
+      process.stdin.on = stdinOn;
+      process.stdout.write = stdoutWrite;
+    }
+  },
+);
+
+test(
   "rpc mode terminalizes from agent_settled when the outer prompt promise never returns",
   { concurrency: false },
   async () => {
@@ -4853,7 +5035,7 @@ test(
 );
 
 test(
-  "rpc mode keeps Pi prompt ownership immutable across a queued steer",
+  "rpc mode keeps Pi prompt ownership immutable across a runtime-formatted queued steer",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -4997,7 +5179,7 @@ test(
       );
       onData(
         Buffer.from(
-          `${JSON.stringify({ id: "turn-steer", type: "prompt", message: "steer now", streamingBehavior: "steer", requestTag: "tag-steer" })}\n`,
+          `${JSON.stringify({ id: "turn-steer", type: "prompt", message: "steer now", streamingBehavior: "steer", requestTag: "tag-steer", promptContext: { source: "chat-bridge" } })}\n`,
         ),
       );
       for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -5021,12 +5203,16 @@ test(
 
       const steeredUser = {
         role: "user",
-        content: [{ type: "text", text: "steer now" }],
+        content: [
+          {
+            type: "text",
+            text: "runtime metadata: rin prompt context v1\n---\nsteer now",
+          },
+        ],
       };
       for (const handler of sessionSubscribers) {
         await handler({
           type: "message_start",
-          requestTag: "tag-steer",
           message: steeredUser,
         });
       }

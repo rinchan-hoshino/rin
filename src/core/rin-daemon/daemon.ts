@@ -392,18 +392,20 @@ export async function startDaemon(
         connection,
         command,
       );
-      if (previousWorker && previousWorker === connection.attachedWorker) {
-        workerPool.detachWorker(connection, { release: false });
-      }
-      const worker = workerPool.resolveWorkerForCommand(connection, command);
-      if (!worker) {
-        writeLine(
-          connection.socket,
-          response(id, type, false, "rin_no_attached_session"),
-        );
-        return true;
-      }
+      let worker: ReturnType<typeof workerPool.resolveWorkerForCommand>;
       try {
+        if (previousWorker) await workerPool.abortWorker(previousWorker);
+        if (previousWorker === connection.attachedWorker) {
+          workerPool.detachWorker(connection, { release: false });
+        }
+        worker = workerPool.resolveWorkerForCommand(connection, command);
+        if (!worker) {
+          writeLine(
+            connection.socket,
+            response(id, type, false, "rin_no_attached_session"),
+          );
+          return true;
+        }
         const state = await workerPool.readWorkerState(worker);
         workerPool.attachWorkerToConnection(connection, worker);
         writeLine(
@@ -418,7 +420,7 @@ export async function startDaemon(
           void workerPool.terminateWorkerGracefullyIfUnattached(previousWorker);
         }
       } catch (error: any) {
-        workerPool.destroyWorker(worker);
+        if (worker) workerPool.destroyWorker(worker);
         if (previousWorker)
           workerPool.attachWorkerToConnection(connection, previousWorker);
         writeLine(

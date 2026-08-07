@@ -620,6 +620,10 @@ setInterval(() => {}, 1000);
 
   await sleep(80);
   pool.evictDetachedWorkers();
+  for (let i = 0; i < 100; i += 1) {
+    if (pool.getStatusSnapshot().workerCount === 0) break;
+    await sleep(10);
+  }
   assert.equal(pool.getStatusSnapshot().workerCount, 0);
 });
 

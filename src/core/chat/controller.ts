@@ -389,6 +389,9 @@ export class ChatController {
   turnAbortRequested = false;
   turnAbortGeneration = 0;
   intentionallyAbortedTurnGenerations = new Set<number>();
+  private turnAdmissionTail: Promise<void> = Promise.resolve();
+  private turnAdmissionGeneration = 0;
+  private releaseCurrentTurnAdmission?: () => void;
   sleepAfterIdleMs = 0;
   lastActivityAt = Date.now();
   commandResponses?: ChatCommandResponses;
@@ -535,6 +538,9 @@ export class ChatController {
     this.turnAbortRequested = false;
     this.turnAbortGeneration += 1;
     this.intentionallyAbortedTurnGenerations.clear();
+    this.turnAdmissionGeneration += 1;
+    this.releaseCurrentTurnAdmission?.();
+    this.releaseCurrentTurnAdmission = undefined;
     this.pendingTurnPresentations.clear();
     this.driver.dispose();
   }
@@ -986,6 +992,7 @@ export class ChatController {
         {
           incomingMessageId: previousIncomingMessageId,
           replyToMessageId: previousReplyToMessageId,
+          endReason: "presentation_transferred",
         },
       );
       this.activeWorkingIndicators = [];
@@ -1325,7 +1332,11 @@ export class ChatController {
 
   private async endWorkingIndicatorsForTurn(
     indicators: WorkingIndicator[],
-    input: { incomingMessageId?: string; replyToMessageId?: string },
+    input: {
+      incomingMessageId?: string;
+      replyToMessageId?: string;
+      endReason?: "presentation_transferred";
+    },
   ) {
     const incomingMessageId = safeString(input.incomingMessageId).trim();
     const replyToMessageId =
@@ -1334,6 +1345,7 @@ export class ChatController {
       event: "end",
       messageId: incomingMessageId || undefined,
       replyToMessageId: replyToMessageId || undefined,
+      endReason: input.endReason,
     });
     const results = await Promise.all(
       selectWorkingIndicatorsForEnd(indicators).map((indicator) =>
@@ -3208,6 +3220,39 @@ export class ChatController {
     })();
   }
 
+  private async runInTurnAdmissionOrder<T>(
+    run: (releaseAdmission: () => void) => Promise<T>,
+  ) {
+    const generation = this.turnAdmissionGeneration;
+    const previous = this.turnAdmissionTail;
+    let releaseQueuedAdmission!: () => void;
+    const queuedAdmission = new Promise<void>((resolve) => {
+      releaseQueuedAdmission = resolve;
+    });
+    this.turnAdmissionTail = previous.then(() => queuedAdmission);
+    await previous;
+
+    let released = false;
+    const releaseAdmission = () => {
+      if (released) return;
+      released = true;
+      if (this.releaseCurrentTurnAdmission === releaseAdmission) {
+        this.releaseCurrentTurnAdmission = undefined;
+      }
+      releaseQueuedAdmission();
+    };
+    if (generation !== this.turnAdmissionGeneration) {
+      releaseAdmission();
+      throw createRinFrontendTurnCancelledError();
+    }
+    this.releaseCurrentTurnAdmission = releaseAdmission;
+    try {
+      return await run(releaseAdmission);
+    } finally {
+      releaseAdmission();
+    }
+  }
+
   async runTurn(
     input: RinToolStartupOptions &
       Pick<RinPiPassthroughOptions, "piStartupOptions"> & {
@@ -3239,14 +3284,15 @@ export class ChatController {
       ) || undefined;
     this.rememberPromptChatType(input.promptMeta);
     this.lastActivityAt = Date.now();
-    const deliverFinal = input.deliverFinal !== false;
-    const currentTurnBeforeSubmission = this.currentTurn;
-    let preserveCurrentTurn = Boolean(
-      currentTurnBeforeSubmission &&
-      input.incomingMessageId &&
-      currentTurnBeforeSubmission.incomingMessageId !== input.incomingMessageId,
-    );
-    return await (async () => {
+    return await this.runInTurnAdmissionOrder(async (releaseAdmission) => {
+      const deliverFinal = input.deliverFinal !== false;
+      const currentTurnBeforeSubmission = this.currentTurn;
+      let preserveCurrentTurn = Boolean(
+        currentTurnBeforeSubmission &&
+        input.incomingMessageId &&
+        currentTurnBeforeSubmission.incomingMessageId !==
+          input.incomingMessageId,
+      );
       const turnAbortGeneration = this.turnAbortGeneration;
       const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
       const wantedSessionFile =
@@ -3332,6 +3378,7 @@ export class ChatController {
           promptContext: input.promptMeta,
           source: "chat-bridge",
           requestTag,
+          observeInputAcceptance: releaseAdmission,
           commitNonterminalAcceptance:
             preserveCurrentTurn &&
             pendingPresentation.outboxTurnFence &&
@@ -3451,7 +3498,7 @@ export class ChatController {
         this.stagedDelivery = null;
         this.saveState();
       }
-    })();
+    });
   }
 
   private async settleProjectedTurnComplete(event: {

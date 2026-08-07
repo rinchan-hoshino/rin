@@ -94,6 +94,36 @@ test("editable text owner sends, edits, chunks, and finalizes one durable group"
   }
 });
 
+test("editable working indicator retires the previous quoted presentation on ownership transfer", async () => {
+  const { cacheDir, calls, group } = await fixture();
+  try {
+    const indicator = group.indicator();
+    assert.equal(
+      await indicator.tick({
+        chatId: "chat",
+        replyToMessageId: "old-owner-message",
+        workingStatusText: "Working",
+      }),
+      true,
+    );
+
+    assert.equal(
+      await indicator.end({
+        chatId: "chat",
+        replyToMessageId: "old-owner-message",
+        endReason: "presentation_transferred",
+      }),
+      true,
+    );
+    assert.deepEqual(
+      calls.deleted.map((call) => call.messageId),
+      calls.sent.map((_, index) => `sent-${index + 1}`),
+    );
+  } finally {
+    await fs.rm(cacheDir, { recursive: true, force: true });
+  }
+});
+
 test("editable text owner recovers from stale edits and cleans surplus messages", async () => {
   let failEdit = false;
   const { cacheDir, calls, group } = await fixture({

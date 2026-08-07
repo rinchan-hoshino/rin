@@ -7,8 +7,6 @@ export type RpcTurnInterrupt = Readonly<{ id: number; epoch: number }>;
 export type RpcTurnAdmission = {
   readonly requestTag: string;
   readonly observedRole: RpcInputObservedRole;
-  readonly text: string;
-  readonly hasImages: boolean;
   readonly turn?: RpcTrackedTurn<unknown>;
   readonly started?: Promise<number | null>;
   readonly cancelled?: Promise<void>;
@@ -18,8 +16,6 @@ export type RpcTurnAdmission = {
 
 export type RpcUserStart = {
   requestTag: string;
-  text: string;
-  hasImages: boolean;
   message: unknown;
 };
 
@@ -238,8 +234,6 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
   admit(input: {
     requestTag: string;
     observedRole: RpcInputObservedRole;
-    text: string;
-    hasImages: boolean;
   }): RpcTurnAdmission {
     this.assertAdmissionOpen();
     const trackedTurn = this.currentTurn;
@@ -258,8 +252,6 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
     const admission: RpcTurnAdmission = {
       requestTag: input.requestTag,
       observedRole: input.observedRole,
-      text: input.text.trim(),
-      hasImages: input.hasImages,
       turn: trackedTurn as RpcTrackedTurn<unknown> | undefined,
       started,
       cancelled,
@@ -334,11 +326,9 @@ export class RpcTurnCoordinator<TSettlement = unknown> {
       ? this.pendingAdmissions.findIndex(
           (admission) => admission.requestTag === input.requestTag,
         )
-      : this.pendingAdmissions.findIndex(
-          (admission) =>
-            admission.text === input.text.trim() &&
-            admission.hasImages === input.hasImages,
-        );
+      : this.pendingAdmissions.length > 0
+        ? 0
+        : -1;
     if (index < 0) return undefined;
     const admission = this.pendingAdmissions.splice(index, 1)[0];
     if (admission.requestTag) {

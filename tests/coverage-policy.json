@@ -400,6 +400,18 @@
       "status": "strict"
     },
     {
+      "source": "src/core/memory/transcript-search-task-worker.ts",
+      "built": "dist/core/memory/transcript-search-task-worker.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/memory/transcript-search-task.ts",
+      "built": "dist/core/memory/transcript-search-task.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/memory/transcript-types.ts",
       "built": "dist/core/memory/transcript-types.js",
       "ownerSuite": "integration",

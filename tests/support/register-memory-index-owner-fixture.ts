@@ -24,6 +24,20 @@ export async function searchTranscriptArchive(query, params, root) {
   if (globalThis.__rinMemoryOwnerFailure === "search") throw new Error("search owner failure");
   return globalThis.__rinMemoryOwnerSearchResults || [];
 }
+export async function searchTranscriptArchiveAbortable(query, params, root, signal) {
+  globalThis.__rinMemoryOwnerEvents.push(["search", query, params, root]);
+  if (globalThis.__rinMemoryOwnerFailure === "search") throw new Error("search owner failure");
+  if (!globalThis.__rinMemoryOwnerHoldSearch) return globalThis.__rinMemoryOwnerSearchResults || [];
+  globalThis.__rinMemoryOwnerSearchStarted?.();
+  return await new Promise((resolve, reject) => {
+    const abort = () => reject(new Error("recall_aborted"));
+    if (signal?.aborted) return abort();
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+export async function loadRecentTranscriptSessionsAbortable(params, root, signal) {
+  return await loadRecentTranscriptSessions(params, root, signal);
+}
 `)}`;
 
 const externalUrl = `data:text/javascript,${encodeURIComponent(`

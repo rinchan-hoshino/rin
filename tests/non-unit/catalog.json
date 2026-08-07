@@ -340,6 +340,18 @@
       "preloads": ["tests/support/register-transcript-search-owner-fixture.ts"]
     },
     {
+      "source": "src/core/memory/transcript-search-task-worker.ts",
+      "built": "dist/core/memory/transcript-search-task-worker.js",
+      "suite": "integration",
+      "tests": ["tests/integration/transcript-search-task-owner.test.ts"]
+    },
+    {
+      "source": "src/core/memory/transcript-search-task.ts",
+      "built": "dist/core/memory/transcript-search-task.js",
+      "suite": "integration",
+      "tests": ["tests/integration/transcript-search-task-owner.test.ts"]
+    },
+    {
       "source": "src/core/memory/transcript-types.ts",
       "built": "dist/core/memory/transcript-types.js",
       "suite": "integration",

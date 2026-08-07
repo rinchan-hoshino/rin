@@ -103,12 +103,22 @@ const replacements: Record<string, string> = {
       registerConnection(connection) { this.connection = connection; }
       unregisterConnection(connection) { if (this.connection === connection) this.connection = undefined; }
       hasSelectedSession(connection) { return Boolean(connection.selectedSession); }
-      resolveCurrentWorkerForCommand(connection, command) { return command.previous === false ? undefined : connection.attachedWorker; }
+      resolveCurrentWorkerForCommand(connection, command) {
+        this.abortCompleted = false;
+        this.failAbort = Boolean(command.failAbort);
+        return command.previous === false ? undefined : connection.attachedWorker;
+      }
+      async abortWorker(worker) {
+        if (this.failAbort) throw new Error("owner abort failed");
+        this.abortedWorker = worker;
+        this.abortCompleted = true;
+      }
       detachWorker(connection, options = {}) {
         connection.attachedWorker = undefined;
         if (options.clearSelection) connection.selectedSession = undefined;
       }
       resolveWorkerForCommand(connection, command) {
+        if (command.requireAbort && !this.abortCompleted) throw new Error("new_session_did_not_abort_previous");
         if (command.failState) this.failNextState = true;
         if (command.stateEmpty) this.worker.stateEmpty = true;
         else this.worker.stateEmpty = false;

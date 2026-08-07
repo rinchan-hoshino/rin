@@ -4154,6 +4154,7 @@ test("chat controller adopts a backend-accepted pending presentation before inte
   assert.deepEqual(accepted, ["m-new-owner"]);
   assert.equal(contexts[0].event, "end");
   assert.equal(contexts[0].messageId, "m-old-owner");
+  assert.equal(contexts[0].endReason, "presentation_transferred");
 
   await controller.handleFrontendEvent({
     type: "assistant_interim",
@@ -4185,6 +4186,64 @@ test("chat controller adopts a backend-accepted pending presentation before inte
       },
     },
   );
+});
+
+test("chat controller preserves same-channel submission order until backend acceptance", async () => {
+  const controller = await createController("discord/1:submission-order");
+  const prepareStarts: string[] = [];
+  let releaseFirstPrepare!: () => void;
+  const firstPrepare = new Promise<void>((resolve) => {
+    releaseFirstPrepare = resolve;
+  });
+  controller.prepareTurnPrompt = async (input: any) => {
+    const messageId = String(input.incomingMessageId || "");
+    prepareStarts.push(messageId);
+    if (messageId === "m-first") await firstPrepare;
+    return { text: input.text, images: [], frontendReady: true };
+  };
+  controller.driver.runTurn = async (input: any) => {
+    await input.commitInputAcceptance?.({
+      requestTag: input.requestTag,
+      outcome: "terminalOwner",
+    });
+    return {
+      outcome: "terminalOwner",
+      superseded: true,
+      requestTag: input.requestTag,
+      sessionFile: "/tmp/submission-order.jsonl",
+    };
+  };
+
+  const first = controller.runTurn({
+    text: "first",
+    attachments: [],
+    incomingMessageId: "m-first",
+    replyToMessageId: "m-first",
+    requestTag: "request-first",
+    deliverFinal: false,
+  });
+  while (!prepareStarts.includes("m-first")) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const second = controller.runTurn({
+    text: "second",
+    attachments: [],
+    incomingMessageId: "m-second",
+    replyToMessageId: "m-second",
+    requestTag: "request-second",
+    deliverFinal: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(
+    prepareStarts,
+    ["m-first"],
+    "a later message must not overtake an earlier message before backend acceptance",
+  );
+
+  releaseFirstPrepare();
+  await Promise.all([first, second]);
+  assert.deepEqual(prepareStarts, ["m-first", "m-second"]);
 });
 
 test("nonterminal input durably joins the terminal owner and takes presentation ownership", async () => {

@@ -247,6 +247,29 @@ test("core daemon routes the complete system-owned RPC and lifecycle contract", 
         await request({
           type: "new_session",
           createWorker: true,
+          requireAbort: true,
+        })
+      ).success,
+      true,
+      "daemon new_session must settle interruption on the previous worker before replacement",
+    );
+    assert.equal(
+      (
+        await request({
+          type: "new_session",
+          createWorker: true,
+          requireAbort: true,
+          failAbort: true,
+        })
+      ).error,
+      "owner abort failed",
+      "a failed interruption must keep new_session from establishing a replacement",
+    );
+    assert.equal(
+      (
+        await request({
+          type: "new_session",
+          createWorker: true,
           failState: true,
         })
       ).error,

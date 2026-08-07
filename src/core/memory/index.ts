@@ -20,8 +20,8 @@ import {
 import {
   appendTranscriptArchiveEntry,
   extractTranscriptText,
-  loadRecentTranscriptSessions,
-  searchTranscriptArchive,
+  loadRecentTranscriptSessionsAbortable,
+  searchTranscriptArchiveAbortable,
 } from "./transcripts.js";
 import {
   searchExternalMemoryProviders,
@@ -332,8 +332,17 @@ export async function executeRecall(
 
     throwIfAborted(signal);
     const localResults = query
-      ? await searchTranscriptArchive(query, normalizedParams, rootOverride)
-      : await loadRecentTranscriptSessions(normalizedParams, rootOverride);
+      ? await searchTranscriptArchiveAbortable(
+          query,
+          normalizedParams,
+          rootOverride,
+          signal,
+        )
+      : await loadRecentTranscriptSessionsAbortable(
+          normalizedParams,
+          rootOverride,
+          signal,
+        );
     throwIfAborted(signal);
     const externalResults = await searchExternalMemoryProviders(
       query,

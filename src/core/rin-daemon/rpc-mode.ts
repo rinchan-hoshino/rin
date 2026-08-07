@@ -950,8 +950,6 @@ export async function runCustomRpcMode(
   const turnCoordinator = new RpcTurnCoordinator<RinTurnTerminalOutcome>();
   type NativeInputSubmission = {
     requestTag: string;
-    text: string;
-    hasImages: boolean;
     streamingBehavior: "steer" | "followUp";
     promptTask?: Promise<unknown>;
     promptTaskReady: Promise<void>;
@@ -1008,8 +1006,6 @@ export async function runCustomRpcMode(
       submission.admissionToken = turnCoordinator.admit({
         requestTag: submission.requestTag,
         observedRole: "terminalOwner",
-        text: submission.text,
-        hasImages: submission.hasImages,
       });
       observeNativeInput(submission, "terminalOwner");
     };
@@ -1468,8 +1464,6 @@ export async function runCustomRpcMode(
         nativeSubmission.admissionToken = turnCoordinator.admit({
           requestTag: nativeSubmission.requestTag,
           observedRole: "nonterminal",
-          text: nativeSubmission.text,
-          hasImages: nativeSubmission.hasImages,
         });
         observeNativeInput(nativeSubmission, "nonterminal");
       }
@@ -1484,30 +1478,10 @@ export async function runCustomRpcMode(
         if (ownerBarrier) await ownerBarrier;
       }
       if (event?.type === "message_start" && event.message?.role === "user") {
-        const userText = Array.isArray(event.message?.content)
-          ? event.message.content
-              .map((part: any) => safeString(part?.text || part?.content))
-              .join("")
-              .trim()
-          : safeString(event.message?.content || event.message?.text).trim();
-        const userHasImages = Array.isArray(event.message?.content)
-          ? event.message.content.some((part: any) => {
-              const partType = safeString(part?.type).toLowerCase();
-              return (
-                partType.includes("image") ||
-                Boolean(part?.image || part?.image_url) ||
-                (Boolean(part?.data) &&
-                  safeString(part?.mimeType || part?.mime_type)
-                    .toLowerCase()
-                    .startsWith("image/"))
-              );
-            })
-          : Array.isArray(event.message?.images) &&
-            event.message.images.length > 0;
+        producerRequestTag =
+          producerRequestTag || safeString(nativeSubmission?.requestTag).trim();
         const match = turnCoordinator.observeUserStart({
           requestTag: producerRequestTag,
-          text: userText,
-          hasImages: userHasImages,
           message: event.message,
         });
         producerRequestTag = producerRequestTag || match?.requestTag || "";
@@ -1709,8 +1683,6 @@ export async function runCustomRpcMode(
         });
         const submission: NativeInputSubmission = {
           requestTag,
-          text: safeString(command.message),
-          hasImages: Array.isArray(command.images) && command.images.length > 0,
           streamingBehavior,
           turnScope: captureTurnScope(session),
           promptTaskReady,
