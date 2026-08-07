@@ -37,7 +37,6 @@ import {
   executeRinFrontendInterruptIntent,
   projectRinFrontendLifecycleEvent,
 } from "./frontend-lifecycle.js";
-import { injectPromptContextHeader } from "./prompt-context.js";
 import {
   submitNativeFrontendPromptTurn,
   type RinFrontendPromptTurnInput,
@@ -2052,7 +2051,7 @@ export class RinFrontendTurnDriver {
     const inputGate = this.inputSubmissionGate(targetSessionFile);
     const requestTag =
       safeString(input.requestTag).trim() || this.createTurnRequestTag();
-    const text = injectPromptContextHeader(input.promptContext, input.text);
+    const text = safeString(input.text);
     const admission = await submitNativeFrontendPromptTurn(this.client, {
       text,
       images: input.images,
@@ -2169,10 +2168,7 @@ export class RinFrontendTurnDriver {
         },
         targetSessionFile,
       );
-      const text = injectPromptContextHeader(
-        input.promptContext,
-        safeString(input.text).trim(),
-      );
+      const text = safeString(input.text).trim();
       const images = Array.isArray(input.images) ? input.images : [];
       this.throwIfTurnInterrupted(turnInterruptionSeq);
       const requestTag =

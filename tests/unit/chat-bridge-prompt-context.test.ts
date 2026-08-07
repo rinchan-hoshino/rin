@@ -21,10 +21,6 @@ test("chat bridge prompt-context facade forwards the public context contract", (
   assert.match(formatted, /runtime metadata: rin prompt context v1/);
   assert.match(formatted, /sender trust: owner/);
   assert.ok(formatted.endsWith("---\nhello"));
-  assert.equal(
-    promptContext.injectPromptContextHeader(meta, formatted),
-    formatted,
-  );
   assert.match(
     promptContext.formatPromptContextSystemPromptBlock(meta),
     /Chat context:/,

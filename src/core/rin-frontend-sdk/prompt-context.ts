@@ -181,13 +181,6 @@ export function formatPromptContextSystemPromptBlock(
   return blocks.join("\n\n");
 }
 
-export function isPromptContextFormatted(body: string) {
-  const text = safeString(body);
-  return new RegExp(
-    `^time: .+\\n${PROMPT_CONTEXT_HEADER_MARKER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n[\\s\\S]*?\\n---\\n`,
-  ).test(text);
-}
-
 function formatChatPromptHeader(
   meta: PromptContextMeta | null | undefined,
   fallbackTimestamp = Date.now(),
@@ -227,22 +220,8 @@ export function formatPromptContext(
   fallbackTimestamp = Date.now(),
 ) {
   const text = safeString(body);
-  if (!meta || isPromptContextFormatted(text)) return text;
+  if (!meta) return text;
   const lines = formatChatPromptHeader(meta, fallbackTimestamp);
   if (lines.length === 0) return text;
   return `${lines.join("\n")}\n---\n${text}`;
-}
-
-export function injectPromptContextHeader(
-  meta: PromptContextMeta | null | undefined,
-  body: string,
-  options: { fallbackTimestamp?: number } = {},
-) {
-  const text = safeString(body);
-  if (!meta) return text;
-  return formatPromptContext(
-    meta,
-    text,
-    options.fallbackTimestamp ?? Date.now(),
-  );
 }

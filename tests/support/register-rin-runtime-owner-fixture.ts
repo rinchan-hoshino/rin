@@ -180,7 +180,7 @@ const sources: Record<string, string> = {
       if (!value || typeof value !== "object" || !Object.keys(value).length) return "";
       return "Prompt context owner: " + JSON.stringify(value);
     }
-    export function injectPromptContextHeader(value, text) {
+    export function formatPromptContext(value, text) {
       globalThis.__rinRuntimeOwner.events.push(["inject-context", value, text]);
       return value ? "[owner-context]\\n" + text : text;
     }

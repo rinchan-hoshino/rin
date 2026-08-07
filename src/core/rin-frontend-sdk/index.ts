@@ -96,7 +96,6 @@ export {
 export {
   formatPromptContext,
   formatPromptContextSystemPromptBlock,
-  injectPromptContextHeader,
   type PromptContextMeta,
 } from "./prompt-context.js";
 

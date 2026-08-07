@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import {
   formatPromptContext,
   formatPromptContextSystemPromptBlock,
-  injectPromptContextHeader,
 } from "../../src/core/rin-frontend-sdk/prompt-context.js";
 import {
   appendPromptContextSystemPrompt,
@@ -114,23 +113,6 @@ test("chat prompt context leaves quote semantics in the rich message body", () =
   assert.equal(systemBlock.includes("[quote:"), false);
   assert.equal(systemBlock.includes("rin.chat.messages.get"), false);
   assert.equal(systemBlock.includes("docs/chat-bridge.md"), false);
-});
-
-test("prompt context header injection is idempotent for runtime-generated headers", () => {
-  const meta = {
-    source: "chat-bridge",
-    sentAt: 1710000000000,
-    chatKey: "telegram/1:2",
-    userId: "guest-1",
-    nickname: "Alice",
-    identity: "OTHER",
-  };
-  const promptText = injectPromptContextHeader(meta, "hello");
-  const reinjected = injectPromptContextHeader(meta, promptText);
-
-  assert.equal(reinjected, promptText);
-  assert.equal(promptText.match(/^time: /gm)?.length, 1);
-  assert.ok(promptText.endsWith("---\nhello"));
 });
 
 test("scheduled task prompt context renders a task block without pretending to be chat", () => {

@@ -31,8 +31,8 @@ import { compileSelfImproveSync } from "../self-improve/store.js";
 import { EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY } from "../session/fork.js";
 import { buildSystemPromptSelfImprove } from "../self-improve/format.js";
 import {
+  formatPromptContext,
   formatPromptContextSystemPromptBlock,
-  injectPromptContextHeader,
 } from "../rin-frontend-sdk/prompt-context.js";
 import type { RinToolStartupOptions } from "./tool-options.js";
 import type { RinPiPassthroughOptions } from "./pi-passthrough.js";
@@ -577,7 +577,7 @@ function applyRinPromptBuilder(session: any) {
         applySessionBaseSystemPrompt(session, nextPrompt);
       }
       return await originalPrompt(
-        injectPromptContextHeader(options?.promptContext, text),
+        formatPromptContext(options?.promptContext, text),
         options,
       );
     };

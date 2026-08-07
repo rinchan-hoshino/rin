@@ -17,10 +17,7 @@ import {
   createRinFrontendTurnCancelledError,
   isRinFrontendTurnCancelledError,
 } from "../rin-frontend-sdk/lifecycle-errors.js";
-import {
-  injectPromptContextHeader,
-  type PromptContextMeta,
-} from "../rin-frontend-sdk/prompt-context.js";
+import type { PromptContextMeta } from "../rin-frontend-sdk/prompt-context.js";
 import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
 import { nowIso } from "../time-utils.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
@@ -199,13 +196,6 @@ function formatTodoNoticeText(
   return mode === "markdown"
     ? formatRinTodoChecklistMarkdownContent(todos)
     : formatRinTodoChecklistCharacterContent(todos);
-}
-
-function formatPromptForChatContext(
-  text: string,
-  promptMeta?: PromptContextMeta,
-) {
-  return injectPromptContextHeader(promptMeta, text);
 }
 
 type WorkingIndicatorKind = "polling" | "marker";
@@ -3305,10 +3295,6 @@ export class ChatController {
         if (this.turnAbortGeneration !== turnAbortGeneration) {
           throw createRinFrontendTurnCancelledError();
         }
-        const submittedText = formatPromptForChatContext(
-          text,
-          input.promptMeta,
-        );
         const messageId = safeString(input.incomingMessageId).trim();
         const chatDeliveryContext =
           input.outboxTurnFence && messageId
@@ -3319,7 +3305,7 @@ export class ChatController {
               }
             : undefined;
         const result = await this.runDriverTurnWithQuietMode(input.quietMode, {
-          text: submittedText,
+          text,
           chatDeliveryContext,
           images,
           assumeConnected: frontendReady === true,

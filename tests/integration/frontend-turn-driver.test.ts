@@ -958,6 +958,9 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
       source: "chat-bridge",
       selfImproveEligible: true,
       chatKey: "telegram/1:2",
+      userId: "guest-1",
+      nickname: "Guest",
+      identity: "OTHER",
     },
   });
 
@@ -988,6 +991,9 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
     source: "chat-bridge",
     selfImproveEligible: true,
     chatKey: "telegram/1:2",
+    userId: "guest-1",
+    nickname: "Guest",
+    identity: "OTHER",
   });
 });
 
