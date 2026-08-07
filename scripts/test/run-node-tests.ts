@@ -11,7 +11,22 @@ const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
-const result = spawnSync(process.execPath, process.argv.slice(2), {
+const nodeArgs = process.argv.slice(2);
+const explicitTestTargets = nodeArgs.filter((value) =>
+  /\.test\.[cm]?[jt]s$/i.test(value),
+);
+for (const target of explicitTestTargets) {
+  const resolved = path.resolve(rootDir, target);
+  let stat;
+  try {
+    stat = await fs.stat(resolved);
+  } catch {
+    throw new Error(`test_file_missing:${target}`);
+  }
+  if (!stat.isFile()) throw new Error(`test_file_not_regular:${target}`);
+}
+
+const result = spawnSync(process.execPath, nodeArgs, {
   cwd: rootDir,
   env: process.env,
   encoding: "utf8",

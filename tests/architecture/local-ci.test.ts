@@ -127,6 +127,33 @@ test("repository test scripts route classified buckets through the shared runner
   assert.match(runner, /suites\.includes\("system"\) \? 2 : 4/);
 });
 
+test("package scripts reference only existing explicit test targets", () => {
+  const packageJson = JSON.parse(readRepoFile("package.json")) as {
+    scripts: Record<string, string>;
+  };
+  const explicitTargets = new Set(
+    Object.values(packageJson.scripts).flatMap((command) =>
+      [...command.matchAll(/\btests\/[^\s"'&|;]+\.test\.[cm]?[jt]s\b/g)].map(
+        (match) => match[0],
+      ),
+    ),
+  );
+
+  for (const target of explicitTargets) {
+    const targetPath = path.join(rootDir, target);
+    assert.equal(
+      fs.existsSync(targetPath),
+      true,
+      `missing package-script test target: ${target}`,
+    );
+    assert.equal(
+      fs.statSync(targetPath).isFile(),
+      true,
+      `package-script test target is not a file: ${target}`,
+    );
+  }
+});
+
 test("strict coverage gates exclude immutable characterization evidence", () => {
   const coverageRunner = readRepoFile("scripts/test/run-coverage.ts");
   assert.match(
@@ -254,6 +281,80 @@ test("node test wrapper accepts behavior output larger than the spawn default", 
     );
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /# tests 1/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("node test wrapper rejects missing explicit test targets before spawning", () => {
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-missing-test-target-"),
+  );
+  const existingFile = path.join(tempDir, "existing.test.mjs");
+  const missingFile = path.join(tempDir, "missing.test.mjs");
+  fs.writeFileSync(
+    existingFile,
+    'import test from "node:test"; test("must not start", () => {});\n',
+  );
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "scripts/test/run-node-tests.ts",
+        "--test",
+        existingFile,
+        missingFile,
+      ],
+      {
+        cwd: rootDir,
+        env: Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([name]) => name !== "NODE_TEST_CONTEXT",
+          ),
+        ),
+        encoding: "utf8",
+      },
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /test_file_missing:/);
+    assert.doesNotMatch(result.stdout, /# tests 1/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("node test wrapper rejects explicit targets that are not regular files", () => {
+  const tempDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-non-file-test-target-"),
+  );
+  const directoryTarget = path.join(tempDir, "directory.test.mjs");
+  fs.mkdirSync(directoryTarget);
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        "scripts/test/run-node-tests.ts",
+        "--test",
+        directoryTarget,
+      ],
+      {
+        cwd: rootDir,
+        env: Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([name]) => name !== "NODE_TEST_CONTEXT",
+          ),
+        ),
+        encoding: "utf8",
+      },
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /test_file_not_regular:/);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
