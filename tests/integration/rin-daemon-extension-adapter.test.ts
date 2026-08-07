@@ -9,9 +9,10 @@ const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
-const { RinDaemonExtensionManager } = await import(
-  pathToFileURL(path.join(rootDir, "dist/core/rin-daemon/extensions.js")).href
-);
+const { RinDaemonExtensionManager, resolveDaemonExtensionJitiStaticPath } =
+  await import(
+    pathToFileURL(path.join(rootDir, "dist/core/rin-daemon/extensions.js")).href
+  );
 
 async function writeJson(filePath: string, value: unknown) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -30,6 +31,53 @@ async function writePackage(root: string, name: string, source: string) {
   await fs.writeFile(path.join(packageDir, "index.js"), source, "utf8");
   return packageDir;
 }
+
+test("daemon TypeScript loading resolves jiti from Pi's runtime package", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-daemon-jiti-"));
+  const piEntryPath = path.join(
+    root,
+    "node_modules",
+    "@earendil-works",
+    "pi-coding-agent",
+    "dist",
+    "index.js",
+  );
+  const expectedJitiPath = path.join(
+    root,
+    "node_modules",
+    "@earendil-works",
+    "pi-coding-agent",
+    "node_modules",
+    "jiti",
+    "lib",
+    "jiti-static.mjs",
+  );
+  try {
+    await fs.mkdir(path.dirname(piEntryPath), { recursive: true });
+    await fs.writeFile(piEntryPath, "export {};\n", "utf8");
+    await writeJson(
+      path.join(
+        root,
+        "node_modules",
+        "@earendil-works",
+        "pi-coding-agent",
+        "node_modules",
+        "jiti",
+        "package.json",
+      ),
+      { name: "jiti", version: "2.7.0" },
+    );
+    await fs.mkdir(path.dirname(expectedJitiPath), { recursive: true });
+    await fs.writeFile(expectedJitiPath, "export {};\n", "utf8");
+
+    assert.equal(
+      resolveDaemonExtensionJitiStaticPath(piEntryPath),
+      expectedJitiPath,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
 
 test("daemon adaptation uses only Pi-discovered extension sources", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-daemon-adapter-"));
@@ -147,7 +195,7 @@ test("daemon adaptation uses only Pi-discovered extension sources", async () => 
   });
   try {
     const running = await manager.start();
-    assert.equal(running.length, 2);
+    assert.equal(running.length, 2, warnings.join("\n"));
     assert.equal(running[0].name, "owner-config");
     assert.equal((await manager.start()).length, 2);
     assert.equal(

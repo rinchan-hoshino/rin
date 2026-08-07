@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   listRinDaemonExtensionConfigs,
@@ -53,8 +53,6 @@ type RinDaemonMemoryProviderEntry = {
   logger: RinExtensionLogger;
 };
 
-const requireFromHere = createRequire(import.meta.url);
-
 function readJson(filePath: string) {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -63,9 +61,14 @@ function readJson(filePath: string) {
   }
 }
 
-function resolveJitiStaticPath() {
+export function resolveDaemonExtensionJitiStaticPath(
+  piEntryPath = fileURLToPath(
+    import.meta.resolve("@earendil-works/pi-coding-agent"),
+  ),
+) {
+  const requireFromPi = createRequire(piEntryPath);
   return path.join(
-    path.dirname(requireFromHere.resolve("jiti/package.json")),
+    path.dirname(requireFromPi.resolve("jiti/package.json")),
     "lib",
     "jiti-static.mjs",
   );
@@ -74,7 +77,7 @@ function resolveJitiStaticPath() {
 async function importDaemonExtensionPath(modulePath: string) {
   if (modulePath.endsWith(".ts")) {
     const { createJiti } = await import(
-      pathToFileURL(resolveJitiStaticPath()).href
+      pathToFileURL(resolveDaemonExtensionJitiStaticPath()).href
     );
     const jiti = createJiti(import.meta.url, {
       moduleCache: false,
