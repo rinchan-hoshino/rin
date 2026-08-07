@@ -128,6 +128,7 @@ import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
   listUnacknowledgedChatTerminalEvents,
+  projectAndAcknowledgeChatTerminalEvent,
   reconcileChatTerminalEvents,
 } from "./terminal-reconciler.js";
 import {
@@ -688,10 +689,10 @@ export async function startChatBridge(
     if (chatBridgeStopping || terminalListInFlight || !terminalRecoveryClient) {
       return;
     }
+    const recoveryClient = terminalRecoveryClient;
     terminalListInFlight = (async () => {
-      const terminals = await listUnacknowledgedChatTerminalEvents(
-        terminalRecoveryClient,
-      );
+      const terminals =
+        await listUnacknowledgedChatTerminalEvents(recoveryClient);
       let scheduled = 0;
       await reconcileChatTerminalEvents(
         terminals,
@@ -713,8 +714,14 @@ export async function startChatBridge(
             if (
               activeController?.ownsAuthoritativeTerminalProjection(terminal)
             ) {
-              await activeController.driver.projectAuthoritativeTerminal(
+              await projectAndAcknowledgeChatTerminalEvent(
+                recoveryClient,
                 terminal,
+                async () => {
+                  await activeController.driver.projectAuthoritativeTerminal(
+                    terminal,
+                  );
+                },
               );
               return;
             }
@@ -729,7 +736,15 @@ export async function startChatBridge(
                 restoreSession: false,
                 recoverTerminals: false,
               });
-              await controller.driver.projectAuthoritativeTerminal(terminal);
+              await projectAndAcknowledgeChatTerminalEvent(
+                recoveryClient,
+                terminal,
+                async () => {
+                  await controller.driver.projectAuthoritativeTerminal(
+                    terminal,
+                  );
+                },
+              );
             } finally {
               controller.dispose();
               detachedControllers.delete(controllerKey);

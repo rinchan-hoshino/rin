@@ -23,6 +23,33 @@ export async function listUnacknowledgedChatTerminalEvents(
   }
 }
 
+export async function projectAndAcknowledgeChatTerminalEvent(
+  client: TerminalLedgerClient,
+  terminal: Record<string, unknown>,
+  projectTerminal: () => Promise<void>,
+) {
+  await projectTerminal();
+  const requestTag = safeString(terminal?.requestTag).trim();
+  const terminalRecord = terminal?.terminalRecord as
+    | Record<string, unknown>
+    | undefined;
+  const terminalId = safeString(terminalRecord?.terminalId).trim();
+  if (!requestTag || !terminalId) {
+    throw new Error("chat_terminal_record_missing");
+  }
+  try {
+    if (!client.isConnected()) await client.connect();
+    await client.request({
+      type: "ack_turn_terminal",
+      requestTag,
+      terminalId,
+    });
+  } catch (error) {
+    await client.disconnect().catch(() => {});
+    throw error;
+  }
+}
+
 export async function reconcileChatTerminalEvents(
   terminals: Record<string, unknown>[],
   handleTerminal: (

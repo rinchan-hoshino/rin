@@ -53,6 +53,100 @@ test("terminal reconciler routes durable backlog without waiting for ingress", a
   ]);
 });
 
+test("terminal reconciliation acknowledges only after the durable projection succeeds", async () => {
+  let connected = false;
+  let connectCalls = 0;
+  const requests = [];
+  const client = {
+    isConnected: () => connected,
+    connect: async () => {
+      connectCalls += 1;
+      connected = true;
+    },
+    request: async (command) => {
+      requests.push(command);
+      return {};
+    },
+    disconnect: async () => {
+      connected = false;
+    },
+  };
+  const terminal = {
+    requestTag: "chat-inbox-recovered",
+    terminalRecord: { terminalId: "terminal-recovered" },
+  };
+  const order = [];
+
+  await reconciler.projectAndAcknowledgeChatTerminalEvent(
+    client,
+    terminal,
+    async () => {
+      order.push("projected");
+    },
+  );
+  order.push("acknowledged");
+
+  assert.deepEqual(order, ["projected", "acknowledged"]);
+  assert.equal(connectCalls, 1);
+  assert.deepEqual(requests, [
+    {
+      type: "ack_turn_terminal",
+      requestTag: "chat-inbox-recovered",
+      terminalId: "terminal-recovered",
+    },
+  ]);
+
+  await assert.rejects(
+    reconciler.projectAndAcknowledgeChatTerminalEvent(
+      client,
+      terminal,
+      async () => {
+        throw new Error("projection_failed");
+      },
+    ),
+    /projection_failed/,
+  );
+  assert.equal(requests.length, 1);
+
+  await assert.rejects(
+    reconciler.projectAndAcknowledgeChatTerminalEvent(
+      client,
+      { requestTag: "chat-inbox-missing-terminal" },
+      async () => {},
+    ),
+    /chat_terminal_record_missing/,
+  );
+  await assert.rejects(
+    reconciler.projectAndAcknowledgeChatTerminalEvent(
+      client,
+      { terminalRecord: { terminalId: "terminal-missing-request" } },
+      async () => {},
+    ),
+    /chat_terminal_record_missing/,
+  );
+
+  let disconnectCalls = 0;
+  const failingClient = {
+    isConnected: () => true,
+    connect: async () => {},
+    request: async () => {
+      throw new Error("ack_failed");
+    },
+    disconnect: async () => {
+      disconnectCalls += 1;
+    },
+  };
+  await assert.rejects(
+    reconciler.projectAndAcknowledgeChatTerminalEvent(
+      failingClient,
+      terminal,
+      async () => {},
+    ),
+    /ack_failed/,
+  );
+  assert.equal(disconnectCalls, 1);
+});
+
 test("terminal reconciler disconnects a failed global ledger client", async () => {
   let disconnectCalls = 0;
   const client = {
