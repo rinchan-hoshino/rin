@@ -378,31 +378,18 @@ export function trustOf(identity: any, platform: string, userId: string) {
   return normalizeTrust(identity?.persons?.[personId]?.trust);
 }
 
-export function canAccessAgentInput({
-  chatType,
+export function canAccessChatInput({
   trust,
-  mentionLike = false,
-  commandLike = false,
-  allowWithoutMention = false,
+  ownerPresent,
+  addressedToAgent,
 }: {
-  chatType: "private" | "group";
   trust: string;
-  mentionLike?: boolean;
-  commandLike?: boolean;
-  allowWithoutMention?: boolean;
+  ownerPresent: boolean;
+  addressedToAgent: boolean;
 }) {
   const nextTrust = normalizeTrust(trust);
-  if (commandLike) return false;
   const trusted = nextTrust === "OWNER" || nextTrust === "TRUSTED";
-  if (chatType === "private") return trusted;
-  return trusted && (Boolean(mentionLike) || Boolean(allowWithoutMention));
-}
-
-export function canRunCommand(trust: string, commandName: string) {
-  const nextTrust = normalizeTrust(trust);
-  const nextName = safeString(commandName).trim().replace(/^\//, "");
-  if (!nextName) return false;
-  return nextTrust === "OWNER" || nextTrust === "TRUSTED";
+  return trusted && Boolean(ownerPresent) && Boolean(addressedToAgent);
 }
 
 export function botsForPlatform(app: any, platform: string) {

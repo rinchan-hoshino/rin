@@ -58,11 +58,6 @@
       "subject": "refactor: streamline chat message store layout"
     },
     {
-      "file": "tests/characterization/chat-policy.test.ts",
-      "introducedBy": "99b01270",
-      "subject": "fix(koishi): allow trusted chat abort"
-    },
-    {
       "file": "tests/characterization/chat-runtime-discord.test.ts",
       "introducedBy": "8dea8fd6",
       "subject": "fix(chat): treat Discord owner-only channels as private-like"

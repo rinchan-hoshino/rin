@@ -53,7 +53,7 @@ test("chat decision enforces direct, mention, media, and owner-presence boundari
     text,
     identity,
   );
-  assert.equal(direct.allow, true);
+  assert.equal(direct.allow, false);
   assert.equal(direct.trust, "TRUSTED");
   assert.equal(direct.chatType, "private");
 
@@ -342,7 +342,7 @@ test("chat decision rejects incomplete adapter fallbacks and malformed membershi
     false,
   );
   assert.equal(
-    await decision.isOwnerPresentForGroup(groupSession({ userId: "trusted" }), {
+    await decision.isOwnerPresentForChat(groupSession({ userId: "trusted" }), {
       aliases: null,
       persons: {},
     }),
@@ -356,7 +356,7 @@ test("chat decision rejects incomplete adapter fallbacks and malformed membershi
     [{ nickname: "Owner" }, true],
     [null, false],
   ] as const) {
-    const present = await decision.isOwnerPresentForGroup(
+    const present = await decision.isOwnerPresentForChat(
       groupSession({
         platform: "discord",
         channelId: `member-${String(expected)}-${JSON.stringify(member)}`,
@@ -373,13 +373,27 @@ test("chat decision rejects incomplete adapter fallbacks and malformed membershi
   }
 });
 
-test("chat decision checks owner membership through Telegram, OneBot, and generic adapters", async () => {
+test("chat decision checks owner presence through direct chats and group adapters", async () => {
   assert.equal(
-    await decision.isOwnerPresentForGroup(groupSession(), identity),
+    await decision.isOwnerPresentForChat(
+      { platform: "telegram", userId: "owner", isDirect: true },
+      identity,
+    ),
     true,
   );
   assert.equal(
-    await decision.isOwnerPresentForGroup(
+    await decision.isOwnerPresentForChat(
+      { platform: "telegram", userId: "trusted", isDirect: true },
+      identity,
+    ),
+    false,
+  );
+  assert.equal(
+    await decision.isOwnerPresentForChat(groupSession(), identity),
+    true,
+  );
+  assert.equal(
+    await decision.isOwnerPresentForChat(
       groupSession({
         userId: "trusted",
         bot: {
@@ -395,7 +409,7 @@ test("chat decision checks owner membership through Telegram, OneBot, and generi
     false,
   );
   assert.equal(
-    await decision.isOwnerPresentForGroup(
+    await decision.isOwnerPresentForChat(
       groupSession({
         platform: "onebot",
         channelId: "group",
@@ -413,7 +427,7 @@ test("chat decision checks owner membership through Telegram, OneBot, and generi
     true,
   );
   assert.equal(
-    await decision.isOwnerPresentForGroup(
+    await decision.isOwnerPresentForChat(
       groupSession({
         platform: "discord",
         channelId: "channel",

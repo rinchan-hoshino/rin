@@ -120,7 +120,7 @@ test("chat decision only enforces access policy, not custom slash-command guessi
   assert.equal(result.text, "/new hello");
 });
 
-test("chat decision allows trusted private messages", async () => {
+test("chat decision rejects trusted private messages without an owner", async () => {
   const result = await decision.shouldProcessText(
     {
       platform: "telegram",
@@ -133,7 +133,7 @@ test("chat decision allows trusted private messages", async () => {
     identity,
   );
 
-  assert.equal(result.allow, true);
+  assert.equal(result.allow, false);
   assert.equal(result.text, "hello from trusted");
   assert.equal(result.trust, "TRUSTED");
 });

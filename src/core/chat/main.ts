@@ -26,7 +26,6 @@ import {
   createChatBridgeRuntime,
 } from "../chat-bridge/runtime.js";
 import {
-  canRunCommand,
   chatStateDir,
   listChatStateFiles,
   listDetachedControllerStateFiles,
@@ -104,6 +103,7 @@ import {
 } from "./chat-key-worker.js";
 import {
   isEffectivePrivateChatSession,
+  resolveChatInputAccess,
   shouldProcessText,
 } from "./decision.js";
 import {
@@ -1346,17 +1346,17 @@ export async function startChatBridge(
         },
       });
     }
-    const commandTrust = commandRequest.commandLike
-      ? trustOf(
-          identity,
-          safeString(queuedSession?.platform).trim(),
-          pickUserId(queuedSession),
-        )
-      : "";
-    if (
-      commandRequest.commandLike &&
-      !canRunCommand(commandTrust, commandRequest.name)
-    ) {
+    const decision = await shouldProcessText(
+      queuedSession,
+      queuedElements,
+      identity,
+      {
+        chatKey: queuedChatKey,
+        addressedToAgent: commandRequest.commandLike,
+      },
+    );
+    const commandTrust = decision.trust;
+    if (commandRequest.commandLike && !decision.allow) {
       return commitAdmission({
         state: "record_only",
         decision: {
@@ -1398,12 +1398,6 @@ export async function startChatBridge(
       });
     }
 
-    const decision = await shouldProcessText(
-      queuedSession,
-      queuedElements,
-      identity,
-      { chatKey: queuedChatKey },
-    );
     if (!decision.allow || isRecordOnlyChatKey(decision.chatKey)) {
       return commitAdmission({
         state: "record_only",
@@ -1522,14 +1516,9 @@ export async function startChatBridge(
       if (!commandName) return true;
       if (!ACTIVE_CHAT_KEY_PRIORITY_COMMAND_NAMES.has(commandName))
         return false;
-      return canRunCommand(
-        trustOf(
-          getIdentity(),
-          safeString(queuedSession?.platform).trim(),
-          pickUserId(queuedSession),
-        ),
-        commandName,
-      );
+      return resolveChatInputAccess(queuedSession, getIdentity(), {
+        addressedToAgent: true,
+      }).then((access) => access.allow);
     },
     logger,
   });

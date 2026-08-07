@@ -34,9 +34,9 @@ test("chat main consumes inbound help messages through the inbox path only once"
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
-        persons: { trusted: { trust: "TRUSTED" } },
-        aliases: [{ platform: "telegram", userId: "trusted-1", personId: "trusted" }],
-        trusted: ["trusted"],
+        persons: { owner: { trust: "OWNER" } },
+        aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
+        trusted: [],
       });
 
       const { app } = await mainMod.startChatBridge({
@@ -64,7 +64,7 @@ test("chat main consumes inbound help messages through the inbox path only once"
         platform: "telegram",
         selfId: "1",
         channelId: "2",
-        userId: "trusted-1",
+        userId: "owner-1",
         messageId: "m1",
         isDirect: true,
         content: "/help",
@@ -1594,7 +1594,7 @@ test("chat main silently consumes unmatched group slash commands", async () => {
   }
 });
 
-test("chat main lets trusted group commands run without owner-present checks or command whitelists", async () => {
+test("chat main lets trusted group commands run only when an owner is present", async () => {
   const tempRoot = os.tmpdir();
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1616,8 +1616,14 @@ test("chat main lets trusted group commands run without owner-present checks or 
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
-        persons: { trusted: { trust: "TRUSTED" } },
-        aliases: [{ platform: "telegram", userId: "trusted-1", personId: "trusted" }],
+        persons: {
+          owner: { trust: "OWNER" },
+          trusted: { trust: "TRUSTED" },
+        },
+        aliases: [
+          { platform: "telegram", userId: "owner-1", personId: "owner" },
+          { platform: "telegram", userId: "trusted-1", personId: "trusted" },
+        ],
         trusted: ["trusted"],
       });
 
@@ -1638,38 +1644,51 @@ test("chat main lets trusted group commands run without owner-present checks or 
         selfId: "1",
         username: "rin_bot",
         name: "rin_bot",
+        internal: {
+          async getChatMember({ chat_id, user_id }) {
+            return chat_id === "-10043" && user_id === "owner-1"
+              ? { status: "member" }
+              : { status: "left" };
+          },
+        },
         async sendMessage() {
           return ["sent"];
         },
       });
 
-      app.emit("message", {
-        platform: "telegram",
-        selfId: "1",
-        channelId: "-10042",
-        guildId: "-10042",
-        userId: "trusted-1",
-        username: "TrustedNick",
-        messageId: "m-trusted-usage",
-        isDirect: false,
-        content: "/usage",
-        stripped: { content: "/usage" },
-        elements: [h.createChatRuntimeH().text("/usage")],
-      });
+      for (const [channelId, messageId] of [
+        ["-10042", "m-trusted-usage-owner-absent"],
+        ["-10043", "m-trusted-usage-owner-present"],
+      ]) {
+        app.emit("message", {
+          platform: "telegram",
+          selfId: "1",
+          channelId,
+          guildId: channelId,
+          userId: "trusted-1",
+          username: "TrustedNick",
+          messageId,
+          isDirect: false,
+          content: "/usage",
+          stripped: { content: "/usage" },
+          elements: [h.createChatRuntimeH().text("/usage")],
+        });
+      }
 
       const deadline = Date.now() + 5000;
       while (Date.now() < deadline && seen.length < 1) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
       const call = seen[0];
       if (
         seen.length !== 1 ||
         call.commandLine !== "/usage" ||
-        call.replyToMessageId !== "m-trusted-usage" ||
-        call.incomingMessageId !== "m-trusted-usage" ||
+        call.replyToMessageId !== "m-trusted-usage-owner-present" ||
+        call.incomingMessageId !== "m-trusted-usage-owner-present" ||
         call.sessionFile !== "" ||
-        call.promptMeta?.chatKey !== "telegram/1:-10042" ||
+        call.promptMeta?.chatKey !== "telegram/1:-10043" ||
         call.promptMeta?.chatType !== "group" ||
         call.promptMeta?.userId !== "trusted-1" ||
         call.promptMeta?.identity !== "TRUSTED"
@@ -1697,7 +1716,7 @@ test("chat main lets trusted group commands run without owner-present checks or 
   }
 });
 
-test("chat main forwards command sender identity without reply session binding", async () => {
+test("chat main rejects trusted private commands while allowing owner private commands", async () => {
   const tempRoot = os.tmpdir();
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -1723,8 +1742,14 @@ test("chat main forwards command sender identity without reply session binding",
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
-        persons: { trusted: { trust: "TRUSTED" } },
-        aliases: [{ platform: "telegram", userId: "trusted-1", personId: "trusted" }],
+        persons: {
+          owner: { trust: "OWNER" },
+          trusted: { trust: "TRUSTED" },
+        },
+        aliases: [
+          { platform: "telegram", userId: "owner-1", personId: "owner" },
+          { platform: "telegram", userId: "trusted-1", personId: "trusted" },
+        ],
         trusted: ["trusted"],
       });
 
@@ -1767,9 +1792,22 @@ test("chat main forwards command sender identity without reply session binding",
       app.emit("message", {
         platform: "telegram",
         selfId: "1",
-        channelId: "2",
+        channelId: "3",
         userId: "trusted-1",
         username: "TrustedNick",
+        messageId: "m-trusted-new",
+        timestamp: 1767225600000,
+        isDirect: true,
+        content: "/new",
+        stripped: { content: "/new" },
+        elements: [h.createChatRuntimeH().text("/new")],
+      });
+      app.emit("message", {
+        platform: "telegram",
+        selfId: "1",
+        channelId: "2",
+        userId: "owner-1",
+        username: "OwnerNick",
         messageId: "m-new",
         timestamp: 1767225600000,
         isDirect: true,
@@ -1786,6 +1824,7 @@ test("chat main forwards command sender identity without reply session binding",
       while (Date.now() < deadline && seen.length < 1) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
       const call = seen[0];
       if (
@@ -1799,9 +1838,9 @@ test("chat main forwards command sender identity without reply session binding",
         "triggerKind" in (call.promptMeta || {}) ||
         call.promptMeta?.chatKey !== "telegram/1:2" ||
         call.promptMeta?.chatType !== "private" ||
-        call.promptMeta?.userId !== "trusted-1" ||
-        call.promptMeta?.nickname !== "TrustedNick" ||
-        call.promptMeta?.identity !== "TRUSTED"
+        call.promptMeta?.userId !== "owner-1" ||
+        call.promptMeta?.nickname !== "OwnerNick" ||
+        call.promptMeta?.identity !== "OWNER"
       ) {
         throw new Error(JSON.stringify({ seen }));
       }
@@ -4139,6 +4178,14 @@ test("chat main owner directly covers private telegram and command normalization
     assert.equal(mod.__rinOwnerElementsToCommandText([{ type: "text", attrs: { content: "status" } }]), "status");
 
     const bridge = await mod.startChatBridge({ hosted: true });
+    const originalGetAdapterStatuses = bridge.app.getAdapterStatuses.bind(bridge.app);
+    bridge.app.getAdapterStatuses = () => [{ status: "degraded" }];
+    assert.equal(bridge.getStatus().status, "degraded");
+    bridge.app.getAdapterStatuses = originalGetAdapterStatuses;
+    const originalBots = bridge.app.bots;
+    bridge.app.bots = null;
+    assert.equal(bridge.getStatus().botCount, 0);
+    bridge.app.bots = originalBots;
     const owner = bridge.__rinOwner;
     const bound = owner.getController("telegram/owner-bot:bound");
     assert.equal(owner.getController("telegram/owner-bot:bound"), bound);

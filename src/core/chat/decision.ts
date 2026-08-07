@@ -1,4 +1,4 @@
-import { canAccessAgentInput, composeChatKey, trustOf } from "./support.js";
+import { canAccessChatInput, composeChatKey, trustOf } from "./support.js";
 import {
   directLike,
   getChatId,
@@ -379,12 +379,15 @@ async function isGroupMember(
   return false;
 }
 
-async function isOwnerPresentInGroupSession(
+async function isOwnerPresentInChatSession(
   session: any,
   identity: any,
   context: ReturnType<typeof normalizeDecisionSessionContext>,
 ) {
   if (context.trust === "OWNER") return true;
+  // A direct chat contains only its sender and the agent. A TRUSTED sender
+  // therefore cannot supply the OWNER-presence required by the shared policy.
+  if (directLike(session)) return false;
   if (!context.platform || !context.chatId) return false;
   const aliases = ownerAliasesForPlatform(identity, context.platform);
   for (const alias of aliases) {
@@ -399,12 +402,34 @@ async function isOwnerPresentInGroupSession(
   return false;
 }
 
-export async function isOwnerPresentForGroup(session: any, identity: any) {
-  return await isOwnerPresentInGroupSession(
+export async function isOwnerPresentForChat(session: any, identity: any) {
+  return await isOwnerPresentInChatSession(
     session,
     identity,
     normalizeDecisionSessionContext(session, identity),
   );
+}
+
+export async function resolveChatInputAccess(
+  session: any,
+  identity: any,
+  options: { addressedToAgent: boolean } = { addressedToAgent: false },
+) {
+  const context = normalizeDecisionSessionContext(session, identity);
+  const ownerPresent = await isOwnerPresentInChatSession(
+    session,
+    identity,
+    context,
+  );
+  return {
+    allow: canAccessChatInput({
+      trust: context.trust,
+      ownerPresent,
+      addressedToAgent: options.addressedToAgent,
+    }),
+    trust: context.trust,
+    ownerPresent,
+  };
 }
 
 export async function isPrivateLikeGroupSession(
@@ -453,7 +478,7 @@ export async function shouldProcessText(
   session: any,
   elements: any[],
   identity: any,
-  options: { chatKey?: string } = {},
+  options: { chatKey?: string; addressedToAgent?: boolean } = {},
 ) {
   const text = normalizeMessageText(
     renderChatNodesMarkdown(elements, { renderAt: () => "" }),
@@ -487,21 +512,16 @@ export async function shouldProcessText(
   const privateLikeGroup =
     chatType === "group" &&
     (await isPrivateLikeGroupSession(session, identity, context));
-  const ownerPresent =
-    chatType === "private" ||
-    (await isOwnerPresentInGroupSession(session, identity, context));
-  const allow =
-    ownerPresent &&
-    canAccessAgentInput({
-      chatType,
-      trust: context.trust,
-      mentionLike: mentionLike(session),
-      commandLike: false,
-      allowWithoutMention: privateLikeGroup,
-    });
+  const access = await resolveChatInputAccess(session, identity, {
+    addressedToAgent:
+      Boolean(options.addressedToAgent) ||
+      directLike(session) ||
+      mentionLike(session) ||
+      privateLikeGroup,
+  });
 
   return {
-    allow,
+    allow: access.allow,
     text,
     chatKey: context.chatKey,
     chatType,

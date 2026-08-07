@@ -71,41 +71,38 @@ test("chat support owns canonical chat keys, access checks, and bot lookup", () 
 
   for (const trust of ["OWNER", "TRUSTED"]) {
     assert.equal(
-      support.canAccessAgentInput({ chatType: "private", trust }),
-      true,
-    );
-    assert.equal(
-      support.canAccessAgentInput({
-        chatType: "group",
+      support.canAccessChatInput({
         trust,
-        mentionLike: true,
+        ownerPresent: true,
+        addressedToAgent: true,
       }),
       true,
     );
-    assert.equal(support.canRunCommand(trust, "/new"), true);
   }
   assert.equal(
-    support.canAccessAgentInput({
-      chatType: "group",
-      trust: "OWNER",
-      allowWithoutMention: true,
-    }),
-    true,
-  );
-  assert.equal(
-    support.canAccessAgentInput({
-      chatType: "group",
-      trust: "OWNER",
-      commandLike: true,
+    support.canAccessChatInput({
+      trust: "TRUSTED",
+      ownerPresent: false,
+      addressedToAgent: true,
     }),
     false,
   );
   assert.equal(
-    support.canAccessAgentInput({ chatType: "private", trust: "OTHER" }),
+    support.canAccessChatInput({
+      trust: "OWNER",
+      ownerPresent: true,
+      addressedToAgent: false,
+    }),
     false,
   );
-  assert.equal(support.canRunCommand("OWNER", "  "), false);
-  assert.equal(support.canRunCommand("OTHER", "new"), false);
+  assert.equal(
+    support.canAccessChatInput({
+      trust: "OTHER",
+      ownerPresent: true,
+      addressedToAgent: true,
+    }),
+    false,
+  );
 
   const app = {
     bots: [
