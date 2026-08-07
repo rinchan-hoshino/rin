@@ -25,6 +25,89 @@ const hostedChat = await import(
   ).href
 );
 
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs = 500,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.fail("condition did not become true before timeout");
+}
+
+test("hosted chat retries transient startup failures and self-heals to ready", async () => {
+  let attempts = 0;
+  const bridge = {
+    getStatus: () => ({ ready: true, adapterCount: 1 }),
+    async stop() {},
+  };
+  const service = hostedChat.createHostedChatService({
+    logger: { error() {} },
+    retry: { initialDelayMs: 5, maxDelayMs: 5, jitterRatio: 0 },
+  });
+
+  await service.start(async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error("rin_timeout:connect");
+    return bridge;
+  });
+
+  assert.deepEqual(service.getStatus(), {
+    ready: false,
+    status: "degraded",
+    error: "rin_timeout:connect",
+    retrying: true,
+    retryAttempt: 1,
+  });
+  await waitFor(() => service.getStatus().ready === true);
+  assert.equal(attempts, 2);
+  assert.equal(await service.getBridge(), bridge);
+  assert.deepEqual(service.getStatus(), { ready: true, adapterCount: 1 });
+  await service.stop();
+});
+
+test("hosted chat stop cancels a pending startup retry", async () => {
+  let attempts = 0;
+  const service = hostedChat.createHostedChatService({
+    logger: { error() {} },
+    retry: { initialDelayMs: 25, maxDelayMs: 25, jitterRatio: 0 },
+  });
+
+  await service.start(async () => {
+    attempts += 1;
+    throw new Error("rin_timeout:connect");
+  });
+  await service.stop();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  assert.equal(attempts, 1);
+  assert.equal(service.getStatus().status, "stopped");
+});
+
+test("hosted chat does not retry permanent startup failures", async () => {
+  let attempts = 0;
+  const service = hostedChat.createHostedChatService({
+    logger: { error() {} },
+    retry: { initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 },
+  });
+
+  await service.start(async () => {
+    attempts += 1;
+    throw new Error("invalid_chat_credentials");
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(attempts, 1);
+  assert.deepEqual(service.getStatus(), {
+    ready: false,
+    status: "degraded",
+    error: "invalid_chat_credentials",
+  });
+  await service.stop();
+});
+
 test("hosted chat startup failure degrades chat without rejecting daemon startup", async () => {
   const errors: string[] = [];
   const service = hostedChat.createHostedChatService({

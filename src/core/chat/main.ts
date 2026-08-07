@@ -565,21 +565,29 @@ export async function startChatBridge(
       },
     );
   };
-  const typingPollTimer = setInterval(() => {
-    for (const controller of controllers.values()) {
-      void controller.pollTyping().catch(() => {});
+  let typingPollTimer: NodeJS.Timeout | null = null;
+  const cleanupFailedStartup = async () => {
+    if (typingPollTimer) {
+      clearInterval(typingPollTimer);
+      typingPollTimer = null;
     }
-    for (const controller of detachedControllers.values()) {
-      void controller.housekeep().catch(() => {});
-    }
-  }, TYPING_POLL_INTERVAL_MS);
+    await terminalRecoveryClient?.disconnect().catch(() => {});
+    await app.stop().catch(() => {});
+    await inboundHttpTransport?.close().catch(() => {});
+  };
   const chatCommandResponses = readChatCommandResponses(runtime.agentDir);
   const frontendClientFactory = options.frontendClientFactory;
-  const commandRows =
-    options.commandRows ??
-    (await loadChatCommandRows(
-      frontendClientFactory?.() ?? new RinDaemonFrontendClient(),
-    ));
+  let commandRows: Awaited<ReturnType<typeof loadChatCommandRows>>;
+  try {
+    commandRows =
+      options.commandRows ??
+      (await loadChatCommandRows(
+        frontendClientFactory?.() ?? new RinDaemonFrontendClient(),
+      ));
+  } catch (error) {
+    await cleanupFailedStartup();
+    throw error;
+  }
   const refreshChatCommands = async () => {
     if (options.commandRows) return;
     await refreshChatCommandRows(
@@ -1817,9 +1825,22 @@ export async function startChatBridge(
     startupRecoveryChatKeys.add(envelope.chatKey);
     app.beginInboundRecoveryChat(envelope.chatKey);
   }
-  await app.start();
-  await syncTelegramCommands(app, logger, commandRows);
-  await syncDiscordCommands(app, logger, commandRows);
+  try {
+    await app.start();
+    await syncTelegramCommands(app, logger, commandRows);
+    await syncDiscordCommands(app, logger, commandRows);
+  } catch (error) {
+    await cleanupFailedStartup();
+    throw error;
+  }
+  typingPollTimer = setInterval(() => {
+    for (const controller of controllers.values()) {
+      void controller.pollTyping().catch(() => {});
+    }
+    for (const controller of detachedControllers.values()) {
+      void controller.housekeep().catch(() => {});
+    }
+  }, TYPING_POLL_INTERVAL_MS);
   logger.info(
     `chat bridge started bots=${JSON.stringify(app.bots.map((bot: any) => ({ platform: bot.platform, selfId: bot.selfId, status: bot.status })))}`,
   );
@@ -1861,7 +1882,7 @@ export async function startChatBridge(
     if (stoppingPromise) return await stoppingPromise;
     stoppingPromise = (async () => {
       chatBridgeStopping = true;
-      clearInterval(typingPollTimer);
+      if (typingPollTimer) clearInterval(typingPollTimer);
       if (inboxPollTimer) clearInterval(inboxPollTimer);
       if (outboxPollTimer) clearInterval(outboxPollTimer);
       if (outboxHistoryCleanupTimer) clearInterval(outboxHistoryCleanupTimer);

@@ -88,8 +88,9 @@ async function main() {
       agentDir: runtime.agentDir,
       logger: console,
     });
+    const daemonExtensionStartPromise = daemonExtensionManager.start();
     void hostedChatService.start(async () => {
-      await daemonExtensionManager!.start();
+      await daemonExtensionStartPromise;
       return await startChatBridge({
         hosted: true,
         chatAdapterProviders: daemonExtensionManager!.getChatAdapterProviders(),
