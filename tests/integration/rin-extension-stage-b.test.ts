@@ -34,15 +34,6 @@ const chatRuntime = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js"))
     .href
 );
-const bundledExtensions = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-bundled-extensions.js"))
-    .href
-);
-const builtInExtensionControls = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-builtin-extension-controls.js"),
-  ).href
-);
 const todoModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "todo.js")).href
 );
@@ -92,7 +83,6 @@ async function writeProviderPackage(
 
 async function createExtensionLoader(agentDir: string) {
   const settingsManager = SettingsManager.create(agentDir, agentDir);
-  bundledExtensions.applyBundledRinExtensionAliases(settingsManager);
   const loader = new DefaultResourceLoader({
     cwd: agentDir,
     agentDir,
@@ -298,52 +288,7 @@ test("core todo remains enabled when optional extensions are disabled", async ()
   }
 });
 
-test("stage B built-in extension controls expose no bundled foreground extensions", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-stage-b-"));
-  try {
-    await writeJson(path.join(agentDir, "settings.json"), {
-      extensions: ["rin:browse"],
-    });
-    const settingsManager = SettingsManager.create(agentDir, agentDir);
-
-    assert.deepEqual(
-      builtInExtensionControls.listBuiltInRinExtensionStates(settingsManager),
-      [],
-    );
-    await assert.rejects(
-      () =>
-        builtInExtensionControls.disableBuiltInRinExtension(
-          settingsManager,
-          "rin:browse",
-        ),
-      /Unknown built-in Rin extension/,
-    );
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-for (const removedAlias of [
-  "rin:browse",
-  "!rin:browse",
-  "rin:browser-use",
-  "rin:computer-use",
-]) {
-  test(`stage B removed built-in extension alias is not expanded: ${removedAlias}`, () => {
-    assert.equal(
-      bundledExtensions.resolveBundledRinExtensionPath(removedAlias),
-      "",
-    );
-    assert.equal(
-      bundledExtensions.expandBundledRinExtensionEntry(removedAlias),
-      removedAlias === "rin:browse" || removedAlias === "!rin:browse"
-        ? ""
-        : removedAlias,
-    );
-  });
-}
-
-test("stage B built-in extension entrypoints stay self-contained", async () => {
+test("Rin core capabilities remain independent of the extension loader", async () => {
   const extensionsDir = path.join(rootDir, "extensions");
   const entries = await fs
     .readdir(extensionsDir, { withFileTypes: true })
@@ -375,6 +320,43 @@ test("stage B removed browse alias does not load a tool", async () => {
     assert.equal(toolNames.includes("browse"), false);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("daemon adapter ignores the removed rinExtensions.daemon loader", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-removed-daemon-loader-"),
+  );
+  const packageDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-removed-daemon-loader-pkg-"),
+  );
+  const markerPath = path.join(agentDir, "loaded.txt");
+  try {
+    await writeProviderPackage(
+      packageDir,
+      "removed-daemon-loader-test",
+      `import fs from "node:fs"; export function rinDaemonExtension() { fs.writeFileSync(${JSON.stringify(markerPath)}, "loaded"); }\n`,
+    );
+    await writeJson(path.join(agentDir, "settings.json"), {
+      rinExtensions: {
+        daemon: [
+          {
+            packageName: "removed-daemon-loader-test",
+            version: `file:${packageDir}`,
+          },
+        ],
+      },
+    });
+    const manager = new backgroundExtensions.RinDaemonExtensionManager({
+      cwd: agentDir,
+      agentDir,
+      logger: { warn: () => {} },
+    });
+    assert.deepEqual(await manager.start(), []);
+    await assert.rejects(() => fs.access(markerPath));
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+    await fs.rm(packageDir, { recursive: true, force: true });
   }
 });
 
@@ -663,6 +645,7 @@ export function rinDaemonExtension(rin) {
     await fs.writeFile(
       path.join(agentDir, "settings.json"),
       JSON.stringify({
+        extensions: [packageDir],
         rinExtensions: {
           daemon: [
             {
@@ -731,6 +714,7 @@ export function rinDaemonExtension(rin) {
 `,
     );
     await writeJson(path.join(agentDir, "settings.json"), {
+      extensions: [packageDir],
       rinExtensions: {
         daemon: [
           {
@@ -904,6 +888,7 @@ export function rinDaemonExtension(rin) {
 `,
     );
     await writeJson(path.join(agentDir, "settings.json"), {
+      extensions: [packageDir],
       rinExtensions: {
         daemon: [
           {

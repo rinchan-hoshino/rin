@@ -28,12 +28,6 @@ import {
 } from "../../core/rin-lib/profile.js";
 import type { RpcSocketConnector } from "../../core/platform/rpc-socket.js";
 import { RinDaemonFrontendClient } from "../../core/rin-frontend-sdk/daemon-client.js";
-import {
-  listBuiltInRinExtensionStatesWithLifecycle,
-  setBuiltInRinExtensionState,
-} from "../../core/rin-builtin-extension-controls.js";
-import { loadRinAgentRuntime } from "../../core/rin-lib/agent-runtime.js";
-import { applyRinSettingsDefaults } from "../../core/rin-lib/runtime.js";
 import { createHostedChatService } from "./hosted-chat-service.js";
 
 async function main() {
@@ -66,16 +60,6 @@ async function main() {
   const stopAllServices = async () => {
     await stopHostedServices();
     await daemonExtensionManager?.stop().catch(() => {});
-  };
-
-  const getSettingsManager = async () => {
-    const agentRuntimeModule: any = await loadRinAgentRuntime();
-    const settingsManager = agentRuntimeModule.SettingsManager.create(
-      runtime.cwd,
-      runtime.agentDir,
-    );
-    applyRinSettingsDefaults(settingsManager);
-    return settingsManager;
   };
 
   try {
@@ -124,31 +108,6 @@ async function main() {
       getExtraStatus: () => ({ chat: hostedChatService.getStatus() }),
       handleLocalCommand: async (command) => {
         const type = String(command?.type || "").trim();
-        if (type === "list_builtin_extensions") {
-          const settingsManager = await getSettingsManager();
-          return {
-            success: true,
-            data: {
-              extensions:
-                await listBuiltInRinExtensionStatesWithLifecycle(
-                  settingsManager,
-                ),
-            },
-          };
-        }
-        if (type === "set_builtin_extension") {
-          const settingsManager = await getSettingsManager();
-          return {
-            success: true,
-            data: {
-              extension: await setBuiltInRinExtensionState(
-                settingsManager,
-                String(command?.extensionId || command?.id || ""),
-                Boolean(command?.enabled),
-              ),
-            },
-          };
-        }
         if (type === "chat_send") {
           return {
             success: true,

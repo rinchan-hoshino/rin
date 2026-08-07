@@ -6,6 +6,7 @@ import {
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
 import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
+import { withRinPiExtensionFactories } from "../rin-lib/pi-extension-options.js";
 import {
   collectRuntimeSlashCommands,
   getOAuthStateFromModelRegistry,
@@ -101,22 +102,24 @@ async function createCatalogContext(
   if (previousCwd !== cwd) process.chdir(cwd);
 
   const settingsManager = SettingsManager.create(cwd, agentDir);
-  const resourceLoader = new DefaultResourceLoader({
-    cwd,
-    agentDir,
-    settingsManager,
-    additionalExtensionPaths,
-    additionalSkillPaths: options.additionalSkillPaths,
-    additionalPromptTemplatePaths: options.additionalPromptTemplatePaths,
-    additionalThemePaths: options.additionalThemePaths,
-    noExtensions: options.noExtensions,
-    noSkills: options.noSkills,
-    noPromptTemplates: options.noPromptTemplates,
-    noThemes: options.noThemes,
-    noContextFiles: options.noContextFiles,
-    systemPrompt: options.systemPrompt,
-    appendSystemPrompt: options.appendSystemPrompt,
-  });
+  const resourceLoader = new DefaultResourceLoader(
+    await withRinPiExtensionFactories({
+      cwd,
+      agentDir,
+      settingsManager,
+      additionalExtensionPaths,
+      additionalSkillPaths: options.additionalSkillPaths,
+      additionalPromptTemplatePaths: options.additionalPromptTemplatePaths,
+      additionalThemePaths: options.additionalThemePaths,
+      noExtensions: options.noExtensions,
+      noSkills: options.noSkills,
+      noPromptTemplates: options.noPromptTemplates,
+      noThemes: options.noThemes,
+      noContextFiles: options.noContextFiles,
+      systemPrompt: options.systemPrompt,
+      appendSystemPrompt: options.appendSystemPrompt,
+    }),
+  );
   await resourceLoader.reload();
 
   const authStorage = AuthStorage.create(path.join(agentDir, "auth.json"));

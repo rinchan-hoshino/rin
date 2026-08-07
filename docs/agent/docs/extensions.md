@@ -1,16 +1,16 @@
-# Builtin Extensions and Capability Sources
+# Extensions and Capability Sources
 
-Use this page to identify where a Rin capability comes from: native Rin core, live third-party tool, practice document, or Rin background extension runtime. For task-level usage, start with `docs/capabilities.md`.
+Use this page to distinguish native Rin core capabilities from Pi extensions and Rin's frontend/backend adapters. For task-level usage, start with `docs/capabilities.md`.
 
 The live tool list remains authoritative for the current turn.
 
 ## Capability source map
 
-| Source                                   | Provides                                                                                                                                                                                  | Configuration surface                                                                          | Agent route                                         |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, note, scheduled-task SDK workflows, agent-owned chat setup, token usage | built into Rin                                                                                 | use live tools, CLI, SDK, or topic docs             |
-| Browser/computer/mobile/search operation | browser, computer, mobile, or search tools supplied by the live runtime, plus documented practice patterns                                                                                | live tool list or external Pi extension config                                                 | read `practices/README.md`                          |
-| Daemon extension runtime                 | trusted long-running services, chat adapters, and external memory providers                                                                                                               | `settings.json -> rinExtensions.daemon` or trusted extension entries with `rinDaemonExtension` | inspect runtime state and relevant extension config |
+| Source                                   | Provides                                                                                                                                                                                  | Configuration surface                                               | Agent route                                         |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------- |
+| Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, note, scheduled-task SDK workflows, agent-owned chat setup, token usage | built into Rin                                                      | use live tools, CLI, SDK, or topic docs             |
+| Browser/computer/mobile/search operation | browser, computer, mobile, or search tools supplied by the live runtime, plus documented practice patterns                                                                                | live tool list or external Pi extension config                      | read `practices/README.md`                          |
+| Daemon extension adapter                 | trusted long-running services, chat adapters, and external memory providers                                                                                                               | ordinary Pi extension entries that also export `rinDaemonExtension` | inspect runtime state and relevant extension config |
 
 ## Rin core capabilities
 
@@ -48,11 +48,11 @@ Todo state is checkpointed in Pi session custom entries and reconstructed from t
 
 Rin core registers the `note` tool and `/notes` TUI command for concise verified continuity. Note uses the same full `read` plus item-level `add`, `edit`, and `remove` contract as todo. Its stable-ID snapshots use session custom entries, preserving the selected branch across compaction without creating cross-session memory. Existing text-buffer snapshots reconstruct as one item; retired whole-buffer operations are not exposed.
 
-## Bundled foreground extensions
+## Extension loading
 
-Rin currently ships no bundled optional foreground extensions. Existing installs that still contain removed bundled aliases such as `rin:browse` have those entries stripped during install/update settings persistence.
+Rin has no separate built-in-extension registry or foreground extension loader. It uses Pi's native `DefaultResourceLoader`, adds Pi's own inline extensions, and applies frontend/backend compatibility adapters around the resulting extension set. Existing installs that still contain retired aliases such as `rin:browse` have those entries stripped during install/update settings persistence.
 
-Use ordinary Pi extension configuration for trusted third-party foreground extensions. Use the live tool list as the source of truth for which tools are available in the current turn.
+Use ordinary Pi extension configuration for trusted third-party extensions. Use the live tool list as the source of truth for which tools are available in the current turn.
 
 ## Browser, computer, mobile, and search operation
 
@@ -72,18 +72,15 @@ Trusted third-party Pi extensions for browser or computer control are configured
 
 Background extensions run in Rin's daemon runtime as trusted Node.js packages. They are used for long-running async services, chat adapters, and external memory providers.
 
-Configuration sources:
+Only extensions discovered through ordinary Pi extension settings or package configuration are eligible for daemon adaptation. `settings.json -> rinExtensions.daemon` may provide matching backend configuration, but it cannot load an extension by itself.
 
-- `settings.json -> rinExtensions.daemon`;
-- trusted local/package extension entries that export `rinDaemonExtension`.
-
-The ordinary default export remains Pi's session extension factory and is never executed again by the daemon. Daemon extensions use the separate `rinDaemonExtension(rin)` registration API:
+The ordinary default export remains Pi's session extension factory and is not replayed by the daemon adapter. Daemon extensions use the separate `rinDaemonExtension(rin)` registration API:
 
 - `rin.registerBackgroundService(...)`;
 - `rin.registerChatAdapter(...)`;
 - `rin.registerMemoryProvider(...)`.
 
-Background services may install or update configured npm packages under `~/.rin/data/extensions/runtime` during startup. Restart or reload Rin after editing daemon extension settings.
+Install and update packages through Pi package commands exposed by the `rin` CLI. Restart or reload Rin after changing extension settings.
 
 Memory providers may implement `search`, `listRecent`, and `write`, and may return remote `reference` or `url` values instead of local transcript paths.
 

@@ -3,7 +3,6 @@ import path from "node:path";
 
 import { isContextOverflow } from "@earendil-works/pi-ai/compat";
 
-import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import itemCommandsExtension from "./item-commands.js";
 import noteCapability from "./note.js";
 import todoCapability from "./todo.js";
@@ -1268,7 +1267,6 @@ export async function createConfiguredAgentSession(
     patchPiSessionManagerConversationPersistence(sessionManager);
 
     const settingsManager = SettingsManager.create(runtimeCwd, runtimeAgentDir);
-    applyBundledRinExtensionAliases(settingsManager);
 
     const piServiceOptions = options.piAgentSessionServicesOptions ?? {};
     const piResourceLoaderOptions =

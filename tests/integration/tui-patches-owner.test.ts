@@ -22,8 +22,6 @@ const fixture = (globalThis as any).__rinTuiPatchesOwner as {
   entries: any[];
   newEntries: any[];
   pages: any[];
-  extensionStates: any[];
-  extensionError?: Error;
   footerLines: string[];
   selector?: any;
   classes: Record<string, any>;
@@ -37,8 +35,6 @@ function resetFixture() {
   fixture.entries = [];
   fixture.newEntries = [];
   fixture.pages = [];
-  fixture.extensionStates = [];
-  fixture.extensionError = undefined;
   fixture.footerLines = ["cwd", "stats", "tail"];
   fixture.selector = undefined;
 }
@@ -138,6 +134,18 @@ test("TUI patch exports preserve resume, chrome, update, and branding contracts"
     patches.rewriteRinStartupHeaderText("pi v0.80.0", "0.80.0", "v1.2.3"),
     "rin v1.2.3",
   );
+  assert.equal(
+    patches.rewriteRinStartupHeaderText("pi v0.80.0", undefined, "   "),
+    "Rin unknown",
+  );
+  assert.equal(
+    patches.rewriteRinStartupHeaderText("pi v0.80.0", undefined, ""),
+    "Rin unknown",
+  );
+  assert.equal(
+    patches.rewriteRinStartupHeaderText("pi v0.80.0", "   ", "1.2.3"),
+    "Rin v1.2.3",
+  );
   const previousQuickRun = process.env.RIN_QUICK_RUN;
   t.after(() => {
     if (previousQuickRun === undefined) delete process.env.RIN_QUICK_RUN;
@@ -171,6 +179,14 @@ test("TUI patch exports preserve resume, chrome, update, and branding contracts"
   );
   assert.equal(expanded, true);
   assert.equal(brandedText, "Rin expanded");
+  assert.equal(
+    patches.applyRinStartupHeaderBranding({
+      builtInHeader: expandable,
+      version: "0.80.0",
+    }),
+    true,
+  );
+  assert.equal(expanded, false);
   let staticText = "";
   assert.equal(
     patches.applyRinStartupHeaderBranding({
@@ -244,6 +260,31 @@ test("TUI git changelog notification formats, renders, and rolls back atomically
     compareUrl: "https://example.invalid/compare",
   };
   assert.equal(patches.showRinGitChangelogNotification({}, notice), false);
+  assert.equal(
+    patches.showRinGitChangelogNotification(
+      { chatContainer: { children: [] } },
+      notice,
+    ),
+    false,
+  );
+  assert.equal(
+    patches.showRinGitChangelogNotification(
+      { chatContainer: childContainer() },
+      notice,
+    ),
+    false,
+  );
+  assert.equal(
+    patches.showRinGitChangelogNotification(
+      {
+        chatContainer: childContainer(),
+        showStartupNoticesIfNeeded() {},
+        ui: {},
+      },
+      notice,
+    ),
+    false,
+  );
 
   const container = childContainer();
   const instance = {
@@ -285,6 +326,22 @@ test("TUI git changelog notification formats, renders, and rolls back atomically
     ),
     false,
   );
+
+  const throwingContainer = childContainer();
+  assert.throws(() =>
+    patches.showRinGitChangelogNotification(
+      {
+        chatContainer: throwingContainer,
+        showStartupNoticesIfNeeded() {
+          throwingContainer.addChild({ text: "temporary" });
+          throw new Error("owner-render-failure");
+        },
+        ui: { requestRender: () => true },
+      },
+      notice,
+    ),
+  );
+  assert.deepEqual(throwingContainer.children, []);
 });
 
 test("TUI initialization builds Pi-native chrome without managed tool fallback", async () => {
@@ -373,6 +430,8 @@ test("TUI initialization builds Pi-native chrome without managed tool fallback",
   assert.equal(verbose.changelogMarkdown, "owner changelog");
   assert.equal(verbose.headerContainer.children.length, 3);
   assert.equal(verbose.ui.children.length, 9);
+  verbose.builtInHeader.setExpanded(true);
+  verbose.builtInHeader.setExpanded(false);
   assert.equal(
     events.some(([name]) => name === "providers"),
     true,
@@ -546,54 +605,6 @@ test("patched settings, selectors, signals, and event bridge keep one native own
   resetFixture();
   await patches.applyRinTuiOverrides();
   const proto = InteractiveMode.prototype;
-
-  const forwarded: any[] = [];
-  const settingsList: any = {
-    items: [{ id: "upstream" }],
-    filteredItems: [],
-    onChange(id: string, value: string) {
-      forwarded.push([id, value]);
-    },
-  };
-  fixture.extensionStates = [
-    {
-      id: "todo",
-      label: "Todo",
-      description: "Owner todo",
-      enabled: true,
-    },
-  ];
-  const settingEvents: any[] = [];
-  const settingsInstance = {
-    editorContainer: {
-      children: [{ getSettingsList: () => settingsList }],
-    },
-    settingsManager: { owner: true },
-    session: { reload: async () => settingEvents.push(["reload"]) },
-    setupAutocompleteProvider: () => settingEvents.push(["autocomplete"]),
-    showStatus: (value: string) => settingEvents.push(["status", value]),
-    showError: (value: string) => settingEvents.push(["error", value]),
-  };
-  proto.showSettingsSelector.call(settingsInstance);
-  assert.equal(settingsList.items.at(-1).id, "rin-built-in-extension:todo");
-  settingsList.onChange("upstream", "value");
-  settingsList.onChange("rin-built-in-extension:todo", "false");
-  await flush();
-  assert.deepEqual(forwarded, [["upstream", "value"]]);
-  assert.deepEqual(settingEvents, [
-    ["reload"],
-    ["autocomplete"],
-    ["status", "Built-in extension settings reloaded."],
-  ]);
-  proto.showSettingsSelector.call(settingsInstance);
-  assert.equal(settingsList.items.length, 2);
-  fixture.extensionError = new Error("owner extension rejected");
-  settingsList.onChange("rin-built-in-extension:todo", "true");
-  await flush();
-  assert.deepEqual(settingEvents.at(-1), [
-    "error",
-    "Failed to update built-in extension setting: owner extension rejected",
-  ]);
 
   fixture.pages = [
     {
@@ -897,11 +908,18 @@ test("patched lifecycle wrappers preserve native fallbacks and cleanup", async (
       branded = value;
     },
   };
+  fixture.notice = {
+    currentVersion: "1.2.3",
+    latestVersion: "1.2.4",
+    channel: "stable",
+  };
   await proto.init.call({
     isInitialized: true,
     builtInHeader: collapsedHeader,
     version: "0.80.0",
   });
+  await flush();
+  fixture.notice = null;
   assert.equal(branded, "rin v1.2.3 compact");
   assert.equal(collapsedHeader.getCollapsedText(), "rin v1.2.3 compact");
 
@@ -1064,44 +1082,10 @@ test("RPC transport failures defer to the Connecting status owner", async () => 
   assert.deepEqual(shown, ["Failed to resume session: renderer exploded"]);
 });
 
-test("remote selectors and extension fallbacks keep bounded ownership", async () => {
+test("remote selectors keep bounded ownership", async () => {
   resetFixture();
   await patches.applyRinTuiOverrides();
   const proto = InteractiveMode.prototype;
-
-  const settingEvents: any[] = [];
-  const settingsList: any = {
-    items: [],
-    filteredItems: [],
-    onChange: () => settingEvents.push(["upstream"]),
-  };
-  fixture.extensionStates = [
-    {
-      id: "memory",
-      label: "Memory",
-      description: "Owner memory",
-      enabled: false,
-    },
-  ];
-  const settingsInstance = {
-    editorContainer: {
-      children: [{ getSettingsList: () => settingsList }],
-    },
-    settingsManager: { owner: "remote" },
-    session: {
-      call: async (name: string) => {
-        settingEvents.push(["call", name]);
-        throw new Error("reload rejected");
-      },
-    },
-    showError: (message: string) => settingEvents.push(["error", message]),
-  };
-  proto.showSettingsSelector.call(settingsInstance);
-  assert.equal(settingsList.items[0].currentValue, "false");
-  settingsList.onChange("rin-built-in-extension:memory", "true");
-  await flush();
-  assert.deepEqual(settingEvents, [["call", "reload"]]);
-  proto.showSettingsSelector.call({ editorContainer: { children: [] } });
 
   let remoteCalls = 0;
   const selectorEvents: any[] = [];

@@ -5,7 +5,21 @@
 
 import { basename } from "node:path";
 
+import { builtInExtensions } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/extensions/index.js";
+import { loadExtensionFromFactory } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js";
 import { resolveToCwd } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
+
+export async function getPiBuiltInExtensions() {
+  return builtInExtensions;
+}
+export {
+  handleConfigCommand as handlePiConfigCommand,
+  handlePackageCommand as handlePiPackageCommand,
+} from "../../../node_modules/@earendil-works/pi-coding-agent/dist/package-manager-cli.js";
+export {
+  parseArgs as parsePiCliArgs,
+  printHelp as printPiCliHelp,
+} from "../../../node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js";
 import { str } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/render-utils.js";
 
 export { initTheme } from "@earendil-works/pi-coding-agent";
@@ -18,8 +32,6 @@ export async function loadPiExtensionFromFactory(
   runtime: any,
   extensionPath: string,
 ) {
-  const { loadExtensionFromFactory } =
-    await import("../../../node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js");
   return await loadExtensionFromFactory(
     factory,
     cwd,

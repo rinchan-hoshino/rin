@@ -432,28 +432,6 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
     return await this.request({ type: "reset_model_options_from_settings" });
   }
 
-  async listBuiltInExtensions(): Promise<any[]> {
-    if (!this.isConnected()) return [];
-    const data = this.getData(
-      await this.send({ type: "list_builtin_extensions" }),
-    );
-    return Array.isArray(data?.extensions) ? data.extensions : [];
-  }
-
-  async setBuiltInExtension(
-    extensionId: string,
-    enabled: boolean,
-  ): Promise<any> {
-    const data = this.getData(
-      await this.send({
-        type: "set_builtin_extension",
-        extensionId,
-        enabled,
-      }),
-    );
-    return data?.extension || null;
-  }
-
   async respondExtensionUi(response: RinExtensionUiResponse) {
     await this.send(response);
   }

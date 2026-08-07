@@ -21,7 +21,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   const readme = readAgentDoc("README.md");
   const capabilities = readAgentDoc("docs/capabilities.md");
   const executionEnvironment = readAgentDoc("docs/execution-environment.md");
-  const builtinCapabilities = readAgentDoc("docs/builtin-extensions.md");
+  const builtinCapabilities = readAgentDoc("docs/extensions.md");
   const sessionAwareness = readAgentDoc("docs/session-awareness.md");
   const nonInteractiveCli = readAgentDoc("docs/non-interactive-cli.md");
   const piOverrides = readAgentDoc("docs/pi-overrides.md");
@@ -122,7 +122,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(builtinCapabilities, /Capability source map/);
   assert.match(
     builtinCapabilities,
-    /Rin currently ships no bundled optional foreground extensions/,
+    /Rin has no separate built-in-extension registry or foreground extension loader/,
   );
   assert.match(
     builtinCapabilities,

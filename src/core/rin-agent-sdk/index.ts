@@ -82,13 +82,6 @@ export type ChatBridgeEvalOptions = {
   sessionId?: string;
 };
 
-export type BuiltInExtensionState = {
-  id: string;
-  label: string;
-  description: string;
-  enabled: boolean;
-};
-
 function mergeOptions(
   base: RinAgentSdkOptions,
   override?: RinAgentSdkOptions,
@@ -258,32 +251,6 @@ export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
           override,
         ),
       control: controlTask,
-    },
-    builtInExtensions: {
-      list: async (override?: RinAgentSdkOptions) =>
-        await request<{ extensions: BuiltInExtensionState[] }>(
-          { type: "list_builtin_extensions" },
-          override,
-        ),
-      setEnabled: async (
-        extensionId: string,
-        enabled: boolean,
-        override?: RinAgentSdkOptions,
-      ) =>
-        await request<{ extension: BuiltInExtensionState }>(
-          { type: "set_builtin_extension", extensionId, enabled },
-          override,
-        ),
-      enable: async (extensionId: string, override?: RinAgentSdkOptions) =>
-        await request<{ extension: BuiltInExtensionState }>(
-          { type: "set_builtin_extension", extensionId, enabled: true },
-          override,
-        ),
-      disable: async (extensionId: string, override?: RinAgentSdkOptions) =>
-        await request<{ extension: BuiltInExtensionState }>(
-          { type: "set_builtin_extension", extensionId, enabled: false },
-          override,
-        ),
     },
     chat: {
       send: async (payload: ChatSendOptions, override?: RinAgentSdkOptions) =>

@@ -40,7 +40,7 @@ Read `docs/memory-layering.md`, `docs/self-improve-distillation.md`, and `docs/c
 
 Use the live tool list for the current turn and Rin capability docs for installed behavior. Rin-owned agent surfaces include archived recall, core todo, scheduled tasks, and chat bridge configuration. Browser, computer, mobile, and search operations are available only when the live runtime exposes the needed tools; route those tasks through `practices/README.md`.
 
-Read `docs/builtin-extensions.md` and `docs/capabilities.md` for the current Rin layer.
+Read `docs/extensions.md` and `docs/capabilities.md` for the current Rin layer.
 
 ### Documentation paths
 
@@ -62,5 +62,5 @@ When a task used Pi docs, report:
 
 - Turn-level environment and live target checks: `docs/execution-environment.md`.
 - Installed runtime paths and manifests: `docs/runtime-layout.md`.
-- Capability surfaces: `docs/capabilities.md` and `docs/builtin-extensions.md`.
+- Capability surfaces: `docs/capabilities.md` and `docs/extensions.md`.
 - Memory/self-improve destination choice: `docs/memory-layering.md`.

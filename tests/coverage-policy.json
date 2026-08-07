@@ -502,18 +502,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-builtin-extension-controls.ts",
-      "built": "dist/core/rin-builtin-extension-controls.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-bundled-extensions.ts",
-      "built": "dist/core/rin-bundled-extensions.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
       "source": "src/core/rin-daemon/catalog-helpers.ts",
       "built": "dist/core/rin-daemon/catalog-helpers.js",
       "ownerSuite": "unit",
@@ -976,12 +964,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-lib/extension-loader.ts",
-      "built": "dist/core/rin-lib/extension-loader.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/rin-lib/interruption.ts",
       "built": "dist/core/rin-lib/interruption.js",
       "ownerSuite": "unit",
@@ -1026,6 +1008,12 @@
     {
       "source": "src/core/rin-lib/note.ts",
       "built": "dist/core/rin-lib/note.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-lib/pi-extension-options.ts",
+      "built": "dist/core/rin-lib/pi-extension-options.js",
       "ownerSuite": "integration",
       "status": "strict"
     },
@@ -1156,6 +1144,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin-tui/frontend-extension-adapter.ts",
+      "built": "dist/core/rin-tui/frontend-extension-adapter.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin-tui/launcher.ts",
       "built": "dist/core/rin-tui/launcher.js",
       "ownerSuite": "integration",
@@ -1206,6 +1200,12 @@
     {
       "source": "src/core/rin/launch.ts",
       "built": "dist/core/rin/launch.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin/pi-command-adapter.ts",
+      "built": "dist/core/rin/pi-command-adapter.js",
       "ownerSuite": "integration",
       "status": "strict"
     },

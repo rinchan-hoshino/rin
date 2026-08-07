@@ -1,7 +1,4 @@
-import fs from "node:fs";
 import path from "node:path";
-import { extensionDataPath } from "./data-layout.js";
-import { resolveBundledRinExtensionPath } from "./rin-bundled-extensions.js";
 
 import { cloneJson, isJsonRecord } from "./json-utils.js";
 import { readJsonFile } from "./platform/fs.js";
@@ -35,8 +32,6 @@ function normalizeDaemonExtensionConfig(
   if (value.enabled === false) return null;
   const packageName = safeString(value.packageName).trim();
   if (!packageName) return null;
-  const bundledPath = resolveBundledRinExtensionPath(packageName);
-  if (bundledPath) return null;
   const name =
     safeString(value.name).trim() ||
     packageName.replace(/^@/, "").replace(/[^A-Za-z0-9._-]+/g, "-");
@@ -57,21 +52,4 @@ export function listRinDaemonExtensionConfigs(
     .map((entry) => normalizeDaemonExtensionConfig(entry))
     .filter((entry): entry is RinDaemonExtensionConfig => Boolean(entry));
   return configuredExtensions;
-}
-
-export function getRinExtensionRuntimeRoot(agentDir: string): string {
-  return extensionDataPath(agentDir, "runtime");
-}
-
-export function ensureRuntimeImporter(runtimeRoot: string, fileName: string) {
-  fs.mkdirSync(runtimeRoot, { recursive: true });
-  const importerPath = path.join(runtimeRoot, fileName);
-  if (!fs.existsSync(importerPath)) {
-    fs.writeFileSync(
-      importerPath,
-      "export async function importProvider(specifier) { return await import(specifier); }\n",
-      "utf8",
-    );
-  }
-  return importerPath;
 }

@@ -95,16 +95,6 @@ const sources: Record<string, string> = {
       globalThis.__rinTuiPatchesOwner.events.push(["rename", sessionPath, name, Boolean(options?.SessionManager)]);
     }
   `,
-  "dist/core/rin-builtin-extension-controls.js": `
-    export function listBuiltInRinExtensionStates() {
-      return globalThis.__rinTuiPatchesOwner.extensionStates;
-    }
-    export async function setBuiltInRinExtensionState(settings, id, enabled) {
-      globalThis.__rinTuiPatchesOwner.events.push(["extension-state", settings, id, enabled]);
-      const error = globalThis.__rinTuiPatchesOwner.extensionError;
-      if (error) throw error;
-    }
-  `,
   "dist/core/platform/process.js": `
     export async function sleep(milliseconds) {
       globalThis.__rinTuiPatchesOwner.events.push(["sleep", milliseconds]);

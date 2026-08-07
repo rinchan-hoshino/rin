@@ -44,6 +44,15 @@ test("Pi private API loads an extension through Pi's canonical factory", async (
   assert.equal(extension.path, "owner-inline-extension");
 });
 
+test("Pi private API reuses Pi CLI parsing and command routing", async () => {
+  assert.equal(
+    privateApi.parsePiCliArgs(["--model", "owner/model"]).model,
+    "owner/model",
+  );
+  assert.equal(await privateApi.handlePiPackageCommand([], {}), false);
+  assert.equal(await privateApi.handlePiConfigCommand([], {}), false);
+});
+
 test("Pi private API exposes the managed tools module", async () => {
   const moduleUrl = privateApi.getPiToolsManagerModuleUrl();
   assert.match(moduleUrl, /pi-coding-agent\/dist\/utils\/tools-manager\.js$/);

@@ -80,15 +80,10 @@ function runLightCliWithModuleDebug(args: string[]) {
   return result;
 }
 
-test("light CLI commands do not load the Pi runtime", () => {
+test("the version fast path does not load the Pi runtime", () => {
   assert.equal(
     runLightCliWithModuleDebug(["version"]).stdout.trim(),
     "unknown",
-  );
-  assert.match(runLightCliWithModuleDebug(["--help"]).stdout, /Usage:/);
-  assert.match(
-    runLightCliWithModuleDebug(["-p", "--help"]).stdout,
-    /AI coding assistant/,
   );
 });
 
@@ -396,9 +391,9 @@ test("cli help omits removed run command and exposes Pi-style non-interactive fl
   assert.match(output, /--mode <mode>/);
   assert.doesNotMatch(output, /--chat-key <chatKey>/);
   assert.match(output, /--managed-session <leaf>/);
-  assert.match(output, /--name <name>/);
-  assert.match(output, /--tools <tools>/);
-  assert.match(output, /--exclude-tools <tools>/);
+  assert.match(output, /--name(?:, -n)? <name>/);
+  assert.match(output, /--tools(?:, -t)? <tools>/);
+  assert.match(output, /--exclude-tools(?:, -xt)? <tools>/);
   assert.match(output, /--no-tools/);
   assert.match(output, /--no-builtin-tools/);
   assert.match(output, /--timeout <seconds>/);

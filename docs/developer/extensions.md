@@ -75,22 +75,17 @@ work are real capabilities. Pi registration methods are intentionally absent
 from the daemon API, and daemon registration methods are absent from the
 session API. Unsupported methods are never installed as silent no-ops.
 
-Trusted entries come from `settings.json -> rinExtensions.daemon`
-or a trusted Pi extension package that exports `rinDaemonExtension`:
+Only ordinary Pi extension entries are loaded. A matching `rinExtensions.daemon` entry may supply backend configuration, but it cannot discover or install a package:
 
 ```json
 {
+  "packages": ["@example/rin-extension"],
   "rinExtensions": {
-    "daemon": [{ "packageName": "@example/rin-extension", "version": "1.0.0" }]
+    "daemon": [{ "packageName": "@example/rin-extension", "config": {} }]
   }
 }
 ```
 
 ## Command ownership
 
-One catalog combines Pi builtins, extension commands, prompt/skill commands,
-and the small Rin builtin contribution. Builtins are never registered through
-`rin.registerCommand()` and remain fully functional when no ExtensionRunner is
-present. One dispatcher routes each invocation to its semantic owner: Pi's
-session runtime, daemon control, a frontend-local adapter, or a Rin service.
-Frontends do not maintain independent command allowlists.
+The `rin` CLI delegates Pi package/config/auth commands to Pi's own command implementations and appends Rin-only commands. It does not maintain a copied Pi command table. At runtime, one catalog projects Pi builtins, extension commands, prompt/skill commands, and the small Rin builtin contribution through frontend/backend adapters; frontends do not maintain independent command allowlists.

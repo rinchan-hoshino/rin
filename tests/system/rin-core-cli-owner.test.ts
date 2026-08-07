@@ -64,23 +64,28 @@ try {
     "update", "start", "stop", "restart", "doctor", "status", "tasks",
     "usage", "self-improve", "versions", "rollback", "memory-index",
   ]) await run([command]);
+  await run(["update", "self"]);
+  await run(["update", "--self", "--force"]);
+  await run(["update", "--all"]);
+  await run(["--user", "owner"]);
   await run(["version", "--target", "remote-two"]);
   await run(["version", "--yes"]);
   await run([]);
 } finally {
   console.log = originalLog;
 }
-assert.deepEqual(logs, ["9.8.7-owner", "9.8.7-owner"]);
+assert.deepEqual(
+  logs.filter((value) => value === "9.8.7-owner"),
+  ["9.8.7-owner", "9.8.7-owner"],
+);
 assert.equal(process.exitCode, 23);
 process.exitCode = 0;
 const names = globalThis.__rinMainOwnerEvents.map(([name]) => name);
 for (const expected of [
-  "print-help", "cac-help", "run", "target", "resolve-target", "run-target",
+  "print-help", "run", "target", "resolve-target", "run-target",
   "update", "start", "stop", "restart", "doctor", "status", "tasks", "usage",
   "self-improve", "versions", "rollback", "memory-index", "launch",
 ]) assert.equal(names.includes(expected), true, expected);
-const helpEvent = globalThis.__rinMainOwnerEvents.find(([name]) => name === "cac-help");
-assert.deepEqual(helpEvent[1], [undefined, undefined]);
 assert.equal(globalThis.__rinMainOwnerCommands.length >= 14, true);
 console.log = originalLog;
 originalLog(JSON.stringify({ events: names.length, commands: globalThis.__rinMainOwnerCommands.length }));
@@ -103,8 +108,8 @@ test("Rin core CLI dispatches every local, internal, target, and default command
       ],
       { env: sandbox.env },
     );
-    const summary = JSON.parse(result.stdout);
-    assert.equal(summary.events >= 25, true);
+    const summary = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+    assert.equal(summary.events >= 24, true);
     assert.equal(summary.commands >= 14, true);
     assert.equal(result.stderr, "");
 

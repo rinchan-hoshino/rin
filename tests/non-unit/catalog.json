@@ -373,7 +373,10 @@
       "source": "src/core/pi/private-api.ts",
       "built": "dist/core/pi/private-api.js",
       "suite": "integration",
-      "tests": ["tests/integration/pi-private-api.test.ts"]
+      "tests": [
+        "tests/integration/pi-private-api.test.ts",
+        "tests/integration/rin-extension-loader-superset.test.ts"
+      ]
     },
     {
       "source": "src/core/pi/render-utils.ts",
@@ -417,14 +420,6 @@
       "built": "dist/core/rin-agent-sdk/index.js",
       "suite": "integration",
       "tests": ["tests/integration/rin-agent-sdk-owner.test.ts"]
-    },
-    {
-      "source": "src/core/rin-builtin-extension-controls.ts",
-      "built": "dist/core/rin-builtin-extension-controls.js",
-      "suite": "integration",
-      "tests": [
-        "tests/integration/rin-builtin-extension-controls-owner.test.ts"
-      ]
     },
     {
       "source": "src/core/rin-daemon/catalog.ts",
@@ -475,8 +470,7 @@
       "source": "src/core/rin-daemon/extensions.ts",
       "built": "dist/core/rin-daemon/extensions.js",
       "suite": "integration",
-      "tests": ["tests/integration/rin-daemon-extensions-owner.test.ts"],
-      "preloads": ["tests/support/register-daemon-extensions-owner-fixture.ts"]
+      "tests": ["tests/integration/rin-daemon-extension-adapter.test.ts"]
     },
     {
       "source": "src/core/rin-daemon/lock.ts",
@@ -799,12 +793,6 @@
       "tests": ["tests/integration/rin-lib-common-owner.test.ts"]
     },
     {
-      "source": "src/core/rin-lib/extension-loader.ts",
-      "built": "dist/core/rin-lib/extension-loader.js",
-      "suite": "integration",
-      "tests": ["tests/integration/rin-extension-loader-owner.test.ts"]
-    },
-    {
       "source": "src/core/rin-lib/item-commands.ts",
       "built": "dist/core/rin-lib/item-commands.js",
       "suite": "integration",
@@ -841,6 +829,12 @@
       "built": "dist/core/rin-lib/note.js",
       "suite": "integration",
       "tests": ["tests/integration/note-tool.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/pi-extension-options.ts",
+      "built": "dist/core/rin-lib/pi-extension-options.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-extension-loader-superset.test.ts"]
     },
     {
       "source": "src/core/rin-lib/pi-passthrough.ts",
@@ -916,6 +910,12 @@
       "tests": ["tests/integration/rpc-events.test.ts"]
     },
     {
+      "source": "src/core/rin-tui/frontend-extension-adapter.ts",
+      "built": "dist/core/rin-tui/frontend-extension-adapter.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-extension-loader-superset.test.ts"]
+    },
+    {
       "source": "src/core/rin-tui/launcher.ts",
       "built": "dist/core/rin-tui/launcher.js",
       "suite": "integration",
@@ -932,7 +932,10 @@
       "source": "src/core/rin-tui/runtime.ts",
       "built": "dist/core/rin-tui/runtime.js",
       "suite": "integration",
-      "tests": ["tests/integration/rin-tui-runtime-owner.test.ts"],
+      "tests": [
+        "tests/integration/rin-extension-loader-superset.test.ts",
+        "tests/integration/rin-tui-runtime-owner.test.ts"
+      ],
       "preloads": ["tests/support/register-rin-tui-runtime-owner-fixture.ts"]
     },
     {
@@ -964,6 +967,12 @@
       "built": "dist/core/rin/launch.js",
       "suite": "integration",
       "tests": ["tests/integration/rin-launch-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/pi-command-adapter.ts",
+      "built": "dist/core/rin/pi-command-adapter.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-cli-pi-superset.test.ts"]
     },
     {
       "source": "src/core/rin/main.ts",

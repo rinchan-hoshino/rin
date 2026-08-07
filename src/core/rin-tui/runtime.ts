@@ -3,7 +3,10 @@ import type {
   AgentMessage,
   ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import { buildContextEntries } from "@earendil-works/pi-coding-agent";
+import {
+  buildContextEntries,
+  ExtensionRunner,
+} from "@earendil-works/pi-coding-agent";
 
 import { asArray } from "../json-utils.js";
 import { safeString } from "../text-utils.js";
@@ -374,10 +377,12 @@ export class RpcInteractiveSession {
   private lastFrontendPhase: RpcFrontendPhase | null = null;
   private nextRequestTagId = 0;
   private coreToolDefinitions = new Map<string, any>();
+  private frontendNativeExtensionRunner?: any;
 
   constructor(
     public client: RpcFrontendClient,
     extensionOptions: string[] | Partial<TuiResourceOptions> = [],
+    frontendExtensions?: { extensions: any[]; runtime: any },
   ) {
     const normalizedExtensionOptions = Array.isArray(extensionOptions)
       ? { additionalExtensionPaths: extensionOptions }
@@ -412,7 +417,6 @@ export class RpcInteractiveSession {
       if (!descriptor || typeof descriptor.value !== "function") continue;
       (this as any)[name] = descriptor.value.bind(this);
     }
-    this.extensionRunner = this.createPassiveExtensionRunner();
     this.agent = new RemoteAgent(client);
     this.settingsManager = undefined;
     this.modelRegistry = createModelRegistry(client);
@@ -442,6 +446,21 @@ export class RpcInteractiveSession {
         void this.setSessionName(name).catch(() => {}),
     };
     this.coreToolDefinitions = this.createCoreToolDefinitions();
+    if (frontendExtensions) {
+      this.frontendNativeExtensionRunner = new ExtensionRunner(
+        frontendExtensions.extensions,
+        frontendExtensions.runtime,
+        getRuntimeProfile().cwd,
+        this.sessionManager,
+        this.modelRegistry,
+      );
+      for (const [name, value] of Object.entries(
+        this.extensionOptions.extensionFlagValues ?? {},
+      )) {
+        this.frontendNativeExtensionRunner.setFlagValue(name, value);
+      }
+    }
+    this.extensionRunner = this.createPassiveExtensionRunner();
   }
 
   async prepareForInteractiveStartup() {
@@ -1059,7 +1078,11 @@ export class RpcInteractiveSession {
   }
 
   getToolDefinition(toolName: string) {
-    return this.coreToolDefinitions.get(String(toolName || "").trim());
+    const name = String(toolName || "").trim();
+    return (
+      this.coreToolDefinitions.get(name) ??
+      this.frontendNativeExtensionRunner?.getToolDefinition(name)
+    );
   }
 
   private createCoreToolDefinitions() {
@@ -1114,14 +1137,28 @@ export class RpcInteractiveSession {
       getCommandDiagnostics: () =>
         this.resourceSnapshot.extensions.commandDiagnostics,
       getShortcutDiagnostics: () =>
+        this.frontendNativeExtensionRunner?.getShortcutDiagnostics?.() ??
         this.resourceSnapshot.extensions.shortcutDiagnostics,
-      getShortcuts: () => new Map(),
-      getMessageRenderer: () => undefined,
-      getMarkdownTransformers: () => [],
-      getEntryRenderer: () => undefined,
+      getShortcuts: (resolvedKeybindings: unknown) =>
+        this.frontendNativeExtensionRunner?.getShortcuts?.(
+          resolvedKeybindings,
+        ) ?? new Map(),
+      getMessageRenderer: (customType: string) =>
+        this.frontendNativeExtensionRunner?.getMessageRenderer?.(customType),
+      getMarkdownTransformers: () =>
+        this.frontendNativeExtensionRunner?.getMarkdownTransformers?.() ?? [],
+      getEntryRenderer: (customType: string) =>
+        this.frontendNativeExtensionRunner?.getEntryRenderer?.(customType),
+      getFlags: () =>
+        this.frontendNativeExtensionRunner?.getFlags?.() ?? new Map(),
+      getFlagValues: () =>
+        this.frontendNativeExtensionRunner?.getFlagValues?.() ?? new Map(),
+      getModelRegistry: () => this.modelRegistry,
       emitUserBash: async () => null,
-      getToolDefinition: () => undefined,
-      invalidate: () => {},
+      getToolDefinition: (toolName: string) => this.getToolDefinition(toolName),
+      getAllRegisteredTools: () =>
+        this.frontendNativeExtensionRunner?.getAllRegisteredTools?.() ?? [],
+      invalidate: () => this.frontendNativeExtensionRunner?.invalidate?.(),
     };
   }
 

@@ -113,10 +113,6 @@ test("frontend daemon client owns the complete RPC command surface", async () =>
       set_model: { provider: request.provider, modelId: request.modelId },
       set_thinking_level: { level: request.level },
       reset_model_options_from_settings: { reset: true },
-      list_builtin_extensions: { extensions: [{ id: "browse" }] },
-      set_builtin_extension: {
-        extension: { id: request.extensionId, enabled: request.enabled },
-      },
       extension_ui_response: { accepted: true },
       list_sessions: {
         sessions: [
@@ -154,7 +150,6 @@ test("frontend daemon client owns the complete RPC command surface", async () =>
         (item) => item.id && item.name && item.description,
       ),
     );
-    assert.deepEqual(await client.listBuiltInExtensions(), []);
     assert.deepEqual(await client.listSessions(), []);
     assert.deepEqual(await client.listModels(), []);
 
@@ -292,11 +287,6 @@ test("frontend daemon client owns the complete RPC command surface", async () =>
     assert.deepEqual(await client.resetModelOptionsFromSettings(), {
       reset: true,
     });
-    assert.deepEqual(await client.listBuiltInExtensions(), [{ id: "browse" }]);
-    assert.deepEqual(await client.setBuiltInExtension("browse", false), {
-      id: "browse",
-      enabled: false,
-    });
     await client.respondExtensionUi({
       type: "extension_ui_response",
       id: "ui-1",
@@ -375,8 +365,6 @@ test("frontend daemon client maps unsolicited daemon events", async () => {
     );
     assert.deepEqual(await client.getAutocompleteItems("/owner"), []);
     assert.deepEqual(await client.compact(), {});
-    assert.deepEqual(await client.listBuiltInExtensions(), []);
-    assert.equal(await client.setBuiltInExtension("missing", true), null);
     assert.deepEqual(await client.listSessions(), []);
     assert.deepEqual(await client.listModels(), []);
 

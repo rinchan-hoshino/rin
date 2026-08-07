@@ -412,7 +412,19 @@ async function startRpcTui(
   const client = new RinDaemonFrontendClient({
     frontendIdentity: TUI_FRONTEND_IDENTITY,
   });
-  const rpcSession = new RpcInteractiveSession(client, resourceOptions);
+  const runtimeProfile = resolveRuntimeProfile();
+  const { loadRinFrontendExtensionDefinitions } =
+    await import("./frontend-extension-adapter.js");
+  const frontendExtensions = await loadRinFrontendExtensionDefinitions({
+    cwd: runtimeProfile.cwd,
+    agentDir: runtimeProfile.agentDir,
+    resources: resourceOptions,
+  });
+  const rpcSession = new RpcInteractiveSession(
+    client,
+    resourceOptions,
+    frontendExtensions,
+  );
   let runtimeHost: { dispose(): Promise<void> } | undefined;
   let interactiveMode: InteractiveMode | undefined;
   try {

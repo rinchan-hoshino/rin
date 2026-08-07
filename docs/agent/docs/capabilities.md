@@ -15,7 +15,7 @@ Use this page as Rin's capability index. It tells agents what runtime surfaces e
 | Todo                                     | Current-branch execution checklist during multi-step work                                                                     | `todo` tool, `/todos`                                       | live tool schema                                               |
 | Note                                     | Session-branch continuity that must survive compaction                                                                        | `note` tool                                                 | live tool schema                                               |
 | Browser/computer/mobile/search operation | Web, desktop, mobile, or search work that needs the owner's current practice workflow                                         | live tool list, practice docs                               | `practices/README.md`                                          |
-| Daemon extensions                        | Trusted long-running async extensions or external event/memory providers                                                      | `settings.json -> rinExtensions.daemon`                     | `docs/builtin-extensions.md`                                   |
+| Extensions                               | Pi-native session extensions plus trusted daemon adapters for async services or external event/memory providers               | ordinary Pi extension/package configuration                 | `docs/extensions.md`                                           |
 | Initialization                           | Owner asks to initialize, reset, or establish preferences                                                                     | initialization prompt flow                                  | `docs/initialization.md`                                       |
 
 ## Launcher, update, and rollback
@@ -67,7 +67,7 @@ Use `docs/rich-text-output-format.md` for native mentions, quotes/replies, attac
 
 ## Background extensions
 
-Daemon extensions are trusted Node.js packages loaded for long-running async work. They are configured through `settings.json -> rinExtensions.daemon` or discovered from trusted Pi extension entries that expose the named `rinDaemonExtension` factory; the default Pi session factory is not replayed.
+Daemon extensions are trusted Node.js packages loaded for long-running async work. Only ordinary Pi extension entries are discovered; entries that expose the named `rinDaemonExtension` factory also receive Rin's backend adapter, while their default Pi session factory is not replayed by that adapter.
 
 Use them for intentionally configured background event bridges, chat adapters, or memory providers. Restart or reload Rin after changing background extension settings.
 

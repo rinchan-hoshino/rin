@@ -98,33 +98,3 @@ test("daemon extension configs reject disabled or incomplete entries and normali
   (configs[0].config.nested as any).enabled = false;
   assert.equal(settings.rinExtensions.daemon[4].config.nested.enabled, true);
 });
-
-test("extension runtime roots and importer creation are stable and non-destructive", async () => {
-  await withAgentDir(async (agentDir) => {
-    const runtimeRoot = extensionSettings.getRinExtensionRuntimeRoot(agentDir);
-    assert.equal(
-      runtimeRoot,
-      path.join(agentDir, "data", "extensions", "runtime"),
-    );
-
-    const importerPath = extensionSettings.ensureRuntimeImporter(
-      runtimeRoot,
-      "import-provider.mjs",
-    );
-    assert.equal(importerPath, path.join(runtimeRoot, "import-provider.mjs"));
-    assert.equal(
-      await fs.readFile(importerPath, "utf8"),
-      "export async function importProvider(specifier) { return await import(specifier); }\n",
-    );
-
-    await fs.writeFile(importerPath, "custom importer\n", "utf8");
-    assert.equal(
-      extensionSettings.ensureRuntimeImporter(
-        runtimeRoot,
-        "import-provider.mjs",
-      ),
-      importerPath,
-    );
-    assert.equal(await fs.readFile(importerPath, "utf8"), "custom importer\n");
-  });
-});

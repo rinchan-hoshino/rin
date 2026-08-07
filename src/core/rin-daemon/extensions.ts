@@ -1,13 +1,9 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 
-import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
 import {
-  ensureRuntimeImporter,
-  getRinExtensionRuntimeRoot,
   listRinDaemonExtensionConfigs,
   readRuntimeSettings,
   type RinDaemonExtensionConfig,
@@ -26,7 +22,6 @@ import type {
   ExternalMemoryResult,
   TranscriptArchiveEntry,
 } from "../memory/transcript-types.js";
-import { ensureDir, stringifyJson } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
 import type {
@@ -53,75 +48,10 @@ type RinDaemonMemoryProviderEntry = {
   name: string;
   packageName: string;
   config: Record<string, any>;
+  runtimeRoot: string;
   provider: RinDaemonMemoryProvider;
   logger: RinExtensionLogger;
 };
-
-function buildRuntimePackage(dependencies: Record<string, string>) {
-  return {
-    private: true,
-    type: "module",
-    dependencies,
-  };
-}
-
-function dependencyInstallPath(runtimeRoot: string, packageName: string) {
-  const parts = packageName.startsWith("@")
-    ? packageName.split("/")
-    : [packageName];
-  return path.join(runtimeRoot, "node_modules", ...parts);
-}
-
-function shouldInstallDaemonExtensionDependencies(
-  runtimeRoot: string,
-  dependencies: Record<string, string>,
-) {
-  if (!Object.keys(dependencies).length) return false;
-  const packageJsonPath = path.join(runtimeRoot, "package.json");
-  const lockPath = path.join(runtimeRoot, "package-lock.json");
-  const expectedText = stringifyJson(buildRuntimePackage(dependencies));
-  const currentText = fs.existsSync(packageJsonPath)
-    ? fs.readFileSync(packageJsonPath, "utf8")
-    : "";
-  if (currentText !== expectedText) return true;
-  if (!fs.existsSync(lockPath)) return true;
-  return Object.keys(dependencies).some(
-    (packageName) =>
-      !fs.existsSync(dependencyInstallPath(runtimeRoot, packageName)),
-  );
-}
-
-export function ensureDaemonExtensionDependencies(
-  agentDir: string,
-  entries: RinDaemonExtensionConfig[],
-) {
-  const dependencies = Object.fromEntries(
-    entries
-      .filter((entry) => !entry.modulePath)
-      .map((entry) => [entry.packageName, entry.version || "latest"] as const)
-      .sort(([a], [b]) => a.localeCompare(b)),
-  );
-  const runtimeRoot = getRinExtensionRuntimeRoot(agentDir);
-  if (!shouldInstallDaemonExtensionDependencies(runtimeRoot, dependencies)) {
-    return runtimeRoot;
-  }
-  ensureDir(runtimeRoot);
-  fs.writeFileSync(
-    path.join(runtimeRoot, "package.json"),
-    stringifyJson(buildRuntimePackage(dependencies)),
-    "utf8",
-  );
-  execFileSync(
-    "npm",
-    ["install", "--omit=dev", "--no-audit", "--no-fund", "--legacy-peer-deps"],
-    {
-      cwd: runtimeRoot,
-      stdio: "pipe",
-      timeout: 120_000,
-    },
-  );
-  return runtimeRoot;
-}
 
 const requireFromHere = createRequire(import.meta.url);
 
@@ -134,27 +64,11 @@ function readJson(filePath: string) {
 }
 
 function resolveJitiStaticPath() {
-  try {
-    return path.join(
-      path.dirname(requireFromHere.resolve("jiti/package.json")),
-      "lib",
-      "jiti-static.mjs",
-    );
-  } catch {
-    return path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "..",
-      "..",
-      "node_modules",
-      "@earendil-works",
-      "pi-coding-agent",
-      "node_modules",
-      "jiti",
-      "lib",
-      "jiti-static.mjs",
-    );
-  }
+  return path.join(
+    path.dirname(requireFromHere.resolve("jiti/package.json")),
+    "lib",
+    "jiti-static.mjs",
+  );
 }
 
 async function importDaemonExtensionPath(modulePath: string) {
@@ -171,29 +85,8 @@ async function importDaemonExtensionPath(modulePath: string) {
   return await import(pathToFileURL(modulePath).href);
 }
 
-async function importDaemonExtensionModule(
-  runtimeRoot: string,
-  entry: RinDaemonExtensionConfig,
-) {
-  if (entry.modulePath)
-    return await importDaemonExtensionPath(entry.modulePath);
-  const { packageName } = entry;
-  try {
-    const importerPath = ensureRuntimeImporter(
-      runtimeRoot,
-      ".rin-extension-importer.mjs",
-    );
-    const importer = await import(pathToFileURL(importerPath).href);
-    return await importer.importProvider(packageName);
-  } catch (error: any) {
-    if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
-    const requireFromRuntimeRoot = createRequire(
-      path.join(runtimeRoot, "package.json"),
-    );
-    return await import(
-      pathToFileURL(requireFromRuntimeRoot.resolve(packageName)).href
-    );
-  }
+async function importDaemonExtensionModule(entry: RinDaemonExtensionConfig) {
+  return await importDaemonExtensionPath(entry.modulePath!);
 }
 
 function createDaemonExtensionApi(
@@ -317,14 +210,13 @@ async function listPiResolvedDaemonExtensionConfigs(options: {
   const agentRuntimeModule = await loadRinAgentRuntime();
   const { DefaultPackageManager, SettingsManager } = agentRuntimeModule as any;
   const settingsManager = SettingsManager.create(options.cwd, options.agentDir);
-  applyBundledRinExtensionAliases(settingsManager);
   const packageManager = new DefaultPackageManager({
     cwd: options.cwd,
     agentDir: options.agentDir,
     settingsManager,
   });
   const resolved = await packageManager.resolve();
-  return (resolved.extensions || [])
+  return resolved.extensions
     .map((entry: any) => daemonExtensionEntryFromResolvedExtension(entry))
     .filter(
       (
@@ -333,49 +225,26 @@ async function listPiResolvedDaemonExtensionConfigs(options: {
     );
 }
 
-function listAutoDiscoveredDaemonExtensionConfigs(options: {
-  cwd: string;
-}): RinDaemonExtensionConfig[] {
-  const extensionsDir = path.join(options.cwd, "extensions");
-  let entries: fs.Dirent[] = [];
-  try {
-    entries = fs.readdirSync(extensionsDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-  return entries.flatMap((entry) => {
-    if (!entry.isDirectory()) return [];
-    const modulePath = path.join(extensionsDir, entry.name, "index.js");
-    if (!fs.existsSync(modulePath)) return [];
-    const daemonExtensionEntry = daemonExtensionEntryFromResolvedExtension({
-      enabled: true,
-      path: modulePath,
-      metadata: { source: "auto", baseDir: path.dirname(modulePath) },
-    });
-    return daemonExtensionEntry ? [daemonExtensionEntry] : [];
-  });
+function hasConfiguredExtensionSources(settings: unknown) {
+  if (!settings || typeof settings !== "object") return false;
+  const value = settings as Record<string, unknown>;
+  return [value.extensions, value.packages].some(
+    (entries) => Array.isArray(entries) && entries.length > 0,
+  );
 }
 
-function shouldResolvePiDaemonExtensions(settings: unknown, agentDir: string) {
-  const value = settings as any;
-  if (Array.isArray(value?.extensions) && value.extensions.length > 0)
-    return true;
-  if (Array.isArray(value?.packages) && value.packages.length > 0) return true;
-  return fs.existsSync(path.join(agentDir, "extensions"));
-}
-
-function dedupeDaemonExtensionEntries(entries: RinDaemonExtensionConfig[]) {
-  const seen = new Set<string>();
-  const result: RinDaemonExtensionConfig[] = [];
-  for (const entry of entries) {
-    const key = entry.modulePath
-      ? `module:${path.resolve(entry.modulePath)}`
-      : `package:${entry.packageName}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(entry);
-  }
-  return result;
+function hasPiExtensionSources(
+  settings: unknown,
+  agentDir: string,
+  cwd: string,
+) {
+  if (hasConfiguredExtensionSources(settings)) return true;
+  const projectSettings = readJson(path.join(cwd, ".pi", "settings.json"));
+  if (hasConfiguredExtensionSources(projectSettings)) return true;
+  return [
+    path.join(agentDir, "extensions"),
+    path.join(cwd, ".pi", "extensions"),
+  ].some((dir) => fs.existsSync(dir));
 }
 
 export class RinDaemonExtensionManager {
@@ -394,47 +263,39 @@ export class RinDaemonExtensionManager {
   async start() {
     this.chatAdapters.length = 0;
     this.memoryProviders.length = 0;
-    const runtimeSettings = readRuntimeSettings(this.options.agentDir);
-    const explicitEntries = listRinDaemonExtensionConfigs(runtimeSettings);
-    const autoDiscoveredEntries = listAutoDiscoveredDaemonExtensionConfigs({
-      cwd: this.options.cwd,
-    });
-    let piResolvedEntries: RinDaemonExtensionConfig[] = [];
-    if (
-      shouldResolvePiDaemonExtensions(runtimeSettings, this.options.agentDir)
-    ) {
-      try {
-        piResolvedEntries = await listPiResolvedDaemonExtensionConfigs(
-          this.options,
-        );
-      } catch (error: any) {
-        this.options.logger?.warn?.(
-          `daemon extension package resolution failed err=${safeString(
-            error?.message || error,
-          )}`,
-        );
-      }
-    }
-    const entries = dedupeDaemonExtensionEntries([
-      ...explicitEntries,
-      ...autoDiscoveredEntries,
-      ...piResolvedEntries,
-    ]);
-    if (!entries.length) return [];
-    let runtimeRoot: string;
+    let entries: RinDaemonExtensionConfig[] = [];
     try {
-      runtimeRoot = ensureDaemonExtensionDependencies(
+      const runtimeSettings = readRuntimeSettings(this.options.agentDir);
+      const resolvedEntries = hasPiExtensionSources(
+        runtimeSettings,
         this.options.agentDir,
-        entries,
-      );
+        this.options.cwd,
+      )
+        ? await listPiResolvedDaemonExtensionConfigs(this.options)
+        : [];
+      const configOverrides = listRinDaemonExtensionConfigs(runtimeSettings);
+      entries = resolvedEntries.map((entry) => {
+        const override = configOverrides.find(
+          (candidate) =>
+            candidate.packageName === entry.packageName ||
+            candidate.name === entry.name,
+        );
+        return override
+          ? {
+              ...entry,
+              name: override.name,
+              config: override.config,
+            }
+          : entry;
+      });
     } catch (error: any) {
       this.options.logger?.warn?.(
-        `daemon extension dependency install failed err=${safeString(
-          error?.stderr || error?.stdout || error?.message || error,
+        `daemon extension package resolution failed err=${safeString(
+          error?.message || error,
         )}`,
       );
-      return [];
     }
+    if (!entries.length) return [];
     const started: Array<{ name: string; packageName: string }> = [];
     for (const entry of entries) {
       const beforeChatAdapterCount = this.chatAdapters.length;
@@ -443,10 +304,10 @@ export class RinDaemonExtensionManager {
       const tasks = new Set<Promise<void>>();
       const stopHandlers: Array<() => Promise<void> | void> = [];
       try {
-        const moduleValue = await importDaemonExtensionModule(
-          runtimeRoot,
-          entry,
+        const runtimeRoot = nearestPackageRoot(
+          entry.modulePath || this.options.cwd,
         );
+        const moduleValue = await importDaemonExtensionModule(entry);
         const running: RunningWorker = { entry, controller, tasks };
         const logger = createWorkerLogger(this.options.logger, entry);
         const context: RinBackgroundServiceContext = {
@@ -502,6 +363,7 @@ export class RinDaemonExtensionManager {
               name,
               packageName: entry.packageName,
               config: (options.config || entry.config) as Record<string, any>,
+              runtimeRoot,
               provider,
               logger,
             });
@@ -512,8 +374,7 @@ export class RinDaemonExtensionManager {
           registerChatAdapter,
           registerMemoryProvider,
         );
-        if (!handled && entry.optional) continue;
-        if (!handled) throw new Error("daemon_extension_entrypoint_missing");
+        if (!handled) continue;
         for (const service of services) {
           const result = await service.start?.(context);
           if (result && typeof result === "object" && result.stop) {
@@ -577,7 +438,7 @@ export class RinDaemonExtensionManager {
       cwd: this.options.cwd,
       agentDir: this.options.agentDir,
       dataDir: path.join(this.options.agentDir, "data"),
-      runtimeRoot: getRinExtensionRuntimeRoot(this.options.agentDir),
+      runtimeRoot: entry.runtimeRoot,
       key: entry.key,
       name: entry.name,
       packageName: entry.packageName,

@@ -14,11 +14,6 @@ const sources: Record<string, string> = {
       return Boolean(globalThis.__rinRuntimeOwner.contextOverflow);
     }
   `,
-  "../rin-bundled-extensions.js": `
-    export function applyBundledRinExtensionAliases(settingsManager) {
-      globalThis.__rinRuntimeOwner.events.push(["extension-aliases", settingsManager]);
-    }
-  `,
   "./todo.js": `
     export default function todoCapability() { return { name: "todo-owner" }; }
   `,

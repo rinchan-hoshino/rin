@@ -50,10 +50,6 @@ const replacements: Record<string, string> = {
       await options.chat.react(payload);
       await options.chat.terminateTurn(payload);
       const commands = [
-        { type: "list_builtin_extensions" },
-        { type: "set_builtin_extension", extensionId: "owner-extension", enabled: true },
-        { type: "set_builtin_extension", id: "owner-id", enabled: false },
-        { type: "set_builtin_extension" },
         { type: "chat_send", payload },
         { type: "chat_send" },
         { type: "chat_run_turn", payload },
@@ -103,16 +99,6 @@ const replacements: Record<string, string> = {
   `,
   "dist/core/rin-frontend-sdk/daemon-client.js": `
     export class RinDaemonFrontendClient { constructor(options) { this.options = options; } }
-  `,
-  "dist/core/rin-builtin-extension-controls.js": `
-    export async function listBuiltInRinExtensionStatesWithLifecycle(settings) {
-      globalThis.__rinAppDaemonOwnerEvents.push(["list-extensions", settings.owner]);
-      return [{ id: "owner-extension" }];
-    }
-    export async function setBuiltInRinExtensionState(settings, id, enabled) {
-      globalThis.__rinAppDaemonOwnerEvents.push(["set-extension", settings.owner, id, enabled]);
-      return { id, enabled };
-    }
   `,
   "dist/core/rin-lib/agent-runtime.js": `
     export async function loadRinAgentRuntime() {

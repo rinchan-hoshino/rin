@@ -5,7 +5,6 @@ import {
   type ParsedArgs,
   readRinPackageVersion,
   resolveParsedArgs,
-  safeString,
   stripRinWrapperArgs,
 } from "./shared-lite.js";
 
@@ -66,22 +65,6 @@ const INTERNAL_COMMANDS = [
   },
 ] as const;
 
-type CacOptionForHelp = {
-  rawName?: string;
-  config?: { default?: unknown };
-};
-
-type CacCliForHelp = {
-  globalCommand?: { options?: CacOptionForHelp[] };
-};
-
-function hideCacNegatedDefaultFromHelp(cli: CacCliForHelp, optionName: string) {
-  const option = cli.globalCommand?.options?.find((candidate) =>
-    safeString(candidate.rawName).includes(optionName),
-  );
-  if (option?.config) option.config.default = undefined;
-}
-
 async function createCli() {
   const { cac } = await import("cac");
   const cli = cac("rin");
@@ -98,35 +81,7 @@ async function createCli() {
     .option("--branch <name>", "Explicit git branch selector")
     .option("--version <value>", "Explicit stable version or git ref selector")
     .option("--yes", "Update mode: run without confirmation prompts")
-    .option("-p, --print", "Non-interactive mode: process prompt and exit")
-    .option("--mode <mode>", "Output mode: text (default) or json")
-    .option("--provider <name>", "Provider name for non-interactive mode")
-    .option("--model <provider/model>", "Model for non-interactive mode")
-    .option("--thinking <level>", "Thinking level for non-interactive mode")
-    .option(
-      "--managed-session <leaf>",
-      "Create and keep a non-interactive session under sessions/managed/<leaf>/",
-    )
-    .option("--name <name>", "Session display name for non-interactive mode")
-    .option("-t, --tools <tools>", "Tool allowlist for non-interactive mode")
-    .option(
-      "-xt, --exclude-tools <tools>",
-      "Tool denylist for non-interactive mode",
-    )
-    .option("-nt, --no-tools", "Disable all tools in non-interactive mode")
-    .option(
-      "-nbt, --no-builtin-tools",
-      "Disable built-in tools in non-interactive mode",
-    )
-    .option("--timeout <seconds>", "Maximum wait time for non-interactive mode")
     .help();
-
-  // CAC treats --no-* flags as negated positive booleans and injects
-  // default:true into help. Rin parses these tool flags from raw argv in
-  // run.ts/Pi, so the top-level help must not claim tools are disabled by
-  // default.
-  hideCacNegatedDefaultFromHelp(cli, "--no-tools");
-  hideCacNegatedDefaultFromHelp(cli, "--no-builtin-tools");
 
   for (const [name, description] of RIN_COMMANDS) {
     cli.command(name, description);
@@ -174,6 +129,26 @@ function hasExplicitTargetArg(rawArgv: string[]) {
   );
 }
 
+function parseRinWrapperOptions(rawArgv: string[]) {
+  const options: Record<string, string> = {};
+  for (let index = 0; index < rawArgv.length; index += 1) {
+    const arg = rawArgv[index];
+    if (arg === "-u" || arg === "--user" || arg === "--target") {
+      const value = rawArgv[index + 1];
+      if (value && !value.startsWith("-")) {
+        options[arg === "--target" ? "target" : "user"] = value;
+        index += 1;
+      }
+      continue;
+    }
+    if (arg.startsWith("--user=")) options.user = arg.slice("--user=".length);
+    if (arg.startsWith("--target=")) {
+      options.target = arg.slice("--target=".length);
+    }
+  }
+  return options;
+}
+
 function isLocalVersionFastPath(rawArgv: string[]) {
   if (hasExplicitTargetArg(rawArgv)) return false;
   const args = stripRinWrapperArgs(rawArgv);
@@ -187,29 +162,77 @@ export async function startRinCli() {
     return;
   }
 
-  const internalDispatch = resolveInternalRinDispatch(rawArgv);
+  const strippedArgv = stripRinWrapperArgs(rawArgv);
+  const isPiUpdateHelp =
+    strippedArgv[0] === "update" &&
+    strippedArgv.some((arg) => arg === "--help" || arg === "-h");
+  const internalDispatch = isPiUpdateHelp
+    ? null
+    : resolveInternalRinDispatch(rawArgv);
   if (internalDispatch) {
     await internalDispatch.run(internalDispatch.args);
     return;
   }
 
-  if (
-    rawArgv.some((arg) => arg === "--help" || arg === "-h") &&
-    shouldRunNonInteractive(rawArgv, true)
-  ) {
-    printRunHelp();
-    return;
+  const { tryRunPiCliCommand } = await import("./pi-command-adapter.js");
+  const piRoute = await tryRunPiCliCommand(strippedArgv);
+  if (piRoute === "handled") return;
+  if (piRoute === "rin-after-pi") {
+    const parsed = resolveParsedArgs(
+      "update",
+      parseRinWrapperOptions(rawArgv),
+      ["update"],
+    );
+    const { runUpdate } = await import("./shared.js");
+    return await runUpdate(parsed);
   }
 
-  const cli = await createCli();
-  const parsedArgv = cli.parse(process.argv, { run: false });
-  if (parsedArgv.options.help) {
-    cli.outputHelp();
-    return;
+  const command = parseCommandName(strippedArgv[0] || "");
+  if (!command) {
+    if (
+      strippedArgv.length === 1 &&
+      (strippedArgv[0] === "--help" || strippedArgv[0] === "-h")
+    ) {
+      const { printRinCliHelp } = await import("./pi-command-adapter.js");
+      printRinCliHelp(RIN_COMMANDS);
+      return;
+    }
+    if (
+      rawArgv.some((arg) => arg === "--help" || arg === "-h") &&
+      shouldRunNonInteractive(rawArgv, true)
+    ) {
+      printRunHelp();
+      return;
+    }
   }
 
-  const command = parseCommandName(safeString(cli.matchedCommandName).trim());
-  const parsed = resolveParsedArgs(command, parsedArgv.options, rawArgv);
+  let parsedOptions = parseRinWrapperOptions(rawArgv);
+  if (command) {
+    const rinCommandArgv =
+      command === "update"
+        ? rawArgv.filter(
+            (arg, index) =>
+              !(
+                index > 0 &&
+                (arg === "self" ||
+                  arg === "pi" ||
+                  arg === "--self" ||
+                  arg === "--force")
+              ),
+          )
+        : rawArgv;
+    const cli = await createCli();
+    const parsedArgv = cli.parse(
+      [process.argv[0], process.argv[1], ...rinCommandArgv],
+      { run: false },
+    );
+    if (parsedArgv.options.help) {
+      cli.outputHelp();
+      return;
+    }
+    parsedOptions = parsedArgv.options;
+  }
+  const parsed = resolveParsedArgs(command, parsedOptions, rawArgv);
 
   if (!command && shouldRunNonInteractive(rawArgv)) {
     const { runNonInteractive } = await import("./run.js");

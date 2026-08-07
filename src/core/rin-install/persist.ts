@@ -8,7 +8,6 @@ import {
   runChatInstallMigrations,
 } from "../chat/install-migration.js";
 import { normalizeStoredChatSettings } from "../chat/settings.js";
-import { stripRemovedBuiltInRinExtensionEntries } from "../rin-bundled-extensions.js";
 import {
   chatDataPath,
   LEGACY_DATA_LAYOUT_MOVES,
@@ -1028,6 +1027,18 @@ function normalizeInstalledSettings(value: unknown) {
   return settings;
 }
 
+function stripRemovedLegacyExtensionEntries(entries: unknown[]) {
+  const removed = new Set(["rin:browse", "rin:browser", "rin:computer"]);
+  return entries.filter(
+    (entry) =>
+      !removed.has(
+        String(entry || "")
+          .trim()
+          .toLowerCase(),
+      ),
+  );
+}
+
 function applyInstalledDefaults(
   target: any,
   options: {
@@ -1042,9 +1053,7 @@ function applyInstalledDefaults(
     target.defaultThinkingLevel = options.thinkingLevel;
   }
   if (Array.isArray(target.extensions)) {
-    const extensions = stripRemovedBuiltInRinExtensionEntries(
-      target.extensions,
-    );
+    const extensions = stripRemovedLegacyExtensionEntries(target.extensions);
     if (extensions.length > 0) target.extensions = extensions;
     else delete target.extensions;
   }

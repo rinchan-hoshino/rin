@@ -70,6 +70,14 @@ test("persist private normalizers reject malformed objects and fill owner defaul
     })),
     { ownerUser: "bob", ownerGroup: 42, ownerHome: "/owner/home" },
   );
+  const partialOwner = owner.__rinOwnerResolveInstallOwner("alice", () => ({
+    name: "",
+    gid: undefined,
+    home: "",
+  }));
+  assert.equal(partialOwner.ownerUser, "alice");
+  assert.equal(partialOwner.ownerGroup, undefined);
+  assert.match(partialOwner.ownerHome, /alice$/);
 
   assert.equal(owner.__rinOwnerNormalizeManagedFilesManifest(null), undefined);
   assert.equal(owner.__rinOwnerNormalizeManagedFilesManifest({}), undefined);
@@ -89,6 +97,19 @@ test("persist private normalizers reject malformed objects and fill owner defaul
   assert.equal(
     owner.__rinOwnerMergeManagedFilesManifests(undefined, undefined),
     undefined,
+  );
+  assert.deepEqual(
+    owner.__rinOwnerMergeManagedFilesManifests(
+      { trees: { prior: ["a"] } },
+      undefined,
+    ),
+    { trees: { prior: ["a"] } },
+  );
+  assert.deepEqual(
+    owner.__rinOwnerMergeManagedFilesManifests(undefined, {
+      trees: { next: ["b"] },
+    }),
+    { trees: { next: ["b"] } },
   );
   assert.deepEqual(
     owner.__rinOwnerMergeManagedFilesManifests(

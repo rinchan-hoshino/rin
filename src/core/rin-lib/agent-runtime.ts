@@ -1,8 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { createRinDefaultResourceLoader } from "./extension-loader.js";
-
 let rinAgentRuntimeModule: any;
 
 function readAuthData(authPath: string | undefined, fallback: any = {}) {
@@ -241,7 +239,7 @@ function composeRinAgentRuntimeExports(PiAgentRuntime: any, tokenHelpers: any) {
 
 function createRinAgentSessionServicesFactory(
   PiAgentRuntime: any,
-  RinDefaultResourceLoader: any,
+  DefaultResourceLoader: any,
 ) {
   return async function createRinAgentSessionServices(options: any) {
     const cwd = options.cwd;
@@ -262,12 +260,16 @@ function createRinAgentSessionServicesFactory(
     const modelRegistry =
       options.modelRegistry ??
       createModelRegistryCompat(PiAgentRuntime, modelRuntime, authStorage);
-    const resourceLoader = new RinDefaultResourceLoader({
-      ...(options.resourceLoaderOptions ?? {}),
-      cwd,
-      agentDir,
-      settingsManager,
-    });
+    const { withRinPiExtensionFactories } =
+      await import("./pi-extension-options.js");
+    const resourceLoader = new DefaultResourceLoader(
+      await withRinPiExtensionFactories({
+        ...(options.resourceLoaderOptions ?? {}),
+        cwd,
+        agentDir,
+        settingsManager,
+      }),
+    );
     await resourceLoader.reload(options.resourceLoaderReloadOptions);
     const diagnostics: any[] = [];
     const extensionsResult = resourceLoader.getExtensions();
@@ -312,8 +314,7 @@ export async function loadRinAgentRuntime() {
       PiAgentRuntimeBase,
       tokenHelpers,
     );
-    const DefaultResourceLoader =
-      createRinDefaultResourceLoader(PiAgentRuntime);
+    const { DefaultResourceLoader } = PiAgentRuntime;
     rinAgentRuntimeModule = {
       ...PiAgentRuntime,
       AuthStorage: AuthStorageCompat,

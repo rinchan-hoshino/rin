@@ -112,11 +112,6 @@
       "built": "dist/core/platform/rpc-socket.js"
     },
     {
-      "test": "tests/unit/bundled-extensions.test.ts",
-      "source": "src/core/rin-bundled-extensions.ts",
-      "built": "dist/core/rin-bundled-extensions.js"
-    },
-    {
       "test": "tests/unit/rin-daemon-catalog-helpers.test.ts",
       "source": "src/core/rin-daemon/catalog-helpers.ts",
       "built": "dist/core/rin-daemon/catalog-helpers.js"

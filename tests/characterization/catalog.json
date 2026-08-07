@@ -223,11 +223,6 @@
       "subject": "refactor: unify truncation rendering helpers"
     },
     {
-      "file": "tests/characterization/rin-cli.test.ts",
-      "introducedBy": "3d3e21f5",
-      "subject": "refactor(rin): unify wrapped subcommand handling"
-    },
-    {
       "file": "tests/characterization/rin-daemon-catalog.test.ts",
       "introducedBy": "84dda24a",
       "subject": "Inline daemon catalog queries in main process"

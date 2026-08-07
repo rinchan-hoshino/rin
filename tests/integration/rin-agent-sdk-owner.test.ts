@@ -88,11 +88,6 @@ test("Rin Agent SDK owns every daemon command shape and override path", async ()
     await sdk.tasks.control("pause", "task-10");
     await sdk.tasks.control("resume", "task-11", override);
 
-    await sdk.builtInExtensions.list();
-    await sdk.builtInExtensions.setEnabled("demo", true);
-    await sdk.builtInExtensions.enable("demo");
-    await sdk.builtInExtensions.disable("demo", override);
-
     await sdk.chat.send({ chatKey: "telegram/1:2", text: "hello" });
     await sdk.chat.send({
       chatKey: "telegram/1:2",
@@ -146,10 +141,6 @@ test("Rin Agent SDK owns every daemon command shape and override path", async ()
         "cron_wake_task",
         "cron_pause_task",
         "cron_resume_task",
-        "list_builtin_extensions",
-        "set_builtin_extension",
-        "set_builtin_extension",
-        "set_builtin_extension",
         "chat_send",
         "chat_send",
         "chat_run_turn",
@@ -173,15 +164,15 @@ test("Rin Agent SDK owns every daemon command shape and override path", async ()
     assert.equal(commands[6].taskId, "task-1");
     assert.equal(commands[9].reason, "completed_by_sdk");
     assert.equal(commands[10].reason, "owner-finished");
-    assert.deepEqual(commands[22].payload.parts, [
+    assert.deepEqual(commands[18].payload.parts, [
       { type: "text", text: "hello" },
     ]);
-    assert.deepEqual(commands[23].payload.parts, [
+    assert.deepEqual(commands[19].payload.parts, [
       { type: "text", text: "structured" },
     ]);
-    assert.equal(commands[25].payload.chatKey, "telegram/1:2");
-    assert.deepEqual(commands[28].payload, { controllerKey: "controller-1" });
-    assert.deepEqual(commands[29].payload, { chatKey: "telegram/1:2" });
+    assert.equal(commands[21].payload.chatKey, "telegram/1:2");
+    assert.deepEqual(commands[24].payload, { controllerKey: "controller-1" });
+    assert.deepEqual(commands[25].payload, { chatKey: "telegram/1:2" });
 
     await assert.rejects(
       () => sdk.tasks.get("  "),

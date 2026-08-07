@@ -50,21 +50,9 @@ test("app daemon assembles hosted services, local commands, and failure cleanup"
     assert.deepEqual(summary.ready, {
       chat: { status: "ready", owner: true },
     });
-    assert.equal(summary.results.length, 18);
-    assert.deepEqual(summary.results[0], {
-      success: true,
-      data: { extensions: [{ id: "owner-extension" }] },
-    });
-    assert.deepEqual(summary.results[1].data.extension, {
-      id: "owner-extension",
-      enabled: true,
-    });
-    assert.deepEqual(summary.results[2].data.extension, {
-      id: "owner-id",
-      enabled: false,
-    });
-    assert.equal(summary.results[16], null);
-    assert.equal(summary.results[17], null);
+    assert.equal(summary.results.length, 14);
+    assert.equal(summary.results[12], null);
+    assert.equal(summary.results[13], null);
     assert.match(success.stderr, /owner cgroup warning/);
 
     const defaultSocket = await runDaemon(root, "success");

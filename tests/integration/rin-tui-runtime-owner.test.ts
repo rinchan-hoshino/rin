@@ -900,7 +900,58 @@ test("rpc runtime exposes bound Pi facades, model mutations, and refresh queues"
   assert.deepEqual(session.extensionRunner.getMarkdownTransformers(), []);
   assert.equal(session.extensionRunner.getEntryRenderer("owner"), undefined);
   assert.equal(session.extensionRunner.getToolDefinition("owner"), undefined);
+  assert.deepEqual(session.extensionRunner.getAllRegisteredTools(), []);
   assert.equal(session.extensionRunner.invalidate(), undefined);
+
+  const messageRenderer = () => "message";
+  const markdownTransformer = () => "markdown";
+  const entryRenderer = () => "entry";
+  const nativeTool = { name: "native-tool" };
+  const nativeShortcuts = new Map([["ctrl+n", { description: "Native" }]]);
+  const nativeFlags = new Map([["native-flag", { type: "boolean" }]]);
+  const nativeFlagValues = new Map([["native-flag", true]]);
+  let invalidations = 0;
+  session.frontendNativeExtensionRunner = {
+    getShortcutDiagnostics: () => ["native shortcut"],
+    getShortcuts: () => nativeShortcuts,
+    getMessageRenderer: () => messageRenderer,
+    getMarkdownTransformers: () => [markdownTransformer],
+    getEntryRenderer: () => entryRenderer,
+    getFlags: () => nativeFlags,
+    getFlagValues: () => nativeFlagValues,
+    getToolDefinition: () => nativeTool,
+    getAllRegisteredTools: () => [nativeTool],
+    invalidate: () => {
+      invalidations += 1;
+    },
+  };
+  assert.deepEqual(session.extensionRunner.getShortcutDiagnostics(), [
+    "native shortcut",
+  ]);
+  assert.equal(session.extensionRunner.getShortcuts({}), nativeShortcuts);
+  assert.equal(
+    session.extensionRunner.getMessageRenderer("owner"),
+    messageRenderer,
+  );
+  assert.deepEqual(session.extensionRunner.getMarkdownTransformers(), [
+    markdownTransformer,
+  ]);
+  assert.equal(
+    session.extensionRunner.getEntryRenderer("owner"),
+    entryRenderer,
+  );
+  assert.equal(session.extensionRunner.getFlags(), nativeFlags);
+  assert.equal(session.extensionRunner.getFlagValues(), nativeFlagValues);
+  assert.equal(
+    session.extensionRunner.getToolDefinition("native-tool"),
+    nativeTool,
+  );
+  assert.deepEqual(session.extensionRunner.getAllRegisteredTools(), [
+    nativeTool,
+  ]);
+  session.extensionRunner.invalidate();
+  assert.equal(invalidations, 1);
+  session.frontendNativeExtensionRunner = undefined;
 
   session.emitSessionResynced();
   assert.equal(
