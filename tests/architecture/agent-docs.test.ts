@@ -107,7 +107,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   );
   assert.match(
     capabilities,
-    /`rin-install\/main\.js --update` has no independent implementation/,
+    /private payload accepts only its running executor-owned job/,
   );
   assert.match(capabilities, /`rin rollback`: switch to the `previousRelease`/);
   assert.match(runtimeLayout, /## Source checkout boundary/);

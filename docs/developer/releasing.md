@@ -129,9 +129,7 @@ Stable, beta, nightly, and hotfix release executors publish a `linux-x64` platfo
 It should contain only:
 
 - `install.sh`
-- `update.sh`
 - `install.ps1`
-- `update.ps1`
 - `scripts/bootstrap-entrypoint.sh`
 - `scripts/bootstrap-entrypoint.ps1`
 - `release-manifest.json`

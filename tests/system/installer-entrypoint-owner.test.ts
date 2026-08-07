@@ -30,7 +30,7 @@ test("installer entrypoint formats ordinary errors and honors apply-error handof
         ),
       (error: any) => {
         assert.equal(error.code, 1);
-        assert.match(error.stderr, /no longer accepts.*--update/i);
+        assert.match(error.stderr, /unknown option.*--update/i);
         return true;
       },
     );

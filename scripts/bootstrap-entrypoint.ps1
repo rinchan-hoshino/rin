@@ -44,7 +44,7 @@ function Show-Usage {
   @"
 Usage: install.ps1 [--quick-run] [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
 
-Install defaults to the stable release channel. Update defaults to the previously installed release channel.
+Install defaults to the stable release channel.
 --quick-run fetches the selected channel, prepares the current user's config, and launches the TUI without installing an app release or daemon.
 --beta installs the current weekly beta candidate.
 --nightly installs the current nightly build.
@@ -53,63 +53,12 @@ Legacy flags such as --branch/--version remain supported.
 "@ | Write-Host
 }
 
-function Read-LauncherInstallDir([string]$Path) {
-  if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return "" }
-  try {
-    $record = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
-    $value = [string]$record.defaultInstallDir
-    if (-not $value) { $value = [string]$record.installDir }
-    return $value.Trim()
-  } catch {
-    return ""
-  }
-}
-
-function Resolve-UpdateInstallDir {
-  if ($env:RIN_DIR) { return $env:RIN_DIR }
-  if ($HOME) {
-    $candidates = @(
-      (Join-Path $HOME "AppData/Roaming/rin/install.json"),
-      (Join-Path $HOME ".config/rin/install.json"),
-      (Join-Path $HOME "Library/Application Support/rin/install.json")
-    )
-    foreach ($candidate in $candidates) {
-      $installDir = Read-LauncherInstallDir $candidate
-      if ($installDir) { return $installDir }
-    }
-    return (Join-Path $HOME ".rin")
-  }
-  return ""
-}
-
-function Inherit-UpdateChannel {
-  if ($script:mode -ne "update" -or $script:explicitChannel) { return }
-  $installDir = Resolve-UpdateInstallDir
-  $manifestPath = if ($installDir) { Join-Path $installDir "installer.json" } else { "" }
-  if (-not $manifestPath -or -not (Test-Path -LiteralPath $manifestPath)) {
-    throw "rin update requires an existing installer.json release record; pass --stable/--beta/--nightly/--git to override"
-  }
-  try {
-    $release = (Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json).currentRelease.release
-    $inheritedChannel = [string]$release.channel
-    if ($inheritedChannel -notin @("stable", "beta", "nightly", "git")) {
-      throw "rin update requires an existing installer.json release channel; pass --stable/--beta/--nightly/--git to override"
-    }
-    $script:channel = $inheritedChannel
-    if ($script:channel -eq "git" -and -not $script:branch -and -not $script:version) {
-      $script:branch = [string]$release.branch
-    }
-  } catch {
-    throw "rin update requires an existing installer.json release channel; pass --stable/--beta/--nightly/--git to override"
-  }
-}
-
 function Parse-Args([string[]]$Values) {
   for ($i = 0; $i -lt $Values.Count; $i++) {
     $arg = $Values[$i]
     if (Is-Flag $arg "mode") {
       $script:mode = (Read-OptionValue $Values ([ref]$i) "--mode").ToLowerInvariant()
-      if ($script:mode -notin @("install", "update")) { throw "invalid mode: $script:mode" }
+      if ($script:mode -ne "install") { throw "invalid mode: $script:mode" }
       continue
     }
     if (Is-Flag $arg "stable") { Set-Channel "stable"; $script:expectGitSelector = $false; continue }
@@ -140,7 +89,7 @@ function Parse-Args([string[]]$Values) {
       $script:expectGitSelector = $false
       continue
     }
-    if ($arg -ieq "install" -or $arg -ieq "update") {
+    if ($arg -ieq "install") {
       $script:mode = $arg.ToLowerInvariant()
       continue
     }
@@ -158,8 +107,6 @@ function Parse-Args([string[]]$Values) {
     }
   }
 
-  Inherit-UpdateChannel
-
   if ($script:branch -and $script:version) { throw "cannot combine --branch and --version" }
   if ($script:channel -eq "stable" -and $script:branch) { throw "stable does not support --branch" }
   if ($script:channel -eq "beta" -and ($script:branch -or $script:version)) { throw "beta does not support explicit selectors" }
@@ -175,26 +122,15 @@ if ($RequestedMode) {
   }
 }
 Parse-Args $parseArgs
-if ($mode -notin @("install", "update")) { throw "invalid mode: $mode" }
-if ($quickRun -and $mode -ne "install") { throw "--quick-run is only supported by install.ps1" }
+if ($mode -ne "install") { throw "invalid mode: $mode" }
 
-if ($mode -eq "update") {
-  $workPrefix = "rin-update"
-  $fetchLabel = "Fetching updater source"
-  $prepLabel = "Preparing updater source"
-  $buildLabel = "Building updater"
-  $launchLabel = "Launching updater..."
-  $logName = "update.log"
-  $nodeError = "rin updater requires Node.js >= 22.19.0"
-} else {
-  $workPrefix = "rin-install"
-  $fetchLabel = "Fetching installer source"
-  $prepLabel = "Preparing installer source"
-  $buildLabel = "Building installer"
-  $launchLabel = "Launching installer..."
-  $logName = "install.log"
-  $nodeError = "rin installer requires Node.js >= 22.19.0"
-}
+$workPrefix = "rin-install"
+$fetchLabel = "Fetching installer source"
+$prepLabel = "Preparing installer source"
+$buildLabel = "Building installer"
+$launchLabel = "Launching installer..."
+$logName = "install.log"
+$nodeError = "rin installer requires Node.js >= 22.19.0"
 if ($quickRun) { $launchLabel = "Launching Rin quick run..." }
 $minimumNodeVersion = [version]"22.19.0"
 $managedNpmVersion = "10.9.3"
@@ -622,7 +558,6 @@ try {
     Say $launchLabel
     $installerArgs = @("dist/app/rin-install/main.js", "--release-file", $releaseFile)
     if ($quickRun) { $installerArgs += "--quick-run" }
-    if ($mode -eq "update") { $installerArgs += "--update" }
     & $managedNode @installerArgs
     exit $LASTEXITCODE
   } finally {

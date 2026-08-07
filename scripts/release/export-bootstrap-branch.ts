@@ -5,9 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const BOOTSTRAP_PAYLOAD_FILES = Object.freeze([
   "install.sh",
-  "update.sh",
   "install.ps1",
-  "update.ps1",
   "scripts/bootstrap-entrypoint.sh",
   "scripts/bootstrap-entrypoint.ps1",
   "release-manifest.json",

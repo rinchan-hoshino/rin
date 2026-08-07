@@ -51,7 +51,7 @@ await assert.rejects(
 await run({}, ["--quick-run"]);
 await assert.rejects(
   () => run({}, ["--update"]),
-  /rin_installer_update_entry_removed/,
+  /--update/,
 );
 
 for (const target of ["ssh", "container", "cloud", "nas", "vm"]) {
@@ -110,7 +110,7 @@ for (const expected of [
 console.log(JSON.stringify({ events: events.length, updater: names.filter((name) => name === "updater").length }));
 `;
 
-test("installer core orchestrates apply, update, deployment, and local install system paths", async () => {
+test("installer core orchestrates apply, deployment, and local install system paths", async () => {
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-installer-core-owner-"),
   );
@@ -141,11 +141,7 @@ test("installer core orchestrates apply, update, deployment, and local install s
     assert.equal(result.stderr, "");
 
     for (const [argv, scenario, expected] of [
-      [
-        ["--quick-run", "--update"],
-        {},
-        "formatted:rin_installer_update_entry_removed",
-      ],
+      [["--quick-run", "--update"], {}, "--update"],
     ] as const) {
       await assert.rejects(
         () =>

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
 
 import {
   cancel,
@@ -46,8 +47,6 @@ import {
   targetHomeForUser,
 } from "./users.js";
 import { defaultInstallDirForHome } from "./paths.js";
-import { activateLegacyUpdateHandoff } from "./update-job-auth.js";
-import { startUpdatePayload } from "./update-payload.js";
 import { runInstallerProgress } from "./progress.js";
 import { runQuickRun } from "./quick-run.js";
 import {
@@ -79,11 +78,21 @@ function readValueArg(argv: string[], name: string) {
 }
 
 function parseInstallerCliArgs(argv: string[]) {
+  parseArgs({
+    args: argv,
+    allowPositionals: false,
+    strict: true,
+    options: {
+      "apply-plan-file": { type: "string" },
+      "apply-result-file": { type: "string" },
+      "apply-error-file": { type: "string" },
+      "quick-run": { type: "boolean" },
+      "release-file": { type: "string" },
+      language: { type: "string" },
+    },
+  });
   const hasFlag = (name: string) =>
     argv.some((arg) => String(arg || "").trim() === name);
-  if (hasFlag("--update")) {
-    throw new Error("rin_installer_update_entry_removed");
-  }
   return {
     applyPlanFile: readValueArg(argv, "--apply-plan-file"),
     applyResultFile: readValueArg(argv, "--apply-result-file"),
@@ -127,12 +136,6 @@ async function launchInstallerTui(options: {
 }
 
 export async function startInstaller(argv = process.argv.slice(2)) {
-  if (argv.includes("--update")) {
-    await startUpdatePayload(
-      activateLegacyUpdateHandoff(argv, readValueArg(argv, "--install-dir")),
-    );
-    return;
-  }
   const cli = parseInstallerCliArgs(argv);
   if (cli.applyPlanFile) {
     const resultPath = cli.applyResultFile;

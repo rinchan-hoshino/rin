@@ -490,7 +490,6 @@ test("bootstrap scripts render progress without rin-install log prefixes", async
   }
   for (const scriptName of [
     "install.ps1",
-    "update.ps1",
     "scripts/bootstrap-entrypoint.ps1",
   ]) {
     const bytes = await fs.readFile(path.join(rootDir, scriptName));
@@ -555,7 +554,8 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
   );
   assert.match(entrypoint, /\$mode = "install"/);
   assert.match(entrypoint, /\$RequestedMode -ieq "--mode"/);
-  assert.match(entrypoint, /\$arg -ieq "install" -or \$arg -ieq "update"/);
+  assert.match(entrypoint, /\$arg -ieq "install"/);
+  assert.doesNotMatch(entrypoint, /\$arg -ieq "update"/);
   assert.match(entrypoint, /Parse-Args \$parseArgs/);
   assert.match(
     entrypoint,
@@ -911,7 +911,7 @@ esac
   });
 });
 
-test("stable install and update wrappers resolve release metadata then npm-install package runtime dependencies", async () => {
+test("stable install wrapper resolves release metadata then npm-installs package runtime dependencies", async () => {
   await withTempDir(async (tempDir) => {
     const archivePath = await createSourceArchive(tempDir);
     const manifestPath = await createReleaseManifest(tempDir);
@@ -945,7 +945,6 @@ test("stable install and update wrappers resolve release metadata then npm-insta
     };
 
     await runBootstrapWrapper("install.sh", [], env);
-    await runBootstrapWrapper("update.sh", [], env);
 
     const log = await fs.readFile(logPath, "utf8");
     assert.match(
@@ -960,69 +959,6 @@ test("stable install and update wrappers resolve release metadata then npm-insta
     assert.match(log, /node:.*:-e const Database=require\('better-sqlite3'\)/);
 
     assert.deepEqual(await fs.readdir(workRoot), []);
-  });
-});
-
-test("update wrapper inherits release channel from launcher metadata install dir", async () => {
-  await withTempDir(async (tempDir) => {
-    const archivePath = await createSourceArchive(tempDir);
-    const manifestPath = await createReleaseManifest(tempDir);
-    const fakeBin = path.join(tempDir, "bin");
-    const logPath = path.join(tempDir, "invocations.log");
-    const workRoot = path.join(tempDir, "work");
-    const currentHome = path.join(tempDir, "operator-home");
-    const installDir = path.join(tempDir, "target-install");
-    await createFakeBin(fakeBin, logPath);
-    await fs.mkdir(workRoot, { recursive: true });
-    await fs.mkdir(path.join(currentHome, ".config", "rin"), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      path.join(currentHome, ".config", "rin", "install.json"),
-      JSON.stringify({
-        defaultTargetUser: "rin",
-        defaultInstallDir: installDir,
-      }),
-      "utf8",
-    );
-    await fs.mkdir(installDir, { recursive: true });
-    await fs.writeFile(
-      path.join(installDir, "installer.json"),
-      JSON.stringify({
-        currentRelease: {
-          release: { channel: "git", branch: "main" },
-        },
-      }),
-      "utf8",
-    );
-
-    const env = {
-      ...process.env,
-      PATH: `${fakeBin}:${process.env.PATH}`,
-      HOME: currentHome,
-      RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
-      TMPDIR: workRoot,
-      RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
-      RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
-      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
-        rootDir,
-        "scripts",
-        "bootstrap-entrypoint.sh",
-      ),
-      RIN_BOOTSTRAP_TEST_LOG: logPath,
-    };
-    delete env.RIN_DIR;
-
-    await runBootstrapWrapper("update.sh", [], env);
-
-    const log = await fs.readFile(logPath, "utf8");
-    assert.match(log, /node:.*\.config\/rin\/install\.json/);
-    assert.match(log, /node:.*target-install\/installer\.json/);
-    assert.match(
-      log,
-      /curl:-fsSL https:\/\/example\.invalid\/rin\/archive\/0123456789abcdef0123456789abcdef01234567\.tar\.gz -o /,
-    );
-    assert.match(log, /npm:.*:ci --no-fund --no-audit/);
   });
 });
 
@@ -1148,10 +1084,6 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
       cwd: bootstrapDir,
       env,
     });
-    await execFileAsync("sh", [path.join(bootstrapDir, "update.sh")], {
-      cwd: bootstrapDir,
-      env,
-    });
 
     const log = await fs.readFile(logPath, "utf8");
     assert.match(
@@ -1216,13 +1148,7 @@ test("install wrapper forwards quick-run while preserving release channel select
   });
 });
 
-test("update bootstrap rejects quick-run", async () => {
-  await assertBootstrapFails(["update", "--quick-run"], {
-    stderr: /--quick-run is only supported by install\.sh/,
-  });
-});
-
-test("bootstrap wrappers forward beta nightly and git channel selections", async () => {
+test("install wrapper forwards beta nightly and git channel selections", async () => {
   await withTempDir(async (tempDir) => {
     const archivePath = await createSourceArchive(tempDir);
     const manifestPath = await createReleaseManifest(tempDir);
@@ -1249,7 +1175,7 @@ test("bootstrap wrappers forward beta nightly and git channel selections", async
 
     await runBootstrapWrapper("install.sh", ["--beta"], env);
     await runBootstrapWrapper("install.sh", ["--nightly"], env);
-    await runBootstrapWrapper("update.sh", ["--git", "main"], env);
+    await runBootstrapWrapper("install.sh", ["--git", "main"], env);
 
     const log = await fs.readFile(logPath, "utf8");
     assert.match(
@@ -1259,10 +1185,6 @@ test("bootstrap wrappers forward beta nightly and git channel selections", async
     assert.match(
       log,
       /node:.*:stdin_tty=0:stdout_tty=0:dist\/app\/rin-install\/main\.js --release-file [^\s]+/,
-    );
-    assert.match(
-      log,
-      /node:.*:stdin_tty=0:stdout_tty=0:dist\/app\/rin-install\/main\.js --release-file [^\s]+ --update/,
     );
   });
 });

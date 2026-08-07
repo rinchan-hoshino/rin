@@ -81,7 +81,7 @@ test("update payload parser owns update-only release arguments", () => {
   );
   assert.throws(
     () => payload.parseUpdatePayloadArgs(["--update"]),
-    /rin_installer_update_entry_removed/,
+    /unknown_run_option:--update/,
   );
 });
 

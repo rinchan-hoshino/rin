@@ -817,9 +817,7 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
     );
     for (const relativePath of [
       "install.sh",
-      "update.sh",
       "install.ps1",
-      "update.ps1",
       path.join("scripts", "bootstrap-entrypoint.sh"),
       path.join("scripts", "bootstrap-entrypoint.ps1"),
       "release-manifest.json",
@@ -831,6 +829,9 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
         true,
         relativePath,
       );
+    }
+    for (const retiredPath of ["update.sh", "update.ps1"]) {
+      assert.equal(fs.existsSync(path.join(tempDir, retiredPath)), false);
     }
     const readme = fs.readFileSync(path.join(tempDir, "README.md"), "utf8");
     const installWrapper = fs.readFileSync(
@@ -865,14 +866,11 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
     assert.match(bootstrapPowerShell, /function Is-Flag/);
     assert.match(bootstrapPowerShell, /Is-Flag \$arg "git"/);
     assert.match(bootstrapPowerShell, /Is-Flag \$arg "mode"/);
-    assert.match(bootstrapPowerShell, /AppData\/Roaming\/rin\/install\.json/);
     assert.match(bootstrapPowerShell, /^param\(/);
     assert.match(bootstrapPowerShell, /\[Alias\("Mode"\)\]/);
     assert.match(bootstrapPowerShell, /\$RequestedMode -ieq "--mode"/);
-    assert.match(
-      bootstrapPowerShell,
-      /\$arg -ieq "install" -or \$arg -ieq "update"/,
-    );
+    assert.match(bootstrapPowerShell, /\$arg -ieq "install"/);
+    assert.doesNotMatch(bootstrapPowerShell, /\$arg -ieq "update"/);
     assert.match(bootstrapPowerShell, /Parse-Args \$parseArgs/);
     assert.match(
       bootstrapPowerShell,

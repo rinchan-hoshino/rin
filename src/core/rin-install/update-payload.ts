@@ -37,12 +37,46 @@ function readOptionalFlagValue(
   return undefined;
 }
 
+function assertKnownUpdatePayloadArgs(argv: string[]) {
+  const booleanOptions = new Set([
+    "--stable",
+    "--beta",
+    "--nightly",
+    "--yes",
+    "--preconfirmed",
+  ]);
+  const valueOptions = new Set([
+    "--target-user",
+    "--install-dir",
+    "--branch",
+    "--version",
+    "--release-file",
+  ]);
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = String(argv[index] || "").trim();
+    if (booleanOptions.has(value)) continue;
+    if (value === "--git") {
+      const next = String(argv[index + 1] || "").trim();
+      if (next && !next.startsWith("--")) index += 1;
+      continue;
+    }
+    if (value.startsWith("--git=")) continue;
+    const option = value.split("=", 1)[0];
+    if (valueOptions.has(option)) {
+      if (value === option) {
+        const next = String(argv[index + 1] || "").trim();
+        if (next && !next.startsWith("--")) index += 1;
+      }
+      continue;
+    }
+    throw new Error(`unknown_run_option:${value}`);
+  }
+}
+
 export function parseUpdatePayloadArgs(argv: string[]) {
+  assertKnownUpdatePayloadArgs(argv);
   const hasFlag = (name: string) =>
     argv.some((arg) => String(arg || "").trim() === name);
-  if (hasFlag("--update")) {
-    throw new Error("rin_installer_update_entry_removed");
-  }
   const gitSelector = readOptionalFlagValue(argv, "--git");
   const selected = [
     hasFlag("--stable") ? "stable" : "",
