@@ -417,7 +417,16 @@ export async function startUpdater(deps: {
           release: resolvedRelease,
         } satisfies FinalizeInstallOptions,
         i18n.refreshingInstalledTargetMessage,
-        { writeStatus() {} },
+        {
+          writeStatus() {},
+          entryPath: path.join(
+            deps.repoRootFromHere(),
+            "dist",
+            "app",
+            "rin-install",
+            "main.js",
+          ),
+        },
       ),
     {
       successMessage: i18n.installStepComplete,

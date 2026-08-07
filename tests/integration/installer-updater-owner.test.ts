@@ -95,6 +95,7 @@ try{
  assert.equal(finalized.options.daemonReadyTimeoutMs,30000);
  assert.equal(Object.hasOwn(finalized.options,"language"),false);
  assert.equal(typeof finalized.status.writeStatus,"function");
+ assert.equal(finalized.status.entryPath,"/repo/owner/dist/app/rin-install/main.js");
  assert.match(output.join(""),/\/docs\/pi/);
  assert.match(output.join(""),/owner\.service/);
 

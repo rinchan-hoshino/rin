@@ -168,9 +168,11 @@ test("installer apply-plan returns the child result with inherited terminal IO",
     options,
     "Applying owner plan",
     {
+      entryPath: "/owner/installer-main.js",
       writeStatus: (message) => statuses.push(message),
       spawnImpl(command, args, spawnOptions) {
         assert.equal(command, process.execPath);
+        assert.equal(args[0], "/owner/installer-main.js");
         assert.deepEqual(spawnOptions.stdio, ["inherit", "inherit", "inherit"]);
         assert.equal(spawnOptions.env, process.env);
         return fakeChild((child) => {

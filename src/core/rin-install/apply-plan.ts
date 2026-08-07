@@ -103,6 +103,7 @@ export async function runFinalizeInstallPlanInChild(
   deps: {
     spawnImpl?: typeof spawn;
     writeStatus?: (message: string) => void;
+    entryPath?: string;
   } = {},
 ) {
   const resultDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-install-"));
@@ -123,7 +124,7 @@ export async function runFinalizeInstallPlanInChild(
     const child = spawnImpl(
       process.execPath,
       [
-        process.argv[1] || fileURLToPath(import.meta.url),
+        deps.entryPath || process.argv[1] || fileURLToPath(import.meta.url),
         "--apply-plan-file",
         planPath,
         "--apply-result-file",
