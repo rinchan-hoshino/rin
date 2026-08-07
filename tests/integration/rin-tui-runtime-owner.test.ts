@@ -897,6 +897,7 @@ test("rpc runtime exposes bound Pi facades, model mutations, and refresh queues"
   );
 
   assert.equal(session.extensionRunner.getMessageRenderer("owner"), undefined);
+  assert.deepEqual(session.extensionRunner.getMarkdownTransformers(), []);
   assert.equal(session.extensionRunner.getEntryRenderer("owner"), undefined);
   assert.equal(session.extensionRunner.getToolDefinition("owner"), undefined);
   assert.equal(session.extensionRunner.invalidate(), undefined);

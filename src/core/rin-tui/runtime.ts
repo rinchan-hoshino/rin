@@ -1117,6 +1117,7 @@ export class RpcInteractiveSession {
         this.resourceSnapshot.extensions.shortcutDiagnostics,
       getShortcuts: () => new Map(),
       getMessageRenderer: () => undefined,
+      getMarkdownTransformers: () => [],
       getEntryRenderer: () => undefined,
       emitUserBash: async () => null,
       getToolDefinition: () => undefined,
