@@ -73,16 +73,29 @@ test("cron utils compute next cron tick", () => {
     Date.parse("2026-03-31T12:00:00.000Z"),
   );
   assert.equal(next, "2026-03-31T12:05:00.000Z");
-  assert.deepEqual(
-    Array.from(cronUtils.formatCronField("1-5/2,10", 0, 10)).sort(
-      (a, b) => a - b,
+  assert.equal(
+    cronUtils.nextCronAt(
+      "1-5/2,10 * * * *",
+      Date.parse("2026-03-31T12:00:00.000Z"),
     ),
-    [1, 3, 5, 10],
+    "2026-03-31T12:01:00.000Z",
   );
-  assert.throws(
-    () => cronUtils.formatCronField("*/0", 0, 59),
-    /cron_invalid_expression/,
+});
+
+test("cron utils follow standard day-of-month OR day-of-week semantics", () => {
+  const next = cronUtils.nextCronAt(
+    "0 0 1 * 1",
+    Date.parse("2026-08-02T00:01:00.000Z"),
   );
+  assert.equal(next, "2026-08-03T00:00:00.000Z");
+});
+
+test("cron utils find valid sparse schedules without an arbitrary two-year horizon", () => {
+  const next = cronUtils.nextCronAt(
+    "0 0 29 2 *",
+    Date.parse("2025-03-01T00:00:00.000Z"),
+  );
+  assert.equal(next, "2028-02-29T00:00:00.000Z");
 });
 
 test("cron utils stop disabled or exhausted tasks before computing the next run", () => {
@@ -166,17 +179,23 @@ test("cron utils derive stable storage paths and run identifiers", (t) => {
 });
 
 test("cron utils reject malformed fields and exhausted one-shot triggers", () => {
-  for (const field of ["", "x", "5-1", "-1", "60", "1/a"]) {
+  for (const expression of [
+    "",
+    "* * *",
+    "* * * * * *",
+    "x * * * *",
+    "5-1 * * * *",
+    "-1 * * * *",
+    "60 * * * *",
+    "1/a * * * *",
+    "*/0 * * * *",
+  ]) {
     assert.throws(
-      () => cronUtils.formatCronField(field, 0, 59),
+      () => cronUtils.nextCronAt(expression, Date.now()),
       /cron_invalid_expression/,
-      field,
+      expression,
     );
   }
-  assert.throws(
-    () => cronUtils.nextCronAt("* * *", Date.now()),
-    /cron_invalid_expression/,
-  );
 
   const task = {
     id: "once",

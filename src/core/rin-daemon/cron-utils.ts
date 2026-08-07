@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { Cron } from "croner";
+
 import { schedulerDataPath } from "../data-layout.js";
 
 import { safeString } from "../platform/process.js";
@@ -19,31 +21,14 @@ function invalidCronExpression(): never {
   throw new Error("cron_invalid_expression");
 }
 
-function parseCronChunk(chunk: string, min: number, max: number) {
-  const [rangePart, stepPart] = chunk.split("/");
-  const step = stepPart == null ? 1 : Number(stepPart);
-  if (!Number.isInteger(step) || step <= 0) invalidCronExpression();
-
-  if (rangePart === "*") {
-    return { start: min, end: max, step };
+function parseFiveFieldCron(expression: string) {
+  const text = safeString(expression).trim();
+  if (text.split(/\s+/).length !== 5) invalidCronExpression();
+  try {
+    return new Cron(text, { paused: true });
+  } catch {
+    return invalidCronExpression();
   }
-
-  const rangeMatch = rangePart.match(/^(\d+)(?:-(\d+))?$/);
-  if (!rangeMatch) invalidCronExpression();
-
-  const start = Number(rangeMatch[1]);
-  const end = rangeMatch[2] == null ? start : Number(rangeMatch[2]);
-  if (
-    !Number.isInteger(start) ||
-    !Number.isInteger(end) ||
-    start < min ||
-    end > max ||
-    start > end
-  ) {
-    invalidCronExpression();
-  }
-
-  return { start, end, step };
 }
 
 function shouldStopTask(task: CronTaskRecord, referenceTs: number) {
@@ -100,46 +85,10 @@ export function summarizeText(value: string, max = 1200) {
   return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
-export function formatCronField(field: string, min: number, max: number) {
-  const chunks = safeString(field)
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  if (!chunks.length) invalidCronExpression();
-
-  const allowed = new Set<number>();
-  for (const chunk of chunks) {
-    const { start, end, step } = parseCronChunk(chunk, min, max);
-    for (let value = start; value <= end; value += step) allowed.add(value);
-  }
-  return allowed;
-}
-
 export function nextCronAt(expression: string, afterTs: number) {
-  const parts = safeString(expression).trim().split(/\s+/);
-  if (parts.length !== 5) invalidCronExpression();
-  const [minuteField, hourField, dayField, monthField, weekField] = parts;
-  const minutes = formatCronField(minuteField, 0, 59);
-  const hours = formatCronField(hourField, 0, 23);
-  const days = formatCronField(dayField, 1, 31);
-  const months = formatCronField(monthField, 1, 12);
-  const weeks = formatCronField(weekField, 0, 6);
-
-  const start = new Date(afterTs);
-  start.setSeconds(0, 0);
-  start.setMinutes(start.getMinutes() + 1);
-
-  for (let i = 0; i < 366 * 24 * 60 * 2; i += 1) {
-    const candidate = new Date(start.getTime() + i * 60_000);
-    if (!minutes.has(candidate.getMinutes())) continue;
-    if (!hours.has(candidate.getHours())) continue;
-    if (!days.has(candidate.getDate())) continue;
-    if (!months.has(candidate.getMonth() + 1)) continue;
-    if (!weeks.has(candidate.getDay())) continue;
-    return candidate.toISOString();
-  }
-
-  throw new Error("cron_next_run_not_found");
+  const next = parseFiveFieldCron(expression).nextRun(new Date(afterTs));
+  if (!next) throw new Error("cron_next_run_not_found");
+  return next.toISOString();
 }
 
 export function computeNextRunAt(task: CronTaskRecord, referenceTs: number) {
