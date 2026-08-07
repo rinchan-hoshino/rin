@@ -24,6 +24,22 @@ const main = await import(pathToFileURL(path.resolve("dist/core/rin/main.js")).h
 assert.equal(main.defaultLaunchModeForPlatform("linux"), "tui");
 assert.equal(main.defaultLaunchModeForPlatform("win32"), "tui");
 assert.equal(main.resolveInternalRinDispatch(["unknown"]), undefined);
+assert.equal(
+  main.isExplicitRinUpdateInvocation(["update", "--git", "--branch", "main", "--yes"]),
+  true,
+);
+assert.equal(
+  main.isExplicitRinUpdateInvocation(["--user", "owner", "update"]),
+  true,
+);
+assert.equal(
+  main.isExplicitRinUpdateInvocation(["update", "--extensions"]),
+  false,
+);
+assert.equal(
+  main.isExplicitRinUpdateInvocation(["install", "--git"]),
+  false,
+);
 
 for (const [marker, expected] of [
   ["__usage_internal", "usage-internal"],
@@ -67,6 +83,7 @@ try {
   await run(["update", "self"]);
   await run(["update", "--self", "--force"]);
   await run(["update", "--all"]);
+  await run(["update", "--git", "--branch", "main", "--yes"]);
   await run(["--user", "owner"]);
   await run(["version", "--target", "remote-two"]);
   await run(["version", "--yes"]);

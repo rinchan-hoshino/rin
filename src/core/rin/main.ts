@@ -129,6 +129,27 @@ function hasExplicitTargetArg(rawArgv: string[]) {
   );
 }
 
+const RIN_UPDATE_ROUTE_FLAGS = new Set([
+  "-u",
+  "--user",
+  "--target",
+  "--stable",
+  "--beta",
+  "--nightly",
+  "--git",
+  "--branch",
+  "--version",
+  "--yes",
+]);
+
+export function isExplicitRinUpdateInvocation(rawArgv: string[]) {
+  if (stripRinWrapperArgs(rawArgv)[0] !== "update") return false;
+  return rawArgv.some((arg) => {
+    const flag = arg.split("=", 1)[0];
+    return RIN_UPDATE_ROUTE_FLAGS.has(flag);
+  });
+}
+
 function parseRinWrapperOptions(rawArgv: string[]) {
   const options: Record<string, string> = {};
   for (let index = 0; index < rawArgv.length; index += 1) {
@@ -175,7 +196,9 @@ export async function startRinCli() {
   }
 
   const { tryRunPiCliCommand } = await import("./pi-command-adapter.js");
-  const piRoute = await tryRunPiCliCommand(strippedArgv);
+  const piRoute = isExplicitRinUpdateInvocation(rawArgv)
+    ? "rin"
+    : await tryRunPiCliCommand(strippedArgv);
   if (piRoute === "handled") return;
   if (piRoute === "rin-after-pi") {
     const parsed = resolveParsedArgs(
