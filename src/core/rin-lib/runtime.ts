@@ -41,7 +41,7 @@ import {
   estimateProviderBoundContextTokens,
 } from "./provider-context.js";
 import { applyRinSystemPromptOverlay } from "./system-prompt-overlay.js";
-import { injectPostCompactionState } from "./post-compaction-state.js";
+import { appendPostCompactionStateToSummary } from "./post-compaction-state.js";
 import {
   bindPiSessionAutoCompactor,
   bindPiSessionCompactionChecker,
@@ -77,9 +77,15 @@ export function createRinCapabilityDefinitions(
             name: "rin_native_compaction",
             hooks: {
               session_before_compact: [
-                async (event: any) => ({
-                  compaction: await options.compactWithPiNative?.(event),
-                }),
+                async (event: any, ctx: any) => {
+                  const compaction = await options.compactWithPiNative?.(event);
+                  return {
+                    compaction: await appendPostCompactionStateToSummary(
+                      compaction,
+                      ctx?.sessionManager,
+                    ),
+                  };
+                },
               ],
             },
           },
@@ -89,16 +95,11 @@ export function createRinCapabilityDefinitions(
       name: "rin_provider_bound_context",
       hooks: {
         context: [
-          async (event: any, ctx: any) => {
+          (event: any, ctx: any) => {
             if (!Array.isArray(event?.messages)) return undefined;
-            const providerEvent = buildProviderBoundContextEvent(event, {
+            return buildProviderBoundContextEvent(event, {
               cwd: String(ctx?.cwd || options.cwd || process.cwd()),
             });
-            const injection = await injectPostCompactionState(
-              providerEvent ?? { messages: event.messages },
-              ctx?.sessionManager,
-            );
-            return injection ?? providerEvent;
           },
         ],
       },

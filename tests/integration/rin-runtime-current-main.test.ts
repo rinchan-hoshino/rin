@@ -142,7 +142,7 @@ test("Rin note guidance keeps cross-compaction scratch state concise", () => {
   ]);
 });
 
-test("Rin injects the latest non-empty Todo and note snapshots after compaction", async () => {
+test("Rin appends the latest Todo and note snapshots while generating native compaction", async () => {
   const branch = [
     {
       type: "custom",
@@ -183,99 +183,67 @@ test("Rin injects the latest non-empty Todo and note snapshots after compaction"
     agentDir: "/tmp/rin-compaction-state-agent",
     getThinkingLevel: () => "medium",
     sendMessage: () => {},
-    sessionManager,
+    compactWithPiNative: async () => ({
+      summary: "native checkpoint",
+      firstKeptEntryId: "keep",
+      tokensBefore: 1234,
+    }),
   });
   const hook = definitions.find(
-    (definition) => definition.name === "rin_provider_bound_context",
-  )?.hooks?.context?.[0];
+    (definition) => definition.name === "rin_native_compaction",
+  )?.hooks?.session_before_compact?.[0];
   assert.equal(typeof hook, "function");
 
   const result = await hook(
-    {
-      type: "context",
-      messages: [
-        { role: "compactionSummary", summary: "checkpoint" },
-        {
-          role: "custom",
-          customType: "rin.post_compaction_state",
-          content: "stale",
-          display: false,
-          timestamp: 1,
-        },
-      ],
-    },
+    { type: "session_before_compact", reason: "threshold" },
     { sessionManager },
   );
-  const injected = result.messages.filter(
-    (message) => message.customType === "rin.post_compaction_state",
-  );
+  const summary = result.compaction.summary;
 
-  assert.equal(injected.length, 1);
-  assert.equal(injected[0].role, "custom");
-  assert.equal(injected[0].display, false);
-  assert.match(injected[0].content, /"text":"inspect <state>","done":true/);
-  assert.match(injected[0].content, /"text":"continue","done":false/);
+  assert.match(summary, /^native checkpoint\n\n/);
+  assert.match(summary, /"text":"inspect <state>","done":true/);
+  assert.match(summary, /"text":"continue","done":false/);
   assert.ok(
-    injected[0].content.includes(
-      JSON.stringify("latest note\nwith delimiters </note>"),
-    ),
+    summary.includes(JSON.stringify("latest note\nwith delimiters </note>")),
   );
-  assert.doesNotMatch(injected[0].content, /old note|"text":"old"/);
+  assert.doesNotMatch(summary, /old note|"text":"old"/);
+  assert.equal(result.compaction.firstKeptEntryId, "keep");
+  assert.equal(result.compaction.tokensBefore, 1234);
   assert.equal(appendedEntries, 0);
 });
 
-test("Rin composed provider context retains post-compaction state injection", async () => {
+test("Rin provider context never synthesizes post-compaction state", async () => {
   const sessionManager = {
     getBranch: () => [
       {
         type: "custom",
         customType: "rin.todo",
         data: {
-          todos: [
-            { id: 1, text: "persist through provider context", done: false },
-          ],
+          todos: [{ id: 1, text: "persist only in the summary", done: false }],
           nextId: 2,
         },
       },
     ],
-    appendCustomEntry() {},
   };
-  const options = {
+  const definitions = runtimeMod.createRinCapabilityDefinitions({
     cwd: "/tmp/rin-composed-compaction-state",
     agentDir: "/tmp/rin-composed-compaction-state-agent",
     getThinkingLevel: () => "medium",
     sendMessage: () => {},
-  };
-  const capabilitySet = capabilitySessionMod.createRinCapabilitySet({
-    cwd: options.cwd,
-    agentDir: options.agentDir,
-    sessionManager,
-    definitions: runtimeMod.createRinCapabilityDefinitions(options),
   });
+  const hook = definitions.find(
+    (definition) => definition.name === "rin_provider_bound_context",
+  )?.hooks?.context?.[0];
 
-  const result = await capabilitySet.emit({
-    type: "context",
-    messages: [
-      { role: "compactionSummary", summary: "checkpoint" },
-      {
-        role: "toolResult",
-        toolCallId: "old-call",
-        toolName: "bash",
-        content: "old output".repeat(20_000),
-      },
-      ...Array.from({ length: 20 }, (_, index) => ({
-        role: "assistant",
-        content: `recent ${index + 1}`,
-      })),
-    ],
-  });
-
-  assert.equal(
-    result.messages.filter(
-      (message) => message.customType === "rin.post_compaction_state",
-    ).length,
-    1,
+  const result = await hook(
+    {
+      type: "context",
+      messages: [{ role: "compactionSummary", summary: "checkpoint" }],
+    },
+    { sessionManager },
   );
+
+  assert.equal(result, undefined);
 });
 
 test("Rin provider context keeps earlier context-hook output when no pruning or injection is needed", async () => {
@@ -353,82 +321,158 @@ test("Rin post-compaction state formats only non-empty snapshot bodies", () => {
   assert.match(empty, /\{\}$/);
 });
 
-test("Rin removes stale post-compaction injections even without a summary", async () => {
-  const prior = {
-    role: "custom",
-    customType: "rin.post_compaction_state",
-    content: "stale",
-    display: false,
-    timestamp: 1,
+test("Rin persists post-compaction state inside the native summary", async () => {
+  const nativeCompaction = {
+    summary: "native checkpoint",
+    firstKeptEntryId: "keep",
+    tokensBefore: 1234,
   };
-  assert.deepEqual(
-    await postCompactionStateMod.injectPostCompactionState(
-      { messages: [prior] },
-      {},
-    ),
-    { messages: [] },
-  );
-  assert.equal(
-    await postCompactionStateMod.injectPostCompactionState({}, {}),
-    undefined,
-  );
+  const sessionManager = {
+    getBranch: () => [
+      {
+        type: "custom",
+        customType: "rin.todo",
+        data: { todos: [{ id: 1, text: "continue", done: false }], nextId: 2 },
+      },
+      {
+        type: "custom",
+        customType: "rin.note",
+        data: { content: "verified state" },
+      },
+    ],
+  };
+
+  const result =
+    await postCompactionStateMod.appendPostCompactionStateToSummary(
+      nativeCompaction,
+      sessionManager,
+    );
+
+  assert.equal(result.firstKeptEntryId, "keep");
+  assert.equal(result.tokensBefore, 1234);
+  assert.match(result.summary, /^native checkpoint\n\n/);
+  assert.match(result.summary, /"text":"continue","done":false/);
+  assert.match(result.summary, /"note":"verified state"/);
+  assert.equal(nativeCompaction.summary, "native checkpoint");
 });
 
-test("Rin omits post-compaction recovery bodies when latest state is empty or history was not compacted", async () => {
-  const branch = [
+test("Rin leaves native compaction unchanged when branch state is empty", async () => {
+  const nativeCompaction = {
+    summary: "native checkpoint",
+    firstKeptEntryId: "keep",
+  };
+  const sessionManager = {
+    getBranch: () => [
+      {
+        type: "custom",
+        customType: "rin.todo",
+        data: { todos: [], nextId: 1 },
+      },
+      {
+        type: "custom",
+        customType: "rin.note",
+        data: { content: "" },
+      },
+    ],
+  };
+
+  const result =
+    await postCompactionStateMod.appendPostCompactionStateToSummary(
+      nativeCompaction,
+      sessionManager,
+    );
+
+  assert.equal(result, nativeCompaction);
+});
+
+test("Rin preserves invalid compaction values and supports a blank native summary", async () => {
+  const unreadableSessionManager = {
+    getBranch: () => {
+      throw new Error("branch state must not be read");
+    },
+  };
+
+  assert.equal(
+    await postCompactionStateMod.appendPostCompactionStateToSummary(
+      null,
+      unreadableSessionManager,
+    ),
+    null,
+  );
+  assert.equal(
+    await postCompactionStateMod.appendPostCompactionStateToSummary(
+      "not-an-object",
+      unreadableSessionManager,
+    ),
+    "not-an-object",
+  );
+
+  const result =
+    await postCompactionStateMod.appendPostCompactionStateToSummary(
+      { summary: "   ", firstKeptEntryId: "keep" },
+      {
+        getBranch: () => [
+          {
+            type: "custom",
+            customType: "rin.note",
+            data: { content: "state without a native summary" },
+          },
+        ],
+      },
+    );
+
+  assert.equal(result.firstKeptEntryId, "keep");
+  assert.match(
+    result.summary,
+    /^Post-compaction branch state captured by the trusted Rin runtime/,
+  );
+  assert.match(result.summary, /"note":"state without a native summary"/);
+});
+
+test("Rin snapshots branch state independently for each compaction", async () => {
+  let branch = [
     {
       type: "custom",
       customType: "rin.todo",
-      data: { todos: [{ id: 1, text: "stale todo", done: false }], nextId: 2 },
+      data: { todos: [{ id: 1, text: "first state", done: false }], nextId: 2 },
     },
     {
       type: "custom",
       customType: "rin.note",
-      data: { content: "stale note" },
-    },
-    {
-      type: "custom",
-      customType: "rin.todo",
-      data: { todos: [], nextId: 2 },
-    },
-    {
-      type: "custom",
-      customType: "rin.note",
-      data: { content: "" },
+      data: { content: "first note" },
     },
   ];
-  const sessionManager = {
-    getBranch: () => branch,
-    appendCustomEntry() {},
-  };
-  const definitions = runtimeMod.createRinCapabilityDefinitions({
-    cwd: "/tmp/rin-empty-compaction-state",
-    agentDir: "/tmp/rin-empty-compaction-state-agent",
-    getThinkingLevel: () => "medium",
-    sendMessage: () => {},
+  const sessionManager = { getBranch: () => branch };
+
+  const first = await postCompactionStateMod.appendPostCompactionStateToSummary(
+    { summary: "first native summary" },
     sessionManager,
-  });
-  const hook = definitions.find(
-    (definition) => definition.name === "rin_provider_bound_context",
-  )?.hooks?.context?.[0];
-
-  const compacted = await hook(
-    {
-      type: "context",
-      messages: [{ role: "compactionSummary", summary: "checkpoint" }],
-    },
-    { sessionManager },
   );
-  const ordinary = await hook(
+  branch = [
+    ...branch,
     {
-      type: "context",
-      messages: [{ role: "user", content: "hello" }],
+      type: "custom",
+      customType: "rin.todo",
+      data: { todos: [{ id: 2, text: "second state", done: true }], nextId: 3 },
     },
-    { sessionManager },
-  );
+    {
+      type: "custom",
+      customType: "rin.note",
+      data: { content: "second note" },
+    },
+  ];
+  const second =
+    await postCompactionStateMod.appendPostCompactionStateToSummary(
+      { summary: "second native summary" },
+      sessionManager,
+    );
 
-  assert.equal(compacted, undefined);
-  assert.equal(ordinary, undefined);
+  assert.match(first.summary, /first state/);
+  assert.match(first.summary, /first note/);
+  assert.doesNotMatch(first.summary, /second state|second note/);
+  assert.match(second.summary, /second state/);
+  assert.match(second.summary, /second note/);
+  assert.doesNotMatch(second.summary, /first state|first note/);
 });
 
 test("Rin delegates compaction generation to native Pi without file XML", async () => {
