@@ -1180,6 +1180,12 @@
       "built": "dist/core/token-usage/store.js",
       "suite": "integration",
       "tests": ["tests/integration/token-usage-store.test.ts"]
+    },
+    {
+      "source": "src/app/rin-install/update-payload.ts",
+      "built": "dist/app/rin-install/update-payload.js",
+      "suite": "system",
+      "tests": ["tests/system/update-payload-entrypoint-owner.test.ts"]
     }
   ]
 }

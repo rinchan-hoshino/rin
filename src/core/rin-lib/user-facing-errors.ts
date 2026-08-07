@@ -677,6 +677,10 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin update recovery failed and the background-service maintenance fence could not be released cleanly.",
   rin_update_installed_release_channel_missing: () =>
     "Rin update could not find the installed release channel. Repair the installed release metadata before updating.",
+  rin_update_job_authorization_required: () =>
+    "Rin's internal update payload requires an authorized update job. Run `rin update` instead.",
+  rin_installer_update_entry_removed: () =>
+    "The installer no longer accepts `--update`. Run `rin update` instead.",
   rin_update_job_invalid: () =>
     "Rin update could not read its job file. Start the update again.",
   rin_update_launchd_user_domain_missing: () =>

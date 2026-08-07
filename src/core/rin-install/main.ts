@@ -34,17 +34,9 @@ import {
   promptInstallTarget,
 } from "./interactive.js";
 import { createInstallerI18n } from "./i18n.js";
-import {
-  detectCurrentUser,
-  detectExecutorUser,
-  repoRootFromHere,
-  runCommand,
-} from "./common.js";
+import { detectCurrentUser, repoRootFromHere, runCommand } from "./common.js";
 import { finalizeCoreUpdate, finalizeInstallPlan } from "./finalize.js";
-import {
-  releaseInfoFromFile,
-  type ReleaseChannel,
-} from "../rin-lib/release.js";
+import { releaseInfoFromFile } from "../rin-lib/release.js";
 import { formatRuntimeErrorForUser } from "../rin-lib/user-facing-errors.js";
 import {
   describeOwnership,
@@ -54,7 +46,6 @@ import {
   targetHomeForUser,
 } from "./users.js";
 import { defaultInstallDirForHome } from "./paths.js";
-import { startUpdater } from "./updater.js";
 import { runInstallerProgress } from "./progress.js";
 import { runQuickRun } from "./quick-run.js";
 import {
@@ -85,64 +76,18 @@ function readValueArg(argv: string[], name: string) {
   return "";
 }
 
-function readOptionalFlagValue(argv: string[], name: string) {
-  for (let index = 0; index < argv.length; index += 1) {
-    const value = String(argv[index] || "").trim();
-    if (value === name) {
-      const next = String(argv[index + 1] || "").trim();
-      return !next || next.startsWith("-") ? "" : next;
-    }
-    if (value.startsWith(`${name}=`))
-      return value.slice(name.length + 1).trim();
-  }
-  return "";
-}
-
-function parseInstallerUpdateReleaseArgs(argv: string[]) {
-  const hasFlag = (name: string) =>
-    argv.some((arg) => String(arg || "").trim() === name);
-  const selected = [
-    hasFlag("--stable") ? "stable" : "",
-    hasFlag("--beta") ? "beta" : "",
-    hasFlag("--nightly") ? "nightly" : "",
-    hasFlag("--git") ? "git" : "",
-  ].filter(Boolean) as ReleaseChannel[];
-  if (selected.length > 1) throw new Error("rin_release_channel_conflict");
-  let branch = readValueArg(argv, "--branch");
-  let version = readValueArg(argv, "--version");
-  const gitSelector = readOptionalFlagValue(argv, "--git");
-  if (!branch && !version && gitSelector) {
-    if (
-      /^[0-9a-f]{7,40}$/i.test(gitSelector) ||
-      gitSelector.startsWith("refs/")
-    )
-      version = gitSelector;
-    else branch = gitSelector;
-  }
-  return {
-    channel: selected[0] || "stable",
-    branch,
-    version,
-    explicitReleaseChannel: selected.length > 0,
-  };
-}
-
 function parseInstallerCliArgs(argv: string[]) {
   const hasFlag = (name: string) =>
     argv.some((arg) => String(arg || "").trim() === name);
-  const updateReleaseRequest = parseInstallerUpdateReleaseArgs(argv);
+  if (hasFlag("--update")) {
+    throw new Error("rin_installer_update_entry_removed");
+  }
   return {
     applyPlanFile: readValueArg(argv, "--apply-plan-file"),
     applyResultFile: readValueArg(argv, "--apply-result-file"),
     applyErrorFile: readValueArg(argv, "--apply-error-file"),
-    update: hasFlag("--update"),
-    updateTargetUser: readValueArg(argv, "--target-user"),
-    updateInstallDir: readValueArg(argv, "--install-dir"),
-    updateAssumeYes: hasFlag("--yes"),
-    updatePreconfirmed: hasFlag("--preconfirmed"),
     quickRun: hasFlag("--quick-run"),
     releaseFile: readValueArg(argv, "--release-file"),
-    updateReleaseRequest,
   };
 }
 
@@ -211,35 +156,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
   }
 
   if (cli.quickRun) {
-    if (cli.update) throw new Error("rin_quick_run_update_not_supported");
     await runQuickRun();
-    return;
-  }
-
-  if (cli.update) {
-    const updateCurrentUser = detectExecutorUser();
-    const updateTargetUser = cli.updateTargetUser || updateCurrentUser;
-    const i18n = createInstallerI18n();
-    const localizedConfirm: typeof confirm = (options) =>
-      confirm({
-        active: i18n.confirmActiveLabel,
-        inactive: i18n.confirmInactiveLabel,
-        ...options,
-      });
-    await startUpdater({
-      detectCurrentUser: () => updateCurrentUser,
-      repoRootFromHere,
-      ensureNotCancelled,
-      release: releaseInfoFromFile(cli.releaseFile),
-      releaseRequest: cli.updateReleaseRequest,
-      select,
-      confirm: localizedConfirm,
-      i18n,
-      requestedInstallDir: cli.updateInstallDir,
-      requestedTargetUser: cli.updateTargetUser,
-      assumeYes: cli.updateAssumeYes,
-      preconfirmed: cli.updatePreconfirmed,
-    });
     return;
   }
 

@@ -49,19 +49,10 @@ await assert.rejects(
 );
 
 await run({}, ["--quick-run"]);
-await assert.rejects(() => run({}, ["--quick-run", "--update"]), /rin_quick_run_update_not_supported/);
-await assert.rejects(() => run({}, ["--update", "--stable", "--beta"]), /rin_release_channel_conflict/);
-for (const argv of [
-  ["--update", "--target-user", "other", "--install-dir", "/owner/update", "--yes", "--preconfirmed", "--language", "fr_FR", "--release-file", "/owner/release.json"],
-  ["--update", "--beta"],
-  ["--update", "--nightly"],
-  ["--update", "--git"],
-  ["--update", "--git=owner-branch"],
-  ["--update", "--git", "abcdef1"],
-  ["--update", "--git=refs/heads/owner"],
-  ["--update", "--git", "--branch", "explicit-branch"],
-  ["--update", "--git", "--version=owner-version"],
-]) await run({ settings: {} }, argv);
+await assert.rejects(
+  () => run({}, ["--update"]),
+  /rin_installer_update_entry_removed/,
+);
 
 for (const target of ["ssh", "container", "cloud", "nas", "vm"]) {
   await run({ target, language: "en_US" }, []);
@@ -113,7 +104,7 @@ await run({
 
 const names = events.map(([name]) => name);
 for (const expected of [
-  "quick-run", "updater", "install-target", "dir-state", "requirements",
+  "quick-run", "install-target", "dir-state", "requirements",
   "finalize-child", "run-command", "register-local",
 ]) assert.equal(names.includes(expected), true, expected);
 console.log(JSON.stringify({ events: events.length, updater: names.filter((name) => name === "updater").length }));
@@ -145,15 +136,15 @@ test("installer core orchestrates apply, update, deployment, and local install s
       },
     );
     const summary = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
-    assert.equal(summary.events > 70, true);
-    assert.equal(summary.updater, 9);
+    assert.equal(summary.events > 40, true);
+    assert.equal(summary.updater, 0);
     assert.equal(result.stderr, "");
 
     for (const [argv, scenario, expected] of [
       [
         ["--quick-run", "--update"],
         {},
-        "formatted:rin_quick_run_update_not_supported",
+        "formatted:rin_installer_update_entry_removed",
       ],
     ] as const) {
       await assert.rejects(

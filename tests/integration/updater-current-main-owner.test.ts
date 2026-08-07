@@ -76,26 +76,45 @@ test("updater private release readers preserve installed channel preferences", a
       owner.__rinOwnerReadInstalledReleasePreference({ channel: "owner" }),
       null,
     );
-    const targetCommand = updater.buildTargetUserUpdaterCommand(
-      {
-        sourceRoot: "/owner/source",
-        targetUser: "owner-target",
-        ownerHome: "/owner/home",
-        installDir: "/owner/install",
-        release: {
-          channel: "git",
-          version: "1.2.3",
-          branch: "owner-branch",
-          ref: "owner-ref",
-          repoUrl: "https://example.invalid/owner.git",
+    const previousJobPath = process.env.RIN_UPDATE_JOB_PATH;
+    const previousJobId = process.env.RIN_UPDATE_JOB_ID;
+    process.env.RIN_UPDATE_JOB_PATH = "/owner/job.json";
+    process.env.RIN_UPDATE_JOB_ID = "owner-job";
+    let forwardedEnv: Record<string, string> | undefined;
+    let targetCommand: any;
+    try {
+      targetCommand = updater.buildTargetUserUpdaterCommand(
+        {
+          sourceRoot: "/owner/source",
+          targetUser: "owner-target",
+          ownerHome: "/owner/home",
+          installDir: "/owner/install",
+          release: {
+            channel: "git",
+            version: "1.2.3",
+            branch: "owner-branch",
+            ref: "owner-ref",
+            repoUrl: "https://example.invalid/owner.git",
+          },
         },
-      },
-      {
-        commandAsUserInvocation(targetUser, command, args, env) {
-          return { command, args: [targetUser, ...args], options: { env } };
+        {
+          commandAsUserInvocation(targetUser, command, args, env) {
+            forwardedEnv = env;
+            return { command, args: [targetUser, ...args], options: { env } };
+          },
         },
-      },
-    );
+      );
+    } finally {
+      if (previousJobPath === undefined) delete process.env.RIN_UPDATE_JOB_PATH;
+      else process.env.RIN_UPDATE_JOB_PATH = previousJobPath;
+      if (previousJobId === undefined) delete process.env.RIN_UPDATE_JOB_ID;
+      else process.env.RIN_UPDATE_JOB_ID = previousJobId;
+    }
+    assert.deepEqual(forwardedEnv, {
+      HOME: "/owner/home",
+      RIN_UPDATE_JOB_PATH: "/owner/job.json",
+      RIN_UPDATE_JOB_ID: "owner-job",
+    });
     assert.match(targetCommand.command, /node$/);
     assert.equal(targetCommand.args[0], "owner-target");
     assert.deepEqual(targetCommand.args.slice(-2), ["--version", "owner-ref"]);
@@ -174,9 +193,8 @@ test("buildPreparedUpdaterCommand launches prepared managed node", async () => {
     });
 
     assert.equal(command.command, managedNode);
-    assert.deepEqual(command.args.slice(0, 3), [
-      path.join(sourceRoot, "dist", "app", "rin-install", "main.js"),
-      "--update",
+    assert.deepEqual(command.args.slice(0, 2), [
+      path.join(sourceRoot, "dist", "app", "rin-install", "update-payload.js"),
       "--target-user",
     ]);
     assert.equal(command.options.cwd, sourceRoot);

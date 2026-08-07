@@ -10,6 +10,9 @@ import { createTestSandbox } from "../support/test-sandbox.js";
 
 const execFileAsync = promisify(execFile);
 const entrypoint = path.resolve("dist/app/rin-install/main.js");
+const updatePayloadEntrypoint = path.resolve(
+  "dist/app/rin-install/update-payload.js",
+);
 const failureRegister = path.resolve(
   "tests/support/register-entrypoint-failure.ts",
 );
@@ -18,6 +21,34 @@ test("installer entrypoint formats ordinary errors and honors apply-error handof
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-install-entry-"));
   const sandbox = await createTestSandbox(root);
   try {
+    await assert.rejects(
+      () =>
+        execFileAsync(
+          process.execPath,
+          [entrypoint, "--update", "--install-dir", root, "--yes"],
+          { env: sandbox.env },
+        ),
+      (error: any) => {
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, /no longer accepts.*--update/i);
+        return true;
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        execFileAsync(
+          process.execPath,
+          [updatePayloadEntrypoint, "--install-dir", root, "--yes"],
+          { env: sandbox.env },
+        ),
+      (error: any) => {
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, /authorized update job/i);
+        return true;
+      },
+    );
+
     await assert.rejects(
       () =>
         execFileAsync(

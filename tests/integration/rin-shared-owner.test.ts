@@ -326,7 +326,6 @@ test("Rin shared boundary owns target reads, execution context, daemon readiness
       /rin_managed_node_runtime_missing/,
     );
 
-    owner.__rinSharedOwnerSpawnResult = { code: 0, signal: null };
     await shared.runUpdate(
       parsed({
         targetUser: "target",
@@ -338,13 +337,21 @@ test("Rin shared boundary owns target reads, execution context, daemon readiness
         releaseVersion: "owner-ref",
       }),
     );
-    const spawnEvent = owner.__rinSharedOwnerEvents.findLast(
+    const jobsDir = path.join(installDir, "data", "core", "updates", "jobs");
+    const [jobFile] = await fs.readdir(jobsDir);
+    const jobPath = path.join(jobsDir, jobFile);
+    const launchEvent = owner.__rinSharedOwnerEvents.findLast(
       ([name]: string[]) => name === "spawn",
     );
-    assert.equal(spawnEvent[1], managedNode);
-    assert.deepEqual(spawnEvent[2], [
-      "/repo-owner/dist/app/rin-install/main.js",
-      "--update",
+    assert.equal(launchEvent[1], managedNode);
+    assert.deepEqual(launchEvent[2], [
+      "/repo-owner/dist/app/rin-install/update-job.js",
+      jobPath,
+    ]);
+    const job = JSON.parse(await fs.readFile(jobPath, "utf8"));
+    assert.equal(job.command, managedNode);
+    assert.deepEqual(job.args, [
+      "/repo-owner/dist/app/rin-install/update-payload.js",
       "--target-user",
       "target",
       "--install-dir",
@@ -357,22 +364,12 @@ test("Rin shared boundary owns target reads, execution context, daemon readiness
       "owner-ref",
     ]);
 
-    owner.__rinSharedOwnerSpawnResult = { code: 7, signal: null };
+    owner.__rinSharedOwnerSpawnResult = { code: 5, signal: null };
     await assert.rejects(
       () => shared.runUpdate(parsed({ targetUser: "target", installDir })),
-      (error: any) => {
-        assert.equal(error.message, "rin_child_command_failed:7");
-        assert.equal(error.status, 7);
-        return true;
-      },
+      /rin_child_command_failed:5/,
     );
-    owner.__rinSharedOwnerSpawnResult = {
-      error: new Error("owner spawn failed"),
-    };
-    await assert.rejects(
-      () => shared.runUpdate(parsed({ targetUser: "target", installDir })),
-      /owner spawn failed/,
-    );
+    owner.__rinSharedOwnerSpawnResult = { code: 0, signal: null };
   } finally {
     await fs.rm(installDir, { recursive: true, force: true });
   }

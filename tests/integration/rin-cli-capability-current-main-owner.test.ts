@@ -177,7 +177,7 @@ test("rin update pre-installer progress uses fixed English copy", () => {
   assert.equal(i18n.formatUpdateSourceLabel("stable latest"), "stable latest");
 });
 
-test("rin update is a thin wrapper around rin-install update", () => {
+test("rin update owns one update-job executor and one private payload", () => {
   const source = fs.readFileSync(
     path.join(rootDir, "src", "core", "rin", "shared.ts"),
     "utf8",
@@ -194,10 +194,10 @@ test("rin update is a thin wrapper around rin-install update", () => {
   assert.match(source, /buildRinInstallUpdateArgs/);
   assert.match(
     source,
-    /path\.join\(\s*repoRoot,\s*"dist",\s*"app",\s*"rin-install",\s*"main\.js"/,
+    /path\.join\(\s*repoRoot,\s*"dist",\s*"app",\s*"rin-install",\s*"update-payload\.js"/,
   );
-  assert.match(source, /launchDaemonIndependentUpdateJob/);
-  assert.match(source, /"--update"/);
+  assert.match(source, /launchIndependentUpdateJob/);
+  assert.doesNotMatch(source, /"--update"/);
   assert.match(source, /"--target-user"/);
   assert.match(source, /"--install-dir"/);
   assert.match(source, /parsed\.updateAssumeYes/);

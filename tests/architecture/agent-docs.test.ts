@@ -103,8 +103,9 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(runtimeLayout, /## Maintenance target contract/);
   assert.match(
     capabilities,
-    /`rin update`: the agent-facing installed-runtime update command/,
+    /`rin update`: the only installed-runtime update command/,
   );
+  assert.match(capabilities, /`rin-install\/main\.js --update` is retired/);
   assert.match(capabilities, /`rin rollback`: switch to the `previousRelease`/);
   assert.match(runtimeLayout, /## Source checkout boundary/);
   assert.match(runtimeLayout, /## Report contract/);

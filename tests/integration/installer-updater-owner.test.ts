@@ -32,7 +32,7 @@ assert.equal(updater.renderUpdaterNote(" owner note ","Owner"),"Owner\n[80]  own
 assert.equal(updater.renderUpdaterNote("", ""), "[80] ");
 const command=updater.buildPreparedUpdaterCommand({sourceRoot:"/prepared",releaseFile:"/prepared/release.json",currentUser:"alice",targetUser:"bob",installDir:"/home/bob/.rin",language:"zh_CN"});
 assert.equal(command.command,"/prepared/runtime/node/current/bin/node");
-assert.deepEqual(command.args,["/prepared/dist/app/rin-install/main.js","--update","--target-user","bob","--install-dir","/home/bob/.rin","--yes","--preconfirmed","--release-file","/prepared/release.json"]);
+assert.deepEqual(command.args,["/prepared/dist/app/rin-install/update-payload.js","--target-user","bob","--install-dir","/home/bob/.rin","--yes","--preconfirmed","--release-file","/prepared/release.json"]);
 assert.equal(command.options.cwd,"/prepared");
 
 const output=[];const originalWrite=process.stdout.write;process.stdout.write=((chunk)=>{output.push(String(chunk));return true});

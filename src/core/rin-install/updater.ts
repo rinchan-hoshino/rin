@@ -24,6 +24,7 @@ import {
 import { renderInstallerNote, wrapInstallerNoteText } from "./interactive.js";
 import { commandAsUserInvocation, readInstallerJson } from "./fs-utils.js";
 import { installerManifestPath, managedNodeExecutablePath } from "./paths.js";
+import { forwardedUpdateJobEnvironment } from "./update-job-auth.js";
 import { runInstallerProgress } from "./progress.js";
 import { isSameSystemUser, targetHomeForUser } from "./users.js";
 import {
@@ -149,8 +150,13 @@ export function buildTargetUserUpdaterCommand(
     options.targetUser,
     managedNodeExecutablePath(options.installDir),
     [
-      path.join(options.sourceRoot, "dist", "app", "rin-install", "main.js"),
-      "--update",
+      path.join(
+        options.sourceRoot,
+        "dist",
+        "app",
+        "rin-install",
+        "update-payload.js",
+      ),
       "--target-user",
       options.targetUser,
       "--install-dir",
@@ -160,7 +166,10 @@ export function buildTargetUserUpdaterCommand(
       `--${options.release.channel}`,
       ...releaseArgs,
     ],
-    { HOME: options.ownerHome },
+    {
+      HOME: options.ownerHome,
+      ...forwardedUpdateJobEnvironment(),
+    },
   );
   return {
     ...invocation,
@@ -192,8 +201,13 @@ export function buildPreparedUpdaterCommand(options: {
   return {
     command: preparedRuntimeNodeExecutable(options.sourceRoot),
     args: [
-      path.join(options.sourceRoot, "dist", "app", "rin-install", "main.js"),
-      "--update",
+      path.join(
+        options.sourceRoot,
+        "dist",
+        "app",
+        "rin-install",
+        "update-payload.js",
+      ),
       "--target-user",
       options.targetUser,
       "--install-dir",

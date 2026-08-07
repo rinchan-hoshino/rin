@@ -1586,6 +1586,24 @@
       "built": "dist/core/usage-metrics.js",
       "ownerSuite": "unit",
       "status": "strict"
+    },
+    {
+      "source": "src/core/rin-install/update-job-auth.ts",
+      "built": "dist/core/rin-install/update-job-auth.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-install/update-payload.ts",
+      "built": "dist/core/rin-install/update-payload.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
+      "source": "src/app/rin-install/update-payload.ts",
+      "built": "dist/app/rin-install/update-payload.js",
+      "ownerSuite": "system",
+      "status": "strict"
     }
   ]
 }

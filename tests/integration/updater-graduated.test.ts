@@ -88,9 +88,8 @@ test("buildPreparedUpdaterCommand launches prepared managed node", async () => {
     });
 
     assert.equal(command.command, managedNode);
-    assert.deepEqual(command.args.slice(0, 3), [
-      path.join(sourceRoot, "dist", "app", "rin-install", "main.js"),
-      "--update",
+    assert.deepEqual(command.args.slice(0, 2), [
+      path.join(sourceRoot, "dist", "app", "rin-install", "update-payload.js"),
       "--target-user",
     ]);
     assert.equal(command.options.cwd, sourceRoot);

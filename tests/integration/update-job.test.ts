@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -15,87 +16,76 @@ const updateJob = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "update-job.js")).href
 );
 
-test("updater detects only the target daemon systemd cgroup", () => {
+test("daemon ownership uses exact cgroup unit boundaries", () => {
   assert.equal(
     updateJob.isProcessInTargetDaemonCgroup("rin", {
       platform: "linux",
-      cgroupText:
-        "0::/user.slice/user-1001.slice/user@1001.service/app.slice/rin-daemon-rin.service/workers/worker_1-42\n",
+      cgroupText: "0::/user.slice/app.slice/rin-daemon-rin.service",
     }),
     true,
   );
   assert.equal(
-    updateJob.isProcessInTargetDaemonCgroup("other", {
+    updateJob.isProcessInTargetDaemonCgroup("rin", {
       platform: "linux",
-      cgroupText:
-        "0::/user.slice/user-1001.slice/user@1001.service/app.slice/rin-daemon-rin.service/workers/worker_1-42\n",
+      cgroupText: "0::/user.slice/app.slice/not-rin-daemon-rin.service",
     }),
     false,
-  );
-  assert.equal(
-    updateJob.isProcessInTargetDaemonCgroup("rin", {
-      platform: "linux",
-      cgroupText: "0::/rin-daemon-rin.service",
-    }),
-    true,
-  );
-  assert.equal(
-    typeof updateJob.isProcessInTargetDaemonCgroup("rin", {
-      platform: "linux",
-    }),
-    "boolean",
   );
   assert.equal(
     updateJob.isProcessInTargetDaemonCgroup("rin", {
       platform: "darwin",
-      cgroupText: "rin-daemon-rin.service",
+      cgroupText: "0::/rin-daemon-rin.service",
+    }),
+    false,
+  );
+  assert.equal(
+    updateJob.isDaemonOwnedUpdate("rin", {
+      platform: "linux",
+      cgroupText: "0::/user.slice/app.slice/rin-daemon-rin.service",
+      env: {},
+    }),
+    true,
+  );
+});
+
+test("daemon ownership accepts the explicit worker owner contract", () => {
+  assert.equal(
+    updateJob.isDaemonOwnedUpdate("rin", {
+      platform: "linux",
+      cgroupText: "0::/user.slice/user-1000.slice/session-1.scope",
+      env: { RIN_DAEMON_WORKER_OWNER: "rin" },
+    }),
+    true,
+  );
+  assert.equal(
+    updateJob.isDaemonOwnedUpdate("other", {
+      platform: "linux",
+      cgroupText: "0::/user.slice/user-1000.slice/session-1.scope",
+      env: { RIN_DAEMON_WORKER_OWNER: "rin" },
     }),
     false,
   );
 });
 
-test("daemon worker ownership marker works across supported platforms", () => {
-  assert.equal(
-    updateJob.isDaemonOwnedUpdate("", { platform: "darwin", env: {} }),
-    false,
-  );
-  for (const platform of ["darwin", "win32"]) {
-    assert.equal(
-      updateJob.isDaemonOwnedUpdate("rin", {
-        platform,
-        env: { RIN_DAEMON_WORKER_OWNER: "rin" },
-      }),
-      true,
-    );
-    assert.equal(
-      updateJob.isDaemonOwnedUpdate("other", {
-        platform,
-        env: { RIN_DAEMON_WORKER_OWNER: "rin" },
-      }),
-      false,
-    );
-  }
-});
-
-test("daemon-owned update launches an installer-owned transient service", async () => {
+test("Linux update launches an installer-owned transient service", async () => {
   const installDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-update-job-"),
   );
   const calls = [];
   try {
-    const launched = updateJob.launchDaemonIndependentUpdateJob(
+    const launched = updateJob.launchIndependentUpdateJob(
       {
         targetUser: "rin",
         installDir,
         nodePath: "/runtime/node",
-        updateEntryPath: "/release/dist/app/rin-install/main.js",
+        updateEntryPath: "/release/dist/app/rin-install/update-payload.js",
         executorEntryPath: "/release/dist/app/rin-install/update-job.js",
-        updateArgs: ["--update", "--yes"],
+        updateArgs: ["--yes"],
         cwd: "/release",
       },
       {
         platform: "linux",
-        cgroupText: "0::/rin-daemon-rin.service/workers/worker_1-42\n",
+        env: { RIN_DAEMON_WORKER_OWNER: "rin" },
         now: () => new Date("2026-07-17T04:00:00.000Z"),
         randomId: () => "abc123",
         systemdRunPath: "/usr/bin/systemd-run",
@@ -123,8 +113,7 @@ test("daemon-owned update launches an installer-owned transient service", async 
     assert.equal(record.status, "queued");
     assert.equal(record.command, "/runtime/node");
     assert.deepEqual(record.args, [
-      "/release/dist/app/rin-install/main.js",
-      "--update",
+      "/release/dist/app/rin-install/update-payload.js",
       "--yes",
     ]);
     assert.equal((await fs.stat(launched.jobPath)).mode & 0o777, 0o600);
@@ -133,20 +122,20 @@ test("daemon-owned update launches an installer-owned transient service", async 
   }
 });
 
-test("daemon-owned macOS update launches a separate LaunchAgent", async () => {
+test("macOS update launches a separate LaunchAgent", async () => {
   const installDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-update-mac-"),
   );
   const calls = [];
   try {
-    const launched = updateJob.launchDaemonIndependentUpdateJob(
+    const launched = updateJob.launchIndependentUpdateJob(
       {
         targetUser: "rin",
         installDir,
         nodePath: "/runtime/node",
         updateEntryPath: "/release/updater.js",
         executorEntryPath: "/release/executor.js",
-        updateArgs: ["--update"],
+        updateArgs: [],
         cwd: "/release",
       },
       {
@@ -193,20 +182,20 @@ test("daemon-owned macOS update launches a separate LaunchAgent", async () => {
   }
 });
 
-test("daemon-owned Windows update launches a detached executor", async () => {
+test("Windows update launches a detached executor", async () => {
   const installDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-update-win-"),
   );
   const calls = [];
   try {
-    const launched = updateJob.launchDaemonIndependentUpdateJob(
+    const launched = updateJob.launchIndependentUpdateJob(
       {
         targetUser: "rin",
         installDir,
         nodePath: "C:\\Rin\\node.exe",
         updateEntryPath: "C:\\Rin\\updater.js",
         executorEntryPath: "C:\\Rin\\executor.js",
-        updateArgs: ["--update"],
+        updateArgs: [],
         cwd: "C:\\Rin",
       },
       {
@@ -316,27 +305,44 @@ test("Windows detached launcher rejects an asynchronous spawn error", async () =
   }
 });
 
-test("update job launcher stays synchronous outside the target daemon", () => {
-  const launched = updateJob.launchDaemonIndependentUpdateJob(
-    {
-      targetUser: "rin",
-      installDir: "/home/rin/.rin",
-      nodePath: "/runtime/node",
-      updateEntryPath: "/release/updater.js",
-      executorEntryPath: "/release/executor.js",
-      updateArgs: [],
-      cwd: "/release",
-    },
-    {
-      platform: "linux",
-      cgroupText: "0::/user.slice/rin-update-rin-job.service\n",
-      env: {},
-      execFileSync() {
-        throw new Error("must not launch");
-      },
-    },
+test("terminal updates create the same job record without a second payload path", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-update-independent-"),
   );
-  assert.equal(launched, null);
+  const calls = [];
+  try {
+    const launched = updateJob.launchIndependentUpdateJob(
+      {
+        targetUser: "rin",
+        installDir,
+        nodePath: "/runtime/node",
+        updateEntryPath: "/release/updater.js",
+        executorEntryPath: "/release/executor.js",
+        updateArgs: [],
+        cwd: "/release",
+      },
+      {
+        platform: "linux",
+        env: {},
+        now: () => new Date("2026-07-17T04:00:00.000Z"),
+        randomId: () => "outside",
+        systemdRunPath: "/usr/bin/systemd-run",
+        execFileSync(command, args) {
+          calls.push({ command, args });
+          return "";
+        },
+      },
+    );
+    assert.equal(launched.launcher, "foreground");
+    assert.equal(launched.detached, false);
+    assert.equal(calls.length, 0);
+    const record = JSON.parse(await fs.readFile(launched.jobPath, "utf8"));
+    assert.equal(record.status, "queued");
+    assert.equal(record.command, "/runtime/node");
+    assert.deepEqual(record.args, ["/release/updater.js"]);
+  } finally {
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
 });
 
 test("update launcher defaults time, id, platform, and systemd discovery safely", async () => {
@@ -345,7 +351,7 @@ test("update launcher defaults time, id, platform, and systemd discovery safely"
   );
   try {
     const calls = [];
-    const launched = updateJob.launchDaemonIndependentUpdateJob(
+    const launched = updateJob.launchIndependentUpdateJob(
       {
         targetUser: "rin",
         installDir,
@@ -381,13 +387,13 @@ test("update launcher validates user domains and cleans failed platform jobs", a
     nodePath: "/runtime/node",
     updateEntryPath: "/release/updater.js",
     executorEntryPath: "/release/executor.js",
-    updateArgs: ["--update"],
+    updateArgs: [],
     cwd: "/release",
   };
   try {
     assert.throws(
       () =>
-        updateJob.launchDaemonIndependentUpdateJob(options, {
+        updateJob.launchIndependentUpdateJob(options, {
           platform: "darwin",
           env: { RIN_DAEMON_WORKER_OWNER: "rin user" },
           uid: -1,
@@ -398,7 +404,7 @@ test("update launcher validates user domains and cleans failed platform jobs", a
     for (const platform of ["darwin", "win32", "linux"]) {
       assert.throws(
         () =>
-          updateJob.launchDaemonIndependentUpdateJob(options, {
+          updateJob.launchIndependentUpdateJob(options, {
             platform,
             env: {
               RIN_DAEMON_WORKER_OWNER: "rin user",
@@ -488,6 +494,23 @@ test("update job executor persists spawn and signal failures", async () => {
     );
 
     await fs.writeFile(jobPath, `${JSON.stringify(baseRecord)}\n`);
+    await assert.rejects(
+      updateJob.runUpdateJobExecutor(jobPath, {
+        spawnImpl() {
+          throw new Error("synchronous spawn failed");
+        },
+        execFileSync() {
+          return "";
+        },
+      }),
+      /synchronous spawn failed/,
+    );
+    assert.equal(
+      JSON.parse(await fs.readFile(jobPath, "utf8")).status,
+      "failed",
+    );
+
+    await fs.writeFile(jobPath, `${JSON.stringify(baseRecord)}\n`);
     const signaled = new EventEmitter();
     const result = updateJob.runUpdateJobExecutor(jobPath, {
       spawnImpl() {
@@ -539,6 +562,13 @@ test("update job executor persists terminal success and unloads a temporary laun
         assert.equal(command, "/runtime/node");
         assert.deepEqual(args, ["updater.js"]);
         assert.equal(options.cwd, "/release");
+        assert.equal(options.env.RIN_UPDATE_JOB_PATH, jobPath);
+        assert.equal(options.env.RIN_UPDATE_JOB_ID, "job-1");
+        assert.equal(options.stdio, "inherit");
+        assert.equal(
+          JSON.parse(fsSync.readFileSync(jobPath, "utf8")).status,
+          "running",
+        );
         process.nextTick(() => child.emit("exit", 0, null));
         return child;
       },

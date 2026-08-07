@@ -29,7 +29,7 @@ import {
   managedSystemdUnitCandidates,
 } from "../rin-install/paths.js";
 import { type ReleaseChannel } from "../rin-lib/release.js";
-import { launchDaemonIndependentUpdateJob } from "./update-job.js";
+import { launchIndependentUpdateJob } from "./update-job.js";
 import {
   extractSubcommandArgv,
   safeString,
@@ -374,7 +374,6 @@ export function rinInstallUpdateNodeCommand(installDir: string) {
 
 function buildRinInstallUpdateArgs(parsed: ParsedArgs, installDir: string) {
   const args = [
-    "--update",
     "--target-user",
     parsed.targetUser,
     "--install-dir",
@@ -396,37 +395,42 @@ export async function runUpdate(parsed: ParsedArgs) {
     "dist",
     "app",
     "rin-install",
-    "main.js",
+    "update-payload.js",
   );
   const updateArgs = buildRinInstallUpdateArgs(parsed, installDir);
-  const detachedJob = launchDaemonIndependentUpdateJob({
+  const executorEntryPath = path.join(
+    repoRoot,
+    "dist",
+    "app",
+    "rin-install",
+    "update-job.js",
+  );
+  const updateJob = launchIndependentUpdateJob({
     targetUser: parsed.targetUser,
     installDir,
     nodePath,
     updateEntryPath,
-    executorEntryPath: path.join(
-      repoRoot,
-      "dist",
-      "app",
-      "rin-install",
-      "update-job.js",
-    ),
+    executorEntryPath,
     updateArgs,
     cwd: repoRoot,
   });
-  if (detachedJob) {
-    process.stdout.write(
-      [
-        `Rin update job accepted: ${detachedJob.id}`,
-        `Status: ${detachedJob.jobPath}`,
-        `Logs: ${detachedJob.logHint}`,
-        "",
-      ].join("\n"),
+  if (!updateJob.detached) {
+    await runInteractiveCommand(
+      nodePath,
+      [executorEntryPath, updateJob.jobPath],
+      {
+        env: { ...process.env },
+        cwd: repoRoot,
+      },
     );
     return;
   }
-  await runInteractiveCommand(nodePath, [updateEntryPath, ...updateArgs], {
-    env: { ...process.env },
-    cwd: repoRoot,
-  });
+  process.stdout.write(
+    [
+      `Rin update job accepted: ${updateJob.id}`,
+      `Status: ${updateJob.jobPath}`,
+      `Logs: ${updateJob.logHint}`,
+      "",
+    ].join("\n"),
+  );
 }

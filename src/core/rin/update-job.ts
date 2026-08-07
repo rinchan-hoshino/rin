@@ -4,6 +4,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 
 import { managedSystemdUnitName } from "../rin-install/paths.js";
+import { updateJobProcessEnvironment } from "../rin-install/update-job-auth.js";
 import { RIN_DAEMON_WORKER_OWNER_ENV } from "../rin-lib/profile.js";
 
 export type UpdateJobRecord = {
@@ -167,7 +168,7 @@ function cleanupLaunchFailure(paths: string[]) {
   }
 }
 
-export function launchDaemonIndependentUpdateJob(
+export function launchIndependentUpdateJob(
   options: {
     targetUser: string;
     installDir: string;
@@ -192,16 +193,11 @@ export function launchDaemonIndependentUpdateJob(
 ) {
   const platform = deps.platform || process.platform;
   const env = deps.env || process.env;
-  if (
-    !isDaemonOwnedUpdate(options.targetUser, {
-      platform,
-      cgroupText: deps.cgroupText,
-      env,
-    })
-  ) {
-    return null;
-  }
-
+  const detached = isDaemonOwnedUpdate(options.targetUser, {
+    platform,
+    cgroupText: deps.cgroupText,
+    env,
+  });
   const now = deps.now || (() => new Date());
   const randomId =
     deps.randomId || (() => randomBytes(4).toString("hex").toLowerCase());
@@ -232,6 +228,18 @@ export function launchDaemonIndependentUpdateJob(
     args: [options.updateEntryPath, ...options.updateArgs],
     cwd: options.cwd,
   };
+
+  if (!detached) {
+    writeJobRecord(jobPath, record);
+    return {
+      detached: false as const,
+      launcher: "foreground" as const,
+      id,
+      unit,
+      jobPath,
+      logHint: jobPath,
+    };
+  }
 
   const run = deps.execFileSync || execFileSync;
   if (platform === "darwin") {
@@ -420,15 +428,29 @@ export async function runUpdateJobExecutor(
   const now = deps.now || (() => new Date());
   const spawnImpl = deps.spawnImpl || spawn;
   const record = readUpdateJob(jobPath);
-  const child = spawnImpl(record.command, record.args, {
-    cwd: record.cwd,
-    env: process.env,
-    stdio: ["ignore", "inherit", "inherit"],
-  });
   record.status = "running";
   record.startedAt = now().toISOString();
-  if (typeof child.pid === "number") record.pid = child.pid;
   writeJobRecord(jobPath, record);
+
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawnImpl(record.command, record.args, {
+      cwd: record.cwd,
+      env: updateJobProcessEnvironment(jobPath, record.id),
+      stdio: "inherit",
+    });
+  } catch (error) {
+    record.status = "failed";
+    record.finishedAt = now().toISOString();
+    record.exitCode = null;
+    writeJobRecord(jobPath, record);
+    cleanupCompletedJob(record, deps.execFileSync);
+    throw error;
+  }
+  if (typeof child.pid === "number") {
+    record.pid = child.pid;
+    writeJobRecord(jobPath, record);
+  }
 
   const result = await new Promise<{
     code: number | null;

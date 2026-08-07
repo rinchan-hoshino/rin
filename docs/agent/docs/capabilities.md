@@ -27,7 +27,7 @@ Use the `rin` launcher as the installed-runtime entrypoint.
 - `rin status` / `rin status --json`: session work state and daemon activity.
 - `rin usage`: subscription/API quota plus usage history and statistics.
 - `rin self-improve`: recent and historical self-improve outcomes.
-- `rin update`: the agent-facing installed-runtime update command. It reinstalls the resolved target even when that exact release is already current, so damaged managed runtime files are restored without replacing the prior rollback release. An update invoked from a managed daemon worker is handed to an updater-owned job before the daemon is stopped: a transient systemd service on Linux, a temporary LaunchAgent on macOS, or a detached executor on Windows. The command reports the job status file and platform log location.
+- `rin update`: the only installed-runtime update command. It reinstalls the resolved target even when that exact release is already current, so damaged managed runtime files are restored without replacing the prior rollback release. Every invocation creates the same updater-owned job record and runs the same update-job executor. Terminal updates keep interactive I/O through that executor; daemon-owned updates host it in a transient systemd service, temporary LaunchAgent, or detached Windows process. `rin-install/main.js --update` is retired, and the private payload accepts only a running executor-owned job.
 - `rin rollback`: switch to the `previousRelease` recorded in the install manifest.
 
 Use `docs/runtime-layout.md` to audit launcher ownership, agent directory, manifests, services, `app/current`, and release directories. Source checkout maintenance and installed-runtime maintenance are different surfaces.
