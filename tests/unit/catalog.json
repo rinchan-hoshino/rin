@@ -217,16 +217,6 @@
       "built": "dist/core/rin-frontend-sdk/turn-completion.js"
     },
     {
-      "test": "tests/unit/desktop-host-launch.test.ts",
-      "source": "src/core/rin-gui/host-launch.ts",
-      "built": "dist/core/rin-gui/host-launch.js"
-    },
-    {
-      "test": "tests/unit/gui-web-assets.test.ts",
-      "source": "src/core/rin-gui/web-assets.ts",
-      "built": "dist/core/rin-gui/web-assets.js"
-    },
-    {
       "test": "tests/unit/installer-candidate-loader.test.ts",
       "source": "src/core/rin-install/candidate-loader.ts",
       "built": "dist/core/rin-install/candidate-loader.js"

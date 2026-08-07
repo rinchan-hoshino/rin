@@ -75,7 +75,7 @@ Après l'installation, utilisez la même commande sur toutes les plateformes :
 rin
 ```
 
-L'installateur Windows écrit le lanceur de commande `rin` et ajoute, lorsque c'est possible, le dossier de lanceurs utilisateur de Rin au `PATH` utilisateur. Ouvrez un nouveau terminal si la session actuelle ne trouve pas immédiatement `rin`. Les entrées GUI de bureau sont temporairement désactivées pendant la refonte de l'interface.
+L'installateur Windows écrit le lanceur de commande `rin` et ajoute, lorsque c'est possible, le dossier de lanceurs utilisateur de Rin au `PATH` utilisateur. Ouvrez un nouveau terminal si la session actuelle ne trouve pas immédiatement `rin`.
 
 ## Sécurité et coûts
 

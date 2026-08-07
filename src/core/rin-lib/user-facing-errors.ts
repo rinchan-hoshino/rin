@@ -518,18 +518,9 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin is shutting down right now. Wait until it starts again.",
   rin_daemon_unavailable: (detail) =>
     withDetail("Rin's background service is not available", detail, "."),
-  rin_desktop_host_failed: () =>
-    "Rin desktop host failed before it could start.",
   rin_digitalocean_ssh_key_not_found: () =>
     "DigitalOcean target setup could not find the SSH key. Add the key.",
   rin_disconnected: () => "Rin lost its connection to the background runtime.",
-  rin_gui_failed: () => "Rin GUI failed before it could start.",
-  rin_gui_unrecognized_arg: (detail) =>
-    withDetail(
-      "Rin GUI received an unsupported option",
-      detail,
-      ". Remove it.",
-    ),
   rin_install_temp_dir_unavailable: () =>
     "Rin installer could not create a temporary directory. Check disk permissions.",
   rin_current_release_missing: (detail) =>
@@ -554,24 +545,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin install is missing the daemon entrypoint. Reinstall or update Rin.",
   rin_installer_apply_result_missing: () =>
     "Rin installer did not return an install result.",
-  rin_installer_gui_command_failed: () =>
-    "Rin installer GUI command failed. Check the install settings.",
-  rin_installer_gui_disabled: () =>
-    "Rin installer GUI is temporarily disabled while the desktop interface is redesigned. Use the terminal installer.",
-  rin_installer_gui_install_dir_required: () =>
-    "Rin installer GUI needs the default local config directory.",
-  rin_installer_gui_model_required: () =>
-    "Rin installer GUI needs a model selection. Choose a model.",
-  rin_installer_gui_provider_required: () =>
-    "Rin installer GUI needs a provider selection. Choose a provider.",
-  rin_installer_gui_token_required: () =>
-    "Rin installer GUI needs an API token for this provider. Enter the token.",
-  rin_installer_gui_unrecognized_arg: (detail) =>
-    withDetail(
-      "Rin installer GUI received an unsupported option",
-      detail,
-      ". Remove it.",
-    ),
   rin_launchd_daemon_stop_incomplete: () =>
     "Rin could not stop the existing macOS background service.",
   rin_launchd_restart_failed: (detail) =>
@@ -614,11 +587,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     ),
   rin_missing_settings_manager: () =>
     "Rin settings are not available in this session.",
-  rin_native_gui_command_failed: () => "Rin native GUI command failed.",
-  rin_native_gui_missing_session: () =>
-    "Rin GUI could not find the requested session. Choose an existing session.",
-  rin_native_gui_settings_path_missing: () =>
-    "Rin GUI could not locate the settings file.",
   rin_new_session_cancelled: () => "New session creation was cancelled.",
   rin_nightly_selector_not_supported: () =>
     "This command does not support selecting the nightly channel here. Remove the nightly selector.",

@@ -28,7 +28,6 @@ test("installer fs utils compute launcher targets and require managed node", () 
   assert.ok(
     targets.rin[0].endsWith(path.join("dist", "app", "rin", "main.js")),
   );
-  assert.equal(targets.rinGui, undefined);
   assert.equal(targets.rinTui, undefined);
   assert.throws(
     () => fsUtils.installedRuntimeNodeCommandArgs({ installDir: "/tmp/rin" }),
@@ -130,8 +129,6 @@ test("writeLaunchersForUser writes native Windows rin command launchers", async 
     path.join(home, ".local", "bin", "rin-install.cmd"),
   );
   assert.equal(launchers.rinTuiPath, undefined);
-  assert.equal(launchers.rinGuiPath, undefined);
-  assert.equal(launchers.windowsGuiShortcutPaths, undefined);
   assert.equal(launchers.windowsPathUpdate.skipped, true);
   const rinScript = await fs.readFile(launchers.rinPath, "utf8");
   assert.match(rinScript, /dist[\\/]app[\\/]rin[\\/]main\.js/);
@@ -142,7 +139,6 @@ test("writeLaunchersForUser writes native Windows rin command launchers", async 
   await assert.rejects(
     fs.access(path.join(home, ".local", "bin", "rin-tui.cmd")),
   );
-  await assert.rejects(fs.access(path.join(home, "Desktop", "Rin GUI.cmd")));
 
   await fs.rm(home, { recursive: true, force: true });
 });

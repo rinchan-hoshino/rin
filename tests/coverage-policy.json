@@ -28,18 +28,6 @@
       "status": "strict"
     },
     {
-      "source": "src/app/rin-desktop-host/main.ts",
-      "built": "dist/app/rin-desktop-host/main.js",
-      "ownerSuite": "system",
-      "status": "strict"
-    },
-    {
-      "source": "src/app/rin-gui/main.ts",
-      "built": "dist/app/rin-gui/main.js",
-      "ownerSuite": "system",
-      "status": "strict"
-    },
-    {
       "source": "src/app/rin-install/chat-migrations.ts",
       "built": "dist/app/rin-install/chat-migrations.js",
       "ownerSuite": "system",
@@ -778,30 +766,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-gui/host-launch.ts",
-      "built": "dist/core/rin-gui/host-launch.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-gui/main.ts",
-      "built": "dist/core/rin-gui/main.js",
-      "ownerSuite": "system",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-gui/native-desktop.ts",
-      "built": "dist/core/rin-gui/native-desktop.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-gui/web-assets.ts",
-      "built": "dist/core/rin-gui/web-assets.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
       "source": "src/core/rin-install/apply-plan.ts",
       "built": "dist/core/rin-install/apply-plan.js",
       "ownerSuite": "integration",
@@ -846,12 +810,6 @@
     {
       "source": "src/core/rin-install/fs-utils.ts",
       "built": "dist/core/rin-install/fs-utils.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-install/gui.ts",
-      "built": "dist/core/rin-install/gui.js",
       "ownerSuite": "integration",
       "status": "strict"
     },

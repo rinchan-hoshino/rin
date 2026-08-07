@@ -130,7 +130,6 @@ function parseInstallerUpdateReleaseArgs(argv: string[]) {
 function parseInstallerCliArgs(argv: string[]) {
   const hasFlag = (name: string) =>
     argv.some((arg) => String(arg || "").trim() === name);
-  const guiDisabled = hasFlag("--gui");
   const updateReleaseRequest = parseInstallerUpdateReleaseArgs(argv);
   return {
     applyPlanFile: readValueArg(argv, "--apply-plan-file"),
@@ -142,7 +141,6 @@ function parseInstallerCliArgs(argv: string[]) {
     updateAssumeYes: hasFlag("--yes"),
     updatePreconfirmed: hasFlag("--preconfirmed"),
     quickRun: hasFlag("--quick-run"),
-    guiDisabled,
     releaseFile: readValueArg(argv, "--release-file"),
     updateReleaseRequest,
   };
@@ -210,10 +208,6 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     } finally {
       cleanupConsumedFinalizeInstallPlan(cli.applyPlanFile);
     }
-  }
-
-  if (cli.guiDisabled) {
-    throw new Error("rin_installer_gui_disabled");
   }
 
   if (cli.quickRun) {

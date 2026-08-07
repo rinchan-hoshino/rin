@@ -50,7 +50,6 @@ await assert.rejects(
 
 await run({}, ["--quick-run"]);
 await assert.rejects(() => run({}, ["--quick-run", "--update"]), /rin_quick_run_update_not_supported/);
-await assert.rejects(() => run({}, ["--gui"]), /rin_installer_gui_disabled/);
 await assert.rejects(() => run({}, ["--update", "--stable", "--beta"]), /rin_release_channel_conflict/);
 for (const argv of [
   ["--update", "--target-user", "other", "--install-dir", "/owner/update", "--yes", "--preconfirmed", "--language", "fr_FR", "--release-file", "/owner/release.json"],
@@ -151,7 +150,6 @@ test("installer core orchestrates apply, update, deployment, and local install s
     assert.equal(result.stderr, "");
 
     for (const [argv, scenario, expected] of [
-      [["--gui"], {}, "formatted:rin_installer_gui_disabled"],
       [
         ["--quick-run", "--update"],
         {},

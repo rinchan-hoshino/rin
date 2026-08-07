@@ -20,19 +20,6 @@ test("installer entrypoint formats ordinary errors and honors apply-error handof
   try {
     await assert.rejects(
       () =>
-        execFileAsync(process.execPath, [entrypoint, "--gui"], {
-          env: sandbox.env,
-        }),
-      (error: any) => {
-        assert.equal(error.code, 1);
-        assert.match(error.stderr, /installer GUI is temporarily disabled/);
-        assert.doesNotMatch(error.stderr, /rin_installer_gui_disabled/);
-        return true;
-      },
-    );
-
-    await assert.rejects(
-      () =>
         execFileAsync(
           process.execPath,
           ["--import", "tsx", "--import", failureRegister, entrypoint],
@@ -48,6 +35,27 @@ test("installer entrypoint formats ordinary errors and honors apply-error handof
         assert.equal(error.code, 1);
         assert.match(error.stderr, /installer failed before it could finish/);
         assert.doesNotMatch(error.stderr, /rin_app_install_failed/);
+        return true;
+      },
+    );
+
+    await assert.rejects(
+      () =>
+        execFileAsync(
+          process.execPath,
+          ["--import", "tsx", "--import", failureRegister, entrypoint],
+          {
+            env: {
+              ...sandbox.env,
+              RIN_TEST_ENTRYPOINT_FAILURE_TARGET:
+                "dist/core/rin-install/main.js",
+              RIN_TEST_ENTRYPOINT_FAILURE_MODE: "silent",
+            },
+          },
+        ),
+      (error: any) => {
+        assert.equal(error.code, 1);
+        assert.equal(error.stderr, "");
         return true;
       },
     );

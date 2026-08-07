@@ -238,23 +238,6 @@ test("installer path helpers centralize home, manifest, config, service, doc, an
       "Rin Daemon.cmd",
     ),
   );
-  assert.equal(
-    pathsMod.windowsGuiStartMenuLauncherPathForHome("C:\\Users\\demo"),
-    path.join(
-      "C:\\Users\\demo",
-      "AppData",
-      "Roaming",
-      "Microsoft",
-      "Windows",
-      "Start Menu",
-      "Programs",
-      "Rin GUI.cmd",
-    ),
-  );
-  assert.equal(
-    pathsMod.windowsGuiDesktopLauncherPathForHome("C:\\Users\\demo"),
-    path.join("C:\\Users\\demo", "Desktop", "Rin GUI.cmd"),
-  );
   const alternateLauncherMetadataPath = pathsMod.launcherMetadataPathForHome(
     linuxHome,
     process.platform === "darwin" ? "linux" : "darwin",

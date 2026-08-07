@@ -319,8 +319,6 @@ test("non-tui app entrypoints format caught errors before printing", () => {
   const entrypoints = [
     "src/app/rin/main.ts",
     "src/app/rin-install/main.ts",
-    "src/app/rin-gui/main.ts",
-    "src/app/rin-desktop-host/main.ts",
     "src/app/rin-daemon/daemon.ts",
     "src/app/rin-daemon/worker.ts",
   ];

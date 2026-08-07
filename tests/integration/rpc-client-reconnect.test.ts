@@ -246,7 +246,7 @@ test("rpc client applies configured frontend identity to scoped frontend command
   const received = [];
   const client = new RinDaemonFrontendClient({
     socketPath: "inprocess://frontend-identity",
-    frontendIdentity: { kind: "gui" },
+    frontendIdentity: { kind: "sdk" },
     connectSocket: async () => {
       const { clientSocket, serverSocket } = createConnectedRpcSocketPair();
       let buffer = "";
@@ -287,11 +287,11 @@ test("rpc client applies configured frontend identity to scoped frontend command
       frontendIdentity: payload.frontendIdentity,
     })),
     [
-      { type: "prompt", frontendIdentity: { kind: "gui" } },
-      { type: "new_session", frontendIdentity: { kind: "gui" } },
-      { type: "select_session", frontendIdentity: { kind: "gui" } },
-      { type: "shutdown_session", frontendIdentity: { kind: "gui" } },
-      { type: "terminate_session", frontendIdentity: { kind: "gui" } },
+      { type: "prompt", frontendIdentity: { kind: "sdk" } },
+      { type: "new_session", frontendIdentity: { kind: "sdk" } },
+      { type: "select_session", frontendIdentity: { kind: "sdk" } },
+      { type: "shutdown_session", frontendIdentity: { kind: "sdk" } },
+      { type: "terminate_session", frontendIdentity: { kind: "sdk" } },
     ],
   );
 });

@@ -8,9 +8,6 @@ RUN apt-get update \
 
 COPY package.json package-lock.json ./
 COPY scripts/install-git-hooks.ts ./scripts/install-git-hooks.ts
-# The test gate compiles the Electron host but never launches Electron itself.
-# Avoid downloading an unused ~300 MiB desktop runtime on dependency refreshes.
-ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN npm ci
 RUN mkdir -p /root/.cache/rin/node-toolchain \
   && npm pack npm@10.9.3 --pack-destination /root/.cache/rin/node-toolchain >/dev/null

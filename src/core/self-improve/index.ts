@@ -10,12 +10,7 @@ import { enqueueSelfImproveMaintenanceJob } from "./async-jobs.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { recordSelfImproveSkillReadEvent } from "./skill-usage.js";
 
-const SELF_IMPROVE_FRONTEND_KINDS = new Set([
-  "chat",
-  "gui",
-  "scheduled-task",
-  "tui",
-]);
+const SELF_IMPROVE_FRONTEND_KINDS = new Set(["chat", "scheduled-task", "tui"]);
 const SELF_IMPROVE_WINDOW_TRIGGER = "self_improve:turn_window_review";
 
 function shouldSkipAutomaticMaintenance(sessionFile: string) {
@@ -74,7 +69,7 @@ function hasSelfImproveEligibility(promptContext: unknown) {
 function isUserFrontendSelfImproveTrigger(event: unknown, ctx: any) {
   const frontend = resolveSelfImproveFrontend(event, ctx);
   if (frontend?.kind === "chat" && !frontend.key) return false;
-  if (frontend?.kind === "gui" || frontend?.kind === "tui") return true;
+  if (frontend?.kind === "tui") return true;
   const promptContext = resolvePromptContext(event, ctx);
   if (!hasSelfImproveEligibility(promptContext)) return false;
   if (frontend && SELF_IMPROVE_FRONTEND_KINDS.has(frontend.kind)) return true;

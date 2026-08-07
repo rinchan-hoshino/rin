@@ -216,26 +216,16 @@ rin_daemon_restart_not_ready
 rin_daemon_shutting_down
 rin_daemon_unavailable
 rin_daemon_update_in_progress
-rin_desktop_host_failed
 rin_digitalocean_ssh_key_not_found
 rin_disconnected
 rin_duplicate_command_id
 rin_elevated_install_unsupported_on_windows
 rin_frontend_disconnected
-rin_gui_failed
-rin_gui_unrecognized_arg
 rin_install_temp_dir_unavailable
 rin_installed_daemon_entry_missing
 rin_installer_apply_result_missing
 rin_installer_fd_install_dir_missing
 rin_installer_fd_manager_unavailable
-rin_installer_gui_command_failed
-rin_installer_gui_disabled
-rin_installer_gui_install_dir_required
-rin_installer_gui_model_required
-rin_installer_gui_provider_required
-rin_installer_gui_token_required
-rin_installer_gui_unrecognized_arg
 rin_invalid_runtime_replacement_paths
 rin_launchd_daemon_stop_incomplete
 rin_launchd_restart_failed
@@ -251,9 +241,6 @@ rin_managed_service_symlink_refused
 rin_managed_service_unsupported
 rin_missing_required_tool
 rin_missing_settings_manager
-rin_native_gui_command_failed
-rin_native_gui_missing_session
-rin_native_gui_settings_path_missing
 rin_new_session_cancelled
 rin_nightly_selector_not_supported
 rin_no_attached_session
@@ -384,7 +371,7 @@ web_fetch_invalid_url`
   .split(/\s+/);
 
 test("every owned runtime marker has a human-facing formatter", () => {
-  assert.equal(OWNED_MARKERS.length, 373);
+  assert.equal(OWNED_MARKERS.length, 360);
   assert.equal(new Set(OWNED_MARKERS).size, OWNED_MARKERS.length);
   for (const marker of OWNED_MARKERS) {
     assert.equal(errors.hasUserFacingRuntimeErrorMapping(marker), true, marker);

@@ -118,7 +118,6 @@
     "@types/proper-lockfile": "^4.1.4",
     "@types/turndown": "^5.0.6",
     "@xterm/headless": "^5.5.0",
-    "electron": "^41.3.0",
     "eslint": "^9.24.0",
     "jiti": "^2.7.0",
     "prettier": "^3.8.1",
@@ -149,7 +148,6 @@
     "@google/genai@1.52.0": true,
     "protobufjs@7.6.4": true,
     "better-sqlite3@12.11.1": true,
-    "electron@41.3.0": true,
     "esbuild@0.28.1": true
   }
 }

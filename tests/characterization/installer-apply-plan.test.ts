@@ -133,7 +133,7 @@ test("installer consumes external apply plans with owned handoff cleanup", () =>
   );
   const branch = source.slice(
     source.indexOf("if (cli.applyPlanFile)"),
-    source.indexOf("if (cli.guiDisabled)"),
+    source.indexOf("if (cli.quickRun)"),
   );
   assert.match(branch, /finally/);
   assert.match(branch, /cleanupConsumedFinalizeInstallPlan/);

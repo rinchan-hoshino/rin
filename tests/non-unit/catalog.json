@@ -25,18 +25,6 @@
       "tests": ["tests/system/daemon-worker-entrypoint-owner.test.ts"]
     },
     {
-      "source": "src/app/rin-desktop-host/main.ts",
-      "built": "dist/app/rin-desktop-host/main.js",
-      "suite": "system",
-      "tests": ["tests/system/desktop-host-entrypoint-owner.test.ts"]
-    },
-    {
-      "source": "src/app/rin-gui/main.ts",
-      "built": "dist/app/rin-gui/main.js",
-      "suite": "system",
-      "tests": ["tests/system/gui-entrypoint-owner.test.ts"]
-    },
-    {
       "source": "src/app/rin-install/chat-migrations.ts",
       "built": "dist/app/rin-install/chat-migrations.js",
       "suite": "system",
@@ -601,18 +589,6 @@
       "tests": ["tests/integration/type-contracts.test.ts"]
     },
     {
-      "source": "src/core/rin-gui/main.ts",
-      "built": "dist/core/rin-gui/main.js",
-      "suite": "system",
-      "tests": ["tests/system/gui-core-owner.test.ts"]
-    },
-    {
-      "source": "src/core/rin-gui/native-desktop.ts",
-      "built": "dist/core/rin-gui/native-desktop.js",
-      "suite": "integration",
-      "tests": ["tests/integration/native-desktop-owner.test.ts"]
-    },
-    {
       "source": "src/core/rin-install/apply-plan.ts",
       "built": "dist/core/rin-install/apply-plan.js",
       "suite": "integration",
@@ -664,12 +640,6 @@
         "tests/integration/installer-fs-utils-owner.test.ts"
       ],
       "preloads": ["tests/support/register-fs-utils-owner-fixture.ts"]
-    },
-    {
-      "source": "src/core/rin-install/gui.ts",
-      "built": "dist/core/rin-install/gui.js",
-      "suite": "integration",
-      "tests": ["tests/integration/installer-gui-owner.test.ts"]
     },
     {
       "source": "src/core/rin-install/i18n.ts",

@@ -414,7 +414,6 @@ test("cli help omits removed run command and exposes Pi-style non-interactive fl
   assert.doesNotMatch(output, /\n\s+self\s+/);
   assert.doesNotMatch(output, /--bind-chat-session/);
   assert.doesNotMatch(output, /\n\s+run\s+Run one non-interactive Rin turn/);
-  assert.doesNotMatch(output, /\n\s+gui\s+/);
   assert.doesNotMatch(output, /--sessions\b/);
   assert.doesNotMatch(output, /--(?:std|rpc)\b/);
 });

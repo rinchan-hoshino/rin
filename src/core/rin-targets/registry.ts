@@ -72,7 +72,7 @@ export const DEPLOYMENT_PROVIDERS: DeploymentProviderDescriptor[] = [
     defaultRuntime: "container",
     notes: [
       "Uses docker exec after installation.",
-      "Does not install host GUI launchers or host user services.",
+      "Does not install host launchers or host user services.",
     ],
   },
   {

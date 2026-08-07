@@ -138,11 +138,6 @@
       "subject": "fix: refresh launchers during core updates"
     },
     {
-      "file": "tests/characterization/installer-gui.test.ts",
-      "introducedBy": "f231c677",
-      "subject": "feat: add cross-platform GUI shell substrate"
-    },
-    {
       "file": "tests/characterization/installer-interactive.test.ts",
       "introducedBy": "70addd7a",
       "subject": "refactor: stabilize runtime boundaries and dist-only flow"
@@ -251,11 +246,6 @@
       "file": "tests/characterization/rin-doctor.test.ts",
       "introducedBy": "84ec5594",
       "subject": "refactor(rin): isolate doctor status rendering"
-    },
-    {
-      "file": "tests/characterization/rin-gui.test.ts",
-      "introducedBy": "f231c677",
-      "subject": "feat: add cross-platform GUI shell substrate"
     },
     {
       "file": "tests/characterization/rin-lib-system.test.ts",

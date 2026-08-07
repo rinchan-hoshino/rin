@@ -225,13 +225,13 @@ test("scheduled task prompt context can describe a non-chat frontend binding", (
     source: "scheduled-task",
     taskId: "cron_frontend_bound",
     taskContextKind: "scheduled-task",
-    frontend: { kind: "gui", key: "desktop/main" },
+    frontend: { kind: "sdk", key: "client/main" },
   });
 
   assert.ok(systemBlock.includes("Scheduled task context:"));
   assert.ok(systemBlock.includes("Frontend binding context:"));
-  assert.ok(systemBlock.includes("- frontend kind: gui"));
-  assert.ok(systemBlock.includes("- frontend key: desktop/main"));
+  assert.ok(systemBlock.includes("- frontend kind: sdk"));
+  assert.ok(systemBlock.includes("- frontend key: client/main"));
   assert.equal(systemBlock.includes("Chat binding context:"), false);
 });
 

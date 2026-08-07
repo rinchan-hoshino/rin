@@ -14,9 +14,6 @@ const INSTALLED_APP_ENTRY_LAYOUT = {
   "rin-install": {
     current: ["app", "rin-install", "main.js"],
   },
-  "rin-gui": {
-    current: ["app", "rin-gui", "main.js"],
-  },
   "rin-tui": {
     current: ["app", "rin-tui", "main.js"],
   },
@@ -284,30 +281,6 @@ export function windowsLauncherPathForHome(
   name: LauncherAppName,
 ) {
   return path.join(localBinDirForHome(home), `${name}.cmd`);
-}
-
-export function windowsDesktopDirForHome(home: string) {
-  return path.join(home, "Desktop");
-}
-
-export function windowsStartMenuProgramsDirForHome(home: string) {
-  return path.join(
-    home,
-    "AppData",
-    "Roaming",
-    "Microsoft",
-    "Windows",
-    "Start Menu",
-    "Programs",
-  );
-}
-
-export function windowsGuiDesktopLauncherPathForHome(home: string) {
-  return path.join(windowsDesktopDirForHome(home), "Rin GUI.cmd");
-}
-
-export function windowsGuiStartMenuLauncherPathForHome(home: string) {
-  return path.join(windowsStartMenuProgramsDirForHome(home), "Rin GUI.cmd");
 }
 
 export function windowsStartupDirForHome(home: string) {

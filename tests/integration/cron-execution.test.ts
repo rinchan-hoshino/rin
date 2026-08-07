@@ -1140,7 +1140,7 @@ test("cron frontend-bound no-session agent task uses frontend controller without
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const task = {
     id: "cron_frontend_bound",
-    frontend: { kind: "gui", key: "desktop/main" },
+    frontend: { kind: "sdk", key: "client/main" },
     session: { mode: "none" },
     target: { kind: "agent_prompt", prompt: "hello" },
   };
@@ -1164,12 +1164,12 @@ test("cron frontend-bound no-session agent task uses frontend controller without
     assert.equal(result.sessionFile, undefined);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].chatKey, undefined);
-    assert.equal(calls[0].controllerKey, "desktop/main");
+    assert.equal(calls[0].controllerKey, "client/main");
     assert.equal(calls[0].affectChatBinding, false);
     assert.equal(calls[0].shutdownAfterTurn, true);
     assert.deepEqual(calls[0].promptMeta?.frontend, {
-      kind: "gui",
-      key: "desktop/main",
+      kind: "sdk",
+      key: "client/main",
     });
     assert.equal(calls[0].promptMeta?.source, "scheduled-task");
     assert.equal(calls[0].promptMeta?.taskId, "cron_frontend_bound");

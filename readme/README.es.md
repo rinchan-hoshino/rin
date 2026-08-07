@@ -75,7 +75,7 @@ Después de instalar, usa el mismo comando en todas las plataformas:
 rin
 ```
 
-El instalador de Windows escribe el lanzador del comando `rin` y, cuando puede, añade el directorio de lanzadores de usuario de Rin al `PATH` del usuario. Abre una terminal nueva si la sesión actual no encuentra `rin` de inmediato. Las entradas de GUI de escritorio están desactivadas temporalmente mientras se rediseña la interfaz.
+El instalador de Windows escribe el lanzador del comando `rin` y, cuando puede, añade el directorio de lanzadores de usuario de Rin al `PATH` del usuario. Abre una terminal nueva si la sesión actual no encuentra `rin` de inmediato.
 
 ## Seguridad y coste
 

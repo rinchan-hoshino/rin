@@ -5,14 +5,14 @@
 > **Your personal AI assistant, living on your computer.**<br>
 > Rin remembers what matters, helps with real tasks, and gets better as you use it.
 
-Rin is a local, general-purpose AI assistant with memory, tools, scheduling, UI entry points, and chat bridges built in. It can help with documents, web research, files, reminders, code, connected services, and repeated workflows — while sharing one assistant state across terminal, desktop, automation, and chat.
+Rin is a local, general-purpose AI assistant with memory, tools, scheduling, terminal workflows, and chat bridges built in. It can help with documents, web research, files, reminders, code, connected services, and repeated workflows — while sharing one assistant state across terminal, automation, and chat.
 
 | What matters             | What Rin provides                                                                     |
 | ------------------------ | ------------------------------------------------------------------------------------- |
 | Global memory            | Useful facts, preferences, and lessons can survive beyond a single chat session.      |
 | Learns from repeated use | Corrections and successful workflows can become compact instructions and skills.      |
 | Local background runtime | Different interfaces connect to one assistant instead of isolated chat windows.       |
-| Ready-to-use product     | Memory, scheduling, tools, chat bridges, and UI paths are provided out of the box.    |
+| Ready-to-use product     | Memory, scheduling, tools, terminal workflows, and chat bridges are built in.         |
 | Self-bootstrapped        | Rin is used to build Rin, making this repository a live test of the assistant itself. |
 
 > [!WARNING]
@@ -92,7 +92,7 @@ After installation, use the same command on every platform:
 rin
 ```
 
-The Windows installer writes the `rin` command launcher and adds Rin's user launcher directory to the user `PATH` when possible. Open a new terminal if the current shell does not see `rin` immediately. The GUI entry points are temporarily disabled while the desktop UI is being redesigned.
+The Windows installer writes the `rin` command launcher and adds Rin's user launcher directory to the user `PATH` when possible. Open a new terminal if the current shell does not see `rin` immediately.
 
 ## Safety and cost
 

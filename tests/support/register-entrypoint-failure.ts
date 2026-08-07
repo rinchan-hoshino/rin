@@ -10,14 +10,12 @@ const replacements: Record<string, string> = {
       throw new Error("rin_request_failed");
     }
   `,
-  "dist/core/rin-install/main.js":
-    "export async function startInstaller() { return await Promise.reject(undefined); }",
-  "dist/core/rin-gui/main.js":
-    "export async function runGui() { return await Promise.reject(undefined); }",
-  "dist/core/rin-gui/native-desktop.js": `
-    export async function runElectronDesktopHost() {
-      if (process.env.RIN_TEST_ENTRYPOINT_FAILURE_MODE === "arg") {
-        throw new Error("desktop host unknown arg");
+  "dist/core/rin-install/main.js": `
+    export async function startInstaller() {
+      if (process.env.RIN_TEST_ENTRYPOINT_FAILURE_MODE === "silent") {
+        const error = new Error("silent installer failure");
+        error.suppressUserFacingPrint = true;
+        throw error;
       }
       return await Promise.reject(undefined);
     }
@@ -46,12 +44,6 @@ const replacementUrl = ${JSON.stringify(
   `data:text/javascript,${encodeURIComponent(replacement)}`,
 )};
 export async function resolve(specifier, context, nextResolve) {
-  if (specifier === "electron") {
-    return {
-      url: "data:text/javascript,export default '/fixture/electron'",
-      shortCircuit: true,
-    };
-  }
   const resolved = await nextResolve(specifier, context);
   if (resolved.url.endsWith(target)) {
     return { url: replacementUrl, shortCircuit: true };

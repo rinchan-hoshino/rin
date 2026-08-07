@@ -118,13 +118,13 @@ test("TUI identities cannot bind while other frontend matching stays unchanged",
     false,
   );
   assert.equal(
-    frontendIdentityMod.sameFrontendIdentity({ kind: "gui" }, { kind: "gui" }),
+    frontendIdentityMod.sameFrontendIdentity({ kind: "sdk" }, { kind: "sdk" }),
     true,
   );
   assert.equal(
     frontendIdentityMod.sameFrontendIdentity(
-      { kind: "gui", key: "desktop/main" },
-      { kind: "gui", key: "desktop/main" },
+      { kind: "sdk", key: "client/main" },
+      { kind: "sdk", key: "client/main" },
     ),
     true,
   );

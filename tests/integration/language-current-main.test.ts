@@ -86,14 +86,12 @@ test("language configuration and CLI localization producers are removed", () => 
     "src/core/rin/shared.ts",
     "src/core/rin-install/apply-plan.ts",
     "src/core/rin-install/finalize.ts",
-    "src/core/rin-install/gui.ts",
     "src/core/rin-install/i18n.ts",
     "src/core/rin-install/interactive.ts",
     "src/core/rin-install/main.ts",
     "src/core/rin-install/persist.ts",
     "src/core/rin-install/quick-run.ts",
     "src/core/rin-install/updater.ts",
-    "src/core/rin-gui/native-desktop.ts",
   ]
     .map((file) => fs.readFileSync(path.join(rootDir, file), "utf8"))
     .join("\n");
@@ -124,10 +122,4 @@ test("language configuration and CLI localization producers are removed", () => 
     "utf8",
   );
   assert.doesNotMatch(installerCopy, /[\u3400-\u9fff]/u);
-
-  const nativeDesktopSource = fs.readFileSync(
-    path.join(rootDir, "src", "core", "rin-gui", "native-desktop.ts"),
-    "utf8",
-  );
-  assert.doesNotMatch(nativeDesktopSource, /delete next\.language/);
 });

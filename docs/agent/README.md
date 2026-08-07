@@ -49,4 +49,4 @@ Use these docs as the Rin-specific layer above upstream Pi docs.
 - Installed upstream Pi reference docs: `~/.rin/docs/pi/`.
 - Source for this installed doc set: `docs/agent/`.
 - Source for Rin-owned installed builtin skills: `docs/agent/builtin-skills/`.
-- Developer-only architecture, testing, GUI, and release workflow docs live in repository `docs/developer/` and are not installed as agent guidance.
+- Developer-only architecture, testing, and release workflow docs live in repository `docs/developer/` and are not installed as agent guidance.

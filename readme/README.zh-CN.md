@@ -75,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/insta
 rin
 ```
 
-Windows 安装器会写入 `rin` 命令启动器，并在可行时把 Rin 的用户启动器目录加入用户 `PATH`。如果当前终端没有立刻识别 `rin`，请重新打开一个终端。桌面 GUI 入口在重构期间暂时禁用。
+Windows 安装器会写入 `rin` 命令启动器，并在可行时把 Rin 的用户启动器目录加入用户 `PATH`。如果当前终端没有立刻识别 `rin`，请重新打开一个终端。
 
 ## 安全与成本
 

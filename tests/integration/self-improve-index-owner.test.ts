@@ -76,8 +76,8 @@ test("self-improve message-end accepts only explicit current frontend producers"
 
   const cases: Array<[string, any, any, boolean]> = [
     [
-      "event gui",
-      { frontend: { kind: "GUI", id: "owner" } },
+      "event tui",
+      { frontend: { kind: "TUI", id: "owner" } },
       context(branch),
       true,
     ],
@@ -91,12 +91,12 @@ test("self-improve message-end accepts only explicit current frontend producers"
       true,
     ],
     [
-      "manager gui",
+      "manager tui",
       {},
       context(branch, {
         frontend: undefined,
         promptContext: undefined,
-        sessionManager: { __rinFrontend: { kind: "gui", key: "owner" } },
+        sessionManager: { __rinFrontend: { kind: "tui", key: "owner" } },
       }),
       true,
     ],
