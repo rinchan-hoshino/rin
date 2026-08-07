@@ -283,11 +283,6 @@
       "subject": "Reduce TUI flicker after daemon reconnect"
     },
     {
-      "file": "tests/characterization/rpc-runtime-binding.test.ts",
-      "introducedBy": "505ac79d",
-      "subject": "Fix detached RPC session method bindings"
-    },
-    {
       "file": "tests/characterization/rpc-runtime-host.test.ts",
       "introducedBy": "97ac210b",
       "subject": "fix(rin-tui): adapt rpc session to InteractiveMode runtime host"
@@ -341,11 +336,6 @@
       "file": "tests/characterization/sidecar-common.test.ts",
       "introducedBy": "70addd7a",
       "subject": "refactor: stabilize runtime boundaries and dist-only flow"
-    },
-    {
-      "file": "tests/characterization/std-mode-runtime.test.ts",
-      "introducedBy": "64960075",
-      "subject": "feat: align TUI extension loading with Pi resources"
     },
     {
       "file": "tests/characterization/task-tools.test.ts",

@@ -1,10 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import {
-  createEditTool,
-  createReadTool,
-  createWriteTool,
-} from "@earendil-works/pi-coding-agent";
+import test from "node:test";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -16,339 +11,348 @@ const rootDir = path.resolve(
 const noteModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "note.js")).href
 );
+const noteStateModule = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "note-state.js"))
+    .href
+);
 
-async function createNoteTool(initialEntries: any[] = []) {
+async function setup(
+  initialEntries: any[] = [],
+  managerOverrides: Record<string, any> = {},
+) {
   const capability = noteModule.default();
   const entries = [...initialEntries];
+  let branch = entries;
   const sessionManager = {
-    getBranch: () => entries,
+    getBranch: () => branch,
     appendCustomEntry(customType: string, data: any) {
       entries.push({ type: "custom", customType, data });
     },
+    ...managerOverrides,
   };
   await capability.hooks?.session_start?.[0]?.({}, { sessionManager });
-  return { capability, tool: capability.tools[0], entries, sessionManager };
+  return {
+    capability,
+    tool: capability.tools[0],
+    entries,
+    sessionManager,
+    setBranch(next: any[]) {
+      branch = next;
+    },
+  };
 }
 
 async function execute(tool: any, params: any, signal?: AbortSignal) {
   return tool.execute("note-call", params, signal, undefined, {});
 }
 
-test("note tool exposes explicit read, write, edit, and append operations", async () => {
-  const { tool } = await createNoteTool();
-
+test("note exposes the same full-read and item-level mutation shape as todo", async () => {
+  const { tool } = await setup();
   assert.equal(tool.name, "note");
   assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
     "action",
-    "content",
-    "edits",
-    "limit",
-    "offset",
+    "all",
+    "beforeId",
+    "id",
+    "ids",
+    "item",
+    "items",
   ]);
   assert.deepEqual(tool.parameters.required, ["action"]);
-
-  const piRead = createReadTool(rootDir);
   assert.deepEqual(
-    tool.parameters.properties.offset,
-    piRead.parameters.properties.offset,
+    tool.parameters.properties.action.anyOf.map((entry: any) => entry.const),
+    ["read", "add", "edit", "remove"],
   );
-  assert.deepEqual(
-    tool.parameters.properties.limit,
-    piRead.parameters.properties.limit,
-  );
-  assert.deepEqual(
-    tool.parameters.properties.content,
-    createWriteTool(rootDir).parameters.properties.content,
-  );
-  assert.deepEqual(
-    tool.parameters.properties.edits,
-    createEditTool(rootDir).parameters.properties.edits,
-  );
+  for (const retired of ["content", "edits", "offset", "limit"]) {
+    assert.equal(tool.parameters.properties[retired], undefined);
+  }
 });
 
-test("note tool writes, appends, and preserves Pi ranged read output", async () => {
-  const { tool, entries } = await createNoteTool();
-
-  const written = await execute(tool, {
-    action: "write",
-    content: "first\nsecond",
-  });
-  assert.match(written.content[0].text, /Successfully wrote/);
-  assert.match(written.content[0].text, /\.rin-session-note\.txt/);
-  assert.equal(written.details, undefined);
-
-  const appended = await execute(tool, {
-    action: "append",
-    content: "\nthird\nfourth",
-  });
-  assert.equal(appended.details.action, "append");
-  assert.equal(appended.details.lineCount, 4);
-  assert.equal(appended.content[0].text, "Appended to note (4 lines total)");
-
-  const read = await execute(tool, { action: "read", offset: 2, limit: 2 });
-  assert.equal(
-    read.content[0].text,
-    "second\nthird\n\n[1 more lines in file. Use offset=4 to continue.]",
-  );
-  assert.equal(read.details, undefined);
-
-  assert.deepEqual(entries, [
-    {
-      type: "custom",
-      customType: "rin.note",
-      data: { content: "first\nsecond" },
-    },
-    {
-      type: "custom",
-      customType: "rin.note",
-      data: { content: "first\nsecond\nthird\nfourth" },
-    },
-  ]);
-});
-
-test("note read inherits Pi optional offset and limit behavior", async () => {
-  const { tool } = await createNoteTool();
-  await execute(tool, { action: "write", content: "one\ntwo\nthree" });
-
-  assert.equal(
-    (await execute(tool, { action: "read" })).content[0].text,
-    "one\ntwo\nthree",
-  );
-  assert.equal(
-    (await execute(tool, { action: "read", offset: 2 })).content[0].text,
-    "two\nthree",
-  );
-  assert.equal(
-    (await execute(tool, { action: "read", limit: 2 })).content[0].text,
-    "one\ntwo\n\n[1 more lines in file. Use offset=3 to continue.]",
-  );
-
-  await assert.rejects(
-    execute(tool, { action: "read", offset: 4 }),
-    /beyond end of file \(3 lines total\)/,
-  );
-});
-
-test("note write rejects missing Pi-required content without checkpointing", async () => {
-  const { tool, entries } = await createNoteTool();
-
-  await assert.rejects(
-    execute(tool, { action: "write" }),
-    /content must be a string/,
-  );
-  assert.equal(entries.length, 0);
-});
-
-test("note edit preserves Pi missing-edits validation without checkpointing", async () => {
-  const { tool, entries } = await createNoteTool();
-
-  await assert.rejects(
-    execute(tool, { action: "edit" }),
-    /edits must contain at least one replacement/,
-  );
-  assert.equal(entries.length, 0);
-});
-
-test("note write preserves Pi abort behavior without checkpointing", async () => {
-  const { tool, entries } = await createNoteTool();
-  const controller = new AbortController();
-  controller.abort();
-
-  await assert.rejects(
-    execute(
-      tool,
-      { action: "write", content: "not written" },
-      controller.signal,
-    ),
-    /Operation aborted/,
-  );
-  assert.equal(entries.length, 0);
-});
-
-test("note edit applies unique non-overlapping replacements atomically", async () => {
-  const { tool, entries } = await createNoteTool();
+test("note adds groups, inserts before an id, and always reads the complete list", async () => {
+  const { tool, entries } = await setup();
   await execute(tool, {
-    action: "write",
-    content: "alpha beta alpha\ngamma",
+    action: "add",
+    items: [{ text: " First fact " }, { text: "Third fact\nwith detail" }],
+  });
+  const inserted = await execute(tool, {
+    action: "add",
+    beforeId: 2,
+    items: [{ text: "Second fact" }],
   });
 
-  await assert.rejects(
-    execute(tool, {
-      action: "edit",
-      edits: [{ oldText: "alpha", newText: "A" }],
-    }),
-    /Found 2 occurrences.*text must be unique/,
-  );
-  assert.equal(entries.length, 1);
+  assert.deepEqual(inserted.details.items, [
+    { id: 1, text: "First fact" },
+    { id: 3, text: "Second fact" },
+    { id: 2, text: "Third fact\nwith detail" },
+  ]);
+  assert.equal(inserted.details.nextId, 4);
+  const read = await execute(tool, { action: "read" });
+  assert.equal(read.details.action, "read");
+  assert.deepEqual(read.details.items, inserted.details.items);
+  assert.match(read.content[0].text, /#1 First fact/);
+  assert.match(read.content[0].text, /#2 Third fact\nwith detail/);
+  assert.deepEqual(entries.at(-1)?.data, {
+    items: inserted.details.items,
+    nextId: 4,
+  });
+});
 
+test("note edits one entry, removes a group atomically, and clears explicitly", async () => {
+  const { tool, entries } = await setup();
+  await execute(tool, {
+    action: "add",
+    items: [{ text: "A" }, { text: "B" }, { text: "C" }],
+  });
   const edited = await execute(tool, {
     action: "edit",
-    edits: [
-      { oldText: "alpha beta alpha", newText: "A beta A" },
-      { oldText: "gamma", newText: "G" },
-    ],
+    id: 2,
+    item: { text: " B updated " },
+  });
+  assert.deepEqual(edited.details.items[1], { id: 2, text: "B updated" });
+
+  const missing = await execute(tool, { action: "remove", ids: [1, 99] });
+  assert.match(missing.details.error, /#99 not found/);
+  assert.equal(entries.length, 2);
+
+  const removed = await execute(tool, { action: "remove", ids: [1, 3] });
+  assert.deepEqual(removed.details.items, [{ id: 2, text: "B updated" }]);
+  assert.equal(removed.details.nextId, 4);
+
+  const cleared = await execute(tool, { action: "remove", all: true });
+  assert.deepEqual(cleared.details.items, []);
+  assert.equal(cleared.details.nextId, 1);
+  assert.equal(cleared.content[0].text, "No notes");
+});
+
+test("note state normalizes current, legacy, malformed, and unavailable snapshots", () => {
+  assert.equal(noteStateModule.normalizeRinNoteItem(null), undefined);
+  assert.equal(
+    noteStateModule.normalizeRinNoteItem({ id: 0, text: "zero" }),
+    undefined,
+  );
+  assert.deepEqual(noteStateModule.normalizeRinNoteItem({ id: 1, text: 7 }), {
+    id: 1,
+    text: "7",
   });
   assert.equal(
-    edited.content[0].text,
-    "Successfully replaced 2 block(s) in .rin-session-note.txt.",
+    noteStateModule.normalizeRinNoteItem({ id: 1, text: "   " }),
+    undefined,
   );
-  assert.match(edited.details.diff, /-1 alpha beta alpha/);
-  assert.match(edited.details.diff, /\+1 A beta A/);
-  assert.match(edited.details.diff, /-2 gamma/);
-  assert.match(edited.details.diff, /\+2 G/);
-
-  const read = await execute(tool, { action: "read", offset: 1, limit: 2 });
-  assert.equal(read.content[0].text, "A beta A\nG");
-  assert.equal(entries.length, 2);
-});
-
-test("note edit follows Pi matching for overlapping occurrences", async () => {
-  const { tool, entries } = await createNoteTool();
-  await execute(tool, { action: "write", content: "aaa" });
-
-  await execute(tool, {
-    action: "edit",
-    edits: [{ oldText: "aa", newText: "A" }],
-  });
-
-  assert.equal(entries.length, 2);
-  const read = await execute(tool, { action: "read", offset: 1, limit: 1 });
-  assert.equal(read.content[0].text, "Aa");
-});
-
-test("note edit reuses Pi line-ending normalization and no-op rejection", async () => {
-  const { tool, entries } = await createNoteTool();
-  await execute(tool, { action: "write", content: "alpha\r\nbeta" });
-
-  await execute(tool, {
-    action: "edit",
-    edits: [{ oldText: "alpha\nbeta", newText: "A\nB" }],
-  });
-  const read = await execute(tool, { action: "read", offset: 1, limit: 2 });
-  assert.equal(read.content[0].text, "A\r\nB");
-
-  await assert.rejects(
-    execute(tool, {
-      action: "edit",
-      edits: [{ oldText: "A\nB", newText: "A\nB" }],
-    }),
-    /No changes made/,
+  assert.deepEqual(
+    noteStateModule.normalizeRinNoteItem({ id: 2, text: "  kept  " }),
+    { id: 2, text: "kept" },
   );
-  assert.equal(entries.length, 2);
-});
 
-test("note edit rejects overlapping replacements without changing state", async () => {
-  const { tool, entries } = await createNoteTool();
-  await execute(tool, { action: "write", content: "abcdef" });
-
-  await assert.rejects(
-    execute(tool, {
-      action: "edit",
-      edits: [
-        { oldText: "abcd", newText: "left" },
-        { oldText: "cdef", newText: "right" },
+  const fromData = (data: unknown) =>
+    noteStateModule.readNoteSnapshotFromSession({
+      sessionManager: {
+        getBranch: () => [
+          null,
+          { type: "custom", customType: "other", data: {} },
+          { type: "custom", customType: "rin.note", data },
+        ],
+      },
+    });
+  assert.deepEqual(
+    fromData({
+      items: [
+        { id: 3, text: "valid" },
+        { id: -1, text: "invalid" },
       ],
+      nextId: 2,
     }),
-    /edits\[0\] and edits\[1\] overlap/,
+    { items: [{ id: 3, text: "valid" }], nextId: 4 },
   );
-
-  assert.equal(entries.length, 1);
-  const read = await execute(tool, { action: "read", offset: 1, limit: 1 });
-  assert.equal(read.content[0].text, "abcdef");
+  assert.deepEqual(fromData({ content: "  legacy  " }), {
+    items: [{ id: 1, text: "legacy" }],
+    nextId: 2,
+  });
+  assert.deepEqual(fromData({ content: "   " }), {
+    items: [],
+    nextId: 1,
+  });
+  assert.deepEqual(fromData({ content: 5 }), { items: [], nextId: 1 });
+  assert.deepEqual(fromData(null), { items: [], nextId: 1 });
+  assert.deepEqual(noteStateModule.readNoteSnapshotFromSession({}), {
+    items: [],
+    nextId: 1,
+  });
+  assert.deepEqual(
+    noteStateModule.readNoteSnapshotFromSession({
+      sessionManager: { getBranch: () => "not-a-branch" },
+    }),
+    { items: [], nextId: 1 },
+  );
+  assert.deepEqual(
+    noteStateModule.readNoteSnapshotFromSession({
+      sessionManager: {
+        getBranch() {
+          throw new Error("unavailable");
+        },
+      },
+    }),
+    { items: [], nextId: 1 },
+  );
 });
 
-test("note append respects aborts while waiting behind Pi mutations", async () => {
-  const { tool, entries } = await createNoteTool();
-  await execute(tool, { action: "write", content: "alpha" });
+test("note migrates a legacy text snapshot to one item without exposing the old protocol", async () => {
+  const legacy = {
+    type: "custom",
+    customType: "rin.note",
+    data: { content: "legacy fact\nwith detail" },
+  };
+  const { tool, entries } = await setup([legacy]);
 
-  const edit = execute(tool, {
-    action: "edit",
-    edits: [{ oldText: "alpha", newText: "edited" }],
+  const read = await execute(tool, { action: "read" });
+  assert.deepEqual(read.details.items, [
+    { id: 1, text: "legacy fact\nwith detail" },
+  ]);
+  assert.equal(read.details.nextId, 2);
+
+  await execute(tool, { action: "add", items: [{ text: "new fact" }] });
+  assert.deepEqual(entries.at(-1)?.data, {
+    items: [
+      { id: 1, text: "legacy fact\nwith detail" },
+      { id: 2, text: "new fact" },
+    ],
+    nextId: 3,
   });
+});
+
+test("note rejects old text-buffer calls and malformed operations without mutation", async () => {
+  const { tool, entries } = await setup();
+  for (const params of [
+    { action: "write", content: "old" },
+    { action: "append", content: "old" },
+    { action: "read", offset: 1 },
+    { action: "add", items: [] },
+    { action: "add", items: [{ text: " " }] },
+    { action: "add", beforeId: 4, items: [{ text: "missing anchor" }] },
+    { action: "edit", id: 1, item: {} },
+    { action: "remove", ids: [] },
+    { action: "remove", all: false },
+  ]) {
+    const result = await execute(tool, params);
+    assert.ok(result.details.error, JSON.stringify(params));
+  }
+  assert.equal(entries.length, 0);
+});
+
+test("note restores the selected branch and keeps state unchanged on abort or persistence failure", async () => {
+  const main = {
+    type: "custom",
+    customType: "rin.note",
+    data: { items: [{ id: 1, text: "main" }], nextId: 2 },
+  };
+  const fork = {
+    type: "custom",
+    customType: "rin.note",
+    data: { items: [{ id: 2, text: "fork" }], nextId: 3 },
+  };
+  const state = await setup([main]);
+  state.setBranch([main, fork]);
+  await state.capability.hooks?.session_tree?.[0]?.(
+    {},
+    { sessionManager: state.sessionManager },
+  );
+  assert.deepEqual(
+    (await execute(state.tool, { action: "read" })).details.items,
+    [{ id: 2, text: "fork" }],
+  );
+
   const controller = new AbortController();
-  const append = execute(
-    tool,
-    { action: "append", content: " appended" },
+  controller.abort();
+  const aborted = await execute(
+    state.tool,
+    { action: "edit", id: 2, item: { text: "lost" } },
     controller.signal,
   );
-  controller.abort();
+  assert.match(aborted.details.error, /aborted/i);
 
-  await edit;
-  await assert.rejects(append, /Operation aborted/);
-  assert.equal(entries.length, 2);
-  const read = await execute(tool, { action: "read", offset: 1, limit: 1 });
-  assert.equal(read.content[0].text, "edited");
-});
-
-test("note checkpoints restore the current branch while a new session starts empty", async () => {
-  const first = await createNoteTool();
-  await execute(first.tool, { action: "write", content: "main branch" });
-
-  const restored = await createNoteTool(first.entries);
-  assert.equal(
-    (await execute(restored.tool, { action: "read", offset: 1, limit: 1 }))
-      .content[0].text,
-    "main branch",
-  );
-
-  const fresh = await createNoteTool();
-  const empty = await execute(fresh.tool, {
-    action: "read",
-    offset: 1,
-    limit: 1,
+  const unavailable = await setup([fork], { appendCustomEntry: undefined });
+  const failed = await execute(unavailable.tool, {
+    action: "edit",
+    id: 2,
+    item: { text: "lost" },
   });
-  assert.equal(empty.content[0].text, "");
-  assert.equal(empty.details, undefined);
-});
-
-test("note session-tree reconstruction follows the selected branch", async () => {
-  const capability = noteModule.default();
-  const mainEntry = {
-    type: "custom",
-    customType: "rin.note",
-    data: { content: "main" },
-  };
-  const forkEntry = {
-    type: "custom",
-    customType: "rin.note",
-    data: { content: "fork" },
-  };
-  let branch = [mainEntry];
-  const sessionManager = {
-    getBranch: () => branch,
-    appendCustomEntry() {},
-  };
-
-  await capability.hooks?.session_start?.[0]?.({}, { sessionManager });
-  const tool = capability.tools[0];
-  assert.equal(
-    (await execute(tool, { action: "read", offset: 1, limit: 1 })).content[0]
-      .text,
-    "main",
-  );
-
-  branch = [mainEntry, forkEntry];
-  await capability.hooks?.session_tree?.[0]?.({}, { sessionManager });
-  assert.equal(
-    (await execute(tool, { action: "read", offset: 1, limit: 1 })).content[0]
-      .text,
-    "fork",
-  );
-});
-
-test("note mutation errors do not change in-memory state", async () => {
-  const capability = noteModule.default();
-  const tool = capability.tools[0];
-  await capability.hooks?.session_start?.[0]?.(
-    {},
-    { sessionManager: { getBranch: () => [] } },
-  );
-
-  await assert.rejects(
-    execute(tool, { action: "write", content: "lost" }),
+  assert.match(
+    failed.details.error,
     /session custom entries are not available/,
   );
+  assert.deepEqual(
+    (await execute(unavailable.tool, { action: "read" })).details.items,
+    [{ id: 2, text: "fork" }],
+  );
+});
 
-  const read = await execute(tool, { action: "read", offset: 1, limit: 1 });
-  assert.equal(read.content[0].text, "");
+test("note renders item calls, results, errors, and fallback text", async () => {
+  const { tool } = await setup();
+  const theme = { fg: (_color: string, text: unknown) => String(text) };
+  assert.match(
+    tool
+      .renderCall({ action: "add" }, theme, { isPartial: true })
+      .render(80)
+      .join(""),
+    /note add/,
+  );
+  assert.match(
+    tool.renderCall({}, theme, { isPartial: true }).render(80).join(""),
+    /note …/,
+  );
+  assert.equal(
+    tool.renderCall({}, theme, { isPartial: false }).render(80).join(""),
+    "",
+  );
+  assert.match(
+    tool
+      .renderResult(
+        {
+          content: [{ type: "text", text: "" }],
+          details: {
+            action: "read",
+            items: [{ id: 1, text: "fact" }],
+            nextId: 2,
+          },
+        },
+        {},
+        theme,
+        {},
+      )
+      .render(80)
+      .join(""),
+    /#1 fact/,
+  );
+  assert.match(
+    tool
+      .renderResult(
+        {
+          content: [{ type: "text", text: "" }],
+          details: {
+            action: "edit",
+            items: [],
+            nextId: 1,
+            error: "failed",
+          },
+        },
+        {},
+        theme,
+        {},
+      )
+      .render(80)
+      .join("\n"),
+    /^Error: failed/,
+  );
+  assert.equal(
+    tool
+      .renderResult(
+        { content: [{ type: "text", text: "fallback" }] },
+        {},
+        theme,
+        {},
+      )
+      .render(80)
+      .join("")
+      .trimEnd(),
+    "fallback",
+  );
 });

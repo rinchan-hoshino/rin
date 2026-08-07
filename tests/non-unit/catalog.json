@@ -805,12 +805,36 @@
       "tests": ["tests/integration/rin-extension-loader-owner.test.ts"]
     },
     {
+      "source": "src/core/rin-lib/item-commands.ts",
+      "built": "dist/core/rin-lib/item-commands.js",
+      "suite": "integration",
+      "tests": ["tests/integration/item-commands.test.ts"]
+    },
+    {
+      "source": "src/core/rin-lib/item-tool.ts",
+      "built": "dist/core/rin-lib/item-tool.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/todo-tool.test.ts",
+        "tests/integration/note-tool.test.ts"
+      ]
+    },
+    {
       "source": "src/core/rin-lib/loader.ts",
       "built": "dist/core/rin-lib/loader.js",
       "suite": "integration",
       "tests": ["tests/integration/rin-lib-loader-owner.test.ts"],
       "preloads": ["tests/support/register-rin-lib-loader-owner-fixture.ts"],
       "node22DynamicImportUncoveredBranches": 6
+    },
+    {
+      "source": "src/core/rin-lib/note-state.ts",
+      "built": "dist/core/rin-lib/note-state.js",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/note-tool.test.ts",
+        "tests/integration/item-commands.test.ts"
+      ]
     },
     {
       "source": "src/core/rin-lib/note.ts",
@@ -854,7 +878,8 @@
       "suite": "integration",
       "tests": [
         "tests/integration/rin-runtime-owner.test.ts",
-        "tests/integration/final-system-prompt.test.ts"
+        "tests/integration/final-system-prompt.test.ts",
+        "tests/integration/rin-extension-stage-b.test.ts"
       ]
     },
     {
@@ -867,7 +892,10 @@
       "source": "src/core/rin-lib/todo.ts",
       "built": "dist/core/rin-lib/todo.js",
       "suite": "integration",
-      "tests": ["tests/integration/todo-owner.test.ts"]
+      "tests": [
+        "tests/integration/todo-owner.test.ts",
+        "tests/integration/todo-tool.test.ts"
+      ]
     },
     {
       "source": "src/core/rin-lib/update-notices.ts",

@@ -88,11 +88,13 @@ test("std configured session strips removed browse extension alias", async () =>
     const session = runtime.session;
     assert.ok(session.getToolDefinition("recall"));
     assert.equal(session.getToolDefinition("browse"), undefined);
-    assert.deepEqual(
+    const extensions =
       runtime.runtime?.session?.resourceLoader?.getExtensions?.()?.extensions ||
-        [],
-      [],
-    );
+      [];
+    assert.equal(extensions.length, 1);
+    assert.equal(extensions[0].path, "<inline:rin-core-items>");
+    assert.equal(extensions[0].hidden, true);
+    assert.deepEqual([...extensions[0].commands.keys()], ["todos", "notes"]);
 
     const memoryTool = session.getToolDefinition("recall");
     assert.equal(

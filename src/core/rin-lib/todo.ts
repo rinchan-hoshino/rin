@@ -1,24 +1,32 @@
 /**
  * Rin core todo capability.
  *
- * State is checkpointed in Pi session custom entries, so session branches
- * reconstruct the todo list that belongs to that branch without relying on LLM
- * context-visible tool results.
+ * The agent mutates one stable-ID item at a time (or an explicit add/remove
+ * group). State is checkpointed in Pi session custom entries and follows the
+ * selected session branch.
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import type {
+  RinCapabilityContext,
+  RinCapabilityDefinition,
+} from "./capability-types.js";
 import {
-  formatRinTodoChecklistContent,
+  createItemToolParameters,
+  normalizeItemId,
+  normalizeNextItemId,
+  resolveInsertIndex,
+  resolveRemovalIds,
+  type ItemAction,
+  validateItemActionParams,
+} from "./item-tool.js";
+import {
   formatRinTodoItemText,
   readTodoSnapshotFromSession,
   RIN_TODO_CUSTOM_ENTRY_TYPE,
 } from "./todo-state.js";
-import type {
-  RinCapabilityDefinition,
-  RinCapabilityContext,
-} from "./capability-types.js";
 
 export interface Todo {
   id: number;
@@ -26,173 +34,189 @@ export interface Todo {
   done: boolean;
 }
 
-type TodoDetailsAction = "write" | "list" | "add" | "toggle" | "clear";
-
 interface TodoDetails {
-  action: TodoDetailsAction;
-  todos: Todo[];
+  action: ItemAction;
+  items: Todo[];
   nextId: number;
   error?: string;
 }
 
-const TodoItemParams: any = Type.Object({
-  text: Type.String({
-    description: "Checklist item as a concrete branch-execution action.",
-  }),
-  done: Type.Optional(
-    Type.Boolean({
-      description: "Whether this checklist item is completed.",
+const TodoAddItemParams: any = Type.Object(
+  {
+    text: Type.String({
+      minLength: 1,
+      description: "Checklist item as a concrete branch-execution action.",
     }),
-  ),
-});
+    done: Type.Optional(
+      Type.Boolean({ description: "Whether this item is completed." }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
-const TodoParams: any = Type.Object({
-  todos: Type.Optional(
-    Type.Array(TodoItemParams, {
-      description:
-        "Complete ordered checklist for the current branch. Omit this property to read the current checklist; pass an empty array to clear it; otherwise include every item that should remain.",
-    }),
-  ),
-});
+const TodoEditItemParams: any = Type.Object(
+  {
+    text: Type.Optional(
+      Type.String({ minLength: 1, description: "Replacement item text." }),
+    ),
+    done: Type.Optional(
+      Type.Boolean({ description: "Replacement completion state." }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
-function normalizeTodoId(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isSafeInteger(value)) return value;
-  if (typeof value !== "string") return undefined;
+const TodoParams: any = createItemToolParameters(
+  TodoAddItemParams,
+  TodoEditItemParams,
+);
 
-  const normalized = value.trim().replace(/^#/, "");
-  if (!/^\d+$/.test(normalized)) return undefined;
-  const id = Number(normalized);
-  return Number.isSafeInteger(id) ? id : undefined;
-}
-
-const TODO_ACTIONS = new Set<TodoDetailsAction>([
-  "write",
-  "list",
-  "add",
-  "toggle",
-  "clear",
-]);
-
-function cloneTodoItem(value: unknown): Todo | undefined {
+function cloneTodo(value: unknown): Todo | undefined {
   const item = value && typeof value === "object" ? (value as any) : null;
   if (!item) return undefined;
-  const id = normalizeTodoId(item.id);
+  const id = normalizeItemId(item.id);
   const text = typeof item.text === "string" ? item.text.trim() : "";
-  if (id === undefined || id <= 0 || !text) return undefined;
+  if (id === undefined || !text) return undefined;
   return { id, text, done: Boolean(item.done) };
 }
 
-function normalizeNextTodoId(todoList: Todo[], value: unknown) {
-  const next = Number(value);
-  if (Number.isSafeInteger(next) && next > 0) return next;
-  return Math.max(0, ...todoList.map((todo) => todo.id)) + 1;
-}
-
-function normalizeTodoWriteItems(value: unknown): Todo[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-
-  const nextTodos: Todo[] = [];
-  for (const item of value) {
-    const record = item && typeof item === "object" ? (item as any) : null;
-    const text = typeof record?.text === "string" ? record.text.trim() : "";
+function normalizeAddItems(
+  value: unknown,
+): Array<Omit<Todo, "id">> | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const items: Array<Omit<Todo, "id">> = [];
+  for (const raw of value) {
+    const item = raw && typeof raw === "object" ? (raw as any) : null;
+    const text = typeof item?.text === "string" ? item.text.trim() : "";
     if (!text) return undefined;
-    nextTodos.push({
-      id: nextTodos.length + 1,
-      text,
-      done: Boolean(record.done),
-    });
+    const keys = Object.keys(item);
+    if (keys.some((key) => key !== "text" && key !== "done")) return undefined;
+    if (item.done !== undefined && typeof item.done !== "boolean") {
+      return undefined;
+    }
+    items.push({ text, done: item.done ?? false });
   }
-  return nextTodos;
+  return items;
 }
 
-function normalizeTodoStreamingItems(value: unknown): Todo[] {
-  if (!Array.isArray(value)) return [];
-
-  const streamedTodos: Todo[] = [];
-  for (const item of value) {
-    const record = item && typeof item === "object" ? (item as any) : null;
-    const text = typeof record?.text === "string" ? record.text.trim() : "";
-    if (!text) continue;
-    streamedTodos.push({
-      id: streamedTodos.length + 1,
-      text,
-      done: Boolean(record.done),
-    });
+function normalizeEdit(
+  value: unknown,
+): Partial<Pick<Todo, "text" | "done">> | undefined {
+  const item = value && typeof value === "object" ? (value as any) : null;
+  if (!item) return undefined;
+  const keys = Object.keys(item);
+  if (
+    keys.length === 0 ||
+    keys.some((key) => key !== "text" && key !== "done")
+  ) {
+    return undefined;
   }
-  return streamedTodos;
-}
-
-function isTodoReadParams(params: unknown): boolean {
-  const value = params && typeof params === "object" ? (params as any) : null;
-  return !value || !Object.hasOwn(value, "todos") || value.todos == null;
+  const edit: Partial<Pick<Todo, "text" | "done">> = {};
+  if (Object.hasOwn(item, "text")) {
+    if (typeof item.text !== "string" || !item.text.trim()) return undefined;
+    edit.text = item.text.trim();
+  }
+  if (Object.hasOwn(item, "done")) {
+    if (typeof item.done !== "boolean") return undefined;
+    edit.done = item.done;
+  }
+  return edit;
 }
 
 function readTodoDetails(value: unknown): TodoDetails | undefined {
   const details = value && typeof value === "object" ? (value as any) : null;
-  if (!details || !Array.isArray(details.todos)) return undefined;
-  const todoList = details.todos
-    .map(cloneTodoItem)
-    .filter((todo): todo is Todo => Boolean(todo));
-  const action = TODO_ACTIONS.has(details.action) ? details.action : "list";
-  const error = typeof details.error === "string" ? details.error : undefined;
+  if (!details || !Array.isArray(details.items)) return undefined;
+  const items = details.items
+    .map(cloneTodo)
+    .filter((item): item is Todo => Boolean(item));
+  const action = ["read", "add", "edit", "remove"].includes(details.action)
+    ? details.action
+    : "read";
   return {
     action,
-    todos: todoList,
-    nextId: normalizeNextTodoId(todoList, details.nextId),
-    ...(error ? { error } : {}),
+    items,
+    nextId: normalizeNextItemId(items, details.nextId),
+    ...(typeof details.error === "string" ? { error: details.error } : {}),
   };
 }
 
-function formatTodoChecklistContent(todoList: Todo[]): string {
-  return formatRinTodoChecklistContent(todoList);
+function formatTodoContent(items: Todo[]) {
+  if (items.length === 0) return "No todos";
+  return items
+    .map(
+      (item) =>
+        `[${item.done ? "x" : " "}] #${item.id} ${formatRinTodoItemText(item)}`,
+    )
+    .join("\n");
 }
 
-function formatTodoChecklistRender(todoList: Todo[], theme: Theme): string {
-  if (todoList.length === 0) {
-    return theme.fg("dim", "○ No todos");
-  }
-
-  return todoList
-    .map((todo) => {
-      const check = todo.done ? theme.fg("success", "✓") : theme.fg("dim", "○");
-      const itemText = formatRinTodoItemText(todo);
-      const text = todo.done
-        ? theme.fg("dim", itemText)
-        : theme.fg("text", itemText);
-      return `${check} ${text}`;
+function formatTodoRender(items: Todo[], theme: Theme): string {
+  if (items.length === 0) return theme.fg("dim", "○ No todos");
+  return items
+    .map((item) => {
+      const check = item.done ? theme.fg("success", "✓") : theme.fg("dim", "○");
+      const id = theme.fg("accent", `#${item.id}`);
+      const text = item.done
+        ? theme.fg("dim", item.text)
+        : theme.fg("text", item.text);
+      return `${check} ${id} ${text}`;
     })
     .join("\n");
 }
 
-function renderTodoText(text: string) {
+function renderText(text: string) {
   return new Text(text, 0, 0);
 }
 
 export default function todoCapability(): RinCapabilityDefinition {
-  let todos: Todo[] = [];
+  let items: Todo[] = [];
   let nextId = 1;
   let activeSessionManager: any;
 
-  const snapshot = (
-    action: TodoDetailsAction,
-    error?: string,
-  ): TodoDetails => ({
+  const details = (action: ItemAction, error?: string): TodoDetails => ({
     action,
-    todos: todos.map((todo) => ({ ...todo })),
+    items: items.map((item) => ({ ...item })),
     nextId,
     ...(error ? { error } : {}),
   });
 
-  const appendTodoStateEntry = (todoList: Todo[], nextTodoId: number) => {
-    if (!activeSessionManager) return;
-    const appendCustomEntry = activeSessionManager.appendCustomEntry;
+  const result = (action: ItemAction, error?: string) => ({
+    content: [
+      {
+        type: "text" as const,
+        text: error ? `Error: ${error}` : formatTodoContent(items),
+      },
+    ],
+    details: details(action, error),
+  });
+
+  const persist = (nextItems: Todo[], nextItemId: number) => {
+    const appendCustomEntry = activeSessionManager?.appendCustomEntry;
     if (typeof appendCustomEntry !== "function") {
       throw new Error("session custom entries are not available");
     }
     appendCustomEntry.call(activeSessionManager, RIN_TODO_CUSTOM_ENTRY_TYPE, {
-      todos: todoList.map((todo) => ({ ...todo })),
-      nextId: nextTodoId,
+      todos: nextItems.map((item) => ({ ...item })),
+      nextId: nextItemId,
     });
+    items = nextItems;
+    nextId = nextItemId;
+  };
+
+  const commit = (
+    action: ItemAction,
+    nextItems: Todo[],
+    nextItemId: number,
+  ) => {
+    try {
+      persist(nextItems, nextItemId);
+      return result(action);
+    } catch (error: any) {
+      return result(
+        action,
+        `failed to persist todo state: ${String(error?.message || error)}`,
+      );
+    }
   };
 
   const reconstructState = (ctx: RinCapabilityContext) => {
@@ -200,122 +224,97 @@ export default function todoCapability(): RinCapabilityDefinition {
     const state = readTodoSnapshotFromSession({
       sessionManager: activeSessionManager,
     });
-    todos = state.todos.map((todo) => ({ ...todo }));
-    nextId = normalizeNextTodoId(todos, state.nextId);
+    items = state.todos.map((item) => ({ ...item }));
+    nextId = normalizeNextItemId(items, state.nextId);
   };
 
-  const todoToolDefinition: any = {
+  const tool: any = {
     name: "todo",
     label: "Checklist",
-    description: "Read or replace the current branch execution checklist.",
+    description:
+      "Maintain the current-branch execution checklist by stable item ID. Read always returns the full list; add accepts one or more items and can insert before an ID; edit changes one item; remove deletes selected IDs or clears all.",
     promptSnippet:
-      "Read the current branch checklist by omitting todos, or rewrite it by passing the complete desired todos array.",
+      "Read the full branch checklist or add, edit, and remove checklist items by stable ID.",
     promptGuidelines: [
       "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist.",
-      "Omit todos to read the current checklist. After compaction, use the current-branch snapshot re-injected by the trusted Rin runtime; never reconstruct it from the prose summary. If the injected snapshot is absent or uncertain, read before replacing the checklist. Pass the complete desired checklist to replace it; omitted items are removed. Rewrite it immediately when the task objective changes. Pass an empty todos array only to clear the checklist. Clear it before starting a new unrelated task.",
+      "Use action read for the full current list. Use add with items and optional beforeId, edit with exactly one id and item patch, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
+      "After compaction, trust the current-branch snapshot injected by Rin; never reconstruct it from prose. Remove obsolete items individually, and clear all before starting a new unrelated task.",
     ],
     parameters: TodoParams,
 
-    async execute(_toolCallId, params: any, _signal, _onUpdate, _ctx) {
-      if (isTodoReadParams(params)) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: formatTodoChecklistContent(todos),
-            },
-          ],
-          details: snapshot("list"),
-        };
+    async execute(_toolCallId: string, params: any, signal?: AbortSignal) {
+      const validated = validateItemActionParams(params);
+      const action = validated.action ?? "read";
+      if (validated.error) return result(action, validated.error);
+      if (action === "read") return result("read");
+      if (signal?.aborted) return result(action, "operation aborted");
+
+      if (action === "add") {
+        const additions = normalizeAddItems(params.items);
+        if (!additions) {
+          return result("add", "add requires one or more valid todo items");
+        }
+        const insertion = resolveInsertIndex(items, params.beforeId);
+        if (insertion.error) return result("add", insertion.error);
+        let allocatedId = nextId;
+        const added = additions.map((item) => ({ id: allocatedId++, ...item }));
+        const nextItems = items.map((item) => ({ ...item }));
+        nextItems.splice(insertion.index!, 0, ...added);
+        return commit("add", nextItems, allocatedId);
       }
 
-      const nextTodos = normalizeTodoWriteItems(params.todos);
-      if (!nextTodos) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: "Error: todos must be omitted or a complete array of non-empty todo items",
-            },
-          ],
-          details: snapshot(
-            "write",
-            "todos must be omitted or a complete array of non-empty todo items",
-          ),
-        };
+      if (action === "edit") {
+        const id = normalizeItemId(params.id);
+        const edit = normalizeEdit(params.item);
+        if (id === undefined || !edit) {
+          return result(
+            "edit",
+            "edit requires one valid id and a non-empty item patch",
+          );
+        }
+        const index = items.findIndex((item) => item.id === id);
+        if (index < 0) return result("edit", `#${id} not found`);
+        const nextItems = items.map((item) => ({ ...item }));
+        nextItems[index] = { ...nextItems[index]!, ...edit };
+        return commit("edit", nextItems, nextId);
       }
 
-      const nextTodoId = normalizeNextTodoId(nextTodos, undefined);
-      try {
-        appendTodoStateEntry(nextTodos, nextTodoId);
-      } catch (error: any) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Error: failed to persist todo state: ${String(error?.message || error)}`,
-            },
-          ],
-          details: snapshot(
-            "write",
-            `failed to persist todo state: ${String(error?.message || error)}`,
-          ),
-        };
-      }
-
-      todos = nextTodos;
-      nextId = nextTodoId;
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: formatTodoChecklistContent(todos),
-          },
-        ],
-        details: snapshot(todos.length === 0 ? "clear" : "write"),
-      };
+      const removal = resolveRemovalIds(params, items);
+      if (removal.error) return result("remove", removal.error);
+      const nextItems = removal.clear
+        ? []
+        : items
+            .filter((item) => !removal.ids!.includes(item.id))
+            .map((item) => ({ ...item }));
+      return commit("remove", nextItems, removal.clear ? 1 : nextId);
     },
 
-    renderCall(args: any, theme, context) {
-      if (context?.isPartial === false) return renderTodoText("");
-      if (context?.argsComplete === false) {
-        const streamedTodos = normalizeTodoStreamingItems(args?.todos);
-        return renderTodoText(
-          streamedTodos.length > 0
-            ? formatTodoChecklistRender(streamedTodos, theme)
-            : theme.fg("dim", "○ …"),
-        );
-      }
-      if (isTodoReadParams(args)) {
-        return renderTodoText(formatTodoChecklistRender(todos, theme));
-      }
-      const nextTodos = normalizeTodoWriteItems(args?.todos);
-      return renderTodoText(
-        nextTodos ? formatTodoChecklistRender(nextTodos, theme) : "",
+    renderCall(args: any, theme: Theme, context: any) {
+      if (context?.isPartial === false) return renderText("");
+      const action = String(args?.action || "").trim();
+      return renderText(
+        theme.fg("toolTitle", action ? `todo ${action}` : "todo …"),
       );
     },
 
-    renderResult(result, _options, theme, _context) {
-      const details = readTodoDetails(result.details);
-      if (!details) {
-        const text = result.content[0];
-        return renderTodoText(text?.type === "text" ? text.text : "");
+    renderResult(value: any, _options: any, theme: Theme) {
+      const parsed = readTodoDetails(value.details);
+      if (!parsed) {
+        const text = value.content?.[0];
+        return renderText(text?.type === "text" ? text.text : "");
       }
-
-      const checklist = formatTodoChecklistRender(details.todos, theme);
-      if (details.error) {
-        return renderTodoText(
-          `${theme.fg("error", `Error: ${details.error}`)}\n${checklist}`,
-        );
-      }
-
-      return renderTodoText(checklist);
+      const checklist = formatTodoRender(parsed.items, theme);
+      return renderText(
+        parsed.error
+          ? `${theme.fg("error", `Error: ${parsed.error}`)}\n${checklist}`
+          : checklist,
+      );
     },
   };
 
   return {
     name: "todo",
-    tools: [todoToolDefinition],
+    tools: [tool],
     hooks: {
       session_start: [async (_event, ctx) => reconstructState(ctx)],
       session_tree: [async (_event, ctx) => reconstructState(ctx)],

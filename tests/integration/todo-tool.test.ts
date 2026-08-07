@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -11,317 +11,252 @@ const rootDir = path.resolve(
 const todoModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "todo.js")).href
 );
-const { ToolExecutionComponent } =
-  await import("@earendil-works/pi-coding-agent");
-const themeModule = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "pi", "private-api.js")).href
+const itemToolModule = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "item-tool.js"))
+    .href
 );
 
-async function createTodoTool() {
+async function setup(
+  initialEntries: any[] = [],
+  managerOverrides: Record<string, any> = {},
+) {
   const capability = todoModule.default();
-  const entries: any[] = [];
+  const entries = [...initialEntries];
   const sessionManager = {
     getBranch: () => entries,
     appendCustomEntry(customType: string, data: any) {
       entries.push({ type: "custom", customType, data });
     },
+    ...managerOverrides,
   };
   await capability.hooks?.session_start?.[0]?.({}, { sessionManager });
   return { capability, tool: capability.tools[0], entries, sessionManager };
 }
 
-test("todo tool replaces the whole checklist in one write", async () => {
-  const { tool } = await createTodoTool();
+async function execute(tool: any, params: any, signal?: AbortSignal) {
+  return tool.execute("todo-call", params, signal, undefined, {});
+}
 
-  assert.deepEqual(Object.keys(tool.parameters.properties).sort(), ["todos"]);
-  assert.deepEqual(tool.parameters.required ?? [], []);
-
-  const first = await tool.execute(
-    "todo-write-1",
-    { todos: [{ text: "First item" }, { text: "Done item", done: true }] },
-    undefined,
-    undefined,
-    {},
+test("shared item helpers validate operation shapes, IDs, insertion, and removal", () => {
+  assert.match(
+    itemToolModule.validateItemActionParams(null).error,
+    /action is required/,
+  );
+  assert.match(
+    itemToolModule.validateItemActionParams({ action: "legacy" }).error,
+    /action must be read, add, edit, or remove/,
+  );
+  assert.match(
+    itemToolModule.validateItemActionParams({ action: "read", id: 1 }).error,
+    /read does not accept: id/,
+  );
+  assert.deepEqual(
+    itemToolModule.validateItemActionParams({ action: "add", items: [] }),
+    { action: "add" },
   );
 
-  assert.equal(first.details.action, "write");
-  assert.deepEqual(first.details.todos, [
-    { id: 1, text: "First item", done: false },
-    { id: 2, text: "Done item", done: true },
-  ]);
-  assert.equal(first.details.nextId, 3);
+  assert.equal(itemToolModule.normalizeItemId(1), 1);
+  assert.equal(itemToolModule.normalizeItemId(" #2 "), 2);
+  assert.equal(itemToolModule.normalizeItemId(0), undefined);
+  assert.equal(itemToolModule.normalizeItemId("bad"), undefined);
+  assert.equal(itemToolModule.normalizeItemId({}), undefined);
+  assert.equal(itemToolModule.normalizeNextItemId([{ id: 3 }], 2), 4);
+  assert.equal(itemToolModule.normalizeNextItemId([{ id: 3 }], 8), 8);
 
-  const second = await tool.execute(
-    "todo-write-2",
-    { todos: [{ text: "Replacement item" }] },
-    undefined,
-    undefined,
-    {},
-  );
-
-  assert.equal(second.details.action, "write");
-  assert.deepEqual(second.details.todos, [
-    { id: 1, text: "Replacement item", done: false },
-  ]);
-  assert.equal(second.details.nextId, 2);
-  assert.doesNotMatch(second.content[0].text, /First item|Done item/);
-});
-
-test("todo tool reads current checklist when todos is omitted", async () => {
-  const { tool } = await createTodoTool();
-
-  await tool.execute(
-    "todo-write-before-read",
-    { todos: [{ text: "Keep this item" }, { text: "Done item", done: true }] },
-    undefined,
-    undefined,
-    {},
-  );
-
-  const read = await tool.execute("todo-read", {}, undefined, undefined, {});
-
-  assert.equal(read.details.action, "list");
-  assert.deepEqual(read.details.todos, [
-    { id: 1, text: "Keep this item", done: false },
-    { id: 2, text: "Done item", done: true },
-  ]);
-  assert.equal(read.details.nextId, 3);
-  assert.equal(read.content[0].text, "[ ] Keep this item\n[x] Done item");
-});
-
-test("todo renderer keeps the complete checklist when tools are collapsed", async () => {
-  const { tool } = await createTodoTool();
-  const todos = Array.from({ length: 6 }, (_, index) => ({
-    text: `Item ${index + 1}`,
-    done: index === 5,
-  }));
-  const theme = {
-    fg: (_kind: string, text: unknown) => String(text),
-  };
-  const renderContext = {
-    state: {},
-    lastComponent: undefined,
-    isPartial: true,
-  };
-
-  await tool.execute(
-    "todo-renderer-state",
-    { todos },
-    undefined,
-    undefined,
-    {},
-  );
-  const readText = tool
-    .renderCall({}, theme, renderContext)
-    .render(80)
-    .join("\n");
-  assert.match(readText, /✓ Item 6/);
-
-  const callText = tool
-    .renderCall({ todos }, theme, renderContext)
-    .render(80)
-    .join("\n");
-  assert.match(callText, /✓ Item 6/);
-  assert.doesNotMatch(callText, /more/);
-
-  const resultText = tool
-    .renderResult(
-      {
-        content: [{ type: "text", text: "" }],
-        details: {
-          action: "write",
-          todos: todos.map((todo, index) => ({
-            id: index + 1,
-            ...todo,
-          })),
-          nextId: 7,
-        },
-      },
-      { expanded: false },
-      theme,
-      renderContext,
-    )
-    .render(80)
-    .join("\n");
-  assert.match(resultText, /✓ Item 6/);
-  assert.doesNotMatch(resultText, /more/);
-});
-
-test("todo renderer streams a replacement checklist without transient shrinking", async () => {
-  themeModule.initTheme("dark", false);
-  const { tool } = await createTodoTool();
-  await tool.execute(
-    "todo-old-checklist",
-    {
-      todos: Array.from({ length: 5 }, (_, index) => ({
-        text: `Old item ${index + 1}`,
-      })),
-    },
-    undefined,
-    undefined,
-    {},
-  );
-
-  const component = new ToolExecutionComponent(
-    "todo",
-    "todo-streaming-replacement",
-    {},
-    { showImages: false },
-    tool,
-    { requestRender() {} },
-    rootDir,
-  );
-  const frames: Array<{ rows: number; text: string }> = [];
-  const capture = () => {
-    const lines = component.render(80);
-    frames.push({ rows: lines.length, text: lines.join("\n") });
-  };
-
-  capture();
-  component.updateArgs({ todos: [] });
-  capture();
-  component.updateArgs({ todos: [{ text: "New item 1" }] });
-  capture();
-  component.updateArgs({ todos: [{ text: "New item 1" }, {}] });
-  capture();
-  component.updateArgs({
-    todos: [{ text: "New item 1" }, { text: "New item 2" }],
+  const items = [{ id: 1 }, { id: 2 }];
+  assert.deepEqual(itemToolModule.resolveInsertIndex(items, undefined), {
+    index: 2,
   });
-  capture();
-
-  assert.match(frames[0]?.text ?? "", /○ …/);
-  assert.match(frames[1]?.text ?? "", /○ …/);
-  assert.doesNotMatch(
-    frames.map((frame) => frame.text).join("\n"),
-    /Old item|No todos/,
+  assert.deepEqual(itemToolModule.resolveInsertIndex(items, "#2"), {
+    index: 1,
+  });
+  assert.match(
+    itemToolModule.resolveInsertIndex(items, 0).error,
+    /positive integer/,
   );
-  assert.match(frames[2]?.text ?? "", /New item 1/);
-  assert.doesNotMatch(frames[2]?.text ?? "", /New item 2/);
-  assert.match(frames[3]?.text ?? "", /New item 1/);
-  assert.doesNotMatch(frames[3]?.text ?? "", /New item 2/);
-  assert.match(frames[4]?.text ?? "", /New item 1/);
-  assert.match(frames[4]?.text ?? "", /New item 2/);
-  assert.ok(
-    frames.every(
-      (frame, index) => index === 0 || frame.rows >= frames[index - 1]!.rows,
-    ),
-    `expected non-shrinking stream frames, got ${frames.map((frame) => frame.rows).join(" -> ")}`,
+  assert.match(
+    itemToolModule.resolveInsertIndex(items, 3).error,
+    /anchor #3 not found/,
   );
 
-  const historicalComponent = new ToolExecutionComponent(
-    "todo",
-    "todo-settled-history",
-    { todos: [{ text: "New item 1" }, { text: "New item 2" }] },
-    { showImages: false },
-    tool,
-    { requestRender() {} },
-    rootDir,
+  assert.deepEqual(itemToolModule.resolveRemovalIds({ all: true }, items), {
+    clear: true,
+    ids: [1, 2],
+  });
+  assert.match(
+    itemToolModule.resolveRemovalIds({ all: true, ids: [1] }, items).error,
+    /either ids or all/,
   );
-  historicalComponent.updateResult(
-    {
-      content: [{ type: "text", text: "[ ] New item 1\n[ ] New item 2" }],
-      details: {
-        action: "write",
-        todos: [
-          { id: 1, text: "New item 1", done: false },
-          { id: 2, text: "New item 2", done: false },
-        ],
-        nextId: 3,
-      },
-      isError: false,
-    },
-    false,
+  assert.match(
+    itemToolModule.resolveRemovalIds({ all: false }, items).error,
+    /all must be true/,
   );
-  const historicalText = historicalComponent.render(80).join("\n");
-  assert.equal(historicalText.match(/New item 1/g)?.length, 1);
-  assert.equal(historicalText.match(/New item 2/g)?.length, 1);
-  assert.doesNotMatch(historicalText, /○ …/);
+  assert.match(
+    itemToolModule.resolveRemovalIds({ ids: [] }, items).error,
+    /requires one or more ids/,
+  );
+  assert.match(
+    itemToolModule.resolveRemovalIds({ ids: [0] }, items).error,
+    /positive integers/,
+  );
+  assert.match(
+    itemToolModule.resolveRemovalIds({ ids: [3] }, items).error,
+    /#3 not found/,
+  );
+  assert.deepEqual(
+    itemToolModule.resolveRemovalIds({ ids: [2, 1, 2] }, items),
+    { ids: [2, 1] },
+  );
 });
 
-test("todo tool clears only when todos is an empty array", async () => {
-  const { tool } = await createTodoTool();
-
-  await tool.execute(
-    "todo-write-before-clear",
-    { todos: [{ text: "Clear this item" }] },
-    undefined,
-    undefined,
-    {},
+test("todo exposes only full-read and item-level mutation inputs", async () => {
+  const { tool } = await setup();
+  assert.equal(tool.name, "todo");
+  assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
+    "action",
+    "all",
+    "beforeId",
+    "id",
+    "ids",
+    "item",
+    "items",
+  ]);
+  assert.deepEqual(tool.parameters.required, ["action"]);
+  assert.deepEqual(
+    tool.parameters.properties.action.anyOf.map((entry: any) => entry.const),
+    ["read", "add", "edit", "remove"],
   );
+  assert.equal(tool.parameters.properties.offset, undefined);
+  assert.equal(tool.parameters.properties.todos, undefined);
+});
 
-  const cleared = await tool.execute(
-    "todo-clear",
-    { todos: [] },
-    undefined,
-    undefined,
-    {},
+test("todo adds one or many items and inserts a group before a stable id", async () => {
+  const { tool, entries } = await setup();
+
+  const added = await execute(tool, {
+    action: "add",
+    items: [{ text: " First " }, { text: "Third", done: true }],
+  });
+  assert.equal(added.details.action, "add");
+  assert.deepEqual(added.details.items, [
+    { id: 1, text: "First", done: false },
+    { id: 2, text: "Third", done: true },
+  ]);
+
+  const inserted = await execute(tool, {
+    action: "add",
+    beforeId: 2,
+    items: [{ text: "Second A" }, { text: "Second B" }],
+  });
+  assert.deepEqual(inserted.details.items, [
+    { id: 1, text: "First", done: false },
+    { id: 3, text: "Second A", done: false },
+    { id: 4, text: "Second B", done: false },
+    { id: 2, text: "Third", done: true },
+  ]);
+  assert.equal(inserted.details.nextId, 5);
+  assert.match(inserted.content[0].text, /#3 Second A/);
+  assert.equal(entries.length, 2);
+});
+
+test("todo reads the complete list and edits exactly one item", async () => {
+  const { tool } = await setup();
+  await execute(tool, { action: "add", items: [{ text: "A" }, { text: "B" }] });
+
+  const edited = await execute(tool, {
+    action: "edit",
+    id: 2,
+    item: { text: " B updated ", done: true },
+  });
+  assert.equal(edited.details.action, "edit");
+  assert.deepEqual(edited.details.items, [
+    { id: 1, text: "A", done: false },
+    { id: 2, text: "B updated", done: true },
+  ]);
+
+  const read = await execute(tool, { action: "read" });
+  assert.equal(read.details.action, "read");
+  assert.deepEqual(read.details.items, edited.details.items);
+  assert.equal(read.content[0].text, "[ ] #1 A\n[x] #2 B updated");
+});
+
+test("todo removes selected ids atomically and clears only with all true", async () => {
+  const { tool, entries } = await setup();
+  await execute(tool, {
+    action: "add",
+    items: [{ text: "A" }, { text: "B" }, { text: "C" }],
+  });
+
+  const missing = await execute(tool, { action: "remove", ids: [2, 99] });
+  assert.match(missing.details.error, /#99 not found/);
+  assert.deepEqual(
+    missing.details.items.map((item: any) => item.id),
+    [1, 2, 3],
   );
+  assert.equal(entries.length, 1);
 
-  assert.equal(cleared.details.action, "clear");
-  assert.deepEqual(cleared.details.todos, []);
+  const removed = await execute(tool, { action: "remove", ids: [1, 3] });
+  assert.deepEqual(removed.details.items, [{ id: 2, text: "B", done: false }]);
+  assert.equal(removed.details.nextId, 4);
+
+  const cleared = await execute(tool, { action: "remove", all: true });
+  assert.deepEqual(cleared.details.items, []);
   assert.equal(cleared.details.nextId, 1);
   assert.equal(cleared.content[0].text, "No todos");
 });
 
-test("todo tool errors when session custom entries are unavailable", async () => {
-  const capability = todoModule.default();
-  const tool = capability.tools[0];
-  await capability.hooks?.session_start?.[0]?.(
+test("todo rejects old whole-list writes and malformed item operations without checkpointing", async () => {
+  const { tool, entries } = await setup();
+  for (const params of [
     {},
-    { sessionManager: { getBranch: () => [] } },
-  );
-
-  const result = await tool.execute(
-    "todo-write-without-custom-entry",
-    { todos: [{ text: "Cannot persist" }] },
-    undefined,
-    undefined,
-    {},
-  );
-
-  assert.equal(result.details.action, "write");
-  assert.match(
-    result.details.error,
-    /session custom entries are not available/,
-  );
-  assert.match(result.content[0].text, /^Error: failed to persist todo state:/);
+    { todos: [{ text: "old protocol" }] },
+    { action: "write", items: [{ text: "old action" }] },
+    { action: "add", items: [] },
+    { action: "add", items: [{ text: "  " }] },
+    { action: "add", beforeId: 99, items: [{ text: "missing anchor" }] },
+    { action: "edit", id: 1, item: {} },
+    { action: "remove", ids: [] },
+    { action: "remove", all: false },
+  ]) {
+    const result = await execute(tool, params);
+    assert.ok(result.details.error, JSON.stringify(params));
+  }
+  assert.equal(entries.length, 0);
 });
 
-test("todo tool writes session custom entry checkpoints", async () => {
-  const { tool, entries, sessionManager } = await createTodoTool();
-  await tool.execute(
-    "todo-write-custom-entry",
-    { todos: [{ text: "Persist via custom entry" }] },
-    undefined,
-    undefined,
-    {},
+test("todo preserves accepted state across aborts, persistence failures, and branch reconstruction", async () => {
+  const first = await setup();
+  await execute(first.tool, { action: "add", items: [{ text: "kept" }] });
+
+  const controller = new AbortController();
+  controller.abort();
+  const aborted = await execute(
+    first.tool,
+    { action: "edit", id: 1, item: { done: true } },
+    controller.signal,
+  );
+  assert.match(aborted.details.error, /aborted/i);
+
+  const restored = await setup(first.entries);
+  assert.deepEqual(
+    (await execute(restored.tool, { action: "read" })).details.items,
+    [{ id: 1, text: "kept", done: false }],
   );
 
-  assert.deepEqual(entries, [
-    {
-      type: "custom",
-      customType: "rin.todo",
-      data: {
-        todos: [{ id: 1, text: "Persist via custom entry", done: false }],
-        nextId: 2,
-      },
-    },
-  ]);
-
-  const restoredCapability = todoModule.default();
-  const restoredTool = restoredCapability.tools[0];
-  await restoredCapability.hooks?.session_start?.[0]?.({}, { sessionManager });
-
-  const read = await restoredTool.execute(
-    "todo-read-after-restore",
-    {},
-    undefined,
-    undefined,
-    {},
+  const unavailable = await setup(first.entries, {
+    appendCustomEntry: undefined,
+  });
+  const failed = await execute(unavailable.tool, {
+    action: "edit",
+    id: 1,
+    item: { done: true },
+  });
+  assert.match(
+    failed.details.error,
+    /session custom entries are not available/,
   );
-
-  assert.equal(read.content[0].text, "[ ] Persist via custom entry");
-  assert.deepEqual(read.details.todos, [
-    { id: 1, text: "Persist via custom entry", done: false },
-  ]);
+  assert.deepEqual(
+    (await execute(unavailable.tool, { action: "read" })).details.items,
+    [{ id: 1, text: "kept", done: false }],
+  );
 });

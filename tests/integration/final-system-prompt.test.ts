@@ -121,47 +121,32 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     baseSystemPrompt.includes("When modifying files, prefer targeted edits"),
     false,
   );
-  assert.ok(baseSystemPrompt.includes("Read the current branch checklist"));
+  assert.ok(baseSystemPrompt.includes("Read the full branch checklist"));
   assert.ok(
     baseSystemPrompt.includes(
       "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist",
     ),
   );
   assert.ok(
-    baseSystemPrompt.includes("Omit todos to read the current checklist"),
+    baseSystemPrompt.includes("Use action read for the full current list"),
   );
+  assert.ok(baseSystemPrompt.includes("add with items and optional beforeId"));
+  assert.ok(
+    baseSystemPrompt.includes("edit with exactly one id and item patch"),
+  );
+  assert.ok(baseSystemPrompt.includes("remove with ids or all: true"));
   assert.ok(
     baseSystemPrompt.includes(
-      "Pass the complete desired checklist to replace it; omitted items are removed",
+      "After compaction, trust the current-branch snapshot injected by Rin",
     ),
   );
+  assert.ok(baseSystemPrompt.includes("never reconstruct it from prose"));
   assert.ok(
-    baseSystemPrompt.includes(
-      "Pass an empty todos array only to clear the checklist",
-    ),
+    baseSystemPrompt.includes("clear all before starting a new unrelated task"),
   );
-  assert.ok(
-    baseSystemPrompt.includes(
-      "After compaction, use the current-branch snapshot re-injected by the trusted Rin runtime",
-    ),
-  );
-  assert.ok(
-    baseSystemPrompt.includes("never reconstruct it from the prose summary"),
-  );
+  assert.equal(baseSystemPrompt.includes("Omit todos to read"), false);
   assert.equal(
-    baseSystemPrompt.includes("After compaction, read it before continuing"),
-    false,
-  );
-  assert.ok(
-    baseSystemPrompt.includes("Clear it before starting a new unrelated task"),
-  );
-  assert.ok(
-    baseSystemPrompt.includes(
-      "Rewrite it immediately when the task objective changes",
-    ),
-  );
-  assert.equal(
-    baseSystemPrompt.includes("Manage the current session todo checklist"),
+    baseSystemPrompt.includes("complete desired todos array"),
     false,
   );
   assert.ok(
@@ -169,27 +154,11 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
       "Use note only for concise, verified facts that must survive compaction; keep plans, pending actions, and checklists in todo",
     ),
   );
-  assert.equal(
-    baseSystemPrompt.includes(
-      "Use note for model-only scratch work that survives compaction",
-    ),
-    false,
-  );
   assert.ok(
-    baseSystemPrompt.includes(
-      "Use note read with Pi-native optional offset and limit",
-    ),
+    baseSystemPrompt.includes("edit with exactly one id and replacement item"),
   );
-  assert.equal(
-    baseSystemPrompt.includes("always provide both offset and limit"),
-    false,
-  );
-  assert.ok(
-    baseSystemPrompt.includes(
-      "Use write for full replacement, edit for exact unique non-overlapping replacements, and append to add exact text at the end",
-    ),
-  );
-  assert.equal(baseSystemPrompt.includes("/notes"), false);
+  assert.equal(baseSystemPrompt.includes("Pi-native optional offset"), false);
+  assert.equal(baseSystemPrompt.includes("write for full replacement"), false);
   assert.equal(baseSystemPrompt.includes("Markdown rich-object syntax"), false);
   assert.equal(
     baseSystemPrompt.includes("Native at: [@name](at:<platform-user-id>)"),

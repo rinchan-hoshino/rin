@@ -411,31 +411,54 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
 
   const noteTool = session.getToolDefinition("note");
   assert.ok(noteTool, "note should be available in the RPC frontend");
-  assert.equal(noteTool.renderCall, undefined);
-  assert.equal(noteTool.renderResult, undefined);
   assert.equal(noteTool.renderShell, undefined);
+  assert.match(
+    noteTool
+      .renderCall({ action: "read" }, theme, renderContext)
+      .render(80)
+      .join("\n"),
+    /note read/,
+  );
+  assert.match(
+    noteTool
+      .renderResult(
+        {
+          content: [{ type: "text", text: "" }],
+          details: {
+            action: "read",
+            items: [{ id: 3, text: "Keep exact state" }],
+            nextId: 4,
+          },
+        },
+        { expanded: false },
+        theme,
+        renderContext,
+      )
+      .render(80)
+      .join("\n"),
+    /#3 Keep exact state/,
+  );
 
   const todoTool = session.getToolDefinition("todo");
   assert.equal(todoTool.renderShell, undefined);
 
   const todoCall = todoTool
     .renderCall(
-      { todos: [{ text: "Wire core todo", done: false }] },
+      { action: "add", items: [{ text: "Wire core todo" }] },
       theme,
       renderContext,
     )
     .render(80)
     .join("\n");
-  assert.match(todoCall, /○ Wire core todo/);
-  assert.doesNotMatch(todoCall, /Checklist|add|toggle/);
+  assert.match(todoCall, /todo add/);
 
   const todoResultLines = todoTool
     .renderResult(
       {
         content: [{ type: "text", text: "" }],
         details: {
-          action: "write",
-          todos: [
+          action: "read",
+          items: [
             { id: 1, text: "Wire core todo", done: false },
             { id: 2, text: "Ship renderer", done: true },
           ],
@@ -448,20 +471,14 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
     )
     .render(80);
   assert.equal(todoResultLines.length, 2);
-  assert.match(todoResultLines[0], /○ Wire core todo/);
-  assert.match(todoResultLines[1], /✓ Ship renderer/);
-
-  const todoExecution = await todoTool.execute("todo-call", {
-    todos: [
-      { text: "Wire core todo", done: false },
-      { text: "Ship renderer", done: true },
-    ],
-  });
-  assert.match(todoExecution.content[0].text, /\[x\] Ship renderer/);
+  assert.match(todoResultLines[0], /○ #1 Wire core todo/);
+  assert.match(todoResultLines[1], /✓ #2 Ship renderer/);
 
   const todoResult = todoResultLines.join("\n");
   assert.doesNotMatch(todoResult, /<toolSuccessBg>/);
-  assert.doesNotMatch(todoResult, /#1|#2|Checklist add|Added todo|completed/);
+  assert.match(todoResult, /#1/);
+  assert.match(todoResult, /#2/);
+  assert.doesNotMatch(todoResult, /<toolSuccessBg>|Added todo|completed/);
 });
 
 test("rpc zero-extension frontend provides Pi's custom entry renderer lookup", () => {

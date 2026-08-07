@@ -988,6 +988,18 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin-lib/item-commands.ts",
+      "built": "dist/core/rin-lib/item-commands.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-lib/item-tool.ts",
+      "built": "dist/core/rin-lib/item-tool.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin-lib/jiti-aliases.ts",
       "built": "dist/core/rin-lib/jiti-aliases.js",
       "ownerSuite": "unit",
@@ -1003,6 +1015,12 @@
       "source": "src/core/rin-lib/memory-task-config.ts",
       "built": "dist/core/rin-lib/memory-task-config.js",
       "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-lib/note-state.ts",
+      "built": "dist/core/rin-lib/note-state.js",
+      "ownerSuite": "integration",
       "status": "strict"
     },
     {

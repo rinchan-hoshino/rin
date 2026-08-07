@@ -4,6 +4,7 @@ import path from "node:path";
 import { isContextOverflow } from "@earendil-works/pi-ai/compat";
 
 import { applyBundledRinExtensionAliases } from "../rin-bundled-extensions.js";
+import itemCommandsExtension from "./item-commands.js";
 import noteCapability from "./note.js";
 import todoCapability from "./todo.js";
 import { loadRinAgentRuntime } from "./agent-runtime.js";
@@ -1279,6 +1280,14 @@ export async function createConfiguredAgentSession(
       settingsManager,
       resourceLoaderOptions: {
         ...piResourceLoaderOptions,
+        extensionFactories: [
+          {
+            name: "rin-core-items",
+            factory: itemCommandsExtension,
+            hidden: true,
+          },
+          ...((piResourceLoaderOptions.extensionFactories as any[]) || []),
+        ],
         additionalExtensionPaths: options.additionalExtensionPaths ?? [],
         noExtensions: options.noExtensions,
         additionalSkillPaths,

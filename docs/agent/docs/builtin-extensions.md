@@ -6,11 +6,11 @@ The live tool list remains authoritative for the current turn.
 
 ## Capability source map
 
-| Source                                   | Provides                                                                                                                                                                            | Configuration surface                                                                          | Agent route                                         |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, scheduled-task SDK workflows, agent-owned chat setup, token usage | built into Rin                                                                                 | use live tools, CLI, SDK, or topic docs             |
-| Browser/computer/mobile/search operation | browser, computer, mobile, or search tools supplied by the live runtime, plus documented practice patterns                                                                          | live tool list or external Pi extension config                                                 | read `practices/README.md`                          |
-| Daemon extension runtime                 | trusted long-running services, chat adapters, and external memory providers                                                                                                         | `settings.json -> rinExtensions.daemon` or trusted extension entries with `rinDaemonExtension` | inspect runtime state and relevant extension config |
+| Source                                   | Provides                                                                                                                                                                                  | Configuration surface                                                                          | Agent route                                         |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, note, scheduled-task SDK workflows, agent-owned chat setup, token usage | built into Rin                                                                                 | use live tools, CLI, SDK, or topic docs             |
+| Browser/computer/mobile/search operation | browser, computer, mobile, or search tools supplied by the live runtime, plus documented practice patterns                                                                                | live tool list or external Pi extension config                                                 | read `practices/README.md`                          |
+| Daemon extension runtime                 | trusted long-running services, chat adapters, and external memory providers                                                                                                               | `settings.json -> rinExtensions.daemon` or trusted extension entries with `rinDaemonExtension` | inspect runtime state and relevant extension config |
 
 ## Rin core capabilities
 
@@ -23,7 +23,7 @@ These capabilities are native Rin behavior rather than optional Pi extensions:
 - frozen session runtime: stable effective system prompt within a session until refresh or reload.
 - TUI input compatibility: Rin-owned compatibility handling for interactive input.
 - todo: `todo` tool and `/todos` command.
-- note: model-only session-branch scratch notes that survive compaction.
+- note: stable-ID session-branch continuity items, plus the `/notes` TUI viewer.
 - task: scheduled task workflows through the local Rin Agent SDK.
 - chat: agent-owned adapter setup, SDK/file workflows, stored-message lookup, and identity/trust data paths.
 - token usage: telemetry under `~/.rin/data/core/usage/usage.db` and the `rin usage` dashboard.
@@ -42,11 +42,11 @@ Rin core always provides todo support. It registers:
 - `todo`: current-branch execution checklist tool.
 - `/todos`: interactive TUI command for the current checklist.
 
-Todo state is checkpointed in Pi session custom entries and reconstructed from the current session branch, so forks and session branches can recover the matching checklist without relying on context-visible tool-result details or compaction summaries. In daemon/RPC chat turns, Rin may continue hidden work when a final answer appears while todo items remain incomplete; hidden continuations end when todos complete, when todo state stops changing, or after the continuation limit.
+Todo state is checkpointed in Pi session custom entries and reconstructed from the current session branch, so forks and session branches can recover the matching checklist without relying on context-visible tool-result details or compaction summaries. The tool exposes only full `read` plus item-level `add`, `edit`, and `remove`; stable IDs support middle insertion and atomic group removal. In daemon/RPC chat turns, Rin may continue hidden work when a final answer appears while todo items remain incomplete; hidden continuations end when todos complete, when todo state stops changing, or after the continuation limit.
 
 ## Core note
 
-Rin core registers the `note` tool for model-only scratch text. Its snapshots use session custom entries, preserving the selected branch across compaction without creating cross-session memory. Reads, whole-note writes, and edits reuse Pi's public schemas, execution, and results through virtual operations; read ranges remain Pi-native and optional, and edit diffs are returned unchanged. Rin adds only the note action wrapper and exact-text append. It has no slash command or dedicated user-facing display; standard tool-call rendering is not suppressed.
+Rin core registers the `note` tool and `/notes` TUI command for concise verified continuity. Note uses the same full `read` plus item-level `add`, `edit`, and `remove` contract as todo. Its stable-ID snapshots use session custom entries, preserving the selected branch across compaction without creating cross-session memory. Existing text-buffer snapshots reconstruct as one item; retired whole-buffer operations are not exposed.
 
 ## Bundled foreground extensions
 

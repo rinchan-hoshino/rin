@@ -147,65 +147,68 @@ test("core todo loads from configured runtime without extension paths", async ()
     try {
       const todoTool = configured.session.getToolDefinition("todo");
       assert.ok(todoTool);
-      assert.equal(
-        todoTool.description,
-        "Read or replace the current branch execution checklist.",
-      );
-      assert.match(todoTool.promptSnippet, /omitting todos/);
-      assert.match(todoTool.promptSnippet, /complete desired todos array/);
+      const commandNames = configured.session.extensionRunner
+        .getRegisteredCommands()
+        .map((command: any) => command.invocationName);
+      assert.equal(commandNames.includes("todos"), true);
+      assert.equal(commandNames.includes("notes"), true);
+      assert.match(todoTool.description, /stable item ID/);
+      assert.match(todoTool.promptSnippet, /add, edit, and remove/);
       assert.deepEqual(todoTool.promptGuidelines, [
         "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist.",
-        "Omit todos to read the current checklist. After compaction, use the current-branch snapshot re-injected by the trusted Rin runtime; never reconstruct it from the prose summary. If the injected snapshot is absent or uncertain, read before replacing the checklist. Pass the complete desired checklist to replace it; omitted items are removed. Rewrite it immediately when the task objective changes. Pass an empty todos array only to clear the checklist. Clear it before starting a new unrelated task.",
+        "Use action read for the full current list. Use add with items and optional beforeId, edit with exactly one id and item patch, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
+        "After compaction, trust the current-branch snapshot injected by Rin; never reconstruct it from prose. Remove obsolete items individually, and clear all before starting a new unrelated task.",
       ]);
 
-      const written = await todoTool.execute(
+      const added = await todoTool.execute(
         "tool-call-1",
-        { todos: [{ text: "Wire core todo" }] },
+        {
+          action: "add",
+          items: [{ text: "Wire core todo" }, { text: "Ship item writer" }],
+        },
         undefined,
         undefined,
         { cwd: agentDir },
       );
-      const rewritten = await todoTool.execute(
+      const edited = await todoTool.execute(
         "tool-call-2",
-        {
-          todos: [
-            { text: "Wire core todo", done: true },
-            { text: "Ship whole-list writer" },
-          ],
-        },
+        { action: "edit", id: 1, item: { done: true } },
         undefined,
         undefined,
         { cwd: agentDir },
       );
       const read = await todoTool.execute(
         "tool-call-3",
-        {},
+        { action: "read" },
         undefined,
         undefined,
         { cwd: agentDir },
       );
       const cleared = await todoTool.execute(
         "tool-call-4",
-        { todos: [] },
+        { action: "remove", all: true },
         undefined,
         undefined,
         { cwd: agentDir },
       );
 
-      assert.equal(written.content[0].text, "[ ] Wire core todo");
       assert.equal(
-        rewritten.content[0].text,
-        "[x] Wire core todo\n[ ] Ship whole-list writer",
+        added.content[0].text,
+        "[ ] #1 Wire core todo\n[ ] #2 Ship item writer",
       );
-      assert.deepEqual(rewritten.details.todos, [
+      assert.equal(
+        edited.content[0].text,
+        "[x] #1 Wire core todo\n[ ] #2 Ship item writer",
+      );
+      assert.deepEqual(edited.details.items, [
         { id: 1, text: "Wire core todo", done: true },
-        { id: 2, text: "Ship whole-list writer", done: false },
+        { id: 2, text: "Ship item writer", done: false },
       ]);
-      assert.equal(read.details.action, "list");
-      assert.deepEqual(read.details.todos, rewritten.details.todos);
-      assert.equal(cleared.details.action, "clear");
+      assert.equal(read.details.action, "read");
+      assert.deepEqual(read.details.items, edited.details.items);
+      assert.equal(cleared.details.action, "remove");
       assert.equal(cleared.content[0].text, "No todos");
-      assert.deepEqual(cleared.details.todos, []);
+      assert.deepEqual(cleared.details.items, []);
     } finally {
       await configured.runtime?.dispose?.().catch?.(() => {});
     }
@@ -253,16 +256,16 @@ test("core todo reconstructs from custom entries around interrupted tool results
     },
   } as any);
 
-  const invalidWrite = await todoTool.execute(
-    "tool-call-invalid-write",
-    { todos: [{ text: "" }] },
+  const invalidAdd = await todoTool.execute(
+    "tool-call-invalid-add",
+    { action: "add", items: [{ text: "" }] },
     undefined,
     undefined,
     {},
   );
 
-  assert.match(invalidWrite.content[0].text, /Error:/);
-  assert.deepEqual(invalidWrite.details.todos, [
+  assert.match(invalidAdd.content[0].text, /Error:/);
+  assert.deepEqual(invalidAdd.details.items, [
     { id: 1, text: "Preserve todo state", done: false },
   ]);
 });

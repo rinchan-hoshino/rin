@@ -1,225 +1,281 @@
 /**
  * Rin core note capability.
  *
- * The model owns one scratch note per session branch. Snapshots live only in
- * Pi session custom entries, so compaction and branch reconstruction preserve
- * the note without turning it into cross-session memory.
- *
- * Read, write, and edit delegate to Pi's public tool factories over virtual
- * operations. Rin owns only the note action wrapper, session persistence, and
- * append behavior.
+ * Verified continuity is stored as stable-ID items scoped to the selected
+ * session branch. Snapshots survive compaction without becoming cross-session
+ * memory.
  */
 
-import {
-  createEditTool,
-  createReadTool,
-  createWriteTool,
-  withFileMutationQueue,
-} from "@earendil-works/pi-coding-agent";
-import { resolve as resolvePath } from "node:path";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type {
   RinCapabilityContext,
   RinCapabilityDefinition,
 } from "./capability-types.js";
+import {
+  createItemToolParameters,
+  normalizeItemId,
+  normalizeNextItemId,
+  resolveInsertIndex,
+  resolveRemovalIds,
+  type ItemAction,
+  validateItemActionParams,
+} from "./item-tool.js";
+import {
+  readNoteSnapshotFromSession,
+  RIN_NOTE_CUSTOM_ENTRY_TYPE,
+  type RinNoteItem,
+} from "./note-state.js";
 
-export const RIN_NOTE_CUSTOM_ENTRY_TYPE = "rin.note";
+export { RIN_NOTE_CUSTOM_ENTRY_TYPE } from "./note-state.js";
+export { readNoteSnapshotFromSession } from "./note-state.js";
 
-const NOTE_VIRTUAL_CWD = process.cwd();
-const NOTE_VIRTUAL_PATH = ".rin-session-note.txt";
-const NOTE_MUTATION_QUEUE_PATH = resolvePath(
-  NOTE_VIRTUAL_CWD,
-  NOTE_VIRTUAL_PATH,
-);
-
-type NoteAction = "read" | "write" | "edit" | "append";
-
-const NOTE_ACTIONS: readonly NoteAction[] = ["read", "write", "edit", "append"];
-
-const NoteActionSchema = Type.Union(
-  [
-    Type.Literal("read"),
-    Type.Literal("write"),
-    Type.Literal("edit"),
-    Type.Literal("append"),
-  ],
-  {
-    description: "Operation to perform on the current session-branch note.",
-  },
-);
-
-function getLineCount(content: string): number {
-  return content === "" ? 0 : content.split("\n").length;
+interface NoteDetails {
+  action: ItemAction;
+  items: RinNoteItem[];
+  nextId: number;
+  error?: string;
 }
 
-export function readLatestNoteContent(sessionManager: any): string {
-  if (!sessionManager || typeof sessionManager.getBranch !== "function") {
-    return "";
-  }
+const NoteAddItemParams: any = Type.Object(
+  {
+    text: Type.String({
+      minLength: 1,
+      description: "One concise verified continuity fact.",
+    }),
+  },
+  { additionalProperties: false },
+);
 
-  let branch: any[];
-  try {
-    branch = sessionManager.getBranch();
-  } catch {
-    return "";
-  }
-  if (!Array.isArray(branch)) return "";
+const NoteEditItemParams: any = Type.Object(
+  {
+    text: Type.String({
+      minLength: 1,
+      description: "Complete replacement text for this one note item.",
+    }),
+  },
+  { additionalProperties: false },
+);
 
-  for (let index = branch.length - 1; index >= 0; index -= 1) {
-    const entry = branch[index];
-    if (
-      entry?.type === "custom" &&
-      entry.customType === RIN_NOTE_CUSTOM_ENTRY_TYPE &&
-      typeof entry.data?.content === "string"
-    ) {
-      return entry.data.content;
+const NoteParams: any = createItemToolParameters(
+  NoteAddItemParams,
+  NoteEditItemParams,
+);
+
+function normalizeAddItems(
+  value: unknown,
+): Array<{ text: string }> | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const items: Array<{ text: string }> = [];
+  for (const raw of value) {
+    const item = raw && typeof raw === "object" ? (raw as any) : null;
+    const text = typeof item?.text === "string" ? item.text.trim() : "";
+    if (!text || Object.keys(item).some((key) => key !== "text")) {
+      return undefined;
     }
+    items.push({ text });
   }
-  return "";
+  return items;
+}
+
+function normalizeEdit(value: unknown): { text: string } | undefined {
+  const item = value && typeof value === "object" ? (value as any) : null;
+  if (!item || Object.keys(item).some((key) => key !== "text")) {
+    return undefined;
+  }
+  const text = typeof item.text === "string" ? item.text.trim() : "";
+  return text ? { text } : undefined;
+}
+
+function formatNoteContent(items: RinNoteItem[]) {
+  if (items.length === 0) return "No notes";
+  return items.map((item) => `#${item.id} ${item.text}`).join("\n");
+}
+
+function formatNoteRender(items: RinNoteItem[], theme: Theme) {
+  if (items.length === 0) return theme.fg("dim", "○ No notes");
+  return items
+    .map(
+      (item) =>
+        `${theme.fg("accent", `#${item.id}`)} ${theme.fg("text", item.text)}`,
+    )
+    .join("\n");
+}
+
+function parseDetails(value: unknown): NoteDetails | undefined {
+  const details = value && typeof value === "object" ? (value as any) : null;
+  if (!details || !Array.isArray(details.items)) return undefined;
+  const items = details.items
+    .map((item: any) => {
+      const id = normalizeItemId(item?.id);
+      const text = typeof item?.text === "string" ? item.text.trim() : "";
+      return id === undefined || !text ? undefined : { id, text };
+    })
+    .filter((item: RinNoteItem | undefined): item is RinNoteItem =>
+      Boolean(item),
+    );
+  const action = ["read", "add", "edit", "remove"].includes(details.action)
+    ? details.action
+    : "read";
+  return {
+    action,
+    items,
+    nextId: normalizeNextItemId(items, details.nextId),
+    ...(typeof details.error === "string" ? { error: details.error } : {}),
+  };
+}
+
+function renderText(text: string) {
+  return new Text(text, 0, 0);
 }
 
 export default function noteCapability(): RinCapabilityDefinition {
-  let content = "";
+  let items: RinNoteItem[] = [];
+  let nextId = 1;
   let activeSessionManager: any;
 
-  const persist = (nextContent: string) => {
+  const details = (action: ItemAction, error?: string): NoteDetails => ({
+    action,
+    items: items.map((item) => ({ ...item })),
+    nextId,
+    ...(error ? { error } : {}),
+  });
+
+  const result = (action: ItemAction, error?: string) => ({
+    content: [
+      {
+        type: "text" as const,
+        text: error ? `Error: ${error}` : formatNoteContent(items),
+      },
+    ],
+    details: details(action, error),
+  });
+
+  const persist = (nextItems: RinNoteItem[], nextItemId: number) => {
     const appendCustomEntry = activeSessionManager?.appendCustomEntry;
     if (typeof appendCustomEntry !== "function") {
       throw new Error("session custom entries are not available");
     }
     appendCustomEntry.call(activeSessionManager, RIN_NOTE_CUSTOM_ENTRY_TYPE, {
-      content: nextContent,
+      items: nextItems.map((item) => ({ ...item })),
+      nextId: nextItemId,
     });
-    content = nextContent;
+    items = nextItems;
+    nextId = nextItemId;
   };
 
-  const piReadTool: any = createReadTool(NOTE_VIRTUAL_CWD, {
-    operations: {
-      async access() {},
-      async readFile() {
-        return Buffer.from(content, "utf8");
-      },
-      async detectImageMimeType() {
-        return undefined;
-      },
-    },
-  });
-
-  const piWriteTool: any = createWriteTool(NOTE_VIRTUAL_CWD, {
-    operations: {
-      async mkdir() {},
-      async writeFile(_absolutePath, nextContent) {
-        persist(nextContent);
-      },
-    },
-  });
-
-  const piEditTool: any = createEditTool(NOTE_VIRTUAL_CWD, {
-    operations: {
-      async access() {},
-      async readFile() {
-        return Buffer.from(content, "utf8");
-      },
-      async writeFile(_absolutePath, nextContent) {
-        persist(nextContent);
-      },
-    },
-  });
-
-  const NoteParams: any = Type.Object({
-    action: NoteActionSchema,
-    offset: piReadTool.parameters.properties.offset,
-    limit: piReadTool.parameters.properties.limit,
-    content: Type.Optional(piWriteTool.parameters.properties.content),
-    edits: Type.Optional(piEditTool.parameters.properties.edits),
-  });
+  const commit = (
+    action: ItemAction,
+    nextItems: RinNoteItem[],
+    nextItemId: number,
+  ) => {
+    try {
+      persist(nextItems, nextItemId);
+      return result(action);
+    } catch (error: any) {
+      return result(
+        action,
+        `failed to persist note state: ${String(error?.message || error)}`,
+      );
+    }
+  };
 
   const reconstructState = (ctx: RinCapabilityContext) => {
     activeSessionManager = ctx.sessionManager;
-    content = readLatestNoteContent(activeSessionManager);
+    const state = readNoteSnapshotFromSession({
+      sessionManager: activeSessionManager,
+    });
+    items = state.items.map((item) => ({ ...item }));
+    nextId = state.nextId;
   };
 
-  const noteToolDefinition: any = {
+  const tool: any = {
     name: "note",
-    label: "note",
+    label: "Notes",
     description:
-      "Maintain concise model-only factual continuity in the current session branch. It survives compaction. Store verified facts only; keep plans and pending actions in todo. Read uses Pi's optional offset and limit, write replaces the whole note, edit uses Pi's exact file-edit semantics, and append adds exact text.",
+      "Maintain concise verified session-branch continuity as stable-ID items. It survives compaction. Read always returns every item; add accepts one or more items and can insert before an ID; edit replaces one item; remove deletes selected IDs or clears all. Keep plans and pending actions in todo.",
     promptSnippet:
-      "Read or mutate factual continuity for the current session branch.",
+      "Read all continuity items or add, edit, and remove verified facts by stable ID.",
     promptGuidelines: [
       "Use note only for concise, verified facts that must survive compaction; keep plans, pending actions, and checklists in todo.",
-      "Use note read with Pi-native optional offset and limit. Use write for full replacement, edit for exact unique non-overlapping replacements, and append to add exact text at the end.",
+      "Use action read for the full current list. Use add with items and optional beforeId, edit with exactly one id and replacement item, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
     ],
     parameters: NoteParams,
 
-    async execute(toolCallId, params: any, signal, onUpdate, executionContext) {
-      const action = params?.action as NoteAction;
-      if (!NOTE_ACTIONS.includes(action)) {
-        throw new Error("invalid note action");
-      }
+    async execute(_toolCallId: string, params: any, signal?: AbortSignal) {
+      const validated = validateItemActionParams(params);
+      const action = validated.action ?? "read";
+      if (validated.error) return result(action, validated.error);
+      if (action === "read") return result("read");
+      if (signal?.aborted) return result(action, "operation aborted");
 
-      if (action === "read") {
-        return piReadTool.execute(
-          toolCallId,
-          {
-            path: NOTE_VIRTUAL_PATH,
-            ...(params.offset === undefined ? {} : { offset: params.offset }),
-            ...(params.limit === undefined ? {} : { limit: params.limit }),
-          },
-          signal,
-          onUpdate,
-          executionContext,
-        );
-      }
-
-      if (action === "write") {
-        if (typeof params.content !== "string") {
-          throw new Error(
-            "Write tool input is invalid. content must be a string.",
-          );
+      if (action === "add") {
+        const additions = normalizeAddItems(params.items);
+        if (!additions) {
+          return result("add", "add requires one or more valid note items");
         }
-        return piWriteTool.execute(
-          toolCallId,
-          { path: NOTE_VIRTUAL_PATH, content: params.content },
-          signal,
-          onUpdate,
-          executionContext,
-        );
+        const insertion = resolveInsertIndex(items, params.beforeId);
+        if (insertion.error) return result("add", insertion.error);
+        let allocatedId = nextId;
+        const added = additions.map((item) => ({ id: allocatedId++, ...item }));
+        const nextItems = items.map((item) => ({ ...item }));
+        nextItems.splice(insertion.index!, 0, ...added);
+        return commit("add", nextItems, allocatedId);
       }
 
       if (action === "edit") {
-        return piEditTool.execute(
-          toolCallId,
-          { path: NOTE_VIRTUAL_PATH, edits: params.edits },
-          signal,
-          onUpdate,
-          executionContext,
-        );
+        const id = normalizeItemId(params.id);
+        const edit = normalizeEdit(params.item);
+        if (id === undefined || !edit) {
+          return result(
+            "edit",
+            "edit requires one valid id and one replacement note item",
+          );
+        }
+        const index = items.findIndex((item) => item.id === id);
+        if (index < 0) return result("edit", `#${id} not found`);
+        const nextItems = items.map((item) => ({ ...item }));
+        nextItems[index] = { id, text: edit.text };
+        return commit("edit", nextItems, nextId);
       }
 
-      if (typeof params.content !== "string") {
-        throw new Error("append requires string content");
+      const removal = resolveRemovalIds(params, items);
+      if (removal.error) return result("remove", removal.error);
+      const nextItems = removal.clear
+        ? []
+        : items
+            .filter((item) => !removal.ids!.includes(item.id))
+            .map((item) => ({ ...item }));
+      return commit("remove", nextItems, removal.clear ? 1 : nextId);
+    },
+
+    renderCall(args: any, theme: Theme, context: any) {
+      if (context?.isPartial === false) return renderText("");
+      const action = String(args?.action || "").trim();
+      return renderText(
+        theme.fg("toolTitle", action ? `note ${action}` : "note …"),
+      );
+    },
+
+    renderResult(value: any, _options: any, theme: Theme) {
+      const parsed = parseDetails(value.details);
+      if (!parsed) {
+        const text = value.content?.[0];
+        return renderText(text?.type === "text" ? text.text : "");
       }
-      if (signal?.aborted) throw new Error("Operation aborted");
-      await withFileMutationQueue(NOTE_MUTATION_QUEUE_PATH, async () => {
-        if (signal?.aborted) throw new Error("Operation aborted");
-        persist(content + params.content);
-      });
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Appended to note (${getLineCount(content)} lines total)`,
-          },
-        ],
-        details: { action, lineCount: getLineCount(content) },
-      };
+      const notes = formatNoteRender(parsed.items, theme);
+      return renderText(
+        parsed.error
+          ? `${theme.fg("error", `Error: ${parsed.error}`)}\n${notes}`
+          : notes,
+      );
     },
   };
 
   return {
     name: "note",
-    tools: [noteToolDefinition],
+    tools: [tool],
     hooks: {
       session_start: [async (_event, ctx) => reconstructState(ctx)],
       session_tree: [async (_event, ctx) => reconstructState(ctx)],

@@ -436,28 +436,39 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
     "/owner/previous.jsonl",
   );
   assert.deepEqual(owner.capabilityOptions.disabledNames, ["disabled-owner"]);
-  assert.deepEqual(
-    owner.events.find(([name]: any[]) => name === "create-services")[1]
-      .resourceLoaderOptions,
-    {
-      ownerResource: true,
-      additionalExtensionPaths: ["/owner/extension"],
-      noExtensions: false,
-      additionalSkillPaths: [
-        "/owner/agent/self_improve/skills",
-        "/owner/agent/docs/rin/builtin-skills",
-        "/owner/extra-skill",
-      ],
-      noSkills: false,
-      additionalPromptTemplatePaths: ["/owner/prompt"],
-      noPromptTemplates: false,
-      additionalThemePaths: ["/owner/theme"],
-      noThemes: false,
-      noContextFiles: false,
-      systemPrompt: undefined,
-      appendSystemPrompt: undefined,
-    },
+  const resourceLoaderOptions = owner.events.find(
+    ([name]: any[]) => name === "create-services",
+  )[1].resourceLoaderOptions;
+  assert.equal(resourceLoaderOptions.extensionFactories.length, 1);
+  assert.equal(
+    resourceLoaderOptions.extensionFactories[0].name,
+    "rin-core-items",
   );
+  assert.equal(resourceLoaderOptions.extensionFactories[0].hidden, true);
+  assert.equal(
+    typeof resourceLoaderOptions.extensionFactories[0].factory,
+    "function",
+  );
+  const { extensionFactories: _extensionFactories, ...ordinaryResources } =
+    resourceLoaderOptions;
+  assert.deepEqual(ordinaryResources, {
+    ownerResource: true,
+    additionalExtensionPaths: ["/owner/extension"],
+    noExtensions: false,
+    additionalSkillPaths: [
+      "/owner/agent/self_improve/skills",
+      "/owner/agent/docs/rin/builtin-skills",
+      "/owner/extra-skill",
+    ],
+    noSkills: false,
+    additionalPromptTemplatePaths: ["/owner/prompt"],
+    noPromptTemplates: false,
+    additionalThemePaths: ["/owner/theme"],
+    noThemes: false,
+    noContextFiles: false,
+    systemPrompt: undefined,
+    appendSystemPrompt: undefined,
+  });
 
   assert.equal(configured.session.settingsManager.getSteeringMode(), "all");
   configured.session.settingsManager.settings.steeringMode = "one-at-a-time";

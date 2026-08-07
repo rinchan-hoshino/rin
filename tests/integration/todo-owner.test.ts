@@ -8,8 +8,8 @@ const todoModule = await importBuiltModule<
 >("dist/core/rin-lib/todo.js");
 
 const theme = {
-  fg(_color: string, text: string) {
-    return text;
+  fg(_color: string, text: unknown) {
+    return String(text);
   },
 };
 
@@ -28,240 +28,128 @@ async function setup(
   await capability.hooks?.session_start?.[0]?.({}, { sessionManager } as any);
   return {
     capability,
-    tool: capability.tools[0] as any,
+    tool: capability.tools![0] as any,
     entries,
     sessionManager,
   };
 }
 
-test("todo owner replaces, reads, clears, validates, and restores branch checkpoints", async () => {
-  const { capability, tool, entries, sessionManager } = await setup();
-  assert.equal(capability.name, "todo");
-  assert.deepEqual(Object.keys((tool.parameters as any).properties), ["todos"]);
-
-  const initial = await tool.execute("read", {}, undefined, undefined, {});
-  assert.equal(initial.details.action, "list");
-  assert.equal(initial.content[0].text, "No todos");
-
-  const invalid = await tool.execute(
-    "invalid",
-    { todos: [{ text: "  " }] },
-    undefined,
-    undefined,
-    {},
-  );
-  assert.equal(invalid.details.action, "write");
-  assert.match(invalid.details.error, /complete array/);
-
-  const written = await tool.execute(
-    "write",
-    { todos: [{ text: " First " }, { text: "Done", done: true }] },
-    undefined,
-    undefined,
-    {},
-  );
-  assert.deepEqual(written.details.todos, [
-    { id: 1, text: "First", done: false },
-    { id: 2, text: "Done", done: true },
-  ]);
-  assert.equal(written.details.nextId, 3);
-  assert.equal(written.content[0].text, "[ ] First\n[x] Done");
-  assert.equal(entries.length, 1);
-
-  const readNull = await tool.execute(
-    "read-null",
-    { todos: null },
-    undefined,
-    undefined,
-    {},
-  );
-  assert.deepEqual(readNull.details.todos, written.details.todos);
-
-  const cleared = await tool.execute(
-    "clear",
-    { todos: [] },
-    undefined,
-    undefined,
-    {},
-  );
-  assert.equal(cleared.details.action, "clear");
-  assert.equal(cleared.details.nextId, 1);
-
-  entries.push({
-    type: "custom",
-    customType: "rin.todo",
-    data: {
-      todos: [
-        { id: 4, text: " Restored ", done: 1 },
-        { id: "bad", text: "ignored" },
-        null,
-      ],
-      nextId: "bad",
+test("todo owner preserves insertion order while reconstructing branch checkpoints", async () => {
+  const entries = [
+    {
+      type: "custom",
+      customType: "rin.todo",
+      data: {
+        todos: [
+          { id: 3, text: "inserted first", done: false },
+          { id: 1, text: "older second", done: true },
+        ],
+        nextId: 4,
+      },
     },
-  });
-  await capability.hooks?.session_tree?.[0]?.({}, { sessionManager } as any);
-  const restored = await tool.execute(
-    "restored",
-    undefined,
+  ];
+  const { tool } = await setup(entries);
+  const read = await tool.execute(
+    "read",
+    { action: "read" },
     undefined,
     undefined,
     {},
   );
-  assert.deepEqual(restored.details.todos, [
-    { id: 4, text: "Restored", done: true },
+  assert.deepEqual(read.details.items, [
+    { id: 3, text: "inserted first", done: false },
+    { id: 1, text: "older second", done: true },
   ]);
-  assert.equal(restored.details.nextId, 5);
 });
 
-test("todo owner reports persistence errors without mutating the accepted checklist", async () => {
-  const { tool } = await setup([], { appendCustomEntry: undefined });
-  const result = await tool.execute(
-    "write",
-    { todos: [{ text: "Cannot persist" }] },
-    undefined,
-    undefined,
-    {},
-  );
-  assert.match(
-    result.details.error,
-    /session custom entries are not available/,
-  );
-  assert.deepEqual(result.details.todos, []);
-
-  const throwing = await setup([], {
+test("todo owner reports thrown persistence values without mutating accepted state", async () => {
+  const { tool } = await setup([], {
     appendCustomEntry() {
       throw "disk failed";
     },
   });
-  const stringError = await throwing.tool.execute(
-    "write",
-    { todos: [{ text: "Cannot persist" }] },
+  const result = await tool.execute(
+    "add",
+    { action: "add", items: [{ text: "Cannot persist" }] },
     undefined,
     undefined,
     {},
   );
-  assert.match(stringError.details.error, /disk failed/);
+  assert.match(result.details.error, /disk failed/);
+  assert.deepEqual(result.details.items, []);
 });
 
-test("todo owner renders calls and results from normalized public details", async () => {
+test("todo owner renders normalized calls, results, errors, and fallbacks", async () => {
   const { tool } = await setup();
-  const partial = tool
-    .renderCall(
-      {
-        todos: Array.from({ length: 7 }, (_, index) => ({
-          text: `Item ${index + 1}`,
-          done: index === 0,
-        })),
-      },
-      theme,
-      { isPartial: true },
-    )
-    .render(80)
-    .join("\n");
-  assert.match(partial, /✓ Item 1/);
-  assert.match(partial, /○ Item 7/);
-  assert.doesNotMatch(partial, /… 2 more/);
-  const streamed = tool
-    .renderCall(
-      { todos: [null, { text: " Streamed " }, { text: "" }] },
-      theme,
-      { isPartial: true, argsComplete: false },
-    )
-    .render(80)
-    .join("");
-  assert.match(streamed, /Streamed/);
   assert.match(
     tool
-      .renderCall({ todos: "pending" }, theme, {
-        isPartial: true,
-        argsComplete: false,
-      })
+      .renderCall({ action: "add" }, theme, { isPartial: true })
       .render(80)
       .join(""),
-    /…/,
+    /todo add/,
+  );
+  assert.match(
+    tool.renderCall({}, theme, { isPartial: true }).render(80).join(""),
+    /todo …/,
   );
   assert.equal(
     tool.renderCall({}, theme, { isPartial: false }).render(80).join(""),
     "",
   );
-  assert.equal(
-    tool
-      .renderCall({ todos: "bad" }, theme, { isPartial: true })
-      .render(80)
-      .join(""),
-    "",
-  );
 
-  const fallback = tool
-    .renderResult(
-      { content: [{ type: "text", text: "fallback" }] },
-      { expanded: false },
-      theme,
-      {},
-    )
-    .render(80)
-    .join("\n");
-  assert.equal(fallback.trimEnd(), "fallback");
-
-  const compact = tool
+  const rendered = tool
     .renderResult(
       {
         content: [{ type: "text", text: "" }],
         details: {
-          action: "unknown",
-          todos: Array.from({ length: 7 }, (_, index) => ({
-            id: index + 1,
-            text: `Item ${index + 1}`,
-            done: false,
-          })),
-          nextId: 8,
+          action: "read",
+          items: [
+            { id: 1, text: "Open", done: false },
+            { id: 2, text: "Done", done: true },
+          ],
+          nextId: 3,
         },
       },
-      { expanded: false },
+      {},
       theme,
       {},
     )
     .render(80)
     .join("\n");
-  assert.match(compact, /○ Item 7/);
-  assert.doesNotMatch(compact, /… 2 more/);
+  assert.match(rendered, /○ #1 Open/);
+  assert.match(rendered, /✓ #2 Done/);
 
-  const expandedError = tool
+  const error = tool
     .renderResult(
       {
         content: [{ type: "text", text: "" }],
         details: {
-          action: "write",
-          todos: [{ id: 1, text: "Kept", done: false }],
+          action: "edit",
+          items: [{ id: 1, text: "Kept", done: false }],
           nextId: 2,
           error: "failed",
         },
       },
-      { expanded: true },
+      {},
       theme,
       {},
     )
     .render(80)
     .join("\n");
-  assert.equal(
-    expandedError
-      .split("\n")
-      .map((line: string) => line.trimEnd())
-      .join("\n"),
-    "Error: failed\n○ Kept",
-  );
+  assert.match(error, /^Error: failed/);
+  assert.match(error, /○ #1 Kept/);
 
-  const empty = tool
-    .renderResult(
-      {
-        content: [{ type: "image" }],
-        details: { action: "list", todos: [], nextId: 1 },
-      },
-      { expanded: false },
-      theme,
-      {},
-    )
-    .render(80)
-    .join("\n");
-  assert.equal(empty.trimEnd(), "○ No todos");
+  assert.equal(
+    tool
+      .renderResult(
+        { content: [{ type: "text", text: "fallback" }] },
+        {},
+        theme,
+        {},
+      )
+      .render(80)
+      .join("")
+      .trimEnd(),
+    "fallback",
+  );
 });

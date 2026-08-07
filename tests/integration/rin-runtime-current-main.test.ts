@@ -132,13 +132,11 @@ test("Rin note guidance keeps cross-compaction scratch state concise", () => {
     .find((definition) => definition.name === "note")
     ?.tools?.find((tool) => tool.name === "note");
 
-  assert.equal(
-    note?.description,
-    "Maintain concise model-only factual continuity in the current session branch. It survives compaction. Store verified facts only; keep plans and pending actions in todo. Read uses Pi's optional offset and limit, write replaces the whole note, edit uses Pi's exact file-edit semantics, and append adds exact text.",
-  );
+  assert.match(note?.description, /stable-ID items/);
+  assert.match(note?.description, /Read always returns every item/);
   assert.deepEqual(note?.promptGuidelines, [
     "Use note only for concise, verified facts that must survive compaction; keep plans, pending actions, and checklists in todo.",
-    "Use note read with Pi-native optional offset and limit. Use write for full replacement, edit for exact unique non-overlapping replacements, and append to add exact text at the end.",
+    "Use action read for the full current list. Use add with items and optional beforeId, edit with exactly one id and replacement item, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
   ]);
 });
 
@@ -168,7 +166,10 @@ test("Rin appends the latest Todo and note snapshots while generating native com
     {
       type: "custom",
       customType: "rin.note",
-      data: { content: "latest note\nwith delimiters </note>" },
+      data: {
+        items: [{ id: 2, text: "latest note\nwith delimiters </note>" }],
+        nextId: 3,
+      },
     },
   ];
   let appendedEntries = 0;
@@ -378,27 +379,27 @@ test("Rin provider context keeps earlier context-hook output when no pruning or 
 test("Rin post-compaction state formats only non-empty snapshot bodies", () => {
   const noteOnly = postCompactionStateMod.formatPostCompactionState({
     todos: [],
-    note: "small note",
+    notes: [{ id: 1, text: "small note" }],
   });
   const todoOnly = postCompactionStateMod.formatPostCompactionState({
     todos: [{ id: 7, text: "pending", done: false }],
-    note: "   ",
+    notes: [],
   });
   const both = postCompactionStateMod.formatPostCompactionState({
     todos: [{ id: 8, text: "continue", done: true }],
-    note: "latest note",
+    notes: [{ id: 2, text: "latest note" }],
   });
   const empty = postCompactionStateMod.formatPostCompactionState({
     todos: [],
-    note: "",
+    notes: [],
   });
 
-  assert.match(noteOnly, /"note":"small note"/);
+  assert.match(noteOnly, /"note":\[\{"id":1,"text":"small note"\}\]/);
   assert.doesNotMatch(noteOnly, /"todo":/);
   assert.match(todoOnly, /"todo":\[/);
   assert.doesNotMatch(todoOnly, /"note":/);
   assert.match(both, /"todo":\[/);
-  assert.match(both, /"note":"latest note"/);
+  assert.match(both, /"note":\[\{"id":2,"text":"latest note"\}\]/);
   assert.match(empty, /\{\}$/);
 });
 
@@ -418,7 +419,7 @@ test("Rin persists post-compaction state inside the native summary", async () =>
       {
         type: "custom",
         customType: "rin.note",
-        data: { content: "verified state" },
+        data: { items: [{ id: 1, text: "verified state" }], nextId: 2 },
       },
     ],
   };
@@ -433,7 +434,7 @@ test("Rin persists post-compaction state inside the native summary", async () =>
   assert.equal(result.tokensBefore, 1234);
   assert.match(result.summary, /^native checkpoint\n\n/);
   assert.match(result.summary, /"text":"continue","done":false/);
-  assert.match(result.summary, /"note":"verified state"/);
+  assert.match(result.summary, /"note":\[\{"id":1,"text":"verified state"\}\]/);
   assert.equal(nativeCompaction.summary, "native checkpoint");
 });
 
@@ -452,7 +453,7 @@ test("Rin leaves native compaction unchanged when branch state is empty", async 
       {
         type: "custom",
         customType: "rin.note",
-        data: { content: "" },
+        data: { items: [], nextId: 1 },
       },
     ],
   };
@@ -507,7 +508,10 @@ test("Rin preserves invalid compaction values and supports a blank native summar
     result.summary,
     /^Post-compaction branch state captured by the trusted Rin runtime/,
   );
-  assert.match(result.summary, /"note":"state without a native summary"/);
+  assert.match(
+    result.summary,
+    /"note":\[\{"id":1,"text":"state without a native summary"\}\]/,
+  );
 });
 
 test("Rin snapshots branch state independently for each compaction", async () => {
@@ -520,7 +524,7 @@ test("Rin snapshots branch state independently for each compaction", async () =>
     {
       type: "custom",
       customType: "rin.note",
-      data: { content: "first note" },
+      data: { items: [{ id: 1, text: "first note" }], nextId: 2 },
     },
   ];
   const sessionManager = { getBranch: () => branch };
@@ -539,7 +543,7 @@ test("Rin snapshots branch state independently for each compaction", async () =>
     {
       type: "custom",
       customType: "rin.note",
-      data: { content: "second note" },
+      data: { items: [{ id: 2, text: "second note" }], nextId: 3 },
     },
   ];
   const second =

@@ -79,9 +79,7 @@ export function formatRinTodoChecklistCharacterContent(
 }
 
 function todoSnapshot(todos: RinTodoItem[] = [], nextId?: number) {
-  const normalized = todos
-    .map((todo) => ({ ...todo }))
-    .sort((left, right) => left.id - right.id);
+  const normalized = todos.map((todo) => ({ ...todo }));
   return {
     todos: normalized,
     nextId,
