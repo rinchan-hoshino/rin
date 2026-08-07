@@ -246,6 +246,87 @@ test("Rin provider context never synthesizes post-compaction state", async () =>
   assert.equal(result, undefined);
 });
 
+test("Rin provider context preserves an append-only prefix between expected bucket rollovers", async () => {
+  const definitions = runtimeMod.createRinCapabilityDefinitions({
+    cwd: "/tmp/rin-provider-prefix-stability",
+    agentDir: "/tmp/rin-provider-prefix-stability-agent",
+    getThinkingLevel: () => "medium",
+    sendMessage: () => {},
+  });
+  const hook = definitions.find(
+    (definition) => definition.name === "rin_provider_bound_context",
+  )?.hooks?.context?.[0];
+  assert.equal(typeof hook, "function");
+
+  const sessionManager = {
+    getBranch: () => [
+      {
+        type: "custom",
+        customType: "rin.todo",
+        data: {
+          todos: [{ id: 1, text: "keep prefix stable", done: false }],
+          nextId: 2,
+        },
+      },
+      {
+        type: "custom",
+        customType: "rin.note",
+        data: { content: "stable branch state" },
+      },
+    ],
+  };
+  const generation = pruningTailPadding(165);
+  generation[0] = {
+    role: "compactionSummary",
+    summary: "checkpoint with persisted branch state",
+  };
+  generation[1] = {
+    role: "toolResult",
+    toolCallId: "old-first-bucket",
+    content: "first bucket output",
+  };
+  generation[32] = {
+    role: "toolResult",
+    toolCallId: "old-second-bucket",
+    content: "second bucket output",
+  };
+
+  let previousProviderContext: any[] | undefined;
+  const observedResetLengths: number[] = [];
+  for (let length = 129; length <= generation.length; length += 1) {
+    const input = generation.slice(0, length);
+    const result = await hook(
+      { type: "context", messages: input },
+      { sessionManager },
+    );
+    const providerContext = result?.messages ?? input;
+
+    assert.equal(
+      providerContext.some(
+        (message) => message?.customType === "rin.post_compaction_state",
+      ),
+      false,
+    );
+    if (previousProviderContext) {
+      const previousLength = previousProviderContext.length;
+      const currentPrefix = providerContext.slice(0, previousLength);
+      if (length === 161) {
+        assert.notDeepEqual(currentPrefix, previousProviderContext);
+        observedResetLengths.push(length);
+      } else {
+        assert.deepEqual(
+          currentPrefix,
+          previousProviderContext,
+          `provider prefix changed unexpectedly at message length ${length}`,
+        );
+      }
+    }
+    previousProviderContext = structuredClone(providerContext);
+  }
+
+  assert.deepEqual(observedResetLengths, [161]);
+});
+
 test("Rin provider context keeps earlier context-hook output when no pruning or injection is needed", async () => {
   const options = {
     cwd: "/tmp/rin-context-noop",
