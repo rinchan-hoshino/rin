@@ -1,9 +1,11 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { networkIsolatedNodeInvocation } from "./network-isolated-process.js";
+import { mapWithConcurrency } from "./parallel.js";
 import { requireTestContainer } from "./require-test-container.js";
 import { createTestProcessEnvironment } from "./test-process-environment.js";
 
@@ -26,6 +28,7 @@ const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
+const isolatedProcessJobs = Math.min(4, os.availableParallelism());
 
 export function findTestFiles(suites: readonly TestSuite[]): string[] {
   const files: string[] = [];
@@ -43,54 +46,72 @@ export function findTestFiles(suites: readonly TestSuite[]): string[] {
   return files.sort();
 }
 
-export function runTestSuites(
+export async function runTestSuites(
   suites: readonly TestSuite[],
   options: { concurrency?: number; extraNodeArgs?: string[] } = {},
-): number {
+): Promise<number> {
   requireTestContainer();
   const files = findTestFiles(suites);
   if (files.length === 0)
     throw new Error(`test_suite_empty:${suites.join(",")}`);
 
-  const groups = suites.includes("characterization")
-    ? files.map((file) => [file])
-    : [files];
-  for (const [index, group] of groups.entries()) {
-    const sandbox = createTestProcessEnvironment(
-      `test-${suites.join("-")}-${index}`,
-    );
-    try {
-      const invocation = networkIsolatedNodeInvocation(
-        [
-          "--import",
-          "tsx",
-          "scripts/test/run-node-tests.ts",
-          "--import",
-          "tsx",
-          "--test",
-          "--test-reporter=tap",
-          `--test-concurrency=${options.concurrency ?? (suites.includes("system") ? 2 : 4)}`,
-          ...(options.extraNodeArgs ?? []),
-          ...group,
-        ],
-        sandbox.env,
+  const isolatesFiles = suites.includes("characterization");
+  const groups = isolatesFiles ? files.map((file) => [file]) : [files];
+  const statuses = await mapWithConcurrency(
+    groups,
+    isolatesFiles ? isolatedProcessJobs : 1,
+    async (group, index) => {
+      const sandbox = createTestProcessEnvironment(
+        `test-${suites.join("-")}-${index}`,
       );
-      const result = spawnSync(invocation.command, invocation.args, {
-        cwd: rootDir,
-        env: invocation.env,
-        stdio: "inherit",
-      });
-
-      if (result.error) throw result.error;
-      if (result.status !== 0) return result.status ?? 1;
-    } finally {
-      sandbox.cleanup();
-    }
-  }
-  return 0;
+      let result: { status: number | null; stdout: string; stderr: string };
+      try {
+        const invocation = networkIsolatedNodeInvocation(
+          [
+            "--import",
+            "tsx",
+            "scripts/test/run-node-tests.ts",
+            "--import",
+            "tsx",
+            "--test",
+            "--test-reporter=tap",
+            `--test-concurrency=${options.concurrency ?? (suites.includes("system") ? 2 : 4)}`,
+            ...(options.extraNodeArgs ?? []),
+            ...group,
+          ],
+          sandbox.env,
+        );
+        result = await new Promise((resolve, reject) => {
+          const child = spawn(invocation.command, invocation.args, {
+            cwd: rootDir,
+            env: invocation.env,
+            stdio: ["inherit", "pipe", "pipe"],
+          });
+          const stdout: Buffer[] = [];
+          const stderr: Buffer[] = [];
+          child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+          child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+          child.once("error", reject);
+          child.once("close", (status) =>
+            resolve({
+              status,
+              stdout: Buffer.concat(stdout).toString("utf8"),
+              stderr: Buffer.concat(stderr).toString("utf8"),
+            }),
+          );
+        });
+      } finally {
+        sandbox.cleanup();
+      }
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      return result.status ?? 1;
+    },
+  );
+  return statuses.find((status) => status !== 0) ?? 0;
 }
 
-function main() {
+async function main() {
   const requested = process.argv.slice(2);
   const suites = requested.length > 0 ? requested : TEST_SUITES;
   for (const suite of suites) {
@@ -98,12 +119,12 @@ function main() {
       throw new Error(`unknown_test_suite:${suite}`);
     }
   }
-  process.exitCode = runTestSuites(suites as TestSuite[]);
+  process.exitCode = await runTestSuites(suites as TestSuite[]);
 }
 
 if (
   process.argv[1] &&
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  main();
+  await main();
 }

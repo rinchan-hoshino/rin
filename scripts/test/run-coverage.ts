@@ -1,5 +1,6 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,6 +16,7 @@ import {
   verifyRatchetMetric,
 } from "./coverage-ownership.js";
 import { networkIsolatedNodeInvocation } from "./network-isolated-process.js";
+import { mapWithConcurrency } from "./parallel.js";
 import { requireTestContainer } from "./require-test-container.js";
 import { findTestFiles, TEST_SUITES } from "./run-test-suite.js";
 import { createTestProcessEnvironment } from "./test-process-environment.js";
@@ -34,14 +36,18 @@ function readJson<T>(relativePath: string): T {
   return JSON.parse(fs.readFileSync(path.join(rootDir, relativePath), "utf8"));
 }
 
-function runCoverage(options: {
+const coverageJobs = Math.min(4, os.availableParallelism());
+
+type CoverageRunOptions = {
   name: string;
   tests: string[];
   includes: string[];
   concurrency: number;
   preloads?: string[];
   detailed?: boolean;
-}) {
+};
+
+async function runCoverage(options: CoverageRunOptions) {
   const reportDir = path.join(rootDir, "coverage", options.name);
   fs.rmSync(reportDir, { recursive: true, force: true });
   fs.mkdirSync(reportDir, { recursive: true });
@@ -50,7 +56,7 @@ function runCoverage(options: {
   const sandbox = createTestProcessEnvironment(
     `coverage-${options.name.replaceAll("/", "-")}`,
   );
-  let result: ReturnType<typeof spawnSync>;
+  let result: { status: number | null; stdout: string; stderr: string };
   try {
     const invocation = networkIsolatedNodeInvocation(
       [
@@ -81,16 +87,33 @@ function runCoverage(options: {
       ],
       sandbox.env,
     );
-    result = spawnSync(invocation.command, invocation.args, {
-      cwd: rootDir,
-      env: invocation.env,
-      stdio: "inherit",
+    result = await new Promise((resolve, reject) => {
+      const child = spawn(invocation.command, invocation.args, {
+        cwd: rootDir,
+        env: invocation.env,
+        stdio: ["inherit", "pipe", "pipe"],
+      });
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+      child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+      child.once("error", reject);
+      child.once("close", (status) =>
+        resolve({
+          status,
+          stdout: Buffer.concat(stdout).toString("utf8"),
+          stderr: Buffer.concat(stderr).toString("utf8"),
+        }),
+      );
     });
   } finally {
     sandbox.cleanup();
   }
-  if (result.error) throw result.error;
-  if (result.status !== 0) process.exit(result.status ?? 1);
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.status !== 0) {
+    throw new Error(`coverage_process_failed:${options.name}:${result.status}`);
+  }
 
   if (options.detailed) {
     const raw = readJson<
@@ -161,9 +184,8 @@ function verifyMetric(
   }
 }
 
-function runUnitCoverage(selectedTest?: string) {
+async function runUnitCoverage(selectedTest?: string) {
   const catalog = readJson<UnitCatalog>("tests/unit/catalog.json");
-  const failures: string[] = [];
   const modules = selectedTest
     ? catalog.modules.filter((module) => module.test === selectedTest)
     : catalog.modules;
@@ -171,133 +193,169 @@ function runUnitCoverage(selectedTest?: string) {
     throw new Error(`unit_coverage_owner_not_found:${selectedTest}`);
   }
 
-  for (const module of modules) {
-    if (!fs.existsSync(path.join(rootDir, module.built))) {
-      failures.push(`${module.built} built module missing`);
-      continue;
-    }
-    const reportName = `unit/${module.source
-      .slice("src/".length)
-      .replace(/\.ts$/, "")
-      .replaceAll("/", "-")}`;
-    const summary = runCoverage({
-      name: reportName,
-      tests: [module.test],
-      includes: [module.built],
-      concurrency: 1,
-      detailed: selectedTest !== undefined,
-    });
-    const actual = summaryFor(summary, module.built);
-    if (!actual) {
-      failures.push(`${module.built} coverage summary missing`);
-      continue;
-    }
-    for (const name of metricNames) {
-      verifyMetric(
-        failures,
-        module.built,
-        name,
-        actual[name],
-        catalog.thresholds[name],
-        "strict unit threshold",
-      );
-    }
-  }
+  const moduleFailures = await mapWithConcurrency(
+    modules,
+    selectedTest ? 1 : coverageJobs,
+    async (module) => {
+      const failures: string[] = [];
+      if (!fs.existsSync(path.join(rootDir, module.built))) {
+        return [`${module.built} built module missing`];
+      }
+      const reportName = `unit/${module.source
+        .slice("src/".length)
+        .replace(/\.ts$/, "")
+        .replaceAll("/", "-")}`;
+      const summary = await runCoverage({
+        name: reportName,
+        tests: [module.test],
+        includes: [module.built],
+        concurrency: 1,
+        detailed: selectedTest !== undefined,
+      });
+      const actual = summaryFor(summary, module.built);
+      if (!actual) return [`${module.built} coverage summary missing`];
+      for (const name of metricNames) {
+        verifyMetric(
+          failures,
+          module.built,
+          name,
+          actual[name],
+          catalog.thresholds[name],
+          "strict unit threshold",
+        );
+      }
+      return failures;
+    },
+  );
+  const failures = moduleFailures.flat();
 
   if (failures.length > 0) {
     throw new Error(`unit_coverage_failed:\n${failures.join("\n")}`);
   }
   console.log(
-    `Unit coverage: ${modules.length} modules meet per-file thresholds.`,
+    `Unit coverage: ${modules.length} modules meet per-file thresholds (${coverageJobs} workers).`,
   );
 }
 
-function runNonUnitOwnerCoverage(
+async function runNonUnitOwnerCoverage(
   policy: CoveragePolicy,
   selectedSource?: string,
 ) {
+  type NonUnitEntry = {
+    source: string;
+    built: string;
+    suite: "integration" | "system";
+    tests: string[];
+    preloads?: string[];
+    node22DynamicImportUncoveredBranches?: number;
+  };
   const catalog = readJson<{
     thresholds: CoveragePolicy["thresholds"];
-    modules: Array<{
-      source: string;
-      built: string;
-      suite: "integration" | "system";
-      tests: string[];
-      preloads?: string[];
-      node22DynamicImportUncoveredBranches?: number;
-    }>;
+    modules: NonUnitEntry[];
   }>("tests/non-unit/catalog.json");
-  const failures: string[] = [];
   const strictModules = policy.modules.filter(
     (module) => module.status === "strict" && module.ownerSuite !== "unit",
   );
 
-  const entries = selectedSource
-    ? catalog.modules.filter((entry) => entry.source === selectedSource)
-    : catalog.modules;
-  if (entries.length === 0) {
+  const indexedEntries = catalog.modules
+    .map((entry, index) => ({ entry, index }))
+    .filter(({ entry }) => !selectedSource || entry.source === selectedSource);
+  if (indexedEntries.length === 0) {
     throw new Error(`non_unit_coverage_owner_not_found:${selectedSource}`);
   }
 
-  for (const [index, entry] of entries.entries()) {
-    const module = strictModules.find(
-      (candidate) =>
-        candidate.source === entry.source &&
-        candidate.built === entry.built &&
-        candidate.ownerSuite === entry.suite,
-    );
-    if (!module) {
-      failures.push(`non_unit_catalog_owner_mismatch:${entry.source}`);
-      continue;
-    }
-    if (!fs.existsSync(path.join(rootDir, entry.built))) {
-      failures.push(`${entry.built} built module missing`);
-      continue;
-    }
-    const plan = {
-      suite: entry.suite,
-      tests: entry.tests,
-      includes: [entry.built],
-    };
-    const summary = relativeCoverageSummary(
-      runCoverage({
-        name: `owner/${entry.suite}/${index}`,
-        tests: entry.tests,
-        includes: [entry.built],
-        concurrency: entry.suite === "system" ? 2 : 1,
-        preloads: entry.preloads,
-        detailed: selectedSource !== undefined,
-      }),
-    );
-    const node22Allowance = entry.node22DynamicImportUncoveredBranches ?? 0;
-    if (
-      node22Allowance > 0 &&
-      Number(process.versions.node.split(".")[0]) === 22
-    ) {
-      const actual = summary[entry.built];
-      if (!actual) {
-        failures.push(`${entry.built} coverage summary missing`);
-      } else {
-        try {
-          actual.branches = normalizeNode22DynamicImportBranches(
-            actual.branches,
-            node22Allowance,
-            22,
-          );
-          console.log(
-            `${entry.built}: normalized ${node22Allowance} Node 22 V8 dynamic-import branch artifacts.`,
-          );
-        } catch (error) {
-          failures.push(
-            `${entry.built} ${error instanceof Error ? error.message : String(error)}`,
-          );
+  const groupedPlans = new Map<
+    string,
+    { index: number; entries: NonUnitEntry[] }
+  >();
+  for (const { entry, index } of indexedEntries) {
+    const key = selectedSource
+      ? String(index)
+      : JSON.stringify([entry.suite, entry.tests, entry.preloads ?? []]);
+    const existing = groupedPlans.get(key);
+    if (existing) existing.entries.push(entry);
+    else groupedPlans.set(key, { index, entries: [entry] });
+  }
+  const plans = [...groupedPlans.values()];
+  const planFailures = await mapWithConcurrency(
+    plans,
+    selectedSource ? 1 : coverageJobs,
+    async ({ index, entries }) => {
+      const failures: string[] = [];
+      const owned = entries.flatMap((entry) => {
+        const module = strictModules.find(
+          (candidate) =>
+            candidate.source === entry.source &&
+            candidate.built === entry.built &&
+            candidate.ownerSuite === entry.suite,
+        );
+        if (!module) {
+          failures.push(`non_unit_catalog_owner_mismatch:${entry.source}`);
+          return [];
+        }
+        if (!fs.existsSync(path.join(rootDir, entry.built))) {
+          failures.push(`${entry.built} built module missing`);
+          return [];
+        }
+        return [{ entry, module }];
+      });
+      if (owned.length === 0) return failures;
+
+      const first = owned[0]?.entry as NonUnitEntry;
+      const plan = {
+        suite: first.suite,
+        tests: first.tests,
+        includes: owned.map(({ entry }) => entry.built),
+      };
+      const summary = relativeCoverageSummary(
+        await runCoverage({
+          name: `owner/${first.suite}/${index}`,
+          tests: first.tests,
+          includes: plan.includes,
+          concurrency: first.suite === "system" ? 2 : 1,
+          preloads: first.preloads,
+          detailed: selectedSource !== undefined,
+        }),
+      );
+      for (const { entry } of owned) {
+        const node22Allowance = entry.node22DynamicImportUncoveredBranches ?? 0;
+        if (
+          node22Allowance > 0 &&
+          Number(process.versions.node.split(".")[0]) === 22
+        ) {
+          const actual = summary[entry.built];
+          if (!actual) {
+            failures.push(`${entry.built} coverage summary missing`);
+          } else {
+            try {
+              actual.branches = normalizeNode22DynamicImportBranches(
+                actual.branches,
+                node22Allowance,
+                22,
+              );
+              console.log(
+                `${entry.built}: normalized ${node22Allowance} Node 22 V8 dynamic-import branch artifacts.`,
+              );
+            } catch (error) {
+              failures.push(
+                `${entry.built} ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
         }
       }
-    }
-    failures.push(
-      ...verifyOwnedCoverage(plan, [module], summary, catalog.thresholds),
-    );
-  }
+      failures.push(
+        ...verifyOwnedCoverage(
+          plan,
+          owned.map(({ module }) => module),
+          summary,
+          catalog.thresholds,
+        ),
+      );
+      return failures;
+    },
+  );
+  const failures = planFailures.flat();
   if (!selectedSource) {
     const catalogSources = new Set(
       catalog.modules.map((entry) => entry.source),
@@ -321,11 +379,11 @@ function runNonUnitOwnerCoverage(
     ]),
   );
   console.log(
-    `Non-unit owner coverage: integration=${counts.integration} system=${counts.system}.`,
+    `Non-unit owner coverage: integration=${counts.integration} system=${counts.system} (${plans.length} plans, ${coverageJobs} workers).`,
   );
 }
 
-function runCombinedRatchetCoverage(policy: CoveragePolicy) {
+async function runCombinedRatchetCoverage(policy: CoveragePolicy) {
   const behaviorSuites = TEST_SUITES.filter(
     (suite) =>
       suite !== "characterization" && suite !== "qa" && suite !== "torture",
@@ -366,7 +424,7 @@ function runCombinedRatchetCoverage(policy: CoveragePolicy) {
     );
     return;
   }
-  const summary = runCoverage({
+  const summary = await runCoverage({
     name: "combined",
     tests,
     includes: ["dist/**/*.js"],
@@ -418,14 +476,14 @@ if (ownerIndex >= 0 && !selectedOwnerTest) {
 if (sourceIndex >= 0 && !selectedSource) {
   throw new Error("non_unit_coverage_source_required");
 }
-if (unitOnly) runUnitCoverage(selectedOwnerTest);
+if (unitOnly) await runUnitCoverage(selectedOwnerTest);
 else {
   const policy = readJson<CoveragePolicy>("tests/coverage-policy.json");
-  if (nonUnitOnly) runNonUnitOwnerCoverage(policy, selectedSource);
-  else if (combinedOnly) runCombinedRatchetCoverage(policy);
+  if (nonUnitOnly) await runNonUnitOwnerCoverage(policy, selectedSource);
+  else if (combinedOnly) await runCombinedRatchetCoverage(policy);
   else {
-    runUnitCoverage();
-    runNonUnitOwnerCoverage(policy);
-    runCombinedRatchetCoverage(policy);
+    await runUnitCoverage();
+    await runNonUnitOwnerCoverage(policy);
+    await runCombinedRatchetCoverage(policy);
   }
 }
