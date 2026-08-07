@@ -10,6 +10,7 @@
 - Long-turn context pruning now protects each turn's message tail, removes older tool results in bounded batches, keeps file context out of summaries, preserves native ESM extension loading, and surfaces compaction retry failures.
 - Self-improvement and memory maintenance now supervise queued reviews in the daemon, recover malformed worker locks, schedule periodic reviews reliably, and support newest-first recall.
 - Rin now uses the Pi 0.82.1 runtime line with centralized RPC turn coordination, refreshed skill provenance, and release execution that pins candidate source independently from later main metadata updates.
+- The dormant desktop interface and installer implementation, Electron dependency, entrypoints, tests, and redesign placeholders have been removed; supported interaction remains terminal, automation, and chat.
 <!-- rin-changelog-coverage
  48fea71 fix: keep queued steer terminal ownership
  9214810 fix(chat): validate migrated legacy content
