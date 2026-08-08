@@ -59,6 +59,54 @@ test("rin reuses Pi package command implementations", async () => {
   }
 });
 
+test("rin auth check maps RIN_DIR into Pi's credential directory", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cli-auth-check-"));
+  const agentDir = path.join(home, "agent");
+  try {
+    await fs.mkdir(agentDir, { recursive: true });
+    await fs.writeFile(
+      path.join(agentDir, "auth.json"),
+      `${JSON.stringify({ openai: { type: "api_key", key: "test-key" } })}\n`,
+      "utf8",
+    );
+    const env = { ...process.env };
+    delete env.PI_CODING_AGENT_DIR;
+    const result = spawnSync(
+      process.execPath,
+      [
+        rinEntry,
+        "auth",
+        "check",
+        "--provider",
+        "openai",
+        "--json",
+        "--no-refresh",
+      ],
+      {
+        cwd: home,
+        encoding: "utf8",
+        timeout: 15_000,
+        env: {
+          ...env,
+          HOME: home,
+          RIN_DIR: agentDir,
+          RIN_SKIP_VERSION_CHECK: "1",
+          NO_COLOR: "1",
+          FORCE_COLOR: "0",
+        },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      status: "ready",
+      provider: "openai",
+      authType: "api_key",
+    });
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+  }
+});
+
 test("rin top-level help includes Pi options and adds Rin commands", async () => {
   const result = await runCli(rinEntry, ["--help"]);
   assert.equal(result.status, 0, result.stderr);
@@ -72,9 +120,11 @@ test("rin top-level help includes Pi options and adds Rin commands", async () =>
 test("the Pi command adapter owns only Pi commands and Rin update overlays", async () => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cli-route-"));
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const previousRinDir = process.env.RIN_DIR;
   const previousOffline = process.env.PI_OFFLINE;
   const previousExitCode = process.exitCode;
   try {
+    process.env.RIN_DIR = path.join(home, ".rin");
     process.env.PI_CODING_AGENT_DIR = path.join(home, ".rin");
     process.env.PI_OFFLINE = "1";
     assert.equal(await tryRunPiCliCommand([]), "rin");
@@ -101,6 +151,8 @@ test("the Pi command adapter owns only Pi commands and Rin update overlays", asy
   } finally {
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    if (previousRinDir === undefined) delete process.env.RIN_DIR;
+    else process.env.RIN_DIR = previousRinDir;
     if (previousOffline === undefined) delete process.env.PI_OFFLINE;
     else process.env.PI_OFFLINE = previousOffline;
     process.exitCode = previousExitCode;

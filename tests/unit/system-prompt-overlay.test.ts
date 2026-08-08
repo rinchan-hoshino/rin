@@ -38,20 +38,20 @@ function applyOverlay(input: Record<string, any>) {
 
 const NATIVE_PROMPT_BASELINE = {
   default: {
-    hash: "b5fb6102289aadaeee3842f08aa485833b6845895115f70472411e200085fab9",
-    length: 5433,
+    hash: "f587e13575c40162ee83391d15a97e615fd739f6044c3a47c74f3c037fdb26f2",
+    length: 5441,
   },
   languageAppend: {
-    hash: "c978f36bc22874b83a24aac8eb99da760a518b1b1a970456758359ea84cdcec9",
-    length: 5447,
+    hash: "d5690590c619085eba1be8d3c1f5d25a8c336381aaf1cb5a66a962438e2d4253",
+    length: 5455,
   },
   custom: {
     hash: "3d1b536c80c1fde077d01c6c8911a0536e6dc20a2ec0f3e78c4edf2151a7621d",
     length: 1797,
   },
   contextSkillSelf: {
-    hash: "a2198104df2d0921d38ee65c12d13a5786b1938419b747c81475787da7d0cc97",
-    length: 6150,
+    hash: "22243c474f0231597debc254e1b6e7a4cfd58955d566bed5e67e2f81ccc37e12",
+    length: 6158,
   },
   readTodo: {
     hash: "08426955e440dc9ca0d4dfcb8f8c1ac8232fbc654261c731642f5cf40f831c59",

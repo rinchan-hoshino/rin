@@ -5,6 +5,10 @@ import {
   handlePiPackageCommand,
   printPiCliHelp,
 } from "../pi/private-api.js";
+import {
+  applyRuntimeProfileEnvironment,
+  resolveRuntimeProfile,
+} from "../rin-lib/profile.js";
 
 /**
  * Let Pi own every Pi package/auth command. Rin only reserves commands whose
@@ -13,6 +17,7 @@ import {
 export type PiCliRoute = "handled" | "rin" | "rin-after-pi";
 
 export async function tryRunPiCliCommand(args: string[]): Promise<PiCliRoute> {
+  applyRuntimeProfileEnvironment(resolveRuntimeProfile());
   const runtimeOptions = {};
 
   if (args[0] === "update") {
