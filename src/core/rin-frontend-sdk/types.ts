@@ -6,6 +6,7 @@ import type { RinTodoItem } from "../rin-lib/todo-state.js";
 import type { RinFrontendIdentity } from "./frontend-identity.js";
 import type { PromptContextMeta } from "./prompt-context.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
+import type { ChatMessagePart } from "../rin-lib/chat-outbox.js";
 
 export type RinRpcCommand = {
   id?: string;
@@ -26,6 +27,7 @@ export type RinExtensionUiMethod =
   | "input"
   | "editor"
   | "notify"
+  | "rinCommandResult"
   | "setStatus"
   | "setWorkingMessage"
   | "setWorkingVisible"
@@ -37,6 +39,12 @@ export type RinExtensionUiMethod =
   | "setTitle"
   | "setToolsExpanded"
   | "set_editor_text";
+
+export type RinExtensionCommandResult = {
+  text?: string;
+  fallbackText?: string;
+  parts?: ChatMessagePart[];
+};
 
 export type RinExtensionUiRequest = {
   type: "extension_ui_request";
@@ -57,6 +65,7 @@ export type RinExtensionUiRequest = {
   widgetPlacement?: string;
   expanded?: boolean;
   text?: string;
+  result?: RinExtensionCommandResult;
   [key: string]: unknown;
 };
 

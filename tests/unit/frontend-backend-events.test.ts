@@ -110,6 +110,26 @@ test("shared frontend translation exposes extension UI requests", () => {
       },
     ],
   );
+  assert.deepEqual(
+    translator.translate({
+      type: "extension_ui_request",
+      method: "rinCommandResult",
+      result: {
+        fallbackText: "Codex usage",
+        parts: [{ type: "image", path: "/tmp/codex-usage.png" }],
+      },
+    }),
+    [
+      {
+        type: "extension_ui_request",
+        method: "rinCommandResult",
+        result: {
+          fallbackText: "Codex usage",
+          parts: [{ type: "image", path: "/tmp/codex-usage.png" }],
+        },
+      },
+    ],
+  );
 });
 
 test("shared frontend translation ignores TUI visibility preferences", () => {

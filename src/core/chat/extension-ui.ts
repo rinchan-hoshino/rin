@@ -1,3 +1,4 @@
+import type { ChatMessagePart } from "../rin-lib/chat-outbox.js";
 import type {
   RinExtensionUiRequest,
   RinExtensionUiResponse,
@@ -5,6 +6,7 @@ import type {
 
 export type ChatExtensionUiProjection = {
   text?: string;
+  parts?: ChatMessagePart[];
   response?: RinExtensionUiResponse;
 };
 
@@ -14,6 +16,18 @@ export function projectChatExtensionUiRequest(
   if (request.method === "notify") {
     const text = String(request.message || request.title || "").trim();
     return text ? { text } : {};
+  }
+
+  if (request.method === "rinCommandResult") {
+    const result = request.result;
+    const text = String(result?.text || "").trim();
+    const parts = Array.isArray(result?.parts)
+      ? (result.parts.filter(Boolean) as ChatMessagePart[])
+      : [];
+    return {
+      ...(text ? { text } : {}),
+      ...(parts.length ? { parts } : {}),
+    };
   }
 
   const projection: ChatExtensionUiProjection = {

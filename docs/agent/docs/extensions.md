@@ -53,6 +53,27 @@ Rin has no separate built-in-extension registry or foreground extension loader. 
 
 Use ordinary Pi extension configuration for trusted third-party extensions. Use the live tool list as the source of truth for which tools are available in the current turn.
 
+## Cross-frontend command results
+
+Pi's native `ctx.ui.notify(...)` remains the portable text-notification path. Rin adds one optional command-result method to the same UI context when the frontend can deliver rich output:
+
+```ts
+ctx.ui.rinCommandResult?.({
+  fallbackText: "Codex usage: 5-hour 80% left",
+  parts: [
+    {
+      type: "image",
+      path: "/absolute/path/to/card.png",
+      mimeType: "image/png",
+    },
+  ],
+});
+```
+
+Use `RinExtensionCommandContext`, `RinExtensionCommandResult`, and `RinExtensionUIContext` from `@hoshinorin/rin/extension` for the canonical types. `text` and `parts` are delivered together by Chat; `fallbackText` is used by terminal frontends that cannot display the rich parts. If `rinCommandResult` is absent, the extension is running under a frontend or plain Pi runtime without Rin rich-result support and should use the native Pi text presentation appropriate for that frontend.
+
+This is a command-result channel, not an out-of-band notification API. Local media paths must exist until Chat has accepted the result; Chat validates and copies/delivers them through its normal outbox boundary.
+
 ## Browser, computer, mobile, and search operation
 
 Browser, desktop, mobile, and search tools are live-runtime capabilities. Use them when they appear in the live tool list.

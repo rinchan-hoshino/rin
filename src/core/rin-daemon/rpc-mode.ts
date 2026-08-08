@@ -852,6 +852,13 @@ export async function runCustomRpcMode(
         message,
         notifyType,
       }),
+    rinCommandResult: (result: unknown) =>
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "rinCommandResult",
+        result,
+      }),
     onTerminalInput: () => () => {},
     setStatus: (statusKey: string, statusText?: string) =>
       output({

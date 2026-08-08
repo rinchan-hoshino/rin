@@ -1342,6 +1342,13 @@ export class RpcInteractiveSession {
       case "notify":
         ui?.notify?.(String(payload.message || ""), payload.notifyType);
         return;
+      case "rinCommandResult": {
+        const fallbackText = String(
+          payload.result?.fallbackText || payload.result?.text || "",
+        ).trim();
+        if (fallbackText) ui?.notify?.(fallbackText, "info");
+        return;
+      }
       case "setStatus":
         ui?.setStatus?.(String(payload.statusKey || ""), payload.statusText);
         return;

@@ -1,16 +1,31 @@
 import type {
   ExtensionAPI,
+  ExtensionCommandContext,
   ExtensionFactory,
+  ExtensionUIContext,
   RegisteredCommand,
 } from "@earendil-works/pi-coding-agent";
+import type { RinExtensionCommandResult } from "./rin-frontend-sdk/types.js";
+
+export type { RinExtensionCommandResult };
+
+/** Cross-frontend result channel added by Rin where the active frontend supports it. */
+export type RinExtensionUIContext = ExtensionUIContext & {
+  rinCommandResult?: (result: RinExtensionCommandResult) => void;
+};
+
+export type RinExtensionCommandContext = Omit<ExtensionCommandContext, "ui"> & {
+  ui: RinExtensionUIContext;
+};
 
 /** Rin metadata layered onto Pi's command definition. */
 export type RinCommandOptions = Omit<
   RegisteredCommand,
-  "name" | "sourceInfo"
+  "name" | "sourceInfo" | "handler"
 > & {
   /** Expose this command to trusted Rin chat callers. */
   chat?: boolean;
+  handler: (args: string, ctx: RinExtensionCommandContext) => Promise<void>;
 };
 
 /**

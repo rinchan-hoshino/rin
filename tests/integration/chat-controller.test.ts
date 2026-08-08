@@ -1547,6 +1547,85 @@ test("chat controller renders extension command notifications from the frontend 
   assert.equal(result.text, "Extension completed");
 });
 
+test("chat controller delivers rich extension command results from the frontend client", async () => {
+  let connected = false;
+  let listener = null;
+  const imagePath = "/tmp/codex-usage-card.png";
+  const frontendClient = {
+    async connect() {
+      connected = true;
+    },
+    async disconnect() {
+      connected = false;
+    },
+    isConnected() {
+      return connected;
+    },
+    subscribe(nextListener) {
+      listener = nextListener;
+      return () => {
+        if (listener === nextListener) listener = null;
+      };
+    },
+    async getState() {
+      return {};
+    },
+    async ensureSessionReady() {
+      return {};
+    },
+    async request(command) {
+      if (command.type === "list_unacknowledged_chat_terminals") {
+        return { terminals: [] };
+      }
+      return {};
+    },
+    async runCommand() {
+      listener?.({
+        type: "extension_ui_request",
+        payload: {
+          type: "extension_ui_request",
+          method: "rinCommandResult",
+          result: {
+            fallbackText: "Codex usage",
+            parts: [{ type: "image", path: imagePath, mimeType: "image/png" }],
+          },
+        },
+      });
+      return { handled: true };
+    },
+  };
+  const controller = await createController("telegram/1:2", {
+    frontendClientFactory: () => frontendClient,
+  });
+  controller.connect = ChatController.prototype.connect.bind(controller);
+  const deliveries = [];
+  controller.commitPendingDelivery = async function () {
+    deliveries.push(this.stagedDelivery);
+    this.stagedDelivery = null;
+  };
+
+  await controller.runCommand("/usage", "usage-message", "usage-message");
+
+  assert.deepEqual(deliveries[0].parts, [
+    { type: "quote", id: "usage-message" },
+    { type: "image", path: imagePath, mimeType: "image/png" },
+  ]);
+});
+
+test("chat controller rejects rich command results outside command execution", async () => {
+  const controller = await createController();
+  await assert.rejects(
+    controller.handleFrontendEvent({
+      type: "extension_ui_request",
+      method: "rinCommandResult",
+      result: {
+        parts: [{ type: "image", path: "/tmp/codex-usage.png" }],
+      },
+    }),
+    /Extension command result arrived outside command execution/,
+  );
+});
+
 test("chat controller cancels unsupported extension dialogs", async () => {
   const controller = await createController();
   controller.session = {};

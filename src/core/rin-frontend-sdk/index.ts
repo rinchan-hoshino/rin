@@ -1,4 +1,5 @@
 export type {
+  RinExtensionCommandResult,
   RinExtensionUiMethod,
   RinExtensionUiRequest,
   RinExtensionUiResponse,

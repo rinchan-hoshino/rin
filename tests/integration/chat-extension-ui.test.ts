@@ -43,6 +43,48 @@ test("chat extension UI renders notifications without a response", () => {
   );
 });
 
+test("chat extension UI projects rich command results without terminal fallback text", () => {
+  assert.deepEqual(
+    ui.projectChatExtensionUiRequest({
+      type: "extension_ui_request",
+      method: "rinCommandResult",
+      result: {
+        text: "Caption",
+        fallbackText: "Terminal fallback",
+        parts: [
+          {
+            type: "image",
+            path: "/tmp/codex-usage.png",
+            mimeType: "image/png",
+          },
+          null,
+        ],
+      },
+    }),
+    {
+      text: "Caption",
+      parts: [
+        { type: "image", path: "/tmp/codex-usage.png", mimeType: "image/png" },
+      ],
+    },
+  );
+  assert.deepEqual(
+    ui.projectChatExtensionUiRequest({
+      type: "extension_ui_request",
+      method: "rinCommandResult",
+      result: { fallbackText: "Terminal only", parts: [] },
+    }),
+    {},
+  );
+  assert.deepEqual(
+    ui.projectChatExtensionUiRequest({
+      type: "extension_ui_request",
+      method: "rinCommandResult",
+    }),
+    {},
+  );
+});
+
 test("chat extension UI cancels unsupported dialogs instead of hanging", () => {
   assert.deepEqual(
     ui.projectChatExtensionUiRequest({

@@ -375,6 +375,7 @@ export class ChatController {
   activeCommandTurnInput: ChatTurnTarget | null = null;
   private collectingCommandUi = false;
   private commandUiMessages: string[] = [];
+  private commandUiParts: ChatMessagePart[] = [];
   backendAcceptedIncomingMessageId = "";
   private pendingTurnPresentations = new Map<string, PendingTurnPresentation>();
   stagedDelivery: ChatAssistantDelivery | null = null;
@@ -3084,6 +3085,7 @@ export class ChatController {
       }
 
       this.commandUiMessages = [];
+      this.commandUiParts = [];
       this.collectingCommandUi = true;
       let data: any = await this.driver.runCommand(commandLine, {
         assumeConnected: frontendReady === true,
@@ -3144,9 +3146,12 @@ export class ChatController {
         return text ? { ...data, text } : data;
       }
 
-      const parts = Array.isArray(data?.parts)
-        ? (data.parts.filter(Boolean) as ChatMessagePart[])
-        : [];
+      const parts = [
+        ...this.commandUiParts,
+        ...(Array.isArray(data?.parts)
+          ? (data.parts.filter(Boolean) as ChatMessagePart[])
+          : []),
+      ];
       if (!text && !parts.length) throw new Error("chat_command_text_missing");
       data = { ...data, text, ...(parts.length ? { parts } : {}) };
       await this.deliverAssistantReply({
@@ -3174,6 +3179,7 @@ export class ChatController {
     } finally {
       this.collectingCommandUi = false;
       this.commandUiMessages = [];
+      this.commandUiParts = [];
       if (!interruptingActiveTurn || activeTurnInterruptionCommitted) {
         this.awaitingTurnSettle = false;
         if (interruptingActiveTurn) this.turnAbortRequested = false;
@@ -3618,10 +3624,17 @@ export class ChatController {
           .respondExtensionUi(projection.response)
           .catch(() => {});
       }
-      if (projection.text) {
+      if (projection.text || projection.parts?.length) {
         if (this.collectingCommandUi) {
-          this.commandUiMessages.push(projection.text);
-        } else {
+          if (projection.text) this.commandUiMessages.push(projection.text);
+          if (projection.parts?.length) {
+            this.commandUiParts.push(...projection.parts);
+          }
+        } else if (projection.parts?.length) {
+          throw new Error(
+            "Extension command result arrived outside command execution",
+          );
+        } else if (projection.text) {
           await this.deliverPassiveNotice(projection.text).catch(() => {});
         }
       }

@@ -704,6 +704,13 @@ test("rpc runtime binds extension UI and passive extension catalog to daemon aut
     { method: "input", id: "input", title: "Input", placeholder: "Owner" },
     { method: "editor", id: "editor", title: "Edit", prefill: "Owner" },
     { method: "notify", message: "Notice", notifyType: "info" },
+    {
+      method: "rinCommandResult",
+      result: {
+        fallbackText: "Codex usage fallback",
+        parts: [{ type: "image", path: "/tmp/codex-usage.png" }],
+      },
+    },
     { method: "setStatus", statusKey: "owner", statusText: "Ready" },
     { method: "setWorkingMessage", message: "Working owner" },
     { method: "setWorkingVisible", visible: true },
@@ -742,6 +749,7 @@ test("rpc runtime binds extension UI and passive extension catalog to daemon aut
     ["input", "Input", "Owner"],
     ["editor", "Edit", "Owner"],
     ["notify", "Notice", "info"],
+    ["notify", "Codex usage fallback", "info"],
     ["status", "owner", "Ready"],
     ["working-message", "Working owner"],
     ["working-visible", false],

@@ -18,6 +18,10 @@ defineRinExtension((rin) => {
     chat: true,
     async handler(args, ctx) {
       ctx.ui.notify(args || "ok", "info");
+      ctx.ui.rinCommandResult?.({
+        fallbackText: args || "ok",
+        parts: [{ type: "image", path: "/tmp/result.png" }],
+      });
     },
   });
   rin.registerCommand("tui-command", {

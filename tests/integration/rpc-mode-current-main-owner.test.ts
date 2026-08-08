@@ -265,6 +265,10 @@ test(
       session.isStreaming = false;
       emitSessionEvent?.({ type: "agent_end" });
       boundUiContext.setWorkingVisible(false);
+      boundUiContext.rinCommandResult({
+        fallbackText: "Codex usage",
+        parts: [{ type: "image", path: "/tmp/codex-usage.png" }],
+      });
       session.isStreaming = true;
       emitSessionEvent?.({ type: "agent_start" });
 
@@ -282,11 +286,16 @@ test(
             event.type === "agent_start" ||
             event.type === "agent_end" ||
             (event.type === "extension_ui_request" &&
-              event.method === "setWorkingVisible"),
+              ["setWorkingVisible", "rinCommandResult"].includes(event.method)),
         )
         .map((event) =>
           event.type === "extension_ui_request"
-            ? { type: event.type, method: event.method, visible: event.visible }
+            ? {
+                type: event.type,
+                method: event.method,
+                visible: event.visible,
+                result: event.result,
+              }
             : { type: event.type },
         );
 
@@ -297,6 +306,16 @@ test(
           type: "extension_ui_request",
           method: "setWorkingVisible",
           visible: false,
+          result: undefined,
+        },
+        {
+          type: "extension_ui_request",
+          method: "rinCommandResult",
+          visible: undefined,
+          result: {
+            fallbackText: "Codex usage",
+            parts: [{ type: "image", path: "/tmp/codex-usage.png" }],
+          },
         },
         { type: "agent_start" },
       ]);
