@@ -72,6 +72,7 @@ try {
   await run(["-p", "--help"]);
   await run(["--help"]);
   await run(["-p", "owner prompt"]);
+  await run(["ext-owner"]);
   await run(["target", "list"]);
   await run(["version", "--target=remote"]);
   await assert.rejects(() => run(["status", "--target=missing"]), /rin_target_not_found:missing/);
@@ -79,6 +80,7 @@ try {
     "update", "start", "stop", "restart", "doctor", "status", "tasks",
     "self-improve", "versions", "rollback", "memory-index",
   ]) await run([command]);
+  await run(["update", "--help"]);
   await run(["update", "self"]);
   await run(["update", "--self", "--force"]);
   await run(["update", "--all"]);

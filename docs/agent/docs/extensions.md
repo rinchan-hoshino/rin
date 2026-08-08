@@ -53,6 +53,12 @@ Rin has no separate built-in-extension registry or foreground extension loader. 
 
 Use ordinary Pi extension configuration for trusted third-party extensions. Use the live tool list as the source of truth for which tools are available in the current turn.
 
+## Extension commands in the Rin CLI
+
+When a top-level word is not a Rin or Pi management command, Rin loads the same Pi package set and resolves a matching extension slash command. Therefore an extension command registered as `/usage` is also available as `rin usage ...`; terminal output is collected from Pi's native `ctx.ui.notify(...)`. Rin does not maintain a second CLI command registry for packages.
+
+Rin also adds `ctx.rin.agentDir` and `ctx.rin.frontendIdentity` to extension lifecycle and command contexts. Use `RinExtensionContext` from `@hoshinorin/rin/extension` for the canonical type. The metadata belongs to Rin's context adapter and replaces reads of private session-manager fields or deployment paths.
+
 ## Cross-frontend command results
 
 Pi's native `ctx.ui.notify(...)` remains the portable text-notification path. Rin adds one optional command-result method to the same UI context when the frontend can deliver rich output:

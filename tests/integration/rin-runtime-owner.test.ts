@@ -1142,3 +1142,25 @@ test("compaction reason, reload, shutdown, and settings wrappers remain idempote
   runtime.applyRinSettingsDefaults(noGetter);
   assert.equal(noGetter.getSteeringMode, undefined);
 });
+
+test("runtime exposes Rin metadata on extension lifecycle and command contexts", () => {
+  const runner = {
+    createContext: () => ({ kind: "lifecycle" }),
+    createCommandContext: () => ({ kind: "command" }),
+  };
+  runtime.applyRinExtensionContextApi(
+    {
+      extensionRunner: runner,
+      sessionManager: {
+        __rinFrontend: { kind: "chat", key: "discord/1:2" },
+      },
+    },
+    "/agent",
+  );
+  assert.deepEqual(runner.createContext().rin, {
+    agentDir: "/agent",
+    frontendIdentity: { kind: "chat", key: "discord/1:2" },
+  });
+  assert.equal(runner.createCommandContext().rin.agentDir, "/agent");
+  runtime.applyRinExtensionContextApi({}, "/agent");
+});

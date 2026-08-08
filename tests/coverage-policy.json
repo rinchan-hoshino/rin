@@ -1574,6 +1574,12 @@
       "built": "dist/app/rin-install/update-payload.js",
       "ownerSuite": "system",
       "status": "strict"
+    },
+    {
+      "source": "src/core/rin/extension-command-adapter.ts",
+      "built": "dist/core/rin/extension-command-adapter.js",
+      "ownerSuite": "integration",
+      "status": "strict"
     }
   ]
 }

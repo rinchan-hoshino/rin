@@ -1161,6 +1161,12 @@
       "built": "dist/app/rin-install/update-payload.js",
       "suite": "system",
       "tests": ["tests/system/update-payload-entrypoint-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/extension-command-adapter.ts",
+      "built": "dist/core/rin/extension-command-adapter.js",
+      "tests": ["tests/integration/extension-command-adapter-owner.test.ts"],
+      "suite": "integration"
     }
   ]
 }

@@ -1192,6 +1192,22 @@ function applyStartupSessionName(sessionManager: any, sessionName?: unknown) {
   sessionManager.appendSessionInfo(name);
 }
 
+export function applyRinExtensionContextApi(session: any, agentDir: string) {
+  const runner = session?.extensionRunner;
+  if (!runner?.createContext || !runner?.createCommandContext) return;
+  for (const method of ["createContext", "createCommandContext"]) {
+    const original = runner[method].bind(runner);
+    runner[method] = (...args: unknown[]) => {
+      const context = original(...args);
+      context.rin = {
+        agentDir,
+        frontendIdentity: session.sessionManager?.__rinFrontend,
+      };
+      return context;
+    };
+  }
+}
+
 export async function createConfiguredAgentSession(
   options: RinToolStartupOptions &
     RinPiPassthroughOptions & {
@@ -1390,6 +1406,7 @@ export async function createConfiguredAgentSession(
       estimateContextTokens,
     });
 
+    applyRinExtensionContextApi(result.session, agentDir);
     applyRinPromptBuilder(result.session);
     applyAutoReloadAfterCompaction(result.session);
     return {

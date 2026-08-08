@@ -204,6 +204,26 @@ export async function startRinCli() {
     return await runUpdate(parsed);
   }
 
+  const extensionCommandAdapter =
+    await import("./extension-command-adapter.js");
+  const runtimeModule = await import("../rin-lib/runtime.js");
+  const loaderModule = await import("../rin-lib/loader.js");
+  const profileModule = await import("../rin-lib/profile.js");
+  if (
+    await extensionCommandAdapter.tryRunExtensionCommandCli({
+      argv: strippedArgv,
+      stdout: process.stdout,
+      stderr: process.stderr,
+      dependencies: {
+        resolveProfile: profileModule.resolveRuntimeProfile,
+        loadSessionManager: loaderModule.loadRinSessionManagerModule,
+        createSession: runtimeModule.createConfiguredAgentSession,
+      },
+    })
+  ) {
+    return;
+  }
+
   const command = parseCommandName(strippedArgv[0] || "");
   if (!command) {
     if (
