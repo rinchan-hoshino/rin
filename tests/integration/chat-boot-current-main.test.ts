@@ -41,14 +41,14 @@ test("chat boot projects chat-enabled commands from the runtime catalog", () => 
     },
     {
       name: "usage",
-      description: "Show usage and quota status",
+      description: "Show Codex quota status",
       source: "builtin",
       chat: true,
     },
   ]);
   assert.deepEqual(rows, [
     { name: "hello", description: "Say hello" },
-    { name: "usage", description: "Show usage and quota status" },
+    { name: "usage", description: "Show Codex quota status" },
   ]);
 });
 
@@ -117,7 +117,7 @@ const chatBuiltinCatalog = [
   { name: "new", chat: true },
   { name: "compact", chat: true },
   { name: "reload", chat: true },
-  { name: "usage", chat: true },
+  { name: "usage", description: "Show Codex quota status", chat: true },
   { name: "status", chat: true },
 ];
 
@@ -131,7 +131,7 @@ test("chat boot falls back to English descriptions for catalog rows", () => {
       "Start a new session",
       "Compact the current session",
       "Reload extensions, prompts, skills, and themes",
-      "Show usage and quota status",
+      "Show Codex quota status",
       "Show this chat session status",
     ],
   );
@@ -192,7 +192,7 @@ test("chat boot builds and syncs Discord application commands", async () => {
     },
     {
       name: "usage",
-      description: "Show usage and quota status",
+      description: "Show Codex quota status",
       type: 1,
       options: [
         { name: "input", description: "Arguments", type: 3, required: false },
@@ -271,7 +271,7 @@ test("chat boot clears common telegram scopes before syncing default commands", 
       command: "reload",
       description: "Reload extensions, prompts, skills, and themes",
     },
-    { command: "usage", description: "Show usage and quota status" },
+    { command: "usage", description: "Show Codex quota status" },
     { command: "status", description: "Show this chat session status" },
   ];
 

@@ -6,11 +6,11 @@ The live tool list remains authoritative for the current turn.
 
 ## Capability source map
 
-| Source                                   | Provides                                                                                                                                                                                  | Configuration surface                                               | Agent route                                         |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------- |
-| Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, note, scheduled-task SDK workflows, agent-owned chat setup, token usage | built into Rin                                                      | use live tools, CLI, SDK, or topic docs             |
-| Browser/computer/mobile/search operation | browser, computer, mobile, or search tools supplied by the live runtime, plus documented practice patterns                                                                                | live tool list or external Pi extension config                      | read `practices/README.md`                          |
-| Daemon extension adapter                 | trusted long-running services, chat adapters, and external memory providers                                                                                                               | ordinary Pi extension entries that also export `rinDaemonExtension` | inspect runtime state and relevant extension config |
+| Source                                   | Provides                                                                                                                                                                     | Configuration surface                                               | Agent route                                         |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------- |
+| Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, note, scheduled-task SDK workflows, agent-owned chat setup | built into Rin                                                      | use live tools, CLI, SDK, or topic docs             |
+| Browser/computer/mobile/search operation | browser, computer, mobile, or search tools supplied by the live runtime, plus documented practice patterns                                                                   | live tool list or external Pi extension config                      | read `practices/README.md`                          |
+| Daemon extension adapter                 | trusted long-running services, chat adapters, and external memory providers                                                                                                  | ordinary Pi extension entries that also export `rinDaemonExtension` | inspect runtime state and relevant extension config |
 
 ## Rin core capabilities
 
@@ -26,7 +26,6 @@ These capabilities are native Rin behavior rather than optional Pi extensions:
 - note: stable-ID session-branch continuity items, plus the `/notes` TUI viewer.
 - task: scheduled task workflows through the local Rin Agent SDK.
 - chat: agent-owned adapter setup, SDK/file workflows, stored-message lookup, and identity/trust data paths.
-- token usage: telemetry under `~/.rin/data/core/usage/usage.db` and the `rin usage` dashboard.
 
 Read the topic document for the capability before operating it:
 
@@ -67,6 +66,8 @@ Use practice docs for current owner workflow routing and setup guidance:
 - search operation: `practices/search/README.md`.
 
 Trusted third-party Pi extensions for browser or computer control are configured through normal Pi extension rules as explicit extension paths or packages.
+
+First-party optional extensions, including Codex-only `/usage` and self-improve result reminders, live in `rinchan-hoshino/rin-extensions` rather than Rin core.
 
 ## Background extensions
 

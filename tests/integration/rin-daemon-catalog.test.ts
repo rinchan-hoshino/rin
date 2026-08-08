@@ -55,7 +55,7 @@ test("daemon catalog lists builtin and extension commands without session worker
     assert.equal(names.has("model"), true);
     assert.equal(names.has("clone"), true);
     assert.equal(names.has("trust"), true);
-    assert.equal(names.has("usage"), true);
+    assert.equal(names.has("usage"), false);
     assert.equal(names.has("todos"), false);
     assert.equal(names.has("init"), false);
   });

@@ -10,7 +10,7 @@ const replacements: Record<string, string> = {
     }
   `,
   "dist/core/rin/shared-lite.js": `
-    const commands = new Set(["update","start","stop","restart","doctor","status","tasks","usage","self-improve","versions","rollback","memory-index","target","version"]);
+    const commands = new Set(["update","start","stop","restart","doctor","status","tasks","self-improve","versions","rollback","memory-index","target","version"]);
     export function hasSubcommandHelpFlag(argv, command) {
       const index = argv.indexOf(command);
       return index >= 0 && argv.slice(index + 1).some((value) => value === "--help" || value === "-h");
@@ -48,7 +48,6 @@ const replacements: Record<string, string> = {
       };
     }
   `,
-  "dist/core/rin/usage.js": `export async function runUsageInternal(args){globalThis.__rinMainOwnerEvents.push(["usage-internal",args])} export async function runUsage(parsed,args){globalThis.__rinMainOwnerEvents.push(["usage",parsed.command,args])}`,
   "dist/core/rin/memory-index.js": `export async function runMemoryIndexInternal(args){globalThis.__rinMainOwnerEvents.push(["memory-index-internal",args])} export async function runMemoryIndex(parsed,args){globalThis.__rinMainOwnerEvents.push(["memory-index",parsed.command,args])}`,
   "dist/core/rin/self-improve.js": `export async function runSelfImproveInternal(args){globalThis.__rinMainOwnerEvents.push(["self-improve-internal",args])} export async function runSelfImprove(parsed,args){globalThis.__rinMainOwnerEvents.push(["self-improve",parsed.command,args])}`,
   "dist/core/rin/status.js": `export async function runStatusInternal(args){globalThis.__rinMainOwnerEvents.push(["status-internal",args])} export async function runStatus(parsed,args){globalThis.__rinMainOwnerEvents.push(["status",parsed.command,args])}`,
@@ -88,7 +87,7 @@ const cacSource = `
       command(name) { globalThis.__rinMainOwnerCommands.push(name); return this; },
       parse() {
         const raw = process.argv.slice(2);
-        const known = new Set(["update","start","stop","restart","doctor","status","tasks","usage","self-improve","versions","rollback","memory-index","target","version"]);
+        const known = new Set(["update","start","stop","restart","doctor","status","tasks","self-improve","versions","rollback","memory-index","target","version"]);
         this.matchedCommandName = raw.find((value) => known.has(value)) || "";
         return { options: { help: raw.includes("--help") || raw.includes("-h") } };
       },

@@ -72,10 +72,13 @@ test("rpc builtin slash commands compose Pi commands with Rin-only overlay", () 
   );
   assert.deepEqual(
     rpc.RIN_BUILTIN_SLASH_COMMANDS.map((command) => command.name),
-    ["help", "abort", "usage", "status"],
+    ["help", "abort", "status"],
   );
   assert.equal(names.includes("todos"), false);
-  assert.equal(rpc.isGenericPromptRunCommandBuiltinSlashCommand("usage"), true);
+  assert.equal(
+    rpc.isGenericPromptRunCommandBuiltinSlashCommand("usage"),
+    false,
+  );
   assert.equal(
     rpc.isGenericPromptRunCommandBuiltinSlashCommand("todos"),
     false,
@@ -108,8 +111,8 @@ test("shared resolveParsedArgs keeps passthrough and install defaults coherent",
   assert.equal(parsed.targetUser, "demo");
   assert.deepEqual(parsed.passthrough, ["--foo", "bar"]);
   assert.deepEqual(
-    shared.stripRinWrapperArgs(["--user=demo", "usage", "--limit", "5"]),
-    ["usage", "--limit", "5"],
+    shared.stripRinWrapperArgs(["--user=demo", "status", "--limit", "5"]),
+    ["status", "--limit", "5"],
   );
   assert.deepEqual(shared.stripRinWrapperArgs(["--session=old"]), [
     "--session=old",

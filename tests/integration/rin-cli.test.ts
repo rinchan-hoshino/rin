@@ -13,9 +13,6 @@ const rootDir = path.resolve(
 const shared = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "shared.js")).href
 );
-const usage = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin", "usage.js")).href
-);
 const memoryIndex = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin", "memory-index.js"))
     .href
@@ -547,90 +544,7 @@ test("run parser supports managed session leaves for delegated non-interactive s
   );
 });
 
-test("usage JSON defaults to seven days unless all history is explicit", () => {
-  const before = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const bounded = usage.parseUsageArgs(["usage", "--json"]);
-  const after = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  assert.equal(bounded.allTime, false);
-  assert.ok(bounded.from);
-  assert.ok(Date.parse(bounded.from) >= before);
-  assert.ok(Date.parse(bounded.from) <= after);
-
-  const allTime = usage.parseUsageArgs(["usage", "--json", "--all-time"]);
-  assert.equal(allTime.allTime, true);
-  assert.equal(allTime.from, undefined);
-  assert.equal(allTime.to, undefined);
-  assert.throws(
-    () =>
-      usage.parseUsageArgs(["usage", "--json", "--all-time", "--from", "7d"]),
-    /--all-time cannot be combined with --from or --to/,
-  );
-  assert.throws(
-    () => usage.parseUsageArgs(["usage", "--all-time"]),
-    /--all-time requires --json/,
-  );
-});
-
-test("usage, status, self-improve, and memory-index parsers ignore wrapper args around the subcommand", () => {
-  assert.deepEqual(
-    usage.parseUsageArgs(["-u", "rin", "usage", "--events", "--limit", "5"]),
-    {
-      groupBy: [],
-      filters: [],
-      limit: 5,
-      orderBy: "total_tokens",
-      direction: "desc",
-      events: true,
-      includeZero: false,
-      dimensions: false,
-      json: false,
-      allTime: false,
-      help: false,
-    },
-  );
-
-  assert.deepEqual(
-    usage.parseUsageArgs(["--user=rin", "usage", "--events", "--limit", "5"]),
-    {
-      groupBy: [],
-      filters: [],
-      limit: 5,
-      orderBy: "total_tokens",
-      direction: "desc",
-      events: true,
-      includeZero: false,
-      dimensions: false,
-      json: false,
-      allTime: false,
-      help: false,
-    },
-  );
-
-  assert.deepEqual(
-    usage.parseUsageArgs([
-      "usage",
-      "--group-by",
-      " provider_model , capability ,, ",
-      "--filter",
-      " source = extension ",
-      "--direction",
-      " ASC ",
-    ]),
-    {
-      groupBy: ["provider_model", "capability"],
-      filters: [{ key: "source", value: "extension" }],
-      limit: 20,
-      orderBy: "total_tokens",
-      direction: "asc",
-      events: false,
-      includeZero: false,
-      dimensions: false,
-      json: false,
-      allTime: false,
-      help: false,
-    },
-  );
-
+test("status, self-improve, and memory-index parsers ignore wrapper args around the subcommand", () => {
   assert.deepEqual(
     status.parseStatusArgs([
       "--user=rin",
@@ -866,9 +780,9 @@ test("captureInternalRinCommand forwards only subcommand args", () => {
         return "forwarded";
       },
     },
-    "__usage_internal",
-    ["--user=rin", "usage", "--events", "--limit", "5"],
-    "usage",
+    "__status_internal",
+    ["--user=rin", "status", "--json"],
+    "status",
   );
 
   assert.equal(result, "forwarded");
@@ -876,10 +790,8 @@ test("captureInternalRinCommand forwards only subcommand args", () => {
     [
       process.execPath,
       path.join("/repo", "dist", "app", "rin", "main.js"),
-      "__usage_internal",
-      "--events",
-      "--limit",
-      "5",
+      "__status_internal",
+      "--json",
     ],
   ]);
 });
@@ -928,15 +840,7 @@ test("status report renders running session activity", () => {
   assert.match(report, /Details/);
 });
 
-test("usage and status parsers reject invalid syntax", () => {
-  assert.throws(
-    () => usage.parseUsageArgs(["usage", "--filter", " source= "]),
-    /invalid_filter:source=/,
-  );
-  assert.throws(
-    () => usage.parseUsageArgs(["usage", "--session=rin-hidden"]),
-    /unknown_usage_arg:--session=rin-hidden/,
-  );
+test("status and task parsers reject invalid syntax", () => {
   assert.throws(
     () => status.parseStatusArgs(["status", "--bad"]),
     /unknown_status_arg:--bad/,
@@ -961,16 +865,10 @@ test("usage and status parsers reject invalid syntax", () => {
 });
 
 test("resolveInternalRinDispatch detects internal markers and wrapped subcommand help", () => {
-  const usageHelp = main.resolveInternalRinDispatch([
-    "-u",
-    "rin",
-    "usage",
-    "--help",
-  ]);
-  assert.ok(usageHelp);
-  assert.equal(typeof usageHelp.run, "function");
-  assert.notEqual(usageHelp.run, usage.runUsageInternal);
-  assert.deepEqual(usageHelp.args, ["--help"]);
+  assert.equal(
+    main.resolveInternalRinDispatch(["-u", "rin", "usage", "--help"]),
+    undefined,
+  );
 
   const memoryInternal = main.resolveInternalRinDispatch([
     "__memory_index_internal",

@@ -42,7 +42,6 @@ assert.equal(
 );
 
 for (const [marker, expected] of [
-  ["__usage_internal", "usage-internal"],
   ["__memory_index_internal", "memory-index-internal"],
   ["__self_improve_internal", "self-improve-internal"],
   ["__status_internal", "status-internal"],
@@ -54,7 +53,7 @@ for (const [marker, expected] of [
   await dispatch.run(dispatch.args);
   assert.equal(globalThis.__rinMainOwnerEvents.at(-1)[0], expected);
 }
-for (const command of ["usage", "memory-index", "self-improve", "status", "tasks"]) {
+for (const command of ["memory-index", "self-improve", "status", "tasks"]) {
   const dispatch = main.resolveInternalRinDispatch([command, "--help"]);
   assert.deepEqual(dispatch.args, ["--help"]);
   await dispatch.run(dispatch.args);
@@ -78,7 +77,7 @@ try {
   await assert.rejects(() => run(["status", "--target=missing"]), /rin_target_not_found:missing/);
   for (const command of [
     "update", "start", "stop", "restart", "doctor", "status", "tasks",
-    "usage", "self-improve", "versions", "rollback", "memory-index",
+    "self-improve", "versions", "rollback", "memory-index",
   ]) await run([command]);
   await run(["update", "self"]);
   await run(["update", "--self", "--force"]);
@@ -100,7 +99,7 @@ process.exitCode = 0;
 const names = globalThis.__rinMainOwnerEvents.map(([name]) => name);
 for (const expected of [
   "print-help", "run", "target", "resolve-target", "run-target",
-  "update", "start", "stop", "restart", "doctor", "status", "tasks", "usage",
+  "update", "start", "stop", "restart", "doctor", "status", "tasks",
   "self-improve", "versions", "rollback", "memory-index", "launch",
 ]) assert.equal(names.includes(expected), true, expected);
 assert.equal(globalThis.__rinMainOwnerCommands.length >= 14, true);
@@ -144,7 +143,6 @@ test("Rin core CLI dispatches every local, internal, target, and default command
       await main.startRinCli();
     `;
     for (const [argv, target] of [
-      [["__usage_internal"], "dist/core/rin/usage.js"],
       [["__memory_index_internal"], "dist/core/rin/memory-index.js"],
       [["__self_improve_internal"], "dist/core/rin/self-improve.js"],
       [["__status_internal"], "dist/core/rin/status.js"],
@@ -160,7 +158,6 @@ test("Rin core CLI dispatches every local, internal, target, and default command
       [["doctor"], "dist/core/rin/doctor.js"],
       [["status"], "dist/core/rin/status.js"],
       [["tasks"], "dist/core/rin/tasks.js"],
-      [["usage"], "dist/core/rin/usage.js"],
       [["self-improve"], "dist/core/rin/self-improve.js"],
       [["versions"], "dist/core/rin/versions.js"],
       [["rollback"], "dist/core/rin/versions.js"],

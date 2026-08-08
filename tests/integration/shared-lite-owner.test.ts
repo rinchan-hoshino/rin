@@ -28,11 +28,11 @@ test("shared-lite strips only Rin wrapper arguments", () => {
       "--user",
       "demo",
       "--target=desktop",
-      "usage",
+      "status",
       "--limit",
       "5",
     ]),
-    ["usage", "--limit", "5"],
+    ["status", "--limit", "5"],
   );
   assert.deepEqual(shared.collectTuiPassthroughArgs(["--session=old"]), [
     "--session=old",

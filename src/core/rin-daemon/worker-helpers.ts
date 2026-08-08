@@ -3,7 +3,6 @@ import { asArray } from "../json-utils.js";
 import { loadRinChangelogModule } from "../rin-lib/loader.js";
 import type { ChatMessagePart } from "../rin-lib/chat-outbox.js";
 import { BUILTIN_SLASH_COMMANDS } from "../rin-lib/rpc.js";
-import { renderUsageReportForChat } from "../rin/usage.js";
 import { listBoundSessions } from "../session/factory.js";
 
 export function writeJsonLine(value: unknown) {
@@ -344,11 +343,6 @@ export function formatSessionStats(stats: any) {
       `${String(stats?.totalMessages || 0)} (user=${String(stats?.userMessages || 0)}, assistant=${String(stats?.assistantMessages || 0)}, toolResults=${String(stats?.toolResults || 0)})`,
     ),
     formatLabelValueLine("Tool Calls", String(stats?.toolCalls || 0)),
-    formatLabelValueLine(
-      "Tokens",
-      `${String(stats?.tokens?.total || 0)} (input=${String(stats?.tokens?.input || 0)}, output=${String(stats?.tokens?.output || 0)}, cacheRead=${String(stats?.tokens?.cacheRead || 0)}, cacheWrite=${String(stats?.tokens?.cacheWrite || 0)})`,
-    ),
-    formatLabelValueLine("Cost", String(stats?.cost || 0)),
   ].join("\n");
 }
 
@@ -359,7 +353,6 @@ export async function runBuiltinCommand(
     SessionManager?: any;
     uiContext?: any;
     listSessions?: typeof listBoundSessions;
-    renderUsageReport?: typeof renderUsageReportForChat;
   },
 ) {
   const session = runtime.session;
@@ -387,15 +380,6 @@ export async function runBuiltinCommand(
       return handledText(commandResponses.reload);
     case "session":
       return handledText(formatSessionStats(session.getSessionStats()));
-    case "usage": {
-      if (!agentDir) {
-        throwCommandError("usage unavailable: missing Rin data directory");
-      }
-      const report = await (deps.renderUsageReport || renderUsageReportForChat)(
-        agentDir,
-      );
-      return handledText(report.text, report.parts);
-    }
     case "changelog": {
       const { getChangelogPath, parseChangelog }: any =
         await loadRinChangelogModule();

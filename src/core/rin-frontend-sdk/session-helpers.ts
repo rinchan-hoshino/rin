@@ -2,7 +2,6 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 import { asArray } from "../json-utils.js";
 import { extractMessageText } from "../message-content.js";
-import { calculateUsageTotalTokens } from "../usage-metrics.js";
 
 export { computeAvailableThinkingLevels } from "../model-thinking-levels.js";
 
@@ -45,9 +44,21 @@ function normalizeTokenCount(value: unknown) {
   return Number.isFinite(tokens) && tokens > 0 ? Math.ceil(tokens) : 0;
 }
 
+function contextTokenCount(value: unknown) {
+  const numeric = Number(value || 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
 export function calculateContextTokens(usage: any) {
   if (!usage || typeof usage !== "object") return 0;
-  return calculateUsageTotalTokens(usage);
+  const explicit = contextTokenCount(usage.totalTokens);
+  if (explicit) return explicit;
+  return (
+    contextTokenCount(usage.input) +
+    contextTokenCount(usage.output) +
+    contextTokenCount(usage.cacheRead) +
+    contextTokenCount(usage.cacheWrite)
+  );
 }
 
 function estimateTextAndImageContentChars(content: any) {

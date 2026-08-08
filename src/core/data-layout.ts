@@ -91,7 +91,6 @@ export const LEGACY_DATA_LAYOUT_MOVES: Array<{
     from: "runtime-update",
     to: path.join("core", "updates"),
   },
-  { id: "token-usage", from: "token-usage", to: path.join("core", "usage") },
   {
     id: "browse",
     from: "browse",

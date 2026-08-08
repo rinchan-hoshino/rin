@@ -25,7 +25,7 @@ Keep changes aligned with that shape. Prefer one clear runtime path over compati
   - `rin-lib`: shared runtime prompt, changelog, model, update, and system helpers.
   - `rin-daemon`: daemon runtime, worker pool, RPC state, and process orchestration.
   - `session`: shared session path and managed-session helpers.
-  - `memory`, `task`, `chat`, `chat-bridge`, `token-usage`, and `self-improve`: first-party capability domains.
+  - `memory`, `task`, `chat`, `chat-bridge`, and `self-improve`: first-party capability domains.
   - `platform`: shared filesystem, process, and OS utilities.
   - `pi`: Pi integration shims and helpers.
 - `tests/`: TypeScript tests split into `unit`, `e2e`, and `interactive` buckets.

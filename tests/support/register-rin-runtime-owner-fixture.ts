@@ -125,7 +125,6 @@ const sources: Record<string, string> = {
   "../memory/index.js": `export default function memory(options) { globalThis.__rinRuntimeOwner.moduleOptions.memory = options; return { name: "memory-owner" }; }`,
   "../self-improve/index.js": `export default function selfImprove(options) { globalThis.__rinRuntimeOwner.moduleOptions.selfImprove = options; return { name: "self-improve-owner" }; }`,
   "../task/index.js": `export default function task() { return { name: "task-owner" }; }`,
-  "../token-usage/index.js": `export default function tokenUsage(options) { globalThis.__rinRuntimeOwner.moduleOptions.tokenUsage = options; return { name: "token-usage-owner" }; }`,
   "../chat/index.js": `export default function chat() { return { name: "chat-owner" }; }`,
   "../rin-frontend-sdk/frontend-identity.js": `
     export function normalizeFrontendIdentity(value) {

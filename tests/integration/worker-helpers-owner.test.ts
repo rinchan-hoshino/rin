@@ -47,14 +47,6 @@ function createRuntime(agentDir: string) {
       assistantMessages: 1,
       toolResults: 1,
       toolCalls: 3,
-      tokens: {
-        total: 20,
-        input: 8,
-        output: 7,
-        cacheRead: 4,
-        cacheWrite: 1,
-      },
-      cost: 0.25,
     }),
   };
   return {
@@ -291,7 +283,9 @@ test("worker helpers own RPC-safe state, diagnostics, completion, and built-in c
       helpers.formatSessionStats(session.getSessionStats()),
       /Session File: In-memory/,
     );
-    assert.match(helpers.formatSessionStats({}), /Tokens: 0/);
+    const emptyStats = helpers.formatSessionStats({});
+    assert.match(emptyStats, /Tool Calls: 0/);
+    assert.doesNotMatch(emptyStats, /Tokens:|Cost:/);
 
     assert.deepEqual(
       await helpers.runBuiltinCommand(runtime, "hello", { SessionManager: {} }),
@@ -438,18 +432,11 @@ test("worker helpers own RPC-safe state, diagnostics, completion, and built-in c
     });
     assert.equal(changelog.handled, true);
     assert.equal(String(changelog.text).length > 0, true);
-    const usage = await helpers.runBuiltinCommand(runtime, "/usage", {
-      SessionManager: {},
-    });
-    assert.equal(usage.handled, true);
-    await assert.rejects(
-      () =>
-        helpers.runBuiltinCommand(
-          { ...runtime, services: { agentDir: "" } },
-          "/usage",
-          { SessionManager: {} },
-        ),
-      /usage unavailable/,
+    assert.deepEqual(
+      await helpers.runBuiltinCommand(runtime, "/usage", {
+        SessionManager: {},
+      }),
+      { handled: false },
     );
     assert.deepEqual(
       await helpers.runBuiltinCommand(runtime, "/owner-unknown", {

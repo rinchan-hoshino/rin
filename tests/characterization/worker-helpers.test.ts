@@ -15,11 +15,6 @@ const workerHelpers = await import(
     path.join(rootDir, "dist", "core", "rin-daemon", "worker-helpers.js"),
   ).href
 );
-const tokenUsageStore = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "token-usage", "store.js"))
-    .href
-);
-
 function createAuthStorageFixture() {
   return {
     list: () => ["gemini"],
@@ -85,11 +80,11 @@ test("worker helpers split command args and format stats", () => {
     assistantMessages: 1,
     toolResults: 1,
     toolCalls: 2,
-    tokens: { total: 10, input: 4, output: 5, cacheRead: 1, cacheWrite: 0 },
-    cost: 0.01,
   });
   assert.ok(text.includes("Session ID: s1"));
   assert.ok(text.includes("Tool Calls: 2"));
+  assert.equal(text.includes("Tokens:"), false);
+  assert.equal(text.includes("Cost:"), false);
 });
 
 test("worker helpers expose resource diagnostics from the active session", () => {
@@ -238,10 +233,11 @@ test("worker helpers expose normalized slash commands and oauth state", async ()
     ),
     false,
   );
-  assert.ok(
+  assert.equal(
     commands.some(
       (command) => command.name === "usage" && command.source === "builtin",
     ),
+    false,
   );
   assert.equal(
     commands.some((command) => command.name === "model"),
@@ -345,91 +341,13 @@ test("runBuiltinCommand lists available models before selection", async () => {
   assert.equal(empty.text, "No models available.");
 });
 
-test("runBuiltinCommand shows compact usage status", async () => {
-  const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-chat-usage-"));
-  try {
-    fs.writeFileSync(
-      path.join(agentDir, "auth.json"),
-      `${JSON.stringify({
-        "google-gemini-cli": {
-          type: "api_key",
-          email: "gemini@example.test",
-        },
-      })}\n`,
-      "utf8",
-    );
-    tokenUsageStore.appendTokenTelemetryEvent(
-      {
-        id: "chat-usage-event",
-        timestamp: new Date().toISOString(),
-        sessionId: "s1",
-        eventType: "message_end",
-        messageRole: "assistant",
-        provider: "google-gemini-cli",
-        model: "gemini-test",
-        inputTokens: 80,
-        outputTokens: 20,
-        totalTokens: 100,
-      },
-      agentDir,
-    );
-
-    const result = await workerHelpers.runBuiltinCommand(
-      { services: { agentDir }, session: {} },
-      "/usage",
-      { SessionManager: { list: async () => [] } },
-    );
-
-    assert.equal(result.handled, true);
-    assert.equal(result.text, "");
-    assert.equal(
-      result.parts?.some((part: any) => part?.type === "text"),
-      false,
-    );
-    const imagePart = result.parts?.find((part: any) => part?.type === "image");
-    assert.equal(imagePart?.mimeType, "image/png");
-    const image = fs.readFileSync(String(imagePart?.path || ""));
-    assert.deepEqual(
-      [...image.subarray(0, 8)],
-      [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
-    );
-  } finally {
-    fs.rmSync(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("runBuiltinCommand reports usage failures instead of sending a partial image", async () => {
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-chat-usage-codex-error-"),
-  );
-  try {
-    await assert.rejects(
-      () =>
-        workerHelpers.runBuiltinCommand(
-          { services: { agentDir }, session: {} },
-          "/usage",
-          {
-            SessionManager: { list: async () => [] },
-            renderUsageReport: async () => {
-              throw new Error("Codex usage unavailable: quota timeout");
-            },
-          },
-        ),
-      /Codex usage unavailable: quota timeout/,
-    );
-  } finally {
-    fs.rmSync(agentDir, { recursive: true, force: true });
-  }
-});
-
 test("runBuiltinCommand reports command errors by throwing", async () => {
-  await assert.rejects(
-    () =>
-      workerHelpers.runBuiltinCommand({ session: {} }, "/usage", {
-        SessionManager: { list: async () => [] },
-      }),
-    /usage unavailable: missing Rin data directory/,
+  const removedUsage = await workerHelpers.runBuiltinCommand(
+    { session: {} },
+    "/usage",
+    { SessionManager: { list: async () => [] } },
   );
+  assert.equal(removedUsage.handled, false);
 
   const runtime = {
     session: {

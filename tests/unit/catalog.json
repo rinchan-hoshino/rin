@@ -462,11 +462,6 @@
       "built": "dist/core/tui-runtime-env.js"
     },
     {
-      "test": "tests/unit/usage-metrics.test.ts",
-      "source": "src/core/usage-metrics.ts",
-      "built": "dist/core/usage-metrics.js"
-    },
-    {
       "test": "tests/unit/update-job-auth.test.ts",
       "source": "src/core/rin-install/update-job-auth.ts",
       "built": "dist/core/rin-install/update-job-auth.js"

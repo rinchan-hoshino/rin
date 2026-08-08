@@ -31,7 +31,7 @@ const chatCommandCatalog = [
   { name: "new", chat: true },
   { name: "compact", chat: true },
   { name: "reload", chat: true },
-  { name: "usage", chat: true },
+  { name: "usage", description: "Show Codex quota status", chat: true },
   { name: "init", chat: false },
   { name: "status" },
 ];
@@ -86,7 +86,7 @@ test("chat boot command descriptions use the fixed English catalog", () => {
       "Start a new session",
       "Compact the current session",
       "Reload extensions, prompts, skills, and themes",
-      "Show usage and quota status",
+      "Show Codex quota status",
     ],
   );
 });
@@ -146,7 +146,7 @@ test("chat boot builds and syncs Discord application commands", async () => {
     },
     {
       name: "usage",
-      description: "Show usage and quota status",
+      description: "Show Codex quota status",
       type: 1,
       options: [
         { name: "input", description: "Arguments", type: 3, required: false },
@@ -217,7 +217,7 @@ test("chat boot clears common telegram scopes before syncing default commands", 
       command: "reload",
       description: "Reload extensions, prompts, skills, and themes",
     },
-    { command: "usage", description: "Show usage and quota status" },
+    { command: "usage", description: "Show Codex quota status" },
   ];
 
   assert.deepEqual(boot.buildTelegramCommandPayload(rows), expectedPayload);

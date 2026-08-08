@@ -46,7 +46,7 @@ test("chat main consumes inbound help messages through the inbox path only once"
           { name: "new", description: "Start a new session" },
           { name: "compact", description: "Compact the current context" },
           { name: "reload", description: "Reload extensions, skills, prompts, and themes" },
-          { name: "usage", description: "Show usage and quota status" },
+          { name: "usage", description: "Show Codex quota status" },
           { name: "status", description: "Show this chat session status" },
         ],
       });
@@ -99,7 +99,7 @@ test("chat main consumes inbound help messages through the inbox path only once"
         JSON.parse(terminal[0].post_delivery_json).markProcessed.messageId !== "m1" ||
         terminal[0].state !== "terminal" ||
         !text.includes("/help — Show available commands") ||
-        !text.includes("/usage — Show usage and quota status") ||
+        !text.includes("/usage — Show Codex quota status") ||
         !text.includes("/status — Show this chat session status") ||
         text.includes("/model —") ||
         text.includes("/session —")

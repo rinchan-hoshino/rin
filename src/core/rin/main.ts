@@ -19,7 +19,6 @@ const RIN_COMMANDS = [
   ["doctor", "Show daemon/socket diagnostics for the target user"],
   ["status", "Show live worker and scheduled task activity"],
   ["tasks", "Operate scheduled task records"],
-  ["usage", "Show subscription/API usage status and backend usage reports"],
   ["self-improve", "Show recent self-improve outcomes and backend history"],
   ["versions", "List installed Rin runtime versions"],
   ["rollback", "Rollback the installed Rin runtime to the previous version"],
@@ -31,11 +30,6 @@ const RIN_COMMANDS = [
 type InternalCommandRunner = (args: string[]) => void | Promise<void>;
 
 const INTERNAL_COMMANDS = [
-  {
-    marker: "__usage_internal",
-    command: "usage",
-    loadRun: async () => (await import("./usage.js")).runUsageInternal,
-  },
   {
     marker: "__memory_index_internal",
     command: "memory-index",
@@ -303,10 +297,6 @@ export async function startRinCli() {
   if (parsed.command === "tasks") {
     const { runTasks } = await import("./tasks.js");
     return await runTasks(parsed, process.argv.slice(2));
-  }
-  if (parsed.command === "usage") {
-    const { runUsage } = await import("./usage.js");
-    return await runUsage(parsed, process.argv.slice(2));
   }
   if (parsed.command === "self-improve") {
     const { runSelfImprove } = await import("./self-improve.js");

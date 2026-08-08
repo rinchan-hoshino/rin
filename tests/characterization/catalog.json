@@ -338,11 +338,6 @@
       "subject": "Add todo final continuation gate"
     },
     {
-      "file": "tests/characterization/token-usage-store.test.ts",
-      "introducedBy": "1e486d3a",
-      "subject": "feat: add token usage telemetry and usage dashboard"
-    },
-    {
       "file": "tests/characterization/tui-launcher.test.ts",
       "introducedBy": "776b7eea",
       "subject": "refactor(rin-tui): normalize launcher mode resolution"

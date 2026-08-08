@@ -1,6 +1,6 @@
 # Persistence Write Reduction and Archive Design
 
-This document records the implemented write reductions, transcript-search schema, and non-production chat archive prototype for Rin's worker recovery state, usage telemetry, transcript search, and chat history.
+This document records the implemented write reductions, transcript-search schema, and non-production chat archive prototype for Rin's worker recovery state, transcript search, and chat history.
 
 ## Invariants
 
@@ -8,7 +8,6 @@ This document records the implemented write reductions, transcript-search schema
 - A storage tier never changes whether content exists. Chat search requires an agent-selected search level; `exhaustive` scans every retained tier, while narrower levels report partial coverage and whether deeper search or another result page is available.
 - Operational chat state remains transactionally safe. An archive must not weaken inbox, turn, outbox, reply, or idempotency behavior.
 - Transcript archives remain the source of truth. The transcript search database is a rebuildable index.
-- During normal database availability, usage telemetry may lose at most one pending batch (up to 32 events or one second) on a hard process kill. Flush failures keep the pending batch bounded for retry and reject new events until the batch can be committed. Normal turn completion and session shutdown attempt a best-effort flush without blocking lifecycle cleanup.
 - Persisted state is written only when its semantic value changes.
 
 ## Implemented write reductions
@@ -23,21 +22,6 @@ Expected steady-state behavior:
 - identical heartbeats do not replace the file;
 - terminal state removes the running record;
 - daemon startup reads the same durable shape as before.
-
-### Usage telemetry
-
-The token-usage capability queues up to 32 normalized events for at most one second and inserts each batch in one SQLite transaction. It also flushes at `agent_end`, `session_shutdown`, and before a usage query reads the database.
-
-The `telemetry_events_tokens_idx` index is removed. Rin's all-time token aggregate explicitly performs a table scan, bounded aggregates use `telemetry_events_timestamp_idx`, and equality filters use their dimension indexes. The total-token index was not selected by any generated query path.
-
-A 320-event synthetic comparison, using the same schema and event data for both paths, produced:
-
-| Write path               | WAL after inserts |  Elapsed |
-| ------------------------ | ----------------: | -------: |
-| One autocommit per event |   4,140,632 bytes | 14.07 ms |
-| Batches of 32            |     844,632 bytes |  6.57 ms |
-
-This is an approximately 79.6% smaller WAL and 53.3% lower insertion time for that workload. It is a transaction-boundary comparison, not a physical-NAND endurance estimate.
 
 ## Transcript search schema v5
 

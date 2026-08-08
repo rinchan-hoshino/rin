@@ -1300,18 +1300,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin/usage-chart.ts",
-      "built": "dist/core/rin/usage-chart.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin/usage.ts",
-      "built": "dist/core/rin/usage.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/rin/versions.ts",
       "built": "dist/core/rin/versions.js",
       "ownerSuite": "integration",
@@ -1564,26 +1552,8 @@
       "status": "strict"
     },
     {
-      "source": "src/core/token-usage/index.ts",
-      "built": "dist/core/token-usage/index.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/token-usage/store.ts",
-      "built": "dist/core/token-usage/store.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/tui-runtime-env.ts",
       "built": "dist/core/tui-runtime-env.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/usage-metrics.ts",
-      "built": "dist/core/usage-metrics.js",
       "ownerSuite": "unit",
       "status": "strict"
     },

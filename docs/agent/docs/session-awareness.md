@@ -67,7 +67,6 @@ Start with low-risk state discovery:
 rin doctor
 rin status
 rin status --json
-rin usage
 rin self-improve
 find ~/.rin/sessions -maxdepth 3 -type f | sort | tail -40
 ps -ef | grep -E 'rin|node|tsx|npm|git|gh' | grep -v grep

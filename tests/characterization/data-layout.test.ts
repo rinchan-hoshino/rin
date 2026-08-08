@@ -19,8 +19,8 @@ test("data layout helpers group runtime state by owner", () => {
     path.join(root, "data", "chat", "inbox"),
   );
   assert.equal(
-    coreDataPath(root, "usage"),
-    path.join(root, "data", "core", "usage"),
+    coreDataPath(root, "state"),
+    path.join(root, "data", "core", "state"),
   );
   assert.equal(
     schedulerDataPath(root, "turns"),

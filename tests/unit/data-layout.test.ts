@@ -18,8 +18,8 @@ const layout = await importBuiltModule<{
 test("data layout groups runtime state by its owning subsystem", () => {
   const root = path.resolve(path.sep, "tmp", "rin-data");
   assert.equal(
-    layout.coreDataPath(root, "usage"),
-    path.join(root, "data", "core", "usage"),
+    layout.coreDataPath(root, "state"),
+    path.join(root, "data", "core", "state"),
   );
   assert.equal(
     layout.chatDataPath(root, "inbox"),

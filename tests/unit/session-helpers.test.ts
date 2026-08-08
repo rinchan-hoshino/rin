@@ -108,12 +108,24 @@ test("context estimates reuse only successful positive assistant usage", () => {
   assert.equal(sessionHelpers.calculateContextTokens("bad"), 0);
   assert.equal(
     sessionHelpers.calculateContextTokens({
+      totalTokens: 42,
+      input: 100,
+      output: 100,
+    }),
+    42,
+  );
+  assert.equal(
+    sessionHelpers.calculateContextTokens({
       input: 2,
       output: 3,
       cacheRead: 4,
       cacheWrite: 1,
     }),
     10,
+  );
+  assert.equal(
+    sessionHelpers.calculateContextTokens({ input: Infinity, output: "bad" }),
+    0,
   );
 
   const estimate = (message: any) => Number(message?.estimate || 0);

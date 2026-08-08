@@ -243,7 +243,7 @@ test("rpc prompt routes frontend /new command to local new session", async () =>
   );
 });
 
-test("rpc prompt routes run-command builtin slash commands from command metadata", async () => {
+test("rpc prompt routes extension slash commands from command metadata", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({
     send(payload) {
@@ -256,8 +256,8 @@ test("rpc prompt routes run-command builtin slash commands from command metadata
               commands: [
                 {
                   name: "usage",
-                  description: "Show usage",
-                  source: "builtin",
+                  description: "Show Codex usage",
+                  source: "extension",
                 },
               ],
             },
@@ -1206,7 +1206,7 @@ test("rpc runtime loads worker resource diagnostics after remote session setup",
   assert.equal(sentTypes.at(-1), "get_resource_diagnostics");
 });
 
-test("rpc runtime routes run-command builtin slash commands from prompt to daemon", async () => {
+test("rpc runtime routes extension slash commands from prompt to daemon", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({
     send(payload) {
@@ -1214,7 +1214,7 @@ test("rpc runtime routes run-command builtin slash commands from prompt to daemo
       if (payload.type === "get_commands") {
         return Promise.resolve({
           success: true,
-          data: { commands: [{ name: "usage", source: "builtin" }] },
+          data: { commands: [{ name: "usage", source: "extension" }] },
         });
       }
       if (payload.type === "run_command") {

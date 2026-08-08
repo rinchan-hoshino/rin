@@ -1,6 +1,6 @@
 # Diagnostic and Status Commands
 
-Use this document when an agent needs Rin health, session work state, subscription/API usage, or self-improve history.
+Use this document when an agent needs Rin health, session work state, or self-improve history.
 
 These commands have two surfaces:
 
@@ -9,12 +9,11 @@ These commands have two surfaces:
 
 ## Command responsibilities
 
-| Command            | Owns                                                                                                        | Frontend view                                                                              | Backend view                                                                                                          |
-| ------------------ | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `rin doctor`       | Whole Rin health: daemon socket, managed service, chat bridge readiness, worker count, and service logs.    | `systemctl`-style health page plus recent logs.                                            | `rin doctor --json` returns the complete health snapshot.                                                             |
-| `rin status`       | Session work state: currently running daemon workers and scheduler activity.                                | Pi-resume-list-style live TUI; `--once` prints a static snapshot.                          | `rin status --json`, RPC `daemon_activity`, or SDK `rin.daemon.activity()` returns the full daemon activity snapshot. |
-| `rin usage`        | Subscription/API usage: provider quota, token/cost history, remaining windows, reset times, and aggregates. | Codex-like quota plus a 7d 3h-bucket text line chart.                                      | Filterable reports through `--from`, `--to`, `--group-by`, `--filter`, `--events`, `--dimensions`, `--include-zero`.  |
-| `rin self-improve` | Self-evolution usage: distillation outcomes, changed artifacts, failures, and historical stats.             | Pi-resume-list-style TUI over recent self-improve runs; `--once`/`--id` print static text. | `rin self-improve --json` plus filters returns complete records and stats.                                            |
+| Command            | Owns                                                                                                     | Frontend view                                                                              | Backend view                                                                                                          |
+| ------------------ | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `rin doctor`       | Whole Rin health: daemon socket, managed service, chat bridge readiness, worker count, and service logs. | `systemctl`-style health page plus recent logs.                                            | `rin doctor --json` returns the complete health snapshot.                                                             |
+| `rin status`       | Session work state: currently running daemon workers and scheduler activity.                             | Pi-resume-list-style live TUI; `--once` prints a static snapshot.                          | `rin status --json`, RPC `daemon_activity`, or SDK `rin.daemon.activity()` returns the full daemon activity snapshot. |
+| `rin self-improve` | Self-evolution usage: distillation outcomes, changed artifacts, failures, and historical stats.          | Pi-resume-list-style TUI over recent self-improve runs; `--once`/`--id` print static text. | `rin self-improve --json` plus filters returns complete records and stats.                                            |
 
 `memory` is not the self-evolution command name. In Rin terminology, memory means original evidence and retrieval. Use `rin self-improve` for distilled self-improve activity.
 
@@ -77,33 +76,7 @@ const sessions = await rin.sessions.list({ limit: 100, offset: 0 });
 
 Use plain `rin status` in a terminal for the live interactive list. Use `rin status --once` when output is piped or a static text snapshot is needed. Use `rin status --json` for the combined backend snapshot: daemon activity plus a session listing page. Use `daemon_activity` / `rin.daemon.activity()` for live workers and scheduled-task activity. Use `list_sessions` / `rin.sessions.list()` when ended or detached session records matter. Use `daemon_status` / `rin.daemon.status()` when daemon health extras such as chat bridge status also matter.
 
-## `rin usage`
-
-Use `usage` when the question is subscription/API consumption, quota, reset time, token history, or grouped cost/token stats.
-
-Frontend:
-
-```sh
-rin usage
-```
-
-The default view shows configured accounts/quota and a recent 7d line chart using 3-hour buckets. JSON reports without an explicit time range also default to the most recent 7 days. Use `--all-time` when the report must cover all stored history, or use backend filters for exact 5h/1d/7d tables and grouped totals.
-
-Backend examples:
-
-```sh
-rin usage --dimensions
-rin usage --json
-rin usage --json --all-time
-rin usage --json --events --from 24h --limit 100
-rin usage --json --group-by provider_model,capability --from 7d
-rin usage --group-by session,capability --filter provider=openai-codex --from 30d
-rin usage --group-by hour --from 1d --include-zero
-```
-
-Supported time forms include ISO timestamps, `YYYY-MM-DD`, and relative values such as `30m`, `5h`, `7d`, and `4w`.
-
-Use `--json` when an agent needs quota plus the queried history/statistics in one backend payload. Text backend reports remain available for quick aggregate/event tables. Use filters for exact dimensions only after checking `rin usage --dimensions`.
+Codex quota is optional rather than a Rin core diagnostic. When the first-party `codex-usage` Pi package extension is installed, use `/usage` in TUI or Chat Bridge. It reports only Codex quota and does not create a telemetry database or chart.
 
 ## `rin self-improve`
 
@@ -132,7 +105,7 @@ Backend output includes generated time, filters, stats, and the matching mainten
 
 ## Choosing CLI, RPC, or SDK
 
-- Use the **CLI backend** when the command reads local files, token usage DBs, service logs, or needs complex filters.
+- Use the **CLI backend** when the command reads local files, service logs, or needs complex filters.
 - Use **RPC** when a running frontend/agent needs daemon state without spawning a subprocess. Current shared RPC commands for this surface are `daemon_activity`, `daemon_status`, and `list_sessions`.
 - Use the **Agent SDK** in Node scripts when composing daemon-backed checks with task/chat operations.
 - Do not infer self-improve history from memory recall. Read `rin self-improve --json` for structured self-improve history, and use `recall` only for original transcript evidence.
@@ -144,5 +117,5 @@ When reporting from these commands, name:
 - command and backend/frontend mode used;
 - time range and filters, if any;
 - key state observed;
-- whether the evidence came from CLI output, RPC, SDK, service logs, or the usage/self-improve store;
+- whether the evidence came from CLI output, RPC, SDK, service logs, or the self-improve store;
 - remaining boundary before changing source, installed runtime, tasks, or chat adapters.

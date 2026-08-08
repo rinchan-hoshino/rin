@@ -1053,19 +1053,6 @@
       "tests": ["tests/integration/update-job.test.ts"]
     },
     {
-      "source": "src/core/rin/usage-chart.ts",
-      "built": "dist/core/rin/usage-chart.js",
-      "suite": "integration",
-      "tests": ["tests/integration/usage-chart-owner.test.ts"]
-    },
-    {
-      "source": "src/core/rin/usage.ts",
-      "built": "dist/core/rin/usage.js",
-      "suite": "integration",
-      "tests": ["tests/integration/rin-usage-owner.test.ts"],
-      "preloads": ["tests/support/register-usage-owner-fixture.ts"]
-    },
-    {
       "source": "src/core/rin/versions.ts",
       "built": "dist/core/rin/versions.js",
       "suite": "integration",
@@ -1168,18 +1155,6 @@
       "built": "dist/core/session/runner.js",
       "suite": "integration",
       "tests": ["tests/integration/session-runner-owner.test.ts"]
-    },
-    {
-      "source": "src/core/token-usage/index.ts",
-      "built": "dist/core/token-usage/index.js",
-      "suite": "integration",
-      "tests": ["tests/integration/token-usage-index-owner.test.ts"]
-    },
-    {
-      "source": "src/core/token-usage/store.ts",
-      "built": "dist/core/token-usage/store.js",
-      "suite": "integration",
-      "tests": ["tests/integration/token-usage-store.test.ts"]
     },
     {
       "source": "src/app/rin-install/update-payload.ts",

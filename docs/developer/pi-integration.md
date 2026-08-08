@@ -10,7 +10,7 @@ still be upgraded intentionally.
   `src/core/pi/private-api.ts`.
 - Do not access selected Pi private session/manager members outside
   `src/core/pi/session-host.ts` or the local bridge under `src/core/pi/`.
-- Product modules such as memory, self-improve, chat, daemon, and token usage
+- Product modules such as memory, self-improve, chat, and daemon
   should depend on Rin facades, not Pi private fields.
 - When adding a new Pi private seam, add a semantic helper in `src/core/pi/`,
   document it below, and update the guard test in `tests/unit/pi-dependencies.test.ts`.

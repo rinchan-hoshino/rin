@@ -301,7 +301,6 @@ test("runtime capability definitions integrate owner modules and hook payloads",
       "self-improve-owner",
       "task-owner",
       "chat-owner",
-      "token-usage-owner",
       "rin_provider_bound_context",
     ],
   );
@@ -313,7 +312,7 @@ test("runtime capability definitions integrate owner modules and hook payloads",
   });
   assert.ok(
     noCompactor.some(
-      (definition: any) => definition.name === "token-usage-owner",
+      (definition: any) => definition.name === "rin_provider_bound_context",
     ),
   );
 
@@ -324,7 +323,7 @@ test("runtime capability definitions integrate owner modules and hook payloads",
   });
   assert.ok(
     compacting.some(
-      (definition: any) => definition.name === "token-usage-owner",
+      (definition: any) => definition.name === "rin_provider_bound_context",
     ),
   );
 });

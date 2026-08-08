@@ -1365,13 +1365,10 @@ test("cron scheduler persists disabled Rin capabilities", () => {
   const task = scheduler.upsertTask({
     trigger: { runAt: "2026-04-10T00:00:00.000Z" },
     session: { mode: "none" },
-    disabledRinCapabilities: [" self_improve ", "self_improve", "token_usage"],
+    disabledRinCapabilities: [" self_improve ", "self_improve", "memory"],
     target: { kind: "agent_prompt", prompt: "hello" },
   });
-  assert.deepEqual(task.disabledRinCapabilities, [
-    "self_improve",
-    "token_usage",
-  ]);
+  assert.deepEqual(task.disabledRinCapabilities, ["self_improve", "memory"]);
 });
 
 test("cron chat-bound no-session agent task preserves session file for quote resume", async () => {

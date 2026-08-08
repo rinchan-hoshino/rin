@@ -1,7 +1,7 @@
 export type InstallerI18n = ReturnType<typeof createInstallerI18n>;
 
 type ChatCommandDescriptions = Record<
-  "help" | "abort" | "new" | "compact" | "reload" | "usage" | "status",
+  "help" | "abort" | "new" | "compact" | "reload" | "status",
   string
 >;
 
@@ -230,7 +230,6 @@ const INSTALLER_DISPLAY_COPY: InstallerDisplayCopy = {
     new: "Start a new session",
     compact: "Compact the current session",
     reload: "Reload extensions, prompts, skills, and themes",
-    usage: "Show usage and quota status",
     status: "Show this chat session status",
   },
   chatRuntime: {

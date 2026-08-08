@@ -44,7 +44,8 @@ test("tui stats compute session stats from entries", () => {
   assert.equal(result.assistantMessages, 1);
   assert.equal(result.toolCalls, 1);
   assert.equal(result.toolResults, 1);
-  assert.equal(result.tokens.total, 33);
+  assert.equal("tokens" in result, false);
+  assert.equal("cost" in result, false);
 
   const emptyResult = stats.computeSessionStats(
     { contextWindow: 1000 },
@@ -54,7 +55,8 @@ test("tui stats compute session stats from entries", () => {
     undefined,
   );
   assert.equal(emptyResult.totalMessages, 0);
-  assert.equal(emptyResult.tokens.total, 0);
+  assert.equal("tokens" in emptyResult, false);
+  assert.equal("cost" in emptyResult, false);
 });
 
 test("tui stats get context usage estimates the pruned provider-bound context", () => {

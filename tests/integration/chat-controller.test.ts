@@ -1729,7 +1729,7 @@ test("chat controller preserves the active turn when backend /abort fails", asyn
   assert.equal(workingClears, 0);
 });
 
-test("chat controller can deliver image-only builtin command parts", async () => {
+test("chat controller can deliver image-only extension command parts", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
@@ -1740,33 +1740,33 @@ test("chat controller can deliver image-only builtin command parts", async () =>
   const sessionFile = path.join(
     controller.agentDir,
     "sessions",
-    "usage-command-parts.jsonl",
+    "media-command-parts.jsonl",
   );
   controller.session = {
     isStreaming: false,
     sessionManager: {
       getSessionFile: () => sessionFile,
-      getSessionId: () => "session-usage",
+      getSessionId: () => "session-media",
       getSessionName: () => controller.chatKey,
     },
     ensureSessionReady: async () => ({
       sessionFile,
-      sessionId: "session-usage",
+      sessionId: "session-media",
     }),
     runCommand: async () => ({
       handled: true,
       text: "",
-      parts: [{ type: "image", path: "/tmp/usage.png", mimeType: "image/png" }],
+      parts: [{ type: "image", path: "/tmp/media.png", mimeType: "image/png" }],
       sessionFile,
     }),
     switchSession: async () => {},
   };
 
-  await controller.runCommand("/usage", "m-usage", "m-usage");
+  await controller.runCommand("/media", "m-media", "m-media");
 
   assert.deepEqual(deliveries[0].parts, [
-    { type: "quote", id: "m-usage" },
-    { type: "image", path: "/tmp/usage.png", mimeType: "image/png" },
+    { type: "quote", id: "m-media" },
+    { type: "image", path: "/tmp/media.png", mimeType: "image/png" },
   ]);
 });
 

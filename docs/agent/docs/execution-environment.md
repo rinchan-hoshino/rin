@@ -21,7 +21,7 @@ Trusted inputs:
 
 - current system prompt and live tool list;
 - `pwd`, `whoami`, `hostname`, OS, environment variables, and process context;
-- `rin status`, `rin status --json`, and `rin usage`;
+- `rin status` and `rin status --json`;
 - repository state and local project instructions for source work;
 - target-specific docs named by this page and adjacent topic docs.
 
@@ -96,7 +96,6 @@ rin doctor
 rin doctor --json
 rin status
 rin status --json
-rin usage
 rin self-improve
 ```
 
@@ -160,7 +159,7 @@ Choose validation that proves the target state:
 - command output, file diff, or test result for repository/source work;
 - `rin doctor --json` for whole-runtime health and service-log evidence;
 - `rin status --json`, RPC `daemon_activity` plus `list_sessions`, or SDK `rin.daemon.activity()` plus `rin.sessions.list()` for daemon, scheduled task, worker, running-session, or ended-session state;
-- `rin usage` backend filters for subscription/API usage history and quota evidence;
+- the optional Codex `/usage` extension for current Codex quota evidence;
 - `rin self-improve --json` for structured self-improve history;
 - message store, SDK result, adapter result, or platform evidence for chat work;
 - screenshot, DOM assertion, file artifact, or app state for browser/desktop work;

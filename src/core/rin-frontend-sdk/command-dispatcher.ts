@@ -76,7 +76,6 @@ export const RIN_NON_INTERACTIVE_COMMAND_NAMES = [
   "new",
   "compact",
   "reload",
-  "usage",
 ] as const;
 
 const RIN_NON_INTERACTIVE_COMMAND_NAME_SET = new Set<string>(

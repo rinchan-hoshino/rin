@@ -32,7 +32,7 @@ test("builtin command discovery does not require an ExtensionRunner", () => {
     resourceLoader: { getSkills: () => ({ skills: [] }) },
   });
 
-  for (const name of ["help", "abort", "usage", "new", "compact", "model"]) {
+  for (const name of ["help", "abort", "new", "compact", "model"]) {
     const command = commands.find((item) => item.name === name);
     assert.equal(command?.source, "builtin", name);
   }
@@ -58,7 +58,7 @@ test("builtin command execution does not call the extension API", async () => {
       calls.push("reload");
     },
     getSessionStats() {
-      return { sessionId: "session-1", totalMessages: 0, tokens: {} };
+      return { sessionId: "session-1", totalMessages: 0 };
     },
   };
   const runtime = {
@@ -105,7 +105,7 @@ test("frontend builtin routing remains independent from extension catalog rows",
     name: "new",
   });
   assert.deepEqual(dispatcher.classifyRinFrontendCommand("/usage", []), {
-    kind: "daemon",
+    kind: "none",
     name: "usage",
   });
   assert.deepEqual(dispatcher.classifyRinFrontendCommand("/custom", []), {

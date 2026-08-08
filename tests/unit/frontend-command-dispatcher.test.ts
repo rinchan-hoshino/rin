@@ -44,7 +44,7 @@ test("frontend dispatcher separates builtins, extensions, and unknown commands",
     name: "",
   });
   assert.deepEqual(dispatcher.classifyRinFrontendCommand("/usage"), {
-    kind: "daemon",
+    kind: "none",
     name: "usage",
   });
   assert.deepEqual(
@@ -72,12 +72,11 @@ test("non-interactive exposure and active-turn policy require exact controls", (
     "new",
     "compact",
     "reload",
-    "usage",
   ]);
-  for (const name of ["new", "/new", "usage"]) {
+  for (const name of ["new", "/new"]) {
     assert.equal(dispatcher.isRinNonInteractiveCommandExposed(name), true);
   }
-  for (const name of ["resume", "todos", "status", null]) {
+  for (const name of ["resume", "todos", "status", "usage", null]) {
     assert.equal(dispatcher.isRinNonInteractiveCommandExposed(name), false);
   }
   assert.deepEqual(

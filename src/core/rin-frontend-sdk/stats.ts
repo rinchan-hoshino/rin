@@ -1,6 +1,5 @@
 import { asArray } from "../json-utils.js";
 import { countToolCalls } from "../message-content.js";
-import { readUsageMetrics } from "../usage-metrics.js";
 import { buildProviderBoundContextMessages } from "../rin-lib/provider-context.js";
 import {
   calculateContextTokens,
@@ -55,11 +54,6 @@ export function computeSessionStats(
   let assistantMessages = 0;
   let toolCalls = 0;
   let toolResults = 0;
-  let input = 0;
-  let output = 0;
-  let cacheRead = 0;
-  let cacheWrite = 0;
-  let cost = 0;
 
   for (const entry of asArray<any>(entries)) {
     if (entry?.type !== "message" || !entry.message) continue;
@@ -67,18 +61,11 @@ export function computeSessionStats(
     if (message.role === "user") userMessages += 1;
     if (message.role === "assistant") {
       assistantMessages += 1;
-      const usageMetrics = readUsageMetrics((message as any).usage);
-      input += usageMetrics.input;
-      output += usageMetrics.output;
-      cacheRead += usageMetrics.cacheRead;
-      cacheWrite += usageMetrics.cacheWrite;
-      cost += usageMetrics.costTotal;
       toolCalls += countToolCalls((message as any).content);
     }
     if (message.role === "toolResult") toolResults += 1;
   }
 
-  const totalTokens = input + output + cacheRead + cacheWrite;
   return {
     sessionFile,
     sessionId,
@@ -87,8 +74,6 @@ export function computeSessionStats(
     toolCalls,
     toolResults,
     totalMessages: userMessages + assistantMessages + toolResults,
-    tokens: { input, output, cacheRead, cacheWrite, total: totalTokens },
-    cost,
     contextUsage,
   };
 }

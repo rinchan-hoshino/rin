@@ -476,7 +476,7 @@ test("rpc runtime owns prompt admission, queue visibility, and recovery without 
   client.set("get_commands", {
     commands: [
       { name: "owner-ext", source: "extension", description: "Owner ext" },
-      { name: "usage", source: "builtin", description: "Usage" },
+      { name: "usage", source: "extension", description: "Codex usage" },
       { name: "template", source: "prompt", description: "Template" },
     ],
   });

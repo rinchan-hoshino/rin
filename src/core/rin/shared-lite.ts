@@ -24,7 +24,6 @@ export type ParsedArgs = {
     | "doctor"
     | "status"
     | "tasks"
-    | "usage"
     | "self-improve"
     | "versions"
     | "rollback"

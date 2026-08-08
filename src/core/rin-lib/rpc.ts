@@ -35,13 +35,6 @@ export const RIN_BUILTIN_SLASH_COMMANDS = [
     chat: true,
   },
   {
-    name: "usage",
-    description: "Show compact quota and usage status",
-    origin: "rin",
-    genericPromptRoute: "run_command",
-    chat: true,
-  },
-  {
     name: "status",
     description: "Show this chat session status",
     origin: "rin",
