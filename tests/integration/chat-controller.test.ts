@@ -1494,18 +1494,53 @@ test("chat controller /new clears the old binding when the logical session has n
   );
 });
 
-test("chat controller renders extension command notifications", async () => {
-  const controller = await createController();
-  controller.session = {
+test("chat controller renders extension command notifications from the frontend client", async () => {
+  let connected = false;
+  let listener = null;
+  const frontendClient = {
+    async connect() {
+      connected = true;
+    },
+    async disconnect() {
+      connected = false;
+    },
+    isConnected() {
+      return connected;
+    },
+    subscribe(nextListener) {
+      listener = nextListener;
+      return () => {
+        if (listener === nextListener) listener = null;
+      };
+    },
+    async getState() {
+      return {};
+    },
+    async ensureSessionReady() {
+      return {};
+    },
+    async request(command) {
+      if (command.type === "list_unacknowledged_chat_terminals") {
+        return { terminals: [] };
+      }
+      return {};
+    },
     async runCommand() {
-      await controller.handleFrontendEvent({
+      listener?.({
         type: "extension_ui_request",
-        method: "notify",
-        message: "Extension completed",
+        payload: {
+          type: "extension_ui_request",
+          method: "notify",
+          message: "Extension completed",
+        },
       });
       return { handled: true };
     },
   };
+  const controller = await createController("telegram/1:2", {
+    frontendClientFactory: () => frontendClient,
+  });
+  controller.connect = ChatController.prototype.connect.bind(controller);
 
   const result = await controller.runCommand("/hello");
 

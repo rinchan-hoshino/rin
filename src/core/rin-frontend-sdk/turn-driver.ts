@@ -50,6 +50,7 @@ import type {
   RinFrontendBackendEvent,
   RinFrontendClient,
   RinFrontendEvent,
+  RinExtensionUiRequest,
   RinNewSessionResult,
   RinPromptContext,
   RinSessionState,
@@ -161,6 +162,7 @@ export type RinFrontendEventHandlingFailure = {
 };
 
 export type RinFrontendTurnDriverEvent =
+  | RinExtensionUiRequest
   | { type: "frontend_status"; phase: RinFrontendTurnPhase }
   | { type: "working_state"; working: boolean }
   | { type: "turn_accepted"; requestTag?: string }
@@ -2627,6 +2629,9 @@ export class RinFrontendTurnDriver {
   ) {
     if (eventEpoch !== this.lifecycleEpoch) return;
     switch (event.type) {
+      case "extension_ui_request":
+        await this.emitAndWait(event);
+        return;
       case "status":
         if (
           event.phase === "connecting" ||
