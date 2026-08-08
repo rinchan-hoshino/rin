@@ -92,7 +92,7 @@ fetch_bootstrap_script() {
     return 0
   fi
   if [ -n "$MAIN_BOOTSTRAP_SCRIPT_URL" ] && [ "$MAIN_BOOTSTRAP_SCRIPT_URL" != "$BOOTSTRAP_SCRIPT_URL" ]; then
-    # Older bootstrap exports may only carry install.sh/update.sh, so fall back to main's shared entrypoint.
+    # Older bootstrap exports may lack the shared entrypoint, so fall back to main.
     fetch "$MAIN_BOOTSTRAP_SCRIPT_URL" "$BOOTSTRAP_SCRIPT"
     return 0
   fi

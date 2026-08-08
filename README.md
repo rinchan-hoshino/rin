@@ -6,9 +6,7 @@ Do not develop Rin source code on this branch.
 
 Included files:
 - install.sh
-- update.sh
 - install.ps1
-- update.ps1
 - scripts/bootstrap-entrypoint.sh
 - scripts/bootstrap-entrypoint.ps1
 - release-manifest.json

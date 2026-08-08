@@ -14,17 +14,6 @@ case "$MODE" in
     FETCH_ERROR='rin installer requires curl or wget'
     NODE_ERROR='rin installer requires Node.js >= 22.19.0'
     ;;
-  update)
-    WORK_PREFIX=rin-update
-    LOG_NAME=update.log
-    MANIFEST_LABEL='Fetching release manifest'
-    FETCH_LABEL='Fetching updater source'
-    PREP_LABEL='Preparing updater source'
-    BUILD_LABEL='Building updater'
-    LAUNCH_LABEL='Launching updater...'
-    FETCH_ERROR='rin updater requires curl or wget'
-    NODE_ERROR='rin updater requires Node.js >= 22.19.0'
-    ;;
   *)
     echo "unknown Rin bootstrap mode: $MODE" >&2
     exit 64
@@ -59,7 +48,7 @@ usage() {
   cat <<'EOF'
 Usage: install.sh [--quick-run] [--stable] [--beta] [--nightly] [--git [main|deadbeef]] [legacy flags]
 
-Install defaults to the stable release channel. Update defaults to the previously installed release channel.
+Install defaults to the stable release channel.
 `--quick-run` fetches the selected channel, prepares the current user's config, and launches the TUI without installing an app release or daemon.
 `--beta` installs the current weekly beta candidate.
 `--nightly` installs the current nightly build.
@@ -185,85 +174,6 @@ read_option_value() {
   OPTION_VALUE=$1
 }
 
-read_launcher_install_dir() {
-  launcher_path=$1
-  if [ ! -r "$launcher_path" ]; then
-    return 0
-  fi
-  if command -v node >/dev/null 2>&1; then
-    node - "$launcher_path" 2>/dev/null <<'NODE' || true
-const fs = require('node:fs');
-try {
-  const record = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')) || {};
-  process.stdout.write(String(record.defaultInstallDir || record.installDir || '').trim());
-} catch {}
-NODE
-    return 0
-  fi
-  sed -n 's/.*"defaultInstallDir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p; s/.*"installDir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$launcher_path" | sed -n '1p'
-}
-
-resolve_update_install_dir() {
-  if [ -n "${RIN_DIR:-}" ]; then
-    printf '%s' "$RIN_DIR"
-    return 0
-  fi
-  home=${HOME:-}
-  if [ -n "$home" ]; then
-    for launcher_path in "$home/.config/rin/install.json" "$home/Library/Application Support/rin/install.json"; do
-      launcher_install_dir=$(read_launcher_install_dir "$launcher_path")
-      if [ -n "$launcher_install_dir" ]; then
-        printf '%s' "$launcher_install_dir"
-        return 0
-      fi
-    done
-    printf '%s' "$home/.rin"
-  fi
-}
-
-inherit_update_channel() {
-  if [ "$MODE" != update ] || [ -n "${EXPLICIT_CHANNEL:-}" ]; then
-    return 0
-  fi
-  install_dir=$(resolve_update_install_dir)
-  manifest_path="$install_dir/installer.json"
-  if [ -z "$install_dir" ] || [ ! -r "$manifest_path" ]; then
-    echo "rin update requires an existing installer.json release record; pass --stable/--beta/--nightly/--git to override" >&2
-    exit 1
-  fi
-  if command -v node >/dev/null 2>&1; then
-    inherited=$(node - "$manifest_path" <<'NODE'
-const fs = require('node:fs');
-try {
-  const release = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))?.currentRelease?.release || {};
-  const channel = String(release.channel || '').trim();
-  if (!['stable', 'beta', 'nightly', 'git'].includes(channel)) process.exit(0);
-  const branch = channel === 'git' ? String(release.branch || '').trim() : '';
-  process.stdout.write(`${channel}\n${branch}\n`);
-} catch {}
-NODE
-)
-  else
-    inherited_channel=$(sed -n 's/.*"channel"[[:space:]]*:[[:space:]]*"\(stable\|beta\|nightly\|git\)".*/\1/p' "$manifest_path" | sed -n '1p')
-    inherited_branch=$(sed -n 's/.*"branch"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest_path" | sed -n '1p')
-    inherited=$(printf '%s\n%s\n' "$inherited_channel" "$inherited_branch")
-  fi
-  inherited_channel=$(printf '%s\n' "$inherited" | sed -n '1p')
-  inherited_branch=$(printf '%s\n' "$inherited" | sed -n '2p')
-  case "$inherited_channel" in
-    stable|beta|nightly|git)
-      CHANNEL=$inherited_channel
-      if [ "$CHANNEL" = git ] && [ -z "$BRANCH" ] && [ -z "$VERSION" ] && [ -n "$inherited_branch" ]; then
-        BRANCH=$inherited_branch
-      fi
-      ;;
-    *)
-      echo "rin update requires an existing installer.json release channel; pass --stable/--beta/--nightly/--git to override" >&2
-      exit 1
-      ;;
-  esac
-}
-
 parse_args() {
   GIT_SELECTOR=
   EXPLICIT_CHANNEL=
@@ -321,10 +231,6 @@ parse_args() {
         shift
         ;;
       --quick-run)
-        if [ "$MODE" != install ]; then
-          echo "--quick-run is only supported by install.sh" >&2
-          exit 1
-        fi
         QUICK_RUN=1
         EXPECT_GIT_SELECTOR=
         ;;
@@ -363,7 +269,6 @@ parse_args() {
     fi
   fi
 
-  inherit_update_channel
 
   if [ -n "$BRANCH" ] && [ -n "$VERSION" ]; then
     echo "cannot combine --branch and --version" >&2
@@ -885,11 +790,6 @@ launch_installer_entry() {
     "$node_command" "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE" --quick-run
     return $?
   fi
-  if [ "$MODE" = update ]; then
-    "$node_command" "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE" --update
-    return $?
-  fi
-
   "$node_command" "$INSTALLER_ENTRY" --release-file "$RELEASE_FILE"
 }
 
