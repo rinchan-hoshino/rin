@@ -1,5 +1,3 @@
-import { AsyncLocalStorage } from "node:async_hooks";
-
 import { getLatestCompactionEntry } from "@earendil-works/pi-coding-agent";
 
 import {
@@ -981,7 +979,7 @@ export async function runCustomRpcMode(
     resolveObserved: (outcome: NativeInputOutcome) => void;
     observed: Promise<NativeInputOutcome>;
   };
-  const nativeInputContext = new AsyncLocalStorage<NativeInputSubmission>();
+  let pendingNativeInputSubmission: NativeInputSubmission | undefined;
   let nativeInputAdmissionTail: Promise<void> = Promise.resolve();
   let gracefulSessionShutdown = false;
   let latestAutoRetryFailureMessage = "";
@@ -1005,6 +1003,9 @@ export async function runCustomRpcMode(
   ) => {
     if (submission.outcome) return;
     submission.outcome = outcome;
+    if (pendingNativeInputSubmission === submission) {
+      pendingNativeInputSubmission = undefined;
+    }
     submission.resolveObserved(outcome);
   };
   const observeNativeTerminalOwner = (
@@ -1472,7 +1473,7 @@ export async function runCustomRpcMode(
       restoreSessionAppendMessage = undefined;
     }
     unsubscribeSessionEvents = session.subscribe(async (event: any) => {
-      const nativeSubmission = nativeInputContext.getStore();
+      const nativeSubmission = pendingNativeInputSubmission;
       if (event?.type === "agent_start" && nativeSubmission) {
         const ownerBarrier = observeNativeTerminalOwner(nativeSubmission);
         if (ownerBarrier) await ownerBarrier;
@@ -1499,13 +1500,14 @@ export async function runCustomRpcMode(
         if (ownerBarrier) await ownerBarrier;
       }
       if (event?.type === "message_start" && event.message?.role === "user") {
-        producerRequestTag =
-          producerRequestTag || safeString(nativeSubmission?.requestTag).trim();
         const match = turnCoordinator.observeUserStart({
           requestTag: producerRequestTag,
           message: event.message,
         });
-        producerRequestTag = producerRequestTag || match?.requestTag || "";
+        producerRequestTag =
+          match?.requestTag ||
+          producerRequestTag ||
+          safeString(nativeSubmission?.requestTag).trim();
       }
       const taggedEvent =
         producerRequestTag && !safeString(event?.requestTag).trim()
@@ -1716,9 +1718,8 @@ export async function runCustomRpcMode(
         };
         let promptTask: Promise<unknown> | undefined;
         try {
-          promptTask = nativeInputContext.run(submission, () =>
-            session.prompt(command.message, promptOptions),
-          );
+          pendingNativeInputSubmission = submission;
+          promptTask = session.prompt(command.message, promptOptions);
           submission.promptTask = promptTask;
           submission.resolvePromptTaskReady();
           const firstResult = await Promise.race([
@@ -1756,6 +1757,9 @@ export async function runCustomRpcMode(
             }),
           );
         } catch (error) {
+          if (pendingNativeInputSubmission === submission) {
+            pendingNativeInputSubmission = undefined;
+          }
           releaseAdmission();
           if (submission.admissionToken) {
             turnCoordinator.removeAdmission(submission.admissionToken);

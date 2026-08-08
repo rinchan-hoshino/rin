@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { AsyncResource } from "node:async_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = path.resolve(
@@ -4907,7 +4908,7 @@ test(
 );
 
 test(
-  "rpc mode keeps Pi prompt ownership immutable across a runtime-formatted queued steer",
+  "rpc mode attributes queued steer acceptance despite stale terminal-owner async context",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -4916,6 +4917,7 @@ test(
     const lines = [];
     const promptStreamingStates = [];
     const sessionSubscribers = new Set();
+    let ownerEventScope;
     let releaseSteeredTurn;
     const steeredTurnGate = new Promise((resolve) => {
       releaseSteeredTurn = resolve;
@@ -4952,22 +4954,25 @@ test(
           await Promise.resolve();
           promptStreamingStates.push(this.isStreaming);
           if (this.isStreaming) {
-            for (const handler of sessionSubscribers) {
-              await handler({
-                type: "queue_update",
-                steering: [message],
-                followUp: [],
-              });
-              await handler({
-                type: "queue_update",
-                steering: [],
-                followUp: [],
-              });
-            }
-            options?.preflightResult?.(true);
-            return;
+            assert.ok(ownerEventScope);
+            return await ownerEventScope.runInAsyncScope(async () => {
+              for (const handler of sessionSubscribers) {
+                await handler({
+                  type: "queue_update",
+                  steering: [message],
+                  followUp: [],
+                });
+                await handler({
+                  type: "queue_update",
+                  steering: [],
+                  followUp: [],
+                });
+              }
+              options?.preflightResult?.(true);
+            });
           }
           options?.preflightResult?.(true);
+          ownerEventScope = new AsyncResource("stale-owner-events");
           this.isStreaming = true;
           const ownerUser = {
             role: "user",
@@ -5199,6 +5204,7 @@ test(
         [{ requestTag: "tag-first", finalText: "steered final" }],
       );
     } finally {
+      ownerEventScope?.emitDestroy();
       releaseSteeredTurn?.();
       for (const handler of sessionSubscribers) {
         handler({ type: "agent_settled" });

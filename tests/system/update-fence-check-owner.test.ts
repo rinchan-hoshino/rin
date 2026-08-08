@@ -223,9 +223,15 @@ test("native Pi events, not Chat or Pi state inference, decide input ownership",
     rpcMode,
     /acceptedAs|rinAcceptedAs|rin_turn_admission_pending/,
   );
-  assert.match(rpcMode, /AsyncLocalStorage<NativeInputSubmission>/);
-  assert.match(rpcMode, /event\?\.type === "agent_start"/);
-  assert.match(rpcMode, /event\?\.type === "queue_update"/);
+  assert.doesNotMatch(rpcMode, /AsyncLocalStorage<NativeInputSubmission>/);
+  assert.match(
+    rpcMode,
+    /pendingNativeInputSubmission[\s\S]*event\?\.type === "agent_start"[\s\S]*event\?\.type === "queue_update"/,
+  );
+  assert.match(
+    rpcMode,
+    /turnCoordinator\.observeUserStart\([\s\S]*match\?\.requestTag \|\|[\s\S]*producerRequestTag/,
+  );
   assert.match(rpcMode, /appendCustomEntry\?\.\("rin_request_identity"/);
   assert.doesNotMatch(workerPool, /piAdmissionKind|acceptedAs|rinAcceptedAs/);
   assert.match(
