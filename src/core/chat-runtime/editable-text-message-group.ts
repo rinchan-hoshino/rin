@@ -77,9 +77,9 @@ export class EditableTextMessageGroup {
   private readonly kinds = new Map<string, string>();
   private readonly operations = new Map<string, Promise<unknown>>();
   private readonly finalizing = new Set<string>();
-  private readonly workingText: string;
-  private readonly workingFrames: string[];
-  private readonly progressTexts: string[];
+  private workingText: string;
+  private workingFrames: string[];
+  private progressTexts: string[];
 
   constructor(private readonly options: EditableTextMessageGroupOptions) {
     const copy = resolveChatRuntimeWorkingCopy(options.agentDir);
@@ -100,6 +100,19 @@ export class EditableTextMessageGroup {
       ).map(editableIntermediateHeadText),
     ]);
     ensureDir(this.options.cacheDir);
+  }
+
+  setWorkingFrames(frames: string[]) {
+    const configured = normalizeDeliveredIds(frames);
+    const normalized = configured.length
+      ? configured
+      : resolveChatRuntimeWorkingCopy().frames;
+    this.workingFrames = normalized;
+    this.workingText = editableIntermediateHeadText(normalized[0]);
+    this.progressTexts = normalizeDeliveredIds([
+      this.workingText,
+      ...normalized.map(editableIntermediateHeadText),
+    ]);
   }
 
   indicator(options: EditableTextMessageIndicatorOptions = {}) {

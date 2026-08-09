@@ -68,7 +68,6 @@ import { buildInboundChatLogInput } from "./inbound-normalization.js";
 import { withoutChatQuoteNodes } from "./rich-text.js";
 import { buildChatMessageRecordKey } from "./message-store.js";
 import { ChatController, loadChatSettings } from "./controller.js";
-import { readChatCommandResponses } from "./command-responses.js";
 import { queryChatSessionStatus, renderChatSessionStatus } from "./status.js";
 import {
   resolveChatModelOptions,
@@ -576,7 +575,9 @@ export async function startChatBridge(
     await app.stop().catch(() => {});
     await inboundHttpTransport?.close().catch(() => {});
   };
-  const chatCommandResponses = readChatCommandResponses(runtime.agentDir);
+  const onChatPresentation = (presentation: { workingFrames?: string[] }) => {
+    app.setWorkingFrames(presentation.workingFrames || []);
+  };
   const frontendClientFactory = options.frontendClientFactory;
   let commandRows: Awaited<ReturnType<typeof loadChatCommandRows>>;
   try {
@@ -608,7 +609,7 @@ export async function startChatBridge(
         logger,
         h,
         frontendClientFactory,
-        commandResponses: chatCommandResponses,
+        onChatPresentation,
       });
       controllers.set(chatKey, controller);
     }
@@ -676,7 +677,7 @@ export async function startChatBridge(
         statePath,
         frontendClientFactory,
         sleepAfterIdleMs: DETACHED_CONTROLLER_SLEEP_IDLE_MS,
-        commandResponses: chatCommandResponses,
+        onChatPresentation,
         frontendIdentity: detachedOptions?.frontendIdentity,
         useChatFrontendIdentity,
       });

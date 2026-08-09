@@ -323,3 +323,25 @@ test("editable polling indicator reflects status and removes only progress artif
     await fs.rm(cacheDir, { recursive: true, force: true });
   }
 });
+
+test("extension presentation updates and resets existing working frames", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-presentation-owner-"),
+  );
+  const { cacheDir, calls, group } = await fixture({
+    agentDir,
+    maxTextLength: 2_000,
+  });
+  try {
+    const indicator = group.indicator();
+    group.setWorkingFrames(["Localized A", "Localized B"]);
+    await indicator.tick({ chatId: "chat", tick: 0 });
+    assert.match(calls.sent.at(-1).text, /Localized A/);
+    group.setWorkingFrames([]);
+    await indicator.tick({ chatId: "chat", tick: 1 });
+    assert.match(calls.edited.at(-1).text, /Working/);
+  } finally {
+    await fs.rm(cacheDir, { recursive: true, force: true });
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});

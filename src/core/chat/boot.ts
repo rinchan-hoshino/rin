@@ -9,7 +9,7 @@ import {
   readChatOutboxItemById,
   writeChatOutboxItem,
 } from "../rin-lib/chat-outbox.js";
-import { createRinI18n } from "../i18n.js";
+import { createRinI18n } from "../rin-install/i18n.js";
 import {
   isInboundChatMessageProcessed,
   markProcessedChatMessage,

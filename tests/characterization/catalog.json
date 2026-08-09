@@ -18,11 +18,6 @@
       "subject": "fix(task): support updating tasks by id"
     },
     {
-      "file": "tests/characterization/chat-command-responses.test.ts",
-      "introducedBy": "22495b18",
-      "subject": "fix(chat): configure command acknowledgements"
-    },
-    {
       "file": "tests/characterization/chat-file-utils.test.ts",
       "introducedBy": "b8a481fc",
       "subject": "refactor(chat): centralize shared file helper logic"

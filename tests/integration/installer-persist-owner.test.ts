@@ -7,9 +7,12 @@ import test from "node:test";
 
 import {
   applyInstallUpgradeMigrations,
+  finalizeInstallUpgradeMigrations,
   normalizeInstalledChatSettings,
   persistInstallerOutputs,
+  preflightInstallUpgradeMigrations,
   reconcileInstallerManifest,
+  rollbackInstallUpgradeMigrations,
 } from "../../dist/core/rin-install/persist.js";
 import * as persistOwner from "../../dist/core/rin-install/persist.js";
 import {
@@ -238,15 +241,6 @@ test("install upgrade migrations move owned data and rewrite persisted chat hist
     fs.mkdirSync(path.dirname(managedCollision), { recursive: true });
     fs.writeFileSync(managedCollision, "existing\n");
 
-    writeJson(path.join(installDir, "i18n.json"), {
-      chatRuntime: {
-        telegramWorking: {
-          workingInitial: "Thinking",
-          workingSuffix: "Still working",
-        },
-      },
-      preserved: true,
-    });
     const deliveredPath = path.join(
       dataDir,
       "chat",
@@ -333,15 +327,6 @@ test("install upgrade migrations move owned data and rewrite persisted chat hist
       true,
     );
     assert.equal(readJson<any>(messagePath).deliveryKind, "final");
-    const i18n = readJson<any>(path.join(installDir, "i18n.json"));
-    assert.equal(i18n.chatRuntime, undefined);
-    assert.deepEqual(i18n.chat.runtime.working.frames, [
-      "Thinking",
-      "Still working",
-      "Still working.",
-      "Still working..",
-    ]);
-
     const repeated = applyInstallUpgradeMigrations(
       { targetUser: "owner", installDir },
       { runPrivileged() {} },
@@ -357,12 +342,8 @@ test("install upgrade migrations move owned data and rewrite persisted chat hist
   });
 });
 
-test("install migrations preserve explicit working frames and skip ineligible chat state", async () => {
+test("install migrations skip ineligible chat state", async () => {
   await withInstallRoot(async (installDir) => {
-    writeJson(path.join(installDir, "i18n.json"), {
-      chat: { runtime: { working: { frames: ["One", "One", "Two"] } } },
-      chatRuntime: { working: { frames: ["Legacy"] } },
-    });
     const stateRoot = path.join(
       installDir,
       "data",
@@ -397,11 +378,6 @@ test("install migrations preserve explicit working frames and skip ineligible ch
       { targetUser: "owner", installDir },
       { runPrivileged() {} },
     );
-    assert.deepEqual(
-      readJson<any>(path.join(installDir, "i18n.json")).chat.runtime.working
-        .frames,
-      ["One", "Two"],
-    );
     const managed = migrations.find(
       (item) => item.id === "chat-session-managed-file-v1",
     ) as any;
@@ -430,10 +406,6 @@ test("elevated install migrations execute file ownership changes as the target u
     fs.mkdirSync(path.join(installDir, "data", "browse"), {
       recursive: true,
     });
-    writeJson(path.join(installDir, "i18n.json"), {
-      chatRuntime: { working: { frames: ["Legacy one", "Legacy two"] } },
-    });
-
     const commands: Array<[string, string[]]> = [];
     const runCommandAsUser = (
       targetUser: string,
@@ -469,25 +441,12 @@ test("elevated install migrations execute file ownership changes as the target u
       true,
     );
     assert.equal(fs.existsSync(path.join(installDir, "data", "browse")), false);
-    assert.deepEqual(
-      readJson<any>(path.join(installDir, "i18n.json")).chat.runtime.working
-        .frames,
-      ["Legacy one", "Legacy two"],
-    );
-    assert.equal(
-      migrations.some((item) => item.id === "chat-working-frames-i18n-v1"),
-      true,
-    );
     assert.equal(
       commands.some(([command]) => command === "mv"),
       true,
     );
     assert.equal(
       commands.some(([command]) => command === "rm"),
-      true,
-    );
-    assert.equal(
-      commands.some(([command]) => command === "install"),
       true,
     );
   });
@@ -810,11 +769,109 @@ test("installer outputs persist settings, auth, initialization, launchers, and c
   });
 });
 
-test("elevated migrations reject writes without target-user command ownership", async () => {
+test("install migration phases delegate memory and chat authority to the target user", async () => {
   await withInstallRoot(async (installDir) => {
-    writeJson(path.join(installDir, "i18n.json"), {
-      chatRuntime: { working: { frames: ["Owner"] } },
+    const commands: Array<{ command: string; args: string[] }> = [];
+    const options = {
+      targetUser: "owner",
+      installDir,
+      elevated: true,
+      migrationRuntimeRoot: "/runtime",
+      targetNodePath: "/runtime/node",
+      chatRuntimeWillBeQuiesced: true,
+    };
+    const deps = {
+      runPrivileged() {},
+      runCommandAsUser(_user: string, command: string, args: string[]) {
+        commands.push({ command, args });
+      },
+      captureCommandAsUser() {
+        return "0";
+      },
+    };
+    const preflight = preflightInstallUpgradeMigrations(options, deps);
+    assert.deepEqual(
+      preflight.map((item) => item.id),
+      [
+        "transcript-search-schema-v5-preflight",
+        "chat-authority-install-migration-v1-preflight",
+      ],
+    );
+    assert.equal(
+      finalizeInstallUpgradeMigrations(options, deps)?.skipped,
+      false,
+    );
+    assert.equal(
+      rollbackInstallUpgradeMigrations(options, deps)?.skipped,
+      false,
+    );
+    assert.equal(commands.length, 4);
+    const applied = applyInstallUpgradeMigrations(
+      { ...options, chatRuntimeQuiesced: false },
+      deps,
+    );
+    assert.equal(
+      applied.some((item) => item.id === "transcript-search-schema-v5"),
+      true,
+    );
+    assert.equal(
+      applied.some((item) => item.id === "chat-authority-install-migration-v1"),
+      true,
+    );
+    preflightInstallUpgradeMigrations(
+      {
+        ...options,
+        targetNodePath: undefined,
+        chatRuntimeWillBeQuiesced: false,
+      },
+      deps,
+    );
+    applyInstallUpgradeMigrations(
+      {
+        ...options,
+        targetNodePath: undefined,
+        chatRuntimeQuiesced: true,
+      },
+      deps,
+    );
+    assert.deepEqual(commands[0], {
+      command: "/runtime/node",
+      args: [
+        "/runtime/dist/app/rin-install/memory-migrations.js",
+        "--preflight",
+        path.resolve(installDir),
+      ],
     });
+    assert.match(commands[1].args.join(" "), /chat-migrations\.js --preflight/);
+    assert.equal(
+      preflightInstallUpgradeMigrations(
+        { targetUser: "owner", installDir },
+        deps,
+      ).length,
+      0,
+    );
+    fs.mkdirSync(path.join(installDir, "memory"), { recursive: true });
+    fs.writeFileSync(path.join(installDir, "memory", "search.db"), "legacy");
+    assert.throws(
+      () =>
+        finalizeInstallUpgradeMigrations(
+          { targetUser: "owner", installDir },
+          deps,
+        ),
+      /memory_install_migration_runtime_required/,
+    );
+  });
+});
+
+test("elevated migrations reject owned data moves without target-user command support", async () => {
+  await withInstallRoot(async (installDir) => {
+    fs.mkdirSync(path.join(installDir, "data", "browse"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(installDir, "data", "browse", "owner.txt"),
+      "owner",
+    );
     assert.throws(
       () =>
         applyInstallUpgradeMigrations(
@@ -822,51 +879,6 @@ test("elevated migrations reject writes without target-user command ownership", 
           { runPrivileged() {} },
         ),
       /target-user command support/,
-    );
-  });
-});
-
-test("working-frame migration handles legacy thinking keys and no-op locale files", async () => {
-  await withInstallRoot(async (root) => {
-    const legacyDir = path.join(root, "legacy");
-    writeJson(path.join(legacyDir, "i18n.json"), {
-      chatRuntime: {
-        telegramWorking: {
-          thinkingInitial: "Legacy thinking",
-          thinkingSuffix: "",
-        },
-      },
-    });
-    const migrated = applyInstallUpgradeMigrations(
-      { targetUser: "owner", installDir: legacyDir },
-      { runPrivileged() {} },
-    );
-    assert.deepEqual(
-      readJson<any>(path.join(legacyDir, "i18n.json")).chat.runtime.working
-        .frames,
-      ["Legacy thinking"],
-    );
-    assert.equal(
-      migrated.some((item) => item.id === "chat-working-frames-i18n-v1"),
-      true,
-    );
-
-    const noOpDir = path.join(root, "no-op");
-    writeJson(path.join(noOpDir, "i18n.json"), {
-      chatRuntime: { telegramWorking: {} },
-      preserved: true,
-    });
-    const noOp = applyInstallUpgradeMigrations(
-      { targetUser: "owner", installDir: noOpDir },
-      { runPrivileged() {} },
-    );
-    assert.equal(
-      noOp.some((item) => item.id === "chat-working-frames-i18n-v1"),
-      false,
-    );
-    assert.equal(
-      readJson<any>(path.join(noOpDir, "i18n.json")).preserved,
-      true,
     );
   });
 });

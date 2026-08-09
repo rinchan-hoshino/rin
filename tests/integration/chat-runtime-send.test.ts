@@ -1361,21 +1361,14 @@ test("telegram adapter edits one progress message from Working through interim b
   });
 });
 
-test("telegram adapter uses custom working frame list from i18n", async () => {
+test("telegram adapter uses extension presentation working frames", async () => {
   await withTempDir(async (agentDir) => {
-    await fs.writeFile(
-      path.join(agentDir, "i18n.json"),
-      JSON.stringify({
-        chat: {
-          runtime: { working: { frames: ["Loop A", "Loop B", "..."] } },
-        },
-      }),
-    );
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
       name: "Telegram",
       config: { token: "123:abc" },
     });
+    app.setWorkingFrames(["Loop A", "Loop B", "..."]);
     const adapter = [...app.adapters][0];
     const h = runtime.createChatRuntimeH();
     const calls: Array<{ method: string; payload: any }> = [];
@@ -3164,28 +3157,17 @@ test("onebot private working indicator is a one-shot marker", async () => {
   });
 });
 
-test("onebot private marker picks a custom working frame", async () => {
+test("onebot private marker uses extension presentation working frames", async () => {
   await withTempDir(async (agentDir) => {
-    await fs.writeFile(
-      path.join(agentDir, "i18n.json"),
-      JSON.stringify({
-        chat: {
-          runtime: {
-            working: {
-              frames: [
-                "\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
-                "\u6574\u7406\u4e2d\uff5e (\uff61\uff65\u03c9\uff65\uff61)",
-              ],
-            },
-          },
-        },
-      }),
-    );
     const app = createRuntimeApp(agentDir, {
       key: "onebot",
       name: "OneBot",
       config: { endpoint: "ws://127.0.0.1:1" },
     });
+    app.setWorkingFrames([
+      "\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
+      "\u6574\u7406\u4e2d\uff5e (\uff61\uff65\u03c9\uff65\uff61)",
+    ]);
     const adapter = [...app.adapters][0];
     const calls: any[] = [];
     adapter.callAction = async (action: string, params: any) => {

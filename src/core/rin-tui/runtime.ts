@@ -1349,6 +1349,8 @@ export class RpcInteractiveSession {
         if (fallbackText) ui?.notify?.(fallbackText, "info");
         return;
       }
+      case "rinChatPresentation":
+        return;
       case "setStatus":
         ui?.setStatus?.(String(payload.statusKey || ""), payload.statusText);
         return;

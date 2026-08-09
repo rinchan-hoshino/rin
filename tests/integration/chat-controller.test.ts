@@ -1626,6 +1626,30 @@ test("chat controller rejects rich command results outside command execution", a
   );
 });
 
+test("chat controller accepts generic presentation from an extension", async () => {
+  const presentations = [];
+  const controller = await createController("telegram/1:2", {
+    onChatPresentation(presentation) {
+      presentations.push(presentation);
+    },
+  });
+  await controller.handleFrontendEvent({
+    type: "extension_ui_request",
+    method: "rinChatPresentation",
+    presentation: {
+      commandResponses: { new: "Localized new session" },
+      workingFrames: [" Frame A ", "", "Frame B"],
+    },
+  });
+  assert.equal(controller.getCommandResponses().new, "Localized new session");
+  assert.deepEqual(presentations, [
+    {
+      commandResponses: { new: "Localized new session" },
+      workingFrames: ["Frame A", "Frame B"],
+    },
+  ]);
+});
+
 test("chat controller cancels unsupported extension dialogs", async () => {
   const controller = await createController();
   controller.session = {};

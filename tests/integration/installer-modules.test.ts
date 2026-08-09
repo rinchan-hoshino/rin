@@ -1379,42 +1379,6 @@ test("persist normalizeInstalledChatSettings applies install upgrade migrations"
   });
 });
 
-test("persist normalizeInstalledChatSettings migrates legacy working frame i18n", async () => {
-  await withTempDir(async (dir) => {
-    await fs.writeFile(
-      path.join(dir, "i18n.json"),
-      JSON.stringify({
-        chatRuntime: { working: { frames: ["\u65e7 A", "\u65e7 B"] } },
-      }),
-      "utf8",
-    );
-
-    const result = persist.normalizeInstalledChatSettings(
-      { targetUser: "demo", installDir: dir, elevated: false },
-      {
-        findSystemUser: () => ({ name: "demo", gid: 1000 }),
-        readInstallerJson: (_filePath, fallback) => fallback,
-        writeJsonFileWithPrivilege: () => {},
-        writeJsonFile: () => {},
-        runPrivileged: () => {},
-      },
-    );
-
-    const migrated = JSON.parse(
-      await fs.readFile(path.join(dir, "i18n.json"), "utf8"),
-    );
-    assert.deepEqual(migrated, {
-      chat: { runtime: { working: { frames: ["\u65e7 A", "\u65e7 B"] } } },
-    });
-    assert.equal(
-      result.migrations.some(
-        (item) => item.id === "chat-working-frames-i18n-v1",
-      ),
-      true,
-    );
-  });
-});
-
 test("persist normalizeInstalledChatSettings migrates assistant delivery kinds from outbox history", async () => {
   await withTempDir(async (dir) => {
     const recordPath = path.join(

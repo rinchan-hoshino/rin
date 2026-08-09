@@ -1,4 +1,3 @@
-import { readRinI18nCatalog, type RinI18nCatalog } from "../i18n.js";
 import {
   DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES,
   type RinFrontendCommandResponses,
@@ -24,30 +23,4 @@ export function resolveChatCommandResponses(
       ];
     }),
   ) as ChatCommandResponses;
-}
-
-const CHAT_COMMAND_RESPONSE_I18N_IDS = {
-  abort: "chat.commandResponses.abort",
-  new: "chat.commandResponses.new",
-  newCancelled: "chat.commandResponses.newCancelled",
-  reload: "chat.commandResponses.reload",
-  compactionStart: "chat.compaction.start",
-  compactionSummaryLine: "chat.compaction.summaryLine",
-} satisfies Partial<Record<keyof RinFrontendCommandResponses, string>>;
-
-function chatCommandResponsesFromI18nCatalog(catalog: RinI18nCatalog) {
-  return Object.fromEntries(
-    Object.entries(CHAT_COMMAND_RESPONSE_I18N_IDS).map(([key, messageId]) => [
-      key,
-      catalog[messageId],
-    ]),
-  ) as Partial<RinFrontendCommandResponses>;
-}
-
-export function readChatCommandResponses(agentDir: string) {
-  const root = String(agentDir || "").trim();
-  if (!root) return resolveChatCommandResponses();
-  return resolveChatCommandResponses(
-    chatCommandResponsesFromI18nCatalog(readRinI18nCatalog(root)),
-  );
 }

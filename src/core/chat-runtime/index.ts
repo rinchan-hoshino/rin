@@ -377,6 +377,14 @@ export class ChatRuntimeApp extends EventEmitter {
     }
   }
 
+  setWorkingFrames(frames: string[]) {
+    for (const adapter of this.adapters) {
+      if (typeof adapter?.setWorkingFrames === "function") {
+        adapter.setWorkingFrames(frames);
+      }
+    }
+  }
+
   beginInboundRecoveryChat(chatKey: string) {
     const normalized = safeString(chatKey).trim();
     if (normalized) this.inboundRecoveryChats.add(normalized);
@@ -618,6 +626,10 @@ class TelegramAdapter {
         }),
     };
     this.app.register(this, this.bot);
+  }
+
+  setWorkingFrames(frames: string[]) {
+    this.editableWorking.setWorkingFrames(frames);
   }
 
   async start() {
@@ -1615,6 +1627,7 @@ class OneBotAdapter {
   private stopped = false;
   private nextEchoId = 1;
   private readonly workingReactions = new Map<string, string>();
+  private workingFrames: string[];
   private readonly pending = new Map<
     string,
     {
@@ -1634,6 +1647,7 @@ class OneBotAdapter {
     this.app = app;
     this.config = config;
     this.logger = createPrefixedLogger("chat-runtime:onebot", logger);
+    this.workingFrames = resolveChatRuntimeWorkingCopy(app.agentDir).frames;
     this.bot = {
       platform: "onebot",
       selfId: safeString(config?.selfId).trim(),
@@ -1750,6 +1764,12 @@ class OneBotAdapter {
       ) => await this.deleteReaction(chatId, messageId, emoji),
     };
     this.app.register(this, this.bot);
+  }
+
+  setWorkingFrames(frames: string[]) {
+    this.workingFrames = frames.length
+      ? [...frames]
+      : resolveChatRuntimeWorkingCopy().frames;
   }
 
   async start() {
@@ -2079,9 +2099,7 @@ class OneBotAdapter {
     await this.callAction("send_private_msg", {
       user_id: targetId,
       message: `${reply}${escapeOneBotText(
-        randomWorkingText(
-          resolveChatRuntimeWorkingCopy(this.app?.agentDir).frames,
-        ),
+        randomWorkingText(this.workingFrames),
       )}`,
       auto_escape: false,
     });

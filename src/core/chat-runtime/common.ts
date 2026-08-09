@@ -23,7 +23,6 @@ import {
   discardRinHttpResponseBody,
   type RinHttpTransport,
 } from "../http/transport.js";
-import { rinI18nPath } from "../i18n.js";
 import { ensureDir } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
@@ -86,42 +85,12 @@ function normalizeWorkingFrames(value: unknown) {
   return uniqueStrings(Array.isArray(value) ? value : [value]);
 }
 
-function readRawRinI18n(agentDir: string) {
-  const root = safeString(agentDir).trim();
-  if (!root) return {};
-  try {
-    return JSON.parse(fs.readFileSync(rinI18nPath(root), "utf8"));
-  } catch {
-    return {};
-  }
-}
-
-function valueAtPath(source: any, path: string[]) {
-  let current = source;
-  for (const key of path) {
-    if (!current || typeof current !== "object") return undefined;
-    current = current[key];
-  }
-  return current;
-}
-
 export function resolveChatRuntimeWorkingCopy(
-  agentDir?: string,
+  _agentDir?: string,
 ): ChatRuntimeWorkingCopy {
-  const root = safeString(agentDir).trim();
-  const raw = readRawRinI18n(root);
-  const configuredFrames = normalizeWorkingFrames(
-    valueAtPath(raw, ["chat", "runtime", "working", "frames"]),
-  );
-  const frames = configuredFrames.length
-    ? configuredFrames
-    : DEFAULT_EDITABLE_WORKING_FRAMES;
   return {
-    frames,
-    progressTexts: uniqueStrings([
-      ...frames,
-      ...DEFAULT_EDITABLE_WORKING_FRAMES,
-    ]),
+    frames: [...DEFAULT_EDITABLE_WORKING_FRAMES],
+    progressTexts: [...DEFAULT_EDITABLE_WORKING_FRAMES],
   };
 }
 

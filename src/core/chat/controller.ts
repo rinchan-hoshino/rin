@@ -10,6 +10,7 @@ import {
   getRinNonInteractiveCommandInteractionPolicy,
   type RinFrontendEventHandlingFailure,
   type RinFrontendIdentity,
+  type RinChatPresentation,
   type RinFrontendTurnClient,
   type RinChatDeliveryContext,
 } from "../rin-frontend-sdk/index.js";
@@ -29,7 +30,6 @@ import {
 } from "../rin-lib/todo-state.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
-  readChatCommandResponses,
   resolveChatCommandResponses,
   type ChatCommandResponses,
 } from "./command-responses.js";
@@ -393,6 +393,7 @@ export class ChatController {
   sleepAfterIdleMs = 0;
   lastActivityAt = Date.now();
   commandResponses?: ChatCommandResponses;
+  onChatPresentation?: (presentation: RinChatPresentation) => void;
   quietModeOverride?: boolean;
 
   constructor(
@@ -410,6 +411,7 @@ export class ChatController {
       commandResponses?: Partial<ChatCommandResponses>;
       frontendIdentity?: RinFrontendIdentity;
       useChatFrontendIdentity?: boolean;
+      onChatPresentation?: (presentation: RinChatPresentation) => void;
     },
   ) {
     this.app = app;
@@ -439,6 +441,7 @@ export class ChatController {
     this.commandResponses = deps.commandResponses
       ? resolveChatCommandResponses(deps.commandResponses)
       : undefined;
+    this.onChatPresentation = deps.onChatPresentation;
     if (!this.state.chatKey) this.state.chatKey = chatKey;
     const frontendIdentity =
       deps.frontendIdentity ||
@@ -1701,7 +1704,7 @@ export class ChatController {
   }
 
   private getCommandResponses() {
-    return this.commandResponses || readChatCommandResponses(this.agentDir);
+    return this.commandResponses || resolveChatCommandResponses();
   }
 
   private localizeBuiltinCommandResult(commandName: string, data: any) {
@@ -3618,6 +3621,22 @@ export class ChatController {
   private async handleFrontendEvent(event: any) {
     if (!event || typeof event !== "object") return;
     if (event.type === "extension_ui_request") {
+      if (event.method === "rinChatPresentation") {
+        const presentation = event.presentation || {};
+        const commandResponses =
+          presentation.commandResponses &&
+          typeof presentation.commandResponses === "object"
+            ? presentation.commandResponses
+            : {};
+        const workingFrames = Array.isArray(presentation.workingFrames)
+          ? presentation.workingFrames
+              .map((frame) => safeString(frame).trim())
+              .filter(Boolean)
+          : [];
+        this.commandResponses = resolveChatCommandResponses(commandResponses);
+        this.onChatPresentation?.({ commandResponses, workingFrames });
+        return;
+      }
       const projection = projectChatExtensionUiRequest(event);
       if (projection.response) {
         await this.client

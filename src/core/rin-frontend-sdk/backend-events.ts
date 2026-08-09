@@ -321,6 +321,7 @@ export function createRinFrontendBackendEventTranslator(
             "editor",
             "notify",
             "rinCommandResult",
+            "rinChatPresentation",
           ].includes(method)
         ) {
           return [{ ...payload, type: "extension_ui_request", method }];

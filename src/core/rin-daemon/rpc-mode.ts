@@ -859,6 +859,15 @@ export async function runCustomRpcMode(
         method: "rinCommandResult",
         result,
       }),
+    rinChatPresentation: (presentation: unknown) => {
+      runtime.rinChatPresentation = presentation;
+      output({
+        type: "extension_ui_request",
+        id: createExtensionUiRequestId(),
+        method: "rinChatPresentation",
+        presentation,
+      });
+    },
     onTerminalInput: () => () => {},
     setStatus: (statusKey: string, statusText?: string) =>
       output({

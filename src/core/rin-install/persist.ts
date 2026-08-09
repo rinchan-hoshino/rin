@@ -640,103 +640,6 @@ function normalizeStringList(value: unknown) {
     : [];
 }
 
-function getObjectAtPath(root: any, keys: string[]) {
-  let current = root;
-  for (const key of keys) {
-    if (!current || typeof current !== "object" || Array.isArray(current)) {
-      return undefined;
-    }
-    current = current[key];
-  }
-  return current;
-}
-
-function ensureObjectAtPath(root: Record<string, unknown>, keys: string[]) {
-  let current: Record<string, unknown> = root;
-  for (const key of keys) {
-    const next = current[key];
-    if (!next || typeof next !== "object" || Array.isArray(next)) {
-      current[key] = {};
-    }
-    current = current[key] as Record<string, unknown>;
-  }
-  return current;
-}
-
-function removeKeyAtPath(root: any, keys: string[]) {
-  const parent = getObjectAtPath(root, keys.slice(0, -1));
-  if (!parent || typeof parent !== "object" || Array.isArray(parent)) return;
-  delete parent[keys[keys.length - 1]];
-}
-
-function legacyTelegramFramesFromI18n(value: any) {
-  const initial = safeString(
-    value?.workingInitial || value?.thinkingInitial,
-  ).trim();
-  const suffix = safeString(
-    value?.workingSuffix || value?.thinkingSuffix,
-  ).trim();
-  return normalizeStringList([
-    initial,
-    suffix,
-    suffix ? `${suffix}.` : "",
-    suffix ? `${suffix}..` : "",
-  ]);
-}
-
-function migrateInstalledChatWorkingFramesI18n(
-  installDir: string,
-  fileOps: InstallMigrationFileOps,
-) {
-  const root = path.resolve(String(installDir || "").trim() || ".");
-  const i18nPath = path.join(root, "i18n.json");
-  const markerPath = path.join(
-    root,
-    "data",
-    "migrations",
-    "chat-working-frames-i18n-v1.json",
-  );
-  const marker = fileOps.readJsonObject(markerPath);
-  if (marker) return null;
-  const raw = fileOps.readJsonObject(i18nPath);
-  const scanned = raw ? 1 : 0;
-  if (!raw) return null;
-  const existing = normalizeStringList(
-    getObjectAtPath(raw, ["chat", "runtime", "working", "frames"]),
-  );
-  const legacyFrames = normalizeStringList(
-    getObjectAtPath(raw, ["chatRuntime", "working", "frames"]),
-  );
-  const telegramFrames = legacyTelegramFramesFromI18n(
-    getObjectAtPath(raw, ["chatRuntime", "telegramWorking"]),
-  );
-  const frames = existing.length
-    ? existing
-    : legacyFrames.length
-      ? legacyFrames
-      : telegramFrames;
-  removeKeyAtPath(raw, ["chatRuntime"]);
-  if (!frames.length) return null;
-  const working = ensureObjectAtPath(raw, ["chat", "runtime", "working"]);
-  working.frames = frames;
-  fileOps.writeJsonObject(i18nPath, raw);
-  fileOps.writeJsonObject(markerPath, {
-    id: "chat-working-frames-i18n-v1",
-    appliedAt: nowIso(),
-    scanned,
-    migrated: 1,
-  });
-  return {
-    id: "chat-working-frames-i18n-v1",
-    markerPath,
-    alreadyApplied: false,
-    skipped: false,
-    scanned,
-    migrated: 1,
-    migratedFiles: [i18nPath],
-  };
-}
-
 function listJsonFilesRecursive(root: string) {
   const output: string[] = [];
   try {
@@ -994,7 +897,6 @@ export function applyInstallUpgradeMigrations(
   return [
     migrateInstalledDataLayout(options.installDir, fileOps),
     removeInstalledBrowseRuntime(options.installDir, fileOps),
-    migrateInstalledChatWorkingFramesI18n(options.installDir, fileOps),
     migrateAssistantDeliveryKindsFromOutboxHistory(options.installDir, fileOps),
     rewriteInstalledChatStateSessionFileKeys(options.installDir, fileOps),
     migrateInstalledChatSessionFilesToManaged(options.installDir, fileOps),

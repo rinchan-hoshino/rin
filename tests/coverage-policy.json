@@ -352,12 +352,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/i18n.ts",
-      "built": "dist/core/i18n.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
       "source": "src/core/json-utils.ts",
       "built": "dist/core/json-utils.js",
       "ownerSuite": "unit",

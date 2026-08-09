@@ -54,7 +54,7 @@ Common top-level paths under the agent directory:
 
 - `auth.json`: model authentication data.
 - `settings.json`: Rin/Pi settings.
-- `i18n.json`: optional local i18n catalog, including chat command acknowledgement strings.
+- `i18n.json`: optional catalog owned by the first-party `i18n` Pi extension, not Rin core.
 - `sessions/`: user-facing session data.
 - `sessions/managed/<kind>/`: durable managed sessions for delegated or non-interactive work.
 - `memory/`: markdown-backed memory data.
@@ -77,7 +77,7 @@ Use stable paths for agent guidance, durable references, scripts, and diagnostic
 - `~/.rin/docs/pi/...`
 - `~/.rin/docs/release/...`
 - `~/.rin/settings.json`
-- `~/.rin/i18n.json`
+- `~/.rin/i18n.json` (only when the optional `i18n` extension is installed)
 - `~/.rin/auth.json`
 - `~/.rin/sessions/...`
 - `~/.rin/memory/...`

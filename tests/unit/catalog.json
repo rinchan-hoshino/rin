@@ -72,11 +72,6 @@
       "built": "dist/core/data-layout.js"
     },
     {
-      "test": "tests/unit/i18n.test.ts",
-      "source": "src/core/i18n.ts",
-      "built": "dist/core/i18n.js"
-    },
-    {
       "test": "tests/unit/json-utils.test.ts",
       "source": "src/core/json-utils.ts",
       "built": "dist/core/json-utils.js"

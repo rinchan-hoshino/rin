@@ -1,4 +1,4 @@
-import { readChatCommandResponses } from "../chat/command-responses.js";
+import { resolveChatCommandResponses } from "../chat/command-responses.js";
 import { asArray } from "../json-utils.js";
 import { loadRinChangelogModule } from "../rin-lib/loader.js";
 import type { ChatMessagePart } from "../rin-lib/chat-outbox.js";
@@ -361,23 +361,24 @@ export async function runBuiltinCommand(
 
   const { command, args, argsText } = parsedCommand;
   const agentDir = runtimeServicesAgentDir(runtime);
-  const commandResponses = readChatCommandResponses(agentDir);
+  const commandResponses = () =>
+    resolveChatCommandResponses(runtime.rinChatPresentation?.commandResponses);
   switch (command) {
     case "abort":
       session.abortCompaction?.();
       await session.abort();
-      return handledText(commandResponses.abort);
+      return handledText(commandResponses().abort);
     case "new":
       session.abortCompaction?.();
       await session.abort();
       await runtime.newSession();
-      return handledText(commandResponses.new);
+      return handledText(commandResponses().new);
     case "compact":
       await session.compact(argsText || undefined);
-      return handledText(commandResponses.compact);
+      return handledText(commandResponses().compact);
     case "reload":
       await session.reload();
-      return handledText(commandResponses.reload);
+      return handledText(commandResponses().reload);
     case "session":
       return handledText(formatSessionStats(session.getSessionStats()));
     case "changelog": {

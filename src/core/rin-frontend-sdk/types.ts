@@ -28,6 +28,7 @@ export type RinExtensionUiMethod =
   | "editor"
   | "notify"
   | "rinCommandResult"
+  | "rinChatPresentation"
   | "setStatus"
   | "setWorkingMessage"
   | "setWorkingVisible"
@@ -39,6 +40,11 @@ export type RinExtensionUiMethod =
   | "setTitle"
   | "setToolsExpanded"
   | "set_editor_text";
+
+export type RinChatPresentation = {
+  commandResponses?: Record<string, string>;
+  workingFrames?: string[];
+};
 
 export type RinExtensionCommandResult = {
   text?: string;
@@ -66,6 +72,7 @@ export type RinExtensionUiRequest = {
   expanded?: boolean;
   text?: string;
   result?: RinExtensionCommandResult;
+  presentation?: RinChatPresentation;
   [key: string]: unknown;
 };
 

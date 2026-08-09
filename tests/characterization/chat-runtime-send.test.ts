@@ -1291,45 +1291,6 @@ test("telegram adapter edits one progress message from Working through interim b
   });
 });
 
-test("telegram adapter uses custom working frame list from i18n", async () => {
-  await withTempDir(async (agentDir) => {
-    await fs.writeFile(
-      path.join(agentDir, "i18n.json"),
-      JSON.stringify({
-        chat: {
-          runtime: { working: { frames: ["Loop A", "Loop B", "..."] } },
-        },
-      }),
-    );
-    const app = createRuntimeApp(agentDir, {
-      key: "telegram",
-      name: "Telegram",
-      config: { token: "123:abc" },
-    });
-    const adapter = [...app.adapters][0];
-    const h = runtime.createChatRuntimeH();
-    const calls: Array<{ method: string; payload: any }> = [];
-    adapter.callApi = async (method: string, payload: any) => {
-      calls.push({ method, payload });
-      if (method === "sendMessage") return { message_id: String(calls.length) };
-      return { message_id: payload?.message_id };
-    };
-
-    const editable = requireEditableIndicator(app.bots[0]);
-    await editable.tick({ chatId: "456", tick: 0 });
-    await editable.tick({ chatId: "456", tick: 1 });
-    await editable.tick({ chatId: "456", tick: 2 });
-    const final = await app.bots[0].sendMessage("456", [h.text("done")]);
-
-    assert.deepEqual(final, ["5"]);
-    assert.equal(calls[0].payload.text, "... Loop A");
-    assert.equal(calls[1].payload.text, "... Loop B");
-    assert.equal(calls[2].payload.text, "... ...");
-    assert.equal(calls[3].payload.message_id, 1);
-    assert.equal(calls[4].payload.text, "done");
-  });
-});
-
 test("telegram adapter scopes forum topic sessions and outbound payloads", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -3090,54 +3051,6 @@ test("onebot private working indicator is a one-shot marker", async () => {
       ["Working...", "Working", "Working.", "Working.."].some(
         (text) => calls[0].params.message === `[CQ:reply,id=m1]${text}`,
       ),
-    );
-  });
-});
-
-test("onebot private marker picks a custom working frame", async () => {
-  await withTempDir(async (agentDir) => {
-    await fs.writeFile(
-      path.join(agentDir, "i18n.json"),
-      JSON.stringify({
-        chat: {
-          runtime: {
-            working: {
-              frames: [
-                "\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
-                "\u6574\u7406\u4e2d\uff5e (\uff61\uff65\u03c9\uff65\uff61)",
-              ],
-            },
-          },
-        },
-      }),
-    );
-    const app = createRuntimeApp(agentDir, {
-      key: "onebot",
-      name: "OneBot",
-      config: { endpoint: "ws://127.0.0.1:1" },
-    });
-    const adapter = [...app.adapters][0];
-    const calls: any[] = [];
-    adapter.callAction = async (action: string, params: any) => {
-      calls.push({ action, params });
-      return { message_id: "notice-1" };
-    };
-
-    const [indicator] = app.bots[0].getWorkingIndicators({
-      chatId: "private:2",
-    });
-
-    assert.equal(
-      await indicator.start({ chatId: "private:2", messageId: "m1" }),
-      true,
-    );
-
-    assert.equal(calls.length, 1);
-    assert.ok(
-      [
-        "\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
-        "\u6574\u7406\u4e2d\uff5e (\uff61\uff65\u03c9\uff65\uff61)",
-      ].some((text) => calls[0].params.message === `[CQ:reply,id=m1]${text}`),
     );
   });
 });

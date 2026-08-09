@@ -1,4 +1,5 @@
 export type {
+  RinChatPresentation,
   RinExtensionCommandResult,
   RinExtensionUiMethod,
   RinExtensionUiRequest,

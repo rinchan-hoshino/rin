@@ -184,6 +184,7 @@ test("discord slash interactions emit after acknowledgement", async () => {
       },
     ],
   });
+  app.setWorkingFrames(["Localized acknowledgement"]);
   const adapter = [...app.adapters][0];
   const seen = [];
   app.on("message", (session) => seen.push(session));
@@ -204,7 +205,8 @@ test("discord slash interactions emit after acknowledgement", async () => {
     member: { displayName: "Owner" },
     isChatInputCommand: () => true,
     options: { getString: () => "" },
-    reply: async () => {
+    reply: async (payload: { content: string }) => {
+      assert.equal(payload.content, "Localized acknowledgement");
       replyStarted = true;
       await replyGate;
     },

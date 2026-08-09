@@ -43,15 +43,13 @@ test("chat runtime working copy and editable sections preserve explicit ownershi
       frames: ["Working...", "Working", "Working.", "Working.."],
       progressTexts: ["Working...", "Working", "Working.", "Working.."],
     });
-    await fs.writeFile(
-      path.join(agentDir, "i18n.json"),
-      JSON.stringify({
-        chat: { runtime: { working: { frames: [" A ", "A", "", "B"] } } },
-      }),
-    );
     const configured = common.resolveChatRuntimeWorkingCopy(agentDir);
-    assert.deepEqual(configured.frames, ["A", "B"]);
-    assert.deepEqual(configured.progressTexts.slice(0, 2), ["A", "B"]);
+    assert.deepEqual(configured.frames, [
+      "Working...",
+      "Working",
+      "Working.",
+      "Working..",
+    ]);
 
     assert.equal(common.editableWorkingText(-1.8, ["one", "two"]), "one");
     assert.equal(common.editableWorkingText("bad", []), "Working...");

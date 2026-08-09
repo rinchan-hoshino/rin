@@ -273,9 +273,9 @@ Configure a chat-specific model or thinking level under `settings.json -> chat.b
 
 ## Command acknowledgement text
 
-Routine chat command acknowledgements such as `/new`, `/abort`, and `/reload` come from i18n/configuration so commands stay predictable and avoid temporary agent turns. `/compact` uses the compaction notice templates below instead of a separate generic completion line.
+Routine chat command acknowledgements such as `/new`, `/abort`, and `/reload` use stable built-in English text and avoid temporary agent turns. The optional first-party `i18n` Pi extension can replace those responses and editable working frames from `~/.rin/i18n.json`; `/compact` uses the same contributed presentation.
 
-If `~/.rin/i18n.json` is absent, Rin uses built-in English replies. To customize command replies, create or edit that generic i18n catalog:
+Install the `i18n` extension package, then create or edit its catalog:
 
 ```json
 {
@@ -300,7 +300,7 @@ Nested JSON is also accepted:
 }
 ```
 
-All entries are optional. Missing or blank entries fall back to the built-in English text. Command replies live in the i18n catalog rather than `settings.json`.
+All entries are optional. Missing or blank entries fall back to the built-in English text. The extension owns catalog loading and hot reload; Rin core only accepts the generic chat-presentation contribution.
 
 ## Rich message delivery
 
