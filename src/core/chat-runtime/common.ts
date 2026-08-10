@@ -5,6 +5,7 @@ import {
   ensureExtension as ensureSharedExtension,
   ensureFileName,
   extensionFromMimeType as extensionFromSharedMimeType,
+  fileNameFromUrl,
   isImageMimeType,
   isImageName,
 } from "../chat/file-utils.js";
@@ -469,14 +470,44 @@ export function isEditableProgressDeliveryKind(value: unknown) {
   return deliveryKind === "interim" || deliveryKind === "passive_notice";
 }
 
+const RICH_DELIVERY_MEDIA_TYPES = new Set([
+  "image",
+  "file",
+  "video",
+  "audio",
+  "sticker",
+]);
+
+function isLocalMediaSource(value: unknown) {
+  const source = safeString(value).trim();
+  if (!source || source.startsWith("//")) return false;
+  if (path.isAbsolute(source) || path.win32.isAbsolute(source)) return true;
+  if (/^file:/i.test(source)) return true;
+  return !/^[a-z][a-z0-9+.-]*:/i.test(source);
+}
+
+function localMediaFallbackText(type: string, attrs: Record<string, any>) {
+  const source = safeString(
+    attrs.src || attrs.url || attrs.file || attrs.path || "",
+  ).trim();
+  if (!isLocalMediaSource(source)) return "";
+  const nameSource = safeString(attrs.name || attrs.file || source).trim();
+  const name = fileNameFromUrl(nameSource.replace(/\\/g, "/"), type);
+  return `[${type}: ${name}]`;
+}
+
 function richDeliverySourceText(node: any): string {
   if (node == null) return "";
   if (typeof node === "string") return node;
   if (Array.isArray(node)) return node.map(richDeliverySourceText).join("");
   if (typeof node !== "object") return "";
-  if (typeof node.raw === "string" && node.raw) return node.raw;
   const type = safeString(node.type).trim().toLowerCase();
   const attrs = node.attrs && typeof node.attrs === "object" ? node.attrs : {};
+  if (RICH_DELIVERY_MEDIA_TYPES.has(type)) {
+    const fallback = localMediaFallbackText(type, attrs);
+    if (fallback) return fallback;
+  }
+  if (typeof node.raw === "string" && node.raw) return node.raw;
   if (type === "text" || type === "markdown" || type === "md") {
     return safeString(
       node.text ??

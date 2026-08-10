@@ -1788,7 +1788,7 @@ test("telegram adapter splits text and image rich parts in order", async () => {
   });
 });
 
-test("telegram adapter falls back to the original rich segment and continues later segments", async () => {
+test("telegram adapter falls back to a safe rich segment and continues later segments", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
@@ -1818,7 +1818,7 @@ test("telegram adapter falls back to the original rich segment and continues lat
     );
     assert.equal(calls[0].payload.reply_to_message_id, "77");
     assert.equal(calls[0].payload.text, "leading text");
-    assert.equal(calls[1].payload.text, `[image: missing](${missingPath})`);
+    assert.equal(calls[1].payload.text, "[image: missing]");
     assert.doesNotMatch(calls[1].payload.text, /chat_media_file_missing:/);
     assert.equal(calls[1].payload.parse_mode, undefined);
     assert.equal(calls[1].payload.reply_to_message_id, undefined);
@@ -2231,7 +2231,7 @@ test("onebot adapter embeds all local media as base64", async () => {
   });
 });
 
-test("onebot adapter falls back to the original rich node during serialization", async () => {
+test("onebot adapter falls back to a safe rich node during serialization", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "onebot",
@@ -2257,7 +2257,7 @@ test("onebot adapter falls back to the original rich node during serialization",
     assert.equal(calls.length, 1);
     assert.equal(
       calls[0].params.message,
-      `before &#91;file: missing.pdf&#93;(${missingPath}) after`,
+      "before &#91;file: missing.pdf&#93; after",
     );
     assert.doesNotMatch(calls[0].params.message, /chat_media_file_missing:/);
   });
@@ -2440,7 +2440,7 @@ test("discord adapter keeps media before following text", async () => {
   });
 });
 
-test("discord adapter treats a successful original-string fallback as delivered", async () => {
+test("discord adapter treats a successful safe-string fallback as delivered", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "discord",
@@ -2466,7 +2466,7 @@ test("discord adapter treats a successful original-string fallback as delivered"
 
     assert.deepEqual(result, ["1", "2", "3"]);
     assert.equal(calls[0].content, "leading text");
-    assert.equal(calls[1].content, `[image: missing](${missingPath})`);
+    assert.equal(calls[1].content, "[image: missing]");
     assert.doesNotMatch(calls[1].content, /chat_media_file_missing:/);
     assert.equal(calls[2].content, "trailing text");
   });
@@ -2723,7 +2723,7 @@ test("lark adapter uploads ordinary files and sends the returned file key", asyn
   });
 });
 
-test("lark adapter falls back from a failed file upload without exposing the SDK error", async () => {
+test("lark adapter falls back from a failed file upload without exposing local paths or SDK errors", async () => {
   await withTempDir(async (agentDir) => {
     const filePath = path.join(agentDir, "spec.pdf");
     await fs.writeFile(filePath, Buffer.from("pdf-content"));
@@ -2760,7 +2760,7 @@ test("lark adapter falls back from a failed file upload without exposing the SDK
 
     assert.deepEqual(result, ["m1", "m2", "m3"]);
     assert.equal(calls[1].data.msg_type, "text");
-    assert.equal(JSON.parse(calls[1].data.content).text, original);
+    assert.equal(JSON.parse(calls[1].data.content).text, "[file: spec.pdf]");
     assert.doesNotMatch(calls[1].data.content, /status code 400/);
   });
 });
@@ -2972,7 +2972,7 @@ test("lark adapter falls back from oversized local images before upload", async 
     assert.equal(calls[0].data.msg_type, "text");
     assert.equal(
       JSON.parse(calls[0].data.content).text,
-      `[image: ${imagePath}](${imagePath})`,
+      "[image: oversized.png]",
     );
     assert.doesNotMatch(calls[0].data.content, /upload limit/);
   });
@@ -3789,7 +3789,7 @@ test("slack adapter sends todo nodes as Block Kit checkboxes", async () => {
   });
 });
 
-test("slack adapter falls back to the original rich segment and continues later segments", async () => {
+test("slack adapter falls back to a safe rich segment and continues later segments", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "slack",
@@ -3822,7 +3822,7 @@ test("slack adapter falls back to the original rich segment and continues later 
 
     assert.deepEqual(result, ["1", "2", "3"]);
     assert.equal(calls[0].text, "leading text");
-    assert.equal(calls[1].text, `[image: missing](${missingPath})`);
+    assert.equal(calls[1].text, "[image: missing]");
     assert.doesNotMatch(calls[1].text, /chat_media_file_missing:/);
     assert.equal(calls[2].text, "trailing text");
   });

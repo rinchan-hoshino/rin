@@ -138,7 +138,7 @@ test("chat runtime renderers preserve shared whitespace semantics", () => {
   );
 });
 
-test("chat runtime renders failed rich nodes as their original marker text", () => {
+test("chat runtime renders safe rich fallbacks without local source paths", () => {
   const nodes = [
     chatRuntimeCommon.normalizeNode("file", {
       src: "/tmp/spec.pdf",
@@ -148,14 +148,17 @@ test("chat runtime renders failed rich nodes as their original marker text", () 
 
   assert.equal(
     chatRuntimeCommon.renderRichDeliveryFallback(nodes),
-    "[file: spec.pdf](/tmp/spec.pdf)",
+    "[file: spec.pdf]",
   );
 
   const original = "[FILE:   Original Label](/tmp/spec.pdf)";
   const parsed = chatRuntimeCommon.prepareOutboundNodes([
     chatRuntimeCommon.normalizeNode("markdown", { content: original }),
   ]).work;
-  assert.equal(chatRuntimeCommon.renderRichDeliveryFallback(parsed), original);
+  assert.equal(
+    chatRuntimeCommon.renderRichDeliveryFallback(parsed),
+    "[file: Original Label]",
+  );
   assert.equal(
     chatRuntimeCommon.renderRichDeliveryFallback([
       chatRuntimeCommon.normalizeNode("markdown", { content: "  **x**  " }),

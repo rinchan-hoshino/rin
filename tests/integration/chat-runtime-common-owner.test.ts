@@ -26,6 +26,24 @@ test("rich delivery fallback preserves heterogeneous source nodes", () => {
   );
 });
 
+test("rich delivery fallback hides local media paths and preserves public URLs", () => {
+  const fallback = common.renderRichDeliveryFallback([
+    { type: "image", attrs: { src: "/home/rin/private/photo.png" } },
+    { type: "file", attrs: { src: "file:///tmp/private/report.pdf" } },
+    { type: "audio", attrs: { src: "C:\\Users\\Rin\\private\\voice.wav" } },
+    {
+      type: "video",
+      attrs: { src: "https://example.com/public/demo.mp4" },
+    },
+  ]);
+
+  assert.match(fallback, /\[image: photo\.png\]/);
+  assert.match(fallback, /\[file: report\.pdf\]/);
+  assert.match(fallback, /\[audio: voice\.wav\]/);
+  assert.match(fallback, /https:\/\/example\.com\/public\/demo\.mp4/);
+  assert.doesNotMatch(fallback, /\/home\/rin|\/tmp\/private|C:\\Users/);
+});
+
 async function withTempDir(run: (directory: string) => Promise<void>) {
   const directory = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-common-owner-"),
