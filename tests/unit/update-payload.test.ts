@@ -161,6 +161,85 @@ test("update payload runs only through authorized shared updater semantics", asy
   );
 });
 
+test("legacy prepared update handoff translates into the shared payload", async () => {
+  const events: any[] = [];
+  await payload.startLegacyPreparedUpdatePayload(
+    [
+      "--update",
+      "--target-user",
+      "owner",
+      "--install-dir",
+      "/owner/.rin",
+      "--yes",
+      "--preconfirmed",
+      "--release-file",
+      "/work/release.json",
+    ],
+    {
+      assertAuthorizedUpdateJob() {
+        events.push(["authorized"]);
+      },
+      detectExecutorUser: () => "owner",
+      createInstallerI18n: () => ({
+        installerCancelled: "cancelled",
+        confirmActiveLabel: "yes",
+        confirmInactiveLabel: "no",
+      }),
+      repoRootFromHere: () => "/work/src",
+      releaseInfoFromFile: (file: string) => ({ file }),
+      isCancel: () => false,
+      select: async () => "selected",
+      confirm: async () => true,
+      async startUpdater(options: any) {
+        events.push([
+          "updater",
+          options.release,
+          options.requestedInstallDir,
+          options.requestedTargetUser,
+          options.assumeYes,
+          options.preconfirmed,
+        ]);
+      },
+    },
+  );
+  assert.deepEqual(events, [
+    [
+      "updater",
+      { file: "/work/release.json" },
+      "/owner/.rin",
+      "owner",
+      true,
+      true,
+    ],
+  ]);
+
+  const completeHandoff = [
+    "--update",
+    "--target-user",
+    "owner",
+    "--install-dir",
+    "/owner/.rin",
+    "--yes",
+    "--preconfirmed",
+    "--release-file",
+    "/work/release.json",
+  ];
+  await assert.rejects(
+    () =>
+      payload.startLegacyPreparedUpdatePayload(completeHandoff, {
+        repoRootFromHere: () => "/installed/current",
+      }),
+    /unknown_run_option:--update/,
+  );
+  await assert.rejects(
+    () =>
+      payload.startLegacyPreparedUpdatePayload(completeHandoff, {
+        repoRootFromHere: () => "/other/src",
+      }),
+    /unknown_run_option:--update/,
+  );
+});
+
 test("update payload preserves updater cancellation semantics", async () => {
   await assert.rejects(
     () =>

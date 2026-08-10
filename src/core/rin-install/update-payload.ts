@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { cancel, confirm, isCancel, select } from "@clack/prompts";
 
 import { repoRootFromHere, detectExecutorUser } from "./common.js";
@@ -145,13 +147,10 @@ export function resolveUpdatePayloadDependencies(
   };
 }
 
-export async function startUpdatePayload(
-  argv = process.argv.slice(2),
-  dependencies: UpdatePayloadDependencies = {},
+async function runUpdatePayload(
+  payload: ReturnType<typeof parseUpdatePayloadArgs>,
+  deps: ReturnType<typeof resolveUpdatePayloadDependencies>,
 ) {
-  const payload = parseUpdatePayloadArgs(argv);
-  const deps = resolveUpdatePayloadDependencies(dependencies);
-  deps.assertAuthorizedUpdateJob(payload.requestedInstallDir);
   const currentUser = deps.detectExecutorUser();
   const i18n = deps.createInstallerI18n();
   const ensureNotCancelled = <T>(value: T | symbol): T => {
@@ -181,4 +180,46 @@ export async function startUpdatePayload(
     assumeYes: payload.assumeYes,
     preconfirmed: payload.preconfirmed,
   });
+}
+
+export async function startUpdatePayload(
+  argv = process.argv.slice(2),
+  dependencies: UpdatePayloadDependencies = {},
+) {
+  const payload = parseUpdatePayloadArgs(argv);
+  const deps = resolveUpdatePayloadDependencies(dependencies);
+  deps.assertAuthorizedUpdateJob(payload.requestedInstallDir);
+  await runUpdatePayload(payload, deps);
+}
+
+function legacyPreparedUpdateHandoffError(): never {
+  throw new Error("unknown_run_option:--update");
+}
+
+export async function startLegacyPreparedUpdatePayload(
+  argv = process.argv.slice(2),
+  dependencies: UpdatePayloadDependencies = {},
+) {
+  if (argv.filter((arg) => arg === "--update").length !== 1) {
+    return legacyPreparedUpdateHandoffError();
+  }
+  const payload = parseUpdatePayloadArgs(
+    argv.filter((arg) => arg !== "--update"),
+  );
+  const deps = resolveUpdatePayloadDependencies(dependencies);
+  const sourceRoot = path.resolve(deps.repoRootFromHere());
+  const releaseFile = path.resolve(payload.releaseFile);
+  if (
+    !payload.assumeYes ||
+    !payload.preconfirmed ||
+    !payload.requestedTargetUser ||
+    !payload.requestedInstallDir ||
+    !payload.releaseFile ||
+    path.basename(sourceRoot) !== "src" ||
+    path.basename(releaseFile) !== "release.json" ||
+    path.dirname(sourceRoot) !== path.dirname(releaseFile)
+  ) {
+    return legacyPreparedUpdateHandoffError();
+  }
+  await runUpdatePayload(payload, deps);
 }

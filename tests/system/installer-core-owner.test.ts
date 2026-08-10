@@ -53,6 +53,14 @@ await assert.rejects(
   () => run({}, ["--update"]),
   /--update/,
 );
+await run({}, [
+  "--update",
+  "--target-user", "owner",
+  "--install-dir", root,
+  "--yes",
+  "--preconfirmed",
+  "--release-file", "/owner/work/release.json",
+]);
 
 for (const target of ["ssh", "container", "cloud", "nas", "vm"]) {
   await run({ target, language: "en_US" }, []);
@@ -107,6 +115,7 @@ for (const expected of [
   "quick-run", "install-target", "dir-state", "requirements",
   "finalize-child", "run-command", "register-local",
 ]) assert.equal(names.includes(expected), true, expected);
+assert.equal(names.filter((name) => name === "updater").length, 1);
 console.log(JSON.stringify({ events: events.length, updater: names.filter((name) => name === "updater").length }));
 `;
 
@@ -137,7 +146,7 @@ test("installer core orchestrates apply, deployment, and local install system pa
     );
     const summary = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
     assert.equal(summary.events > 40, true);
-    assert.equal(summary.updater, 0);
+    assert.equal(summary.updater, 1);
     assert.equal(result.stderr, "");
 
     for (const [argv, scenario, expected] of [

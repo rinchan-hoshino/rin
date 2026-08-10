@@ -65,7 +65,7 @@ const replacements: Record<string, string> = {
   "dist/core/rin-install/common.js": `
     export function detectCurrentUser() { return "owner"; }
     export function detectExecutorUser() { return "owner"; }
-    export function repoRootFromHere() { return "/owner/source"; }
+    export function repoRootFromHere() { return "/owner/work/src"; }
     export async function runCommand(command, args, options) { globalThis.__rinInstallerOwnerEvents.push(["run-command", command, args, options]); return { code: 0 }; }
   `,
   "dist/core/rin-install/finalize.js": `

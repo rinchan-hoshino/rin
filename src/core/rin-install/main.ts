@@ -35,6 +35,7 @@ import {
   promptInstallTarget,
 } from "./interactive.js";
 import { createInstallerI18n } from "./i18n.js";
+import { startLegacyPreparedUpdatePayload } from "./update-payload.js";
 import { detectCurrentUser, repoRootFromHere, runCommand } from "./common.js";
 import { finalizeCoreUpdate, finalizeInstallPlan } from "./finalize.js";
 import { releaseInfoFromFile } from "../rin-lib/release.js";
@@ -136,6 +137,10 @@ async function launchInstallerTui(options: {
 }
 
 export async function startInstaller(argv = process.argv.slice(2)) {
+  if (argv.includes("--update") && argv.includes("--preconfirmed")) {
+    await startLegacyPreparedUpdatePayload(argv);
+    return;
+  }
   const cli = parseInstallerCliArgs(argv);
   if (cli.applyPlanFile) {
     const resultPath = cli.applyResultFile;
