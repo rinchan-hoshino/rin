@@ -57,9 +57,9 @@
       "built": "dist/core/chat/rich-text.js"
     },
     {
-      "test": "tests/unit/chat-session-state.test.ts",
-      "source": "src/core/chat/session-state.ts",
-      "built": "dist/core/chat/session-state.js"
+      "test": "tests/unit/chat-extension-api.test.ts",
+      "source": "src/core/chat/extension-api.ts",
+      "built": "dist/core/chat/extension-api.js"
     },
     {
       "test": "tests/unit/chat-settings.test.ts",
@@ -390,6 +390,16 @@
       "test": "tests/unit/self-improve-skill-usage.test.ts",
       "source": "src/core/self-improve/skill-usage.ts",
       "built": "dist/core/self-improve/skill-usage.js"
+    },
+    {
+      "test": "tests/unit/session-activity-status.test.ts",
+      "source": "src/core/session/activity-status.ts",
+      "built": "dist/core/session/activity-status.js"
+    },
+    {
+      "test": "tests/unit/session-extension-api.test.ts",
+      "source": "src/core/session/extension-api.ts",
+      "built": "dist/core/session/extension-api.js"
     },
     {
       "test": "tests/unit/session-fork.test.ts",

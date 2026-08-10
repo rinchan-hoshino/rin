@@ -104,6 +104,6 @@ Install and update packages through Pi package commands exposed by the `rin` CLI
 
 Memory providers may implement `search`, `listRecent`, and `write`, and may return remote `reference` or `url` values instead of local transcript paths.
 
-A background service may use `ctx.chat.listKeys(...)` and `ctx.chat.getSessionStates(...)` when it needs authoritative chat lifecycle state. These APIs expose persisted chat identities and the current bound Pi session's `idle`, `executing`, or `waiting` state without giving extensions direct database or session-file ownership.
+A background service may use `ctx.chat.listKeys(...)` and `ctx.chat.getSessionBindings(...)` to discover chats and their opaque current-session references, then pass those references to `ctx.sessions.getStates(...)`. Chat owns the binding, while the session subsystem owns `idle`, `executing`, or `waiting`; extensions receive neither database nor session-file ownership.
 
 Keep normal built-in chat adapter configuration under `settings.json -> chat`. Use background services for intentionally configured background event bridges, custom chat adapters, or trusted external memory backends.

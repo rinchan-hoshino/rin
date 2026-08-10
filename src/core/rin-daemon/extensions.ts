@@ -33,6 +33,7 @@ import type {
   RinDaemonExtensionAPI,
   RinDaemonMemoryProvider,
   RinDaemonMemoryProviderContext,
+  RinDaemonSessionAPI,
   RinDaemonMemorySearchRequest,
   RinExtensionLogger,
 } from "../rin-extension-api.js";
@@ -109,6 +110,7 @@ function createDaemonExtensionApi(
     config: context.config,
     logger: context.logger,
     chat: context.chat,
+    sessions: context.sessions,
     registerBackgroundService: (provider) => {
       if (typeof provider === "function") {
         services.push({ start: provider });
@@ -256,8 +258,14 @@ const unavailableDaemonChatApi: RinDaemonChatAPI = {
   async listKeys() {
     throw new Error("Chat runtime is unavailable.");
   },
-  async getSessionStates() {
+  async getSessionBindings() {
     throw new Error("Chat runtime is unavailable.");
+  },
+};
+
+const unavailableDaemonSessionApi: RinDaemonSessionAPI = {
+  async getStates() {
+    throw new Error("Session runtime is unavailable.");
   },
 };
 
@@ -266,10 +274,14 @@ export class RinDaemonExtensionManager {
   private readonly chatAdapters: ChatRuntimeExternalAdapterEntry[] = [];
   private readonly memoryProviders: RinDaemonMemoryProviderEntry[] = [];
   private chatApi: RinDaemonChatAPI;
+  private sessionApi: RinDaemonSessionAPI;
   private readonly extensionChatApi: RinDaemonChatAPI = {
     listKeys: async (filter) => await this.chatApi.listKeys(filter),
-    getSessionStates: async (chatKeys) =>
-      await this.chatApi.getSessionStates(chatKeys),
+    getSessionBindings: async (chatKeys) =>
+      await this.chatApi.getSessionBindings(chatKeys),
+  };
+  private readonly extensionSessionApi: RinDaemonSessionAPI = {
+    getStates: async (refs) => await this.sessionApi.getStates(refs),
   };
 
   constructor(
@@ -278,13 +290,19 @@ export class RinDaemonExtensionManager {
       agentDir: string;
       logger?: RinExtensionLogger;
       chat?: RinDaemonChatAPI;
+      sessions?: RinDaemonSessionAPI;
     },
   ) {
     this.chatApi = options.chat || unavailableDaemonChatApi;
+    this.sessionApi = options.sessions || unavailableDaemonSessionApi;
   }
 
   setChatApi(chat: RinDaemonChatAPI) {
     this.chatApi = chat;
+  }
+
+  setSessionApi(sessions: RinDaemonSessionAPI) {
+    this.sessionApi = sessions;
   }
 
   async start() {
@@ -346,6 +364,7 @@ export class RinDaemonExtensionManager {
           packageName: entry.packageName,
           config: entry.config,
           chat: this.extensionChatApi,
+          sessions: this.extensionSessionApi,
           signal: controller.signal,
           logger,
           runAsync: (label, work) => {

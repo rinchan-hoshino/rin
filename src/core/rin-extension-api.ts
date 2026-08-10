@@ -153,6 +153,10 @@ export type RinBackgroundServiceStop = {
 
 export type RinChatSessionState = "idle" | "executing" | "waiting";
 
+export type RinDaemonSessionRef = {
+  readonly token: string;
+};
+
 export type RinDaemonChatKeyFilter = {
   platform?: string;
   accountIds?: readonly string[];
@@ -160,9 +164,15 @@ export type RinDaemonChatKeyFilter = {
 
 export type RinDaemonChatAPI = {
   listKeys(filter?: RinDaemonChatKeyFilter): Promise<string[]>;
-  getSessionStates(
+  getSessionBindings(
     chatKeys: readonly string[],
-  ): Promise<Record<string, RinChatSessionState>>;
+  ): Promise<Array<RinDaemonSessionRef | null>>;
+};
+
+export type RinDaemonSessionAPI = {
+  getStates(
+    refs: readonly (RinDaemonSessionRef | null)[],
+  ): Promise<RinChatSessionState[]>;
 };
 
 export type RinBackgroundServiceContext = {
@@ -174,6 +184,7 @@ export type RinBackgroundServiceContext = {
   readonly packageName: string;
   readonly config: Record<string, unknown>;
   readonly chat: RinDaemonChatAPI;
+  readonly sessions: RinDaemonSessionAPI;
   readonly signal: AbortSignal;
   readonly logger: RinExtensionLogger;
   runAsync(label: string, work: () => Promise<void> | void): void;
