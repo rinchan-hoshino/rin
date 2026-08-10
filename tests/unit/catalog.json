@@ -457,6 +457,11 @@
       "built": "dist/core/tui-runtime-env.js"
     },
     {
+      "test": "tests/unit/update-confirmation.test.ts",
+      "source": "src/core/rin-install/update-confirmation.ts",
+      "built": "dist/core/rin-install/update-confirmation.js"
+    },
+    {
       "test": "tests/unit/update-job-auth.test.ts",
       "source": "src/core/rin-install/update-job-auth.ts",
       "built": "dist/core/rin-install/update-job-auth.js"

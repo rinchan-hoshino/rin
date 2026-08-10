@@ -187,6 +187,10 @@ test("rin update owns one update-job executor and one private payload", () => {
     path.join(rootDir, "src", "core", "rin-install", "updater.ts"),
     "utf8",
   );
+  const confirmationSource = fs.readFileSync(
+    path.join(rootDir, "src", "core", "rin-install", "update-confirmation.ts"),
+    "utf8",
+  );
 
   assert.match(source, /buildRinInstallUpdateArgs/);
   assert.match(
@@ -204,8 +208,16 @@ test("rin update owns one update-job executor and one private payload", () => {
   assert.doesNotMatch(source, /prepareUpdateRuntimeSource/);
   assert.doesNotMatch(source, /confirmUpdateBeforeSourcePreparation/);
   assert.doesNotMatch(source, /bootstrap-entrypoint/);
+  assert.match(source, /assertUpdateConfirmationAvailable/);
   assert.match(updaterSource, /prepareUpdateRuntimeSource/);
-  assert.match(updaterSource, /rin_update_confirmation_required/);
+  assert.match(updaterSource, /assertUpdateConfirmationAvailable/);
+  assert.match(confirmationSource, /rin_update_confirmation_required/);
+  assert.equal(
+    [source, updaterSource, confirmationSource].filter((content) =>
+      content.includes("rin_update_confirmation_required"),
+    ).length,
+    1,
+  );
   assert.match(updaterSource, /isInstalledReleaseCurrent/);
   assert.match(updaterSource, /--preconfirmed/);
   assert.match(workflowSource, /runInstallerProgress/);
@@ -408,6 +420,20 @@ test("cli help omits removed run command and exposes Pi-style non-interactive fl
   assert.doesNotMatch(output, /\n\s+run\s+Run one non-interactive Rin turn/);
   assert.doesNotMatch(output, /--sessions\b/);
   assert.doesNotMatch(output, /--(?:std|rpc)\b/);
+});
+
+test("rin update help exposes the runtime non-interactive confirmation contract", () => {
+  const output = execFileSync(
+    process.execPath,
+    [path.join(rootDir, "dist", "app", "rin", "main.js"), "update", "--help"],
+    { cwd: rootDir, encoding: "utf8" },
+  );
+
+  assert.match(output, /Rin runtime update:/);
+  assert.match(
+    output,
+    /--yes\s+Confirm the Rin runtime update non-interactively; required when stdin or stdout is not a TTY/,
+  );
 });
 
 test("print help shows the Pi-style non-interactive CLI contract", () => {

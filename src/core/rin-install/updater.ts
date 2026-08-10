@@ -16,6 +16,7 @@ import {
 } from "../rin-lib/release.js";
 
 import { createInstallerI18n, type InstallerI18n } from "./i18n.js";
+import { assertUpdateConfirmationAvailable } from "./update-confirmation.js";
 import { discoverInstalledTargets } from "./update-targets.js";
 import {
   runFinalizeInstallPlanInChild as runFinalizeInstallPlanInChildImpl,
@@ -343,11 +344,11 @@ export async function startUpdater(deps: {
       i18n.updatePlanTitle,
     );
 
-    if (!deps.assumeYes && (!process.stdin.isTTY || !process.stdout.isTTY)) {
-      throw new Error(
-        "rin_update_confirmation_required: pass --yes in non-interactive mode",
-      );
-    }
+    assertUpdateConfirmationAvailable({
+      assumeYes: deps.assumeYes,
+      stdinIsTTY: process.stdin.isTTY === true,
+      stdoutIsTTY: process.stdout.isTTY === true,
+    });
     const shouldProceed = deps.assumeYes
       ? true
       : deps.ensureNotCancelled(

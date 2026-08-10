@@ -22,6 +22,7 @@ import {
 import { repoRootFromHere, runCommand } from "../rin-install/common.js";
 import { createInstallerI18n } from "../rin-install/i18n.js";
 import { readJsonFileWithPrivilege } from "../rin-install/fs-utils.js";
+import { assertUpdateConfirmationAvailable } from "../rin-install/update-confirmation.js";
 import {
   defaultInstallDirForHome,
   installerManifestPath,
@@ -386,7 +387,19 @@ function buildRinInstallUpdateArgs(parsed: ParsedArgs, installDir: string) {
   return args;
 }
 
-export async function runUpdate(parsed: ParsedArgs) {
+export async function runUpdate(
+  parsed: ParsedArgs,
+  confirmationContext: {
+    stdinIsTTY?: boolean;
+    stdoutIsTTY?: boolean;
+  } = {},
+) {
+  assertUpdateConfirmationAvailable({
+    assumeYes: parsed.updateAssumeYes,
+    stdinIsTTY: confirmationContext.stdinIsTTY ?? process.stdin.isTTY === true,
+    stdoutIsTTY:
+      confirmationContext.stdoutIsTTY ?? process.stdout.isTTY === true,
+  });
   const installDir = resolveInstallDirForTarget(parsed);
   const repoRoot = repoRootFromHere();
   const nodePath = rinInstallUpdateNodeCommand(installDir);

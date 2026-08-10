@@ -351,7 +351,7 @@ test("installer and updater source expose no language controls", () => {
   assert.match(updaterSource, /wrapInstallerNoteText/);
   assert.match(updaterSource, /selectUpdateTarget/);
   assert.match(updaterSource, /const i18n = initialI18n/);
-  assert.match(updaterSource, /rin_update_confirmation_required/);
+  assert.match(updaterSource, /assertUpdateConfirmationAvailable/);
 });
 
 test("installer no longer prompts for bundled extension selection", () => {

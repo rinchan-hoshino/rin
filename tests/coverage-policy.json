@@ -892,6 +892,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin-install/update-confirmation.ts",
+      "built": "dist/core/rin-install/update-confirmation.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin-install/update-targets.ts",
       "built": "dist/core/rin-install/update-targets.js",
       "ownerSuite": "unit",

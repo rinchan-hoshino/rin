@@ -25,7 +25,10 @@ export async function tryRunPiCliCommand(args: string[]): Promise<PiCliRoute> {
     if (updateArgs.includes("--help") || updateArgs.includes("-h")) {
       await handlePiPackageCommand(args, runtimeOptions);
       process.stdout.write(
-        "Rin compatibility: `rin update`, `rin update self`, and `rin update --self` update the Rin runtime instead of the standalone Pi binary.\n",
+        "\nRin runtime update:\n" +
+          "  rin update [--stable|--beta|--nightly|--git [branch-or-ref]] [--branch <name>] [--version <value>] [--yes]\n" +
+          "  --yes                     Confirm the Rin runtime update non-interactively; required when stdin or stdout is not a TTY\n" +
+          "\n`rin update`, `rin update self`, and `rin update --self` update the Rin runtime instead of the standalone Pi binary.\n",
       );
       return "handled";
     }

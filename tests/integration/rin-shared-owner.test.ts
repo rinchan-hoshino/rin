@@ -364,9 +364,28 @@ test("Rin shared boundary owns target reads, execution context, daemon readiness
       "owner-ref",
     ]);
 
+    const eventCountBeforeRejectedUpdate = owner.__rinSharedOwnerEvents.length;
+    await assert.rejects(
+      () =>
+        shared.runUpdate(parsed({ targetUser: "target", installDir }), {
+          stdinIsTTY: false,
+          stdoutIsTTY: false,
+        }),
+      /rin_update_confirmation_required: pass --yes in non-interactive mode/,
+    );
+    assert.equal(
+      owner.__rinSharedOwnerEvents.length,
+      eventCountBeforeRejectedUpdate,
+    );
+    assert.deepEqual(await fs.readdir(jobsDir), [jobFile]);
+
     owner.__rinSharedOwnerSpawnResult = { code: 5, signal: null };
     await assert.rejects(
-      () => shared.runUpdate(parsed({ targetUser: "target", installDir })),
+      () =>
+        shared.runUpdate(parsed({ targetUser: "target", installDir }), {
+          stdinIsTTY: true,
+          stdoutIsTTY: true,
+        }),
       /rin_child_command_failed:5/,
     );
     owner.__rinSharedOwnerSpawnResult = { code: 0, signal: null };
