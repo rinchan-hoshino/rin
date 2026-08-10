@@ -2652,7 +2652,7 @@ test(
 );
 
 test(
-  "rpc mode includes retry exhaustion in terminal provider failures",
+  "rpc mode carries structured retry exhaustion in terminal provider failures",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -2773,10 +2773,11 @@ test(
         (event) => event.type === "rpc_turn_event" && event.event === "error",
       );
       assert.equal(error?.requestTag, "tag-1");
-      assert.equal(
-        error?.error,
-        "Retry failed after 3 attempts: Codex SSE response headers timed out after 20000ms",
-      );
+      assert.equal(error?.error, providerError);
+      assert.deepEqual(error?.retryFailure, {
+        attempt: 3,
+        finalError: providerError,
+      });
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -2785,7 +2786,7 @@ test(
 );
 
 test(
-  "rpc mode includes retry exhaustion when provider failure is thrown",
+  "rpc mode carries structured retry exhaustion when provider failure is thrown",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -2903,10 +2904,11 @@ test(
       assert.equal(error?.requestTag, "tag-1");
       assert.equal(error?.sessionFile, "/tmp/test-session.jsonl");
       assert.equal(error?.sessionId, "session-1");
-      assert.equal(
-        error?.error,
-        "Retry failed after 3 attempts: Codex SSE response headers timed out after 20000ms",
-      );
+      assert.equal(error?.error, providerError);
+      assert.deepEqual(error?.retryFailure, {
+        attempt: 3,
+        finalError: providerError,
+      });
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -5694,6 +5696,9 @@ test(
             continued = true;
           },
         },
+        _runAgentPrompt: async () => {
+          continued = true;
+        },
         subscribe: () => () => {},
         appendMessage: () => {},
         getSessionStats: () => ({}),
@@ -5765,6 +5770,42 @@ test(
       assert.equal(complete, undefined);
       assert.equal(error, undefined);
       assert.match(lines.join(""), /"resumed":false/);
+
+      lines.length = 0;
+      messages.splice(
+        0,
+        messages.length,
+        { role: "user", content: "restart prompt" },
+        {
+          role: "assistant",
+          content: [],
+          stopReason: "error",
+          errorMessage: "fetch failed",
+        },
+      );
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "3", type: "resume_interrupted_turn", requestTag: "retry-tail", source: "daemon-restart" })}\n`,
+        ),
+      );
+      await wait(10);
+      assert.equal(continued, false);
+      assert.match(lines.join(""), /"resumed":false/);
+      assert.doesNotMatch(lines.join(""), /"event":"error"/);
+
+      lines.length = 0;
+      messages.splice(0, messages.length, {
+        role: "user",
+        content: "resume this admitted turn",
+      });
+      onData(
+        Buffer.from(
+          `${JSON.stringify({ id: "4", type: "resume_interrupted_turn", requestTag: "user-tail", source: "daemon-restart" })}\n`,
+        ),
+      );
+      await wait(10);
+      assert.equal(continued, true);
+      assert.match(lines.join(""), /"resumed":true/);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

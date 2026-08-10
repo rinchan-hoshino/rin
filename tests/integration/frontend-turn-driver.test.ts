@@ -804,6 +804,61 @@ test("turn driver carries canonical retry and compaction failures to chat withou
   );
 });
 
+test("turn driver projects Pi retry exhaustion once through the frontend SDK", async () => {
+  const driver = createDriver();
+  const seen: any[] = [];
+  driver.subscribe((event: any) => seen.push(event));
+
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "start",
+    requestTag: "retry-turn",
+  });
+  await emitDriverEvent(driver, {
+    type: "auto_retry_start",
+    attempt: 3,
+    maxAttempts: 3,
+    delayMs: 8000,
+    errorMessage: "fetch failed",
+    requestTag: "retry-turn",
+  });
+  await emitDriverEvent(driver, {
+    type: "auto_retry_end",
+    success: false,
+    attempt: 3,
+    finalError: "fetch failed",
+    requestTag: "retry-turn",
+  });
+  await emitDriverEvent(driver, {
+    type: "rpc_turn_event",
+    event: "error",
+    error: "fetch failed",
+    retryFailure: {
+      attempt: 3,
+      finalError: "fetch failed",
+    },
+    requestTag: "retry-turn",
+  });
+
+  assert.deepEqual(
+    seen.filter((event) => event.type !== "frontend_status"),
+    [
+      { type: "turn_accepted", requestTag: "retry-turn" },
+      {
+        type: "turn_error",
+        error: "Retry failed after 3 attempts: fetch failed",
+        retryFailure: {
+          attempt: 3,
+          finalError: "fetch failed",
+        },
+        sessionId: undefined,
+        sessionFile: undefined,
+        requestTag: "retry-turn",
+      },
+    ],
+  );
+});
+
 async function emitRpcTurnComplete(
   driver: any,
   requestTag: string,

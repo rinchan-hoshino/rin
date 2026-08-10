@@ -5,6 +5,7 @@ import {
 import type {
   RinChatDeliveryContext,
   RinFrontendBackendEvent,
+  RinFrontendRetryFailure,
 } from "./types.js";
 
 export type RinFrontendInterruptIntent =
@@ -103,6 +104,7 @@ export type RinFrontendLifecycleEvent =
       kind: "turn_terminal";
       outcome: "error";
       error: string;
+      retryFailure?: RinFrontendRetryFailure;
       sessionId?: string;
       sessionFile?: string;
     });
@@ -161,6 +163,27 @@ function optionalTerminalRecord(value: unknown) {
 function optionalText(value: unknown): string | undefined {
   const text = safeString(value).trim();
   return text || undefined;
+}
+
+function optionalRetryFailure(
+  value: unknown,
+): RinFrontendRetryFailure | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const finalError = safeString((value as any).finalError).trim();
+  if (!finalError) return;
+  const rawAttempt = safeNumber((value as any).attempt);
+  const attempt = Math.max(1, Math.trunc(rawAttempt));
+  return { attempt, finalError };
+}
+
+export function formatRinFrontendRetryFailure(
+  retryFailure: RinFrontendRetryFailure | undefined,
+): string {
+  const finalError = safeString(retryFailure?.finalError).trim();
+  if (!finalError) return "";
+  if (/^Retry failed after\b/i.test(finalError)) return finalError;
+  const attempt = Math.max(1, Math.trunc(safeNumber(retryFailure?.attempt)));
+  return `Retry failed after ${attempt} attempts: ${finalError}`;
 }
 
 function requestTagOf(payload: any): LifecycleEventBase {
@@ -319,6 +342,7 @@ export function projectRinFrontendLifecycleEvent(
           kind: "turn_terminal",
           outcome: "error",
           error: safeString(payload.error).trim() || "rpc_turn_failed",
+          retryFailure: optionalRetryFailure(payload.retryFailure),
           sessionId: optionalText(payload.sessionId),
           sessionFile: optionalText(payload.sessionFile),
           chatDeliveryContext: optionalChatDeliveryContext(
@@ -546,7 +570,9 @@ export function renderRinFrontendLifecycleEvent(
       return [
         {
           type: "turn_error",
-          error: event.error,
+          error:
+            formatRinFrontendRetryFailure(event.retryFailure) || event.error,
+          ...(event.retryFailure ? { retryFailure: event.retryFailure } : {}),
           sessionId: event.sessionId,
           sessionFile: event.sessionFile,
           requestTag: event.requestTag,

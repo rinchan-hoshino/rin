@@ -77,9 +77,18 @@ async function exerciseResumeInterruptedTurn(
           calls.push(["appendMessage", message]);
         },
         getEntries: () => [],
-        getBranch: () => [],
+        getBranch: () =>
+          stateMessages.map((message, index) => ({
+            id: `message-${index}`,
+            parentId: index > 0 ? `message-${index - 1}` : null,
+            type: "message",
+            message,
+          })),
         getTree: () => [],
-        getLeafId: () => null,
+        getLeafId: () =>
+          stateMessages.length > 0
+            ? `message-${stateMessages.length - 1}`
+            : null,
         getCwd: () => process.cwd(),
         getSessionDir: () => process.cwd(),
       },
@@ -194,8 +203,23 @@ test(
 
       assert.deepEqual(result.calls, []);
       assert.equal(stateMessages.length, 1);
-      assert.ok(
-        result.lines.join("").includes('"command":"resume_interrupted_turn"'),
+      const events = result.lines
+        .join("")
+        .trim()
+        .split(/\n+/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      const response = events.find(
+        (event) => event.type === "response" && event.id === "2",
+      );
+      assert.equal(response?.data?.resumed, false);
+      assert.equal(
+        events.some(
+          (event) =>
+            event.type === "rpc_turn_event" &&
+            (event.event === "complete" || event.event === "error"),
+        ),
+        false,
       );
     }
   },
@@ -254,6 +278,7 @@ test(
           attempt: 3,
           finalError: providerError,
         });
+        emit({ type: "agent_settled" });
       },
     });
 
@@ -288,9 +313,10 @@ test(
     const terminalError = events.find(
       (event) => event.type === "rpc_turn_event" && event.event === "error",
     );
-    assert.equal(
-      terminalError?.error,
-      `Retry failed after 3 attempts: ${providerError}`,
-    );
+    assert.equal(terminalError?.error, providerError);
+    assert.deepEqual(terminalError?.retryFailure, {
+      attempt: 3,
+      finalError: providerError,
+    });
   },
 );

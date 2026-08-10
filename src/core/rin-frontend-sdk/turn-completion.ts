@@ -418,11 +418,7 @@ export function resolveRinTurnCompletionFromMessages(
   };
 }
 
-export function resolveRinTurnFailureMessage(
-  session: any,
-  messages: any[],
-  options: { retryFailureMessage?: string } = {},
-) {
+export function resolveRinTurnFailureMessage(session: any, messages: any[]) {
   for (const message of [...messages].reverse()) {
     if (safeString(message?.role).trim() !== "assistant") continue;
     const errorMessage = safeString(
@@ -435,9 +431,6 @@ export function resolveRinTurnFailureMessage(
         : "Agent producer failed.";
     }
   }
-
-  const retryFailureMessage = safeString(options.retryFailureMessage).trim();
-  if (retryFailureMessage) return retryFailureMessage;
 
   const stateError = safeString(session?.agent?.state?.errorMessage).trim();
   if (stateError) return stateError;

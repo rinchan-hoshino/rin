@@ -2864,10 +2864,11 @@ test(
         (event) => event.type === "rpc_turn_event" && event.event === "error",
       );
       assert.equal(error?.requestTag, "tag-1");
-      assert.equal(
-        error?.error,
-        "Retry failed after 3 attempts: Codex SSE response headers timed out after 20000ms",
-      );
+      assert.equal(error?.error, providerError);
+      assert.deepEqual(error?.retryFailure, {
+        attempt: 3,
+        finalError: providerError,
+      });
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -2994,10 +2995,11 @@ test(
       assert.equal(error?.requestTag, "tag-1");
       assert.equal(error?.sessionFile, "/tmp/test-session.jsonl");
       assert.equal(error?.sessionId, "session-1");
-      assert.equal(
-        error?.error,
-        "Retry failed after 3 attempts: Codex SSE response headers timed out after 20000ms",
-      );
+      assert.equal(error?.error, providerError);
+      assert.deepEqual(error?.retryFailure, {
+        attempt: 3,
+        finalError: providerError,
+      });
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

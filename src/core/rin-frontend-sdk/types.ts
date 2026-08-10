@@ -102,6 +102,11 @@ export type RinTerminalRecord = {
   terminalAt?: string;
 };
 
+export type RinFrontendRetryFailure = {
+  attempt: number;
+  finalError: string;
+};
+
 export type RinFrontendBackendEvent =
   | RinExtensionUiRequest
   | {
@@ -156,6 +161,7 @@ export type RinFrontendBackendEvent =
   | {
       type: "turn_error";
       error: string;
+      retryFailure?: RinFrontendRetryFailure;
       sessionId?: string;
       sessionFile?: string;
       requestTag?: string;

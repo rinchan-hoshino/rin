@@ -791,6 +791,31 @@ test("frontend backend event translator keeps retry schedules silent without ter
   );
   assert.deepEqual(
     translator.translate({
+      type: "rpc_turn_event",
+      event: "error",
+      error: "Provider unavailable",
+      retryFailure: {
+        attempt: 3,
+        finalError: "Provider unavailable",
+      },
+      requestTag: "retry-turn",
+    }),
+    [
+      {
+        type: "turn_error",
+        error: "Retry failed after 3 attempts: Provider unavailable",
+        retryFailure: {
+          attempt: 3,
+          finalError: "Provider unavailable",
+        },
+        sessionId: undefined,
+        sessionFile: undefined,
+        requestTag: "retry-turn",
+      },
+    ],
+  );
+  assert.deepEqual(
+    translator.translate({
       type: "compaction_end",
       reason: "threshold",
       aborted: false,

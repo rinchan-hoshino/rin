@@ -18,6 +18,7 @@ import {
   type RinTurnScope,
 } from "../session/turn-scope.js";
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
+import type { RinFrontendRetryFailure } from "../rin-frontend-sdk/types.js";
 import {
   RIN_TURN_TERMINAL_ABSENT,
   RinTurnSettlementProjector,
@@ -333,6 +334,12 @@ function appendInterruptedToolResults(
   return true;
 }
 
+function isAssistantFailureMessage(message: any) {
+  if (safeString(message?.role).trim() !== "assistant") return false;
+  const stopReason = safeString(message?.stopReason).trim();
+  return stopReason === "error" || stopReason === "aborted";
+}
+
 function isInterruptedTurnResumable(session: any) {
   if (session?.agent?.signal) return true;
   const messages = Array.isArray(session?.agent?.state?.messages)
@@ -340,7 +347,12 @@ function isInterruptedTurnResumable(session: any) {
     : [];
   const lastMessage = messages[messages.length - 1];
   if (!lastMessage) return false;
-  return true;
+  if (lastMessage.role === "user" || lastMessage.role === "toolResult") {
+    return true;
+  }
+  if (lastMessage.role !== "assistant") return false;
+  if (isAssistantFailureMessage(lastMessage)) return false;
+  return extractPiContinuableToolCallParts(lastMessage).length > 0;
 }
 
 async function resumeInterruptedTurn(session: any) {
@@ -998,7 +1010,7 @@ export async function runCustomRpcMode(
   let pendingNativeInputSubmission: NativeInputSubmission | undefined;
   let nativeInputAdmissionTail: Promise<void> = Promise.resolve();
   let gracefulSessionShutdown = false;
-  let latestAutoRetryFailureMessage = "";
+  let latestAutoRetryFailure: RinFrontendRetryFailure | undefined;
   const emitTurnEvent = (
     event: string,
     requestTag: string,
@@ -1063,7 +1075,7 @@ export async function runCustomRpcMode(
     } = {},
   ) => {
     if (turnCoordinator.isActive) throw new Error("rpc_turn_already_active");
-    latestAutoRetryFailureMessage = "";
+    latestAutoRetryFailure = undefined;
     const turnSession = getSession();
     let terminalScope = options.turnScope ?? captureTurnScope(turnSession);
     const trackedTurn = turnCoordinator.openTurn(
@@ -1132,6 +1144,9 @@ export async function runCustomRpcMode(
                 sessionFile: turnSession.sessionFile,
                 sessionId: turnSession.sessionId,
                 error: outcome.error,
+                ...(latestAutoRetryFailure
+                  ? { retryFailure: { ...latestAutoRetryFailure } }
+                  : {}),
               };
         const terminalKey = JSON.stringify({ event, payload });
         const committed = trackedTurn.commitTerminal(terminalKey, () => {
@@ -1237,7 +1252,6 @@ export async function runCustomRpcMode(
             resolveRinTurnFailureMessage(
               turnSession,
               terminalOutcome.resolution.messages,
-              { retryFailureMessage: latestAutoRetryFailureMessage },
             ) || terminalOutcome.error;
           throw new Error(failureMessage);
         }
@@ -1282,7 +1296,6 @@ export async function runCustomRpcMode(
               ? resolveRinTurnFailureMessage(
                   turnSession,
                   recoveredOutcome.resolution.messages,
-                  { retryFailureMessage: latestAutoRetryFailureMessage },
                 ) || recoveredOutcome.error
               : "";
           commitTurnTerminal({
@@ -1293,14 +1306,10 @@ export async function runCustomRpcMode(
           });
           return;
         }
-        const retryFailureMessage = safeString(
-          latestAutoRetryFailureMessage,
-        ).trim();
         const errorMessage =
-          retryFailureMessage ||
+          latestAutoRetryFailure?.finalError ||
           String(error?.message || error || "rpc_turn_failed");
         commitTurnTerminal({ kind: "error", error: errorMessage });
-        if (retryFailureMessage) throw new Error(retryFailureMessage);
         throw error;
       } finally {
         turnSettlement.dispose();
@@ -1530,20 +1539,17 @@ export async function runCustomRpcMode(
           ? { ...event, requestTag: producerRequestTag }
           : event;
       if (event?.type === "auto_retry_start") {
-        latestAutoRetryFailureMessage = "";
+        latestAutoRetryFailure = undefined;
       }
       if (event?.type === "auto_retry_end") {
-        if (event.success === false) {
-          const finalError = safeString(event.finalError).trim();
-          const attempt = Number(event.attempt || 0);
-          latestAutoRetryFailureMessage = finalError
-            ? /^Retry failed after\b/i.test(finalError)
-              ? finalError
-              : `Retry failed after ${attempt || 1} attempts: ${finalError}`
-            : "";
-        } else {
-          latestAutoRetryFailureMessage = "";
-        }
+        const finalError = safeString(event.finalError).trim();
+        latestAutoRetryFailure =
+          event.success === false && finalError
+            ? {
+                attempt: Math.max(1, Math.trunc(Number(event.attempt || 0))),
+                finalError,
+              }
+            : undefined;
       }
       if (event?.type === "message_start" && event.message?.role === "user") {
         if (producerRequestTag) {

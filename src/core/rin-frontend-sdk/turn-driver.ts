@@ -50,6 +50,7 @@ import type {
   RinFrontendBackendEvent,
   RinFrontendClient,
   RinFrontendEvent,
+  RinFrontendRetryFailure,
   RinExtensionUiRequest,
   RinNewSessionResult,
   RinPromptContext,
@@ -194,6 +195,7 @@ export type RinFrontendTurnDriverEvent =
   | {
       type: "turn_error";
       error: string;
+      retryFailure?: RinFrontendRetryFailure;
       sessionId?: string;
       sessionFile?: string;
       requestTag?: string;
@@ -2779,6 +2781,7 @@ export class RinFrontendTurnDriver {
         > = {
           type: "turn_error",
           error: event.error,
+          ...(event.retryFailure ? { retryFailure: event.retryFailure } : {}),
           sessionId: event.sessionId,
           sessionFile: event.sessionFile,
           requestTag: safeString(event.requestTag).trim() || undefined,

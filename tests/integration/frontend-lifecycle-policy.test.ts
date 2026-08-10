@@ -202,6 +202,31 @@ test("canonical lifecycle renderer owns complete and error terminal projection",
       requestTag: "turn-4",
     },
   ]);
+
+  const retryExhausted = projectRinFrontendLifecycleEvent({
+    type: "rpc_turn_event",
+    event: "error",
+    error: "fetch failed",
+    retryFailure: {
+      attempt: 3,
+      finalError: "fetch failed",
+    },
+    requestTag: "turn-retry",
+  });
+  assert.ok(retryExhausted);
+  assert.deepEqual(renderRinFrontendLifecycleEvent(retryExhausted), [
+    {
+      type: "turn_error",
+      error: "Retry failed after 3 attempts: fetch failed",
+      retryFailure: {
+        attempt: 3,
+        finalError: "fetch failed",
+      },
+      sessionId: undefined,
+      sessionFile: undefined,
+      requestTag: "turn-retry",
+    },
+  ]);
 });
 
 test("canonical lifecycle renders manual and automatic compaction cancellation", () => {

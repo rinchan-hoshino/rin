@@ -987,12 +987,6 @@ test("Rin terminal compatibility and failure helpers preserve explicit errors", 
     "Agent producer failed.",
   );
   assert.equal(
-    resolveRinTurnFailureMessage({}, [], {
-      retryFailureMessage: " retry exhausted ",
-    }),
-    "retry exhausted",
-  );
-  assert.equal(
     resolveRinTurnFailureMessage(
       { agent: { state: { errorMessage: " state failure " } } },
       [],

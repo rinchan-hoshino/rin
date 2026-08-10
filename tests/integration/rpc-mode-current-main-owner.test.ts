@@ -2762,7 +2762,7 @@ test(
 );
 
 test(
-  "rpc mode includes retry exhaustion in terminal provider failures",
+  "rpc mode carries structured retry exhaustion in terminal provider failures",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -2883,10 +2883,11 @@ test(
         (event) => event.type === "rpc_turn_event" && event.event === "error",
       );
       assert.equal(error?.requestTag, "tag-1");
-      assert.equal(
-        error?.error,
-        "Retry failed after 3 attempts: Codex SSE response headers timed out after 20000ms",
-      );
+      assert.equal(error?.error, providerError);
+      assert.deepEqual(error?.retryFailure, {
+        attempt: 3,
+        finalError: providerError,
+      });
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
@@ -2895,7 +2896,7 @@ test(
 );
 
 test(
-  "rpc mode includes retry exhaustion when provider failure is thrown",
+  "rpc mode carries structured retry exhaustion when provider failure is thrown",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -3013,10 +3014,11 @@ test(
       assert.equal(error?.requestTag, "tag-1");
       assert.equal(error?.sessionFile, "/tmp/test-session.jsonl");
       assert.equal(error?.sessionId, "session-1");
-      assert.equal(
-        error?.error,
-        "Retry failed after 3 attempts: Codex SSE response headers timed out after 20000ms",
-      );
+      assert.equal(error?.error, providerError);
+      assert.deepEqual(error?.retryFailure, {
+        attempt: 3,
+        finalError: providerError,
+      });
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;
