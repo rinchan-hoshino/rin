@@ -38,6 +38,16 @@ defineRinDaemonExtension((rin) => {
   rin.registerBackgroundService({
     async start(ctx) {
       ctx.logger.info?.(`starting ${ctx.name}`);
+      const chatKeys = await ctx.chat.listKeys({
+        platform: "discord",
+        accountIds: ["1"],
+      });
+      const states = await ctx.chat.getSessionStates([
+        ...chatKeys,
+        "telegram/2:20",
+      ]);
+      const state: "idle" | "executing" | "waiting" = states["discord/1:10"];
+      ctx.logger.info?.(`state ${state}`);
       return { stop() {} };
     },
   });

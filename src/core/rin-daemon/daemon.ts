@@ -34,6 +34,7 @@ import {
   listBoundSessions,
   renameBoundSession,
 } from "../session/factory.js";
+import { createDaemonChatAPI } from "../chat/session-state.js";
 import { CronScheduler } from "./cron.js";
 import {
   getCatalogOAuthState,
@@ -183,6 +184,12 @@ export async function startDaemon(
       agentDir: runtime.agentDir,
       logger: console,
     });
+  daemonExtensionManager.setChatApi(
+    createDaemonChatAPI({
+      agentDir: runtime.agentDir,
+      getActivity: () => workerPool.getStatusSnapshot(),
+    }),
+  );
   if (!options.daemonExtensionManager) {
     await daemonExtensionManager.start();
   }

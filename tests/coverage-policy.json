@@ -298,6 +298,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/chat/session-state.ts",
+      "built": "dist/core/chat/session-state.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
       "source": "src/core/chat/settings.ts",
       "built": "dist/core/chat/settings.js",
       "ownerSuite": "unit",

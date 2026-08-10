@@ -70,10 +70,17 @@ export const rinDaemonExtension = defineRinDaemonExtension((rin) => {
 ```
 
 The daemon API is registration-only. Runtime work belongs in a background
-service's `start(ctx)` callback, where cancellation, logging, and tracked async
-work are real capabilities. Pi registration methods are intentionally absent
-from the daemon API, and daemon registration methods are absent from the
-session API. Unsupported methods are never installed as silent no-ops.
+service's `start(ctx)` callback, where cancellation, logging, tracked async
+work, and the authoritative `ctx.chat` lifecycle API are real capabilities.
+`ctx.chat.listKeys(...)` lists persisted chat identities without exposing the
+chat database. `ctx.chat.getSessionStates(chatKeys)` reports `idle`,
+`executing`, or `waiting` strictly from each chat's currently bound Pi session:
+an unbound or empty session is idle, an active bound session is executing, and
+a settled bound session with conversation context is waiting. Extensions must
+consume this API rather than open Rin's chat database or session files. Pi
+registration methods are intentionally absent from the daemon API, and daemon
+registration methods are absent from the session API. Unsupported methods are
+never installed as silent no-ops.
 
 Only ordinary Pi extension entries are loaded. A matching `rinExtensions.daemon` entry may supply backend configuration, but it cannot discover or install a package:
 

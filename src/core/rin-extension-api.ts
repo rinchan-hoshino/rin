@@ -151,6 +151,20 @@ export type RinBackgroundServiceStop = {
   stop?: () => Promise<void> | void;
 };
 
+export type RinChatSessionState = "idle" | "executing" | "waiting";
+
+export type RinDaemonChatKeyFilter = {
+  platform?: string;
+  accountIds?: readonly string[];
+};
+
+export type RinDaemonChatAPI = {
+  listKeys(filter?: RinDaemonChatKeyFilter): Promise<string[]>;
+  getSessionStates(
+    chatKeys: readonly string[],
+  ): Promise<Record<string, RinChatSessionState>>;
+};
+
 export type RinBackgroundServiceContext = {
   readonly cwd: string;
   readonly agentDir: string;
@@ -159,6 +173,7 @@ export type RinBackgroundServiceContext = {
   readonly name: string;
   readonly packageName: string;
   readonly config: Record<string, unknown>;
+  readonly chat: RinDaemonChatAPI;
   readonly signal: AbortSignal;
   readonly logger: RinExtensionLogger;
   runAsync(label: string, work: () => Promise<void> | void): void;
