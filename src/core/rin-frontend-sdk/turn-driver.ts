@@ -2242,6 +2242,7 @@ export class RinFrontendTurnDriver {
           "rin_worker_unavailable",
           "rin_worker_oom",
           "rin_disconnected",
+          "rin_prompt_outcome_indeterminate",
         ].some(
           (candidate) => code === candidate || code.startsWith(`${candidate}:`),
         );
@@ -2280,7 +2281,14 @@ export class RinFrontendTurnDriver {
           ? observed.originalOutcome
           : observed.outcome;
       if (effectiveOutcome === "indeterminate") {
-        throw new Error("rin_prompt_outcome_indeterminate");
+        if (existingLiveTurn) {
+          await existingLiveTurn.promise.catch(() => {});
+        }
+        return await this.resumeTurn({
+          requestTag,
+          sessionFile: targetSessionFile,
+          chatDeliveryContext: input.chatDeliveryContext,
+        });
       }
       const ownsTerminal = effectiveOutcome === "terminalOwner";
       if (!ownsTerminal) {

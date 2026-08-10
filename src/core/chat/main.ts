@@ -484,7 +484,6 @@ export async function startChatBridge(
         id,
         idempotencyKey: options.idempotencyKey,
         deliveryKind,
-        turnTerminalKind: options.turnTerminalKind,
         postDelivery: options.postDelivery,
       },
     );
@@ -1200,53 +1199,6 @@ export async function startChatBridge(
       }
       return admission;
     };
-    const interruptedUnknownJob = (
-      admission: ChatInboxAdmission,
-    ): PreparedChatKeyWorkerJob => ({
-      run: () =>
-        runClaimedInboxJob(job, async () => {
-          await enqueueAndDrainOutbox(
-            {
-              createdAt: nowIso(),
-              chatKey: queuedChatKey,
-              parts: withChatQuotePart(
-                [
-                  {
-                    type: "text",
-                    text: "The previous turn was interrupted, and Rin could not verify whether it completed. It was not submitted again.",
-                  },
-                ],
-                envelope.messageId,
-              ),
-              sessionFile: admission.executionSessionFile,
-            },
-            "error",
-            {
-              turnTerminalKind: "interrupted_unknown",
-              id: `interrupted-unknown-${buildChatMessageRecordKey(
-                queuedChatKey,
-                envelope.messageId,
-              )}`,
-              idempotencyKey: JSON.stringify([
-                "interrupted_unknown",
-                queuedChatKey,
-                envelope.messageId,
-              ]),
-              postDelivery: {
-                markProcessed: {
-                  chatKey: queuedChatKey,
-                  messageId: envelope.messageId,
-                  bindSession: false,
-                },
-              },
-            },
-          );
-          return {
-            disposition: "actionable",
-            terminalKind: "interrupted_unknown",
-          };
-        }),
-    });
     const prepareFromAdmission = (
       admission: ChatInboxAdmission,
       recoverCommittedWork = false,
@@ -1259,7 +1211,9 @@ export async function startChatBridge(
         case "record_only":
           return recordOnlyJob();
         case "command":
-          if (recoverCommittedWork) return interruptedUnknownJob(admission);
+          if (recoverCommittedWork) {
+            throw new Error("chat_command_recovery_requires_durable_result");
+          }
           return {
             run: () =>
               runClaimedInboxJob(job, () =>
@@ -1273,7 +1227,9 @@ export async function startChatBridge(
               ),
           };
         case "unmatched_command":
-          if (recoverCommittedWork) return interruptedUnknownJob(admission);
+          if (recoverCommittedWork) {
+            throw new Error("chat_command_recovery_requires_durable_result");
+          }
           return {
             run: () =>
               runClaimedInboxJob(job, () =>
@@ -1296,8 +1252,8 @@ export async function startChatBridge(
                 }),
               ),
           };
-        case "interrupted_unknown":
-          return interruptedUnknownJob(admission);
+        case "unavailable":
+          throw new Error(`chat_inbox_admission_required:${resolved.reason}`);
         case "unclassified":
           throw new Error("chat_inbox_admission_required");
       }

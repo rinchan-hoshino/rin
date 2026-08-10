@@ -5207,21 +5207,143 @@ test("frontend SDK exposes native rejection without waiting for a terminal", asy
   assert.equal(result.requestTag, "tag-rejected");
 });
 
-test("frontend SDK preserves a rejoined indeterminate outcome without resubmission", async () => {
+test("frontend SDK continues a rejoined indeterminate outcome without resubmission", async () => {
   const client = createFrontendClient();
-  client.prompt = async (_text: string, options: any = {}) => ({
-    outcome: "rejoined",
-    originalOutcome: "indeterminate",
-    requestTag: options.requestTag,
-  });
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    return {
+      outcome: "rejoined",
+      originalOutcome: "indeterminate",
+      requestTag: options.requestTag,
+    };
+  };
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command.type !== "await_turn_terminal") return { ok: true };
+    return {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: command.requestTag,
+      finalText: "durable continuation result",
+      terminalRecord: {
+        terminalId: "terminal-ambiguous",
+        state: "complete",
+        terminalAt: "2026-08-10T09:34:53.118Z",
+      },
+    };
+  };
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
     promptSource: "chat-bridge",
   });
 
-  await assert.rejects(
-    driver.runTurn({ text: "ambiguous input", requestTag: "tag-ambiguous" }),
-    /rin_prompt_outcome_indeterminate/,
+  const result = await driver.runTurn({
+    text: "ambiguous input",
+    requestTag: "tag-ambiguous",
+  });
+  assert.equal(result.finalText, "durable continuation result");
+  assert.equal(
+    client.calls.filter((call: any) => call.type === "prompt").length,
+    1,
+  );
+  assert.equal(
+    client.calls.filter(
+      (call: any) => call.command?.type === "await_turn_terminal",
+    ).length,
+    1,
+  );
+});
+
+test("frontend SDK waits for an existing local turn before continuing an indeterminate submission", async () => {
+  const client = createFrontendClient();
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    return {
+      outcome: "rejoined",
+      originalOutcome: "indeterminate",
+      requestTag: options.requestTag,
+    };
+  };
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command.type !== "await_turn_terminal") return { ok: true };
+    return {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: command.requestTag,
+      finalText: "continued after local turn",
+      terminalRecord: {
+        terminalId: "terminal-after-local-turn",
+        state: "complete",
+        terminalAt: "2026-08-10T09:34:53.118Z",
+      },
+    };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const existing = (driver as any).startLiveTurn("tag-existing-local");
+
+  const pending = driver.runTurn({
+    text: "ambiguous input",
+    requestTag: "tag-after-local",
+  });
+  await waitUntil(
+    () => client.calls.some((call: any) => call.type === "prompt"),
+    "indeterminate submission did not reach backend",
+  );
+  await emitRpcTurnComplete(
+    driver,
+    "tag-existing-local",
+    "existing local final",
+  );
+  await existing.promise;
+
+  const result = await pending;
+  assert.equal(result.finalText, "continued after local turn");
+});
+
+test("frontend SDK continues a thrown indeterminate submission without replaying it", async () => {
+  const client = createFrontendClient();
+  client.prompt = async (text: string, options: any = {}) => {
+    client.calls.push({ type: "prompt", text, options });
+    throw new Error("rin_prompt_outcome_indeterminate");
+  };
+  client.request = async (command: any) => {
+    client.calls.push({ type: "request", command });
+    if (command.type !== "await_turn_terminal") return { ok: true };
+    return {
+      type: "rpc_turn_event",
+      event: "complete",
+      requestTag: command.requestTag,
+      finalText: "continued after uncertain transport",
+      terminalRecord: {
+        terminalId: "terminal-thrown-ambiguous",
+        state: "complete",
+        terminalAt: "2026-08-10T09:34:53.118Z",
+      },
+    };
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  const result = await driver.runTurn({
+    text: "ambiguous input",
+    requestTag: "tag-thrown-ambiguous",
+  });
+  assert.equal(result.finalText, "continued after uncertain transport");
+  assert.equal(
+    client.calls.filter((call: any) => call.type === "prompt").length,
+    1,
+  );
+  assert.equal(
+    client.calls.filter(
+      (call: any) => call.command?.type === "await_turn_terminal",
+    ).length,
+    1,
   );
 });
 

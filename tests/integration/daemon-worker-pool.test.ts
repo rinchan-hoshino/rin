@@ -908,6 +908,47 @@ setInterval(() => {}, 1000);
   pool.destroyAll();
 });
 
+test("a worker that cannot resume never manufactures a daemon terminal", async () => {
+  const dir = await makeTempDir("rin-worker-pool-nonterminal-recovery-");
+  const workerPath = path.join(dir, "worker.cjs");
+  const sessionFile = path.join(dir, "session.jsonl");
+  await fs.writeFile(sessionFile, "");
+  await fs.writeFile(
+    workerPath,
+    `const readline = require("node:readline");
+const sessionFile = ${JSON.stringify(sessionFile)};
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const command = JSON.parse(line);
+  if (command.type === "get_state") {
+    process.stdout.write(JSON.stringify({ id: command.id, success: true, command: command.type, data: { sessionFile, sessionId: "nonterminal-session", turnActive: false } }) + "\\n");
+    return;
+  }
+  if (command.type === "shutdown_session") {
+    process.stdout.write(JSON.stringify({ id: command.id, success: true, command: command.type, data: { shutdown: true } }) + "\\n");
+    setImmediate(() => process.exit(0));
+    return;
+  }
+  if (command.type === "resume_interrupted_turn") {
+    process.stdout.write(JSON.stringify({ id: command.id, type: "response", success: true, command: command.type, data: { resumed: false, requestTag: command.requestTag } }) + "\\n");
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+  beginDaemonTurn(dir, {
+    requestTag: "nonterminal-request",
+    sessionFile,
+  });
+  const pool = new WorkerPool({ workerPath, cwd: dir, agentDir: dir });
+
+  assert.deepEqual(await pool.recoverActiveDaemonTurns(), [false]);
+  const record = readDaemonTurn(dir, "nonterminal-request");
+  assert.equal(record?.state, "active");
+  assert.equal(record?.terminalEvent, undefined);
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("worker exit cause never terminalizes an active durable turn", async () => {
   const dir = await makeTempDir("rin-worker-pool-resume-active-");
   const workerPath = path.join(dir, "worker.cjs");

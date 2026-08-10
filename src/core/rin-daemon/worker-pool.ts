@@ -1022,21 +1022,7 @@ export class WorkerPool {
         requestTag,
       });
       if (response?.data?.resumed !== true) {
-        const workingAfterInterruption =
-          this.isWorkerWorkingAfterLifecycleSettlement(worker);
-        if (
-          !this.interruptDaemonTurnByRequestTag(
-            requestTag,
-            "rin_turn_not_resumable",
-            workingAfterInterruption,
-            worker,
-          )
-        ) {
-          throw new Error("rin_turn_ledger_interrupt_failed");
-        }
-        this.clearLifecycleOwner(worker);
-        this.publishWorkerWorkingState(worker);
-        return false;
+        throw new Error("rin_turn_recovery_not_started");
       }
       worker.terminalPending = true;
       this.publishWorkerWorkingState(worker);

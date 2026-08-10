@@ -206,7 +206,9 @@ test(
     );
 
     for (const stopReason of ["error", "aborted"] as const) {
+      const baseMessage = { role: "user", content: [] };
       const stateMessages = [
+        baseMessage,
         {
           role: "assistant",
           stopReason,
@@ -222,10 +224,22 @@ test(
         },
       ];
 
-      const result = await exerciseResumeInterruptedTurn(stateMessages);
+      const finalMessage = {
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: `continued after ${stopReason}` }],
+      };
+      const result = await exerciseResumeInterruptedTurn(stateMessages, {
+        onRunAgentPrompt: ({ emit, stateMessages: messages }) => {
+          assert.deepEqual(messages, [baseMessage]);
+          messages.push(finalMessage);
+          emit({ type: "message_end", message: finalMessage });
+          emit({ type: "agent_settled" });
+        },
+      });
 
-      assert.deepEqual(result.calls, []);
-      assert.equal(stateMessages.length, 1);
+      assert.deepEqual(result.calls, [["runAgentPrompt", []]]);
+      assert.deepEqual(stateMessages, [baseMessage, finalMessage]);
       const events = result.lines
         .join("")
         .trim()
@@ -235,21 +249,20 @@ test(
       const response = events.find(
         (event) => event.type === "response" && event.id === "2",
       );
-      assert.equal(response?.data?.resumed, false);
+      assert.equal(response?.data?.resumed, true);
       assert.equal(
-        events.some(
+        events.filter(
           (event) =>
-            event.type === "rpc_turn_event" &&
-            (event.event === "complete" || event.event === "error"),
-        ),
-        false,
+            event.type === "rpc_turn_event" && event.event === "complete",
+        ).length,
+        1,
       );
     }
   },
 );
 
 test(
-  "rpc interrupted-turn recovery restores Pi retry budget without replaying prompt input",
+  "rpc interrupted-turn recovery continues a failure tail without reconstructing Pi retry budget",
   { concurrency: false },
   async () => {
     const baseMessage = { role: "toolResult", content: [] };
@@ -269,7 +282,7 @@ test(
       {
         retryableError: true,
         onRunAgentPrompt: ({ emit, retryAttempt, stateMessages }) => {
-          assert.equal(retryAttempt, 1);
+          assert.equal(retryAttempt, 0);
           assert.deepEqual(stateMessages, [baseMessage]);
           stateMessages.push(finalMessage);
           emit({ type: "message_end", message: finalMessage });
@@ -306,7 +319,7 @@ test(
 );
 
 test(
-  "rpc interrupted-turn recovery settles already exhausted retries once",
+  "rpc interrupted-turn recovery treats an unterminated error tail as continuation input",
   { concurrency: false },
   async () => {
     const errors = Array.from({ length: 4 }, (_, index) => ({
@@ -315,15 +328,30 @@ test(
       errorMessage: `fetch failed ${index + 1}`,
       content: [],
     }));
+    const baseMessage = { role: "user", content: [] };
+    const finalMessage = {
+      role: "assistant",
+      stopReason: "stop",
+      content: [{ type: "text", text: "continued after process loss" }],
+    };
     const { calls, lines } = await exerciseResumeInterruptedTurn(
-      [{ role: "user", content: [] }, ...errors],
-      { retryableError: true, maxRetries: 3 },
+      [baseMessage, ...errors],
+      {
+        retryableError: true,
+        maxRetries: 3,
+        onRunAgentPrompt: ({ emit, retryAttempt, stateMessages }) => {
+          assert.equal(retryAttempt, 0);
+          assert.deepEqual(stateMessages, [baseMessage]);
+          stateMessages.push(finalMessage);
+          emit({ type: "message_end", message: finalMessage });
+          emit({ type: "agent_settled" });
+        },
+      },
     );
 
-    assert.equal(
-      calls.some(([name]) => name === "runAgentPrompt"),
-      false,
-      "an exhausted Pi retry budget must not issue another provider request",
+    assert.deepEqual(
+      calls.filter(([name]) => name === "runAgentPrompt"),
+      [["runAgentPrompt", []]],
     );
     const payloads = lines
       .map((line) => {
@@ -334,16 +362,15 @@ test(
         }
       })
       .filter(Boolean);
-    const terminalErrors = payloads.filter(
+    const terminalCompletes = payloads.filter(
       (payload) =>
-        payload?.type === "rpc_turn_event" && payload?.event === "error",
+        payload?.type === "rpc_turn_event" && payload?.event === "complete",
     );
-    assert.equal(terminalErrors.length, 1);
-    assert.equal(terminalErrors[0]?.error, "fetch failed 4");
-    assert.deepEqual(terminalErrors[0]?.retryFailure, {
-      attempt: 3,
-      finalError: "fetch failed 4",
-    });
+    assert.equal(terminalCompletes.length, 1);
+    assert.equal(
+      payloads.some((payload) => payload?.retryFailure),
+      false,
+    );
   },
 );
 

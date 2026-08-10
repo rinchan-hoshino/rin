@@ -113,6 +113,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   chat_bridge_unavailable: (detail) =>
     withDetail("Chat is currently unavailable", detail),
   chat_command_failed: () => "Rin could not run that chat command.",
+  chat_command_recovery_requires_durable_result: () =>
+    "Chat is still waiting for the command's durable result.",
   chat_command_text_missing: () =>
     "Rin ran the chat command, but it returned no reply text.",
   chat_controller_key_required: () =>
@@ -758,8 +760,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin observed the input lifecycle but could not retain its Pi task.",
   rin_turn_request_tag_required: () =>
     "Rin could not start the turn because its durable request identity is missing.",
-  rin_turn_not_resumable: () =>
-    "Rin could not continue the interrupted Pi session state.",
+  rin_turn_recovery_not_started: () =>
+    "Rin is still waiting to continue the active turn.",
   rin_turn_recovery_session_busy: () =>
     "Rin found another active turn owning the recovery session.",
   rin_turn_recovery_session_missing: () =>

@@ -91,7 +91,7 @@ test("durable admission resolves only integrity-verified message submissions", (
   ]) {
     assert.equal(
       admission.resolveDurableChatAdmission(candidate, turn).kind,
-      "interrupted_unknown",
+      "unavailable",
     );
   }
   assert.deepEqual(
@@ -105,7 +105,7 @@ test("durable admission resolves only integrity-verified message submissions", (
       },
       { chatKey: turn.chatKey, messageId: "different-message" },
     ),
-    { kind: "interrupted_unknown", reason: "unsupported_admission" },
+    { kind: "unavailable", reason: "unsupported_admission" },
   );
 });
 
@@ -177,7 +177,7 @@ test("durable admission rejects unsupported payload placement and missing submis
       },
       turn,
     ),
-    { kind: "interrupted_unknown", reason: "unsupported_admission" },
+    { kind: "unavailable", reason: "unsupported_admission" },
   );
   assert.deepEqual(
     admission.resolveDurableChatAdmission(
@@ -190,7 +190,7 @@ test("durable admission rejects unsupported payload placement and missing submis
       },
       turn,
     ),
-    { kind: "interrupted_unknown", reason: "missing_frozen_submission" },
+    { kind: "unavailable", reason: "missing_frozen_submission" },
   );
   assert.deepEqual(
     admission.resolveDurableChatAdmission(
@@ -210,7 +210,7 @@ test("durable admission rejects unsupported payload placement and missing submis
       },
       turn,
     ),
-    { kind: "interrupted_unknown", reason: "unsupported_admission" },
+    { kind: "unavailable", reason: "unsupported_admission" },
   );
   assert.deepEqual(
     admission.resolveDurableChatAdmission(
@@ -221,7 +221,7 @@ test("durable admission rejects unsupported payload placement and missing submis
       },
       turn,
     ),
-    { kind: "interrupted_unknown", reason: "unsupported_admission" },
+    { kind: "unavailable", reason: "unsupported_admission" },
   );
 });
 
@@ -250,7 +250,7 @@ test("durable admission accepts only integrity-verified current record-only deci
       },
       turn,
     ),
-    { kind: "interrupted_unknown", reason: "unsupported_admission" },
+    { kind: "unavailable", reason: "unsupported_admission" },
   );
 });
 
@@ -318,7 +318,7 @@ test("durable admission validates frozen command identity and integrity", () => 
         },
         turn,
       ).kind,
-      "interrupted_unknown",
+      "unavailable",
     );
   }
   assert.equal(
@@ -330,7 +330,7 @@ test("durable admission validates frozen command identity and integrity", () => 
       },
       turn,
     ).kind,
-    "interrupted_unknown",
+    "unavailable",
   );
   assert.equal(
     admission.resolveDurableChatAdmission(
@@ -349,7 +349,7 @@ test("durable admission validates frozen command identity and integrity", () => 
       },
       turn,
     ).kind,
-    "interrupted_unknown",
+    "unavailable",
   );
   assert.deepEqual(
     admission.resolveDurableChatAdmission(
@@ -429,7 +429,7 @@ test("durable admission validates frozen command identity and integrity", () => 
   ]) {
     assert.equal(
       admission.resolveDurableChatAdmission(candidate, turn).kind,
-      "interrupted_unknown",
+      "unavailable",
     );
   }
 });

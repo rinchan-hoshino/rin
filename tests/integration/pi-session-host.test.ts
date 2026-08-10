@@ -7,9 +7,7 @@ import { importBuiltModule } from "../support/import-built-module.js";
 const {
   getPiExtensionRunner,
   getPiSessionExtensionMode,
-  canResumePiSessionRetry,
   getPiSessionResourcePromptState,
-  resumePiSessionRetry,
   resumePiSessionTurn,
   runPiNativeCompactionWithoutFileSummary,
 } = await importBuiltModule<typeof import("../../src/core/pi/session-host.js")>(
@@ -21,11 +19,6 @@ test("Pi session host resumes through the session-level runner", async () => {
     typeof (AgentSession.prototype as any)._runAgentPrompt,
     "function",
   );
-  assert.equal(
-    typeof (AgentSession.prototype as any)._isRetryableError,
-    "function",
-  );
-
   const calls: any[] = [];
   const session = {
     marker: "session",
@@ -53,78 +46,6 @@ test("Pi session host resumes through the session-level runner", async () => {
       }),
     /Pi AgentSession transcript is not continuable/,
   );
-});
-
-test("Pi session host restores remaining native retries without replaying input", async () => {
-  const providerError = {
-    role: "assistant",
-    stopReason: "error",
-    errorMessage: "fetch failed",
-    content: [],
-  };
-  const baseMessage = { role: "toolResult", content: [] };
-  const calls: any[] = [];
-  const session = {
-    _retryAttempt: 0,
-    agent: {
-      state: { messages: [baseMessage, providerError] },
-    },
-    settingsManager: {
-      getRetrySettings: () => ({ enabled: true, maxRetries: 3 }),
-    },
-    _isRetryableError: (message: any) => message === providerError,
-    async _runAgentPrompt(messages: any[]) {
-      calls.push({
-        messages,
-        retryAttempt: this._retryAttempt,
-        stateMessages: [...this.agent.state.messages],
-      });
-    },
-  };
-
-  assert.equal(canResumePiSessionRetry(session), true);
-  assert.deepEqual(await resumePiSessionRetry(session), {
-    status: "continued",
-    attempt: 1,
-  });
-  assert.deepEqual(calls, [
-    {
-      messages: [],
-      retryAttempt: 1,
-      stateMessages: [baseMessage],
-    },
-  ]);
-});
-
-test("Pi session host recognizes durable native retry exhaustion exactly", async () => {
-  const baseMessage = { role: "user", content: [] };
-  const errors = Array.from({ length: 4 }, (_, index) => ({
-    role: "assistant",
-    stopReason: "error",
-    errorMessage: `fetch failed ${index + 1}`,
-    content: [],
-  }));
-  const session = {
-    agent: { state: { messages: [baseMessage, ...errors] } },
-    settingsManager: {
-      getRetrySettings: () => ({ enabled: true, maxRetries: 3 }),
-    },
-    _isRetryableError: (message: any) => errors.includes(message),
-    async _runAgentPrompt() {
-      assert.fail(
-        "exhausted retry state must not issue another provider request",
-      );
-    },
-  };
-
-  assert.equal(canResumePiSessionRetry(session), true);
-  assert.deepEqual(await resumePiSessionRetry(session), {
-    status: "exhausted",
-    retryFailure: {
-      attempt: 3,
-      finalError: "fetch failed 4",
-    },
-  });
 });
 
 test("isolated OAuth custom-compaction smoke preserves public auth and native routing", async () => {

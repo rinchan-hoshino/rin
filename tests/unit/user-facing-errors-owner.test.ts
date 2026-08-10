@@ -33,6 +33,7 @@ chat_bridge_entry_missing
 chat_bridge_send_empty
 chat_bridge_unavailable
 chat_command_failed
+chat_command_recovery_requires_durable_result
 chat_command_text_missing
 chat_controller_disposed
 chat_controller_key_required
@@ -296,7 +297,7 @@ rin_turn_ledger_terminal_record_failed
 rin_turn_ledger_terminal_request_mismatch
 rin_turn_ledger_terminal_request_tag_required
 rin_turn_ledger_turn_id_required
-rin_turn_not_resumable
+rin_turn_recovery_not_started
 rin_turn_recovery_session_busy
 rin_turn_recovery_session_missing
 rin_turn_request_tag_required
@@ -369,7 +370,7 @@ web_fetch_invalid_url`
   .split(/\s+/);
 
 test("every owned runtime marker has a human-facing formatter", () => {
-  assert.equal(OWNED_MARKERS.length, 358);
+  assert.equal(OWNED_MARKERS.length, 359);
   assert.equal(new Set(OWNED_MARKERS).size, OWNED_MARKERS.length);
   for (const marker of OWNED_MARKERS) {
     assert.equal(errors.hasUserFacingRuntimeErrorMapping(marker), true, marker);

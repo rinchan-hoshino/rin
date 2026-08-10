@@ -2343,7 +2343,7 @@ test("chat main leaves daemon startup failure pending without an error outbox", 
   }
 });
 
-test("chat main fails closed for unverifiable actionable admissions", async () => {
+test("chat main keeps unverifiable admissions pending without inventing a terminal", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-legacy-admission-"),
   );
@@ -2525,24 +2525,16 @@ test("chat main fails closed for unverifiable actionable admissions", async () =
       };
       const bridge = await mainMod.startChatBridge(bridgeOptions);
       try {
-        const deadline = Date.now() + 5000;
-        let rows = [];
-        while (Date.now() < deadline) {
-          rows = db.prepare(
-            "SELECT inbox_jobs.turn_id, inbox_jobs.state, inbox_jobs.terminal_kind " +
-            "FROM inbox_jobs WHERE inbox_jobs.turn_id IN (?, ?, ?, ?)",
-          ).all(
-            item.itemId,
-            hashless.itemId,
-            dirtyUnclassified.itemId,
-            dirtyCommand.itemId,
-          );
-          if (
-            rows.length === 4 &&
-            rows.every((row) => row.state === "terminal")
-          ) break;
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const rows = db.prepare(
+          "SELECT inbox_jobs.turn_id, inbox_jobs.state, inbox_jobs.terminal_kind " +
+          "FROM inbox_jobs WHERE inbox_jobs.turn_id IN (?, ?, ?, ?)",
+        ).all(
+          item.itemId,
+          hashless.itemId,
+          dirtyUnclassified.itemId,
+          dirtyCommand.itemId,
+        );
         const terminals = db.prepare(
           "SELECT delivery_kind, payload_json FROM outbox WHERE turn_id IN (?, ?, ?, ?)",
         ).all(
@@ -2551,37 +2543,18 @@ test("chat main fails closed for unverifiable actionable admissions", async () =
           dirtyUnclassified.itemId,
           dirtyCommand.itemId,
         );
-        const texts = terminals.map((terminal) =>
-          JSON.parse(terminal.payload_json).parts
-            .map((part) => part.text || "")
-            .join("\\n"),
-        );
         if (
           runTurnCalls !== 0 ||
           runCommandCalls !== 0 ||
           rows.length !== 4 ||
-          rows.some(
-            (row) =>
-              row.state !== "terminal" ||
-              row.terminal_kind !== "interrupted_unknown",
-          ) ||
-          terminals.length !== 4 ||
-          terminals.some((terminal) => terminal.delivery_kind !== "error") ||
-          texts.some((text) => !text.includes("was not submitted again"))
+          rows.some((row) => row.state === "terminal") ||
+          terminals.length !== 0
         ) {
-          throw new Error(JSON.stringify({ runTurnCalls, runCommandCalls, rows, terminals, texts }));
+          throw new Error(JSON.stringify({ runTurnCalls, runCommandCalls, rows, terminals }));
         }
       } finally {
         await bridge.stop();
       }
-      const outboxCountBeforeRestart = db.prepare(
-        "SELECT COUNT(*) AS count FROM outbox WHERE turn_id IN (?, ?, ?, ?)",
-      ).get(
-        item.itemId,
-        hashless.itemId,
-        dirtyUnclassified.itemId,
-        dirtyCommand.itemId,
-      ).count;
       const restarted = await mainMod.startChatBridge(bridgeOptions);
       await new Promise((resolve) => setTimeout(resolve, 300));
       await restarted.stop();
@@ -2596,13 +2569,11 @@ test("chat main fails closed for unverifiable actionable admissions", async () =
       if (
         runTurnCalls !== 0 ||
         runCommandCalls !== 0 ||
-        outboxCountBeforeRestart !== 4 ||
-        outboxCountAfterRestart !== 4
+        outboxCountAfterRestart !== 0
       ) {
         throw new Error(JSON.stringify({
           runTurnCalls,
           runCommandCalls,
-          outboxCountBeforeRestart,
           outboxCountAfterRestart,
         }));
       }
@@ -2858,7 +2829,7 @@ test("hard Chat process death leaves the claimed inbox lifecycle active", async 
   }
 });
 
-test("chat main keeps an accepted local error pending across restart without prompt replay", async () => {
+test("chat main resumes joined acceptance across restart without prompt replay or a synthetic terminal", async () => {
   const tempRoot = os.tmpdir();
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2895,6 +2866,7 @@ test("chat main keeps an accepted local error pending across restart without pro
         databaseMod.markChatMessageAcceptedWithFence(agentDir, fence, {
           acceptedAt: new Date().toISOString(),
           sessionFile: "managed/chat/backend-accepted.jsonl",
+          joinedTurnId: "terminal-owner-turn",
         });
         throw undefined;
       };

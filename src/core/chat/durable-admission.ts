@@ -80,7 +80,7 @@ export type ResolvedDurableChatAdmission =
     }
   | { kind: "turn"; submission: FrozenChatTurnSubmission }
   | {
-      kind: "interrupted_unknown";
+      kind: "unavailable";
       reason: "missing_frozen_submission" | "unsupported_admission";
     };
 
@@ -250,7 +250,7 @@ export function resolveDurableChatAdmission(
       !admission.submission &&
       !admission.executionSessionFile
       ? { kind: "unclassified" }
-      : { kind: "interrupted_unknown", reason: "unsupported_admission" };
+      : { kind: "unavailable", reason: "unsupported_admission" };
   }
 
   const decision = admission.decision;
@@ -267,7 +267,7 @@ export function resolveDurableChatAdmission(
         turn,
       )
       ? { kind: "record_only" }
-      : { kind: "interrupted_unknown", reason: "unsupported_admission" };
+      : { kind: "unavailable", reason: "unsupported_admission" };
   }
 
   if (
@@ -283,7 +283,7 @@ export function resolveDurableChatAdmission(
       turn,
     )
   ) {
-    return { kind: "interrupted_unknown", reason: "unsupported_admission" };
+    return { kind: "unavailable", reason: "unsupported_admission" };
   }
   if (
     decision.kind !== "message" &&
@@ -292,7 +292,7 @@ export function resolveDurableChatAdmission(
       admission.submission ||
       admission.submissionHash)
   ) {
-    return { kind: "interrupted_unknown", reason: "unsupported_admission" };
+    return { kind: "unavailable", reason: "unsupported_admission" };
   }
   if (decision.kind === "command") {
     if (
@@ -311,7 +311,7 @@ export function resolveDurableChatAdmission(
         decision.trust,
       )
     ) {
-      return { kind: "interrupted_unknown", reason: "unsupported_admission" };
+      return { kind: "unavailable", reason: "unsupported_admission" };
     }
     return {
       kind: "command",
@@ -337,7 +337,7 @@ export function resolveDurableChatAdmission(
           name: decision.name,
           respond: decision.respond,
         }
-      : { kind: "interrupted_unknown", reason: "unsupported_admission" };
+      : { kind: "unavailable", reason: "unsupported_admission" };
   }
   if (decision.kind === "message") {
     const submission =
@@ -346,7 +346,7 @@ export function resolveDurableChatAdmission(
         : null;
     if (!submission) {
       return {
-        kind: "interrupted_unknown",
+        kind: "unavailable",
         reason: "missing_frozen_submission",
       };
     }
@@ -361,5 +361,5 @@ export function resolveDurableChatAdmission(
       },
     };
   }
-  return { kind: "interrupted_unknown", reason: "unsupported_admission" };
+  return { kind: "unavailable", reason: "unsupported_admission" };
 }

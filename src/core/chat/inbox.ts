@@ -141,6 +141,15 @@ function hashDurableJson(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function immutableAdmissionDecisionText(admission: Record<string, unknown>) {
+  const {
+    joinedTurnId: _joinedTurnId,
+    settledOutboxId: _settledOutboxId,
+    ...decision
+  } = admission;
+  return JSON.stringify(decision);
+}
+
 function admissionFromRow(row: any): ChatInboxAdmission {
   const state = safeString(row?.admission_state) as ChatInboxAdmissionState;
   const stateIntegrity = ["unclassified", "actionable", "record_only"].includes(
@@ -162,7 +171,8 @@ function admissionFromRow(row: any): ChatInboxAdmission {
       : decisionText &&
           admissionHash &&
           decision &&
-          hashDurableJson(decisionText) === admissionHash
+          hashDurableJson(immutableAdmissionDecisionText(decision)) ===
+            admissionHash
         ? "valid"
         : "invalid";
   const submissionText = safeString(row?.submission_json);

@@ -32,6 +32,11 @@ const chatDatabase = {
 const chatInbox = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
 );
+const durableAdmission = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "chat", "durable-admission.js"),
+  ).href
+);
 const chatOutbox = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
     .href
@@ -605,6 +610,75 @@ test("chat database reopens the current version 10 delivery-only layout", async 
         )
         .get(),
       undefined,
+    );
+  });
+});
+
+test("joined acceptance preserves the immutable admission decision across recovery", async () => {
+  await withTempDir(async (agentDir) => {
+    const queued = chatInbox.enqueueChatInboxItem(agentDir, {
+      chatKey: "discord/1:joined-admission",
+      messageId: "joined-admission-message",
+      session: {
+        platform: "discord",
+        selfId: "1",
+        channelId: "joined-admission",
+        userId: "owner",
+        messageId: "joined-admission-message",
+        content: "continue",
+        stripped: { content: "continue" },
+      },
+      elements: [{ type: "text", attrs: { content: "continue" } }],
+    }).item;
+    const claimed = chatInbox.claimChatInboxItem(agentDir, queued.itemId);
+    assert.ok(claimed);
+    const submission = {
+      version: 1,
+      chatKey: queued.chatKey,
+      incomingMessageId: queued.messageId,
+      text: "continue",
+      attachments: [],
+      promptMeta: { chatKey: queued.chatKey, identity: "OWNER" },
+    };
+    assert.equal(
+      chatInbox.commitClaimedChatInboxAdmission(agentDir, claimed, {
+        state: "actionable",
+        decision: { version: 1, kind: "message", decision: { allow: true } },
+        submission,
+      })?.decisionIntegrity,
+      "valid",
+    );
+
+    assert.equal(
+      chatDatabase.markChatMessageAcceptedWithFence(
+        agentDir,
+        {
+          turnId: claimed.itemId,
+          chatKey: claimed.chatKey,
+          messageId: claimed.messageId,
+          ownerEpoch: claimed.ownerEpoch,
+          attempt: claimed.attemptCount,
+        },
+        {
+          acceptedAt: "2026-08-10T09:34:53.118Z",
+          sessionFile: "managed/chat/joined.jsonl",
+          joinedTurnId: "terminal-owner-turn",
+        },
+      ),
+      true,
+    );
+
+    const recovered = chatInbox.getChatInboxItem(agentDir, queued.itemId);
+    assert.equal(recovered?.admission.decisionIntegrity, "valid");
+    assert.deepEqual(
+      durableAdmission.resolveDurableChatAdmission(recovered.admission, {
+        chatKey: queued.chatKey,
+        messageId: queued.messageId,
+      }),
+      {
+        kind: "turn",
+        submission: { ...submission, sessionFile: "managed/chat/joined.jsonl" },
+      },
     );
   });
 });

@@ -146,7 +146,6 @@ export type EnqueueChatOutboxOptions = {
   id?: string;
   idempotencyKey?: string;
   deliveryKind?: ChatOutboxDeliveryKind;
-  turnTerminalKind?: "interrupted_unknown";
   postDelivery?: ChatOutboxPostDelivery;
   turnFence?: ChatOutboxTurnFence;
   terminalTurn?: ChatTerminalTurn;
@@ -642,8 +641,7 @@ export function enqueueChatOutboxPayload(
   validateChatOutboxPayloadParts(normalizedPayload);
   const executionSessionFile =
     safeString(normalizedPayload.sessionFile).trim() || null;
-  const turnTerminalKind =
-    safeString(options.turnTerminalKind).trim() || `outbox_${deliveryKind}`;
+  const turnTerminalKind = `outbox_${deliveryKind}`;
   const idempotencyKey = safeString(options.idempotencyKey).trim();
   const id =
     sanitizeIdPart(options.id) ||

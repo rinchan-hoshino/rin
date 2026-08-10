@@ -27,10 +27,8 @@ import {
   type RinTurnTerminalOutcome,
 } from "../rin-frontend-sdk/turn-completion.js";
 import {
-  canResumePiSessionRetry,
   emitPiSessionEvent,
   refreshPiSessionToolRegistry,
-  resumePiSessionRetry,
   resumePiSessionTurn,
 } from "../pi/session-host.js";
 import { safeString } from "../text-utils.js";
@@ -342,21 +340,11 @@ function isAssistantFailureMessage(message: any) {
   return stopReason === "error" || stopReason === "aborted";
 }
 
-function isInterruptedTurnResumable(session: any) {
-  if (session?.agent?.signal) return true;
+function discardInterruptedAssistantFailures(session: any) {
   const messages = Array.isArray(session?.agent?.state?.messages)
     ? session.agent.state.messages
     : [];
-  const lastMessage = messages[messages.length - 1];
-  if (!lastMessage) return false;
-  if (lastMessage.role === "user" || lastMessage.role === "toolResult") {
-    return true;
-  }
-  if (lastMessage.role !== "assistant") return false;
-  if (isAssistantFailureMessage(lastMessage)) {
-    return canResumePiSessionRetry(session);
-  }
-  return extractPiContinuableToolCallParts(lastMessage).length > 0;
+  while (isAssistantFailureMessage(messages.at(-1))) messages.pop();
 }
 
 async function resumeInterruptedTurn(session: any) {
@@ -364,16 +352,12 @@ async function resumeInterruptedTurn(session: any) {
     ? session.agent.state.messages
     : [];
   if (!messages.length) return;
-  const originalLastMessage = messages.at(-1);
-  if (isAssistantFailureMessage(originalLastMessage)) {
-    const retryResume = await resumePiSessionRetry(session);
-    if (retryResume.status === "exhausted") {
-      return {
-        finalText: safeString(session.getLastAssistantText?.()),
-        result: { messages: [originalLastMessage] },
-        retryFailure: retryResume.retryFailure,
-      };
-    }
+  if (isAssistantFailureMessage(messages.at(-1))) {
+    // A persisted failure without a daemon terminal is not a settled result.
+    // Pi owns retry policy for the new continuation; Rin only restores a
+    // provider-valid context and never replays the accepted user input.
+    discardInterruptedAssistantFailures(session);
+    await resumePiSessionTurn(session);
     return;
   }
 
@@ -1808,16 +1792,10 @@ export async function runCustomRpcMode(
       }
       case "resume_interrupted_turn": {
         const requestTag = rpcRequestTag(command.requestTag);
-        if (!isInterruptedTurnResumable(session)) {
-          return done(id, type, { resumed: false });
-        }
-        startInterruptTurnTask(requestTag, async () => {
-          const result = await resumeInterruptedTurn(session);
-          if (result?.retryFailure) {
-            latestAutoRetryFailure = result.retryFailure;
-          }
-          return result;
-        });
+        startInterruptTurnTask(
+          requestTag,
+          async () => await resumeInterruptedTurn(session),
+        );
         return done(id, type, { resumed: true, requestTag });
       }
       case "clear_queue":
