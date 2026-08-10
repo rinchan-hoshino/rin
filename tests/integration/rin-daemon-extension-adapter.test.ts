@@ -100,7 +100,9 @@ test("daemon adaptation uses only Pi-discovered extension sources", async () => 
           name: "owner-service",
           install: async (ctx) => record(["install", ctx.config.owner]),
           status: async () => ({ ready: true }),
-          start: async () => {
+          start: async (ctx) => {
+            const chatKeys = await ctx.chat.listKeys({ platform: "discord" });
+            record(["chat", await ctx.chat.getSessionStates(chatKeys)]);
             record(["start"]);
             return {
               stop: async () => { record(["stop"]); throw new Error("owner-stop"); },
@@ -193,6 +195,14 @@ test("daemon adaptation uses only Pi-discovered extension sources", async () => 
       error: (message: string) => messages.push(message),
     },
   });
+  manager.setChatApi({
+    async listKeys() {
+      return ["discord/1:10"];
+    },
+    async getSessionStates(chatKeys: readonly string[]) {
+      return Object.fromEntries(chatKeys.map((chatKey) => [chatKey, "idle"]));
+    },
+  });
   try {
     const running = await manager.start();
     assert.equal(running.length, 2, warnings.join("\n"));
@@ -214,6 +224,16 @@ test("daemon adaptation uses only Pi-discovered extension sources", async () => 
       text: "owner",
     });
     assert.deepEqual(written, { written: 1, providerCount: 2 });
+    const events = (await fs.readFile(eventsPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(
+      events.some(
+        (value) => value[0] === "chat" && value[1]["discord/1:10"] === "idle",
+      ),
+      true,
+    );
     assert.equal(
       messages.some((value) => value.includes("owner-info")),
       true,

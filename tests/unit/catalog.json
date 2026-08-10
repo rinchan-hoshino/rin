@@ -57,6 +57,11 @@
       "built": "dist/core/chat/rich-text.js"
     },
     {
+      "test": "tests/unit/chat-session-state.test.ts",
+      "source": "src/core/chat/session-state.ts",
+      "built": "dist/core/chat/session-state.js"
+    },
+    {
       "test": "tests/unit/chat-settings.test.ts",
       "source": "src/core/chat/settings.ts",
       "built": "dist/core/chat/settings.js"

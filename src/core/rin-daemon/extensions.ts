@@ -29,6 +29,7 @@ import type {
   RinBackgroundServiceFactory as BackgroundServiceFactory,
   RinBackgroundServiceProvider as BackgroundServiceProvider,
   RinBackgroundServiceStop as BackgroundServiceStop,
+  RinDaemonChatAPI,
   RinDaemonExtensionAPI,
   RinDaemonMemoryProvider,
   RinDaemonMemoryProviderContext,
@@ -107,6 +108,7 @@ function createDaemonExtensionApi(
     packageName: context.packageName,
     config: context.config,
     logger: context.logger,
+    chat: context.chat,
     registerBackgroundService: (provider) => {
       if (typeof provider === "function") {
         services.push({ start: provider });
@@ -250,18 +252,40 @@ function hasPiExtensionSources(
   ].some((dir) => fs.existsSync(dir));
 }
 
+const unavailableDaemonChatApi: RinDaemonChatAPI = {
+  async listKeys() {
+    throw new Error("Chat runtime is unavailable.");
+  },
+  async getSessionStates() {
+    throw new Error("Chat runtime is unavailable.");
+  },
+};
+
 export class RinDaemonExtensionManager {
   private readonly workers: RunningWorker[] = [];
   private readonly chatAdapters: ChatRuntimeExternalAdapterEntry[] = [];
   private readonly memoryProviders: RinDaemonMemoryProviderEntry[] = [];
+  private chatApi: RinDaemonChatAPI;
+  private readonly extensionChatApi: RinDaemonChatAPI = {
+    listKeys: async (filter) => await this.chatApi.listKeys(filter),
+    getSessionStates: async (chatKeys) =>
+      await this.chatApi.getSessionStates(chatKeys),
+  };
 
   constructor(
     private readonly options: {
       cwd: string;
       agentDir: string;
       logger?: RinExtensionLogger;
+      chat?: RinDaemonChatAPI;
     },
-  ) {}
+  ) {
+    this.chatApi = options.chat || unavailableDaemonChatApi;
+  }
+
+  setChatApi(chat: RinDaemonChatAPI) {
+    this.chatApi = chat;
+  }
 
   async start() {
     this.chatAdapters.length = 0;
@@ -321,6 +345,7 @@ export class RinDaemonExtensionManager {
           name: entry.name,
           packageName: entry.packageName,
           config: entry.config,
+          chat: this.extensionChatApi,
           signal: controller.signal,
           logger,
           runAsync: (label, work) => {
