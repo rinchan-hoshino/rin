@@ -633,7 +633,7 @@ test("self-improve distillation manual is the concise canonical contract", async
     "utf8",
   );
 
-  assert.ok(manual.length < 6_500, `manual is too long: ${manual.length}`);
+  assert.ok(manual.length < 5_500, `manual is too long: ${manual.length}`);
   for (const heading of [
     "## Candidate",
     "## Pass modes",
@@ -646,14 +646,25 @@ test("self-improve distillation manual is the concise canonical contract", async
   assert.match(manual, /Memory preserves evidence/);
   assert.match(manual, /Self-improve stores the smallest future behavior/);
   assert.match(manual, /Evidence, trigger, behavior, and owner/);
+  assert.match(manual, /Every pass performs garbage collection/);
   assert.match(manual, /Turn-window/);
+  assert.match(manual, /local garbage collection/);
+  assert.match(manual, /even when the candidate is already covered/);
+  assert.match(manual, /A pass that only appends.*is incomplete/);
   assert.match(manual, /Nightly owns global prompt and skill entropy/);
   assert.match(manual, /state\/skill-usage\.json/);
   assert.match(manual, /startedAt/);
   assert.match(manual, /Usage is a signal, never a deletion verdict/);
   assert.match(manual, /fully absorbed by another owner|retired mechanism/);
+  assert.match(manual, /Every changed pass reports before\/after bytes/);
+  assert.match(manual, /net growth names the deletion, merge, or replacement/);
+  assert.match(manual, /pure or unexplained append fails/);
   assert.match(manual, /before\/after bytes.*skill count/);
   assert.match(manual, /one-in-one-out/);
+  assert.doesNotMatch(
+    manual,
+    /runtime (?:validator|enforcement|rejection|rollback)/i,
+  );
   assert.match(manual, /future-trigger replay/);
   assert.match(manual, /user_profile.*stable facts only/);
   assert.match(manual, /memory-index.*provenance/);
