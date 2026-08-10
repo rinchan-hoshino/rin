@@ -71,6 +71,7 @@ export async function tryRunPiCliCommand(args: string[]): Promise<PiCliRoute> {
 
 export function printRinCliHelp(
   rinCommands: ReadonlyArray<readonly [string, string]>,
+  extensionCommands: ReadonlyArray<readonly [string, string]> = [],
 ) {
   printPiCliHelp();
   process.stdout.write(
@@ -85,5 +86,15 @@ export function printRinCliHelp(
   const width = Math.max(...rinCommands.map(([name]) => name.length));
   for (const [name, description] of rinCommands) {
     process.stdout.write(`  ${name.padEnd(width)}  ${description}\n`);
+  }
+  if (extensionCommands.length === 0) return;
+  process.stdout.write(
+    "\nExtension commands (available as rin subcommands):\n",
+  );
+  const extensionWidth = Math.max(
+    ...extensionCommands.map(([name]) => name.length),
+  );
+  for (const [name, description] of extensionCommands) {
+    process.stdout.write(`  ${name.padEnd(extensionWidth)}  ${description}\n`);
   }
 }

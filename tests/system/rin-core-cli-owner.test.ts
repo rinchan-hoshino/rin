@@ -100,7 +100,7 @@ assert.equal(process.exitCode, 23);
 process.exitCode = 0;
 const names = globalThis.__rinMainOwnerEvents.map(([name]) => name);
 for (const expected of [
-  "print-help", "run", "target", "resolve-target", "run-target",
+  "print-help", "extension-command-list", "run", "target", "resolve-target", "run-target",
   "update", "start", "stop", "restart", "doctor", "status", "tasks",
   "self-improve", "versions", "rollback", "memory-index", "launch",
 ]) assert.equal(names.includes(expected), true, expected);

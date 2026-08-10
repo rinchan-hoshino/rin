@@ -54,7 +54,7 @@ const replacements: Record<string, string> = {
   "dist/core/rin/tasks.js": `export async function runTasksInternal(args){globalThis.__rinMainOwnerEvents.push(["tasks-internal",args])} export async function runTasks(parsed,args){globalThis.__rinMainOwnerEvents.push(["tasks",parsed.command,args])}`,
   "dist/core/rin/docs.js": `export async function runDocsInternal(args){globalThis.__rinMainOwnerEvents.push(["docs-internal",args])}`,
   "dist/core/rin/run.js": `export async function runNonInteractive(parsed,args){globalThis.__rinMainOwnerEvents.push(["run",parsed.command,args])}`,
-  "dist/core/rin/extension-command-adapter.js": `export async function tryRunExtensionCommandCli(options){globalThis.__rinMainOwnerEvents.push(["extension-command",options.argv]); return options.argv[0] === "ext-owner"}`,
+  "dist/core/rin/extension-command-adapter.js": `export async function tryRunExtensionCommandCli(options){globalThis.__rinMainOwnerEvents.push(["extension-command",options.argv]); return options.argv[0] === "ext-owner"} export async function listExtensionCliCommands(){globalThis.__rinMainOwnerEvents.push(["extension-command-list"]); return [["usage","Show ChatGPT Codex usage and quota"]]}`,
   "dist/core/rin/targets.js": `export async function runTargetCommand(args){globalThis.__rinMainOwnerEvents.push(["target",args])}`,
   "dist/core/rin-targets/runner.js": `
     export function resolveTargetForName(name){globalThis.__rinMainOwnerEvents.push(["resolve-target",name]); return name === "missing" ? undefined : {name};}

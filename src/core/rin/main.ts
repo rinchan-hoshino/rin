@@ -209,16 +209,17 @@ export async function startRinCli() {
   const runtimeModule = await import("../rin-lib/runtime.js");
   const loaderModule = await import("../rin-lib/loader.js");
   const profileModule = await import("../rin-lib/profile.js");
+  const extensionCommandDependencies = {
+    resolveProfile: profileModule.resolveRuntimeProfile,
+    loadSessionManager: loaderModule.loadRinSessionManagerModule,
+    createSession: runtimeModule.createConfiguredAgentSession,
+  };
   if (
     await extensionCommandAdapter.tryRunExtensionCommandCli({
       argv: strippedArgv,
       stdout: process.stdout,
       stderr: process.stderr,
-      dependencies: {
-        resolveProfile: profileModule.resolveRuntimeProfile,
-        loadSessionManager: loaderModule.loadRinSessionManagerModule,
-        createSession: runtimeModule.createConfiguredAgentSession,
-      },
+      dependencies: extensionCommandDependencies,
     })
   ) {
     return;
@@ -231,7 +232,11 @@ export async function startRinCli() {
       (strippedArgv[0] === "--help" || strippedArgv[0] === "-h")
     ) {
       const { printRinCliHelp } = await import("./pi-command-adapter.js");
-      printRinCliHelp(RIN_COMMANDS);
+      const extensionCommands =
+        await extensionCommandAdapter.listExtensionCliCommands({
+          dependencies: extensionCommandDependencies,
+        });
+      printRinCliHelp(RIN_COMMANDS, extensionCommands);
       return;
     }
     if (

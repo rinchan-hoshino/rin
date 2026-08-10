@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { tryRunExtensionCommandCli } from "../../dist/core/rin/extension-command-adapter.js";
+import {
+  listExtensionCliCommands,
+  tryRunExtensionCommandCli,
+} from "../../dist/core/rin/extension-command-adapter.js";
 
-function harness(commandExists = true, promptError = false) {
+function harness(
+  commandExists = true,
+  promptError = false,
+  registeredCommands?: Array<Record<string, unknown>>,
+) {
   let ui: any;
   let prompted = "";
   let disposed = false;
@@ -30,6 +37,16 @@ function harness(commandExists = true, promptError = false) {
           session: {
             extensionRunner: {
               getCommand: () => (commandExists ? { name: "usage" } : undefined),
+              getRegisteredCommands: () =>
+                registeredCommands ||
+                (commandExists
+                  ? [
+                      {
+                        invocationName: "usage",
+                        description: "Show ChatGPT Codex usage and quota",
+                      },
+                    ]
+                  : []),
               setUIContext(next: any) {
                 ui = next;
               },
@@ -67,6 +84,33 @@ test("extension command adapter exposes Pi extension commands as rin CLI command
     disposed: true,
     exitCode: undefined,
   });
+});
+
+test("extension command adapter lists Pi extension commands for rin help", async () => {
+  const run = harness(true);
+  assert.deepEqual(await listExtensionCliCommands(run.options), [
+    ["usage", "Show ChatGPT Codex usage and quota"],
+  ]);
+  assert.deepEqual(run.finish(), {
+    stdout: [],
+    stderr: [],
+    prompted: "",
+    disposed: true,
+    exitCode: undefined,
+  });
+});
+
+test("extension command catalog normalizes fallback metadata and sorts names", async () => {
+  const run = harness(true, false, [
+    { invocationName: "zeta" },
+    { name: "alpha", description: "Alpha command" },
+    { invocationName: "", name: "", description: "ignored" },
+  ]);
+  assert.deepEqual(await listExtensionCliCommands(run.options), [
+    ["alpha", "Alpha command"],
+    ["zeta", "Pi extension command"],
+  ]);
+  assert.equal(run.finish().disposed, true);
 });
 
 test("extension command adapter leaves unknown commands to Rin parsing", async () => {
