@@ -189,6 +189,28 @@ export async function startRinCli() {
     return;
   }
 
+  const candidateCommand = parseCommandName(strippedArgv[0] || "");
+  const preliminaryParsed = resolveParsedArgs(
+    candidateCommand,
+    parseRinWrapperOptions(rawArgv),
+    rawArgv,
+  );
+  const launchModule = await import("./launch.js");
+  const isRootHelp =
+    strippedArgv.length === 1 &&
+    (strippedArgv[0] === "--help" || strippedArgv[0] === "-h");
+  const shouldDelegateCandidate =
+    !candidateCommand &&
+    (isRootHelp ||
+      Boolean(strippedArgv[0] && !strippedArgv[0].startsWith("-")));
+  if (
+    shouldDelegateCandidate &&
+    launchModule.shouldDelegateCrossUserCli(preliminaryParsed)
+  ) {
+    await launchModule.delegateRinCliToTarget(preliminaryParsed, strippedArgv);
+    return;
+  }
+
   const { tryRunPiCliCommand } = await import("./pi-command-adapter.js");
   const piRoute = isExplicitRinUpdateInvocation(rawArgv)
     ? "rin"
@@ -225,7 +247,7 @@ export async function startRinCli() {
     return;
   }
 
-  const command = parseCommandName(strippedArgv[0] || "");
+  const command = candidateCommand;
   if (!command) {
     if (
       strippedArgv.length === 1 &&

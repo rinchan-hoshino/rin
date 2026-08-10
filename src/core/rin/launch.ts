@@ -1,7 +1,12 @@
 import os from "node:os";
 import path from "node:path";
+import { installedRuntimeNodeCommandArgs } from "../rin-install/fs-utils.js";
 import { RIN_DIR_ENV } from "../rin-lib/runtime.js";
-import { buildUserShell, targetUserRuntimeEnv } from "../rin-lib/system.js";
+import {
+  buildUserShell,
+  isSameSystemUser,
+  targetUserRuntimeEnv,
+} from "../rin-lib/system.js";
 import {
   RIN_TUI_MAINTENANCE_ROLE,
   RIN_TUI_RUNTIME_ROLE_ENV,
@@ -50,6 +55,17 @@ export function buildDirectTuiArgs(
   options: { passthrough: string[] },
 ) {
   return [process.execPath, tuiEntry, ...options.passthrough];
+}
+
+export function shouldDelegateCrossUserCli(
+  parsed: ParsedArgs,
+  currentUser = os.userInfo().username,
+) {
+  return Boolean(
+    !parsed.explicitTarget &&
+    parsed.targetUser &&
+    !isSameSystemUser(parsed.targetUser, currentUser),
+  );
 }
 
 async function runTargetCommand(
@@ -115,6 +131,31 @@ async function resolveLaunchContext(parsed: ParsedArgs) {
     tuiArgv,
     maintenanceModeNotice: launchEnvironment.maintenanceModeNotice,
   };
+}
+
+export async function delegateRinCliToTarget(
+  parsed: ParsedArgs,
+  argv: string[],
+) {
+  const context = createTargetExecutionContext(parsed);
+  const currentUser = os.userInfo().username;
+  const runtimeEnv = buildTuiRuntimeEnv(
+    context.targetUser,
+    currentUser,
+    parsed.installDir,
+  );
+  const cliEntry = path.join(context.repoRoot, "dist", "app", "rin", "main.js");
+  const [targetNode] = installedRuntimeNodeCommandArgs({
+    installDir: context.installDir,
+  });
+  const code = await runTargetCommand(
+    context.targetUser,
+    [targetNode, cliEntry, ...argv],
+    runtimeEnv as Record<string, string>,
+    context.repoRoot,
+  );
+  process.exitCode = code;
+  return code;
 }
 
 export async function launchDefaultRin(parsed: ParsedArgs) {

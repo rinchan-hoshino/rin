@@ -73,6 +73,9 @@ try {
   await run(["--help"]);
   await run(["-p", "owner prompt"]);
   await run(["ext-owner"]);
+  globalThis.__rinMainOwnerCrossUser = true;
+  await run(["usage", "--days", "7"]);
+  globalThis.__rinMainOwnerCrossUser = false;
   await run(["target", "list"]);
   await run(["version", "--target=remote"]);
   await assert.rejects(() => run(["status", "--target=missing"]), /rin_target_not_found:missing/);
@@ -100,7 +103,7 @@ assert.equal(process.exitCode, 23);
 process.exitCode = 0;
 const names = globalThis.__rinMainOwnerEvents.map(([name]) => name);
 for (const expected of [
-  "print-help", "extension-command-list", "run", "target", "resolve-target", "run-target",
+  "print-help", "extension-command-list", "delegate-target", "run", "target", "resolve-target", "run-target",
   "update", "start", "stop", "restart", "doctor", "status", "tasks",
   "self-improve", "versions", "rollback", "memory-index", "launch",
 ]) assert.equal(names.includes(expected), true, expected);

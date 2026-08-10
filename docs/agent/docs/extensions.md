@@ -55,7 +55,7 @@ Use ordinary Pi extension configuration for trusted third-party extensions. Use 
 
 ## Extension commands in the Rin CLI
 
-When a top-level word is not a Rin or Pi management command, Rin loads the same Pi package set and resolves a matching extension slash command. Therefore an extension command registered as `/usage` is also available as `rin usage ...`; terminal output is collected from Pi's native `ctx.ui.notify(...)`. `rin --help` discovers those registered commands and lists them as extension-provided subcommands. Rin does not maintain a second CLI command registry for packages.
+When a top-level word is not a Rin or Pi management command, Rin loads the same Pi package set and resolves a matching extension slash command. Therefore an extension command registered as `/usage` is also available as `rin usage ...`; terminal output is collected from Pi's native `ctx.ui.notify(...)`. `rin --help` discovers those registered commands and lists them as extension-provided subcommands. Rin does not maintain a second CLI command registry for packages. For a saved cross-user install, Pi and extension subcommands are delegated to the target user's Rin CLI before discovery so packages, credentials, and extension data resolve from the target runtime instead of the invoking user's home.
 
 Rin also adds `ctx.rin.agentDir` and `ctx.rin.frontendIdentity` to extension lifecycle and command contexts. Use `RinExtensionContext` from `@hoshinorin/rin/extension` for the canonical type. The metadata belongs to Rin's context adapter and replaces reads of private session-manager fields or deployment paths.
 

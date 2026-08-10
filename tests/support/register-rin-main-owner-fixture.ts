@@ -64,7 +64,11 @@ const replacements: Record<string, string> = {
   "dist/core/rin/control.js": `export async function runStart(parsed){globalThis.__rinMainOwnerEvents.push(["start",parsed.command])} export async function runStop(parsed){globalThis.__rinMainOwnerEvents.push(["stop",parsed.command])} export async function runRestart(parsed){globalThis.__rinMainOwnerEvents.push(["restart",parsed.command])}`,
   "dist/core/rin/doctor.js": `export async function runDoctor(parsed,args){globalThis.__rinMainOwnerEvents.push(["doctor",parsed.command,args])}`,
   "dist/core/rin/versions.js": `export function runVersions(parsed){globalThis.__rinMainOwnerEvents.push(["versions",parsed.command])} export async function runRollback(parsed){globalThis.__rinMainOwnerEvents.push(["rollback",parsed.command])}`,
-  "dist/core/rin/launch.js": `export async function launchDefaultRin(parsed){globalThis.__rinMainOwnerEvents.push(["launch",parsed.command])}`,
+  "dist/core/rin/launch.js": `
+    export function shouldDelegateCrossUserCli(){return Boolean(globalThis.__rinMainOwnerCrossUser)}
+    export async function delegateRinCliToTarget(parsed, argv){globalThis.__rinMainOwnerEvents.push(["delegate-target",parsed.targetUser,argv])}
+    export async function launchDefaultRin(parsed){globalThis.__rinMainOwnerEvents.push(["launch",parsed.command])}
+  `,
 };
 
 const replacementUrls = Object.fromEntries(

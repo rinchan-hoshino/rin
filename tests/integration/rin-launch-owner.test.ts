@@ -69,6 +69,30 @@ test("TUI launch arguments preserve the current Node executable and passthrough"
   );
 });
 
+test("cross-user CLI delegation excludes same-user and remote-target routes", () => {
+  assert.equal(
+    launch.shouldDelegateCrossUserCli(
+      parsed({ targetUser: "runtime-owner", explicitTarget: false }),
+      "invoker",
+    ),
+    true,
+  );
+  assert.equal(
+    launch.shouldDelegateCrossUserCli(
+      parsed({ targetUser: "invoker", explicitTarget: false }),
+      "invoker",
+    ),
+    false,
+  );
+  assert.equal(
+    launch.shouldDelegateCrossUserCli(
+      parsed({ targetUser: "runtime-owner", explicitTarget: true }),
+      "invoker",
+    ),
+    false,
+  );
+});
+
 test("TUI runtime environment selects explicit Rin dirs only for matching users", () => {
   const currentUser = os.userInfo().username;
   const previousRinDir = process.env.RIN_DIR;
@@ -124,6 +148,50 @@ test("launch environment reports success and maintenance fallback without mutati
   });
   assert.match(unavailable.maintenanceModeNotice || "", /not ready/);
   assert.equal(calls, 1);
+});
+
+test("cross-user CLI delegation runs the target CLI entry with stripped arguments", async () => {
+  const installDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-cli-delegate-owner-"),
+  );
+  const managedNode = path.join(
+    installDir,
+    "runtime",
+    "node",
+    "current",
+    process.platform === "win32" ? "node.exe" : "bin/node",
+  );
+  await fs.mkdir(path.dirname(managedNode), { recursive: true });
+  await fs.writeFile(managedNode, "");
+  const spawnCalls: any[][] = [];
+  const spawn = mock.method(childProcess, "spawn", (...values: any[]) => {
+    spawnCalls.push(values);
+    const child = new EventEmitter();
+    queueMicrotask(() => child.emit("exit", 0, null));
+    return child as any;
+  });
+  syncBuiltinESMExports();
+  try {
+    const code = await launch.delegateRinCliToTarget(parsed({ installDir }), [
+      "usage",
+      "--days",
+      "7",
+    ]);
+    assert.equal(code, 0);
+  } finally {
+    spawn.mock.restore();
+    syncBuiltinESMExports();
+    process.exitCode = 0;
+    await fs.rm(installDir, { recursive: true, force: true });
+  }
+  assert.equal(spawnCalls.length, 1);
+  assert.equal(spawnCalls[0][0], managedNode);
+  assert.ok(
+    spawnCalls[0][1].some((value: string) =>
+      value.endsWith("dist/app/rin/main.js"),
+    ),
+  );
+  assert.deepEqual(spawnCalls[0][1].slice(-3), ["usage", "--days", "7"]);
 });
 
 test("default launch refuses an uninstalled implicit target before spawning", async () => {
