@@ -101,6 +101,7 @@ function resetOwner() {
   owner.autoCompactionResult = "owner-compacted";
   owner.autoCompactionError = undefined;
   owner.promptResult = "owner-prompted";
+  owner.promptPreflightResult = true;
   owner.reloadResult = "owner-reloaded";
   owner.compactResult = "owner-manual-compacted";
   owner.customMessageError = undefined;
@@ -375,6 +376,71 @@ test("prompt exports preserve empty, duplicate, persisted, and lazy fallback beh
       owner: 2,
     }),
   );
+});
+
+test("configured runtime grants system authority only to the latest accepted prompt binding", async () => {
+  resetOwner();
+  const manager = makeManager();
+  const first = await runtime.createConfiguredAgentSession({
+    cwd: process.cwd(),
+    agentDir: "/owner/agent",
+    sessionManager: manager,
+  });
+  const contextA = {
+    source: "chat-bridge",
+    chatKey: "discord/owner:room-a",
+    chatName: "Room A",
+    chatType: "group",
+  };
+  const contextB = {
+    ...contextA,
+    chatKey: "discord/owner:room-b",
+    chatName: "Room B",
+  };
+  const rejectedContext = {
+    ...contextA,
+    chatKey: "discord/owner:rejected",
+    chatName: "Rejected Room",
+  };
+
+  await first.session.prompt("from A", { promptContext: contextA });
+  await first.session.prompt("from B", { promptContext: contextB });
+
+  const activePrompt = String(first.session._baseSystemPrompt || "");
+  assert.doesNotMatch(activePrompt, /Room A/);
+  assert.match(activePrompt, /Room B/);
+  assert.equal(
+    manager.__ownerBranch.filter(
+      (entry: any) => entry.customType === "rin-system-prompt-blocks",
+    ).length,
+    2,
+  );
+
+  const resumed = await runtime.createConfiguredAgentSession({
+    cwd: process.cwd(),
+    agentDir: "/owner/agent",
+    sessionManager: manager,
+  });
+  const resumedPrompt = runtime.ensureSessionBaseSystemPrompt(resumed.session);
+  assert.doesNotMatch(resumedPrompt, /Room A/);
+  assert.match(resumedPrompt, /Room B/);
+
+  owner.promptPreflightResult = false;
+  await resumed.session.prompt("rejected", {
+    promptContext: rejectedContext,
+  });
+  const afterRejectedPrompt = String(resumed.session._baseSystemPrompt || "");
+  assert.doesNotMatch(afterRejectedPrompt, /Rejected Room/);
+  assert.match(afterRejectedPrompt, /Room B/);
+  assert.equal(
+    manager.__ownerBranch.filter(
+      (entry: any) => entry.customType === "rin-system-prompt-blocks",
+    ).length,
+    2,
+  );
+
+  await first.runtime.dispose();
+  await resumed.runtime.dispose();
 });
 
 test("configured runtime integrates profile, services, prompt, compaction, and shutdown ownership", async () => {

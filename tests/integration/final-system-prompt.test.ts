@@ -815,7 +815,7 @@ test("persisted system prompt restores across resume and refreshes on reload", a
   await replacementRuntime.runtime.dispose();
 });
 
-test("stored system prompt blocks participate in frozen prompts", async (t) => {
+test("only the latest stored system prompt block participates in frozen prompts", async (t) => {
   const cwd = makeTempDir(t, "rin-block-prompt-cwd-");
   const agentDir = makeTempDir(t, "rin-block-prompt-agent-");
   const { session, runtime } = await runtimeMod.createConfiguredAgentSession({
@@ -825,14 +825,19 @@ test("stored system prompt blocks participate in frozen prompts", async (t) => {
 
   session.sessionManager.appendCustomEntry("rin-system-prompt-blocks", {
     version: 1,
-    blocks: ["Stable chat bridge block."],
+    blocks: ["Stale chat bridge block."],
+  });
+  session.sessionManager.appendCustomEntry("rin-system-prompt-blocks", {
+    version: 1,
+    blocks: ["Current chat bridge block."],
   });
   const prompt = runtimeMod.ensureSessionBaseSystemPrompt(session);
 
-  assert.ok(prompt.includes("Stable chat bridge block."));
+  assert.equal(prompt.includes("Stale chat bridge block."), false);
+  assert.ok(prompt.includes("Current chat bridge block."));
   assert.equal(
-    prompt.indexOf("Stable chat bridge block."),
-    prompt.lastIndexOf("Stable chat bridge block."),
+    prompt.indexOf("Current chat bridge block."),
+    prompt.lastIndexOf("Current chat bridge block."),
   );
   await runtime.dispose();
 });

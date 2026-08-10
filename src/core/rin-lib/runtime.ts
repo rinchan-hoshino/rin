@@ -362,28 +362,34 @@ function findPersistedSessionBaseSystemPrompt(entries: any[]) {
   return "";
 }
 
+function normalizeSessionSystemPromptBlocks(rows: unknown[]) {
+  const blocks: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const block = String(row || "").trim();
+    if (!block || seen.has(block)) continue;
+    seen.add(block);
+    blocks.push(block);
+  }
+  return blocks;
+}
+
 function readPersistedSessionSystemPromptBlocks(session: any) {
   const entries = session?.sessionManager?.getBranch?.();
   if (!Array.isArray(entries)) return [];
-  const blocks: string[] = [];
-  const seen = new Set<string>();
-  for (const entry of entries) {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
     if (
       entry?.type !== "custom" ||
       String(entry?.customType || "") !==
-        SESSION_SYSTEM_PROMPT_BLOCKS_ENTRY_TYPE
+        SESSION_SYSTEM_PROMPT_BLOCKS_ENTRY_TYPE ||
+      !Array.isArray(entry?.data?.blocks)
     ) {
       continue;
     }
-    const rows = Array.isArray(entry?.data?.blocks) ? entry.data.blocks : [];
-    for (const row of rows) {
-      const block = String(row || "").trim();
-      if (!block || seen.has(block)) continue;
-      seen.add(block);
-      blocks.push(block);
-    }
+    return normalizeSessionSystemPromptBlocks(entry.data.blocks);
   }
-  return blocks;
+  return [];
 }
 
 function applyPersistedSystemPromptBlocks(prompt: string, blocks: string[]) {
@@ -392,6 +398,20 @@ function applyPersistedSystemPromptBlocks(prompt: string, blocks: string[]) {
     const normalized = String(block || "").trim();
     if (!normalized || next.includes(normalized)) continue;
     next = `${next}\n\n${normalized}`;
+  }
+  return next;
+}
+
+function removeTrailingSystemPromptBlocks(prompt: string, blocks: string[]) {
+  let next = String(prompt || "").trimEnd();
+  for (const block of [...blocks].reverse()) {
+    const normalized = String(block || "").trim();
+    if (!normalized) continue;
+    if (next === normalized) return "";
+    const suffix = `\n\n${normalized}`;
+    if (next.endsWith(suffix)) {
+      next = next.slice(0, -suffix.length).trimEnd();
+    }
   }
   return next;
 }
@@ -418,20 +438,26 @@ function persistSessionBaseSystemPrompt(session: any, systemPrompt: string) {
   });
 }
 
-function persistSessionSystemPromptBlock(session: any, block: string) {
-  const normalized = String(block || "").trim();
-  if (!normalized) return;
-  if (typeof session?.sessionManager?.appendCustomEntry !== "function") return;
-  if (readPersistedSessionSystemPromptBlocks(session).includes(normalized)) {
-    return;
+function persistSessionSystemPromptBlocks(session: any, blocks: string[]) {
+  const normalized = normalizeSessionSystemPromptBlocks(blocks);
+  if (typeof session?.sessionManager?.appendCustomEntry !== "function") {
+    return false;
+  }
+  const current = readPersistedSessionSystemPromptBlocks(session);
+  if (
+    current.length === normalized.length &&
+    current.every((block, index) => block === normalized[index])
+  ) {
+    return false;
   }
   session.sessionManager.appendCustomEntry(
     SESSION_SYSTEM_PROMPT_BLOCKS_ENTRY_TYPE,
     {
       version: 1,
-      blocks: [normalized],
+      blocks: normalized,
     },
   );
+  return true;
 }
 
 export function applySessionBaseSystemPrompt(
@@ -496,18 +522,59 @@ export function appendPromptContextSystemPrompt(
   return base ? `${base}\n\n${block}` : block;
 }
 
+type PromptContextSystemPromptTransition = {
+  previousBlocks: string[];
+  nextPrompt: string;
+  nextBlocks: string[];
+  changed: boolean;
+};
+
+function preparePromptContextSystemPromptTransition(
+  session: any,
+  systemPrompt: string,
+  promptContext: unknown,
+): PromptContextSystemPromptTransition {
+  const previousPrompt = String(systemPrompt || "");
+  const block = formatPromptContextSystemPromptBlock(
+    promptContext as any,
+  ).trim();
+  const previousBlocks = readPersistedSessionSystemPromptBlocks(session);
+  if (!block) {
+    return {
+      previousBlocks,
+      nextPrompt: previousPrompt,
+      nextBlocks: previousBlocks,
+      changed: false,
+    };
+  }
+  const nextBlocks = [block];
+  const basePrompt = removeTrailingSystemPromptBlocks(
+    previousPrompt,
+    previousBlocks,
+  );
+  const nextPrompt = applyPersistedSystemPromptBlocks(basePrompt, nextBlocks);
+  return {
+    previousBlocks,
+    nextPrompt,
+    nextBlocks,
+    changed: previousBlocks.length !== 1 || previousBlocks[0] !== nextBlocks[0],
+  };
+}
+
 export function persistPromptContextSystemPrompt(
   session: any,
   systemPrompt: string,
   promptContext: unknown,
 ) {
-  const block = formatPromptContextSystemPromptBlock(promptContext as any);
-  if (!block.trim()) return String(systemPrompt || "");
-  const next = appendPromptContextSystemPrompt(systemPrompt, promptContext);
-  if (next !== String(systemPrompt || "")) {
-    persistSessionSystemPromptBlock(session, block);
+  const transition = preparePromptContextSystemPromptTransition(
+    session,
+    systemPrompt,
+    promptContext,
+  );
+  if (transition.changed) {
+    persistSessionSystemPromptBlocks(session, transition.nextBlocks);
   }
-  return next;
+  return transition.nextPrompt;
 }
 
 function applyRinPromptBuilder(session: any) {
@@ -552,7 +619,7 @@ function applyRinPromptBuilder(session: any) {
   if (originalPrompt) {
     session.prompt = async (text: string, options?: any) => {
       const basePrompt = ensureSessionBaseSystemPrompt(session);
-      const nextPrompt = persistPromptContextSystemPrompt(
+      const transition = preparePromptContextSystemPromptTransition(
         session,
         basePrompt,
         options?.promptContext,
@@ -560,24 +627,54 @@ function applyRinPromptBuilder(session: any) {
       const frontendIdentity = normalizeFrontendIdentity(
         options?.frontendIdentity,
       );
-      if (session.sessionManager) {
-        session.sessionManager.__rinLastPromptSource = String(
-          options?.source || "",
-        ).trim();
-        session.sessionManager.__rinLastPromptContext = options?.promptContext;
-        if (frontendIdentity) {
-          session.sessionManager.__rinFrontend = frontendIdentity;
-        } else {
-          delete session.sessionManager.__rinFrontend;
+      const callerPreflightResult = options?.preflightResult;
+      let preflightObserved = false;
+      let promptAccepted = false;
+      if (transition.nextPrompt !== basePrompt) {
+        applySessionBaseSystemPrompt(session, transition.nextPrompt);
+      }
+      const promptOptions = {
+        ...(options || {}),
+        preflightResult(accepted: boolean) {
+          preflightObserved = true;
+          if (accepted) {
+            if (transition.changed) {
+              persistSessionSystemPromptBlocks(session, transition.nextBlocks);
+            }
+            if (session.sessionManager) {
+              session.sessionManager.__rinLastPromptSource = String(
+                options?.source || "",
+              ).trim();
+              session.sessionManager.__rinLastPromptContext =
+                options?.promptContext;
+              if (frontendIdentity) {
+                session.sessionManager.__rinFrontend = frontendIdentity;
+              } else {
+                delete session.sessionManager.__rinFrontend;
+              }
+            }
+            promptAccepted = true;
+          } else if (transition.nextPrompt !== basePrompt) {
+            applySessionBaseSystemPrompt(session, basePrompt);
+          }
+          callerPreflightResult?.(accepted);
+        },
+      };
+      try {
+        const result = await originalPrompt(
+          formatPromptContext(options?.promptContext, text),
+          promptOptions,
+        );
+        if (!preflightObserved && transition.nextPrompt !== basePrompt) {
+          applySessionBaseSystemPrompt(session, basePrompt);
         }
+        return result;
+      } catch (error) {
+        if (!promptAccepted && transition.nextPrompt !== basePrompt) {
+          applySessionBaseSystemPrompt(session, basePrompt);
+        }
+        throw error;
       }
-      if (nextPrompt !== basePrompt) {
-        applySessionBaseSystemPrompt(session, nextPrompt);
-      }
-      return await originalPrompt(
-        formatPromptContext(options?.promptContext, text),
-        options,
-      );
     };
   }
 

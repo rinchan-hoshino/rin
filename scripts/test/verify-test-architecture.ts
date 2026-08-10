@@ -80,7 +80,7 @@ const ORIGINAL_COVERAGE_BASELINE_SHA256 =
 const CHARACTERIZATION_BASELINE_SHA256 =
   "ecf775c014ee4bb5f2cd5f603968f3c9399462d89e5d166de6f7046047232381";
 const CHARACTERIZATION_CASE_BASELINE_SHA256 =
-  "5459733f2b8eb758ea7fea18b9f6e21e46556853d010e93e10e3a660878912dc";
+  "26478f4bca64f0fb08e6c7615bd83c8530bc7fefd8fe12d96f6963ecc5939018";
 
 function readJson<T>(relativePath: string): T {
   return JSON.parse(fs.readFileSync(path.join(rootDir, relativePath), "utf8"));

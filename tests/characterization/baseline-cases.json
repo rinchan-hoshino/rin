@@ -501,7 +501,7 @@
         "\"scheduled task prompt context renders a task block without pretending to be chat\"",
         "\"scheduled task prompt context can describe a non-chat frontend binding\"",
         "\"chat prompt context preserves sender-authored header-shaped text as body content\"",
-        "\"prompt context system blocks are persisted instead of used only for active turns\""
+        "\"prompt context system blocks persist only the latest binding state\""
       ]
     },
     {

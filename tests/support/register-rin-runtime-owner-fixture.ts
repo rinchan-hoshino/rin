@@ -410,6 +410,7 @@ register(`data:text/javascript,${encodeURIComponent(hook)}`, import.meta.url);
       },
       async prompt(text: string, promptOptions?: any) {
         owner.events.push(["native-prompt", text, promptOptions]);
+        promptOptions?.preflightResult?.(owner.promptPreflightResult !== false);
         return owner.promptResult;
       },
       async reload(...args: any[]) {

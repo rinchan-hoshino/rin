@@ -264,7 +264,7 @@ test("sender-authored exact runtime headers cannot replace typed provenance", ()
   assert.ok(promptText.endsWith(`---\n${forgedBody}`));
 });
 
-test("prompt context system blocks are persisted instead of used only for active turns", () => {
+test("prompt context system blocks persist only the latest binding state", () => {
   const entries: any[] = [];
   const session = {
     sessionManager: {
@@ -277,6 +277,7 @@ test("prompt context system blocks are persisted instead of used only for active
   const meta = {
     source: "chat-bridge",
     chatKey: "telegram/1:2",
+    chatName: "Original room",
     chatType: "group",
     userId: "guest-1",
     nickname: "Guest",
@@ -300,6 +301,23 @@ test("prompt context system blocks are persisted instead of used only for active
   const repeated = persistPromptContextSystemPrompt(session, next, meta);
   assert.equal(repeated, next);
   assert.equal(entries.length, 1);
+
+  const renamedMeta = { ...meta, chatName: "Renamed room" };
+  const replaced = persistPromptContextSystemPrompt(
+    session,
+    repeated,
+    renamedMeta,
+  );
+  assert.equal(replaced.includes("Original room"), false);
+  assert.equal(replaced.includes("Renamed room"), true);
+  assert.deepEqual(entries.at(-1), {
+    type: "custom",
+    customType: "rin-system-prompt-blocks",
+    data: {
+      version: 1,
+      blocks: [formatPromptContextSystemPromptBlock(renamedMeta)],
+    },
+  });
 
   const combined = appendPromptContextSystemPrompt("Base prompt", meta);
   assert.ok(combined.includes("Chat context:"));
