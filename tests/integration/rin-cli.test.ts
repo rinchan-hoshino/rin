@@ -432,8 +432,53 @@ test("rin update help exposes the runtime non-interactive confirmation contract"
   assert.match(output, /Rin runtime update:/);
   assert.match(
     output,
+    /rin update \[--stable\|--beta\|--nightly\|--git \[branch-or-ref\]\] \[--version <value>\] \[--yes\]/,
+  );
+  assert.doesNotMatch(output, /rin update[^\n]*--branch/);
+  assert.match(
+    output,
+    /--git \[branch-or-ref\]\s+Use the git release channel; omit the selector to use main/,
+  );
+  assert.match(
+    output,
     /--yes\s+Confirm the Rin runtime update non-interactively; required when stdin or stdout is not a TTY/,
   );
+});
+
+test("rin update --git main reaches the updater without a legacy branch flag", () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "rin-git-selector-"));
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        path.join(rootDir, "dist", "app", "rin", "main.js"),
+        "update",
+        "--git",
+        "main",
+      ],
+      {
+        cwd: rootDir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: homeDir,
+          RIN_DIR: path.join(homeDir, ".rin"),
+        },
+      },
+    );
+    const output = `${result.stdout}${result.stderr}`;
+    assert.notEqual(result.status, 0);
+    assert.match(
+      output,
+      /update confirmation required: pass --yes in non-interactive mode/,
+    );
+    assert.doesNotMatch(
+      output,
+      /Stable releases do not support selecting a branch/,
+    );
+  } finally {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
 });
 
 test("print help shows the Pi-style non-interactive CLI contract", () => {

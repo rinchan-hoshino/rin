@@ -159,7 +159,7 @@ test("resolveParsedArgs accepts beta, nightly, and git selectors", () => {
   assert.equal(nightlyParsed.releaseBranch, "");
   assert.equal(nightlyParsed.releaseVersion, "");
 
-  const gitBranchParsed = shared.resolveParsedArgs("update", { git: true }, [
+  const gitBranchParsed = shared.resolveParsedArgs("update", {}, [
     "update",
     "--git",
     "main",

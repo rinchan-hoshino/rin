@@ -198,6 +198,16 @@ function extractOptionalFlagSelector(
   return "";
 }
 
+function hasReleaseChannelFlag(
+  rawArgv: string[],
+  command: string,
+  flag: "--stable" | "--beta" | "--nightly" | "--git",
+) {
+  return extractSubcommandArgv(rawArgv, command).some(
+    (arg) => arg === flag || arg.startsWith(`${flag}=`),
+  );
+}
+
 function resolveParsedReleaseArgs(
   command: ParsedArgs["command"],
   options: any,
@@ -219,10 +229,18 @@ function resolveParsedReleaseArgs(
   }
 
   const selectedChannels = [
-    options.stable ? "stable" : "",
-    options.beta ? "beta" : "",
-    options.nightly ? "nightly" : "",
-    options.git ? "git" : "",
+    options.stable || hasReleaseChannelFlag(rawArgv, command, "--stable")
+      ? "stable"
+      : "",
+    options.beta || hasReleaseChannelFlag(rawArgv, command, "--beta")
+      ? "beta"
+      : "",
+    options.nightly || hasReleaseChannelFlag(rawArgv, command, "--nightly")
+      ? "nightly"
+      : "",
+    options.git || hasReleaseChannelFlag(rawArgv, command, "--git")
+      ? "git"
+      : "",
   ].filter(Boolean) as ReleaseChannel[];
 
   if (selectedChannels.length > 1) {

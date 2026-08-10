@@ -66,8 +66,11 @@ async function createCli() {
     .option("--stable", "Use the stable release channel")
     .option("--beta", "Use the beta release channel")
     .option("--nightly", "Use the nightly release channel")
-    .option("--git", "Use the git release channel")
-    .option("--branch <name>", "Explicit git branch selector")
+    .option(
+      "--git [branchOrRef]",
+      "Use the git release channel, optionally selecting a branch or ref",
+    )
+    .option("--branch <name>", "Legacy explicit git branch selector")
     .option("--version <value>", "Explicit stable version or git ref selector")
     .option("--yes", "Update mode: run without confirmation prompts")
     .help();
