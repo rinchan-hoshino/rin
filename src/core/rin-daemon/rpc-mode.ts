@@ -2159,6 +2159,7 @@ export async function runCustomRpcMode(
               {
                 SessionManager,
                 uiContext: createExtensionUiContext(),
+                promptContext: command.promptContext,
               },
             );
             if (builtinResult.handled) return builtinResult;

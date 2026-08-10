@@ -323,7 +323,19 @@ test("worker helpers own RPC-safe state, diagnostics, completion, and built-in c
     await helpers.runBuiltinCommand(runtime, "/compact focus owner", {
       SessionManager: {},
     });
-    await helpers.runBuiltinCommand(runtime, "/reload", { SessionManager: {} });
+    const reloadPromptContext = {
+      source: "chat-bridge",
+      chatKey: "discord/owner:room",
+      chatName: "Owner room",
+    };
+    await helpers.runBuiltinCommand(runtime, "/reload", {
+      SessionManager: {},
+      promptContext: reloadPromptContext,
+    });
+    assert.deepEqual(
+      runtime.session.sessionManager.__rinLastPromptContext,
+      reloadPromptContext,
+    );
     assert.match(
       String(
         (

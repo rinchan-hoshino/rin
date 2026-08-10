@@ -641,9 +641,17 @@ test("persisted prompt cleanup preserves bytes before stored blocks", async (t) 
     blocks: ["Stable stored block."],
   });
 
+  const sealedPrompt = runtimeMod.ensureSessionBaseSystemPrompt(session);
   assert.equal(
-    runtimeMod.ensureSessionBaseSystemPrompt(session),
+    sealedPrompt,
     `Prefix.\n\n${LEGACY_RIN_DOCS_BLOCK}\n\n\n\n\n\nStable stored block.`,
+  );
+  assert.equal(
+    session.sessionManager
+      .getBranch()
+      .filter((entry: any) => entry.customType === "rin-system-prompt-state")
+      .at(-1)?.data?.systemPrompt,
+    sealedPrompt,
   );
   await runtime.dispose();
 });
@@ -815,7 +823,7 @@ test("persisted system prompt restores across resume and refreshes on reload", a
   await replacementRuntime.runtime.dispose();
 });
 
-test("only the latest stored system prompt block participates in frozen prompts", async (t) => {
+test("legacy sidecar state is sealed once into the whole frozen prompt", async (t) => {
   const cwd = makeTempDir(t, "rin-block-prompt-cwd-");
   const agentDir = makeTempDir(t, "rin-block-prompt-agent-");
   const { session, runtime } = await runtimeMod.createConfiguredAgentSession({
@@ -823,6 +831,10 @@ test("only the latest stored system prompt block participates in frozen prompts"
     agentDir,
   });
 
+  session.sessionManager.appendCustomEntry("rin-system-prompt-state", {
+    version: 1,
+    systemPrompt: "Frozen base prompt.",
+  });
   session.sessionManager.appendCustomEntry("rin-system-prompt-blocks", {
     version: 1,
     blocks: ["Stale chat bridge block."],
@@ -833,11 +845,21 @@ test("only the latest stored system prompt block participates in frozen prompts"
   });
   const prompt = runtimeMod.ensureSessionBaseSystemPrompt(session);
 
-  assert.equal(prompt.includes("Stale chat bridge block."), false);
-  assert.ok(prompt.includes("Current chat bridge block."));
+  assert.equal(prompt, "Frozen base prompt.\n\nCurrent chat bridge block.");
+  const promptStates = session.sessionManager
+    .getBranch()
+    .filter((entry: any) => entry.customType === "rin-system-prompt-state");
+  assert.equal(promptStates.length, 2);
+  assert.equal(promptStates.at(-1)?.data?.systemPrompt, prompt);
+
+  runtimeMod.clearSessionBaseSystemPrompt(session);
+  assert.equal(runtimeMod.ensureSessionBaseSystemPrompt(session), prompt);
   assert.equal(
-    prompt.indexOf("Current chat bridge block."),
-    prompt.lastIndexOf("Current chat bridge block."),
+    session.sessionManager
+      .getBranch()
+      .filter((entry: any) => entry.customType === "rin-system-prompt-state")
+      .length,
+    2,
   );
   await runtime.dispose();
 });

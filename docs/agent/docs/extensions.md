@@ -18,9 +18,9 @@ These capabilities are native Rin behavior rather than optional Pi extensions:
 
 - `memory`: `recall`, transcript archiving, and searchable session-history index.
 - `self-improve`: compact distilled guidance in prompt baselines, agent-managed skills, periodic review, and hidden nightly consolidation.
-- system prompt assembly: Rin default stance, tool guidance, configured baselines, and available skill metadata.
-- message metadata: `sent at` and chat-specific prompt context when applicable.
-- frozen session runtime: stable effective system prompt within a session until refresh or reload.
+- system prompt assembly: Rin default stance, tool guidance, configured baselines, available skill metadata, and the load-scoped chat/task binding supplied before first materialization.
+- message metadata: turn-local `sent at`, sender, trust, file, and reply context stays with the current user input.
+- frozen session runtime: the complete effective system prompt has one durable owner and remains byte-stable until explicit reload; ordinary turns and group-name changes cannot update it.
 - TUI input compatibility: Rin-owned compatibility handling for interactive input.
 - todo: `todo` tool and `/todos` command.
 - note: stable-ID session-branch continuity items, plus the `/notes` TUI viewer.

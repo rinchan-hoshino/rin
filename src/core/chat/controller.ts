@@ -3103,6 +3103,7 @@ export class ChatController {
         restoreSessionFile,
         sessionFile: explicitSessionFile,
         managedSessionLeaf,
+        promptContext: commandName === "reload" ? promptMeta : undefined,
         onActiveTurnInterruptionCommitted: interruptingActiveTurn
           ? () => {
               if (activeTurnInterruptionCommitted) return;

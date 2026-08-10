@@ -182,7 +182,6 @@ test("Rin overlay preserves Pi-owned sections and adds only Rin-owned layers", (
     },
     agentDir: "/tmp/rin-agent",
     selfImprovePromptBlock: "SELF-IMPROVE BLOCK",
-    persistedBlocks: ["PERSISTED BLOCK"],
   });
 
   assert.match(result, /- Future Pi default/);
@@ -197,7 +196,6 @@ test("Rin overlay preserves Pi-owned sections and adds only Rin-owned layers", (
       result.indexOf("Rin and Pi documentation:"),
   );
   assert.match(result, /SELF-IMPROVE BLOCK/);
-  assert.match(result, /PERSISTED BLOCK/);
   assert.doesNotMatch(result, /Current date:/);
   assert.doesNotMatch(result, /Current working directory:/);
   assert.ok(
@@ -531,15 +529,13 @@ Current working directory: /tmp`;
     },
     agentDir: "/tmp/rin-agent",
     selfImprovePromptBlock: "SELF-IMPROVE BLOCK",
-    persistedBlocks: ["PERSISTED BLOCK"],
   });
   assert.match(
     result,
     /CUSTOM BASE\n\nAPPEND BLOCK\n\n<project_context>[\s\S]*NATIVE SKILLS BLOCK/,
   );
   assert.match(result, /NATIVE SKILLS BLOCK\n\nRin and Pi documentation:/);
-  assert.match(result, /SELF-IMPROVE BLOCK/);
-  assert.match(result, /PERSISTED BLOCK$/);
+  assert.match(result, /SELF-IMPROVE BLOCK$/);
   assert.doesNotMatch(result, /Current working directory:/);
   assert.doesNotMatch(result, /Current date:/);
 });

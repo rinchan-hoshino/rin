@@ -34,7 +34,6 @@ export type RinSystemPromptOverlayInput = {
   activeToolNames: string[];
   agentDir: string;
   selfImprovePromptBlock?: string;
-  persistedBlocks?: string[];
 };
 
 function findRequiredAnchor(prompt: string, anchor: string, fromIndex = 0) {
@@ -234,16 +233,6 @@ function overlayDefaultPiPrompt(
   return `${promptThroughGuidelines}${nativeDocs}\n\n${docsBlock}${nativeDataTail}`;
 }
 
-function applyPersistedBlocks(prompt: string, blocks: string[] | undefined) {
-  let next = String(prompt || "");
-  for (const value of Array.isArray(blocks) ? blocks : []) {
-    const block = String(value || "").trim();
-    if (!block || next.includes(block)) continue;
-    next = `${next}\n\n${block}`;
-  }
-  return next;
-}
-
 export function applyRinSystemPromptOverlay(
   input: RinSystemPromptOverlayInput,
 ) {
@@ -267,6 +256,5 @@ export function applyRinSystemPromptOverlay(
   if (input.selfImprovePromptBlock) {
     prompt += `\n\n${input.selfImprovePromptBlock}`;
   }
-  prompt = applyPersistedBlocks(prompt, input.persistedBlocks);
   return `${PROMPT_PREFIX}\n${RUNTIME_AWARENESS}\n${WEB_SOURCE_REQUIREMENT}\n\n${prompt}`;
 }

@@ -329,7 +329,7 @@ test("runtime capability definitions integrate owner modules and hook payloads",
   );
 });
 
-test("prompt exports preserve empty, duplicate, persisted, and lazy fallback behavior", () => {
+test("prompt exports preserve empty, duplicate, and lazy fallback behavior", () => {
   resetOwner();
   const plain: any = { _baseSystemPrompt: "base" };
   runtime.applySessionBaseSystemPrompt(plain, "next");
@@ -353,32 +353,9 @@ test("prompt exports preserve empty, duplicate, persisted, and lazy fallback beh
     runtime.appendPromptContextSystemPrompt("", { owner: true }),
     /^Prompt context owner:/,
   );
-
-  const manager = makeManager();
-  const session: any = { sessionManager: manager };
-  assert.equal(
-    runtime.persistPromptContextSystemPrompt(session, "base", null),
-    "base",
-  );
-  const persisted = runtime.persistPromptContextSystemPrompt(session, "base", {
-    owner: 1,
-  });
-  assert.match(persisted, /Prompt context owner/);
-  runtime.persistPromptContextSystemPrompt(session, persisted, { owner: 1 });
-  assert.equal(
-    manager.__ownerBranch.filter(
-      (entry: any) => entry.customType === "rin-system-prompt-blocks",
-    ).length,
-    1,
-  );
-  assert.doesNotThrow(() =>
-    runtime.persistPromptContextSystemPrompt({ sessionManager: {} }, "base", {
-      owner: 2,
-    }),
-  );
 });
 
-test("configured runtime grants system authority only to the latest accepted prompt binding", async () => {
+test("configured runtime freezes the initial prompt binding until reload", async () => {
   resetOwner();
   const manager = makeManager();
   const first = await runtime.createConfiguredAgentSession({
@@ -404,16 +381,23 @@ test("configured runtime grants system authority only to the latest accepted pro
   };
 
   await first.session.prompt("from A", { promptContext: contextA });
-  await first.session.prompt("from B", { promptContext: contextB });
+  const frozenPrompt = String(first.session._baseSystemPrompt || "");
+  assert.match(frozenPrompt, /Room A/);
+  assert.doesNotMatch(frozenPrompt, /Room B/);
 
-  const activePrompt = String(first.session._baseSystemPrompt || "");
-  assert.doesNotMatch(activePrompt, /Room A/);
-  assert.match(activePrompt, /Room B/);
+  await first.session.prompt("from B", { promptContext: contextB });
+  assert.equal(String(first.session._baseSystemPrompt || ""), frozenPrompt);
   assert.equal(
     manager.__ownerBranch.filter(
       (entry: any) => entry.customType === "rin-system-prompt-blocks",
     ).length,
-    2,
+    0,
+  );
+  assert.equal(
+    manager.__ownerBranch
+      .filter((entry: any) => entry.customType === "rin-system-prompt-state")
+      .at(-1)?.data?.systemPrompt,
+    frozenPrompt,
   );
 
   const resumed = await runtime.createConfiguredAgentSession({
@@ -421,26 +405,36 @@ test("configured runtime grants system authority only to the latest accepted pro
     agentDir: "/owner/agent",
     sessionManager: manager,
   });
-  const resumedPrompt = runtime.ensureSessionBaseSystemPrompt(resumed.session);
-  assert.doesNotMatch(resumedPrompt, /Room A/);
-  assert.match(resumedPrompt, /Room B/);
+  assert.equal(
+    runtime.ensureSessionBaseSystemPrompt(resumed.session),
+    frozenPrompt,
+  );
 
   owner.promptPreflightResult = false;
   await resumed.session.prompt("rejected", {
     promptContext: rejectedContext,
   });
-  const afterRejectedPrompt = String(resumed.session._baseSystemPrompt || "");
-  assert.doesNotMatch(afterRejectedPrompt, /Rejected Room/);
-  assert.match(afterRejectedPrompt, /Room B/);
+  assert.equal(String(resumed.session._baseSystemPrompt || ""), frozenPrompt);
+
+  owner.promptPreflightResult = true;
+  await first.session.reload();
+  const reloadedPrompt = String(first.session._baseSystemPrompt || "");
+  assert.doesNotMatch(reloadedPrompt, /Room A/);
+  assert.match(reloadedPrompt, /Room B/);
+
+  const replacement = await runtime.createConfiguredAgentSession({
+    cwd: process.cwd(),
+    agentDir: "/owner/agent",
+    sessionManager: manager,
+  });
   assert.equal(
-    manager.__ownerBranch.filter(
-      (entry: any) => entry.customType === "rin-system-prompt-blocks",
-    ).length,
-    2,
+    runtime.ensureSessionBaseSystemPrompt(replacement.session),
+    reloadedPrompt,
   );
 
   await first.runtime.dispose();
   await resumed.runtime.dispose();
+  await replacement.runtime.dispose();
 });
 
 test("configured runtime integrates profile, services, prompt, compaction, and shutdown ownership", async () => {
@@ -660,9 +654,15 @@ test("configured prompt reuses persisted state and falls back to Pi rebuild on R
     agentDir: "/owner/agent",
     sessionManager: manager,
   });
+  const sealedPrompt = runtime.ensureSessionBaseSystemPrompt(
+    configured.session,
+  );
+  assert.equal(sealedPrompt, "persisted owner prompt\n\npersisted block");
   assert.equal(
-    runtime.ensureSessionBaseSystemPrompt(configured.session),
-    "persisted owner prompt\n\npersisted block",
+    manager.__ownerBranch
+      .filter((entry: any) => entry.customType === "rin-system-prompt-state")
+      .at(-1)?.data?.systemPrompt,
+    sealedPrompt,
   );
   const promptToolCalls = owner.events.filter(
     ([name]: any[]) => name === "prompt-tool-state",
@@ -679,7 +679,7 @@ test("configured prompt reuses persisted state and falls back to Pi rebuild on R
     fallbackPrompt,
     /^As the assistant, you must fulfill the user's requests\./,
   );
-  assert.match(fallbackPrompt, /persisted block/);
+  assert.doesNotMatch(fallbackPrompt, /persisted block/);
   assert.equal(eventNames().includes("native-rebuild"), true);
 
   const noRebuilder = { _baseSystemPrompt: "kept" } as any;

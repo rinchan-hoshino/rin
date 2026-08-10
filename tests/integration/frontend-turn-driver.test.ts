@@ -1149,6 +1149,39 @@ test("frontend SDK turn driver reuses the controller-restored command session", 
   );
 });
 
+test("frontend SDK carries reload binding context to the worker command", async () => {
+  const driver = createDriver();
+  const client = (driver as any).testClient;
+  const promptContext = {
+    source: "chat-bridge",
+    chatKey: "discord/owner:room",
+    chatName: "Owner room",
+    chatType: "group",
+  };
+
+  await driver.connect({ restoreSessionFile: "/tmp/frontend-chat.jsonl" });
+  await driver.runCommand("/reload", {
+    assumeConnected: true,
+    assumeSessionReady: true,
+    restoreSessionFile: "/tmp/frontend-chat.jsonl",
+    promptContext,
+  });
+
+  assert.deepEqual(
+    client.calls.find(
+      (call: any) =>
+        call.type === "request" && call.command?.type === "run_command",
+    )?.command,
+    {
+      type: "run_command",
+      commandLine: "/reload",
+      sessionFile: "/tmp/frontend-chat.jsonl",
+      promptContext,
+      frontendIdentity: { kind: "chat-bridge" },
+    },
+  );
+});
+
 test("frontend SDK turn driver reuses the controller-restored prompt session", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;

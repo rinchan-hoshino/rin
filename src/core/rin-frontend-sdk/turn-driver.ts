@@ -1640,6 +1640,7 @@ export class RinFrontendTurnDriver {
       restoreSessionFile?: string;
       sessionFile?: string;
       managedSessionLeaf?: string;
+      promptContext?: RinPromptContext;
       onActiveTurnInterruptionCommitted?: () => void;
     } = {},
   ) {
@@ -1830,6 +1831,7 @@ export class RinFrontendTurnDriver {
             commandLine,
             targetSessionFile,
             commandEpoch,
+            options.promptContext,
           );
     } catch (error) {
       if (this.lifecycleEpoch !== commandEpoch) {
@@ -1866,6 +1868,7 @@ export class RinFrontendTurnDriver {
     commandLine: string,
     sessionFile?: string,
     commandEpoch = this.lifecycleEpoch,
+    promptContext?: RinPromptContext,
   ) {
     if (commandEpoch !== this.lifecycleEpoch) {
       throw createRinFrontendTurnCancelledError();
@@ -1874,14 +1877,16 @@ export class RinFrontendTurnDriver {
     const client = this.client;
     const wanted = safeString(sessionFile || "").trim();
     try {
-      const result = !wanted
-        ? await client.runCommand(commandLine)
-        : await client.request({
-            type: "run_command",
-            commandLine,
-            sessionFile: wanted,
-            frontendIdentity: this.frontendIdentity,
-          });
+      const result =
+        !wanted && promptContext === undefined
+          ? await client.runCommand(commandLine)
+          : await client.request({
+              type: "run_command",
+              commandLine,
+              ...(wanted ? { sessionFile: wanted } : {}),
+              ...(promptContext === undefined ? {} : { promptContext }),
+              frontendIdentity: this.frontendIdentity,
+            });
       if (commandEpoch !== this.lifecycleEpoch) {
         throw createRinFrontendTurnCancelledError();
       }

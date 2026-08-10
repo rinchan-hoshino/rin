@@ -353,6 +353,7 @@ export async function runBuiltinCommand(
     SessionManager?: any;
     uiContext?: any;
     listSessions?: typeof listBoundSessions;
+    promptContext?: unknown;
   },
 ) {
   const session = runtime.session;
@@ -377,6 +378,9 @@ export async function runBuiltinCommand(
       await session.compact(argsText || undefined);
       return handledText(commandResponses().compact);
     case "reload":
+      if (deps.promptContext !== undefined && session.sessionManager) {
+        session.sessionManager.__rinLastPromptContext = deps.promptContext;
+      }
       await session.reload();
       return handledText(commandResponses().reload);
     case "session":

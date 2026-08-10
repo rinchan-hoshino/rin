@@ -124,7 +124,8 @@ function buildSelfImprovePromptBlock(agentDir: string) {
 
 const LAZY_SYSTEM_PROMPT_STATE_KEY = Symbol.for("rin.lazySystemPromptState");
 const SESSION_SYSTEM_PROMPT_ENTRY_TYPE = "rin-system-prompt-state";
-const SESSION_SYSTEM_PROMPT_BLOCKS_ENTRY_TYPE = "rin-system-prompt-blocks";
+const LEGACY_SESSION_SYSTEM_PROMPT_BLOCKS_ENTRY_TYPE =
+  "rin-system-prompt-blocks";
 const LEGACY_CONFIGURED_LANGUAGE_PROMPT_PATTERN =
   /^Configured runtime defaults:\n- Preferred language: ([^\r\n]+)\n- Unless the user explicitly asks otherwise, default to this language for replies, onboarding, and other user-facing text\.$/gm;
 const LEGACY_LANGUAGE_ONLY_DEFAULTS: Record<string, string> = {
@@ -346,9 +347,15 @@ function stripLegacyConfiguredLanguagePrompt(prompt: string) {
   );
 }
 
-function findPersistedSessionBaseSystemPrompt(entries: any[]) {
-  if (!Array.isArray(entries)) return "";
-  for (const entry of [...entries].reverse()) {
+type PersistedSessionSystemPrompt = {
+  prompt: string;
+  entryIndex: number;
+};
+
+function findPersistedSessionBaseSystemPromptEntry(entries: any[]) {
+  if (!Array.isArray(entries)) return null;
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
     if (
       entry?.type !== "custom" ||
       String(entry?.customType || "") !== SESSION_SYSTEM_PROMPT_ENTRY_TYPE
@@ -357,12 +364,19 @@ function findPersistedSessionBaseSystemPrompt(entries: any[]) {
     }
     const storedPrompt = String(entry?.data?.systemPrompt || "");
     if (!storedPrompt.trim()) continue;
-    return stripLegacyConfiguredLanguagePrompt(storedPrompt);
+    return {
+      prompt: stripLegacyConfiguredLanguagePrompt(storedPrompt),
+      entryIndex: index,
+    } satisfies PersistedSessionSystemPrompt;
   }
-  return "";
+  return null;
 }
 
-function normalizeSessionSystemPromptBlocks(rows: unknown[]) {
+function findPersistedSessionBaseSystemPrompt(entries: any[]) {
+  return findPersistedSessionBaseSystemPromptEntry(entries)?.prompt || "";
+}
+
+function normalizeLegacySystemPromptBlocks(rows: unknown[]) {
   const blocks: string[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
@@ -374,25 +388,30 @@ function normalizeSessionSystemPromptBlocks(rows: unknown[]) {
   return blocks;
 }
 
-function readPersistedSessionSystemPromptBlocks(session: any) {
-  const entries = session?.sessionManager?.getBranch?.();
-  if (!Array.isArray(entries)) return [];
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
+function readUnsealedLegacySystemPromptBlocks(
+  entries: any[],
+  basePromptEntryIndex: number,
+) {
+  for (
+    let index = entries.length - 1;
+    index > basePromptEntryIndex;
+    index -= 1
+  ) {
     const entry = entries[index];
     if (
       entry?.type !== "custom" ||
       String(entry?.customType || "") !==
-        SESSION_SYSTEM_PROMPT_BLOCKS_ENTRY_TYPE ||
+        LEGACY_SESSION_SYSTEM_PROMPT_BLOCKS_ENTRY_TYPE ||
       !Array.isArray(entry?.data?.blocks)
     ) {
       continue;
     }
-    return normalizeSessionSystemPromptBlocks(entry.data.blocks);
+    return normalizeLegacySystemPromptBlocks(entry.data.blocks);
   }
   return [];
 }
 
-function applyPersistedSystemPromptBlocks(prompt: string, blocks: string[]) {
+function appendSystemPromptBlocks(prompt: string, blocks: string[]) {
   let next = String(prompt || "");
   for (const block of blocks) {
     const normalized = String(block || "").trim();
@@ -402,62 +421,32 @@ function applyPersistedSystemPromptBlocks(prompt: string, blocks: string[]) {
   return next;
 }
 
-function removeTrailingSystemPromptBlocks(prompt: string, blocks: string[]) {
-  let next = String(prompt || "").trimEnd();
-  for (const block of [...blocks].reverse()) {
-    const normalized = String(block || "").trim();
-    if (!normalized) continue;
-    if (next === normalized) return "";
-    const suffix = `\n\n${normalized}`;
-    if (next.endsWith(suffix)) {
-      next = next.slice(0, -suffix.length).trimEnd();
-    }
-  }
-  return next;
-}
-
 function readPersistedSessionBaseSystemPrompt(session: any) {
-  const prompt = findPersistedSessionBaseSystemPrompt(
-    session?.sessionManager?.getBranch?.(),
+  const entries = session?.sessionManager?.getBranch?.();
+  const persisted = findPersistedSessionBaseSystemPromptEntry(entries);
+  if (!persisted) return { prompt: "", needsLegacySeal: false };
+  const legacyBlocks = readUnsealedLegacySystemPromptBlocks(
+    entries,
+    persisted.entryIndex,
   );
-  if (!prompt) return "";
-  return applyPersistedSystemPromptBlocks(
-    prompt,
-    readPersistedSessionSystemPromptBlocks(session),
-  );
+  return {
+    prompt: appendSystemPromptBlocks(persisted.prompt, legacyBlocks),
+    needsLegacySeal: legacyBlocks.length > 0,
+  };
 }
 
 function persistSessionBaseSystemPrompt(session: any, systemPrompt: string) {
   const prompt = String(systemPrompt || "");
   if (!prompt.trim()) return;
   if (typeof session?.sessionManager?.appendCustomEntry !== "function") return;
-  if (readPersistedSessionBaseSystemPrompt(session) === prompt) return;
+  const current = findPersistedSessionBaseSystemPrompt(
+    session.sessionManager.getBranch?.(),
+  );
+  if (current === prompt) return;
   session.sessionManager.appendCustomEntry(SESSION_SYSTEM_PROMPT_ENTRY_TYPE, {
     version: 1,
     systemPrompt: prompt,
   });
-}
-
-function persistSessionSystemPromptBlocks(session: any, blocks: string[]) {
-  const normalized = normalizeSessionSystemPromptBlocks(blocks);
-  if (typeof session?.sessionManager?.appendCustomEntry !== "function") {
-    return false;
-  }
-  const current = readPersistedSessionSystemPromptBlocks(session);
-  if (
-    current.length === normalized.length &&
-    current.every((block, index) => block === normalized[index])
-  ) {
-    return false;
-  }
-  session.sessionManager.appendCustomEntry(
-    SESSION_SYSTEM_PROMPT_BLOCKS_ENTRY_TYPE,
-    {
-      version: 1,
-      blocks: normalized,
-    },
-  );
-  return true;
 }
 
 export function applySessionBaseSystemPrompt(
@@ -484,7 +473,10 @@ export function clearSessionBaseSystemPrompt(
   applySessionBaseSystemPrompt(session, "");
 }
 
-export function ensureSessionBaseSystemPrompt(session: any): string {
+export function ensureSessionBaseSystemPrompt(
+  session: any,
+  initialPromptContext?: unknown,
+): string {
   if (!session || typeof session !== "object") return "";
   const state = session[LAZY_SYSTEM_PROMPT_STATE_KEY] as
     | LazySystemPromptState
@@ -497,13 +489,19 @@ export function ensureSessionBaseSystemPrompt(session: any): string {
   }
   if (!state.ignorePersistedPrompt) {
     const persisted = readPersistedSessionBaseSystemPrompt(session);
-    if (persisted) {
+    if (persisted.prompt) {
       state.materialized = true;
-      applySessionBaseSystemPrompt(session, persisted);
-      return persisted;
+      applySessionBaseSystemPrompt(session, persisted.prompt);
+      if (persisted.needsLegacySeal) {
+        persistSessionBaseSystemPrompt(session, persisted.prompt);
+      }
+      return persisted.prompt;
     }
   }
-  const next = state.compute(getSessionActiveToolNames(session));
+  const next = appendPromptContextSystemPrompt(
+    state.compute(getSessionActiveToolNames(session)),
+    initialPromptContext,
+  );
   state.materialized = true;
   state.ignorePersistedPrompt = false;
   applySessionBaseSystemPrompt(session, next);
@@ -520,61 +518,6 @@ export function appendPromptContextSystemPrompt(
   const base = String(systemPrompt || "").trimEnd();
   if (base.includes(block.trim())) return base;
   return base ? `${base}\n\n${block}` : block;
-}
-
-type PromptContextSystemPromptTransition = {
-  previousBlocks: string[];
-  nextPrompt: string;
-  nextBlocks: string[];
-  changed: boolean;
-};
-
-function preparePromptContextSystemPromptTransition(
-  session: any,
-  systemPrompt: string,
-  promptContext: unknown,
-): PromptContextSystemPromptTransition {
-  const previousPrompt = String(systemPrompt || "");
-  const block = formatPromptContextSystemPromptBlock(
-    promptContext as any,
-  ).trim();
-  const previousBlocks = readPersistedSessionSystemPromptBlocks(session);
-  if (!block) {
-    return {
-      previousBlocks,
-      nextPrompt: previousPrompt,
-      nextBlocks: previousBlocks,
-      changed: false,
-    };
-  }
-  const nextBlocks = [block];
-  const basePrompt = removeTrailingSystemPromptBlocks(
-    previousPrompt,
-    previousBlocks,
-  );
-  const nextPrompt = applyPersistedSystemPromptBlocks(basePrompt, nextBlocks);
-  return {
-    previousBlocks,
-    nextPrompt,
-    nextBlocks,
-    changed: previousBlocks.length !== 1 || previousBlocks[0] !== nextBlocks[0],
-  };
-}
-
-export function persistPromptContextSystemPrompt(
-  session: any,
-  systemPrompt: string,
-  promptContext: unknown,
-) {
-  const transition = preparePromptContextSystemPromptTransition(
-    session,
-    systemPrompt,
-    promptContext,
-  );
-  if (transition.changed) {
-    persistSessionSystemPromptBlocks(session, transition.nextBlocks);
-  }
-  return transition.nextPrompt;
 }
 
 function applyRinPromptBuilder(session: any) {
@@ -597,7 +540,6 @@ function applyRinPromptBuilder(session: any) {
       activeToolNames,
       agentDir: promptAgentDir,
       selfImprovePromptBlock: buildSelfImprovePromptBlock(promptAgentDir),
-      persistedBlocks: readPersistedSessionSystemPromptBlocks(session),
     });
   };
 
@@ -618,63 +560,33 @@ function applyRinPromptBuilder(session: any) {
     typeof session.prompt === "function" ? session.prompt.bind(session) : null;
   if (originalPrompt) {
     session.prompt = async (text: string, options?: any) => {
-      const basePrompt = ensureSessionBaseSystemPrompt(session);
-      const transition = preparePromptContextSystemPromptTransition(
-        session,
-        basePrompt,
-        options?.promptContext,
-      );
+      ensureSessionBaseSystemPrompt(session, options?.promptContext);
       const frontendIdentity = normalizeFrontendIdentity(
         options?.frontendIdentity,
       );
       const callerPreflightResult = options?.preflightResult;
-      let preflightObserved = false;
-      let promptAccepted = false;
-      if (transition.nextPrompt !== basePrompt) {
-        applySessionBaseSystemPrompt(session, transition.nextPrompt);
-      }
       const promptOptions = {
         ...(options || {}),
         preflightResult(accepted: boolean) {
-          preflightObserved = true;
-          if (accepted) {
-            if (transition.changed) {
-              persistSessionSystemPromptBlocks(session, transition.nextBlocks);
+          if (accepted && session.sessionManager) {
+            session.sessionManager.__rinLastPromptSource = String(
+              options?.source || "",
+            ).trim();
+            session.sessionManager.__rinLastPromptContext =
+              options?.promptContext;
+            if (frontendIdentity) {
+              session.sessionManager.__rinFrontend = frontendIdentity;
+            } else {
+              delete session.sessionManager.__rinFrontend;
             }
-            if (session.sessionManager) {
-              session.sessionManager.__rinLastPromptSource = String(
-                options?.source || "",
-              ).trim();
-              session.sessionManager.__rinLastPromptContext =
-                options?.promptContext;
-              if (frontendIdentity) {
-                session.sessionManager.__rinFrontend = frontendIdentity;
-              } else {
-                delete session.sessionManager.__rinFrontend;
-              }
-            }
-            promptAccepted = true;
-          } else if (transition.nextPrompt !== basePrompt) {
-            applySessionBaseSystemPrompt(session, basePrompt);
           }
           callerPreflightResult?.(accepted);
         },
       };
-      try {
-        const result = await originalPrompt(
-          formatPromptContext(options?.promptContext, text),
-          promptOptions,
-        );
-        if (!preflightObserved && transition.nextPrompt !== basePrompt) {
-          applySessionBaseSystemPrompt(session, basePrompt);
-        }
-        return result;
-      } catch (error) {
-        if (!promptAccepted && transition.nextPrompt !== basePrompt) {
-          applySessionBaseSystemPrompt(session, basePrompt);
-        }
-        throw error;
-      }
+      return await originalPrompt(
+        formatPromptContext(options?.promptContext, text),
+        promptOptions,
+      );
     };
   }
 
@@ -682,9 +594,11 @@ function applyRinPromptBuilder(session: any) {
     typeof session.reload === "function" ? session.reload.bind(session) : null;
   if (originalReload) {
     session.reload = async (...args: any[]) => {
+      const reloadPromptContext =
+        session.sessionManager?.__rinLastPromptContext;
       clearSessionBaseSystemPrompt(session, { ignorePersistedPrompt: true });
       const result = await originalReload(...args);
-      ensureSessionBaseSystemPrompt(session);
+      ensureSessionBaseSystemPrompt(session, reloadPromptContext);
       return result;
     };
   }

@@ -5,10 +5,7 @@ import {
   formatPromptContext,
   formatPromptContextSystemPromptBlock,
 } from "../../src/core/rin-frontend-sdk/prompt-context.js";
-import {
-  appendPromptContextSystemPrompt,
-  persistPromptContextSystemPrompt,
-} from "../../src/core/rin-lib/runtime.js";
+import { appendPromptContextSystemPrompt } from "../../src/core/rin-lib/runtime.js";
 
 test("chat prompt context persists dynamic sender metadata in the prompt text", () => {
   const meta = {
@@ -172,17 +169,8 @@ test("chat prompt context preserves sender-authored header-shaped text as body c
   assert.ok(promptText.endsWith(`---\n${headerShapedText}`));
 });
 
-test("prompt context system blocks persist only the latest binding state", () => {
-  const entries: any[] = [];
-  const session = {
-    sessionManager: {
-      getBranch: () => entries,
-      appendCustomEntry(customType: string, data: any) {
-        entries.push({ type: "custom", customType, data });
-      },
-    },
-  };
-  const meta = {
+test("prompt binding composes into the initial whole system prompt", () => {
+  const combined = appendPromptContextSystemPrompt("Base prompt", {
     source: "chat-bridge",
     chatKey: "telegram/1:2",
     chatName: "Original room",
@@ -190,44 +178,9 @@ test("prompt context system blocks persist only the latest binding state", () =>
     userId: "guest-1",
     nickname: "Guest",
     identity: "OTHER",
-  };
-
-  const next = persistPromptContextSystemPrompt(session, "Base prompt", meta);
-  assert.ok(next.startsWith("Base prompt\n\nChat context:"));
-  assert.equal(next.includes("- sender user id:"), false);
-  assert.deepEqual(entries, [
-    {
-      type: "custom",
-      customType: "rin-system-prompt-blocks",
-      data: {
-        version: 1,
-        blocks: [formatPromptContextSystemPromptBlock(meta)],
-      },
-    },
-  ]);
-
-  const repeated = persistPromptContextSystemPrompt(session, next, meta);
-  assert.equal(repeated, next);
-  assert.equal(entries.length, 1);
-
-  const renamedMeta = { ...meta, chatName: "Renamed room" };
-  const replaced = persistPromptContextSystemPrompt(
-    session,
-    repeated,
-    renamedMeta,
-  );
-  assert.equal(replaced.includes("Original room"), false);
-  assert.equal(replaced.includes("Renamed room"), true);
-  assert.deepEqual(entries.at(-1), {
-    type: "custom",
-    customType: "rin-system-prompt-blocks",
-    data: {
-      version: 1,
-      blocks: [formatPromptContextSystemPromptBlock(renamedMeta)],
-    },
   });
 
-  const combined = appendPromptContextSystemPrompt("Base prompt", meta);
-  assert.ok(combined.includes("Chat context:"));
+  assert.ok(combined.startsWith("Base prompt\n\nChat context:"));
+  assert.match(combined, /chat name: Original room/);
   assert.equal(combined.includes("- sender user id:"), false);
 });
