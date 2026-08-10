@@ -14,7 +14,7 @@ Use this page as Rin's capability index. It tells agents what runtime surfaces e
 | Chat bridge                              | Agent-owned chat adapter setup, outbound chat operations, stored chat inspection, identity/trust data, or detached chat turns | `settings.json -> chat`, Rin Agent SDK, chat message store | `docs/chat-bridge.md`, `docs/rich-text-output-format.md`       |
 | Todo                                     | Current-branch execution checklist during multi-step work                                                                     | `todo` tool, `/todos`                                      | live tool schema                                               |
 | Note                                     | Session-branch continuity that must survive compaction                                                                        | `note` tool                                                | live tool schema                                               |
-| Browser/computer/mobile/search operation | Web, desktop, mobile, or search work that needs the owner's current practice workflow                                         | live tool list, practice docs                              | `practices/README.md`                                          |
+| Browser/computer/mobile/search operation | Web, desktop, mobile, or search work supported by the current runtime                                                         | live tool list                                             | live tool schema                                               |
 | Extensions                               | Pi-native session extensions plus trusted daemon adapters for async services or external event/memory providers               | ordinary Pi extension/package configuration                | `docs/extensions.md`                                           |
 | Initialization                           | Owner asks to initialize, reset, or establish preferences                                                                     | initialization prompt flow                                 | `docs/initialization.md`                                       |
 
@@ -73,12 +73,7 @@ Use them for intentionally configured background event bridges, chat adapters, o
 
 ## Browser, computer, mobile, and search operation
 
-Use browser, desktop, mobile, or search tools from the live tool list when they are present. For current owner practice routing, read `practices/README.md`, then the narrow page:
-
-- `practices/browser/README.md`
-- `practices/computer/README.md`
-- `practices/mobile/README.md`
-- `practices/search/README.md`
+Use browser, desktop, mobile, or search tools only when they are present in the live tool list, and follow their current tool schemas.
 
 ## Stable documentation paths
 

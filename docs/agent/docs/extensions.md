@@ -9,7 +9,7 @@ The live tool list remains authoritative for the current turn.
 | Source                                   | Provides                                                                                                                                                                     | Configuration surface                                               | Agent route                                         |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------- |
 | Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, note, scheduled-task SDK workflows, agent-owned chat setup | built into Rin                                                      | use live tools, CLI, SDK, or topic docs             |
-| Browser/computer/mobile/search operation | browser, computer, mobile, or search tools supplied by the live runtime, plus documented practice patterns                                                                   | live tool list or external Pi extension config                      | read `practices/README.md`                          |
+| Browser/computer/mobile/search operation | browser, computer, mobile, or search tools supplied by the live runtime                                                                                                      | live tool list or external Pi extension config                      | follow the live tool schema                         |
 | Daemon extension adapter                 | trusted long-running services, chat adapters, and external memory providers                                                                                                  | ordinary Pi extension entries that also export `rinDaemonExtension` | inspect runtime state and relevant extension config |
 
 ## Rin core capabilities
@@ -82,15 +82,7 @@ This is a command-result channel, not an out-of-band notification API. Local med
 
 ## Browser, computer, mobile, and search operation
 
-Browser, desktop, mobile, and search tools are live-runtime capabilities. Use them when they appear in the live tool list.
-
-Use practice docs for current owner workflow routing and setup guidance:
-
-- route map: `practices/README.md`.
-- browser operation: `practices/browser/README.md`.
-- desktop operation: `practices/computer/README.md`.
-- mobile operation: `practices/mobile/README.md`.
-- search operation: `practices/search/README.md`.
+Browser, desktop, mobile, and search tools are live-runtime capabilities. Use them when they appear in the live tool list and follow their current schemas.
 
 Trusted third-party Pi extensions for browser or computer control are configured through normal Pi extension rules as explicit extension paths or packages.
 

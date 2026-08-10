@@ -310,11 +310,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   chat_turn_request_tag_missing: () =>
     "Chat turn recovery failed because its durable request identity is missing.",
 
-  agent_practices_fetch_failed: () =>
-    "Agent practice document refresh failed because a remote file could not be downloaded.",
-  agent_practices_fetch_unavailable: () =>
-    "Agent practice document refresh needs a runtime HTTP fetch implementation.",
-
   cron_chat_unavailable: () =>
     "Scheduled task delivery failed because the target chat is unavailable. Check the task frontend binding.",
   cron_frontend_key_required: () =>
@@ -817,8 +812,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Telegram adapter needs a bot token before it can start. Add the token.",
 
   unknown_model: modelNotFound,
-  unknown_docs_internal_command: () =>
-    "Internal document maintenance command is unknown.",
   unknown_run_option: (detail) =>
     withDetail(
       "Unknown run option",

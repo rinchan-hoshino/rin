@@ -78,11 +78,6 @@
       "subject": "refactor(chat): centralize chat target type inference"
     },
     {
-      "file": "tests/characterization/cron-hidden-builtin.test.ts",
-      "introducedBy": "ed0dc622",
-      "subject": "feat: sync agent practices docs"
-    },
-    {
       "file": "tests/characterization/daemon-worker-pool.test.ts",
       "introducedBy": "84dda24a",
       "subject": "Inline daemon catalog queries in main process"
@@ -201,11 +196,6 @@
       "file": "tests/characterization/platform.test.ts",
       "introducedBy": "70addd7a",
       "subject": "refactor: stabilize runtime boundaries and dist-only flow"
-    },
-    {
-      "file": "tests/characterization/practices-sync.test.ts",
-      "introducedBy": "ed0dc622",
-      "subject": "feat: sync agent practices docs"
     },
     {
       "file": "tests/characterization/release.test.ts",

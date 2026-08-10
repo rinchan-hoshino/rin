@@ -65,23 +65,10 @@ test("cron scheduler installs protected built-ins and exposes filtered status", 
         includeBuiltIn: true,
         includeHidden: true,
       });
-      assert.equal(allBuiltIns.length, 3);
+      assert.equal(allBuiltIns.length, 2);
       assert.equal(
         allBuiltIns.some((task) => task.hidden),
-        true,
-      );
-      assert.equal(
-        scheduler.getTask("builtin_agent_practices_docs_sync_daily", {
-          includeBuiltIn: true,
-        }),
-        undefined,
-      );
-      assert.equal(
-        scheduler.getTask("builtin_agent_practices_docs_sync_daily", {
-          includeBuiltIn: true,
-          includeHidden: true,
-        })?.hidden,
-        true,
+        false,
       );
       assert.equal(scheduler.getTask("missing"), undefined);
 
@@ -89,8 +76,8 @@ test("cron scheduler installs protected built-ins and exposes filtered status", 
         includeBuiltIn: true,
         includeHidden: true,
       });
-      assert.equal(status.taskCount, 3);
-      assert.equal(status.enabledTaskCount, 3);
+      assert.equal(status.taskCount, 2);
+      assert.equal(status.enabledTaskCount, 2);
       assert.equal(status.runningTaskCount, 0);
       assert.equal(status.builtInTaskCount, 2);
       assert.ok(status.nextRunAt);
@@ -109,6 +96,51 @@ test("cron scheduler installs protected built-ins and exposes filtered status", 
       scheduler.stop();
     }
     assert.equal(fs.existsSync(cronTasksPath(agentDir)), true);
+  });
+});
+
+test("cron scheduler removes persisted built-ins that are no longer defined", async () => {
+  await withAgentDir(async (agentDir) => {
+    const filePath = cronTasksPath(agentDir);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(
+      filePath,
+      `${JSON.stringify([
+        {
+          id: "builtin_retired_example",
+          builtIn: true,
+          hidden: true,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+          name: "Retired built-in",
+          enabled: true,
+          trigger: { expression: "0 0 * * *", timezone: "local" },
+          session: { mode: "none" },
+          target: { kind: "shell_command", command: "echo stale" },
+          quiet: true,
+          runCount: 1,
+          running: false,
+        },
+      ])}\n`,
+      "utf8",
+    );
+
+    const scheduler = new CronScheduler({ agentDir });
+    scheduler.start();
+    scheduler.stop();
+
+    assert.equal(
+      scheduler.getTask("builtin_retired_example", {
+        includeBuiltIn: true,
+        includeHidden: true,
+      }),
+      undefined,
+    );
+    const persisted = JSON.parse(fs.readFileSync(filePath, "utf8")) as any[];
+    assert.equal(
+      persisted.some((task) => task.id === "builtin_retired_example"),
+      false,
+    );
   });
 });
 

@@ -38,7 +38,7 @@ Read `docs/memory-layering.md`, `docs/self-improve-distillation.md`, and `docs/c
 
 ### Capabilities
 
-Use the live tool list for the current turn and Rin capability docs for installed behavior. Rin-owned agent surfaces include archived recall, core todo, scheduled tasks, and chat bridge configuration. Browser, computer, mobile, and search operations are available only when the live runtime exposes the needed tools; route those tasks through `practices/README.md`.
+Use the live tool list for the current turn and Rin capability docs for installed behavior. Rin-owned agent surfaces include archived recall, core todo, scheduled tasks, and chat bridge configuration. Browser, computer, mobile, and search operations are available only when the live runtime exposes the needed tools; follow their current tool schemas.
 
 Read `docs/extensions.md` and `docs/capabilities.md` for the current Rin layer.
 

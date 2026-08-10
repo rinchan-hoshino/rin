@@ -353,33 +353,6 @@ function createBuiltInMemoryIndexRepairTask(agentDir: string): CronTaskRecord {
   return task;
 }
 
-function createBuiltInAgentPracticesDocsSyncTask(
-  agentDir: string,
-): CronTaskRecord {
-  const createdAt = nowIso();
-  const command = `${shellQuote(process.execPath)} ${shellQuote(path.join(agentDir, "app", "current", "dist", "app", "rin", "main.js"))} __docs_internal sync-practices`;
-  const task: CronTaskRecord = {
-    id: "builtin_agent_practices_docs_sync_daily",
-    builtIn: true,
-    hidden: true,
-    createdAt,
-    updatedAt: createdAt,
-    name: "Sync agent practices docs",
-    enabled: true,
-    trigger: {
-      expression: "23 4 * * *",
-      timezone: "local",
-    },
-    session: { mode: "none" },
-    target: { kind: "shell_command", command },
-    quiet: true,
-    runCount: 0,
-    running: false,
-  };
-  task.nextRunAt = computeNextRunAt(task, Date.now());
-  return task;
-}
-
 function createBuiltInSelfImproveSleepConsolidationTask(
   agentDir: string,
 ): CronTaskRecord {
@@ -921,7 +894,7 @@ export class CronScheduler {
     const previousTasks = this.tasks;
     this.tasks = loadedTasks;
     this.persistenceBlocked = false;
-    this.installBuiltInTasks();
+    this.reconcileBuiltInTasks();
     if (options.terminateRemovedActiveTasks) {
       for (const [taskId, previousTask] of previousTasks) {
         if (!this.activeExecutions.has(taskId)) continue;
@@ -1049,12 +1022,15 @@ export class CronScheduler {
     return current;
   }
 
-  private installBuiltInTasks() {
+  private reconcileBuiltInTasks() {
     const builtins = [
       createBuiltInMemoryIndexRepairTask(this.options.agentDir),
       createBuiltInSelfImproveSleepConsolidationTask(this.options.agentDir),
-      createBuiltInAgentPracticesDocsSyncTask(this.options.agentDir),
     ];
+    const currentIds = new Set(builtins.map((task) => task.id));
+    for (const [taskId, task] of this.tasks) {
+      if (task.builtIn && !currentIds.has(taskId)) this.tasks.delete(taskId);
+    }
     for (const builtin of builtins) {
       const existing = this.tasks.get(builtin.id);
       this.tasks.set(builtin.id, mergeBuiltInTaskState(existing, builtin));

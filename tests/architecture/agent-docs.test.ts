@@ -34,22 +34,11 @@ test("agent docs expose scheduled task operation workflow", () => {
   const chatBridge = readAgentDoc("docs/chat-bridge.md");
   const richText = readAgentDoc("docs/rich-text-output-format.md");
   const initialization = readAgentDoc("docs/initialization.md");
-  const practiceIndex = readAgentDoc("practices/README.md");
-  const browserUsePractice = readAgentDoc("practices/browser/README.md");
-  const computerUsePractice = readAgentDoc("practices/computer/README.md");
-  const mobileUsePractice = readAgentDoc("practices/mobile/README.md");
-  const androidPractice = readAgentDoc("practices/mobile/android.md");
-  const searchPractice = readAgentDoc("practices/search/README.md");
 
   assert.match(readme, /docs\/agent-sdk\.md/);
   assert.match(readme, /docs\/scheduled-tasks\.md/);
   assert.match(readme, /docs\/chat-bridge\.md/);
   assert.match(readme, /docs\/initialization\.md/);
-  assert.match(readme, /practices\/README\.md/);
-  assert.match(readme, /practices\/browser\/README\.md/);
-  assert.match(readme, /practices\/computer\/README\.md/);
-  assert.match(readme, /practices\/mobile\/README\.md/);
-  assert.match(readme, /practices\/search\/README\.md/);
   assert.match(capabilities, /agent-sdk\.md/);
   assert.match(capabilities, /scheduled-tasks\.md/);
   assert.match(capabilities, /chat-bridge\.md/);
@@ -135,41 +124,6 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.doesNotMatch(builtinCapabilities, /provides `run_subagent`/);
   assert.doesNotMatch(builtinCapabilities, /rin:browser-use/);
   assert.doesNotMatch(capabilities, /bundled `browser_use`/);
-
-  assert.match(practiceIndex, /# Agent Practices/);
-  assert.match(practiceIndex, /## Route map/);
-  assert.match(practiceIndex, /## General contract/);
-  assert.match(practiceIndex, /browser\/README\.md/);
-  assert.match(practiceIndex, /computer\/README\.md/);
-  assert.match(practiceIndex, /mobile\/README\.md/);
-  assert.match(practiceIndex, /search\/README\.md/);
-  assert.match(practiceIndex, /~\/\.rin\/docs\/rin\/practices\//);
-  assert.doesNotMatch(practiceIndex, /Best Practices/i);
-  assert.match(browserUsePractice, /Selection rule/);
-  assert.match(browserUsePractice, /Brave \+ agent-browser baseline/);
-  assert.match(browserUsePractice, /Headful Brave \+ agent-browser/);
-  assert.match(browserUsePractice, /Evidence bundle/);
-  assert.doesNotMatch(browserUsePractice, /approved browser\/account workflow/);
-  assert.doesNotMatch(browserUsePractice, /rinchan-vm-browser-workflow/);
-  assert.doesNotMatch(browserUsePractice, /Rin does not ship/);
-  assert.match(computerUsePractice, /Selection rule/);
-  assert.match(computerUsePractice, /Windows/);
-  assert.match(computerUsePractice, /Linux/);
-  assert.match(computerUsePractice, /macOS/);
-  assert.match(computerUsePractice, /Evidence bundle/);
-  assert.doesNotMatch(computerUsePractice, /Rin does not ship/);
-  assert.doesNotMatch(computerUsePractice, /approved Windows-agent/);
-  assert.doesNotMatch(computerUsePractice, /RinWin11/);
-  assert.match(mobileUsePractice, /Android/);
-  assert.match(mobileUsePractice, /Evidence bundle/);
-  assert.match(androidPractice, /android-screen-before\.png/);
-  assert.match(androidPractice, /android-screen-after\.png/);
-  assert.doesNotMatch(androidPractice, /> \/tmp\/android-screen\.png/);
-  assert.match(searchPractice, /Google URL/);
-  assert.match(searchPractice, /SearXNG/);
-  assert.match(searchPractice, /explicitly authorizes installing/);
-  assert.match(searchPractice, /Do not overwrite an existing Compose file/);
-  assert.match(searchPractice, /Evidence bundle/);
 
   for (const helper of [
     "rin.tasks.list",

@@ -36,11 +36,6 @@ Use these docs as the Rin-specific layer above upstream Pi docs.
 - `docs/scheduled-tasks.md`: scheduled task creation, inspection, update, deletion, and verification.
 - `docs/chat-bridge.md`: chat bridge SDK/configuration workflows, stored chat paths, and adapter notes.
 - `docs/rich-text-output-format.md`: native mentions, quotes/replies, attachments, files/images, and fallback syntax.
-- `practices/README.md`: route browser, computer, mobile, and search work to the current practice pages.
-- `practices/browser/README.md`: browser operation using the owner's external browser workflow.
-- `practices/computer/README.md`: desktop operation patterns for Linux, Windows, macOS, and local/remote work.
-- `practices/mobile/README.md`: mobile operation patterns.
-- `practices/search/README.md`: web search patterns, including direct Google URLs and optional SearXNG.
 
 ## Source and installed locations
 

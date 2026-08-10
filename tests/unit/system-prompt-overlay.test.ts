@@ -38,28 +38,28 @@ function applyOverlay(input: Record<string, any>) {
 
 const NATIVE_PROMPT_BASELINE = {
   default: {
-    hash: "f587e13575c40162ee83391d15a97e615fd739f6044c3a47c74f3c037fdb26f2",
-    length: 5441,
+    hash: "48f07c3a9ffbf539bea46dd6a83a24c3b1a050afafabcdb32724dec62bccef29",
+    length: 5376,
   },
   languageAppend: {
-    hash: "d5690590c619085eba1be8d3c1f5d25a8c336381aaf1cb5a66a962438e2d4253",
-    length: 5455,
+    hash: "914b937abe76e1c322f1d3184f9ffb3da433b73c0538378bb9e8718875e3739d",
+    length: 5390,
   },
   custom: {
-    hash: "3d1b536c80c1fde077d01c6c8911a0536e6dc20a2ec0f3e78c4edf2151a7621d",
-    length: 1797,
+    hash: "419648d8f6600d633a7539d9a7746da9514b9a24266861fd688e526fbcf6515d",
+    length: 1732,
   },
   contextSkillSelf: {
-    hash: "22243c474f0231597debc254e1b6e7a4cfd58955d566bed5e67e2f81ccc37e12",
-    length: 6158,
+    hash: "ab03f57abaaa936adc3aa73d0d851a3a727d1de73df4e7fc72d1de4e5ecec118",
+    length: 6093,
   },
   readTodo: {
-    hash: "08426955e440dc9ca0d4dfcb8f8c1ac8232fbc654261c731642f5cf40f831c59",
-    length: 3913,
+    hash: "fdd61f7778566c3186bbe194bdf1a019966377877932663a046d40172a9de312",
+    length: 3848,
   },
   noTools: {
-    hash: "e7301d7e95ee0ba0acf4fd0423fd6e61057ef45500ceb4e8832b800402373d1a",
-    length: 3218,
+    hash: "87ba8839e718e5a8192748cb41ff708eb7e690faf0702483a29b4b6f56877026",
+    length: 3153,
   },
 } as const;
 
@@ -715,6 +715,7 @@ test("Pi-native overlay preserves native content across six prompt scenarios", a
     assert.doesNotMatch(prompt, /Current working directory:/);
     assert.doesNotMatch(prompt, /Current date:/);
     assert.doesNotMatch(prompt, /Preferred language:/);
+    assert.doesNotMatch(prompt, /practices\/README\.md/);
   }
   assert.match(
     actual.default,

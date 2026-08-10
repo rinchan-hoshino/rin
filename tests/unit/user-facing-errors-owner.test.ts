@@ -7,9 +7,7 @@ const errors = await import(
   pathToFileURL(path.resolve("dist/core/rin-lib/user-facing-errors.js")).href
 );
 
-const OWNED_MARKERS = `agent_practices_fetch_failed
-agent_practices_fetch_unavailable
-daemon_extension_entrypoint_missing
+const OWNED_MARKERS = `daemon_extension_entrypoint_missing
 chat_accepted_inbound_turn_not_active
 chat_archive_header_compare_and_swap_failed
 chat_archive_hot_delete_failed
@@ -363,7 +361,6 @@ transcript_search_install_migration_required
 transcript_search_install_publish_guard_missing
 transcript_search_install_staging_path_invalid
 transcript_search_install_staging_schema_mismatch
-unknown_docs_internal_command
 unknown_error
 unknown_model
 unknown_run_option
@@ -372,7 +369,7 @@ web_fetch_invalid_url`
   .split(/\s+/);
 
 test("every owned runtime marker has a human-facing formatter", () => {
-  assert.equal(OWNED_MARKERS.length, 361);
+  assert.equal(OWNED_MARKERS.length, 358);
   assert.equal(new Set(OWNED_MARKERS).size, OWNED_MARKERS.length);
   for (const marker of OWNED_MARKERS) {
     assert.equal(errors.hasUserFacingRuntimeErrorMapping(marker), true, marker);

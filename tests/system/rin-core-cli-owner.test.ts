@@ -46,7 +46,6 @@ for (const [marker, expected] of [
   ["__self_improve_internal", "self-improve-internal"],
   ["__status_internal", "status-internal"],
   ["__tasks_internal", "tasks-internal"],
-  ["__docs_internal", "docs-internal"],
 ]) {
   const dispatch = main.resolveInternalRinDispatch([marker, "owner"]);
   assert.deepEqual(dispatch.args, ["owner"]);
@@ -68,7 +67,6 @@ async function run(argv) {
 }
 try {
   await run(["version"]);
-  await run(["__docs_internal", "manual"]);
   await run(["-p", "--help"]);
   await run(["--help"]);
   await run(["-p", "owner prompt"]);
@@ -152,7 +150,6 @@ test("Rin core CLI dispatches every local, internal, target, and default command
       [["__self_improve_internal"], "dist/core/rin/self-improve.js"],
       [["__status_internal"], "dist/core/rin/status.js"],
       [["__tasks_internal"], "dist/core/rin/tasks.js"],
-      [["__docs_internal"], "dist/core/rin/docs.js"],
       [["-p", "owner prompt"], "dist/core/rin/run.js"],
       [["target", "list"], "dist/core/rin/targets.js"],
       [["status", "--target=remote"], "dist/core/rin-targets/runner.js"],

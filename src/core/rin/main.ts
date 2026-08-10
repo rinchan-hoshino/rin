@@ -52,11 +52,6 @@ const INTERNAL_COMMANDS = [
     command: "tasks",
     loadRun: async () => (await import("./tasks.js")).runTasksInternal,
   },
-  {
-    marker: "__docs_internal",
-    command: "",
-    loadRun: async () => (await import("./docs.js")).runDocsInternal,
-  },
 ] as const;
 
 async function createCli() {

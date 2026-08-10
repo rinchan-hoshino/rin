@@ -293,12 +293,6 @@
       "tests": ["tests/integration/chat-transport-owner.test.ts"]
     },
     {
-      "source": "src/core/docs/practices-sync.ts",
-      "built": "dist/core/docs/practices-sync.js",
-      "suite": "integration",
-      "tests": ["tests/integration/practices-sync.test.ts"]
-    },
-    {
       "source": "src/core/http/transport.ts",
       "built": "dist/core/http/transport.js",
       "suite": "integration",
@@ -949,12 +943,6 @@
       "built": "dist/core/rin/control.js",
       "suite": "integration",
       "tests": ["tests/integration/rin-control-owner.test.ts"]
-    },
-    {
-      "source": "src/core/rin/docs.ts",
-      "built": "dist/core/rin/docs.js",
-      "suite": "integration",
-      "tests": ["tests/integration/rin-docs-owner.test.ts"]
     },
     {
       "source": "src/core/rin/doctor.ts",
