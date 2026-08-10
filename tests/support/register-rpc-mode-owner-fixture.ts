@@ -10,8 +10,10 @@ const rootDir = path.resolve(
 const target = "dist/core/rin-daemon/rpc-mode.js";
 const modules = {
   "dist/core/pi/session-host.js": [
+    "canResumePiSessionRetry",
     "emitPiSessionEvent",
     "refreshPiSessionToolRegistry",
+    "resumePiSessionRetry",
     "resumePiSessionTurn",
   ],
   "dist/core/session/factory.js": [

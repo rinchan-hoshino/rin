@@ -27,8 +27,10 @@ import {
   type RinTurnTerminalOutcome,
 } from "../rin-frontend-sdk/turn-completion.js";
 import {
+  canResumePiSessionRetry,
   emitPiSessionEvent,
   refreshPiSessionToolRegistry,
+  resumePiSessionRetry,
   resumePiSessionTurn,
 } from "../pi/session-host.js";
 import { safeString } from "../text-utils.js";
@@ -351,7 +353,9 @@ function isInterruptedTurnResumable(session: any) {
     return true;
   }
   if (lastMessage.role !== "assistant") return false;
-  if (isAssistantFailureMessage(lastMessage)) return false;
+  if (isAssistantFailureMessage(lastMessage)) {
+    return canResumePiSessionRetry(session);
+  }
   return extractPiContinuableToolCallParts(lastMessage).length > 0;
 }
 
@@ -360,6 +364,19 @@ async function resumeInterruptedTurn(session: any) {
     ? session.agent.state.messages
     : [];
   if (!messages.length) return;
+  const originalLastMessage = messages.at(-1);
+  if (isAssistantFailureMessage(originalLastMessage)) {
+    const retryResume = await resumePiSessionRetry(session);
+    if (retryResume.status === "exhausted") {
+      return {
+        finalText: safeString(session.getLastAssistantText?.()),
+        result: { messages: [originalLastMessage] },
+        retryFailure: retryResume.retryFailure,
+      };
+    }
+    return;
+  }
+
   const appendedInterruption = appendInterruptedToolResults(session);
   const lastMessage = session.agent.state.messages.at(-1);
   if (!appendedInterruption && lastMessage?.role === "assistant") {
@@ -1794,10 +1811,13 @@ export async function runCustomRpcMode(
         if (!isInterruptedTurnResumable(session)) {
           return done(id, type, { resumed: false });
         }
-        startInterruptTurnTask(
-          requestTag,
-          async () => await resumeInterruptedTurn(session),
-        );
+        startInterruptTurnTask(requestTag, async () => {
+          const result = await resumeInterruptedTurn(session);
+          if (result?.retryFailure) {
+            latestAutoRetryFailure = result.retryFailure;
+          }
+          return result;
+        });
         return done(id, type, { resumed: true, requestTag });
       }
       case "clear_queue":

@@ -21,8 +21,11 @@ function wait(ms = 0) {
 async function exerciseResumeInterruptedTurn(
   stateMessages: any[],
   options: {
+    maxRetries?: number;
+    retryableError?: boolean;
     onRunAgentPrompt?: (context: {
       emit: (event: any) => void;
+      retryAttempt: number;
       stateMessages: any[];
     }) => Promise<void> | void;
   } = {},
@@ -32,8 +35,12 @@ async function exerciseResumeInterruptedTurn(
   const handlers = new Map();
   const lines: string[] = [];
   const calls: any[] = [];
+  const durableMessages = [...stateMessages];
   const sessionSubscribers = new Set<(event: any) => void>();
   const emit = (event: any) => {
+    if (event?.type === "message_end" && event.message) {
+      durableMessages.push(event.message);
+    }
     for (const handler of sessionSubscribers) handler(event);
   };
 
@@ -63,9 +70,24 @@ async function exerciseResumeInterruptedTurn(
         sessionSubscribers.add(handler);
         return () => sessionSubscribers.delete(handler);
       },
+      settingsManager: {
+        getRetrySettings: () => ({
+          enabled: true,
+          maxRetries: options.maxRetries ?? 3,
+        }),
+      },
+      _isRetryableError: (message: any) =>
+        options.retryableError === true &&
+        message?.role === "assistant" &&
+        message?.stopReason === "error",
+      _retryAttempt: 0,
       _runAgentPrompt: async (messages: any[]) => {
         calls.push(["runAgentPrompt", messages]);
-        await options.onRunAgentPrompt?.({ emit, stateMessages });
+        await options.onRunAgentPrompt?.({
+          emit,
+          retryAttempt: session._retryAttempt,
+          stateMessages: session.agent.state.messages,
+        });
       },
       prompt: async () => {},
       steer: async () => {},
@@ -75,10 +97,11 @@ async function exerciseResumeInterruptedTurn(
       sessionManager: {
         appendMessage: (message: any) => {
           calls.push(["appendMessage", message]);
+          durableMessages.push(message);
         },
         getEntries: () => [],
         getBranch: () =>
-          stateMessages.map((message, index) => ({
+          durableMessages.map((message: any, index: number) => ({
             id: `message-${index}`,
             parentId: index > 0 ? `message-${index - 1}` : null,
             type: "message",
@@ -86,8 +109,8 @@ async function exerciseResumeInterruptedTurn(
           })),
         getTree: () => [],
         getLeafId: () =>
-          stateMessages.length > 0
-            ? `message-${stateMessages.length - 1}`
+          durableMessages.length > 0
+            ? `message-${durableMessages.length - 1}`
             : null,
         getCwd: () => process.cwd(),
         getSessionDir: () => process.cwd(),
@@ -222,6 +245,105 @@ test(
         false,
       );
     }
+  },
+);
+
+test(
+  "rpc interrupted-turn recovery restores Pi retry budget without replaying prompt input",
+  { concurrency: false },
+  async () => {
+    const baseMessage = { role: "toolResult", content: [] };
+    const providerError = {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "fetch failed",
+      content: [],
+    };
+    const finalMessage = {
+      role: "assistant",
+      stopReason: "stop",
+      content: [{ type: "text", text: "recovered" }],
+    };
+    const { calls, lines } = await exerciseResumeInterruptedTurn(
+      [baseMessage, providerError],
+      {
+        retryableError: true,
+        onRunAgentPrompt: ({ emit, retryAttempt, stateMessages }) => {
+          assert.equal(retryAttempt, 1);
+          assert.deepEqual(stateMessages, [baseMessage]);
+          stateMessages.push(finalMessage);
+          emit({ type: "message_end", message: finalMessage });
+          emit({ type: "agent_settled" });
+        },
+      },
+    );
+
+    assert.deepEqual(
+      calls.filter(([name]) => name === "runAgentPrompt"),
+      [["runAgentPrompt", []]],
+    );
+    const payloads = lines
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return undefined;
+        }
+      })
+      .filter(Boolean);
+    assert.equal(
+      payloads.find((payload) => payload?.id === "2")?.data?.resumed,
+      true,
+    );
+    assert.equal(
+      payloads.filter(
+        (payload) =>
+          payload?.type === "rpc_turn_event" && payload?.event === "complete",
+      ).length,
+      1,
+    );
+  },
+);
+
+test(
+  "rpc interrupted-turn recovery settles already exhausted retries once",
+  { concurrency: false },
+  async () => {
+    const errors = Array.from({ length: 4 }, (_, index) => ({
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: `fetch failed ${index + 1}`,
+      content: [],
+    }));
+    const { calls, lines } = await exerciseResumeInterruptedTurn(
+      [{ role: "user", content: [] }, ...errors],
+      { retryableError: true, maxRetries: 3 },
+    );
+
+    assert.equal(
+      calls.some(([name]) => name === "runAgentPrompt"),
+      false,
+      "an exhausted Pi retry budget must not issue another provider request",
+    );
+    const payloads = lines
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return undefined;
+        }
+      })
+      .filter(Boolean);
+    const terminalErrors = payloads.filter(
+      (payload) =>
+        payload?.type === "rpc_turn_event" && payload?.event === "error",
+    );
+    assert.equal(terminalErrors.length, 1);
+    assert.equal(terminalErrors[0]?.error, "fetch failed 4");
+    assert.deepEqual(terminalErrors[0]?.retryFailure, {
+      attempt: 3,
+      finalError: "fetch failed 4",
+    });
   },
 );
 

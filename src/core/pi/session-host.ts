@@ -26,6 +26,8 @@ const PI_SESSION_PRIVATE = {
   rebuildSystemPrompt: "_rebuildSystemPrompt",
   refreshToolRegistry: "_refreshToolRegistry",
   resourceLoader: "_resourceLoader",
+  retryAttempt: "_retryAttempt",
+  isRetryableError: "_isRetryableError",
   runAgentPrompt: "_runAgentPrompt",
   rewriteFile: "_rewriteFile",
   runAutoCompaction: "_runAutoCompaction",
@@ -253,6 +255,102 @@ export function refreshPiSessionToolRegistry(session: any) {
 
 export function emitPiSessionEvent(session: any, event: any) {
   return session?.[PI_SESSION_PRIVATE.emit]?.(event);
+}
+
+type PiSessionRetryResumePlan = {
+  baseMessages: any[];
+  errors: any[];
+  maxRetries: number;
+};
+
+function createPiSessionRetryResumePlan(
+  session: any,
+): PiSessionRetryResumePlan | undefined {
+  const messages = session?.agent?.state?.messages;
+  const retrySettings = session?.settingsManager?.getRetrySettings?.();
+  const isRetryableError = bindMethod(
+    session,
+    PI_SESSION_PRIVATE.isRetryableError,
+  );
+  const rawMaxRetries = Number(retrySettings?.maxRetries);
+  const maxRetries = Number.isFinite(rawMaxRetries)
+    ? Math.max(0, Math.trunc(rawMaxRetries))
+    : -1;
+  if (
+    !Array.isArray(messages) ||
+    retrySettings?.enabled !== true ||
+    maxRetries < 0 ||
+    !isRetryableError
+  ) {
+    return undefined;
+  }
+
+  let index = messages.length - 1;
+  const errors: any[] = [];
+  while (index >= 0) {
+    const message = messages[index];
+    if (
+      message?.role !== "assistant" ||
+      message?.stopReason !== "error" ||
+      !isRetryableError(message)
+    ) {
+      break;
+    }
+    errors.unshift(message);
+    index -= 1;
+  }
+  if (errors.length === 0 || errors.length > maxRetries + 1) {
+    return undefined;
+  }
+
+  const baseMessages = messages.slice(0, index + 1);
+  const baseLastMessage = baseMessages.at(-1);
+  if (
+    baseLastMessage?.role !== "user" &&
+    baseLastMessage?.role !== "toolResult"
+  ) {
+    return undefined;
+  }
+  return { baseMessages, errors, maxRetries };
+}
+
+export function canResumePiSessionRetry(session: any) {
+  return createPiSessionRetryResumePlan(session) !== undefined;
+}
+
+export async function resumePiSessionRetry(session: any): Promise<
+  | { status: "continued"; attempt: number }
+  | {
+      status: "exhausted";
+      retryFailure: { attempt: number; finalError: string };
+    }
+> {
+  const plan = createPiSessionRetryResumePlan(session);
+  if (!plan) {
+    throw new Error("Pi AgentSession retry continuation is unavailable");
+  }
+  const lastError = plan.errors.at(-1);
+  if (plan.errors.length === plan.maxRetries + 1) {
+    return {
+      status: "exhausted",
+      retryFailure: {
+        attempt: plan.maxRetries,
+        finalError: String(lastError?.errorMessage || "Unknown error"),
+      },
+    };
+  }
+
+  const runAgentPrompt = bindMethod(session, PI_SESSION_PRIVATE.runAgentPrompt);
+  if (!runAgentPrompt) {
+    throw new Error("Pi AgentSession continuation runner is unavailable");
+  }
+  session.agent.state.messages = plan.baseMessages;
+  session[PI_SESSION_PRIVATE.retryAttempt] = plan.errors.length;
+  // The durable assistant errors prove which Pi provider attempts completed.
+  // Restore Pi's in-memory retry counter, then invoke its unchanged session
+  // runner without persisting or replaying user input.
+  await runAgentPrompt([]);
+  return { status: "continued", attempt: plan.errors.length };
 }
 
 export async function resumePiSessionTurn(session: any) {
