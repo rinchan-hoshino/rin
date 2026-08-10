@@ -382,11 +382,6 @@
       "built": "dist/core/self-improve/relevance.js"
     },
     {
-      "test": "tests/unit/self-improve-restricted-tools.test.ts",
-      "source": "src/core/self-improve/restricted-tools.ts",
-      "built": "dist/core/self-improve/restricted-tools.js"
-    },
-    {
       "test": "tests/unit/self-improve-skill-usage.test.ts",
       "source": "src/core/self-improve/skill-usage.ts",
       "built": "dist/core/self-improve/skill-usage.js"

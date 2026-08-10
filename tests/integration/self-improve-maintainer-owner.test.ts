@@ -121,13 +121,9 @@ const bindEvent = globalThis.__rinMaintainerOwnerEvents.find(([name]) => name ==
 assert.equal(bindEvent[1].cwd, "/workspace/project");
 assert.equal(bindEvent[1].agentDir, agentDir);
 assert.deepEqual(bindEvent[1].additionalExtensionPaths, ["/extensions/owner.ts"]);
-assert.deepEqual(bindEvent[1].disabledRinCapabilities, [
-  "self_improve",
-  "task",
-  "chat",
-  "todo",
-  "note",
-]);
+assert.equal("tools" in bindEvent[1], false);
+assert.equal("customTools" in bindEvent[1], false);
+assert.equal("disabledRinCapabilities" in bindEvent[1], false);
 const promptEvent = globalThis.__rinMaintainerOwnerEvents.find(([name]) => name === "prompt");
 assert.match(promptEvent[1], /Trigger context.*owner-trigger/);
 assert.deepEqual(promptEvent[2], {

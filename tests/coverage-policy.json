@@ -1414,12 +1414,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/self-improve/restricted-tools.ts",
-      "built": "dist/core/self-improve/restricted-tools.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
       "source": "src/core/self-improve/run-audit.ts",
       "built": "dist/core/self-improve/run-audit.js",
       "ownerSuite": "integration",

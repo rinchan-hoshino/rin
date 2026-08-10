@@ -15,21 +15,12 @@ import { resolveAgentDir } from "./agent-dir.js";
 import { safeString } from "./core/utils.js";
 import { maintenanceLockPath } from "./paths.js";
 import { buildSelfImproveReviewPrompt } from "./prompt.js";
-import { createSelfImproveMutationTools } from "./restricted-tools.js";
 import {
   beginSelfImproveAuditObservation,
   completeSelfImproveAuditObservation,
 } from "./audit-observer.js";
 
 export { buildSelfImproveReviewPrompt };
-
-export function createSelfImproveMaintainerToolOptions(agentDir: string) {
-  return {
-    tools: ["read", "write", "edit"],
-    customTools: createSelfImproveMutationTools(agentDir),
-    disabledRinCapabilities: ["self_improve", "task", "chat", "todo", "note"],
-  };
-}
 
 type ExtensionCtxLike = {
   model?: Model<any> | null;
@@ -91,7 +82,6 @@ async function runForkedSessionPrompt(options: {
     cwd: fork.cwd,
     agentDir: options.agentDir,
     additionalExtensionPaths: options.additionalExtensionPaths,
-    ...createSelfImproveMaintainerToolOptions(options.agentDir),
     sessionManager: fork.sessionManager,
     // Keep the source session's model options so provider prefix caching
     // matches a normal appended turn on the same conversation.

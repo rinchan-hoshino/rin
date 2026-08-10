@@ -12,7 +12,7 @@ Conversation is evidence, not authority to execute unfinished work. A one-off de
 
 ### Turn-window
 
-Use only the supplied recent window. Extract candidates, then read the one likely owner for each survivor; that owner is the cleanup neighborhood. Perform local garbage collection before deciding whether behavior is missing: delete stale, duplicated, narrower, historical, or overlong guidance; merge equivalent rules; rewrite toward one canonical target state. Do this even when the candidate is already covered. If the window implicates no reusable owner, make no change. Do not inventory unrelated prompts, skills, memory, or usage state.
+Use the complete supplied source conversation through its pinned leaf; the turn window controls review cadence, not the evidence boundary. Extract candidates, then read the one likely owner for each survivor; that owner is the cleanup neighborhood. Perform local garbage collection before deciding whether behavior is missing: delete stale, duplicated, narrower, historical, or overlong guidance; merge equivalent rules; rewrite toward one canonical target state. Do this even when the candidate is already covered. If the conversation implicates no reusable owner, make no change. Do not inventory unrelated prompts, skills, memory, or usage state.
 
 ### Nightly-retrospective
 

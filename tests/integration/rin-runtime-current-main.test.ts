@@ -13,11 +13,6 @@ const runtimeMod = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "runtime.js"))
     .href
 );
-const selfImproveMaintainerMod = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "self-improve", "maintainer.js"),
-  ).href
-);
 const postCompactionStateMod = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-lib", "post-compaction-state.js"),
@@ -76,48 +71,6 @@ test("Rin core registers the private session note capability", () => {
     note.tools?.map((tool) => tool.name),
     ["note"],
   );
-});
-
-test("self-improve maintainer exposes only read and library-scoped mutation tools", async () => {
-  const agentDir = await fs.mkdtemp("/tmp/rin-self-improve-tools-");
-  const libraryRoot = path.join(agentDir, "self_improve");
-  await fs.mkdir(libraryRoot, { recursive: true });
-  const outsideFile = path.join(agentDir, "outside.txt");
-  const configured = await runtimeMod.createConfiguredAgentSession({
-    cwd: rootDir,
-    agentDir,
-    settingSources: [],
-    extensionPaths: [],
-    noExtensions: true,
-    noSkillDiscovery: true,
-    ...selfImproveMaintainerMod.createSelfImproveMaintainerToolOptions(
-      agentDir,
-    ),
-  });
-  try {
-    assert.deepEqual(configured.session.getActiveToolNames().sort(), [
-      "edit",
-      "read",
-      "write",
-    ]);
-    const write = configured.session.agent.state.tools.find(
-      (tool) => tool.name === "write",
-    );
-    assert.ok(write);
-    await assert.rejects(
-      () =>
-        write.execute(
-          "test-call",
-          { path: outsideFile, content: "forbidden" },
-          new AbortController().signal,
-        ),
-      /self_improve_mutation_outside_library/,
-    );
-  } finally {
-    await configured.session.abort().catch(() => undefined);
-    await configured.runtime.dispose();
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
 });
 
 test("Rin note guidance keeps cross-compaction scratch state concise", () => {
