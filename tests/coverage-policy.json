@@ -298,8 +298,8 @@
       "status": "strict"
     },
     {
-      "source": "src/core/chat/session-state.ts",
-      "built": "dist/core/chat/session-state.js",
+      "source": "src/core/chat/extension-api.ts",
+      "built": "dist/core/chat/extension-api.js",
       "ownerSuite": "unit",
       "status": "strict"
     },
@@ -1444,9 +1444,21 @@
       "status": "strict"
     },
     {
+      "source": "src/core/session/activity-status.ts",
+      "built": "dist/core/session/activity-status.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
       "source": "src/core/session/catalog.ts",
       "built": "dist/core/session/catalog.js",
       "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/session/extension-api.ts",
+      "built": "dist/core/session/extension-api.js",
+      "ownerSuite": "unit",
       "status": "strict"
     },
     {

@@ -29,12 +29,13 @@ import {
   applyRuntimeProfileEnvironment,
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
+import { createDaemonChatAPI } from "../chat/extension-api.js";
 import {
   listBoundSessionPage,
   listBoundSessions,
   renameBoundSession,
 } from "../session/factory.js";
-import { createDaemonChatAPI } from "../chat/session-state.js";
+import { createDaemonSessionAPI } from "../session/extension-api.js";
 import { CronScheduler } from "./cron.js";
 import {
   getCatalogOAuthState,
@@ -185,7 +186,10 @@ export async function startDaemon(
       logger: console,
     });
   daemonExtensionManager.setChatApi(
-    createDaemonChatAPI({
+    createDaemonChatAPI({ agentDir: runtime.agentDir }),
+  );
+  daemonExtensionManager.setSessionApi(
+    createDaemonSessionAPI({
       agentDir: runtime.agentDir,
       getActivity: () => workerPool.getStatusSnapshot(),
     }),

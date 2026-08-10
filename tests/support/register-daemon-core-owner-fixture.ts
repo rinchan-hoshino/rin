@@ -66,6 +66,7 @@ const replacements: Record<string, string> = {
     export class RinDaemonExtensionManager {
       constructor(options) { this.options = options; }
       setChatApi(chat) { this.chat = chat; }
+      setSessionApi(sessions) { this.sessions = sessions; }
       async start() { if (process.env.RIN_TEST_DAEMON_MANAGER_START_FAIL) throw new Error("owner manager start failed"); }
       async stop() { if (process.env.RIN_TEST_DAEMON_MANAGER_STOP_FAIL) throw new Error("owner manager stop failed"); }
       async recallProviders(payload) { return [{ recalled: payload }]; }

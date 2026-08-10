@@ -42,11 +42,12 @@ defineRinDaemonExtension((rin) => {
         platform: "discord",
         accountIds: ["1"],
       });
-      const states = await ctx.chat.getSessionStates([
+      const bindings = await ctx.chat.getSessionBindings([
         ...chatKeys,
         "telegram/2:20",
       ]);
-      const state: "idle" | "executing" | "waiting" = states["discord/1:10"];
+      const states = await ctx.sessions.getStates(bindings);
+      const state: "idle" | "executing" | "waiting" = states[0];
       ctx.logger.info?.(`state ${state}`);
       return { stop() {} };
     },

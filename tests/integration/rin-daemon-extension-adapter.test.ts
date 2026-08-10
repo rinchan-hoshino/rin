@@ -101,8 +101,10 @@ test("daemon adaptation uses only Pi-discovered extension sources", async () => 
           install: async (ctx) => record(["install", ctx.config.owner]),
           status: async () => ({ ready: true }),
           start: async (ctx) => {
+            await ctx.sessions.getStates([]);
             const chatKeys = await ctx.chat.listKeys({ platform: "discord" });
-            record(["chat", await ctx.chat.getSessionStates(chatKeys)]);
+            const bindings = await ctx.chat.getSessionBindings(chatKeys);
+            record(["chat", await ctx.sessions.getStates(bindings)]);
             record(["start"]);
             return {
               stop: async () => { record(["stop"]); throw new Error("owner-stop"); },
@@ -195,12 +197,25 @@ test("daemon adaptation uses only Pi-discovered extension sources", async () => 
       error: (message: string) => messages.push(message),
     },
   });
+  const unavailableManager = new RinDaemonExtensionManager({
+    agentDir: root,
+    cwd: root,
+    logger: console,
+  });
+  await unavailableManager.start();
+  await unavailableManager.stop();
+
   manager.setChatApi({
     async listKeys() {
       return ["discord/1:10"];
     },
-    async getSessionStates(chatKeys: readonly string[]) {
-      return Object.fromEntries(chatKeys.map((chatKey) => [chatKey, "idle"]));
+    async getSessionBindings() {
+      return [{ token: "owner-session" }];
+    },
+  });
+  manager.setSessionApi({
+    async getStates(refs: readonly unknown[]) {
+      return refs.map(() => "idle" as const);
     },
   });
   try {
@@ -229,9 +244,7 @@ test("daemon adaptation uses only Pi-discovered extension sources", async () => 
       .split("\n")
       .map((line) => JSON.parse(line));
     assert.equal(
-      events.some(
-        (value) => value[0] === "chat" && value[1]["discord/1:10"] === "idle",
-      ),
+      events.some((value) => value[0] === "chat" && value[1][0] === "idle"),
       true,
     );
     assert.equal(
