@@ -60,6 +60,10 @@ test("todo owner preserves insertion order while reconstructing branch checkpoin
     { id: 3, text: "inserted first", done: false },
     { id: 1, text: "older second", done: true },
   ]);
+  assert.equal(
+    read.content[0].text,
+    "[ ] #3 inserted first\n[x] #1 older second",
+  );
 });
 
 test("todo owner reports thrown persistence values without mutating accepted state", async () => {
@@ -116,8 +120,9 @@ test("todo owner renders normalized calls, results, errors, and fallbacks", asyn
     )
     .render(80)
     .join("\n");
-  assert.match(rendered, /○ #1 Open/);
-  assert.match(rendered, /✓ #2 Done/);
+  assert.match(rendered, /○ Open/);
+  assert.match(rendered, /✓ Done/);
+  assert.doesNotMatch(rendered, /#1|#2/);
 
   const error = tool
     .renderResult(
@@ -137,7 +142,8 @@ test("todo owner renders normalized calls, results, errors, and fallbacks", asyn
     .render(80)
     .join("\n");
   assert.match(error, /^Error: failed/);
-  assert.match(error, /○ #1 Kept/);
+  assert.match(error, /○ Kept/);
+  assert.doesNotMatch(error, /#1/);
 
   assert.equal(
     tool

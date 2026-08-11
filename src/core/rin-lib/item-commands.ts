@@ -25,6 +25,7 @@ class BranchItemListComponent {
     private readonly onClose: () => void,
     private readonly emptyText: string,
     private readonly showProgress: boolean,
+    private readonly showStableIds: boolean,
   ) {}
 
   handleInput(data: string): void {
@@ -76,11 +77,13 @@ class BranchItemListComponent {
             ? theme.fg("success", "✓")
             : theme.fg("dim", "○")
           : theme.fg("dim", "•");
-        const id = theme.fg("accent", `#${item.id}`);
+        const id = this.showStableIds
+          ? `${theme.fg("accent", `#${item.id}`)} `
+          : "";
         const text = item.done
           ? theme.fg("dim", item.text)
           : theme.fg("text", item.text);
-        lines.push(truncateToWidth(`  ${marker} ${id} ${text}`, width));
+        lines.push(truncateToWidth(`  ${marker} ${id}${text}`, width));
       }
     }
 
@@ -107,6 +110,7 @@ async function showItems(
     items: DisplayItem[];
     emptyText: string;
     showProgress: boolean;
+    showStableIds: boolean;
   },
 ) {
   if (ctx.mode !== "tui") {
@@ -133,6 +137,7 @@ async function showItems(
         done,
         input.emptyText,
         input.showProgress,
+        input.showStableIds,
       ),
   );
 }
@@ -147,6 +152,7 @@ export default function itemCommandsExtension(pi: ExtensionAPI) {
         items,
         emptyText: "No todos yet. Ask the agent to add some!",
         showProgress: true,
+        showStableIds: false,
       });
     },
   });
@@ -160,6 +166,7 @@ export default function itemCommandsExtension(pi: ExtensionAPI) {
         items,
         emptyText: "No notes yet. Ask the agent to add verified facts!",
         showProgress: false,
+        showStableIds: true,
       });
     },
   });

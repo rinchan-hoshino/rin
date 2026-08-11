@@ -158,11 +158,10 @@ function formatTodoRender(items: Todo[], theme: Theme): string {
   return items
     .map((item) => {
       const check = item.done ? theme.fg("success", "✓") : theme.fg("dim", "○");
-      const id = theme.fg("accent", `#${item.id}`);
       const text = item.done
         ? theme.fg("dim", item.text)
         : theme.fg("text", item.text);
-      return `${check} ${id} ${text}`;
+      return `${check} ${text}`;
     })
     .join("\n");
 }

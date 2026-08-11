@@ -59,7 +59,7 @@ test("core item commands register /todos and /notes as branch viewers", () => {
   );
 });
 
-test("/todos and /notes render current stable ids, including legacy note snapshots", async () => {
+test("/todos hides stable ids while /notes keeps them for direct reference", async () => {
   const commands = registerCommands();
   const branch = [
     {
@@ -83,8 +83,9 @@ test("/todos and /notes render current stable ids, including legacy note snapsho
   const todos = await renderCommand(commands.get("todos"), branch);
   assert.match(todos.text, /Todos/);
   assert.match(todos.text, /1\/2 completed/);
-  assert.match(todos.text, /○ #1 open/);
-  assert.match(todos.text, /✓ #2 done/);
+  assert.match(todos.text, /○ open/);
+  assert.match(todos.text, /✓ done/);
+  assert.doesNotMatch(todos.text, /#1|#2/);
   const cached = todos.component.render(100);
   assert.equal(todos.component.render(100), cached);
   todos.component.invalidate();

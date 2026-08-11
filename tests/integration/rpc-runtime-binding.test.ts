@@ -471,14 +471,12 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
     )
     .render(80);
   assert.equal(todoResultLines.length, 2);
-  assert.match(todoResultLines[0], /○ #1 Wire core todo/);
-  assert.match(todoResultLines[1], /✓ #2 Ship renderer/);
+  assert.match(todoResultLines[0], /○ Wire core todo/);
+  assert.match(todoResultLines[1], /✓ Ship renderer/);
 
   const todoResult = todoResultLines.join("\n");
-  assert.doesNotMatch(todoResult, /<toolSuccessBg>/);
-  assert.match(todoResult, /#1/);
-  assert.match(todoResult, /#2/);
-  assert.doesNotMatch(todoResult, /<toolSuccessBg>|Added todo|completed/);
+  assert.doesNotMatch(todoResult, /<toolSuccessBg>|#1|#2/);
+  assert.doesNotMatch(todoResult, /Added todo|completed/);
 });
 
 test("rpc zero-extension frontend provides Pi's custom entry renderer lookup", () => {
