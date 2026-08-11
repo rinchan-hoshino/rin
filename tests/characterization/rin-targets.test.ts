@@ -13,11 +13,6 @@ const store = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-targets", "store.js"))
     .href
 );
-const registry = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-targets", "registry.js"),
-  ).href
-);
 const runner = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-targets", "runner.js"))
     .href
@@ -54,16 +49,6 @@ test("rin target store upserts, defaults, and removes targets", async () => {
   assert.equal(store.getDefaultTarget(filePath).name, "local");
   assert.equal(store.removeTarget("local", filePath), true);
   assert.equal(store.getDefaultTarget(filePath), undefined);
-});
-
-test("rin target registry lists only closed-loop deployment providers", () => {
-  assert.ok(registry.findDeploymentProvider("cloud", "hetzner"));
-  assert.ok(registry.findDeploymentProvider("cloud", "digitalocean"));
-  assert.equal(registry.findDeploymentProvider("cloud", "aws"), undefined);
-  assert.ok(registry.findDeploymentProvider("nas", "synology"));
-  assert.ok(registry.findDeploymentProvider("vm", "multipass"));
-  assert.equal(registry.findDeploymentProvider("vm", "hyperv"), undefined);
-  assert.ok(registry.findDeploymentProvider("container", "docker"));
 });
 
 test("rin target runner strips target wrapper args before delegation", () => {

@@ -131,7 +131,7 @@ test("target list renders every runtime transport without exposing store interna
           createdAt: now,
           updatedAt: now,
           runtime: { kind: "command", command: "runner", argsBeforeRin: [] },
-        },
+        } as any,
       ],
     },
     filePath,
@@ -143,6 +143,10 @@ test("target list renders every runtime transport without exposing store interna
   assert.ok(lines.some((line) => line.endsWith("host-only")));
   assert.ok(lines.some((line) => line.endsWith("docker:rin")));
   assert.ok(lines.some((line) => line.endsWith("unknown")));
+  await assert.rejects(
+    () => targets.runTargetCommand(["target", "use", "unknown"]),
+    /rin_target_unsupported:vm/,
+  );
 });
 
 test("target provider catalog supports filtered and complete listings", async () => {
@@ -163,9 +167,11 @@ test("target provider catalog supports filtered and complete listings", async ()
   const all = await captureLogs(() =>
     targets.runTargetCommand(["target", "providers"]),
   );
-  assert.ok(all.some((line) => line.startsWith("cloud/hetzner\t")));
-  assert.ok(all.some((line) => line.startsWith("nas/synology\t")));
-  assert.ok(all.some((line) => line.startsWith("vm/multipass\t")));
+  assert.deepEqual(all, containers);
+  const removed = await captureLogs(() =>
+    targets.runTargetCommand(["target", "providers", "cloud"]),
+  );
+  assert.deepEqual(removed, []);
 });
 
 test("target command reports missing names and unknown command usage", async () => {
@@ -186,7 +192,7 @@ test("target command reports missing names and unknown command usage", async () 
       "  rin target list",
       "  rin target use <name>",
       "  rin target remove <name>",
-      "  rin target providers [cloud|nas|vm|container]",
+      "  rin target providers [container]",
     ].join("\n"),
   ]);
 });

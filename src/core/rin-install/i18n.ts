@@ -43,22 +43,15 @@ type InstallerDisplayCopy = {
   localUserInstallTargetLabel: string;
   sshInstallTargetLabel: string;
   containerInstallTargetLabel: string;
-  cloudInstallTargetLabel: string;
-  vmInstallTargetLabel: string;
-  nasInstallTargetLabel: string;
   sameMachineHint: string;
   reuseSshAuthHint: string;
   containerIsolationHint: string;
-  providerApiProvisionerHint: string;
-  hypervisorProvisionerHint: string;
-  nasIsolationHint: string;
   sshTargetMessage: string;
   sshTargetRequired: string;
   targetNameMessage: string;
   targetNameRequired: string;
   containerEngineMessage: string;
   containerImageMessage: string;
-  chooseDeploymentProviderMessage: (kind: string) => string;
   noneFoundHint: string;
   usersHint: (count: number) => string;
   newUserHint: string;
@@ -273,22 +266,15 @@ const INSTALLER_DISPLAY_COPY: InstallerDisplayCopy = {
   localUserInstallTargetLabel: "Another local user",
   sshInstallTargetLabel: "Existing SSH host",
   containerInstallTargetLabel: "Local container",
-  cloudInstallTargetLabel: "New cloud instance",
-  vmInstallTargetLabel: "New virtual machine",
-  nasInstallTargetLabel: "NAS isolated runtime",
   sameMachineHint: "same machine",
   reuseSshAuthHint: "reuse your ssh config/auth",
   containerIsolationHint: "Docker or Podman isolation",
-  providerApiProvisionerHint: "provider API provisioner",
-  hypervisorProvisionerHint: "hypervisor provisioner",
-  nasIsolationHint: "vendor app/container runtime",
   sshTargetMessage: "SSH target (Host alias or user@host)",
   sshTargetRequired: "SSH target is required",
   targetNameMessage: "Target name for future rin --target use",
   targetNameRequired: "Target name is required",
   containerEngineMessage: "Container engine",
   containerImageMessage: "Base image",
-  chooseDeploymentProviderMessage: (kind: string) => `Choose ${kind} provider`,
   noneFoundHint: "none found",
   usersHint: (count: number) => `${count} user(s)`,
   newUserHint: "enter a username",

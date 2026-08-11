@@ -548,8 +548,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Rin is shutting down right now. Wait until it starts again.",
   rin_daemon_unavailable: (detail) =>
     withDetail("Rin's background service is not available", detail, "."),
-  rin_digitalocean_ssh_key_not_found: () =>
-    "DigitalOcean target setup could not find the SSH key. Add the key.",
   rin_disconnected: () => "Rin lost its connection to the background runtime.",
   rin_install_temp_dir_unavailable: () =>
     "Rin installer could not create a temporary directory. Check disk permissions.",
@@ -665,8 +663,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Stable releases do not support selecting a branch. Remove the branch option.",
   rin_stable_selector_not_supported: () =>
     "This command does not support selecting the stable channel here. Remove the stable selector.",
-  rin_ssh_not_ready: (detail) =>
-    withDetail("SSH target is not ready", detail, ". Check SSH access."),
   rin_target_name_required: () =>
     "Target command needs a target name. Provide the target name.",
   rin_target_not_found: (detail) =>
@@ -674,6 +670,12 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
       "Rin target was not found",
       detail,
       ". Choose an existing target.",
+    ),
+  rin_target_unsupported: (detail) =>
+    withDetail(
+      "Rin target mode is no longer supported",
+      detail,
+      ". Use a local-user, SSH, or container target.",
     ),
   rin_target_register_local_user_usage: () =>
     "Registering a local target needs both a target name and a user. Provide both.",

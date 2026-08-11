@@ -18,7 +18,7 @@ function usage() {
     "  rin target list",
     "  rin target use <name>",
     "  rin target remove <name>",
-    "  rin target providers [cloud|nas|vm|container]",
+    "  rin target providers [container]",
   ].join("\n");
 }
 
@@ -63,15 +63,9 @@ export async function runTargetCommand(rawArgv: string[]) {
   }
 
   if (subcommand === "providers") {
-    const kind = safeString(subArgs[1]).trim() as any;
-    const providers = kind
-      ? findDeploymentProviders(kind)
-      : [
-          ...findDeploymentProviders("cloud"),
-          ...findDeploymentProviders("nas"),
-          ...findDeploymentProviders("vm"),
-          ...findDeploymentProviders("container"),
-        ];
+    const kind = safeString(subArgs[1]).trim();
+    const providers =
+      !kind || kind === "container" ? findDeploymentProviders("container") : [];
     for (const provider of providers) {
       console.log(
         `${provider.kind}/${provider.id}\t${provider.label}\t${provider.recommendedIsolation}`,

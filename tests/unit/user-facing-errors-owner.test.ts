@@ -215,7 +215,6 @@ rin_daemon_restart_not_ready
 rin_daemon_shutting_down
 rin_daemon_unavailable
 rin_daemon_update_in_progress
-rin_digitalocean_ssh_key_not_found
 rin_disconnected
 rin_duplicate_command_id
 rin_elevated_install_unsupported_on_windows
@@ -264,7 +263,6 @@ rin_session_file_required
 rin_session_model_runtime_unavailable
 rin_session_recovering
 rin_session_worker_unavailable
-rin_ssh_not_ready
 rin_stable_branch_not_supported
 rin_stable_selector_not_supported
 rin_staged_release_missing
@@ -273,6 +271,7 @@ rin_systemd_legacy_hold_invalid_result
 rin_target_name_required
 rin_target_not_found
 rin_target_register_local_user_usage
+rin_target_unsupported
 rin_timeout
 rin_tui_disposed
 rin_tui_failed
@@ -370,7 +369,7 @@ web_fetch_invalid_url`
   .split(/\s+/);
 
 test("every owned runtime marker has a human-facing formatter", () => {
-  assert.equal(OWNED_MARKERS.length, 359);
+  assert.equal(OWNED_MARKERS.length, 358);
   assert.equal(new Set(OWNED_MARKERS).size, OWNED_MARKERS.length);
   for (const marker of OWNED_MARKERS) {
     assert.equal(errors.hasUserFacingRuntimeErrorMapping(marker), true, marker);

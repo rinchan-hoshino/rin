@@ -13,125 +13,171 @@ const registerFixture = path.resolve(
 
 const childScript = String.raw`
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 globalThis.__rinDeploymentOwnerEvents = [];
-let missingCommand = "";
-let inspectExists = false;
-let vmExists = false;
-let failMode = "";
+let containerExists = false;
+let failNextMutation = "";
 globalThis.__rinDeploymentOwnerSpawn = (command, args) => {
-  const isProbe =
-    ((command === "docker" || command === "podman") && args[0] === "container" && args[1] === "inspect") ||
-    (command === "multipass" && args[0] === "info");
-  if (!isProbe && failMode === "error") { failMode = ""; return { error: new Error("owner spawn failed"), status: null }; }
-  if (!isProbe && failMode === "status") { failMode = ""; return { status: 17 }; }
-  if ((command === "docker" || command === "podman") && args[0] === "container" && args[1] === "inspect") return { status: inspectExists ? 0 : 1 };
-  if (command === "multipass" && args[0] === "info") return { status: vmExists ? 0 : 1 };
+  const isInspect =
+    (command === "docker" || command === "podman") &&
+    args[0] === "container" && args[1] === "inspect";
+  if (isInspect) return { status: containerExists ? 0 : 1 };
+  if (failNextMutation === "error") {
+    failNextMutation = "";
+    return { error: new Error("owner isolated spawn failed"), status: null };
+  }
+  if (failNextMutation === "status") {
+    failNextMutation = "";
+    return { status: 17 };
+  }
   return { status: 0 };
 };
-globalThis.__rinDeploymentOwnerCapture = (command, args) => {
-  if (command === "sh" && missingCommand && args[1].includes(missingCommand)) throw new Error("missing");
-  if (command === "hcloud" && args[0] === "server" && args[1] === "ip") return "203.0.113.10\n";
-  if (command === "doctl" && args[0] === "compute" && args[1] === "ssh-key" && args[2] === "list") return globalThis.__rinDeploymentOwnerDoctlKeys ?? "42 rin-owner-cloud\n";
-  if (command === "doctl" && args[0] === "compute" && args[1] === "droplet" && args[2] === "get") return "203.0.113.20\n";
-  return "/usr/bin/" + String(args.at(-1) || command) + "\n";
+globalThis.__rinDeploymentOwnerCapture = () => {
+  throw new Error("isolated deployment test must not execute capture commands");
 };
 
 const targets = await import(
   pathToFileURL(path.resolve("dist/core/rin-install/deployment-targets.js")).href
 );
-assert.equal(
-  targets.defaultSshControlPath(" Owner Box "),
-  path.join(process.env.RIN_TEST_DEPLOYMENT_TMP, "rin-ssh-owner-box-%C"),
-);
-assert.equal(
-  targets.defaultSshControlPath(""),
-  path.join(process.env.RIN_TEST_DEPLOYMENT_TMP, "rin-ssh-target-%C"),
-);
+const INSTALL_COMMAND =
+  "curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh";
 
-const ssh = targets.installExistingSshTarget({ kind: "ssh", name: "Owner SSH", host: "alice@example.test" });
+assert.equal("installCloudTarget" in targets, false);
+assert.equal("installNasTarget" in targets, false);
+assert.equal("installVmTarget" in targets, false);
+assert.equal("withTemporaryCloudInit" in targets, false);
+
+const sshStart = globalThis.__rinDeploymentOwnerEvents.length;
+const ssh = targets.installExistingSshTarget({
+  kind: "ssh",
+  name: "Owner SSH",
+  host: "alice@example.test",
+});
+const controlPath = path.join(
+  process.env.RIN_TEST_DEPLOYMENT_TMP,
+  "rin-ssh-owner-ssh-%C",
+);
 assert.deepEqual(ssh.runtime, {
   kind: "ssh",
   host: "alice@example.test",
-  controlPath: path.join(process.env.RIN_TEST_DEPLOYMENT_TMP, "rin-ssh-owner-ssh-%C"),
+  controlPath,
 });
+const sshEvents = globalThis.__rinDeploymentOwnerEvents.slice(sshStart);
+assert.deepEqual(
+  sshEvents.filter(([name]) => name === "spawn").map(([, command, args]) => [command, args]),
+  [
+    ["ssh", [
+      "-o", "ControlMaster=auto",
+      "-o", "ControlPersist=10m",
+      "-o", "ControlPath=" + controlPath,
+      "alice@example.test", "true",
+    ]],
+    ["ssh", [
+      "-tt",
+      "-o", "ControlMaster=auto",
+      "-o", "ControlPersist=10m",
+      "-o", "ControlPath=" + controlPath,
+      "alice@example.test", "sh", "-lc", INSTALL_COMMAND,
+    ]],
+  ],
+);
+assert.equal(sshEvents.at(-1)[0], "upsert");
 
-await assert.rejects(async () => targets.installContainerTarget({ kind: "container", name: "!!!", engine: "docker", image: "node:22" }), /rin_container_name_required/);
-inspectExists = false;
-const container = targets.installContainerTarget({ kind: "container", name: "Owner Box", engine: "docker", image: "node:22" });
-assert.equal(container.runtime.container, "owner-box");
-inspectExists = true;
-targets.installContainerTarget({ kind: "container", name: "Owner Box", engine: "podman", image: "node:22" });
-
-failMode = "error";
-assert.throws(() => targets.installContainerTarget({ kind: "container", name: "Error Box", engine: "docker", image: "node:22" }), /owner spawn failed/);
-failMode = "status";
-assert.throws(() => targets.installContainerTarget({ kind: "container", name: "Status Box", engine: "docker", image: "node:22" }), /rin_command_failed:docker:17/);
-
-const hetzner = targets.installCloudTarget({
-  kind: "cloud", name: "Owner Cloud", provider: "hetzner", token: "secret",
-  region: "fsn1", size: "cx22", image: "ubuntu-24.04",
-});
-assert.deepEqual(hetzner.runtime, {
-  kind: "ssh", host: "203.0.113.10", user: "root",
-  identityFile: path.join(process.env.RIN_TEST_DEPLOYMENT_HOME, ".rin", "targets", "keys", "owner-cloud"),
-});
+const upsertsBeforeSshFailure = globalThis.__rinDeploymentOwnerEvents.filter(
+  ([name]) => name === "upsert",
+).length;
+failNextMutation = "status";
 assert.throws(
-  () => fs.readFileSync(path.join(process.env.RIN_TEST_DEPLOYMENT_TMP, "rin-cloud-init-owner-cloud.yml"), "utf8"),
-  (error) => error?.code === "ENOENT",
+  () => targets.installExistingSshTarget({
+    kind: "ssh", name: "Broken SSH", host: "broken@example.test",
+  }),
+  /rin_command_failed:ssh:17/,
+);
+assert.equal(
+  globalThis.__rinDeploymentOwnerEvents.filter(([name]) => name === "upsert").length,
+  upsertsBeforeSshFailure,
 );
 
-const digitalOcean = targets.installCloudTarget({
-  kind: "cloud", name: "Owner Cloud", provider: "digitalocean", token: "secret",
-  region: "nyc3", size: "s-1vcpu-1gb", image: "ubuntu-24-04-x64",
+assert.throws(
+  () => targets.installContainerTarget({
+    kind: "container", name: "!!!", engine: "docker", image: "node:22",
+  }),
+  /rin_container_name_required/,
+);
+containerExists = false;
+const containerStart = globalThis.__rinDeploymentOwnerEvents.length;
+const container = targets.installContainerTarget({
+  kind: "container", name: "Owner Box", engine: "docker", image: "node:22",
 });
-assert.equal(digitalOcean.label, "DigitalOcean 203.0.113.20");
-globalThis.__rinDeploymentOwnerDoctlKeys = "77 another-key\n";
-assert.throws(() => targets.installCloudTarget({
-  kind: "cloud", name: "Missing Key", provider: "digitalocean", token: "secret",
-  region: "nyc3", size: "small", image: "ubuntu",
-}), /rin_digitalocean_ssh_key_not_found/);
-assert.throws(() => targets.installCloudTarget({ kind: "cloud", name: "Other", provider: "other", token: "", region: "", size: "", image: "" }), /rin_cloud_provider_not_implemented:other/);
-missingCommand = "hcloud";
-assert.throws(() => targets.installCloudTarget({
-  kind: "cloud", name: "No Tool", provider: "hetzner", token: "secret",
-  region: "fsn1", size: "cx22", image: "ubuntu",
-}), /rin_missing_required_tool:hcloud/);
-missingCommand = "";
+assert.equal(container.runtime.container, "owner-box");
+const containerEvents = globalThis.__rinDeploymentOwnerEvents.slice(containerStart);
+assert.deepEqual(
+  containerEvents.filter(([name]) => name === "spawn").map(([, command, args]) => [command, args]),
+  [
+    ["docker", ["container", "inspect", "owner-box"]],
+    ["docker", [
+      "run", "-d", "--name", "owner-box",
+      "-v", "owner-box-rin:/home/rin/.rin",
+      "-v", "owner-box-workspace:/workspace",
+      "-w", "/workspace", "node:22", "sleep", "infinity",
+    ]],
+    ["docker", ["exec", "owner-box", "sh", "-lc", INSTALL_COMMAND]],
+  ],
+);
+assert.equal(containerEvents.at(-1)[0], "upsert");
 
-const nas = targets.installNasTarget({
-  kind: "nas", name: "Owner NAS", provider: "synology", host: "nas.test",
-  engine: "docker", image: "node:22",
+containerExists = true;
+const existingStart = globalThis.__rinDeploymentOwnerEvents.length;
+targets.installContainerTarget({
+  kind: "container", name: "Owner Box", engine: "podman", image: "node:22",
 });
-assert.deepEqual(nas.runtime, {
-  kind: "command", command: "ssh",
-  argsBeforeRin: ["nas.test", "docker", "exec", "owner-nas"],
-});
-vmExists = false;
-const vm = targets.installVmTarget({ kind: "vm", name: "Owner VM", provider: "multipass", image: "24.04" });
-assert.deepEqual(vm.runtime.argsBeforeRin, ["exec", "owner-vm", "--"]);
-vmExists = true;
-targets.installVmTarget({ kind: "vm", name: "Owner VM", provider: "multipass", image: "24.04" });
+const existingEvents = globalThis.__rinDeploymentOwnerEvents.slice(existingStart);
+assert.deepEqual(
+  existingEvents.filter(([name]) => name === "spawn").map(([, command, args]) => [command, args]),
+  [
+    ["podman", ["container", "inspect", "owner-box"]],
+    ["podman", ["exec", "owner-box", "sh", "-lc", INSTALL_COMMAND]],
+  ],
+);
+
+const upsertsBeforeContainerFailure = globalThis.__rinDeploymentOwnerEvents.filter(
+  ([name]) => name === "upsert",
+).length;
+failNextMutation = "error";
+assert.throws(
+  () => targets.installContainerTarget({
+    kind: "container", name: "Broken Box", engine: "docker", image: "node:22",
+  }),
+  /owner isolated spawn failed/,
+);
+assert.equal(
+  globalThis.__rinDeploymentOwnerEvents.filter(([name]) => name === "upsert").length,
+  upsertsBeforeContainerFailure,
+);
+
 assert.deepEqual(targets.registerLocalUserTarget("alice"), {
-  name: "alice", kind: "local-user", label: "alice",
+  name: "alice",
+  kind: "local-user",
+  label: "alice",
   runtime: { kind: "local-user", user: "alice" },
   metadata: { installedBy: "rin-install" },
 });
-assert.equal(targets.registerLocalUserTarget("alice", "workstation").name, "workstation");
+assert.equal(
+  targets.registerLocalUserTarget("alice", "workstation").name,
+  "workstation",
+);
 
 const events = globalThis.__rinDeploymentOwnerEvents;
-assert.equal(events.filter(([name]) => name === "upsert").length, 10);
-assert.equal(events.some(([name, command, args]) => name === "spawn" && command === "ssh-keygen" && args.includes("ed25519")), true);
-assert.equal(events.some(([name, command, args]) => name === "spawn" && command === "ssh" && args.includes("-tt")), true);
-assert.equal(events.some(([name, command, args]) => name === "spawn" && command === "docker" && args[0] === "run"), true);
-assert.equal(events.some(([name, command, args]) => name === "spawn" && command === "multipass" && args[0] === "launch"), true);
-console.log(JSON.stringify({ events: events.length, upserts: 10 }));
+assert.equal(events.some(([name]) => name === "capture"), false);
+console.log(JSON.stringify({
+  events: events.length,
+  upserts: events.filter(([name]) => name === "upsert").length,
+}));
 `;
 
-test("deployment target installers execute each provider contract and persist its runtime identity", async () => {
+test("SSH and container installers stay isolated and persist only after successful commands", async () => {
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-deployment-owner-"),
   );
@@ -162,9 +208,7 @@ test("deployment target installers execute each provider contract and persist it
       },
     );
     const summary = JSON.parse(result.stdout);
-    assert.equal(summary.upserts, 10);
-    assert.equal(summary.events > 35, true);
-    assert.equal(result.stderr, "");
+    assert.equal(summary.upserts, 5);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

@@ -1,12 +1,6 @@
 import { safeString } from "../text-utils.js";
 
-export type RinTargetKind =
-  | "local-user"
-  | "ssh"
-  | "container"
-  | "cloud"
-  | "nas"
-  | "vm";
+export type RinTargetKind = "local-user" | "ssh" | "container";
 
 export type RinRuntimeTransport =
   | { kind: "local-user"; user: string }
@@ -23,11 +17,6 @@ export type RinRuntimeTransport =
       engine: "docker" | "podman";
       container: string;
       user?: string;
-    }
-  | {
-      kind: "command";
-      command: string;
-      argsBeforeRin: string[];
     };
 
 export type RinTargetRecord = {
@@ -41,7 +30,7 @@ export type RinTargetRecord = {
   metadata?: Record<string, unknown>;
 };
 
-export type DeploymentProviderKind = "cloud" | "nas" | "vm" | "container";
+export type DeploymentProviderKind = "container";
 
 export type DeploymentProviderDescriptor = {
   kind: DeploymentProviderKind;
@@ -49,7 +38,7 @@ export type DeploymentProviderDescriptor = {
   label: string;
   recommendedIsolation: string;
   requiredInputs: string[];
-  defaultRuntime: "ssh" | "container" | "local";
+  defaultRuntime: "container";
   notes: string[];
 };
 
@@ -57,9 +46,6 @@ export const TARGET_KIND_LABELS: Record<RinTargetKind, string> = {
   "local-user": "Local user",
   ssh: "Existing SSH host",
   container: "Local container",
-  cloud: "Cloud instance",
-  nas: "NAS isolated runtime",
-  vm: "Virtual machine",
 };
 
 export const DEPLOYMENT_PROVIDERS: DeploymentProviderDescriptor[] = [
@@ -87,50 +73,6 @@ export const DEPLOYMENT_PROVIDERS: DeploymentProviderDescriptor[] = [
       "Rootless Podman is preferred when available.",
     ],
   },
-  ...[
-    ["hetzner", "Hetzner Cloud"],
-    ["digitalocean", "DigitalOcean Droplets"],
-  ].map(([id, label]) => ({
-    kind: "cloud" as const,
-    id,
-    label,
-    recommendedIsolation: "dedicated Linux VM created through the provider API",
-    requiredInputs: ["API token", "region"],
-    defaultRuntime: "ssh" as const,
-    notes: [
-      "Provision with the provider CLI and cloud-init, then run the normal Rin installer inside the instance.",
-      "Only providers with an implemented create/install/register loop are listed here.",
-    ],
-  })),
-  ...[
-    ["synology", "Synology DSM"],
-    ["qnap", "QNAP QTS/QuTS"],
-    ["truenas-scale", "TrueNAS SCALE"],
-    ["unraid", "Unraid"],
-  ].map(([id, label]) => ({
-    kind: "nas" as const,
-    id,
-    label,
-    recommendedIsolation: "vendor container/app runtime when available",
-    requiredInputs: ["NAS address", "NAS API/session credentials"],
-    defaultRuntime: "container" as const,
-    notes: [
-      "Prefer the vendor-recommended isolated app/container runtime over modifying the NAS host OS.",
-      "Fall back to SSH only when the NAS explicitly supports a normal Linux shell with Node.js/npm.",
-    ],
-  })),
-  ...[["multipass", "Multipass"]].map(([id, label]) => ({
-    kind: "vm" as const,
-    id,
-    label,
-    recommendedIsolation: "fresh Linux VM from a cloud image plus cloud-init",
-    requiredInputs: ["VM name", "CPU/memory/disk defaults or overrides"],
-    defaultRuntime: "ssh" as const,
-    notes: [
-      "Create the VM from scratch, install prerequisites through cloud-init, then run the Rin installer.",
-      "Register Multipass exec as the target runtime.",
-    ],
-  })),
 ];
 
 export function normalizeTargetName(value: string) {
@@ -147,12 +89,14 @@ export function findDeploymentProviders(kind: DeploymentProviderKind) {
   return DEPLOYMENT_PROVIDERS.filter((provider) => provider.kind === kind);
 }
 
-export function findDeploymentProvider(
-  kind: DeploymentProviderKind,
-  id: string,
-) {
-  const nextId = safeString(id).trim().toLowerCase();
-  return DEPLOYMENT_PROVIDERS.find(
-    (provider) => provider.kind === kind && provider.id === nextId,
-  );
+export function isSupportedTargetRecord(
+  value: unknown,
+): value is RinTargetRecord {
+  if (!value || typeof value !== "object") return false;
+  const target = value as any;
+  if (!target.runtime || typeof target.runtime !== "object") return false;
+  if (target.kind === "local-user") return target.runtime.kind === "local-user";
+  if (target.kind === "ssh") return target.runtime.kind === "ssh";
+  if (target.kind === "container") return target.runtime.kind === "container";
+  return false;
 }

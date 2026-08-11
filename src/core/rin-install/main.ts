@@ -51,11 +51,8 @@ import { defaultInstallDirForHome } from "./paths.js";
 import { runInstallerProgress } from "./progress.js";
 import { runQuickRun } from "./quick-run.js";
 import {
-  installCloudTarget,
   installContainerTarget,
   installExistingSshTarget,
-  installNasTarget,
-  installVmTarget,
   registerLocalUserTarget,
 } from "./deployment-targets.js";
 
@@ -256,49 +253,6 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     );
     return;
   }
-  if (target.kind === "cloud") {
-    const registered = await runInstallerProgress(
-      i18n.applyingTargetSelectionMessage,
-      () => installCloudTarget(target),
-      {
-        successMessage: i18n.installStepComplete,
-        failureMessage: i18n.installStepFailed,
-      },
-    );
-    outro(
-      `Provisioned, installed, and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
-    );
-    return;
-  }
-  if (target.kind === "nas") {
-    const registered = await runInstallerProgress(
-      i18n.applyingTargetSelectionMessage,
-      () => installNasTarget(target),
-      {
-        successMessage: i18n.installStepComplete,
-        failureMessage: i18n.installStepFailed,
-      },
-    );
-    outro(
-      `Installed and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
-    );
-    return;
-  }
-  if (target.kind === "vm") {
-    const registered = await runInstallerProgress(
-      i18n.applyingTargetSelectionMessage,
-      () => installVmTarget(target),
-      {
-        successMessage: i18n.installStepComplete,
-        failureMessage: i18n.installStepFailed,
-      },
-    );
-    outro(
-      `Provisioned, installed, and registered Rin target ${registered.name}. Open with rin --target ${registered.name}.`,
-    );
-    return;
-  }
-
   const { targetUser, installDir } = target;
   const installDirNote = await runInstallerProgress(
     i18n.inspectingInstallDirectoryMessage,

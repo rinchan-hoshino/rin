@@ -21,32 +21,27 @@ test("target names normalize to stable CLI identifiers", () => {
   assert.equal(registry.isValidTargetName("   "), false);
 });
 
-test("target registry exposes only deployment providers with closed loops", () => {
-  assert.ok(registry.findDeploymentProvider("cloud", "hetzner"));
-  assert.ok(registry.findDeploymentProvider("cloud", "digitalocean"));
-  assert.equal(registry.findDeploymentProvider("cloud", "aws"), undefined);
-  assert.ok(registry.findDeploymentProvider("nas", "synology"));
-  assert.ok(registry.findDeploymentProvider("vm", "multipass"));
-  assert.equal(registry.findDeploymentProvider("vm", "hyperv"), undefined);
-  assert.ok(registry.findDeploymentProvider("container", "docker"));
+test("target registry exposes only the three maintained deployment modes", () => {
+  assert.deepEqual(Object.keys(registry.TARGET_KIND_LABELS).sort(), [
+    "container",
+    "local-user",
+    "ssh",
+  ]);
+  assert.deepEqual(
+    registry.DEPLOYMENT_PROVIDERS.map(
+      (provider) => `${provider.kind}/${provider.id}`,
+    ),
+    ["container/docker", "container/podman"],
+  );
 });
 
-test("target registry filters provider groups and normalizes provider ids", () => {
+test("target registry filters container providers", () => {
   assert.deepEqual(
     registry
       .findDeploymentProviders("container")
       .map((provider) => provider.id),
     ["docker", "podman"],
   );
-  assert.deepEqual(
-    registry.findDeploymentProviders("cloud").map((provider) => provider.id),
-    ["hetzner", "digitalocean"],
-  );
-  assert.equal(
-    registry.findDeploymentProvider("container", "  PODMAN  ")?.label,
-    "Podman",
-  );
-  assert.equal(registry.findDeploymentProvider("nas", "unknown"), undefined);
   assert.equal(
     registry.DEPLOYMENT_PROVIDERS.every(
       (provider) =>
@@ -55,4 +50,28 @@ test("target registry filters provider groups and normalizes provider ids", () =
     true,
   );
   assert.equal(registry.TARGET_KIND_LABELS.ssh, "Existing SSH host");
+});
+
+test("target registry accepts only matching maintained target records", () => {
+  for (const target of [
+    { kind: "local-user", runtime: { kind: "local-user", user: "rin" } },
+    { kind: "ssh", runtime: { kind: "ssh", host: "example.test" } },
+    {
+      kind: "container",
+      runtime: { kind: "container", engine: "docker", container: "rin" },
+    },
+  ]) {
+    assert.equal(registry.isSupportedTargetRecord(target), true);
+  }
+  for (const target of [
+    null,
+    {},
+    { kind: "ssh" },
+    { kind: "local-user", runtime: { kind: "ssh" } },
+    { kind: "ssh", runtime: { kind: "container" } },
+    { kind: "container", runtime: { kind: "local-user" } },
+    { kind: "cloud", runtime: { kind: "ssh" } },
+  ]) {
+    assert.equal(registry.isSupportedTargetRecord(target), false);
+  }
 });

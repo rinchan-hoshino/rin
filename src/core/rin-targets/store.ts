@@ -4,7 +4,11 @@ import path from "node:path";
 
 import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
-import { normalizeTargetName, type RinTargetRecord } from "./registry.js";
+import {
+  isSupportedTargetRecord,
+  normalizeTargetName,
+  type RinTargetRecord,
+} from "./registry.js";
 
 export type RinTargetStoreData = {
   defaultTarget?: string;
@@ -110,12 +114,14 @@ export function removeTarget(name: string, filePath = targetStorePath()) {
 export function setDefaultTarget(name: string, filePath = targetStorePath()) {
   const targetName = normalizeTargetName(name);
   const store = readTargetStore(filePath);
-  if (
-    !store.targets.some(
-      (entry) => normalizeTargetName(entry.name) === targetName,
-    )
-  ) {
-    throw new Error(`rin_target_not_found:${targetName}`);
+  const target = store.targets.find(
+    (entry) => normalizeTargetName(entry.name) === targetName,
+  );
+  if (!target) throw new Error(`rin_target_not_found:${targetName}`);
+  if (!isSupportedTargetRecord(target as unknown)) {
+    throw new Error(
+      `rin_target_unsupported:${safeString((target as any)?.kind)}`,
+    );
   }
   store.defaultTarget = targetName;
   store.targets = store.targets.map((entry) => ({

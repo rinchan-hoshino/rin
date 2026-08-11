@@ -69,30 +69,8 @@ test("target runner resolves explicit and default target records", () => {
   assert.equal(runner.resolveTargetForName("missing-target"), undefined);
 });
 
-test("target runner executes command, container, ssh, and local-user transports with exact argv", async () => {
+test("target runner executes container, ssh, and local-user transports with exact argv", async () => {
   await withCommandProbe(async (probe, output) => {
-    assert.equal(
-      runner.runRinOnTarget(
-        {
-          name: "command",
-          kind: "container",
-          runtime: {
-            kind: "command",
-            command: probe,
-            argsBeforeRin: ["prefix"],
-          },
-        } as any,
-        ["status", "--target=command", "--json"],
-      ),
-      0,
-    );
-    assert.deepEqual((await fs.readFile(output, "utf8")).trim().split("\n"), [
-      "prefix",
-      "rin",
-      "status",
-      "--json",
-    ]);
-
     assert.equal(
       runner.runRinOnTarget(
         {
@@ -128,7 +106,7 @@ test("target runner executes command, container, ssh, and local-user transports 
         runner.runRinOnTarget(
           {
             name: "ssh",
-            kind: "vm",
+            kind: "ssh",
             runtime: {
               kind: "ssh",
               host: "example.invalid",
@@ -187,6 +165,25 @@ test("target runner executes command, container, ssh, and local-user transports 
   });
 });
 
+test("target runner rejects records from removed deployment modes before execution", () => {
+  assert.throws(
+    () =>
+      runner.runRinOnTarget(
+        {
+          name: "legacy-vm",
+          kind: "vm",
+          runtime: {
+            kind: "command",
+            command: "/must-not-run",
+            argsBeforeRin: [],
+          },
+        } as any,
+        ["status"],
+      ),
+    /rin_target_unsupported:vm/,
+  );
+});
+
 test("target runner surfaces spawn failures and normalizes signal-only exits", async () => {
   assert.throws(
     () =>
@@ -195,28 +192,38 @@ test("target runner surfaces spawn failures and normalizes signal-only exits", a
           name: "missing",
           kind: "container",
           runtime: {
-            kind: "command",
-            command: "/missing/rin-probe",
-            argsBeforeRin: [],
+            kind: "container",
+            engine: "/missing/rin-probe",
+            container: "rin",
           },
         } as any,
         [],
       ),
     /ENOENT/,
   );
-  assert.equal(
-    runner.runRinOnTarget(
-      {
-        name: "signal",
-        kind: "container",
-        runtime: {
-          kind: "command",
-          command: "sh",
-          argsBeforeRin: ["-c", "kill -TERM $$", "rin-probe"],
-        },
-      } as any,
-      [],
-    ),
-    1,
-  );
+
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-target-signal-"));
+  const signalProbe = path.join(root, "signal-probe.sh");
+  await fs.writeFile(signalProbe, "#!/bin/sh\nkill -TERM $$\n", {
+    mode: 0o755,
+  });
+  try {
+    assert.equal(
+      runner.runRinOnTarget(
+        {
+          name: "signal",
+          kind: "container",
+          runtime: {
+            kind: "container",
+            engine: signalProbe,
+            container: "rin",
+          },
+        } as any,
+        [],
+      ),
+      1,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });

@@ -109,11 +109,8 @@ const replacements: Record<string, string> = {
   `,
   "dist/core/rin-install/deployment-targets.js": `
     const install = (kind) => async (target) => { globalThis.__rinInstallerOwnerEvents.push(["install-target", kind, target]); return { name: kind + "-owner" }; };
-    export const installCloudTarget = install("cloud");
     export const installContainerTarget = install("container");
     export const installExistingSshTarget = install("ssh");
-    export const installNasTarget = install("nas");
-    export const installVmTarget = install("vm");
     export function registerLocalUserTarget(user) { globalThis.__rinInstallerOwnerEvents.push(["register-local", user]); }
   `,
 };

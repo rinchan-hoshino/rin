@@ -75,14 +75,24 @@ test("install target options preserve platform capabilities", () => {
   const linux = interactive.buildInstallTargetOptions("owner", i18n, "linux");
   assert.deepEqual(
     linux.map((item) => item.value),
-    ["current", "local-user", "ssh", "container", "cloud", "vm", "nas"],
+    ["current", "local-user", "ssh", "container"],
   );
   assert.equal(linux[0].hint, "owner");
   const windows = interactive.buildInstallTargetOptions("owner", i18n, "win32");
   assert.deepEqual(
     windows.map((item) => item.value),
-    ["current", "ssh", "container", "cloud", "vm", "nas"],
+    ["current", "ssh", "container"],
   );
+});
+
+test("removed install target modes fail explicitly without prompting for legacy inputs", async () => {
+  const prompt = createPrompt({ selects: ["cloud"] });
+  await assert.rejects(
+    () =>
+      interactive.promptInstallTarget(prompt, "owner", users, targetHome, i18n),
+    /rin_target_unsupported:cloud/,
+  );
+  assert.equal(prompt.seen.text.length, 0);
 });
 
 test("local target prompts distinguish current, existing, new, and unavailable users", async () => {
@@ -188,90 +198,6 @@ test("SSH and container prompts return validated direct targets", async () => {
     name: "owner-container",
     engine: "podman",
     image: "node:22-alpine",
-  });
-});
-
-test("cloud prompts preserve provider-specific defaults and required token", async () => {
-  const hetznerPrompt = createPrompt({
-    selects: ["cloud", "hetzner"],
-    texts: ["owner-cloud", " token ", " fsn1 ", " cpx11 ", " ubuntu-24.04 "],
-  });
-  const hetzner = await interactive.promptInstallTarget(
-    hetznerPrompt,
-    "owner",
-    users,
-    targetHome,
-    i18n,
-  );
-  assert.deepEqual(hetzner, {
-    kind: "cloud",
-    name: "owner-cloud",
-    provider: "hetzner",
-    token: "token",
-    region: "fsn1",
-    size: "cpx11",
-    image: "ubuntu-24.04",
-  });
-  assert.equal(
-    hetznerPrompt.seen.text[1].validate(" "),
-    "This value is required",
-  );
-  assert.equal(hetznerPrompt.seen.text[1].validate("token"), undefined);
-  assert.equal(hetznerPrompt.seen.text[2].defaultValue, "fsn1");
-
-  const digitalOceanPrompt = createPrompt({
-    selects: ["cloud", "digitalocean"],
-    texts: ["do-cloud", "token", "sfo3", "s-1vcpu-1gb", "ubuntu-24-04-x64"],
-  });
-  const digitalOcean = await interactive.promptInstallTarget(
-    digitalOceanPrompt,
-    "owner",
-    users,
-    targetHome,
-    i18n,
-  );
-  assert.equal(digitalOcean.kind, "cloud");
-  assert.equal((digitalOcean as any).region, "sfo3");
-  assert.equal((digitalOcean as any).size, "s-1vcpu-1gb");
-});
-
-test("NAS and VM prompts return provider-owned deployment inputs", async () => {
-  const nasPrompt = createPrompt({
-    selects: ["nas", "synology", "docker"],
-    texts: ["owner-nas", "nas-host", "node:22-bookworm"],
-  });
-  const nas = await interactive.promptInstallTarget(
-    nasPrompt,
-    "owner",
-    users,
-    targetHome,
-    i18n,
-  );
-  assert.deepEqual(nas, {
-    kind: "nas",
-    name: "owner-nas",
-    provider: "synology",
-    host: "nas-host",
-    engine: "docker",
-    image: "node:22-bookworm",
-  });
-
-  const vmPrompt = createPrompt({
-    selects: ["vm", "multipass"],
-    texts: ["owner-vm", "24.04"],
-  });
-  const vm = await interactive.promptInstallTarget(
-    vmPrompt,
-    "owner",
-    users,
-    targetHome,
-    i18n,
-  );
-  assert.deepEqual(vm, {
-    kind: "vm",
-    name: "owner-vm",
-    provider: "multipass",
-    image: "24.04",
   });
 });
 

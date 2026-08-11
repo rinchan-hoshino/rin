@@ -69,7 +69,7 @@ function exerciseCopy(languageTag: string) {
     if (typeof result === "string") assert.ok(result.length > 0, name);
     called.push(name);
   }
-  assert.equal(called.length, 34);
+  assert.equal(called.length, 33);
   return copy;
 }
 

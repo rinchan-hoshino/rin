@@ -62,7 +62,7 @@ await run({}, [
   "--release-file", "/owner/work/release.json",
 ]);
 
-for (const target of ["ssh", "container", "cloud", "nas", "vm"]) {
+for (const target of ["ssh", "container"]) {
   await run({ target, language: "en_US" }, []);
 }
 await run({ target: "cancelled" }, []);

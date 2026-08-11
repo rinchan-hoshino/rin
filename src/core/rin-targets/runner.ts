@@ -1,6 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { safeString } from "../text-utils.js";
-import type { RinTargetRecord, RinRuntimeTransport } from "./registry.js";
+import {
+  isSupportedTargetRecord,
+  type RinTargetRecord,
+  type RinRuntimeTransport,
+} from "./registry.js";
 import { findTarget, getDefaultTarget } from "./store.js";
 
 const TARGET_FLAGS_WITH_VALUE = new Set(["--target"]);
@@ -47,19 +51,23 @@ function commandForTransport(
     args.push(target, "rin", ...rinArgs);
     return { command: "ssh", args };
   }
-  if (transport.kind === "command") {
-    return {
-      command: transport.command,
-      args: [...transport.argsBeforeRin, "rin", ...rinArgs],
-    };
+  if (transport.kind === "container") {
+    const args = ["exec"];
+    if (transport.user) args.push("-u", transport.user);
+    args.push(transport.container, "rin", ...rinArgs);
+    return { command: transport.engine, args };
   }
-  const args = ["exec"];
-  if (transport.user) args.push("-u", transport.user);
-  args.push(transport.container, "rin", ...rinArgs);
-  return { command: transport.engine, args };
+  throw new Error(
+    `rin_target_unsupported:${safeString((transport as any)?.kind)}`,
+  );
 }
 
 export function runRinOnTarget(target: RinTargetRecord, rawArgv: string[]) {
+  if (!isSupportedTargetRecord(target)) {
+    throw new Error(
+      `rin_target_unsupported:${safeString((target as any)?.kind)}`,
+    );
+  }
   const rinArgs = stripTargetWrapperArgs(rawArgv);
   const { command, args } = commandForTransport(target.runtime, rinArgs);
   const result = spawnSync(command, args, {
