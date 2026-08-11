@@ -1555,22 +1555,23 @@ export class RpcInteractiveSession {
   }
 
   private async sendOrQueue(operation: PendingRpcOperation) {
+    const tracksTurn =
+      operation.mode === "prompt" && !operation.streamingBehavior;
+    if (tracksTurn) {
+      this.emitLocalUserMessage(operation.message);
+    }
+
     if (
       !this.client.isConnected() ||
       !this.rpcConnected ||
       this.recoveryPending
     ) {
-      throw new Error("rin_frontend_disconnected");
-    }
-
-    if (operation.mode === "prompt" && !operation.streamingBehavior) {
-      this.emitLocalUserMessage(operation.message);
+      if (!tracksTurn) throw new Error("rin_frontend_disconnected");
+      await this.waitForDaemonAvailable();
     }
 
     if (this.clearQueuePromise) await this.clearQueuePromise;
 
-    const tracksTurn =
-      operation.mode === "prompt" && !operation.streamingBehavior;
     if (tracksTurn) {
       this.activeTurn = operation;
       this.syncStreamingState();

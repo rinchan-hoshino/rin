@@ -452,8 +452,25 @@ function getLocalUserEchoQueue(instance: any): LocalUserEcho[] {
   return nextQueue;
 }
 
-function resetLocalUserEchoQueue(instance: any) {
-  instance[LOCAL_USER_ECHO_QUEUE_KEY] = [];
+async function renderLocalUserEcho(
+  instance: any,
+  localEcho: LocalUserEcho,
+  handleEvent: (...args: any[]) => unknown,
+) {
+  const children = Array.isArray(instance.chatContainer?.children)
+    ? instance.chatContainer.children
+    : [];
+  const previousChildren = new Set(children);
+  await handleEvent.call(instance, {
+    type: "message_start",
+    message: {
+      role: "user",
+      content: [{ type: "text", text: localEcho.text }],
+    },
+  });
+  localEcho.renderedChildren = children.filter(
+    (child: unknown) => !previousChildren.has(child),
+  );
 }
 
 function takeMatchingLocalUserEcho(instance: any, event: any) {
@@ -1402,9 +1419,7 @@ export async function applyRinTuiOverrides() {
         try {
           await this.session.prompt(initialMessage, { images: initialImages });
         } catch (error) {
-          this.showError(
-            error instanceof Error ? error.message : "Unknown error occurred",
-          );
+          this.showError(formatRuntimeErrorForFrontendDisplay(error));
         }
       }
       if (initialMessages) {
@@ -1412,9 +1427,7 @@ export async function applyRinTuiOverrides() {
           try {
             await this.session.prompt(message);
           } catch (error) {
-            this.showError(
-              error instanceof Error ? error.message : "Unknown error occurred",
-            );
+            this.showError(formatRuntimeErrorForFrontendDisplay(error));
           }
         }
       }
@@ -1425,9 +1438,7 @@ export async function applyRinTuiOverrides() {
             source: "rin-init",
           });
         } catch (error) {
-          this.showError(
-            error instanceof Error ? error.message : "Unknown error occurred",
-          );
+          this.showError(formatRuntimeErrorForFrontendDisplay(error));
         }
       }
 
@@ -1436,9 +1447,7 @@ export async function applyRinTuiOverrides() {
         try {
           await this.session.prompt(userInput);
         } catch (error) {
-          this.showError(
-            error instanceof Error ? error.message : "Unknown error occurred",
-          );
+          this.showError(formatRuntimeErrorForFrontendDisplay(error));
         }
       }
     };
@@ -1649,30 +1658,19 @@ export async function applyRinTuiOverrides() {
           renderedChildren: [],
         };
         getLocalUserEchoQueue(this).push(localEcho);
-        const children = Array.isArray(this.chatContainer?.children)
-          ? this.chatContainer.children
-          : [];
-        const previousChildren = new Set(children);
-        const renderResult = originalHandleEvent.call(this, {
-          type: "message_start",
-          message: {
-            role: "user",
-            content: [{ type: "text", text }],
-          },
-        });
-        localEcho.renderedChildren = children.filter(
-          (child: unknown) => !previousChildren.has(child),
-        );
-        await renderResult;
+        await renderLocalUserEcho(this, localEcho, originalHandleEvent);
         return;
       }
 
       if (event?.type === "rpc_session_resynced") {
-        resetLocalUserEchoQueue(this);
+        const localUserEchoes = [...getLocalUserEchoQueue(this)];
         if (typeof this.handleRuntimeSessionChange === "function") {
           await this.handleRuntimeSessionChange();
         }
         redrawCurrentSessionHistoryAfterRpcResync(this);
+        for (const localEcho of localUserEchoes) {
+          await renderLocalUserEcho(this, localEcho, originalHandleEvent);
+        }
         syncRpcFrontendStatus(this);
         return;
       }

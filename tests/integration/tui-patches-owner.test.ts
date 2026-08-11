@@ -1025,7 +1025,7 @@ test("patched lifecycle wrappers preserve native fallbacks and cleanup", async (
       session: {
         modelRegistry: { getError: () => undefined },
         prompt: async () => {
-          throw "plain prompt failure";
+          throw new Error("rin_frontend_disconnected");
         },
       },
       showWarning: (message: string) => runEvents.push(["warning", message]),
@@ -1043,9 +1043,13 @@ test("patched lifecycle wrappers preserve native fallbacks and cleanup", async (
   assert.equal(
     runEvents.filter(
       ([kind, message]) =>
-        kind === "error" && message === "Unknown error occurred",
+        kind === "error" && message === "frontend disconnected",
     ).length,
     4,
+  );
+  assert.equal(
+    runEvents.some(([, message]) => message === "rin_frontend_disconnected"),
+    false,
   );
 });
 

@@ -564,10 +564,24 @@ test("rpc runtime owns prompt admission, queue visibility, and recovery without 
   client.connected = false;
   session.setRpcConnected(false);
   let reconnectCalls = 0;
-  session.ensureReconnectLoop = () => {
+  session.ensureReconnectLoop = async () => {
     reconnectCalls += 1;
-    return Promise.resolve();
+    client.connected = true;
+    session.setRpcConnected(true);
   };
+  const reconnectEchoCount = events.filter(
+    (event) => event.type === "rpc_local_user_message",
+  ).length;
+  await session.prompt("wait for daemon");
+  assert.equal(
+    events.filter((event) => event.type === "rpc_local_user_message").length,
+    reconnectEchoCount + 1,
+  );
+  assert.equal(sentOf(client, "prompt").at(-1)?.message, "wait for daemon");
+  assert.equal(reconnectCalls, 1);
+
+  client.connected = false;
+  session.setRpcConnected(false);
   await assert.rejects(
     session.steer("queued steer"),
     /rin_frontend_disconnected/,
@@ -579,7 +593,7 @@ test("rpc runtime owns prompt admission, queue visibility, and recovery without 
   assert.deepEqual(session.getSteeringMessages(), []);
   assert.deepEqual(session.getFollowUpMessages(), []);
   assert.equal(session.pendingMessageCount, 0);
-  assert.equal(reconnectCalls, 0);
+  assert.equal(reconnectCalls, 1);
   assert.deepEqual(session.clearQueue(), {
     steering: [],
     followUp: [],

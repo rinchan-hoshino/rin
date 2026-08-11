@@ -2029,9 +2029,13 @@ test("rpc runtime applies daemon queue updates before the user message starts", 
   ]);
 });
 
-test("rpc runtime rejects an unconfirmed connecting prompt instead of queuing it", async () => {
+test("rpc runtime renders a connecting prompt locally and submits it after recovery", async () => {
+  const sent = [];
+  let connected = false;
+  let releaseRecovery;
   const session = new RpcInteractiveSession({
-    send() {
+    send(payload) {
+      sent.push(payload);
       return Promise.resolve({ success: true, data: {} });
     },
     subscribe() {
@@ -2041,10 +2045,7 @@ test("rpc runtime rejects an unconfirmed connecting prompt instead of queuing it
       return Promise.resolve();
     },
     isConnected() {
-      return false;
-    },
-    connect() {
-      return new Promise(() => {});
+      return connected;
     },
     disconnect() {
       return Promise.resolve();
@@ -2053,23 +2054,34 @@ test("rpc runtime rejects an unconfirmed connecting prompt instead of queuing it
 
   session.rpcConnected = false;
   session.startupPending = false;
+  session.waitForDaemonAvailable = () =>
+    new Promise((resolve) => {
+      releaseRecovery = () => {
+        connected = true;
+        session.rpcConnected = true;
+        resolve();
+      };
+    });
+  session.ensureRemoteSession = () => Promise.resolve();
 
   const seen = [];
   session.subscribe((event) => seen.push(event));
   seen.length = 0;
 
-  await assert.rejects(
-    session.prompt("hello", {
-      expandPromptTemplates: false,
-    }),
-    /rin_frontend_disconnected/,
-  );
+  const promptPromise = session.prompt("hello", {
+    expandPromptTemplates: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(session.getSteeringMessages(), []);
-  assert.equal(
-    seen.some((event) => event?.type === "rpc_local_user_message"),
-    false,
-  );
+  assert.deepEqual(seen, [{ type: "rpc_local_user_message", text: "hello" }]);
+  assert.equal(sent.length, 0);
+
+  releaseRecovery();
+  await promptPromise;
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.type, "prompt");
+  assert.equal(sent[0]?.message, "hello");
 });
 
 test("rpc runtime emits the local user message before remote prompt submission finishes", async () => {

@@ -2608,10 +2608,23 @@ test("rpc backend user message replaces its matching local echo", async () => {
   assert.equal(renders, 3);
 });
 
-test("rpc session resync clears pending local user echo", async () => {
+test("rpc session resync preserves a pending local echo until backend replacement", async () => {
   await overrides.applyRinTuiOverrides();
 
   const messages = [];
+  const chatContainer = {
+    children: [],
+    clear() {
+      this.children.length = 0;
+    },
+    addChild(child) {
+      this.children.push(child);
+    },
+    removeChild(child) {
+      const index = this.children.indexOf(child);
+      if (index >= 0) this.children.splice(index, 1);
+    },
+  };
   let renders = 0;
   const instance = createRealInteractiveModeResyncInstance({
     ui: {
@@ -2620,8 +2633,10 @@ test("rpc session resync clears pending local user echo", async () => {
       },
       terminal: { setProgress() {} },
     },
+    chatContainer,
     addMessageToChat(message) {
       messages.push(message);
+      chatContainer.children.push({ message });
     },
     updatePendingMessagesDisplay() {},
   });
@@ -2634,9 +2649,15 @@ test("rpc session resync clears pending local user echo", async () => {
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "rpc_session_resynced",
   });
+  assert.deepEqual(
+    chatContainer.children.map(({ message }) => message.content[0]?.text),
+    ["hello"],
+  );
+
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "message_start",
     message: {
+      id: "backend-owner",
       role: "user",
       content: [{ type: "text", text: "hello" }],
     },
@@ -2644,7 +2665,11 @@ test("rpc session resync clears pending local user echo", async () => {
 
   assert.deepEqual(
     messages.map((message) => message.content[0]?.text),
-    ["hello", "hello"],
+    ["hello", "hello", "hello"],
+  );
+  assert.deepEqual(
+    chatContainer.children.map(({ message }) => message.id),
+    ["backend-owner"],
   );
   assert.ok(renders >= 3);
 });
