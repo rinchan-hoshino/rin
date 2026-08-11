@@ -17,9 +17,8 @@ const rootDir = path.resolve(
 const { loadRinAgentRuntime } = await import(
   pathToFileURL(path.join(rootDir, "dist/core/rin-lib/agent-runtime.js")).href
 );
-const { withRinPiExtensionFactories } = await import(
-  pathToFileURL(path.join(rootDir, "dist/core/rin-lib/pi-extension-options.js"))
-    .href
+const { withPiDefaultExtensionFactories } = await import(
+  pathToFileURL(path.join(rootDir, "dist/core/pi/private-api.js")).href
 );
 const { createConfiguredAgentSession } = await import(
   pathToFileURL(path.join(rootDir, "dist/core/rin-lib/runtime.js")).href
@@ -38,9 +37,9 @@ test("Rin uses Pi's native resource loader instead of a parallel loader", async 
   assert.equal(runtime.DefaultResourceLoader, DefaultResourceLoader);
 });
 
-test("Rin preserves caller inline extensions after Pi built-ins", async () => {
+test("Rin's Pi adapter preserves caller inline extensions after Pi built-ins", async () => {
   const customFactory = { name: "owner-inline", factory() {} };
-  const options = await withRinPiExtensionFactories({
+  const options = withPiDefaultExtensionFactories({
     extensionFactories: [customFactory],
   });
   assert.equal(options.extensionFactories.at(-1), customFactory);

@@ -94,7 +94,6 @@ test("quick-run finalization persists only sandbox initialization state", async 
     assert.equal(result.written.options.writeLaunchers, false);
     assert.equal(eventNames().includes("publish"), false);
     assert.equal(eventNames().includes("refresh-service"), false);
-    assert.equal(eventNames().includes("prepare-tools"), false);
     assert.equal(eventNames().includes("launcher"), false);
   });
 });
@@ -309,7 +308,6 @@ test("default options and platform service hints preserve all production fallbac
           authData: undefined,
           publishRuntime: false,
           manageDaemon: false,
-          prepareManagedTools: false,
           writeLaunchers: false,
         } as any);
         assert.equal(result.currentUser, "owner");

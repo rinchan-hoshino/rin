@@ -364,10 +364,6 @@ test("installer target-user helpers do not execute the staging process Node acro
     path.join(rootDir, "src", "core", "rin-install", "finalize.ts"),
     "utf8",
   );
-  const piToolsSource = fs.readFileSync(
-    path.join(rootDir, "src", "core", "rin-install", "pi-tools.ts"),
-    "utf8",
-  );
   const serviceSource = fs.readFileSync(
     path.join(rootDir, "src", "core", "rin-install", "service.ts"),
     "utf8",
@@ -376,10 +372,6 @@ test("installer target-user helpers do not execute the staging process Node acro
   assert.doesNotMatch(
     finalizeSource,
     /captureCommandAsUser\([^)]*process\.execPath/s,
-  );
-  assert.doesNotMatch(
-    piToolsSource,
-    /runCommandAsUser\([^)]*process\.execPath/s,
   );
   assert.doesNotMatch(
     serviceSource,

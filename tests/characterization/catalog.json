@@ -188,11 +188,6 @@
       "subject": "refactor: prefer public Pi integration seams"
     },
     {
-      "file": "tests/characterization/pi-tools.test.ts",
-      "introducedBy": "b802e1bb",
-      "subject": "fix(tui): prepare managed tools during install"
-    },
-    {
       "file": "tests/characterization/platform.test.ts",
       "introducedBy": "70addd7a",
       "subject": "refactor: stabilize runtime boundaries and dist-only flow"

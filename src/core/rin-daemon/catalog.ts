@@ -6,7 +6,7 @@ import {
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
 import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
-import { withRinPiExtensionFactories } from "../rin-lib/pi-extension-options.js";
+import { withPiDefaultExtensionFactories } from "../pi/private-api.js";
 import {
   collectRuntimeSlashCommands,
   getOAuthStateFromModelRegistry,
@@ -103,7 +103,7 @@ async function createCatalogContext(
 
   const settingsManager = SettingsManager.create(cwd, agentDir);
   const resourceLoader = new DefaultResourceLoader(
-    await withRinPiExtensionFactories({
+    withPiDefaultExtensionFactories({
       cwd,
       agentDir,
       settingsManager,

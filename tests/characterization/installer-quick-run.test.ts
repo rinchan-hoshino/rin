@@ -152,7 +152,6 @@ test("quick run finalizes prepare-only state then launches temporary daemon and 
   assert.match(finalizeSource, /export async function finalizeQuickRunInstall/);
   assert.match(finalizeSource, /publishRuntime:\s*false/);
   assert.match(finalizeSource, /manageDaemon:\s*false/);
-  assert.match(finalizeSource, /prepareManagedTools:\s*false/);
   assert.match(finalizeSource, /writeLaunchers:\s*false/);
 });
 

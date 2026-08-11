@@ -697,12 +697,6 @@
       "preloads": ["tests/support/register-persist-owner-fixture.ts"]
     },
     {
-      "source": "src/core/rin-install/pi-tools.ts",
-      "built": "dist/core/rin-install/pi-tools.js",
-      "suite": "integration",
-      "tests": ["tests/integration/pi-tools.test.ts"]
-    },
-    {
       "source": "src/core/rin-install/progress.ts",
       "built": "dist/core/rin-install/progress.js",
       "suite": "integration",
@@ -835,12 +829,6 @@
       "built": "dist/core/rin-lib/note.js",
       "suite": "integration",
       "tests": ["tests/integration/note-tool.test.ts"]
-    },
-    {
-      "source": "src/core/rin-lib/pi-extension-options.ts",
-      "built": "dist/core/rin-lib/pi-extension-options.js",
-      "suite": "integration",
-      "tests": ["tests/integration/rin-extension-loader-superset.test.ts"]
     },
     {
       "source": "src/core/rin-lib/pi-passthrough.ts",

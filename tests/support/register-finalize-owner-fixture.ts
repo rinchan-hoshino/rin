@@ -73,9 +73,6 @@ const sources: Record<string, string> = {
     export async function acquireTargetDaemonMigrationLock(options) { return await acquire("migration", options); }
     export async function acquireTargetDaemonUpdateFence(options) { return await acquire("update", options); }
   `,
-  "dist/core/rin-install/pi-tools.js": `
-    export async function preparePiManagedToolsForInstall(options) { globalThis.__rinFinalizeEvents.push(["prepare-tools", options]); return { prepared: [] }; }
-  `,
   "dist/core/rin-lib/release.js": `
     export function buildGitHubRefArchiveUrl(repo, ref) { return repo.replace(/\\.git$/, "") + "/archive/" + ref + ".tar.gz"; }
   `,

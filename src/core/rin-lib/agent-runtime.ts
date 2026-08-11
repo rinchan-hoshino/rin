@@ -260,10 +260,10 @@ function createRinAgentSessionServicesFactory(
     const modelRegistry =
       options.modelRegistry ??
       createModelRegistryCompat(PiAgentRuntime, modelRuntime, authStorage);
-    const { withRinPiExtensionFactories } =
-      await import("./pi-extension-options.js");
+    const { withPiDefaultExtensionFactories } =
+      await import("../pi/private-api.js");
     const resourceLoader = new DefaultResourceLoader(
-      await withRinPiExtensionFactories({
+      withPiDefaultExtensionFactories({
         ...(options.resourceLoaderOptions ?? {}),
         cwd,
         agentDir,

@@ -868,12 +868,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-install/pi-tools.ts",
-      "built": "dist/core/rin-install/pi-tools.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/rin-install/progress.ts",
       "built": "dist/core/rin-install/progress.js",
       "ownerSuite": "integration",
@@ -1020,12 +1014,6 @@
     {
       "source": "src/core/rin-lib/note.ts",
       "built": "dist/core/rin-lib/note.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-lib/pi-extension-options.ts",
-      "built": "dist/core/rin-lib/pi-extension-options.js",
       "ownerSuite": "integration",
       "status": "strict"
     },

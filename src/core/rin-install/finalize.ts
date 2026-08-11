@@ -45,7 +45,6 @@ import {
   waitForSocket,
 } from "./service.js";
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
-import { preparePiManagedToolsForInstall } from "./pi-tools.js";
 import { buildGitHubRefArchiveUrl } from "../rin-lib/release.js";
 import { sleep } from "../platform/process.js";
 import {
@@ -409,7 +408,6 @@ async function applyInstalledRuntime(
     daemonFailureCode: string;
     publishRuntime?: boolean;
     manageDaemon?: boolean;
-    prepareManagedTools?: boolean;
     writeLaunchers?: boolean;
   },
 ) {
@@ -429,7 +427,6 @@ async function applyInstalledRuntime(
   if (publishRuntime && !manageDaemon) {
     throw new Error("Runtime publishing requires managed daemon control.");
   }
-  const prepareManagedTools = options.prepareManagedTools !== false;
   const writeLaunchers = options.writeLaunchers !== false;
   const sourceRoot =
     String(options.sourceRoot || "").trim() || repoRootFromHere();
@@ -528,15 +525,6 @@ async function applyInstalledRuntime(
         useElevatedWrite,
         serviceDeps,
       );
-    }
-    if (prepareManagedTools) {
-      await preparePiManagedToolsForInstall({
-        currentUser,
-        targetUser,
-        targetHome,
-        installDir,
-        targetNodePath: executionContext.targetNodePath,
-      });
     }
     let installedService: null | {
       kind: "launchd" | "systemd" | "windows-startup";
@@ -885,7 +873,6 @@ export async function finalizeQuickRunInstall(options: FinalizeInstallOptions) {
     persistInstallerState: true,
     publishRuntime: false,
     manageDaemon: false,
-    prepareManagedTools: false,
     writeLaunchers: false,
     setDefaultTarget: false,
     daemonFailureCode: "rin_quick_run_install_failed",
