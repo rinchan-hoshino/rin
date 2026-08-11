@@ -2072,7 +2072,7 @@ test("rpc runtime rejects an unconfirmed connecting prompt instead of queuing it
   );
 });
 
-test("rpc runtime marks a connected prompt as sending before remote session setup finishes", async () => {
+test("rpc runtime emits the local user message before remote prompt submission finishes", async () => {
   const sent = [];
   let releaseEnsureRemoteSession;
   const session = new RpcInteractiveSession({
@@ -2120,6 +2120,7 @@ test("rpc runtime marks a connected prompt as sending before remote session setu
     connected: true,
   });
   assert.deepEqual(seen, [
+    { type: "rpc_local_user_message", text: "hello" },
     {
       type: "rpc_frontend_status",
       phase: "sending",

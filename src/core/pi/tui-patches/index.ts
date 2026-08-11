@@ -439,10 +439,15 @@ function shouldSyncLocalWorkingAfterEvent(instance: any, event: any) {
   );
 }
 
-function getLocalUserEchoQueue(instance: any) {
+type LocalUserEcho = {
+  text: string;
+  renderedChildren: unknown[];
+};
+
+function getLocalUserEchoQueue(instance: any): LocalUserEcho[] {
   const queue = instance[LOCAL_USER_ECHO_QUEUE_KEY];
   if (Array.isArray(queue)) return queue;
-  const nextQueue: string[] = [];
+  const nextQueue: LocalUserEcho[] = [];
   instance[LOCAL_USER_ECHO_QUEUE_KEY] = nextQueue;
   return nextQueue;
 }
@@ -451,14 +456,21 @@ function resetLocalUserEchoQueue(instance: any) {
   instance[LOCAL_USER_ECHO_QUEUE_KEY] = [];
 }
 
-function shouldSuppressLocalUserEcho(instance: any, event: any) {
-  if (event?.type !== "message_start") return false;
+function takeMatchingLocalUserEcho(instance: any, event: any) {
+  if (event?.type !== "message_start") return undefined;
   const nextText = extractUserTextFromEvent(event);
-  if (!nextText) return false;
+  if (!nextText) return undefined;
   const queue = getLocalUserEchoQueue(instance);
-  if (queue[0] !== nextText) return false;
-  queue.shift();
-  return true;
+  if (queue[0]?.text !== nextText) return undefined;
+  return queue.shift();
+}
+
+function removeRenderedLocalUserEcho(instance: any, echo?: LocalUserEcho) {
+  const container = instance?.chatContainer;
+  if (!echo || typeof container?.removeChild !== "function") return;
+  for (const child of echo.renderedChildren) {
+    container.removeChild(child);
+  }
 }
 
 function shouldIgnoreInteractiveSigint(instance: any) {
@@ -1632,14 +1644,26 @@ export async function applyRinTuiOverrides() {
       if (event?.type === "rpc_local_user_message") {
         const text = String(event.text || "").trim();
         if (!text) return;
-        getLocalUserEchoQueue(this).push(text);
-        await originalHandleEvent.call(this, {
+        const localEcho: LocalUserEcho = {
+          text,
+          renderedChildren: [],
+        };
+        getLocalUserEchoQueue(this).push(localEcho);
+        const children = Array.isArray(this.chatContainer?.children)
+          ? this.chatContainer.children
+          : [];
+        const previousChildren = new Set(children);
+        const renderResult = originalHandleEvent.call(this, {
           type: "message_start",
           message: {
             role: "user",
             content: [{ type: "text", text }],
           },
         });
+        localEcho.renderedChildren = children.filter(
+          (child: unknown) => !previousChildren.has(child),
+        );
+        await renderResult;
         return;
       }
 
@@ -1653,7 +1677,7 @@ export async function applyRinTuiOverrides() {
         return;
       }
 
-      if (shouldSuppressLocalUserEcho(this, event)) return;
+      removeRenderedLocalUserEcho(this, takeMatchingLocalUserEcho(this, event));
 
       const shouldSyncLocalWorking = shouldSyncLocalWorkingAfterEvent(
         this,

@@ -1456,6 +1456,12 @@ export class RpcInteractiveSession {
     this.emitEvent({ type: "rpc_session_resynced" } as any);
   }
 
+  private emitLocalUserMessage(text: string) {
+    const nextText = String(text || "").trim();
+    if (!nextText) return;
+    this.emitEvent({ type: "rpc_local_user_message", text: nextText } as any);
+  }
+
   private setRpcConnected(connected: boolean) {
     this.rpcConnected = connected;
     if (!connected) {
@@ -1555,6 +1561,10 @@ export class RpcInteractiveSession {
       this.recoveryPending
     ) {
       throw new Error("rin_frontend_disconnected");
+    }
+
+    if (operation.mode === "prompt" && !operation.streamingBehavior) {
+      this.emitLocalUserMessage(operation.message);
     }
 
     if (this.clearQueuePromise) await this.clearQueuePromise;

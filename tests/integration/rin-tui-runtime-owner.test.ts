@@ -510,7 +510,16 @@ test("rpc runtime owns prompt admission, queue visibility, and recovery without 
         event.type === "rpc_local_user_message" &&
         event.text === "owner prompt",
     ),
-    false,
+    true,
+  );
+
+  const localEchoCount = events.filter(
+    (event) => event.type === "rpc_local_user_message",
+  ).length;
+  await session.prompt("   ", { expandPromptTemplates: false });
+  assert.equal(
+    events.filter((event) => event.type === "rpc_local_user_message").length,
+    localEchoCount,
   );
 
   await session.steer("owner steer", undefined, { source: "owner" });

@@ -2539,10 +2539,17 @@ test("rpc startup submission uses an already waiting input callback", async () =
   assert.deepEqual(history, ["ready"]);
 });
 
-test("rpc local user echo suppresses the matching daemon echo", async () => {
+test("rpc backend user message replaces its matching local echo", async () => {
   await overrides.applyRinTuiOverrides();
 
   const messages = [];
+  const chatContainer = {
+    children: [],
+    removeChild(child) {
+      const index = this.children.indexOf(child);
+      if (index >= 0) this.children.splice(index, 1);
+    },
+  };
   let renders = 0;
   const instance = {
     isInitialized: true,
@@ -2552,8 +2559,10 @@ test("rpc local user echo suppresses the matching daemon echo", async () => {
       },
     },
     footer: { invalidate() {} },
+    chatContainer,
     addMessageToChat(message) {
       messages.push(message);
+      chatContainer.children.push({ message });
     },
     updatePendingMessagesDisplay() {},
   };
@@ -2565,6 +2574,7 @@ test("rpc local user echo suppresses the matching daemon echo", async () => {
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "message_start",
     message: {
+      id: "backend-owner",
       role: "user",
       content: [{ type: "text", text: "hello" }],
     },
@@ -2578,10 +2588,24 @@ test("rpc local user echo suppresses the matching daemon echo", async () => {
   });
 
   assert.deepEqual(
-    messages.map((message) => message.content[0]?.text),
-    ["hello", "different"],
+    messages.map((message) => [message.id, message.content[0]?.text]),
+    [
+      [undefined, "hello"],
+      ["backend-owner", "hello"],
+      [undefined, "different"],
+    ],
   );
-  assert.equal(renders, 2);
+  assert.deepEqual(
+    chatContainer.children.map(({ message }) => [
+      message.id,
+      message.content[0]?.text,
+    ]),
+    [
+      ["backend-owner", "hello"],
+      [undefined, "different"],
+    ],
+  );
+  assert.equal(renders, 3);
 });
 
 test("rpc session resync clears pending local user echo", async () => {

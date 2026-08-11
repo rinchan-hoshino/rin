@@ -785,7 +785,11 @@ test("patched event bridge coordinates RPC transport, resync, local echo, and th
     type: "message_start",
     message: { role: "user", content: [{ type: "text", text: "owner local" }] },
   });
-  assert.equal(fixture.events.length, beforeEcho);
+  assert.equal(fixture.events.length, beforeEcho + 1);
+  assert.equal(
+    fixture.events.at(-1)?.[1]?.message?.content?.[0]?.text,
+    "owner local",
+  );
   await proto.handleEvent.call(instance, { type: "rpc_session_resynced" });
   assert.equal(renders.includes("session-change"), true);
   assert.equal(renders.includes("history:true"), true);
