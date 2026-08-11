@@ -1,3 +1,12 @@
+export type TranscriptMediaMetadata = {
+  type: "image" | "file";
+  mimeType?: string;
+  name?: string;
+  width?: number;
+  height?: number;
+  size?: number;
+};
+
 export type TranscriptArchiveEntry = {
   id: string;
   timestamp: string;
@@ -5,7 +14,9 @@ export type TranscriptArchiveEntry = {
   sessionFile: string;
   role: string;
   text: string;
+  /** Historical archives may contain this field; new writes omit it. */
   content?: unknown;
+  media?: TranscriptMediaMetadata[];
   toolName?: string;
   toolCallId?: string;
   customType?: string;

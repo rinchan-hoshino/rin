@@ -124,7 +124,7 @@ test("transcript search rejects invalid markers and repairs a marker without a d
     await fs.mkdir(path.dirname(markerPath), { recursive: true });
     await fs.writeFile(
       markerPath,
-      JSON.stringify({ schemaVersion: 5, state: "invalid" }),
+      JSON.stringify({ schemaVersion: 6, state: "invalid" }),
     );
     assert.equal(readTranscriptSearchSchemaMarker(dbPath), null);
 
@@ -291,6 +291,47 @@ test("transcript search supports exact, quoted, structured, and CJK queries", as
     assert.deepEqual(
       await searchTranscriptArchive("no-such-token", {}, root),
       [],
+    );
+  });
+});
+
+test("trigram indexing covers human text without expanding tool logs", async () => {
+  await withSearchRoot(async (root) => {
+    const sessionFile = await createSessionFile(root, "role-scoped-trigram");
+    await appendTranscriptArchiveEntry(
+      archiveInput(sessionFile, {
+        id: "human-cjk",
+        role: "assistant",
+        text: "\u4e3b\u4eba\u786e\u8ba4\u676d\u5dde\u53d1\u5e03\u8bb0\u5f55\u53ef\u4ee5\u641c\u7d22",
+      }),
+      root,
+    );
+    await appendTranscriptArchiveEntry(
+      archiveInput(sessionFile, {
+        id: "tool-cjk",
+        role: "toolResult",
+        toolName: "bash",
+        text: "\u5de5\u5177\u65e5\u5fd7\u4e2d\u95f4\u4e2d\u6587\u552f\u4e00\u6807\u8bb0\u4ee5\u53ca english-tool-token",
+      }),
+      root,
+    );
+
+    assert.equal(
+      (await searchTranscriptArchive("\u676d\u5dde\u53d1\u5e03", {}, root))[0]
+        .id,
+      "owner-session",
+    );
+    assert.deepEqual(
+      await searchTranscriptArchive(
+        "\u4e2d\u95f4\u4e2d\u6587",
+        { fidelity: "exact" },
+        root,
+      ),
+      [],
+    );
+    assert.equal(
+      (await searchTranscriptArchive("english-tool-token", {}, root))[0].id,
+      "owner-session",
     );
   });
 });

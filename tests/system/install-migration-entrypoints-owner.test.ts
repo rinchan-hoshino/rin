@@ -38,6 +38,10 @@ test("memory migration entrypoint validates and dispatches every install phase",
       () => memoryMigrations.main(["--unknown", root]),
       /mode_invalid:--unknown/,
     );
+    await assert.rejects(
+      () => memoryMigrations.main(["--preflight", "--rollback", root]),
+      /mode_invalid:--preflight,--rollback/,
+    );
 
     const preflight = await memoryMigrations.main(["--preflight", root]);
     assert.equal(preflight.reason, "missing");

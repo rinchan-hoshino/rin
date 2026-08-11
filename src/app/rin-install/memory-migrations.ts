@@ -10,11 +10,34 @@ import {
 } from "../../core/memory/install-migration.js";
 
 export async function main(args = process.argv.slice(2)) {
-  const mode = String(args[0] || "").startsWith("--")
-    ? String(args[0])
-    : "--apply";
-  const positional = mode === "--apply" ? args : args.slice(1);
-  const installDir = String(positional[0] || "").trim();
+  const allowedFlags = new Set([
+    "--apply",
+    "--preflight",
+    "--finalize",
+    "--rollback",
+    "--runtime-quiesced",
+  ]);
+  const invalidFlag = args.find(
+    (argument) =>
+      String(argument).startsWith("--") && !allowedFlags.has(String(argument)),
+  );
+  if (invalidFlag) {
+    throw new Error(`memory_install_migration_mode_invalid:${invalidFlag}`);
+  }
+  const modes = args.filter((argument) =>
+    ["--apply", "--preflight", "--finalize", "--rollback"].includes(
+      String(argument),
+    ),
+  );
+  if (modes.length > 1) {
+    throw new Error(`memory_install_migration_mode_invalid:${modes.join(",")}`);
+  }
+  const mode = modes[0] || "--apply";
+  const installDir = String(
+    [...args]
+      .reverse()
+      .find((argument) => !String(argument).startsWith("--")) || "",
+  ).trim();
   if (!installDir)
     throw new Error("memory_install_migration_install_dir_required");
   if (mode === "--preflight") {
@@ -29,7 +52,9 @@ export async function main(args = process.argv.slice(2)) {
   if (mode !== "--apply") {
     throw new Error(`memory_install_migration_mode_invalid:${mode}`);
   }
-  return migrateTranscriptSearchIndexForInstall(installDir);
+  return migrateTranscriptSearchIndexForInstall(installDir, {
+    runtimeQuiesced: args.includes("--runtime-quiesced"),
+  });
 }
 
 const isDirectEntry =

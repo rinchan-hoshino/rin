@@ -207,8 +207,8 @@ test("transcript search uses external-content FTS without canonical entry JSON",
     await transcripts.appendTranscriptArchiveEntry(
       {
         timestamp: "2026-04-04T11:11:11.000Z",
-        sessionId: "session-schema-v5",
-        sessionFile: "/tmp/session-schema-v5.jsonl",
+        sessionId: "session-schema-v6",
+        sessionFile: "/tmp/session-schema-v6.jsonl",
         role: "assistant",
         content: [{ type: "text", text: "external content schema marker" }],
         provider: "provider-kept-in-archive",
@@ -224,7 +224,7 @@ test("transcript search uses external-content FTS without canonical entry JSON",
           "utf8",
         ),
       ),
-      { schemaVersion: 5, state: "current" },
+      { schemaVersion: 6, state: "current" },
     );
     const db = new BetterSqlite3(path.join(root, "memory", "search.db"), {
       readonly: true,
@@ -254,18 +254,18 @@ test("transcript search uses external-content FTS without canonical entry JSON",
         db
           .prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
           .get().value,
-        "5",
+        "6",
       );
     } finally {
       db.close();
     }
 
     const loaded = await transcripts.loadTranscriptSessionEntries(
-      { sessionId: "session-schema-v5" },
+      { sessionId: "session-schema-v6" },
       root,
     );
     assert.equal(loaded[0].provider, "provider-kept-in-archive");
-    assert.ok(Array.isArray(loaded[0].content));
+    assert.equal(loaded[0].content, undefined);
   });
 });
 
@@ -452,6 +452,7 @@ test("installer replaces a schema-v4 transcript index from canonical archives", 
       await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
         root,
         {
+          runtimeQuiesced: true,
           onPublishGuard() {
             publishGuardObserved = true;
             assert.equal(fsSync.statSync(dbPath).isDirectory(), true);
@@ -498,7 +499,7 @@ test("installer replaces a schema-v4 transcript index from canonical archives", 
         rebuiltDb
           .prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
           .get().value,
-        "5",
+        "6",
       );
       assert.deepEqual(
         rebuiltDb
@@ -511,6 +512,160 @@ test("installer replaces a schema-v4 transcript index from canonical archives", 
     } finally {
       rebuiltDb.close();
     }
+  });
+});
+
+test("installer memory-v6 migration sanitizes transcripts without reading managed sessions", async () => {
+  await withTempRoot(async (root) => {
+    const managedSession = await writeSessionFile(root, "managed.jsonl", [
+      { type: "session", id: "managed-session" },
+      {
+        type: "message",
+        message: {
+          role: "user",
+          content: [{ type: "image", data: "managed-base64" }],
+        },
+      },
+    ]);
+    const managedBefore = await fs.readFile(managedSession);
+    const archivePath = path.join(
+      root,
+      "memory",
+      "transcripts",
+      "2026",
+      "08",
+      "managed-session.jsonl",
+    );
+    const legacyArchive = `${JSON.stringify({
+      id: "image-entry",
+      timestamp: "2026-08-11T02:00:00.000Z",
+      sessionId: "managed-session",
+      sessionFile: managedSession,
+      role: "toolResult",
+      text: "read image [image:image/png]",
+      content: [
+        {
+          type: "image",
+          data: "transcript-base64",
+          mimeType: "image/png",
+          width: 800,
+          height: 600,
+        },
+      ],
+    })}\n`;
+    await fs.mkdir(path.dirname(archivePath), { recursive: true });
+    await fs.writeFile(archivePath, legacyArchive);
+    const dbPath = path.join(root, "memory", "search.db");
+    const legacyDb = new BetterSqlite3(dbPath);
+    legacyDb.exec(`
+      CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
+    `);
+    legacyDb.close();
+    await fs.writeFile(
+      `${dbPath}.schema.json`,
+      `${JSON.stringify({ schemaVersion: 5, state: "current" })}\n`,
+    );
+
+    const prepared =
+      await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+        root,
+      );
+    const stagedArchive = path.join(
+      prepared.stagingTranscriptRoot,
+      "2026",
+      "08",
+      "managed-session.jsonl",
+    );
+    assert.doesNotMatch(await fs.readFile(stagedArchive, "utf8"), /base64/);
+    assert.equal(await fs.readFile(archivePath, "utf8"), legacyArchive);
+    assert.deepEqual(await fs.readFile(managedSession), managedBefore);
+    await assert.rejects(
+      () =>
+        transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(root),
+      /memory_install_migration_runtime_not_quiesced/,
+    );
+    assert.equal(await fs.readFile(archivePath, "utf8"), legacyArchive);
+    await assert.rejects(
+      () =>
+        transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+          root,
+          {
+            runtimeQuiesced: true,
+            afterTranscriptPublish() {
+              throw new Error("interrupt_after_transcript_publish");
+            },
+          },
+        ),
+      /interrupt_after_transcript_publish/,
+    );
+    assert.equal(await fs.readFile(archivePath, "utf8"), legacyArchive);
+    assert.deepEqual(await fs.readFile(managedSession), managedBefore);
+    const restoredDb = new BetterSqlite3(dbPath, { readonly: true });
+    try {
+      assert.equal(
+        restoredDb
+          .prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
+          .get().value,
+        "5",
+      );
+    } finally {
+      restoredDb.close();
+    }
+    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+      root,
+    );
+
+    await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+      root,
+      { runtimeQuiesced: true },
+    );
+    assert.doesNotMatch(await fs.readFile(archivePath, "utf8"), /base64/);
+    assert.deepEqual(await fs.readFile(managedSession), managedBefore);
+
+    const rolledBack =
+      transcriptInstallMigration.rollbackTranscriptSearchMigrationForInstall(
+        root,
+      );
+    assert.equal(rolledBack.skipped, false);
+    assert.equal(await fs.readFile(archivePath, "utf8"), legacyArchive);
+    assert.equal(
+      fsSync.existsSync(
+        path.join(root, "memory", "transcripts", ".sanitization-manifest.json"),
+      ),
+      false,
+    );
+    assert.deepEqual(await fs.readFile(managedSession), managedBefore);
+
+    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+      root,
+    );
+    await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+      root,
+      { runtimeQuiesced: true },
+    );
+    assert.equal(
+      transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+        root,
+      ).cleanupPending,
+      false,
+    );
+    assert.doesNotMatch(await fs.readFile(archivePath, "utf8"), /base64/);
+    assert.equal(
+      fsSync.existsSync(
+        `${path.join(root, "memory", "transcripts")}.migration-backup-v6`,
+      ),
+      false,
+    );
+    assert.equal(fsSync.existsSync(`${dbPath}.migration-backup-v6`), false);
+    const migrationReport = JSON.parse(
+      await fs.readFile(
+        path.join(root, "memory", "transcript-migration-v6.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(migrationReport.summary.unknownCorruptLines, 0);
+    assert.deepEqual(await fs.readFile(managedSession), managedBefore);
   });
 });
 
@@ -561,7 +716,7 @@ test("installer publish failure restores the live transcript index", async () =>
       await assert.rejects(
         transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
           root,
-          failure.options,
+          { runtimeQuiesced: true, ...failure.options },
         ),
         /test_(before_backup|after_backup|publish)_abort/,
         failure.label,
@@ -600,16 +755,17 @@ test("installer completes recovery after interruption following publish", async 
       await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
         root,
         {
+          runtimeQuiesced: true,
           afterPublish() {
             throw new Error("simulated-post-publish-interruption");
           },
         },
       );
     assert.equal(result.action, "rebuilt");
-    assert.equal(fsSync.existsSync(`${dbPath}.migration-backup-v5`), true);
+    assert.equal(fsSync.existsSync(`${dbPath}.migration-backup-v6`), true);
     assert.deepEqual(
       JSON.parse(await fs.readFile(`${dbPath}.schema.json`, "utf8")),
-      { schemaVersion: 5, state: "installer-migrating" },
+      { schemaVersion: 6, state: "installer-migrating" },
     );
     const finalized =
       transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
@@ -617,10 +773,10 @@ test("installer completes recovery after interruption following publish", async 
       );
     assert.equal(finalized.skipped, false);
     assert.equal(finalized.cleanupPending, false);
-    assert.equal(fsSync.existsSync(`${dbPath}.migration-backup-v5`), false);
+    assert.equal(fsSync.existsSync(`${dbPath}.migration-backup-v6`), false);
     assert.deepEqual(
       JSON.parse(await fs.readFile(`${dbPath}.schema.json`, "utf8")),
-      { schemaVersion: 5, state: "current" },
+      { schemaVersion: 6, state: "current" },
     );
   });
 });
@@ -641,6 +797,7 @@ test("installer rollback restores legacy bytes before restarting the old runtime
     );
     await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
       root,
+      { runtimeQuiesced: true },
     );
 
     const rolledBack =
@@ -650,7 +807,7 @@ test("installer rollback restores legacy bytes before restarting the old runtime
     assert.equal(rolledBack.skipped, false);
     assert.deepEqual(await fs.readFile(dbPath), legacyBytes);
     assert.equal(fsSync.existsSync(`${dbPath}.schema.json`), false);
-    assert.equal(fsSync.existsSync(`${dbPath}.migration-backup-v5`), false);
+    assert.equal(fsSync.existsSync(`${dbPath}.migration-backup-v6`), false);
   });
 });
 
@@ -667,7 +824,7 @@ test("installer rollback removes a pre-backup marker before old-runtime restart"
     const legacyBytes = await fs.readFile(dbPath);
     await fs.writeFile(
       `${dbPath}.schema.json`,
-      `${JSON.stringify({ schemaVersion: 5, state: "installer-migrating" })}\n`,
+      `${JSON.stringify({ schemaVersion: 6, state: "installer-migrating" })}\n`,
     );
 
     const result =
@@ -694,7 +851,7 @@ test("installer preserves backup payloads when the backup manifest is invalid", 
       root,
     );
 
-    const backupDir = `${dbPath}.migration-backup-v5`;
+    const backupDir = `${dbPath}.migration-backup-v6`;
     const backupDbPath = path.join(backupDir, "search.db");
     await fs.mkdir(backupDir, { recursive: true });
     await fs.rename(dbPath, backupDbPath);
@@ -705,7 +862,9 @@ test("installer preserves backup payloads when the backup manifest is invalid", 
     );
 
     await assert.rejects(
-      transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(root),
+      transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(root, {
+        runtimeQuiesced: true,
+      }),
       /transcript_search_install_backup_manifest_invalid/,
     );
     assert.deepEqual(await fs.readFile(backupDbPath), backupBytes);
@@ -716,7 +875,7 @@ test("installer preserves backup payloads when the backup manifest is invalid", 
 test("installer preserves a guard when a declared backup payload is missing", async () => {
   await withTempRoot(async (root) => {
     const dbPath = path.join(root, "memory", "search.db");
-    const backupDir = `${dbPath}.migration-backup-v5`;
+    const backupDir = `${dbPath}.migration-backup-v6`;
     await fs.mkdir(backupDir, { recursive: true });
     await fs.mkdir(dbPath);
     const manifestPath = path.join(backupDir, "manifest.json");
@@ -732,7 +891,9 @@ test("installer preserves a guard when a declared backup payload is missing", as
     await fs.writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
 
     await assert.rejects(
-      transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(root),
+      transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(root, {
+        runtimeQuiesced: true,
+      }),
       /transcript_search_install_backup_manifest_invalid/,
     );
     assert.equal(fsSync.statSync(dbPath).isDirectory(), true);
@@ -794,8 +955,9 @@ test("installer rejects symlink backup payloads before finalization", async (t) 
     );
     await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
       root,
+      { runtimeQuiesced: true },
     );
-    const backupPath = path.join(`${dbPath}.migration-backup-v5`, "search.db");
+    const backupPath = path.join(`${dbPath}.migration-backup-v6`, "search.db");
     const sentinelPath = path.join(root, "sentinel.db");
     await fs.writeFile(sentinelPath, "sentinel");
     await fs.rm(backupPath);
@@ -816,7 +978,7 @@ test("installer rejects symlink backup payloads before finalization", async (t) 
 test("installer completes rollback after payload restore but before marker cleanup", async () => {
   await withTempRoot(async (root) => {
     const dbPath = path.join(root, "memory", "search.db");
-    const backupDir = `${dbPath}.migration-backup-v5`;
+    const backupDir = `${dbPath}.migration-backup-v6`;
     await fs.mkdir(backupDir, { recursive: true });
     const liveDb = new BetterSqlite3(dbPath);
     liveDb.exec(`
@@ -839,7 +1001,7 @@ test("installer completes rollback after payload restore but before marker clean
     );
     await fs.writeFile(
       `${dbPath}.schema.json`,
-      `${JSON.stringify({ schemaVersion: 5, state: "current" })}\n`,
+      `${JSON.stringify({ schemaVersion: 6, state: "current" })}\n`,
     );
 
     const result =
@@ -855,7 +1017,7 @@ test("installer completes rollback after payload restore but before marker clean
 test("installer cleans an interrupted manifest temp before retry", async () => {
   await withTempRoot(async (root) => {
     const dbPath = path.join(root, "memory", "search.db");
-    const backupDir = `${dbPath}.migration-backup-v5`;
+    const backupDir = `${dbPath}.migration-backup-v6`;
     await fs.mkdir(backupDir, { recursive: true });
     await fs.writeFile(
       path.join(backupDir, "manifest.json.123.tmp"),
@@ -865,6 +1027,7 @@ test("installer cleans an interrupted manifest temp before retry", async () => {
     const result =
       await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
         root,
+        { runtimeQuiesced: true },
       );
     assert.equal(result.action, "none");
     assert.equal(fsSync.existsSync(backupDir), false);
@@ -875,17 +1038,18 @@ test("installer cleans partial backup deletion after durable current marker", as
   await withTempRoot(async (root) => {
     const dbPath = path.join(root, "memory", "search.db");
     await transcripts.searchTranscriptArchive("initialize", {}, root);
-    const backupDir = `${dbPath}.migration-backup-v5`;
+    const backupDir = `${dbPath}.migration-backup-v6`;
     await fs.mkdir(backupDir, { recursive: true });
     await fs.writeFile(path.join(backupDir, "orphaned-payload"), "old");
 
     await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
       root,
+      { runtimeQuiesced: true },
     );
     assert.equal(fsSync.existsSync(backupDir), false);
     assert.deepEqual(
       JSON.parse(await fs.readFile(`${dbPath}.schema.json`, "utf8")),
-      { schemaVersion: 5, state: "current" },
+      { schemaVersion: 6, state: "current" },
     );
   });
 });
@@ -922,39 +1086,39 @@ test("installer treats a migration marker without a live index as incomplete", a
     await fs.writeFile(
       `${dbPath}.schema.json`,
       `${JSON.stringify({
-        schemaVersion: 5,
+        schemaVersion: 6,
         state: "installer-migrating",
       })}\n`,
     );
     assert.deepEqual(
       transcriptInstallMigration.preflightTranscriptSearchMigration(root),
       {
-        id: "transcript-search-schema-v5",
+        id: "transcript-search-schema-v6",
         skipped: false,
         action: "rebuild",
-        currentVersion: 5,
-        targetVersion: 5,
+        currentVersion: 6,
+        targetVersion: 6,
         reason: "incomplete",
       },
     );
   });
 });
 
-test("installer retries an interrupted schema-v5 transcript rebuild", async () => {
+test("installer retries an interrupted schema-v6 transcript rebuild", async () => {
   await withTempRoot(async (root) => {
     const dbPath = path.join(root, "memory", "search.db");
     await fs.mkdir(path.dirname(dbPath), { recursive: true });
     const interruptedDb = new BetterSqlite3(dbPath);
     interruptedDb.exec(`
       CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '6');
       INSERT INTO metadata(key, value) VALUES ('rebuild_required', '1');
     `);
     interruptedDb.close();
     await fs.writeFile(
       `${dbPath}.schema.json`,
       `${JSON.stringify({
-        schemaVersion: 5,
+        schemaVersion: 6,
         state: "installer-migrating",
       })}\n`,
     );
@@ -966,9 +1130,10 @@ test("installer retries an interrupted schema-v5 transcript rebuild", async () =
     const result =
       await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
         root,
+        { runtimeQuiesced: true },
       );
     assert.equal(result.action, "rebuilt");
-    assert.equal(result.currentVersion, 5);
+    assert.equal(result.currentVersion, 6);
     transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
       root,
     );
@@ -2530,4 +2695,256 @@ test("recall rendered result appends timing info", () => {
 
   assert.match(rendered, /Searching archived sessions for "recall hang"/);
   assert.match(rendered, /Took 2\.5s/);
+});
+
+test("installer restores a transcript guard that predates its backup manifest", async () => {
+  await withTempRoot(async (root) => {
+    const liveRoot = path.join(root, "memory", "transcripts");
+    const backupRoot = `${liveRoot}.migration-backup-v6`;
+    const archivePath = path.join(backupRoot, "2026", "08", "recovered.jsonl");
+    await fs.mkdir(path.dirname(archivePath), { recursive: true });
+    await fs.writeFile(
+      archivePath,
+      `${JSON.stringify({
+        id: "recovered",
+        timestamp: "2026-08-11T00:00:00.000Z",
+        sessionId: "recovered",
+        sessionFile: "/tmp/recovered.jsonl",
+        role: "assistant",
+        text: "recovered archive",
+      })}\n`,
+    );
+    await fs.writeFile(liveRoot, "transcript migration guard\n");
+
+    const recovered =
+      await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+        root,
+        { runtimeQuiesced: true },
+      );
+    assert.equal(recovered.action, "rebuilt");
+    assert.equal(fsSync.statSync(liveRoot).isDirectory(), true);
+    assert.equal(fsSync.existsSync(backupRoot), true);
+    assert.match(
+      await fs.readFile(
+        path.join(liveRoot, "2026", "08", "recovered.jsonl"),
+        "utf8",
+      ),
+      /recovered archive/,
+    );
+    transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+      root,
+    );
+    assert.equal(fsSync.existsSync(backupRoot), false);
+  });
+});
+
+test("installer rejects an unexplained transcript backup beside a live directory", async () => {
+  await withTempRoot(async (root) => {
+    const liveRoot = path.join(root, "memory", "transcripts");
+    const backupRoot = `${liveRoot}.migration-backup-v6`;
+    await fs.mkdir(liveRoot, { recursive: true });
+    await fs.mkdir(backupRoot, { recursive: true });
+    await fs.writeFile(path.join(backupRoot, "orphan"), "data");
+    await assert.rejects(
+      transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(root, {
+        runtimeQuiesced: true,
+      }),
+      /transcript_archive_install_backup_manifest_invalid/,
+    );
+    assert.equal(fsSync.existsSync(path.join(backupRoot, "orphan")), true);
+  });
+});
+
+test("installer recovers a guarded transcript manifest after both payloads publish", async () => {
+  await withTempRoot(async (root) => {
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        timestamp: "2026-08-11T00:00:00.000Z",
+        sessionId: "recovery-session",
+        sessionFile: "/tmp/recovery-session.jsonl",
+        role: "assistant",
+        content: [{ type: "text", text: "recovery payload" }],
+      },
+      root,
+    );
+    transcripts.flushTranscriptSearchIndexWrites(root);
+    const legacyDb = new BetterSqlite3(path.join(root, "memory", "search.db"));
+    legacyDb
+      .prepare("UPDATE metadata SET value = '5' WHERE key = 'schema_version'")
+      .run();
+    legacyDb.close();
+    await fs.writeFile(
+      path.join(root, "memory", "search.db.schema.json"),
+      `${JSON.stringify({ schemaVersion: 5, state: "current" })}\n`,
+    );
+    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+      root,
+    );
+    await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+      root,
+      { runtimeQuiesced: true },
+    );
+    const backupRoot = `${path.join(root, "memory", "transcripts")}.migration-backup-v6`;
+    const manifestPath = path.join(backupRoot, ".migration-manifest.json");
+    const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+    await fs.writeFile(
+      manifestPath,
+      `${JSON.stringify({ ...manifest, phase: "guarded" })}\n`,
+    );
+
+    const recovered =
+      await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+        root,
+        { runtimeQuiesced: true },
+      );
+    assert.equal(recovered.action, "rebuilt");
+    assert.equal(
+      JSON.parse(await fs.readFile(manifestPath, "utf8")).phase,
+      "published",
+    );
+    assert.equal(
+      transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+        root,
+      ).cleanupPending,
+      false,
+    );
+  });
+});
+
+test("installer refuses finalization without the transcript sanitization report", async () => {
+  await withTempRoot(async (root) => {
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        timestamp: "2026-08-11T00:00:00.000Z",
+        sessionId: "missing-report-session",
+        sessionFile: "/tmp/missing-report-session.jsonl",
+        role: "assistant",
+        content: [{ type: "text", text: "missing report payload" }],
+      },
+      root,
+    );
+    transcripts.flushTranscriptSearchIndexWrites(root);
+    const legacyDb = new BetterSqlite3(path.join(root, "memory", "search.db"));
+    legacyDb
+      .prepare("UPDATE metadata SET value = '5' WHERE key = 'schema_version'")
+      .run();
+    legacyDb.close();
+    await fs.writeFile(
+      path.join(root, "memory", "search.db.schema.json"),
+      `${JSON.stringify({ schemaVersion: 5, state: "current" })}\n`,
+    );
+    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+      root,
+    );
+    await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+      root,
+      { runtimeQuiesced: true },
+    );
+    const backupRoot = `${path.join(root, "memory", "transcripts")}.migration-backup-v6`;
+    const sanitizationPath = path.join(
+      backupRoot,
+      ".sanitization-manifest.json",
+    );
+    const sanitizationManifest = await fs.readFile(sanitizationPath);
+    await fs.rm(sanitizationPath);
+    await assert.rejects(
+      Promise.resolve().then(() =>
+        transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+          root,
+        ),
+      ),
+      /transcript_archive_install_migration_incomplete/,
+    );
+    await fs.writeFile(sanitizationPath, sanitizationManifest);
+    const publishManifestPath = path.join(
+      backupRoot,
+      ".migration-manifest.json",
+    );
+    const publishManifest = JSON.parse(
+      await fs.readFile(publishManifestPath, "utf8"),
+    );
+    await fs.writeFile(
+      publishManifestPath,
+      `${JSON.stringify({ ...publishManifest, phase: "guarded" })}\n`,
+    );
+    assert.throws(
+      () =>
+        transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+          root,
+        ),
+      /transcript_archive_install_migration_incomplete/,
+    );
+    assert.equal(
+      transcriptInstallMigration.rollbackTranscriptSearchMigrationForInstall(
+        root,
+      ).skipped,
+      false,
+    );
+  });
+});
+
+test("installer rejects non-directory transcript backups in every phase", async () => {
+  for (const phase of ["apply", "finalize", "rollback"] as const) {
+    await withTempRoot(async (root) => {
+      const backupRoot = `${path.join(root, "memory", "transcripts")}.migration-backup-v6`;
+      await fs.mkdir(path.dirname(backupRoot), { recursive: true });
+      await fs.writeFile(backupRoot, "not-a-directory");
+      if (phase === "apply") {
+        await assert.rejects(
+          transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+            root,
+            { runtimeQuiesced: true },
+          ),
+          /transcript_archive_install_backup_manifest_invalid/,
+        );
+      } else {
+        assert.throws(
+          () =>
+            phase === "finalize"
+              ? transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+                  root,
+                )
+              : transcriptInstallMigration.rollbackTranscriptSearchMigrationForInstall(
+                  root,
+                ),
+          /transcript_archive_install_backup_manifest_invalid/,
+        );
+      }
+    });
+  }
+});
+
+test("installer requires quiescence even when only an empty legacy index exists", async () => {
+  await withTempRoot(async (root) => {
+    const dbPath = path.join(root, "memory", "search.db");
+    await fs.mkdir(path.dirname(dbPath), { recursive: true });
+    const legacyDb = new BetterSqlite3(dbPath);
+    legacyDb.exec(`
+      CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
+    `);
+    legacyDb.close();
+    await fs.writeFile(
+      `${dbPath}.schema.json`,
+      `${JSON.stringify({ schemaVersion: 5, state: "current" })}\n`,
+    );
+    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+      root,
+    );
+    await assert.rejects(
+      transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(root),
+      /memory_install_migration_runtime_not_quiesced/,
+    );
+    const unchanged = new BetterSqlite3(dbPath, { readonly: true });
+    try {
+      assert.equal(
+        unchanged
+          .prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
+          .get().value,
+        "5",
+      );
+    } finally {
+      unchanged.close();
+    }
+  });
 });

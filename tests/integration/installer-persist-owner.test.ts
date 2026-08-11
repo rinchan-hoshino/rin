@@ -793,7 +793,7 @@ test("install migration phases delegate memory and chat authority to the target 
     assert.deepEqual(
       preflight.map((item) => item.id),
       [
-        "transcript-search-schema-v5-preflight",
+        "transcript-search-schema-v6-preflight",
         "chat-authority-install-migration-v1-preflight",
       ],
     );
@@ -811,7 +811,7 @@ test("install migration phases delegate memory and chat authority to the target 
       deps,
     );
     assert.equal(
-      applied.some((item) => item.id === "transcript-search-schema-v5"),
+      applied.some((item) => item.id === "transcript-search-schema-v6"),
       true,
     );
     assert.equal(
@@ -833,6 +833,20 @@ test("install migration phases delegate memory and chat authority to the target 
         chatRuntimeQuiesced: true,
       },
       deps,
+    );
+    const memoryApplyCommands = commands.filter(
+      (entry) =>
+        entry.args[0]?.endsWith("memory-migrations.js") &&
+        entry.args.includes("--apply"),
+    );
+    assert.equal(memoryApplyCommands.length, 2);
+    assert.equal(
+      memoryApplyCommands[0].args.includes("--runtime-quiesced"),
+      false,
+    );
+    assert.equal(
+      memoryApplyCommands[1].args.includes("--runtime-quiesced"),
+      true,
     );
     assert.deepEqual(commands[0], {
       command: "/runtime/node",

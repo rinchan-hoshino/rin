@@ -100,6 +100,29 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "The transcript search migration lost its publish guard.",
   transcript_search_install_backup_manifest_invalid: () =>
     "The transcript search migration backup manifest is invalid.",
+  transcript_archive_install_manifest_invalid: () =>
+    "The transcript archive migration manifest is invalid.",
+  transcript_archive_install_staging_path_invalid: () =>
+    "The staged transcript archive path is invalid.",
+  transcript_archive_install_backup_manifest_invalid: () =>
+    "The transcript archive migration backup manifest is invalid.",
+  transcript_archive_install_live_path_invalid: () =>
+    "The live transcript archive path is invalid.",
+  transcript_archive_install_publish_guard_missing: () =>
+    "The transcript archive migration lost its publish guard.",
+  transcript_archive_install_migration_incomplete: () =>
+    "The Rin installer could not finish upgrading the transcript archive.",
+  transcript_archive_install_target_path_invalid: () =>
+    "The transcript archive migration target path is invalid.",
+  transcript_archive_install_source_path_invalid: () =>
+    "The transcript archive migration source path is invalid.",
+  transcript_archive_install_target_not_empty: () =>
+    "The transcript archive migration target is not empty.",
+  transcript_archive_install_unknown_corruption: (detail) =>
+    withDetail(
+      "Transcript archive migration found unexplained malformed data",
+      detail,
+    ),
   chat_accepted_inbound_turn_not_active: () =>
     "Chat recovery could not find the active turn for the accepted message.",
   chat_bridge_at_id_required: () =>
@@ -195,6 +218,16 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Memory migration needs the target Rin install directory.",
   memory_install_migration_runtime_required: () =>
     "Memory migration needs the staged Rin runtime before installation can continue.",
+  memory_install_migration_mode_invalid: (detail) =>
+    withDetail("Memory migration received an invalid mode", detail),
+  memory_install_migration_failed: () =>
+    "The Rin installer could not complete memory migration.",
+  memory_install_migration_prepare_incomplete: () =>
+    "The Rin installer could not prepare all memory migration payloads.",
+  memory_install_migration_publish_state_inconsistent: () =>
+    "Memory migration found inconsistent published payload state.",
+  memory_install_migration_runtime_not_quiesced: () =>
+    "Memory migration requires the Rin runtime to be fully stopped.",
   chat_install_migration_invalid_session_state: (detail) =>
     withDetail("Chat migration found invalid legacy session state", detail),
   chat_install_migration_session_state_read_failed: (detail) =>

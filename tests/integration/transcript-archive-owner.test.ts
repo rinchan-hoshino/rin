@@ -222,6 +222,58 @@ test("transcript append rejects incomplete records and persists complete metadat
   });
 });
 
+test("transcript append omits binary payloads and serializes concurrent writes", async () => {
+  await withTempDir(async (root) => {
+    const sessionFile = "/tmp/concurrent-session.jsonl";
+    const binary = "A".repeat(600 * 1024);
+    const writes = Array.from({ length: 12 }, (_, index) =>
+      archive.appendTranscriptArchiveRecord(
+        {
+          id: `image-${index}`,
+          timestamp: "2026-04-05T12:22:24.000Z",
+          sessionId: "concurrent-session",
+          sessionFile,
+          role: "toolResult",
+          toolName: "read",
+          content: [
+            { type: "text", text: `image result ${index} ${binary}` },
+            {
+              type: "image",
+              data: `${index}:${binary}`,
+              mimeType: "image/png",
+              width: 2168,
+              height: 725,
+            },
+          ],
+        },
+        root,
+      ),
+    );
+    const results = await Promise.all(writes);
+    const archivePath = results[0]?.filePath;
+    assert.ok(archivePath);
+    const raw = await fs.readFile(archivePath, "utf8");
+    assert.doesNotMatch(raw, /"data"\s*:/);
+    assert.doesNotMatch(raw, /"content"\s*:/);
+    const records = raw
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(
+      records.map((record) => record.id),
+      Array.from({ length: 12 }, (_, index) => `image-${index}`),
+    );
+    assert.deepEqual(records[0].media, [
+      {
+        type: "image",
+        mimeType: "image/png",
+        width: 2168,
+        height: 725,
+      },
+    ]);
+  });
+});
+
 test("transcript files load recursively while discarding malformed and legacy rows", async () => {
   await withTempDir(async (root) => {
     const nested = path.join(root, "memory", "transcripts", "2026", "04");

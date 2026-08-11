@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import fssync from "node:fs";
 import path from "node:path";
-import readline from "node:readline";
 
 import { appendJsonLine } from "../platform/fs.js";
 import { nowIso } from "../time-utils.js";
@@ -14,11 +13,14 @@ import { parseTimestampMs, safeString, sha, trimText } from "./utils.js";
 import type {
   TranscriptArchiveEntry,
   TranscriptFileState,
+  TranscriptMediaMetadata,
   TranscriptResultMessage,
   TranscriptSessionResult,
 } from "./transcript-types.js";
 
 export const MAX_MATCHED_ENTRIES_PER_SESSION = 3;
+
+const transcriptAppendTails = new Map<string, Promise<void>>();
 
 function resolveMemoryRoot(rootOverride = ""): string {
   return safeString(rootOverride).trim()
@@ -140,6 +142,72 @@ function summarizePart(part: unknown): string {
   return "";
 }
 
+function positiveFiniteNumber(value: unknown): number | undefined {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : undefined;
+}
+
+function transcriptMediaPart(part: unknown): TranscriptMediaMetadata | null {
+  if (!part || typeof part !== "object") return null;
+  const value = part as Record<string, unknown>;
+  if (value.type === "image") {
+    const mimeType = safeString(value.mimeType || "").trim() || undefined;
+    const width = positiveFiniteNumber(value.width);
+    const height = positiveFiniteNumber(value.height);
+    return {
+      type: "image",
+      ...(mimeType ? { mimeType } : {}),
+      ...(width ? { width } : {}),
+      ...(height ? { height } : {}),
+    };
+  }
+  if (value.type === "file") {
+    const mimeType = safeString(value.mimeType || "").trim() || undefined;
+    const name = safeString(value.name || value.path || "").trim() || undefined;
+    const size = positiveFiniteNumber(value.size);
+    return {
+      type: "file",
+      ...(mimeType ? { mimeType } : {}),
+      ...(name ? { name } : {}),
+      ...(size ? { size } : {}),
+    };
+  }
+  return null;
+}
+
+export function extractTranscriptMedia(
+  input: Record<string, unknown>,
+): TranscriptMediaMetadata[] {
+  const source = Array.isArray(input.media)
+    ? input.media
+    : Array.isArray(input.content)
+      ? input.content
+      : [];
+  return source
+    .map((part) => transcriptMediaPart(part))
+    .filter((part): part is TranscriptMediaMetadata => Boolean(part));
+}
+
+async function withSerializedTranscriptAppend<T>(
+  filePath: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = transcriptAppendTails.get(filePath) || Promise.resolve();
+  const current = previous.catch(() => undefined).then(operation);
+  const tail = current.then(
+    () => undefined,
+    () => undefined,
+  );
+  transcriptAppendTails.set(filePath, tail);
+  try {
+    return await current;
+  } finally {
+    if (transcriptAppendTails.get(filePath) === tail) {
+      transcriptAppendTails.delete(filePath);
+    }
+  }
+}
+
 export function extractTranscriptText(input: Record<string, unknown>): string {
   const role = safeString(input.role || "").trim();
   const content = input.content;
@@ -184,6 +252,7 @@ export async function appendTranscriptArchiveRecord(
   const sessionFile = path.resolve(rawSessionFile);
   const text = extractTranscriptText(input);
   if (!text) return undefined;
+  const media = extractTranscriptMedia(input);
   const entry: TranscriptArchiveEntry = {
     id:
       safeString(input.id || "").trim() ||
@@ -202,7 +271,7 @@ export async function appendTranscriptArchiveRecord(
     sessionFile,
     role,
     text,
-    content: input.content,
+    ...(media.length ? { media } : {}),
     toolName: safeString(input.toolName || "").trim() || undefined,
     toolCallId: safeString(input.toolCallId || "").trim() || undefined,
     customType: safeString(input.customType || "").trim() || undefined,
@@ -213,17 +282,19 @@ export async function appendTranscriptArchiveRecord(
     display: typeof input.display === "boolean" ? input.display : undefined,
   };
   const filePath = getTranscriptArchivePath(entry, rootOverride);
-  await appendJsonLine(filePath, entry);
-  const stat = await fs.stat(filePath);
-  return {
-    entry,
-    filePath,
-    fileState: {
-      archivePath: filePath,
-      mtimeMs: Math.trunc(stat.mtimeMs),
-      size: stat.size,
-    },
-  };
+  return withSerializedTranscriptAppend(filePath, async () => {
+    await appendJsonLine(filePath, entry);
+    const stat = await fs.stat(filePath);
+    return {
+      entry,
+      filePath,
+      fileState: {
+        archivePath: filePath,
+        mtimeMs: Math.trunc(stat.mtimeMs),
+        size: stat.size,
+      },
+    };
+  });
 }
 
 function parseTranscriptArchiveLine(
@@ -246,22 +317,42 @@ function parseTranscriptArchiveLine(
   }
 }
 
-export async function* iterateTranscriptArchiveFile(filePath: string) {
+export async function* iterateLfDelimitedTextFile(filePath: string) {
   if (!fssync.existsSync(filePath)) return;
   const input = fssync.createReadStream(filePath, { encoding: "utf8" });
-  const lines = readline.createInterface({ input, crlfDelay: Infinity });
+  let pending = "";
   let lineNumber = 0;
   try {
-    for await (const line of lines) {
+    for await (const chunk of input) {
+      pending += String(chunk);
+      while (true) {
+        const delimiter = pending.indexOf("\n");
+        if (delimiter < 0) break;
+        lineNumber += 1;
+        let line = pending.slice(0, delimiter);
+        pending = pending.slice(delimiter + 1);
+        if (line.endsWith("\r")) line = line.slice(0, -1);
+        yield { line, lineNumber };
+      }
+    }
+    if (pending) {
       lineNumber += 1;
-      const rawLine = line.trim();
-      if (!rawLine) continue;
-      const parsed = parseTranscriptArchiveLine(rawLine, lineNumber, filePath);
-      if (parsed) yield parsed;
+      if (pending.endsWith("\r")) pending = pending.slice(0, -1);
+      yield { line: pending, lineNumber };
     }
   } finally {
-    lines.close();
     input.destroy();
+  }
+}
+
+export async function* iterateTranscriptArchiveFile(filePath: string) {
+  for await (const { line, lineNumber } of iterateLfDelimitedTextFile(
+    filePath,
+  )) {
+    const rawLine = line.trim();
+    if (!rawLine) continue;
+    const parsed = parseTranscriptArchiveLine(rawLine, lineNumber, filePath);
+    if (parsed) yield parsed;
   }
 }
 

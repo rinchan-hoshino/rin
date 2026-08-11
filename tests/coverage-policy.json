@@ -388,6 +388,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/memory/transcript-install-migration.ts",
+      "built": "dist/core/memory/transcript-install-migration.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/memory/transcript-search.ts",
       "built": "dist/core/memory/transcript-search.js",
       "ownerSuite": "integration",

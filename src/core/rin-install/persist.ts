@@ -767,7 +767,12 @@ function runMemoryInstallMigration(
   );
   const args = [
     runnerPath,
-    ...(mode === "apply" ? [] : [`--${mode}`]),
+    ...(mode === "apply"
+      ? [
+          "--apply",
+          ...(options.chatRuntimeQuiesced ? ["--runtime-quiesced"] : []),
+        ]
+      : [`--${mode}`]),
     path.resolve(options.installDir),
   ];
   const nodePath =
@@ -780,8 +785,8 @@ function runMemoryInstallMigration(
   return {
     id:
       mode === "apply"
-        ? "transcript-search-schema-v5"
-        : `transcript-search-schema-v5-${mode}`,
+        ? "transcript-search-schema-v6"
+        : `transcript-search-schema-v6-${mode}`,
     skipped: false,
     executedAs: options.targetUser,
   };

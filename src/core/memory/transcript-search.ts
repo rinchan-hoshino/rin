@@ -85,7 +85,7 @@ const transcriptWriterMarkerId = `${process.pid}-${Date.now()}-${Math.random()
   .toString(16)
   .slice(2)}`;
 let transcriptWriterExitHookInstalled = false;
-export const TRANSCRIPT_SEARCH_SCHEMA_VERSION = 5;
+export const TRANSCRIPT_SEARCH_SCHEMA_VERSION = 6;
 export type TranscriptSearchSchemaMarkerState =
   | "current"
   | "runtime-initializing"
@@ -306,25 +306,29 @@ function initializeTranscriptSearchDb(db: Database, busyTimeoutMs = 5000) {
       INSERT INTO entries_fts_token(rowid, row_key, session_id, role, tool_name, custom_type, text)
       VALUES (new.rowid, new.row_key, new.session_id, new.role, new.tool_name, new.custom_type, new.text);
       INSERT INTO entries_fts_trigram(rowid, row_key, session_id, role, tool_name, custom_type, text)
-      VALUES (new.rowid, new.row_key, new.session_id, new.role, new.tool_name, new.custom_type, new.text);
+      SELECT new.rowid, new.row_key, new.session_id, new.role, new.tool_name, new.custom_type, new.text
+      WHERE new.role IN ('user', 'assistant', 'compactionSummary', 'branchSummary', 'custom');
     END;
 
     CREATE TRIGGER IF NOT EXISTS entries_search_delete AFTER DELETE ON entries BEGIN
       INSERT INTO entries_fts_token(entries_fts_token, rowid, row_key, session_id, role, tool_name, custom_type, text)
       VALUES ('delete', old.rowid, old.row_key, old.session_id, old.role, old.tool_name, old.custom_type, old.text);
       INSERT INTO entries_fts_trigram(entries_fts_trigram, rowid, row_key, session_id, role, tool_name, custom_type, text)
-      VALUES ('delete', old.rowid, old.row_key, old.session_id, old.role, old.tool_name, old.custom_type, old.text);
+      SELECT 'delete', old.rowid, old.row_key, old.session_id, old.role, old.tool_name, old.custom_type, old.text
+      WHERE old.role IN ('user', 'assistant', 'compactionSummary', 'branchSummary', 'custom');
     END;
 
     CREATE TRIGGER IF NOT EXISTS entries_search_update AFTER UPDATE ON entries BEGIN
       INSERT INTO entries_fts_token(entries_fts_token, rowid, row_key, session_id, role, tool_name, custom_type, text)
       VALUES ('delete', old.rowid, old.row_key, old.session_id, old.role, old.tool_name, old.custom_type, old.text);
       INSERT INTO entries_fts_trigram(entries_fts_trigram, rowid, row_key, session_id, role, tool_name, custom_type, text)
-      VALUES ('delete', old.rowid, old.row_key, old.session_id, old.role, old.tool_name, old.custom_type, old.text);
+      SELECT 'delete', old.rowid, old.row_key, old.session_id, old.role, old.tool_name, old.custom_type, old.text
+      WHERE old.role IN ('user', 'assistant', 'compactionSummary', 'branchSummary', 'custom');
       INSERT INTO entries_fts_token(rowid, row_key, session_id, role, tool_name, custom_type, text)
       VALUES (new.rowid, new.row_key, new.session_id, new.role, new.tool_name, new.custom_type, new.text);
       INSERT INTO entries_fts_trigram(rowid, row_key, session_id, role, tool_name, custom_type, text)
-      VALUES (new.rowid, new.row_key, new.session_id, new.role, new.tool_name, new.custom_type, new.text);
+      SELECT new.rowid, new.row_key, new.session_id, new.role, new.tool_name, new.custom_type, new.text
+      WHERE new.role IN ('user', 'assistant', 'compactionSummary', 'branchSummary', 'custom');
     END;
   `);
   const insertMetadata = db.prepare(
@@ -566,9 +570,18 @@ function insertIndexedEntry(db: Database, item: IndexedTranscriptEntry) {
   statements.insertEntry.run(...buildIndexedEntryValues(item));
 }
 
+type IndexedTranscriptFileState = TranscriptFileState & {
+  sourcePath?: string;
+};
+
+type TranscriptSearchSyncOptions = {
+  sourceTranscriptRoot?: string;
+  logicalTranscriptRoot?: string;
+};
+
 async function replaceIndexedArchiveEntries(
   db: Database,
-  state: TranscriptFileState,
+  state: IndexedTranscriptFileState,
 ) {
   const statements = getTranscriptSearchWriteStatements(db);
   db.transaction(() => removeIndexedArchiveEntries(db, state.archivePath))();
@@ -577,7 +590,9 @@ async function replaceIndexedArchiveEntries(
   });
   let batch: IndexedEntryInsertValues[] = [];
   let rowIndex = 0;
-  for await (const entry of iterateTranscriptArchiveFile(state.archivePath)) {
+  for await (const entry of iterateTranscriptArchiveFile(
+    state.sourcePath || state.archivePath,
+  )) {
     batch.push(
       buildIndexedEntryValues(
         toIndexedEntry(entry, state.archivePath, rowIndex),
@@ -608,14 +623,26 @@ function appendIndexedArchiveEntry(
   statements.upsertFileState.run(state.archivePath, state.mtimeMs, state.size);
 }
 
-async function syncTranscriptSearchIndex(db: Database, rootOverride = "") {
-  const transcriptRoot = resolveTranscriptRoot(rootOverride);
-  const files = await collectTranscriptFiles(transcriptRoot);
-  const actualStates = new Map<string, TranscriptFileState>();
-  for (const archivePath of files) {
-    const stat = await fs.stat(archivePath);
+async function syncTranscriptSearchIndex(
+  db: Database,
+  rootOverride = "",
+  options: TranscriptSearchSyncOptions = {},
+) {
+  const logicalTranscriptRoot = path.resolve(
+    options.logicalTranscriptRoot || resolveTranscriptRoot(rootOverride),
+  );
+  const sourceTranscriptRoot = path.resolve(
+    options.sourceTranscriptRoot || logicalTranscriptRoot,
+  );
+  const files = await collectTranscriptFiles(sourceTranscriptRoot);
+  const actualStates = new Map<string, IndexedTranscriptFileState>();
+  for (const sourcePath of files) {
+    const relativePath = path.relative(sourceTranscriptRoot, sourcePath);
+    const archivePath = path.join(logicalTranscriptRoot, relativePath);
+    const stat = await fs.stat(sourcePath);
     actualStates.set(archivePath, {
       archivePath,
+      sourcePath,
       mtimeMs: Math.trunc(stat.mtimeMs),
       size: stat.size,
     });
@@ -910,6 +937,7 @@ export async function appendTranscriptArchiveEntry(
 export async function synchronizeTranscriptSearchIndexAtPathForInstall(
   dbPath: string,
   rootOverride = "",
+  options: TranscriptSearchSyncOptions = {},
 ) {
   fssync.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new BetterSqlite3(dbPath);
@@ -922,7 +950,7 @@ export async function synchronizeTranscriptSearchIndexAtPathForInstall(
     db.prepare(
       "UPDATE metadata SET value = '1' WHERE key = 'rebuild_required'",
     ).run();
-    await syncTranscriptSearchIndex(db, rootOverride);
+    await syncTranscriptSearchIndex(db, rootOverride, options);
     db.prepare(
       "UPDATE metadata SET value = '0' WHERE key = 'rebuild_required'",
     ).run();
@@ -947,11 +975,16 @@ export async function synchronizeTranscriptSearchIndexAtPathForInstall(
 export async function rebuildTranscriptSearchIndexAtPathForInstall(
   dbPath: string,
   rootOverride = "",
+  options: TranscriptSearchSyncOptions = {},
 ) {
   for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
     fssync.rmSync(candidate, { force: true });
   }
-  return synchronizeTranscriptSearchIndexAtPathForInstall(dbPath, rootOverride);
+  return synchronizeTranscriptSearchIndexAtPathForInstall(
+    dbPath,
+    rootOverride,
+    options,
+  );
 }
 
 export async function repairTranscriptSearchIndex(
