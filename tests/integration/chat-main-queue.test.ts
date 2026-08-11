@@ -2859,6 +2859,14 @@ test("chat main resumes joined acceptance across restart without prompt replay o
 
       let runTurnCalls = 0;
       let resumeTurnCalls = 0;
+      let connectCalls = 0;
+      controllerMod.ChatController.prototype.connect = async function (options) {
+        connectCalls += 1;
+        if (options?.restoreSessionFile !== "managed/chat/backend-accepted.jsonl") {
+          throw new Error("startup_recovery_preconnect_session_mismatch");
+        }
+        return true;
+      };
       controllerMod.ChatController.prototype.runTurn = async function (input) {
         runTurnCalls += 1;
         const fence = this.turnFenceForInboundMessage(input.incomingMessageId);
@@ -2927,6 +2935,7 @@ test("chat main resumes joined acceptance across restart without prompt replay o
       if (
         runTurnCalls !== 1 ||
         resumeTurnCalls !== 1 ||
+        connectCalls !== 1 ||
         !inbound?.acceptedAt ||
         errors.length !== 0 ||
         running.length !== 0 ||
@@ -2936,6 +2945,7 @@ test("chat main resumes joined acceptance across restart without prompt replay o
           JSON.stringify({
             runTurnCalls,
             resumeTurnCalls,
+            connectCalls,
             inbound,
             errors,
             running,

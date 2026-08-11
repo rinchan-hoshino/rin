@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+
 import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
 
@@ -24,6 +27,148 @@ type ChatKeyWorker<T> = {
   pumping: boolean;
   activeTasks: Set<Promise<void>>;
 };
+
+const MIB = 1024 * 1024;
+export const STARTUP_RECOVERY_MEMORY_RESERVE_BYTES = 2 * 1024 * MIB;
+const STARTUP_RECOVERY_BASE_MEMORY_BYTES = 512 * MIB;
+const STARTUP_RECOVERY_SESSION_SIZE_MULTIPLIER = 2;
+
+export function estimateStartupRecoveryMemoryBytes(sessionFileBytes: number) {
+  const bytes = Number.isFinite(sessionFileBytes)
+    ? Math.max(0, sessionFileBytes)
+    : 0;
+  return (
+    STARTUP_RECOVERY_BASE_MEMORY_BYTES +
+    bytes * STARTUP_RECOVERY_SESSION_SIZE_MULTIPLIER
+  );
+}
+
+export function readSystemAvailableMemoryBytes(
+  deps: {
+    readMeminfo?: () => string;
+    fallbackAvailableBytes?: () => number;
+  } = {},
+) {
+  try {
+    const meminfo = (
+      deps.readMeminfo || (() => fs.readFileSync("/proc/meminfo", "utf8"))
+    )();
+    const match = /^MemAvailable:\s+(\d+)\s+kB$/m.exec(meminfo);
+    if (match) return Number(match[1]) * 1024;
+  } catch {}
+  const fallback = Number((deps.fallbackAvailableBytes || os.freemem)());
+  return Number.isFinite(fallback) ? Math.max(0, fallback) : 0;
+}
+
+type StartupRecoveryAdmissionEntry = {
+  estimatedBytes: number;
+  label: string;
+  task: () => Promise<unknown>;
+  resolve: (value: unknown) => void;
+  reject: (error: unknown) => void;
+};
+
+export function createStartupRecoveryAdmission(deps: {
+  availableMemoryBytes: () => number;
+  reserveBytes?: number;
+  logger?: { info?: (...args: any[]) => void };
+}) {
+  const queue: StartupRecoveryAdmissionEntry[] = [];
+  const reserveBytes = Number.isFinite(deps.reserveBytes)
+    ? Math.max(0, Number(deps.reserveBytes))
+    : STARTUP_RECOVERY_MEMORY_RESERVE_BYTES;
+  let activeEstimatedBytes = 0;
+  let pumpScheduled = false;
+
+  const availableMemoryBytes = () => {
+    try {
+      const value = Number(deps.availableMemoryBytes());
+      return Number.isFinite(value) ? Math.max(0, value) : 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  const schedulePump = () => {
+    if (pumpScheduled) return;
+    pumpScheduled = true;
+    queueMicrotask(() => {
+      pumpScheduled = false;
+      while (queue.length) {
+        const availableBytes = availableMemoryBytes();
+        const headroomBytes = Math.max(
+          0,
+          availableBytes - reserveBytes - activeEstimatedBytes,
+        );
+        let index = queue.findIndex(
+          (entry) => entry.estimatedBytes <= headroomBytes,
+        );
+        if (index < 0) {
+          if (activeEstimatedBytes > 0) return;
+          index = 0;
+        }
+        const entry = queue.splice(index, 1)[0]!;
+        activeEstimatedBytes += entry.estimatedBytes;
+        deps.logger?.info?.(
+          `chat startup recovery admitted session=${entry.label || "unknown"} estimatedBytes=${entry.estimatedBytes} availableBytes=${availableBytes} activeEstimatedBytes=${activeEstimatedBytes} queued=${queue.length}`,
+        );
+        void Promise.resolve()
+          .then(entry.task)
+          .then(entry.resolve, entry.reject)
+          .finally(() => {
+            activeEstimatedBytes = Math.max(
+              0,
+              activeEstimatedBytes - entry.estimatedBytes,
+            );
+            schedulePump();
+          });
+      }
+    });
+  };
+
+  return {
+    run<T>(
+      estimatedBytes: number,
+      task: () => Promise<T>,
+      label = "",
+    ): Promise<T> {
+      const estimate = Number.isFinite(estimatedBytes)
+        ? Math.max(0, estimatedBytes)
+        : STARTUP_RECOVERY_BASE_MEMORY_BYTES;
+      return new Promise<T>((resolve, reject) => {
+        queue.push({
+          estimatedBytes: estimate,
+          label: safeString(label).trim(),
+          task,
+          resolve: (value) => resolve(value as T),
+          reject,
+        });
+        schedulePump();
+      });
+    },
+  };
+}
+
+export async function runStartupRecoveryWithAdmission<T>(input: {
+  admission: {
+    run<R>(
+      estimatedBytes: number,
+      task: () => Promise<R>,
+      label?: string,
+    ): Promise<R>;
+  };
+  estimatedBytes: number;
+  preconnect: () => Promise<void>;
+  resume: () => Promise<T>;
+  label?: string;
+}) {
+  await input.admission.run(
+    input.estimatedBytes,
+    input.preconnect,
+    input.label,
+  );
+  return await input.resume();
+}
 
 export function createChatKeyWorkerPool<T>(deps: {
   prepare: (payload: T, chatKey: string) => Promise<PreparedChatKeyWorkerJob>;

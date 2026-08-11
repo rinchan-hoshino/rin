@@ -11,6 +11,7 @@ import { safeString } from "../text-utils.js";
 export type ClaimedChatInboxJob = {
   envelope: ClaimedChatInboxItem;
   resumeOnly?: boolean;
+  startupRecoveryEstimatedBytes?: number;
 };
 
 export type ChatInboxJobResult = {

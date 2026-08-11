@@ -7709,6 +7709,31 @@ test("chat controller clears a stale bound session so ordinary chat can start fr
   assert.deepEqual(attempts, [""]);
 });
 
+test("chat controller preconnects an explicit startup recovery session", async () => {
+  const controller = await createController("telegram/1:2");
+  delete controller.connect;
+  controller.state.sessionFile = "other-chat.jsonl";
+  const explicitSessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "startup-recovery.jsonl",
+  );
+  await fs.mkdir(path.dirname(explicitSessionFile), { recursive: true });
+  await fs.writeFile(explicitSessionFile, "", "utf8");
+  const attempts = [];
+  controller.driver.connect = async ({ restoreSessionFile = "" } = {}) => {
+    attempts.push(restoreSessionFile);
+    return true;
+  };
+
+  await controller.connect({
+    restoreSessionFile: "startup-recovery.jsonl",
+    recoverTerminals: false,
+  });
+
+  assert.deepEqual(attempts, [explicitSessionFile]);
+});
+
 test("chat controller reports an explicit missing resume target", async () => {
   const controller = await createController("telegram/1:2");
   controller.state.sessionFile = "existing-binding.jsonl";

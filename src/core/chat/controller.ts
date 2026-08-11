@@ -479,10 +479,18 @@ export class ChatController {
   }
 
   async connect(
-    options: { restoreSession?: boolean; recoverTerminals?: boolean } = {},
+    options: {
+      restoreSession?: boolean;
+      restoreSessionFile?: string;
+      recoverTerminals?: boolean;
+    } = {},
   ) {
     const restoreSessionFile =
-      options.restoreSession === false ? "" : this.getRecoverableSessionFile();
+      options.restoreSession === false
+        ? ""
+        : options.restoreSessionFile !== undefined
+          ? this.resolveSessionFileForUse(options.restoreSessionFile)
+          : this.getRecoverableSessionFile();
     const connected = await this.driver.connect({ restoreSessionFile });
     if (this.affectChatBinding && restoreSessionFile) {
       this.updateStoredSessionFile(

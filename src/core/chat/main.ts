@@ -99,6 +99,10 @@ import {
 import {
   type PreparedChatKeyWorkerJob,
   createChatKeyWorkerPool,
+  createStartupRecoveryAdmission,
+  estimateStartupRecoveryMemoryBytes,
+  readSystemAvailableMemoryBytes,
+  runStartupRecoveryWithAdmission,
 } from "./chat-key-worker.js";
 import {
   isEffectivePrivateChatSession,
@@ -145,7 +149,10 @@ import {
   sendTyping,
   validateChatOutboxPayloadForDispatch,
 } from "./transport.js";
-import { normalizeSessionRef } from "../session/ref.js";
+import {
+  normalizeSessionRef,
+  resolveStoredSessionFile,
+} from "../session/ref.js";
 
 function createLogger(name: string) {
   const prefix = `[${name}]`;
@@ -446,6 +453,10 @@ export async function startChatBridge(
   ensureDir(dataDir);
 
   const settings = loadChatSettings(settingsPath);
+  const startupRecoveryAdmission = createStartupRecoveryAdmission({
+    availableMemoryBytes: readSystemAvailableMemoryBytes,
+    logger,
+  });
 
   const h = createChatRuntimeH();
   const app = createChatRuntimeApp(runtime.agentDir);
@@ -1054,16 +1065,35 @@ export async function startChatBridge(
 
   const handlePreparedChatTurnSubmission = async (
     submission: FrozenChatTurnSubmission,
-    options: { resume?: boolean } = {},
+    options: {
+      resume?: boolean;
+      startupRecoveryEstimatedBytes?: number;
+    } = {},
   ) => {
     const controller = getController(submission.chatKey);
     if (options.resume) {
-      await controller.resumeTurn({
-        replyToMessageId: submission.replyToMessageId,
-        incomingMessageId: submission.incomingMessageId,
-        sessionFile: submission.sessionFile,
-        receivedAt: submission.receivedAt,
-      });
+      const resume = () =>
+        controller.resumeTurn({
+          replyToMessageId: submission.replyToMessageId,
+          incomingMessageId: submission.incomingMessageId,
+          sessionFile: submission.sessionFile,
+          receivedAt: submission.receivedAt,
+        });
+      if (options.startupRecoveryEstimatedBytes) {
+        await runStartupRecoveryWithAdmission({
+          admission: startupRecoveryAdmission,
+          estimatedBytes: options.startupRecoveryEstimatedBytes,
+          label: submission.sessionFile,
+          preconnect: async () => {
+            await controller.connect({
+              restoreSessionFile: submission.sessionFile,
+            });
+          },
+          resume,
+        });
+      } else {
+        await resume();
+      }
     } else {
       await controller.runTurn({
         text: submission.text,
@@ -1249,6 +1279,8 @@ export async function startChatBridge(
                   resume:
                     recoverCommittedWork &&
                     Boolean(admission.executionSessionFile),
+                  startupRecoveryEstimatedBytes:
+                    job.startupRecoveryEstimatedBytes,
                 }),
               ),
           };
@@ -1775,13 +1807,35 @@ export async function startChatBridge(
   reconcileCommittedChatOutboxProcessing(runtime.agentDir);
   const startupRecoverableProcessing = listRunningChatInboxItems(
     runtime.agentDir,
-  ).flatMap((envelope) => {
-    const reclaimed = reclaimRunningChatInboxItem(runtime.agentDir, envelope, {
-      force: true,
-    });
-    return reclaimed ? [reclaimed] : [];
-  });
-  for (const envelope of startupRecoverableProcessing) {
+  )
+    .flatMap((envelope) => {
+      const reclaimed = reclaimRunningChatInboxItem(
+        runtime.agentDir,
+        envelope,
+        {
+          force: true,
+        },
+      );
+      if (!reclaimed) return [];
+      const storedSessionFile =
+        reclaimed.admission.executionSessionFile ||
+        reclaimed.admission.submission?.sessionFile;
+      const sessionFile =
+        resolveStoredSessionFile(runtime.agentDir, storedSessionFile) ||
+        safeString(storedSessionFile).trim();
+      let sessionFileBytes = 0;
+      try {
+        sessionFileBytes = sessionFile ? fs.statSync(sessionFile).size : 0;
+      } catch {}
+      return [
+        {
+          envelope: reclaimed,
+          estimatedBytes: estimateStartupRecoveryMemoryBytes(sessionFileBytes),
+        },
+      ];
+    })
+    .sort((left, right) => right.estimatedBytes - left.estimatedBytes);
+  for (const { envelope } of startupRecoverableProcessing) {
     if (startupRecoveryChatKeys.has(envelope.chatKey)) continue;
     startupRecoveryChatKeys.add(envelope.chatKey);
     app.beginInboundRecoveryChat(envelope.chatKey);
@@ -1806,8 +1860,12 @@ export async function startChatBridge(
     `chat bridge started bots=${JSON.stringify(app.bots.map((bot: any) => ({ platform: bot.platform, selfId: bot.selfId, status: bot.status })))}`,
   );
 
-  for (const envelope of startupRecoverableProcessing) {
-    enqueueClaimedInboxItem({ envelope, resumeOnly: true });
+  for (const { envelope, estimatedBytes } of startupRecoverableProcessing) {
+    enqueueClaimedInboxItem({
+      envelope,
+      resumeOnly: true,
+      startupRecoveryEstimatedBytes: estimatedBytes,
+    });
   }
   if (startupRecoverableProcessing.length) {
     logger.info(
