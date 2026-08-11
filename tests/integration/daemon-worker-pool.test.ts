@@ -2152,7 +2152,6 @@ setInterval(() => {}, 1000);
     workerPath,
     cwd: dir,
     gcIdleMs: 20,
-    sweepIntervalMs: 10,
   });
   const worker = pool.resolveWorkerForCommand(connection, {
     type: "new_session",
@@ -2163,7 +2162,10 @@ setInterval(() => {}, 1000);
   });
   pool.attachWorker(connection, worker);
 
-  for (let i = 0; i < 50; i += 1) {
+  pool.evictDetachedWorkers();
+  await sleep(30);
+  pool.evictDetachedWorkers();
+  for (let i = 0; i < 100; i += 1) {
     if (pool.getStatusSnapshot().workerCount === 0) break;
     await sleep(10);
   }

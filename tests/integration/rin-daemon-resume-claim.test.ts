@@ -122,6 +122,21 @@ async function readLogLines(logPath) {
   }
 }
 
+async function killLoggedProcesses(logPath) {
+  const pids = new Set(
+    (await readLogLines(logPath))
+      .map((line) => Number(line.split(":", 1)[0]))
+      .filter(Number.isFinite),
+  );
+  for (const pid of pids) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // already exited
+    }
+  }
+}
+
 function spawnDaemon(agentDir, socketPath, workerPath) {
   return spawn(
     process.execPath,
@@ -980,14 +995,7 @@ setInterval(() => {}, 1000);
     firstDaemon.kill("SIGKILL");
     await new Promise((resolve) => firstDaemon.once("exit", resolve));
     firstDaemon = undefined;
-    for (const line of await readLogLines(logPath)) {
-      const pid = Number(line.split(":", 1)[0]);
-      if (Number.isFinite(pid)) {
-        try {
-          process.kill(pid, "SIGKILL");
-        } catch {}
-      }
-    }
+    await killLoggedProcesses(logPath);
 
     secondDaemon = spawnDaemon(agentDir, socketPath, workerPath);
     await waitForSocket(socketPath, 10_000);
@@ -1017,6 +1025,7 @@ setInterval(() => {}, 1000);
         new Promise((resolve) => setTimeout(resolve, 1000)),
       ]);
     }
+    await killLoggedProcesses(logPath);
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });

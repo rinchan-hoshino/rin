@@ -279,7 +279,7 @@ test("chat snapshots inherited running jobs before adapters can claim new work",
   );
   const adaptersStart = chatMain.indexOf("await app.start()", recoveryFence);
   const recoveryEnqueue = chatMain.indexOf(
-    "for (const envelope of startupRecoverableProcessing)",
+    "for (const { envelope, estimatedBytes } of startupRecoverableProcessing)",
     adaptersStart,
   );
   const recoveryRelease = chatMain.indexOf(
@@ -291,6 +291,10 @@ test("chat snapshots inherited running jobs before adapters can claim new work",
   assert.ok(recoveryFence > snapshot);
   assert.ok(adaptersStart > recoveryFence);
   assert.ok(recoveryEnqueue > adaptersStart);
+  assert.match(
+    chatMain.slice(recoveryEnqueue),
+    /startupRecoveryEstimatedBytes: estimatedBytes/,
+  );
   assert.ok(recoveryRelease >= 0);
 });
 
