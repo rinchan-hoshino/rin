@@ -61,7 +61,7 @@ const replacements: Record<string, string> = {
     export function resolveTargetForName(name){globalThis.__rinMainOwnerEvents.push(["resolve-target",name]); return name === "missing" ? undefined : {name};}
     export function runRinOnTarget(target,args){globalThis.__rinMainOwnerEvents.push(["run-target",target.name,args]); return 23;}
   `,
-  "dist/core/rin/shared.js": `export async function runUpdate(parsed){globalThis.__rinMainOwnerEvents.push(["update",parsed.command])}`,
+  "dist/core/rin/shared.js": `export async function runUpdate(parsed){globalThis.__rinMainOwnerEvents.push(["update",parsed.command,parsed.updateAssumeYes])}`,
   "dist/core/rin/control.js": `export async function runStart(parsed){globalThis.__rinMainOwnerEvents.push(["start",parsed.command])} export async function runStop(parsed){globalThis.__rinMainOwnerEvents.push(["stop",parsed.command])} export async function runRestart(parsed){globalThis.__rinMainOwnerEvents.push(["restart",parsed.command])}`,
   "dist/core/rin/doctor.js": `export async function runDoctor(parsed,args){globalThis.__rinMainOwnerEvents.push(["doctor",parsed.command,args])}`,
   "dist/core/rin/versions.js": `export function runVersions(parsed){globalThis.__rinMainOwnerEvents.push(["versions",parsed.command])} export async function runRollback(parsed){globalThis.__rinMainOwnerEvents.push(["rollback",parsed.command])}`,

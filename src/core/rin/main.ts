@@ -136,7 +136,13 @@ const RIN_UPDATE_ROUTE_FLAGS = new Set([
 ]);
 
 export function isExplicitRinUpdateInvocation(rawArgv: string[]) {
-  if (stripRinWrapperArgs(rawArgv)[0] !== "update") return false;
+  const strippedArgv = stripRinWrapperArgs(rawArgv);
+  if (strippedArgv[0] !== "update") return false;
+  const hasExplicitTarget = rawArgv.some((arg) => {
+    const flag = arg.split("=", 1)[0];
+    return flag === "-u" || flag === "--user" || flag === "--target";
+  });
+  if (strippedArgv.includes("--all") && !hasExplicitTarget) return false;
   return rawArgv.some((arg) => {
     const flag = arg.split("=", 1)[0];
     return RIN_UPDATE_ROUTE_FLAGS.has(flag);
@@ -218,8 +224,11 @@ export async function startRinCli() {
   if (piRoute === "rin-after-pi") {
     const parsed = resolveParsedArgs(
       "update",
-      parseRinWrapperOptions(rawArgv),
-      ["update"],
+      {
+        ...parseRinWrapperOptions(rawArgv),
+        yes: rawArgv.includes("--yes"),
+      },
+      rawArgv,
     );
     const { runUpdate } = await import("./shared.js");
     return await runUpdate(parsed);

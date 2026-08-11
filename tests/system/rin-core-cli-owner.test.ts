@@ -37,6 +37,10 @@ assert.equal(
   false,
 );
 assert.equal(
+  main.isExplicitRinUpdateInvocation(["update", "--all", "--yes"]),
+  false,
+);
+assert.equal(
   main.isExplicitRinUpdateInvocation(["install", "--git"]),
   false,
 );
@@ -85,6 +89,12 @@ try {
   await run(["update", "self"]);
   await run(["update", "--self", "--force"]);
   await run(["update", "--all"]);
+  const allUpdateStart = globalThis.__rinMainOwnerEvents.length;
+  await run(["update", "--all", "--yes"]);
+  assert.deepEqual(
+    globalThis.__rinMainOwnerEvents.slice(allUpdateStart),
+    [["update", "update", true]],
+  );
   await run(["update", "--git", "--branch", "main", "--yes"]);
   await run(["--user", "owner"]);
   await run(["--maint"]);

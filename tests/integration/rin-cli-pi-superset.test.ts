@@ -142,6 +142,10 @@ test("the Pi command adapter owns only Pi commands and Rin update overlays", asy
     assert.equal(await tryRunPiCliCommand(["auth", "--help"]), "handled");
     assert.equal(await tryRunPiCliCommand(["update", "--all"]), "rin-after-pi");
     assert.equal(
+      await tryRunPiCliCommand(["update", "--all", "--yes"]),
+      "rin-after-pi",
+    );
+    assert.equal(
       await tryRunPiCliCommand(["update", "--all", "--approve"]),
       "rin-after-pi",
     );
