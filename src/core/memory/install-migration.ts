@@ -355,6 +355,13 @@ async function prepareTranscriptArchiveStaging(
   return { stagingTranscriptRoot: stagingRoot, transcriptManifest: manifest };
 }
 
+function summarizeTranscriptArchiveManifest(
+  manifest: TranscriptArchiveMigrationManifest,
+) {
+  const { files: _files, ...summary } = manifest;
+  return summary;
+}
+
 function readTranscriptBackupManifest(
   backupRoot: string,
 ): TranscriptBackupManifest {
@@ -597,7 +604,10 @@ export async function prepareTranscriptSearchMigrationForInstall(
       prepared: true,
       reused: reusable,
       stagingDbPath,
-      ...archive,
+      stagingTranscriptRoot: archive.stagingTranscriptRoot,
+      transcript: summarizeTranscriptArchiveManifest(
+        archive.transcriptManifest,
+      ),
     };
   } catch (error) {
     fs.rmSync(stagingDir, { recursive: true, force: true });
@@ -838,14 +848,13 @@ export async function migrateTranscriptSearchIndexForInstall(
       await prepareTranscriptSearchMigrationForInstall(rootOverride);
     if (
       !preparedMigration.prepared ||
-      !("stagingTranscriptRoot" in preparedMigration) ||
-      !("transcriptManifest" in preparedMigration)
+      !("stagingTranscriptRoot" in preparedMigration)
     ) {
       throw new Error("memory_install_migration_prepare_incomplete");
     }
     prepared = {
       stagingTranscriptRoot: preparedMigration.stagingTranscriptRoot,
-      transcriptManifest: preparedMigration.transcriptManifest,
+      transcriptManifest: assertPreparedTranscriptArchive(dbPath),
     };
   }
   assertPreparedTranscriptSearchDb(stagingDbPath);

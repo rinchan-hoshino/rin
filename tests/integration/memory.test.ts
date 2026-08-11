@@ -571,6 +571,8 @@ test("installer memory-v6 migration sanitizes transcripts without reading manage
       await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
         root,
       );
+    assert.equal("transcriptManifest" in prepared, false);
+    assert.ok(JSON.stringify(prepared).length < 16_384);
     const stagedArchive = path.join(
       prepared.stagingTranscriptRoot,
       "2026",
