@@ -18,6 +18,7 @@ const sources: Record<string, string> = {
     export const RIN_TUI_MAINTENANCE_ROLE = "maintenance-tui";
     export const RIN_TUI_RPC_FRONTEND_ROLE = "rpc-frontend";
     export const RIN_TUI_RUNTIME_ROLE_ENV = "RIN_TUI_RUNTIME_ROLE";
+    export const RIN_TUI_MAINTENANCE_REQUESTED_ENV = "RIN_TUI_MAINTENANCE_REQUESTED";
     export function setRinTuiRuntimeRole(role) { globalThis.__rinTuiOwnerEvents.push(["role", role]); }
   `,
   "dist/core/rin-daemon/client.js": `

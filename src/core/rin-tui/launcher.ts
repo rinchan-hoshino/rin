@@ -8,6 +8,7 @@ import {
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
 import {
+  RIN_TUI_MAINTENANCE_REQUESTED_ENV,
   RIN_TUI_MAINTENANCE_ROLE,
   RIN_TUI_RPC_FRONTEND_ROLE,
   RIN_TUI_RUNTIME_ROLE_ENV,
@@ -135,9 +136,11 @@ export function isRecoverableRpcStartupError(error: unknown) {
   );
 }
 
-export function formatTuiMaintenanceModeNotice() {
+export function formatTuiMaintenanceModeNotice(requested = false) {
   return [
-    "Rin daemon is unavailable.",
+    requested
+      ? "Maintenance mode requested with --maint."
+      : "Rin daemon is unavailable.",
     "Entering temporary maintenance mode.",
     "Some features may be unavailable or not match daemon/RPC behavior.",
   ].join("\n");
@@ -493,6 +496,8 @@ export async function startTui(options: StartTuiOptions = {}) {
     process.env[RIN_TUI_RUNTIME_ROLE_ENV] === RIN_TUI_MAINTENANCE_ROLE
       ? RIN_TUI_MAINTENANCE_ROLE
       : undefined;
+  const maintenanceRequested =
+    process.env[RIN_TUI_MAINTENANCE_REQUESTED_ENV] === "1";
   const maintenanceMode = await shouldStartMaintenanceMode({ requestedRole });
   applyTuiRuntimeRole(maintenanceMode);
   const interactiveOptions: TuiInteractiveOptions = {
@@ -510,7 +515,12 @@ export async function startTui(options: StartTuiOptions = {}) {
   await applyRinTuiOverrides();
 
   if (maintenanceMode) {
-    await startMaintenanceTui(resourceOptions, profile, interactiveOptions);
+    await startMaintenanceTui(
+      resourceOptions,
+      profile,
+      interactiveOptions,
+      formatTuiMaintenanceModeNotice(maintenanceRequested),
+    );
     return;
   }
 

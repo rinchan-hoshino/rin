@@ -159,6 +159,7 @@ test("launch environment reports success and maintenance fallback without mutati
   assert.deepEqual(forced.runtimeEnv, {
     ...runtimeEnv,
     RIN_TUI_RUNTIME_ROLE: "maintenance-tui",
+    RIN_TUI_MAINTENANCE_REQUESTED: "1",
   });
   assert.equal(forcedProbeCalls, 0);
 });

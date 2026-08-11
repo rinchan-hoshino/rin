@@ -103,6 +103,9 @@ test("launcher owns terminal animation, clearing, timeout, and recoverable error
     launcher.formatTuiMaintenanceModeNotice(),
     /Some features may be unavailable/,
   );
+  const requestedNotice = launcher.formatTuiMaintenanceModeNotice(true);
+  assert.match(requestedNotice, /requested with --maint/);
+  assert.doesNotMatch(requestedNotice, /daemon is unavailable/);
 });
 
 test("launcher owns daemon readiness, option resolution, quiet startup, and onboarding mutation", async () => {
@@ -321,6 +324,30 @@ test("startTui owns rpc success, startup cleanup, maintenance fallback, and fata
   scenario.rpcPrepareError = "owner scalar fatal";
   await assert.rejects(launcher.startTui(), /owner scalar fatal/);
   assert.equal(names().includes("rpc-disconnect"), true);
+});
+
+test("startTui presents explicitly requested maintenance without claiming daemon failure", async () => {
+  reset();
+  const previousRole = process.env.RIN_TUI_RUNTIME_ROLE;
+  const previousRequest = process.env.RIN_TUI_MAINTENANCE_REQUESTED;
+  process.env.RIN_TUI_RUNTIME_ROLE = "maintenance-tui";
+  process.env.RIN_TUI_MAINTENANCE_REQUESTED = "1";
+  try {
+    await launcher.startTui({ resourceOptions: { noTools: true } });
+  } finally {
+    if (previousRole === undefined) delete process.env.RIN_TUI_RUNTIME_ROLE;
+    else process.env.RIN_TUI_RUNTIME_ROLE = previousRole;
+    if (previousRequest === undefined)
+      delete process.env.RIN_TUI_MAINTENANCE_REQUESTED;
+    else process.env.RIN_TUI_MAINTENANCE_REQUESTED = previousRequest;
+  }
+  assert.equal(names().includes("configured-session"), true);
+  assert.equal(names().includes("rpc-session"), false);
+  assert.equal(
+    events.find(([name]) => name === "interactive-construct")?.[2]
+      .rinStartupWarnings[0],
+    launcher.formatTuiMaintenanceModeNotice(true),
+  );
 });
 
 test("startTui enters maintenance directly when daemon readiness expires", async () => {

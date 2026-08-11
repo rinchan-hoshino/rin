@@ -8,6 +8,7 @@ import {
   targetUserRuntimeEnv,
 } from "../rin-lib/system.js";
 import {
+  RIN_TUI_MAINTENANCE_REQUESTED_ENV,
   RIN_TUI_MAINTENANCE_ROLE,
   RIN_TUI_RUNTIME_ROLE_ENV,
 } from "../tui-runtime-env.js";
@@ -81,6 +82,22 @@ async function runTargetCommand(
   });
 }
 
+function maintenanceRuntimeEnv(
+  runtimeEnv: NodeJS.ProcessEnv,
+  requested: boolean,
+) {
+  const maintenanceEnv = {
+    ...runtimeEnv,
+    [RIN_TUI_RUNTIME_ROLE_ENV]: RIN_TUI_MAINTENANCE_ROLE,
+  };
+  if (requested) {
+    maintenanceEnv[RIN_TUI_MAINTENANCE_REQUESTED_ENV] = "1";
+  } else {
+    delete maintenanceEnv[RIN_TUI_MAINTENANCE_REQUESTED_ENV];
+  }
+  return maintenanceEnv;
+}
+
 export async function resolveTuiLaunchEnvironment(
   context: ReturnType<typeof createTargetExecutionContext>,
   runtimeEnv: NodeJS.ProcessEnv,
@@ -90,22 +107,14 @@ export async function resolveTuiLaunchEnvironment(
   } = {},
 ): Promise<{ runtimeEnv: NodeJS.ProcessEnv; maintenanceModeNotice?: string }> {
   if (deps.forceMaintenance) {
-    return {
-      runtimeEnv: {
-        ...runtimeEnv,
-        [RIN_TUI_RUNTIME_ROLE_ENV]: RIN_TUI_MAINTENANCE_ROLE,
-      },
-    };
+    return { runtimeEnv: maintenanceRuntimeEnv(runtimeEnv, true) };
   }
   try {
     await (deps.assertDaemonAvailable || assertDaemonAvailable)(context);
     return { runtimeEnv };
   } catch (error) {
     return {
-      runtimeEnv: {
-        ...runtimeEnv,
-        [RIN_TUI_RUNTIME_ROLE_ENV]: RIN_TUI_MAINTENANCE_ROLE,
-      },
+      runtimeEnv: maintenanceRuntimeEnv(runtimeEnv, false),
       maintenanceModeNotice: formatMaintenanceModeNotice(error),
     };
   }
