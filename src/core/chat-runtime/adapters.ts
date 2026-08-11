@@ -1255,7 +1255,7 @@ export class DiscordAdapter {
           delivered.push(...textChunkIds);
           if (textChunkIds.length) firstReply = undefined;
         } catch (error) {
-          await recordFailure(error, textNodes);
+          failures.push(error);
         }
       }
       delivered.push(...chunkIds);

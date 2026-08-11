@@ -857,6 +857,88 @@ test("discord adapter edits one quoted non-final message and deletes it only on 
   }
 });
 
+test("discord adapter retries a transient progress edit instead of leaking a new interim", async () => {
+  const agentDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-chat-discord-"),
+  );
+  try {
+    let bot: any = null;
+    const adapter = new adapters.DiscordAdapter(
+      {
+        register(_adapter: unknown, registeredBot: any) {
+          bot = registeredBot;
+        },
+      },
+      agentDir,
+      {},
+      { warn() {}, info() {}, error() {}, debug() {} },
+    );
+    assert.ok(bot);
+
+    const sends: any[] = [];
+    const edits: any[] = [];
+    let failFetch = false;
+    const message = {
+      id: "progress-1",
+      async edit(payload: any) {
+        edits.push(payload);
+        return this;
+      },
+    };
+    const channel = {
+      async send(payload: any) {
+        sends.push(payload);
+        return message;
+      },
+      messages: {
+        async fetch(id: string) {
+          assert.equal(id, "progress-1");
+          if (failFetch) throw new Error("fetch failed");
+          return message;
+        },
+        async delete() {},
+      },
+    };
+    (adapter as any).client = {
+      channels: {
+        async fetch() {
+          return channel;
+        },
+      },
+    };
+
+    const interim = (text: string) => [
+      { type: "quote", attrs: { id: "incoming-1" }, children: [] },
+      { type: "markdown", attrs: { content: text }, children: [] },
+    ];
+    const options = {
+      deliveryKind: "interim",
+      coalesceWithWorkingMessage: true,
+    };
+
+    assert.deepEqual(
+      await bot.sendMessage("channel-1", interim("first"), options),
+      ["progress-1"],
+    );
+    failFetch = true;
+    await assert.rejects(
+      () => bot.sendMessage("channel-1", interim("second"), options),
+      /fetch failed/,
+    );
+    assert.equal(sends.length, 1);
+
+    failFetch = false;
+    assert.deepEqual(
+      await bot.sendMessage("channel-1", interim("second"), options),
+      ["progress-1"],
+    );
+    assert.equal(sends.length, 1);
+    assert.equal(edits.length, 1);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("discord adapter acknowledges chat input interactions with callback endpoint before emitting", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-discord-"),
