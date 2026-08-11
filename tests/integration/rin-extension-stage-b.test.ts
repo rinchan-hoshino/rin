@@ -264,7 +264,7 @@ test("core todo remains enabled when optional extensions are disabled", async ()
   const originalCwd = process.cwd();
   for (const scenario of [
     { settings: {}, options: { noExtensions: true } },
-    { settings: { extensions: ["!rin:browse"] }, options: {} },
+    { settings: { extensions: [] }, options: {} },
   ]) {
     const agentDir = await fs.mkdtemp(
       path.join(os.tmpdir(), "rin-builtin-todo-on-"),
@@ -305,21 +305,6 @@ test("Rin core capabilities remain independent of the extension loader", async (
       false,
       `${entry.name} must not import Rin core implementation from src/ or dist/`,
     );
-  }
-});
-
-test("stage B removed browse alias does not load a tool", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-browse-ext-"));
-  try {
-    await writeJson(path.join(agentDir, "settings.json"), {
-      extensions: ["rin:browse"],
-    });
-    const loader = await createExtensionLoader(agentDir);
-    const toolNames = extensionToolNames(loader);
-
-    assert.equal(toolNames.includes("browse"), false);
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
 

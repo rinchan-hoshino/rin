@@ -49,7 +49,7 @@ Rin core registers the `note` tool and `/notes` TUI command for concise verified
 
 ## Extension loading
 
-Rin has no separate built-in-extension registry or foreground extension loader. It uses Pi's native `DefaultResourceLoader`, adds Pi's own inline extensions, and applies frontend/backend compatibility adapters around the resulting extension set. Existing installs that still contain retired aliases such as `rin:browse` have those entries stripped during install/update settings persistence.
+Rin has no separate built-in-extension registry or foreground extension loader. It uses Pi's native `DefaultResourceLoader`, adds Pi's own inline extensions, and applies frontend/backend compatibility adapters around the resulting extension set.
 
 Use ordinary Pi extension configuration for trusted third-party extensions. Use the live tool list as the source of truth for which tools are available in the current turn.
 

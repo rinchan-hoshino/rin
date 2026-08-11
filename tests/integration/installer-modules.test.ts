@@ -1199,7 +1199,7 @@ test("persistInstallerOutputs creates elevated runtime user skill directory as t
   });
 });
 
-test("persistInstallerOutputs removes legacy language and strips removed built-in extensions", async () => {
+test("persistInstallerOutputs removes legacy language and preserves extension entries", async () => {
   await withTempDir(async (dir) => {
     const writes = [];
     const launchWrites = [];
@@ -1221,7 +1221,7 @@ test("persistInstallerOutputs removes legacy language and strips removed built-i
           String(filePath).endsWith("settings.json")
             ? {
                 language: "zh_CN",
-                extensions: ["rin:browse", "/opt/custom-extension"],
+                extensions: ["owner-extension", "/opt/custom-extension"],
               }
             : fallback,
         writeJsonFileWithPrivilege: () => {},
@@ -1253,7 +1253,10 @@ test("persistInstallerOutputs removes legacy language and strips removed built-i
     assert.equal(settingsWrite.value.defaultModel, "gpt");
     assert.equal(settingsWrite.value.defaultThinkingLevel, "medium");
     assert.equal(Object.hasOwn(settingsWrite.value, "language"), false);
-    assert.deepEqual(settingsWrite.value.extensions, ["/opt/custom-extension"]);
+    assert.deepEqual(settingsWrite.value.extensions, [
+      "owner-extension",
+      "/opt/custom-extension",
+    ]);
 
     const manifestWrites = writes.filter(
       (entry) =>

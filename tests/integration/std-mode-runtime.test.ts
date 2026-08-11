@@ -69,13 +69,13 @@ test("configured sessions forward Pi tool startup options", async () => {
   }
 });
 
-test("std configured session strips removed browse extension alias", async () => {
+test("std configured session composes Pi and Rin core extensions", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-std-runtime-"));
   const agentDir = path.join(root, "agent");
   await fs.mkdir(agentDir, { recursive: true });
   await fs.writeFile(
     path.join(agentDir, "settings.json"),
-    `${JSON.stringify({ extensions: ["rin:browse"] })}\n`,
+    `${JSON.stringify({})}\n`,
     "utf8",
   );
 
@@ -91,10 +91,6 @@ test("std configured session strips removed browse extension alias", async () =>
     const loadedExtensions =
       runtime.runtime?.session?.resourceLoader?.getExtensions?.()?.extensions ||
       [];
-    assert.equal(
-      loadedExtensions.some((entry: any) => entry.path === "rin:browse"),
-      false,
-    );
     assert.equal(
       loadedExtensions.some(
         (entry: any) => entry.path === "<inline:llama.cpp>",

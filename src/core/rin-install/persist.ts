@@ -934,18 +934,6 @@ function normalizeInstalledSettings(value: unknown) {
   return settings;
 }
 
-function stripRemovedLegacyExtensionEntries(entries: unknown[]) {
-  const removed = new Set(["rin:browse", "rin:browser", "rin:computer"]);
-  return entries.filter(
-    (entry) =>
-      !removed.has(
-        String(entry || "")
-          .trim()
-          .toLowerCase(),
-      ),
-  );
-}
-
 function applyInstalledDefaults(
   target: any,
   options: {
@@ -958,11 +946,6 @@ function applyInstalledDefaults(
   if (options.modelId) target.defaultModel = options.modelId;
   if (options.thinkingLevel) {
     target.defaultThinkingLevel = options.thinkingLevel;
-  }
-  if (Array.isArray(target.extensions)) {
-    const extensions = stripRemovedLegacyExtensionEntries(target.extensions);
-    if (extensions.length > 0) target.extensions = extensions;
-    else delete target.extensions;
   }
 }
 

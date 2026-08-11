@@ -650,7 +650,7 @@ test("installer outputs persist settings, auth, initialization, launchers, and c
     const { deps, launcherWrites } = createFsDeps(home);
     writeJson(installSettingsPath(installDir), {
       koishi: { removed: true },
-      extensions: ["rin:browse", "owner-extension"],
+      extensions: ["owner-extension"],
       chat: { quietMode: { default: true } },
     });
     writeJson(installAuthPath(installDir), { existing: "kept" });
@@ -714,7 +714,7 @@ test("installer outputs persist settings, auth, initialization, launchers, and c
     ]);
 
     writeJson(installSettingsPath(installDir), {
-      extensions: ["rin:browse"],
+      extensions: ["same-user-extension"],
     });
     const sameUser = await persistInstallerOutputs(
       {
@@ -733,7 +733,9 @@ test("installer outputs persist settings, auth, initialization, launchers, and c
       readJson<any>(sameUser.launcherPath).defaultTargetUser,
       "alice",
     );
-    assert.equal(readJson<any>(sameUser.settingsPath).extensions, undefined);
+    assert.deepEqual(readJson<any>(sameUser.settingsPath).extensions, [
+      "same-user-extension",
+    ]);
     assert.equal(sameUser.currentRinPath, sameUser.targetRinPath);
     assert.deepEqual(launcherWrites.at(-1), {
       userName: "alice",

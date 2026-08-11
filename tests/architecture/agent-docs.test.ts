@@ -122,7 +122,6 @@ test("agent docs expose scheduled task operation workflow", () => {
     /Browser, computer, mobile, and search operation/,
   );
   assert.doesNotMatch(builtinCapabilities, /provides `run_subagent`/);
-  assert.doesNotMatch(builtinCapabilities, /rin:browser-use/);
   assert.doesNotMatch(capabilities, /bundled `browser_use`/);
 
   for (const helper of [
