@@ -849,12 +849,6 @@
       "tests": ["tests/integration/type-contracts.test.ts"]
     },
     {
-      "source": "src/core/rin-lib/post-compaction-state.ts",
-      "built": "dist/core/rin-lib/post-compaction-state.js",
-      "suite": "integration",
-      "tests": ["tests/integration/rin-runtime-current-main.test.ts"]
-    },
-    {
       "source": "src/core/rin-lib/profile.ts",
       "built": "dist/core/rin-lib/profile.js",
       "suite": "integration",

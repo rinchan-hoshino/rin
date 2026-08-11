@@ -40,7 +40,6 @@ import {
   estimateProviderBoundContextTokens,
 } from "./provider-context.js";
 import { applyRinSystemPromptOverlay } from "./system-prompt-overlay.js";
-import { appendPostCompactionStateToSummary } from "./post-compaction-state.js";
 import {
   bindPiSessionAutoCompactor,
   bindPiSessionCompactionChecker,
@@ -75,15 +74,9 @@ export function createRinCapabilityDefinitions(
             name: "rin_native_compaction",
             hooks: {
               session_before_compact: [
-                async (event: any, ctx: any) => {
-                  const compaction = await options.compactWithPiNative?.(event);
-                  return {
-                    compaction: await appendPostCompactionStateToSummary(
-                      compaction,
-                      ctx?.sessionManager,
-                    ),
-                  };
-                },
+                async (event: any) => ({
+                  compaction: await options.compactWithPiNative?.(event),
+                }),
               ],
             },
           },

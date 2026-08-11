@@ -1036,12 +1036,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-lib/post-compaction-state.ts",
-      "built": "dist/core/rin-lib/post-compaction-state.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/rin-lib/profile.ts",
       "built": "dist/core/rin-lib/profile.js",
       "ownerSuite": "integration",
