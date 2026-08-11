@@ -14,6 +14,12 @@ export type DaemonChatDeliveryContext = {
   messageId: string;
 };
 
+export type DaemonTurnInvocationContext = {
+  source?: string;
+  frontendIdentity?: { kind: string; key?: string };
+  promptContext?: Record<string, unknown>;
+};
+
 export type DaemonTurnState = "active" | "complete" | "error" | "interrupted";
 
 export type DaemonTurnRecord = {
@@ -21,6 +27,7 @@ export type DaemonTurnRecord = {
   sessionFile?: string;
   sessionId?: string;
   chatDeliveryContext?: DaemonChatDeliveryContext;
+  invocationContext?: DaemonTurnInvocationContext;
   state: DaemonTurnState;
   terminalId?: string;
   terminalEvent?: Record<string, unknown>;
@@ -34,6 +41,7 @@ type BeginDaemonTurnInput = {
   sessionFile?: string;
   sessionId?: string;
   chatDeliveryContext?: DaemonChatDeliveryContext;
+  invocationContext?: DaemonTurnInvocationContext;
 };
 
 type TerminalDaemonTurnInput = {
@@ -49,6 +57,7 @@ type TurnRow = {
   transport_turn_id: string | null;
   chat_key: string | null;
   message_id: string | null;
+  invocation_context_json: string | null;
   state: DaemonTurnState;
   terminal_id: string | null;
   terminal_event_json: string | null;
@@ -105,6 +114,45 @@ function normalizeChatContext(
   };
 }
 
+function normalizeInvocationContext(
+  input: unknown,
+): DaemonTurnInvocationContext | undefined {
+  if (input == null) return undefined;
+  const value = input as Record<string, unknown>;
+  const source = optionalText(value.source);
+  const frontendValue = value.frontendIdentity as
+    | Record<string, unknown>
+    | undefined;
+  const frontendKind = optionalText(frontendValue?.kind);
+  const frontendKey = optionalText(frontendValue?.key);
+  const frontendIdentity = frontendKind
+    ? {
+        kind: frontendKind,
+        ...(frontendKey ? { key: frontendKey } : {}),
+      }
+    : undefined;
+  let promptContext: Record<string, unknown> | undefined;
+  if (value.promptContext !== undefined) {
+    if (
+      !value.promptContext ||
+      typeof value.promptContext !== "object" ||
+      Array.isArray(value.promptContext)
+    ) {
+      throw new Error("Turn invocation prompt context is invalid");
+    }
+    promptContext = JSON.parse(canonicalJson(value.promptContext)) as Record<
+      string,
+      unknown
+    >;
+  }
+  if (!source && !frontendIdentity && !promptContext) return undefined;
+  return {
+    ...(source ? { source } : {}),
+    ...(frontendIdentity ? { frontendIdentity } : {}),
+    ...(promptContext ? { promptContext } : {}),
+  };
+}
+
 function normalizeBegin(input: BeginDaemonTurnInput) {
   return {
     requestTag: requireText(
@@ -114,6 +162,7 @@ function normalizeBegin(input: BeginDaemonTurnInput) {
     sessionFile: optionalText(input.sessionFile),
     sessionId: optionalText(input.sessionId),
     chatDeliveryContext: normalizeChatContext(input.chatDeliveryContext),
+    invocationContext: normalizeInvocationContext(input.invocationContext),
   };
 }
 
@@ -125,11 +174,15 @@ function rowToRecord(row: TurnRow): DaemonTurnRecord {
         messageId: row.message_id!,
       }
     : undefined;
+  const invocationContext = row.invocation_context_json
+    ? normalizeInvocationContext(JSON.parse(row.invocation_context_json))
+    : undefined;
   return {
     requestTag: row.request_tag,
     ...(row.session_file ? { sessionFile: row.session_file } : {}),
     ...(row.session_id ? { sessionId: row.session_id } : {}),
     ...(context ? { chatDeliveryContext: context } : {}),
+    ...(invocationContext ? { invocationContext } : {}),
     state: row.state,
     ...(row.terminal_id ? { terminalId: row.terminal_id } : {}),
     ...(row.terminal_event_json
@@ -150,6 +203,7 @@ function turnLedgerTableSql(tableName = "turn_records") {
       transport_turn_id TEXT UNIQUE,
       chat_key TEXT,
       message_id TEXT,
+      invocation_context_json TEXT,
       state TEXT NOT NULL
         CHECK (state IN ('active', 'complete', 'error', 'interrupted')),
       terminal_id TEXT UNIQUE,
@@ -197,11 +251,11 @@ function initialize(db: BetterSqlite3.Database) {
   db.pragma("synchronous = FULL");
   db.pragma("busy_timeout = 5000");
   const version = Number(db.pragma("user_version", { simple: true }) || 0);
-  if (version > 2) throw new Error("rin_turn_ledger_newer_schema");
+  if (version > 3) throw new Error("rin_turn_ledger_newer_schema");
   if (version === 0) {
     db.exec(turnLedgerTableSql());
     createTurnLedgerIndexes(db);
-    db.pragma("user_version = 2");
+    db.pragma("user_version = 3");
     return;
   }
   if (version === 1) {
@@ -224,7 +278,17 @@ function initialize(db: BetterSqlite3.Database) {
         DROP TABLE turn_records_v1;
       `);
       createTurnLedgerIndexes(db);
-      db.pragma("user_version = 2");
+      db.pragma("user_version = 3");
+    });
+    migrate();
+    return;
+  }
+  if (version === 2) {
+    const migrate = db.transaction(() => {
+      db.exec(
+        "ALTER TABLE turn_records ADD COLUMN invocation_context_json TEXT",
+      );
+      db.pragma("user_version = 3");
     });
     migrate();
   }
@@ -260,6 +324,9 @@ export function beginDaemonTurn(
       sessionFile: normalized.sessionFile,
       sessionId: normalized.sessionId,
       chatDeliveryContext: normalized.chatDeliveryContext,
+      ...(existing.invocation_context_json !== null
+        ? { invocationContext: normalized.invocationContext }
+        : {}),
     };
     const actual = {
       requestTag: existing.request_tag,
@@ -272,6 +339,13 @@ export function beginDaemonTurn(
             messageId: existing.message_id,
           }
         : undefined,
+      ...(existing.invocation_context_json !== null
+        ? {
+            invocationContext: normalizeInvocationContext(
+              JSON.parse(existing.invocation_context_json),
+            ),
+          }
+        : {}),
     };
     if (canonicalJson(actual) !== canonicalJson(expected)) {
       throw new Error("rin_turn_ledger_begin_conflict");
@@ -282,9 +356,9 @@ export function beginDaemonTurn(
   db.prepare(
     `INSERT INTO turn_records (
        request_tag, session_file, session_id,
-       transport_turn_id, chat_key, message_id,
+       transport_turn_id, chat_key, message_id, invocation_context_json,
        state, created_at
-     ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
   ).run(
     normalized.requestTag,
     normalized.sessionFile,
@@ -292,6 +366,7 @@ export function beginDaemonTurn(
     context?.turnId || null,
     context?.chatKey || null,
     context?.messageId || null,
+    canonicalJson(normalized.invocationContext ?? {}),
     nowIso(),
   );
   return {

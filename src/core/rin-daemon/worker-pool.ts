@@ -12,6 +12,7 @@ import {
   listActiveDaemonTurns,
   readDaemonTurn,
   recordDaemonTurnTerminal,
+  type DaemonTurnInvocationContext,
 } from "./turn-ledger.js";
 import { setRunningWorkerSession } from "./running-workers.js";
 import {
@@ -54,6 +55,7 @@ type PendingResponse = {
       chatKey: string;
       messageId: string;
     };
+    invocationContext?: DaemonTurnInvocationContext;
   };
   stateEpoch: number;
   connection?: ConnectionState;
@@ -156,6 +158,14 @@ const TURN_TERMINAL_COMMAND_TYPES = new Set(["prompt", "send_user_message"]);
 
 function lifecycleRequestTag(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function turnInvocationContext(command: any): DaemonTurnInvocationContext {
+  return {
+    source: command?.source,
+    frontendIdentity: command?.frontendIdentity,
+    promptContext: command?.promptContext,
+  };
 }
 
 function nativeInputOutcome(data: any) {
@@ -548,6 +558,7 @@ export class WorkerPool {
           sessionFile: recoverySelector.sessionFile,
           sessionId: recoverySelector.sessionId,
           chatDeliveryContext: command.chatDeliveryContext,
+          invocationContext: turnInvocationContext(command),
         });
         if (!admission.created) {
           if (commandId !== undefined) {
@@ -594,6 +605,7 @@ export class WorkerPool {
                       messageId: string;
                     }
                   | undefined,
+                invocationContext: turnInvocationContext(command),
               },
             }
           : {}),
@@ -1020,6 +1032,7 @@ export class WorkerPool {
       const response = await this.sendInternalCommand(worker, {
         type: "resume_interrupted_turn",
         requestTag,
+        ...record.invocationContext,
       });
       if (response?.data?.resumed !== true) {
         throw new Error("rin_turn_recovery_not_started");
@@ -1096,6 +1109,7 @@ export class WorkerPool {
       sessionFile: selector.sessionFile,
       sessionId: selector.sessionId,
       chatDeliveryContext: pending.inputSubmission?.chatDeliveryContext,
+      invocationContext: pending.inputSubmission?.invocationContext,
     });
     if (admission.record.state !== "active") return;
     worker.terminalPending = true;

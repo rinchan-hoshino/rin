@@ -29,6 +29,16 @@ async function withAgentDir(run: (agentDir: string) => Promise<void> | void) {
   }
 }
 
+const invocationContext = {
+  source: "chat-bridge",
+  frontendIdentity: { kind: "chat", key: "discord/guild/channel" },
+  promptContext: {
+    source: "chat-bridge",
+    chatKey: "discord/guild/channel",
+    selfImproveEligible: true,
+  },
+};
+
 const chatContext = {
   turnId: "transport-turn-1",
   chatKey: "discord/guild/channel",
@@ -41,6 +51,7 @@ function begin(agentDir: string, overrides: Record<string, unknown> = {}) {
     sessionFile: "/sessions/one.jsonl",
     sessionId: "session-1",
     chatDeliveryContext: chatContext,
+    invocationContext,
     ...overrides,
   }).record;
 }
@@ -50,9 +61,17 @@ test("daemon turn ledger owns one immutable lifecycle record per request", async
     const active = begin(agentDir);
     assert.equal(active.state, "active");
     assert.deepEqual(active.chatDeliveryContext, chatContext);
+    assert.deepEqual(active.invocationContext, invocationContext);
     assert.deepEqual(begin(agentDir), active);
     assert.throws(
       () => begin(agentDir, { sessionId: "different-session" }),
+      /rin_turn_ledger_begin_conflict/,
+    );
+    assert.throws(
+      () =>
+        begin(agentDir, {
+          invocationContext: { ...invocationContext, source: "tui" },
+        }),
       /rin_turn_ledger_begin_conflict/,
     );
 
@@ -263,7 +282,7 @@ test("daemon turn ledger uses SQLite WAL instead of an application file WAL", as
     begin(agentDir);
     const info = ledger.inspectDaemonTurnLedger(agentDir);
     assert.equal(info.journalMode, "wal");
-    assert.equal(info.userVersion, 2);
+    assert.equal(info.userVersion, 3);
     assert.match(info.path, /data\/core\/daemon\/turn-ledger\.sqlite$/);
   });
 });
@@ -299,7 +318,7 @@ test("Chat message identity is scoped by chat instead of globally", async () => 
   });
 });
 
-test("daemon turn ledger migrates v1 global message uniqueness to scoped v2", async () => {
+test("daemon turn ledger migrates v1 global message uniqueness to the current schema", async () => {
   await withAgentDir(async (agentDir) => {
     const dbPath = ledger.resolveDaemonTurnLedgerPath(agentDir);
     await fs.mkdir(path.dirname(dbPath), { recursive: true });
@@ -329,7 +348,7 @@ test("daemon turn ledger migrates v1 global message uniqueness to scoped v2", as
     `);
     db.close();
 
-    assert.equal(ledger.inspectDaemonTurnLedger(agentDir).userVersion, 2);
+    assert.equal(ledger.inspectDaemonTurnLedger(agentDir).userVersion, 3);
     assert.equal(ledger.readDaemonTurn(agentDir, "v1-request").state, "active");
     assert.equal(
       ledger.beginDaemonTurn(agentDir, {
@@ -342,5 +361,51 @@ test("daemon turn ledger migrates v1 global message uniqueness to scoped v2", as
       }).created,
       true,
     );
+  });
+});
+
+test("daemon turn ledger adds nullable invocation provenance to v2 records", async () => {
+  await withAgentDir(async (agentDir) => {
+    const dbPath = ledger.resolveDaemonTurnLedgerPath(agentDir);
+    await fs.mkdir(path.dirname(dbPath), { recursive: true });
+    const db = new BetterSqlite3(dbPath);
+    db.exec(`
+      CREATE TABLE turn_records (
+        request_tag TEXT PRIMARY KEY,
+        session_file TEXT,
+        session_id TEXT,
+        transport_turn_id TEXT UNIQUE,
+        chat_key TEXT,
+        message_id TEXT,
+        state TEXT NOT NULL,
+        terminal_id TEXT UNIQUE,
+        terminal_event_json TEXT,
+        created_at TEXT NOT NULL,
+        terminal_at TEXT,
+        acknowledged_at TEXT
+      );
+      INSERT INTO turn_records (
+        request_tag, session_file, state, created_at
+      ) VALUES (
+        'v2-request', '/sessions/v2.jsonl', 'active',
+        '2026-08-11T00:00:00.000Z'
+      );
+      PRAGMA user_version = 2;
+    `);
+    db.close();
+
+    assert.equal(ledger.inspectDaemonTurnLedger(agentDir).userVersion, 3);
+    const legacy = ledger.readDaemonTurn(agentDir, "v2-request");
+    assert.equal(legacy.state, "active");
+    assert.equal(legacy.invocationContext, undefined);
+    const rejoinedLegacy = ledger.beginDaemonTurn(agentDir, {
+      requestTag: "v2-request",
+      sessionFile: "/sessions/v2.jsonl",
+      invocationContext,
+    });
+    assert.equal(rejoinedLegacy.created, false);
+    assert.equal(rejoinedLegacy.record.invocationContext, undefined);
+    const current = begin(agentDir);
+    assert.deepEqual(current.invocationContext, invocationContext);
   });
 });

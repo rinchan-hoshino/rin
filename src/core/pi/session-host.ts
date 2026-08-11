@@ -4,6 +4,7 @@ import type { AuthResult } from "@earendil-works/pi-ai";
 import { compact } from "@earendil-works/pi-coding-agent";
 
 import { updateSessionCatalogFromSessionManagerSync } from "../session/catalog.js";
+import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 
 // This file is Rin's controlled seam for Pi AgentSession/SessionManager
 // implementation details. Product code should call these semantic helpers
@@ -255,7 +256,29 @@ export function emitPiSessionEvent(session: any, event: any) {
   return session?.[PI_SESSION_PRIVATE.emit]?.(event);
 }
 
-export async function resumePiSessionTurn(session: any) {
+export async function resumePiSessionTurn(
+  session: any,
+  invocationContext?: {
+    source?: unknown;
+    frontendIdentity?: unknown;
+    promptContext?: unknown;
+  },
+) {
+  const sessionManager = session?.sessionManager;
+  if (sessionManager && invocationContext) {
+    sessionManager.__rinLastPromptSource = String(
+      invocationContext.source || "",
+    ).trim();
+    sessionManager.__rinLastPromptContext = invocationContext.promptContext;
+    const frontendIdentity = normalizeFrontendIdentity(
+      invocationContext.frontendIdentity,
+    );
+    if (frontendIdentity) {
+      sessionManager.__rinFrontend = frontendIdentity;
+    } else {
+      delete sessionManager.__rinFrontend;
+    }
+  }
   const runAgentPrompt = bindMethod(session, PI_SESSION_PRIVATE.runAgentPrompt);
   if (!runAgentPrompt) {
     throw new Error("Pi AgentSession continuation runner is unavailable");

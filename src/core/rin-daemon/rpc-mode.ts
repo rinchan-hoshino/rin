@@ -347,7 +347,14 @@ function discardInterruptedAssistantFailures(session: any) {
   while (isAssistantFailureMessage(messages.at(-1))) messages.pop();
 }
 
-async function resumeInterruptedTurn(session: any) {
+async function resumeInterruptedTurn(
+  session: any,
+  invocationContext?: {
+    source?: unknown;
+    frontendIdentity?: unknown;
+    promptContext?: unknown;
+  },
+) {
   const messages = Array.isArray(session?.agent?.state?.messages)
     ? session.agent.state.messages
     : [];
@@ -357,7 +364,7 @@ async function resumeInterruptedTurn(session: any) {
     // Pi owns retry policy for the new continuation; Rin only restores a
     // provider-valid context and never replays the accepted user input.
     discardInterruptedAssistantFailures(session);
-    await resumePiSessionTurn(session);
+    await resumePiSessionTurn(session, invocationContext);
     return;
   }
 
@@ -1794,7 +1801,7 @@ export async function runCustomRpcMode(
         const requestTag = rpcRequestTag(command.requestTag);
         startInterruptTurnTask(
           requestTag,
-          async () => await resumeInterruptedTurn(session),
+          async () => await resumeInterruptedTurn(session, command),
         );
         return done(id, type, { resumed: true, requestTag });
       }

@@ -5519,6 +5519,22 @@ test(
         _runAgentPrompt: async (messages: any[]) => {
           assert.deepEqual(messages, []);
           calls.push(["continue"]);
+          assert.equal(
+            (session.sessionManager as any).__rinLastPromptSource,
+            "chat-bridge",
+          );
+          assert.deepEqual((session.sessionManager as any).__rinFrontend, {
+            kind: "chat",
+            key: "discord/1:2",
+          });
+          assert.deepEqual(
+            (session.sessionManager as any).__rinLastPromptContext,
+            {
+              source: "chat-bridge",
+              chatKey: "discord/1:2",
+              selfImproveEligible: true,
+            },
+          );
         },
         bindExtensions: async () => {},
         subscribe: () => {},
@@ -5597,7 +5613,18 @@ test(
       assert.equal(typeof onData, "function");
       onData(
         Buffer.from(
-          `${JSON.stringify({ id: "2", type: "resume_interrupted_turn", requestTag: "tag-2", source: "rpc-reconnect" })}\n`,
+          `${JSON.stringify({
+            id: "2",
+            type: "resume_interrupted_turn",
+            requestTag: "tag-2",
+            source: "chat-bridge",
+            frontendIdentity: { kind: "chat", key: "discord/1:2" },
+            promptContext: {
+              source: "chat-bridge",
+              chatKey: "discord/1:2",
+              selfImproveEligible: true,
+            },
+          })}\n`,
         ),
       );
       await wait(10);

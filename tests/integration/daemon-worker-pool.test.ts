@@ -963,7 +963,14 @@ const sessionFile = ${JSON.stringify(sessionFile)};
 const log = ${JSON.stringify(commandLog)};
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const command = JSON.parse(line);
-  fs.appendFileSync(log, JSON.stringify({ pid: process.pid, type: command.type, requestTag: command.requestTag }) + "\\n");
+  fs.appendFileSync(log, JSON.stringify({
+    pid: process.pid,
+    type: command.type,
+    requestTag: command.requestTag,
+    source: command.source,
+    frontendIdentity: command.frontendIdentity,
+    promptContext: command.promptContext,
+  }) + "\\n");
   if (command.type === "get_state") {
     process.stdout.write(JSON.stringify({ id: command.id, success: true, command: command.type, data: { sessionFile, sessionId: "resume-session", turnActive: false } }) + "\\n");
     return;
@@ -1001,6 +1008,13 @@ setInterval(() => {}, 1000);
     type: "prompt",
     message: "continue me",
     requestTag: "resume-request",
+    source: "chat-bridge",
+    frontendIdentity: { kind: "chat", key: "discord/1:2" },
+    promptContext: {
+      source: "chat-bridge",
+      chatKey: "discord/1:2",
+      selfImproveEligible: true,
+    },
     sessionFile,
   });
   await sleep(50);
@@ -1035,10 +1049,22 @@ setInterval(() => {}, 1000);
     .split("\n")
     .map((line) => JSON.parse(line));
   assert.equal(commands.filter((entry) => entry.type === "prompt").length, 1);
-  assert.equal(
-    commands.filter((entry) => entry.type === "resume_interrupted_turn").length,
-    1,
+  const resumedCommands = commands.filter(
+    (entry) => entry.type === "resume_interrupted_turn",
   );
+  assert.equal(resumedCommands.length, 1);
+  assert.deepEqual(resumedCommands[0], {
+    pid: resumedCommands[0].pid,
+    type: "resume_interrupted_turn",
+    requestTag: "resume-request",
+    source: "chat-bridge",
+    frontendIdentity: { kind: "chat", key: "discord/1:2" },
+    promptContext: {
+      source: "chat-bridge",
+      chatKey: "discord/1:2",
+      selfImproveEligible: true,
+    },
+  });
 });
 
 test("stored terminal delivery uses current backend Working for the session", async () => {

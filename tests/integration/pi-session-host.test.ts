@@ -22,18 +22,40 @@ test("Pi session host resumes through the session-level runner", async () => {
   const calls: any[] = [];
   const session = {
     marker: "session",
+    sessionManager: {},
     agent: { state: { messages: [{ role: "toolResult" }] } },
     async _runAgentPrompt(messages: any[]) {
       calls.push({ receiver: this, messages });
     },
   };
 
-  await resumePiSessionTurn(session);
+  await resumePiSessionTurn(session, {
+    source: "chat-bridge",
+    frontendIdentity: { kind: "chat", key: "discord/1:2" },
+    promptContext: {
+      source: "chat-bridge",
+      chatKey: "discord/1:2",
+      selfImproveEligible: true,
+    },
+  });
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].receiver, session);
   assert.deepEqual(calls[0].messages, []);
   assert.deepEqual(session.agent.state.messages, [{ role: "toolResult" }]);
+  assert.equal(
+    (session.sessionManager as any).__rinLastPromptSource,
+    "chat-bridge",
+  );
+  assert.deepEqual((session.sessionManager as any).__rinFrontend, {
+    kind: "chat",
+    key: "discord/1:2",
+  });
+  assert.deepEqual((session.sessionManager as any).__rinLastPromptContext, {
+    source: "chat-bridge",
+    chatKey: "discord/1:2",
+    selfImproveEligible: true,
+  });
   await assert.rejects(
     () => resumePiSessionTurn({}),
     /Pi AgentSession continuation runner is unavailable/,
