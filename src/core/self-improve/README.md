@@ -11,7 +11,7 @@ This module owns distilled guidance that changes future agent behavior:
 - always-on prompt baselines under `~/.rin/self_improve/prompts`
 - agent-managed reusable skills under `~/.rin/self_improve/skills`
 - onboarding for resident self-improve prompts
-- turn-window and session-shutdown self-improve review; each full eligible user-turn window queues one daemon-owned review, but the window controls cadence only—the worker pins the completed source leaf and reviews the complete source branch with its raw messages and tool results
+- turn-window and session-shutdown self-improve review; each full eligible user-turn window queues one daemon-owned review, but the window controls cadence only—the worker pins the completed source leaf and reviews Pi's canonical effective context there: the latest compaction summary, retained entries, and subsequent branch entries
 
 It does not own original session-history recall. Original evidence and retrieval belong to the `memory` module.
 

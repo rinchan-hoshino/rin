@@ -5,12 +5,21 @@ const replacements = {
     export async function loadRinSessionManagerModule() {
       return {
         SessionManager: {
-          open(sessionFile, sessionDir) {
-            globalThis.__rinMaintainerOwnerEvents.push(["open", sessionFile, sessionDir]);
+          inMemory(cwd, options) {
+            globalThis.__rinMaintainerOwnerEvents.push(["memory", cwd, options]);
+            const header = {
+              type: "session",
+              version: 3,
+              id: options.id,
+              cwd,
+              parentSession: options.parentSession,
+            };
             return {
-              getCwd() {
-                return globalThis.__rinMaintainerOwnerCwd;
-              },
+              kind: "owner-memory-session",
+              header,
+              getHeader() { return header; },
+              getCwd() { return cwd; },
+              isPersisted() { return false; },
             };
           },
         },
@@ -48,10 +57,10 @@ const replacements = {
       };
     }
   `,
-  "dist/core/session/fork.js": `
-    export function forkSessionManagerCompat(...args) {
-      globalThis.__rinMaintainerOwnerEvents.push(["fork", args]);
-      return { kind: "owner-fork", args };
+  "dist/core/pi/session-host.js": `
+    export function seedPiInMemorySessionManager(manager, entries) {
+      globalThis.__rinMaintainerOwnerEvents.push(["seed", entries]);
+      manager.entries = entries;
     }
   `,
   "dist/core/session/metadata.js": `

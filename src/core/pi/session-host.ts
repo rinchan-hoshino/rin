@@ -389,3 +389,16 @@ export function rewritePiSessionManagerFile(sessionManager: any) {
 export function buildPiSessionManagerIndex(sessionManager: any) {
   return sessionManager?.[PI_SESSION_PRIVATE.buildIndex]?.();
 }
+
+export function seedPiInMemorySessionManager(
+  sessionManager: any,
+  entries: readonly Record<string, any>[],
+) {
+  if (sessionManager?.isPersisted?.() !== false) {
+    throw new Error("Pi session seeding requires a non-persisted manager");
+  }
+  const header = sessionManager.getHeader?.();
+  if (!header) throw new Error("Pi session seeding requires a session header");
+  sessionManager.fileEntries = [header, ...entries];
+  buildPiSessionManagerIndex(sessionManager);
+}

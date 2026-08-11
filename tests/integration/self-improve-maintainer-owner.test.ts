@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+
+import { importBuiltModule } from "../support/import-built-module.js";
+
 const execFileAsync = promisify(execFile);
+const maintainerModule = await importBuiltModule<Record<string, any>>(
+  "dist/core/self-improve/maintainer.js",
+);
 const registerFixture = path.resolve(
   "tests/support/register-maintainer-owner-fixture.ts",
 );
@@ -30,13 +38,31 @@ await fs.mkdir(path.dirname(sessionFile), { recursive: true });
 await fs.mkdir(path.dirname(deleted), { recursive: true });
 await fs.mkdir(path.dirname(unchanged), { recursive: true });
 await fs.mkdir(promptDir, { recursive: true });
-await fs.writeFile(sessionFile, "{}\n");
+await fs.writeFile(
+  sessionFile,
+  [
+    JSON.stringify({
+      type: "session",
+      version: 3,
+      id: "019fad2a-b02a-74cc-9d03-56b909f1f929",
+      cwd: "/workspace/project",
+    }),
+    JSON.stringify({
+      type: "custom_message",
+      id: "leaf-owner",
+      parentId: null,
+      timestamp: "2026-08-11T00:00:00.000Z",
+      customType: "test",
+      content: "owner context",
+      display: false,
+    }),
+  ].join("\n") + "\n",
+);
 await fs.writeFile(updated, "before\n");
 await fs.writeFile(deleted, "delete me\n");
 await fs.writeFile(unchanged, "same\n");
 
 globalThis.__rinMaintainerOwnerEvents = [];
-globalThis.__rinMaintainerOwnerCwd = " /workspace/project ";
 globalThis.__rinMaintainerOwnerFinalText = "  owner review complete  ";
 globalThis.__rinMaintainerOwnerAbortFails = true;
 globalThis.__rinMaintainerOwnerDisposeFails = true;
@@ -89,7 +115,7 @@ try {
   await lockHandle.close();
 }
 assert.equal(result.skipped, "");
-assert.equal(result.forked, true);
+assert.equal(result.inMemory, true);
 assert.equal(result.saved, true);
 assert.equal(result.output, "owner review complete");
 assert.deepEqual(
@@ -106,17 +132,17 @@ assert.equal(result.leafId, "leaf-owner");
 assert.equal(result.trigger, "owner-trigger");
 assert.equal(result.audit.output, "owner review complete");
 assert.equal(result.auditHandle.runId, "maintainer-owner-run");
-const openEvent = globalThis.__rinMaintainerOwnerEvents.find(([name]) => name === "open");
-assert.deepEqual(openEvent, ["open", sessionFile, path.dirname(sessionFile)]);
-const forkEvent = globalThis.__rinMaintainerOwnerEvents.find(([name]) => name === "fork");
-assert.equal(forkEvent[1][1], sessionFile);
-assert.equal(forkEvent[1][2], "/workspace/project");
-assert.deepEqual(forkEvent[1][4], {
-  persist: false,
-  leafId: "leaf-owner",
-  preserveSourceSessionId: true,
-  disableRoutineCompaction: true,
-});
+const memoryEvent = globalThis.__rinMaintainerOwnerEvents.find(([name]) => name === "memory");
+assert.deepEqual(memoryEvent, [
+  "memory",
+  "/workspace/project",
+  {
+    id: "019fad2a-b02a-74cc-9d03-56b909f1f929",
+    parentSession: sessionFile,
+  },
+]);
+const seedEvent = globalThis.__rinMaintainerOwnerEvents.find(([name]) => name === "seed");
+assert.equal(seedEvent[1].some((entry) => entry.id === "leaf-owner"), true);
 const bindEvent = globalThis.__rinMaintainerOwnerEvents.find(([name]) => name === "bind");
 assert.equal(bindEvent[1].cwd, "/workspace/project");
 assert.equal(bindEvent[1].agentDir, agentDir);
@@ -224,7 +250,11 @@ globalThis.__rinMaintainerOwnerMutation = async () => {
 };
 const primitiveAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-maintainer-primitive-owner-"));
 const primitiveSessionFile = path.join(primitiveAgentDir, "session.jsonl");
-await fs.writeFile(primitiveSessionFile, '{"type":"session","id":"primitive"}\\n');
+await fs.writeFile(
+  primitiveSessionFile,
+  '{"type":"session","id":"019fad2a-b02a-74cc-9d03-56b909f1f929","cwd":"/primitive"}\n' +
+    '{"type":"custom_message","id":"primitive-leaf","parentId":null,"customType":"test","content":"primitive","display":false}\n',
+);
 await assert.rejects(
   () => withMaintenanceLock(primitiveAgentDir, (maintenanceLockHandle) =>
     maintainer.runMaintainerUnderMaintenanceLock({}, {
@@ -242,7 +272,11 @@ globalThis.__rinMaintainerOwnerMutation = async () => {};
 globalThis.__rinMaintainerOwnerFinalText = "default owner output";
 const defaultAgentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-maintainer-default-owner-"));
 const defaultSessionFile = path.join(defaultAgentDir, "session.jsonl");
-await fs.writeFile(defaultSessionFile, '{"type":"session","id":"default"}\\n');
+await fs.writeFile(
+  defaultSessionFile,
+  '{"type":"session","id":"019fad2a-b02a-74cc-9d03-56b909f1f929","cwd":"/default"}\n' +
+    '{"type":"custom_message","id":"default-leaf","parentId":null,"customType":"test","content":"default","display":false}\n',
+);
 const defaultResult = await withMaintenanceLock(defaultAgentDir, (maintenanceLockHandle) =>
   maintainer.runMaintainerUnderMaintenanceLock({}, {
     agentDir: defaultAgentDir,
@@ -292,7 +326,140 @@ try {
 console.log(JSON.stringify({ changed: result.changedFiles.length, events: globalThis.__rinMaintainerOwnerEvents.length }));
 `;
 
-test("self-improve maintainer forks one isolated review and reports exact artifact changes", async () => {
+test("self-improve seeds one in-memory Pi session from the pinned effective context", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-maintainer-context-"),
+  );
+  const sessionFile = path.join(root, "source.jsonl");
+  const sourceId = "019fad2a-b02a-74cc-9d03-56b909f1f929";
+  const timestamp = "2026-08-11T00:00:00.000Z";
+  const oldPayload = `summarized-history:${"x".repeat(2 * 1024 * 1024)}`;
+  const entries = [
+    { type: "session", version: 3, id: sourceId, timestamp, cwd: "/source" },
+    {
+      type: "model_change",
+      id: "model001",
+      parentId: null,
+      timestamp,
+      provider: "openai",
+      modelId: "gpt-test",
+    },
+    {
+      type: "thinking_level_change",
+      id: "think001",
+      parentId: "model001",
+      timestamp,
+      thinkingLevel: "high",
+    },
+    {
+      type: "custom_message",
+      id: "old00001",
+      parentId: "think001",
+      timestamp,
+      customType: "test",
+      content: oldPayload,
+      display: false,
+    },
+    {
+      type: "custom_message",
+      id: "keep0001",
+      parentId: "old00001",
+      timestamp,
+      customType: "test",
+      content: "kept context",
+      display: false,
+    },
+    {
+      type: "compaction",
+      id: "compact1",
+      parentId: "keep0001",
+      timestamp,
+      summary: "complete prior summary",
+      firstKeptEntryId: "keep0001",
+      tokensBefore: 1000,
+    },
+    {
+      type: "custom_message",
+      id: "post0001",
+      parentId: "compact1",
+      timestamp,
+      customType: "test",
+      content: "post-compaction context",
+      display: false,
+    },
+    {
+      type: "custom_message",
+      id: "target01",
+      parentId: "post0001",
+      timestamp,
+      customType: "test",
+      content: "pinned leaf",
+      display: false,
+    },
+    {
+      type: "custom_message",
+      id: "other001",
+      parentId: "old00001",
+      timestamp,
+      customType: "test",
+      content: "abandoned branch",
+      display: false,
+    },
+  ];
+
+  try {
+    await fs.writeFile(
+      sessionFile,
+      `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    );
+    const before = createHash("sha256")
+      .update(await fs.readFile(sessionFile))
+      .digest("hex");
+    const sourceManager = SessionManager.open(sessionFile, root);
+    sourceManager.branch("target01");
+
+    const created = await maintainerModule.createSelfImproveInMemorySession({
+      sessionFile,
+      leafId: "target01",
+    });
+
+    assert.equal(created.cwd, "/source");
+    assert.equal(created.sessionManager.isPersisted(), false);
+    assert.equal(created.sessionManager.getSessionFile(), undefined);
+    assert.equal(created.sessionManager.getSessionId(), sourceId);
+    assert.deepEqual(
+      created.sessionManager.buildSessionContext(),
+      sourceManager.buildSessionContext(),
+    );
+    const projected = JSON.stringify(created.sessionManager.getEntries());
+    assert.doesNotMatch(projected, /summarized-history:/);
+    assert.doesNotMatch(projected, /abandoned branch/);
+    assert.equal(
+      created.sessionManager[
+        Symbol.for("rin.ephemeralFork.disableRoutineCompaction")
+      ],
+      undefined,
+    );
+    await assert.rejects(
+      () =>
+        maintainerModule.createSelfImproveInMemorySession({
+          sessionFile,
+          leafId: "missing-leaf",
+        }),
+      /self_improve_session_leaf_missing:missing-leaf/,
+    );
+    assert.equal(
+      createHash("sha256")
+        .update(await fs.readFile(sessionFile))
+        .digest("hex"),
+      before,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("self-improve maintainer runs one isolated in-memory review and reports exact artifact changes", async () => {
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-maintainer-owner-"),
   );

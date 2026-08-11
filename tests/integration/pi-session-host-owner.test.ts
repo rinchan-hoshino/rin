@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+
 import { importBuiltModule } from "../support/import-built-module.js";
 
 const host = await importBuiltModule<
@@ -175,6 +177,41 @@ test("Pi session host binds, replaces, and invokes private semantic methods", ()
     "refresh",
     "emit:done",
   ]);
+});
+
+test("Pi session host seeds only non-persisted managers", () => {
+  const manager = SessionManager.inMemory("/workspace", {
+    id: "019fad2a-b02a-74cc-9d03-56b909f1f929",
+  });
+  host.seedPiInMemorySessionManager(manager, [
+    {
+      type: "custom_message",
+      id: "context1",
+      parentId: null,
+      timestamp: "2026-08-11T00:00:00.000Z",
+      customType: "test",
+      content: "context",
+      display: false,
+    },
+  ]);
+  assert.equal(manager.getLeafId(), "context1");
+  assert.equal(manager.buildSessionContext().messages.length, 1);
+  assert.throws(
+    () =>
+      host.seedPiInMemorySessionManager(
+        { isPersisted: () => true, getHeader: () => ({}) },
+        [],
+      ),
+    /Pi session seeding requires a non-persisted manager/,
+  );
+  assert.throws(
+    () =>
+      host.seedPiInMemorySessionManager(
+        { isPersisted: () => false, getHeader: () => null },
+        [],
+      ),
+    /Pi session seeding requires a session header/,
+  );
 });
 
 test("Pi session manager persistence patch creates and indexes conversation files", async () => {

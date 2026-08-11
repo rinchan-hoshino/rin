@@ -4,12 +4,17 @@ import os from "node:os";
 import path from "node:path";
 
 import type { Model } from "@earendil-works/pi-ai";
+import {
+  buildContextEntries,
+  type SessionEntry,
+  type SessionHeader,
+} from "@earendil-works/pi-coding-agent";
 
 const HOME_DIR = os.homedir();
 
 import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
+import { seedPiInMemorySessionManager } from "../pi/session-host.js";
 import { openBoundSession } from "../session/factory.js";
-import { forkSessionManagerCompat } from "../session/fork.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { resolveAgentDir } from "./agent-dir.js";
 import { safeString } from "./core/utils.js";
@@ -26,7 +31,177 @@ type ExtensionCtxLike = {
   model?: Model<any> | null;
 };
 
-async function createForkedSessionManager(options: {
+type SessionEntryMetadata = {
+  id: string;
+  parentId: string | null;
+  type: string;
+  [key: string]: any;
+};
+
+async function visitSessionEntries(
+  sessionFile: string,
+  visit: (entry: Record<string, any>) => void,
+) {
+  const handle = await fs.open(sessionFile, "r");
+  try {
+    for await (const line of handle.readLines()) {
+      if (!line.trim()) continue;
+      let entry: unknown;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (entry && typeof entry === "object") {
+        visit(entry as Record<string, any>);
+      }
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+function sessionEntryMetadata(entry: Record<string, any>) {
+  const metadata: SessionEntryMetadata = {
+    type: safeString(entry.type),
+    id: safeString(entry.id).trim(),
+    parentId:
+      entry.parentId === null
+        ? null
+        : safeString(entry.parentId).trim() || null,
+  };
+  if (entry.type === "compaction") {
+    metadata.firstKeptEntryId = safeString(entry.firstKeptEntryId).trim();
+  } else if (entry.type === "model_change") {
+    metadata.provider = safeString(entry.provider);
+    metadata.modelId = safeString(entry.modelId);
+  } else if (entry.type === "thinking_level_change") {
+    metadata.thinkingLevel = safeString(entry.thinkingLevel);
+  } else if (entry.type === "message" && entry.message?.role === "assistant") {
+    metadata.assistantModel = {
+      provider: safeString(entry.message.provider),
+      modelId: safeString(entry.message.model),
+    };
+  }
+  return metadata;
+}
+
+function pinnedSessionBranch(
+  entriesById: Map<string, SessionEntryMetadata>,
+  leafId: string,
+) {
+  const reversed: SessionEntryMetadata[] = [];
+  const visited = new Set<string>();
+  let current = entriesById.get(leafId);
+  while (current) {
+    if (visited.has(current.id)) {
+      throw new Error(`self_improve_session_parent_cycle:${current.id}`);
+    }
+    visited.add(current.id);
+    reversed.push(current);
+    if (!current.parentId) break;
+    const parent = entriesById.get(current.parentId);
+    if (!parent) {
+      throw new Error(
+        `self_improve_session_parent_missing:${current.parentId}`,
+      );
+    }
+    current = parent;
+  }
+  return reversed.reverse();
+}
+
+async function readPinnedContext(options: {
+  sessionFile: string;
+  leafId?: string;
+}) {
+  let header: SessionHeader | undefined;
+  let lastEntryId = "";
+  const entriesById = new Map<string, SessionEntryMetadata>();
+  await visitSessionEntries(options.sessionFile, (entry) => {
+    if (!header) {
+      if (entry.type !== "session" || !safeString(entry.id).trim()) {
+        throw new Error(
+          `self_improve_session_invalid_header:${options.sessionFile}`,
+        );
+      }
+      header = entry as SessionHeader;
+      return;
+    }
+    const projected = sessionEntryMetadata(entry);
+    if (!projected.id) return;
+    entriesById.set(projected.id, projected);
+    lastEntryId = projected.id;
+  });
+  if (!header) {
+    throw new Error(
+      `self_improve_session_invalid_header:${options.sessionFile}`,
+    );
+  }
+
+  const leafId = safeString(options.leafId).trim() || lastEntryId;
+  if (!leafId || !entriesById.has(leafId)) {
+    throw new Error(`self_improve_session_leaf_missing:${leafId || "[empty]"}`);
+  }
+  const branch = pinnedSessionBranch(entriesById, leafId);
+  const contextMetadata = buildContextEntries(
+    branch as SessionEntry[],
+    leafId,
+    entriesById as Map<string, SessionEntry>,
+  ) as SessionEntryMetadata[];
+  const selectedIds = new Set(contextMetadata.map((entry) => entry.id));
+  const selectedEntries = new Map<string, Record<string, any>>();
+  await visitSessionEntries(options.sessionFile, (entry) => {
+    const id = safeString(entry.id).trim();
+    if (selectedIds.has(id)) selectedEntries.set(id, entry);
+  });
+
+  let model: { provider: string; modelId: string } | null = null;
+  let thinkingLevel = "off";
+  for (const entry of branch) {
+    if (entry.type === "model_change") {
+      model = { provider: entry.provider, modelId: entry.modelId };
+    } else if (entry.type === "thinking_level_change") {
+      thinkingLevel = entry.thinkingLevel;
+    } else if (entry.assistantModel) {
+      model = entry.assistantModel;
+    }
+  }
+
+  const entries: Record<string, any>[] = contextMetadata.map((entry, index) => {
+    const selected = selectedEntries.get(entry.id);
+    if (!selected) {
+      throw new Error(`self_improve_session_entry_missing:${entry.id}`);
+    }
+    return {
+      ...selected,
+      parentId: index === 0 ? null : contextMetadata[index - 1].id,
+    };
+  });
+  let parentId = entries.at(-1)?.id || null;
+  if (model) {
+    const id = crypto.randomUUID();
+    entries.push({
+      type: "model_change",
+      id,
+      parentId,
+      timestamp: new Date().toISOString(),
+      provider: model.provider,
+      modelId: model.modelId,
+    });
+    parentId = id;
+  }
+  entries.push({
+    type: "thinking_level_change",
+    id: crypto.randomUUID(),
+    parentId,
+    timestamp: new Date().toISOString(),
+    thinkingLevel,
+  });
+  return { header, entries };
+}
+
+export async function createSelfImproveInMemorySession(options: {
   sessionFile: string;
   leafId?: string;
 }) {
@@ -35,54 +210,36 @@ async function createForkedSessionManager(options: {
     ? path.resolve(session.sessionFile)
     : "";
   if (!sessionFile) throw new Error("session_file_required");
-  const leafId = session.leafId || undefined;
-  const { SessionManager } = await loadRinSessionManagerModule();
-  const sourceManager = SessionManager.open(
+  const projection = await readPinnedContext({
     sessionFile,
-    path.dirname(sessionFile),
-  );
-  const cwd = safeString(sourceManager.getCwd?.() || "").trim() || HOME_DIR;
-  return {
-    cwd,
-    sessionManager: forkSessionManagerCompat(
-      SessionManager as any,
-      sessionFile,
-      cwd,
-      undefined,
-      {
-        persist: false,
-        leafId,
-        // Self-improve needs a temporary, non-persisted fork that behaves like
-        // appending one distillation turn to the source conversation for
-        // provider prefix-cache purposes. Keep the source session id as the
-        // provider cache key while keeping distillation messages outside the
-        // source transcript.
-        preserveSourceSessionId: true,
-        // Self-improve distillation forks are background turns. Routine
-        // threshold-based compaction would add an extra model turn; keep
-        // compaction for provider-error/context-overflow recovery.
-        disableRoutineCompaction: true,
-      },
-    ),
-  };
+    leafId: session.leafId || undefined,
+  });
+  const cwd = safeString(projection.header.cwd).trim() || HOME_DIR;
+  const { SessionManager } = await loadRinSessionManagerModule();
+  const sessionManager = SessionManager.inMemory(cwd, {
+    id: projection.header.id,
+    parentSession: sessionFile,
+  });
+  seedPiInMemorySessionManager(sessionManager, projection.entries);
+  return { cwd, sessionManager };
 }
 
-async function runForkedSessionPrompt(options: {
+async function runInMemorySessionPrompt(options: {
   agentDir: string;
   sessionFile: string;
   leafId?: string;
   prompt: string;
   additionalExtensionPaths?: string[];
 }) {
-  const fork = await createForkedSessionManager({
+  const contextSession = await createSelfImproveInMemorySession({
     sessionFile: options.sessionFile,
     leafId: options.leafId,
   });
   const { session, runtime } = await openBoundSession({
-    cwd: fork.cwd,
+    cwd: contextSession.cwd,
     agentDir: options.agentDir,
     additionalExtensionPaths: options.additionalExtensionPaths,
-    sessionManager: fork.sessionManager,
+    sessionManager: contextSession.sessionManager,
     // Keep the source session's model options so provider prefix caching
     // matches a normal appended turn on the same conversation.
   });
@@ -117,7 +274,7 @@ async function assertUsableSessionFile(sessionFile: string) {
   }
 }
 
-async function runForkedSessionSelfImproveReview(options: {
+async function runInMemorySessionSelfImproveReview(options: {
   agentDir: string;
   runId: string;
   startedAt: string;
@@ -142,7 +299,7 @@ async function runForkedSessionSelfImproveReview(options: {
   let finalText: string;
   try {
     await assertUsableSessionFile(options.sessionFile);
-    finalText = await runForkedSessionPrompt({
+    finalText = await runInMemorySessionPrompt({
       agentDir: options.agentDir,
       sessionFile: options.sessionFile,
       leafId: options.leafId,
@@ -181,7 +338,7 @@ async function runForkedSessionSelfImproveReview(options: {
   });
   return {
     skipped: "",
-    forked: true,
+    inMemory: true,
     saved: true,
     output: finalText,
     changedFiles: observed.changedFiles,
@@ -223,7 +380,7 @@ export async function runMaintainerUnderMaintenanceLock(
   const leafId = session.leafId || undefined;
   const agentDir = resolveAgentDir(opts.agentDir);
   await assertMaintenanceLockHeld(agentDir, opts.maintenanceLockHandle);
-  const extracted = await runForkedSessionSelfImproveReview({
+  const extracted = await runInMemorySessionSelfImproveReview({
     agentDir,
     runId:
       safeString(opts.runId).trim() ||
