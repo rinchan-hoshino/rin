@@ -8588,6 +8588,56 @@ test("daemon terminal refuses to overwrite a Chat-local terminal error", async (
   );
 });
 
+test("resumeTurn primes the recovered presentation before an admitted startup connect", async () => {
+  const controller = await createController("discord/1:2");
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "startup-recovery-presentation.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(sessionFile, "");
+  const contexts = [];
+  let resumed = false;
+  controller.driver.resumeTurn = async () => {
+    resumed = true;
+    return {
+      finalText: "resumed final",
+      sessionFile,
+      sessionId: "startup-recovery-presentation",
+    };
+  };
+
+  await controller.resumeTurn(
+    {
+      incomingMessageId: "recovered-incoming",
+      replyToMessageId: "recovered-quote",
+      requestTag: "startup-recovery-request",
+      sessionFile,
+    },
+    {
+      connect: async () => {
+        contexts.push(controller.workingIndicatorContext());
+      },
+    },
+  );
+
+  assert.equal(resumed, true);
+  assert.deepEqual(contexts, [
+    {
+      chatKey: "discord/1:2",
+      platform: "discord",
+      botId: "1",
+      chatId: "2",
+      messageId: "recovered-incoming",
+      replyToMessageId: "recovered-quote",
+      tick: 0,
+      todoNoticeText: undefined,
+      assistantSummaryText: undefined,
+    },
+  ]);
+});
+
 test("resumeTurn attaches to the durable request without submitting the prompt again", async () => {
   const controller = await createController("telegram/1:2");
   const sessionFile = path.join(

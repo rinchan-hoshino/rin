@@ -3186,14 +3186,17 @@ export class ChatController {
     }
   }
 
-  async resumeTurn(input: {
-    incomingMessageId?: string;
-    replyToMessageId?: string;
-    receivedAt?: string;
-    requestTag?: string;
-    sessionFile?: string;
-    outboxTurnFence?: ChatOutboxTurnFence;
-  }) {
+  async resumeTurn(
+    input: {
+      incomingMessageId?: string;
+      replyToMessageId?: string;
+      receivedAt?: string;
+      requestTag?: string;
+      sessionFile?: string;
+      outboxTurnFence?: ChatOutboxTurnFence;
+    },
+    options: { connect?: () => Promise<unknown> } = {},
+  ) {
     input.outboxTurnFence ||= getActiveChatOutboxTurnFence();
     input.requestTag ||=
       this.requestTagForInboundMessage(
@@ -3212,7 +3215,7 @@ export class ChatController {
       const recoveredTurn = this.currentTurn;
       this.awaitingTurnSettle = true;
       try {
-        await this.connect();
+        await (options.connect ? options.connect() : this.connect());
         if (this.currentTurn) this.currentTurn.frontendReadyAt = Date.now();
         return await this.driver.resumeTurn({
           requestTag,

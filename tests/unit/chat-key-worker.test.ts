@@ -38,7 +38,7 @@ const runStartupRecoveryWithAdmission = (workerModule as any)
   admission: ReturnType<typeof createStartupRecoveryAdmission>;
   estimatedBytes: number;
   preconnect: () => Promise<void>;
-  resume: () => Promise<T>;
+  resume: (connect: () => Promise<void>) => Promise<T>;
 }) => Promise<T>;
 
 async function waitUntil(predicate: () => boolean, message: string) {
@@ -457,7 +457,9 @@ test("startup recovery releases admission after session open while resumed turns
       admission,
       estimatedBytes: gib,
       preconnect,
-      resume: async () => {
+      resume: async (connect) => {
+        events.push(`${name}-prime`);
+        await connect();
         events.push(`${name}-resume`);
         await resumeGate;
         return name;
@@ -476,13 +478,15 @@ test("startup recovery releases admission after session open while resumed turns
     () => events.includes("first-open"),
     "first open did not start",
   );
-  assert.deepEqual(events, ["first-open"]);
+  assert.deepEqual(events, ["first-prime", "second-prime", "first-open"]);
   releaseFirstOpen();
   await waitUntil(
     () => events.includes("second-resume"),
     "second turn did not resume while first turn remained active",
   );
   assert.deepEqual(events, [
+    "first-prime",
+    "second-prime",
     "first-open",
     "first-resume",
     "second-open",

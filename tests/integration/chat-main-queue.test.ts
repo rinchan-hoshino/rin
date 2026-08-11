@@ -2878,8 +2878,9 @@ test("chat main resumes joined acceptance across restart without prompt replay o
         });
         throw undefined;
       };
-      controllerMod.ChatController.prototype.resumeTurn = async function () {
+      controllerMod.ChatController.prototype.resumeTurn = async function (_input, options) {
         resumeTurnCalls += 1;
+        await options?.connect?.();
       };
       const createBot = () => ({
         platform: "telegram",

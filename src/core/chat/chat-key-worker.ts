@@ -159,15 +159,16 @@ export async function runStartupRecoveryWithAdmission<T>(input: {
   };
   estimatedBytes: number;
   preconnect: () => Promise<void>;
-  resume: () => Promise<T>;
+  resume: (connect: () => Promise<void>) => Promise<T>;
   label?: string;
 }) {
-  await input.admission.run(
-    input.estimatedBytes,
-    input.preconnect,
-    input.label,
-  );
-  return await input.resume();
+  return await input.resume(async () => {
+    await input.admission.run(
+      input.estimatedBytes,
+      input.preconnect,
+      input.label,
+    );
+  });
 }
 
 export function createChatKeyWorkerPool<T>(deps: {

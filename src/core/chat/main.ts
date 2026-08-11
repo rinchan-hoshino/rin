@@ -1072,13 +1072,16 @@ export async function startChatBridge(
   ) => {
     const controller = getController(submission.chatKey);
     if (options.resume) {
-      const resume = () =>
-        controller.resumeTurn({
-          replyToMessageId: submission.replyToMessageId,
-          incomingMessageId: submission.incomingMessageId,
-          sessionFile: submission.sessionFile,
-          receivedAt: submission.receivedAt,
-        });
+      const resume = (connect?: () => Promise<void>) =>
+        controller.resumeTurn(
+          {
+            replyToMessageId: submission.replyToMessageId,
+            incomingMessageId: submission.incomingMessageId,
+            sessionFile: submission.sessionFile,
+            receivedAt: submission.receivedAt,
+          },
+          { connect },
+        );
       if (options.startupRecoveryEstimatedBytes) {
         await runStartupRecoveryWithAdmission({
           admission: startupRecoveryAdmission,
