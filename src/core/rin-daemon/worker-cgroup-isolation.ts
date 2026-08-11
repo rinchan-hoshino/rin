@@ -7,6 +7,8 @@ const CGROUP_ROOT = "/sys/fs/cgroup";
 const PROC_ROOT = "/proc";
 const WORKER_OOM_SCORE_FLOOR = 500;
 const WORKER_OOM_SCORE_OFFSET = 300;
+const WORKER_MEMORY_HIGH_BYTES = 1024 * 1024 * 1024;
+const WORKER_MEMORY_MAX_BYTES = 1536 * 1024 * 1024;
 const CLEANUP_ATTEMPTS = 40;
 const CLEANUP_DELAY_MS = 25;
 
@@ -245,6 +247,14 @@ export function createWorkerCgroupIsolation(
           deps.writeText(
             path.posix.join(workerPath, "memory.oom.group"),
             "1\n",
+          );
+          deps.writeText(
+            path.posix.join(workerPath, "memory.high"),
+            `${WORKER_MEMORY_HIGH_BYTES}\n`,
+          );
+          deps.writeText(
+            path.posix.join(workerPath, "memory.max"),
+            `${WORKER_MEMORY_MAX_BYTES}\n`,
           );
           deps.writeText(
             path.posix.join(workerPath, "cgroup.procs"),

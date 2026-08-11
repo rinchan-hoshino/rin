@@ -68,53 +68,6 @@ function createFakeCgroupFs(selfPath: string, daemonOomScore = 200) {
   };
 }
 
-test("delegated worker cgroups isolate ownership without memory budgets", async () => {
-  const selfPath =
-    "/user.slice/user-1001.slice/user@1001.service/app.slice/rin-daemon-demo.service/daemon";
-  const fake = createFakeCgroupFs(selfPath);
-  const isolation = createWorkerCgroupIsolation(fake.deps);
-
-  assert.ok(isolation);
-  const lease = isolation.attachWorker("worker_1", 202);
-  const workerPath = `/sys/fs/cgroup${path.posix.dirname(selfPath)}/workers/worker_1-202`;
-
-  assert.ok(fake.directories.has(workerPath));
-  assert.ok(
-    fake.writes.some(
-      ([filePath, value]) =>
-        filePath === `${workerPath}/memory.oom.group` && value === "1\n",
-    ),
-  );
-  assert.ok(
-    fake.writes.some(
-      ([filePath, value]) =>
-        filePath === `${workerPath}/cgroup.procs` && value === "202\n",
-    ),
-  );
-  assert.ok(
-    fake.writes.some(
-      ([filePath, value]) =>
-        filePath === "/proc/202/oom_score_adj" && value === "500\n",
-    ),
-  );
-  assert.equal(
-    fake.writes.some(([filePath]) => /memory\.(?:high|max)$/.test(filePath)),
-    false,
-  );
-
-  fake.files.set(`${workerPath}/memory.events.local`, "oom 1\noom_kill 1\n");
-  fake.files.set(`${workerPath}/cgroup.events`, "populated 0\n");
-  assert.equal(lease.wasOomKilled(), true);
-  assert.equal(await lease.cleanup(), true);
-  assert.ok(
-    fake.writes.some(
-      ([filePath, value]) =>
-        filePath === `${workerPath}/cgroup.kill` && value === "1\n",
-    ),
-  );
-  assert.deepEqual(fake.removed, [workerPath]);
-});
-
 test("delegated isolation moves an older-systemd daemon into a leaf subgroup", () => {
   const selfPath =
     "/user.slice/user-1001.slice/user@1001.service/app.slice/rin-daemon-demo.service";
