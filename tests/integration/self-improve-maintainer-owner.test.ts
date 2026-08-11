@@ -459,6 +459,139 @@ test("self-improve seeds one in-memory Pi session from the pinned effective cont
   }
 });
 
+test("self-improve rejects malformed pinned session topology", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-maintainer-invalid-context-"),
+  );
+  const writeSession = async (name: string, lines: string[]) => {
+    const sessionFile = path.join(root, `${name}.jsonl`);
+    await fs.writeFile(sessionFile, `${lines.join("\n")}\n`);
+    return sessionFile;
+  };
+  const header = JSON.stringify({
+    type: "session",
+    version: 3,
+    id: "019fad2a-b02a-74cc-9d03-56b909f1f929",
+    cwd: "/source",
+  });
+
+  try {
+    const invalidHeader = await writeSession("invalid-header", [
+      "not-json",
+      JSON.stringify({ type: "custom_message", id: "not-a-header" }),
+    ]);
+    await assert.rejects(
+      () =>
+        maintainerModule.createSelfImproveInMemorySession({
+          sessionFile: invalidHeader,
+        }),
+      /self_improve_session_invalid_header:/,
+    );
+
+    const missingHeader = await writeSession("missing-header", ["not-json"]);
+    await assert.rejects(
+      () =>
+        maintainerModule.createSelfImproveInMemorySession({
+          sessionFile: missingHeader,
+        }),
+      /self_improve_session_invalid_header:/,
+    );
+
+    const missingParent = await writeSession("missing-parent", [
+      header,
+      JSON.stringify({
+        type: "custom_message",
+        id: "leaf",
+        parentId: "absent",
+        content: "owner context",
+      }),
+    ]);
+    await assert.rejects(
+      () =>
+        maintainerModule.createSelfImproveInMemorySession({
+          sessionFile: missingParent,
+          leafId: "leaf",
+        }),
+      /self_improve_session_parent_missing:absent/,
+    );
+
+    const parentCycle = await writeSession("parent-cycle", [
+      header,
+      JSON.stringify({
+        type: "custom_message",
+        id: "first",
+        parentId: "second",
+        content: "first",
+      }),
+      JSON.stringify({
+        type: "custom_message",
+        id: "second",
+        parentId: "first",
+        content: "second",
+      }),
+    ]);
+    await assert.rejects(
+      () =>
+        maintainerModule.createSelfImproveInMemorySession({
+          sessionFile: parentCycle,
+          leafId: "first",
+        }),
+      /self_improve_session_parent_cycle:first/,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("self-improve restores assistant model metadata from the pinned branch", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-maintainer-assistant-model-"),
+  );
+  const sessionFile = path.join(root, "source.jsonl");
+  try {
+    await fs.writeFile(
+      sessionFile,
+      [
+        JSON.stringify({
+          type: "session",
+          version: 3,
+          id: "019fad2a-b02a-74cc-9d03-56b909f1f929",
+          cwd: "",
+        }),
+        JSON.stringify({
+          type: "message",
+          id: "assistant",
+          parentId: null,
+          message: {
+            role: "assistant",
+            provider: "openai",
+            model: "owner-model",
+            content: [{ type: "text", text: "context" }],
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+
+    const created = await maintainerModule.createSelfImproveInMemorySession({
+      sessionFile,
+    });
+    assert.equal(created.cwd, os.homedir());
+    assert.equal(
+      created.sessionManager
+        .getEntries()
+        .some(
+          (entry: any) =>
+            entry.type === "model_change" &&
+            entry.provider === "openai" &&
+            entry.modelId === "owner-model",
+        ),
+      true,
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("self-improve maintainer runs one isolated in-memory review and reports exact artifact changes", async () => {
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-maintainer-owner-"),
