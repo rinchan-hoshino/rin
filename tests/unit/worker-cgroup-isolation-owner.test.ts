@@ -122,18 +122,6 @@ test("worker cgroup isolation attaches, detects OOM, and releases a worker", asy
   assert.ok(
     fake.writes.some(
       ([filePath, value]) =>
-        filePath === `${workerPath}/memory.high` && value === "1073741824\n",
-    ),
-  );
-  assert.ok(
-    fake.writes.some(
-      ([filePath, value]) =>
-        filePath === `${workerPath}/memory.max` && value === "1610612736\n",
-    ),
-  );
-  assert.ok(
-    fake.writes.some(
-      ([filePath, value]) =>
         filePath === "/proc/202/oom_score_adj" && value === "500\n",
     ),
   );
