@@ -22,7 +22,6 @@
     }
   },
   "scripts": {
-    "build:core": "tsx scripts/build.ts --core",
     "build": "tsx scripts/build.ts",
     "format": "tsx scripts/run-format-check.ts --write",
     "format:check": "tsx scripts/run-format-check.ts --check",

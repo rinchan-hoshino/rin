@@ -22,12 +22,8 @@ test("package build scripts stay cross-platform for git installs", async () => {
     await fs.readFile(path.join(rootDir, "package.json"), "utf8"),
   );
   assert.equal(packageJson.scripts.build, "tsx scripts/build.ts");
-  assert.equal(
-    packageJson.scripts["build:core"],
-    "tsx scripts/build.ts --core",
-  );
+  assert.equal(packageJson.scripts["build:core"], undefined);
   assert.doesNotMatch(packageJson.scripts.build, /\b(?:rm|chmod)\b/);
-  assert.doesNotMatch(packageJson.scripts["build:core"], /\b(?:rm|chmod)\b/);
 });
 
 test("resolveParsedArgs marks omitted update channel as inherited", () => {

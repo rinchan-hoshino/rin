@@ -7,8 +7,6 @@ const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const coreOnly = process.argv.includes("--core");
-
 function runNodeScript(scriptPath: string, args: string[]) {
   const result = spawnSync(process.execPath, [scriptPath, ...args], {
     cwd: rootDir,
@@ -26,7 +24,7 @@ runNodeScript(path.join(rootDir, "node_modules", "typescript", "bin", "tsc"), [
   "false",
 ]);
 
-if (!coreOnly && process.platform !== "win32") {
+if (process.platform !== "win32") {
   for (const relativePath of [
     "dist/app/rin/main.js",
     "dist/app/rin-daemon/daemon.js",
