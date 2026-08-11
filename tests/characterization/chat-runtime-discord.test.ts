@@ -885,6 +885,7 @@ test("discord adapter acknowledges chat input interactions with callback endpoin
       },
     );
     (adapter as any).bot.selfId = "bot-discord";
+    adapter.setWorkingText("Localized acknowledgement");
 
     let resolveFetch: () => void = () => {};
     const fetchGate = new Promise<void>((resolve) => {
@@ -951,7 +952,7 @@ test("discord adapter acknowledges chat input interactions with callback endpoin
     );
     const callbackBody = JSON.parse(fetchCalls[0].init.body);
     assert.equal(callbackBody.type, 4);
-    assert.equal(callbackBody.data.content, "Working...");
+    assert.equal(callbackBody.data.content, "Localized acknowledgement");
     assert.equal(callbackBody.data.flags, 64);
     assert.equal(emitted.length, 1);
     assert.equal(emitted[0].payload.content, "/new");

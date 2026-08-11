@@ -206,7 +206,7 @@ test("discord slash interactions emit after acknowledgement", async () => {
     isChatInputCommand: () => true,
     options: { getString: () => "" },
     reply: async (payload: { content: string }) => {
-      assert.equal(payload.content, "Working...");
+      assert.equal(payload.content, "Localized acknowledgement");
       replyStarted = true;
       await replyGate;
     },

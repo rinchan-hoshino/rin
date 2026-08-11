@@ -40,6 +40,7 @@ import {
   renderMarkdownFromNodes,
   renderPlainTextFromNodes,
   renderRichDeliveryFallback,
+  resolveChatRuntimeWorkingCopy,
   safeString,
   sleep,
   splitPlainText,
@@ -575,6 +576,7 @@ export class DiscordAdapter {
   private readonly editableWorking: EditableTextMessageGroup;
   private readonly inboundGate = new InboundRecoveryGate<any>();
   private readonly deletedChannelIds = new Set<string>();
+  private workingText = resolveChatRuntimeWorkingCopy().workingText;
   private client: any = null;
   private restRequest: ReturnType<
     typeof createDiscordRestRequestStrategy
@@ -963,7 +965,9 @@ export class DiscordAdapter {
   }
 
   setWorkingText(text: string) {
-    this.editableWorking.setWorkingText(text);
+    this.workingText =
+      safeString(text).trim() || resolveChatRuntimeWorkingCopy().workingText;
+    this.editableWorking.setWorkingText(this.workingText);
   }
 
   async start() {
@@ -1281,7 +1285,7 @@ export class DiscordAdapter {
     const responseBody = {
       type: DISCORD_INTERACTION_RESPONSE_CHANNEL_MESSAGE_WITH_SOURCE,
       data: {
-        content: "Working...",
+        content: this.workingText,
         flags: DISCORD_MESSAGE_FLAG_EPHEMERAL,
       },
     };
