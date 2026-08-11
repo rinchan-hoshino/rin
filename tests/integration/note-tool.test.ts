@@ -46,7 +46,7 @@ async function execute(tool: any, params: any, signal?: AbortSignal) {
   return tool.execute("note-call", params, signal, undefined, {});
 }
 
-test("note exposes the same full-read and item-level mutation shape as todo", async () => {
+test("note exposes ranged reads and item-level mutation inputs", async () => {
   const { tool } = await setup();
   assert.equal(tool.name, "note");
   assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
@@ -57,18 +57,22 @@ test("note exposes the same full-read and item-level mutation shape as todo", as
     "ids",
     "item",
     "items",
+    "limit",
+    "offset",
   ]);
   assert.deepEqual(tool.parameters.required, ["action"]);
   assert.deepEqual(
     tool.parameters.properties.action.anyOf.map((entry: any) => entry.const),
     ["read", "add", "edit", "remove"],
   );
-  for (const retired of ["content", "edits", "offset", "limit"]) {
+  assert.equal(tool.parameters.properties.offset.minimum, 1);
+  assert.equal(tool.parameters.properties.limit.minimum, 1);
+  for (const retired of ["content", "edits"]) {
     assert.equal(tool.parameters.properties[retired], undefined);
   }
 });
 
-test("note adds groups, inserts before an id, and always reads the complete list", async () => {
+test("note adds groups, inserts before an id, and supports full or ranged reads", async () => {
   const { tool, entries } = await setup();
   await execute(tool, {
     action: "add",
@@ -91,6 +95,12 @@ test("note adds groups, inserts before an id, and always reads the complete list
   assert.deepEqual(read.details.items, inserted.details.items);
   assert.match(read.content[0].text, /#1 First fact/);
   assert.match(read.content[0].text, /#2 Third fact\nwith detail/);
+
+  const ranged = await execute(tool, { action: "read", offset: 2, limit: 1 });
+  assert.deepEqual(ranged.details.items, [{ id: 3, text: "Second fact" }]);
+  assert.match(ranged.content[0].text, /^Items 2-2 of 3\n#3 Second fact$/);
+  assert.doesNotMatch(ranged.content[0].text, /First fact|Third fact/);
+  assert.equal(entries.length, 2);
   assert.deepEqual(entries.at(-1)?.data, {
     items: inserted.details.items,
     nextId: 4,
@@ -224,7 +234,9 @@ test("note rejects old text-buffer calls and malformed operations without mutati
   for (const params of [
     { action: "write", content: "old" },
     { action: "append", content: "old" },
-    { action: "read", offset: 1 },
+    { action: "read", offset: 0 },
+    { action: "read", limit: 0 },
+    { action: "add", offset: 1, items: [{ text: "not a read" }] },
     { action: "add", items: [] },
     { action: "add", items: [{ text: " " }] },
     { action: "add", beforeId: 4, items: [{ text: "missing anchor" }] },

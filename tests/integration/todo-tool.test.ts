@@ -51,6 +51,14 @@ test("shared item helpers validate operation shapes, IDs, insertion, and removal
     /read does not accept: id/,
   );
   assert.deepEqual(
+    itemToolModule.validateItemActionParams({
+      action: "read",
+      offset: 2,
+      limit: 3,
+    }),
+    { action: "read" },
+  );
+  assert.deepEqual(
     itemToolModule.validateItemActionParams({ action: "add", items: [] }),
     { action: "add" },
   );
@@ -62,6 +70,33 @@ test("shared item helpers validate operation shapes, IDs, insertion, and removal
   assert.equal(itemToolModule.normalizeItemId({}), undefined);
   assert.equal(itemToolModule.normalizeNextItemId([{ id: 3 }], 2), 4);
   assert.equal(itemToolModule.normalizeNextItemId([{ id: 3 }], 8), 8);
+
+  assert.deepEqual(
+    itemToolModule.resolveItemReadWindow(["A", "B", "C"], { limit: 2 }),
+    {
+      items: ["A", "B"],
+      ranged: true,
+      offset: 1,
+      total: 3,
+    },
+  );
+  assert.deepEqual(
+    itemToolModule.resolveItemReadWindow(["A", "B", "C"], { offset: 4 }),
+    {
+      items: [],
+      ranged: true,
+      offset: 4,
+      total: 3,
+    },
+  );
+  assert.equal(
+    itemToolModule.formatItemReadWindowLabel({
+      items: [],
+      offset: 4,
+      total: 3,
+    }),
+    "No items at offset 4 (3 total)",
+  );
 
   const items = [{ id: 1 }, { id: 2 }];
   assert.deepEqual(itemToolModule.resolveInsertIndex(items, undefined), {
@@ -109,7 +144,7 @@ test("shared item helpers validate operation shapes, IDs, insertion, and removal
   );
 });
 
-test("todo exposes only full-read and item-level mutation inputs", async () => {
+test("todo exposes ranged reads and item-level mutation inputs", async () => {
   const { tool } = await setup();
   assert.equal(tool.name, "todo");
   assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
@@ -120,13 +155,16 @@ test("todo exposes only full-read and item-level mutation inputs", async () => {
     "ids",
     "item",
     "items",
+    "limit",
+    "offset",
   ]);
   assert.deepEqual(tool.parameters.required, ["action"]);
   assert.deepEqual(
     tool.parameters.properties.action.anyOf.map((entry: any) => entry.const),
     ["read", "add", "edit", "remove"],
   );
-  assert.equal(tool.parameters.properties.offset, undefined);
+  assert.equal(tool.parameters.properties.offset.minimum, 1);
+  assert.equal(tool.parameters.properties.limit.minimum, 1);
   assert.equal(tool.parameters.properties.todos, undefined);
 });
 
@@ -159,9 +197,12 @@ test("todo adds one or many items and inserts a group before a stable id", async
   assert.equal(entries.length, 2);
 });
 
-test("todo reads the complete list and edits exactly one item", async () => {
-  const { tool } = await setup();
-  await execute(tool, { action: "add", items: [{ text: "A" }, { text: "B" }] });
+test("todo supports full or ranged reads and edits exactly one item", async () => {
+  const { tool, entries } = await setup();
+  await execute(tool, {
+    action: "add",
+    items: [{ text: "A" }, { text: "B" }, { text: "C" }],
+  });
 
   const edited = await execute(tool, {
     action: "edit",
@@ -172,12 +213,20 @@ test("todo reads the complete list and edits exactly one item", async () => {
   assert.deepEqual(edited.details.items, [
     { id: 1, text: "A", done: false },
     { id: 2, text: "B updated", done: true },
+    { id: 3, text: "C", done: false },
   ]);
 
   const read = await execute(tool, { action: "read" });
   assert.equal(read.details.action, "read");
   assert.deepEqual(read.details.items, edited.details.items);
-  assert.equal(read.content[0].text, "[ ] #1 A\n[x] #2 B updated");
+  assert.equal(read.content[0].text, "[ ] #1 A\n[x] #2 B updated\n[ ] #3 C");
+
+  const ranged = await execute(tool, { action: "read", offset: 2, limit: 1 });
+  assert.deepEqual(ranged.details.items, [
+    { id: 2, text: "B updated", done: true },
+  ]);
+  assert.equal(ranged.content[0].text, "Items 2-2 of 3\n[x] #2 B updated");
+  assert.equal(entries.length, 2);
 });
 
 test("todo removes selected ids atomically and clears only with all true", async () => {
@@ -211,6 +260,9 @@ test("todo rejects old whole-list writes and malformed item operations without c
     {},
     { todos: [{ text: "old protocol" }] },
     { action: "write", items: [{ text: "old action" }] },
+    { action: "read", offset: 0 },
+    { action: "read", limit: 0 },
+    { action: "edit", offset: 1, id: 1, item: { done: true } },
     { action: "add", items: [] },
     { action: "add", items: [{ text: "  " }] },
     { action: "add", beforeId: 99, items: [{ text: "missing anchor" }] },

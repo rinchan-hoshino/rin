@@ -86,10 +86,10 @@ test("Rin note guidance keeps cross-compaction scratch state concise", () => {
     ?.tools?.find((tool) => tool.name === "note");
 
   assert.match(note?.description, /stable-ID items/);
-  assert.match(note?.description, /Read always returns every item/);
+  assert.match(note?.description, /1-based offset\/limit range/);
   assert.deepEqual(note?.promptGuidelines, [
     "Use note only for concise, verified facts that must survive compaction; keep plans, pending actions, and checklists in todo.",
-    "Use action read for the full current list. Use add with items and optional beforeId, edit with exactly one id and replacement item, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
+    "Use action read without offset/limit for the full list or with a 1-based item offset and positive limit for a range. Use add with items and optional beforeId, edit with exactly one id and replacement item, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
   ]);
 });
 

@@ -38,24 +38,24 @@ function applyOverlay(input: Record<string, any>) {
 
 const NATIVE_PROMPT_BASELINE = {
   default: {
-    hash: "48f07c3a9ffbf539bea46dd6a83a24c3b1a050afafabcdb32724dec62bccef29",
-    length: 5376,
+    hash: "275cb5a1dd86b7a272f7921eafd7e9c5c2538c67c76778fc458e49a7609de637",
+    length: 5548,
   },
   languageAppend: {
-    hash: "914b937abe76e1c322f1d3184f9ffb3da433b73c0538378bb9e8718875e3739d",
-    length: 5390,
+    hash: "9526bacb068c594a20c55cb5b4da57347c53fd7e0165afd7598bda5336c06ae6",
+    length: 5562,
   },
   custom: {
     hash: "419648d8f6600d633a7539d9a7746da9514b9a24266861fd688e526fbcf6515d",
     length: 1732,
   },
   contextSkillSelf: {
-    hash: "ab03f57abaaa936adc3aa73d0d851a3a727d1de73df4e7fc72d1de4e5ecec118",
-    length: 6093,
+    hash: "583bae60e99c1bd8054371319c8d9fb3325633f188d22b69030d78c3b2b29230",
+    length: 6265,
   },
   readTodo: {
-    hash: "fdd61f7778566c3186bbe194bdf1a019966377877932663a046d40172a9de312",
-    length: 3848,
+    hash: "448964529f365f77419717570e7638c8f79a91486034ad0df2c29303b05bd43a",
+    length: 3934,
   },
   noTools: {
     hash: "87ba8839e718e5a8192748cb41ff708eb7e690faf0702483a29b4b6f56877026",

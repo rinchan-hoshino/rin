@@ -18,7 +18,7 @@ export const ItemActionSchema = Type.Union(
 
 const PositiveIdSchema = Type.Integer({
   minimum: 1,
-  description: "Stable item ID returned by a full read.",
+  description: "Stable item ID returned by a read.",
 });
 
 export function createItemToolParameters(
@@ -28,6 +28,20 @@ export function createItemToolParameters(
   return Type.Object(
     {
       action: ItemActionSchema,
+      offset: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          description:
+            "1-based item position to start reading from. Read only; omit to start at the first item.",
+        }),
+      ),
+      limit: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          description:
+            "Maximum number of items to return. Read only; omit to return every remaining item.",
+        }),
+      ),
       items: Type.Optional(
         Type.Array(addItemSchema, {
           minItems: 1,
@@ -80,7 +94,7 @@ export function normalizeNextItemId(
 }
 
 const ACTION_FIELDS: Record<ItemAction, Set<string>> = {
-  read: new Set(["action"]),
+  read: new Set(["action", "offset", "limit"]),
   add: new Set(["action", "items", "beforeId"]),
   edit: new Set(["action", "id", "item"]),
   remove: new Set(["action", "ids", "all"]),
@@ -105,7 +119,65 @@ export function validateItemActionParams(params: unknown): {
       error: `${action} does not accept: ${unexpected.join(", ")}`,
     };
   }
+  if (action === "read") {
+    for (const field of ["offset", "limit"] as const) {
+      const input = value[field];
+      if (
+        input !== undefined &&
+        (!Number.isSafeInteger(input) || Number(input) < 1)
+      ) {
+        return { action, error: `${field} must be a positive integer` };
+      }
+    }
+  }
   return { action };
+}
+
+export type ItemReadWindow<T> = {
+  items: T[];
+  ranged: boolean;
+  offset?: number;
+  total?: number;
+};
+
+export function resolveItemReadWindow<T>(
+  items: ReadonlyArray<T>,
+  params: { offset?: number; limit?: number },
+): ItemReadWindow<T> {
+  const ranged = params.offset !== undefined || params.limit !== undefined;
+  if (!ranged) return { items: [...items], ranged: false };
+
+  const offset = params.offset ?? 1;
+  const start = offset - 1;
+  const limit = params.limit ?? Math.max(items.length - start, 0);
+  const selected = items.slice(start, start + limit);
+  return {
+    items: selected,
+    ranged: true,
+    offset,
+    total: items.length,
+  };
+}
+
+export function formatItemReadWindowLabel(
+  window: Pick<ItemReadWindow<unknown>, "items" | "offset" | "total">,
+) {
+  const offset = window.offset ?? 1;
+  const total = window.total ?? window.items.length;
+  if (window.items.length === 0) {
+    return `No items at offset ${offset} (${total} total)`;
+  }
+  return `Items ${offset}-${offset + window.items.length - 1} of ${total}`;
+}
+
+export function formatItemReadWindowContent<T>(
+  window: ItemReadWindow<T>,
+  formatItems: (items: ReadonlyArray<T>) => string,
+) {
+  const body = formatItems(window.items);
+  if (!window.ranged) return body;
+  const label = formatItemReadWindowLabel(window);
+  return window.items.length > 0 ? `${label}\n${body}` : label;
 }
 
 export function resolveInsertIndex(

@@ -121,14 +121,18 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     baseSystemPrompt.includes("When modifying files, prefer targeted edits"),
     false,
   );
-  assert.ok(baseSystemPrompt.includes("Read the full branch checklist"));
+  assert.ok(
+    baseSystemPrompt.includes("Read the full branch checklist or a range"),
+  );
   assert.ok(
     baseSystemPrompt.includes(
       "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist",
     ),
   );
   assert.ok(
-    baseSystemPrompt.includes("Use action read for the full current list"),
+    baseSystemPrompt.includes(
+      "Use action read without offset/limit for the full list or with a 1-based item offset and positive limit for a range",
+    ),
   );
   assert.ok(baseSystemPrompt.includes("add with items and optional beforeId"));
   assert.ok(

@@ -15,11 +15,14 @@ import type {
 } from "./capability-types.js";
 import {
   createItemToolParameters,
+  formatItemReadWindowContent,
   normalizeItemId,
   normalizeNextItemId,
   resolveInsertIndex,
+  resolveItemReadWindow,
   resolveRemovalIds,
   type ItemAction,
+  type ItemReadWindow,
   validateItemActionParams,
 } from "./item-tool.js";
 import {
@@ -135,21 +138,34 @@ export default function noteCapability(): RinCapabilityDefinition {
   let nextId = 1;
   let activeSessionManager: any;
 
-  const details = (action: ItemAction, error?: string): NoteDetails => ({
+  const details = (
+    action: ItemAction,
+    error?: string,
+    readWindow?: ItemReadWindow<RinNoteItem>,
+  ): NoteDetails => ({
     action,
-    items: items.map((item) => ({ ...item })),
+    items: (readWindow?.items ?? items).map((item) => ({ ...item })),
     nextId,
     ...(error ? { error } : {}),
   });
 
-  const result = (action: ItemAction, error?: string) => ({
+  const result = (
+    action: ItemAction,
+    error?: string,
+    readWindow?: ItemReadWindow<RinNoteItem>,
+  ) => ({
     content: [
       {
         type: "text" as const,
-        text: error ? `Error: ${error}` : formatNoteContent(items),
+        text: error
+          ? `Error: ${error}`
+          : formatItemReadWindowContent(
+              readWindow ?? { items, ranged: false },
+              formatNoteContent,
+            ),
       },
     ],
-    details: details(action, error),
+    details: details(action, error, readWindow),
   });
 
   const persist = (nextItems: RinNoteItem[], nextItemId: number) => {
@@ -194,12 +210,12 @@ export default function noteCapability(): RinCapabilityDefinition {
     name: "note",
     label: "Notes",
     description:
-      "Maintain concise verified session-branch continuity as stable-ID items. It survives compaction. Read always returns every item; add accepts one or more items and can insert before an ID; edit replaces one item; remove deletes selected IDs or clears all. Keep plans and pending actions in todo.",
+      "Maintain concise verified session-branch continuity as stable-ID items. It survives compaction. Read returns every item by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit replaces one item; remove deletes selected IDs or clears all. Keep plans and pending actions in todo.",
     promptSnippet:
-      "Read all continuity items or add, edit, and remove verified facts by stable ID.",
+      "Read all continuity items or a range, or add, edit, and remove verified facts by stable ID.",
     promptGuidelines: [
       "Use note only for concise, verified facts that must survive compaction; keep plans, pending actions, and checklists in todo.",
-      "Use action read for the full current list. Use add with items and optional beforeId, edit with exactly one id and replacement item, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
+      "Use action read without offset/limit for the full list or with a 1-based item offset and positive limit for a range. Use add with items and optional beforeId, edit with exactly one id and replacement item, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
     ],
     parameters: NoteParams,
 
@@ -207,7 +223,9 @@ export default function noteCapability(): RinCapabilityDefinition {
       const validated = validateItemActionParams(params);
       const action = validated.action ?? "read";
       if (validated.error) return result(action, validated.error);
-      if (action === "read") return result("read");
+      if (action === "read") {
+        return result("read", undefined, resolveItemReadWindow(items, params));
+      }
       if (signal?.aborted) return result(action, "operation aborted");
 
       if (action === "add") {

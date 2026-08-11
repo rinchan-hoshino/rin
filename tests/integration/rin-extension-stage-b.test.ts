@@ -146,7 +146,7 @@ test("core todo loads from configured runtime without extension paths", async ()
       assert.match(todoTool.promptSnippet, /add, edit, and remove/);
       assert.deepEqual(todoTool.promptGuidelines, [
         "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist.",
-        "Use action read for the full current list. Use add with items and optional beforeId, edit with exactly one id and item patch, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
+        "Use action read without offset/limit for the full list or with a 1-based item offset and positive limit for a range. Use add with items and optional beforeId, edit with exactly one id and item patch, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
         "After compaction, trust the current-branch snapshot injected by Rin; never reconstruct it from prose. Remove obsolete items individually, and clear all before starting a new unrelated task.",
       ]);
 

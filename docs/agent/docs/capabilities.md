@@ -45,11 +45,11 @@ Read `docs/memory-layering.md` before choosing a destination. Read `docs/self-im
 
 ## Core todo
 
-The core todo capability registers the `todo` tool and `/todos` command from Rin core. It stores the checklist as stable-ID session-branch items. Its only operations are `read`, `add`, `edit`, and `remove`: reads return the complete list; adds accept one or more items and optional `beforeId`; edits target exactly one `id`; removals target one or more `ids` or use `all: true` to clear.
+The core todo capability registers the `todo` tool and `/todos` command from Rin core. It stores the checklist as stable-ID session-branch items. Its only operations are `read`, `add`, `edit`, and `remove`: reads return the complete list by default or a positional item range with 1-based `offset` and positive `limit`; adds accept one or more items and optional `beforeId`; edits target exactly one `id`; removals target one or more `ids` or use `all: true` to clear.
 
 ## Core note
 
-The core `note` tool uses the same stable-ID item operations for concise verified continuity scoped to the current session branch. Note snapshots are stored in session custom entries, so they survive compaction and follow branch reconstruction without becoming cross-session memory. Existing text-buffer snapshots migrate to one note item when reconstructed; the retired whole-buffer writes, appends, ranged reads, and exact-text edits are not exposed. The TUI `/notes` command displays all note items on the current branch.
+The core `note` tool uses the same stable-ID item operations and optional read range for concise verified continuity scoped to the current session branch. Note snapshots are stored in session custom entries, so they survive compaction and follow branch reconstruction without becoming cross-session memory. Existing text-buffer snapshots migrate to one note item when reconstructed; retired whole-buffer writes, appends, and exact-text edits are not exposed. The TUI `/notes` command displays all note items on the current branch.
 
 ## Chat bridge
 

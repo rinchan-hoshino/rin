@@ -41,11 +41,11 @@ Rin core always provides todo support. It registers:
 - `todo`: current-branch execution checklist tool.
 - `/todos`: interactive TUI command for the current checklist.
 
-Todo state is checkpointed in Pi session custom entries and reconstructed from the current session branch, so forks and session branches can recover the matching checklist without relying on context-visible tool-result details or compaction summaries. The tool exposes only full `read` plus item-level `add`, `edit`, and `remove`; stable IDs support middle insertion and atomic group removal. In daemon/RPC chat turns, Rin may continue hidden work when a final answer appears while todo items remain incomplete; hidden continuations end when todos complete, when todo state stops changing, or after the continuation limit.
+Todo state is checkpointed in Pi session custom entries and reconstructed from the current session branch, so forks and session branches can recover the matching checklist without relying on context-visible tool-result details or compaction summaries. The tool exposes item-level `read`, `add`, `edit`, and `remove`; read returns the full list by default or accepts a 1-based item `offset` and positive `limit`, while stable IDs support middle insertion and atomic group removal. In daemon/RPC chat turns, Rin may continue hidden work when a final answer appears while todo items remain incomplete; hidden continuations end when todos complete, when todo state stops changing, or after the continuation limit.
 
 ## Core note
 
-Rin core registers the `note` tool and `/notes` TUI command for concise verified continuity. Note uses the same full `read` plus item-level `add`, `edit`, and `remove` contract as todo. Its stable-ID snapshots use session custom entries, preserving the selected branch across compaction without creating cross-session memory. Existing text-buffer snapshots reconstruct as one item; retired whole-buffer operations are not exposed.
+Rin core registers the `note` tool and `/notes` TUI command for concise verified continuity. Note uses the same full-or-ranged `read` plus item-level `add`, `edit`, and `remove` contract as todo. Its stable-ID snapshots use session custom entries, preserving the selected branch across compaction without creating cross-session memory. Existing text-buffer snapshots reconstruct as one item; retired whole-buffer operations are not exposed.
 
 ## Extension loading
 
