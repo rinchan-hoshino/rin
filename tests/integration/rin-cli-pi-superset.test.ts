@@ -112,6 +112,7 @@ test("rin top-level help includes Pi options and adds Rin commands", async () =>
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /--api-key <key>/);
   assert.match(result.stdout, /--session-id <id>/);
+  assert.match(result.stdout, /--maint/);
   assert.match(result.stdout, /install <source>/);
   assert.match(result.stdout, /doctor/);
   assert.match(result.stdout, /tasks/);

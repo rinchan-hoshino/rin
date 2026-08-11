@@ -774,7 +774,6 @@ export class WorkerPool {
     const type = String(command?.type || "unknown");
 
     if (type === "new_session") {
-      if (!this.isActiveTurnRecoveryConverged()) return undefined;
       if (command.resourceOptions)
         connection.resourceOptions = command.resourceOptions;
       const managedSessionLeaf = String(

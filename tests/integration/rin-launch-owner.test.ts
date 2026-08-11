@@ -148,6 +148,19 @@ test("launch environment reports success and maintenance fallback without mutati
   });
   assert.match(unavailable.maintenanceModeNotice || "", /not ready/);
   assert.equal(calls, 1);
+
+  let forcedProbeCalls = 0;
+  const forced = await launch.resolveTuiLaunchEnvironment(context, runtimeEnv, {
+    forceMaintenance: true,
+    assertDaemonAvailable: async () => {
+      forcedProbeCalls += 1;
+    },
+  });
+  assert.deepEqual(forced.runtimeEnv, {
+    ...runtimeEnv,
+    RIN_TUI_RUNTIME_ROLE: "maintenance-tui",
+  });
+  assert.equal(forcedProbeCalls, 0);
 });
 
 test("cross-user CLI delegation runs the target CLI entry with stripped arguments", async () => {

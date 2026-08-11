@@ -22,6 +22,7 @@ const replacements: Record<string, string> = {
       for (let index = 0; index < argv.length; index += 1) {
         const value = argv[index];
         if (value === "--target" || value === "--user" || value === "-u") { index += 1; continue; }
+        if (value === "--maint") continue;
         if (value.startsWith("--target=") || value.startsWith("--user=")) continue;
         result.push(value);
       }
@@ -36,7 +37,7 @@ const replacements: Record<string, string> = {
         targetUser: "owner",
         targetName,
         installDir: "/agent/owner",
-        passthrough: rawArgv,
+        passthrough: stripRinWrapperArgs(rawArgv),
         explicitUser: false,
         explicitTarget: Boolean(targetName),
         hasSavedInstall: false,
@@ -45,6 +46,7 @@ const replacements: Record<string, string> = {
         releaseVersion: "",
         explicitReleaseChannel: false,
         updateAssumeYes: rawArgv.includes("--yes"),
+        maintenanceMode: !command && rawArgv.includes("--maint"),
       };
     }
   `,
@@ -66,7 +68,7 @@ const replacements: Record<string, string> = {
   "dist/core/rin/launch.js": `
     export function shouldDelegateCrossUserCli(){return Boolean(globalThis.__rinMainOwnerCrossUser)}
     export async function delegateRinCliToTarget(parsed, argv){globalThis.__rinMainOwnerEvents.push(["delegate-target",parsed.targetUser,argv])}
-    export async function launchDefaultRin(parsed){globalThis.__rinMainOwnerEvents.push(["launch",parsed.command])}
+    export async function launchDefaultRin(parsed){globalThis.__rinMainOwnerEvents.push(["launch",parsed.command,parsed.maintenanceMode,parsed.passthrough])}
   `,
 };
 

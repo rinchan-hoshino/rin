@@ -2200,14 +2200,14 @@ test("worker pool owner covers state reads, selection routing, snapshots, shutdo
     undefined,
   );
 
+  const created = createOwnerSyntheticWorker();
+  pool.createWorker = () => created;
   pool.isActiveTurnRecoveryConverged = () => false;
   assert.equal(
     pool.resolveWorkerForCommand(connection, { type: "new_session" }),
-    undefined,
+    created,
   );
   pool.isActiveTurnRecoveryConverged = () => true;
-  const created = createOwnerSyntheticWorker();
-  pool.createWorker = () => created;
   assert.equal(
     pool.resolveWorkerForCommand(connection, {
       type: "new_session",

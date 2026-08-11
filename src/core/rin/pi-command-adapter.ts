@@ -85,6 +85,7 @@ export function printRinCliHelp(
       "  --yes                     Confirm Rin update/install prompts non-interactively\n" +
       "  --user <name>             Run against another local user's Rin runtime\n" +
       "  --target <name>           Run against a configured Rin deployment target\n" +
+      "  --maint                   Start the TUI directly in maintenance mode\n" +
       "\nRin commands (in addition to Pi):\n",
   );
   const width = Math.max(...rinCommands.map(([name]) => name.length));

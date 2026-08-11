@@ -86,8 +86,17 @@ export async function resolveTuiLaunchEnvironment(
   runtimeEnv: NodeJS.ProcessEnv,
   deps: {
     assertDaemonAvailable?: typeof assertDaemonAvailable;
+    forceMaintenance?: boolean;
   } = {},
 ): Promise<{ runtimeEnv: NodeJS.ProcessEnv; maintenanceModeNotice?: string }> {
+  if (deps.forceMaintenance) {
+    return {
+      runtimeEnv: {
+        ...runtimeEnv,
+        [RIN_TUI_RUNTIME_ROLE_ENV]: RIN_TUI_MAINTENANCE_ROLE,
+      },
+    };
+  }
   try {
     await (deps.assertDaemonAvailable || assertDaemonAvailable)(context);
     return { runtimeEnv };
@@ -120,6 +129,7 @@ async function resolveLaunchContext(parsed: ParsedArgs) {
   const launchEnvironment = await resolveTuiLaunchEnvironment(
     context,
     runtimeEnv,
+    { forceMaintenance: parsed.maintenanceMode },
   );
   const tuiArgv = buildDirectTuiArgs(tuiEntry, {
     passthrough: parsed.passthrough,

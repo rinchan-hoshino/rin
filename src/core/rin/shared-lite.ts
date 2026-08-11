@@ -42,6 +42,7 @@ export type ParsedArgs = {
   releaseVersion: string;
   explicitReleaseChannel: boolean;
   updateAssumeYes: boolean;
+  maintenanceMode: boolean;
 };
 
 type InstallConfig = {
@@ -50,7 +51,7 @@ type InstallConfig = {
 };
 
 const RIN_WRAPPER_FLAGS_WITH_VALUE = new Set(["-u", "--user", "--target"]);
-const RIN_WRAPPER_FLAGS = new Set<string>();
+const RIN_WRAPPER_FLAGS = new Set(["--maint"]);
 
 function hasInlineWrapperValue(arg: string) {
   return arg.startsWith("--user=") || arg.startsWith("--target=");
@@ -322,6 +323,7 @@ export function resolveParsedArgs(
     ),
     ...resolveParsedReleaseArgs(command, options, rawArgv),
     updateAssumeYes: command === "update" && Boolean(options.yes),
+    maintenanceMode: !command && rawArgv.includes("--maint"),
   };
 }
 

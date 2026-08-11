@@ -63,6 +63,7 @@ async function createCli() {
     )
     .option("-u, --user <name>", "Run against a specific daemon user")
     .option("--target <name>", "Run against a configured Rin deployment target")
+    .option("--maint", "Start the TUI directly in maintenance mode")
     .option("--stable", "Use the stable release channel")
     .option("--beta", "Use the beta release channel")
     .option("--nightly", "Use the nightly release channel")

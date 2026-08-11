@@ -28,6 +28,7 @@ test("shared-lite strips only Rin wrapper arguments", () => {
       "--user",
       "demo",
       "--target=desktop",
+      "--maint",
       "status",
       "--limit",
       "5",
@@ -117,6 +118,7 @@ test("shared-lite resolves explicit update release selectors", () => {
     "--user=demo",
     "--target",
     "desk",
+    "--maint",
     "--session",
     "s1",
   ]);
@@ -124,6 +126,7 @@ test("shared-lite resolves explicit update release selectors", () => {
   assert.equal(tui.targetName, "desk");
   assert.equal(tui.explicitUser, true);
   assert.equal(tui.explicitTarget, true);
+  assert.equal(tui.maintenanceMode, true);
   assert.deepEqual(tui.passthrough, ["--session", "s1"]);
   assert.equal(tui.releaseChannel, "stable");
   assert.equal(tui.explicitReleaseChannel, false);

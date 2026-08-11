@@ -87,6 +87,7 @@ try {
   await run(["update", "--all"]);
   await run(["update", "--git", "--branch", "main", "--yes"]);
   await run(["--user", "owner"]);
+  await run(["--maint"]);
   await run(["version", "--target", "remote-two"]);
   await run(["version", "--yes"]);
   await run([]);
@@ -105,6 +106,13 @@ for (const expected of [
   "update", "start", "stop", "restart", "doctor", "status", "tasks",
   "self-improve", "versions", "rollback", "memory-index", "launch",
 ]) assert.equal(names.includes(expected), true, expected);
+assert.equal(
+  globalThis.__rinMainOwnerEvents.some(
+    ([name, _command, maintenanceMode, passthrough]) =>
+      name === "launch" && maintenanceMode === true && passthrough.length === 0,
+  ),
+  true,
+);
 assert.equal(globalThis.__rinMainOwnerCommands.length >= 14, true);
 console.log = originalLog;
 originalLog(JSON.stringify({ events: names.length, commands: globalThis.__rinMainOwnerCommands.length }));
