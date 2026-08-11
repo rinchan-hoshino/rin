@@ -1,5 +1,181 @@
 # Rin Changelog
 
+## 0.11.0
+
+- Chat turns now use a daemon-led durable lifecycle for acceptance, Working state, steering, retries, compaction, terminal settlement, and delivery recovery across sessions, adapters, transport loss, and restarts.
+- Chat integrations now provide static queued/working reactions, an authoritative session-status command and API, safer owner-presence trust checks, clearer extension notifications, and more reliable Lark, OneBot, and shutdown behavior.
+- Extensions now share one loading and command-registration model, can expose lifecycle context, CLI commands, and rich command results, and own more presentation such as chat localization and quota reporting.
+- Updates and installs now preserve exact release and channel selections across prepared and cross-user handoffs, enforce one updater path, support explicit source selectors, and recover or restage interrupted releases more safely.
+- Context, memory, compaction, and self-improvement now retain branch state and verifiable history while pruning bounded tool-result buckets, optimizing explicit recall, scheduling reviews at safer boundaries, and exposing session-scoped notes.
+- The runtime now follows Pi 0.84.1 with native prompt admission and compaction ownership, latest-binding isolation, durable restart recovery, and restored prompt ownership.
+- The dormant GUI implementation and obsolete bootstrap updater surface were removed, while TUI Markdown, command discovery, release bundle staging, and release recovery behavior were tightened.
+- Todo and note tools now use stable item-level operations, and the autonomous test system adds isolated architecture, provider-prefix, release-target, and parallel coverage safeguards.
+<!-- rin-changelog-coverage
+ 2f1337b2 fix(update): reinstall the current release
+ eed671f3 fix(chat): close terminal settlement after final
+ 9e2cc3be fix(chat): fence terminal projections by request tag
+ 8bebc19c fix(chat): keep inbox typing until terminal
+ 8f28ff1d fix(chat): accept Lark string member counts
+ e29017c9 Revert "fix(chat): keep inbox typing until terminal"
+ be3077f4 fix(chat): preserve active session ownership
+ 3b3ee7b3 Revert "fix(chat): preserve active session ownership"
+ dcefa028 fix(chat): close compaction terminal ownership
+ 24836935 fix(pi): restore native compaction ownership
+ 3f81d0f3 fix(pi): preserve existing compaction callback
+ d97b7bb2 fix(self-improve): retain verifiable run audit evidence
+ 7176f860 fix(chat): surface frontend event handling failures
+ a8e0d20c fix(chat): reconcile legacy command terminal outbox
+ 60f346b6 fix: make terminal settlement durable
+ c105ca15 revert: remove stale-turn terminal settlement change
+ 818ed99c fix(chat): fail closed on reclaimed turns
+ d7534c54 Revert "fix(chat): fail closed on reclaimed turns"
+ f98cbcc2 fix(frontend): preserve backend terminal request tag
+ a9255242 perf(memory): optimize explicit session recall
+ a395a55a fix(chat): durably settle canonical terminal runs
+ a95accd3 fix(chat): reconcile shutdown-requeued legacy turns
+ b49c4be8 fix(scheduler): isolate chat session binding
+ 1d4a433b fix(chat): make terminal WAL delivery reliable
+ 3e579e18 fix(chat): recover terminal WAL before adapters start
+ b14b0cf0 fix(chat): quarantine stale terminal WAL
+ 649646bd chore(deps): refresh audited transitive locks
+ 1e1353ed refactor(daemon): route events by session selection
+ baf7a9c3 refactor(chat): remove pre-input terminal replay
+ 2901be62 refactor(frontend): await terminal turns through daemon
+ 7a54de87 refactor(runtime): make daemon ledger own turn lifecycle
+ db9897fa fix(installer): stop reimporting retired chat state
+ 50066cce fix(installer): interrupt stale pre-cutover inbox work
+ 27b5949e fix(chat): drain terminal backlog before new turns
+ 36f0c8f3 fix(release): stage local bundles outside tmpfs
+ 1c7f52c4 fix(daemon): keep terminal delivery ledger-owned
+ 5f34ab4f fix(frontend): consume durable terminal wait result
+ b2f6809f fix(runtime): resume active turns after daemon loss
+ 208123f2 fix(chat): snapshot inherited recovery before adapters
+ 3af75451 fix(frontend): key terminal identity by durable turn
+ ecc39c1b fix(runtime): keep terminal recovery ledger-owned
+ ed4a6e46 fix(self-improve): remove audit internals from agent guidance
+ f13f9bff fix(runtime): clean temporary handoff artifacts
+ a63e1b43 fix(runtime): fence inherited chat recovery before adapters
+ 3347b88f fix(installer): make release restaging idempotent
+ 1a9b1320 fix(self-improve): decouple audit from execution
+ 0a040525 fix(self-improve): decouple audit from execution
+ d84a9ee8 fix(installer): run cross-user updates as target owner
+ fd87eb82 fix(self-improve): remove audit internals from agent guidance
+ 88eda9da fix(installer): distinguish updater executor identity
+ 19dc8d9e fix(installer): preserve exact release across handoff
+ ee824425 fix(installer): use canonical handoff channel flags
+ 636b44a3 fix(chat): let reset commands stop recovered turns
+ 3b23e0e9 fix(frontend): ack suppressed abort terminals
+ 535f8889 fix(runtime): make Working backend-owned
+ 65ea2da7 fix(chat): preserve interrupted inbox claims
+ f3d67414 refactor(runtime): make recovery independent of process exit
+ 7acfbd59 fix(chat): reconcile terminal backlog without ingress
+ e3021aa7 fix daemon lifecycle ownership during updates
+ 0ebf7097 fix(chat): isolate terminal backlog projection
+ 53ff9237 fix(chat): scope terminal reconciliation to inbox turns
+ 4918d0a8 fix(chat): attach terminal reconciler to durable session
+ cb30cf13 fix(chat): key terminal reconciler by ledger record
+ 713d0289 fix(frontend): project durable terminals across sessions
+ de780e9f fix(chat): read terminal identity from ledger record
+ 742a069b fix(chat): restore durable mid-turn steering
+ 5a927117 fix(chat): retain detached turns without terminal
+ c8590f81 chore(deps): sync Pi 0.83.0
+ f86ee72f fix daemon lifecycle ownership during updates
+ b3420c9b feat(chat): add static working and queued reactions
+ bc8fc3d1 refactor(frontend): delegate live prompt admission to pi
+ 14d8a446 fix(lifecycle): deduplicate native queue updates per input
+ 2e47e7cf fix(chat): retain session connect failures across restart
+ 471012b4 refactor(frontend): type session disconnection semantics
+ 1208b1cc refactor(chat): defer turn outcomes to durable lifecycle
+ 5bb0b444 refactor(frontend): silence retry countdown notices
+ 167afa51 fix(installer): preserve running chat lifecycle
+ 3b454b52 fix(daemon): return selected session identity
+ aa4efbe8 fix(chat): resume only backend-accepted turns
+ b6ee3954 fix(frontend): project nonterminal input acceptance
+ 2d3c9070 fix(chat): project terminals after transport completion
+ d626a804 refactor(cron): replace deliverFinal with quiet
+ eba0bfc6 fix(chat): establish typing before Working
+ 5d1e692f fix(chat): start Working indicators concurrently
+ c291db31 fix(chat): fence terminal cleanup by turn owner
+ eefaf6cb fix(chat): join nonterminal input presentation
+ ef1c714f fix(chat): preserve live Working ownership
+ 339b0ad2 fix(chat): show Working in onebot private turns
+ 74cb6840 fix(chat): adopt accepted presentation before interim
+ 4d25bb81 feat: add session-scoped note tool
+ bef90804 fix(chat): durably commit joined acceptance
+ 49fe0137 fix(self-improve): review before context pruning
+ 17f3f387 refactor(extensions): unify command registration surfaces
+ 196cc2a3 fix(self-improve): review once per pruning turn window
+ 98cfd8b9 fix(self-improve): queue reviews after final persistence
+ 20a6c63d fix(release): resume interrupted nightly bootstrap
+ 8eb3f4a5 fix(release): allow recovery-path commits
+ 4e8ec0b9 fix(compaction): restore branch scratch state
+ e34bdd70 fix(rpc): keep prompt admission pending
+ 9dd46554 feat(chat): add session status command
+ 4e4a0ed1 fix(chat): keep retry schedules nonterminal
+ 0af8268e fix(chat): reserve terminal outbox kinds
+ 113145ff fix(chat): honor standard recovery boundaries
+ e64b9a6f fix(context): remove message-tail tool pruning
+ b1c7ac59 fix(runtime): remove daemon graceful shutdown wait
+ 98cd7044 fix(runtime): persist refreshed prompt on reload
+ 88e462e8 fix(chat): simplify live-only recovery
+ b244f28e fix(chat): make terminal slot authoritative
+ 38294bdd fix(chat): reconcile delivered terminal settlement
+ d3b36735 refactor(self-improve): bound prompt maintenance scope
+ 8a6587a2 fix(chat): make manual compaction presentation exclusive
+ 0280103c fix(self-improve): preserve usage history and simplify distillation
+ 4ebe589f perf(context): prune tool results in stable message buckets
+ e6f3a5ea fix(self-improve): distill pre-prune context prefixes
+ 77908eb0 perf(context): customize tool history pruning
+ 9be55b57 chore(deps): sync Pi 0.84.0
+ 3f9d518b test: enforce isolated autonomous test architecture
+ 86af0752 fix(chat): reuse canonical backend interruption lifecycle
+ b50266bf fix(context): persist branch state in compaction summary
+ 8895c06c test(context): lock provider prefix stability
+ f3077afa refactor: remove dormant GUI implementation
+ a869667b fix(tui): preserve markdown transformer contract over RPC
+ 236fab1b refactor(cron): delegate expression evaluation to Croner
+ 51d27453 test: parallelize isolated coverage gates
+ f941babe fix(chat): preserve trusted provenance to the session boundary
+ c333b9e2 fix(test): fail closed on missing release targets
+ b16ad1fe fix(chat): self-heal transient startup failures
+ 8a9d2905 test(chat): isolate daemon status queries
+ 91a3d5df fix(lifecycle): restore ordered turn settlement
+ 3d6ccdab fix(chat): acknowledge reconciled terminals
+ 809a1491 feat(core): make todo and note item-based
+ 1bbf61ec fix(chat): require owner presence for trusted input
+ 223d007a refactor(extensions): unify loading with Pi
+ 391417bf fix(extensions): resolve Pi's nested TypeScript loader
+ 9f3e5691 fix(cli): preserve Rin update source options
+ 349498f5 fix(lifecycle): isolate worker control plane
+ cf18f5cc fix(update): enforce one updater execution path
+ 66318d2b fix(update): bridge legacy prepared handoff
+ d734fda3 fix(update): target installer apply handoff
+ 35b826b5 chore: refresh skill-creator upstream provenance
+ a339462d refactor(update): remove bootstrap updater surface
+ ad21181e chore: sync Pi 0.84.1
+ f6d2e32d refactor(usage): move quota reporting out of core
+ 966e3898 fix(chat): transfer accepted steer presentation
+ ceb98baf fix(chat): project extension command notifications
+ 82c7d462 feat(extensions): support rich command results
+ bf33ea28 feat(extensions): expose lifecycle context and CLI commands
+ 9764b5f2 refactor(i18n): move chat presentation to extension
+ 2c8a7f18 fix(update): accept prepared legacy handoff
+ ed80910b fix(cli): list extension subcommands in help
+ b199f837 fix(cli): resolve extension commands in target user
+ eca27528 fix(chat): project Pi retry failures through frontend SDK
+ b5a4a1e6 fix(self-improve): require garbage collection in every pass
+ a14a88cd fix(chat): hide local paths in rich fallbacks
+ 0b1bfad4 fix(chat): resume Pi retries after worker restart
+ b8f90b53 refactor(docs): retire agent practices
+ 9154bf2c fix(update): fail fast without noninteractive confirmation
+ 688c62eb fix(chat): keep restart recovery daemon authoritative
+ 694ef152 feat: expose authoritative chat session states
+ cd085e38 fix(runtime): keep only latest prompt binding active
+ 78a9591c refactor: separate chat bindings from session state
+ 8f1f6062 fix(update): honor git selector flag
+ f2ac13c9 fix(runtime): restore frozen prompt ownership
+-->
+
 ## 0.10.0
 
 - Chat and daemon turns now keep one durable terminal owner across queued steering, recovery, restarts, RPC failures, Working updates, successful tool prefaces, and final delivery, while session identity is cleanly separated from persistence.
