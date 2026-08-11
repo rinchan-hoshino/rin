@@ -870,22 +870,36 @@ process.stdin.on("data", (chunk) => {
   try {
     await waitForSocket(socketPath);
     await driver.connect({ restoreSessionFile: sessionFile });
+    const initialStatus = await rpc(socketPath, {
+      id: "initial-worker-status",
+      type: "daemon_status",
+    });
+    const initialWorkers = (initialStatus.data?.workers || []).filter(
+      (worker) => worker.sessionFile === sessionFile,
+    );
+    assert.equal(initialWorkers.length, 1);
+    const firstWorkerId = initialWorkers[0].id;
+
     const first = await runWithTimeout("chat-inbox-recovered");
     assert.equal(first.finalText, "final:chat-inbox-recovered");
 
-    let workerExited = false;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    let firstWorkerRetired = false;
+    for (let attempt = 0; attempt < 300; attempt += 1) {
       const status = await rpc(socketPath, {
-        id: `wait-worker-exit-${attempt}`,
+        id: `wait-worker-replacement-${attempt}`,
         type: "daemon_status",
       });
-      if ((status.data?.workers || []).length === 0) {
-        workerExited = true;
+      if (
+        !(status.data?.workers || []).some(
+          (worker) => worker.id === firstWorkerId,
+        )
+      ) {
+        firstWorkerRetired = true;
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    assert.equal(workerExited, true);
+    assert.equal(firstWorkerRetired, true);
 
     const second = await runWithTimeout("chat-inbox-current");
     assert.equal(second.finalText, "final:chat-inbox-current");
