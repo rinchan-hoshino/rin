@@ -117,10 +117,26 @@ test("worker helpers expose resource diagnostics from the active session", () =>
       }),
       getPrompts: () => ({ prompts: [], diagnostics: [] }),
       getThemes: () => ({ themes: [], diagnostics: [] }),
-      getExtensions: () => ({ extensions: [], errors: [] }),
+      getExtensions: () => ({
+        extensions: [
+          {
+            path: "<inline:rin-core-items>",
+            hidden: true,
+            sourceInfo: { source: "built-in", scope: "user" },
+          },
+        ],
+        errors: [],
+      }),
     },
   });
 
+  assert.deepEqual(diagnostics.extensions.extensions, [
+    {
+      path: "<inline:rin-core-items>",
+      hidden: true,
+      sourceInfo: { source: "built-in", scope: "user" },
+    },
+  ]);
   assert.deepEqual(diagnostics.skills.diagnostics, [
     {
       type: "warning",

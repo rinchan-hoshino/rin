@@ -105,6 +105,9 @@ function sanitizeTheme(theme: any) {
 function sanitizeExtension(extension: any) {
   return {
     path: String(extension?.path || ""),
+    ...(typeof extension?.hidden === "boolean"
+      ? { hidden: extension.hidden }
+      : {}),
     sourceInfo: sanitizeSourceInfo(extension?.sourceInfo),
   };
 }
