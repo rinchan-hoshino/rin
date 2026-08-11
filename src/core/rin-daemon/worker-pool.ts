@@ -449,8 +449,16 @@ export class WorkerPool {
   ) {
     const commandType = String(command?.type || "unknown");
     const commandId = command?.id ? String(command.id) : undefined;
+    const selector = this.getSessionSelector(command);
+    const recoverySelector = resolveSessionSelector(
+      selector,
+      resolveSessionSelector(
+        this.getConnectionSelector(connection),
+        this.getWorkerSelector(worker),
+      ),
+    );
     if (
-      !this.isActiveTurnRecoveryConverged() &&
+      !this.isSessionRecoveryConverged(recoverySelector) &&
       ACTIVE_COMMAND_TYPES.has(commandType)
     ) {
       if (commandId) {
@@ -473,20 +481,12 @@ export class WorkerPool {
       return;
     }
     if (attach) this.attachWorker(connection, worker);
-    const selector = this.getSessionSelector(command);
     if (hasSessionSelector(selector)) {
       this.rememberSessionSelection(connection, selector);
     }
     worker.lastUsedAt = Date.now();
     worker.idleSince = null;
     const wasRunning = this.isWorkerRunning(worker);
-    const recoverySelector = resolveSessionSelector(
-      selector,
-      resolveSessionSelector(
-        this.getConnectionSelector(connection),
-        this.getWorkerSelector(worker),
-      ),
-    );
     const inputSubmissionCommand = commandType === "prompt";
     const keepUntilTerminalTurnEvent =
       !inputSubmissionCommand && expectsTerminalTurnEvent(commandType, command);
@@ -740,7 +740,7 @@ export class WorkerPool {
     if (this.findTrackedWorkerBySelector(wanted)?.recoveryStopRequested) {
       return undefined;
     }
-    if (!wanted.sessionFile || !this.isActiveTurnRecoveryConverged()) {
+    if (!wanted.sessionFile || !this.isSessionRecoveryConverged(wanted)) {
       return undefined;
     }
 
@@ -906,7 +906,8 @@ export class WorkerPool {
 
   restoreSessionWorker(item: { sessionFile?: string }) {
     const selector = sessionSelectorFromState(item);
-    if (!selector.sessionFile || !this.isActiveTurnRecoveryConverged()) return;
+    if (!selector.sessionFile || !this.isSessionRecoveryConverged(selector))
+      return;
     return this.restoreWorkerForSession(selector);
   }
 
@@ -2008,7 +2009,10 @@ export class WorkerPool {
     selector: SessionSelector,
     options: { recovery?: boolean } = {},
   ) {
-    if (options.recovery !== true && !this.isActiveTurnRecoveryConverged()) {
+    if (
+      options.recovery !== true &&
+      !this.isSessionRecoveryConverged(selector)
+    ) {
       throw new Error("rin_daemon_recovering");
     }
     const wanted = sessionSelectorFromState(selector);
@@ -2033,7 +2037,9 @@ export class WorkerPool {
     return claimed;
   }
 
-  private isActiveTurnRecoveryConverged() {
+  private isSessionRecoveryConverged(selector: SessionSelector) {
+    const wanted = sessionSelectorFromState(selector);
+    if (!hasSessionSelector(wanted)) return true;
     let records;
     try {
       records = listActiveDaemonTurns(this.daemonLedgerAgentDir());
@@ -2041,17 +2047,29 @@ export class WorkerPool {
       this.scheduleActiveDaemonTurnRecoveryScan();
       return false;
     }
-    return records.every((record) => {
-      const worker = this.findTrackedWorkerBySelector(
-        sessionSelectorFromState(record),
-      );
-      return Boolean(
-        worker &&
-        !worker.recoveryStopRequested &&
-        worker.activeLifecycleRequestTag === record.requestTag &&
-        (worker.turnActive || worker.terminalPending || worker.isStreaming),
-      );
-    });
+    return records
+      .filter((record) => {
+        const activeSelector = sessionSelectorFromState(record);
+        if (wanted.sessionFile && activeSelector.sessionFile) {
+          return wanted.sessionFile === activeSelector.sessionFile;
+        }
+        return Boolean(
+          wanted.sessionId &&
+          activeSelector.sessionId &&
+          wanted.sessionId === activeSelector.sessionId,
+        );
+      })
+      .every((record) => {
+        const worker = this.findTrackedWorkerBySelector(
+          sessionSelectorFromState(record),
+        );
+        return Boolean(
+          worker &&
+          !worker.recoveryStopRequested &&
+          worker.activeLifecycleRequestTag === record.requestTag &&
+          (worker.turnActive || worker.terminalPending || worker.isStreaming),
+        );
+      });
   }
 
   private currentBackendWorking(

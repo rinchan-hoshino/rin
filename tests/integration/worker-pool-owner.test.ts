@@ -1945,6 +1945,124 @@ test("worker pool owner covers destruction fanout, pending response forms, and r
   pool.stopWorkerForRecovery(recoveryWorker);
 });
 
+test("worker pool recovery admission isolates unrelated sessions", async () => {
+  const dir = await makeTempDir("rin-worker-pool-recovery-isolation-owner-");
+  const pool = new WorkerPool({
+    workerPath: path.join(dir, "unused-worker.js"),
+    cwd: dir,
+    agentDir: dir,
+  }) as any;
+  activePools.add(pool);
+  const activeSessionFile = path.join(dir, "active.jsonl");
+  const unrelatedSessionFile = path.join(dir, "unrelated.jsonl");
+  turnLedger.beginDaemonTurn(dir, {
+    requestTag: "owner-active-session",
+    sessionFile: activeSessionFile,
+    sessionId: "active-session",
+  });
+
+  assert.equal(
+    pool.isSessionRecoveryConverged({
+      sessionFile: unrelatedSessionFile,
+      sessionId: "unrelated-session",
+    }),
+    true,
+  );
+  assert.equal(
+    pool.isSessionRecoveryConverged({ sessionFile: activeSessionFile }),
+    false,
+  );
+  assert.equal(
+    pool.isSessionRecoveryConverged({
+      sessionFile: activeSessionFile,
+      sessionId: "stale-session-id",
+    }),
+    false,
+  );
+
+  let unrelatedForwarded = false;
+  const unrelated = createOwnerSyntheticWorker({
+    worker: {
+      sessionFile: unrelatedSessionFile,
+      sessionId: "unrelated-session",
+    },
+  });
+  unrelated.child.stdin.write = (
+    _data: unknown,
+    callback: (error?: Error | null) => void,
+  ) => {
+    unrelatedForwarded = true;
+    callback(null);
+    return true;
+  };
+  pool.workers.add(unrelated);
+  pool.setWorkerSessionRefs(unrelated, {
+    sessionFile: unrelatedSessionFile,
+    sessionId: "unrelated-session",
+  });
+  const unrelatedResponses: any[] = [];
+  const unrelatedConnection = {
+    socket: {
+      destroyed: false,
+      write(line: string) {
+        unrelatedResponses.push(JSON.parse(line));
+      },
+    },
+    sessionFile: unrelatedSessionFile,
+    sessionId: "unrelated-session",
+  } as any;
+  pool.requestWorker(
+    unrelated,
+    unrelatedConnection,
+    { id: "unrelated-command", type: "run_command" },
+    false,
+  );
+  assert.equal(unrelatedForwarded, true);
+  assert.equal(
+    unrelatedResponses.some((row) => row.error === "rin_daemon_recovering"),
+    false,
+  );
+
+  const recovering = createOwnerSyntheticWorker({
+    worker: {
+      sessionFile: activeSessionFile,
+      sessionId: "active-session",
+    },
+  });
+  pool.workers.add(recovering);
+  pool.setWorkerSessionRefs(recovering, {
+    sessionFile: activeSessionFile,
+    sessionId: "active-session",
+  });
+  const activeResponses: any[] = [];
+  pool.requestWorker(
+    recovering,
+    {
+      socket: {
+        destroyed: false,
+        write(line: string) {
+          activeResponses.push(JSON.parse(line));
+        },
+      },
+      sessionFile: activeSessionFile,
+      sessionId: "active-session",
+    } as any,
+    { id: "active-command", type: "run_command" },
+    false,
+  );
+  assert.equal(
+    activeResponses.some((row) => row.error === "rin_daemon_recovering"),
+    true,
+  );
+
+  recovering.activeLifecycleRequestTag = "owner-active-session";
+  recovering.turnActive = true;
+  assert.equal(
+    pool.isSessionRecoveryConverged({ sessionId: "active-session" }),
+    true,
+  );
+});
+
 test("worker pool owner covers recovery admission, duplicate fencing, and lifecycle request routing", async () => {
   const dir = await makeTempDir("rin-worker-pool-request-owner-");
   const pool = new WorkerPool({
@@ -1976,7 +2094,7 @@ test("worker pool owner covers recovery admission, duplicate fencing, and lifecy
   });
   pool.workers.add(worker);
 
-  pool.isActiveTurnRecoveryConverged = () => false;
+  pool.isSessionRecoveryConverged = () => false;
   pool.requestWorker(
     worker,
     connection,
@@ -1986,7 +2104,7 @@ test("worker pool owner covers recovery admission, duplicate fencing, and lifecy
   pool.requestWorker(worker, connection, { type: "run_command" }, false);
   assert.ok(writes.some((row) => row.error === "rin_daemon_recovering"));
 
-  pool.isActiveTurnRecoveryConverged = () => true;
+  pool.isSessionRecoveryConverged = () => true;
   worker.pendingResponses.set("duplicate", { id: "duplicate" });
   pool.requestWorker(
     worker,
@@ -2180,9 +2298,9 @@ test("worker pool owner covers state reads, selection routing, snapshots, shutdo
   pool.findTrackedWorkerBySelector = () => ({ recoveryStopRequested: true });
   assert.equal(await pool.ensureSelectedWorker(connection), undefined);
   pool.findTrackedWorkerBySelector = () => undefined;
-  pool.isActiveTurnRecoveryConverged = () => false;
+  pool.isSessionRecoveryConverged = () => false;
   assert.equal(await pool.ensureSelectedWorker(connection), undefined);
-  pool.isActiveTurnRecoveryConverged = () => true;
+  pool.isSessionRecoveryConverged = () => true;
   pool.withSessionClaim = async (_selector: any, run: () => any) => await run();
   pool.createWorkerForSession = () => worker;
   assert.equal(await pool.ensureSelectedWorker(connection), worker);
@@ -2202,12 +2320,10 @@ test("worker pool owner covers state reads, selection routing, snapshots, shutdo
 
   const created = createOwnerSyntheticWorker();
   pool.createWorker = () => created;
-  pool.isActiveTurnRecoveryConverged = () => false;
   assert.equal(
     pool.resolveWorkerForCommand(connection, { type: "new_session" }),
     created,
   );
-  pool.isActiveTurnRecoveryConverged = () => true;
   assert.equal(
     pool.resolveWorkerForCommand(connection, {
       type: "new_session",
@@ -2274,12 +2390,12 @@ test("worker pool owner covers state reads, selection routing, snapshots, shutdo
       .some((item: any) => item.sessionFile === worker.sessionFile),
   );
 
-  pool.isActiveTurnRecoveryConverged = () => false;
+  pool.isSessionRecoveryConverged = () => false;
   assert.equal(
     pool.restoreSessionWorker({ sessionFile: path.join(dir, "restore.jsonl") }),
     undefined,
   );
-  pool.isActiveTurnRecoveryConverged = () => true;
+  pool.isSessionRecoveryConverged = () => true;
   pool.restoreWorkerForSession = () => worker;
   assert.equal(
     pool.restoreSessionWorker({ sessionFile: path.join(dir, "restore.jsonl") }),
@@ -2411,9 +2527,9 @@ test("worker pool owner covers recovery schedulers, shared recovery, restoration
 
   pool.findTrackedWorkerBySelector = () => undefined;
   pool.findWorkerBySelector = () => undefined;
-  pool.isActiveTurnRecoveryConverged = () => true;
+  pool.isSessionRecoveryConverged = () => true;
   assert.equal(pool.restoreSessionWorker({}), undefined);
-  pool.isActiveTurnRecoveryConverged = () => false;
+  pool.isSessionRecoveryConverged = () => false;
   assert.equal(
     pool.restoreSessionWorker({
       sessionFile: path.join(dir, "not-converged.jsonl"),
@@ -2421,7 +2537,7 @@ test("worker pool owner covers recovery schedulers, shared recovery, restoration
     undefined,
   );
 
-  pool.isActiveTurnRecoveryConverged = () => true;
+  pool.isSessionRecoveryConverged = () => true;
   pool.workers.clear();
   pool.destroyAll();
   assert.equal(scans, 0);
