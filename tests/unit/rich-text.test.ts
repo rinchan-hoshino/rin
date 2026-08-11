@@ -183,6 +183,33 @@ test("rich syntax expands only unprotected markdown references", () => {
     richText.expandRichTextSyntaxNodes([{ type: "md", content: "plain" }]),
     [{ type: "markdown", attrs: { content: "plain" }, children: [] }],
   );
+
+  const fileUrl = "file:///tmp/reference.txt";
+  const attachmentAuthority = richText.expandRichTextSyntaxNodes([
+    {
+      type: "markdown",
+      content: [
+        `bare ${fileUrl}`,
+        `[reference](${fileUrl})`,
+        `[file: attached](${fileUrl})`,
+      ].join("\n"),
+    },
+  ]);
+  assert.equal(
+    attachmentAuthority.filter((node: any) => node?.type === "file").length,
+    1,
+  );
+  assert.equal(
+    attachmentAuthority.find((node: any) => node?.type === "file")?.attrs?.src,
+    fileUrl,
+  );
+  assert.match(
+    attachmentAuthority
+      .filter((node: any) => node?.type === "markdown")
+      .map((node: any) => node.attrs?.content)
+      .join(""),
+    /bare file:\/\/\/tmp\/reference\.txt[\s\S]*\[reference\]\(file:\/\/\/tmp\/reference\.txt\)/,
+  );
   assert.deepEqual(richText.expandRichTextSyntaxNodes(null as any), []);
 });
 

@@ -24,20 +24,23 @@ async function withTempDir(fn) {
   }
 }
 
-test("turn result builder assembles text, images, and file references from the last assistant message", async () => {
+test("turn result builder keeps file URLs as text instead of implicit attachments", async () => {
   await withTempDir(async (dir) => {
     const filePath = path.join(dir, "demo.txt");
     await fs.writeFile(filePath, "hello");
+    const fileUrl = pathToFileURL(filePath).href;
+    const text = [
+      `plain ${fileUrl}`,
+      `[reference](${fileUrl})`,
+      `\`\`\`text\n${fileUrl}\n\`\`\``,
+    ].join("\n");
 
     const result = turnResult.buildTurnResultFromMessages([
       { role: "user", content: [{ type: "text", text: "hi" }] },
       {
         role: "assistant",
         content: [
-          {
-            type: "text",
-            text: `done file://${filePath}`,
-          },
+          { type: "text", text },
           {
             type: "image",
             data: Buffer.from("abc").toString("base64"),
@@ -49,15 +52,28 @@ test("turn result builder assembles text, images, and file references from the l
 
     assert.deepEqual(result, {
       messages: [
-        { type: "text", text: `done file://${filePath}` },
+        { type: "text", text },
         {
           type: "image",
           data: Buffer.from("abc").toString("base64"),
           mimeType: "image/png",
         },
-        { type: "file", path: filePath, name: "demo.txt" },
       ],
     });
+  });
+});
+
+test("turn completion preserves explicitly structured file attachments", () => {
+  const result = {
+    messages: [
+      { type: "text", text: "attached explicitly" },
+      { type: "file", path: "/tmp/demo.txt", name: "demo.txt" },
+    ],
+  };
+
+  assert.deepEqual(turnResult.resolveTurnCompletion({ result }), {
+    finalText: "attached explicitly",
+    result,
   });
 });
 

@@ -74,6 +74,7 @@ Full log.
 Markdown contract:
 
 - Raw `@name` is visible text; native mention syntax supplies the platform id.
+- A bare `file://` URL or ordinary Markdown link is text, not attachment authorization. Use explicit `[file: name](path)` / `[image: name](path)` syntax or structured `parts` to send local resources.
 - Quote is part of the ordered rich message, not separate message metadata. The first quote object supplies the reply target for adapters that support reply/quote delivery.
 - An inbound quote node is an ID-only lazy reference under the current `chatKey`. Do not inject the referenced message body into the current prompt; call `rin.chat.messages.get({ chatKey, messageId })` only when the request depends on it, and follow any nested quote node only as needed.
 - For outbound delivery, quote context belongs in visible text only when recipient understanding depends on it.

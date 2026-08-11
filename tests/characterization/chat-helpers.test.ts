@@ -511,24 +511,6 @@ test("chat chat helpers report fetch failures consistently across media sources"
   });
 });
 
-test("chat chat helpers only auto-attach explicit file URLs, not plain paths", async () => {
-  await withTempDir(async (dir) => {
-    const filePath = path.join(dir, "demo.txt");
-    await fs.writeFile(filePath, "demo", "utf8");
-
-    assert.deepEqual(
-      helpers.extractExistingFilePaths(`Path for reference only: ${filePath}`),
-      [],
-    );
-    assert.deepEqual(
-      helpers.extractExistingFilePaths(
-        `Explicit attachment: file://${filePath}`,
-      ),
-      [filePath],
-    );
-  });
-});
-
 test("chat metadata enrichment preserves first-seen rich inbound evidence", async () => {
   await withTempDir(async (agentDir) => {
     const receivedAt = "2026-07-14T01:00:00.000Z";

@@ -21,7 +21,6 @@ import {
   pickUserId,
 } from "./inbound-normalization.js";
 import {
-  extractExistingFilePaths as extractExistingFilePathsFromText,
   extractImageParts as extractStructuredImageParts,
   extractMessageText,
   normalizeMessageText,
@@ -124,10 +123,6 @@ export function extractTextFromContent(
 
 export function extractImageParts(content: any) {
   return extractStructuredImageParts(content);
-}
-
-export function extractExistingFilePaths(text: string) {
-  return extractExistingFilePathsFromText(text);
 }
 
 export function enrichInboundMessageMetadata(

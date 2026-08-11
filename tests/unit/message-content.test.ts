@@ -1,7 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -13,17 +11,6 @@ const rootDir = path.resolve(
 const messageContent = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "message-content.js")).href
 );
-
-async function withTempDir(fn) {
-  const dir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-message-content-test-"),
-  );
-  try {
-    await fn(dir);
-  } finally {
-    await fs.rm(dir, { recursive: true, force: true });
-  }
-}
 
 test("message content helpers extract text with optional thinking and trimming", () => {
   assert.equal(
@@ -272,52 +259,4 @@ test("message content helpers classify assistant finals with chat-compatible too
     }),
     false,
   );
-});
-
-test("message content helpers resolve only explicit existing file URLs", async () => {
-  await withTempDir(async (dir) => {
-    const first = path.join(dir, "first.txt");
-    const spaced = path.join(dir, "spaced file.txt");
-    await fs.writeFile(first, "one", "utf8");
-    await fs.writeFile(spaced, "two", "utf8");
-
-    assert.deepEqual(
-      messageContent.extractExistingFilePaths(
-        [
-          `file://${first}`,
-          `file://${first}`,
-          `plain path ${spaced}`,
-          pathToFileURL(spaced).href,
-          `${pathToFileURL(spaced).href}?download=1#preview`,
-          `file://${path.join(dir, "missing.txt")}`,
-        ].join("\n"),
-      ),
-      [first, spaced],
-    );
-  });
-});
-
-test("message content helpers keep file-url filtering and max limits stable", async () => {
-  await withTempDir(async (dir) => {
-    const filePath = path.join(dir, "keep.txt");
-    const folderPath = path.join(dir, "folder");
-    await fs.writeFile(filePath, "one", "utf8");
-    await fs.mkdir(folderPath, { recursive: true });
-
-    const fileUrl = pathToFileURL(filePath).href;
-    const dirUrl = pathToFileURL(folderPath).href;
-    const text = [
-      fileUrl,
-      dirUrl,
-      "https://example.com/demo.txt",
-      `${fileUrl}?download=1#preview`,
-    ].join("\n");
-
-    assert.deepEqual(messageContent.extractExistingFilePaths(text), [filePath]);
-    assert.deepEqual(messageContent.extractExistingFilePaths(text, 1), [
-      filePath,
-    ]);
-    assert.deepEqual(messageContent.extractExistingFilePaths(text, 0), []);
-    assert.deepEqual(messageContent.extractExistingFilePaths(text, -1), []);
-  });
 });

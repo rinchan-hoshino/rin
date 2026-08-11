@@ -80,12 +80,6 @@ test("chat helpers recognize content, images, files, and media element families"
     ]),
     [{ data: "abc", mimeType: "image/png" }],
   );
-  assert.deepEqual(
-    helpers.extractExistingFilePaths(
-      `see ${pathToFileURL(import.meta.filename).href}`,
-    ),
-    [import.meta.filename],
-  );
 });
 
 test("chat helpers persist inbound identity and resolve reply session state", async () => {

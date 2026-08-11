@@ -1,7 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { safeString } from "./text-utils.js";
 
 export type RenderMessageTextOptions = {
@@ -19,7 +15,6 @@ type NormalizedMessagePart = {
 };
 
 const EMPTY_OBJECT: Record<string, any> = {};
-const FILE_URL_PATTERN = /file:\/\/[^\s'"`<>]+/g;
 
 function isMessagePart(value: unknown): value is MessagePart {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -225,43 +220,4 @@ export function extractImageParts(content: any) {
       mimeType: safeString(part.mimeType || "").trim() || "image/png",
     };
   });
-}
-
-function normalizeFileUrlPath(rawUrl: string) {
-  const value = safeString(rawUrl).trim();
-  if (!value) return "";
-  try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "file:") return "";
-    parsed.search = "";
-    parsed.hash = "";
-    return path.resolve(fileURLToPath(parsed));
-  } catch {
-    return "";
-  }
-}
-
-function isExistingFile(filePath: string) {
-  if (!filePath) return false;
-  try {
-    return fs.statSync(filePath).isFile();
-  } catch {
-    return false;
-  }
-}
-
-export function extractExistingFilePaths(text: string, max = 8) {
-  const limit = Math.max(0, max);
-  if (!limit) return [];
-
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const match of safeString(text).matchAll(FILE_URL_PATTERN)) {
-    const resolved = normalizeFileUrlPath(match[0]);
-    if (!resolved || seen.has(resolved) || !isExistingFile(resolved)) continue;
-    seen.add(resolved);
-    out.push(resolved);
-    if (out.length >= limit) break;
-  }
-  return out;
 }

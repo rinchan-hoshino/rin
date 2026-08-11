@@ -1,9 +1,6 @@
-import path from "node:path";
-
 import { asArray } from "../json-utils.js";
 import {
   extractAssistantFinalText,
-  extractExistingFilePaths,
   extractImageParts,
   extractMessageText,
   isAssistantFailedMessage,
@@ -113,19 +110,11 @@ export function buildTurnResultFromAssistantMessage(
       ).trim()
     : extractAssistantFinalText(assistant);
   const images = extractImageParts(assistant.content);
-  const files = extractExistingFilePaths(text);
   const result: TurnResultMessage[] = [];
 
   if (text) result.push({ type: "text", text });
   for (const image of images) {
     result.push({ type: "image", data: image.data, mimeType: image.mimeType });
-  }
-  for (const filePath of files) {
-    result.push({
-      type: "file",
-      path: filePath,
-      name: path.basename(filePath),
-    });
   }
 
   return { messages: result };
