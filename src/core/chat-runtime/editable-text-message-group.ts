@@ -5,7 +5,6 @@ import {
   composeEditableMessageText,
   editableIntermediateHeadText,
   editableMessageSectionsFromRecord,
-  editableWorkingText,
   ensureDir,
   ensureFileName,
   isEditableWorkingText,
@@ -36,8 +35,6 @@ export type EditableTextMessageGroupOptions = {
   cacheScope: string;
   maxTextLength: number;
   workingText?: string;
-  agentDir?: string;
-  workingFrames?: string[];
   progressTexts?: string[];
   chunkText?: (text: string) => string[];
   sendText: (input: {
@@ -78,22 +75,15 @@ export class EditableTextMessageGroup {
   private readonly operations = new Map<string, Promise<unknown>>();
   private readonly finalizing = new Set<string>();
   private workingText: string;
-  private workingFrames: string[];
   private progressTexts: string[];
 
   constructor(private readonly options: EditableTextMessageGroupOptions) {
-    const copy = resolveChatRuntimeWorkingCopy(options.agentDir);
-    this.workingFrames = normalizeDeliveredIds(
-      options.workingFrames?.length ? options.workingFrames : copy.frames,
-    );
+    const copy = resolveChatRuntimeWorkingCopy();
     this.workingText = editableIntermediateHeadText(
-      safeString(options.workingText).trim() ||
-        this.workingFrames[0] ||
-        "Working...",
+      safeString(options.workingText).trim() || copy.workingText,
     );
     this.progressTexts = normalizeDeliveredIds([
       this.workingText,
-      ...this.workingFrames.map(editableIntermediateHeadText),
       ...(options.progressTexts?.length
         ? options.progressTexts
         : copy.progressTexts
@@ -102,17 +92,18 @@ export class EditableTextMessageGroup {
     ensureDir(this.options.cacheDir);
   }
 
-  setWorkingFrames(frames: string[]) {
-    const configured = normalizeDeliveredIds(frames);
-    const normalized = configured.length
-      ? configured
-      : resolveChatRuntimeWorkingCopy().frames;
-    this.workingFrames = normalized;
-    this.workingText = editableIntermediateHeadText(normalized[0]);
+  setWorkingText(text: string) {
+    const copy = resolveChatRuntimeWorkingCopy();
+    const nextText = editableIntermediateHeadText(
+      safeString(text).trim() || copy.workingText,
+    );
     this.progressTexts = normalizeDeliveredIds([
+      nextText,
       this.workingText,
-      ...normalized.map(editableIntermediateHeadText),
+      ...this.progressTexts,
+      ...copy.progressTexts.map(editableIntermediateHeadText),
     ]);
+    this.workingText = nextText;
   }
 
   indicator(options: EditableTextMessageIndicatorOptions = {}) {
@@ -125,9 +116,7 @@ export class EditableTextMessageGroup {
         const defaultInput: EditableTextMessageIndicatorTickInput = {
           chatId: safeString(context?.chatId).trim(),
           text: editableIntermediateHeadText(
-            statusText ||
-              summaryText ||
-              editableWorkingText(context?.tick, this.workingFrames),
+            statusText || summaryText || this.workingText,
           ),
           replyToMessageId:
             safeString(context?.replyToMessageId).trim() || undefined,
@@ -137,11 +126,17 @@ export class EditableTextMessageGroup {
           ? options.prepareTick(context, defaultInput)
           : defaultInput;
         if (!input || !safeString(input.chatId).trim()) return false;
+        const key = this.key(
+          safeString(input.chatId).trim(),
+          input.replyToMessageId,
+          input.key,
+        );
+        const previousText = this.read(key)?.text || "";
         const ids = await this.updateText({
           ...input,
           kind: "working",
         });
-        return ids.length > 0;
+        return ids.length > 0 && (this.read(key)?.text || "") !== previousText;
       },
       end: async (context: any) => {
         // Normal lifecycle completion is finalized by the fresh delivery path.

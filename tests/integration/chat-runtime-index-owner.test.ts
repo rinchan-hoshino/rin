@@ -77,12 +77,12 @@ test("runtime app owns durable ingress, adapter ordering, builders, and provider
   await withTempDir(async (directory) => {
     const app = runtime.createChatRuntimeApp(directory) as any;
     const lifecycle: string[] = [];
-    const presentationFrames: string[][] = [];
+    const presentationTexts: string[] = [];
     app.register(
       {
         start: async () => lifecycle.push("start-1"),
         stop: async () => lifecycle.push("stop-1"),
-        setWorkingFrames: (frames: string[]) => presentationFrames.push(frames),
+        setWorkingText: (text: string) => presentationTexts.push(text),
       },
       { platform: "owner-1", selfId: "one" },
     );
@@ -97,8 +97,8 @@ test("runtime app owns durable ingress, adapter ordering, builders, and provider
     await app.start();
     await app.stop();
     assert.deepEqual(lifecycle, ["start-1", "start-2", "stop-2", "stop-1"]);
-    app.setWorkingFrames(["Localized"]);
-    assert.deepEqual(presentationFrames, [["Localized"]]);
+    app.setWorkingText("Localized");
+    assert.deepEqual(presentationTexts, ["Localized"]);
 
     let seen = 0;
     app.on("message", () => {

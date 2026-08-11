@@ -32,7 +32,6 @@ import {
   partialChatDeliveryError,
   prependChatQuoteNode,
   prepareOutboundNodes,
-  randomWorkingText,
   readBinaryFromNode,
   renderMarkdownFromNodes,
   renderPlainTextFromNodes,
@@ -377,10 +376,10 @@ export class ChatRuntimeApp extends EventEmitter {
     }
   }
 
-  setWorkingFrames(frames: string[]) {
+  setWorkingText(text: string) {
     for (const adapter of this.adapters) {
-      if (typeof adapter?.setWorkingFrames === "function") {
-        adapter.setWorkingFrames(frames);
+      if (typeof adapter?.setWorkingText === "function") {
+        adapter.setWorkingText(text);
       }
     }
   }
@@ -557,7 +556,6 @@ class TelegramAdapter {
       cacheDir: this.cacheDir,
       cacheScope: this.botCacheKey,
       maxTextLength: 4096,
-      agentDir: app?.agentDir,
       chunkText: (text) => this.telegramTextChunks(text),
       sendText: async ({ chatId, text, replyToMessageId }) =>
         await this.sendText(chatId, text, replyToMessageId, "HTML"),
@@ -628,8 +626,8 @@ class TelegramAdapter {
     this.app.register(this, this.bot);
   }
 
-  setWorkingFrames(frames: string[]) {
-    this.editableWorking.setWorkingFrames(frames);
+  setWorkingText(text: string) {
+    this.editableWorking.setWorkingText(text);
   }
 
   async start() {
@@ -1627,7 +1625,7 @@ class OneBotAdapter {
   private stopped = false;
   private nextEchoId = 1;
   private readonly workingReactions = new Map<string, string>();
-  private workingFrames: string[];
+  private workingText: string;
   private readonly pending = new Map<
     string,
     {
@@ -1647,7 +1645,7 @@ class OneBotAdapter {
     this.app = app;
     this.config = config;
     this.logger = createPrefixedLogger("chat-runtime:onebot", logger);
-    this.workingFrames = resolveChatRuntimeWorkingCopy(app.agentDir).frames;
+    this.workingText = resolveChatRuntimeWorkingCopy().workingText;
     this.bot = {
       platform: "onebot",
       selfId: safeString(config?.selfId).trim(),
@@ -1766,10 +1764,9 @@ class OneBotAdapter {
     this.app.register(this, this.bot);
   }
 
-  setWorkingFrames(frames: string[]) {
-    this.workingFrames = frames.length
-      ? [...frames]
-      : resolveChatRuntimeWorkingCopy().frames;
+  setWorkingText(text: string) {
+    this.workingText =
+      safeString(text).trim() || resolveChatRuntimeWorkingCopy().workingText;
   }
 
   async start() {
@@ -2098,9 +2095,7 @@ class OneBotAdapter {
       : "";
     await this.callAction("send_private_msg", {
       user_id: targetId,
-      message: `${reply}${escapeOneBotText(
-        randomWorkingText(this.workingFrames),
-      )}`,
+      message: `${reply}${escapeOneBotText(this.workingText)}`,
       auto_escape: false,
     });
     return true;

@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import test, { mock } from "node:test";
+import test from "node:test";
 
 import { importBuiltModule } from "../support/import-built-module.js";
 
@@ -56,30 +56,16 @@ async function withTempDir(run: (directory: string) => Promise<void>) {
 }
 
 test("chat runtime working copy and editable sections preserve explicit ownership", async () => {
-  await withTempDir(async (agentDir) => {
-    assert.deepEqual(common.resolveChatRuntimeWorkingCopy(""), {
-      frames: ["Working...", "Working", "Working.", "Working.."],
+  await withTempDir(async () => {
+    assert.deepEqual(common.resolveChatRuntimeWorkingCopy(), {
+      workingText: "Working...",
       progressTexts: ["Working...", "Working", "Working.", "Working.."],
     });
-    const configured = common.resolveChatRuntimeWorkingCopy(agentDir);
-    assert.deepEqual(configured.frames, [
-      "Working...",
-      "Working",
-      "Working.",
-      "Working..",
-    ]);
+    assert.equal("randomWorkingText" in common, false);
 
-    assert.equal(common.editableWorkingText(-1.8, ["one", "two"]), "one");
-    assert.equal(common.editableWorkingText("bad", []), "Working...");
     assert.equal(common.editableIntermediateHeadText(""), "");
     assert.equal(common.editableIntermediateHeadText("... ready"), "... ready");
     assert.equal(common.editableIntermediateHeadText("ready"), "... ready");
-    const random = mock.method(Math, "random", () => 0.9);
-    try {
-      assert.equal(common.randomWorkingText(["first", "last"]), "last");
-    } finally {
-      random.mock.restore();
-    }
     assert.equal(common.isEditableWorkingText(" Working. "), true);
     assert.equal(common.isEditableWorkingText("custom", ["custom"]), true);
     assert.equal(common.isEditableWorkingText(""), false);

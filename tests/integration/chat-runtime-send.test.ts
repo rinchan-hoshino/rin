@@ -204,23 +204,18 @@ test("editable progress indicator lets adapters map tick input without owning li
         todoNoticeText: "todo",
         tick: 1,
       }),
-      true,
+      false,
     );
     assert.equal(await indicator.end({ chatId: "C1" }), false);
 
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["send", "edit"],
+      ["send"],
     );
     assert.deepEqual(calls[0].input, {
       chatId: "C1:topic:T1",
       text: "<b>... Working...</b>\n\n────────\n\n<i>todo</i>",
       replyToMessageId: "owner-1",
-    });
-    assert.deepEqual(calls[1].input, {
-      chatId: "C1:topic:T1",
-      messageId: "progress-1",
-      text: "<b>... Working</b>\n\n────────\n\n<i>todo</i>",
     });
   });
 });
@@ -702,28 +697,23 @@ test("discord adapter keeps todo unchanged while compaction replaces interim con
     assert.deepEqual(final, ["2"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["send", "edit", "edit", "edit", "edit", "edit", "delete", "send"],
+      ["send", "edit", "edit", "edit", "delete", "send"],
     );
     assert.equal(calls[0].payload.content, "... Working...");
-    assert.equal(calls[1].payload.content, "... Working");
+    assert.equal(
+      calls[1].payload.content,
+      "... Working...\n\n────────\n\n[ ] first task",
+    );
     assert.equal(
       calls[2].payload.content,
-      "... Working\n\n────────\n\n[ ] first task",
+      "... Working...\n\n────────\n\nCompacting...\n\n────────\n\n[ ] first task",
     );
     assert.equal(
       calls[3].payload.content,
-      "... Working\n\n────────\n\nCompacting...\n\n────────\n\n[ ] first task",
+      "... Working...\n\n────────\n\nCompacted from 108,642 tokens\n\n────────\n\n[ ] first task",
     );
-    assert.equal(
-      calls[4].payload.content,
-      "... Working\n\n────────\n\nCompacted from 108,642 tokens\n\n────────\n\n[ ] first task",
-    );
-    assert.equal(
-      calls[5].payload.content,
-      "... Working.\n\n────────\n\nCompacted from 108,642 tokens\n\n────────\n\n[ ] first task",
-    );
-    assert.equal(calls[6].id, "1");
-    assert.equal(calls[7].payload.content, "done");
+    assert.equal(calls[4].id, "1");
+    assert.equal(calls[5].payload.content, "done");
   });
 });
 
@@ -773,18 +763,16 @@ test("discord adapter sends errors beside editable progress", async () => {
     assert.deepEqual(error, ["2"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["send", "send", "edit"],
+      ["send", "send"],
     );
     assert.equal(calls[0].id, "1");
     assert.equal(calls[0].payload.content, "... Working...");
     assert.equal(calls[1].id, "2");
     assert.equal(calls[1].payload.content, "rin error: failed");
-    assert.equal(calls[2].id, "1");
-    assert.equal(calls[2].payload.content, "... Working");
   });
 });
 
-test("discord adapter uses neutral working frames without custom config", async () => {
+test("discord adapter keeps default editable Working static", async () => {
   await withTempDir(async (agentDir) => {
     await fs.writeFile(
       path.join(agentDir, "settings.json"),
@@ -830,12 +818,11 @@ test("discord adapter uses neutral working frames without custom config", async 
     assert.deepEqual(final, ["2"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["send", "edit", "delete", "send"],
+      ["send", "delete", "send"],
     );
     assert.equal(calls[0].payload.content, "... Working...");
-    assert.equal(calls[1].payload.content, "... Working");
-    assert.equal(calls[2].id, "1");
-    assert.equal(calls[3].payload.content, "done");
+    assert.equal(calls[1].id, "1");
+    assert.equal(calls[2].payload.content, "done");
   });
 });
 
@@ -874,7 +861,11 @@ test("discord adapter sends a new Working message when the cached progress is no
 
     const editable = requireEditableIndicator(app.bots[0]);
     await editable.tick({ chatId: "C1", tick: 0 });
-    await editable.tick({ chatId: "C1", tick: 1 });
+    await editable.tick({
+      chatId: "C1",
+      tick: 1,
+      workingStatusText: "Checking",
+    });
     const final = await app.bots[0].sendMessage("C1", [h.text("done")]);
 
     assert.deepEqual(final, ["3"]);
@@ -886,7 +877,7 @@ test("discord adapter sends a new Working message when the cached progress is no
     assert.equal(calls[0].payload.content, "... Working...");
     assert.equal(calls[1].id, "1");
     assert.equal(calls[2].id, "2");
-    assert.equal(calls[2].payload.content, "... Working");
+    assert.equal(calls[2].payload.content, "... Checking");
     assert.equal(calls[3].id, "1");
     assert.equal(calls[4].id, "2");
     assert.equal(calls[5].payload.content, "done");
@@ -1118,7 +1109,7 @@ test("telegram adapter keeps working and todo editable before final text", async
     const finalResult = await app.bots[0].sendMessage("456", [h.text("done")]);
 
     assert.deepEqual(todoResult, ["2"]);
-    assert.deepEqual(finalResult, ["7"]);
+    assert.deepEqual(finalResult, ["6"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
       [
@@ -1126,7 +1117,6 @@ test("telegram adapter keeps working and todo editable before final text", async
         "sendMessage",
         "editMessageText",
         "sendChatAction",
-        "editMessageText",
         "deleteMessage",
         "sendMessage",
       ],
@@ -1138,10 +1128,7 @@ test("telegram adapter keeps working and todo editable before final text", async
       "... Working...\n\n────────\n\n[ ] first task",
     );
     assert.equal(calls[4].payload.message_id, 2);
-    assert.match(calls[4].payload.text, /^\.\.\. Working/);
-    assert.match(calls[4].payload.text, /────────\n\n\[ \] first task$/);
-    assert.equal(calls[5].payload.message_id, 2);
-    assert.equal(calls[6].payload.text, "done");
+    assert.equal(calls[5].payload.text, "done");
   });
 });
 
@@ -1206,12 +1193,10 @@ test("telegram adapter sends errors beside editable progress", async () => {
     assert.deepEqual(error, ["2"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["sendMessage", "sendMessage", "editMessageText"],
+      ["sendMessage", "sendMessage"],
     );
     assert.equal(calls[0].payload.text, "... Working...");
     assert.equal(calls[1].payload.text, "rin error: failed");
-    assert.equal(calls[2].payload.message_id, 1);
-    assert.equal(calls[2].payload.text, "... Working");
   });
 });
 
@@ -1243,19 +1228,13 @@ test("telegram adapter keeps todo below repeated working ticks from context", as
 
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["sendMessage", "editMessageText"],
+      ["sendMessage"],
     );
     assert.equal(
       calls[0].payload.text,
       "... Working...\n\n────────\n\n✅ <s>finished task</s>\n⬜ next task",
     );
     assert.equal(calls[0].payload.parse_mode, "HTML");
-    assert.match(calls[1].payload.text, /^\.\.\. Working/);
-    assert.match(
-      calls[1].payload.text,
-      /────────\n\n✅ <s>finished task<\/s>\n⬜ next task$/,
-    );
-    assert.equal(calls[1].payload.parse_mode, "HTML");
   });
 });
 
@@ -1337,38 +1316,30 @@ test("telegram adapter edits one progress message from Working through interim b
     const final = await app.bots[0].sendMessage("456", [h.text("done")]);
 
     assert.deepEqual(interim, ["1"]);
-    assert.deepEqual(final, ["6"]);
+    assert.deepEqual(final, ["4"]);
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      [
-        "sendMessage",
-        "editMessageText",
-        "editMessageText",
-        "editMessageText",
-        "deleteMessage",
-        "sendMessage",
-      ],
+      ["sendMessage", "editMessageText", "deleteMessage", "sendMessage"],
     );
     assert.equal(calls[0].payload.text, "... Working...");
     assert.equal(calls[1].payload.message_id, 1);
-    assert.equal(calls[1].payload.text, "... Working");
+    assert.equal(
+      calls[1].payload.text,
+      "... Working...\n\n────────\n\nchecking",
+    );
     assert.equal(calls[2].payload.message_id, 1);
-    assert.equal(calls[2].payload.text, "... Working\n\n────────\n\nchecking");
-    assert.equal(calls[3].payload.message_id, 1);
-    assert.equal(calls[3].payload.text, "... Working.\n\n────────\n\nchecking");
-    assert.equal(calls[4].payload.message_id, 1);
-    assert.equal(calls[5].payload.text, "done");
+    assert.equal(calls[3].payload.text, "done");
   });
 });
 
-test("telegram adapter uses extension presentation working frames", async () => {
+test("telegram adapter applies extension working text as static editable Working", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "telegram",
       name: "Telegram",
       config: { token: "123:abc" },
     });
-    app.setWorkingFrames(["Loop A", "Loop B", "..."]);
+    app.setWorkingText("Loop A");
     const adapter = [...app.adapters][0];
     const h = runtime.createChatRuntimeH();
     const calls: Array<{ method: string; payload: any }> = [];
@@ -1384,12 +1355,10 @@ test("telegram adapter uses extension presentation working frames", async () => 
     await editable.tick({ chatId: "456", tick: 2 });
     const final = await app.bots[0].sendMessage("456", [h.text("done")]);
 
-    assert.deepEqual(final, ["5"]);
+    assert.deepEqual(final, ["3"]);
     assert.equal(calls[0].payload.text, "... Loop A");
-    assert.equal(calls[1].payload.text, "... Loop B");
-    assert.equal(calls[2].payload.text, "... ...");
-    assert.equal(calls[3].payload.message_id, 1);
-    assert.equal(calls[4].payload.text, "done");
+    assert.equal(calls[1].payload.message_id, 1);
+    assert.equal(calls[2].payload.text, "done");
   });
 });
 
@@ -3149,25 +3118,20 @@ test("onebot private working indicator is a one-shot marker", async () => {
     assert.equal(calls[0].action, "send_private_msg");
     assert.equal(calls[0].params.user_id, 2);
     assert.equal(calls[0].params.auto_escape, false);
-    assert.ok(
-      ["Working...", "Working", "Working.", "Working.."].some(
-        (text) => calls[0].params.message === `[CQ:reply,id=m1]${text}`,
-      ),
-    );
+    assert.equal(calls[0].params.message, "[CQ:reply,id=m1]Working...");
   });
 });
 
-test("onebot private marker uses extension presentation working frames", async () => {
+test("onebot private marker uses extension presentation working text", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "onebot",
       name: "OneBot",
       config: { endpoint: "ws://127.0.0.1:1" },
     });
-    app.setWorkingFrames([
+    app.setWorkingText(
       "\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
-      "\u6574\u7406\u4e2d\uff5e (\uff61\uff65\u03c9\uff65\uff61)",
-    ]);
+    );
     const adapter = [...app.adapters][0];
     const calls: any[] = [];
     adapter.callAction = async (action: string, params: any) => {
@@ -3185,11 +3149,9 @@ test("onebot private marker uses extension presentation working frames", async (
     );
 
     assert.equal(calls.length, 1);
-    assert.ok(
-      [
-        "\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
-        "\u6574\u7406\u4e2d\uff5e (\uff61\uff65\u03c9\uff65\uff61)",
-      ].some((text) => calls[0].params.message === `[CQ:reply,id=m1]${text}`),
+    assert.equal(
+      calls[0].params.message,
+      "[CQ:reply,id=m1]\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
     );
   });
 });

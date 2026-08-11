@@ -574,8 +574,8 @@ export async function startChatBridge(
     await app.stop().catch(() => {});
     await inboundHttpTransport?.close().catch(() => {});
   };
-  const onChatPresentation = (presentation: { workingFrames?: string[] }) => {
-    app.setWorkingFrames(presentation.workingFrames || []);
+  const onChatPresentation = (presentation: { workingText?: string }) => {
+    app.setWorkingText(presentation.workingText || "");
   };
   const frontendClientFactory = options.frontendClientFactory;
   let commandRows: Awaited<ReturnType<typeof loadChatCommandRows>>;

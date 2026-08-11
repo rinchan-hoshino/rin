@@ -20,7 +20,7 @@ defineRinExtension((rin) => {
       ctx.ui.notify(args || "ok", "info");
       ctx.ui.rinChatPresentation?.({
         commandResponses: { new: "Started." },
-        workingFrames: ["Working"],
+        workingText: "Working",
       });
       ctx.ui.rinCommandResult?.({
         fallbackText: args || "ok",

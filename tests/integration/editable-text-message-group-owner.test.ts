@@ -24,7 +24,8 @@ async function fixture(overrides: Record<string, unknown> = {}) {
     cacheDir,
     cacheScope: "owner/scope",
     maxTextLength: 6,
-    workingFrames: ["Wait", "Think"],
+    workingText: "Wait",
+    progressTexts: ["Wait", "Think"],
     sendText: async (input) => {
       calls.sent.push(input);
       nextId += 1;
@@ -223,7 +224,6 @@ test("editable text owner covers fallback copy, empty delivery, override keys, a
     cacheDir,
     cacheScope: "",
     maxTextLength: 20,
-    workingFrames: [],
     progressTexts: [],
     chunkText: (text) => (text === "drop" ? [] : [text]),
     sendText: async (input) => {
@@ -324,24 +324,27 @@ test("editable polling indicator reflects status and removes only progress artif
   }
 });
 
-test("extension presentation updates and resets existing working frames", async () => {
-  const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-presentation-owner-"),
-  );
-  const { cacheDir, calls, group } = await fixture({
-    agentDir,
-    maxTextLength: 2_000,
-  });
+test("extension presentation applies each static Working text and resets to Working...", async () => {
+  const { cacheDir, calls, group } = await fixture({ maxTextLength: 2_000 });
   try {
     const indicator = group.indicator();
-    group.setWorkingFrames(["Localized A", "Localized B"]);
+    group.setWorkingText("Localized A");
     await indicator.tick({ chatId: "chat", tick: 0 });
-    assert.match(calls.sent.at(-1).text, /Localized A/);
-    group.setWorkingFrames([]);
     await indicator.tick({ chatId: "chat", tick: 1 });
-    assert.match(calls.edited.at(-1).text, /Working/);
+    assert.match(calls.sent.at(-1).text, /Localized A/);
+    assert.equal(calls.edited.length, 0);
+
+    group.setWorkingText("Localized B");
+    await indicator.tick({ chatId: "chat", tick: 2 });
+    await indicator.tick({ chatId: "chat", tick: 3 });
+    assert.equal(calls.edited.at(-1).text, "... Localized B");
+    assert.equal(calls.edited.length, 1);
+
+    group.setWorkingText("");
+    await indicator.tick({ chatId: "chat", tick: 4 });
+    assert.equal(calls.edited.at(-1).text, "... Working...");
+    assert.equal(calls.edited.length, 2);
   } finally {
     await fs.rm(cacheDir, { recursive: true, force: true });
-    await fs.rm(agentDir, { recursive: true, force: true });
   }
 });

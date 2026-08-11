@@ -1638,14 +1638,14 @@ test("chat controller accepts generic presentation from an extension", async () 
     method: "rinChatPresentation",
     presentation: {
       commandResponses: { new: "Localized new session" },
-      workingFrames: [" Frame A ", "", "Frame B"],
+      workingText: " Frame A ",
     },
   });
   assert.equal(controller.getCommandResponses().new, "Localized new session");
   assert.deepEqual(presentations, [
     {
       commandResponses: { new: "Localized new session" },
-      workingFrames: ["Frame A", "Frame B"],
+      workingText: "Frame A",
     },
   ]);
 });
@@ -5202,7 +5202,7 @@ test("chat controller polls typing without repeating the fixed working reaction"
   assert.deepEqual(reactions, [["create", "2", "m1", "🤔"]]);
 });
 
-test("chat controller keeps typing heartbeat frequent while throttling editable Working refreshes", async () => {
+test("chat controller polls static editable Working on the platform heartbeat", async () => {
   const controller = await createController("discord/1:2");
   const calls: Array<[string, number]> = [];
   controller.app.bots[0].platform = "discord";
@@ -5245,17 +5245,6 @@ test("chat controller keeps typing heartbeat frequent while throttling editable 
     ["typing", 0],
     ["edit", 0],
     ["typing", 0],
-    ["typing", 1],
-  ]);
-
-  controller.lastTypingIndicatorAt -= 9_000;
-  controller.lastWorkingIndicatorAt -= 21_000;
-  assert.equal(await controller.pollTyping(), true);
-  assert.deepEqual(calls, [
-    ["typing", 0],
-    ["edit", 0],
-    ["typing", 0],
-    ["typing", 1],
     ["typing", 1],
     ["edit", 1],
     ["typing", 1],
@@ -5621,7 +5610,7 @@ test("chat controller logs failed discord typing without changing its cadence", 
             presentation: "editable-message",
             async tick() {
               editableTicks += 1;
-              return true;
+              return editableTicks === 1;
             },
           },
           {
@@ -5665,7 +5654,7 @@ test("chat controller logs failed discord typing without changing its cadence", 
     now += 1;
     assert.equal(await controller.pollTyping(), true);
     assert.equal(typingAttempts, 2);
-    assert.equal(editableTicks, 1);
+    assert.equal(editableTicks, 2);
   } finally {
     Date.now = originalNow;
   }
@@ -9167,23 +9156,9 @@ test("chat controller internal ownership helpers normalize durable and display s
   assert.equal(controller.isTypingHeartbeatDue(0, 1), true);
   assert.equal(controller.isTypingHeartbeatDue(1, 2), false);
   assert.equal(controller.isTypingHeartbeatDue(1, 60_000), true);
-  assert.equal(controller.isVisibleWorkingPollDue([], 0, 1), true);
-  assert.equal(
-    controller.isVisibleWorkingPollDue(
-      [{ presentation: "editable-message" }],
-      1_000,
-      1_100,
-    ),
-    false,
-  );
-  assert.equal(
-    controller.isVisibleWorkingPollDue(
-      [{ presentation: "editable-message" }],
-      1_000,
-      60_000,
-    ),
-    true,
-  );
+  assert.equal(controller.isVisibleWorkingPollDue(0, 1), true);
+  assert.equal(controller.isVisibleWorkingPollDue(1_000, 1_100), false);
+  assert.equal(controller.isVisibleWorkingPollDue(1_000, 60_000), true);
   controller.warnTypingIndicatorFailure(new Error("first"), 10);
   controller.warnTypingIndicatorFailure("suppressed", 11);
   assert.equal(controller.getWorkingIndicators().length, 1);

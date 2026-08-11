@@ -708,11 +708,7 @@ test("discord adapter maps chat input interactions to Rin slash messages", async
     });
 
     assert.equal(replies.length, 1);
-    assert.ok(
-      ["Working...", "Working", "Working.", "Working.."].includes(
-        replies[0].content,
-      ),
-    );
+    assert.equal(replies[0].content, "Working...");
     assert.equal(replies[0].flags, 64);
     assert.equal(emitted.length, 1);
     assert.equal(emitted[0].eventName, "message");
@@ -955,11 +951,7 @@ test("discord adapter acknowledges chat input interactions with callback endpoin
     );
     const callbackBody = JSON.parse(fetchCalls[0].init.body);
     assert.equal(callbackBody.type, 4);
-    assert.ok(
-      ["Working...", "Working", "Working.", "Working.."].includes(
-        callbackBody.data.content,
-      ),
-    );
+    assert.equal(callbackBody.data.content, "Working...");
     assert.equal(callbackBody.data.flags, 64);
     assert.equal(emitted.length, 1);
     assert.equal(emitted[0].payload.content, "/new");

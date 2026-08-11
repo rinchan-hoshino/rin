@@ -38,10 +38,8 @@ import {
   prepareOutboundNodes,
   readBinaryFromNode,
   renderMarkdownFromNodes,
-  randomWorkingText,
   renderPlainTextFromNodes,
   renderRichDeliveryFallback,
-  resolveChatRuntimeWorkingCopy,
   safeString,
   sleep,
   splitPlainText,
@@ -575,7 +573,6 @@ export class DiscordAdapter {
   private readonly logger: any;
   private readonly cacheDir: string;
   private readonly editableWorking: EditableTextMessageGroup;
-  private workingFrames: string[];
   private readonly inboundGate = new InboundRecoveryGate<any>();
   private readonly deletedChannelIds = new Set<string>();
   private client: any = null;
@@ -593,7 +590,6 @@ export class DiscordAdapter {
     this.app = app;
     this.config = config;
     this.logger = createPrefixedLogger("chat-runtime:discord", logger);
-    this.workingFrames = resolveChatRuntimeWorkingCopy(app?.agentDir).frames;
     this.cacheDir = path.join(dataDir, "chat", "runtime-cache", "discord");
     ensureDir(this.cacheDir);
     const internal: any = {
@@ -651,7 +647,6 @@ export class DiscordAdapter {
       cacheDir: this.cacheDir,
       cacheScope: sanitizeCacheScope(config?.token, "default"),
       maxTextLength: DISCORD_MAX_TEXT_LENGTH,
-      agentDir: app?.agentDir,
       sendText: async ({ chatId, text, replyToMessageId }) => {
         const channel = await this.fetchChannel(chatId);
         if (!channel?.send)
@@ -967,11 +962,8 @@ export class DiscordAdapter {
     this.inboundGate.open(chatId);
   }
 
-  setWorkingFrames(frames: string[]) {
-    this.editableWorking.setWorkingFrames(frames);
-    this.workingFrames = frames.length
-      ? [...frames]
-      : resolveChatRuntimeWorkingCopy().frames;
+  setWorkingText(text: string) {
+    this.editableWorking.setWorkingText(text);
   }
 
   async start() {
@@ -1289,7 +1281,7 @@ export class DiscordAdapter {
     const responseBody = {
       type: DISCORD_INTERACTION_RESPONSE_CHANNEL_MESSAGE_WITH_SOURCE,
       data: {
-        content: randomWorkingText(this.workingFrames),
+        content: "Working...",
         flags: DISCORD_MESSAGE_FLAG_EPHEMERAL,
       },
     };
@@ -1559,7 +1551,6 @@ export class SlackAdapter {
         "default",
       ),
       maxTextLength: SLACK_MAX_TEXT_LENGTH,
-      agentDir: app?.agentDir,
       repeatReplyToMessageId: true,
       sendText: async ({ chatId, text, replyToMessageId }) =>
         await this.postText(chatId, text, replyToMessageId),
@@ -1601,8 +1592,8 @@ export class SlackAdapter {
     this.app.register(this, this.bot);
   }
 
-  setWorkingFrames(frames: string[]) {
-    this.editableWorking.setWorkingFrames(frames);
+  setWorkingText(text: string) {
+    this.editableWorking.setWorkingText(text);
   }
 
   async start() {

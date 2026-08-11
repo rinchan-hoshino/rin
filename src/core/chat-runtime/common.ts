@@ -55,18 +55,14 @@ export function partialChatDeliveryError(
   return next;
 }
 
-const DEFAULT_EDITABLE_WORKING_FRAMES = [
-  "Working...",
-  "Working",
-  "Working.",
-  "Working..",
-];
+const DEFAULT_WORKING_TEXT = "Working...";
+const LEGACY_EDITABLE_WORKING_TEXTS = ["Working", "Working.", "Working.."];
 
 export const EDITABLE_INTERMEDIATE_PREFIX = "...";
 export const EDITABLE_MESSAGE_SECTION_SEPARATOR = "────────";
 
 type ChatRuntimeWorkingCopy = {
-  frames: string[];
+  workingText: string;
   progressTexts: string[];
 };
 
@@ -82,26 +78,11 @@ function uniqueStrings(values: unknown[]) {
   return output;
 }
 
-function normalizeWorkingFrames(value: unknown) {
-  return uniqueStrings(Array.isArray(value) ? value : [value]);
-}
-
-export function resolveChatRuntimeWorkingCopy(
-  _agentDir?: string,
-): ChatRuntimeWorkingCopy {
+export function resolveChatRuntimeWorkingCopy(): ChatRuntimeWorkingCopy {
   return {
-    frames: [...DEFAULT_EDITABLE_WORKING_FRAMES],
-    progressTexts: [...DEFAULT_EDITABLE_WORKING_FRAMES],
+    workingText: DEFAULT_WORKING_TEXT,
+    progressTexts: [DEFAULT_WORKING_TEXT, ...LEGACY_EDITABLE_WORKING_TEXTS],
   };
-}
-
-export function editableWorkingText(tick: unknown, frames?: unknown) {
-  const options = normalizeWorkingFrames(frames);
-  const resolvedFrames = options.length
-    ? options
-    : DEFAULT_EDITABLE_WORKING_FRAMES;
-  const index = Math.abs(Math.floor(Number(tick) || 0)) % resolvedFrames.length;
-  return resolvedFrames[index] || DEFAULT_EDITABLE_WORKING_FRAMES[0];
 }
 
 export function editableIntermediateHeadText(text: unknown) {
@@ -113,22 +94,14 @@ export function editableIntermediateHeadText(text: unknown) {
   return `${EDITABLE_INTERMEDIATE_PREFIX} ${value}`;
 }
 
-export function randomWorkingText(frames?: unknown) {
-  const options = normalizeWorkingFrames(frames);
-  const resolvedFrames = options.length
-    ? options
-    : DEFAULT_EDITABLE_WORKING_FRAMES;
-  const index = Math.floor(Math.random() * resolvedFrames.length);
-  return resolvedFrames[index] || DEFAULT_EDITABLE_WORKING_FRAMES[0];
-}
-
-export function isEditableWorkingText(text: unknown, frames?: unknown) {
+export function isEditableWorkingText(text: unknown, progressTexts?: unknown) {
   const value = safeString(text).trim();
-  const options = normalizeWorkingFrames(frames);
-  const resolvedFrames = options.length
-    ? options
-    : DEFAULT_EDITABLE_WORKING_FRAMES;
-  return Boolean(value && resolvedFrames.includes(value));
+  const resolvedTexts = uniqueStrings([
+    DEFAULT_WORKING_TEXT,
+    ...LEGACY_EDITABLE_WORKING_TEXTS,
+    ...(Array.isArray(progressTexts) ? progressTexts : [progressTexts]),
+  ]);
+  return Boolean(value && resolvedTexts.includes(value));
 }
 
 export function extensionFromMimeType(mimeType: string) {

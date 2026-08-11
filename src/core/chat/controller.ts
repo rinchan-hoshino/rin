@@ -1247,18 +1247,8 @@ export class ChatController {
     );
   }
 
-  private isVisibleWorkingPollDue(
-    indicators: WorkingIndicator[],
-    lastPolledAt: number,
-    now = Date.now(),
-  ) {
-    const intervalMs = indicators.some(
-      (indicator) =>
-        workingIndicatorPresentation(indicator) === "editable-message",
-    )
-      ? DEFAULT_TYPING_POLL_INTERVAL_MS
-      : this.typingPollIntervalMs();
-    return lastPolledAt <= 0 || now - lastPolledAt >= intervalMs;
+  private isVisibleWorkingPollDue(lastPolledAt: number, now = Date.now()) {
+    return this.isTypingHeartbeatDue(lastPolledAt, now);
   }
 
   private warnTypingIndicatorFailure(error: unknown, now = Date.now()) {
@@ -1470,11 +1460,7 @@ export class ChatController {
       this.isTypingHeartbeatDue(this.lastCompactionTypingIndicatorAt, now);
     const visibleDue =
       visibleIndicators.length > 0 &&
-      this.isVisibleWorkingPollDue(
-        visibleIndicators,
-        this.lastCompactionIndicatorAt,
-        now,
-      );
+      this.isVisibleWorkingPollDue(this.lastCompactionIndicatorAt, now);
     if (!typingDue && !visibleDue) return false;
 
     const context = this.compactionWorkingIndicatorContext({
@@ -1642,11 +1628,7 @@ export class ChatController {
       this.isTypingHeartbeatDue(this.lastTypingIndicatorAt, now);
     const visibleDue =
       visibleIndicators.length > 0 &&
-      this.isVisibleWorkingPollDue(
-        visibleIndicators,
-        this.lastWorkingIndicatorAt,
-        now,
-      );
+      this.isVisibleWorkingPollDue(this.lastWorkingIndicatorAt, now);
     if (!typingDue && !visibleDue) return false;
 
     const context = this.workingIndicatorContext({
@@ -3629,13 +3611,10 @@ export class ChatController {
           typeof presentation.commandResponses === "object"
             ? presentation.commandResponses
             : {};
-        const workingFrames = Array.isArray(presentation.workingFrames)
-          ? presentation.workingFrames
-              .map((frame) => safeString(frame).trim())
-              .filter(Boolean)
-          : [];
+        const workingText = safeString(presentation.workingText).trim();
         this.commandResponses = resolveChatCommandResponses(commandResponses);
-        this.onChatPresentation?.({ commandResponses, workingFrames });
+        this.onChatPresentation?.({ commandResponses, workingText });
+        await this.refreshEditableWorkingNotice().catch(() => false);
         return;
       }
       const projection = projectChatExtensionUiRequest(event);

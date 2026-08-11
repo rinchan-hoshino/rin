@@ -43,7 +43,7 @@ export type RinExtensionUiMethod =
 
 export type RinChatPresentation = {
   commandResponses?: Record<string, string>;
-  workingFrames?: string[];
+  workingText?: string;
 };
 
 export type RinExtensionCommandResult = {

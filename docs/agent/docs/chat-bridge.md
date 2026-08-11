@@ -273,7 +273,7 @@ Configure a chat-specific model or thinking level under `settings.json -> chat.b
 
 ## Command acknowledgement text
 
-Routine chat command acknowledgements such as `/new`, `/abort`, and `/reload` use stable built-in English text and avoid temporary agent turns. The optional first-party `i18n` Pi extension can replace those responses and editable working frames from `~/.rin/i18n.json`; `/compact` uses the same contributed presentation.
+Routine chat command acknowledgements such as `/new`, `/abort`, and `/reload` use stable built-in English text and avoid temporary agent turns. Discord acknowledges a slash command immediately with a fixed `Working...` before the session extension starts. Rin core accepts only one current `workingText` and never selects or rotates frames. The optional first-party `i18n` Pi extension owns the frame list and animation timer from `~/.rin/i18n.json`, publishing each current text through the generic presentation API. `/compact` uses the same contributed command presentation.
 
 Install the `i18n` extension package, then create or edit its catalog:
 
