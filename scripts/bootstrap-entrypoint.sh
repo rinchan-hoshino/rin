@@ -593,10 +593,10 @@ provision_source_managed_node() {
 }
 
 resolve_release() {
-  node - "$MANIFEST_PATH" "$REPO_URL" "$PACKAGE_NAME" "$CHANNEL" "$BRANCH" "$VERSION" "$BOOTSTRAP_BRANCH" <<'NODE'
+  node - "$MANIFEST_PATH" "$REPO_URL" "$PACKAGE_NAME" "$CHANNEL" "$BRANCH" "$VERSION" <<'NODE'
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
-const [manifestPath, repoArg, packageArg, channelArg, branchArg, versionArg, bootstrapBranchArg] = process.argv.slice(2);
+const [manifestPath, repoArg, packageArg, channelArg, branchArg, versionArg] = process.argv.slice(2);
 const safeString = (value) => (value == null ? '' : String(value));
 const trimValue = (value) => safeString(value).trim();
 const repoUrl = trimValue(repoArg || 'https://github.com/rinchan-hoshino/rin').replace(/\.git$/i, '').replace(/\/+$/g, '');
@@ -628,43 +628,21 @@ const buildRefArchiveUrlForRepo = (repo, ref) => {
 const buildNpmTarballUrl = (name, releaseVersion) => {
   const encodedName = encodeURIComponent(name || '@hoshinorin/rin');
   const fileBase = String(name || '@hoshinorin/rin').split('/').pop();
-  return `https://registry.npmjs.org/${encodedName}/-/${fileBase}-${releaseVersion || '0.0.0'}.tgz`;
+  return `https://registry.npmjs.org/${encodedName}/-/${fileBase}-${releaseVersion}.tgz`;
 };
-const defaultManifest = {
-  schemaVersion: 2,
-  packageName,
-  repoUrl,
-  bootstrapBranch: trimValue(bootstrapBranchArg || 'bootstrap') || 'bootstrap',
-  train: {
-    series: '0.0',
-    nightlyBranch: 'main',
-  },
-  stable: {
-    version: '0.0.0',
-    archiveUrl: buildNpmTarballUrl(packageName, '0.0.0'),
-    ref: 'main',
-  },
-  beta: {
-    version: '0.1.0-beta.0',
-    archiveUrl: buildRefArchiveUrlForRepo(repoUrl, 'refs/heads/main'),
-    ref: 'main',
-    promotionVersion: '0.1.0',
-  },
-  nightly: {
-    version: '0.1.0-nightly.0',
-    archiveUrl: buildRefArchiveUrlForRepo(repoUrl, 'refs/heads/main'),
-    ref: 'main',
-    branch: 'main',
-  },
-  git: {
-    defaultBranch: 'main',
-    repoUrl,
-  },
+const invalidManifest = (detail) => {
+  console.error(`invalid Rin release manifest: ${detail}`);
+  process.exit(1);
 };
-let manifest = defaultManifest;
+const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+let manifest;
 try {
-  manifest = { ...defaultManifest, ...JSON.parse(fs.readFileSync(manifestPath, 'utf8')) };
-} catch {}
+  manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+} catch {
+  invalidManifest('expected readable JSON');
+}
+if (!isRecord(manifest)) invalidManifest('expected an object');
+if (!isRecord(manifest[channel])) invalidManifest(`missing ${channel} release`);
 const releaseRepoUrl = trimValue(manifest.repoUrl || repoUrl).replace(/\.git$/i, '').replace(/\/+$/g, '');
 const releasePackageName = trimValue(manifest.packageName || packageName) || '@hoshinorin/rin';
 const buildRefArchiveUrl = (ref) => buildRefArchiveUrlForRepo(releaseRepoUrl, ref);
@@ -719,21 +697,24 @@ let resolved;
 if (branch && version) throw new Error('rin_release_branch_and_version_conflict');
 if (channel === 'stable') {
   if (branch) throw new Error('rin_stable_branch_not_supported');
-  const entry = version && manifest.stable && manifest.stable.versions ? manifest.stable.versions[version] : undefined;
-  const resolvedVersion = version || trimValue(manifest.stable && manifest.stable.version) || '0.0.0';
+  const stable = manifest.stable;
+  const entry = version && isRecord(stable.versions) ? stable.versions[version] : undefined;
+  const resolvedVersion = version || trimValue(stable.version);
+  if (!resolvedVersion) invalidManifest('missing stable release version');
   resolved = {
     channel: 'stable',
-    archiveUrl: trimValue(entry && entry.archiveUrl) || trimValue(manifest.stable && manifest.stable.archiveUrl) || buildNpmTarballUrl(releasePackageName, resolvedVersion),
+    archiveUrl: trimValue(entry && entry.archiveUrl) || trimValue(stable.archiveUrl) || buildNpmTarballUrl(releasePackageName, resolvedVersion),
     version: resolvedVersion,
     branch: 'stable',
-    ref: trimValue(entry && entry.ref) || trimValue(manifest.stable && manifest.stable.ref) || version || trimValue(manifest.stable && manifest.stable.version) || 'main',
+    ref: trimValue(entry && entry.ref) || trimValue(stable.ref) || version || resolvedVersion,
     sourceLabel: version ? `stable version ${resolvedVersion}` : `stable ${resolvedVersion}`,
   };
 } else if (channel === 'beta') {
   if (branch || version) throw new Error('rin_beta_selector_not_supported');
-  const beta = manifest.beta || {};
+  const beta = manifest.beta;
   const resolvedRef = trimValue(beta.ref) || 'main';
-  const resolvedVersion = trimValue(beta.version) || '0.1.0-beta.0';
+  const resolvedVersion = trimValue(beta.version);
+  if (!resolvedVersion) invalidManifest('missing beta release version');
   resolved = {
     channel: 'beta',
     archiveUrl: trimValue(beta.archiveUrl) || buildRefArchiveUrl(resolvedRef),
@@ -744,19 +725,21 @@ if (channel === 'stable') {
   };
 } else if (channel === 'nightly') {
   if (branch || version) throw new Error('rin_nightly_selector_not_supported');
-  const nightly = manifest.nightly || {};
+  const nightly = manifest.nightly;
+  const resolvedVersion = trimValue(nightly.version);
+  if (!resolvedVersion) invalidManifest('missing nightly release version');
   const resolvedBranch = trimValue(nightly.branch) || trimValue(manifest.train && manifest.train.nightlyBranch) || 'main';
   const resolvedRef = trimValue(nightly.ref) || resolvedBranch;
   resolved = {
     channel: 'nightly',
     archiveUrl: trimValue(nightly.archiveUrl) || (trimValue(nightly.ref) ? buildRefArchiveUrl(resolvedRef) : buildBranchArchiveUrl(resolvedBranch)),
-    version: trimValue(nightly.version) || '0.1.0-nightly.0',
+    version: resolvedVersion,
     branch: resolvedBranch,
     ref: resolvedRef,
-    sourceLabel: `nightly ${trimValue(nightly.version) || '0.1.0-nightly.0'}`,
+    sourceLabel: `nightly ${resolvedVersion}`,
   };
 } else {
-  const git = manifest.git || {};
+  const git = manifest.git;
   const resolvedBranch = branch || trimValue(git.defaultBranch) || 'main';
   const selector = version || resolvedBranch;
   const resolvedRef = resolveGitCommit(selector, version ? '' : resolvedBranch);

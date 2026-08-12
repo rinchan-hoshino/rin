@@ -479,6 +479,88 @@ exit 1
   });
 });
 
+test("POSIX bootstrap rejects invalid release manifests without inventing 0.0.0", async (t) => {
+  for (const fixture of [
+    { name: "malformed JSON", content: "{\n" },
+    { name: "empty object", content: "{}\n" },
+    {
+      name: "missing selected channel",
+      content: `${JSON.stringify({ schemaVersion: 2, beta: { version: "1.2.3-beta.1" } })}\n`,
+    },
+    {
+      name: "missing stable identity",
+      content: `${JSON.stringify({ schemaVersion: 2, stable: {} })}\n`,
+    },
+  ]) {
+    await t.test(fixture.name, async () => {
+      await withTempDir(async (tempDir) => {
+        const fakeBin = path.join(tempDir, "bin");
+        const manifestPath = path.join(tempDir, "release-manifest.json");
+        const logPath = path.join(tempDir, "fetch.log");
+        const workRoot = path.join(tempDir, "work");
+        await fs.mkdir(fakeBin, { recursive: true });
+        await fs.mkdir(workRoot, { recursive: true });
+        await fs.writeFile(manifestPath, fixture.content, "utf8");
+        await fs.writeFile(logPath, "", "utf8");
+        await writeExecutable(
+          path.join(fakeBin, "curl"),
+          `#!/bin/sh
+echo "curl:$*" >>"$RIN_BOOTSTRAP_TEST_LOG"
+OUT=
+URL=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) OUT=$2; shift 2 ;;
+    -*) shift ;;
+    *) URL=$1; shift ;;
+  esac
+done
+case "$URL" in
+  *release-manifest.json) cp "$RIN_BOOTSTRAP_TEST_MANIFEST" "$OUT" ;;
+  *) exit 22 ;;
+esac
+`,
+        );
+        await writeExecutable(
+          path.join(fakeBin, "wget"),
+          "#!/bin/sh\nexit 1\n",
+        );
+
+        await assert.rejects(
+          execFileAsync(
+            "sh",
+            [
+              path.join(rootDir, "scripts", "bootstrap-entrypoint.sh"),
+              "install",
+            ],
+            {
+              cwd: rootDir,
+              env: {
+                ...process.env,
+                PATH: `${fakeBin}:${process.env.PATH}`,
+                RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
+                RIN_BOOTSTRAP_TEST_LOG: logPath,
+                RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
+                TMPDIR: workRoot,
+              },
+            },
+          ),
+          (error) => {
+            assert.match(
+              String(error.stderr || ""),
+              /invalid Rin release manifest/,
+            );
+            return true;
+          },
+        );
+
+        const fetchLog = await fs.readFile(logPath, "utf8");
+        assert.doesNotMatch(fetchLog, /0\.0\.0|registry\.npmjs\.org/);
+      });
+    });
+  }
+});
+
 test("bootstrap scripts render progress without rin-install log prefixes", async () => {
   for (const scriptName of [
     "install.sh",
