@@ -78,12 +78,12 @@ async function runClosingTurn(windowTurns: number | undefined, turns: number) {
   return queued;
 }
 
-test("self-improve defaults to one independent review every four completed user turns", async () => {
-  assert.equal((await runClosingTurn(undefined, 3)).length, 0);
-  const queued = await runClosingTurn(undefined, 4);
+test("self-improve defaults to one independent review every eight completed user turns", async () => {
+  assert.equal((await runClosingTurn(undefined, 7)).length, 0);
+  const queued = await runClosingTurn(undefined, 8);
   assert.equal(queued.length, 1);
   assert.equal(queued[0].trigger, "self_improve:turn_window_review");
-  assert.match(queued[0].snapshotKey, /^turn-window:4:4:/);
+  assert.match(queued[0].snapshotKey, /^turn-window:8:8:/);
   assert.equal(queued[0].sourceContext, undefined);
 });
 

@@ -1,4 +1,4 @@
-export const DEFAULT_SELF_IMPROVE_TURN_WINDOW_TURNS = 4;
+export const DEFAULT_SELF_IMPROVE_TURN_WINDOW_TURNS = 8;
 
 export function normalizeSelfImproveTurnWindowTurns(value: unknown) {
   const turns = Number(value);

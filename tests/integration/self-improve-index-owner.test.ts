@@ -66,6 +66,7 @@ test("self-improve message-end accepts only explicit current frontend producers"
   const closing = branch.at(-1).message;
   const queued: any[] = [];
   const definition = selfImprove.default({
+    selfImproveTurnWindowTurns: 4,
     async enqueueSelfImproveMaintenanceJob(job) {
       queued.push(job);
     },
@@ -194,6 +195,7 @@ test("self-improve message-end fails closed at final, window, and persistence bo
   const closing = branch.at(-1).message;
   const queued: any[] = [];
   const definition = selfImprove.default({
+    selfImproveTurnWindowTurns: 4,
     async enqueueSelfImproveMaintenanceJob(job) {
       queued.push(job);
     },
@@ -298,6 +300,7 @@ test("self-improve shutdown uses complete windows or a persisted fallback review
   const fourTurns = linearTurnBranch(4);
   const queued: any[] = [];
   const definition = selfImprove.default({
+    selfImproveTurnWindowTurns: 4,
     async enqueueSelfImproveMaintenanceJob(job) {
       queued.push(job);
     },

@@ -383,6 +383,7 @@ test("self-improve queues one review after Pi persists each shared turn window f
   const queued: any[] = [];
   let branch: any[] = [];
   const definition = selfImproveIndex.default({
+    selfImproveTurnWindowTurns: 4,
     async enqueueSelfImproveMaintenanceJob(job) {
       queued.push(job);
     },
@@ -487,6 +488,7 @@ test("turn-window completion followed by shutdown queues only one review", async
     let activeBranch = branch;
     const pendingEnqueues = [];
     const definition = selfImproveIndex.default({
+      selfImproveTurnWindowTurns: 4,
       enqueueSelfImproveMaintenanceJob(job) {
         const pending = asyncJobs.enqueueSelfImproveMaintenanceJob(job);
         pendingEnqueues.push(pending);
