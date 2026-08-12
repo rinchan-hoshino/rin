@@ -2449,6 +2449,7 @@ test("worker pool owner covers recovery schedulers, shared recovery, restoration
   pool.scheduleActiveDaemonTurnRecovery("owner-retry");
   const retryTimer = pool.activeTurnRecoveryTimers.get("owner-retry");
   assert.ok(retryTimer);
+  assert.equal(retryTimer._idleTimeout, 500);
   pool.scheduleActiveDaemonTurnRecovery("owner-retry");
   clearTimeout(retryTimer);
   pool.activeTurnRecoveryTimers.clear();

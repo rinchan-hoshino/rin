@@ -562,6 +562,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin-daemon/recovery-backoff.ts",
+      "built": "dist/core/rin-daemon/recovery-backoff.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin-daemon/rpc-mode.ts",
       "built": "dist/core/rin-daemon/rpc-mode.js",
       "ownerSuite": "integration",

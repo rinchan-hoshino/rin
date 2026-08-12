@@ -298,13 +298,15 @@ test("cron scheduler does not relaunch a live durable invocation on tick", async
   }
 });
 
-test("cron scheduler keeps a durable invocation after infrastructure failure", async () => {
+test("cron scheduler persists infrastructure retry backoff without inflating run count", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const taskId = "cron_retry_infrastructure_failure";
+  let calls = 0;
   const scheduler = new cronMod.CronScheduler({
     agentDir,
     chat: {
       runTurn: async () => {
+        calls += 1;
         throw new Error("chat transport unavailable");
       },
     },
@@ -323,11 +325,88 @@ test("cron scheduler keeps a durable invocation after infrastructure failure", a
 
     const row = scheduler.tasks.get(taskId);
     assert.equal(row.activeInvocation?.taskId, taskId);
+    assert.equal(row.activeInvocation?.retryAttempt, 1);
+    const retryDelayMs =
+      Date.parse(row.activeInvocation?.nextAttemptAt || "") - Date.now();
+    assert.ok(retryDelayMs > 0 && retryDelayMs <= 500);
     assert.equal(row.lastFinishedAt, undefined);
     assert.equal(row.lastError, undefined);
     assert.equal(scheduler.getTask(taskId).running, true);
+    assert.equal(scheduler.getTask(taskId).runCount, 1);
+
+    await scheduler.tick();
+    assert.equal(calls, 1);
   } finally {
     scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron scheduler preserves retry backoff across restart and wake bypasses it", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const taskId = "cron_retry_restart_backoff";
+  const firstScheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async () => {
+        throw new Error("first transport failure");
+      },
+    },
+  });
+  let retryCalls = 0;
+  let secondScheduler;
+  try {
+    firstScheduler.upsertTask({
+      id: taskId,
+      trigger: { runAt: "2099-04-10T00:00:00.000Z" },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "retry after restart" },
+    });
+    firstScheduler.runTaskNow(taskId);
+    for (
+      let i = 0;
+      i < 50 && firstScheduler.activeExecutions.has(taskId);
+      i += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    firstScheduler.tasks.get(taskId).activeInvocation.nextAttemptAt = new Date(
+      Date.now() + 60_000,
+    ).toISOString();
+    firstScheduler.stop();
+
+    secondScheduler = new cronMod.CronScheduler({
+      agentDir,
+      chat: {
+        runTurn: async () => {
+          retryCalls += 1;
+          throw new Error("second transport failure");
+        },
+      },
+    });
+    secondScheduler.start();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(retryCalls, 0);
+    assert.equal(secondScheduler.getTask(taskId).runCount, 1);
+
+    secondScheduler.wakeTaskNow(taskId);
+    await secondScheduler.tick();
+    for (
+      let i = 0;
+      i < 50 && secondScheduler.activeExecutions.has(taskId);
+      i += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(retryCalls, 1);
+    assert.equal(secondScheduler.getTask(taskId).runCount, 1);
+    assert.equal(
+      secondScheduler.tasks.get(taskId).activeInvocation.retryAttempt,
+      2,
+    );
+  } finally {
+    firstScheduler.stop();
+    secondScheduler?.stop();
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });

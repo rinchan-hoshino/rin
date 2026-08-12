@@ -122,6 +122,11 @@
       "built": "dist/core/rin-daemon/cron-utils.js"
     },
     {
+      "test": "tests/unit/recovery-backoff.test.ts",
+      "source": "src/core/rin-daemon/recovery-backoff.ts",
+      "built": "dist/core/rin-daemon/recovery-backoff.js"
+    },
+    {
       "test": "tests/unit/running-workers.test.ts",
       "source": "src/core/rin-daemon/running-workers.ts",
       "built": "dist/core/rin-daemon/running-workers.js"

@@ -21,6 +21,7 @@ import {
 import { getManagedTaskSessionFile } from "../session/managed-paths.js";
 import { buildSelfImproveSleepPrompt } from "../self-improve/prompt.js";
 import { evaluateCronTaskCondition } from "./cron-condition.js";
+import { daemonRecoveryDelayMs } from "./recovery-backoff.js";
 import {
   appendCronTaskTerminalHistory,
   applyCronTaskTerminalProjection,
@@ -98,6 +99,8 @@ export type CronSessionInvocation = {
   session: CronTaskSessionBinding;
   target: Extract<CronTaskTarget, { kind: "agent_prompt" }>;
   promptMeta: Record<string, unknown> & { sentAt: number };
+  retryAttempt?: number;
+  nextAttemptAt?: string;
 };
 
 export type CronTaskRecord = {
@@ -464,6 +467,14 @@ function normalizeCronSessionInvocation(
   if (!Number.isFinite(sentAt) || sentAt <= 0) {
     throw new Error("cron_tasks_file_invalid");
   }
+  const retryAttempt = Number(raw.retryAttempt || 0);
+  if (!Number.isInteger(retryAttempt) || retryAttempt < 0) {
+    throw new Error("cron_tasks_file_invalid");
+  }
+  const nextAttemptAt = normalizeIso(raw.nextAttemptAt, "nextAttemptAt");
+  if (retryAttempt === 0 && nextAttemptAt) {
+    throw new Error("cron_tasks_file_invalid");
+  }
   return {
     id,
     requestTag,
@@ -486,6 +497,8 @@ function normalizeCronSessionInvocation(
     session,
     target,
     promptMeta: { ...raw.promptMeta, sentAt },
+    retryAttempt: retryAttempt || undefined,
+    nextAttemptAt,
   };
 }
 
@@ -766,6 +779,7 @@ export class CronScheduler {
     if (task.completedAt) throw new Error(`cron_task_completed:${taskId}`);
     task.enabled = true;
     delete task.pausedAt;
+    if (task.activeInvocation) delete task.activeInvocation.nextAttemptAt;
     task.nextRunAt = nowIso();
     task.updatedAt = nowIso();
     this.save();
@@ -1046,6 +1060,7 @@ export class CronScheduler {
 
   private resumeActiveInvocations() {
     let changed = false;
+    const now = Date.now();
     for (const task of this.tasks.values()) {
       const invocation = task.activeInvocation;
       if (!invocation || this.activeExecutions.has(task.id)) continue;
@@ -1054,8 +1069,11 @@ export class CronScheduler {
         changed = true;
         continue;
       }
+      const nextAttemptAt = Date.parse(invocation.nextAttemptAt || "");
+      if (Number.isFinite(nextAttemptAt) && nextAttemptAt > now) continue;
+      delete invocation.nextAttemptAt;
       this.activeExecutions.set(task.id, {
-        startedAt: Date.parse(invocation.startedAt) || Date.now(),
+        startedAt: Date.parse(invocation.startedAt) || now,
       });
       void this.executeSessionInvocation(task.id, invocation).catch(() => {});
     }
@@ -1083,11 +1101,16 @@ export class CronScheduler {
       if (error?.rinTurnTerminal !== true) {
         this.activeExecutions.delete(taskId);
         const current = this.tasks.get(taskId);
-        if (
-          current?.activeInvocation?.id === invocation.id &&
-          (!current.enabled || current.completedAt)
-        ) {
-          delete current.activeInvocation;
+        if (current?.activeInvocation?.id === invocation.id) {
+          if (!current.enabled || current.completedAt) {
+            delete current.activeInvocation;
+          } else {
+            const retryAttempt = (invocation.retryAttempt || 0) + 1;
+            invocation.retryAttempt = retryAttempt;
+            invocation.nextAttemptAt = new Date(
+              Date.now() + daemonRecoveryDelayMs(retryAttempt),
+            ).toISOString();
+          }
           this.save();
         }
         return;

@@ -14,6 +14,7 @@ import {
   recordDaemonTurnTerminal,
   type DaemonTurnInvocationContext,
 } from "./turn-ledger.js";
+import { daemonRecoveryDelayMs } from "./recovery-backoff.js";
 import { setRunningWorkerSession } from "./running-workers.js";
 import {
   WORKER_CGROUP_DELEGATION_ENV,
@@ -946,7 +947,7 @@ export class WorkerPool {
     }
     const attempt = (this.activeTurnRecoveryAttempts.get(requestTag) || 0) + 1;
     this.activeTurnRecoveryAttempts.set(requestTag, attempt);
-    const delayMs = Math.min(30_000, 500 * 2 ** Math.min(attempt - 1, 6));
+    const delayMs = daemonRecoveryDelayMs(attempt);
     const timer = setTimeout(() => {
       this.activeTurnRecoveryTimers.delete(requestTag);
       void this.recoverActiveDaemonTurn(requestTag).catch((error) => {
