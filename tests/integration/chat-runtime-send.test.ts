@@ -2168,14 +2168,16 @@ test("onebot adapter degrades markdown formatting instead of exposing raw markdo
 
     assert.deepEqual(result, ["m1"]);
     assert.equal(calls[0].action, "send_private_msg");
-    assert.equal(
-      calls[0].params.message,
-      "bold docs\n- one\n1. first\n> quoted",
-    );
+    assert.deepEqual(calls[0].params.message, [
+      {
+        type: "text",
+        data: { text: "bold docs\n- one\n1. first\n> quoted" },
+      },
+    ]);
   });
 });
 
-test("onebot adapter renders structured at as native CQ mention", async () => {
+test("onebot adapter renders structured at as a native message segment", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "onebot",
@@ -2192,11 +2194,18 @@ test("onebot adapter renders structured at as native CQ mention", async () => {
 
     await app.bots[0].sendMessage("2", [
       h.at("12345", { name: "Alice" }),
-      h.text(" hello"),
+      h.text(" hello [CQ:image,file=not-media]"),
     ]);
 
     assert.equal(calls[0].action, "send_group_msg");
-    assert.equal(calls[0].params.message, "[CQ:at,qq=12345] hello");
+    assert.deepEqual(calls[0].params.message, [
+      { type: "at", data: { qq: "12345" } },
+      {
+        type: "text",
+        data: { text: " hello [CQ:image,file=not-media]" },
+      },
+    ]);
+    assert.equal("auto_escape" in calls[0].params, false);
   });
 });
 
@@ -2232,10 +2241,10 @@ test("onebot adapter routes files through native upload with the requested name"
     assert.deepEqual(result, ["m1", "file-1"]);
     assert.equal(calls.length, 2);
     assert.equal(calls[0].action, "send_private_msg");
-    assert.equal(
-      calls[0].params.message,
-      "[CQ:image,file=base64://cG5n]" + "[CQ:video,file=base64://bXA0]",
-    );
+    assert.deepEqual(calls[0].params.message, [
+      { type: "image", data: { file: "base64://cG5n" } },
+      { type: "video", data: { file: "base64://bXA0" } },
+    ]);
     assert.equal(calls[1].action, "upload_private_file");
     assert.equal(calls[1].params.user_id, 2);
     assert.equal(calls[1].params.file, "base64://bm90ZXM=");
@@ -2272,13 +2281,16 @@ test("onebot adapter falls back to a safe rich node during serialization", async
 
     assert.deepEqual(result, ["m1", "m1", "m1"]);
     assert.equal(calls.length, 3);
-    assert.equal(calls[0].params.message, "before ");
-    assert.equal(calls[1].params.message, "&#91;file: missing.pdf&#93;");
-    assert.equal(calls[2].params.message, " after");
-    assert.doesNotMatch(
-      calls.map((call) => call.params.message).join(""),
-      /chat_media_file_missing:/,
-    );
+    assert.deepEqual(calls[0].params.message, [
+      { type: "text", data: { text: "before " } },
+    ]);
+    assert.deepEqual(calls[1].params.message, [
+      { type: "text", data: { text: "[file: missing.pdf]" } },
+    ]);
+    assert.deepEqual(calls[2].params.message, [
+      { type: "text", data: { text: " after" } },
+    ]);
+    assert.doesNotMatch(JSON.stringify(calls), /chat_media_file_missing:/);
   });
 });
 
@@ -2327,16 +2339,23 @@ test("onebot adapter falls back to plain text after a confirmed rich send failur
     assert.deepEqual(result, ["caption-message", "fallback-message"]);
     assert.equal(calls.length, 3);
     assert.equal(calls[0].action, "send_group_msg");
-    assert.match(calls[0].params.message, /^\[CQ:reply,id=88\]/);
-    assert.match(calls[0].params.message, /Resending as plain text:/);
-    assert.doesNotMatch(calls[0].params.message, /CQ:file|base64:/);
+    assert.deepEqual(calls[0].params.message, [
+      { type: "reply", data: { id: "88" } },
+      { type: "text", data: { text: "Resending as plain text:\n" } },
+    ]);
+    assert.doesNotMatch(
+      JSON.stringify(calls[0].params.message),
+      /CQ:file|base64:/,
+    );
     assert.equal(calls[1].action, "upload_group_file");
     assert.equal(calls[1].params.group_id, 2);
     assert.equal(calls[1].params.file, "base64://ZHJhZnQ=");
     assert.equal(calls[1].params.name, "draft.xlsx");
     assert.equal(calls[1].params.upload_file, true);
     assert.equal(calls[2].action, "send_group_msg");
-    assert.equal(calls[2].params.message, "&#91;file: draft.xlsx&#93;");
+    assert.deepEqual(calls[2].params.message, [
+      { type: "text", data: { text: "[file: draft.xlsx]" } },
+    ]);
     assert.equal(calls[2].params.timeout, runtime.ONEBOT_ACTION_TIMEOUT_MS);
   });
 });
@@ -3305,8 +3324,11 @@ test("onebot private working indicator is a one-shot marker", async () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].action, "send_private_msg");
     assert.equal(calls[0].params.user_id, 2);
-    assert.equal(calls[0].params.auto_escape, false);
-    assert.equal(calls[0].params.message, "[CQ:reply,id=m1]Working...");
+    assert.equal("auto_escape" in calls[0].params, false);
+    assert.deepEqual(calls[0].params.message, [
+      { type: "reply", data: { id: "m1" } },
+      { type: "text", data: { text: "Working..." } },
+    ]);
   });
 });
 
@@ -3337,10 +3359,15 @@ test("onebot private marker uses extension presentation working text", async () 
     );
 
     assert.equal(calls.length, 1);
-    assert.equal(
-      calls[0].params.message,
-      "[CQ:reply,id=m1]\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
-    );
+    assert.deepEqual(calls[0].params.message, [
+      { type: "reply", data: { id: "m1" } },
+      {
+        type: "text",
+        data: {
+          text: "\u5de5\u4f5c\u4e2d... (\u0e51\u2022\u0300\u3142\u2022\u0301)\u0648\u2727",
+        },
+      },
+    ]);
   });
 });
 

@@ -1521,14 +1521,6 @@ function parseOneBotSegments(input: unknown) {
   return segments;
 }
 
-function escapeOneBotText(value: string) {
-  return safeString(value)
-    .replace(/&/g, "&amp;")
-    .replace(/\[/g, "&#91;")
-    .replace(/\]/g, "&#93;")
-    .replace(/,/g, "&#44;");
-}
-
 const NAPCAT_ONEBOT_EMOJI_ID_OVERRIDES: Record<string, string> = {
   "🌘": "75",
   "🌗": "74",
@@ -1995,54 +1987,56 @@ class OneBotAdapter {
       node?.attrs && typeof node.attrs === "object" ? node.attrs : {};
     if (type === "quote") {
       const id = safeString(attrs.id).trim();
-      return id ? `[CQ:reply,id=${escapeOneBotText(id)}]` : "";
+      return id ? [{ type: "reply", data: { id } }] : [];
     }
     if (type === "text") {
-      return escapeOneBotText(safeString(attrs.content));
+      const text = safeString(attrs.content);
+      return text ? [{ type: "text", data: { text } }] : [];
     }
     if (type === "markdown" || type === "md" || type === "html") {
-      return escapeOneBotText(renderPlainTextFromNodes([node]));
+      const text = renderPlainTextFromNodes([node]);
+      return text ? [{ type: "text", data: { text } }] : [];
     }
     if (type === "at") {
-      const id = safeString(attrs.id).trim();
-      return id ? `[CQ:at,qq=${escapeOneBotText(id)}]` : "";
+      const qq = safeString(attrs.id).trim();
+      return qq ? [{ type: "at", data: { qq } }] : [];
     }
-    if (type === "br") return "\n";
+    if (type === "br") return [{ type: "text", data: { text: "\n" } }];
     if (type === "image") {
-      const media = await this.normalizeOutboundMedia(node, "image");
-      return media ? `[CQ:image,file=${escapeOneBotText(media)}]` : "";
+      const file = await this.normalizeOutboundMedia(node, "image");
+      return file ? [{ type: "image", data: { file } }] : [];
     }
     if (type === "audio" || type === "voice" || type === "record") {
-      const media = await this.normalizeOutboundMedia(node, "file");
-      return media ? `[CQ:record,file=${escapeOneBotText(media)}]` : "";
+      const file = await this.normalizeOutboundMedia(node, "file");
+      return file ? [{ type: "record", data: { file } }] : [];
     }
     if (type === "video") {
-      const media = await this.normalizeOutboundMedia(node, "file");
-      return media ? `[CQ:video,file=${escapeOneBotText(media)}]` : "";
+      const file = await this.normalizeOutboundMedia(node, "file");
+      return file ? [{ type: "video", data: { file } }] : [];
     }
     if (type === "file" || type === "sticker") {
-      const media = await this.normalizeOutboundMedia(node, "file");
-      return media ? `[CQ:file,file=${escapeOneBotText(media)}]` : "";
+      const file = await this.normalizeOutboundMedia(node, "file");
+      return file ? [{ type: "file", data: { file } }] : [];
     }
     const children = Array.isArray(node?.children) ? node.children : [];
-    return children.length ? await this.renderOutboundMessage(children) : "";
+    return children.length ? await this.renderOutboundMessage(children) : [];
   }
 
   private async renderOutboundMessage(nodes: any[]) {
-    const parts: string[] = [];
+    const segments: Array<{ type: string; data: Record<string, string> }> = [];
     for (const node of nodes) {
       try {
-        parts.push(await this.renderOutboundNode(node));
+        segments.push(...(await this.renderOutboundNode(node)));
       } catch (error: any) {
         this.logger.warn(
           `rich message segment failed err=${safeString(error?.message || error)}`,
         );
         const fallback = renderRichDeliveryFallback([node]);
         if (!fallback) throw error;
-        parts.push(escapeOneBotText(fallback));
+        segments.push({ type: "text", data: { text: fallback } });
       }
     }
-    return parts.join("");
+    return segments;
   }
 
   private sendMessage(chatId: string, content: any, _options?: any) {
@@ -2101,17 +2095,17 @@ class OneBotAdapter {
           exposeDispatch(actionTask);
           return await actionTask;
         };
-        const sendText = async (nextMessage: string) => {
+        const sendSegments = async (
+          message: Array<{ type: string; data: Record<string, string> }>,
+        ) => {
           const params = isPrivate
             ? {
                 user_id: targetId,
-                message: nextMessage,
-                auto_escape: false,
+                message,
               }
             : {
                 group_id: targetId,
-                message: nextMessage,
-                auto_escape: false,
+                message,
               };
           const data: any = await call(messageAction, params);
           const messageId = safeString(data?.message_id || data).trim();
@@ -2121,17 +2115,17 @@ class OneBotAdapter {
         const delivered: string[] = [];
         let replyAttached = false;
         const takeReply = () => {
-          if (replyAttached || !replyToMessageId) return "";
+          if (replyAttached || !replyToMessageId) return [];
           replyAttached = true;
-          return `[CQ:reply,id=${escapeOneBotText(replyToMessageId)}]`;
+          return [{ type: "reply", data: { id: replyToMessageId } }];
         };
         for (const fragment of fragments) {
           if (fragment.kind === "message") {
             const message = await this.renderOutboundMessage(fragment.nodes);
-            if (!message) continue;
+            if (!message.length) continue;
             const reply = takeReply();
             try {
-              delivered.push(await sendText(`${reply}${message}`));
+              delivered.push(await sendSegments([...reply, ...message]));
               continue;
             } catch (error: any) {
               let deliveryError = error;
@@ -2146,7 +2140,10 @@ class OneBotAdapter {
                   );
                   try {
                     delivered.push(
-                      await sendText(`${reply}${escapeOneBotText(fallback)}`),
+                      await sendSegments([
+                        ...reply,
+                        { type: "text", data: { text: fallback } },
+                      ]),
                     );
                     continue;
                   } catch (fallbackError) {
@@ -2214,7 +2211,10 @@ class OneBotAdapter {
             );
             try {
               delivered.push(
-                await sendText(`${takeReply()}${escapeOneBotText(fallback)}`),
+                await sendSegments([
+                  ...takeReply(),
+                  { type: "text", data: { text: fallback } },
+                ]),
               );
               continue;
             } catch (fallbackError) {
@@ -2272,13 +2272,15 @@ class OneBotAdapter {
     const replyToMessageId = safeString(
       context?.replyToMessageId || context?.messageId,
     ).trim();
-    const reply = replyToMessageId
-      ? `[CQ:reply,id=${escapeOneBotText(replyToMessageId)}]`
-      : "";
+    const message = [
+      ...(replyToMessageId
+        ? [{ type: "reply", data: { id: replyToMessageId } }]
+        : []),
+      { type: "text", data: { text: this.workingText } },
+    ];
     await this.callAction("send_private_msg", {
       user_id: targetId,
-      message: `${reply}${escapeOneBotText(this.workingText)}`,
-      auto_escape: false,
+      message,
     });
     return true;
   }
