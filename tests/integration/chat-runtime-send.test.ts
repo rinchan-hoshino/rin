@@ -2200,7 +2200,7 @@ test("onebot adapter renders structured at as native CQ mention", async () => {
   });
 });
 
-test("onebot adapter embeds all local media as base64", async () => {
+test("onebot adapter routes files through native upload with the requested name", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
       key: "onebot",
@@ -2211,34 +2211,39 @@ test("onebot adapter embeds all local media as base64", async () => {
     const h = runtime.createChatRuntimeH();
     const imagePath = path.join(agentDir, "avatar.png");
     const videoPath = path.join(agentDir, "clip.mp4");
-    const filePath = path.join(agentDir, "notes.txt");
+    const filePath = path.join(agentDir, "random-source-name.txt");
     const calls: Array<{ action: string; params: any }> = [];
     await fs.writeFile(imagePath, Buffer.from("png"));
     await fs.writeFile(videoPath, Buffer.from("mp4"));
     await fs.writeFile(filePath, Buffer.from("notes"));
     adapter.callAction = async (action: string, params: any) => {
       calls.push({ action, params });
-      return { message_id: "m1" };
+      return action === "upload_private_file"
+        ? { file_id: "file-1" }
+        : { message_id: "m1" };
     };
 
     const result = await app.bots[0].sendMessage("private:2", [
       h.image(imagePath),
       h("video", { src: videoPath, name: "clip.mp4", mimeType: "video/mp4" }),
-      h.file(filePath, "text/plain", { name: "notes.txt" }),
+      h.file(filePath, "text/plain", { name: "report final.txt" }),
     ]);
 
-    assert.deepEqual(result, ["m1"]);
-    assert.equal(calls.length, 1);
+    assert.deepEqual(result, ["m1", "file-1"]);
+    assert.equal(calls.length, 2);
     assert.equal(calls[0].action, "send_private_msg");
     assert.equal(
-      calls[0].params.timeout,
-      runtime.ONEBOT_MEDIA_ACTION_TIMEOUT_MS,
-    );
-    assert.equal(
       calls[0].params.message,
-      "[CQ:image,file=base64://cG5n]" +
-        "[CQ:video,file=base64://bXA0]" +
-        "[CQ:file,file=base64://bm90ZXM=]",
+      "[CQ:image,file=base64://cG5n]" + "[CQ:video,file=base64://bXA0]",
+    );
+    assert.equal(calls[1].action, "upload_private_file");
+    assert.equal(calls[1].params.user_id, 2);
+    assert.equal(calls[1].params.file, "base64://bm90ZXM=");
+    assert.equal(calls[1].params.name, "report final.txt");
+    assert.equal(calls[1].params.upload_file, true);
+    assert.equal(
+      calls[1].params.timeout,
+      runtime.ONEBOT_MEDIA_ACTION_TIMEOUT_MS,
     );
   });
 });
@@ -2265,13 +2270,15 @@ test("onebot adapter falls back to a safe rich node during serialization", async
       h.text(" after"),
     ]);
 
-    assert.deepEqual(result, ["m1"]);
-    assert.equal(calls.length, 1);
-    assert.equal(
-      calls[0].params.message,
-      "before &#91;file: missing.pdf&#93; after",
+    assert.deepEqual(result, ["m1", "m1", "m1"]);
+    assert.equal(calls.length, 3);
+    assert.equal(calls[0].params.message, "before ");
+    assert.equal(calls[1].params.message, "&#91;file: missing.pdf&#93;");
+    assert.equal(calls[2].params.message, " after");
+    assert.doesNotMatch(
+      calls.map((call) => call.params.message).join(""),
+      /chat_media_file_missing:/,
     );
-    assert.doesNotMatch(calls[0].params.message, /chat_media_file_missing:/);
   });
 });
 
@@ -2289,7 +2296,7 @@ test("onebot adapter falls back to plain text after a confirmed rich send failur
     await fs.writeFile(filePath, Buffer.from("draft"));
     adapter.callAction = (action: string, params: any) => {
       calls.push({ action, params });
-      if (calls.length === 1) {
+      if (action === "upload_group_file") {
         const error: any = runtime.oneBotActionRejectedError({
           wording: "group file upload failed: code=-303 msg=invalid file name",
         });
@@ -2300,7 +2307,9 @@ test("onebot adapter falls back to plain text after a confirmed rich send failur
         rejected.dispatched = Promise.resolve();
         return rejected;
       }
-      return Promise.resolve({ message_id: "fallback-message" });
+      return Promise.resolve({
+        message_id: calls.length === 1 ? "caption-message" : "fallback-message",
+      });
     };
 
     const result = await app.bots[0].sendMessage("2", [
@@ -2315,19 +2324,20 @@ test("onebot adapter falls back to plain text after a confirmed rich send failur
       ),
     ]);
 
-    assert.deepEqual(result, ["fallback-message"]);
-    assert.equal(calls.length, 2);
+    assert.deepEqual(result, ["caption-message", "fallback-message"]);
+    assert.equal(calls.length, 3);
     assert.equal(calls[0].action, "send_group_msg");
-    assert.match(calls[0].params.message, /\[CQ:file,file=base64:\/\//);
-    assert.equal(calls[1].action, "send_group_msg");
-    assert.match(calls[1].params.message, /^\[CQ:reply,id=88\]/);
-    assert.match(calls[1].params.message, /Resending as plain text:/);
-    assert.match(calls[1].params.message, /file: draft\.xlsx/);
-    assert.doesNotMatch(
-      calls[1].params.message,
-      /base64:|chat_media_file_missing|\/tmp\//,
-    );
-    assert.equal(calls[1].params.timeout, runtime.ONEBOT_ACTION_TIMEOUT_MS);
+    assert.match(calls[0].params.message, /^\[CQ:reply,id=88\]/);
+    assert.match(calls[0].params.message, /Resending as plain text:/);
+    assert.doesNotMatch(calls[0].params.message, /CQ:file|base64:/);
+    assert.equal(calls[1].action, "upload_group_file");
+    assert.equal(calls[1].params.group_id, 2);
+    assert.equal(calls[1].params.file, "base64://ZHJhZnQ=");
+    assert.equal(calls[1].params.name, "draft.xlsx");
+    assert.equal(calls[1].params.upload_file, true);
+    assert.equal(calls[2].action, "send_group_msg");
+    assert.equal(calls[2].params.message, "&#91;file: draft.xlsx&#93;");
+    assert.equal(calls[2].params.timeout, runtime.ONEBOT_ACTION_TIMEOUT_MS);
   });
 });
 

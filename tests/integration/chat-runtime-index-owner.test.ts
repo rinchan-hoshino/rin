@@ -639,7 +639,17 @@ test("onebot adapter owns WebSocket actions, internal proxy signatures, recovery
       },
     ]);
     await sent.dispatched;
-    assert.deepEqual(await sent, ["200"]);
+    assert.deepEqual(await sent, ["200", "200", "200"]);
+    assert.equal(
+      owner.events.some(
+        ([event, request]: any[]) =>
+          event === "ws-send" &&
+          request.action === "upload_group_file" &&
+          request.params.name === "file" &&
+          request.params.file === "https://owner/file",
+      ),
+      true,
+    );
     assert.deepEqual(
       await bot.sendMessage("private:7", [
         { type: "text", attrs: { content: "owner" }, children: [] },

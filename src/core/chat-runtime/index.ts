@@ -2048,6 +2048,7 @@ class OneBotAdapter {
   private sendMessage(chatId: string, content: any, _options?: any) {
     let resolveDispatched: () => void = () => {};
     let rejectDispatched: (error: unknown) => void = () => {};
+    let dispatchExposed = false;
     const dispatched = new Promise<void>((resolve, reject) => {
       resolveDispatched = resolve;
       rejectDispatched = reject;
@@ -2055,18 +2056,53 @@ class OneBotAdapter {
     void dispatched.catch(() => {});
     const task = (async () => {
       try {
-        const { nodes, work, replyToMessageId } = prepareOutboundNodes(content);
-        const message = await this.renderOutboundMessage(nodes);
-        if (!message) throw new Error("onebot_send_message_empty");
+        const { work, replyToMessageId } = prepareOutboundNodes(content);
+        const isFileNode = (node: any) =>
+          safeString(node?.type).trim().toLowerCase() === "file";
+        const fragments: Array<
+          { kind: "message"; nodes: any[] } | { kind: "file"; node: any }
+        > = [];
+        for (const node of work) {
+          if (isFileNode(node)) {
+            fragments.push({ kind: "file", node });
+            continue;
+          }
+          const previous = fragments.at(-1);
+          if (previous?.kind === "message") {
+            previous.nodes.push(node);
+          } else {
+            fragments.push({ kind: "message", nodes: [node] });
+          }
+        }
         const isPrivate = safeString(chatId).startsWith("private:");
         const targetId = Number(
           safeString(chatId)
             .replace(/^private:/, "")
             .trim(),
         );
-        const action = isPrivate ? "send_private_msg" : "send_group_msg";
-        const actionParams = (nextMessage: string) =>
-          isPrivate
+        const messageAction = isPrivate ? "send_private_msg" : "send_group_msg";
+        const exposeDispatch = (actionTask: any) => {
+          if (dispatchExposed) return;
+          dispatchExposed = true;
+          if (actionTask?.dispatched) {
+            void actionTask.dispatched.then(
+              resolveDispatched,
+              rejectDispatched,
+            );
+          } else {
+            resolveDispatched();
+          }
+        };
+        const call = async (action: string, params: Record<string, any>) => {
+          const actionTask: any = this.callAction(
+            action,
+            withOneBotActionTimeoutParam(action, params),
+          );
+          exposeDispatch(actionTask);
+          return await actionTask;
+        };
+        const sendText = async (nextMessage: string) => {
+          const params = isPrivate
             ? {
                 user_id: targetId,
                 message: nextMessage,
@@ -2077,43 +2113,124 @@ class OneBotAdapter {
                 message: nextMessage,
                 auto_escape: false,
               };
-        const send = async (nextMessage: string, exposeDispatch = false) => {
-          const actionTask: any = this.callAction(
-            action,
-            withOneBotActionTimeoutParam(action, actionParams(nextMessage)),
-          );
-          if (exposeDispatch) {
-            if (actionTask?.dispatched) {
-              void actionTask.dispatched.then(
-                resolveDispatched,
-                rejectDispatched,
-              );
-            } else {
-              resolveDispatched();
-            }
-          }
-          const data: any = await actionTask;
+          const data: any = await call(messageAction, params);
           const messageId = safeString(data?.message_id || data).trim();
           if (!messageId) throw new Error("onebot_send_message_empty_result");
           return messageId;
         };
-        try {
-          return [await send(message, true)];
-        } catch (error: any) {
-          if (error?.oneBotActionRejected && oneBotNodesContainMedia(work)) {
-            const fallback = renderRichDeliveryFallback(work);
-            if (fallback) {
-              this.logger.warn(
-                `rich message send failed; falling back to plain text err=${safeString(error?.message || error)}`,
-              );
-              const reply = replyToMessageId
-                ? `[CQ:reply,id=${escapeOneBotText(replyToMessageId)}]`
-                : "";
-              return [await send(`${reply}${escapeOneBotText(fallback)}`)];
+        const delivered: string[] = [];
+        let replyAttached = false;
+        const takeReply = () => {
+          if (replyAttached || !replyToMessageId) return "";
+          replyAttached = true;
+          return `[CQ:reply,id=${escapeOneBotText(replyToMessageId)}]`;
+        };
+        for (const fragment of fragments) {
+          if (fragment.kind === "message") {
+            const message = await this.renderOutboundMessage(fragment.nodes);
+            if (!message) continue;
+            const reply = takeReply();
+            try {
+              delivered.push(await sendText(`${reply}${message}`));
+              continue;
+            } catch (error: any) {
+              let deliveryError = error;
+              if (
+                error?.oneBotActionRejected &&
+                oneBotNodesContainMedia(fragment.nodes)
+              ) {
+                const fallback = renderRichDeliveryFallback(fragment.nodes);
+                if (fallback) {
+                  this.logger.warn(
+                    `rich message send failed; falling back to plain text err=${safeString(error?.message || error)}`,
+                  );
+                  try {
+                    delivered.push(
+                      await sendText(`${reply}${escapeOneBotText(fallback)}`),
+                    );
+                    continue;
+                  } catch (fallbackError) {
+                    deliveryError = richFallbackDeliveryError(
+                      error,
+                      fallbackError,
+                    );
+                  }
+                }
+              }
+              if (delivered.length) {
+                throw partialChatDeliveryError(deliveryError, delivered);
+              }
+              throw deliveryError;
             }
           }
-          throw error;
+          let uploadError: unknown;
+          try {
+            const payload = await readBinaryFromNode(fragment.node);
+            if (!payload) throw new Error("onebot_file_source_empty");
+            const attrs =
+              fragment.node?.attrs && typeof fragment.node.attrs === "object"
+                ? fragment.node.attrs
+                : {};
+            const requestedName = ensureExtension(
+              ensureFileName(
+                safeString(attrs.name).trim() || payload.name,
+                "file",
+              ),
+              payload.mimeType,
+            );
+            const source = payload.url
+              ? payload.url
+              : `base64://${payload.data.toString("base64")}`;
+            const uploadAction = isPrivate
+              ? "upload_private_file"
+              : "upload_group_file";
+            const uploadParams = isPrivate
+              ? {
+                  user_id: targetId,
+                  file: source,
+                  name: requestedName,
+                  upload_file: true,
+                }
+              : {
+                  group_id: targetId,
+                  file: source,
+                  name: requestedName,
+                  upload_file: true,
+                };
+            const data: any = await call(uploadAction, uploadParams);
+            const fileId = safeString(
+              data?.file_id || data?.message_id || data,
+            ).trim();
+            if (!fileId) throw new Error("onebot_upload_file_empty_result");
+            delivered.push(fileId);
+            continue;
+          } catch (error) {
+            uploadError = error;
+          }
+          const fallback = renderRichDeliveryFallback([fragment.node]);
+          if (fallback) {
+            this.logger.warn(
+              `file upload failed; falling back to plain text err=${safeString((uploadError as any)?.message || uploadError)}`,
+            );
+            try {
+              delivered.push(
+                await sendText(`${takeReply()}${escapeOneBotText(fallback)}`),
+              );
+              continue;
+            } catch (fallbackError) {
+              uploadError = richFallbackDeliveryError(
+                uploadError,
+                fallbackError,
+              );
+            }
+          }
+          if (delivered.length) {
+            throw partialChatDeliveryError(uploadError, delivered);
+          }
+          throw uploadError;
         }
+        if (!delivered.length) throw new Error("onebot_send_message_empty");
+        return delivered;
       } catch (error) {
         rejectDispatched(error);
         throw error;

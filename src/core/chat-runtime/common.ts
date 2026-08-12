@@ -77,6 +77,9 @@ export function partialChatDeliveryError(
   };
   next.deliveredMessageIds = [...deliveredMessageIds];
   next.partialDelivery = true;
+  if ((error as any)?.chatOutboxConfirmedNotDelivered === true) {
+    (next as any).chatOutboxConfirmedNotDelivered = true;
+  }
   return next;
 }
 
