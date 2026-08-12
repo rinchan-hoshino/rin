@@ -13,7 +13,6 @@ DEFAULT_BOOTSTRAP_BRANCH=main
 BOOTSTRAP_BRANCH=${RIN_BOOTSTRAP_BRANCH:-$DEFAULT_BOOTSTRAP_BRANCH}
 RAW_BASE=$(printf '%s' "$REPO_URL" | sed -e 's#^https://github.com/#https://raw.githubusercontent.com/#' -e 's#\.git$##')
 BOOTSTRAP_SCRIPT_URL=${RIN_BOOTSTRAP_SCRIPT_URL:-$RAW_BASE/$BOOTSTRAP_BRANCH/scripts/bootstrap-entrypoint.sh}
-MAIN_BOOTSTRAP_SCRIPT_URL=${RIN_BOOTSTRAP_SCRIPT_FALLBACK_URL:-$RAW_BASE/main/scripts/bootstrap-entrypoint.sh}
 CACHE_BASE=${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}
 TMPDIR_BASE=${RIN_INSTALL_TMPDIR:-$CACHE_BASE/rin-install}
 mkdir -p "$TMPDIR_BASE"
@@ -87,17 +86,5 @@ run_step() {
   return "$status"
 }
 
-fetch_bootstrap_script() {
-  if fetch "$BOOTSTRAP_SCRIPT_URL" "$BOOTSTRAP_SCRIPT"; then
-    return 0
-  fi
-  if [ -n "$MAIN_BOOTSTRAP_SCRIPT_URL" ] && [ "$MAIN_BOOTSTRAP_SCRIPT_URL" != "$BOOTSTRAP_SCRIPT_URL" ]; then
-    # Older bootstrap exports may lack the shared entrypoint, so fall back to main.
-    fetch "$MAIN_BOOTSTRAP_SCRIPT_URL" "$BOOTSTRAP_SCRIPT"
-    return 0
-  fi
-  return 1
-}
-
-run_step "Fetching Rin bootstrap" fetch_bootstrap_script
+run_step "Fetching Rin bootstrap" fetch "$BOOTSTRAP_SCRIPT_URL" "$BOOTSTRAP_SCRIPT"
 sh "$BOOTSTRAP_SCRIPT" "$BOOTSTRAP_MODE" "$@"

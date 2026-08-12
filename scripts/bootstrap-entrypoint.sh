@@ -296,12 +296,8 @@ adjust_quick_run_labels() {
 
 fetch_manifest() {
   RAW_BASE=$(printf '%s' "$REPO_URL" | sed -e 's#^https://github.com/#https://raw.githubusercontent.com/#' -e 's#\.git$##')
-  PRIMARY_URL="$RAW_BASE/$BOOTSTRAP_BRANCH/release-manifest.json"
-  FALLBACK_URL="$RAW_BASE/main/release-manifest.json"
-  if fetch "$PRIMARY_URL" "$MANIFEST_PATH"; then
-    return 0
-  fi
-  if fetch "$FALLBACK_URL" "$MANIFEST_PATH"; then
+  MANIFEST_URL="$RAW_BASE/$BOOTSTRAP_BRANCH/release-manifest.json"
+  if fetch "$MANIFEST_URL" "$MANIFEST_PATH"; then
     return 0
   fi
   if [ -r "$LOCAL_MANIFEST_PATH" ]; then
@@ -314,12 +310,8 @@ fetch_manifest() {
 
 fetch_assets_env() {
   RAW_BASE=$(printf '%s' "$REPO_URL" | sed -e 's#^https://github.com/#https://raw.githubusercontent.com/#' -e 's#\.git$##')
-  PRIMARY_URL="$RAW_BASE/$BOOTSTRAP_BRANCH/release-assets.env"
-  FALLBACK_URL="$RAW_BASE/main/release-assets.env"
-  if fetch "$PRIMARY_URL" "$ASSETS_ENV"; then
-    return 0
-  fi
-  if fetch "$FALLBACK_URL" "$ASSETS_ENV"; then
+  ASSETS_URL="$RAW_BASE/$BOOTSTRAP_BRANCH/release-assets.env"
+  if fetch "$ASSETS_URL" "$ASSETS_ENV"; then
     return 0
   fi
   if [ -r "$REPO_ROOT/release-assets.env" ]; then

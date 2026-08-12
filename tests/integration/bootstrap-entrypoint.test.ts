@@ -597,6 +597,24 @@ test("bootstrap scripts render progress without rin-install log prefixes", async
   );
 });
 
+test("bootstrap source selection never falls back to mutable main", async () => {
+  const [installSh, installPs1, entrypointSh, entrypointPs1] =
+    await Promise.all(
+      [
+        "install.sh",
+        "install.ps1",
+        "scripts/bootstrap-entrypoint.sh",
+        "scripts/bootstrap-entrypoint.ps1",
+      ].map((relativePath) =>
+        fs.readFile(path.join(rootDir, relativePath), "utf8"),
+      ),
+    );
+  assert.doesNotMatch(installSh, /MAIN_BOOTSTRAP_SCRIPT_URL|FALLBACK_URL/);
+  assert.doesNotMatch(installPs1, /mainBootstrapScriptUrl|FALLBACK_URL/);
+  assert.doesNotMatch(entrypointSh, /FALLBACK_URL=.*\/main\//);
+  assert.doesNotMatch(entrypointPs1, /\$fallbackUrl = .*\/main\//);
+});
+
 test("PowerShell install wrapper passes mode as parser args", async () => {
   const powerShell = await fs.readFile(
     path.join(rootDir, "install.ps1"),
@@ -1112,15 +1130,13 @@ test("wrapper-only main install script fetches the shared entrypoint from main",
   });
 });
 
-test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first", async () => {
+test("wrapper-only bootstrap exports fail closed when their selected entrypoint is unavailable", async () => {
   await withTempDir(async (tempDir) => {
-    const archivePath = await createSourceArchive(tempDir);
-    const manifestPath = await createReleaseManifest(tempDir);
     const fakeBin = path.join(tempDir, "bin");
     const logPath = path.join(tempDir, "invocations.log");
     const workRoot = path.join(tempDir, "work");
     const bootstrapDir = path.join(tempDir, "bootstrap");
-    await createFakeBin(fakeBin, logPath);
+    await fs.mkdir(fakeBin, { recursive: true });
     await fs.mkdir(workRoot, { recursive: true });
 
     await execFileAsync(
@@ -1132,69 +1148,44 @@ test("wrapper-only bootstrap exports fetch the entrypoint from bootstrap first",
       ],
       { cwd: rootDir },
     );
-    assert.equal(
-      await fs
-        .stat(path.join(bootstrapDir, "scripts", "bootstrap-entrypoint.sh"))
-        .then(() => true),
-      true,
-    );
-    assert.equal(
-      await fs
-        .stat(path.join(bootstrapDir, "release-assets.env"))
-        .then(() => true),
-      true,
-    );
     await fs.rm(path.join(bootstrapDir, "scripts"), {
       recursive: true,
       force: true,
     });
-    const installDir = path.join(tempDir, "install");
-    await fs.mkdir(installDir, { recursive: true });
-    await fs.writeFile(
-      path.join(installDir, "installer.json"),
-      JSON.stringify({ currentRelease: { release: { channel: "stable" } } }),
-      "utf8",
+    await writeExecutable(
+      path.join(fakeBin, "curl"),
+      `#!/bin/sh
+echo "curl:$*" >>"$RIN_BOOTSTRAP_TEST_LOG"
+case "$*" in
+  */bootstrap/scripts/bootstrap-entrypoint.sh*) exit 22 ;;
+  */main/scripts/bootstrap-entrypoint.sh*) exit 0 ;;
+  *) exit 22 ;;
+esac
+`,
     );
 
-    const env = {
-      ...process.env,
-      PATH: `${fakeBin}:${process.env.PATH}`,
-      RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
-      RIN_DIR: installDir,
-      TMPDIR: workRoot,
-      RIN_BOOTSTRAP_TEST_ARCHIVE: archivePath,
-      RIN_BOOTSTRAP_TEST_MANIFEST: manifestPath,
-      RIN_BOOTSTRAP_TEST_BOOTSTRAP_SCRIPT: path.join(
-        rootDir,
-        "scripts",
-        "bootstrap-entrypoint.sh",
-      ),
-      RIN_BOOTSTRAP_TEST_LOG: logPath,
-    };
-
-    await execFileAsync("sh", [path.join(bootstrapDir, "install.sh")], {
-      cwd: bootstrapDir,
-      env,
-    });
+    await assert.rejects(
+      execFileAsync("sh", [path.join(bootstrapDir, "install.sh")], {
+        cwd: bootstrapDir,
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}:${process.env.PATH}`,
+          RIN_INSTALL_REPO_URL: "https://example.invalid/rin",
+          RIN_INSTALL_TMPDIR: workRoot,
+          RIN_BOOTSTRAP_TEST_LOG: logPath,
+        },
+      }),
+    );
 
     const log = await fs.readFile(logPath, "utf8");
     assert.match(
       log,
       /curl:-fsSL https:\/\/example\.invalid\/rin\/bootstrap\/scripts\/bootstrap-entrypoint\.sh -o /,
     );
-    assert.equal(
-      /curl:-fsSL https:\/\/example\.invalid\/rin\/main\/scripts\/bootstrap-entrypoint\.sh -o /.test(
-        log,
-      ),
-      false,
-    );
-    assert.match(
+    assert.doesNotMatch(
       log,
-      /curl:-fsSL https:\/\/example\.invalid\/rin\/bootstrap\/release-manifest\.json -o /,
+      /curl:-fsSL https:\/\/example\.invalid\/rin\/main\/scripts\/bootstrap-entrypoint\.sh -o /,
     );
-    assert.equal(/npm:.*:exec --yes --package/.test(log), false);
-    assert.match(log, /npm:.*:install --omit=dev --no-fund --no-audit\n/);
-    assert.deepEqual(await fs.readdir(workRoot), []);
   });
 });
 

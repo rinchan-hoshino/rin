@@ -484,13 +484,8 @@ try {
   Assert-NodeVersion
   Invoke-WithSpinner "Fetching release manifest" {
     $rawBase = ($using:repoUrl -replace "^https://github.com/", "https://raw.githubusercontent.com/") -replace "\.git$", ""
-    $primaryUrl = "$rawBase/$using:bootstrapBranch/release-manifest.json"
-    $fallbackUrl = "$rawBase/main/release-manifest.json"
-    try {
-      Invoke-WebRequest -UseBasicParsing -Uri $primaryUrl -OutFile $using:manifestPath
-    } catch {
-      Invoke-WebRequest -UseBasicParsing -Uri $fallbackUrl -OutFile $using:manifestPath
-    }
+    $manifestUrl = "$rawBase/$using:bootstrapBranch/release-manifest.json"
+    Invoke-WebRequest -UseBasicParsing -Uri $manifestUrl -OutFile $using:manifestPath
   }
   $release = Resolve-Release
   Write-Release-Handoff $release
