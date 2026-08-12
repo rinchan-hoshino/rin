@@ -1915,7 +1915,10 @@ test("chat controller suppresses ordinary Working for manual compaction", async 
   const actions = [];
   const reactions = [];
   controller.app.bots[0].workingIndicators = [
-    testPollingIndicator(actions, reactions),
+    {
+      ...testPollingIndicator(actions, reactions),
+      presentation: "editable-message",
+    },
   ];
   const deliveries = [];
   controller.commitPendingDelivery = async function () {
@@ -1970,6 +1973,21 @@ test("chat controller suppresses ordinary Working for manual compaction", async 
   const command = controller.runCommand("/compact", "m-compact", "m-compact");
   await commandStartedPromise;
   await new Promise((resolve) => setImmediate(resolve));
+  await controller.handleFrontendEvent({
+    type: "compaction_start_notice",
+    text: "Localized compacting",
+  });
+  actions.length = 0;
+  reactions.length = 0;
+  deliveries.length = 0;
+  await controller.handleFrontendEvent({
+    type: "extension_ui_request",
+    method: "rinChatPresentation",
+    presentation: {
+      commandResponses: { compactionStart: "Localized compacting" },
+      workingText: "Localized Working",
+    },
+  });
 
   assert.deepEqual(actions, []);
   assert.deepEqual(reactions, []);

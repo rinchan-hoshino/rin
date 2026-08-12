@@ -225,7 +225,7 @@ export function createRinFrontendBackendEventTranslator(
     compactionExpandKeyText?: string;
   } = {},
 ): RinFrontendBackendEventTranslator {
-  const commandResponses = resolveRinFrontendCommandResponses(
+  let commandResponses = resolveRinFrontendCommandResponses(
     options.commandResponses,
   );
   let latestAssistantText = "";
@@ -313,6 +313,11 @@ export function createRinFrontendBackendEventTranslator(
 
       if (payload.type === "extension_ui_request") {
         const method = safeString(payload.method).trim();
+        if (method === "rinChatPresentation") {
+          commandResponses = resolveRinFrontendCommandResponses(
+            payload.presentation?.commandResponses,
+          );
+        }
         if (
           [
             "select",

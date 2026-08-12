@@ -132,6 +132,50 @@ test("shared frontend translation exposes extension UI requests", () => {
   );
 });
 
+test("shared frontend translation applies dynamic presentation to lifecycle copy", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+  const presentation = {
+    commandResponses: {
+      compactionStart: "Localized compacting",
+      compactionSummaryLine: "Localized {tokens}",
+    },
+  };
+
+  assert.deepEqual(
+    translator.translate({
+      type: "extension_ui_request",
+      method: "rinChatPresentation",
+      presentation,
+    }),
+    [
+      {
+        type: "extension_ui_request",
+        method: "rinChatPresentation",
+        presentation,
+      },
+    ],
+  );
+  assert.deepEqual(translator.translate({ type: "compaction_start" }), [
+    { type: "compaction_start_notice", text: "Localized compacting" },
+  ]);
+  assert.deepEqual(
+    translator.translate({
+      type: "compaction_end",
+      reason: "threshold",
+      result: { tokensBefore: 1234 },
+    }),
+    [
+      {
+        type: "passive_notice",
+        text: "[compaction]\n\nLocalized 1,234",
+        level: "info",
+        deferDuringTurn: false,
+        noticeKind: "compaction_end",
+      },
+    ],
+  );
+});
+
 test("shared frontend translation ignores TUI visibility preferences", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 

@@ -731,6 +731,50 @@ test("frontend turn driver propagates canonical run identity through terminal pr
   );
 });
 
+test("frontend presentation updates subsequent compaction lifecycle copy", async () => {
+  const driver = createDriver();
+  const seen: any[] = [];
+  driver.subscribe((event: any) => seen.push(event));
+
+  await emitDriverEvent(driver, {
+    type: "extension_ui_request",
+    method: "rinChatPresentation",
+    presentation: {
+      commandResponses: {
+        compactionStart: "Localized compacting",
+        compactionSummaryLine: "Localized {tokens}",
+      },
+    },
+  });
+  await emitDriverEvent(driver, { type: "compaction_start" });
+  await emitDriverEvent(driver, {
+    type: "compaction_end",
+    reason: "threshold",
+    result: { tokensBefore: 1234 },
+  });
+
+  assert.deepEqual(seen, [
+    {
+      type: "extension_ui_request",
+      method: "rinChatPresentation",
+      presentation: {
+        commandResponses: {
+          compactionStart: "Localized compacting",
+          compactionSummaryLine: "Localized {tokens}",
+        },
+      },
+    },
+    { type: "compaction_start_notice", text: "Localized compacting" },
+    {
+      type: "passive_notice",
+      text: "[compaction]\n\nLocalized 1,234",
+      level: "info",
+      deferDuringTurn: false,
+      noticeKind: "compaction_end",
+    },
+  ]);
+});
+
 test("backend Working state is the only shared frontend Working source", async () => {
   const driver = createDriver();
   const seen: any[] = [];

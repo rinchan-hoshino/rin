@@ -1531,6 +1531,7 @@ export class ChatController {
       this.hasUnacceptedPendingPresentationReplacement() ||
       !this.canDeliverReplies() ||
       this.shouldSuppressQuietDelivery("passive_notice") ||
+      this.ownsManualCompactionPresentation() ||
       (!options.force && !this.shouldShowTypingIndicator())
     ) {
       return false;
@@ -1583,9 +1584,11 @@ export class ChatController {
       indicators,
       "polling",
     );
-    const visibleIndicators = this.hasUnacceptedPendingPresentationReplacement()
-      ? []
-      : selectVisibleWorkingIndicatorsForKind(indicators, "polling");
+    const visibleIndicators =
+      this.hasUnacceptedPendingPresentationReplacement() ||
+      this.ownsManualCompactionPresentation()
+        ? []
+        : selectVisibleWorkingIndicatorsForKind(indicators, "polling");
     const typingDue =
       typingIndicators.length > 0 &&
       this.isTypingHeartbeatDue(this.lastTypingIndicatorAt, now);
@@ -3573,7 +3576,9 @@ export class ChatController {
         const workingText = safeString(presentation.workingText).trim();
         this.commandResponses = resolveChatCommandResponses(commandResponses);
         this.onChatPresentation?.({ commandResponses, workingText });
-        await this.refreshEditableWorkingNotice().catch(() => false);
+        if (!this.ownsManualCompactionPresentation()) {
+          await this.refreshEditableWorkingNotice().catch(() => false);
+        }
         return;
       }
       const projection = projectChatExtensionUiRequest(event);
