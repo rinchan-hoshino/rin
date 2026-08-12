@@ -780,7 +780,14 @@ export class CronScheduler {
     if (this.activeExecutions.has(taskId) || task.activeInvocation) {
       throw new Error(`cron_task_already_running:${taskId}`);
     }
-    if (!this.evaluateCondition(task)) {
+    let conditionPassed = false;
+    try {
+      conditionPassed = this.evaluateCondition(task);
+    } catch (error) {
+      this.projectConditionFailure(task, error);
+      return this.publicTask(task);
+    }
+    if (!conditionPassed) {
       this.rescheduleSkippedTask(task, "condition_false");
       return this.publicTask(task);
     }
@@ -1166,13 +1173,42 @@ export class CronScheduler {
 
   private evaluateCondition(task: CronTaskRecord) {
     if (!task.condition) return true;
-    const result = evaluateCronTaskCondition(task.condition, task);
     const now = nowIso();
     task.condition.lastEvaluatedAt = now;
-    task.condition.lastResult = result.passed;
-    task.condition.lastOutput = result.output;
     task.updatedAt = now;
-    return result.passed;
+    try {
+      const result = evaluateCronTaskCondition(task.condition, task);
+      task.condition.lastResult = result.passed;
+      task.condition.lastOutput = result.output;
+      return result.passed;
+    } catch (error) {
+      delete task.condition.lastResult;
+      delete task.condition.lastOutput;
+      throw error;
+    }
+  }
+
+  private projectConditionFailure(task: CronTaskRecord, error: unknown) {
+    const startedAt = task.condition?.lastEvaluatedAt || nowIso();
+    task.lastStartedAt = startedAt;
+    task.runCount += 1;
+    if (task.trigger.expression) {
+      task.nextRunAt = nextCronAt(task.trigger.expression, Date.now());
+    } else {
+      task.nextRunAt = undefined;
+    }
+    const errorText =
+      error instanceof Error ? error.message : safeString(error).trim();
+    const terminal: CronTaskTerminal = {
+      status: "failed",
+      error: errorText || "cron_condition_failed",
+    };
+    applyCronTaskTerminalProjection(task, terminal);
+    this.save();
+    void appendCronTaskTerminalHistory(task, terminal, {
+      agentDir: this.options.agentDir,
+      startedAt,
+    }).catch(() => {});
   }
 
   private rescheduleSkippedTask(task: CronTaskRecord, reason: string) {

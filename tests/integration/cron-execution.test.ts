@@ -2206,6 +2206,86 @@ test("cron execution shell task returns summarized success body", async () => {
   assert.ok(text.includes("stdout:"));
 });
 
+test("cron scheduler isolates condition failures and continues the due loop", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const scheduler = new cronMod.CronScheduler({ agentDir });
+  try {
+    scheduler.upsertTask({
+      id: "cron_condition_broken",
+      trigger: { expression: "* * * * *", timezone: "local" },
+      session: { mode: "none" },
+      target: { kind: "shell_command", command: "printf broken" },
+      condition: {
+        code: "(() => { throw new Error('condition blocked'); })()",
+      },
+    });
+    scheduler.upsertTask({
+      id: "cron_condition_healthy",
+      trigger: { expression: "* * * * *", timezone: "local" },
+      session: { mode: "none" },
+      target: { kind: "shell_command", command: "printf healthy" },
+      condition: { code: "true" },
+    });
+
+    const tasks = (scheduler as any).tasks as Map<string, any>;
+    const broken = tasks.get("cron_condition_broken");
+    const healthy = tasks.get("cron_condition_healthy");
+    broken.nextRunAt = new Date(Date.now() - 61_000).toISOString();
+    healthy.nextRunAt = new Date(Date.now() - 60_000).toISOString();
+
+    await (scheduler as any).tick();
+
+    const failed = scheduler.getTask("cron_condition_broken");
+    const started = scheduler.getTask("cron_condition_healthy");
+    assert.equal(failed.runCount, 1);
+    assert.match(String(failed.lastError || ""), /cron_condition_failed/);
+    assert.ok(failed.lastFinishedAt);
+    assert.ok(failed.condition.lastEvaluatedAt);
+    assert.equal(failed.condition.lastResult, undefined);
+    assert.ok(Date.parse(failed.nextRunAt) > Date.now());
+    assert.equal(started.runCount, 1);
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("one-time condition failures terminate without running the target", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  let runTurnCount = 0;
+  const scheduler = new cronMod.CronScheduler({
+    agentDir,
+    chat: {
+      runTurn: async () => {
+        runTurnCount += 1;
+        return { finalText: "ran" };
+      },
+    },
+  });
+  try {
+    scheduler.upsertTask({
+      id: "cron_condition_broken_once",
+      trigger: { runAt: new Date(Date.now() + 60_000).toISOString() },
+      session: { mode: "none" },
+      target: { kind: "agent_prompt", prompt: "must not run" },
+      condition: { code: "(() => { throw new Error('blocked once'); })()" },
+    });
+
+    const failed = scheduler.runTaskNow("cron_condition_broken_once");
+
+    assert.equal(runTurnCount, 0);
+    assert.equal(failed.runCount, 1);
+    assert.equal(failed.running, false);
+    assert.equal(failed.enabled, false);
+    assert.ok(failed.completedAt);
+    assert.equal(failed.nextRunAt, undefined);
+    assert.match(String(failed.lastError || ""), /cron_condition_failed/);
+  } finally {
+    scheduler.stop();
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("cron task condition false skips execution and schedules the next tick", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   let runTurnCount = 0;
