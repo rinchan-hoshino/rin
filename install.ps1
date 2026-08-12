@@ -23,7 +23,6 @@ $defaultBootstrapBranch = "bootstrap"
 $bootstrapBranch = if ($env:RIN_BOOTSTRAP_BRANCH) { $env:RIN_BOOTSTRAP_BRANCH } else { $defaultBootstrapBranch }
 $rawBase = ($repoUrl -replace "^https://github.com/", "https://raw.githubusercontent.com/") -replace "\.git$", ""
 $bootstrapScriptUrl = if ($env:RIN_BOOTSTRAP_SCRIPT_URL) { $env:RIN_BOOTSTRAP_SCRIPT_URL } else { "$rawBase/$bootstrapBranch/scripts/bootstrap-entrypoint.ps1" }
-$mainBootstrapScriptUrl = if ($env:RIN_BOOTSTRAP_SCRIPT_FALLBACK_URL) { $env:RIN_BOOTSTRAP_SCRIPT_FALLBACK_URL } else { "$rawBase/main/scripts/bootstrap-entrypoint.ps1" }
 $cacheBase = if ($env:XDG_CACHE_HOME) { $env:XDG_CACHE_HOME } elseif ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
 $tempBase = if ($env:RIN_INSTALL_TMPDIR) { $env:RIN_INSTALL_TMPDIR } else { Join-Path $cacheBase "rin-install" }
 New-Item -ItemType Directory -Force -Path $tempBase | Out-Null
@@ -34,15 +33,7 @@ function Fetch-File([string]$Url, [string]$OutFile) {
 }
 
 try {
-  try {
-    Fetch-File $bootstrapScriptUrl $bootstrapScript
-  } catch {
-    if ($mainBootstrapScriptUrl -and $mainBootstrapScriptUrl -ne $bootstrapScriptUrl) {
-      Fetch-File $mainBootstrapScriptUrl $bootstrapScript
-    } else {
-      throw
-    }
-  }
+  Fetch-File $bootstrapScriptUrl $bootstrapScript
 
   & $bootstrapScript "--mode" $mode @bootstrapArgs
   exit $LASTEXITCODE
