@@ -3887,6 +3887,133 @@ test("chat controller suppresses /compact acknowledgement but keeps configured /
   }
 });
 
+test("chat controller commits manual /compact completion without transient presentation state", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (_chatId, content, options) => {
+    deliveries.push({ content, options });
+    return [`compact-${deliveries.length}`];
+  };
+
+  const receivedAt = new Date().toISOString();
+  saveChatMessage(controller.agentDir, {
+    messageId: "m-compact-no-presentation",
+    chatKey: controller.chatKey,
+    platform: "telegram",
+    chatId: "2",
+    chatType: "private",
+    role: "user",
+    receivedAt,
+    text: "/compact",
+  });
+
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "compact-no-presentation.jsonl",
+  );
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "session-compact-no-presentation",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile,
+      sessionId: "session-compact-no-presentation",
+    }),
+    compact: async () => ({
+      handled: true,
+      tokensBefore: 142065,
+      sessionFile,
+    }),
+    prompt: async (text, options = {}) => {
+      emitRpcTurnComplete(controller, options, "unexpected temp reply");
+    },
+    switchSession: async () => {},
+  };
+
+  assert.equal(controller.compactionTurn, null);
+  await controller.runCommand(
+    "/compact",
+    "m-compact-no-presentation",
+    "m-compact-no-presentation",
+  );
+
+  assert.deepEqual(
+    deliveries.map(({ content, options }) => ({
+      text: content.map((node) => node?.attrs?.content || "").join(""),
+      quote: content.find((node) => node?.type === "quote")?.attrs?.id,
+      deliveryKind: options?.deliveryKind,
+    })),
+    [
+      {
+        text: "Compacted from 142,065 tokens",
+        quote: "m-compact-no-presentation",
+        deliveryKind: "interim",
+      },
+    ],
+  );
+  assert.ok(
+    getChatMessage(
+      controller.agentDir,
+      controller.chatKey,
+      "m-compact-no-presentation",
+    )?.processedAt,
+  );
+});
+
+test("chat controller rejects manual /compact when completion cannot enter outbox", async () => {
+  const controller = await createController("telegram/1:2");
+  controller.app.bots[0].sendMessage = async () => ["m-error"];
+  const originalEnqueueAndDrainDelivery =
+    controller.enqueueAndDrainDelivery.bind(controller);
+  controller.enqueueAndDrainDelivery = async (payload, options = {}) => {
+    if (options.deliveryKind === "interim") {
+      throw new Error("compact completion enqueue exploded");
+    }
+    return await originalEnqueueAndDrainDelivery(payload, options);
+  };
+
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "compact-completion-failure.jsonl",
+  );
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "session-compact-completion-failure",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile,
+      sessionId: "session-compact-completion-failure",
+    }),
+    compact: async () => {
+      controller.compactionTurn = {
+        startedAt: Date.now(),
+        incomingMessageId: "m-progress",
+        replyToMessageId: "m-compact-failure",
+        ackIncomingMessageId: "m-compact-failure",
+        ackReplyToMessageId: "m-compact-failure",
+      };
+      return { handled: true, tokensBefore: 99000, sessionFile };
+    },
+    prompt: async (text, options = {}) => {
+      emitRpcTurnComplete(controller, options, "unexpected temp reply");
+    },
+    switchSession: async () => {},
+  };
+
+  await assert.rejects(
+    controller.runCommand("/compact", "m-compact-failure", "m-compact-failure"),
+    /chat_compaction_completion_delivery_failed/,
+  );
+});
+
 test("chat controller completes manual /compact from its command response", async () => {
   const controller = await createController("telegram/1:2");
   const actions = [];

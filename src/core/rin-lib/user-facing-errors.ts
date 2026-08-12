@@ -140,6 +140,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat is still waiting for the command's durable result.",
   chat_command_text_missing: () =>
     "Rin ran the chat command, but it returned no reply text.",
+  chat_compaction_completion_delivery_failed: () =>
+    "Rin compacted the session but could not queue the completion message.",
   chat_controller_key_required: () =>
     "Chat controller setup is missing a controller key. Recreate the chat binding.",
   chat_controller_disposed: () =>

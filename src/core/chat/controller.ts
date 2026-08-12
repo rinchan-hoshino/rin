@@ -2729,13 +2729,21 @@ export class ChatController {
   }
 
   private compactionAckTarget() {
+    const commandInput = this.ownsManualCompactionPresentation()
+      ? this.activeCommandTurnInput
+      : null;
     const incomingMessageId = safeString(
-      this.compactionTurn?.ackIncomingMessageId || "",
+      this.compactionTurn?.ackIncomingMessageId ||
+        commandInput?.incomingMessageId ||
+        "",
     ).trim();
     if (!incomingMessageId) return null;
     const replyToMessageId =
-      safeString(this.compactionTurn?.ackReplyToMessageId || "").trim() ||
-      incomingMessageId;
+      safeString(
+        this.compactionTurn?.ackReplyToMessageId ||
+          commandInput?.replyToMessageId ||
+          "",
+      ).trim() || incomingMessageId;
     return { incomingMessageId, replyToMessageId };
   }
 
@@ -2769,33 +2777,39 @@ export class ChatController {
           sha256Hex(safeString(text).trim()),
         ])
       : "";
-    const delivered = await this.sendCompactionInterimNow(text, {
-      ...(shouldCoalesce
-        ? {
-            coalesceWithWorkingMessage: true,
-            ...(coalesceReplyToMessageId
-              ? { replyToMessageId: coalesceReplyToMessageId }
-              : {}),
-          }
-        : {}),
-      ...(manualCompaction ? { exclusiveProgressMessage: true } : {}),
-      ...(ackTarget
-        ? {
-            postDelivery: {
-              markProcessed: {
-                chatKey: this.chatKey,
-                messageId: ackTarget.incomingMessageId,
-                bindSession: false,
+    try {
+      const delivered = await this.sendCompactionInterimNow(text, {
+        ...(shouldCoalesce
+          ? {
+              coalesceWithWorkingMessage: true,
+              ...(coalesceReplyToMessageId
+                ? { replyToMessageId: coalesceReplyToMessageId }
+                : {}),
+            }
+          : {}),
+        ...(manualCompaction ? { exclusiveProgressMessage: true } : {}),
+        ...(ackTarget
+          ? {
+              postDelivery: {
+                markProcessed: {
+                  chatKey: this.chatKey,
+                  messageId: ackTarget.incomingMessageId,
+                  bindSession: false,
+                },
               },
-            },
-            id: `compaction-final-${sha256Hex(idempotencyKey)}`,
-            idempotencyKey,
-            waitForDeliveryMs: 1000,
-          }
-        : {}),
-    });
-    await this.finishCompactionNotice();
-    return delivered;
+              id: `compaction-final-${sha256Hex(idempotencyKey)}`,
+              idempotencyKey,
+              waitForDeliveryMs: 1000,
+            }
+          : {}),
+      });
+      if (!delivered && ackTarget) {
+        throw new Error("chat_compaction_completion_delivery_failed");
+      }
+      return delivered;
+    } finally {
+      await this.finishCompactionNotice();
+    }
   }
 
   private async deliverCompactionStartNotice(text: string) {
@@ -3088,9 +3102,7 @@ export class ChatController {
         .join("\n");
 
       if (commandName === "compact") {
-        if (text && this.compactionTurn) {
-          await this.deliverCompactionEndNotice(text);
-        }
+        if (text) await this.deliverCompactionEndNotice(text);
         return text ? { ...data, text } : data;
       }
 
