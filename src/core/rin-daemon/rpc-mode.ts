@@ -76,8 +76,9 @@ function createExtensionUiResponseParser(defaultValue: any) {
 }
 
 function latestCompactionTokensBefore(session: any) {
-  const entries = Array.isArray(session?.entries) ? session.entries : [];
-  return getLatestCompactionEntry(entries as any)?.tokensBefore;
+  const branch = session?.sessionManager?.getBranch?.();
+  return getLatestCompactionEntry(Array.isArray(branch) ? branch : [])
+    ?.tokensBefore;
 }
 
 function withCompactionEventMetadata(session: any, event: any) {

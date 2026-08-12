@@ -6517,7 +6517,6 @@ async function createRpcModeOwnerHarness(
     retryAttempt: 0,
     sessionFile: "/owner/session.jsonl",
     sessionId: "owner-session",
-    entries,
     messages: [
       { role: "user", content: [{ type: "text", text: "hello" }] },
       {
@@ -6874,14 +6873,14 @@ test(
       harness.session.getAllTools = allTools;
       harness.session.setActiveToolsByName = setActiveTools;
 
-      const entries = harness.session.entries;
-      harness.session.entries = undefined;
+      const getBranch = harness.session.sessionManager.getBranch;
+      harness.session.sessionManager.getBranch = () => [];
       await harness.send({
         id: "compact-empty",
         type: "compact",
         customInstructions: "empty",
       });
-      harness.session.entries = entries;
+      harness.session.sessionManager.getBranch = getBranch;
 
       const getEntries = harness.session.sessionManager.getEntries;
       const getTree = harness.session.sessionManager.getTree;
@@ -7106,10 +7105,10 @@ test(
         aborted: false,
         tokensBefore: 123,
       });
-      const entries = harness.session.entries;
-      harness.session.entries = [];
+      const getBranch = harness.session.sessionManager.getBranch;
+      harness.session.sessionManager.getBranch = () => [];
       harness.emit({ type: "compaction_end", aborted: false });
-      harness.session.entries = entries;
+      harness.session.sessionManager.getBranch = getBranch;
       harness.emit("owner-non-event");
       harness.emit(null);
 
@@ -7363,6 +7362,16 @@ test("rpc mode owner directly covers response parsing and outcome normalization 
     );
     assert.equal(mod.__rinOwnerLatestCompactionTokensBefore(undefined), undefined);
     assert.equal(mod.__rinOwnerLatestCompactionTokensBefore({ entries: "bad" }), undefined);
+    assert.equal(
+      mod.__rinOwnerLatestCompactionTokensBefore({
+        sessionManager: {
+          getBranch: () => [
+            { id: "compact", type: "compaction", tokensBefore: 321 },
+          ],
+        },
+      }),
+      321,
+    );
     assert.equal(mod.__rinOwnerWithCompactionEventMetadata({}, null), null);
     assert.equal(mod.__rinOwnerWithCompactionEventMetadata({}, "event"), "event");
     assert.deepEqual(
@@ -7385,7 +7394,13 @@ test("rpc mode owner directly covers response parsing and outcome normalization 
     );
     assert.deepEqual(
       mod.__rinOwnerWithCompactionEventMetadata(
-        { entries: [{ id: "compact", type: "compaction", tokensBefore: 321 }] },
+        {
+          sessionManager: {
+            getBranch: () => [
+              { id: "compact", type: "compaction", tokensBefore: 321 },
+            ],
+          },
+        },
         { type: "compaction_end" },
       ),
       { type: "compaction_end", tokensBefore: 321 },
