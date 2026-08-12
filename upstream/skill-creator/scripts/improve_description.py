@@ -129,13 +129,13 @@ Based on the failures, write a new and improved description that is more likely 
 1. Avoid overfitting
 2. The list might get loooong and it's injected into ALL queries and there might be a lot of skills, so we don't want to blow too much space on any given description.
 
-Concretely, your description should not be more than about 100-200 words, even if that comes at the cost of accuracy. There is a hard limit of 1024 characters — descriptions over that will be truncated, so stay comfortably under it.
+Concretely, keep the description under 180 characters. It contains concise trigger conditions only: when the skill should or should not be consulted. Do not summarize capabilities, outcomes, procedures, examples, or implementation details; those belong in the skill body or references.
 
 Here are some tips that we've found to work well in writing these descriptions:
-- The skill should be phrased in the imperative -- "Use this skill for" rather than "this skill does"
-- The skill description should focus on the user's intent, what they are trying to achieve, vs. the implementation details of how the skill works.
-- The description competes with other skills for Claude's attention — make it distinctive and immediately recognizable.
-- If you're getting lots of failures after repeated attempts, change things up. Try different sentence structures or wordings.
+- Phrase the route as "Use when ..." and name the user's intent or situation.
+- Include only decision-changing near-miss exclusions.
+- Make the trigger distinctive enough to compete with adjacent skills.
+- If repeated attempts fail, change the trigger categories or boundaries rather than adding behavior summaries.
 
 I'd encourage you to be creative and mix up the style in different iterations since you'll have multiple opportunities to try different approaches and we'll just grab the highest-scoring one at the end. 
 

@@ -244,12 +244,9 @@ export default function todoCapability(): RinCapabilityDefinition {
     label: "Checklist",
     description:
       "Maintain the current-branch execution checklist by stable item ID. Read returns the full list by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit changes one item; remove deletes selected IDs or clears all.",
-    promptSnippet:
-      "Read the full branch checklist or a range, or add, edit, and remove checklist items by stable ID.",
+    promptSnippet: "Current-branch execution checklist.",
     promptGuidelines: [
-      "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist.",
-      "Use action read without offset/limit for the full list or with a 1-based item offset and positive limit for a range. Use add with items and optional beforeId, edit with exactly one id and item patch, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
-      "After compaction, trust the current-branch snapshot injected by Rin; never reconstruct it from prose. Remove obsolete items individually, and clear all before starting a new unrelated task.",
+      "Use todo when current-branch work has multiple concrete execution steps that benefit from a visible checklist.",
     ],
     parameters: TodoParams,
 

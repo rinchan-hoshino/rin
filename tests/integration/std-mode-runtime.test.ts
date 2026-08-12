@@ -108,10 +108,7 @@ test("std configured session composes Pi and Rin core extensions", async () => {
       memoryTool.description,
       "Search archived session history by query, or browse recent sessions when query is omitted.",
     );
-    assert.equal(
-      memoryTool.promptSnippet,
-      "Search archived session history for past-conversation evidence.",
-    );
+    assert.equal(memoryTool.promptSnippet, "Archived session-history search.");
     assert.deepEqual(memoryTool.promptGuidelines, [
       "Use recall when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters.",
     ]);

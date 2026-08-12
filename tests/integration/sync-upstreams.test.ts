@@ -337,7 +337,30 @@ test("sync-upstreams mirrors the full skill-creator source root", () => {
       "skill readme\n",
       "utf8",
     );
-    fs.writeFileSync(path.join(sourceRoot, "SKILL.md"), "skill body\n", "utf8");
+    fs.writeFileSync(
+      path.join(sourceRoot, "SKILL.md"),
+      [
+        "---",
+        "name: skill-creator",
+        "description: Create and improve skills. Use when skill work is requested.",
+        "---",
+        "",
+        "- **description**: When to trigger, what it does.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    fs.mkdirSync(path.join(sourceRoot, "scripts"), { recursive: true });
+    fs.writeFileSync(
+      path.join(sourceRoot, "scripts", "improve_description.py"),
+      [
+        "Concretely, your description should not be more than about 100-200 words,",
+        "and should summarize the skill.",
+        "- If you're getting lots of failures after repeated attempts, change things up. Try different sentence structures or wordings.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
     commitSnapshot(mirrorRepo, "snapshot skill creator", "skill-test");
 
     writeSyncWorkspace(workspace, "0.70.0");
@@ -364,10 +387,20 @@ test("sync-upstreams mirrors the full skill-creator source root", () => {
       fs.readFileSync(path.join(destRoot, "README.md"), "utf8"),
       "skill readme\n",
     );
-    assert.equal(
-      fs.readFileSync(path.join(destRoot, "SKILL.md"), "utf8"),
-      "skill body\n",
+    const skill = fs.readFileSync(path.join(destRoot, "SKILL.md"), "utf8");
+    assert.match(
+      skill,
+      /description: "Use when creating, changing, evaluating, benchmarking, packaging, or optimizing the trigger accuracy of a skill\."/,
     );
+    assert.match(skill, /description\*\*: Concise trigger conditions only/);
+    assert.doesNotMatch(skill, /When to trigger, what it does/);
+    const optimizer = fs.readFileSync(
+      path.join(destRoot, "scripts", "improve_description.py"),
+      "utf8",
+    );
+    assert.match(optimizer, /keep the description under 180 characters/);
+    assert.match(optimizer, /trigger conditions only/);
+    assert.doesNotMatch(optimizer, /100-200 words/);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

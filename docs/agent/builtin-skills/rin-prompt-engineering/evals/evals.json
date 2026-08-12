@@ -34,7 +34,7 @@
     {
       "id": 6,
       "prompt": "这个 skill 写得像论文，触发描述也不准。请按 skill 编写规范和提示词工程原则重写。",
-      "expected_output": "Uses skill-creator with the prompt workflow: concise operational entry point, discovery metadata describing what and when, one-level progressive references, canonical behavior rules, realistic trigger and behavior evals, and removal of non-operative explanation.",
+      "expected_output": "Uses skill-creator with the prompt workflow: concise operational entry point, discovery metadata containing trigger conditions only, one-level progressive references, canonical behavior rules, realistic trigger and behavior evals, and removal of non-operative explanation.",
       "files": []
     },
     {

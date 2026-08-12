@@ -1,6 +1,6 @@
 ---
 name: rin-prompt-engineering
-description: "Designs, refactors, reviews, and debugs prompts and reusable LLM instructions. Use for system/developer prompts, agent tasks, skills, tool instructions, retrieval prompts, structured-output prompts, and prompt evaluation."
+description: "Use when creating, changing, reviewing, or evaluating prompts, reusable LLM instructions, skill bodies, or tool prompt metadata."
 ---
 
 # Rin prompt engineering
@@ -166,7 +166,7 @@ Put shape enforcement in the schema or typed tool. Define field meaning, unknown
 
 ### Write a skill
 
-Use `skill-creator` with this skill. Keep the entry point concise, move detailed material into one-level references, make discovery metadata describe what the skill does and when it applies, and test it with realistic trigger and behavior evals.
+Use `skill-creator` with this skill. Keep the entry point concise, move detailed material into one-level references, keep skill descriptions to concise trigger conditions only, and test them with realistic trigger and behavior evals.
 
 ## Deliverables
 

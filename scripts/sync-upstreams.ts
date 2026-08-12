@@ -72,6 +72,43 @@ function replacePath(sourcePath, destPath) {
   fs.cpSync(sourcePath, destPath, { recursive: true });
 }
 
+function preserveRinSkillCreatorPromptContract(destRoot) {
+  const skillPath = path.join(destRoot, "SKILL.md");
+  const optimizerPath = path.join(
+    destRoot,
+    "scripts",
+    "improve_description.py",
+  );
+  if (fs.existsSync(skillPath)) {
+    let skill = fs.readFileSync(skillPath, "utf8");
+    skill = skill
+      .replace(
+        /^description:.*$/m,
+        'description: "Use when creating, changing, evaluating, benchmarking, packaging, or optimizing the trigger accuracy of a skill."',
+      )
+      .replace(
+        /- \*\*description\*\*:.*$/m,
+        "- **description**: Concise trigger conditions only. State when the skill should and should not be consulted; keep capabilities, outcomes, procedures, and examples in the body or references. This is the primary routing mechanism, so use realistic intent language and include only decision-changing near-miss boundaries.",
+      );
+    fs.writeFileSync(skillPath, skill, "utf8");
+  }
+
+  if (fs.existsSync(optimizerPath)) {
+    let optimizer = fs.readFileSync(optimizerPath, "utf8");
+    optimizer = optimizer.replace(
+      /Concretely, your description should not be more than about 100-200 words,[\s\S]*?- If you're getting lots of failures after repeated attempts, change things up\. Try different sentence structures or wordings\./,
+      `Concretely, keep the description under 180 characters. It contains concise trigger conditions only: when the skill should or should not be consulted. Do not summarize capabilities, outcomes, procedures, examples, or implementation details; those belong in the skill body or references.
+
+Here are some tips that we've found to work well in writing these descriptions:
+- Phrase the route as "Use when ..." and name the user's intent or situation.
+- Include only decision-changing near-miss exclusions.
+- Make the trigger distinctive enough to compete with adjacent skills.
+- If repeated attempts fail, change the trigger categories or boundaries rather than adding behavior summaries.`,
+    );
+    fs.writeFileSync(optimizerPath, optimizer, "utf8");
+  }
+}
+
 const packageJson = readJson(packageJsonPath, {});
 const piPackageVersion = normalizeVersion(
   packageJson?.dependencies?.["@earendil-works/pi-coding-agent"],
@@ -168,6 +205,9 @@ function syncMirror(name, options = {}) {
       }
     } else {
       replacePath(path.join(cloneDir, sourceSubdir), mirror.destRoot);
+    }
+    if (name === "skill-creator") {
+      preserveRinSkillCreatorPromptContract(mirror.destRoot);
     }
 
     const nextMeta = {

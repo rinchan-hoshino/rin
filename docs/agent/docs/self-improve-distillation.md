@@ -34,6 +34,8 @@ Turn-window does not open memory-index entries, `short-term-memory/records/`, us
 
 Choose the narrowest owner: product code for deterministic behavior; `agent_profile` for role and voice; `user_profile` for stable facts only; `core_doctrine` for cross-domain invariants; one existing skill for a repeatable workflow; relationship stores for identity; memory-index for provenance and chronology; `short-term-memory/records/` for unfinished continuity with cleanup.
 
+Keep durable prompt categories separate: core doctrine contains concise general principles only; skill descriptions contain concise trigger conditions only; tool prompt snippets contain brief introductions only; tool prompt guidelines contain concise trigger conditions only. Put behavior, procedures, examples, and operation syntax in the owned body, documentation, or tool schema instead of discovery metadata.
+
 Do not put product defects in prompts, procedures in memory-index, temporary state in skills, or workflow detail in core doctrine. For skill creation, merge, or deletion, follow `skill-creator` and preserve unique behavior.
 
 ## Acceptance
@@ -47,7 +49,7 @@ A changed pass must satisfy all of these:
 - net growth names the deletion, merge, or replacement already performed and why missing behavior could not fit by replacement; pure or unexplained append fails;
 - a justified duplicate or retired nightly candidate produces a net decrease; never force deletion when inspection finds no removable content;
 - future-trigger replay selects the intended owner and excludes adjacent non-triggers;
-- files parse, links resolve, skill metadata validates, and product changes pass focused tests;
+- files parse, links resolve, skill and tool prompt metadata obey their category contracts, and product changes pass focused tests;
 - no source task, secret, or bulky transcript enters durable state.
 
 If unchanged, report the reason, rejected candidates, and owner neighborhood inspected for garbage collection. If changed, report only owner, deletion/merge/replacement/addition, size delta, validation, and uncertainty.

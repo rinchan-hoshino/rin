@@ -70,7 +70,7 @@ Use a skill for:
 - distilled facts, owner preferences, implicit defaults, or key knowledge useful for matching tasks;
 - references that would bloat the resident prompt.
 
-Skill descriptions are retrieval handles for distilled guidance. Put detailed instructions in `SKILL.md` or `references/`, not in prompt baselines.
+Skill descriptions are concise trigger conditions only. Put capabilities, outcomes, detailed instructions, examples, and exclusions that do not change routing in `SKILL.md` or `references/`, not in resident discovery metadata.
 
 Use composite skills with clear headings for related recurring material. A new skill is useful when it has a distinct recurring trigger and no existing skill is a clean home.
 
