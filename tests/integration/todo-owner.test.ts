@@ -83,17 +83,24 @@ test("todo owner reports thrown persistence values without mutating accepted sta
   assert.deepEqual(result.details.items, []);
 });
 
-test("todo owner renders normalized calls, results, errors, and fallbacks", async () => {
+test("todo owner updates one TUI component and hides an empty checklist", async () => {
   const { tool } = await setup();
+  const pending = tool.renderCall({ action: "add" }, theme, {
+    isPartial: true,
+    lastComponent: undefined,
+  });
+  assert.match(pending.render(80).join(""), /todo add/);
+  const updatedPending = tool.renderCall({ action: "edit" }, theme, {
+    isPartial: true,
+    lastComponent: pending,
+  });
+  assert.equal(updatedPending, pending);
+  assert.match(updatedPending.render(80).join(""), /todo edit/);
   assert.match(
     tool
-      .renderCall({ action: "add" }, theme, { isPartial: true })
+      .renderCall({}, theme, { isPartial: true, lastComponent: undefined })
       .render(80)
       .join(""),
-    /todo add/,
-  );
-  assert.match(
-    tool.renderCall({}, theme, { isPartial: true }).render(80).join(""),
     /todo …/,
   );
   assert.equal(
@@ -123,6 +130,50 @@ test("todo owner renders normalized calls, results, errors, and fallbacks", asyn
   assert.match(rendered, /○ Open/);
   assert.match(rendered, /✓ Done/);
   assert.doesNotMatch(rendered, /#1|#2/);
+
+  const firstResult = tool.renderResult(
+    {
+      content: [{ type: "text", text: "" }],
+      details: {
+        action: "read",
+        items: [{ id: 1, text: "Old", done: false }],
+        nextId: 2,
+      },
+    },
+    {},
+    theme,
+    { lastComponent: undefined },
+  );
+  const updatedResult = tool.renderResult(
+    {
+      content: [{ type: "text", text: "" }],
+      details: {
+        action: "edit",
+        items: [{ id: 1, text: "New", done: true }],
+        nextId: 2,
+      },
+    },
+    {},
+    theme,
+    { lastComponent: firstResult },
+  );
+  assert.equal(updatedResult, firstResult);
+  assert.match(updatedResult.render(80).join("\n"), /✓ New/);
+  assert.doesNotMatch(updatedResult.render(80).join("\n"), /Old/);
+
+  const empty = tool
+    .renderResult(
+      {
+        content: [{ type: "text", text: "" }],
+        details: { action: "remove", items: [], nextId: 1 },
+      },
+      {},
+      theme,
+      { lastComponent: undefined },
+    )
+    .render(80)
+    .join("");
+  assert.equal(empty, "");
 
   const error = tool
     .renderResult(

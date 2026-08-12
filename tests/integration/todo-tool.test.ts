@@ -251,7 +251,7 @@ test("todo removes selected ids atomically and clears only with all true", async
   const cleared = await execute(tool, { action: "remove", all: true });
   assert.deepEqual(cleared.details.items, []);
   assert.equal(cleared.details.nextId, 1);
-  assert.equal(cleared.content[0].text, "No todos");
+  assert.equal(cleared.content[0].text, "");
 });
 
 test("todo rejects old whole-list writes and malformed item operations without checkpointing", async () => {

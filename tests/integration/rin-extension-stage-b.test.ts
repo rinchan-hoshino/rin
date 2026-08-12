@@ -197,7 +197,7 @@ test("core todo loads from configured runtime without extension paths", async ()
       assert.equal(read.details.action, "read");
       assert.deepEqual(read.details.items, edited.details.items);
       assert.equal(cleared.details.action, "remove");
-      assert.equal(cleared.content[0].text, "No todos");
+      assert.equal(cleared.content[0].text, "");
       assert.deepEqual(cleared.details.items, []);
     } finally {
       await configured.runtime?.dispose?.().catch?.(() => {});

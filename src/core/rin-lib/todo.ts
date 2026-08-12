@@ -7,7 +7,6 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type {
   RinCapabilityContext,
@@ -23,6 +22,7 @@ import {
   resolveRemovalIds,
   type ItemAction,
   type ItemReadWindow,
+  updateItemToolText,
   validateItemActionParams,
 } from "./item-tool.js";
 import {
@@ -144,7 +144,7 @@ function readTodoDetails(value: unknown): TodoDetails | undefined {
 }
 
 function formatTodoContent(items: Todo[]) {
-  if (items.length === 0) return "No todos";
+  if (items.length === 0) return "";
   return items
     .map(
       (item) =>
@@ -154,7 +154,7 @@ function formatTodoContent(items: Todo[]) {
 }
 
 function formatTodoRender(items: Todo[], theme: Theme): string {
-  if (items.length === 0) return theme.fg("dim", "○ No todos");
+  if (items.length === 0) return "";
   return items
     .map((item) => {
       const check = item.done ? theme.fg("success", "✓") : theme.fg("dim", "○");
@@ -164,10 +164,6 @@ function formatTodoRender(items: Todo[], theme: Theme): string {
       return `${check} ${text}`;
     })
     .join("\n");
-}
-
-function renderText(text: string) {
-  return new Text(text, 0, 0);
 }
 
 export default function todoCapability(): RinCapabilityDefinition {
@@ -307,24 +303,32 @@ export default function todoCapability(): RinCapabilityDefinition {
     },
 
     renderCall(args: any, theme: Theme, context: any) {
-      if (context?.isPartial === false) return renderText("");
       const action = String(args?.action || "").trim();
-      return renderText(
-        theme.fg("toolTitle", action ? `todo ${action}` : "todo …"),
+      return updateItemToolText(
+        context?.isPartial === false
+          ? ""
+          : theme.fg("toolTitle", action ? `todo ${action}` : "todo …"),
+        context,
       );
     },
 
-    renderResult(value: any, _options: any, theme: Theme) {
+    renderResult(value: any, _options: any, theme: Theme, context: any) {
       const parsed = readTodoDetails(value.details);
       if (!parsed) {
         const text = value.content?.[0];
-        return renderText(text?.type === "text" ? text.text : "");
+        return updateItemToolText(
+          text?.type === "text" ? text.text : "",
+          context,
+        );
       }
       const checklist = formatTodoRender(parsed.items, theme);
-      return renderText(
+      return updateItemToolText(
         parsed.error
-          ? `${theme.fg("error", `Error: ${parsed.error}`)}\n${checklist}`
+          ? [theme.fg("error", `Error: ${parsed.error}`), checklist]
+              .filter(Boolean)
+              .join("\n")
           : checklist,
+        context,
       );
     },
   };

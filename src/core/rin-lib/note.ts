@@ -7,7 +7,6 @@
  */
 
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type {
   RinCapabilityContext,
@@ -23,6 +22,7 @@ import {
   resolveRemovalIds,
   type ItemAction,
   type ItemReadWindow,
+  updateItemToolText,
   validateItemActionParams,
 } from "./item-tool.js";
 import {
@@ -45,7 +45,8 @@ const NoteAddItemParams: any = Type.Object(
   {
     text: Type.String({
       minLength: 1,
-      description: "One concise verified continuity fact.",
+      description:
+        "Shortest verified content that must survive compaction exactly.",
     }),
   },
   { additionalProperties: false },
@@ -55,7 +56,8 @@ const NoteEditItemParams: any = Type.Object(
   {
     text: Type.String({
       minLength: 1,
-      description: "Complete replacement text for this one note item.",
+      description:
+        "Shortest complete replacement that must survive compaction exactly.",
     }),
   },
   { additionalProperties: false },
@@ -127,10 +129,6 @@ function parseDetails(value: unknown): NoteDetails | undefined {
     nextId: normalizeNextItemId(items, details.nextId),
     ...(typeof details.error === "string" ? { error: details.error } : {}),
   };
-}
-
-function renderText(text: string) {
-  return new Text(text, 0, 0);
 }
 
 export default function noteCapability(): RinCapabilityDefinition {
@@ -210,11 +208,11 @@ export default function noteCapability(): RinCapabilityDefinition {
     name: "note",
     label: "Notes",
     description:
-      "Maintain concise verified session-branch continuity as stable-ID items. It survives compaction. Read returns every item by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit replaces one item; remove deletes selected IDs or clears all. Keep plans and pending actions in todo.",
+      "Maintain a minimal scratchpad of verified content that must survive compaction exactly as stable-ID items scoped to the session branch. Read returns every item by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit replaces one item; remove deletes selected IDs or clears all.",
     promptSnippet:
-      "Read all continuity items or a range, or add, edit, and remove verified facts by stable ID.",
+      "Read or minimally update exact cross-compaction scratchpad items by stable ID.",
     promptGuidelines: [
-      "Use note only for concise, verified facts that must survive compaction; keep plans, pending actions, and checklists in todo.",
+      "Use note only as a minimal scratchpad for verified content that must survive compaction exactly. Keep each item as short as possible; omit reasoning, progress, plans, pending actions, and anything recoverable from files or tools. Delete items once exact cross-compaction retention is no longer needed; keep checklists in todo.",
       "Use action read without offset/limit for the full list or with a 1-based item offset and positive limit for a range. Use add with items and optional beforeId, edit with exactly one id and replacement item, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
     ],
     parameters: NoteParams,
@@ -269,24 +267,32 @@ export default function noteCapability(): RinCapabilityDefinition {
     },
 
     renderCall(args: any, theme: Theme, context: any) {
-      if (context?.isPartial === false) return renderText("");
       const action = String(args?.action || "").trim();
-      return renderText(
-        theme.fg("toolTitle", action ? `note ${action}` : "note …"),
+      return updateItemToolText(
+        context?.isPartial === false
+          ? ""
+          : theme.fg("toolTitle", action ? `note ${action}` : "note …"),
+        context,
       );
     },
 
-    renderResult(value: any, _options: any, theme: Theme) {
+    renderResult(value: any, _options: any, theme: Theme, context: any) {
       const parsed = parseDetails(value.details);
       if (!parsed) {
         const text = value.content?.[0];
-        return renderText(text?.type === "text" ? text.text : "");
+        return updateItemToolText(
+          text?.type === "text" ? text.text : "",
+          context,
+        );
       }
       const notes = formatNoteRender(parsed.items, theme);
-      return renderText(
+      return updateItemToolText(
         parsed.error
-          ? `${theme.fg("error", `Error: ${parsed.error}`)}\n${notes}`
+          ? [theme.fg("error", `Error: ${parsed.error}`), notes]
+              .filter(Boolean)
+              .join("\n")
           : notes,
+        context,
       );
     },
   };

@@ -67,6 +67,14 @@ test("note exposes ranged reads and item-level mutation inputs", async () => {
   );
   assert.equal(tool.parameters.properties.offset.minimum, 1);
   assert.equal(tool.parameters.properties.limit.minimum, 1);
+  assert.match(
+    tool.parameters.properties.items.items.properties.text.description,
+    /Shortest verified content that must survive compaction exactly/,
+  );
+  assert.match(
+    tool.parameters.properties.item.properties.text.description,
+    /Shortest complete replacement that must survive compaction exactly/,
+  );
   for (const retired of ["content", "edits"]) {
     assert.equal(tool.parameters.properties[retired], undefined);
   }
@@ -297,16 +305,20 @@ test("note restores the selected branch and keeps state unchanged on abort or pe
   );
 });
 
-test("note renders item calls, results, errors, and fallback text", async () => {
+test("note updates the same TUI call and result components", async () => {
   const { tool } = await setup();
   const theme = { fg: (_color: string, text: unknown) => String(text) };
-  assert.match(
-    tool
-      .renderCall({ action: "add" }, theme, { isPartial: true })
-      .render(80)
-      .join(""),
-    /note add/,
-  );
+  const pending = tool.renderCall({ action: "add" }, theme, {
+    isPartial: true,
+    lastComponent: undefined,
+  });
+  assert.match(pending.render(80).join(""), /note add/);
+  const updatedPending = tool.renderCall({ action: "edit" }, theme, {
+    isPartial: true,
+    lastComponent: pending,
+  });
+  assert.equal(updatedPending, pending);
+  assert.match(updatedPending.render(80).join(""), /note edit/);
   assert.match(
     tool.renderCall({}, theme, { isPartial: true }).render(80).join(""),
     /note …/,
@@ -315,25 +327,36 @@ test("note renders item calls, results, errors, and fallback text", async () => 
     tool.renderCall({}, theme, { isPartial: false }).render(80).join(""),
     "",
   );
-  assert.match(
-    tool
-      .renderResult(
-        {
-          content: [{ type: "text", text: "" }],
-          details: {
-            action: "read",
-            items: [{ id: 1, text: "fact" }],
-            nextId: 2,
-          },
-        },
-        {},
-        theme,
-        {},
-      )
-      .render(80)
-      .join(""),
-    /#1 fact/,
+  const firstResult = tool.renderResult(
+    {
+      content: [{ type: "text", text: "" }],
+      details: {
+        action: "read",
+        items: [{ id: 1, text: "old fact" }],
+        nextId: 2,
+      },
+    },
+    {},
+    theme,
+    { lastComponent: undefined },
   );
+  assert.match(firstResult.render(80).join(""), /#1 old fact/);
+  const updatedResult = tool.renderResult(
+    {
+      content: [{ type: "text", text: "" }],
+      details: {
+        action: "edit",
+        items: [{ id: 1, text: "new fact" }],
+        nextId: 2,
+      },
+    },
+    {},
+    theme,
+    { lastComponent: firstResult },
+  );
+  assert.equal(updatedResult, firstResult);
+  assert.match(updatedResult.render(80).join(""), /#1 new fact/);
+  assert.doesNotMatch(updatedResult.render(80).join(""), /old fact/);
   assert.match(
     tool
       .renderResult(

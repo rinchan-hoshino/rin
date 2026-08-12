@@ -68,7 +68,7 @@ test("Rin core registers the private session note capability", () => {
   );
 });
 
-test("Rin note guidance keeps cross-compaction scratch state concise", () => {
+test("Rin note guidance limits the scratchpad to exact minimal cross-compaction state", () => {
   const definitions = runtimeMod.createRinCapabilityDefinitions({
     cwd: "/tmp/rin-note-guidance",
     agentDir: "/tmp/rin-note-guidance-agent",
@@ -80,10 +80,12 @@ test("Rin note guidance keeps cross-compaction scratch state concise", () => {
     .find((definition) => definition.name === "note")
     ?.tools?.find((tool) => tool.name === "note");
 
+  assert.match(note?.description, /minimal scratchpad/);
+  assert.match(note?.description, /must survive compaction exactly/);
   assert.match(note?.description, /stable-ID items/);
   assert.match(note?.description, /1-based offset\/limit range/);
   assert.deepEqual(note?.promptGuidelines, [
-    "Use note only for concise, verified facts that must survive compaction; keep plans, pending actions, and checklists in todo.",
+    "Use note only as a minimal scratchpad for verified content that must survive compaction exactly. Keep each item as short as possible; omit reasoning, progress, plans, pending actions, and anything recoverable from files or tools. Delete items once exact cross-compaction retention is no longer needed; keep checklists in todo.",
     "Use action read without offset/limit for the full list or with a 1-based item offset and positive limit for a range. Use add with items and optional beforeId, edit with exactly one id and replacement item, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
   ]);
 });
