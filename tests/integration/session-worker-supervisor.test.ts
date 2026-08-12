@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -38,6 +39,42 @@ function parsedLines(chunks: string[]) {
     .filter(Boolean)
     .map((line) => JSON.parse(line));
 }
+
+test("session worker supervisor bootstrap stays independent from Pi execution modules", () => {
+  const hookSource = `
+    export async function resolve(specifier, context, nextResolve) {
+      const resolved = await nextResolve(specifier, context);
+      if (resolved.url.endsWith("/dist/core/pi/private-api.js")) {
+        throw new Error("supervisor_loaded_pi_execution_module");
+      }
+      return resolved;
+    }
+  `;
+  const registerSource = `
+    import { register } from "node:module";
+    register(
+      "data:text/javascript," + encodeURIComponent(${JSON.stringify(hookSource)}),
+      import.meta.url,
+    );
+  `;
+  const registerUrl = `data:text/javascript,${encodeURIComponent(registerSource)}`;
+  const supervisorUrl = pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-daemon", "worker-supervisor.js"),
+  ).href;
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      registerUrl,
+      "--input-type=module",
+      "-e",
+      `await import(${JSON.stringify(supervisorUrl)})`,
+    ],
+    { cwd: rootDir, encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
 
 test("session worker supervisor replaces a synchronously blocked execution plane and reaches native abort without replaying the prompt", async () => {
   const root = await fs.mkdtemp(

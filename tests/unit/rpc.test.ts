@@ -38,6 +38,22 @@ test("rpc command catalog preserves Rin overrides and generic prompt routing", (
   assert.equal(rpc.isGenericPromptRunCommandBuiltinSlashCommand(null), false);
 });
 
+test("rpc command composition filters blanks and lets Rin override Pi", () => {
+  assert.deepEqual(
+    rpc.composeBuiltinSlashCommands(
+      [
+        { name: "", description: "" },
+        { name: " shared ", description: "Pi pi" },
+      ],
+      [
+        { name: " ", description: "ignored" },
+        { name: "shared", description: "Rin override", origin: "rin" },
+      ],
+    ),
+    [{ name: "shared", description: "Rin override", origin: "rin" }],
+  );
+});
+
 test("rpc command scope recognizes only normalized session commands", () => {
   for (const command of [
     " prompt ",
@@ -52,7 +68,7 @@ test("rpc command scope recognizes only normalized session commands", () => {
   assert.equal(rpc.isSessionScopedCommand(""), false);
 });
 
-test("rpc response helpers preserve payloads and normalize failures", () => {
+test("rpc command module preserves response helper exports", () => {
   assert.deepEqual(rpc.response("1", "get_state", true), {
     id: "1",
     type: "response",
@@ -66,18 +82,7 @@ test("rpc response helpers preserve payloads and normalize failures", () => {
     success: true,
     data: { accepted: true },
   });
-  assert.deepEqual(rpc.fail("2", "prompt", { message: " stopped " }), {
-    id: "2",
-    type: "response",
-    command: "prompt",
-    success: false,
-    error: "stopped",
-  });
-  assert.equal(rpc.fail("3", "prompt", { error: "failed" }).error, "failed");
-  assert.equal(rpc.fail("4", "prompt", " denied ").error, "denied");
-  assert.equal(rpc.fail("5", "prompt", {}).error, "[object Object]");
-  assert.equal(rpc.fail("6", "prompt", "   ").error, "rin_request_failed");
-  assert.equal(rpc.fail("7", "prompt", null).error, "rin_request_failed");
+  assert.equal(rpc.fail("2", "prompt", " stopped ").error, "stopped");
 });
 
 test("rpc empty session state returns independent canonical snapshots", () => {

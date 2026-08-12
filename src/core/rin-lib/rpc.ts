@@ -1,5 +1,7 @@
 import { PI_BUILTIN_SLASH_COMMANDS } from "../pi/private-api.js";
 
+export { fail, ok, response } from "./rpc-response.js";
+
 export type BuiltinSlashCommandOrigin = "pi" | "rin";
 export type BuiltinSlashCommandGenericPromptRoute = "run_command";
 
@@ -46,7 +48,7 @@ function rinizePiCommandDescription(description: string) {
   return description.replace(/\bPi\b/g, "Rin").replace(/\bpi\b/g, "rin");
 }
 
-function composeBuiltinSlashCommands(
+export function composeBuiltinSlashCommands(
   piCommands: ReadonlyArray<{ name: string; description: string }>,
   rinCommands: ReadonlyArray<BuiltinSlashCommand>,
 ) {
@@ -170,42 +172,8 @@ function normalizeCommandType(type: unknown) {
   return String(type || "").trim();
 }
 
-function normalizeResponseError(payload: unknown) {
-  const message = String(
-    (payload as any)?.message || (payload as any)?.error || payload || "",
-  ).trim();
-  return message || "rin_request_failed";
-}
-
-function buildResponseEnvelope(
-  id: string | undefined,
-  command: string,
-  success: boolean,
-) {
-  return { id, type: "response", command, success };
-}
-
 export function isSessionScopedCommand(type: string) {
   return SESSION_SCOPED_COMMANDS.has(normalizeCommandType(type));
-}
-
-export function response(
-  id: string | undefined,
-  command: string,
-  success: boolean,
-  payload?: unknown,
-) {
-  const base = buildResponseEnvelope(id, command, success);
-  if (success) return payload === undefined ? base : { ...base, data: payload };
-  return { ...base, error: normalizeResponseError(payload) };
-}
-
-export function ok(id: string | undefined, command: string, data?: unknown) {
-  return response(id, command, true, data);
-}
-
-export function fail(id: string | undefined, command: string, error: unknown) {
-  return response(id, command, false, error);
 }
 
 export function emptySessionState() {

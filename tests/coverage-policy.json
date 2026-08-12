@@ -1048,6 +1048,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin-lib/rpc-response.ts",
+      "built": "dist/core/rin-lib/rpc-response.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin-lib/rpc-types.ts",
       "built": "dist/core/rin-lib/rpc-types.js",
       "ownerSuite": "integration",

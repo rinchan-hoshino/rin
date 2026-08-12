@@ -5,7 +5,7 @@ import path from "node:path";
 import type { Readable, Writable } from "node:stream";
 
 import { parseJsonl } from "../rin-lib/common.js";
-import { fail } from "../rin-lib/rpc.js";
+import { fail } from "../rin-lib/rpc-response.js";
 
 const DEFAULT_ABORT_CONTROL_GRACE_MS = 250;
 const DEFAULT_EXECUTION_STARTUP_TIMEOUT_MS = 30_000;

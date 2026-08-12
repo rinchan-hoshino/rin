@@ -267,6 +267,11 @@
       "built": "dist/core/rin-lib/provider-context.js"
     },
     {
+      "test": "tests/unit/rpc-response.test.ts",
+      "source": "src/core/rin-lib/rpc-response.ts",
+      "built": "dist/core/rin-lib/rpc-response.js"
+    },
+    {
       "test": "tests/unit/rpc.test.ts",
       "source": "src/core/rin-lib/rpc.ts",
       "built": "dist/core/rin-lib/rpc.js"
