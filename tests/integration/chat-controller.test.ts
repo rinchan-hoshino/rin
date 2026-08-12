@@ -3121,44 +3121,6 @@ test("chat controller attempts independent todo errors when progress delivery fa
   }
 });
 
-test("chat controller keeps todo text plain for character-only chats", async () => {
-  const controller = await createController("minecraft/minecraft:overworld");
-  controller.app.bots[0].platform = "minecraft";
-  setDurableCurrentTurn(controller);
-  controller.app.bots[0].selfId = "minecraft";
-  const deliveries = [];
-  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
-    deliveries.push({ nodes, kind: options?.deliveryKind });
-    return [`m-out-${deliveries.length}`];
-  };
-
-  await controller.handleClientEvent({
-    type: "backend_event",
-    payload: {
-      type: "passive_notice",
-      text: "[ ] Keep working\n[x] Ship renderer",
-      noticeKind: "todo",
-      deferDuringTurn: false,
-      todoItems: [
-        { id: 1, text: "Keep working", done: false },
-        { id: 2, text: "Ship renderer", done: true },
-      ],
-    },
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(deliveries.length, 1);
-  assert.equal(deliveries[0].kind, "passive_notice");
-  assert.deepEqual(deliveries[0].nodes, [
-    {
-      type: "markdown",
-      attrs: {
-        content: "⬜ Keep working\n✅ Ship renderer",
-      },
-    },
-  ]);
-});
-
 test("chat controller sends structured todo nodes to native todo chats", async () => {
   const controller = await createController("slack/B1:C1");
   controller.app.bots[0].platform = "slack";

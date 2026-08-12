@@ -41,6 +41,31 @@ export {
   sleep,
 };
 
+export function confirmedChatDeliveryError(error: unknown) {
+  const next: any =
+    error instanceof Error
+      ? error
+      : new Error(safeString(error) || "chat_delivery_rejected");
+  next.chatOutboxConfirmedNotDelivered = true;
+  return next;
+}
+
+export function richFallbackDeliveryError(
+  primaryError: unknown,
+  fallbackError: unknown,
+) {
+  const next: any =
+    primaryError instanceof Error
+      ? primaryError
+      : new Error(safeString(primaryError) || "rich_delivery_failed");
+  if ((fallbackError as any)?.chatOutboxConfirmedNotDelivered === true) {
+    next.chatOutboxConfirmedNotDelivered = true;
+  } else {
+    delete next.chatOutboxConfirmedNotDelivered;
+  }
+  return next;
+}
+
 export function partialChatDeliveryError(
   error: unknown,
   deliveredMessageIds: string[],

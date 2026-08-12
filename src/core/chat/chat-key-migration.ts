@@ -91,7 +91,6 @@ function inferBotIdForPlatform(platform: string, config: Record<string, any>) {
     case "discord":
       return inferDiscordBotId(config);
     case "onebot":
-    case "minecraft":
       return normalizeBotId(config.selfId || config.botId || config.id);
     case "qq":
       return normalizeBotId(config.selfId || config.botId || config.id);

@@ -20,6 +20,7 @@ import {
 import { composeChatKeyForBot } from "../chat/support.js";
 import {
   compactObject,
+  confirmedChatDeliveryError,
   createPrefixedLogger,
   editableIntermediateHeadText,
   emitBotStatus,
@@ -27,6 +28,7 @@ import {
   ensureExtension,
   ensureFileName,
   fileUrl,
+  flattenNodes,
   isEditableProgressDeliveryKind,
   normalizeNode,
   partialChatDeliveryError,
@@ -37,6 +39,7 @@ import {
   renderPlainTextFromNodes,
   renderRichDeliveryFallback,
   renderTelegramHtmlFromNodes,
+  richFallbackDeliveryError,
   resolveChatRuntimeWorkingCopy,
   safeString,
   sleep,
@@ -46,12 +49,7 @@ import {
   EditableTextMessageGroup,
   type EditableTextMessageIndicatorTickInput,
 } from "./editable-text-message-group.js";
-import {
-  DiscordAdapter,
-  LarkAdapter,
-  MinecraftAdapter,
-  SlackAdapter,
-} from "./adapters.js";
+import { DiscordAdapter, LarkAdapter, SlackAdapter } from "./adapters.js";
 import { InboundRecoveryGate } from "./inbound-recovery.js";
 
 function toSnakeCase(value: string) {
@@ -262,6 +260,13 @@ const TELEGRAM_MAX_CAPTION_LENGTH = 1024;
 function isTelegramPhotoDimensionError(error: unknown) {
   return /\bPHOTO_INVALID_DIMENSIONS\b/i.test(
     safeString((error as any)?.message || error),
+  );
+}
+
+function isTelegramProviderRejection(error: unknown) {
+  return (
+    safeString((error as any)?.name).trim() === "GrammyError" &&
+    (error as any)?.ok === false
   );
 }
 
@@ -734,10 +739,17 @@ class TelegramAdapter {
     if (typeof fn !== "function") {
       throw new Error(`telegram_api_method_missing:${method}`);
     }
-    if (TELEGRAM_ZERO_PAYLOAD_METHODS.has(method)) {
-      return await fn(signal);
+    try {
+      if (TELEGRAM_ZERO_PAYLOAD_METHODS.has(method)) {
+        return await fn(signal);
+      }
+      return await fn(payload || {}, signal);
+    } catch (error) {
+      if (isTelegramProviderRejection(error)) {
+        throw confirmedChatDeliveryError(error);
+      }
+      throw error;
     }
-    return await fn(payload || {}, signal);
   }
 
   private async handleTelegramUpdates(updates: any[]) {
@@ -1174,14 +1186,7 @@ class TelegramAdapter {
     replyToMessageId?: string,
   ) {
     if (!fallback) return "";
-    try {
-      return await this.sendText(chatId, fallback, replyToMessageId);
-    } catch (fallbackError: any) {
-      this.logger.warn(
-        `rich fallback delivery failed err=${safeString(fallbackError?.message || fallbackError)}`,
-      );
-      return "";
-    }
+    return await this.sendText(chatId, fallback, replyToMessageId);
   }
 
   private telegramTextChunks(text: string) {
@@ -1269,13 +1274,18 @@ class TelegramAdapter {
           firstReply,
         );
         if (!fallbackId) {
-          failures.push(error);
+          failures.push(
+            richFallbackDeliveryError(
+              error,
+              new Error("telegram_rich_fallback_empty_result"),
+            ),
+          );
           return;
         }
         delivered.push(fallbackId);
         firstReply = undefined;
       } catch (fallbackError: any) {
-        failures.push(error);
+        failures.push(richFallbackDeliveryError(error, fallbackError));
         this.logger.warn(
           `rich fallback delivery failed err=${safeString(fallbackError?.message || fallbackError)}`,
         );
@@ -1616,6 +1626,36 @@ export function formatOneBotActionFailureMessage(payload: any) {
   return oneBotFailureText(payload) || "onebot_action_failed";
 }
 
+export function oneBotActionRejectedError(payload: any) {
+  const error: any = confirmedChatDeliveryError(
+    new Error(formatOneBotActionFailureMessage(payload)),
+  );
+  error.oneBotActionRejected = true;
+  return error;
+}
+
+function oneBotNodesContainMedia(nodes: any[]): boolean {
+  return flattenNodes(nodes).some((node) => {
+    const type = safeString(node?.type).trim().toLowerCase();
+    if (
+      [
+        "image",
+        "audio",
+        "voice",
+        "record",
+        "video",
+        "file",
+        "sticker",
+      ].includes(type)
+    ) {
+      return true;
+    }
+    return (
+      Array.isArray(node?.children) && oneBotNodesContainMedia(node.children)
+    );
+  });
+}
+
 class OneBotAdapter {
   private readonly app: ChatRuntimeApp;
   private readonly config: Record<string, any>;
@@ -1878,7 +1918,7 @@ class OneBotAdapter {
         safeString(payload?.status).trim() === "failed" ||
         Number(payload?.retcode) < 0
       ) {
-        pending.reject(new Error(formatOneBotActionFailureMessage(payload)));
+        pending.reject(oneBotActionRejectedError(payload));
         return;
       }
       pending.resolve(payload?.data);
@@ -2015,7 +2055,7 @@ class OneBotAdapter {
     void dispatched.catch(() => {});
     const task = (async () => {
       try {
-        const { nodes } = prepareOutboundNodes(content);
+        const { nodes, work, replyToMessageId } = prepareOutboundNodes(content);
         const message = await this.renderOutboundMessage(nodes);
         if (!message) throw new Error("onebot_send_message_empty");
         const isPrivate = safeString(chatId).startsWith("private:");
@@ -2025,30 +2065,55 @@ class OneBotAdapter {
             .trim(),
         );
         const action = isPrivate ? "send_private_msg" : "send_group_msg";
-        const params = isPrivate
-          ? {
-              user_id: targetId,
-              message,
-              auto_escape: false,
+        const actionParams = (nextMessage: string) =>
+          isPrivate
+            ? {
+                user_id: targetId,
+                message: nextMessage,
+                auto_escape: false,
+              }
+            : {
+                group_id: targetId,
+                message: nextMessage,
+                auto_escape: false,
+              };
+        const send = async (nextMessage: string, exposeDispatch = false) => {
+          const actionTask: any = this.callAction(
+            action,
+            withOneBotActionTimeoutParam(action, actionParams(nextMessage)),
+          );
+          if (exposeDispatch) {
+            if (actionTask?.dispatched) {
+              void actionTask.dispatched.then(
+                resolveDispatched,
+                rejectDispatched,
+              );
+            } else {
+              resolveDispatched();
             }
-          : {
-              group_id: targetId,
-              message,
-              auto_escape: false,
-            };
-        const actionTask: any = this.callAction(
-          action,
-          withOneBotActionTimeoutParam(action, params),
-        );
-        if (actionTask?.dispatched) {
-          void actionTask.dispatched.then(resolveDispatched, rejectDispatched);
-        } else {
-          resolveDispatched();
+          }
+          const data: any = await actionTask;
+          const messageId = safeString(data?.message_id || data).trim();
+          if (!messageId) throw new Error("onebot_send_message_empty_result");
+          return messageId;
+        };
+        try {
+          return [await send(message, true)];
+        } catch (error: any) {
+          if (error?.oneBotActionRejected && oneBotNodesContainMedia(work)) {
+            const fallback = renderRichDeliveryFallback(work);
+            if (fallback) {
+              this.logger.warn(
+                `rich message send failed; falling back to plain text err=${safeString(error?.message || error)}`,
+              );
+              const reply = replyToMessageId
+                ? `[CQ:reply,id=${escapeOneBotText(replyToMessageId)}]`
+                : "";
+              return [await send(`${reply}${escapeOneBotText(fallback)}`)];
+            }
+          }
+          throw error;
         }
-        const data: any = await actionTask;
-        const messageId = safeString(data?.message_id || data).trim();
-        if (!messageId) throw new Error("onebot_send_message_empty_result");
-        return [messageId];
       } catch (error) {
         rejectDispatched(error);
         throw error;
@@ -2547,7 +2612,6 @@ const BUILT_IN_CHAT_RUNTIME_ADAPTER_FACTORIES: Record<
   lark: LarkAdapter,
   discord: DiscordAdapter,
   slack: SlackAdapter,
-  minecraft: MinecraftAdapter,
 };
 
 export function createChatRuntimeApp(agentDir?: string) {

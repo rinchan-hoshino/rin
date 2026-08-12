@@ -43,13 +43,11 @@ test("chat key migration infers configured bot ids without adapter-specific key 
       telegram: { token: "8623230033:secret" },
       onebot: { selfId: "2301401877" },
       discord: { rin: { token: "MTUxOTkwODk1NjIxMjgyMjExNw.secret" } },
-      minecraft: { selfId: "minecraft" },
     },
   });
 
   assert.deepEqual(botIds, {
     discord: "1519908956212822117",
-    minecraft: "minecraft",
     onebot: "2301401877",
     telegram: "8623230033",
   });
@@ -94,7 +92,6 @@ test("chat key migration exercises empty, nested, and explicit adapter identitie
         telegram: [{ token: "" }, { botId: "telegram-explicit" }],
         discord: { selfId: "discord-explicit" },
         onebot: {},
-        minecraft: { id: "minecraft-id" },
         qq: { botId: "qq-bot" },
         lark: { botId: "lark-bot" },
         slack: { userId: "slack-user" },
@@ -108,7 +105,6 @@ test("chat key migration exercises empty, nested, and explicit adapter identitie
     {
       discord: "discord-explicit",
       lark: "lark-bot",
-      minecraft: "minecraft-id",
       nested: "nested-id",
       qq: "qq-bot",
       slack: "slack-user",

@@ -176,9 +176,6 @@ maintenance_job_invalid_payload
 managed_new_session_unsupported
 memory_install_migration_install_dir_required
 memory_install_migration_runtime_required
-minecraft_not_connected
-minecraft_send_message_empty
-minecraft_url_required
 missing_self_improve_interval
 missing_status_interval
 missing_status_limit
@@ -369,7 +366,7 @@ web_fetch_invalid_url`
   .split(/\s+/);
 
 test("every owned runtime marker has a human-facing formatter", () => {
-  assert.equal(OWNED_MARKERS.length, 358);
+  assert.equal(OWNED_MARKERS.length, 355);
   assert.equal(new Set(OWNED_MARKERS).size, OWNED_MARKERS.length);
   for (const marker of OWNED_MARKERS) {
     assert.equal(errors.hasUserFacingRuntimeErrorMapping(marker), true, marker);

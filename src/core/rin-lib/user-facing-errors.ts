@@ -447,12 +447,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   managed_new_session_unsupported: () =>
     "This managed session cannot create a new session through that path. Use /new or the session menu instead.",
 
-  minecraft_not_connected: () =>
-    "Minecraft chat adapter is not connected. Check the adapter connection.",
-  minecraft_send_message_empty: () =>
-    "Minecraft chat send failed because the outgoing message is empty. Add text.",
-  minecraft_url_required: () =>
-    "Minecraft chat adapter needs a server URL before it can start. Add the URL.",
   invalid_self_improve_interval: () =>
     "Self-improve live view needs a positive refresh interval.",
   self_improve_audit_invalid_policy: () =>

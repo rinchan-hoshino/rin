@@ -200,14 +200,7 @@ test("historical evidence resolver covers the production-sized recovery distribu
 });
 
 test("historical evidence resolver covers every bot-qualified platform", () => {
-  const platforms = [
-    "telegram",
-    "onebot",
-    "discord",
-    "lark",
-    "slack",
-    "minecraft",
-  ];
+  const platforms = ["telegram", "onebot", "discord", "lark", "slack"];
   const records = platforms.flatMap((platform, index) => {
     const botId = `bot-${index}`;
     const chatId = `chat-${index}`;

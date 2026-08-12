@@ -285,6 +285,13 @@ function isPartialChatDeliveryError(error: unknown) {
   );
 }
 
+function isConfirmedChatOutboxFailure(error: unknown) {
+  return (
+    (error as any)?.chatOutboxPreDispatchFailure === true ||
+    (error as any)?.chatOutboxConfirmedNotDelivered === true
+  );
+}
+
 function isPermanentChatOutboxError(error: unknown) {
   const message = chatOutboxErrorMessage(error);
   return (
@@ -642,10 +649,7 @@ function settleChatOutboxFailure(
       error: chatOutboxErrorMessage(error),
     };
   }
-  if (
-    sending.dispatchStartedAt &&
-    !(error as any)?.chatOutboxPreDispatchFailure
-  ) {
+  if (sending.dispatchStartedAt && !isConfirmedChatOutboxFailure(error)) {
     const delivered = deliveredUnconfirmedChatOutboxItem(sending, error);
     if (!writeChatOutboxItem(agentDir, delivered)) {
       return {
@@ -718,7 +722,7 @@ function settleLateChatOutboxFailure(
     warnChatOutboxFailure(logger, failed, error, "failed");
     return;
   }
-  if (current.dispatchStartedAt) {
+  if (current.dispatchStartedAt && !isConfirmedChatOutboxFailure(error)) {
     const delivered = deliveredUnconfirmedChatOutboxItem(current, error);
     if (!writeChatOutboxItem(agentDir, delivered)) return;
     applyPostDelivery(agentDir, delivered);

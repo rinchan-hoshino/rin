@@ -53,7 +53,7 @@ The core `note` tool uses the same stable-ID item operations and optional read r
 
 ## Chat bridge
 
-Rin's direct built-in chat bridge currently includes Telegram, OneBot, Feishu / Lark, Discord, Slack, and Minecraft / QueQiao.
+Rin's direct built-in chat bridge currently includes Telegram, OneBot, Feishu / Lark, Discord, and Slack.
 
 Use `docs/chat-bridge.md` for:
 

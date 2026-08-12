@@ -918,6 +918,51 @@ test("chat outbox retries a rejected provider pre-dispatch signal", async () => 
   });
 });
 
+test("chat outbox retries an explicit provider rejection after dispatch", async () => {
+  await withTempDir(async (dir) => {
+    const id = outbox.enqueueChatOutboxPayload(
+      dir,
+      payload("provider rejected rich message"),
+    );
+    const error: any = new Error("provider rejected message");
+    error.chatOutboxConfirmedNotDelivered = true;
+    let providerAttempts = 0;
+    const app = {
+      bots: [
+        {
+          platform: "telegram",
+          selfId: "777",
+          sendMessage() {
+            providerAttempts += 1;
+            const delivery = Promise.reject(error);
+            delivery.dispatched = Promise.resolve();
+            return delivery;
+          },
+        },
+      ],
+    };
+
+    const results = await boot.drainChatOutbox(
+      app,
+      dir,
+      h(),
+      { warn() {} },
+      { itemId: id },
+    );
+    assert.equal(results[0].status, "dispatched");
+    await waitFor(() => {
+      assert.equal(
+        outbox.readChatOutboxItemById(dir, id).item.status,
+        "queued",
+      );
+    });
+    const queued = outbox.readChatOutboxItemById(dir, id).item;
+    assert.equal(providerAttempts, 1);
+    assert.equal(queued.deliveryUnconfirmed, undefined);
+    assert.equal(queued.lastError, "provider rejected message");
+  });
+});
+
 test("chat outbox does not retry rejection without dispatch evidence", async () => {
   await withTempDir(async (dir) => {
     const id = outbox.enqueueChatOutboxPayload(

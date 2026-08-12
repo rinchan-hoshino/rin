@@ -26,7 +26,7 @@ test("chat bridge adapter labels and defaults come from shared built-in specs", 
 
   assert.deepEqual(
     specs.map((item) => item.key),
-    ["telegram", "onebot", "lark", "discord", "slack", "minecraft"],
+    ["telegram", "onebot", "lark", "discord", "slack"],
   );
   assert.deepEqual(adapters.getChatBridgeAdapterSpec("telegram")?.defaults, {
     protocol: "polling",
@@ -42,7 +42,6 @@ test("chat bridge adapter labels and defaults come from shared built-in specs", 
     "Feishu / Lark",
     "Discord",
     "Slack",
-    "Minecraft / QueQiao",
   ]);
 });
 
@@ -103,7 +102,7 @@ test("chat bridge runtime adapter entries expose only configured built-in adapte
 
   assert.deepEqual(
     entries.map((item) => item.key),
-    ["telegram", "onebot", "minecraft"],
+    ["telegram", "onebot"],
   );
 });
 

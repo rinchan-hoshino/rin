@@ -156,9 +156,9 @@ test("runtime app owns durable ingress, adapter ordering, builders, and provider
     });
     assert.deepEqual(
       created.map((entry: any) => entry.key),
-      ["telegram", "onebot", "lark", "discord", "slack", "minecraft"],
+      ["telegram", "onebot", "lark", "discord", "slack"],
     );
-    assert.equal(all.bots.length, 6);
+    assert.equal(all.bots.length, 5);
     assert.equal(
       builtInLog.records.some((entry) =>
         /not implemented/.test(entry.join(" ")),

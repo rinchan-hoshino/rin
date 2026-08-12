@@ -3,8 +3,7 @@ export type ChatBridgeBuiltInAdapterKey =
   | "onebot"
   | "lark"
   | "discord"
-  | "slack"
-  | "minecraft";
+  | "slack";
 
 export type ChatBridgeAdapterSpec = {
   key: ChatBridgeBuiltInAdapterKey;
@@ -37,14 +36,6 @@ const SLACK_DEFAULTS = {
   protocol: "ws",
 };
 
-const MINECRAFT_DEFAULTS = {
-  protocol: "ws",
-  url: "",
-  selfId: "minecraft",
-  serverName: "",
-  token: "",
-};
-
 const CHAT_BRIDGE_ADAPTER_SPECS: readonly ChatBridgeAdapterSpec[] = [
   {
     key: "telegram",
@@ -75,12 +66,6 @@ const CHAT_BRIDGE_ADAPTER_SPECS: readonly ChatBridgeAdapterSpec[] = [
     label: "Slack",
     pluginKey: "adapter-slack",
     defaults: SLACK_DEFAULTS,
-  },
-  {
-    key: "minecraft",
-    label: "Minecraft / QueQiao",
-    pluginKey: "adapter-minecraft",
-    defaults: MINECRAFT_DEFAULTS,
   },
 ];
 

@@ -19,13 +19,11 @@ test("chat key migration infers configured bot ids without adapter-specific key 
       telegram: { token: "8623230033:secret" },
       onebot: { selfId: "2301401877" },
       discord: { rin: { token: "MTUxOTkwODk1NjIxMjgyMjExNw.secret" } },
-      minecraft: { selfId: "minecraft" },
     },
   });
 
   assert.deepEqual(botIds, {
     discord: "1519908956212822117",
-    minecraft: "minecraft",
     onebot: "2301401877",
     telegram: "8623230033",
   });

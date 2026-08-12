@@ -1795,6 +1795,49 @@ test("telegram adapter falls back to a safe rich segment and continues later seg
   });
 });
 
+test("telegram adapter falls back after the provider rejects a file send", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ method: string; payload: any }> = [];
+    adapter.api = {
+      raw: {
+        sendDocument: async (payload: any) => {
+          calls.push({ method: "sendDocument", payload });
+          const error: any = new Error("Bad Request: file rejected");
+          error.name = "GrammyError";
+          error.ok = false;
+          throw error;
+        },
+        sendMessage: async (payload: any) => {
+          calls.push({ method: "sendMessage", payload });
+          return { message_id: `m${calls.length}` };
+        },
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("456", [
+      h.quote("77"),
+      h.file(Buffer.from("draft"), "application/octet-stream", {
+        name: "draft.bin",
+      }),
+    ]);
+
+    assert.deepEqual(result, ["m2"]);
+    assert.deepEqual(
+      calls.map((entry) => entry.method),
+      ["sendDocument", "sendMessage"],
+    );
+    assert.equal(calls[1].payload.reply_to_message_id, "77");
+    assert.equal(calls[1].payload.text, "[file: draft.bin]");
+  });
+});
+
 test("telegram adapter reports partial delivery when original-string fallback also fails", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -2232,6 +2275,62 @@ test("onebot adapter falls back to a safe rich node during serialization", async
   });
 });
 
+test("onebot adapter falls back to plain text after a confirmed rich send failure", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "onebot",
+      name: "OneBot",
+      config: { selfId: "1", url: "ws://127.0.0.1:9" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: Array<{ action: string; params: any }> = [];
+    const filePath = path.join(agentDir, "draft.xlsx");
+    await fs.writeFile(filePath, Buffer.from("draft"));
+    adapter.callAction = (action: string, params: any) => {
+      calls.push({ action, params });
+      if (calls.length === 1) {
+        const error: any = runtime.oneBotActionRejectedError({
+          wording: "group file upload failed: code=-303 msg=invalid file name",
+        });
+        assert.equal(error.chatOutboxConfirmedNotDelivered, true);
+        const rejected = Promise.reject(error) as Promise<any> & {
+          dispatched?: Promise<void>;
+        };
+        rejected.dispatched = Promise.resolve();
+        return rejected;
+      }
+      return Promise.resolve({ message_id: "fallback-message" });
+    };
+
+    const result = await app.bots[0].sendMessage("2", [
+      h.quote("88"),
+      h.text("Resending as plain text:\n"),
+      h.file(
+        filePath,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        {
+          name: "draft.xlsx",
+        },
+      ),
+    ]);
+
+    assert.deepEqual(result, ["fallback-message"]);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].action, "send_group_msg");
+    assert.match(calls[0].params.message, /\[CQ:file,file=base64:\/\//);
+    assert.equal(calls[1].action, "send_group_msg");
+    assert.match(calls[1].params.message, /^\[CQ:reply,id=88\]/);
+    assert.match(calls[1].params.message, /Resending as plain text:/);
+    assert.match(calls[1].params.message, /file: draft\.xlsx/);
+    assert.doesNotMatch(
+      calls[1].params.message,
+      /base64:|chat_media_file_missing|\/tmp\//,
+    );
+    assert.equal(calls[1].params.timeout, runtime.ONEBOT_ACTION_TIMEOUT_MS);
+  });
+});
+
 test("onebot adapter exposes media send dispatch before the OneBot echo", async () => {
   await withTempDir(async (agentDir) => {
     const app = createRuntimeApp(agentDir, {
@@ -2438,6 +2537,44 @@ test("discord adapter treats a successful safe-string fallback as delivered", as
     assert.equal(calls[1].content, "[image: missing]");
     assert.doesNotMatch(calls[1].content, /chat_media_file_missing:/);
     assert.equal(calls[2].content, "trailing text");
+  });
+});
+
+test("discord adapter falls back after the provider rejects a file send", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "abc" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.fetchChannel = async () => ({
+      send: async (payload: any) => {
+        calls.push(payload);
+        if (payload.files) {
+          const error: any = new Error("Invalid Form Body");
+          error.name = "DiscordAPIError[50035]";
+          error.code = 50035;
+          throw error;
+        }
+        return { id: `m${calls.length}` };
+      },
+    });
+
+    const result = await app.bots[0].sendMessage("456", [
+      h.quote("88"),
+      h.file(Buffer.from("draft"), "application/octet-stream", {
+        name: "draft.bin",
+      }),
+    ]);
+
+    assert.deepEqual(result, ["m2"]);
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[0].files[0].attachment, Buffer.from("draft"));
+    assert.equal(calls[1].content, "[file: draft.bin]");
+    assert.equal(calls[1].reply.messageReference, "88");
   });
 });
 
@@ -2731,6 +2868,47 @@ test("lark adapter falls back from a failed file upload without exposing local p
     assert.equal(calls[1].data.msg_type, "text");
     assert.equal(JSON.parse(calls[1].data.content).text, "[file: spec.pdf]");
     assert.doesNotMatch(calls[1].data.content, /status code 400/);
+  });
+});
+
+test("lark adapter falls back when the file message is rejected after upload", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const calls: any[] = [];
+    adapter.client = {
+      im: {
+        file: {
+          create: async () => ({ file_key: "file_v2_draft" }),
+        },
+        message: {
+          create: async (payload: any) => {
+            calls.push(payload);
+            if (payload.data.msg_type === "file") {
+              return { code: 230001, msg: "invalid file message" };
+            }
+            return { data: { message_id: "fallback-message" } };
+          },
+        },
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("oc_1", [
+      h.file(Buffer.from("draft"), "application/octet-stream", {
+        name: "draft.bin",
+      }),
+    ]);
+
+    assert.deepEqual(result, ["fallback-message"]);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].data.msg_type, "file");
+    assert.equal(calls[1].data.msg_type, "text");
+    assert.equal(JSON.parse(calls[1].data.content).text, "[file: draft.bin]");
   });
 });
 
@@ -3787,6 +3965,167 @@ test("slack adapter falls back to a safe rich segment and continues later segmen
     assert.equal(calls[1].text, "[image: missing]");
     assert.doesNotMatch(calls[1].text, /chat_media_file_missing:/);
     assert.equal(calls[2].text, "trailing text");
+  });
+});
+
+test("slack adapter falls back after the provider rejects a file upload", async () => {
+  await withTempDir(async (agentDir) => {
+    const app = createRuntimeApp(agentDir, {
+      key: "slack",
+      name: "Slack",
+      config: { botToken: "xoxb-test", appToken: "xapp-test" },
+    });
+    const adapter = [...app.adapters][0];
+    const h = runtime.createChatRuntimeH();
+    const posts: any[] = [];
+    adapter.web = {
+      chat: {
+        postMessage: async (payload: any) => {
+          posts.push(payload);
+          return { ts: `m${posts.length}` };
+        },
+      },
+      files: {
+        uploadV2: async () => {
+          const error: any = new Error("An API error occurred: invalid_file");
+          error.code = "slack_webapi_platform_error";
+          throw error;
+        },
+      },
+    };
+
+    const result = await app.bots[0].sendMessage("C1", [
+      h.quote("99"),
+      h.file(Buffer.from("draft"), "application/octet-stream", {
+        name: "draft.bin",
+      }),
+    ]);
+
+    assert.deepEqual(result, ["m1"]);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].text, "[file: draft.bin]");
+    assert.equal(posts[0].thread_ts, "99");
+  });
+});
+
+test("rich adapters preserve confirmed-not-delivered when providers reject fallback text", async () => {
+  await withTempDir(async (agentDir) => {
+    const h = runtime.createChatRuntimeH();
+    const rejected = async (task: Promise<any>) => {
+      try {
+        await task;
+        return null;
+      } catch (error) {
+        return error as any;
+      }
+    };
+    const file = () =>
+      h.file(Buffer.from("draft"), "application/octet-stream", {
+        name: "draft.bin",
+      });
+
+    const telegram = createRuntimeApp(agentDir, {
+      key: "telegram",
+      name: "Telegram",
+      config: { token: "123:abc" },
+    });
+    const telegramAdapter = [...telegram.adapters][0];
+    const telegramRejection = async () => {
+      const error: any = new Error("Bad Request: rejected");
+      error.name = "GrammyError";
+      error.ok = false;
+      throw error;
+    };
+    telegramAdapter.api = {
+      raw: {
+        sendDocument: telegramRejection,
+        sendMessage: telegramRejection,
+      },
+    };
+
+    const discord = createRuntimeApp(agentDir, {
+      key: "discord",
+      name: "Discord",
+      config: { token: "abc" },
+    });
+    const discordAdapter = [...discord.adapters][0];
+    discordAdapter.fetchChannel = async () => ({
+      send: async () => {
+        const error: any = new Error("Invalid Form Body");
+        error.name = "DiscordAPIError[50035]";
+        error.code = 50035;
+        throw error;
+      },
+    });
+
+    const lark = createRuntimeApp(agentDir, {
+      key: "lark",
+      name: "Lark",
+      config: { appId: "app", appSecret: "secret" },
+    });
+    const larkAdapter = [...lark.adapters][0];
+    larkAdapter.client = {
+      im: {
+        file: { create: async () => ({ file_key: "file_v2_draft" }) },
+        message: {
+          create: async () => ({ code: 230001, msg: "invalid message" }),
+        },
+      },
+    };
+
+    const slack = createRuntimeApp(agentDir, {
+      key: "slack",
+      name: "Slack",
+      config: { botToken: "xoxb-test", appToken: "xapp-test" },
+    });
+    const slackAdapter = [...slack.adapters][0];
+    const slackRejection = () => {
+      const error: any = new Error("An API error occurred: invalid_file");
+      error.code = "slack_webapi_platform_error";
+      throw error;
+    };
+    slackAdapter.web = {
+      chat: { postMessage: async () => slackRejection() },
+      files: { uploadV2: async () => slackRejection() },
+    };
+
+    const onebot = createRuntimeApp(agentDir, {
+      key: "onebot",
+      name: "OneBot",
+      config: { selfId: "1", url: "ws://127.0.0.1:9" },
+    });
+    const onebotAdapter = [...onebot.adapters][0];
+    onebotAdapter.callAction = () => {
+      const task = Promise.reject(
+        runtime.oneBotActionRejectedError({ wording: "message rejected" }),
+      ) as Promise<any> & { dispatched?: Promise<void> };
+      task.dispatched = Promise.resolve();
+      return task;
+    };
+
+    const errors = {
+      telegram: await rejected(telegram.bots[0].sendMessage("456", [file()])),
+      discord: await rejected(discord.bots[0].sendMessage("456", [file()])),
+      lark: await rejected(lark.bots[0].sendMessage("oc_1", [file()])),
+      slack: await rejected(slack.bots[0].sendMessage("C1", [file()])),
+      onebot: await rejected(onebot.bots[0].sendMessage("2", [file()])),
+    };
+
+    assert.deepEqual(
+      Object.fromEntries(
+        Object.entries(errors).map(([platform, error]) => [
+          platform,
+          error?.chatOutboxConfirmedNotDelivered === true,
+        ]),
+      ),
+      {
+        telegram: true,
+        discord: true,
+        lark: true,
+        slack: true,
+        onebot: true,
+      },
+    );
   });
 });
 

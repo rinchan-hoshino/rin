@@ -7,7 +7,6 @@ export const BOT_QUALIFIED_CHAT_PLATFORMS = new Set([
   "discord",
   "lark",
   "slack",
-  "minecraft",
 ]);
 
 export type LegacyChatKeyResolutionSource =

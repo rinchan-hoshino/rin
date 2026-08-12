@@ -67,7 +67,6 @@ Rin's built-in direct chat runtime supports these adapter families:
 - Feishu / Lark
 - Discord
 - Slack
-- Minecraft / QueQiao
 
 Adapter lifecycle failures are isolated. If one configured adapter cannot initialize or connect, its status is `degraded`; other adapters continue starting and the core daemon remains available. If the whole hosted Chat service cannot start, daemon status reports Chat as degraded and Chat commands fail explicitly without taking down TUI, scheduler, workers, or daemon RPC.
 
@@ -91,13 +90,7 @@ Minimal built-in adapter examples:
     },
     "lark": { "platform": "feishu", "appId": "cli_xxx", "appSecret": "secret" },
     "discord": { "token": "bot-token" },
-    "slack": { "protocol": "ws", "token": "xapp-...", "botToken": "xoxb-..." },
-    "minecraft": {
-      "url": "ws://127.0.0.1:8080",
-      "selfId": "minecraft",
-      "serverName": "Survival",
-      "token": ""
-    }
+    "slack": { "protocol": "ws", "token": "xapp-...", "botToken": "xoxb-..." }
   }
 }
 ```
@@ -126,7 +119,7 @@ lark/cli_xxx:oc_xxx
 Rules:
 
 - Every platform chat key uses the same bot-qualified shape: `platform/botId:chatId`.
-- `botId` is the stable account/bot identity for the adapter instance, such as Telegram bot id, OneBot selfId, Discord bot id, Lark appId, Slack bot user id, or Minecraft selfId.
+- `botId` is the stable account/bot identity for the adapter instance, such as Telegram bot id, OneBot selfId, Discord bot id, Lark appId, or Slack bot user id.
 - Do not introduce platform-specific unqualified forms such as `platform:chatId`; migrate stored files and settings to the single canonical shape instead.
 - Telegram private/group shape is inferred from `chatId`; negative ids are groups/channels.
 - OneBot private chats commonly use `private:<userId>`; group chats use the group id.

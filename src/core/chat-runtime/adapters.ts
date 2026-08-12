@@ -3,7 +3,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Lexer } from "marked";
-import WebSocket from "ws";
 
 import { EditableTextMessageGroup } from "./editable-text-message-group.js";
 import {
@@ -22,6 +21,7 @@ import {
 import { formatRinTodoChecklistMarkdownContent } from "../rin-lib/todo-state.js";
 import {
   compactObject,
+  confirmedChatDeliveryError,
   createPrefixedLogger,
   downloadToFile,
   emitBotStatus,
@@ -41,6 +41,7 @@ import {
   renderPlainTextFromNodes,
   renderRichDeliveryFallback,
   resolveChatRuntimeWorkingCopy,
+  richFallbackDeliveryError,
   safeString,
   sleep,
   splitPlainText,
@@ -62,6 +63,25 @@ const DISCORD_MAX_TEXT_LENGTH = 2000;
 export const DISCORD_REST_REQUEST_TIMEOUT_MS = 60_000;
 export const DISCORD_REST_RETRIES = 1;
 const SLACK_MAX_TEXT_LENGTH = 40000;
+
+function isDiscordProviderRejection(error: unknown) {
+  return /^DiscordAPIError(?:\[|$)/.test(
+    safeString((error as any)?.name).trim(),
+  );
+}
+
+function isSlackProviderRejection(error: unknown) {
+  return (
+    safeString((error as any)?.code).trim() === "slack_webapi_platform_error"
+  );
+}
+
+function markProviderRejection(
+  error: unknown,
+  predicate: (error: unknown) => boolean,
+) {
+  return predicate(error) ? confirmedChatDeliveryError(error) : error;
+}
 
 export function createDiscordRestRequestStrategy(
   transport: RinHttpTransport = createRinHttpTransport({
@@ -1111,18 +1131,23 @@ export class DiscordAdapter {
       input.text,
       DISCORD_MAX_TEXT_LENGTH,
     )) {
-      const sent = await channel.send(
-        compactObject({
-          content: textChunk,
-          reply:
-            input.replyToMessageId && !delivered.length
-              ? {
-                  messageReference: input.replyToMessageId,
-                  failIfNotExists: false,
-                }
-              : undefined,
-        }),
-      );
+      let sent: any;
+      try {
+        sent = await channel.send(
+          compactObject({
+            content: textChunk,
+            reply:
+              input.replyToMessageId && !delivered.length
+                ? {
+                    messageReference: input.replyToMessageId,
+                    failIfNotExists: false,
+                  }
+                : undefined,
+          }),
+        );
+      } catch (error) {
+        throw markProviderRejection(error, isDiscordProviderRejection);
+      }
       const messageId = safeString(sent?.id).trim();
       if (messageId) delivered.push(messageId);
     }
@@ -1135,17 +1160,22 @@ export class DiscordAdapter {
   ) {
     const file = await this.readOutboundFile(input.node);
     if (!file) return [] as string[];
-    const sent = await channel.send(
-      compactObject({
-        files: [file],
-        reply: input.replyToMessageId
-          ? {
-              messageReference: input.replyToMessageId,
-              failIfNotExists: false,
-            }
-          : undefined,
-      }),
-    );
+    let sent: any;
+    try {
+      sent = await channel.send(
+        compactObject({
+          files: [file],
+          reply: input.replyToMessageId
+            ? {
+                messageReference: input.replyToMessageId,
+                failIfNotExists: false,
+              }
+            : undefined,
+        }),
+      );
+    } catch (error) {
+      throw markProviderRejection(error, isDiscordProviderRejection);
+    }
     return [safeString(sent?.id).trim()].filter(Boolean);
   }
 
@@ -1186,13 +1216,18 @@ export class DiscordAdapter {
           replyToMessageId: firstReply,
         });
         if (!fallbackIds.length) {
-          failures.push(error);
+          failures.push(
+            richFallbackDeliveryError(
+              error,
+              new Error("discord_rich_fallback_empty_result"),
+            ),
+          );
           return;
         }
         delivered.push(...fallbackIds);
         firstReply = undefined;
       } catch (fallbackError: any) {
-        failures.push(error);
+        failures.push(richFallbackDeliveryError(error, fallbackError));
         this.logger.warn(
           `rich fallback delivery failed err=${safeString(fallbackError?.message || fallbackError)}`,
         );
@@ -1728,13 +1763,18 @@ export class SlackAdapter {
   ) {
     const delivered: string[] = [];
     for (const textChunk of splitPlainText(text, SLACK_MAX_TEXT_LENGTH)) {
-      const sent = await this.web.chat.postMessage(
-        compactObject({
-          channel: chatId,
-          text: textChunk,
-          thread_ts: replyToMessageId || undefined,
-        }),
-      );
+      let sent: any;
+      try {
+        sent = await this.web.chat.postMessage(
+          compactObject({
+            channel: chatId,
+            text: textChunk,
+            thread_ts: replyToMessageId || undefined,
+          }),
+        );
+      } catch (error) {
+        throw markProviderRejection(error, isSlackProviderRejection);
+      }
       const ts = safeString(sent?.ts).trim();
       if (ts) delivered.push(ts);
     }
@@ -1782,14 +1822,19 @@ export class SlackAdapter {
   private async postTodo(chatId: string, node: any, replyToMessageId?: string) {
     const payload = this.buildTodoBlocks(node);
     if (!payload) return [] as string[];
-    const sent = await this.web.chat.postMessage(
-      compactObject({
-        channel: chatId,
-        text: payload.text,
-        blocks: payload.blocks,
-        thread_ts: replyToMessageId || undefined,
-      }),
-    );
+    let sent: any;
+    try {
+      sent = await this.web.chat.postMessage(
+        compactObject({
+          channel: chatId,
+          text: payload.text,
+          blocks: payload.blocks,
+          thread_ts: replyToMessageId || undefined,
+        }),
+      );
+    } catch (error) {
+      throw markProviderRejection(error, isSlackProviderRejection);
+    }
     const ts = safeString(sent?.ts).trim();
     return ts ? [ts] : [];
   }
@@ -1799,14 +1844,19 @@ export class SlackAdapter {
     payload: { data: Buffer; name: string },
     replyToMessageId?: string,
   ) {
-    const uploaded = await this.web.files.uploadV2(
-      compactObject({
-        channel_id: chatId,
-        file: payload.data,
-        filename: payload.name,
-        thread_ts: replyToMessageId || undefined,
-      }),
-    );
+    let uploaded: any;
+    try {
+      uploaded = await this.web.files.uploadV2(
+        compactObject({
+          channel_id: chatId,
+          file: payload.data,
+          filename: payload.name,
+          thread_ts: replyToMessageId || undefined,
+        }),
+      );
+    } catch (error) {
+      throw markProviderRejection(error, isSlackProviderRejection);
+    }
     return safeString(
       uploaded?.files?.[0]?.id || uploaded?.file?.id || "",
     ).trim();
@@ -1864,12 +1914,17 @@ export class SlackAdapter {
           replyToMessageId,
         );
         if (!fallbackIds.length) {
-          failures.push(error);
+          failures.push(
+            richFallbackDeliveryError(
+              error,
+              new Error("slack_rich_fallback_empty_result"),
+            ),
+          );
           return;
         }
         delivered.push(...fallbackIds);
       } catch (fallbackError: any) {
-        failures.push(error);
+        failures.push(richFallbackDeliveryError(error, fallbackError));
         this.logger.warn(
           `rich fallback delivery failed err=${safeString(fallbackError?.message || fallbackError)}`,
         );
@@ -2914,7 +2969,11 @@ export class LarkAdapter {
             ...data,
           },
         });
-    assertLarkApiSuccess(result);
+    try {
+      assertLarkApiSuccess(result);
+    } catch (error) {
+      throw confirmedChatDeliveryError(error);
+    }
     return [
       safeString(result?.data?.message_id || result?.message_id || "").trim(),
     ].filter(Boolean);
@@ -3196,12 +3255,17 @@ export class LarkAdapter {
           replyToMessageId,
         );
         if (!fallbackIds.length) {
-          failures.push(error);
+          failures.push(
+            richFallbackDeliveryError(
+              error,
+              new Error("lark_rich_fallback_empty_result"),
+            ),
+          );
           return;
         }
         delivered.push(...fallbackIds);
       } catch (fallbackError: any) {
-        failures.push(error);
+        failures.push(richFallbackDeliveryError(error, fallbackError));
         this.logger.warn(
           `rich fallback delivery failed err=${safeString(fallbackError?.message || fallbackError)}`,
         );
@@ -3342,294 +3406,5 @@ export class LarkAdapter {
       },
       elements: canonicalElements,
     });
-  }
-}
-
-export class MinecraftAdapter {
-  private readonly app: any;
-  private readonly config: Record<string, any>;
-  private readonly logger: any;
-  private ws: WebSocket | null = null;
-  private loopPromise: Promise<void> | null = null;
-  private stopped = false;
-  private nextEchoId = 1;
-  private readonly pending = new Map<
-    string,
-    {
-      resolve: (value: any) => void;
-      reject: (error: unknown) => void;
-      timer: NodeJS.Timeout;
-    }
-  >();
-  readonly bot: any;
-
-  constructor(
-    app: any,
-    _dataDir: string,
-    config: Record<string, any>,
-    logger: any,
-  ) {
-    this.app = app;
-    this.config = config;
-    this.logger = createPrefixedLogger("chat-runtime:minecraft", logger);
-    const internal: any = {
-      ws: null,
-      broadcast: async (message: string) =>
-        await this.callApi("broadcast", {
-          message: [{ text: safeString(message) }],
-        }),
-      sendPrivateMessage: async (nickname: string, message: string) =>
-        await this.callApi("send_private_msg", {
-          nickname,
-          message: [{ text: safeString(message) }],
-        }),
-      sendRconCommand: async (command: string) =>
-        await this.callApi("send_rcon_command", { command }),
-      title: async (nickname: string, title: string, subtitle = "") =>
-        await this.callApi("title", {
-          nickname,
-          title,
-          subtitle,
-        }),
-      actionBar: async (nickname: string, text: string) =>
-        await this.callApi("action_bar", {
-          nickname,
-          text,
-        }),
-    };
-    this.bot = {
-      platform: "minecraft",
-      selfId: safeString(config?.selfId).trim() || "minecraft",
-      status: 0,
-      workingIndicators: [
-        createReactionWorkingIndicator(() => this.bot),
-        createTypingWorkingIndicator(() => this.bot),
-      ],
-      user: {},
-      internal,
-      sendMessage: async (chatId: string, content: any) =>
-        await this.sendMessage(chatId, content),
-    };
-    this.app.register(this, this.bot);
-  }
-
-  async start() {
-    if (this.loopPromise) return;
-    this.stopped = false;
-    this.loopPromise = this.runLoop();
-  }
-
-  async stop() {
-    this.stopped = true;
-    try {
-      this.ws?.close();
-    } catch {}
-    this.ws = null;
-    try {
-      await this.loopPromise;
-    } catch {}
-    this.loopPromise = null;
-    emitBotStatus(this.app, this.bot, 0);
-  }
-
-  private async runLoop() {
-    while (!this.stopped) {
-      try {
-        await this.connect();
-        await new Promise<void>((resolve) => {
-          this.ws?.once("close", () => resolve());
-        });
-      } catch (error: any) {
-        if (!this.stopped) {
-          this.logger?.warn?.(
-            `connect failed err=${safeString(error?.message || error)}`,
-          );
-        }
-      } finally {
-        this.rejectPending(new Error("minecraft_disconnected"));
-        this.ws = null;
-        this.bot.internal.ws = null;
-        emitBotStatus(this.app, this.bot, 0);
-      }
-      if (!this.stopped) await sleep(3000);
-    }
-  }
-
-  private async connect() {
-    const url = safeString(this.config?.url || this.config?.endpoint).trim();
-    if (!url) throw new Error("minecraft_url_required");
-    await new Promise<void>((resolve, reject) => {
-      const headers: Record<string, string> = {
-        "x-self-name":
-          safeString(this.config?.serverName).trim() ||
-          safeString(this.bot?.selfId).trim() ||
-          "minecraft",
-      };
-      const token = safeString(
-        this.config?.token || this.config?.accessToken,
-      ).trim();
-      if (token) headers.Authorization = `Bearer ${token}`;
-      const ws = new WebSocket(url, { headers });
-      let settled = false;
-      ws.once("open", () => {
-        settled = true;
-        this.ws = ws;
-        this.bot.internal.ws = ws;
-        this.bot.inboundRecovery = {
-          status: "degraded",
-          failures: ["provider_replay_unsupported"],
-        };
-        this.logger.warn(
-          "inbound recovery degraded: QueQiao does not expose a durable replay/history action",
-        );
-        emitBotStatus(this.app, this.bot, 1);
-        resolve();
-      });
-      ws.once("error", (error) => {
-        if (!settled) reject(error);
-      });
-      ws.on("message", (buffer) => {
-        void this.handleSocketMessage(buffer.toString("utf8"));
-      });
-    });
-  }
-
-  private rejectPending(error: Error) {
-    for (const [echo, pending] of this.pending.entries()) {
-      clearTimeout(pending.timer);
-      pending.reject(error);
-      this.pending.delete(echo);
-    }
-  }
-
-  private async callApi(api: string, data: any) {
-    const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      throw new Error("minecraft_not_connected");
-    }
-    const echo = `rin-minecraft-${Date.now()}-${this.nextEchoId++}`;
-    return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(echo);
-        reject(new Error(`minecraft_api_timeout:${api}`));
-      }, 15000);
-      this.pending.set(echo, { resolve, reject, timer });
-      ws.send(JSON.stringify({ api, data, echo }));
-    });
-  }
-
-  private async handleSocketMessage(text: string) {
-    let payload: any;
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      return;
-    }
-    const echo = safeString(payload?.echo).trim();
-    if (echo && this.pending.has(echo)) {
-      const pending = this.pending.get(echo)!;
-      clearTimeout(pending.timer);
-      this.pending.delete(echo);
-      if (safeString(payload?.status).trim() === "SUCCESS") {
-        pending.resolve(payload);
-      } else {
-        pending.reject(
-          new Error(safeString(payload?.message || "minecraft_api_failed")),
-        );
-      }
-      return;
-    }
-    const eventName = safeString(payload?.event_name).trim();
-    if (!eventName) return;
-    const session = this.buildSession(payload);
-    if (session) this.app.emit("message", session);
-  }
-
-  private async sendMessage(chatId: string, content: any) {
-    const { work } = prepareOutboundNodes(content);
-    const text = renderPlainTextFromNodes(work, {
-      renderAt(attrs) {
-        return `@${safeString(attrs.name || attrs.id).trim()}`;
-      },
-    });
-    if (!text) throw new Error("minecraft_send_message_empty");
-    const target = safeString(chatId).trim();
-    if (target.startsWith("private:")) {
-      const nickname = target.slice("private:".length);
-      const result: any = await this.callApi("send_private_msg", {
-        nickname,
-        message: [{ text }],
-      });
-      return [
-        safeString(result?.echo || result?.message_id || Date.now()).trim(),
-      ];
-    }
-    const result: any = await this.callApi("broadcast", {
-      message: [{ text }],
-    });
-    return [
-      safeString(result?.echo || result?.message_id || Date.now()).trim(),
-    ];
-  }
-
-  private buildSession(payload: any) {
-    const eventName = safeString(payload?.event_name).trim();
-    if (eventName !== "PlayerChatEvent" && eventName !== "PlayerCommandEvent") {
-      return null;
-    }
-    const player =
-      payload?.player && typeof payload.player === "object"
-        ? payload.player
-        : {};
-    const userId =
-      safeString(player?.uuid || player?.nickname || "").trim() || undefined;
-    if (!userId) return null;
-    const rawText =
-      safeString(payload?.message || payload?.command || "").trim() ||
-      undefined;
-    const selfToken = safeString(this.bot?.selfId).trim();
-    const mentionSelf = Boolean(
-      rawText && selfToken && rawText.includes(`@${selfToken}`),
-    );
-    const strippedContent = mentionSelf
-      ? stripMentionTokens(rawText, [`@${selfToken}`])
-      : rawText;
-    return {
-      platform: "minecraft",
-      selfId: safeString(this.bot?.selfId).trim() || undefined,
-      bot: this.bot,
-      messageId: safeString(
-        payload?.message_id || payload?.timestamp || Date.now(),
-      ).trim(),
-      timestamp: Number.isFinite(Number(payload?.timestamp))
-        ? Number(payload.timestamp) * 1000
-        : Date.now(),
-      userId,
-      author: {
-        userId,
-        name: safeString(player?.nickname).trim() || undefined,
-        nick: safeString(player?.nickname).trim() || undefined,
-      },
-      user: {
-        id: userId,
-        userId,
-        name: safeString(player?.nickname).trim() || undefined,
-        nick: safeString(player?.nickname).trim() || undefined,
-      },
-      channelId:
-        safeString(payload?.server_name || "minecraft").trim() || "minecraft",
-      channelName: safeString(payload?.server_name || "").trim() || undefined,
-      guildId: safeString(payload?.server_name || "").trim() || undefined,
-      guildName: safeString(payload?.server_name || "").trim() || undefined,
-      isDirect: false,
-      content: rawText,
-      stripped: {
-        appel: mentionSelf,
-        content: strippedContent,
-      },
-      elements: strippedContent
-        ? [normalizeNode("text", { content: strippedContent })]
-        : [],
-    };
   }
 }
