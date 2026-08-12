@@ -458,6 +458,56 @@ test("failed terminal projection remains replayable until listeners commit it", 
   assert.equal(failures[0].stage, "terminal_listener");
 });
 
+test("permanent terminal listener failure rejects the local turn after bounded retries", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+    onEventHandlingError() {},
+  });
+  let attempts = 0;
+  driver.subscribe((event: any) => {
+    if (event.type !== "turn_complete") return;
+    attempts += 1;
+    throw new Error("permanent terminal projection failure");
+  });
+  await driver.connect();
+  const requestTag = "bounded-terminal-projection-failure";
+  const liveTurn = (driver as any).startLiveTurn(requestTag);
+  const handling = driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "durable but not projected",
+    sessionId: "frontend-session",
+    sessionFile: "/tmp/frontend-chat.jsonl",
+    terminalRecord: {
+      terminalId: `terminal-${"c".repeat(64)}`,
+      state: "complete",
+      terminalAt: "2026-08-12T03:47:46.000Z",
+    },
+  });
+  const outcome = await Promise.race([
+    liveTurn.promise.then(
+      () => ({ state: "resolved" }),
+      (error: Error) => ({ state: "rejected", error }),
+    ),
+    new Promise<{ state: "pending" }>((resolve) =>
+      setTimeout(() => resolve({ state: "pending" }), 1_000),
+    ),
+  ]);
+  if (outcome.state === "pending") driver.dispose();
+  await handling;
+
+  assert.equal(outcome.state, "rejected");
+  assert.match(
+    outcome.state === "rejected" ? outcome.error.message : "",
+    /rin_terminal_projection_failed/,
+  );
+  assert.equal(attempts, 3);
+  assert.equal(driver.hasActiveTurn(), false);
+});
+
 test("terminal projection retries only listeners that have not committed", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({

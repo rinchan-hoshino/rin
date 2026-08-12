@@ -62,6 +62,8 @@ export {
   type RinFrontendPromptTurnInput,
 } from "./input-submission.js";
 
+const TERMINAL_PROJECTION_MAX_ATTEMPTS = 3;
+
 export type RinFrontendTurnPhase =
   | "idle"
   | "connecting"
@@ -2429,6 +2431,23 @@ export class RinFrontendTurnDriver {
     return this.liveTurnsByRequestTag.get(terminalRequestTag) || null;
   }
 
+  private rejectTerminalProjectionFailure(requestTag?: string) {
+    const terminalRequestTag = safeString(requestTag).trim();
+    if (!terminalRequestTag) return;
+    const error = new Error("rin_terminal_projection_failed") as Error & {
+      rinTurnTerminal?: boolean;
+    };
+    error.rinTurnTerminal = true;
+    const pendingSettlement =
+      this.pendingSubmissionSettlements.get(terminalRequestTag);
+    if (pendingSettlement) {
+      this.pendingSubmissionSettlements.delete(terminalRequestTag);
+      pendingSettlement.cancel(error);
+      return;
+    }
+    this.liveTurnForRequestTag(terminalRequestTag)?.reject(error);
+  }
+
   private async emitTerminalAfterCommit(
     event: Extract<
       RinFrontendTurnDriverEvent,
@@ -2479,7 +2498,9 @@ export class RinFrontendTurnDriver {
               frontendEvent: event,
             });
           }
-          if (!this.client) return false;
+          if (attempt >= TERMINAL_PROJECTION_MAX_ATTEMPTS || !this.client) {
+            return false;
+          }
           await new Promise((resolve) =>
             setTimeout(resolve, Math.min(2_000, 100 * 2 ** (attempt - 1))),
           );
@@ -2764,6 +2785,9 @@ export class RinFrontendTurnDriver {
             : {}),
         };
         if (!(await this.emitTerminalAfterCommit(terminalEvent, eventEpoch))) {
+          if (eventEpoch === this.lifecycleEpoch) {
+            this.rejectTerminalProjectionFailure(terminalEvent.requestTag);
+          }
           return;
         }
         if (eventEpoch !== this.lifecycleEpoch) return;
@@ -2806,6 +2830,9 @@ export class RinFrontendTurnDriver {
             : {}),
         };
         if (!(await this.emitTerminalAfterCommit(terminalEvent, eventEpoch))) {
+          if (eventEpoch === this.lifecycleEpoch) {
+            this.rejectTerminalProjectionFailure(terminalEvent.requestTag);
+          }
           return;
         }
         if (eventEpoch !== this.lifecycleEpoch) return;

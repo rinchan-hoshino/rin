@@ -8382,6 +8382,102 @@ test("authoritative terminal replay adopts one outbox after the transport job se
   );
 });
 
+test("a committed older terminal settles its local promise after the controller advances", async () => {
+  const controller = await createController("telegram/1:2");
+  const inbound = enqueueChatInboxItem(controller.agentDir, {
+    chatKey: controller.chatKey,
+    messageId: "committed-older-terminal",
+    session: {
+      platform: "telegram",
+      selfId: "1",
+      channelId: "2",
+      messageId: "committed-older-terminal",
+      content: "older turn",
+      stripped: { content: "older turn" },
+    },
+    elements: [{ type: "text", attrs: { content: "older turn" } }],
+  }).item;
+  const claim = claimChatInboxItem(controller.agentDir, inbound.itemId);
+  const requestTag = "committed-older-terminal-request";
+  const terminalId = "terminal-committed-older-terminal";
+  const chatDeliveryContext = {
+    turnId: claim.itemId,
+    chatKey: claim.chatKey,
+    messageId: claim.messageId,
+  };
+  enqueueChatOutboxPayload(
+    controller.agentDir,
+    {
+      createdAt: new Date().toISOString(),
+      chatKey: controller.chatKey,
+      parts: [{ type: "text", text: "older durable final" }],
+    },
+    {
+      id: `chat-${terminalId}`,
+      idempotencyKey: `chat-${terminalId}`,
+      deliveryKind: "final",
+      terminalRecordId: terminalId,
+      terminalTurn: chatDeliveryContext,
+      turnFence: {
+        agentDir: controller.agentDir,
+        turnId: claim.itemId,
+        chatKey: claim.chatKey,
+        messageId: claim.messageId,
+        ownerEpoch: claim.ownerEpoch,
+        attempt: claim.attemptCount,
+      },
+    },
+  );
+
+  controller.setCurrentTurn({
+    incomingMessageId: "newer-message",
+    requestTag,
+    outboxTurnFence: {
+      agentDir: controller.agentDir,
+      turnId: "newer-turn",
+      chatKey: controller.chatKey,
+      messageId: "newer-message",
+      ownerEpoch: "newer-epoch",
+      attempt: 1,
+    },
+  });
+  const newerTurn = controller.currentTurn;
+  let acknowledgements = 0;
+  controller.driver.acknowledgeTerminal = async (tag, id) => {
+    assert.equal(tag, requestTag);
+    assert.equal(id, terminalId);
+    acknowledgements += 1;
+  };
+  const liveTurn = controller.driver.startLiveTurn(
+    requestTag,
+    chatDeliveryContext,
+  );
+  const handling = controller.driver.handleClientEvent({
+    type: "rpc_turn_event",
+    event: "complete",
+    requestTag,
+    finalText: "older durable final",
+    sessionFile: "/tmp/committed-older-terminal.jsonl",
+    sessionId: "committed-older-terminal",
+    chatDeliveryContext,
+    terminalRecord: {
+      terminalId,
+      state: "complete",
+      terminalAt: "2026-08-12T03:47:46.000Z",
+    },
+  });
+  const outcome = await Promise.race([
+    liveTurn.promise.then(() => "settled"),
+    new Promise((resolve) => setTimeout(() => resolve("pending"), 100)),
+  ]);
+  if (outcome === "pending") controller.driver.dispose();
+  await handling;
+
+  assert.equal(outcome, "settled");
+  assert.equal(acknowledgements, 1);
+  assert.equal(controller.currentTurn, newerTurn);
+});
+
 test("authoritative daemon terminal replaces a legacy interrupted inbox fixture", async () => {
   const controller = await createController("telegram/1:2");
   const inbound = enqueueChatInboxItem(controller.agentDir, {

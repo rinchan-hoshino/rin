@@ -862,6 +862,47 @@ export class ChatController {
     );
   }
 
+  private hasCommittedTerminalDeliveryEvent(
+    event: {
+      chatDeliveryContext?: RinChatDeliveryContext;
+      terminalRecord?: { terminalId: string };
+    },
+    deliveryKind: "final" | "error",
+  ) {
+    const context = event.chatDeliveryContext;
+    const terminalId = safeString(event.terminalRecord?.terminalId).trim();
+    if (!context || !terminalId) return false;
+    const committed = readChatOutboxItemById(
+      this.agentDir,
+      `chat-${terminalId}`,
+    )?.item;
+    return Boolean(
+      committed &&
+      committed.turnId === context.turnId &&
+      committed.deliveryKind === deliveryKind &&
+      committed.payload.chatKey === context.chatKey &&
+      context.chatKey === this.chatKey,
+    );
+  }
+
+  private async acknowledgeCommittedTerminalDeliveryEvent(event: {
+    requestTag?: string;
+    terminalRecord?: { terminalId: string };
+  }) {
+    const requestTag = safeString(event.requestTag).trim();
+    const terminalId = safeString(event.terminalRecord?.terminalId).trim();
+    if (!requestTag || !terminalId) return;
+    try {
+      await this.driver.acknowledgeTerminal(requestTag, terminalId);
+    } catch (error: any) {
+      this.logger?.warn?.(
+        `chat terminal acknowledgement deferred: ${String(
+          error?.message || error,
+        )}`,
+      );
+    }
+  }
+
   private acceptsScopedTurnEvent(requestTag?: string) {
     if (!this.currentTurn?.outboxTurnFence) return true;
     const actual = safeString(requestTag).trim();
@@ -3812,11 +3853,16 @@ export class ChatController {
           throw new Error("chat_terminal_record_missing");
         }
         if (event.chatDeliveryContext) {
+          this.authoritativeTerminalEvent(event, "complete");
           this.recoverTerminalDeliveryEvent(
             event.chatDeliveryContext,
             event.requestTag,
           );
           if (!this.acceptsTerminalDeliveryEvent(event.chatDeliveryContext)) {
+            if (this.hasCommittedTerminalDeliveryEvent(event, "final")) {
+              await this.acknowledgeCommittedTerminalDeliveryEvent(event);
+              return;
+            }
             throw new Error("chat_terminal_delivery_mismatch");
           }
           await this.settleProjectedTurnComplete(event);
@@ -3837,11 +3883,16 @@ export class ChatController {
           throw new Error("chat_terminal_record_missing");
         }
         if (event.chatDeliveryContext) {
+          this.authoritativeTerminalEvent(event, "error");
           this.recoverTerminalDeliveryEvent(
             event.chatDeliveryContext,
             event.requestTag,
           );
           if (!this.acceptsTerminalDeliveryEvent(event.chatDeliveryContext)) {
+            if (this.hasCommittedTerminalDeliveryEvent(event, "error")) {
+              await this.acknowledgeCommittedTerminalDeliveryEvent(event);
+              return;
+            }
             throw new Error("chat_terminal_delivery_mismatch");
           }
           await this.settleProjectedTurnError(event);
