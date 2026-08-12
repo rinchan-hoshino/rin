@@ -85,7 +85,7 @@ test("Rin note guidance limits the scratchpad to exact minimal cross-compaction 
   assert.match(note?.description, /stable-ID items/);
   assert.match(note?.description, /1-based offset\/limit range/);
   assert.deepEqual(note?.promptGuidelines, [
-    "Use note only as a minimal scratchpad for verified content that must survive compaction exactly. Keep each item as short as possible; omit reasoning, progress, plans, pending actions, and anything recoverable from files or tools. Delete items once exact cross-compaction retention is no longer needed; keep checklists in todo.",
+    "Use note as a minimal scratchpad for verified content that must survive compaction exactly. Keep each item as short as possible and focused on exact cross-compaction state; rely on files or tools for recoverable context, and todo for plans, pending actions, and checklists. Clean up notes promptly as work advances.",
     "Use action read without offset/limit for the full list or with a 1-based item offset and positive limit for a range. Use add with items and optional beforeId, edit with exactly one id and replacement item, and remove with ids or all: true. Read before mutating when stable IDs are unknown or uncertain.",
   ]);
 });

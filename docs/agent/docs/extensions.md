@@ -45,7 +45,7 @@ Todo state is checkpointed in Pi session custom entries and reconstructed from t
 
 ## Core note
 
-Rin core registers the `note` tool and `/notes` TUI command as a minimal scratchpad for verified content that must survive compaction exactly. Note uses the same full-or-ranged `read` plus item-level `add`, `edit`, and `remove` contract as todo. Keep each item as short as possible; omit reasoning, progress, plans, pending actions, and content recoverable from files or tools, then delete the item once exact cross-compaction retention is no longer needed. Its stable-ID snapshots use session custom entries, preserving the selected branch across compaction without creating cross-session memory or summary injection; agents read note state through the tool when needed. Existing text-buffer snapshots reconstruct as one item; retired whole-buffer operations are not exposed.
+Rin core registers the `note` tool and `/notes` TUI command as a minimal scratchpad for verified content that must survive compaction exactly. Note uses the same full-or-ranged `read` plus item-level `add`, `edit`, and `remove` contract as todo. Keep each item as short as possible and focused on exact cross-compaction state; rely on files or tools for recoverable context, and todo for plans and pending actions. Clean up notes promptly as work advances. Its stable-ID snapshots use session custom entries, preserving the selected branch across compaction without creating cross-session memory or summary injection; agents read note state through the tool when needed. Existing text-buffer snapshots reconstruct as one item; retired whole-buffer operations are not exposed.
 
 ## Extension loading
 

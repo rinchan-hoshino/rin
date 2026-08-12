@@ -155,19 +155,21 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.ok(
     baseSystemPrompt.includes(
-      "Use note only as a minimal scratchpad for verified content that must survive compaction exactly",
-    ),
-  );
-  assert.ok(baseSystemPrompt.includes("Keep each item as short as possible"));
-  assert.ok(
-    baseSystemPrompt.includes(
-      "omit reasoning, progress, plans, pending actions, and anything recoverable from files or tools",
+      "Use note as a minimal scratchpad for verified content that must survive compaction exactly",
     ),
   );
   assert.ok(
     baseSystemPrompt.includes(
-      "Delete items once exact cross-compaction retention is no longer needed",
+      "Keep each item as short as possible and focused on exact cross-compaction state",
     ),
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "rely on files or tools for recoverable context, and todo for plans, pending actions, and checklists",
+    ),
+  );
+  assert.ok(
+    baseSystemPrompt.includes("Clean up notes promptly as work advances"),
   );
   assert.ok(
     baseSystemPrompt.includes("edit with exactly one id and replacement item"),
