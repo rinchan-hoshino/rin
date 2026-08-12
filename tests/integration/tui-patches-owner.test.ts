@@ -344,107 +344,27 @@ test("TUI git changelog notification formats, renders, and rolls back atomically
   assert.deepEqual(throwingContainer.children, []);
 });
 
-test("TUI initialization builds Pi-native chrome without managed tool fallback", async () => {
+test("patched Pi initialization preserves native lifecycle additions before applying Rin branding", async (t) => {
   resetFixture();
-  const events: any[] = [];
-  const makeInstance = (quiet: boolean, verbose: boolean) => {
-    const containers = {
-      header: childContainer(),
-      resources: childContainer(),
-      chat: childContainer(),
-      pending: childContainer(),
-      status: childContainer(),
-      above: childContainer(),
-      editor: childContainer(),
-      below: childContainer(),
-    };
-    const ui = {
-      children: [] as any[],
-      addChild(child: any) {
-        this.children.push(child);
-      },
-      setFocus(child: any) {
-        events.push(["focus", child]);
-      },
-      start() {
-        events.push(["ui-start"]);
-      },
-      invalidate() {
-        events.push(["invalidate"]);
-      },
-      requestRender() {
-        events.push(["render"]);
-      },
-    };
-    return {
-      isInitialized: false,
-      session: {
-        scopedModels: [
-          { model: { id: "owner-a" }, thinkingLevel: "high" },
-          { model: { id: "owner-b" } },
-        ],
-      },
-      options: { verbose },
-      settingsManager: { getQuietStartup: () => quiet },
-      keybindings: {
-        getKeys(name: string) {
-          return name === "app.model.cycleForward" ? ["ctrl+n"] : [];
-        },
-      },
-      version: "1.2.3",
-      headerContainer: containers.header,
-      loadedResourcesContainer: containers.resources,
-      chatContainer: containers.chat,
-      pendingMessagesContainer: containers.pending,
-      statusContainer: containers.status,
-      widgetContainerAbove: containers.above,
-      editorContainer: containers.editor,
-      widgetContainerBelow: containers.below,
-      footer: { owner: "footer" },
-      editor: { owner: "editor" },
-      ui,
-      footerDataProvider: {
-        onBranchChange(callback: () => void) {
-          events.push(["branch-callback", callback]);
-        },
-      },
-      registerSignalHandlers: () => events.push(["signals"]),
-      getChangelogForDisplay: () => "owner changelog",
-      getStartupExpansionState: () => false,
-      renderWidgets: () => events.push(["widgets"]),
-      setupKeyHandlers: () => events.push(["keys"]),
-      setupEditorSubmitHandler: () => events.push(["submit"]),
-      rebindCurrentSession: async () => events.push(["rebind"]),
-      showLoadedResources: (options: any) =>
-        events.push(["resources", options]),
-      showStartupNoticesIfNeeded: () => events.push(["notices"]),
-      renderInitialMessages: () => events.push(["messages"]),
-      updateEditorBorderColor: () => events.push(["border"]),
-      updateAvailableProviderCount: async () => events.push(["providers"]),
-    };
-  };
+  await patches.applyRinTuiOverrides();
+  const previousPiOffline = process.env.PI_OFFLINE;
+  t.after(() => {
+    if (previousPiOffline === undefined) delete process.env.PI_OFFLINE;
+    else process.env.PI_OFFLINE = previousPiOffline;
+  });
+  process.env.PI_OFFLINE = "owner-before-init";
 
-  const verbose = makeInstance(false, true);
-  await patches.initializePiInteractiveModeWithoutManagedToolEnsure(verbose);
-  assert.equal(verbose.isInitialized, true);
-  assert.equal(verbose.changelogMarkdown, "owner changelog");
-  assert.equal(verbose.headerContainer.children.length, 3);
-  assert.equal(verbose.ui.children.length, 9);
-  verbose.builtInHeader.setExpanded(true);
-  verbose.builtInHeader.setExpanded(false);
-  assert.equal(
-    events.some(([name]) => name === "providers"),
-    true,
-  );
-  const before = events.length;
-  await patches.initializePiInteractiveModeWithoutManagedToolEnsure(verbose);
-  assert.equal(events.length, before);
+  const instance: any = {};
+  await InteractiveMode.prototype.init.call(instance);
 
-  const quiet = makeInstance(true, false);
-  quiet.session.scopedModels = [];
-  await patches.initializePiInteractiveModeWithoutManagedToolEnsure(quiet);
-  assert.equal(quiet.headerContainer.children.length, 1);
-  assert.equal(quiet.builtInHeader.text, "");
+  assert.deepEqual(fixture.events, [["original-init", "1"]]);
+  assert.equal(process.env.PI_OFFLINE, "owner-before-init");
+  assert.equal(instance.isInitialized, true);
+  assert.deepEqual(instance.fullscreenLayoutRoot, {
+    owner: "native-fullscreen-layout",
+  });
+  assert.match(instance.builtInHeader.text, /^Rin v1\.2\.3/m);
+  assert.match(instance.builtInHeader.text, /Rin can explain its own features/);
 });
 
 test("patched Pi lifecycle presents Rin identity, changelog, settings, and prompt flow", async (t) => {

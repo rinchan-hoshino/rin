@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { runUiOnlyTuiJourney } from "../support/install-to-tui-harness.js";
+import {
+  runFullscreenTuiJourney,
+  runHotSwitchTuiJourney,
+  runUiOnlyTuiJourney,
+} from "../support/install-to-tui-harness.js";
 
 test("UI-only: a user opens keyboard help and quits from the installed TUI", async () => {
   const journey = await runUiOnlyTuiJourney();
@@ -13,5 +17,31 @@ test("UI-only: a user opens keyboard help and quits from the installed TUI", asy
   assert.doesNotMatch(
     journey.finalScreen,
     /Rin fatal error|TypeError|MODULE_NOT_FOUND|Cannot find module/,
+  );
+});
+
+test("UI-only: fullscreen starts, scrolls, and quits against the installed daemon", async () => {
+  const journey = await runFullscreenTuiJourney();
+
+  assert.match(journey.startupScreen, /Rin can explain its own features/);
+  assert.match(journey.hotkeysScreen, /Keyboard Shortcuts/);
+  assert.match(journey.scrolledScreen, /Keyboard Shortcuts/);
+  assert.equal(journey.exit.code, 0, journey.finalScreen);
+  assert.doesNotMatch(
+    journey.finalScreen,
+    /Fullscreen layout is not initialized|Rin fatal error|TypeError|MODULE_NOT_FOUND|Cannot find module/,
+  );
+});
+
+test("UI-only: regular and fullscreen hot-switch in both directions against the installed daemon", async () => {
+  const journey = await runHotSwitchTuiJourney();
+
+  assert.match(journey.startupScreen, /Rin can explain its own features/);
+  assert.match(journey.fullscreenScreen, /Slash commands/);
+  assert.match(journey.regularScreen, /TUI mode/);
+  assert.equal(journey.exit.code, 0, journey.finalScreen);
+  assert.doesNotMatch(
+    journey.finalScreen,
+    /Fullscreen layout is not initialized|Rin fatal error|TypeError|MODULE_NOT_FOUND|Cannot find module/,
   );
 });

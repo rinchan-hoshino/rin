@@ -46,3 +46,18 @@ export function isPiCompactSkillReadCall(args: unknown, cwd: string) {
     basename(resolveToCwd(rawPath, String(cwd || process.cwd()))) === "SKILL.md"
   );
 }
+
+export async function runPiInteractiveModeInit<T>(
+  nativeInit: (this: unknown, ...args: any[]) => Promise<T>,
+  receiver: unknown,
+  args: any[] = [],
+): Promise<T> {
+  const previousPiOffline = process.env.PI_OFFLINE;
+  process.env.PI_OFFLINE = "1";
+  try {
+    return await nativeInit.apply(receiver, args);
+  } finally {
+    if (previousPiOffline === undefined) delete process.env.PI_OFFLINE;
+    else process.env.PI_OFFLINE = previousPiOffline;
+  }
+}

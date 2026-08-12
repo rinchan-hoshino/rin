@@ -846,6 +846,203 @@ export async function runUiOnlyTuiJourney() {
   return result;
 }
 
+export async function runFullscreenTuiJourney() {
+  if (process.platform !== "linux") {
+    throw new Error("fullscreen TUI journey currently requires linux");
+  }
+  if (!(await commandExists("script"))) {
+    throw new Error("fullscreen TUI journey requires util-linux script");
+  }
+
+  let result:
+    | {
+        startupScreen: string;
+        hotkeysScreen: string;
+        scrolledScreen: string;
+        finalScreen: string;
+        exit: PtyCommandResult;
+      }
+    | undefined;
+  await withIsolatedTempDir(async (tempDir) => {
+    const flow = await setupIsolatedInstalledRuntime(tempDir);
+    const settings = JSON.parse(
+      await fs.readFile(flow.written.settingsPath, "utf8"),
+    );
+    settings.tuiMode = "fullscreen";
+    await fs.writeFile(
+      flow.written.settingsPath,
+      `${JSON.stringify(settings, null, 2)}\n`,
+      "utf8",
+    );
+
+    await withInstalledDaemon(flow, async () => {
+      const command = startPtyCommand(
+        `stty cols 120 rows 40; exec ${shellQuote(flow.rinPath)}`,
+        flow.env,
+      );
+      let exit: PtyCommandResult | undefined;
+      try {
+        const startupScreen = await waitForVisiblePtyText(
+          command,
+          /Rin can explain its own features/,
+          15_000,
+        );
+        command.child.stdin.write("/hotkeys\r");
+        const hotkeysScreen = await waitForVisiblePtyText(
+          command,
+          /Keyboard Shortcuts/,
+          8_000,
+        );
+        command.child.stdin.write("\u001b[6~");
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        assert.equal(command.child.exitCode, null, command.getOutput());
+        command.child.stdin.write("\u001b[5~");
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        assert.equal(command.child.exitCode, null, command.getOutput());
+        const scrolledScreen = stripAnsi(command.getOutput());
+
+        command.child.stdin.write("/quit\r");
+        exit = await waitForPtyExit(command.exitPromise, 8_000);
+        if (!exit) throw new Error("fullscreen_ui_quit_timeout");
+        result = {
+          startupScreen,
+          hotkeysScreen,
+          scrolledScreen,
+          finalScreen: stripAnsi(command.getOutput()),
+          exit,
+        };
+      } finally {
+        if (!exit) await stopPtyCommand(command);
+      }
+    });
+  });
+  if (!result) throw new Error("fullscreen_ui_journey_result_missing");
+  return result;
+}
+
+async function waitForPtyOutputAfter(
+  command: PtyCommand,
+  offset: number,
+  expected: string,
+  timeoutMs: number,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (command.getOutput().slice(offset).includes(expected)) return;
+    if (command.child.exitCode !== null || command.child.signalCode !== null) {
+      throw new Error(
+        `ui_process_exited_before_output:${JSON.stringify(expected)}:${command.getOutput()}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(
+    `ui_output_timeout:${JSON.stringify(expected)}:${command.getOutput()}`,
+  );
+}
+
+async function selectTuiModeFromSettings(command: PtyCommand) {
+  command.child.stdin.write("tui");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  command.child.stdin.write("\r");
+}
+
+export async function runHotSwitchTuiJourney() {
+  if (process.platform !== "linux") {
+    throw new Error("hot-switch TUI journey currently requires linux");
+  }
+  if (!(await commandExists("script"))) {
+    throw new Error("hot-switch TUI journey requires util-linux script");
+  }
+
+  let result:
+    | {
+        startupScreen: string;
+        fullscreenScreen: string;
+        regularScreen: string;
+        finalScreen: string;
+        exit: PtyCommandResult;
+      }
+    | undefined;
+  await withIsolatedTempDir(async (tempDir) => {
+    const flow = await setupIsolatedInstalledRuntime(tempDir);
+    await withInstalledDaemon(flow, async () => {
+      const command = startPtyCommand(
+        `stty cols 120 rows 40; exec ${shellQuote(flow.rinPath)}`,
+        flow.env,
+      );
+      let exit: PtyCommandResult | undefined;
+      try {
+        const startupScreen = await waitForVisiblePtyText(
+          command,
+          /Rin can explain its own features/,
+          15_000,
+        );
+
+        command.child.stdin.write("/settings\r");
+        await waitForVisiblePtyText(command, /Type to search/, 8_000);
+        const fullscreenOffset = command.getOutput().length;
+        await selectTuiModeFromSettings(command);
+        await waitForPtyOutputAfter(
+          command,
+          fullscreenOffset,
+          "\u001b[?1049h",
+          8_000,
+        );
+
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        command.child.stdin.write("\u001b");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        command.child.stdin.write("\u001b");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        command.child.stdin.write("/hotkeys\r");
+        const fullscreenScreen = await waitForVisiblePtyText(
+          command,
+          /Slash commands/,
+          8_000,
+        );
+        command.child.stdin.write("\u001b[6~");
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        command.child.stdin.write("\u001b[5~");
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        assert.equal(command.child.exitCode, null, command.getOutput());
+
+        command.child.stdin.write("/settings\r");
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const regularOffset = command.getOutput().length;
+        await selectTuiModeFromSettings(command);
+        await waitForPtyOutputAfter(
+          command,
+          regularOffset,
+          "\u001b[?1049l",
+          8_000,
+        );
+        const regularScreen = stripAnsi(command.getOutput());
+
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        command.child.stdin.write("\u001b");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        command.child.stdin.write("\u001b");
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        command.child.stdin.write("/quit\r");
+        exit = await waitForPtyExit(command.exitPromise, 8_000);
+        if (!exit) throw new Error("hot_switch_ui_quit_timeout");
+        result = {
+          startupScreen,
+          fullscreenScreen,
+          regularScreen,
+          finalScreen: stripAnsi(command.getOutput()),
+          exit,
+        };
+      } finally {
+        if (!exit) await stopPtyCommand(command);
+      }
+    });
+  });
+  if (!result) throw new Error("hot_switch_ui_journey_result_missing");
+  return result;
+}
+
 export async function runManualInnerSession(options: { scripted?: boolean }) {
   if (process.platform !== "linux") {
     throw new Error("install-to-TUI manual harness currently requires linux");

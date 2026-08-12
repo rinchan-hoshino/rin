@@ -17,7 +17,16 @@ const sources: Record<string, string> = {
       }
     }
     export class InteractiveMode {
-      async init() { globalThis.__rinTuiPatchesOwner.events.push(["original-init"]); }
+      async init() {
+        if (this.isInitialized) return;
+        globalThis.__rinTuiPatchesOwner.events.push(["original-init", process.env.PI_OFFLINE]);
+        this.isInitialized = true;
+        this.fullscreenLayoutRoot = { owner: "native-fullscreen-layout" };
+        this.builtInHeader = {
+          text: "Pi v0.84.1\\nPi can explain its own features and look up its docs. Ask it how to use or extend Pi.",
+          setText(value) { this.text = value; },
+        };
+      }
       updateTerminalTitle() { globalThis.__rinTuiPatchesOwner.events.push(["original-title"]); }
       async shutdown() { process.stdout.write("To resume this session:\\n  pi --session owner\\n"); return "shutdown-owner"; }
       async run() { globalThis.__rinTuiPatchesOwner.events.push(["original-run"]); }
