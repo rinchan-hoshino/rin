@@ -515,13 +515,14 @@ try {
       Invoke-WithSpinner "Installing dependencies" {
         Set-Location $using:srcDir
         $packagePath = Join-Path $using:srcDir "package.json"
-        try {
-          $packageJson = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
-          if ($packageJson.scripts -and (Get-Property $packageJson.scripts "prepare")) {
-            $packageJson.scripts.PSObject.Properties.Remove("prepare")
-            $packageJson | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $packagePath -Encoding UTF8
+        $packageJson = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+        if ($packageJson.scripts -and ($packageJson.scripts.PSObject.Properties.Name -contains "prepare")) {
+          $packageJson.scripts.PSObject.Properties.Remove("prepare")
+          if ($packageJson.scripts.PSObject.Properties.Name -contains "prepare") {
+            throw "rin stable bootstrap could not remove the package prepare script"
           }
-        } catch {}
+          $packageJson | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $packagePath -Encoding UTF8
+        }
         & $using:managedNode $using:managedNpmCli install --omit=dev --no-fund --no-audit
         if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE" }
       }

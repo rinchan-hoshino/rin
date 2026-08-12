@@ -594,6 +594,16 @@ test("PowerShell install wrapper passes mode as parser args", async () => {
     entrypoint,
     /& \$using:managedNode \$using:managedNpmCli (?:install|ci)/,
   );
+  const stableDependencyJob = entrypoint.slice(
+    entrypoint.indexOf('if ($release.Channel -eq "stable")'),
+    entrypoint.indexOf('} elseif (Test-Path -LiteralPath "package-lock.json")'),
+  );
+  assert.match(
+    stableDependencyJob,
+    /\.PSObject\.Properties\.Name -contains "prepare"/,
+  );
+  assert.doesNotMatch(stableDependencyJob, /Get-Property/);
+  assert.doesNotMatch(stableDependencyJob, /catch\s*\{\s*\}/);
   assert.match(entrypoint, /& \$managedNode @installerArgs/);
   assert.doesNotMatch(entrypoint, /^\s*npm (?:install|ci|run|prune)/m);
   assert.doesNotMatch(
