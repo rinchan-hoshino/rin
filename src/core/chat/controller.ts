@@ -145,6 +145,8 @@ type ChatTurnTarget = {
   outboxTurnFence?: ChatOutboxTurnFence;
 };
 
+type ChatCommandTurnInput = Readonly<ChatTurnTarget>;
+
 type PendingTurnPresentation = ChatTurnTarget & {
   backendAccepted: boolean;
   joinedOwnerTurnId?: string;
@@ -157,8 +159,6 @@ type ChatTurnMeta = ChatTurnTarget & {
   receivedAtMs?: number;
   frontendReadyAt?: number;
   startupTimingLogged?: boolean;
-  ackIncomingMessageId?: string;
-  ackReplyToMessageId?: string;
 };
 
 type ChatAssistantDelivery = {
@@ -367,12 +367,11 @@ export class ChatController {
   private presentationIncomingMessageId = "";
   private presentationReplyToMessageId = "";
   compactionTurn: ChatTurnMeta | null = null;
-  private compactionEndDelivery: Promise<boolean> | null = null;
   compactionWorkingIndicators: WorkingIndicator[] = [];
   lastCompactionIndicatorAt = 0;
   lastCompactionTypingIndicatorAt = 0;
   compactionIndicatorTick = 0;
-  activeCommandTurnInput: ChatTurnTarget | null = null;
+  activeCommandTurnInput: ChatCommandTurnInput | null = null;
   private collectingCommandUi = false;
   private commandUiMessages: string[] = [];
   private commandUiParts: ChatMessagePart[] = [];
@@ -1096,7 +1095,7 @@ export class ChatController {
   }) {
     const outboxTurnFence =
       input.outboxTurnFence || getActiveChatOutboxTurnFence();
-    this.activeCommandTurnInput = {
+    const commandTurnInput = Object.freeze({
       incomingMessageId:
         safeString(input.incomingMessageId || "").trim() || undefined,
       replyToMessageId:
@@ -1109,7 +1108,9 @@ export class ChatController {
         ),
       commandName: safeString(input.commandName).trim() || undefined,
       outboxTurnFence,
-    };
+    });
+    this.activeCommandTurnInput = commandTurnInput;
+    return commandTurnInput;
   }
 
   private clearActiveCommandTurnInput() {
@@ -2719,66 +2720,41 @@ export class ChatController {
     this.pendingPassiveNotices = [];
   }
 
-  private async finishCompactionNotice() {
-    const resumeWorking = !this.ownsManualCompactionPresentation();
+  private async clearCompactionPresentation() {
     await this.clearCompactionWorkingReaction().catch(() => false);
     this.compactionTurn = null;
-    if (resumeWorking) {
-      await this.refreshEditableWorkingNotice().catch(() => false);
-    }
   }
 
-  private compactionAckTarget() {
-    const commandInput = this.ownsManualCompactionPresentation()
-      ? this.activeCommandTurnInput
-      : null;
+  private async deliverManualCompactionCompletion(
+    text: string,
+    commandTurnInput: ChatCommandTurnInput,
+  ) {
     const incomingMessageId = safeString(
-      this.compactionTurn?.ackIncomingMessageId ||
-        commandInput?.incomingMessageId ||
-        "",
+      commandTurnInput.incomingMessageId,
     ).trim();
-    if (!incomingMessageId) return null;
-    const replyToMessageId =
-      safeString(
-        this.compactionTurn?.ackReplyToMessageId ||
-          commandInput?.replyToMessageId ||
-          "",
-      ).trim() || incomingMessageId;
-    return { incomingMessageId, replyToMessageId };
-  }
-
-  private async deliverCompactionEndNotice(text: string) {
-    const inFlight = this.compactionEndDelivery;
-    if (inFlight) return await inFlight;
-    const delivery = this.performCompactionEndNotice(text);
-    this.compactionEndDelivery = delivery;
     try {
-      return await delivery;
+      await this.deliverAssistantReply({
+        text,
+        incomingMessageId,
+        replyToMessageId:
+          safeString(commandTurnInput.replyToMessageId).trim() ||
+          incomingMessageId,
+        clearProcessing: true,
+        bindSession: false,
+        outboxTurnFence: commandTurnInput.outboxTurnFence,
+      });
     } finally {
-      if (this.compactionEndDelivery === delivery) {
-        this.compactionEndDelivery = null;
-      }
+      await this.clearCompactionPresentation();
     }
   }
 
-  private async performCompactionEndNotice(text: string) {
-    const manualCompaction = this.ownsManualCompactionPresentation();
-    const ackTarget = this.compactionAckTarget();
+  private async deliverAutomaticCompactionEndNotice(text: string) {
     const coalesceReplyToMessageId = safeString(
       this.compactionTurn?.replyToMessageId || "",
     ).trim();
     const shouldCoalesce = Boolean(this.compactionTurn || this.currentTurn);
-    const idempotencyKey = ackTarget
-      ? JSON.stringify([
-          "compaction_end_ack",
-          this.chatKey,
-          ackTarget.incomingMessageId,
-          ackTarget.replyToMessageId,
-          sha256Hex(safeString(text).trim()),
-        ])
-      : "";
     try {
-      const delivered = await this.sendCompactionInterimNow(text, {
+      return await this.sendCompactionInterimNow(text, {
         ...(shouldCoalesce
           ? {
               coalesceWithWorkingMessage: true,
@@ -2787,28 +2763,10 @@ export class ChatController {
                 : {}),
             }
           : {}),
-        ...(manualCompaction ? { exclusiveProgressMessage: true } : {}),
-        ...(ackTarget
-          ? {
-              postDelivery: {
-                markProcessed: {
-                  chatKey: this.chatKey,
-                  messageId: ackTarget.incomingMessageId,
-                  bindSession: false,
-                },
-              },
-              id: `compaction-final-${sha256Hex(idempotencyKey)}`,
-              idempotencyKey,
-              waitForDeliveryMs: 1000,
-            }
-          : {}),
       });
-      if (!delivered && ackTarget) {
-        throw new Error("chat_compaction_completion_delivery_failed");
-      }
-      return delivered;
     } finally {
-      await this.finishCompactionNotice();
+      await this.clearCompactionPresentation();
+      await this.refreshEditableWorkingNotice().catch(() => false);
     }
   }
 
@@ -2816,31 +2774,29 @@ export class ChatController {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
     if (!this.canDeliverReplies()) return true;
-    const ackIncomingMessageId = safeString(
+    const commandIncomingMessageId = safeString(
       this.activeCommandTurnInput?.incomingMessageId || "",
     ).trim();
-    const ackReplyToMessageId =
+    const commandReplyToMessageId =
       safeString(this.activeCommandTurnInput?.replyToMessageId || "").trim() ||
-      ackIncomingMessageId;
+      commandIncomingMessageId;
     const coalesceReplyToMessageId =
-      this.currentReplyToMessageId() || ackReplyToMessageId || undefined;
+      this.currentReplyToMessageId() || commandReplyToMessageId || undefined;
 
     const manualCompaction = this.ownsManualCompactionPresentation();
     if (!manualCompaction && this.hasEditableWorkingIndicator()) {
       this.ensureVisibleCommandTurn();
       const incomingMessageId =
-        this.currentIncomingMessageId() || ackIncomingMessageId;
+        this.currentIncomingMessageId() || commandIncomingMessageId;
       const replyToMessageId =
         this.currentReplyToMessageId() ||
-        ackReplyToMessageId ||
+        commandReplyToMessageId ||
         incomingMessageId;
       this.compactionTurn = {
         startedAt: Date.now(),
         incomingMessageId: incomingMessageId || undefined,
         replyToMessageId: replyToMessageId || undefined,
         workingNoticeSent: true,
-        ackIncomingMessageId: ackIncomingMessageId || undefined,
-        ackReplyToMessageId: ackReplyToMessageId || undefined,
       };
       return await this.sendCompactionInterimNow(trimmed, {
         replyToMessageId,
@@ -2876,8 +2832,6 @@ export class ChatController {
           incomingMessageId: messageId,
           replyToMessageId: coalesceReplyToMessageId || messageId,
           workingNoticeSent: false,
-          ackIncomingMessageId: ackIncomingMessageId || undefined,
-          ackReplyToMessageId: ackReplyToMessageId || undefined,
         };
         if (!manualCompaction) {
           const marker = this.startCompactionWorkingMarker().catch(() => false);
@@ -3030,7 +2984,7 @@ export class ChatController {
           ? this.managedSessionLeafForFreshChat()
           : undefined;
     this.lastActivityAt = Date.now();
-    this.setActiveCommandTurnInput({
+    const commandTurnInput = this.setActiveCommandTurnInput({
       incomingMessageId,
       replyToMessageId,
       commandName,
@@ -3102,7 +3056,9 @@ export class ChatController {
         .join("\n");
 
       if (commandName === "compact") {
-        if (text) await this.deliverCompactionEndNotice(text);
+        if (text) {
+          await this.deliverManualCompactionCompletion(text, commandTurnInput);
+        }
         return text ? { ...data, text } : data;
       }
 
@@ -3761,7 +3717,7 @@ export class ChatController {
       }
       case "passive_notice":
         if (event.noticeKind === "compaction_end") {
-          await this.deliverCompactionEndNotice(event.text);
+          await this.deliverAutomaticCompactionEndNotice(event.text);
           return;
         }
         if (event.noticeKind === "todo" && event.deferDuringTurn === false) {

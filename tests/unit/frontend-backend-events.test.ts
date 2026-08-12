@@ -159,6 +159,21 @@ test("shared frontend translation ignores TUI visibility preferences", () => {
   assert.deepEqual(translator.translate({ type: "compaction_end" }), []);
 });
 
+test("frontend backend event translator leaves manual compact completion to the command response", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator();
+
+  assert.deepEqual(
+    translator.translate({
+      type: "compaction_end",
+      reason: "manual",
+      aborted: false,
+      tokensBefore: 108642,
+      result: { summary: "Summary of conversation must not reach chat" },
+    }),
+    [],
+  );
+});
+
 test("frontend backend event translator exposes compact collapsed notice without summary text", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 

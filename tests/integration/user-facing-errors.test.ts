@@ -173,10 +173,6 @@ test("runtime error formatter maps known internal markers to actionable messages
     "Rin update stopped because the platform bundle checksum did not match.",
   );
   assert.equal(
-    formatRuntimeErrorForUser("chat_compaction_completion_delivery_failed"),
-    "Rin compacted the session but could not queue the completion message.",
-  );
-  assert.equal(
     formatRuntimeErrorForUser("chat_database_admission_model_incomplete"),
     "The chat database update migration did not complete.",
   );

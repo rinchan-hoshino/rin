@@ -500,6 +500,7 @@ export function renderRinFrontendLifecycleEvent(
           }),
         ];
       }
+      if (event.reason === "manual") return [];
       const summary = formatCompactionSummaryCollapsedText(
         event.tokensBefore,
         options,

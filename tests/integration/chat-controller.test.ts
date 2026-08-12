@@ -1978,7 +1978,7 @@ test("chat controller suppresses ordinary Working for manual compaction", async 
   assert.equal(controller.currentTurn, null);
   assert.deepEqual(actions, []);
   assert.deepEqual(reactions, []);
-  assert.deepEqual(deliveries, []);
+  assert.deepEqual(deliveries, ["Compacted session."]);
 });
 
 test("chat controller command failure atomically terminalizes its durable inbox turn", async () => {
@@ -3822,9 +3822,9 @@ test("chat controller does not duplicate a projected pending rollback terminal e
   assert.match(deliveries[0]?.text || "", /pending rollback terminal error/);
 });
 
-test("chat controller suppresses /compact acknowledgement but keeps configured /reload response", async () => {
+test("chat controller uses the dedicated compact command and delivers command results", async () => {
   for (const [command, resultText, expectedDeliveries] of [
-    ["/compact", "Compacted session.", []],
+    ["/compact", "Compacted session.", ["Compacted session."]],
     [
       "/reload",
       "Reloaded extensions, prompts, skills, and themes.",
@@ -3887,7 +3887,7 @@ test("chat controller suppresses /compact acknowledgement but keeps configured /
   }
 });
 
-test("chat controller commits manual /compact completion without transient presentation state", async () => {
+test("chat controller commits manual /compact completion to its captured command target", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.app.bots[0].sendMessage = async (_chatId, content, options) => {
@@ -3923,11 +3923,21 @@ test("chat controller commits manual /compact completion without transient prese
       sessionFile,
       sessionId: "session-compact-no-presentation",
     }),
-    compact: async () => ({
-      handled: true,
-      tokensBefore: 142065,
-      sessionFile,
-    }),
+    compact: async () => {
+      const capturedInput = controller.activeCommandTurnInput;
+      controller.activeCommandTurnInput = Object.freeze({
+        commandName: "compact",
+        incomingMessageId: "m-drifted-command",
+        replyToMessageId: "m-drifted-command",
+      });
+      controller.compactionTurn = null;
+      assert.equal(Object.isFrozen(capturedInput), true);
+      return {
+        handled: true,
+        tokensBefore: 142065,
+        sessionFile,
+      };
+    },
     prompt: async (text, options = {}) => {
       emitRpcTurnComplete(controller, options, "unexpected temp reply");
     },
@@ -3951,7 +3961,7 @@ test("chat controller commits manual /compact completion without transient prese
       {
         text: "Compacted from 142,065 tokens",
         quote: "m-compact-no-presentation",
-        deliveryKind: "interim",
+        deliveryKind: "final",
       },
     ],
   );
@@ -3970,7 +3980,7 @@ test("chat controller rejects manual /compact when completion cannot enter outbo
   const originalEnqueueAndDrainDelivery =
     controller.enqueueAndDrainDelivery.bind(controller);
   controller.enqueueAndDrainDelivery = async (payload, options = {}) => {
-    if (options.deliveryKind === "interim") {
+    if (options.deliveryKind === "final") {
       throw new Error("compact completion enqueue exploded");
     }
     return await originalEnqueueAndDrainDelivery(payload, options);
@@ -3997,8 +4007,6 @@ test("chat controller rejects manual /compact when completion cannot enter outbo
         startedAt: Date.now(),
         incomingMessageId: "m-progress",
         replyToMessageId: "m-compact-failure",
-        ackIncomingMessageId: "m-compact-failure",
-        ackReplyToMessageId: "m-compact-failure",
       };
       return { handled: true, tokensBefore: 99000, sessionFile };
     },
@@ -4010,7 +4018,7 @@ test("chat controller rejects manual /compact when completion cannot enter outbo
 
   await assert.rejects(
     controller.runCommand("/compact", "m-compact-failure", "m-compact-failure"),
-    /chat_compaction_completion_delivery_failed/,
+    /compact completion enqueue exploded/,
   );
 });
 
@@ -4165,60 +4173,84 @@ test("chat controller completes manual /compact from its command response", asyn
         exclusiveProgressMessage: true,
       },
       {
-        deliveryKind: "interim",
-        coalesceWithWorkingMessage: true,
-        exclusiveProgressMessage: true,
+        deliveryKind: "final",
+        coalesceWithWorkingMessage: undefined,
+        exclusiveProgressMessage: undefined,
       },
     ],
   );
 });
 
-test("chat controller rejoins concurrent manual compaction completion producers", async () => {
+test("chat controller uses only the command response for manual /compact completion", async () => {
   const controller = await createController("telegram/1:2");
-  controller.activeCommandTurnInput = {
-    commandName: "compact",
-    incomingMessageId: "m-compact",
-    replyToMessageId: "m-compact",
-  };
-  controller.compactionTurn = {
-    startedAt: Date.now(),
-    incomingMessageId: "m-provider",
-    replyToMessageId: "m-compact",
-    ackIncomingMessageId: "m-compact",
-    ackReplyToMessageId: "m-compact",
+  const deliveries = [];
+  controller.app.bots[0].sendMessage = async (_chatId, content, options) => {
+    deliveries.push({ content, options });
+    return [`compact-${deliveries.length}`];
   };
 
-  let completionProjections = 0;
-  let releaseFirst = () => {};
-  let firstStarted = () => {};
-  const firstStartedPromise = new Promise((resolve) => {
-    firstStarted = resolve;
+  const receivedAt = new Date().toISOString();
+  saveChatMessage(controller.agentDir, {
+    messageId: "m-compact-single-owner",
+    chatKey: controller.chatKey,
+    platform: "telegram",
+    chatId: "2",
+    chatType: "private",
+    role: "user",
+    receivedAt,
+    text: "/compact",
   });
-  const releaseFirstPromise = new Promise((resolve) => {
-    releaseFirst = resolve;
-  });
-  controller.sendCompactionInterimNow = async () => {
-    completionProjections += 1;
-    if (completionProjections === 1) {
-      firstStarted();
-      await releaseFirstPromise;
-    }
-    return true;
+
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "compact-single-owner.jsonl",
+  );
+  controller.session = {
+    isStreaming: false,
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "session-compact-single-owner",
+      getSessionName: () => controller.chatKey,
+    },
+    ensureSessionReady: async () => ({
+      sessionFile,
+      sessionId: "session-compact-single-owner",
+    }),
+    compact: async () => {
+      await controller.handleClientEvent({
+        type: "ui",
+        payload: {
+          type: "compaction_end",
+          reason: "manual",
+          aborted: false,
+          tokensBefore: 77625,
+        },
+      });
+      return {
+        handled: true,
+        tokensBefore: 77625,
+        sessionFile,
+      };
+    },
+    prompt: async (text, options = {}) => {
+      emitRpcTurnComplete(controller, options, "unexpected temp reply");
+    },
+    switchSession: async () => {},
   };
 
-  const nativeEnd = controller.deliverCompactionEndNotice(
-    "Compacted from 77,625 tokens",
+  await controller.runCommand(
+    "/compact",
+    "m-compact-single-owner",
+    "m-compact-single-owner",
   );
-  await firstStartedPromise;
-  const commandResponse = controller.deliverCompactionEndNotice(
-    "Compacted from 77,625 tokens",
-  );
-  await new Promise((resolve) => setImmediate(resolve));
-  releaseFirst();
-  await Promise.all([nativeEnd, commandResponse]);
 
-  assert.equal(completionProjections, 1);
-  assert.equal(controller.compactionTurn, null);
+  assert.deepEqual(
+    deliveries.map(({ content }) =>
+      content.map((node) => node?.attrs?.content || "").join(""),
+    ),
+    ["Compacted from 77,625 tokens"],
+  );
 });
 
 test("chat controller leaves prompt-versus-steer admission to Pi", async () => {
