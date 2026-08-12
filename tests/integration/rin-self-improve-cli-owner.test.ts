@@ -293,6 +293,51 @@ test("self-improve reports preserve filtering, detail, backend, table, and TUI c
     },
   );
 
+  await withHistory(
+    [
+      record({
+        id: "run-expired-audit",
+        audit: {
+          version: 1,
+          auditId: "a".repeat(64),
+          path: "self_improve/state/run-audits/expired.json",
+          sha256: "b".repeat(64),
+          complete: true,
+          redacted: false,
+          truncated: false,
+        },
+      }),
+      record({
+        id: "run-invalid-audit",
+        audit: {
+          version: 1,
+          auditId: "c".repeat(64),
+          path: "../outside.json",
+          sha256: "d".repeat(64),
+          complete: true,
+          redacted: false,
+          truncated: false,
+        },
+      }),
+    ],
+    (agentDir) => {
+      assert.match(
+        selfImprove.renderSelfImproveReport(
+          agentDir,
+          options({ id: "run-expired-audit", once: true, watch: false }),
+        ),
+        /integrity: unavailable \(retained evidence expired\)/,
+      );
+      assert.match(
+        selfImprove.renderSelfImproveReport(
+          agentDir,
+          options({ id: "run-invalid-audit", once: true, watch: false }),
+        ),
+        /integrity: INVALID \(path_outside_agent_dir\)/,
+      );
+    },
+  );
+
   assert.match(
     selfImprove.renderSelfImproveReport("/missing", options()),
     /no self-improve outcomes/,

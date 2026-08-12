@@ -312,7 +312,7 @@ async function runInMemorySessionSelfImproveReview(options: {
   } catch (error) {
     const observed = await completeSelfImproveAuditObservation({
       agentDir: options.agentDir,
-      handle: startedAudit.handle,
+      capture: startedAudit.capture,
       status: "failed",
       finishedAt: new Date().toISOString(),
       error: error instanceof Error ? error.message : String(error),
@@ -322,7 +322,6 @@ async function runInMemorySessionSelfImproveReview(options: {
       error && typeof error === "object" ? error : new Error(String(error));
     Object.assign(failure, {
       selfImproveAudit: observed.audit,
-      selfImproveAuditHandle: observed.auditHandle,
       selfImproveAuditError: observed.auditError,
     });
     throw failure;
@@ -330,7 +329,7 @@ async function runInMemorySessionSelfImproveReview(options: {
 
   const observed = await completeSelfImproveAuditObservation({
     agentDir: options.agentDir,
-    handle: startedAudit.handle,
+    capture: startedAudit.capture,
     status: "completed",
     finishedAt: new Date().toISOString(),
     output: finalText,
@@ -343,7 +342,6 @@ async function runInMemorySessionSelfImproveReview(options: {
     output: finalText,
     changedFiles: observed.changedFiles,
     audit: observed.audit,
-    auditHandle: observed.auditHandle,
     auditError: observed.auditError,
   };
 }
@@ -358,7 +356,7 @@ async function assertMaintenanceLockHeld(agentDir: string, handle: FileHandle) {
   }
 }
 
-/** Internal mutation boundary; callers must keep the supplied lock held through history acknowledgment. */
+/** Internal mutation boundary; callers must keep the supplied lock held through final audit capture. */
 export async function runMaintainerUnderMaintenanceLock(
   _ctx: ExtensionCtxLike & { sessionManager?: any },
   opts: {

@@ -7,10 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import lockfile from "proper-lockfile";
 
-import {
-  acknowledgeSelfImproveAuditObservation,
-  reportSelfImproveAuditObservationError,
-} from "./audit-observer.js";
+import { reportSelfImproveAuditObservationError } from "./audit-observer.js";
 import { runMaintainerUnderMaintenanceLock } from "./maintainer.js";
 import { asArray } from "../json-utils.js";
 import {
@@ -24,7 +21,6 @@ import { nowIso, safeString, uniqueStrings } from "./core/utils.js";
 import {
   resolveSafeSelfImprovePath,
   sanitizeSelfImproveHistoryText,
-  type SelfImproveRunAuditHandle,
   type SelfImproveRunAuditReference,
 } from "./run-audit.js";
 import {
@@ -737,23 +733,6 @@ export async function appendMaintenanceHistoryRecord(
   await appendHistoryRecord(resolveAgentDir(agentDir), record);
 }
 
-async function acknowledgeCommittedResultAudit(
-  agentDir: string,
-  audit: unknown,
-  handle: unknown,
-  auditError?: string,
-) {
-  const result = await acknowledgeSelfImproveAuditObservation({
-    agentDir,
-    handle: handle as SelfImproveRunAuditHandle | undefined,
-    reference: audit as SelfImproveRunAuditReference | undefined,
-    auditError,
-  });
-  if (result && result !== auditError) {
-    reportSelfImproveAuditObservationError(result);
-  }
-}
-
 function persistedExecutionStartedAt(job: MaintenanceJob) {
   return safeString(job.executionStartedAt).trim();
 }
@@ -849,7 +828,7 @@ export async function runSelfImproveMaintenanceJobNow(
       const message = normalizeErrorMessage(error);
       const auditError =
         safeString((error as any)?.selfImproveAuditError).trim() || undefined;
-      const historyCommitted = await commitHistoryRecord(job.agentDir, {
+      await commitHistoryRecord(job.agentDir, {
         id: job.id,
         kind: job.kind,
         status: "failed",
@@ -864,14 +843,6 @@ export async function runSelfImproveMaintenanceJobNow(
         audit: normalizeAuditReference((error as any)?.selfImproveAudit),
         auditError,
       });
-      if (historyCommitted) {
-        await acknowledgeCommittedResultAudit(
-          job.agentDir,
-          (error as any)?.selfImproveAudit,
-          (error as any)?.selfImproveAuditHandle,
-          auditError,
-        );
-      }
       await removeMatchingJobs(job.agentDir, job, true);
       return {
         status: "failed",
@@ -882,7 +853,7 @@ export async function runSelfImproveMaintenanceJobNow(
     const changedFiles = normalizeChangedFiles(result?.changedFiles);
     const skipped = safeString(result?.skipped).trim() || undefined;
     const auditError = safeString(result?.auditError).trim() || undefined;
-    const historyCommitted = await commitHistoryRecord(job.agentDir, {
+    await commitHistoryRecord(job.agentDir, {
       id: job.id,
       kind: job.kind,
       status: "completed",
@@ -901,14 +872,6 @@ export async function runSelfImproveMaintenanceJobNow(
       audit: normalizeAuditReference(result?.audit),
       auditError,
     });
-    if (historyCommitted) {
-      await acknowledgeCommittedResultAudit(
-        job.agentDir,
-        result?.audit,
-        result?.auditHandle,
-        auditError,
-      );
-    }
     await removeMatchingJobs(job.agentDir, job, true);
     return {
       status: "completed",
@@ -965,7 +928,7 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
         const attempts = Math.max(1, Number(job.attempts || 0) + 1);
         const auditError =
           safeString((error as any)?.selfImproveAuditError).trim() || undefined;
-        const historyCommitted = await commitHistoryRecord(resolvedAgentDir, {
+        await commitHistoryRecord(resolvedAgentDir, {
           id: job.id,
           kind: job.kind,
           status: "failed",
@@ -980,14 +943,6 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
           audit: normalizeAuditReference((error as any)?.selfImproveAudit),
           auditError,
         });
-        if (historyCommitted) {
-          await acknowledgeCommittedResultAudit(
-            resolvedAgentDir,
-            (error as any)?.selfImproveAudit,
-            (error as any)?.selfImproveAuditHandle,
-            auditError,
-          );
-        }
         await removeMatchingJobs(resolvedAgentDir, job);
         failed += 1;
         continue;
@@ -996,7 +951,7 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
       const changedFiles = normalizeChangedFiles(result?.changedFiles);
       const skipped = safeString(result?.skipped).trim() || undefined;
       const auditError = safeString(result?.auditError).trim() || undefined;
-      const historyCommitted = await commitHistoryRecord(resolvedAgentDir, {
+      await commitHistoryRecord(resolvedAgentDir, {
         id: job.id,
         kind: job.kind,
         status: "completed",
@@ -1013,14 +968,6 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
         audit: normalizeAuditReference(result?.audit),
         auditError,
       });
-      if (historyCommitted) {
-        await acknowledgeCommittedResultAudit(
-          resolvedAgentDir,
-          result?.audit,
-          result?.auditHandle,
-          auditError,
-        );
-      }
       await removeMatchingJobs(resolvedAgentDir, job);
       processed += 1;
     }

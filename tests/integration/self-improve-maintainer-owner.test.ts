@@ -131,7 +131,6 @@ assert.equal(result.sessionFile, sessionFile);
 assert.equal(result.leafId, "leaf-owner");
 assert.equal(result.trigger, "owner-trigger");
 assert.equal(result.audit.output, "owner review complete");
-assert.equal(result.auditHandle.runId, "maintainer-owner-run");
 const memoryEvent = globalThis.__rinMaintainerOwnerEvents.find(([name]) => name === "memory");
 assert.deepEqual(memoryEvent, [
   "memory",

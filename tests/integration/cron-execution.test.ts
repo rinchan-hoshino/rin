@@ -2121,7 +2121,7 @@ test("audit history persistence failure does not block cron terminal projection"
     target: { kind: "agent_prompt", prompt: "self improve" },
   };
   try {
-    const auditHandle = await runAuditMod.beginSelfImproveRunAudit({
+    const auditCapture = await runAuditMod.beginSelfImproveRunAudit({
       agentDir,
       runId: "cron-history-failure",
       kind: "cron",
@@ -2129,12 +2129,11 @@ test("audit history persistence failure does not block cron terminal projection"
     });
     const audit = await runAuditMod.completeSelfImproveRunAudit({
       agentDir,
-      handle: auditHandle,
+      capture: auditCapture,
       status: "completed",
       finishedAt: "2026-05-08T09:34:00.000Z",
       output: "done",
     });
-    const pendingPath = path.join(agentDir, auditHandle.pendingPath);
     await fs.mkdir(historyPath, { recursive: true });
     await execMod.projectCronTaskTerminal(
       task,
@@ -2142,14 +2141,16 @@ test("audit history persistence failure does not block cron terminal projection"
         status: "completed",
         text: "done",
         audit,
-        auditHandle,
       },
       { agentDir, startedAt: task.lastStartedAt },
     );
     assert.equal(typeof (task as any).lastFinishedAt, "string");
     assert.equal(task.lastResultText, "done");
     assert.equal(task.runCount, 1);
-    assert.equal((await fs.stat(pendingPath)).isFile(), true);
+    assert.equal(
+      (await fs.stat(path.join(agentDir, audit.path))).isFile(),
+      true,
+    );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

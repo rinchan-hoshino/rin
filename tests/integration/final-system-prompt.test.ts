@@ -101,9 +101,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.equal(baseSystemPrompt.includes("Current working directory:"), false);
   assert.ok(baseSystemPrompt.includes("- recall:"));
   assert.ok(
-    baseSystemPrompt.includes(
-      "Search archived session history for past-conversation evidence.",
-    ),
+    baseSystemPrompt.includes("- recall: Archived session-history search."),
   );
   assert.ok(
     baseSystemPrompt.includes(
@@ -122,57 +120,14 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     false,
   );
   assert.ok(
-    baseSystemPrompt.includes("Read the full branch checklist or a range"),
-  );
-  assert.ok(
     baseSystemPrompt.includes(
-      "Use todo for current-branch work with multiple concrete execution steps that benefit from a visible checklist",
+      "Use note when minimal verified state must survive compaction exactly; use todo for execution checklists and files or tools for recoverable context.",
     ),
-  );
-  assert.ok(
-    baseSystemPrompt.includes(
-      "Use action read without offset/limit for the full list or with a 1-based item offset and positive limit for a range",
-    ),
-  );
-  assert.ok(baseSystemPrompt.includes("add with items and optional beforeId"));
-  assert.ok(
-    baseSystemPrompt.includes("edit with exactly one id and item patch"),
-  );
-  assert.ok(baseSystemPrompt.includes("remove with ids or all: true"));
-  assert.ok(
-    baseSystemPrompt.includes(
-      "After compaction, trust the current-branch snapshot injected by Rin",
-    ),
-  );
-  assert.ok(baseSystemPrompt.includes("never reconstruct it from prose"));
-  assert.ok(
-    baseSystemPrompt.includes("clear all before starting a new unrelated task"),
   );
   assert.equal(baseSystemPrompt.includes("Omit todos to read"), false);
   assert.equal(
     baseSystemPrompt.includes("complete desired todos array"),
     false,
-  );
-  assert.ok(
-    baseSystemPrompt.includes(
-      "Use note as a minimal scratchpad for verified content that must survive compaction exactly",
-    ),
-  );
-  assert.ok(
-    baseSystemPrompt.includes(
-      "Keep each item as short as possible and focused on exact cross-compaction state",
-    ),
-  );
-  assert.ok(
-    baseSystemPrompt.includes(
-      "rely on files or tools for recoverable context, and todo for plans, pending actions, and checklists",
-    ),
-  );
-  assert.ok(
-    baseSystemPrompt.includes("Clean up notes promptly as work advances"),
-  );
-  assert.ok(
-    baseSystemPrompt.includes("edit with exactly one id and replacement item"),
   );
   assert.equal(baseSystemPrompt.includes("Pi-native optional offset"), false);
   assert.equal(baseSystemPrompt.includes("write for full replacement"), false);

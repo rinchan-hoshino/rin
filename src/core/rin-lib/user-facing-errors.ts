@@ -455,12 +455,14 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Self-improve audit received an invalid run timestamp.",
   self_improve_audit_symlink_path: () =>
     "Self-improve audit rejected a symbolic-link path outside its trusted storage boundary.",
-  self_improve_audit_pending_mismatch: () =>
-    "Self-improve audit found incompatible pending evidence.",
+  self_improve_audit_path_outside_agent_dir: () =>
+    "Self-improve audit rejected an unsafe evidence path.",
+  self_improve_audit_capture_mismatch: () =>
+    "Self-improve audit capture does not belong to this agent directory.",
+  self_improve_audit_artifact_invalid: () =>
+    "Self-improve audit evidence is incomplete or corrupt.",
   self_improve_audit_history_corrupt: () =>
     "Self-improve audit history is incomplete or corrupt; refusing to append evidence.",
-  self_improve_audit_pending_path_outside_agent_dir: () =>
-    "Self-improve audit recovery rejected an unsafe evidence path.",
   self_improve_maintenance_lock_timeout: () =>
     "Self-improve maintenance stayed busy and this run could not start safely.",
   self_improve_maintenance_lock_required: () =>
@@ -491,6 +493,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "OneBot adapter needs an endpoint before it can start. Add the endpoint.",
   onebot_not_connected: () =>
     "OneBot adapter is not connected. Check NapCat/OneBot.",
+  onebot_file_source_empty: () =>
+    "OneBot file delivery needs a file source. Add a file source.",
   onebot_reaction_emoji_unsupported: () =>
     "OneBot reaction failed because this emoji is not supported. Choose a supported emoji.",
   onebot_reaction_requires_group_chat: () =>
@@ -499,6 +503,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "OneBot send failed because the outgoing message is empty. Add text or an attachment.",
   onebot_send_message_empty_result: () =>
     "OneBot accepted the send request but returned no delivered message. Check NapCat/OneBot.",
+  onebot_upload_file_empty_result: () =>
+    "OneBot accepted the file upload but returned no file identifier. Check NapCat/OneBot.",
 
   pi_prompt_shape_changed: () =>
     "Rin stopped because Pi's system prompt structure changed and Rin could not apply its prompt overlay safely.",

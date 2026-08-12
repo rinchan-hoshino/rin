@@ -20,16 +20,13 @@ import {
   releaseSelfImproveMaintenanceLock,
 } from "../self-improve/async-jobs.js";
 import {
-  acknowledgeSelfImproveAuditObservation,
   beginSelfImproveAuditObservation,
   completeSelfImproveAuditObservation,
-  reportSelfImproveAuditObservationError,
 } from "../self-improve/audit-observer.js";
 import { maintenanceHistoryPath } from "../self-improve/paths.js";
 import {
   resolveSafeSelfImprovePath,
   sanitizeSelfImproveHistoryText,
-  type SelfImproveRunAuditHandle,
   type SelfImproveRunAuditReference,
 } from "../self-improve/run-audit.js";
 import type {
@@ -558,7 +555,6 @@ export type CronTaskTerminal = {
   error?: string;
   sessionFile?: string;
   audit?: SelfImproveRunAuditReference;
-  auditHandle?: SelfImproveRunAuditHandle;
   auditError?: string;
   historyCommitted?: boolean;
 };
@@ -674,7 +670,7 @@ export async function executeCronSessionInvocation(
       const observed = audited
         ? await completeSelfImproveAuditObservation({
             agentDir: options.agentDir,
-            handle: startedAudit.handle,
+            capture: startedAudit.capture,
             status: "completed",
             finishedAt: nowIso(),
             output: result.auditOutput,
@@ -690,7 +686,6 @@ export async function executeCronSessionInvocation(
               text: result.text,
               sessionFile: result.sessionFile,
               audit: observed.audit,
-              auditHandle: observed.auditHandle,
               auditError,
             },
             { agentDir: options.agentDir, startedAt: invocation.startedAt },
@@ -707,7 +702,7 @@ export async function executeCronSessionInvocation(
       const observed = audited
         ? await completeSelfImproveAuditObservation({
             agentDir: options.agentDir,
-            handle: startedAudit.handle,
+            capture: startedAudit.capture,
             status: "failed",
             finishedAt: nowIso(),
             error: errorText,
@@ -722,7 +717,6 @@ export async function executeCronSessionInvocation(
               status: "failed",
               error: errorText,
               audit: observed.audit,
-              auditHandle: observed.auditHandle,
               auditError,
             },
             { agentDir: options.agentDir, startedAt: invocation.startedAt },
@@ -807,15 +801,6 @@ export async function appendCronTaskTerminalHistory(
       startedAt: options.startedAt,
       finishedAt: nowIso(),
     });
-    const acknowledgedError = await acknowledgeSelfImproveAuditObservation({
-      agentDir: options.agentDir,
-      handle: terminal.auditHandle,
-      reference: terminal.audit,
-      auditError: terminal.auditError,
-    });
-    if (acknowledgedError && acknowledgedError !== terminal.auditError) {
-      reportSelfImproveAuditObservationError(acknowledgedError);
-    }
     return true;
   } catch (error) {
     const message = sanitizeSelfImproveHistoryText(
@@ -893,7 +878,7 @@ export async function executeCronTask(
       const observed = audited
         ? await completeSelfImproveAuditObservation({
             agentDir: options.agentDir,
-            handle: startedAudit.handle,
+            capture: startedAudit.capture,
             status: "completed",
             finishedAt: nowIso(),
             output: result.auditOutput,
@@ -905,7 +890,6 @@ export async function executeCronTask(
         text: result.text,
         sessionFile: result.sessionFile,
         audit: observed.audit,
-        auditHandle: observed.auditHandle,
         auditError: observed.auditError,
       };
     }
@@ -916,7 +900,7 @@ export async function executeCronTask(
     const observed = audited
       ? await completeSelfImproveAuditObservation({
           agentDir: options.agentDir,
-          handle: startedAudit.handle,
+          capture: startedAudit.capture,
           status: "failed",
           finishedAt: nowIso(),
           error: errorText,
@@ -927,7 +911,6 @@ export async function executeCronTask(
       status: "failed",
       error: errorText,
       audit: observed.audit,
-      auditHandle: observed.auditHandle,
       auditError: observed.auditError,
     };
   } finally {

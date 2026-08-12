@@ -9,6 +9,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { importBuiltModule } from "../support/import-built-module.js";
 
+await import("../support/register-daemon-update-fence-owner-fixture.ts");
+
 const { acquireDaemonInstanceLock, daemonUpdateFencePath } =
   await importBuiltModule<typeof import("../../src/core/rin-daemon/lock.js")>(
     "dist/core/rin-daemon/lock.js",

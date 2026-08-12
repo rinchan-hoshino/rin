@@ -1744,7 +1744,7 @@ test("cgroup cleanup failure rejects pending work without recovering the session
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
     workerPath,
-    "setTimeout(() => process.exit(7), 40); process.stdin.resume();\n",
+    "process.stdin.once('data', () => setTimeout(() => process.exit(7), 20)); process.stdin.resume();\n",
   );
   const writes: string[] = [];
   const connection = {
@@ -1778,7 +1778,10 @@ test("cgroup cleanup failure rejects pending work without recovering the session
     type: "get_state",
   });
   await waitForChildExit(worker.child);
-  await sleep(20);
+  const deadline = Date.now() + 1_000;
+  while (writes.length < 2 && Date.now() <= deadline) {
+    await sleep(10);
+  }
 
   const payloads = writes.map((line) => JSON.parse(line));
   assert.equal(payloads[0]?.type, "worker_exit");

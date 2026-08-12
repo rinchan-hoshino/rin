@@ -29,14 +29,6 @@ export type SelfImproveRunAuditSource = {
   trigger?: string;
 };
 
-export type SelfImproveRunAuditHandle = {
-  version: 1;
-  runId: string;
-  auditId: string;
-  storageId: string;
-  pendingPath: string;
-};
-
 export type SelfImproveRunAuditReference = {
   version: 1;
   auditId?: string;
@@ -49,7 +41,6 @@ export type SelfImproveRunAuditReference = {
 
 export type CompletedSelfImproveRunAudit = SelfImproveRunAuditReference & {
   status: "completed" | "failed" | "skipped";
-  evidenceRetained?: boolean;
   output?: string;
   error?: string;
   changedFiles: Array<{
@@ -76,23 +67,10 @@ type Snapshot = {
   truncated: boolean;
 };
 
-type AcknowledgedAuditMarker = {
+export type SelfImproveRunAuditCapture = {
   version: 1;
-  storageId: string;
+  agentRoot: string;
   auditId: string;
-  fileName: string;
-  reference: SelfImproveRunAuditReference;
-  status: "completed" | "failed";
-  integritySha256: string;
-};
-
-type PendingAudit = {
-  version: 1;
-  auditId: string;
-  storageId: string;
-  generationId: string;
-  fileName: string;
-  integritySha256: string;
   runId: string;
   runIdSha256: string;
   kind: string;
@@ -203,11 +181,7 @@ function sanitizeSource(
   maxBytes: number,
 ) {
   if (!source) {
-    return {
-      source: undefined,
-      redacted: false,
-      truncated: false,
-    };
+    return { source: undefined, redacted: false, truncated: false };
   }
   let redacted = false;
   let truncated = false;
@@ -228,6 +202,50 @@ function sanitizeSource(
     redacted,
     truncated,
   };
+}
+
+async function canonicalAgentRoot(agentDir: string) {
+  return await fs.realpath(path.resolve(agentDir));
+}
+
+async function assertSafeAgentPath(agentDir: string, targetPath: string) {
+  const root = path.resolve(agentDir);
+  const target = path.resolve(targetPath);
+  if (target !== root && !target.startsWith(`${root}${path.sep}`)) {
+    throw new Error("self_improve_audit_path_outside_agent_dir");
+  }
+  const relative = path.relative(root, target);
+  let current = root;
+  for (const component of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, component);
+    try {
+      const stat = await fs.lstat(current);
+      if (stat.isSymbolicLink()) {
+        throw new Error("self_improve_audit_symlink_path");
+      }
+    } catch (error: any) {
+      if (error?.code === "ENOENT") break;
+      throw error;
+    }
+  }
+}
+
+export async function resolveSafeSelfImprovePath(
+  agentDir: string,
+  targetPath: string,
+) {
+  const lexicalRoot = path.resolve(agentDir);
+  const lexicalTarget = path.resolve(targetPath);
+  if (
+    lexicalTarget !== lexicalRoot &&
+    !lexicalTarget.startsWith(`${lexicalRoot}${path.sep}`)
+  ) {
+    throw new Error("self_improve_audit_path_outside_agent_dir");
+  }
+  const root = await canonicalAgentRoot(lexicalRoot);
+  const target = path.resolve(root, path.relative(lexicalRoot, lexicalTarget));
+  await assertSafeAgentPath(root, target);
+  return target;
 }
 
 async function collectFiles(dir: string): Promise<string[]> {
@@ -316,64 +334,6 @@ async function captureSnapshot(
   return { rootSha256, entries, redacted, truncated };
 }
 
-function safeRunFileName(runId: string, auditId: string) {
-  const readable =
-    runId.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 96) || "run";
-  return `${readable}-${auditId}`;
-}
-
-async function canonicalAgentRoot(agentDir: string) {
-  return await fs.realpath(path.resolve(agentDir));
-}
-
-async function assertSafeAgentPath(agentDir: string, targetPath: string) {
-  const root = path.resolve(agentDir);
-  const target = path.resolve(targetPath);
-  if (target !== root && !target.startsWith(`${root}${path.sep}`)) {
-    throw new Error("self_improve_audit_pending_path_outside_agent_dir");
-  }
-  const relative = path.relative(root, target);
-  let current = root;
-  for (const component of relative.split(path.sep).filter(Boolean)) {
-    current = path.join(current, component);
-    try {
-      const stat = await fs.lstat(current);
-      if (stat.isSymbolicLink()) {
-        throw new Error("self_improve_audit_symlink_path");
-      }
-    } catch (error: any) {
-      if (error?.code === "ENOENT") break;
-      throw error;
-    }
-  }
-}
-
-export async function resolveSafeSelfImprovePath(
-  agentDir: string,
-  targetPath: string,
-) {
-  const lexicalRoot = path.resolve(agentDir);
-  const lexicalTarget = path.resolve(targetPath);
-  if (
-    lexicalTarget !== lexicalRoot &&
-    !lexicalTarget.startsWith(`${lexicalRoot}${path.sep}`)
-  ) {
-    throw new Error("self_improve_audit_pending_path_outside_agent_dir");
-  }
-  const root = await canonicalAgentRoot(lexicalRoot);
-  const target = path.resolve(root, path.relative(lexicalRoot, lexicalTarget));
-  await assertSafeAgentPath(root, target);
-  return target;
-}
-
-function pendingDir(agentDir: string) {
-  return path.join(selfImproveStateDir(agentDir), "run-audits-pending");
-}
-
-function acknowledgedDir(agentDir: string) {
-  return path.join(selfImproveStateDir(agentDir), "run-audits-acknowledged");
-}
-
 function auditsDir(agentDir: string) {
   return path.join(selfImproveStateDir(agentDir), "run-audits");
 }
@@ -385,6 +345,12 @@ function relativeToAgent(agentDir: string, filePath: string) {
     .join("/");
 }
 
+function safeRunFileName(runId: string, auditId: string) {
+  const readable =
+    runId.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 96) || "run";
+  return `${readable}-${auditId}`;
+}
+
 function completedAuditPath(
   agentDir: string,
   startedAt: string,
@@ -392,16 +358,11 @@ function completedAuditPath(
   auditId: string,
 ) {
   const date = normalizeIsoTimestamp(startedAt).slice(0, 10);
-  const root = path.resolve(auditsDir(agentDir));
-  const filePath = path.resolve(
-    root,
+  return path.join(
+    auditsDir(agentDir),
     date,
     `${safeRunFileName(runId, auditId)}.json`,
   );
-  if (!filePath.startsWith(`${root}${path.sep}`)) {
-    throw new Error("self_improve_audit_pending_path_outside_agent_dir");
-  }
-  return filePath;
 }
 
 async function syncDirectory(dirPath: string) {
@@ -413,199 +374,30 @@ async function syncDirectory(dirPath: string) {
   }
 }
 
-async function syncDirectoryChain(agentDir: string, dirPath: string) {
-  const root = path.resolve(agentDir);
-  let current = path.resolve(dirPath);
-  while (current === root || current.startsWith(`${root}${path.sep}`)) {
-    await syncDirectory(current);
-    if (current === root) break;
-    current = path.dirname(current);
-  }
-}
-
-async function writeJsonPrivate(
+async function writeJsonPrivateAtomic(
   agentDir: string,
   filePath: string,
   value: unknown,
-  options: { exclusive?: boolean; preserveTempOnFailure?: boolean } = {},
 ) {
   await assertSafeAgentPath(agentDir, filePath);
   await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
   await assertSafeAgentPath(agentDir, filePath);
-  await syncDirectoryChain(agentDir, path.dirname(filePath));
   const tempPath = `${filePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  let tempDurable = false;
-  let promoted = false;
   try {
     const handle = await fs.open(tempPath, "wx", 0o600);
     try {
       await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
       await handle.chmod(0o600);
       await handle.sync();
-      tempDurable = true;
     } finally {
       await handle.close();
     }
-    if (options.exclusive) await fs.link(tempPath, filePath);
-    else await fs.rename(tempPath, filePath);
+    await fs.link(tempPath, filePath);
+    await fs.rm(tempPath);
     await syncDirectory(path.dirname(filePath));
-    promoted = true;
   } finally {
-    if (promoted || !tempDurable || !options.preserveTempOnFailure) {
-      await fs.rm(tempPath, { force: true });
-      await syncDirectory(path.dirname(tempPath));
-    }
+    await fs.rm(tempPath, { force: true });
   }
-}
-
-async function readJson<T>(filePath: string): Promise<T> {
-  return JSON.parse(await fs.readFile(filePath, "utf8")) as T;
-}
-
-async function readPrivateJson<T>(agentDir: string, filePath: string) {
-  await assertSafeAgentPath(agentDir, filePath);
-  const stat = await fs.lstat(filePath);
-  if (!stat.isFile() || (stat.mode & 0o777) !== 0o600) {
-    throw new Error("self_improve_audit_pending_mismatch");
-  }
-  return await readJson<T>(filePath);
-}
-
-function recordIntegritySha256(record: object) {
-  return sha256(JSON.stringify(record));
-}
-
-function referenceOnly(
-  reference: SelfImproveRunAuditReference,
-): SelfImproveRunAuditReference {
-  return {
-    version: 1,
-    auditId: reference.auditId,
-    path: reference.path,
-    sha256: reference.sha256,
-    complete: reference.complete,
-    redacted: reference.redacted,
-    truncated: reference.truncated,
-  };
-}
-
-function pendingIntegritySha256(
-  pending: Omit<PendingAudit, "integritySha256">,
-) {
-  return recordIntegritySha256(pending);
-}
-
-function validatePendingAudit(
-  pending: PendingAudit,
-  expectedStorageId: string,
-  expectedAuditId?: string,
-  expectedFileName?: string,
-) {
-  const { integritySha256, ...unsigned } = pending;
-  if (
-    pending.version !== 1 ||
-    pending.storageId !== expectedStorageId ||
-    (expectedAuditId !== undefined && pending.auditId !== expectedAuditId) ||
-    (expectedFileName !== undefined && pending.fileName !== expectedFileName) ||
-    integritySha256 !== pendingIntegritySha256(unsigned)
-  ) {
-    throw new Error("self_improve_audit_pending_mismatch");
-  }
-  return policyWithDefaults(pending.policy);
-}
-
-async function readAcknowledgedMarker(
-  agentDir: string,
-  markerPath: string,
-  expectedStorageId: string,
-) {
-  const stat = await fs.lstat(markerPath);
-  if (!stat.isFile() || (stat.mode & 0o777) !== 0o600) {
-    throw new Error("self_improve_audit_pending_mismatch");
-  }
-  const marker = await readJson<AcknowledgedAuditMarker>(markerPath);
-  const { integritySha256, ...unsigned } = marker;
-  if (
-    marker.version !== 1 ||
-    path.resolve(path.dirname(markerPath)) !==
-      path.resolve(acknowledgedDir(agentDir)) ||
-    marker.fileName !== path.basename(markerPath) ||
-    marker.storageId !== expectedStorageId ||
-    marker.auditId !== marker.reference.auditId ||
-    integritySha256 !== recordIntegritySha256(unsigned)
-  ) {
-    throw new Error("self_improve_audit_pending_mismatch");
-  }
-  return marker;
-}
-
-export async function beginSelfImproveRunAudit(input: {
-  agentDir: string;
-  runId: string;
-  kind: string;
-  startedAt: string;
-  source?: SelfImproveRunAuditSource;
-  policy?: Partial<SelfImproveRunAuditPolicy>;
-}): Promise<SelfImproveRunAuditHandle> {
-  const agentDir = await canonicalAgentRoot(input.agentDir);
-  const policy = policyWithDefaults(input.policy);
-  const startedAt = normalizeIsoTimestamp(input.startedAt);
-  const storageId = sha256(
-    JSON.stringify({
-      runId: input.runId,
-      kind: input.kind,
-      startedAt,
-      source: input.source || null,
-    }),
-  );
-  const runIdMetadata = sanitizeBoundedText(
-    input.runId,
-    policy.maxMetadataBytes,
-  );
-  const kindMetadata = sanitizeBoundedText(input.kind, policy.maxMetadataBytes);
-  const sourceMetadata = sanitizeSource(input.source, policy.maxMetadataBytes);
-  const fileName = `${safeRunFileName(runIdMetadata.text, storageId)}.json`;
-  const filePath = path.join(pendingDir(agentDir), fileName);
-  await assertSafeAgentPath(agentDir, filePath);
-  const before = await captureSnapshot(agentDir, policy);
-  const generationId = crypto.randomUUID();
-  const auditId = sha256(
-    JSON.stringify({ storageId, generationId, policy, before }),
-  );
-  const unsignedPending: Omit<PendingAudit, "integritySha256"> = {
-    version: 1,
-    auditId,
-    storageId,
-    generationId,
-    fileName,
-    runId: runIdMetadata.text,
-    runIdSha256: sha256(input.runId),
-    kind: kindMetadata.text,
-    startedAt,
-    source: sourceMetadata.source,
-    policy,
-    metadataRedacted:
-      runIdMetadata.redacted ||
-      kindMetadata.redacted ||
-      sourceMetadata.redacted,
-    metadataTruncated:
-      runIdMetadata.truncated ||
-      kindMetadata.truncated ||
-      sourceMetadata.truncated,
-    before,
-  };
-  const pending: PendingAudit = {
-    ...unsignedPending,
-    integritySha256: pendingIntegritySha256(unsignedPending),
-  };
-  await writeJsonPrivate(agentDir, filePath, pending, { exclusive: true });
-  return {
-    version: 1,
-    runId: input.runId,
-    auditId,
-    storageId,
-    pendingPath: relativeToAgent(agentDir, filePath),
-  };
 }
 
 function mapEntries(snapshot: Snapshot) {
@@ -665,17 +457,11 @@ function buildChanges(
         0,
         policy.maxPatchBytes - patchBytes,
       );
-      if (remainingPatchBytes === 0) {
-        entry.patch = "";
-        entry.patchTruncated = true;
-        truncated = true;
-      } else {
-        const bounded = truncateUtf8(patch, remainingPatchBytes);
-        entry.patch = bounded.text;
-        entry.patchTruncated = bounded.truncated || undefined;
-        patchBytes += Buffer.byteLength(bounded.text, "utf8");
-        truncated ||= bounded.truncated;
-      }
+      const bounded = truncateUtf8(patch, remainingPatchBytes);
+      entry.patch = bounded.text;
+      entry.patchTruncated = bounded.truncated || undefined;
+      patchBytes += Buffer.byteLength(bounded.text, "utf8");
+      truncated ||= bounded.truncated;
     }
     entry.redacted =
       Boolean(oldEntry?.redacted || newEntry?.redacted) || undefined;
@@ -685,10 +471,11 @@ function buildChanges(
   return { changes, changedFiles, redacted, truncated };
 }
 
-async function listFilesEnding(
-  root: string,
-  suffix: string,
-): Promise<string[]> {
+function recordIntegritySha256(record: object) {
+  return sha256(JSON.stringify(record));
+}
+
+async function listArtifactFiles(root: string): Promise<string[]> {
   if (!fssync.existsSync(root)) return [];
   const entries = await fs.readdir(root, { withFileTypes: true });
   const files: string[] = [];
@@ -697,255 +484,22 @@ async function listFilesEnding(
     if (entry.isSymbolicLink()) {
       throw new Error("self_improve_audit_symlink_path");
     }
-    if (entry.isDirectory()) {
-      files.push(...(await listFilesEnding(fullPath, suffix)));
-    } else if (entry.isFile() && entry.name.endsWith(suffix)) {
+    if (entry.isDirectory()) files.push(...(await listArtifactFiles(fullPath)));
+    else if (entry.isFile() && entry.name.endsWith(".json"))
       files.push(fullPath);
-    }
   }
   return files;
-}
-
-export async function maintainSelfImproveRunAuditStorage(input: {
-  agentDir: string;
-}) {
-  const agentDir = await canonicalAgentRoot(input.agentDir);
-  const legacyExecutionRoot = path.join(
-    selfImproveStateDir(agentDir),
-    "run-audits-executing",
-  );
-  for (const root of [
-    pendingDir(agentDir),
-    acknowledgedDir(agentDir),
-    legacyExecutionRoot,
-  ]) {
-    await assertSafeAgentPath(agentDir, root);
-    for (const tempPath of await listFilesEnding(root, ".tmp")) {
-      await assertSafeAgentPath(agentDir, tempPath);
-      await fs.rm(tempPath, { force: true });
-      await syncDirectory(path.dirname(tempPath));
-    }
-  }
-  for (const markerPath of await listFilesEnding(
-    acknowledgedDir(agentDir),
-    "",
-  )) {
-    const raw = await readJson<AcknowledgedAuditMarker>(markerPath);
-    const marker = await readAcknowledgedMarker(
-      agentDir,
-      markerPath,
-      raw.storageId,
-    );
-    const pendingPath = path.join(pendingDir(agentDir), marker.fileName);
-    if (!fssync.existsSync(pendingPath)) continue;
-    const pending = await readPrivateJson<PendingAudit>(agentDir, pendingPath);
-    validatePendingAudit(
-      pending,
-      marker.storageId,
-      marker.auditId,
-      marker.fileName,
-    );
-    const expectedReferencePath = relativeToAgent(
-      agentDir,
-      completedAuditPath(
-        agentDir,
-        pending.startedAt,
-        pending.runId,
-        pending.auditId,
-      ),
-    );
-    if (marker.reference.path !== expectedReferencePath) {
-      throw new Error("self_improve_audit_pending_mismatch");
-    }
-    const verified = await verifySelfImproveRunAudit(
-      agentDir,
-      marker.reference,
-    );
-    if (!verified.ok) {
-      throw new Error("self_improve_audit_pending_mismatch");
-    }
-    await assertSafeAgentPath(agentDir, pendingPath);
-    await fs.rm(pendingPath, { force: true });
-    await syncDirectory(path.dirname(pendingPath));
-  }
-
-  for (const markerPath of await listFilesEnding(legacyExecutionRoot, "")) {
-    await assertSafeAgentPath(agentDir, markerPath);
-    await fs.rm(markerPath, { force: true });
-    await syncDirectory(path.dirname(markerPath));
-  }
-
-  const root = auditsDir(agentDir);
-  await assertSafeAgentPath(agentDir, root);
-  for (const tempPath of await listFilesEnding(root, ".tmp")) {
-    await assertSafeAgentPath(agentDir, tempPath);
-    const artifactPath = tempPath.replace(/\.\d+\.[0-9a-f-]+\.tmp$/i, "");
-    if (artifactPath === tempPath) {
-      await fs.rm(tempPath, { force: true });
-      await syncDirectory(path.dirname(tempPath));
-      continue;
-    }
-    let validated:
-      | Awaited<ReturnType<typeof readValidatedCompletedArtifact>>
-      | undefined;
-    try {
-      validated = await readValidatedCompletedArtifact(
-        agentDir,
-        tempPath,
-        undefined,
-        undefined,
-        path.basename(artifactPath),
-      );
-    } catch (error: any) {
-      if (
-        !(error instanceof SyntaxError) &&
-        error?.message !== "self_improve_audit_pending_mismatch"
-      ) {
-        throw error;
-      }
-      await fs.rm(tempPath, { force: true });
-      await syncDirectory(path.dirname(tempPath));
-      continue;
-    }
-    const { artifact, artifactBuffer } = validated;
-    await assertSafeAgentPath(agentDir, artifactPath);
-    if (fssync.existsSync(artifactPath)) {
-      const existing = await readValidatedCompletedArtifact(
-        agentDir,
-        artifactPath,
-        artifact.auditId,
-        artifact.storageId,
-      );
-      if (sha256(existing.artifactBuffer) !== sha256(artifactBuffer)) {
-        throw new Error("self_improve_audit_pending_mismatch");
-      }
-    } else {
-      await fs.link(tempPath, artifactPath);
-      await syncDirectory(path.dirname(artifactPath));
-    }
-    await fs.rm(tempPath, { force: true });
-    await syncDirectory(path.dirname(tempPath));
-  }
-}
-
-async function pruneRunAudits(
-  agentDir: string,
-  _policy: SelfImproveRunAuditPolicy,
-  nowMs: number,
-  preservePath?: string,
-) {
-  const root = auditsDir(agentDir);
-  const protectedPaths = new Set<string>();
-  if (preservePath) protectedPaths.add(path.resolve(preservePath));
-  await assertSafeAgentPath(agentDir, root);
-
-  const pendingRoot = pendingDir(agentDir);
-  await assertSafeAgentPath(agentDir, pendingRoot);
-  for (const filePath of await listFilesEnding(pendingRoot, "")) {
-    const pending = await readPrivateJson<PendingAudit>(agentDir, filePath);
-    validatePendingAudit(
-      pending,
-      pending.storageId,
-      pending.auditId,
-      path.basename(filePath),
-    );
-    protectedPaths.add(
-      path.resolve(
-        completedAuditPath(
-          agentDir,
-          pending.startedAt,
-          pending.runId,
-          pending.auditId,
-        ),
-      ),
-    );
-  }
-
-  const acknowledgedRoot = acknowledgedDir(agentDir);
-  await assertSafeAgentPath(agentDir, acknowledgedRoot);
-  const acknowledged = new Map<string, AcknowledgedAuditMarker>();
-  for (const markerPath of await listFilesEnding(acknowledgedRoot, "")) {
-    const raw = await readJson<AcknowledgedAuditMarker>(markerPath);
-    const marker = await readAcknowledgedMarker(
-      agentDir,
-      markerPath,
-      raw.storageId,
-    );
-    if (acknowledged.has(marker.storageId)) {
-      throw new Error("self_improve_audit_pending_mismatch");
-    }
-    acknowledged.set(marker.storageId, marker);
-  }
-
-  const rows: Array<{
-    filePath: string;
-    finishedAt: number;
-    maxAgeMs: number;
-    maxArtifacts: number;
-    retentionAcknowledged: boolean;
-  }> = [];
-  for (const filePath of await listFilesEnding(root, "")) {
-    const { artifact } = await readValidatedCompletedArtifact(
-      agentDir,
-      filePath,
-    );
-    const artifactPolicy = policyWithDefaults(artifact.policy);
-    const reference = await completedReference(
-      agentDir,
-      filePath,
-      artifact.auditId,
-      artifact.storageId,
-    );
-    const marker = acknowledged.get(artifact.storageId);
-    if (
-      marker &&
-      (marker.status !== reference.status ||
-        JSON.stringify(marker.reference) !==
-          JSON.stringify(referenceOnly(reference)))
-    ) {
-      throw new Error("self_improve_audit_pending_mismatch");
-    }
-    rows.push({
-      filePath,
-      finishedAt: Date.parse(normalizeIsoTimestamp(artifact.finishedAt)),
-      maxAgeMs: artifactPolicy.maxAgeMs,
-      maxArtifacts: artifactPolicy.maxArtifacts,
-      retentionAcknowledged: Boolean(marker),
-    });
-  }
-  rows.sort(
-    (a, b) =>
-      b.finishedAt - a.finishedAt || b.filePath.localeCompare(a.filePath),
-  );
-
-  const removals: string[] = [];
-  for (const [index, row] of rows.entries()) {
-    if (protectedPaths.has(path.resolve(row.filePath))) continue;
-    if (
-      row.retentionAcknowledged &&
-      (nowMs - row.finishedAt > row.maxAgeMs || index >= row.maxArtifacts)
-    ) {
-      removals.push(row.filePath);
-    }
-  }
-  for (const filePath of removals) {
-    await assertSafeAgentPath(agentDir, filePath);
-    await fs.rm(filePath, { force: true });
-    await syncDirectory(path.dirname(filePath));
-  }
 }
 
 async function readValidatedCompletedArtifact(
   agentDir: string,
   artifactPath: string,
   expectedAuditId?: string,
-  expectedStorageId?: string,
-  expectedFileName = path.basename(artifactPath),
 ) {
   await assertSafeAgentPath(agentDir, artifactPath);
   const stat = await fs.lstat(artifactPath);
   if (!stat.isFile() || (stat.mode & 0o777) !== 0o600) {
-    throw new Error("self_improve_audit_pending_mismatch");
+    throw new Error("self_improve_audit_artifact_invalid");
   }
   const artifactBuffer = await fs.readFile(artifactPath);
   const artifactText = artifactBuffer.toString("utf8");
@@ -954,14 +508,12 @@ async function readValidatedCompletedArtifact(
   if (
     artifactText !== `${JSON.stringify(artifact, null, 2)}\n` ||
     artifact.version !== 1 ||
-    artifact.fileName !== expectedFileName ||
+    artifact.fileName !== path.basename(artifactPath) ||
     !integritySha256 ||
     integritySha256 !== recordIntegritySha256(unsignedArtifact) ||
-    (expectedAuditId !== undefined && artifact.auditId !== expectedAuditId) ||
-    (expectedStorageId !== undefined &&
-      artifact.storageId !== expectedStorageId)
+    (expectedAuditId !== undefined && artifact.auditId !== expectedAuditId)
   ) {
-    throw new Error("self_improve_audit_pending_mismatch");
+    throw new Error("self_improve_audit_artifact_invalid");
   }
   normalizeIsoTimestamp(artifact.finishedAt);
   return { artifact, artifactBuffer };
@@ -971,13 +523,11 @@ async function completedReference(
   agentDir: string,
   artifactPath: string,
   expectedAuditId?: string,
-  expectedStorageId?: string,
 ): Promise<CompletedSelfImproveRunAudit> {
   const { artifact, artifactBuffer } = await readValidatedCompletedArtifact(
     agentDir,
     artifactPath,
     expectedAuditId,
-    expectedStorageId,
   );
   return {
     version: 1,
@@ -999,95 +549,149 @@ async function completedReference(
   };
 }
 
+async function pruneRunAudits(
+  agentDir: string,
+  policy: SelfImproveRunAuditPolicy,
+  nowMs: number,
+  preservePath: string,
+) {
+  const root = auditsDir(agentDir);
+  await assertSafeAgentPath(agentDir, root);
+  const rows: Array<{ filePath: string; finishedAt: number }> = [];
+  for (const filePath of await listArtifactFiles(root)) {
+    const { artifact } = await readValidatedCompletedArtifact(
+      agentDir,
+      filePath,
+    );
+    rows.push({
+      filePath,
+      finishedAt: Date.parse(normalizeIsoTimestamp(artifact.finishedAt)),
+    });
+  }
+  rows.sort(
+    (a, b) =>
+      b.finishedAt - a.finishedAt || b.filePath.localeCompare(a.filePath),
+  );
+  let retained = 0;
+  for (const row of rows) {
+    const current = path.resolve(row.filePath) === path.resolve(preservePath);
+    if (
+      current ||
+      (retained < policy.maxArtifacts &&
+        nowMs - row.finishedAt <= policy.maxAgeMs)
+    ) {
+      retained += 1;
+      continue;
+    }
+    await fs.rm(row.filePath, { force: true });
+  }
+}
+
+export async function beginSelfImproveRunAudit(input: {
+  agentDir: string;
+  runId: string;
+  kind: string;
+  startedAt: string;
+  source?: SelfImproveRunAuditSource;
+  policy?: Partial<SelfImproveRunAuditPolicy>;
+}): Promise<SelfImproveRunAuditCapture> {
+  const agentRoot = await canonicalAgentRoot(input.agentDir);
+  const policy = policyWithDefaults(input.policy);
+  const startedAt = normalizeIsoTimestamp(input.startedAt);
+  const runId = sanitizeBoundedText(input.runId, policy.maxMetadataBytes);
+  const kind = sanitizeBoundedText(input.kind, policy.maxMetadataBytes);
+  const source = sanitizeSource(input.source, policy.maxMetadataBytes);
+  const before = await captureSnapshot(agentRoot, policy);
+  const auditId = sha256(
+    JSON.stringify({
+      runId: input.runId,
+      kind: input.kind,
+      startedAt,
+      source: input.source || null,
+      generationId: crypto.randomUUID(),
+      beforeRootSha256: before.rootSha256,
+    }),
+  );
+  return {
+    version: 1,
+    agentRoot,
+    auditId,
+    runId: runId.text,
+    runIdSha256: sha256(input.runId),
+    kind: kind.text,
+    startedAt,
+    source: source.source,
+    policy,
+    metadataRedacted: runId.redacted || kind.redacted || source.redacted,
+    metadataTruncated: runId.truncated || kind.truncated || source.truncated,
+    before,
+  };
+}
+
 export async function completeSelfImproveRunAudit(input: {
   agentDir: string;
-  handle: SelfImproveRunAuditHandle;
+  capture: SelfImproveRunAuditCapture;
   status: "completed" | "failed" | "skipped";
   finishedAt: string;
   output?: string;
   error?: string;
   nowMs?: number;
 }): Promise<CompletedSelfImproveRunAudit> {
-  const agentDir = await canonicalAgentRoot(input.agentDir);
+  const agentRoot = await canonicalAgentRoot(input.agentDir);
+  if (input.capture.version !== 1 || input.capture.agentRoot !== agentRoot) {
+    throw new Error("self_improve_audit_capture_mismatch");
+  }
   const finishedAt = normalizeIsoTimestamp(input.finishedAt);
-  const pendingPath = path.resolve(agentDir, input.handle.pendingPath);
-  if (!pendingPath.startsWith(`${agentDir}${path.sep}`)) {
-    throw new Error("self_improve_audit_pending_path_outside_agent_dir");
-  }
-  await assertSafeAgentPath(agentDir, pendingPath);
-  const pending = await readPrivateJson<PendingAudit>(agentDir, pendingPath);
-  const pendingPolicy = validatePendingAudit(
-    pending,
-    input.handle.storageId,
-    input.handle.auditId,
-    path.basename(pendingPath),
-  );
-  const artifactPath = completedAuditPath(
-    agentDir,
-    pending.startedAt,
-    pending.runId,
-    pending.auditId,
-  );
-  if (fssync.existsSync(artifactPath)) {
-    const reference = await completedReference(
-      agentDir,
-      artifactPath,
-      pending.auditId,
-      pending.storageId,
-    );
-    await pruneRunAudits(
-      agentDir,
-      pendingPolicy,
-      input.nowMs ?? Date.now(),
-      artifactPath,
-    );
-    return reference;
-  }
-  const after = await captureSnapshot(agentDir, pendingPolicy);
+  const after = await captureSnapshot(agentRoot, input.capture.policy);
   const changeResult = buildChanges(
-    agentDir,
-    pending.before,
+    agentRoot,
+    input.capture.before,
     after,
-    pendingPolicy,
+    input.capture.policy,
   );
   const rawOutput = String(input.output || "");
-  const sanitizedOutput = sanitizeBoundedText(
+  const output = sanitizeBoundedText(
     rawOutput,
-    pendingPolicy.maxOutputBytes,
+    input.capture.policy.maxOutputBytes,
   );
   const rawError = String(input.error || "");
-  const sanitizedError = sanitizeBoundedText(
+  const error = sanitizeBoundedText(
     rawError,
-    pendingPolicy.maxErrorBytes,
+    input.capture.policy.maxErrorBytes,
   );
   const redacted =
-    pending.metadataRedacted ||
-    pending.before.redacted ||
+    input.capture.metadataRedacted ||
+    input.capture.before.redacted ||
     after.redacted ||
     changeResult.redacted ||
-    sanitizedOutput.redacted ||
-    sanitizedError.redacted;
+    output.redacted ||
+    error.redacted;
   const truncated =
-    pending.metadataTruncated ||
-    pending.before.truncated ||
+    input.capture.metadataTruncated ||
+    input.capture.before.truncated ||
     after.truncated ||
     changeResult.truncated ||
-    sanitizedOutput.truncated ||
-    sanitizedError.truncated;
+    output.truncated ||
+    error.truncated;
+  const artifactPath = completedAuditPath(
+    agentRoot,
+    input.capture.startedAt,
+    input.capture.runId,
+    input.capture.auditId,
+  );
   const unsignedArtifact = {
     version: 1,
-    auditId: pending.auditId,
-    storageId: pending.storageId,
+    auditId: input.capture.auditId,
     fileName: path.basename(artifactPath),
-    runId: pending.runId,
-    runIdSha256: pending.runIdSha256,
-    kind: pending.kind,
-    startedAt: pending.startedAt,
+    runId: input.capture.runId,
+    runIdSha256: input.capture.runIdSha256,
+    kind: input.capture.kind,
+    startedAt: input.capture.startedAt,
     finishedAt,
     status: input.status,
-    source: pending.source,
-    policy: pendingPolicy,
-    beforeRootSha256: pending.before.rootSha256,
+    source: input.capture.source,
+    policy: input.capture.policy,
+    beforeRootSha256: input.capture.before.rootSha256,
     afterRootSha256: after.rootSha256,
     complete: !truncated && !redacted,
     redacted,
@@ -1095,17 +699,17 @@ export async function completeSelfImproveRunAudit(input: {
     output: {
       sha256: sha256(rawOutput),
       bytes: Buffer.byteLength(rawOutput, "utf8"),
-      text: sanitizedOutput.text,
-      redacted: sanitizedOutput.redacted,
-      truncated: sanitizedOutput.truncated,
+      text: output.text,
+      redacted: output.redacted,
+      truncated: output.truncated,
     },
     error: input.error
       ? {
           sha256: sha256(rawError),
           bytes: Buffer.byteLength(rawError, "utf8"),
-          text: sanitizedError.text,
-          redacted: sanitizedError.redacted,
-          truncated: sanitizedError.truncated,
+          text: error.text,
+          redacted: error.redacted,
+          truncated: error.truncated,
         }
       : undefined,
     changes: changeResult.changes,
@@ -1114,97 +718,19 @@ export async function completeSelfImproveRunAudit(input: {
     ...unsignedArtifact,
     integritySha256: recordIntegritySha256(unsignedArtifact),
   };
-  await writeJsonPrivate(agentDir, artifactPath, artifact, {
-    exclusive: true,
-    preserveTempOnFailure: true,
-  });
+  await writeJsonPrivateAtomic(agentRoot, artifactPath, artifact);
   const reference = await completedReference(
-    agentDir,
+    agentRoot,
     artifactPath,
-    pending.auditId,
-    pending.storageId,
+    input.capture.auditId,
   );
   await pruneRunAudits(
-    agentDir,
-    pendingPolicy,
+    agentRoot,
+    input.capture.policy,
     input.nowMs ?? Date.now(),
     artifactPath,
   );
   return reference;
-}
-
-export async function acknowledgeSelfImproveRunAudit(input: {
-  agentDir: string;
-  handle: SelfImproveRunAuditHandle;
-  reference: SelfImproveRunAuditReference;
-}) {
-  const agentDir = await canonicalAgentRoot(input.agentDir);
-  const pendingPath = path.resolve(agentDir, input.handle.pendingPath);
-  if (!pendingPath.startsWith(`${agentDir}${path.sep}`)) {
-    throw new Error("self_improve_audit_pending_path_outside_agent_dir");
-  }
-  const artifactPath = path.resolve(agentDir, input.reference.path);
-  if (!artifactPath.startsWith(`${agentDir}${path.sep}`)) {
-    throw new Error("self_improve_audit_pending_path_outside_agent_dir");
-  }
-  const acknowledgedPath = path.join(
-    acknowledgedDir(agentDir),
-    path.basename(pendingPath),
-  );
-  await assertSafeAgentPath(agentDir, acknowledgedPath);
-  const expectedReference = referenceOnly(input.reference);
-  if (fssync.existsSync(acknowledgedPath)) {
-    const marker = await readAcknowledgedMarker(
-      agentDir,
-      acknowledgedPath,
-      input.handle.storageId,
-    );
-    if (
-      marker.auditId !== input.handle.auditId ||
-      JSON.stringify(marker.reference) !== JSON.stringify(expectedReference)
-    ) {
-      throw new Error("self_improve_audit_pending_mismatch");
-    }
-  } else {
-    const reference = await completedReference(
-      agentDir,
-      artifactPath,
-      input.handle.auditId,
-      input.handle.storageId,
-    );
-    if (reference.sha256 !== input.reference.sha256) {
-      throw new Error("self_improve_audit_pending_mismatch");
-    }
-    const unsignedMarker: Omit<AcknowledgedAuditMarker, "integritySha256"> = {
-      version: 1,
-      storageId: input.handle.storageId,
-      auditId: input.handle.auditId,
-      fileName: path.basename(acknowledgedPath),
-      reference: expectedReference,
-      status: reference.status === "failed" ? "failed" : "completed",
-    };
-    await writeJsonPrivate(
-      agentDir,
-      acknowledgedPath,
-      {
-        ...unsignedMarker,
-        integritySha256: recordIntegritySha256(unsignedMarker),
-      },
-      { exclusive: true },
-    );
-  }
-  if (fssync.existsSync(pendingPath)) {
-    const pending = await readPrivateJson<PendingAudit>(agentDir, pendingPath);
-    validatePendingAudit(
-      pending,
-      input.handle.storageId,
-      input.handle.auditId,
-      path.basename(pendingPath),
-    );
-  }
-  await assertSafeAgentPath(agentDir, pendingPath);
-  await fs.rm(pendingPath, { force: true });
-  await syncDirectory(path.dirname(pendingPath));
 }
 
 export async function verifySelfImproveRunAudit(
@@ -1223,10 +749,8 @@ export async function verifySelfImproveRunAudit(
       return { ok: false, error: "sha256_mismatch" };
     }
     const actual = await completedReference(root, filePath, reference.auditId);
-    if (actual.sha256 !== reference.sha256) {
-      return { ok: false, error: "sha256_mismatch" };
-    }
     if (
+      actual.sha256 !== reference.sha256 ||
       reference.version !== actual.version ||
       reference.complete !== actual.complete ||
       reference.redacted !== actual.redacted ||
@@ -1235,7 +759,10 @@ export async function verifySelfImproveRunAudit(
       return { ok: false, error: "reference_metadata_mismatch" };
     }
     return { ok: true };
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.code === "ENOENT") {
+      return { ok: false, error: "artifact_unavailable" };
+    }
     return {
       ok: false,
       error: error instanceof Error ? error.message : String(error),

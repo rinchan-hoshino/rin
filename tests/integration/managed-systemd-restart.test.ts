@@ -5,10 +5,14 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
-import { runManagedSystemdServiceAction } from "../../dist/core/rin/managed-runtime-service.js";
-import { recoverOwnedLegacySystemdUnitHold } from "../../dist/core/rin-install/legacy-service-hold.js";
-import * as legacyHoldOwner from "../../dist/core/rin-install/legacy-service-hold.js";
-import { recoverOwnedLegacySystemdServiceHold } from "../../dist/core/rin-install/service.js";
+await import("../support/register-legacy-service-hold-owner-fixture.ts");
+const { runManagedSystemdServiceAction } =
+  await import("../../dist/core/rin/managed-runtime-service.js");
+const { recoverOwnedLegacySystemdServiceHold } =
+  await import("../../dist/core/rin-install/service.js");
+const legacyHoldOwner =
+  await import("../../dist/core/rin-install/legacy-service-hold.js");
+const { recoverOwnedLegacySystemdUnitHold } = legacyHoldOwner;
 
 test("legacy hold private helpers classify links and restore directories", () => {
   const owner = legacyHoldOwner as typeof legacyHoldOwner & {

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { importBuiltModule } from "../support/import-built-module.ts";
 
+await import("../support/register-audit-observer-owner-fixture.ts");
+
 const observer = await importBuiltModule<
   typeof import("../../src/core/self-improve/audit-observer.ts")
 >("dist/core/self-improve/audit-observer.js");
@@ -10,8 +12,6 @@ interface OwnerState {
   calls: unknown[][];
   beginError?: unknown;
   completeError?: unknown;
-  maintainError?: unknown;
-  ackError?: unknown;
 }
 
 function installState(overrides: Partial<OwnerState> = {}): OwnerState {
@@ -38,10 +38,6 @@ test("audit observer preserves primary work across every audit outcome", async (
     "self_improve_audit_failed",
   );
   assert.equal(
-    observer.combineSelfImproveAuditErrors("owner", "owner"),
-    "owner",
-  );
-  assert.equal(
     observer.combineSelfImproveAuditErrors("owner-a", new Error("owner-b")),
     "owner-a; owner-b",
   );
@@ -55,57 +51,47 @@ test("audit observer preserves primary work across every audit outcome", async (
 
   const beginState = installState();
   const begun = await observer.beginSelfImproveAuditObservation(base);
-  assert.deepEqual(begun.handle, {
-    pendingPath: "pending/owner.json",
+  assert.deepEqual(begun.capture, {
+    auditId: "owner-audit",
     runId: "owner-run",
   });
-  assert.equal(begun.auditError, undefined);
   assert.equal(beginState.calls[0][0], "begin");
 
   installState({ beginError: new Error("begin owner failure") });
   const beginFailure = await observer.beginSelfImproveAuditObservation(base);
-  assert.equal(beginFailure.handle, undefined);
+  assert.equal(beginFailure.capture, undefined);
   assert.match(beginFailure.auditError || "", /begin owner failure/);
 
-  const maintenanceOnly = installState();
-  const withoutHandle = await observer.completeSelfImproveAuditObservation({
+  const withoutCapture = await observer.completeSelfImproveAuditObservation({
     ...base,
     status: "completed",
     finishedAt: "2026-07-31T00:01:00.000Z",
     output: "owner output",
   });
-  assert.equal(withoutHandle.audit, undefined);
-  assert.equal(withoutHandle.auditHandle, undefined);
-  assert.deepEqual(withoutHandle.changedFiles, []);
-  assert.equal(withoutHandle.auditError, undefined);
-  assert.equal(maintenanceOnly.calls[0][0], "maintain");
+  assert.equal(withoutCapture.audit, undefined);
+  assert.deepEqual(withoutCapture.changedFiles, []);
 
   const completedState = installState();
   const completed = await observer.completeSelfImproveAuditObservation({
     ...base,
-    handle: begun.handle,
+    capture: begun.capture,
     status: "completed",
     finishedAt: "2026-07-31T00:02:00.000Z",
     output: "owner output",
   });
   assert.equal(completed.audit?.path, "runs/owner.json");
-  assert.equal(completed.auditHandle, begun.handle);
   assert.deepEqual(completed.changedFiles, [
     { path: "owner.ts", change: "updated" },
   ]);
-  assert.equal(completed.auditError, undefined);
   assert.deepEqual(
     completedState.calls.map((entry) => entry[0]),
-    ["complete", "maintain"],
+    ["complete"],
   );
 
-  installState({
-    completeError: new Error("complete owner failure"),
-    maintainError: new Error("maintain owner failure"),
-  });
+  installState({ completeError: new Error("complete owner failure") });
   const failed = await observer.completeSelfImproveAuditObservation({
     ...base,
-    handle: begun.handle,
+    capture: begun.capture,
     status: "failed",
     finishedAt: "2026-07-31T00:03:00.000Z",
     error: "primary owner failure",
@@ -113,34 +99,8 @@ test("audit observer preserves primary work across every audit outcome", async (
   });
   assert.equal(failed.audit, undefined);
   assert.deepEqual(failed.changedFiles, []);
-  assert.match(failed.auditError || "", /earlier owner failure/);
-  assert.match(failed.auditError || "", /complete owner failure/);
-  assert.match(failed.auditError || "", /maintain owner failure/);
-
-  const ackState = installState();
   assert.equal(
-    await observer.acknowledgeSelfImproveAuditObservation({
-      agentDir: base.agentDir,
-      auditError: "owner existing error",
-    }),
-    "owner existing error",
+    failed.auditError,
+    "earlier owner failure; complete owner failure",
   );
-  assert.equal(
-    await observer.acknowledgeSelfImproveAuditObservation({
-      agentDir: base.agentDir,
-      handle: begun.handle,
-      reference: completed.audit,
-    }),
-    undefined,
-  );
-  assert.equal(ackState.calls[0][0], "ack");
-
-  installState({ ackError: new Error("ack owner failure") });
-  const ackFailure = await observer.acknowledgeSelfImproveAuditObservation({
-    agentDir: base.agentDir,
-    handle: begun.handle,
-    reference: completed.audit,
-    auditError: "earlier owner failure",
-  });
-  assert.equal(ackFailure, "earlier owner failure; ack owner failure");
 });

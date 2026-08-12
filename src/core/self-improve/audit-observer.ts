@@ -1,15 +1,13 @@
 import {
-  acknowledgeSelfImproveRunAudit,
   beginSelfImproveRunAudit,
   completeSelfImproveRunAudit,
-  maintainSelfImproveRunAuditStorage,
   sanitizeSelfImproveHistoryText,
-  type SelfImproveRunAuditHandle,
+  type SelfImproveRunAuditCapture,
   type SelfImproveRunAuditReference,
 } from "./run-audit.js";
 
-// Audit is an observational side effect. Queue and scheduler state alone own
-// execution, retry, and terminal lifecycle decisions.
+// Audit observes a run. Queue and scheduler state alone own execution,
+// interruption, retry, and terminal lifecycle decisions.
 function auditErrorText(error: unknown) {
   const message = String(
     (error as any)?.message || error || "self_improve_audit_failed",
@@ -33,74 +31,44 @@ export function reportSelfImproveAuditObservationError(error: unknown) {
 
 export async function beginSelfImproveAuditObservation(
   input: Parameters<typeof beginSelfImproveRunAudit>[0],
-): Promise<{ handle?: SelfImproveRunAuditHandle; auditError?: string }> {
+): Promise<{ capture?: SelfImproveRunAuditCapture; auditError?: string }> {
   try {
-    return { handle: await beginSelfImproveRunAudit(input) };
+    return { capture: await beginSelfImproveRunAudit(input) };
   } catch (error) {
     return { auditError: auditErrorText(error) };
   }
 }
 
 export async function completeSelfImproveAuditObservation(
-  input: Omit<Parameters<typeof completeSelfImproveRunAudit>[0], "handle"> & {
-    handle?: SelfImproveRunAuditHandle;
+  input: Omit<Parameters<typeof completeSelfImproveRunAudit>[0], "capture"> & {
+    capture?: SelfImproveRunAuditCapture;
     auditError?: string;
   },
 ): Promise<{
   audit?: SelfImproveRunAuditReference;
-  auditHandle?: SelfImproveRunAuditHandle;
   changedFiles: Array<{
     path: string;
     change: "created" | "updated" | "deleted";
   }>;
   auditError?: string;
 }> {
-  let audit: SelfImproveRunAuditReference | undefined;
-  let changedFiles: Array<{
-    path: string;
-    change: "created" | "updated" | "deleted";
-  }> = [];
-  let auditError = input.auditError;
-  if (input.handle) {
-    try {
-      const completed = await completeSelfImproveRunAudit({
-        ...input,
-        handle: input.handle,
-      });
-      audit = completed;
-      changedFiles = completed.changedFiles;
-    } catch (error) {
-      auditError = combineSelfImproveAuditErrors(auditError, error);
-    }
+  if (!input.capture) {
+    return { changedFiles: [], auditError: input.auditError };
   }
   try {
-    await maintainSelfImproveRunAuditStorage({ agentDir: input.agentDir });
-  } catch (error) {
-    auditError = combineSelfImproveAuditErrors(auditError, error);
-  }
-  return {
-    audit,
-    auditHandle: input.handle,
-    changedFiles,
-    auditError,
-  };
-}
-
-export async function acknowledgeSelfImproveAuditObservation(input: {
-  agentDir: string;
-  handle?: SelfImproveRunAuditHandle;
-  reference?: SelfImproveRunAuditReference;
-  auditError?: string;
-}) {
-  if (!input.handle || !input.reference) return input.auditError;
-  try {
-    await acknowledgeSelfImproveRunAudit({
-      agentDir: input.agentDir,
-      handle: input.handle,
-      reference: input.reference,
+    const completed = await completeSelfImproveRunAudit({
+      ...input,
+      capture: input.capture,
     });
-    return input.auditError;
+    return {
+      audit: completed,
+      changedFiles: completed.changedFiles,
+      auditError: input.auditError,
+    };
   } catch (error) {
-    return combineSelfImproveAuditErrors(input.auditError, error);
+    return {
+      changedFiles: [],
+      auditError: combineSelfImproveAuditErrors(input.auditError, error),
+    };
   }
 }

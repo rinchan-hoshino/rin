@@ -185,11 +185,13 @@ oauth_login_failed
 oauth_provider_id_required
 onebot_disconnected
 onebot_endpoint_required
+onebot_file_source_empty
 onebot_not_connected
 onebot_reaction_emoji_unsupported
 onebot_reaction_requires_group_chat
 onebot_send_message_empty
 onebot_send_message_empty_result
+onebot_upload_file_empty_result
 pi_prompt_shape_changed
 recall_aborted
 rin_agent_sdk_task_id_required
@@ -334,9 +336,10 @@ run_prompt_required
 run_session_conflict
 self_improve_audit_history_corrupt
 self_improve_audit_invalid_policy
+self_improve_audit_artifact_invalid
+self_improve_audit_capture_mismatch
 self_improve_audit_invalid_timestamp
-self_improve_audit_pending_mismatch
-self_improve_audit_pending_path_outside_agent_dir
+self_improve_audit_path_outside_agent_dir
 self_improve_audit_symlink_path
 self_improve_content_required
 self_improve_maintenance_lock_required
@@ -366,7 +369,7 @@ web_fetch_invalid_url`
   .split(/\s+/);
 
 test("every owned runtime marker has a human-facing formatter", () => {
-  assert.equal(OWNED_MARKERS.length, 355);
+  assert.equal(OWNED_MARKERS.length, 358);
   assert.equal(new Set(OWNED_MARKERS).size, OWNED_MARKERS.length);
   for (const marker of OWNED_MARKERS) {
     assert.equal(errors.hasUserFacingRuntimeErrorMapping(marker), true, marker);

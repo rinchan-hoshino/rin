@@ -6,6 +6,14 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  installAuthPath,
+  installerManifestPaths,
+  installSettingsPath,
+} from "../../dist/core/rin-install/paths.js";
+
+await import("../support/register-persist-owner-fixture.ts");
+const persistOwner = await import("../../dist/core/rin-install/persist.js");
+const {
   applyInstallUpgradeMigrations,
   finalizeInstallUpgradeMigrations,
   normalizeInstalledChatSettings,
@@ -13,13 +21,7 @@ import {
   preflightInstallUpgradeMigrations,
   reconcileInstallerManifest,
   rollbackInstallUpgradeMigrations,
-} from "../../dist/core/rin-install/persist.js";
-import * as persistOwner from "../../dist/core/rin-install/persist.js";
-import {
-  installAuthPath,
-  installerManifestPaths,
-  installSettingsPath,
-} from "../../dist/core/rin-install/paths.js";
+} = persistOwner;
 
 async function withInstallRoot(run: (root: string) => Promise<void>) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "rin-persist-owner-"));

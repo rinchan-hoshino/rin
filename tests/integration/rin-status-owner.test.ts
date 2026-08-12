@@ -5,6 +5,8 @@ import test, { after, mock } from "node:test";
 import { importBuiltModule } from "../support/import-built-module.js";
 import { createSocketTestSandbox } from "../support/socket-test-sandbox.js";
 
+await import("../support/register-rin-status-owner-fixture.ts");
+
 const socketSandbox = createSocketTestSandbox("status-owner");
 Object.assign(process.env, socketSandbox.env);
 after(() => socketSandbox.cleanup());

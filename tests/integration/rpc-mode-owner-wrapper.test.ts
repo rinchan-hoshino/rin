@@ -6,6 +6,8 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
+await import("../support/register-rpc-mode-owner-fixture.ts");
+
 const execFileAsync = promisify(execFile);
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -15,6 +17,13 @@ const rootDir = path.resolve(
 test("rpc mode owner cases complete in an isolated test-file runner", async () => {
   const childEnv = { ...process.env };
   delete childEnv.NODE_TEST_CONTEXT;
+  if (process.env.RIN_TEST_CONTAINER === "1") {
+    childEnv.RIN_TEST_CONTAINER = "1";
+  } else if (process.env.RIN_SYSTEM_TEST_CONTAINER_INNER === "1") {
+    childEnv.RIN_SYSTEM_TEST_CONTAINER_INNER = "1";
+  } else if (process.env.RIN_INSTALL_TUI_CONTAINER_INNER === "1") {
+    childEnv.RIN_INSTALL_TUI_CONTAINER_INNER = "1";
+  }
   const tempDir = await fs.mkdtemp(
     path.join(rootDir, "tests", "support", ".rpc-owner-wrapper-"),
   );
@@ -22,6 +31,15 @@ test("rpc mode owner cases complete in an isolated test-file runner", async () =
   await fs.writeFile(
     shimPath,
     `import ${JSON.stringify(
+      pathToFileURL(
+        path.join(
+          rootDir,
+          "tests",
+          "support",
+          "register-rpc-mode-owner-fixture.ts",
+        ),
+      ).href,
+    )};\nimport ${JSON.stringify(
       pathToFileURL(
         path.join(rootDir, "tests", "support", "rpc-mode-owner-cases.ts"),
       ).href,

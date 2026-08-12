@@ -2025,10 +2025,12 @@ test("onebot adapter degrades markdown formatting instead of exposing raw markdo
 
     assert.deepEqual(result, ["m1"]);
     assert.equal(calls[0].action, "send_private_msg");
-    assert.equal(
-      calls[0].params.message,
-      "bold docs\n- one\n1. first\n> quoted",
-    );
+    assert.deepEqual(calls[0].params.message, [
+      {
+        type: "text",
+        data: { text: "bold docs\n- one\n1. first\n> quoted" },
+      },
+    ]);
   });
 });
 
@@ -2053,7 +2055,10 @@ test("onebot adapter renders structured at as native CQ mention", async () => {
     ]);
 
     assert.equal(calls[0].action, "send_group_msg");
-    assert.equal(calls[0].params.message, "[CQ:at,qq=12345] hello");
+    assert.deepEqual(calls[0].params.message, [
+      { type: "at", data: { qq: "12345" } },
+      { type: "text", data: { text: " hello" } },
+    ]);
   });
 });
 
@@ -2068,34 +2073,39 @@ test("onebot adapter embeds all local media as base64", async () => {
     const h = runtime.createChatRuntimeH();
     const imagePath = path.join(agentDir, "avatar.png");
     const videoPath = path.join(agentDir, "clip.mp4");
-    const filePath = path.join(agentDir, "notes.txt");
+    const filePath = path.join(agentDir, "random-source-name.txt");
     const calls: Array<{ action: string; params: any }> = [];
     await fs.writeFile(imagePath, Buffer.from("png"));
     await fs.writeFile(videoPath, Buffer.from("mp4"));
     await fs.writeFile(filePath, Buffer.from("notes"));
     adapter.callAction = async (action: string, params: any) => {
       calls.push({ action, params });
-      return { message_id: "m1" };
+      return action === "upload_private_file"
+        ? { file_id: "file-1" }
+        : { message_id: "m1" };
     };
 
     const result = await app.bots[0].sendMessage("private:2", [
       h.image(imagePath),
       h("video", { src: videoPath, name: "clip.mp4", mimeType: "video/mp4" }),
-      h.file(filePath, "text/plain", { name: "notes.txt" }),
+      h.file(filePath, "text/plain", { name: "report final.txt" }),
     ]);
 
-    assert.deepEqual(result, ["m1"]);
-    assert.equal(calls.length, 1);
+    assert.deepEqual(result, ["m1", "file-1"]);
+    assert.equal(calls.length, 2);
     assert.equal(calls[0].action, "send_private_msg");
+    assert.deepEqual(calls[0].params.message, [
+      { type: "image", data: { file: "base64://cG5n" } },
+      { type: "video", data: { file: "base64://bXA0" } },
+    ]);
+    assert.equal(calls[1].action, "upload_private_file");
+    assert.equal(calls[1].params.user_id, 2);
+    assert.equal(calls[1].params.file, "base64://bm90ZXM=");
+    assert.equal(calls[1].params.name, "report final.txt");
+    assert.equal(calls[1].params.upload_file, true);
     assert.equal(
-      calls[0].params.timeout,
+      calls[1].params.timeout,
       runtime.ONEBOT_MEDIA_ACTION_TIMEOUT_MS,
-    );
-    assert.equal(
-      calls[0].params.message,
-      "[CQ:image,file=base64://cG5n]" +
-        "[CQ:video,file=base64://bXA0]" +
-        "[CQ:file,file=base64://bm90ZXM=]",
     );
   });
 });
@@ -2122,13 +2132,18 @@ test("onebot adapter falls back to the original rich node during serialization",
       h.text(" after"),
     ]);
 
-    assert.deepEqual(result, ["m1"]);
-    assert.equal(calls.length, 1);
-    assert.equal(
-      calls[0].params.message,
-      "before &#91;file: missing.pdf&#93; after",
-    );
-    assert.doesNotMatch(calls[0].params.message, /chat_media_file_missing:/);
+    assert.deepEqual(result, ["m1", "m1", "m1"]);
+    assert.equal(calls.length, 3);
+    assert.deepEqual(calls[0].params.message, [
+      { type: "text", data: { text: "before " } },
+    ]);
+    assert.deepEqual(calls[1].params.message, [
+      { type: "text", data: { text: "[file: missing.pdf]" } },
+    ]);
+    assert.deepEqual(calls[2].params.message, [
+      { type: "text", data: { text: " after" } },
+    ]);
+    assert.doesNotMatch(JSON.stringify(calls), /chat_media_file_missing:/);
   });
 });
 
@@ -3017,12 +3032,11 @@ test("onebot private working indicator is a one-shot marker", async () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].action, "send_private_msg");
     assert.equal(calls[0].params.user_id, 2);
-    assert.equal(calls[0].params.auto_escape, false);
-    assert.ok(
-      ["Working...", "Working", "Working.", "Working.."].some(
-        (text) => calls[0].params.message === `[CQ:reply,id=m1]${text}`,
-      ),
-    );
+    assert.equal("auto_escape" in calls[0].params, false);
+    assert.deepEqual(calls[0].params.message, [
+      { type: "reply", data: { id: "m1" } },
+      { type: "text", data: { text: "Working..." } },
+    ]);
   });
 });
 

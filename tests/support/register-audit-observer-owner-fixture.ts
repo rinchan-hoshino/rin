@@ -6,17 +6,12 @@ const source = `
   const state = () => globalThis.__rinAuditObserverOwnerState ?? {};
   export function sanitizeSelfImproveHistoryText(value) {
     const text = String(value).slice(0, 40);
-    return {
-      text,
-      originalBytes: String(value).length,
-      storedBytes: text.length,
-      truncated: text.length !== String(value).length,
-    };
+    return { text, truncated: text.length !== String(value).length };
   }
   export async function beginSelfImproveRunAudit(options) {
     if (state().beginError) throw state().beginError;
     state().calls?.push(["begin", options]);
-    return { pendingPath: "pending/owner.json", runId: options.runId };
+    return { auditId: "owner-audit", runId: options.runId };
   }
   export async function completeSelfImproveRunAudit(options) {
     if (state().completeError) throw state().completeError;
@@ -25,14 +20,6 @@ const source = `
       path: "runs/owner.json",
       changedFiles: [{ path: "owner.ts", change: "updated" }],
     };
-  }
-  export async function maintainSelfImproveRunAuditStorage(options) {
-    if (state().maintainError) throw state().maintainError;
-    state().calls?.push(["maintain", options]);
-  }
-  export async function acknowledgeSelfImproveRunAudit(options) {
-    if (state().ackError) throw state().ackError;
-    state().calls?.push(["ack", options]);
   }
 `;
 const replacement = `data:text/javascript,${encodeURIComponent(source)}`;

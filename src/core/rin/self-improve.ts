@@ -48,7 +48,11 @@ type MaintenanceHistoryRecord = {
   outputPreview?: string;
   changedFiles?: Array<{ path?: string; change?: string }>;
   audit?: SelfImproveRunAuditReference;
-  auditIntegrity?: { ok: boolean; error?: string };
+  auditIntegrity?: {
+    ok: boolean;
+    availability?: "available" | "unavailable";
+    error?: string;
+  };
   historyRedacted?: boolean;
   historyTruncated?: boolean;
 };
@@ -410,8 +414,23 @@ function verifyAuditIntegritySync(
     }
     return { ok: true };
   } catch (error: any) {
+    if (error?.code === "ENOENT") {
+      return {
+        ok: false,
+        availability: "unavailable",
+        error: "artifact_unavailable",
+      };
+    }
     return { ok: false, error: error?.code || "unreadable_audit" };
   }
+}
+
+function auditIntegrityLabel(record: MaintenanceHistoryRecord) {
+  if (!record.auditIntegrity) return "legacy";
+  if (record.auditIntegrity.ok) return "verified";
+  if (record.auditIntegrity.availability === "unavailable")
+    return "unavailable";
+  return "INVALID";
 }
 
 function querySelfImproveRecords(
@@ -437,7 +456,7 @@ function renderSelfImproveList(records: MaintenanceHistoryRecord[]) {
       return [
         `${String(index + 1).padStart(2, " ")}. ${formatReportTime(record.finishedAt || record.startedAt)}  ${record.status || "-"}  ${record.trigger || "-"}`,
         `    id ${id} · session ${sessionLabel(record.sessionFile)} · attempts ${String(record.attempts || 1)}`,
-        `    changed ${changed} · audit ${record.auditIntegrity ? (record.auditIntegrity.ok ? "verified" : "INVALID") : "legacy"}`,
+        `    changed ${changed} · audit ${auditIntegrityLabel(record)}`,
         error ? `    note ${error}` : undefined,
       ]
         .filter(Boolean)
@@ -493,7 +512,13 @@ function renderSelfImproveDetail(record: MaintenanceHistoryRecord | undefined) {
       `  complete: ${record.audit.complete === true ? "yes" : "no"}`,
       `  redacted: ${record.audit.redacted === true ? "yes" : "no"}`,
       `  truncated: ${record.audit.truncated === true ? "yes" : "no"}`,
-      `  integrity: ${record.auditIntegrity?.ok ? "verified" : `INVALID (${record.auditIntegrity?.error || "unknown"})`}`,
+      `  integrity: ${
+        record.auditIntegrity?.ok
+          ? "verified"
+          : record.auditIntegrity?.availability === "unavailable"
+            ? "unavailable (retained evidence expired)"
+            : `INVALID (${record.auditIntegrity?.error || "unknown"})`
+      }`,
     );
   }
   if (record.auditError) {

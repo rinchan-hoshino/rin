@@ -142,6 +142,32 @@ test("chat runtime working copy and editable sections preserve explicit ownershi
   });
 });
 
+test("chat delivery errors preserve confirmed non-delivery semantics", () => {
+  const rejection = new Error("rejected");
+  assert.equal(common.confirmedChatDeliveryError(rejection), rejection);
+  assert.equal((rejection as any).chatOutboxConfirmedNotDelivered, true);
+
+  const normalized = common.confirmedChatDeliveryError("transport rejected");
+  assert.equal(normalized.message, "transport rejected");
+  assert.equal((normalized as any).chatOutboxConfirmedNotDelivered, true);
+  assert.equal(
+    common.confirmedChatDeliveryError(null).message,
+    "chat_delivery_rejected",
+  );
+
+  const primary = new Error("rich delivery failed");
+  assert.equal(common.richFallbackDeliveryError(primary, rejection), primary);
+  assert.equal((primary as any).chatOutboxConfirmedNotDelivered, true);
+
+  const uncertain = common.richFallbackDeliveryError("primary failed", null);
+  assert.equal(uncertain.message, "primary failed");
+  assert.equal("chatOutboxConfirmedNotDelivered" in uncertain, false);
+  assert.equal(
+    common.richFallbackDeliveryError(null, null).message,
+    "rich_delivery_failed",
+  );
+});
+
 test("chat runtime utility helpers cover text, logging, and structured delivery", () => {
   assert.equal(common.extensionFromMimeType("text/plain"), ".txt");
   assert.equal(common.ensureExtension("report", "text/plain"), "report.txt");
