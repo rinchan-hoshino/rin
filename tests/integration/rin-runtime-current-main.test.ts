@@ -29,6 +29,31 @@ function pruningTailPadding(count: number) {
   }));
 }
 
+function pruningToolCallPadding(count: number, start = 0) {
+  return Array.from({ length: count }, (_, index) => {
+    const id = `pruning-${start + index}`;
+    return [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id,
+            name: "read",
+            arguments: { path: `/tmp/${id}` },
+          },
+        ],
+      },
+      {
+        role: "toolResult",
+        toolCallId: id,
+        toolName: "read",
+        content: `tool output ${id}`,
+      },
+    ];
+  }).flat();
+}
+
 test("provider-bound pruning is the sole builtin context-transform capability", () => {
   const definitions = runtimeMod.createRinCapabilityDefinitions({
     cwd: rootDir,
@@ -207,26 +232,18 @@ test("Rin provider context preserves an append-only prefix between expected buck
       },
     ],
   };
-  const generation = pruningTailPadding(165);
-  generation[0] = {
-    role: "compactionSummary",
-    summary: "native checkpoint without tool state",
-  };
-  generation[1] = {
-    role: "toolResult",
-    toolCallId: "old-first-bucket",
-    content: "first bucket output",
-  };
-  generation[32] = {
-    role: "toolResult",
-    toolCallId: "old-second-bucket",
-    content: "second bucket output",
-  };
+  const generation = [
+    {
+      role: "compactionSummary",
+      summary: "native checkpoint without tool state",
+    },
+    ...pruningToolCallPadding(80),
+  ];
 
   let previousProviderContext: any[] | undefined;
-  const observedResetLengths: number[] = [];
-  for (let length = 129; length <= generation.length; length += 1) {
-    const input = generation.slice(0, length);
+  const observedResetToolCallCounts: number[] = [];
+  for (let toolCallCount = 64; toolCallCount <= 80; toolCallCount += 1) {
+    const input = generation.slice(0, 1 + toolCallCount * 2);
     const result = await hook(
       { type: "context", messages: input },
       { sessionManager },
@@ -242,21 +259,21 @@ test("Rin provider context preserves an append-only prefix between expected buck
     if (previousProviderContext) {
       const previousLength = previousProviderContext.length;
       const currentPrefix = providerContext.slice(0, previousLength);
-      if (length === 161) {
+      if (toolCallCount === 80) {
         assert.notDeepEqual(currentPrefix, previousProviderContext);
-        observedResetLengths.push(length);
+        observedResetToolCallCounts.push(toolCallCount);
       } else {
         assert.deepEqual(
           currentPrefix,
           previousProviderContext,
-          `provider prefix changed unexpectedly at message length ${length}`,
+          `provider prefix changed unexpectedly at tool-call count ${toolCallCount}`,
         );
       }
     }
     previousProviderContext = structuredClone(providerContext);
   }
 
-  assert.deepEqual(observedResetLengths, [161]);
+  assert.deepEqual(observedResetToolCallCounts, [80]);
 });
 
 test("Rin provider context keeps earlier context-hook output when no pruning or injection is needed", async () => {
@@ -577,8 +594,18 @@ test("Rin percent compaction estimates error contexts from pruned provider conte
       state: {
         messages: [
           { role: "user", content: "old" },
-          { role: "toolResult", content: "huge old output" },
-          ...pruningTailPadding(119),
+          {
+            role: "assistant",
+            content: [
+              { type: "toolCall", id: "old-huge", name: "read", arguments: {} },
+            ],
+          },
+          {
+            role: "toolResult",
+            toolCallId: "old-huge",
+            content: "huge old output",
+          },
+          ...pruningToolCallPadding(63),
           { role: "user", content: "recent 1" },
           { role: "assistant", content: "ok" },
           { role: "user", content: "recent 2" },
@@ -632,7 +659,17 @@ test("Rin context usage reports the pruned provider-bound estimate", () => {
     model: { contextWindow: 1000 },
     messages: [
       { role: "user", content: "old" },
-      { role: "toolResult", content: "huge old output" },
+      {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "old-usage", name: "read", arguments: {} },
+        ],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "old-usage",
+        content: "huge old output",
+      },
       { role: "user", content: "recent 1" },
       { role: "assistant", content: "ok" },
       { role: "user", content: "recent 2" },
@@ -641,7 +678,7 @@ test("Rin context usage reports the pruned provider-bound estimate", () => {
       { role: "assistant", content: "ok" },
       { role: "user", content: "recent 4" },
       { role: "assistant", content: "ok" },
-      ...pruningTailPadding(119),
+      ...pruningToolCallPadding(63),
     ],
     getContextUsage() {
       return { tokens: 900, contextWindow: 1000, percent: 90 };

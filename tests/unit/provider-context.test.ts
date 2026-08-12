@@ -14,6 +14,34 @@ function padding(count: number, start = 0) {
   }));
 }
 
+function toolExchange(id: string) {
+  return [
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          id,
+          name: "read",
+          arguments: { path: `/tmp/${id}` },
+        },
+      ],
+    },
+    {
+      role: "toolResult",
+      toolCallId: id,
+      toolName: "read",
+      content: `result ${id}`,
+    },
+  ];
+}
+
+function toolCallPadding(count: number, start = 0) {
+  return Array.from({ length: count }, (_, index) =>
+    toolExchange(`padding-${start + index}`),
+  ).flat();
+}
+
 test("provider-bound context leaves non-tool rich content unchanged", () => {
   const userContent = "see image: [image: demo.png](file:///tmp/demo.png)";
   const assistantContent = [
@@ -43,49 +71,39 @@ test("provider-bound context leaves non-tool rich content unchanged", () => {
   assert.equal(providerMessages[2].content, toolResultContent);
 });
 
-test("provider-bound context keeps the first four complete 32-message buckets", () => {
-  const openingToolResult = {
-    role: "toolResult",
-    content: "x".repeat(25_000),
-  };
-  const messages = [openingToolResult, ...padding(127, 1)];
+test("provider-bound context keeps 63 tool calls before the fourth bucket fills", () => {
+  const messages = toolCallPadding(63);
+  messages.splice(2, 0, ...padding(300));
 
   assert.equal(
     providerContext.buildProviderBoundContextMessages(messages),
     messages,
   );
-  assert.equal(messages[0], openingToolResult);
 });
 
-test("provider-bound context omits old tool results at a stable bucket rollover", () => {
-  const oldToolResult = { role: "toolResult", content: "old output" };
-  const retainedToolResult = {
-    role: "toolResult",
-    content: "retained output",
-  };
-  const messages = padding(129);
-  messages[0] = oldToolResult;
-  messages[32] = retainedToolResult;
+test("provider-bound context omits old tool results when the fourth tool-call bucket fills", () => {
+  const messages = toolCallPadding(64);
+  const oldToolResult = messages[1];
+  const retainedToolResult = messages[33];
 
   const providerMessages =
     providerContext.buildProviderBoundContextMessages(messages);
 
   assert.notEqual(providerMessages, messages);
-  assert.equal(providerMessages[0].content, "old tool result omitted");
-  assert.equal(providerMessages[32], retainedToolResult);
-  assert.equal(messages[0].content, "old output");
+  assert.equal(providerMessages[1].content, "old tool result omitted");
+  assert.equal(providerMessages[33], retainedToolResult);
+  assert.equal(oldToolResult.content, "result padding-0");
 });
 
-test("provider-bound context exposes custom bucket sizing through one policy surface", () => {
-  const oldToolResult = { role: "toolResult", content: "old output" };
-  const messages = [oldToolResult, ...padding(4, 1)];
+test("provider-bound context exposes custom tool-call bucket sizing through one policy surface", () => {
+  const messages = toolCallPadding(5);
 
   const providerMessages = providerContext.buildProviderBoundContextMessages(
     messages,
-    { messageBucketSize: 2, retainedBuckets: 2 },
+    { toolCallBucketSize: 2, retainedToolCallBuckets: 2 },
   );
 
-  assert.equal(providerMessages[0].content, "old tool result omitted");
+  assert.equal(providerMessages[1].content, "old tool result omitted");
 });
 
 for (const stopReason of ["error", "aborted"] as const) {
@@ -164,10 +182,8 @@ test("provider-bound context keeps recent orphan tool results", () => {
 });
 
 test("provider-bound context policy owns token estimates", () => {
-  const messages = [
-    { role: "toolResult", content: "huge old output" },
-    ...padding(4, 1),
-  ];
+  const messages = toolCallPadding(5);
+  messages[1] = { ...messages[1], content: "huge old output" };
 
   const tokens = providerContext.estimateProviderBoundContextTokens(
     messages,
@@ -178,7 +194,7 @@ test("provider-bound context policy owns token estimates", () => {
         ? 900
         : 10,
     }),
-    { messageBucketSize: 2, retainedBuckets: 2 },
+    { toolCallBucketSize: 2, retainedToolCallBuckets: 2 },
   );
 
   assert.equal(tokens, 10);
@@ -276,21 +292,19 @@ test("provider-bound context normalizes estimates and stale usage around compact
   );
 });
 
-test("provider-bound context event uses the same bucket policy surface", () => {
+test("provider-bound context event uses the same tool-call bucket policy surface", () => {
   assert.equal(providerContext.buildProviderBoundContextEvent(null), undefined);
   assert.equal(
     providerContext.buildProviderBoundContextEvent({ messages: [] }),
     undefined,
   );
-  const messages = [
-    { role: "toolResult", content: "huge old output" },
-    ...padding(4, 1),
-  ];
+  const messages = toolCallPadding(5);
+  messages[1] = { ...messages[1], content: "huge old output" };
 
   const result = providerContext.buildProviderBoundContextEvent(
     { messages },
-    { messageBucketSize: 2, retainedBuckets: 2 },
+    { toolCallBucketSize: 2, retainedToolCallBuckets: 2 },
   );
 
-  assert.equal(result.messages[0].content, "old tool result omitted");
+  assert.equal(result.messages[1].content, "old tool result omitted");
 });

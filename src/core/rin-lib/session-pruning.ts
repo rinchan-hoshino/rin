@@ -1,8 +1,8 @@
 import { extractToolCallParts } from "../message-content.js";
 import { isPiCompactSkillReadCall } from "../pi/private-api.js";
 
-export const RIN_SESSION_PRUNING_MESSAGE_BUCKET_SIZE = 32;
-export const RIN_SESSION_PRUNING_RETAINED_BUCKETS = 4;
+export const RIN_SESSION_PRUNING_TOOL_CALL_BUCKET_SIZE = 16;
+export const RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_BUCKETS = 4;
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT = "old tool input omitted";
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT =
   "old tool result omitted";
@@ -12,6 +12,7 @@ export type ToolHistoryExchange = {
   toolCallId: string;
   callMessageIndex: number;
   callPartIndex: number;
+  callOrdinal: number;
   call: any;
   resultMessageIndex: number;
   result: any;
@@ -19,7 +20,7 @@ export type ToolHistoryExchange = {
 
 export type ToolHistoryPolicyContext = {
   cwd: string;
-  pruningBoundary: number;
+  protectedToolCallStart: number;
 };
 
 export type ToolHistoryProtection = {
@@ -45,8 +46,8 @@ export type ToolHistoryPolicy = {
 };
 
 export type SessionPruningOptions = {
-  messageBucketSize?: number;
-  retainedBuckets?: number;
+  toolCallBucketSize?: number;
+  retainedToolCallBuckets?: number;
   cwd?: string;
   toolHistoryPolicies?: Record<string, ToolHistoryPolicy>;
 };
@@ -56,6 +57,7 @@ type ToolCallLocation = {
   toolCallId: string;
   messageIndex: number;
   partIndex: number;
+  ordinal: number;
   part: any;
 };
 
@@ -65,15 +67,18 @@ function normalizePositiveInteger(value: unknown, fallback: number) {
   return Math.floor(number);
 }
 
-export function normalizeMessageBucketSize(value: unknown) {
+export function normalizeToolCallBucketSize(value: unknown) {
   return normalizePositiveInteger(
     value,
-    RIN_SESSION_PRUNING_MESSAGE_BUCKET_SIZE,
+    RIN_SESSION_PRUNING_TOOL_CALL_BUCKET_SIZE,
   );
 }
 
-export function normalizeRetainedMessageBuckets(value: unknown) {
-  return normalizePositiveInteger(value, RIN_SESSION_PRUNING_RETAINED_BUCKETS);
+export function normalizeRetainedToolCallBuckets(value: unknown) {
+  return normalizePositiveInteger(
+    value,
+    RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_BUCKETS,
+  );
 }
 
 function normalizedToolName(value: unknown) {
@@ -91,6 +96,7 @@ function isToolResultMessage(message: any) {
 
 function collectToolCalls(messages: any[]) {
   const calls = new Map<string, ToolCallLocation>();
+  let count = 0;
   messages.forEach((message, messageIndex) => {
     if (String(message?.role || "").trim() !== "assistant") return;
     const parts = Array.isArray(message?.content) ? message.content : [];
@@ -103,21 +109,25 @@ function collectToolCalls(messages: any[]) {
         return;
       }
       const id = toolCallId(part?.id ?? part?.toolCallId);
-      if (!id || calls.has(id)) return;
-      calls.set(id, {
-        toolName: normalizedToolName(part?.name ?? part?.toolName),
-        toolCallId: id,
-        messageIndex,
-        partIndex,
-        part,
-      });
+      if (!id) return;
+      if (!calls.has(id)) {
+        calls.set(id, {
+          toolName: normalizedToolName(part?.name ?? part?.toolName),
+          toolCallId: id,
+          messageIndex,
+          partIndex,
+          ordinal: count,
+          part,
+        });
+      }
+      count += 1;
     });
   });
-  return calls;
+  return { calls, count };
 }
 
 function collectToolExchanges(messages: any[]) {
-  const calls = collectToolCalls(messages);
+  const { calls } = collectToolCalls(messages);
   const exchanges = new Map<string, ToolHistoryExchange>();
   messages.forEach((message, resultMessageIndex) => {
     if (!isToolResultMessage(message)) return;
@@ -130,6 +140,7 @@ function collectToolExchanges(messages: any[]) {
       toolCallId: id,
       callMessageIndex: call.messageIndex,
       callPartIndex: call.partIndex,
+      callOrdinal: call.ordinal,
       call: call.part,
       resultMessageIndex,
       result: message,
@@ -207,15 +218,18 @@ function resolveToolHistoryPolicy(
   } satisfies ToolHistoryPolicy;
 }
 
-export function findProtectedMessageBucketStart(
+export function findProtectedToolCallBucketStart(
   messages: any[],
-  messageBucketSize: number,
-  retainedBuckets: number,
+  toolCallBucketSize: number,
+  retainedToolCallBuckets: number,
 ) {
-  if (messages.length === 0) return 0;
-  const bucketSize = normalizeMessageBucketSize(messageBucketSize);
-  const retainedBucketCount = normalizeRetainedMessageBuckets(retainedBuckets);
-  const currentBucketOrdinal = Math.floor((messages.length - 1) / bucketSize);
+  const toolCallCount = collectToolCalls(messages).count;
+  if (toolCallCount === 0) return 0;
+  const bucketSize = normalizeToolCallBucketSize(toolCallBucketSize);
+  const retainedBucketCount = normalizeRetainedToolCallBuckets(
+    retainedToolCallBuckets,
+  );
+  const currentBucketOrdinal = Math.floor(toolCallCount / bucketSize);
   const oldestRetainedBucketOrdinal = Math.max(
     0,
     currentBucketOrdinal - retainedBucketCount + 1,
@@ -258,27 +272,24 @@ export function pruneSessionContextMessages(
   options: SessionPruningOptions = {},
 ) {
   const input = Array.isArray(messages) ? messages : [];
-  const protectedStart = findProtectedMessageBucketStart(
+  const protectedToolCallStart = findProtectedToolCallBucketStart(
     input,
-    normalizeMessageBucketSize(options.messageBucketSize),
-    normalizeRetainedMessageBuckets(options.retainedBuckets),
+    normalizeToolCallBucketSize(options.toolCallBucketSize),
+    normalizeRetainedToolCallBuckets(options.retainedToolCallBuckets),
   );
   const context: ToolHistoryPolicyContext = {
     cwd: String(options.cwd || process.cwd()),
-    pruningBoundary: protectedStart,
+    protectedToolCallStart,
   };
   const exchanges = collectToolExchanges(input);
+  const oldExchangeIds = new Set<string>();
   const callArguments = new Map<string, any>();
   const resultContent = new Map<string, any>();
   const protectedResults = new Set<string>();
 
   for (const exchange of exchanges.values()) {
-    if (
-      exchange.callMessageIndex >= protectedStart ||
-      exchange.resultMessageIndex >= protectedStart
-    ) {
-      continue;
-    }
+    if (exchange.callOrdinal >= protectedToolCallStart) continue;
+    oldExchangeIds.add(exchange.toolCallId);
     const policy = resolveToolHistoryPolicy(
       exchange.toolName,
       options.toolHistoryPolicies,
@@ -309,8 +320,7 @@ export function pruneSessionContextMessages(
   }
 
   let changed = false;
-  const pruned = input.map((message, index) => {
-    if (index >= protectedStart) return message;
+  const pruned = input.map((message) => {
     if (String(message?.role || "").trim() === "assistant") {
       if (!Array.isArray(message?.content) || callArguments.size === 0) {
         return message;
@@ -337,7 +347,7 @@ export function pruneSessionContextMessages(
     }
     if (!isToolResultMessage(message)) return message;
     const id = toolCallId(message?.toolCallId);
-    if (protectedResults.has(id)) return message;
+    if (!oldExchangeIds.has(id) || protectedResults.has(id)) return message;
     const customContent = resultContent.get(id);
     const content =
       customContent === undefined

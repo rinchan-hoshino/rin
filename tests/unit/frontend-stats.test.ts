@@ -64,20 +64,24 @@ test("tui stats get context usage estimates the pruned provider-bound context", 
     { contextWindow: 1000 },
     [
       { role: "user", content: "turn 1" },
-      { role: "toolResult", content: "x".repeat(4000) },
-      { role: "assistant", content: "done 1" },
-      { role: "user", content: "turn 2" },
-      { role: "assistant", content: "done 2" },
-      { role: "user", content: "turn 3" },
-      { role: "assistant", content: "done 3" },
-      { role: "user", content: "turn 4" },
-      { role: "assistant", content: "done 4" },
-      { role: "user", content: "turn 5" },
-      { role: "assistant", content: "done 5" },
-      ...Array.from({ length: 118 }, (_, index) => ({
+      {
         role: "assistant",
-        content: `tail padding ${index + 1}`,
-      })),
+        content: [
+          { type: "toolCall", id: "huge-old", name: "read", arguments: {} },
+        ],
+      },
+      { role: "toolResult", toolCallId: "huge-old", content: "x".repeat(4000) },
+      { role: "assistant", content: "done 1" },
+      ...Array.from({ length: 63 }, (_, index) => {
+        const id = `padding-${index + 1}`;
+        return [
+          {
+            role: "assistant",
+            content: [{ type: "toolCall", id, name: "read", arguments: {} }],
+          },
+          { role: "toolResult", toolCallId: id, content: `output ${id}` },
+        ];
+      }).flat(),
     ],
     [],
   );
