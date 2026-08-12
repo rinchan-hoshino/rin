@@ -4469,6 +4469,93 @@ test("chat controller adopts a backend-accepted pending presentation before inte
   );
 });
 
+test("restart recovery joins a native nonterminal accepted after its owner is restored", async () => {
+  const controller = await createController("telegram/1:2");
+  const ownerClaim = claimDurableTurnFence(
+    controller,
+    "m-restart-terminal-owner",
+  );
+  const joinedClaim = claimDurableTurnFence(
+    controller,
+    "m-restart-joined-input",
+  );
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "restart-joined-input.jsonl",
+  );
+  controller.prepareTurnPrompt = async () => ({
+    text: "follow-up during recovery",
+    images: [],
+    frontendReady: true,
+  });
+  controller.driver.currentSessionFile = () => sessionFile;
+  controller.driver.runTurn = async (input: any) => {
+    controller.currentTurn = {
+      startedAt: Date.now(),
+      incomingMessageId: ownerClaim.claim.messageId,
+      replyToMessageId: ownerClaim.claim.messageId,
+      requestTag: "request-restart-terminal-owner",
+      outboxTurnFence: ownerClaim.fence,
+      workingNoticeSent: false,
+    };
+    await input.commitNonterminalAcceptance?.({
+      requestTag: "request-restart-joined-input",
+      sessionFile,
+    });
+    await controller.handleFrontendEvent({
+      type: "turn_accepted",
+      requestTag: "request-restart-joined-input",
+    });
+    return {
+      outcome: "nonterminal",
+      superseded: true,
+      requestTag: "request-restart-joined-input",
+      sessionFile,
+    };
+  };
+
+  await controller.runTurn({
+    text: "follow-up during recovery",
+    attachments: [],
+    incomingMessageId: joinedClaim.claim.messageId,
+    replyToMessageId: joinedClaim.claim.messageId,
+    requestTag: "request-restart-joined-input",
+    outboxTurnFence: joinedClaim.fence,
+  });
+
+  const joined = openChatDatabase(controller.agentDir)
+    .prepare(
+      `SELECT messages.accepted_at,
+              inbox_jobs.execution_session_file,
+              json_extract(inbox_jobs.admission_json, '$.joinedTurnId') AS joined_turn_id
+         FROM inbox_jobs
+         JOIN messages ON messages.id = inbox_jobs.inbound_message_id
+        WHERE inbox_jobs.turn_id = ?`,
+    )
+    .get(joinedClaim.claim.itemId);
+  assert.ok(joined.accepted_at);
+  assert.equal(
+    joined.execution_session_file,
+    "managed/chat/restart-joined-input.jsonl",
+  );
+  assert.equal(joined.joined_turn_id, ownerClaim.claim.itemId);
+  assert.equal(
+    controller.currentTurn.outboxTurnFence.turnId,
+    ownerClaim.claim.itemId,
+  );
+  assert.equal(
+    controller.currentTurn.requestTag,
+    "request-restart-terminal-owner",
+  );
+  assert.equal(
+    controller.presentationIncomingMessageId,
+    joinedClaim.claim.messageId,
+  );
+});
+
 test("nonterminal input durably joins the terminal owner and takes presentation ownership", async () => {
   const controller = await createController("telegram/1:2");
   const ownerInbound = enqueueChatInboxItem(controller.agentDir, {

@@ -3330,34 +3330,47 @@ export class ChatController {
           promptContext: input.promptMeta,
           source: "chat-bridge",
           requestTag,
-          commitNonterminalAcceptance:
-            preserveCurrentTurn &&
-            pendingPresentation.outboxTurnFence &&
-            pendingPresentation.joinedOwnerTurnId
-              ? async (acceptance) => {
-                  if (acceptance.requestTag !== requestTag) {
-                    throw new Error("chat_turn_fence_lost");
-                  }
+          commitNonterminalAcceptance: pendingPresentation.outboxTurnFence
+            ? async (acceptance) => {
+                if (acceptance.requestTag !== requestTag) {
+                  throw new Error("chat_turn_fence_lost");
+                }
+                if (!pendingPresentation.joinedOwnerTurnId) {
+                  const activeOwnerTurnId = safeString(
+                    this.currentTurn?.outboxTurnFence?.turnId,
+                  ).trim();
                   if (
-                    !pendingPresentation.sessionFile ||
-                    !sameSessionFile(
-                      this.agentDir,
-                      acceptance.sessionFile,
-                      pendingPresentation.sessionFile,
-                    )
+                    activeOwnerTurnId &&
+                    this.currentIncomingMessageId() !==
+                      safeString(pendingPresentation.incomingMessageId).trim()
                   ) {
-                    throw new Error("chat_turn_fence_lost");
-                  }
-                  const acceptedPresentation =
-                    await this.adoptBackendAcceptedPendingPresentation(
-                      requestTag,
-                      { sessionFile: acceptance.sessionFile },
-                    );
-                  if (!acceptedPresentation?.backendAccepted) {
-                    throw new Error("chat_turn_fence_lost");
+                    pendingPresentation.joinedOwnerTurnId = activeOwnerTurnId;
                   }
                 }
-              : undefined,
+                if (!pendingPresentation.joinedOwnerTurnId) {
+                  throw new Error("chat_turn_fence_lost");
+                }
+                if (
+                  !pendingPresentation.sessionFile ||
+                  !sameSessionFile(
+                    this.agentDir,
+                    acceptance.sessionFile,
+                    pendingPresentation.sessionFile,
+                  )
+                ) {
+                  throw new Error("chat_turn_fence_lost");
+                }
+                const acceptedPresentation =
+                  await this.adoptBackendAcceptedPendingPresentation(
+                    requestTag,
+                    { sessionFile: acceptance.sessionFile },
+                  );
+                if (!acceptedPresentation?.backendAccepted) {
+                  throw new Error("chat_turn_fence_lost");
+                }
+                preserveCurrentTurn = true;
+              }
+            : undefined,
         });
         if (this.consumeIntentionalTurnAbort(turnAbortGeneration)) {
           return {
