@@ -500,30 +500,7 @@ export class ChatController {
       this.saveState();
     }
     if (connected && options.recoverTerminals !== false) {
-      const reservedTurn = this.currentTurn;
-      const reservedPresentationIncomingMessageId =
-        this.presentationIncomingMessageId;
-      const reservedPresentationReplyToMessageId =
-        this.presentationReplyToMessageId;
-      const reservedAwaitingTurnSettle = this.awaitingTurnSettle;
-      if (reservedTurn) {
-        this.currentTurn = null;
-        this.presentationIncomingMessageId = "";
-        this.presentationReplyToMessageId = "";
-        this.awaitingTurnSettle = false;
-      }
-      try {
-        await this.driver.recoverUnacknowledgedChatTerminals(this.chatKey);
-      } finally {
-        if (reservedTurn) {
-          this.currentTurn = reservedTurn;
-          this.presentationIncomingMessageId =
-            reservedPresentationIncomingMessageId;
-          this.presentationReplyToMessageId =
-            reservedPresentationReplyToMessageId;
-          this.awaitingTurnSettle = reservedAwaitingTurnSettle;
-        }
-      }
+      await this.driver.recoverUnacknowledgedChatTerminals(this.chatKey);
     }
     return connected;
   }
@@ -776,50 +753,6 @@ export class ChatController {
     )}`;
   }
 
-  private recoverTerminalDeliveryEvent(
-    chatDeliveryContext?: RinChatDeliveryContext,
-    requestTag?: string,
-  ) {
-    if (!chatDeliveryContext || this.currentTurn) return;
-    const db = openChatDatabase(this.agentDir);
-    try {
-      const row = db
-        .prepare(
-          `SELECT inbox_jobs.turn_id, inbox_jobs.owner_epoch, inbox_jobs.attempt,
-                  messages.message_id
-           FROM inbox_jobs
-           JOIN messages ON messages.id = inbox_jobs.inbound_message_id
-           WHERE inbox_jobs.turn_id = ? AND inbox_jobs.chat_key = ?
-             AND messages.message_id = ?
-             AND (
-               inbox_jobs.state IN ('running', 'terminal')
-               OR (inbox_jobs.state = 'failed'
-                   AND inbox_jobs.terminal_kind = 'interrupted')
-             )`,
-        )
-        .get(
-          chatDeliveryContext.turnId,
-          chatDeliveryContext.chatKey,
-          chatDeliveryContext.messageId,
-        ) as any;
-      if (!row || chatDeliveryContext.chatKey !== this.chatKey) return;
-      this.setCurrentTurn({
-        incomingMessageId: row.message_id,
-        outboxTurnFence: {
-          agentDir: this.agentDir,
-          chatKey: this.chatKey,
-          messageId: row.message_id,
-          turnId: row.turn_id,
-          ownerEpoch: row.owner_epoch,
-          attempt: Number(row.attempt || 0),
-        },
-        requestTag: safeString(requestTag).trim() || undefined,
-      });
-    } finally {
-      db.close();
-    }
-  }
-
   private authoritativeTerminalEvent(
     event: {
       requestTag?: string;
@@ -840,6 +773,9 @@ export class ChatController {
       throw new Error("chat_terminal_record_missing");
     }
     if (
+      context.chatKey !== this.chatKey ||
+      !safeString(context.turnId).trim() ||
+      !safeString(context.messageId).trim() ||
       (terminalKind === "complete" && terminalState !== "complete") ||
       (terminalKind === "error" &&
         terminalState !== "error" &&
@@ -850,57 +786,34 @@ export class ChatController {
     return event;
   }
 
-  private acceptsTerminalDeliveryEvent(
-    chatDeliveryContext?: RinChatDeliveryContext,
-  ) {
-    if (!chatDeliveryContext) return false;
-    return Boolean(
-      chatDeliveryContext.chatKey === this.chatKey &&
-      this.currentTurn?.outboxTurnFence?.turnId ===
-        chatDeliveryContext.turnId &&
-      this.currentTurn?.incomingMessageId === chatDeliveryContext.messageId,
-    );
-  }
-
-  private hasCommittedTerminalDeliveryEvent(
-    event: {
-      chatDeliveryContext?: RinChatDeliveryContext;
-      terminalRecord?: { terminalId: string };
-    },
-    deliveryKind: "final" | "error",
-  ) {
-    const context = event.chatDeliveryContext;
-    const terminalId = safeString(event.terminalRecord?.terminalId).trim();
-    if (!context || !terminalId) return false;
-    const committed = readChatOutboxItemById(
+  private terminalDeliveryTarget(context: RinChatDeliveryContext) {
+    const joined = readLatestJoinedChatPresentation(
       this.agentDir,
-      `chat-${terminalId}`,
-    )?.item;
-    return Boolean(
-      committed &&
-      committed.turnId === context.turnId &&
-      committed.deliveryKind === deliveryKind &&
-      committed.payload.chatKey === context.chatKey &&
-      context.chatKey === this.chatKey,
+      context.turnId,
     );
+    const messageId =
+      joined?.chatKey === context.chatKey
+        ? safeString(joined.messageId).trim() || context.messageId
+        : context.messageId;
+    return {
+      incomingMessageId: messageId,
+      replyToMessageId: messageId,
+      outboxTurnFence: undefined,
+    };
   }
 
-  private async acknowledgeCommittedTerminalDeliveryEvent(event: {
-    requestTag?: string;
-    terminalRecord?: { terminalId: string };
-  }) {
-    const requestTag = safeString(event.requestTag).trim();
-    const terminalId = safeString(event.terminalRecord?.terminalId).trim();
-    if (!requestTag || !terminalId) return;
-    try {
-      await this.driver.acknowledgeTerminal(requestTag, terminalId);
-    } catch (error: any) {
-      this.logger?.warn?.(
-        `chat terminal acknowledgement deferred: ${String(
-          error?.message || error,
-        )}`,
-      );
+  private currentPresentationForTerminal(
+    context: RinChatDeliveryContext,
+  ): ChatTurnMeta | null {
+    const turn = this.currentTurn;
+    if (
+      !turn ||
+      safeString(turn.outboxTurnFence?.turnId).trim() !== context.turnId ||
+      safeString(turn.incomingMessageId).trim() !== context.messageId
+    ) {
+      return null;
     }
+    return turn;
   }
 
   private acceptsScopedTurnEvent(requestTag?: string) {
@@ -3540,20 +3453,24 @@ export class ChatController {
       terminalAt?: string;
     };
   }) {
-    if (!this.currentTurn) return;
-    if (event.chatDeliveryContext) {
+    const context = event.chatDeliveryContext;
+    if (!context && !this.currentTurn) return;
+    if (context) {
       event = this.authoritativeTerminalEvent(
         event,
         "complete",
       ) as typeof event;
     }
-    const settledTurn = this.currentTurn;
-    const deliveryTarget = this.currentDeliveryTarget(settledTurn);
-    const replyToMessageId =
-      this.currentReplyToMessageId() || deliveryTarget.replyToMessageId;
-    const joinedOwnerTurnId = safeString(
-      settledTurn.outboxTurnFence?.turnId,
-    ).trim();
+    const presentationTurn = context
+      ? this.currentPresentationForTerminal(context)
+      : this.currentTurn;
+    const deliveryTarget = context
+      ? this.terminalDeliveryTarget(context)
+      : this.currentDeliveryTarget(presentationTurn || {});
+    const replyToMessageId = context
+      ? deliveryTarget.replyToMessageId
+      : this.currentReplyToMessageId() || deliveryTarget.replyToMessageId;
+    const joinedOwnerTurnId = context?.turnId || "";
     const resultParts = assistantDeliveryParts(event.finalText, event.result);
     if (safeString(event.finalText).trim() || resultParts.length) {
       await this.deliverAssistantReply({
@@ -3563,25 +3480,26 @@ export class ChatController {
         replyToMessageId,
         incomingMessageId: deliveryTarget.incomingMessageId,
         outboxTurnFence: deliveryTarget.outboxTurnFence,
-        sessionFile: event.sessionFile || this.currentSessionFile(),
-        terminalTurn: event.chatDeliveryContext,
-        terminalRequestTag: settledTurn?.requestTag,
+        sessionFile:
+          event.sessionFile ||
+          (context ? undefined : this.currentSessionFile()),
+        terminalTurn: context,
+        terminalRequestTag: event.requestTag,
         terminalRecordId: event.terminalRecord?.terminalId,
         joinedOwnerTurnId,
-        clearProcessing: true,
       });
-    } else if (event.chatDeliveryContext) {
+    } else if (context) {
       await this.deliverAssistantReply({
         text: "Rin completed this turn without a text response.",
         replyToMessageId,
         incomingMessageId: deliveryTarget.incomingMessageId,
-        outboxTurnFence: deliveryTarget.outboxTurnFence,
-        sessionFile: event.sessionFile || this.currentSessionFile(),
-        terminalTurn: event.chatDeliveryContext,
-        terminalRequestTag: settledTurn?.requestTag,
+        sessionFile:
+          event.sessionFile ||
+          (context ? undefined : this.currentSessionFile()),
+        terminalTurn: context,
+        terminalRequestTag: event.requestTag,
         terminalRecordId: event.terminalRecord?.terminalId,
         joinedOwnerTurnId,
-        clearProcessing: true,
         deliveryKind: "final",
       });
     } else {
@@ -3591,12 +3509,7 @@ export class ChatController {
         sessionFile: event.sessionFile || this.currentSessionFile(),
       });
     }
-    if (!this.currentTurn || this.currentTurn === settledTurn) {
-      this.awaitingTurnSettle = false;
-      if (this.currentTurn === settledTurn) this.clearCurrentTurn();
-      this.saveState();
-      await this.flushPendingPassiveNotices(false);
-    }
+    await this.finishTerminalPresentation(presentationTurn);
   }
 
   private async settleProjectedTurnError(event: {
@@ -3610,33 +3523,46 @@ export class ChatController {
       terminalAt?: string;
     };
   }) {
-    if (!this.currentTurn) return;
-    if (event.chatDeliveryContext) {
+    const context = event.chatDeliveryContext;
+    if (!context && !this.currentTurn) return;
+    if (context) {
       event = this.authoritativeTerminalEvent(event, "error") as typeof event;
     }
     const errorMessage = safeString(event.error).trim() || "rpc_turn_failed";
-    const settledTurn = this.currentTurn;
-    const deliveryTarget = this.currentDeliveryTarget(settledTurn);
+    const presentationTurn = context
+      ? this.currentPresentationForTerminal(context)
+      : this.currentTurn;
+    const deliveryTarget = context
+      ? this.terminalDeliveryTarget(context)
+      : this.currentDeliveryTarget(presentationTurn || {});
     await this.deliverAssistantReply({
       text: errorMessage,
-      replyToMessageId:
-        this.currentReplyToMessageId() || deliveryTarget.replyToMessageId,
+      replyToMessageId: context
+        ? deliveryTarget.replyToMessageId
+        : this.currentReplyToMessageId() || deliveryTarget.replyToMessageId,
       incomingMessageId: deliveryTarget.incomingMessageId,
       outboxTurnFence: deliveryTarget.outboxTurnFence,
-      sessionFile: event.sessionFile || this.currentSessionFile(),
-      terminalTurn: event.chatDeliveryContext,
-      terminalRequestTag: settledTurn?.requestTag,
+      sessionFile:
+        event.sessionFile || (context ? undefined : this.currentSessionFile()),
+      terminalTurn: context,
+      terminalRequestTag: event.requestTag,
       terminalRecordId: event.terminalRecord?.terminalId,
-      joinedOwnerTurnId: safeString(settledTurn.outboxTurnFence?.turnId).trim(),
-      clearProcessing: true,
+      joinedOwnerTurnId: context?.turnId,
       deliveryKind: "error",
     });
-    if (!this.currentTurn || this.currentTurn === settledTurn) {
-      this.awaitingTurnSettle = false;
-      if (this.currentTurn === settledTurn) this.clearCurrentTurn();
-      this.saveState();
-      await this.flushPendingPassiveNotices(false);
+    await this.finishTerminalPresentation(presentationTurn);
+  }
+
+  private async finishTerminalPresentation(turn: ChatTurnMeta | null) {
+    if (!turn || (this.currentTurn && this.currentTurn !== turn)) return;
+    if (this.currentTurn === turn) {
+      await this.clearWorkingReaction().catch(() => {});
     }
+    if (this.currentTurn && this.currentTurn !== turn) return;
+    this.awaitingTurnSettle = false;
+    if (this.currentTurn === turn) this.clearCurrentTurn();
+    this.saveState();
+    await this.flushPendingPassiveNotices(false);
   }
 
   async housekeep() {
@@ -3853,18 +3779,6 @@ export class ChatController {
           throw new Error("chat_terminal_record_missing");
         }
         if (event.chatDeliveryContext) {
-          this.authoritativeTerminalEvent(event, "complete");
-          this.recoverTerminalDeliveryEvent(
-            event.chatDeliveryContext,
-            event.requestTag,
-          );
-          if (!this.acceptsTerminalDeliveryEvent(event.chatDeliveryContext)) {
-            if (this.hasCommittedTerminalDeliveryEvent(event, "final")) {
-              await this.acknowledgeCommittedTerminalDeliveryEvent(event);
-              return;
-            }
-            throw new Error("chat_terminal_delivery_mismatch");
-          }
           await this.settleProjectedTurnComplete(event);
         } else if (this.acceptsScopedTurnEvent(event.requestTag)) {
           await this.settleProjectedTurnComplete(event);
@@ -3883,18 +3797,6 @@ export class ChatController {
           throw new Error("chat_terminal_record_missing");
         }
         if (event.chatDeliveryContext) {
-          this.authoritativeTerminalEvent(event, "error");
-          this.recoverTerminalDeliveryEvent(
-            event.chatDeliveryContext,
-            event.requestTag,
-          );
-          if (!this.acceptsTerminalDeliveryEvent(event.chatDeliveryContext)) {
-            if (this.hasCommittedTerminalDeliveryEvent(event, "error")) {
-              await this.acknowledgeCommittedTerminalDeliveryEvent(event);
-              return;
-            }
-            throw new Error("chat_terminal_delivery_mismatch");
-          }
           await this.settleProjectedTurnError(event);
         } else if (this.acceptsScopedTurnEvent(event.requestTag)) {
           await this.settleProjectedTurnError(event);

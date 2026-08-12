@@ -62,8 +62,6 @@ export {
   type RinFrontendPromptTurnInput,
 } from "./input-submission.js";
 
-const TERMINAL_PROJECTION_MAX_ATTEMPTS = 3;
-
 export type RinFrontendTurnPhase =
   | "idle"
   | "connecting"
@@ -2470,42 +2468,24 @@ export class RinFrontendTurnDriver {
     let projection = this.terminalProjectionTasks.get(terminalIdentity);
     if (!projection) {
       projection = (async () => {
-        const pendingListeners = new Set(this.listeners);
-        let attempt = 0;
-        while (pendingListeners.size > 0) {
-          if (projectionEpoch !== this.lifecycleEpoch) return false;
-          const failures: unknown[] = [];
-          await Promise.all(
-            Array.from(pendingListeners, async (listener) => {
-              if (projectionEpoch !== this.lifecycleEpoch) return;
-              try {
-                await listener(event);
-                if (projectionEpoch === this.lifecycleEpoch) {
-                  pendingListeners.delete(listener);
-                }
-              } catch (error) {
-                failures.push(error);
-              }
-            }),
-          );
-          if (projectionEpoch !== this.lifecycleEpoch) return false;
-          if (failures.length === 0) return true;
-          attempt += 1;
-          for (const failure of failures) {
-            this.reportEventHandlingError({
-              stage: "terminal_listener",
-              error: failure,
-              frontendEvent: event,
-            });
-          }
-          if (attempt >= TERMINAL_PROJECTION_MAX_ATTEMPTS || !this.client) {
-            return false;
-          }
-          await new Promise((resolve) =>
-            setTimeout(resolve, Math.min(2_000, 100 * 2 ** (attempt - 1))),
-          );
+        const results = await Promise.allSettled(
+          Array.from(this.listeners, (listener) =>
+            Promise.resolve().then(() => listener(event)),
+          ),
+        );
+        if (projectionEpoch !== this.lifecycleEpoch) return false;
+        const failures = results.filter(
+          (result): result is PromiseRejectedResult =>
+            result.status === "rejected",
+        );
+        for (const failure of failures) {
+          this.reportEventHandlingError({
+            stage: "terminal_listener",
+            error: failure.reason,
+            frontendEvent: event,
+          });
         }
-        return projectionEpoch === this.lifecycleEpoch;
+        return failures.length === 0;
       })();
       this.terminalProjectionTasks.set(terminalIdentity, projection);
     }

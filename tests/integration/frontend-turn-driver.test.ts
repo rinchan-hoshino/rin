@@ -458,7 +458,7 @@ test("failed terminal projection remains replayable until listeners commit it", 
   assert.equal(failures[0].stage, "terminal_listener");
 });
 
-test("permanent terminal listener failure rejects the local turn after bounded retries", async () => {
+test("terminal listener failure rejects the exact local turn without an internal retry loop", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
@@ -504,11 +504,11 @@ test("permanent terminal listener failure rejects the local turn after bounded r
     outcome.state === "rejected" ? outcome.error.message : "",
     /rin_terminal_projection_failed/,
   );
-  assert.equal(attempts, 3);
+  assert.equal(attempts, 1);
   assert.equal(driver.hasActiveTurn(), false);
 });
 
-test("terminal projection retries only listeners that have not committed", async () => {
+test("terminal projection invokes each listener at most once per delivery attempt", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
@@ -542,7 +542,7 @@ test("terminal projection retries only listeners that have not committed", async
   });
 
   assert.equal(committedCalls, 1);
-  assert.equal(retryingCalls, 2);
+  assert.equal(retryingCalls, 1);
 });
 
 test("terminal projection requires the daemon requestTag", async () => {

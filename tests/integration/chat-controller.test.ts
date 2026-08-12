@@ -7288,12 +7288,21 @@ test("chat controller leaves confirmed pre-dispatch failure to durable outbox re
     switchSession: async () => {},
   };
 
-  await controller.runTurn({
-    text: "hello",
-    attachments: [],
-    incomingMessageId: "m-send-fail",
-    replyToMessageId: "m-send-fail",
-  });
+  const projectionFailures = [];
+  const reportFailure = controller.driver.onEventHandlingError;
+  controller.driver.onEventHandlingError = async (failure) => {
+    projectionFailures.push(failure);
+    await reportFailure(failure);
+  };
+  await assert.rejects(
+    controller.runTurn({
+      text: "hello",
+      attachments: [],
+      incomingMessageId: "m-send-fail",
+      replyToMessageId: "m-send-fail",
+    }),
+    /rin_terminal_projection_failed/,
+  );
 
   const stored = getChatMessage(controller.agentDir, chatKey, "m-send-fail");
   const [queued] = listChatOutboxItems(controller.agentDir).map(
@@ -7301,6 +7310,8 @@ test("chat controller leaves confirmed pre-dispatch failure to durable outbox re
   );
   assert.ok(stored?.acceptedAt);
   assert.equal(stored?.processedAt, undefined);
+  assert.equal(projectionFailures.length, 1);
+  assert.match(String(projectionFailures[0].error?.message), /send failed/);
   assert.equal(queued.status, "queued");
 });
 
@@ -8382,56 +8393,33 @@ test("authoritative terminal replay adopts one outbox after the transport job se
   );
 });
 
-test("a committed older terminal settles its local promise after the controller advances", async () => {
+test("an older terminal settles by its own identity after the presentation advances", async () => {
   const controller = await createController("telegram/1:2");
   const inbound = enqueueChatInboxItem(controller.agentDir, {
     chatKey: controller.chatKey,
-    messageId: "committed-older-terminal",
+    messageId: "older-terminal-message",
     session: {
       platform: "telegram",
       selfId: "1",
       channelId: "2",
-      messageId: "committed-older-terminal",
+      messageId: "older-terminal-message",
       content: "older turn",
       stripped: { content: "older turn" },
     },
     elements: [{ type: "text", attrs: { content: "older turn" } }],
   }).item;
   const claim = claimChatInboxItem(controller.agentDir, inbound.itemId);
-  const requestTag = "committed-older-terminal-request";
-  const terminalId = "terminal-committed-older-terminal";
+  const requestTag = "older-terminal-request";
+  const terminalId = "terminal-older-turn";
   const chatDeliveryContext = {
     turnId: claim.itemId,
     chatKey: claim.chatKey,
     messageId: claim.messageId,
   };
-  enqueueChatOutboxPayload(
-    controller.agentDir,
-    {
-      createdAt: new Date().toISOString(),
-      chatKey: controller.chatKey,
-      parts: [{ type: "text", text: "older durable final" }],
-    },
-    {
-      id: `chat-${terminalId}`,
-      idempotencyKey: `chat-${terminalId}`,
-      deliveryKind: "final",
-      terminalRecordId: terminalId,
-      terminalTurn: chatDeliveryContext,
-      turnFence: {
-        agentDir: controller.agentDir,
-        turnId: claim.itemId,
-        chatKey: claim.chatKey,
-        messageId: claim.messageId,
-        ownerEpoch: claim.ownerEpoch,
-        attempt: claim.attemptCount,
-      },
-    },
-  );
 
   controller.setCurrentTurn({
     incomingMessageId: "newer-message",
-    requestTag,
+    requestTag: "newer-request",
     outboxTurnFence: {
       agentDir: controller.agentDir,
       turnId: "newer-turn",
@@ -8441,24 +8429,13 @@ test("a committed older terminal settles its local promise after the controller 
       attempt: 1,
     },
   });
+  controller.awaitingTurnSettle = true;
   const newerTurn = controller.currentTurn;
-  let acknowledgements = 0;
-  controller.driver.acknowledgeTerminal = async (tag, id) => {
-    assert.equal(tag, requestTag);
-    assert.equal(id, terminalId);
-    acknowledgements += 1;
-  };
-  const liveTurn = controller.driver.startLiveTurn(
+  await controller.settleProjectedTurnComplete({
     requestTag,
-    chatDeliveryContext,
-  );
-  const handling = controller.driver.handleClientEvent({
-    type: "rpc_turn_event",
-    event: "complete",
-    requestTag,
-    finalText: "older durable final",
-    sessionFile: "/tmp/committed-older-terminal.jsonl",
-    sessionId: "committed-older-terminal",
+    finalText: "older final",
+    sessionFile: "/tmp/older-terminal.jsonl",
+    sessionId: "older-terminal",
     chatDeliveryContext,
     terminalRecord: {
       terminalId,
@@ -8466,16 +8443,16 @@ test("a committed older terminal settles its local promise after the controller 
       terminalAt: "2026-08-12T03:47:46.000Z",
     },
   });
-  const outcome = await Promise.race([
-    liveTurn.promise.then(() => "settled"),
-    new Promise((resolve) => setTimeout(() => resolve("pending"), 100)),
-  ]);
-  if (outcome === "pending") controller.driver.dispose();
-  await handling;
 
-  assert.equal(outcome, "settled");
-  assert.equal(acknowledgements, 1);
+  const terminalOutbox = readChatOutboxItemById(
+    controller.agentDir,
+    `chat-${terminalId}`,
+  )?.item;
+  assert.equal(terminalOutbox?.turnId, claim.itemId);
+  assert.equal(terminalOutbox?.payload?.replyToMessageId, undefined);
+  assert.equal(deliveryQuoteId(terminalOutbox?.payload), claim.messageId);
   assert.equal(controller.currentTurn, newerTurn);
+  assert.equal(controller.awaitingTurnSettle, true);
 });
 
 test("authoritative daemon terminal replaces a legacy interrupted inbox fixture", async () => {
@@ -8904,7 +8881,7 @@ test("connect drains an older terminal before restoring the new primed turn", as
     acknowledgements.push({ tag, terminalId });
   };
   controller.driver.recoverUnacknowledgedChatTerminals = async () => {
-    assert.equal(controller.currentTurn, null);
+    assert.equal(controller.currentTurn, newTurn);
     await controller.handleFrontendEvent({
       type: "turn_error",
       error: terminalEvent.error,
@@ -9228,38 +9205,29 @@ test("chat controller internal ownership helpers normalize durable and display s
     requestTag,
     outboxTurnFence: fence,
   });
-  assert.equal(controller.acceptsTerminalDeliveryEvent(undefined), false);
   assert.equal(
-    controller.acceptsTerminalDeliveryEvent({
+    controller.currentPresentationForTerminal({
       turnId: "other-turn",
       chatKey: controller.chatKey,
       messageId: "message-1",
     }),
-    false,
+    null,
   );
   assert.equal(
-    controller.acceptsTerminalDeliveryEvent({
-      turnId: fence.turnId,
-      chatKey: "other/chat",
-      messageId: "message-1",
-    }),
-    false,
-  );
-  assert.equal(
-    controller.acceptsTerminalDeliveryEvent({
+    controller.currentPresentationForTerminal({
       turnId: fence.turnId,
       chatKey: controller.chatKey,
       messageId: "other-message",
     }),
-    false,
+    null,
   );
   assert.equal(
-    controller.acceptsTerminalDeliveryEvent({
+    controller.currentPresentationForTerminal({
       turnId: fence.turnId,
       chatKey: controller.chatKey,
       messageId: "message-1",
     }),
-    true,
+    controller.currentTurn,
   );
   assert.throws(
     () => controller.authoritativeTerminalEvent({}, "complete"),
@@ -9361,7 +9329,6 @@ test("chat controller internal ownership helpers normalize durable and display s
   controller.clearCurrentTurn();
   assert.equal(controller.ensureVisibleCommandTurn(), true);
   controller.clearCurrentTurn();
-  controller.recoverTerminalDeliveryEvent(undefined);
   controller.connect = async () => true;
   const prepared = await controller.prepareTurnPrompt(
     { text: "prepared", attachments: [] },
@@ -9440,11 +9407,6 @@ test("chat controller internal ownership helpers normalize durable and display s
   controller.driver.runTurn = originalRunTurn;
 
   controller.clearCurrentTurn();
-  controller.recoverTerminalDeliveryEvent({
-    turnId: "missing-turn",
-    chatKey: controller.chatKey,
-    messageId: "missing-message",
-  });
   const reactionEvents = [];
   controller.app.bots[0].workingIndicators = [
     {
