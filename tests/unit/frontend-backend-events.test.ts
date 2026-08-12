@@ -182,8 +182,11 @@ test("frontend backend event translator exposes compact collapsed notice without
       type: "compaction_end",
       reason: "threshold",
       aborted: false,
-      tokensBefore: 108642,
-      result: { summary: "Summary of conversation must not reach chat" },
+      tokensBefore: 1,
+      result: {
+        summary: "Summary of conversation must not reach chat",
+        tokensBefore: 108642,
+      },
     }),
     [
       {
@@ -207,8 +210,10 @@ test("frontend backend event translator adds expand hint only when the caller su
       type: "compaction_end",
       reason: "threshold",
       aborted: false,
-      tokensBefore: 255166,
-      result: { summary: "Summary of conversation must not reach chat" },
+      result: {
+        summary: "Summary of conversation must not reach chat",
+        tokensBefore: 255166,
+      },
     }),
     [
       {

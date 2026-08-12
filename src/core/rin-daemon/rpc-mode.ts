@@ -1,5 +1,3 @@
-import { getLatestCompactionEntry } from "@earendil-works/pi-coding-agent";
-
 import {
   extractPiContinuableToolCallIds,
   extractPiContinuableToolCallParts,
@@ -73,20 +71,6 @@ function createExtensionUiResponseParser(defaultValue: any) {
     if ("value" in (response || {})) return response.value;
     return defaultValue;
   };
-}
-
-function latestCompactionTokensBefore(session: any) {
-  const branch = session?.sessionManager?.getBranch?.();
-  return getLatestCompactionEntry(Array.isArray(branch) ? branch : [])
-    ?.tokensBefore;
-}
-
-function withCompactionEventMetadata(session: any, event: any) {
-  if (!event || typeof event !== "object") return event;
-  if (event.type !== "compaction_end") return event;
-  if (event.tokensBefore !== undefined) return event;
-  const tokensBefore = latestCompactionTokensBefore(session);
-  return tokensBefore === undefined ? event : { ...event, tokensBefore };
 }
 
 function stableJson(value: any) {
@@ -1564,10 +1548,10 @@ export async function runCustomRpcMode(
         if (producerRequestTag) {
           userMessageRequestTags.set(event.message, producerRequestTag);
         }
-        output(withCompactionEventMetadata(session, taggedEvent));
+        output(taggedEvent);
         return;
       }
-      output(withCompactionEventMetadata(session, taggedEvent));
+      output(taggedEvent);
     });
   };
 
@@ -1991,10 +1975,7 @@ export async function runCustomRpcMode(
       case "compact":
         return run(id, type, async () => {
           const value = await session.compact(command.customInstructions);
-          return {
-            ...(value && typeof value === "object" ? value : {}),
-            tokensBefore: latestCompactionTokensBefore(session),
-          };
+          return value && typeof value === "object" ? value : {};
         });
       case "set_auto_compaction":
         return run(id, type, () =>

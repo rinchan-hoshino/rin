@@ -64,7 +64,7 @@ export async function load(url, context, nextLoad) {
   if (!url.endsWith(target)) return loaded;
   return {
     ...loaded,
-    source: String(loaded.source) + "\\nexport { createExtensionUiResponseParser as __rinOwnerCreateExtensionUiResponseParser, latestCompactionTokensBefore as __rinOwnerLatestCompactionTokensBefore, withCompactionEventMetadata as __rinOwnerWithCompactionEventMetadata, stableJson as __rinOwnerStableJson, rpcRequestTag as __rinOwnerRpcRequestTag, getSessionEntries as __rinOwnerGetSessionEntries, getSessionEntriesSince as __rinOwnerGetSessionEntriesSince, getSessionLeafId as __rinOwnerGetSessionLeafId, getSessionTree as __rinOwnerGetSessionTree, clampSessionThinkingLevel as __rinOwnerClampSessionThinkingLevel, combinedLoginPromptSignal as __rinOwnerCombinedLoginPromptSignal, isWorkerLocalSessionReplacementCommand as __rinOwnerIsWorkerLocalSessionReplacementCommand, logoutSessionProvider as __rinOwnerLogoutSessionProvider };\\n",
+    source: String(loaded.source) + "\\nexport { createExtensionUiResponseParser as __rinOwnerCreateExtensionUiResponseParser, stableJson as __rinOwnerStableJson, rpcRequestTag as __rinOwnerRpcRequestTag, getSessionEntries as __rinOwnerGetSessionEntries, getSessionEntriesSince as __rinOwnerGetSessionEntriesSince, getSessionLeafId as __rinOwnerGetSessionLeafId, getSessionTree as __rinOwnerGetSessionTree, clampSessionThinkingLevel as __rinOwnerClampSessionThinkingLevel, combinedLoginPromptSignal as __rinOwnerCombinedLoginPromptSignal, isWorkerLocalSessionReplacementCommand as __rinOwnerIsWorkerLocalSessionReplacementCommand, logoutSessionProvider as __rinOwnerLogoutSessionProvider };\\n",
     shortCircuit: true,
   };
 }

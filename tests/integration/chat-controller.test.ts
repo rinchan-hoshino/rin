@@ -848,8 +848,10 @@ test("chat controller delivers compact collapsed notice without summary text", a
       type: "compaction_end",
       reason: "threshold",
       aborted: false,
-      tokensBefore: 108642,
-      result: { summary: "Summary of conversation must not reach chat" },
+      result: {
+        summary: "Summary of conversation must not reach chat",
+        tokensBefore: 108642,
+      },
     },
   });
   await new Promise((resolve) => setImmediate(resolve));
@@ -2169,7 +2171,7 @@ test("chat controller sends compaction notices as interim progress and reacts on
       type: "compaction_end",
       reason: "threshold",
       aborted: false,
-      tokensBefore: 108642,
+      result: { tokensBefore: 108642 },
     },
   });
   await new Promise((resolve) => setImmediate(resolve));
@@ -2251,7 +2253,7 @@ test("chat controller coalesces automatic compaction completion into the active 
       type: "compaction_end",
       reason: "threshold",
       aborted: false,
-      tokensBefore: 108642,
+      result: { tokensBefore: 108642 },
     },
   });
   await new Promise((resolve) => setImmediate(resolve));
@@ -2327,7 +2329,7 @@ test("chat controller keeps editable compaction in interim content", async () =>
       type: "compaction_end",
       reason: "threshold",
       aborted: false,
-      tokensBefore: 108642,
+      result: { tokensBefore: 108642 },
     },
   });
   await new Promise((resolve) => setImmediate(resolve));

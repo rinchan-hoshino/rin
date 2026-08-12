@@ -268,9 +268,7 @@ export function projectRinFrontendLifecycleEvent(
         kind: "compaction_finished",
         reason: safeString(payload.reason),
         result: payload.result,
-        tokensBefore: safeNumber(
-          payload.tokensBefore ?? payload.result?.tokensBefore,
-        ),
+        tokensBefore: safeNumber(payload.result?.tokensBefore),
         aborted: payload.aborted === true,
         willRetry: payload.willRetry === true,
         errorMessage: safeString(payload.errorMessage).trim(),

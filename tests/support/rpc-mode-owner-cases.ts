@@ -6598,7 +6598,7 @@ async function createRpcModeOwnerHarness(
     setFollowUpMode: (mode: string) => calls.push(["setFollowUpMode", mode]),
     compact: async (instructions: string) => (
       calls.push(["compact", instructions]),
-      { compacted: true }
+      { compacted: true, tokensBefore: 654 }
     ),
     setAutoCompactionEnabled: (enabled: boolean) =>
       calls.push(["setAutoCompactionEnabled", enabled]),
@@ -6958,7 +6958,7 @@ test(
         byId.get("resolved-final")?.data.finalText,
         "resolved owner",
       );
-      assert.equal(byId.get("compact")?.data.tokensBefore, 321);
+      assert.equal(byId.get("compact")?.data.tokensBefore, 654);
       assert.deepEqual(byId.get("html")?.data, { path: "/owner/out.html" });
       assert.equal(harness.bindings.length, 3);
       assert.ok(harness.calls.some((call) => call[0] === "abortCompaction"));
@@ -7099,16 +7099,12 @@ test(
       harness.emit({ type: "auto_retry_end", success: true, attempt: 2 });
       harness.emit({ type: "message_start", message: userMessage });
       harness.session.sessionManager.appendMessage(userMessage);
-      harness.emit({ type: "compaction_end", aborted: false });
       harness.emit({
         type: "compaction_end",
+        reason: "manual",
         aborted: false,
-        tokensBefore: 123,
+        result: { compacted: true, tokensBefore: 123 },
       });
-      const getBranch = harness.session.sessionManager.getBranch;
-      harness.session.sessionManager.getBranch = () => [];
-      harness.emit({ type: "compaction_end", aborted: false });
-      harness.session.sessionManager.getBranch = getBranch;
       harness.emit("owner-non-event");
       harness.emit(null);
 
@@ -7120,7 +7116,9 @@ test(
       assert.ok(
         payloads.some(
           (payload) =>
-            payload?.type === "compaction_end" && payload.tokensBefore === 321,
+            payload?.type === "compaction_end" &&
+            payload.result?.tokensBefore === 123 &&
+            payload.tokensBefore === undefined,
         ),
       );
       assert.ok(payloads.some((payload) => payload?.type === "message_start"));
@@ -7359,51 +7357,6 @@ test("rpc mode owner directly covers response parsing and outcome normalization 
         turnActive: false,
         isStreaming: false,
       },
-    );
-    assert.equal(mod.__rinOwnerLatestCompactionTokensBefore(undefined), undefined);
-    assert.equal(mod.__rinOwnerLatestCompactionTokensBefore({ entries: "bad" }), undefined);
-    assert.equal(
-      mod.__rinOwnerLatestCompactionTokensBefore({
-        sessionManager: {
-          getBranch: () => [
-            { id: "compact", type: "compaction", tokensBefore: 321 },
-          ],
-        },
-      }),
-      321,
-    );
-    assert.equal(mod.__rinOwnerWithCompactionEventMetadata({}, null), null);
-    assert.equal(mod.__rinOwnerWithCompactionEventMetadata({}, "event"), "event");
-    assert.deepEqual(
-      mod.__rinOwnerWithCompactionEventMetadata({ entries: [] }, { type: "owner" }),
-      { type: "owner" },
-    );
-    assert.deepEqual(
-      mod.__rinOwnerWithCompactionEventMetadata(
-        { entries: [] },
-        { type: "compaction_end", tokensBefore: 1 },
-      ),
-      { type: "compaction_end", tokensBefore: 1 },
-    );
-    assert.deepEqual(
-      mod.__rinOwnerWithCompactionEventMetadata(
-        { entries: [] },
-        { type: "compaction_end" },
-      ),
-      { type: "compaction_end" },
-    );
-    assert.deepEqual(
-      mod.__rinOwnerWithCompactionEventMetadata(
-        {
-          sessionManager: {
-            getBranch: () => [
-              { id: "compact", type: "compaction", tokensBefore: 321 },
-            ],
-          },
-        },
-        { type: "compaction_end" },
-      ),
-      { type: "compaction_end", tokensBefore: 321 },
     );
     assert.deepEqual(mod.__rinOwnerGetSessionEntries({ entries: [1] }), []);
     assert.deepEqual(
