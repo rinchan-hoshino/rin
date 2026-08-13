@@ -80,7 +80,6 @@ type SelfImproveReviewOptions = {
   sessionFile?: string;
   leafId?: string;
   trigger: string;
-  snapshotKey?: string;
 };
 
 type EnqueueMaintenanceJob = typeof enqueueSelfImproveMaintenanceJob;
@@ -91,12 +90,12 @@ function resolveReviewJob(ctx: any, opts: SelfImproveReviewOptions) {
   if (!sessionFile || !agentDir) return null;
   if (shouldSkipAutomaticMaintenance(sessionFile)) return null;
   const meta = readSessionMetadata(opts);
+  if (!meta.leafId) return null;
   return {
     agentDir,
     sessionFile,
-    leafId: meta.leafId || undefined,
+    leafId: meta.leafId,
     trigger: opts.trigger,
-    snapshotKey: opts.snapshotKey,
   };
 }
 
@@ -197,7 +196,6 @@ function resolveCompletedTurnWindow(
   return {
     leafId: closingAssistantLeafId,
     trigger: SELF_IMPROVE_WINDOW_TRIGGER,
-    snapshotKey: `turn-window:${windowTurns}:${userTurns}:${closingAssistantLeafId}`,
   };
 }
 

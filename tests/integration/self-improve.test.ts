@@ -446,7 +446,6 @@ test("self-improve queues one review after Pi persists each shared turn window f
   assert.equal(queued.length, 1);
   assert.equal(queued[0].trigger, "self_improve:turn_window_review");
   assert.equal(queued[0].leafId, "a4");
-  assert.equal(queued[0].snapshotKey, "turn-window:4:4:a4");
 
   branch = makeBranch(5);
   await emitFinal(branch.at(-1).message);
@@ -458,7 +457,6 @@ test("self-improve queues one review after Pi persists each shared turn window f
   await settleDeferredReview();
   assert.equal(queued.length, 2);
   assert.equal(queued[1].leafId, "a8");
-  assert.equal(queued[1].snapshotKey, "turn-window:4:8:a8");
   assert.equal(definition.hooks.context, undefined);
 });
 
@@ -541,7 +539,6 @@ test("turn-window completion followed by shutdown queues only one review", async
     assert.equal(queue.length, 1);
     assert.equal(queue[0].trigger, "self_improve:turn_window_review");
     assert.equal(queue[0].leafId, "a4");
-    assert.equal(queue[0].snapshotKey, "turn-window:4:4:a4");
   });
 });
 
@@ -913,8 +910,8 @@ test("queued distillation drops invalid session jobs into history instead of blo
     await asyncJobs.enqueueSelfImproveMaintenanceJob({
       agentDir: root,
       sessionFile: path.join(root, "missing-session.jsonl"),
+      leafId: "review-5",
       trigger: "self_improve:periodic_review",
-      snapshotKey: "review:5",
     });
 
     const result = await asyncJobs.processQueuedSelfImproveJobs(root);
@@ -1310,8 +1307,8 @@ test("synchronous self-improve distillation records terminal result without queu
     const result = await asyncJobs.runSelfImproveMaintenanceJobNow({
       agentDir: root,
       sessionFile,
+      leafId: "leaf-sync",
       trigger: "self_improve:periodic_review",
-      snapshotKey: "review:leaf-sync",
     });
 
     assert.equal(result.status, "failed");
@@ -1324,7 +1321,7 @@ test("synchronous self-improve distillation records terminal result without queu
     assert.equal(history.length, 1);
     assert.equal(history[0].kind, "self_improve_review");
     assert.equal(history[0].status, "failed");
-    assert.equal(history[0].snapshotKey, "review:leaf-sync");
+    assert.equal(history[0].leafId, "leaf-sync");
     assert.match(
       String(history[0].error || ""),
       /maintenance_job_invalid_session_file:/,
@@ -1332,19 +1329,22 @@ test("synchronous self-improve distillation records terminal result without queu
   });
 });
 
-test("completed turn-window snapshots are not queued again after worker re-entry", async () => {
+test("completed leaves are not queued again after worker re-entry", async () => {
   await withTempRoot(async (root) => {
     const sessionFile = path.join(root, "empty-session.jsonl");
     await fs.writeFile(sessionFile, "", "utf8");
     const job = {
       agentDir: root,
       sessionFile,
+      leafId: "a4",
       trigger: "self_improve:turn_window_review",
-      snapshotKey: "turn-window:4:4:a4",
     };
 
     await asyncJobs.runSelfImproveMaintenanceJobNow(job);
-    await asyncJobs.enqueueSelfImproveMaintenanceJob(job);
+    await asyncJobs.enqueueSelfImproveMaintenanceJob({
+      ...job,
+      trigger: "self_improve:session_shutdown_review",
+    });
 
     const queue = JSON.parse(
       await fs.readFile(queuePath(root), "utf8").catch((error) => {
@@ -1356,7 +1356,7 @@ test("completed turn-window snapshots are not queued again after worker re-entry
   });
 });
 
-test("concurrent worker enqueues preserve distinct windows and deduplicate repeats", async () => {
+test("concurrent worker enqueues preserve distinct leaves and deduplicate repeats", async () => {
   await withTempRoot(async (root) => {
     const sessionFile = path.join(root, "session.jsonl");
     await fs.writeFile(sessionFile, "", "utf8");
@@ -1366,8 +1366,8 @@ test("concurrent worker enqueues preserve distinct windows and deduplicate repea
           asyncJobs.enqueueSelfImproveMaintenanceJob({
             agentDir: root,
             sessionFile,
+            leafId: `a${index + 1}`,
             trigger: "self_improve:turn_window_review",
-            snapshotKey: `turn-window:4:${(index + 1) * 4}:a${index + 1}`,
           }),
         ),
       ).flat(),
@@ -1375,22 +1375,22 @@ test("concurrent worker enqueues preserve distinct windows and deduplicate repea
 
     const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
     assert.equal(queue.length, 8);
-    assert.equal(new Set(queue.map((job) => job.snapshotKey)).size, 8);
+    assert.equal(new Set(queue.map((job) => job.leafId)).size, 8);
   });
 });
 
-test("enqueue racing with worker completion preserves each snapshot exactly once", async () => {
+test("enqueue racing with worker completion preserves each leaf exactly once", async () => {
   await withTempRoot(async (root) => {
     const sessionFile = path.join(root, "empty-session.jsonl");
     await fs.writeFile(sessionFile, "", "utf8");
-    const makeJob = (snapshotKey: string) => ({
+    const makeJob = (leafId: string) => ({
       agentDir: root,
       sessionFile,
+      leafId,
       trigger: "self_improve:turn_window_review",
-      snapshotKey,
     });
-    const first = makeJob("turn-window:4:4:a4");
-    const second = makeJob("turn-window:4:8:a8");
+    const first = makeJob("a4");
+    const second = makeJob("a8");
     await asyncJobs.enqueueSelfImproveMaintenanceJob(first);
 
     await Promise.all([
@@ -1414,41 +1414,33 @@ test("enqueue racing with worker completion preserves each snapshot exactly once
       .split(/\r?\n/g)
       .filter(Boolean)
       .map((line) => JSON.parse(line));
-    const snapshots = [...queue, ...history].map(
-      (record) => record.snapshotKey,
-    );
-    assert.equal(
-      snapshots.filter((snapshot) => snapshot === first.snapshotKey).length,
-      1,
-    );
-    assert.equal(
-      snapshots.filter((snapshot) => snapshot === second.snapshotKey).length,
-      1,
-    );
+    const leaves = [...queue, ...history].map((record) => record.leafId);
+    assert.equal(leaves.filter((leafId) => leafId === first.leafId).length, 1);
+    assert.equal(leaves.filter((leafId) => leafId === second.leafId).length, 1);
   });
 });
 
-test("compaction snapshot jobs stay distinct for the same session", async () => {
+test("different leaf jobs stay distinct for the same session", async () => {
   await withTempRoot(async (root) => {
     await asyncJobs.enqueueSelfImproveMaintenanceJob({
       agentDir: root,
       cwd: "/tmp/project-a",
       sessionFile: "/tmp/session-a.jsonl",
+      leafId: "first-kept-a",
       trigger: "compaction-a",
-      snapshotKey: "compaction:first-kept-a",
     });
     await asyncJobs.enqueueSelfImproveMaintenanceJob({
       agentDir: root,
       cwd: "/tmp/project-a",
       sessionFile: "/tmp/session-a.jsonl",
+      leafId: "first-kept-b",
       trigger: "compaction-b",
-      snapshotKey: "compaction:first-kept-b",
     });
 
     const queue = JSON.parse(await fs.readFile(queuePath(root), "utf8"));
     assert.equal(queue.length, 2);
-    assert.equal(queue[0].snapshotKey, "compaction:first-kept-a");
-    assert.equal(queue[1].snapshotKey, "compaction:first-kept-b");
+    assert.equal(queue[0].leafId, "first-kept-a");
+    assert.equal(queue[1].leafId, "first-kept-b");
   });
 });
 

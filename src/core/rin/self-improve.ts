@@ -38,7 +38,6 @@ type MaintenanceHistoryRecord = {
   trigger?: string;
   sessionFile?: string;
   leafId?: string;
-  snapshotKey?: string;
   startedAt?: string;
   finishedAt?: string;
   attempts?: number;

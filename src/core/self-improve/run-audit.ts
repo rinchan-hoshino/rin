@@ -25,7 +25,6 @@ export type SelfImproveRunAuditPolicy = {
 export type SelfImproveRunAuditSource = {
   sessionFile?: string;
   leafId?: string;
-  snapshotKey?: string;
   trigger?: string;
 };
 
@@ -196,7 +195,6 @@ function sanitizeSource(
     source: {
       sessionFile: bounded(source.sessionFile),
       leafId: bounded(source.leafId),
-      snapshotKey: bounded(source.snapshotKey),
       trigger: bounded(source.trigger),
     },
     redacted,

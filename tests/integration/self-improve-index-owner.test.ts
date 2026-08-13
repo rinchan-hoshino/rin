@@ -184,7 +184,6 @@ test("self-improve message-end accepts only explicit current frontend producers"
     queued.every(
       (job) =>
         job.trigger === "self_improve:turn_window_review" &&
-        job.snapshotKey === "turn-window:4:4:owner-assistant-4" &&
         job.leafId === "owner-assistant-4",
     ),
   );
@@ -319,22 +318,20 @@ test("self-improve shutdown uses complete windows or a persisted fallback review
     {},
     context([], { sessionManager: { getLeafId: () => undefined } }),
   );
-  assert.equal(queued.length, 1);
-  assert.equal(queued[0].trigger, "self_improve:session_shutdown_review");
-  assert.equal(queued[0].leafId, undefined);
+  assert.equal(queued.length, 0);
 
   await shutdown(
     {},
     context(oneTurn, { sessionManager: { getLeafId: () => "fallback-leaf" } }),
   );
-  assert.equal(queued.length, 2);
-  assert.equal(queued[1].trigger, "self_improve:session_shutdown_review");
-  assert.equal(queued[1].leafId, "fallback-leaf");
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].trigger, "self_improve:session_shutdown_review");
+  assert.equal(queued[0].leafId, "fallback-leaf");
 
   await shutdown({}, context(fourTurns));
-  assert.equal(queued.length, 3);
-  assert.equal(queued[2].trigger, "self_improve:turn_window_review");
-  assert.equal(queued[2].snapshotKey, "turn-window:4:4:owner-assistant-4");
+  assert.equal(queued.length, 2);
+  assert.equal(queued[1].trigger, "self_improve:turn_window_review");
+  assert.equal(queued[1].leafId, "owner-assistant-4");
 
   await shutdown(
     {},
@@ -343,7 +340,7 @@ test("self-improve shutdown uses complete windows or a persisted fallback review
     }),
   );
   await shutdown({}, context(oneTurn, { agentDir: "" }));
-  assert.equal(queued.length, 3);
+  assert.equal(queued.length, 2);
 
   const throwing = selfImprove.default({
     async enqueueSelfImproveMaintenanceJob() {

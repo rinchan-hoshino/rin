@@ -72,15 +72,15 @@ test("maintenance private normalizers cover sparse lock and history boundaries",
   );
   assert.equal(
     seam.__rinOwnerSameJob(
-      { ...base, snapshotKey: "one" },
-      { ...base, snapshotKey: "two" },
+      { ...base, leafId: "one" },
+      { ...base, leafId: "two" },
     ),
     false,
   );
   assert.equal(
     seam.__rinOwnerSameJob(
-      { ...base, snapshotKey: "one" },
-      { ...base, snapshotKey: "one" },
+      { ...base, leafId: "one", trigger: "turn-window" },
+      { ...base, leafId: "one", trigger: "shutdown" },
     ),
     true,
   );
@@ -168,7 +168,6 @@ test("maintenance private normalizers cover sparse lock and history boundaries",
     sessionFile: "/owner/session.jsonl",
     leafId: "owner-leaf",
     trigger: "owner-trigger",
-    snapshotKey: "owner-snapshot",
   });
   assert.deepEqual(activeLock.activeJob, {
     id: "owner-job",
@@ -176,7 +175,6 @@ test("maintenance private normalizers cover sparse lock and history boundaries",
     trigger: "owner-trigger",
     sessionFile: "/owner/session.jsonl",
     leafId: "owner-leaf",
-    snapshotKey: "owner-snapshot",
   });
 });
 
@@ -205,7 +203,7 @@ test("queued worker supervisor is bounded when no runnable queue exists", async 
   });
 });
 
-test("maintenance queue normalizes identities and keeps snapshot jobs distinct", async () => {
+test("maintenance queue normalizes identities and keeps leaf jobs distinct", async () => {
   await withTempRoot(async (root) => {
     const queuePath = selfImprovePaths.maintenanceQueuePath(root);
     await fs.mkdir(path.dirname(queuePath), { recursive: true });
@@ -254,13 +252,13 @@ test("maintenance queue normalizes identities and keeps snapshot jobs distinct",
       agentDir: root,
       sessionFile: "/tmp/owner-session.jsonl",
       trigger: "owner refresh",
-      leafId: "leaf-after",
+      leafId: "leaf-before",
       additionalExtensionPaths: [],
     });
     queue = await readJson(queuePath);
     assert.equal(queue.length, 1);
     assert.equal(queue[0].trigger, "owner refresh");
-    assert.equal(queue[0].leafId, "leaf-after");
+    assert.equal(queue[0].leafId, "leaf-before");
     assert.equal(queue[0].additionalExtensionPaths, undefined);
     assert.equal(queue[0].attempts, undefined);
     assert.equal(queue[0].lastError, undefined);
@@ -269,19 +267,19 @@ test("maintenance queue normalizes identities and keeps snapshot jobs distinct",
     await asyncJobs.enqueueSelfImproveMaintenanceJob({
       agentDir: root,
       sessionFile: "/tmp/owner-session.jsonl",
-      trigger: "snapshot a",
-      snapshotKey: " snapshot:a ",
+      trigger: "leaf a",
+      leafId: " leaf-a ",
     });
     await asyncJobs.enqueueSelfImproveMaintenanceJob({
       agentDir: root,
       sessionFile: "/tmp/owner-session.jsonl",
-      trigger: "snapshot b",
-      snapshotKey: "snapshot:b",
+      trigger: "leaf b",
+      leafId: "leaf-b",
     });
     queue = await readJson(queuePath);
     assert.deepEqual(
-      queue.map((job: any) => job.snapshotKey),
-      [undefined, "snapshot:a", "snapshot:b"],
+      queue.map((job: any) => job.leafId),
+      ["leaf-before", "leaf-a", "leaf-b"],
     );
 
     await assert.rejects(
@@ -436,6 +434,7 @@ test("synchronous maintenance validates sessions before entering its processor",
     const missing = await asyncJobs.runSelfImproveMaintenanceJobNow({
       agentDir: root,
       sessionFile: path.join(root, "missing.jsonl"),
+      leafId: "missing-leaf",
       trigger: "missing-now",
     });
     assert.deepEqual(missing.status, "failed");
@@ -447,7 +446,7 @@ test("synchronous maintenance validates sessions before entering its processor",
       agentDir: root,
       sessionFile: emptyPath,
       trigger: "empty-now",
-      snapshotKey: "snapshot:empty",
+      leafId: "empty-leaf",
     });
     assert.deepEqual(empty.status, "failed");
     assert.match(String((empty as any).error), /invalid_session_file/);
@@ -459,15 +458,11 @@ test("synchronous maintenance validates sessions before entering its processor",
       history.map((record: any) => ({
         status: record.status,
         trigger: record.trigger,
-        snapshotKey: record.snapshotKey,
+        leafId: record.leafId,
       })),
       [
-        { status: "failed", trigger: "missing-now", snapshotKey: undefined },
-        {
-          status: "failed",
-          trigger: "empty-now",
-          snapshotKey: "snapshot:empty",
-        },
+        { status: "failed", trigger: "missing-now", leafId: "missing-leaf" },
+        { status: "failed", trigger: "empty-now", leafId: "empty-leaf" },
       ],
     );
   });
@@ -512,12 +507,12 @@ await jobs.enqueueSelfImproveMaintenanceJob({
   sessionFile: sessionA,
   leafId: "leaf-a",
   trigger: "queued-success",
-  snapshotKey: "snapshot:a",
   additionalExtensionPaths: ["/tmp/owner-ext.ts"],
 });
 await jobs.enqueueSelfImproveMaintenanceJob({
   agentDir: root,
   sessionFile: sessionB,
+  leafId: "leaf-b",
   trigger: "queued-failure",
 });
 const processed = await jobs.processQueuedSelfImproveJobs(root);
@@ -535,12 +530,14 @@ globalThis.__rinAsyncJobsOwnerBehaviors.push(
 const completed = await jobs.runSelfImproveMaintenanceJobNow({
   agentDir: root,
   sessionFile: sessionC,
+  leafId: "leaf-now-success",
   trigger: "now-success",
 });
 assert.equal(completed.status, "completed");
 const failed = await jobs.runSelfImproveMaintenanceJobNow({
   agentDir: root,
   sessionFile: sessionC,
+  leafId: "leaf-now-failure",
   trigger: "now-failure",
 });
 assert.deepEqual(failed, { status: "failed", error: "now owner failure" });
@@ -555,6 +552,7 @@ globalThis.__rinAsyncJobsOwnerBehaviors.push({
 await jobs.enqueueSelfImproveMaintenanceJob({
   agentDir: root,
   sessionFile: sessionC,
+  leafId: "leaf-requeue-missing",
   trigger: "requeue-missing",
 });
 const requeued = await jobs.processQueuedSelfImproveJobs(root);
@@ -629,7 +627,6 @@ test("maintenance history sanitization and audit identity remain private and ide
       trigger: "Authorization: Bearer trigger-secret",
       sessionFile: "password=session-secret",
       leafId: "token=leaf-secret",
-      snapshotKey: "api_key=snapshot-secret",
       startedAt: "2026-07-28T15:00:00.000Z",
       finishedAt: "2026-07-28T15:01:00.000Z",
       attempts: 1,

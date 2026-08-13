@@ -39,7 +39,6 @@ export type MaintenanceJob = {
   sessionFile: string;
   leafId?: string;
   trigger: string;
-  snapshotKey?: string;
   additionalExtensionPaths?: string[];
   attempts?: number;
   // Persisted before agent execution; its presence makes crash recovery at-most-once.
@@ -61,7 +60,6 @@ type MaintenanceHistoryRecord = {
   trigger: string;
   sessionFile: string;
   leafId?: string;
-  snapshotKey?: string;
   startedAt: string;
   finishedAt: string;
   attempts: number;
@@ -171,17 +169,13 @@ function sameJob(a: Partial<MaintenanceJob>, b: Partial<MaintenanceJob>) {
     safeString(a.kind).trim() === safeString(b.kind).trim() &&
     safeString(a.agentDir).trim() === safeString(b.agentDir).trim() &&
     safeString(a.sessionFile).trim() === safeString(b.sessionFile).trim();
-  if (!sameBase) return false;
-  const aSnapshotKey = safeString(a.snapshotKey).trim();
-  const bSnapshotKey = safeString(b.snapshotKey).trim();
-  if (aSnapshotKey || bSnapshotKey) {
-    return aSnapshotKey === bSnapshotKey;
-  }
-  return true;
+  return (
+    sameBase && safeString(a.leafId).trim() === safeString(b.leafId).trim()
+  );
 }
 
 async function maintenanceHistoryContainsJob(job: MaintenanceJob) {
-  if (!safeString(job.snapshotKey).trim()) return false;
+  if (!safeString(job.leafId).trim()) return false;
   try {
     const text = await fs.readFile(
       maintenanceHistoryPath(job.agentDir),
@@ -211,7 +205,6 @@ function createMaintenanceJob(
   const sessionFile = resolveSessionFile(input.sessionFile);
   const kind: MaintenanceJob["kind"] = "self_improve_review";
   const trigger = safeString(input.trigger).trim() || defaultTrigger(kind);
-  const snapshotKey = safeString(input.snapshotKey).trim();
   const leafId = safeString(input.leafId).trim();
   if (!agentDir || !sessionFile) {
     throw new Error("maintenance_job_invalid_input");
@@ -227,7 +220,6 @@ function createMaintenanceJob(
     sessionFile,
     leafId: leafId || undefined,
     trigger,
-    snapshotKey: snapshotKey || undefined,
     additionalExtensionPaths: normalizeAdditionalExtensionPaths(
       input.additionalExtensionPaths,
     ),
@@ -247,7 +239,6 @@ async function enqueueMaintenanceJob(
       existing.kind = nextJob.kind;
       existing.trigger = nextJob.trigger;
       existing.leafId = nextJob.leafId;
-      existing.snapshotKey = nextJob.snapshotKey;
       existing.additionalExtensionPaths = nextJob.additionalExtensionPaths;
       existing.attempts = undefined;
       existing.lastError = undefined;
@@ -286,7 +277,7 @@ type MaintenanceWorkerLock = {
   updatedAt: string;
   activeJob?: Pick<
     MaintenanceJob,
-    "id" | "kind" | "trigger" | "sessionFile" | "leafId" | "snapshotKey"
+    "id" | "kind" | "trigger" | "sessionFile" | "leafId"
   >;
 };
 
@@ -323,7 +314,6 @@ function lockPayload(job?: MaintenanceJob): MaintenanceWorkerLock {
             trigger: job.trigger,
             sessionFile: job.sessionFile,
             leafId: job.leafId,
-            snapshotKey: job.snapshotKey,
           },
         }
       : {}),
@@ -566,7 +556,6 @@ export function sanitizeMaintenanceHistoryRecord(
     trigger: text(record.trigger, 4 * 1024),
     sessionFile: text(record.sessionFile, 4 * 1024),
     leafId: text(record.leafId, 4 * 1024),
-    snapshotKey: text(record.snapshotKey, 4 * 1024),
     skipped: text(record.skipped, 4 * 1024),
     error: text(record.error, 64 * 1024),
     auditError: text(record.auditError, 64 * 1024),
@@ -654,7 +643,6 @@ async function appendHistoryRecord(
           startedAt: sanitized.startedAt,
           sessionFile: sanitized.sessionFile,
           leafId: sanitized.leafId,
-          snapshotKey: sanitized.snapshotKey,
         }),
       )
       .digest("hex");
@@ -752,7 +740,6 @@ async function finalizeInterruptedJob(
     trigger: job.trigger,
     sessionFile: job.sessionFile,
     leafId: job.leafId,
-    snapshotKey: job.snapshotKey,
     startedAt,
     finishedAt: nowIso(),
     attempts: Math.max(1, Number(job.attempts || 0) + 1),
@@ -780,7 +767,6 @@ async function processJob(
     additionalExtensionPaths: job.additionalExtensionPaths,
     runId: job.id,
     startedAt,
-    snapshotKey: job.snapshotKey,
     maintenanceLockHandle,
   });
 }
@@ -838,7 +824,6 @@ export async function runSelfImproveMaintenanceJobNow(
         trigger: job.trigger,
         sessionFile: job.sessionFile,
         leafId: job.leafId,
-        snapshotKey: job.snapshotKey,
         startedAt,
         finishedAt,
         attempts: 1,
@@ -863,7 +848,6 @@ export async function runSelfImproveMaintenanceJobNow(
       trigger: job.trigger,
       sessionFile: job.sessionFile,
       leafId: job.leafId,
-      snapshotKey: job.snapshotKey,
       startedAt,
       finishedAt,
       attempts: 1,
@@ -938,7 +922,6 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
           trigger: job.trigger,
           sessionFile: job.sessionFile,
           leafId: job.leafId,
-          snapshotKey: job.snapshotKey,
           startedAt,
           finishedAt,
           attempts,
@@ -961,7 +944,6 @@ export async function processQueuedSelfImproveJobs(agentDir: string) {
         trigger: job.trigger,
         sessionFile: job.sessionFile,
         leafId: job.leafId,
-        snapshotKey: job.snapshotKey,
         startedAt,
         finishedAt,
         attempts: Math.max(1, Number(job.attempts || 0) || 1),

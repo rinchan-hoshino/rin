@@ -280,7 +280,6 @@ async function runInMemorySessionSelfImproveReview(options: {
   startedAt: string;
   sessionFile: string;
   leafId?: string;
-  snapshotKey?: string;
   trigger?: string;
   additionalExtensionPaths?: string[];
 }) {
@@ -292,7 +291,6 @@ async function runInMemorySessionSelfImproveReview(options: {
     source: {
       sessionFile: options.sessionFile,
       leafId: options.leafId,
-      snapshotKey: options.snapshotKey,
       trigger: options.trigger,
     },
   });
@@ -367,7 +365,6 @@ export async function runMaintainerUnderMaintenanceLock(
     additionalExtensionPaths?: string[];
     runId?: string;
     startedAt?: string;
-    snapshotKey?: string;
     maintenanceLockHandle: FileHandle;
   },
 ) {
@@ -386,7 +383,6 @@ export async function runMaintainerUnderMaintenanceLock(
     startedAt: safeString(opts.startedAt).trim() || new Date().toISOString(),
     sessionFile,
     leafId,
-    snapshotKey: safeString(opts.snapshotKey).trim() || undefined,
     trigger,
     additionalExtensionPaths: opts.additionalExtensionPaths,
   });

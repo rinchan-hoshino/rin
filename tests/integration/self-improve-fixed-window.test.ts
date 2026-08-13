@@ -83,7 +83,7 @@ test("self-improve defaults to one independent review every eight completed user
   const queued = await runClosingTurn(undefined, 8);
   assert.equal(queued.length, 1);
   assert.equal(queued[0].trigger, "self_improve:turn_window_review");
-  assert.match(queued[0].snapshotKey, /^turn-window:8:8:/);
+  assert.equal(queued[0].leafId, "entry-15");
   assert.equal(queued[0].sourceContext, undefined);
 });
 
@@ -91,5 +91,5 @@ test("self-improve turn-window cadence is independently configurable", async () 
   assert.equal((await runClosingTurn(2, 1)).length, 0);
   const queued = await runClosingTurn(2, 2);
   assert.equal(queued.length, 1);
-  assert.match(queued[0].snapshotKey, /^turn-window:2:2:/);
+  assert.equal(queued[0].leafId, "entry-3");
 });

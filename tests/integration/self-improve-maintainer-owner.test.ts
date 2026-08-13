@@ -280,7 +280,6 @@ const defaultResult = await withMaintenanceLock(defaultAgentDir, (maintenanceLoc
   maintainer.runMaintainerUnderMaintenanceLock({}, {
     agentDir: defaultAgentDir,
     sessionFile: defaultSessionFile,
-    snapshotKey: "snapshot-owner",
     maintenanceLockHandle,
   }),
 );
