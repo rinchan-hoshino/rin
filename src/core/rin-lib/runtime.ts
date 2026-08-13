@@ -15,7 +15,6 @@ import {
 } from "./profile.js";
 import memoryModule from "../memory/index.js";
 import selfImproveModule from "../self-improve/index.js";
-import taskModule from "../task/index.js";
 import chatModule from "../chat/index.js";
 import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
 import type {
@@ -67,7 +66,6 @@ export function createRinCapabilityDefinitions(
     todoCapability(),
     memoryModule(options),
     selfImproveModule(options),
-    taskModule(),
     chatModule(),
     ...(options.compactWithPiNative
       ? [

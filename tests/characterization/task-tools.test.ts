@@ -4,12 +4,7 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import taskCapability from "../../src/core/task/index.ts";
 import { createRinAgentSdk } from "../../src/core/rin-agent-sdk/index.ts";
-
-function getTaskTools() {
-  return taskCapability().tools || [];
-}
 
 async function listen(server, socketPath) {
   await new Promise((resolve, reject) => {
@@ -69,13 +64,6 @@ async function withDaemon(dataForPayload, run) {
     await fs.rm(runtimeDir, { recursive: true, force: true });
   }
 }
-
-test("task capability no longer exposes model task tools", () => {
-  assert.deepEqual(
-    getTaskTools().map((tool) => tool.name),
-    [],
-  );
-});
 
 test("agent SDK maps task helpers to daemon task commands", async () => {
   await withDaemon(

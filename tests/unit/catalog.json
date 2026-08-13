@@ -447,11 +447,6 @@
       "built": "dist/core/session/turn-scope.js"
     },
     {
-      "test": "tests/unit/task-capability.test.ts",
-      "source": "src/core/task/index.ts",
-      "built": "dist/core/task/index.js"
-    },
-    {
       "test": "tests/unit/text-utils.test.ts",
       "source": "src/core/text-utils.ts",
       "built": "dist/core/text-utils.js"

@@ -54,6 +54,18 @@ function pruningToolCallPadding(count: number, start = 0) {
   }).flat();
 }
 
+test("runtime does not register an empty task capability", () => {
+  const definitions = runtimeMod.createRinCapabilityDefinitions({
+    cwd: rootDir,
+    agentDir: rootDir,
+  });
+
+  assert.equal(
+    definitions.some((definition) => definition.name === "task"),
+    false,
+  );
+});
+
 test("provider-bound pruning is the sole builtin context-transform capability", () => {
   const definitions = runtimeMod.createRinCapabilityDefinitions({
     cwd: rootDir,
