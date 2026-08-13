@@ -72,6 +72,12 @@ const TodoEditItemParams: any = Type.Object(
 const TodoParams: any = createItemToolParameters(
   TodoAddItemParams,
   TodoEditItemParams,
+  {
+    actionDescriptions: {
+      remove:
+        "Remove one or more items by stable ID. When starting a new task, remove stale Todo items.",
+    },
+  },
 );
 
 function cloneTodo(value: unknown): Todo | undefined {
@@ -243,7 +249,7 @@ export default function todoCapability(): RinCapabilityDefinition {
     name: "todo",
     label: "Checklist",
     description:
-      "Maintain the current-branch execution checklist by stable item ID. Read returns the full list by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit changes one item; remove deletes selected IDs or clears all.",
+      "Maintain the current-branch execution checklist by stable item ID. Read returns the full list by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit changes one item; remove deletes one or more selected IDs.",
     promptSnippet: "Current-branch execution checklist.",
     promptGuidelines: [
       "Use todo when current-branch work has multiple concrete execution steps that benefit from a visible checklist.",
@@ -291,12 +297,10 @@ export default function todoCapability(): RinCapabilityDefinition {
 
       const removal = resolveRemovalIds(params, items);
       if (removal.error) return result("remove", removal.error);
-      const nextItems = removal.clear
-        ? []
-        : items
-            .filter((item) => !removal.ids!.includes(item.id))
-            .map((item) => ({ ...item }));
-      return commit("remove", nextItems, removal.clear ? 1 : nextId);
+      const nextItems = items
+        .filter((item) => !removal.ids!.includes(item.id))
+        .map((item) => ({ ...item }));
+      return commit("remove", nextItems, nextId);
     },
 
     renderCall(args: any, theme: Theme, context: any) {

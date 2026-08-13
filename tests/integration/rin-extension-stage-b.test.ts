@@ -177,7 +177,7 @@ test("core todo loads from configured runtime without extension paths", async ()
       );
       const cleared = await todoTool.execute(
         "tool-call-4",
-        { action: "remove", all: true },
+        { action: "remove", ids: [1, 2] },
         undefined,
         undefined,
         { cwd: agentDir },

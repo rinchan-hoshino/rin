@@ -22,12 +22,23 @@ export const ITEM_ACTIONS: readonly ItemAction[] = [
   "remove",
 ];
 
-export const ItemActionSchema = Type.Union(
-  ITEM_ACTIONS.map((action) => Type.Literal(action)),
-  {
-    description: "Item-level operation to perform.",
-  },
-);
+function createItemActionSchema(
+  descriptions: Partial<Record<ItemAction, string>> = {},
+) {
+  return Type.Union(
+    ITEM_ACTIONS.map((action) =>
+      Type.Literal(
+        action,
+        descriptions[action] ? { description: descriptions[action] } : {},
+      ),
+    ),
+    {
+      description: "Item-level operation to perform.",
+    },
+  );
+}
+
+export const ItemActionSchema = createItemActionSchema();
 
 const PositiveIdSchema = Type.Integer({
   minimum: 1,
@@ -37,10 +48,13 @@ const PositiveIdSchema = Type.Integer({
 export function createItemToolParameters(
   addItemSchema: any,
   editItemSchema: any,
+  options: {
+    actionDescriptions?: Partial<Record<ItemAction, string>>;
+  } = {},
 ) {
   return Type.Object(
     {
-      action: ItemActionSchema,
+      action: createItemActionSchema(options.actionDescriptions),
       offset: Type.Optional(
         Type.Integer({
           minimum: 1,
@@ -76,11 +90,6 @@ export function createItemToolParameters(
           description: "One or more stable IDs to remove atomically.",
         }),
       ),
-      all: Type.Optional(
-        Type.Boolean({
-          description: "Set to true with remove to clear every item.",
-        }),
-      ),
     },
     { additionalProperties: false },
   );
@@ -106,13 +115,6 @@ export function normalizeNextItemId(
   return Number.isSafeInteger(next) && next >= minimum ? next : minimum;
 }
 
-const ACTION_FIELDS: Record<ItemAction, Set<string>> = {
-  read: new Set(["action", "offset", "limit"]),
-  add: new Set(["action", "items", "beforeId"]),
-  edit: new Set(["action", "id", "item"]),
-  remove: new Set(["action", "ids", "all"]),
-};
-
 export function validateItemActionParams(params: unknown): {
   action?: ItemAction;
   error?: string;
@@ -123,8 +125,14 @@ export function validateItemActionParams(params: unknown): {
   if (!ITEM_ACTIONS.includes(action)) {
     return { error: "action must be read, add, edit, or remove" };
   }
+  const actionFields: Record<ItemAction, Set<string>> = {
+    read: new Set(["action", "offset", "limit"]),
+    add: new Set(["action", "items", "beforeId"]),
+    edit: new Set(["action", "id", "item"]),
+    remove: new Set(["action", "ids"]),
+  };
   const unexpected = Object.keys(value).filter(
-    (key) => !ACTION_FIELDS[action].has(key),
+    (key) => !actionFields[action].has(key),
   );
   if (unexpected.length > 0) {
     return {
@@ -209,18 +217,12 @@ export function resolveInsertIndex(
 export function resolveRemovalIds(
   params: any,
   items: ReadonlyArray<{ id: number }>,
-): { clear?: boolean; ids?: number[]; error?: string } {
-  if (params.all === true) {
-    if (params.ids !== undefined) {
-      return { error: "remove accepts either ids or all, not both" };
-    }
-    return { clear: true, ids: items.map((item) => item.id) };
-  }
+): { ids?: number[]; error?: string } {
   if (params.all !== undefined) {
-    return { error: "all must be true when provided" };
+    return { error: "remove does not accept all" };
   }
   if (!Array.isArray(params.ids) || params.ids.length === 0) {
-    return { error: "remove requires one or more ids, or all: true" };
+    return { error: "remove requires one or more ids" };
   }
   const ids: number[] = [];
   for (const value of params.ids) {

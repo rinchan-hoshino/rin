@@ -51,7 +51,6 @@ test("note exposes ranged reads and item-level mutation inputs", async () => {
   assert.equal(tool.name, "note");
   assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
     "action",
-    "all",
     "beforeId",
     "id",
     "ids",
@@ -60,6 +59,12 @@ test("note exposes ranged reads and item-level mutation inputs", async () => {
     "limit",
     "offset",
   ]);
+  assert.equal(
+    tool.parameters.properties.action.anyOf.find(
+      (entry: any) => entry.const === "remove",
+    ).description,
+    "Remove one or more items by stable ID. When starting a new task, remove stale notes.",
+  );
   assert.deepEqual(tool.parameters.required, ["action"]);
   assert.deepEqual(
     tool.parameters.properties.action.anyOf.map((entry: any) => entry.const),
@@ -115,7 +120,7 @@ test("note adds groups, inserts before an id, and supports full or ranged reads"
   });
 });
 
-test("note edits one entry, removes a group atomically, and clears explicitly", async () => {
+test("note edits one entry and removes one or many entries atomically", async () => {
   const { tool, entries } = await setup();
   await execute(tool, {
     action: "add",
@@ -136,10 +141,10 @@ test("note edits one entry, removes a group atomically, and clears explicitly", 
   assert.deepEqual(removed.details.items, [{ id: 2, text: "B updated" }]);
   assert.equal(removed.details.nextId, 4);
 
-  const cleared = await execute(tool, { action: "remove", all: true });
-  assert.deepEqual(cleared.details.items, []);
-  assert.equal(cleared.details.nextId, 1);
-  assert.equal(cleared.content[0].text, "No notes");
+  const removedLast = await execute(tool, { action: "remove", ids: [2] });
+  assert.deepEqual(removedLast.details.items, []);
+  assert.equal(removedLast.details.nextId, 4);
+  assert.equal(removedLast.content[0].text, "No notes");
 });
 
 test("note state normalizes current, legacy, malformed, and unavailable snapshots", () => {
@@ -250,7 +255,7 @@ test("note rejects old text-buffer calls and malformed operations without mutati
     { action: "add", beforeId: 4, items: [{ text: "missing anchor" }] },
     { action: "edit", id: 1, item: {} },
     { action: "remove", ids: [] },
-    { action: "remove", all: false },
+    { action: "remove", all: true },
   ]) {
     const result = await execute(tool, params);
     assert.ok(result.details.error, JSON.stringify(params));

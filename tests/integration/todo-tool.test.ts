@@ -114,17 +114,9 @@ test("shared item helpers validate operation shapes, IDs, insertion, and removal
     /anchor #3 not found/,
   );
 
-  assert.deepEqual(itemToolModule.resolveRemovalIds({ all: true }, items), {
-    clear: true,
-    ids: [1, 2],
-  });
   assert.match(
-    itemToolModule.resolveRemovalIds({ all: true, ids: [1] }, items).error,
-    /either ids or all/,
-  );
-  assert.match(
-    itemToolModule.resolveRemovalIds({ all: false }, items).error,
-    /all must be true/,
+    itemToolModule.resolveRemovalIds({ all: true }, items).error,
+    /does not accept all/,
   );
   assert.match(
     itemToolModule.resolveRemovalIds({ ids: [] }, items).error,
@@ -149,7 +141,6 @@ test("todo exposes ranged reads and item-level mutation inputs", async () => {
   assert.equal(tool.name, "todo");
   assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
     "action",
-    "all",
     "beforeId",
     "id",
     "ids",
@@ -162,6 +153,12 @@ test("todo exposes ranged reads and item-level mutation inputs", async () => {
   assert.deepEqual(
     tool.parameters.properties.action.anyOf.map((entry: any) => entry.const),
     ["read", "add", "edit", "remove"],
+  );
+  assert.equal(
+    tool.parameters.properties.action.anyOf.find(
+      (entry: any) => entry.const === "remove",
+    ).description,
+    "Remove one or more items by stable ID. When starting a new task, remove stale Todo items.",
   );
   assert.equal(tool.parameters.properties.offset.minimum, 1);
   assert.equal(tool.parameters.properties.limit.minimum, 1);
@@ -229,7 +226,7 @@ test("todo supports full or ranged reads and edits exactly one item", async () =
   assert.equal(entries.length, 2);
 });
 
-test("todo removes selected ids atomically and clears only with all true", async () => {
+test("todo removes one or many selected ids atomically", async () => {
   const { tool, entries } = await setup();
   await execute(tool, {
     action: "add",
@@ -248,10 +245,10 @@ test("todo removes selected ids atomically and clears only with all true", async
   assert.deepEqual(removed.details.items, [{ id: 2, text: "B", done: false }]);
   assert.equal(removed.details.nextId, 4);
 
-  const cleared = await execute(tool, { action: "remove", all: true });
-  assert.deepEqual(cleared.details.items, []);
-  assert.equal(cleared.details.nextId, 1);
-  assert.equal(cleared.content[0].text, "");
+  const removedLast = await execute(tool, { action: "remove", ids: [2] });
+  assert.deepEqual(removedLast.details.items, []);
+  assert.equal(removedLast.details.nextId, 4);
+  assert.equal(removedLast.content[0].text, "");
 });
 
 test("todo rejects old whole-list writes and malformed item operations without checkpointing", async () => {
@@ -268,7 +265,7 @@ test("todo rejects old whole-list writes and malformed item operations without c
     { action: "add", beforeId: 99, items: [{ text: "missing anchor" }] },
     { action: "edit", id: 1, item: {} },
     { action: "remove", ids: [] },
-    { action: "remove", all: false },
+    { action: "remove", all: true },
   ]) {
     const result = await execute(tool, params);
     assert.ok(result.details.error, JSON.stringify(params));

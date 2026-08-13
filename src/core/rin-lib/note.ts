@@ -66,6 +66,12 @@ const NoteEditItemParams: any = Type.Object(
 const NoteParams: any = createItemToolParameters(
   NoteAddItemParams,
   NoteEditItemParams,
+  {
+    actionDescriptions: {
+      remove:
+        "Remove one or more items by stable ID. When starting a new task, remove stale notes.",
+    },
+  },
 );
 
 function normalizeAddItems(
@@ -208,7 +214,7 @@ export default function noteCapability(): RinCapabilityDefinition {
     name: "note",
     label: "Notes",
     description:
-      "Maintain a minimal scratchpad of verified content that must survive compaction exactly as stable-ID items scoped to the session branch. Read returns every item by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit replaces one item; remove deletes selected IDs or clears all.",
+      "Maintain a minimal scratchpad of verified content that must survive compaction exactly as stable-ID items scoped to the session branch. Read returns every item by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit replaces one item; remove deletes one or more selected IDs.",
     promptSnippet:
       "Session-branch scratchpad for exact cross-compaction state.",
     promptGuidelines: [
@@ -257,12 +263,10 @@ export default function noteCapability(): RinCapabilityDefinition {
 
       const removal = resolveRemovalIds(params, items);
       if (removal.error) return result("remove", removal.error);
-      const nextItems = removal.clear
-        ? []
-        : items
-            .filter((item) => !removal.ids!.includes(item.id))
-            .map((item) => ({ ...item }));
-      return commit("remove", nextItems, removal.clear ? 1 : nextId);
+      const nextItems = items
+        .filter((item) => !removal.ids!.includes(item.id))
+        .map((item) => ({ ...item }));
+      return commit("remove", nextItems, nextId);
     },
 
     renderCall(args: any, theme: Theme, context: any) {
