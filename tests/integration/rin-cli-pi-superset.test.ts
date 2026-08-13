@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
+const execFileAsync = promisify(execFile);
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -27,7 +29,7 @@ const { tryRunPiCliCommand } = await import(
 async function runCli(entry: string, args: string[]) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cli-pi-"));
   try {
-    const result = spawnSync(process.execPath, [entry, ...args], {
+    return await execFileAsync(process.execPath, [entry, ...args], {
       cwd: home,
       encoding: "utf8",
       timeout: 15_000,
@@ -40,8 +42,6 @@ async function runCli(entry: string, args: string[]) {
         FORCE_COLOR: "0",
       },
     });
-    assert.equal(result.signal, null, result.stderr || result.stdout);
-    return result;
   } finally {
     await fs.rm(home, { recursive: true, force: true });
   }
@@ -53,7 +53,6 @@ test("rin reuses Pi package command implementations", async () => {
       runCli(piEntry, [command, "--help"]),
       runCli(rinEntry, [command, "--help"]),
     ]);
-    assert.equal(rin.status, pi.status, `${command} exit status`);
     assert.equal(rin.stdout, pi.stdout, `${command} help output`);
     assert.equal(rin.stderr, pi.stderr, `${command} help diagnostics`);
   }
@@ -71,7 +70,7 @@ test("rin auth check maps RIN_DIR into Pi's credential directory", async () => {
     );
     const env = { ...process.env };
     delete env.PI_CODING_AGENT_DIR;
-    const result = spawnSync(
+    const result = await execFileAsync(
       process.execPath,
       [
         rinEntry,
@@ -96,7 +95,6 @@ test("rin auth check maps RIN_DIR into Pi's credential directory", async () => {
         },
       },
     );
-    assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.deepEqual(JSON.parse(result.stdout), {
       status: "ready",
       provider: "openai",
@@ -109,7 +107,6 @@ test("rin auth check maps RIN_DIR into Pi's credential directory", async () => {
 
 test("rin top-level help includes Pi options and adds Rin commands", async () => {
   const result = await runCli(rinEntry, ["--help"]);
-  assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /--api-key <key>/);
   assert.match(result.stdout, /--session-id <id>/);
   assert.match(result.stdout, /--maint/);

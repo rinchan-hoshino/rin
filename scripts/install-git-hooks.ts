@@ -21,13 +21,18 @@ function findRepoRoot(cwd: string) {
 const repoRoot = findRepoRoot(process.cwd());
 if (!repoRoot) process.exit(0);
 
-const preCommit = path.join(repoRoot, ".githooks", "pre-commit");
-if (!fs.existsSync(preCommit)) process.exit(0);
+const hooks = ["pre-commit", "pre-push"].map((hook) =>
+  path.join(repoRoot, ".githooks", hook),
+);
+if (!hooks.some((hook) => fs.existsSync(hook))) process.exit(0);
 
-try {
-  fs.chmodSync(preCommit, 0o755);
-} catch {
-  // The executable bit is tracked by git; chmod is only a best-effort repair for odd filesystems.
+for (const hook of hooks) {
+  if (!fs.existsSync(hook)) continue;
+  try {
+    fs.chmodSync(hook, 0o755);
+  } catch {
+    // The executable bit is tracked by git; chmod is only a best-effort repair for odd filesystems.
+  }
 }
 
 runGit(["config", "core.hooksPath", ".githooks"], { cwd: repoRoot });

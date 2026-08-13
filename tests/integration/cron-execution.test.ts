@@ -2316,7 +2316,12 @@ test("cron scheduler isolates condition failures and continues the due loop", as
     await (scheduler as any).tick();
 
     const failed = scheduler.getTask("cron_condition_broken");
-    const started = scheduler.getTask("cron_condition_healthy");
+    let started = scheduler.getTask("cron_condition_healthy");
+    const completionDeadline = Date.now() + 5_000;
+    while (!started.lastFinishedAt && Date.now() < completionDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      started = scheduler.getTask("cron_condition_healthy");
+    }
     assert.equal(failed.runCount, 1);
     assert.match(String(failed.lastError || ""), /cron_condition_failed/);
     assert.ok(failed.lastFinishedAt);
@@ -2324,6 +2329,7 @@ test("cron scheduler isolates condition failures and continues the due loop", as
     assert.equal(failed.condition.lastResult, undefined);
     assert.ok(Date.parse(failed.nextRunAt) > Date.now());
     assert.equal(started.runCount, 1);
+    assert.ok(started.lastFinishedAt);
   } finally {
     scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });

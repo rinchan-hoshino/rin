@@ -79,7 +79,6 @@ test("local CI runner reuses image dependencies before repo checks", () => {
     "npm run lint",
     "npm run build",
     "npm run test:types:run",
-    "npm run test:release:run",
     "npm run test:inner",
     "npm run test:characterization:run",
   ]);
@@ -537,8 +536,19 @@ test("local CI runner enables inner install-to-TUI smoke before tests", () => {
   assertOrdered(runner, [
     "export RIN_INSTALL_TUI_CONTAINER_INNER=1",
     "export RIN_SYSTEM_TEST_CONTAINER_INNER=1",
-    "npm run test:release:run",
+    "npm run test:inner",
   ]);
+});
+
+test("local CI does not run behavior suites again before complete coverage", () => {
+  const runner = readRepoFile(".ci/local-ci/run-checks.sh");
+
+  assert.doesNotMatch(
+    runner,
+    /npm run test:(?:release|architecture|acceptance|property):run/,
+  );
+  assert.match(runner, /npm run test:inner/);
+  assert.match(runner, /npm run test:characterization:run/);
 });
 
 test("local CI runner bounds the full test gate", () => {
@@ -563,20 +573,24 @@ test("local CI runner preserves staged format target filtering", () => {
   assert.match(runner, /No staged files need format checking\./);
 });
 
-test("pre-commit runs only the bounded containerized local CI", () => {
-  const hook = readRepoFile(".githooks/pre-commit");
+test("git hooks split focused commit feedback from the complete push gate", () => {
+  const preCommit = readRepoFile(".githooks/pre-commit");
+  const prePush = readRepoFile(".githooks/pre-push");
 
-  assertOrdered(hook, [
-    'tree_id="$(git write-tree)"',
-    'image_tag="rin-local-ci:staged-${tree_id}"',
-    "git archive --format=tar --mtime=1970-01-01T00:00:00Z",
-    'scripts/test/build-test-image.sh "$archive_file" "$image_tag"',
-    'image_id="$(docker image inspect --format \'{{.Id}}\' "$image_tag")"',
-    "docker run --rm --network none --memory 4g --memory-swap 4g",
-  ]);
-  assert.doesNotMatch(hook, /--volume|^\s+-v(?:\s|=)/m);
-  assert.doesNotMatch(hook, /run_host_checks/);
-  assert.doesNotMatch(hook, /fallback/i);
-  assert.doesNotMatch(hook, /npm run lint/);
-  assert.doesNotMatch(hook, /npm test/);
+  for (const hook of [preCommit, prePush]) {
+    assertOrdered(hook, [
+      'tree_id="$(git write-tree)"',
+      'image_tag="rin-local-ci:staged-${tree_id}"',
+      "git archive --format=tar --mtime=1970-01-01T00:00:00Z",
+      'scripts/test/build-test-image.sh "$archive_file" "$image_tag"',
+      'image_id="$(docker image inspect --format \'{{.Id}}\' "$image_tag")"',
+      "docker run --rm --network none --memory 4g --memory-swap 4g",
+    ]);
+    assert.doesNotMatch(hook, /--volume|^\s+-v(?:\s|=)/m);
+    assert.doesNotMatch(hook, /fallback/i);
+  }
+  assert.match(preCommit, /\.ci\/local-ci\/run-staged\.sh/);
+  assert.match(preCommit, /STAGED_FILES/);
+  assert.match(prePush, /complete pre-push gate/);
+  assert.doesNotMatch(prePush, /run-staged/);
 });

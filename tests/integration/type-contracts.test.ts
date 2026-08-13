@@ -63,37 +63,40 @@ const contracts = [
   },
 ] as const;
 
-function compileFixture(
-  directory: string,
-  contract: (typeof contracts)[number],
-  text: string,
-) {
-  const sourcePath = path
-    .join(rootDir, contract.source)
-    .replace(/\.ts$/, ".js");
-  const specifier = path
-    .relative(directory, sourcePath)
-    .split(path.sep)
-    .join("/");
-  const fixture = path.join(directory, "fixture.ts");
-  fs.writeFileSync(
-    fixture,
-    text.replace(
-      "SOURCE",
-      specifier.startsWith(".") ? specifier : `./${specifier}`,
+function compileFixtures(directory: string, kind: "valid" | "invalid") {
+  const fixtures = contracts.map((contract, index) => {
+    const sourcePath = path
+      .join(rootDir, contract.source)
+      .replace(/\.ts$/, ".js");
+    const specifier = path
+      .relative(directory, sourcePath)
+      .split(path.sep)
+      .join("/");
+    const fixture = path.join(directory, `${kind}-${index}.ts`);
+    fs.writeFileSync(
+      fixture,
+      contract[kind].replace(
+        "SOURCE",
+        specifier.startsWith(".") ? specifier : `./${specifier}`,
+      ),
+    );
+    return { contract, fixture };
+  });
+  const diagnostics = ts.getPreEmitDiagnostics(
+    ts.createProgram(
+      fixtures.map(({ fixture }) => fixture),
+      {
+        strict: true,
+        noEmit: true,
+        skipLibCheck: true,
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.NodeNext,
+        moduleResolution: ts.ModuleResolutionKind.NodeNext,
+        types: ["node"],
+      },
     ),
   );
-  return ts.getPreEmitDiagnostics(
-    ts.createProgram([fixture], {
-      strict: true,
-      noEmit: true,
-      skipLibCheck: true,
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.NodeNext,
-      moduleResolution: ts.ModuleResolutionKind.NodeNext,
-      types: ["node"],
-    }),
-  );
+  return { diagnostics, fixtures };
 }
 
 test("type-only production modules enforce positive and negative compile contracts", async () => {
@@ -101,23 +104,29 @@ test("type-only production modules enforce positive and negative compile contrac
     path.join(os.tmpdir(), "rin-type-contract-"),
   );
   try {
-    for (const contract of contracts) {
-      assert.deepEqual(
-        compileFixture(directory, contract, contract.valid),
-        [],
-        contract.source,
-      );
+    const valid = compileFixtures(directory, "valid");
+    assert.deepEqual(valid.diagnostics, []);
+
+    const invalid = compileFixtures(directory, "invalid");
+    for (const { contract, fixture } of invalid.fixtures) {
       assert.ok(
-        compileFixture(directory, contract, contract.invalid).length > 0,
+        invalid.diagnostics.some(
+          (diagnostic) => diagnostic.file?.fileName === fixture,
+        ),
         contract.source,
-      );
-      const runtime = await importBuiltModule(contract.built);
-      assert.deepEqual(
-        Object.keys(runtime),
-        [],
-        `${contract.source} runtime surface`,
       );
     }
+
+    await Promise.all(
+      contracts.map(async (contract) => {
+        const runtime = await importBuiltModule(contract.built);
+        assert.deepEqual(
+          Object.keys(runtime),
+          [],
+          `${contract.source} runtime surface`,
+        );
+      }),
+    );
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

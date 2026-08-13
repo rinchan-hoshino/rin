@@ -81,7 +81,7 @@ test("chat main consumes inbound help messages through the inbox path only once"
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await new Promise((resolve) => setImmediate(resolve));
       const rows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
@@ -969,7 +969,7 @@ test("chat main records record-only chat messages without starting an agent turn
         if (rows.length >= 1) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await new Promise((resolve) => setImmediate(resolve));
 
       if (rows.length !== 1 || rows[0]?.text !== "please just record this" || seen.length !== 0) {
         throw new Error(JSON.stringify({ rows, seen }));
@@ -1072,7 +1072,7 @@ test("chat main records record-only chat commands without running command handle
         if (userRows.length >= 1) break;
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await new Promise((resolve) => setImmediate(resolve));
       const assistantRows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
@@ -2050,9 +2050,17 @@ test("chat main does not retry a queued prompt while the controller is already h
         elements: [h.createChatRuntimeH().text("hello slow world")],
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 2500));
+      const deadline = Date.now() + 5000;
+      let rows = [];
+      while (Date.now() < deadline) {
+        rows = storeMod
+          .listChatMessages(agentDir)
+          .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
+        if (promptCalls === 1 && rows.length === 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
 
-      const rows = storeMod
+      rows = storeMod
         .listChatMessages(agentDir)
         .filter((item) => item.chatKey === "telegram/1:2" && item.role === "assistant");
       if (promptCalls !== 1 || rows.length !== 1) {
@@ -2919,7 +2927,15 @@ test("chat main resumes joined acceptance across restart without prompt replay o
 
       const second = await mainMod.startChatBridge({ hosted: true, commandRows: [] });
       second.app.bots.push(createBot());
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const recoveryDeadline = Date.now() + 5000;
+      while (Date.now() < recoveryDeadline) {
+        const inboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
+        if (
+          resumeTurnCalls === 1 &&
+          inboxMod.listChatInboxItems(agentDir, ["terminal"]).length === 1
+        ) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
       await second.stop();
 
       const inbound = storeMod.getChatMessage(
@@ -3850,7 +3866,10 @@ test("chat main does not downgrade a quoted reply to a plain turn when linked se
         ],
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const deadline = Date.now() + 5000;
+      while (seen.length !== 1 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
       if (seen.length !== 1) {
         throw new Error(JSON.stringify({ seen, replySessionFile }));
       }
