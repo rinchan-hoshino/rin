@@ -1,7 +1,13 @@
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
-export type ItemAction = "read" | "add" | "edit" | "remove";
+export type ItemAction =
+  | "read"
+  | "add"
+  | "edit"
+  | "remove"
+  | "toggle"
+  | "clear";
 
 export function updateItemToolText(
   text: string,
@@ -20,25 +26,27 @@ export const ITEM_ACTIONS: readonly ItemAction[] = [
   "add",
   "edit",
   "remove",
+  "toggle",
+  "clear",
 ];
 
-function createItemActionSchema(
-  descriptions: Partial<Record<ItemAction, string>> = {},
-) {
+export const DEFAULT_ITEM_ACTIONS: readonly ItemAction[] = [
+  "read",
+  "add",
+  "edit",
+  "remove",
+];
+
+function createItemActionSchema(actions: readonly ItemAction[]) {
   return Type.Union(
-    ITEM_ACTIONS.map((action) =>
-      Type.Literal(
-        action,
-        descriptions[action] ? { description: descriptions[action] } : {},
-      ),
-    ),
+    actions.map((action) => Type.Literal(action)),
     {
       description: "Item-level operation to perform.",
     },
   );
 }
 
-export const ItemActionSchema = createItemActionSchema();
+export const ItemActionSchema = createItemActionSchema(DEFAULT_ITEM_ACTIONS);
 
 const PositiveIdSchema = Type.Integer({
   minimum: 1,
@@ -49,12 +57,12 @@ export function createItemToolParameters(
   addItemSchema: any,
   editItemSchema: any,
   options: {
-    actionDescriptions?: Partial<Record<ItemAction, string>>;
+    actions?: readonly ItemAction[];
   } = {},
 ) {
   return Type.Object(
     {
-      action: createItemActionSchema(options.actionDescriptions),
+      action: createItemActionSchema(options.actions ?? DEFAULT_ITEM_ACTIONS),
       offset: Type.Optional(
         Type.Integer({
           minimum: 1,
@@ -87,7 +95,7 @@ export function createItemToolParameters(
       ids: Type.Optional(
         Type.Array(PositiveIdSchema, {
           minItems: 1,
-          description: "One or more stable IDs to remove atomically.",
+          description: "One or more stable IDs selected for this operation.",
         }),
       ),
     },
@@ -115,21 +123,31 @@ export function normalizeNextItemId(
   return Number.isSafeInteger(next) && next >= minimum ? next : minimum;
 }
 
-export function validateItemActionParams(params: unknown): {
+function formatAllowedActions(actions: readonly ItemAction[]) {
+  if (actions.length < 2) return actions.join("");
+  return `${actions.slice(0, -1).join(", ")}, or ${actions.at(-1)}`;
+}
+
+export function validateItemActionParams(
+  params: unknown,
+  allowedActions: readonly ItemAction[] = DEFAULT_ITEM_ACTIONS,
+): {
   action?: ItemAction;
   error?: string;
 } {
   const value = params && typeof params === "object" ? (params as any) : null;
   if (!value) return { error: "action is required" };
   const action = value.action as ItemAction;
-  if (!ITEM_ACTIONS.includes(action)) {
-    return { error: "action must be read, add, edit, or remove" };
+  if (!allowedActions.includes(action)) {
+    return { error: `action must be ${formatAllowedActions(allowedActions)}` };
   }
   const actionFields: Record<ItemAction, Set<string>> = {
     read: new Set(["action", "offset", "limit"]),
     add: new Set(["action", "items", "beforeId"]),
     edit: new Set(["action", "id", "item"]),
     remove: new Set(["action", "ids"]),
+    toggle: new Set(["action", "ids"]),
+    clear: new Set(["action"]),
   };
   const unexpected = Object.keys(value).filter(
     (key) => !actionFields[action].has(key),
@@ -214,15 +232,16 @@ export function resolveInsertIndex(
     : { error: `insertion anchor #${id} not found` };
 }
 
-export function resolveRemovalIds(
+export function resolveSelectedItemIds(
+  action: "remove" | "toggle",
   params: any,
   items: ReadonlyArray<{ id: number }>,
 ): { ids?: number[]; error?: string } {
   if (params.all !== undefined) {
-    return { error: "remove does not accept all" };
+    return { error: `${action} does not accept all` };
   }
   if (!Array.isArray(params.ids) || params.ids.length === 0) {
-    return { error: "remove requires one or more ids" };
+    return { error: `${action} requires one or more ids` };
   }
   const ids: number[] = [];
   for (const value of params.ids) {

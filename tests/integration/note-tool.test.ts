@@ -63,12 +63,12 @@ test("note exposes ranged reads and item-level mutation inputs", async () => {
     tool.parameters.properties.action.anyOf.find(
       (entry: any) => entry.const === "remove",
     ).description,
-    "Remove one or more items by stable ID. When starting a new task, remove stale notes.",
+    undefined,
   );
   assert.deepEqual(tool.parameters.required, ["action"]);
   assert.deepEqual(
     tool.parameters.properties.action.anyOf.map((entry: any) => entry.const),
-    ["read", "add", "edit", "remove"],
+    ["read", "add", "edit", "remove", "clear"],
   );
   assert.equal(tool.parameters.properties.offset.minimum, 1);
   assert.equal(tool.parameters.properties.limit.minimum, 1);
@@ -120,7 +120,7 @@ test("note adds groups, inserts before an id, and supports full or ranged reads"
   });
 });
 
-test("note edits one entry and removes one or many entries atomically", async () => {
+test("note edits and removes selected entries, then clears the scratchpad explicitly", async () => {
   const { tool, entries } = await setup();
   await execute(tool, {
     action: "add",
@@ -141,10 +141,11 @@ test("note edits one entry and removes one or many entries atomically", async ()
   assert.deepEqual(removed.details.items, [{ id: 2, text: "B updated" }]);
   assert.equal(removed.details.nextId, 4);
 
-  const removedLast = await execute(tool, { action: "remove", ids: [2] });
-  assert.deepEqual(removedLast.details.items, []);
-  assert.equal(removedLast.details.nextId, 4);
-  assert.equal(removedLast.content[0].text, "No notes");
+  const cleared = await execute(tool, { action: "clear" });
+  assert.equal(cleared.details.action, "clear");
+  assert.deepEqual(cleared.details.items, []);
+  assert.equal(cleared.details.nextId, 1);
+  assert.equal(cleared.content[0].text, "No notes");
 });
 
 test("note state normalizes current, legacy, malformed, and unavailable snapshots", () => {
@@ -254,6 +255,8 @@ test("note rejects old text-buffer calls and malformed operations without mutati
     { action: "add", items: [{ text: " " }] },
     { action: "add", beforeId: 4, items: [{ text: "missing anchor" }] },
     { action: "edit", id: 1, item: {} },
+    { action: "toggle", id: 1 },
+    { action: "clear", ids: [1] },
     { action: "remove", ids: [] },
     { action: "remove", all: true },
   ]) {

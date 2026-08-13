@@ -19,7 +19,7 @@ import {
   normalizeNextItemId,
   resolveInsertIndex,
   resolveItemReadWindow,
-  resolveRemovalIds,
+  resolveSelectedItemIds,
   type ItemAction,
   type ItemReadWindow,
   updateItemToolText,
@@ -63,15 +63,18 @@ const NoteEditItemParams: any = Type.Object(
   { additionalProperties: false },
 );
 
+const NOTE_ACTIONS: readonly ItemAction[] = [
+  "read",
+  "add",
+  "edit",
+  "remove",
+  "clear",
+];
+
 const NoteParams: any = createItemToolParameters(
   NoteAddItemParams,
   NoteEditItemParams,
-  {
-    actionDescriptions: {
-      remove:
-        "Remove one or more items by stable ID. When starting a new task, remove stale notes.",
-    },
-  },
+  { actions: NOTE_ACTIONS },
 );
 
 function normalizeAddItems(
@@ -126,7 +129,7 @@ function parseDetails(value: unknown): NoteDetails | undefined {
     .filter((item: RinNoteItem | undefined): item is RinNoteItem =>
       Boolean(item),
     );
-  const action = ["read", "add", "edit", "remove"].includes(details.action)
+  const action = NOTE_ACTIONS.includes(details.action)
     ? details.action
     : "read";
   return {
@@ -214,7 +217,7 @@ export default function noteCapability(): RinCapabilityDefinition {
     name: "note",
     label: "Notes",
     description:
-      "Maintain a minimal scratchpad of verified content that must survive compaction exactly as stable-ID items scoped to the session branch. Read returns every item by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit replaces one item; remove deletes one or more selected IDs.",
+      "Maintain a minimal scratchpad of verified content that must survive compaction exactly as stable-ID items scoped to the session branch. Read returns every item by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit replaces one item; remove deletes selected IDs; clear removes every item.",
     promptSnippet:
       "Session-branch scratchpad for exact cross-compaction state.",
     promptGuidelines: [
@@ -223,7 +226,7 @@ export default function noteCapability(): RinCapabilityDefinition {
     parameters: NoteParams,
 
     async execute(_toolCallId: string, params: any, signal?: AbortSignal) {
-      const validated = validateItemActionParams(params);
+      const validated = validateItemActionParams(params, NOTE_ACTIONS);
       const action = validated.action ?? "read";
       if (validated.error) return result(action, validated.error);
       if (action === "read") {
@@ -261,7 +264,11 @@ export default function noteCapability(): RinCapabilityDefinition {
         return commit("edit", nextItems, nextId);
       }
 
-      const removal = resolveRemovalIds(params, items);
+      if (action === "clear") {
+        return commit("clear", [], 1);
+      }
+
+      const removal = resolveSelectedItemIds("remove", params, items);
       if (removal.error) return result("remove", removal.error);
       const nextItems = items
         .filter((item) => !removal.ids!.includes(item.id))

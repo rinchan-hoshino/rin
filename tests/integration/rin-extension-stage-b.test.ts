@@ -163,7 +163,7 @@ test("core todo loads from configured runtime without extension paths", async ()
       );
       const edited = await todoTool.execute(
         "tool-call-2",
-        { action: "edit", id: 1, item: { done: true } },
+        { action: "toggle", ids: [1] },
         undefined,
         undefined,
         { cwd: agentDir },
@@ -177,7 +177,7 @@ test("core todo loads from configured runtime without extension paths", async ()
       );
       const cleared = await todoTool.execute(
         "tool-call-4",
-        { action: "remove", ids: [1, 2] },
+        { action: "clear" },
         undefined,
         undefined,
         { cwd: agentDir },
@@ -197,7 +197,7 @@ test("core todo loads from configured runtime without extension paths", async ()
       ]);
       assert.equal(read.details.action, "read");
       assert.deepEqual(read.details.items, edited.details.items);
-      assert.equal(cleared.details.action, "remove");
+      assert.equal(cleared.details.action, "clear");
       assert.equal(cleared.content[0].text, "");
       assert.deepEqual(cleared.details.items, []);
     } finally {

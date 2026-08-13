@@ -19,7 +19,7 @@ import {
   normalizeNextItemId,
   resolveInsertIndex,
   resolveItemReadWindow,
-  resolveRemovalIds,
+  resolveSelectedItemIds,
   type ItemAction,
   type ItemReadWindow,
   updateItemToolText,
@@ -59,25 +59,24 @@ const TodoAddItemParams: any = Type.Object(
 
 const TodoEditItemParams: any = Type.Object(
   {
-    text: Type.Optional(
-      Type.String({ minLength: 1, description: "Replacement item text." }),
-    ),
-    done: Type.Optional(
-      Type.Boolean({ description: "Replacement completion state." }),
-    ),
+    text: Type.String({ minLength: 1, description: "Replacement item text." }),
   },
   { additionalProperties: false },
 );
 
+const TODO_ACTIONS: readonly ItemAction[] = [
+  "read",
+  "add",
+  "edit",
+  "remove",
+  "toggle",
+  "clear",
+];
+
 const TodoParams: any = createItemToolParameters(
   TodoAddItemParams,
   TodoEditItemParams,
-  {
-    actionDescriptions: {
-      remove:
-        "Remove one or more items by stable ID. When starting a new task, remove stale Todo items.",
-    },
-  },
+  { actions: TODO_ACTIONS },
 );
 
 function cloneTodo(value: unknown): Todo | undefined {
@@ -108,28 +107,13 @@ function normalizeAddItems(
   return items;
 }
 
-function normalizeEdit(
-  value: unknown,
-): Partial<Pick<Todo, "text" | "done">> | undefined {
+function normalizeEdit(value: unknown): { text: string } | undefined {
   const item = value && typeof value === "object" ? (value as any) : null;
-  if (!item) return undefined;
-  const keys = Object.keys(item);
-  if (
-    keys.length === 0 ||
-    keys.some((key) => key !== "text" && key !== "done")
-  ) {
+  if (!item || Object.keys(item).some((key) => key !== "text")) {
     return undefined;
   }
-  const edit: Partial<Pick<Todo, "text" | "done">> = {};
-  if (Object.hasOwn(item, "text")) {
-    if (typeof item.text !== "string" || !item.text.trim()) return undefined;
-    edit.text = item.text.trim();
-  }
-  if (Object.hasOwn(item, "done")) {
-    if (typeof item.done !== "boolean") return undefined;
-    edit.done = item.done;
-  }
-  return edit;
+  const text = typeof item.text === "string" ? item.text.trim() : "";
+  return text ? { text } : undefined;
 }
 
 function readTodoDetails(value: unknown): TodoDetails | undefined {
@@ -138,7 +122,7 @@ function readTodoDetails(value: unknown): TodoDetails | undefined {
   const items = details.items
     .map(cloneTodo)
     .filter((item): item is Todo => Boolean(item));
-  const action = ["read", "add", "edit", "remove"].includes(details.action)
+  const action = TODO_ACTIONS.includes(details.action)
     ? details.action
     : "read";
   return {
@@ -249,7 +233,7 @@ export default function todoCapability(): RinCapabilityDefinition {
     name: "todo",
     label: "Checklist",
     description:
-      "Maintain the current-branch execution checklist by stable item ID. Read returns the full list by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit changes one item; remove deletes one or more selected IDs.",
+      "Maintain the current-branch execution checklist by stable item ID. Read returns the full list by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit changes item text; remove deletes selected IDs; toggle changes the completion state of one or more selected IDs atomically; clear removes every item.",
     promptSnippet: "Current-branch execution checklist.",
     promptGuidelines: [
       "Use todo when current-branch work has multiple concrete execution steps that benefit from a visible checklist.",
@@ -257,7 +241,7 @@ export default function todoCapability(): RinCapabilityDefinition {
     parameters: TodoParams,
 
     async execute(_toolCallId: string, params: any, signal?: AbortSignal) {
-      const validated = validateItemActionParams(params);
+      const validated = validateItemActionParams(params, TODO_ACTIONS);
       const action = validated.action ?? "read";
       if (validated.error) return result(action, validated.error);
       if (action === "read") {
@@ -291,11 +275,26 @@ export default function todoCapability(): RinCapabilityDefinition {
         const index = items.findIndex((item) => item.id === id);
         if (index < 0) return result("edit", `#${id} not found`);
         const nextItems = items.map((item) => ({ ...item }));
-        nextItems[index] = { ...nextItems[index]!, ...edit };
+        nextItems[index] = { ...nextItems[index]!, text: edit.text };
         return commit("edit", nextItems, nextId);
       }
 
-      const removal = resolveRemovalIds(params, items);
+      if (action === "toggle") {
+        const selection = resolveSelectedItemIds("toggle", params, items);
+        if (selection.error) return result("toggle", selection.error);
+        const selected = new Set(selection.ids);
+        const nextItems = items.map((item) => ({
+          ...item,
+          done: selected.has(item.id) ? !item.done : item.done,
+        }));
+        return commit("toggle", nextItems, nextId);
+      }
+
+      if (action === "clear") {
+        return commit("clear", [], 1);
+      }
+
+      const removal = resolveSelectedItemIds("remove", params, items);
       if (removal.error) return result("remove", removal.error);
       const nextItems = items
         .filter((item) => !removal.ids!.includes(item.id))
