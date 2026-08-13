@@ -321,6 +321,7 @@ export class RinFrontendTurnDriver {
   >();
   private readonly retiredFrontendClients =
     new WeakSet<RinFrontendTurnClient>();
+  private clientEventUnsubscribe: (() => void) | null = null;
   private pendingTurnCount = 0;
   private readonly pendingSubmissionSettlements = new Map<
     string,
@@ -417,6 +418,33 @@ export class RinFrontendTurnDriver {
     await Promise.all([...this.listeners].map((listener) => listener(event)));
   }
 
+  private ensureClientEventSubscription(
+    client: RinFrontendTurnClient,
+    subscriptionEpoch: number,
+  ) {
+    if (this.clientEventUnsubscribe) return;
+    this.clientEventUnsubscribe = client.subscribe(
+      (event: RinFrontendEvent) => {
+        void this.handleClientEvent(event, subscriptionEpoch).catch((error) => {
+          if (this.lifecycleEpoch !== subscriptionEpoch) return;
+          this.reportEventHandlingError({
+            stage: "client_event",
+            error,
+            clientEvent: event,
+          });
+        });
+      },
+    );
+  }
+
+  private clearClientEventSubscription() {
+    const unsubscribe = this.clientEventUnsubscribe;
+    this.clientEventUnsubscribe = null;
+    try {
+      unsubscribe?.();
+    } catch {}
+  }
+
   private async disconnectSupersededClient(client: RinFrontendTurnClient) {
     if (!this.daemonShutdownDetached && this.client === client) return false;
     await client.disconnect?.().catch(() => {});
@@ -444,18 +472,8 @@ export class RinFrontendTurnDriver {
       const disconnected = await this.disconnectSupersededClient(client);
       this.throwIfLifecycleEpochChanged(connectionEpoch);
       if (disconnected) return false;
-      const subscriptionEpoch = connectionEpoch;
-      client.subscribe((event: RinFrontendEvent) => {
-        void this.handleClientEvent(event, subscriptionEpoch).catch((error) => {
-          if (this.lifecycleEpoch !== subscriptionEpoch) return;
-          this.reportEventHandlingError({
-            stage: "client_event",
-            error,
-            clientEvent: event,
-          });
-        });
-      });
     }
+    this.ensureClientEventSubscription(client, connectionEpoch);
 
     const wantedSessionFile = safeString(
       options.restoreSessionFile || "",
@@ -504,6 +522,7 @@ export class RinFrontendTurnDriver {
     const client = this.client;
     if (client) this.retiredFrontendClients.add(client);
     this.client = null;
+    this.clearClientEventSubscription();
     this.frontendState = {};
     if (client?.disconnect) {
       void client.disconnect().catch(() => {});
@@ -514,6 +533,7 @@ export class RinFrontendTurnDriver {
     this.daemonShutdownDetached = true;
     const client = this.client;
     this.client = null;
+    this.clearClientEventSubscription();
     if (client?.disconnect) {
       await client.disconnect().catch(() => {});
     }
@@ -530,6 +550,7 @@ export class RinFrontendTurnDriver {
     this.frontendPhase = "idle";
     const client = this.client;
     this.client = null;
+    this.clearClientEventSubscription();
     this.frontendState = {};
     if (client?.disconnect) {
       await client.disconnect().catch(() => {});

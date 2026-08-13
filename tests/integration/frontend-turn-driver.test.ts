@@ -304,6 +304,58 @@ test("frontend driver reports when the backend queue becomes idle", async () => 
   );
 });
 
+test("frontend driver keeps one backend event subscription across reconnects", async () => {
+  const client = createFrontendClient();
+  const backendListeners = new Set<(event: any) => void | Promise<void>>();
+  client.subscribe = (listener: any) => {
+    backendListeners.add(listener);
+    return () => backendListeners.delete(listener);
+  };
+  client.emit = async (event: any) => {
+    client.rememberTerminal(event?.payload);
+    await Promise.all([...backendListeners].map((listener) => listener(event)));
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  const seen: any[] = [];
+  driver.subscribe((event: any) => seen.push(event));
+
+  await driver.connect();
+  await client.disconnect();
+  await driver.connect();
+  await client.disconnect();
+  await driver.connect();
+
+  await client.emit({
+    type: "ui",
+    payload: { type: "compaction_start", reason: "threshold" },
+  });
+  await client.emit({
+    type: "ui",
+    payload: {
+      type: "compaction_end",
+      reason: "threshold",
+      result: { tokensBefore: 108642 },
+    },
+  });
+
+  assert.equal(backendListeners.size, 1);
+  assert.equal(
+    seen.filter((event) => event.type === "compaction_start_notice").length,
+    1,
+  );
+  assert.equal(
+    seen.filter(
+      (event) =>
+        event.type === "passive_notice" &&
+        event.noticeKind === "compaction_end",
+    ).length,
+    1,
+  );
+});
+
 test("frontend client event handler failures are reported without becoming turn errors", async () => {
   const client = createFrontendClient();
   const failures: any[] = [];
