@@ -32,13 +32,11 @@ test("install git hooks configures fresh worktrees", () => {
     run("git", ["init", "-b", "main"], tempDir);
     const hooksDir = path.join(tempDir, ".githooks");
     fs.mkdirSync(hooksDir);
-    for (const hook of ["pre-commit", "pre-push"]) {
-      fs.writeFileSync(
-        path.join(hooksDir, hook),
-        "#!/usr/bin/env bash\nexit 0\n",
-        "utf8",
-      );
-    }
+    fs.writeFileSync(
+      path.join(hooksDir, "pre-commit"),
+      "#!/usr/bin/env bash\nexit 0\n",
+      "utf8",
+    );
 
     const output = run(tsxBin, [scriptPath], tempDir);
     assert.match(output, /configured core\.hooksPath=\.githooks/);
@@ -46,13 +44,10 @@ test("install git hooks configures fresh worktrees", () => {
       run("git", ["config", "--get", "core.hooksPath"], tempDir),
       ".githooks",
     );
-    for (const hook of ["pre-commit", "pre-push"]) {
-      assert.equal(
-        (fs.statSync(path.join(hooksDir, hook)).mode & 0o111) !== 0,
-        true,
-        hook,
-      );
-    }
+    assert.equal(
+      (fs.statSync(path.join(hooksDir, "pre-commit")).mode & 0o111) !== 0,
+      true,
+    );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

@@ -9,11 +9,9 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-staged_files="$(git diff --cached --name-only --diff-filter=ACMR)"
-format_targets="$(
-  printf '%s\n' "$staged_files" |
-    grep -E '^(src|tests|scripts|extensions|docs)/.*\.(ts|md|json|yml|yaml)$|^\.github/workflows/.*\.(yml|yaml)$|^(README\.md|package(-lock)?\.json|tsconfig.*\.json|eslint\.config\.ts)$' || true
-)"
+format_targets="$({
+  git diff --cached --name-only --diff-filter=ACMR
+} | grep -E '^(src|tests|scripts|extensions|docs)/.*\.(ts|md|json|yml|yaml)$|^\.github/workflows/.*\.(yml|yaml)$|^(README\.md|package(-lock)?\.json|tsconfig.*\.json|eslint\.config\.ts)$' || true)"
 
 tree_id="$(git write-tree)"
 image_tag="rin-local-ci:staged-${tree_id}"
@@ -29,9 +27,5 @@ echo "rin local ci: building container image from staged tree..."
 scripts/test/build-test-image.sh "$archive_file" "$image_tag"
 image_id="$(docker image inspect --format '{{.Id}}' "$image_tag")"
 
-echo "rin local ci: running staged checks from staged tree..."
-docker run --rm --network none --memory 4g --memory-swap 4g \
-  --entrypoint /opt/rin/source/.ci/local-ci/run-staged.sh \
-  -e FORMAT_TARGETS="$format_targets" \
-  -e STAGED_FILES="$staged_files" \
-  "$image_id"
+echo "rin local ci: running format, lint, test from staged tree..."
+docker run --rm --network none --memory 4g --memory-swap 4g -e FORMAT_TARGETS_SET=1 -e FORMAT_TARGETS="$format_targets" "$image_id"

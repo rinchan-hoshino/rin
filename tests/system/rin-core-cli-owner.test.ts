@@ -163,61 +163,62 @@ test("Rin core CLI dispatches every local, internal, target, and default command
       ];
       await main.startRinCli();
     `;
-    await Promise.all(
-      (
-        [
-          [["__memory_index_internal"], "dist/core/rin/memory-index.js"],
-          [["__self_improve_internal"], "dist/core/rin/self-improve.js"],
-          [["__status_internal"], "dist/core/rin/status.js"],
-          [["__tasks_internal"], "dist/core/rin/tasks.js"],
-          [["-p", "owner prompt"], "dist/core/rin/run.js"],
-          [["target", "list"], "dist/core/rin/targets.js"],
-          [["status", "--target=remote"], "dist/core/rin-targets/runner.js"],
-          [["update"], "dist/core/rin/shared.js"],
-          [["start"], "dist/core/rin/control.js"],
-          [["stop"], "dist/core/rin/control.js"],
-          [["restart"], "dist/core/rin/control.js"],
-          [["doctor"], "dist/core/rin/doctor.js"],
-          [["status"], "dist/core/rin/status.js"],
-          [["tasks"], "dist/core/rin/tasks.js"],
-          [["self-improve"], "dist/core/rin/self-improve.js"],
-          [["versions"], "dist/core/rin/versions.js"],
-          [["rollback"], "dist/core/rin/versions.js"],
-          [["memory-index"], "dist/core/rin/memory-index.js"],
-          [["unknown"], "dist/core/rin/launch.js"],
-        ] as const
-      ).map(async ([argv, target]) => {
-        await assert.rejects(
-          () =>
-            execFileAsync(
-              process.execPath,
-              [
-                "--import",
-                "tsx",
-                "--import",
-                registerFixture,
-                "--input-type=module",
-                "-e",
-                failureScript,
-              ],
-              {
-                env: {
-                  ...sandbox.env,
-                  RIN_TEST_MAIN_FAILURE_ARGV: JSON.stringify(argv),
-                  RIN_TEST_MAIN_IMPORT_FAILURE: target,
+    const failureCases = [
+      [["__memory_index_internal"], "dist/core/rin/memory-index.js"],
+      [["__self_improve_internal"], "dist/core/rin/self-improve.js"],
+      [["__status_internal"], "dist/core/rin/status.js"],
+      [["__tasks_internal"], "dist/core/rin/tasks.js"],
+      [["-p", "owner prompt"], "dist/core/rin/run.js"],
+      [["target", "list"], "dist/core/rin/targets.js"],
+      [["status", "--target=remote"], "dist/core/rin-targets/runner.js"],
+      [["update"], "dist/core/rin/shared.js"],
+      [["start"], "dist/core/rin/control.js"],
+      [["stop"], "dist/core/rin/control.js"],
+      [["restart"], "dist/core/rin/control.js"],
+      [["doctor"], "dist/core/rin/doctor.js"],
+      [["status"], "dist/core/rin/status.js"],
+      [["tasks"], "dist/core/rin/tasks.js"],
+      [["self-improve"], "dist/core/rin/self-improve.js"],
+      [["versions"], "dist/core/rin/versions.js"],
+      [["rollback"], "dist/core/rin/versions.js"],
+      [["memory-index"], "dist/core/rin/memory-index.js"],
+      [["unknown"], "dist/core/rin/launch.js"],
+    ] as const;
+    for (let index = 0; index < failureCases.length; index += 2) {
+      await Promise.all(
+        failureCases.slice(index, index + 2).map(async ([argv, target]) => {
+          await assert.rejects(
+            () =>
+              execFileAsync(
+                process.execPath,
+                [
+                  "--import",
+                  "tsx",
+                  "--import",
+                  registerFixture,
+                  "--input-type=module",
+                  "-e",
+                  failureScript,
+                ],
+                {
+                  env: {
+                    ...sandbox.env,
+                    RIN_TEST_MAIN_FAILURE_ARGV: JSON.stringify(argv),
+                    RIN_TEST_MAIN_IMPORT_FAILURE: target,
+                  },
                 },
-              },
-            ),
-          (error: any) => {
-            assert.equal(error.killed, false);
-            assert.equal(error.signal ?? undefined, undefined);
-            assert.notEqual(error.code, undefined);
-            assert.match(error.stderr, /owner_main_import_failed/);
-            return true;
-          },
-        );
-      }),
-    );
+              ),
+            (error: any) => {
+              assert.equal(error.killed, false);
+              assert.equal(error.signal ?? undefined, undefined);
+              assert.notEqual(error.code, undefined);
+              assert.match(error.stderr, /owner_main_import_failed/);
+              return true;
+            },
+          );
+        }),
+      );
+    }
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

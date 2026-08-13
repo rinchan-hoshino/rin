@@ -573,24 +573,21 @@ test("local CI runner preserves staged format target filtering", () => {
   assert.match(runner, /No staged files need format checking\./);
 });
 
-test("git hooks split focused commit feedback from the complete push gate", () => {
-  const preCommit = readRepoFile(".githooks/pre-commit");
-  const prePush = readRepoFile(".githooks/pre-push");
+test("pre-commit is the sole complete repository gate", () => {
+  const hook = readRepoFile(".githooks/pre-commit");
 
-  for (const hook of [preCommit, prePush]) {
-    assertOrdered(hook, [
-      'tree_id="$(git write-tree)"',
-      'image_tag="rin-local-ci:staged-${tree_id}"',
-      "git archive --format=tar --mtime=1970-01-01T00:00:00Z",
-      'scripts/test/build-test-image.sh "$archive_file" "$image_tag"',
-      'image_id="$(docker image inspect --format \'{{.Id}}\' "$image_tag")"',
-      "docker run --rm --network none --memory 4g --memory-swap 4g",
-    ]);
-    assert.doesNotMatch(hook, /--volume|^\s+-v(?:\s|=)/m);
-    assert.doesNotMatch(hook, /fallback/i);
-  }
-  assert.match(preCommit, /\.ci\/local-ci\/run-staged\.sh/);
-  assert.match(preCommit, /STAGED_FILES/);
-  assert.match(prePush, /complete pre-push gate/);
-  assert.doesNotMatch(prePush, /run-staged/);
+  assertOrdered(hook, [
+    'tree_id="$(git write-tree)"',
+    'image_tag="rin-local-ci:staged-${tree_id}"',
+    "git archive --format=tar --mtime=1970-01-01T00:00:00Z",
+    'scripts/test/build-test-image.sh "$archive_file" "$image_tag"',
+    'image_id="$(docker image inspect --format \'{{.Id}}\' "$image_tag")"',
+    "docker run --rm --network none --memory 4g --memory-swap 4g",
+  ]);
+  assert.doesNotMatch(hook, /--volume|^\s+-v(?:\s|=)/m);
+  assert.doesNotMatch(hook, /run-staged|STAGED_FILES|fallback/i);
+  assert.equal(
+    fs.existsSync(path.join(rootDir, ".githooks", "pre-push")),
+    false,
+  );
 });
