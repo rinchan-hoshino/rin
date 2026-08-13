@@ -107,7 +107,7 @@ test("cron session resolution accepts only valid owned session modes", async () 
 
 test("cron shell execution reports command output and failures", async () => {
   await withAgentDir(async (agentDir) => {
-    const success = await cronExecution.executeCronShellTask(
+    const success = await cronExecution.executeCronShellCommand(
       task({
         target: {
           kind: "shell_command",
@@ -122,7 +122,7 @@ test("cron shell execution reports command output and failures", async () => {
     assert.match(success, /stderr:\nowner-err/);
 
     await assert.rejects(
-      cronExecution.executeCronShellTask(
+      cronExecution.executeCronShellCommand(
         task({
           target: {
             kind: "shell_command",
@@ -138,7 +138,7 @@ test("cron shell execution reports command output and failures", async () => {
       },
     );
     await assert.rejects(
-      cronExecution.executeCronShellTask(task(), { agentDir }),
+      cronExecution.executeCronShellCommand(task(), { agentDir }),
       /cron_invalid_shell_task/,
     );
 
@@ -147,7 +147,7 @@ test("cron shell execution reports command output and failures", async () => {
       JSON.stringify({ shellPath: "/missing/owner-shell" }),
     );
     await assert.rejects(
-      cronExecution.executeCronShellTask(
+      cronExecution.executeCronShellCommand(
         task({ target: { kind: "shell_command", command: "true" } }),
         { agentDir },
       ),
@@ -158,7 +158,7 @@ test("cron shell execution reports command output and failures", async () => {
       path.join(agentDir, "settings.json"),
       JSON.stringify({ shellPath: "/bin/sh" }),
     );
-    const custom = await cronExecution.executeCronShellTask(
+    const custom = await cronExecution.executeCronShellCommand(
       task({ target: { kind: "shell_command", command: "printf custom" } }),
       { agentDir },
     );
@@ -651,7 +651,7 @@ test("self-improve cron terminal history is durable and idempotent", async () =>
   });
 });
 
-test("executeCronTask owns shell, agent, session, delivery, and failure terminals", async () => {
+test("executeCronShellTask owns shell delivery and failure terminals", async () => {
   await withAgentDir(async (agentDir) => {
     const working: any[] = [];
     const sent: any[] = [];
@@ -660,7 +660,7 @@ test("executeCronTask owns shell, agent, session, delivery, and failure terminal
       frontend: { kind: "chat", key: "discord/1:2" },
       target: { kind: "shell_command", command: "printf shell-owner" },
     });
-    await cronExecution.executeCronTask(shell, {
+    await cronExecution.executeCronShellTask(shell, {
       agentDir,
       chat: {
         setWorkingVisible: async (payload) => working.push(payload),
@@ -680,7 +680,7 @@ test("executeCronTask owns shell, agent, session, delivery, and failure terminal
       frontend: { kind: "tui", key: "terminal" },
       target: { kind: "shell_command", command: "exit 9" },
     });
-    await cronExecution.executeCronTask(controllerShell, {
+    await cronExecution.executeCronShellTask(controllerShell, {
       agentDir,
       chat: {
         setWorkingVisible: async (payload) => working.push(payload),
@@ -688,12 +688,5 @@ test("executeCronTask owns shell, agent, session, delivery, and failure terminal
     });
     assert.match(controllerShell.lastError, /Exit: 9/);
     assert.equal(working.length, 2);
-
-    const agent = task({ trigger: { expression: "* * * * *" } });
-    await cronExecution.executeCronTask(agent, {
-      agentDir,
-      chat: { runTurn: async () => ({ finalText: "agent owner" }) },
-    });
-    assert.equal(agent.lastResultText, "agent owner");
   });
 });

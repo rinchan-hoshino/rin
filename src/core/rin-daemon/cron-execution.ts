@@ -130,7 +130,7 @@ async function getCronShellConfig(agentDir: string) {
   return { shell: "sh", args: ["-c"] };
 }
 
-export async function executeCronShellTask(
+export async function executeCronShellCommand(
   task: CronTaskRecord,
   options: { agentDir: string },
 ) {
@@ -823,114 +823,53 @@ export async function projectCronTaskTerminal(
   }
 }
 
-export async function executeCronTask(
-  task: CronTaskRecord,
+export type CronShellTaskRecord = CronTaskRecord & {
+  target: Extract<CronTaskRecord["target"], { kind: "shell_command" }>;
+};
+
+export async function executeCronShellTask(
+  task: CronShellTaskRecord,
   options: {
     agentDir: string;
-    additionalExtensionPaths?: string[];
     chat?: CronChatCapability;
   },
 ) {
   const startedAt = task.lastStartedAt || nowIso();
   const runId = cronTaskRunId(task, startedAt);
-  const showExternalWorking =
-    task.target.kind === "shell_command" && task.quiet !== true;
-  const audited = isSelfImproveDistillationTask(task);
-  const maintenanceLock = audited
-    ? await acquireSelfImproveMaintenanceLock(options.agentDir)
-    : null;
-  if (audited && !maintenanceLock) {
-    throw new Error("self_improve_maintenance_lock_timeout");
-  }
-  let terminal: CronTaskTerminal | undefined;
-  const startedAudit = audited
-    ? await beginSelfImproveAuditObservation({
-        agentDir: options.agentDir,
-        runId: `${task.id}:${task.runCount}`,
-        kind: "cron",
-        startedAt,
-        source: { trigger: `cron:${task.id}` },
-      })
-    : {};
+  const showExternalWorking = task.quiet !== true;
+  let terminal: CronTaskTerminal;
   try {
     if (showExternalWorking) {
       await setCronTaskFrontendWorking(task, options, true);
     }
-    if (task.target.kind === "shell_command") {
-      const text = await executeCronShellTask(task, {
-        agentDir: options.agentDir,
-      });
-      terminal = { status: "completed", text };
-      const frontend = resolveCronTaskFrontend(task);
-      const chatKey = shouldDeliverCronTaskFinal(task, frontend)
-        ? frontend?.key
-        : undefined;
-      if (chatKey && text) {
-        await sendChatText(options, {
-          chatKey,
-          taskId: task.id,
-          runId,
-          text,
-        }).catch(() => {});
-      }
-    } else {
-      const result = await executeCronAgentTask(task, { ...options, runId });
-      const observed = audited
-        ? await completeSelfImproveAuditObservation({
-            agentDir: options.agentDir,
-            capture: startedAudit.capture,
-            status: "completed",
-            finishedAt: nowIso(),
-            output: result.auditOutput,
-            auditError: startedAudit.auditError,
-          })
-        : { changedFiles: [] };
-      terminal = {
-        status: "completed",
-        text: result.text,
-        sessionFile: result.sessionFile,
-        audit: observed.audit,
-        auditError: observed.auditError,
-      };
+    const text = await executeCronShellCommand(task, {
+      agentDir: options.agentDir,
+    });
+    terminal = { status: "completed", text };
+    const frontend = resolveCronTaskFrontend(task);
+    const chatKey = shouldDeliverCronTaskFinal(task, frontend)
+      ? frontend?.key
+      : undefined;
+    if (chatKey && text) {
+      await sendChatText(options, {
+        chatKey,
+        taskId: task.id,
+        runId,
+        text,
+      }).catch(() => {});
     }
   } catch (error: any) {
-    const errorText = String(
-      error?.message || error || "cron_task_failed",
-    ).trim();
-    const observed = audited
-      ? await completeSelfImproveAuditObservation({
-          agentDir: options.agentDir,
-          capture: startedAudit.capture,
-          status: "failed",
-          finishedAt: nowIso(),
-          error: errorText,
-          auditError: startedAudit.auditError,
-        })
-      : { changedFiles: [] };
     terminal = {
       status: "failed",
-      error: errorText,
-      audit: observed.audit,
-      auditError: observed.auditError,
+      error: String(error?.message || error || "cron_task_failed").trim(),
     };
   } finally {
-    try {
-      if (showExternalWorking) {
-        await setCronTaskFrontendWorking(task, options, false);
-      }
-      if (terminal) {
-        await projectCronTaskTerminal(task, terminal, {
-          agentDir: options.agentDir,
-          startedAt,
-        });
-      }
-    } finally {
-      if (maintenanceLock) {
-        await releaseSelfImproveMaintenanceLock(
-          options.agentDir,
-          maintenanceLock,
-        );
-      }
+    if (showExternalWorking) {
+      await setCronTaskFrontendWorking(task, options, false);
     }
   }
+  await projectCronTaskTerminal(task, terminal, {
+    agentDir: options.agentDir,
+    startedAt,
+  });
 }

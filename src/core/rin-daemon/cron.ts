@@ -27,7 +27,8 @@ import {
   applyCronTaskTerminalProjection,
   createCronSessionInvocation,
   executeCronSessionInvocation,
-  executeCronTask,
+  executeCronShellTask,
+  type CronShellTaskRecord,
   type CronTaskTerminal,
 } from "./cron-execution.js";
 import {
@@ -831,7 +832,7 @@ export class CronScheduler {
         () => {},
       );
     } else {
-      void this.executeTask(task).catch(() => {});
+      void this.executeShellTask(task).catch(() => {});
     }
     return this.publicTask(task);
   }
@@ -1251,10 +1252,13 @@ export class CronScheduler {
     this.save();
   }
 
-  private async executeTask(task: CronTaskRecord) {
+  private async executeShellTask(task: CronTaskRecord) {
+    if (task.target.kind !== "shell_command") {
+      throw new Error("cron_invalid_shell_task");
+    }
     const scheduledNextRunAt = safeString(task.nextRunAt).trim() || undefined;
     try {
-      await executeCronTask(task, this.options);
+      await executeCronShellTask(task as CronShellTaskRecord, this.options);
       if (
         !task.completedAt &&
         task.trigger.expression &&

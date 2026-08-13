@@ -1791,7 +1791,8 @@ test("cron chat-bound agent task links its delivery without changing chat bindin
     runCount: 1,
   };
   try {
-    await execMod.executeCronTask(task, {
+    const invocation = execMod.createCronSessionInvocation(task, agentDir);
+    const result = await execMod.executeCronSessionInvocation(invocation, {
       agentDir,
       chat: {
         runTurn: async (payload) => {
@@ -1829,7 +1830,8 @@ test("cron quiet agent task suppresses every automatic frontend delivery", async
     runCount: 1,
   };
   try {
-    await execMod.executeCronTask(task, {
+    const invocation = execMod.createCronSessionInvocation(task, agentDir);
+    const result = await execMod.executeCronSessionInvocation(invocation, {
       agentDir,
       chat: {
         runTurn: async (payload) => {
@@ -1844,7 +1846,7 @@ test("cron quiet agent task suppresses every automatic frontend delivery", async
         },
       },
     });
-    assert.equal(task.lastResultText, "hidden final");
+    assert.equal(result.text, "hidden final");
     assert.equal(sent.length, 0);
     assert.equal(working.length, 0);
     assert.equal(calls[0].chatKey, undefined);
@@ -1854,75 +1856,6 @@ test("cron quiet agent task suppresses every automatic frontend delivery", async
       kind: "scheduled-task",
       key: "cron_silent_delivery",
     });
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("cron chat-bound shell task toggles frontend working while running", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const working = [];
-  const task = {
-    id: "cron_shell_working",
-    frontend: { kind: "chat", key: "telegram/demo:1" },
-    session: { mode: "none" },
-    trigger: { runAt: new Date(Date.now() - 1000).toISOString() },
-    target: { kind: "shell_command", command: "printf done" },
-    runCount: 1,
-  };
-  try {
-    await execMod.executeCronTask(task, {
-      agentDir,
-      chat: {
-        setWorkingVisible: async (payload) => {
-          working.push(payload);
-        },
-        send: async () => {},
-      },
-    });
-    assert.deepEqual(working, [
-      {
-        chatKey: "telegram/demo:1",
-        visible: true,
-      },
-      {
-        chatKey: "telegram/demo:1",
-        visible: false,
-      },
-    ]);
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("cron quiet shell task emits no frontend messages or working state", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const sent = [];
-  const working = [];
-  const task = {
-    id: "cron_shell_quiet",
-    frontend: { kind: "chat", key: "telegram/demo:1" },
-    quiet: true,
-    session: { mode: "none" },
-    trigger: { runAt: new Date(Date.now() - 1000).toISOString() },
-    target: { kind: "shell_command", command: "printf done" },
-    runCount: 1,
-  };
-  try {
-    await execMod.executeCronTask(task, {
-      agentDir,
-      chat: {
-        setWorkingVisible: async (payload) => {
-          working.push(payload);
-        },
-        send: async (payload) => {
-          sent.push(payload);
-        },
-      },
-    });
-    assert.equal(task.lastResultText.includes("done"), true);
-    assert.deepEqual(working, []);
-    assert.deepEqual(sent, []);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -1957,7 +1890,8 @@ test("built-in self-improve cron task keeps audit observational", async () => {
   try {
     await fs.mkdir(path.dirname(managedFile), { recursive: true });
     await fs.writeFile(managedFile, "before\n", "utf8");
-    await execMod.executeCronTask(task, {
+    const invocation = execMod.createCronSessionInvocation(task, agentDir);
+    const result = await execMod.executeCronSessionInvocation(invocation, {
       agentDir,
       chat: {
         runTurn: async (payload) => {
@@ -2023,17 +1957,24 @@ test("built-in self-improve cron task keeps audit observational", async () => {
       runCount: 4,
       lastStartedAt: "2026-05-08T09:33:09.353Z",
     };
-    await execMod.executeCronTask(repeatedTask, {
+    const repeatedInvocation = execMod.createCronSessionInvocation(
+      repeatedTask,
       agentDir,
-      chat: {
-        runTurn: async () => {
-          repeatedRunCalls += 1;
-          return { finalText: "second execution" };
+    );
+    const repeatedResult = await execMod.executeCronSessionInvocation(
+      repeatedInvocation,
+      {
+        agentDir,
+        chat: {
+          runTurn: async () => {
+            repeatedRunCalls += 1;
+            return { finalText: "second execution" };
+          },
         },
       },
-    });
+    );
     assert.equal(repeatedRunCalls, 1);
-    assert.equal(repeatedTask.lastResultText, "second execution");
+    assert.equal(repeatedResult.text, "second execution");
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -2064,7 +2005,8 @@ test("built-in self-improve cron executes when audit initialization fails", asyn
     };
     let calls = 0;
 
-    await execMod.executeCronTask(task, {
+    const invocation = execMod.createCronSessionInvocation(task, agentDir);
+    const result = await execMod.executeCronSessionInvocation(invocation, {
       agentDir,
       chat: {
         runTurn: async () => {
@@ -2075,7 +2017,7 @@ test("built-in self-improve cron executes when audit initialization fails", asyn
     });
 
     assert.equal(calls, 1);
-    assert.equal(task.lastResultText, "distilled");
+    assert.equal(result.text, "distilled");
     const history = (
       await fs.readFile(
         path.join(
@@ -2093,6 +2035,75 @@ test("built-in self-improve cron executes when audit initialization fails", asyn
     assert.equal(history[0].status, "completed");
     assert.equal(history[0].audit, undefined);
     assert.equal(history[0].auditError, "self_improve_audit_symlink_path");
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron chat-bound shell task toggles frontend working while running", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const working = [];
+  const task = {
+    id: "cron_shell_working",
+    frontend: { kind: "chat", key: "telegram/demo:1" },
+    session: { mode: "none" },
+    trigger: { runAt: new Date(Date.now() - 1000).toISOString() },
+    target: { kind: "shell_command", command: "printf done" },
+    runCount: 1,
+  };
+  try {
+    await execMod.executeCronShellTask(task, {
+      agentDir,
+      chat: {
+        setWorkingVisible: async (payload) => {
+          working.push(payload);
+        },
+        send: async () => {},
+      },
+    });
+    assert.deepEqual(working, [
+      {
+        chatKey: "telegram/demo:1",
+        visible: true,
+      },
+      {
+        chatKey: "telegram/demo:1",
+        visible: false,
+      },
+    ]);
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("cron quiet shell task emits no frontend messages or working state", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const sent = [];
+  const working = [];
+  const task = {
+    id: "cron_shell_quiet",
+    frontend: { kind: "chat", key: "telegram/demo:1" },
+    quiet: true,
+    session: { mode: "none" },
+    trigger: { runAt: new Date(Date.now() - 1000).toISOString() },
+    target: { kind: "shell_command", command: "printf done" },
+    runCount: 1,
+  };
+  try {
+    await execMod.executeCronShellTask(task, {
+      agentDir,
+      chat: {
+        setWorkingVisible: async (payload) => {
+          working.push(payload);
+        },
+        send: async (payload) => {
+          sent.push(payload);
+        },
+      },
+    });
+    assert.equal(task.lastResultText.includes("done"), true);
+    assert.deepEqual(working, []);
+    assert.deepEqual(sent, []);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -2275,7 +2286,7 @@ test("cron scheduler terminates task sessions when tasks stop", async () => {
 });
 
 test("cron execution shell task returns summarized success body", async () => {
-  const text = await execMod.executeCronShellTask(
+  const text = await execMod.executeCronShellCommand(
     {
       target: { kind: "shell_command", command: "printf hello" },
       cwd: process.cwd(),
@@ -2760,7 +2771,10 @@ test("cron scheduler preserves an agent-chosen recurring next run after executio
     task.runCount = 1;
     task.nextRunAt = "2099-01-01T00:00:00.000Z";
 
-    await scheduler.executeTask(task);
+    const invocation = execMod.createCronSessionInvocation(task, agentDir);
+    task.activeInvocation = invocation;
+    scheduler.activeExecutions.set(task.id, { startedAt: Date.now() });
+    await scheduler.executeSessionInvocation(task.id, invocation);
 
     const after = scheduler.getTask("cron_recurring_self_next");
     assert.equal(after?.nextRunAt, chosenNextRunAt);
