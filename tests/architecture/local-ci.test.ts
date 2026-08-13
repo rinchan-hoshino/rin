@@ -80,7 +80,6 @@ test("local CI runner reuses image dependencies before repo checks", () => {
     "npm run build",
     "npm run test:types:run",
     "npm run test:inner",
-    "npm run test:characterization:run",
   ]);
   assert.doesNotMatch(
     runner,
@@ -90,6 +89,46 @@ test("local CI runner reuses image dependencies before repo checks", () => {
     scripts: Record<string, string>;
   };
   assert.doesNotMatch(packageJson.scripts["test:inner"], /npm run build/);
+});
+
+test("the commit gate runs isolated suites concurrently and keeps slow calibration explicit", () => {
+  const packageJson = JSON.parse(readRepoFile("package.json")) as {
+    scripts: Record<string, string>;
+  };
+  const commitRunner = readRepoFile("scripts/test/run-commit-tests.ts");
+
+  assert.equal(
+    packageJson.scripts["test:current:run"],
+    "tsx scripts/test/run-commit-tests.ts",
+  );
+  for (const suite of [
+    "architecture",
+    "unit",
+    "acceptance",
+    "property",
+    "regression",
+    "integration",
+    "system",
+    "qa",
+    "torture",
+    "characterization",
+  ]) {
+    assert.match(commitRunner, new RegExp(`"${suite}"`));
+  }
+  assert.match(commitRunner, /mapWithConcurrency\(suites, 3/);
+  assert.match(packageJson.scripts["test:inner"], /test:current:run/);
+  assert.doesNotMatch(
+    packageJson.scripts["test:inner"],
+    /test:coverage:run|test:mutation:run/,
+  );
+  assert.equal(
+    packageJson.scripts["test:coverage"],
+    "npm run test:container -- --suite coverage",
+  );
+  assert.equal(
+    packageJson.scripts["test:mutation"],
+    "npm run test:container -- --suite mutation",
+  );
 });
 
 test("repository test scripts route classified buckets through the shared runner", () => {
@@ -540,7 +579,7 @@ test("local CI runner enables inner install-to-TUI smoke before tests", () => {
   ]);
 });
 
-test("local CI does not run behavior suites again before complete coverage", () => {
+test("local CI delegates the complete ordinary gate to one runner", () => {
   const runner = readRepoFile(".ci/local-ci/run-checks.sh");
 
   assert.doesNotMatch(
@@ -548,7 +587,7 @@ test("local CI does not run behavior suites again before complete coverage", () 
     /npm run test:(?:release|architecture|acceptance|property):run/,
   );
   assert.match(runner, /npm run test:inner/);
-  assert.match(runner, /npm run test:characterization:run/);
+  assert.doesNotMatch(runner, /npm run test:characterization:run/);
 });
 
 test("local CI runner bounds the full test gate", () => {

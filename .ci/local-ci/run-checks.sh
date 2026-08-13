@@ -24,10 +24,7 @@ npm run test:types:run
 ci_timeout="45m"
 echo "Running the complete test gate with ${ci_timeout} timeout..."
 timeout --foreground "$ci_timeout" bash -c '
-  # Coverage ownership executes every architecture, unit, acceptance, property,
-  # regression, integration, system, and release-path behavior test exactly
-  # once, either as a direct owner or in the combined behavior run.
-  # Characterization remains intentionally isolated from coverage.
-  npm run test:inner &&
-  npm run test:characterization:run
+  # The ordinary gate runs every current behavior suite once in an isolated
+  # sandbox. Coverage and mutation remain explicit calibration commands.
+  npm run test:inner
 '

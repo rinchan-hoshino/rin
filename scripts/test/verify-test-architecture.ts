@@ -1017,9 +1017,18 @@ export function verifyTestArchitecture() {
   if (
     packageJson.scripts?.["test:mutation:run"] !==
       "tsx scripts/test/run-mutation.ts" ||
-    !completeGate.includes("test:mutation:run")
+    completeGate.includes("test:mutation:run")
   ) {
-    errors.push("mutation_gate_not_wired");
+    errors.push("mutation_calibration_gate_invalid");
+  }
+
+  if (
+    packageJson.scripts?.["test:current:run"] !==
+      "tsx scripts/test/run-commit-tests.ts" ||
+    !completeGate.includes("test:current:run") ||
+    completeGate.includes("test:coverage:run")
+  ) {
+    errors.push("current_behavior_commit_gate_invalid");
   }
 
   const qaTests = allTests.filter((file) => file.startsWith("tests/qa/"));
@@ -1036,7 +1045,12 @@ export function verifyTestArchitecture() {
   if (
     packageJson.scripts?.["test:qa:run"] !==
       "tsx scripts/test/run-test-suite.ts qa" ||
-    !completeGate.includes("test:qa:run")
+    !fs
+      .readFileSync(
+        path.join(rootDir, "scripts/test/run-commit-tests.ts"),
+        "utf8",
+      )
+      .includes('"qa"')
   ) {
     errors.push("qa_gate_not_wired");
   }
@@ -1078,7 +1092,12 @@ export function verifyTestArchitecture() {
   if (
     packageJson.scripts?.["test:torture:run"] !==
       "tsx scripts/test/run-test-suite.ts torture" ||
-    !completeGate.includes("test:torture:run")
+    !fs
+      .readFileSync(
+        path.join(rootDir, "scripts/test/run-commit-tests.ts"),
+        "utf8",
+      )
+      .includes('"torture"')
   ) {
     errors.push("torture_gate_not_wired");
   }
