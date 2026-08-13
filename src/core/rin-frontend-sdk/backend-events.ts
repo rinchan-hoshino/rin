@@ -126,7 +126,7 @@ function todoNoticeFromDetails(details: unknown): TodoNotice | null {
   const value =
     details && typeof details === "object" ? (details as any) : null;
   if (!value) return null;
-  const todos = normalizeRinTodoItems(value.todos);
+  const todos = normalizeRinTodoItems(value.items);
   if (!todos) return null;
   const checklist = todos.length ? formatRinTodoChecklistContent(todos) : "";
   const error = safeString(value.error).trim();

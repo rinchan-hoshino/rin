@@ -448,8 +448,8 @@ test("frontend backend event translator emits todo notice for single todo execut
       result: {
         content: [{ type: "text", text: "legacy text is ignored" }],
         details: {
-          action: "write",
-          todos: [
+          action: "add",
+          items: [
             { id: 1, text: "Keep working", done: false },
             { id: 2, text: "Ship renderer", done: true },
           ],
@@ -486,8 +486,8 @@ test("frontend backend event translator displays todo reads", () => {
       toolName: "todo",
       result: {
         details: {
-          action: "list",
-          todos: [{ id: 1, text: "Keep working", done: false }],
+          action: "read",
+          items: [{ id: 1, text: "Keep working", done: false }],
           nextId: 2,
         },
       },
@@ -520,7 +520,7 @@ test("frontend backend event translator emits empty todo notices as clears", () 
         content: [{ type: "text", text: "No todos" }],
         details: {
           action: "clear",
-          todos: [],
+          items: [],
           nextId: 1,
         },
       },
@@ -546,8 +546,8 @@ test("frontend backend event translator emits empty todo notices as clears", () 
       toolName: "todo",
       result: {
         details: {
-          action: "write",
-          todos: [],
+          action: "remove",
+          items: [],
           nextId: 1,
           error: "invalid todo list",
         },
@@ -593,8 +593,8 @@ test("frontend backend event translator waits for the active tool batch before t
       toolName: "todo",
       result: {
         details: {
-          action: "write",
-          todos: [
+          action: "edit",
+          items: [
             { id: 1, text: "Keep working", done: false },
             { id: 2, text: "Ship renderer", done: true },
           ],
@@ -669,8 +669,8 @@ test("frontend backend event translator emits nested multi-tool todo notice when
             recipient_name: "functions.todo",
             result: {
               details: {
-                action: "write",
-                todos: [
+                action: "edit",
+                items: [
                   { id: 1, text: "Keep working", done: false },
                   { id: 2, text: "Ship renderer", done: true },
                 ],
@@ -1003,7 +1003,8 @@ test("frontend backend event translator covers wrapper, optional-status, and unt
       toolCallId: "todo-untagged",
       result: {
         details: {
-          todos: [],
+          action: "remove",
+          items: [],
           error: "owner error",
         },
       },
