@@ -82,11 +82,6 @@
       "built": "dist/core/json-utils.js"
     },
     {
-      "test": "tests/unit/external-memory-results.test.ts",
-      "source": "src/core/memory/external-results.ts",
-      "built": "dist/core/memory/external-results.js"
-    },
-    {
       "test": "tests/unit/memory-utils.test.ts",
       "source": "src/core/memory/utils.ts",
       "built": "dist/core/memory/utils.js"

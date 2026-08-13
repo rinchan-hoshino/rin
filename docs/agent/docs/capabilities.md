@@ -15,7 +15,7 @@ Use this page as Rin's capability index. It tells agents what runtime surfaces e
 | Todo                                     | Current-branch execution checklist during multi-step work                                                                     | `todo` tool, `/todos`                                      | live tool schema                                               |
 | Note                                     | Session-branch continuity that must survive compaction                                                                        | `note` tool                                                | live tool schema                                               |
 | Browser/computer/mobile/search operation | Web, desktop, mobile, or search work supported by the current runtime                                                         | live tool list                                             | live tool schema                                               |
-| Extensions                               | Pi-native session extensions plus trusted daemon adapters for async services or external event/memory providers               | ordinary Pi extension/package configuration                | `docs/extensions.md`                                           |
+| Extensions                               | Pi-native session extensions plus trusted daemon adapters for async services and external events                              | ordinary Pi extension/package configuration                | `docs/extensions.md`                                           |
 | Initialization                           | Owner asks to initialize, reset, or establish preferences                                                                     | initialization prompt flow                                 | `docs/initialization.md`                                       |
 
 ## Launcher, update, and rollback
@@ -69,7 +69,7 @@ Use `docs/rich-text-output-format.md` for native mentions, quotes/replies, attac
 
 Daemon extensions are trusted Node.js packages loaded for long-running async work. Only ordinary Pi extension entries are discovered; entries that expose the named `rinDaemonExtension` factory also receive Rin's backend adapter, while their default Pi session factory is not replayed by that adapter.
 
-Use them for intentionally configured background event bridges, chat adapters, or memory providers. Restart or reload Rin after changing background extension settings.
+Use them for intentionally configured background event bridges, chat adapters. Restart or reload Rin after changing background extension settings.
 
 ## Browser, computer, mobile, and search operation
 

@@ -205,8 +205,6 @@ test("core daemon routes the complete system-owned RPC and lifecycle contract", 
       "get_all_models",
       "get_available_models",
       "get_oauth_state",
-      "memory_search_external",
-      "memory_write_external",
     ]) {
       assert.equal(
         (
@@ -221,14 +219,6 @@ test("core daemon routes the complete system-owned RPC and lifecycle contract", 
       );
     }
     assert.equal((await request({ type: "get_commands" })).success, true);
-    assert.equal(
-      (await request({ type: "memory_search_external" })).success,
-      true,
-    );
-    assert.equal(
-      (await request({ type: "memory_write_external" })).success,
-      true,
-    );
 
     assert.equal(
       (await request({ type: "prompt", noWorker: true })).error,

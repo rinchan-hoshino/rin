@@ -358,18 +358,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/memory/external-results.ts",
-      "built": "dist/core/memory/external-results.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/memory/external.ts",
-      "built": "dist/core/memory/external.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/memory/index.ts",
       "built": "dist/core/memory/index.js",
       "ownerSuite": "integration",

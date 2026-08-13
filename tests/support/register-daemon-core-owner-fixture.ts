@@ -69,8 +69,6 @@ const replacements: Record<string, string> = {
       setSessionApi(sessions) { this.sessions = sessions; }
       async start() { if (process.env.RIN_TEST_DAEMON_MANAGER_START_FAIL) throw new Error("owner manager start failed"); }
       async stop() { if (process.env.RIN_TEST_DAEMON_MANAGER_STOP_FAIL) throw new Error("owner manager stop failed"); }
-      async recallProviders(payload) { return [{ recalled: payload }]; }
-      async writeMemoryProviders(payload) { return { written: payload }; }
     }
   `,
   "dist/core/rin-daemon/running-workers.js": `

@@ -1,7 +1,6 @@
 import { register } from "node:module";
 
 const transcriptsTarget = "dist/core/memory/transcripts.js";
-const externalTarget = "dist/core/memory/external.js";
 
 const transcriptsUrl = `data:text/javascript,${encodeURIComponent(`
 export async function appendTranscriptArchiveEntry(input, agentDir) {
@@ -40,22 +39,9 @@ export async function loadRecentTranscriptSessionsAbortable(params, root, signal
 }
 `)}`;
 
-const externalUrl = `data:text/javascript,${encodeURIComponent(`
-export async function searchExternalMemoryProviders(query, params) {
-  globalThis.__rinMemoryOwnerEvents.push(["external", query, params]);
-  if (globalThis.__rinMemoryOwnerFailure === "external") throw new Error("external owner failure");
-  return globalThis.__rinMemoryOwnerExternalResults || [];
-}
-export async function writeExternalMemoryEntry(input) {
-  globalThis.__rinMemoryOwnerEvents.push(["external-write", input]);
-  if (globalThis.__rinMemoryOwnerExternalWriteFailure) throw new Error("external write failure");
-}
-`)}`;
-
 const hookSource = `
 const replacements = new Map([
   [${JSON.stringify(transcriptsTarget)}, ${JSON.stringify(transcriptsUrl)}],
-  [${JSON.stringify(externalTarget)}, ${JSON.stringify(externalUrl)}],
 ]);
 export async function resolve(specifier, context, nextResolve) {
   const resolved = await nextResolve(specifier, context);

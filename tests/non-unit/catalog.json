@@ -299,12 +299,6 @@
       "tests": ["tests/integration/http-transport.test.ts"]
     },
     {
-      "source": "src/core/memory/external.ts",
-      "built": "dist/core/memory/external.js",
-      "suite": "integration",
-      "tests": ["tests/integration/external-memory-owner.test.ts"]
-    },
-    {
       "source": "src/core/memory/index.ts",
       "built": "dist/core/memory/index.js",
       "suite": "integration",

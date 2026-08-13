@@ -23,10 +23,6 @@ import {
   loadRecentTranscriptSessionsAbortable,
   searchTranscriptArchiveAbortable,
 } from "./transcripts.js";
-import {
-  searchExternalMemoryProviders,
-  writeExternalMemoryEntry,
-} from "./external.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { parseTimestampMs } from "./utils.js";
 
@@ -100,10 +96,14 @@ function buildMemoryTranscriptInput(message: any, ctx: any) {
 async function archiveMessageTranscript(message: any, ctx: any) {
   const input = buildMemoryTranscriptInput(message, ctx);
   if (!input) return;
-  await Promise.allSettled([
-    appendTranscriptArchiveEntry(input, String(ctx?.agentDir || "").trim()),
-    writeExternalMemoryEntry(input),
-  ]);
+  try {
+    await appendTranscriptArchiveEntry(
+      input,
+      String(ctx?.agentDir || "").trim(),
+    );
+  } catch {
+    // Transcript archiving is best effort and must not fail message completion.
+  }
 }
 
 function trimSnippet(value: string, max = 220): string {
@@ -123,14 +123,7 @@ function resultSnippet(item: any): string {
 }
 
 function resultLocation(item: any): string {
-  const direct = String(
-    item?.path || item?.reference || item?.url || item?.sessionId || "",
-  ).trim();
-  if (direct) return direct;
-  const provider = String(item?.provider || "").trim();
-  const id = String(item?.id || item?.externalId || "").trim();
-  if (provider && id) return `${provider}:${id}`;
-  return id || "Memory";
+  return String(item?.path || "Memory").trim();
 }
 
 function resultMessages(item: any): Array<any> {
@@ -267,44 +260,6 @@ function throwIfAborted(signal?: AbortSignal) {
   throw new Error("recall_aborted");
 }
 
-function resultTimestampMs(item: any): number {
-  return latestResultTimestamp(item).ms;
-}
-
-function resultScore(item: any): number {
-  const score = Number(item?.score);
-  return Number.isFinite(score) ? score : 0;
-}
-
-function mergeMemoryResults(
-  localResults: any[],
-  externalResults: any[],
-  options: { limit: number; order: "relevance" | "newest" },
-) {
-  const rows = [
-    ...(Array.isArray(localResults) ? localResults : []),
-    ...(Array.isArray(externalResults) ? externalResults : []),
-  ];
-  const ordered = rows
-    .map((item, index) => ({ item, index }))
-    .sort((a, b) => {
-      const primary =
-        options.order === "newest"
-          ? resultTimestampMs(b.item) - resultTimestampMs(a.item)
-          : resultScore(b.item) - resultScore(a.item);
-      if (primary) return primary;
-      const timestampDiff =
-        resultTimestampMs(b.item) - resultTimestampMs(a.item);
-      if (timestampDiff) return timestampDiff;
-      return a.index - b.index;
-    });
-  const limit = Math.max(1, Number(options.limit || 8) || 8);
-  return {
-    results: ordered.slice(0, limit).map((row) => row.item),
-    totalResults: rows.length,
-  };
-}
-
 export async function executeRecall(
   params: any,
   ctx: any,
@@ -344,16 +299,7 @@ export async function executeRecall(
           signal,
         );
     throwIfAborted(signal);
-    const externalResults = await searchExternalMemoryProviders(
-      query,
-      normalizedParams,
-    );
-    throwIfAborted(signal);
-    const merged = mergeMemoryResults(localResults, externalResults, {
-      limit: normalizedParams.limit,
-      order,
-    });
-    const results = merged.results;
+    const results = Array.isArray(localResults) ? localResults : [];
 
     const response = {
       mode,
@@ -364,16 +310,13 @@ export async function executeRecall(
     const agentText = formatAgentSearchResult(response);
     const userText = formatSearchResult(response);
     const truncated = prepareTruncatedText(agentText);
-    const visibleRows = Array.isArray(response?.results)
-      ? response.results
-      : [];
     const details: MemoryToolDetails = {
-      hiddenCount: Math.max(0, merged.totalResults - visibleRows.length),
-      totalResults: merged.totalResults,
+      hiddenCount: 0,
+      totalResults: results.length,
       userText,
     };
 
-    if (!visibleRows.length) {
+    if (!results.length) {
       details.emptyMessage = "No recall results found.";
     }
 

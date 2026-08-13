@@ -1,9 +1,6 @@
 export type {
-  ExternalMemoryResult,
-  ExternalMemoryResultMessage,
   IndexedSessionBucket,
   IndexedTranscriptEntry,
-  MemorySearchResult,
   TranscriptArchiveEntry,
   TranscriptFileState,
   TranscriptResultMessage,

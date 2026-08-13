@@ -54,32 +54,6 @@ export type TranscriptSessionResult = {
   messages?: TranscriptResultMessage[];
 };
 
-export type ExternalMemoryResultMessage = Record<string, unknown> &
-  Partial<TranscriptResultMessage> & {
-    role: string;
-    line: number;
-    text: string;
-  };
-
-export type ExternalMemoryResult = Record<string, unknown> & {
-  sourceType: "external";
-  provider: string;
-  id: string;
-  name: string;
-  score: number;
-  timestamp?: string;
-  description?: string;
-  preview?: string;
-  summary?: string;
-  path?: string;
-  url?: string;
-  reference?: string;
-  externalId?: string;
-  messages?: ExternalMemoryResultMessage[];
-};
-
-export type MemorySearchResult = TranscriptSessionResult | ExternalMemoryResult;
-
 export type IndexedTranscriptEntry = {
   rowKey: string;
   archivePath: string;

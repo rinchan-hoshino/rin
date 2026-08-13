@@ -39,24 +39,6 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
     }),
     result({ path: "/local-low", score: 1, timestamp: "2026-07-17T09:00:00Z" }),
   ];
-  owner.__rinMemoryOwnerExternalResults = [
-    result({
-      path: "",
-      reference: "external-ref",
-      score: 5,
-      timestamp: "2026-07-17T08:00:00Z",
-      summary: "External owner evidence",
-    }),
-    result({
-      path: "",
-      reference: "",
-      provider: "notes",
-      id: "owner-42",
-      score: 5,
-      timestamp: "2026-07-17T08:00:00Z",
-      summary: "Provider result",
-    }),
-  ];
 
   const updates: any[] = [];
   const searched = await memory.executeRecall(
@@ -73,13 +55,13 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
   );
   assert.equal(updates[0].details.phase, "search");
   assert.equal(searched.name, "memory");
-  assert.match(searched.content[0].text, /^recall owner migration \(3\)/);
+  assert.match(searched.content[0].text, /^recall owner migration \(2\)/);
   assert.match(searched.content[0].text, /1\. .* \/local-high/);
-  assert.match(searched.content[0].text, /2\. .* external-ref/);
+  assert.match(searched.content[0].text, /2\. .* \/local-low/);
   assert.match(searched.content[0].text, /L1 assistant: Owner result text/);
   assert.match(searched.content[0].text, /L9 toolResult\/bash: validated/);
-  assert.equal(searched.details.totalResults, 4);
-  assert.equal(searched.details.hiddenCount, 1);
+  assert.equal(searched.details.totalResults, 2);
+  assert.equal(searched.details.hiddenCount, 0);
   assert.match(searched.details.userText, /Owner migration evidence/);
   assert.deepEqual(
     owner.__rinMemoryOwnerEvents.filter(
@@ -94,12 +76,10 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
   );
 
   owner.__rinMemoryOwnerRecentResults = [
-    result({ path: "/older", timestamp: "2026-07-16T08:00:00Z" }),
     result({ path: "/newer", timestamp: "2026-07-17T10:00:00Z" }),
+    result({ path: "/older", timestamp: "2026-07-16T08:00:00Z" }),
   ];
-  owner.__rinMemoryOwnerExternalResults = [
-    result({ path: "/middle", timestamp: "2026-07-17T09:00:00Z" }),
-  ];
+
   const recentUpdates: any[] = [];
   const recent = await memory.executeRecall(
     { limit: "2" },
@@ -115,10 +95,9 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
   assert.equal(recentUpdates[0].details.phase, "recent");
   assert.match(recent.content[0].text, /^recall recent \(2\)/);
   assert.match(recent.content[0].text, /1\. .* \/newer/);
-  assert.match(recent.content[0].text, /2\. .* \/middle/);
+  assert.match(recent.content[0].text, /2\. .* \/older/);
 
   owner.__rinMemoryOwnerRecentResults = [];
-  owner.__rinMemoryOwnerExternalResults = [];
   const empty = await memory.executeRecall({}, {}, "off");
   assert.equal(empty.details.emptyMessage, "No recall results found.");
   assert.equal(empty.details.totalResults, 0);
@@ -192,10 +171,7 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
       results: [
         result({
           path: "",
-          reference: "",
-          provider: "",
-          id: "",
-          externalId: "",
+          sessionFile: "",
           sessionId: "",
           summary: "",
           name: "Owner name",
@@ -204,23 +180,6 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
       ],
     }),
     /^.* Memory\nOwner name$/,
-  );
-  assert.match(
-    memory.formatSearchResult({
-      results: [
-        result({
-          path: "",
-          reference: "",
-          provider: "notes",
-          id: "",
-          externalId: "external-owner",
-          summary: "",
-          name: "",
-          description: "Owner description",
-        }),
-      ],
-    }),
-    /^.* notes:external-owner\nOwner description/,
   );
   assert.match(
     memory.formatSearchResult({
@@ -311,7 +270,6 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
   assert.equal(renderContext.state.endedAt > 0, true);
 
   owner.__rinMemoryOwnerSearchResults = [result({ path: "/tool" })];
-  owner.__rinMemoryOwnerExternalResults = [];
   const toolResult = await definition.tools[0].execute(
     "tool-owner",
     { query: "tool" },
@@ -347,15 +305,7 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
     ),
     true,
   );
-  assert.equal(
-    owner.__rinMemoryOwnerEvents.some(
-      ([name]: string[]) => name === "external-write",
-    ),
-    true,
-  );
-
   owner.__rinMemoryOwnerArchiveFailure = true;
-  owner.__rinMemoryOwnerExternalWriteFailure = true;
   await messageHook(
     { message: { role: "assistant", content: "settled failures" } },
     {
@@ -365,7 +315,6 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
     },
   );
   owner.__rinMemoryOwnerArchiveFailure = false;
-  owner.__rinMemoryOwnerExternalWriteFailure = false;
   await messageHook(
     { message: { role: "assistant", content: "missing session" } },
     { agentDir: "/agent/hook" },

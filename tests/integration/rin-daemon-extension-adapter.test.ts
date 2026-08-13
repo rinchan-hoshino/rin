@@ -116,21 +116,6 @@ test("daemon adaptation uses only Pi-discovered extension sources", async () => 
           { name: "owner-chat-two", provider: { id: "owner-chat-two" } },
           { key: "chat-two", name: "Chat Two", config: { owner: 2 } },
         );
-        api.registerMemoryProvider({});
-        api.registerMemoryProvider({
-          name: "owner-memory",
-          metadata: { label: "Owner Memory" },
-          search: async (request, ctx) => [{
-            text: request.query,
-            score: 1,
-            metadata: { root: ctx.runtimeRoot },
-          }],
-          write: async () => true,
-        });
-        api.registerMemoryProvider({
-          listRecent: async () => { throw new Error("owner-recent"); },
-          write: async () => { throw new Error("owner-write"); },
-        }, { key: "bad-memory", name: "Bad Memory" });
       };
     `,
   );
@@ -228,17 +213,6 @@ test("daemon adaptation uses only Pi-discovered extension sources", async () => 
       "owner-chat",
     );
     assert.equal(manager.getChatAdapterProviders()[1].key, "chat-two");
-    assert.equal(manager.getMemoryProviderMetadata()[0].name, "owner-config");
-    assert.equal(manager.getMemoryProviderMetadata()[1].key, "bad-memory");
-    const recalled = await manager.recallProviders({ query: "owner" });
-    assert.equal(recalled[0].text, "owner");
-    assert.equal(recalled[0].metadata.root, good);
-    assert.deepEqual(await manager.recallProviders(), []);
-    const written = await manager.writeMemoryProviders({
-      role: "user",
-      text: "owner",
-    });
-    assert.deepEqual(written, { written: 1, providerCount: 2 });
     const events = (await fs.readFile(eventsPath, "utf8"))
       .trim()
       .split("\n")
@@ -305,12 +279,6 @@ test("daemon adaptation remains idle without Pi extension sources", async () => 
     assert.deepEqual(await manager.start(), []);
     assert.deepEqual(await manager.start({ packages: ["owner-unused"] }), []);
     assert.deepEqual(manager.getChatAdapterProviders(), []);
-    assert.deepEqual(manager.getMemoryProviderMetadata(), []);
-    assert.deepEqual(await manager.recallProviders(), []);
-    assert.deepEqual(await manager.writeMemoryProviders({}), {
-      written: 0,
-      providerCount: 0,
-    });
   } finally {
     await manager.stop();
     await fs.rm(root, { recursive: true, force: true });

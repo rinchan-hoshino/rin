@@ -45,7 +45,7 @@ behavior with Pi's `ctx.mode` contract.
 
 ## Daemon extensions
 
-Long-running services, Chat adapters, and external memory providers have a
+Long-running services, Chat adapters have a
 different lifetime from Pi session extensions. Declare them through the named
 `rinDaemonExtension` export, never through the default Pi factory:
 

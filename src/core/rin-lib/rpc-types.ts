@@ -59,8 +59,6 @@ export type RinRpcCommandType =
   | "chat_message_get"
   | "chat_message_list"
   | "chat_bridge_eval"
-  | "memory_search_external"
-  | "memory_write_external"
   | "cron_list_tasks"
   | "cron_reload_tasks"
   | "cron_get_task"

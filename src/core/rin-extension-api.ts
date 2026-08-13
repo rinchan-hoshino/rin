@@ -56,69 +56,6 @@ export type RinExtensionLogger = {
   error?: (message: string) => void;
 };
 
-export type RinExternalMemoryResult = Record<string, unknown> & {
-  sourceType: "external";
-  provider: string;
-  id: string;
-  name: string;
-  score: number;
-};
-
-export type RinTranscriptArchiveEntry = {
-  id: string;
-  timestamp: string;
-  sessionId: string;
-  sessionFile: string;
-  role: string;
-  text: string;
-  content?: unknown;
-  [key: string]: unknown;
-};
-
-export type RinDaemonMemorySearchRequest = {
-  readonly mode: "search" | "recent";
-  readonly query: string;
-  readonly limit: number;
-  readonly params: Record<string, unknown>;
-};
-
-export type RinDaemonMemoryProviderContext = {
-  readonly cwd: string;
-  readonly agentDir: string;
-  readonly dataDir: string;
-  readonly runtimeRoot: string;
-  readonly key: string;
-  readonly name: string;
-  readonly packageName: string;
-  readonly config: Record<string, unknown>;
-  readonly logger: RinExtensionLogger;
-};
-
-export type RinDaemonMemoryProvider = {
-  search?: (
-    request: RinDaemonMemorySearchRequest,
-    context: RinDaemonMemoryProviderContext,
-  ) =>
-    | Promise<
-        RinExternalMemoryResult[] | { results?: RinExternalMemoryResult[] }
-      >
-    | RinExternalMemoryResult[]
-    | { results?: RinExternalMemoryResult[] };
-  listRecent?: (
-    request: RinDaemonMemorySearchRequest,
-    context: RinDaemonMemoryProviderContext,
-  ) =>
-    | Promise<
-        RinExternalMemoryResult[] | { results?: RinExternalMemoryResult[] }
-      >
-    | RinExternalMemoryResult[]
-    | { results?: RinExternalMemoryResult[] };
-  write?: (
-    entry: RinTranscriptArchiveEntry,
-    context: RinDaemonMemoryProviderContext,
-  ) => Promise<void> | void;
-};
-
 export type RinChatAdapterProviderInput = {
   app: unknown;
   agentDir?: string;
@@ -213,14 +150,6 @@ export type RinDaemonExtensionAPI = Omit<
   ): void;
   registerChatAdapter(
     provider: RinChatAdapterProvider,
-    options?: {
-      key?: string;
-      name?: string;
-      config?: Record<string, unknown>;
-    },
-  ): void;
-  registerMemoryProvider(
-    provider: RinDaemonMemoryProvider,
     options?: {
       key?: string;
       name?: string;
