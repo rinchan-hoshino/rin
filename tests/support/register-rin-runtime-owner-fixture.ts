@@ -180,6 +180,10 @@ const sources: Record<string, string> = {
     }
   `,
   "./provider-context.js": `
+    export function buildProviderBoundCompactionEvent(event, providerMessages, options) {
+      globalThis.__rinRuntimeOwner.events.push(["provider-compaction-event", event, providerMessages, options]);
+      return globalThis.__rinRuntimeOwner.compactionEvent || event;
+    }
     export function buildProviderBoundContextEvent(event, options) {
       globalThis.__rinRuntimeOwner.events.push(["provider-context-event", event, options]);
       return { ...event, ownerCwd: options.cwd };

@@ -292,6 +292,57 @@ test("provider-bound context normalizes estimates and stale usage around compact
   );
 });
 
+test("provider-bound context maps compaction slices without mutating history", () => {
+  const fullContext = toolCallPadding(5);
+  fullContext[1] = { ...fullContext[1], content: "huge old output" };
+  const summarySlice = [fullContext[0], fullContext[1]];
+
+  const mapped = providerContext.mapMessagesToProviderBoundContext(
+    summarySlice,
+    fullContext,
+    { toolCallBucketSize: 2, retainedToolCallBuckets: 2 },
+  );
+
+  assert.notEqual(mapped, summarySlice);
+  assert.equal(mapped[0], summarySlice[0]);
+  assert.equal(mapped[1].content, "old tool result omitted");
+  assert.equal(summarySlice[1].content, "huge old output");
+});
+
+test("provider-bound compaction projects both summary slices without mutating the event", () => {
+  const fullContext = toolCallPadding(5);
+  fullContext[1] = { ...fullContext[1], content: "huge old output" };
+  const event = {
+    preparation: {
+      messagesToSummarize: [fullContext[0], fullContext[1]],
+      turnPrefixMessages: [fullContext[1]],
+    },
+  };
+
+  const projected = providerContext.buildProviderBoundCompactionEvent(
+    event,
+    fullContext,
+    { toolCallBucketSize: 2, retainedToolCallBuckets: 2 },
+  );
+
+  assert.equal(
+    projected.preparation.messagesToSummarize[1].content,
+    "old tool result omitted",
+  );
+  assert.equal(
+    projected.preparation.turnPrefixMessages[0].content,
+    "old tool result omitted",
+  );
+  assert.equal(
+    event.preparation.messagesToSummarize[1].content,
+    "huge old output",
+  );
+  assert.equal(
+    event.preparation.turnPrefixMessages[0].content,
+    "huge old output",
+  );
+});
+
 test("provider-bound context event uses the same tool-call bucket policy surface", () => {
   assert.equal(providerContext.buildProviderBoundContextEvent(null), undefined);
   assert.equal(

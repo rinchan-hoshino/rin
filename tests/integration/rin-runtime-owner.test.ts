@@ -33,6 +33,7 @@ function resetOwner() {
   owner.contextOverflow = false;
   owner.estimatedContextTokens = { tokens: 12 };
   owner.mappedMessages = undefined;
+  owner.compactionEvent = undefined;
   owner.compactionAuth = {
     apiKey: "owner-key",
     headers: { owner: "yes" },
@@ -327,6 +328,50 @@ test("runtime capability definitions integrate owner modules and hook payloads",
       (definition: any) => definition.name === "rin_provider_bound_context",
     ),
   );
+});
+
+test("configured compaction sends the provider-bound event to native Pi", async () => {
+  resetOwner();
+  const originalEvent = {
+    preparation: {
+      messagesToSummarize: [{ role: "toolResult", content: "full output" }],
+      turnPrefixMessages: [],
+    },
+  };
+  const projectedEvent = {
+    preparation: {
+      messagesToSummarize: [
+        { role: "toolResult", content: "old tool result omitted" },
+      ],
+      turnPrefixMessages: [],
+    },
+  };
+  owner.compactionEvent = projectedEvent;
+  const configured = await runtime.createConfiguredAgentSession({
+    cwd: process.cwd(),
+    agentDir: "/owner/agent",
+  });
+  const definition = owner.capabilityDefinitions.find(
+    (candidate: any) => candidate.name === "rin_native_compaction",
+  );
+
+  await definition.hooks.session_before_compact[0](originalEvent);
+
+  const projection = owner.events.find(
+    ([name]: any[]) => name === "provider-compaction-event",
+  );
+  const native = owner.events.find(
+    ([name]: any[]) => name === "native-compaction",
+  );
+  assert.equal(projection[1], originalEvent);
+  assert.equal(projection[2], owner.providerMessages);
+  assert.equal(native[1], configured.session);
+  assert.equal(native[2], projectedEvent);
+  assert.equal(
+    originalEvent.preparation.messagesToSummarize[0].content,
+    "full output",
+  );
+  owner.compactionEvent = undefined;
 });
 
 test("prompt exports preserve empty, duplicate, and lazy fallback behavior", () => {

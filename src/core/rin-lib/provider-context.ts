@@ -14,6 +14,61 @@ export function buildProviderBoundContextMessages(
   return pruneSessionContextMessages(messages, options);
 }
 
+export function mapMessagesToProviderBoundContext(
+  messages: any[],
+  fullContextMessages: any[],
+  options: ProviderBoundContextOptions = {},
+) {
+  if (!messages.length || !fullContextMessages.length) return messages;
+
+  const providerContext = buildProviderBoundContextMessages(
+    fullContextMessages,
+    options,
+  );
+  if (providerContext === fullContextMessages) return messages;
+
+  const replacements = new Map<any, any>();
+  fullContextMessages.forEach((message, index) => {
+    const replacement = providerContext[index];
+    if (replacement !== message) replacements.set(message, replacement);
+  });
+  if (!replacements.size) return messages;
+
+  let changed = false;
+  const mapped = messages.map((message) => {
+    const replacement = replacements.get(message);
+    if (!replacement) return message;
+    changed = true;
+    return replacement;
+  });
+  return changed ? mapped : messages;
+}
+
+export function buildProviderBoundCompactionEvent(
+  event: any,
+  fullContextMessages: any[],
+  options: ProviderBoundContextOptions = {},
+) {
+  const preparation = event?.preparation;
+  if (!preparation) return event;
+  return {
+    ...event,
+    preparation: {
+      ...preparation,
+      messagesToSummarize: mapMessagesToProviderBoundContext(
+        preparation.messagesToSummarize || [],
+        fullContextMessages,
+        options,
+      ),
+      turnPrefixMessages: mapMessagesToProviderBoundContext(
+        preparation.turnPrefixMessages || [],
+        fullContextMessages,
+        options,
+      ),
+    },
+  };
+}
+
 export function buildProviderBoundContextEvent(
   event: any,
   options: ProviderBoundContextOptions = {},

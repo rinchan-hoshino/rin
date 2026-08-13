@@ -36,6 +36,7 @@ import {
 import type { RinToolStartupOptions } from "./tool-options.js";
 import type { RinPiPassthroughOptions } from "./pi-passthrough.js";
 import {
+  buildProviderBoundCompactionEvent,
   buildProviderBoundContextEvent,
   estimateProviderBoundContextTokens,
 } from "./provider-context.js";
@@ -1360,7 +1361,14 @@ export async function createConfiguredAgentSession(
           sessionRef.current?.__rinEmitCoreEvent?.(event);
         },
         compactWithPiNative: (event) =>
-          runPiNativeCompactionWithoutFileSummary(sessionRef.current, event),
+          runPiNativeCompactionWithoutFileSummary(
+            sessionRef.current,
+            buildProviderBoundCompactionEvent(
+              event,
+              getSessionProviderContextMessages(sessionRef.current),
+              { cwd: runtimeCwd },
+            ),
+          ),
         selfImproveTurnWindowTurns:
           options.selfImproveTurnWindowTurns ??
           services.settingsManager?.settings?.selfImprove?.turnWindowTurns,
