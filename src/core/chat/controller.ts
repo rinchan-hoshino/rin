@@ -8,6 +8,7 @@ import {
   chatFrontendIdentity,
   frontendCommandNameFromLine,
   getRinNonInteractiveCommandInteractionPolicy,
+  RIN_EMPTY_AGENT_RESPONSE_ERROR,
   type RinFrontendEventHandlingFailure,
   type RinFrontendIdentity,
   type RinChatPresentation,
@@ -68,7 +69,6 @@ import { applyPostDelivery, drainChatOutbox } from "./boot.js";
 import { assistantDeliveryParts } from "./terminal-delivery.js";
 import {
   advanceChatGeneration,
-  completeChatTurnWithoutDelivery,
   markChatMessageAcceptedWithFence,
   openChatDatabase,
   readChatSessionBinding,
@@ -2183,33 +2183,6 @@ export class ChatController {
     return outcome;
   }
 
-  private async settleEmptyAssistantCompletion(input: {
-    incomingMessageId?: string;
-    sessionFile?: string;
-    outboxTurnFence?: ChatOutboxTurnFence;
-  }) {
-    const settledTurn = this.currentTurn;
-    const incomingMessageId = safeString(input.incomingMessageId).trim();
-    const fence =
-      input.outboxTurnFence ||
-      this.turnFenceForInboundMessage(incomingMessageId);
-    if (fence) {
-      const completed = completeChatTurnWithoutDelivery(this.agentDir, fence, {
-        sessionFile: toStoredSessionFile(
-          this.agentDir,
-          input.sessionFile || this.currentSessionFile(),
-        ),
-      });
-      if (!completed) throw new Error("chat_turn_fence_lost");
-    } else {
-      this.markProcessedMessage(incomingMessageId);
-    }
-    if (!this.currentTurn || this.currentTurn === settledTurn) {
-      await this.clearWorkingReaction().catch(() => {});
-      if (this.currentTurn === settledTurn) this.clearCurrentTurn();
-    }
-  }
-
   private async deliverAssistantReply(input: {
     text?: string;
     parts?: ChatMessagePart[];
@@ -2432,8 +2405,8 @@ export class ChatController {
         ]),
       )
       .digest("hex")}`;
-    await this.sendPassiveNoticeNow(
-      `rin error: frontend event handling failed (${failure.stage}/${eventType}): ${errorText}`,
+    await this.sendErrorNoticeNow(
+      `frontend event handling failed (${failure.stage}/${eventType}): ${errorText}`,
       { idempotencyKey },
     );
   }
@@ -2645,8 +2618,8 @@ export class ChatController {
       // An empty Todo snapshot has no durable delivery to fence. Do not let it
       // mutate or refresh presentation state; final settlement clears Working.
       if (!error) return true;
-      const errorDelivered = await this.sendPassiveNoticeNow(
-        `rin error: ${error}`,
+      const errorDelivered = await this.sendErrorNoticeNow(
+        error,
         errorDeliveryOptions,
       );
       if (errorDelivered) commitTodoDisplayState([errorIdempotencyKey]);
@@ -2689,7 +2662,7 @@ export class ChatController {
       })();
     }
     const errorDelivery = error
-      ? this.sendPassiveNoticeNow(`rin error: ${error}`, errorDeliveryOptions)
+      ? this.sendErrorNoticeNow(error, errorDeliveryOptions)
       : Promise.resolve(true);
     const [todoDelivered, errorDelivered] = await Promise.all([
       todoDelivery,
@@ -3472,26 +3445,15 @@ export class ChatController {
         terminalRecordId: event.terminalRecord?.terminalId,
         joinedOwnerTurnId,
       });
-    } else if (context) {
-      await this.deliverAssistantReply({
-        text: "Rin completed this turn without a text response.",
-        replyToMessageId,
-        incomingMessageId: deliveryTarget.incomingMessageId,
-        sessionFile:
-          event.sessionFile ||
-          (context ? undefined : this.currentSessionFile()),
-        terminalTurn: context,
-        terminalRequestTag: event.requestTag,
-        terminalRecordId: event.terminalRecord?.terminalId,
-        joinedOwnerTurnId,
-        deliveryKind: "final",
-      });
     } else {
-      await this.settleEmptyAssistantCompletion({
-        incomingMessageId: deliveryTarget.incomingMessageId,
-        outboxTurnFence: deliveryTarget.outboxTurnFence,
-        sessionFile: event.sessionFile || this.currentSessionFile(),
+      await this.settleProjectedTurnError({
+        error: RIN_EMPTY_AGENT_RESPONSE_ERROR,
+        sessionFile: event.sessionFile,
+        requestTag: event.requestTag,
+        chatDeliveryContext: context,
+        terminalRecord: event.terminalRecord,
       });
+      return;
     }
     await this.finishTerminalPresentation(presentationTurn);
   }
@@ -3730,7 +3692,7 @@ export class ChatController {
           return;
         }
         if (event.level === "error" && event.deferDuringTurn === false) {
-          await this.sendPassiveNoticeNow(`rin error: ${event.text}`);
+          await this.sendErrorNoticeNow(event.text);
           return;
         }
         if (event.deferDuringTurn === false) {

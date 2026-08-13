@@ -1476,7 +1476,7 @@ test("chat main reports unmatched slash commands in owner-only Lark groups", asy
         seen.length !== 0 ||
         sentCount !== 1 ||
         rows.length !== 1 ||
-        rows[0]?.text !== "rin error: Unknown command. Send /help to see available commands."
+        rows[0]?.text !== "Error: Unknown command. Send /help to see available commands."
       ) {
         throw new Error(JSON.stringify({ sentCount, runCommandCalls, seen, rows }));
       }

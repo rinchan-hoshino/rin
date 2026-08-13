@@ -318,6 +318,28 @@ async function writeTuiSessionRecord(agentDir, options) {
   return sessionPath;
 }
 
+test("TUI and chat share one complete Error renderer", async () => {
+  await overrides.applyRinTuiOverrides();
+  themeModule.initTheme("dark", false);
+
+  const chatContainer = new piTuiModule.Container();
+  let renders = 0;
+  codingAgentModule.InteractiveMode.prototype.showError.call(
+    {
+      chatContainer,
+      outputPad: 1,
+      ui: { requestRender: () => (renders += 1) },
+    },
+    "rin error: rin_request_failed",
+  );
+
+  assert.equal(
+    stripVTControlCharacters(chatContainer.render(80).join("\n")).trim(),
+    "Error: request failed",
+  );
+  assert.equal(renders, 1);
+});
+
 test("terminal title override shows only session name", async () => {
   await overrides.applyRinTuiOverrides();
 

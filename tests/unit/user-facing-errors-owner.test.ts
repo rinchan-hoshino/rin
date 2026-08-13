@@ -410,8 +410,8 @@ test("archive and migration marker families execute their dedicated mappings", (
     assert.equal(output.includes(marker), false, marker);
   }
   assert.equal(
-    errors.preGovernanceChatErrorTextForIdempotency("rin_request_failed"),
-    "rin error: request failed",
+    errors.formatRuntimeErrorForFrontend("rin_request_failed"),
+    "Error: request failed",
   );
 });
 
@@ -510,11 +510,11 @@ test("frontend and chat display boundaries keep terse marker details", () => {
     "ordinary failure",
   );
   assert.equal(
-    errors.formatRuntimeErrorForChat("rin_request_failed"),
-    "rin error: request failed",
+    errors.formatRuntimeErrorForFrontend("rin_request_failed"),
+    "Error: request failed",
   );
   assert.equal(
-    errors.formatRuntimeErrorForChat("rin error: kept"),
-    "rin error: kept",
+    errors.formatRuntimeErrorForFrontend("rin error: kept"),
+    "Error: kept",
   );
 });

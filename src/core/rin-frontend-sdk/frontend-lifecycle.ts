@@ -7,6 +7,10 @@ import type {
   RinFrontendBackendEvent,
   RinFrontendRetryFailure,
 } from "./types.js";
+import {
+  RIN_EMPTY_AGENT_RESPONSE_ERROR,
+  resolveRinTurnTerminalOutcomeFromTurnResult,
+} from "./turn-completion.js";
 
 export type RinFrontendInterruptIntent =
   | "stop_turn"
@@ -321,11 +325,11 @@ export function projectRinFrontendLifecycleEvent(
         };
       }
       if (payload.event === "complete") {
-        return {
-          kind: "turn_terminal",
-          outcome: "complete",
-          finalText: safeString(payload.finalText).trim(),
+        const terminalOutcome = resolveRinTurnTerminalOutcomeFromTurnResult({
+          finalText: payload.finalText,
           result: payload.result,
+        });
+        const terminalContext = {
           sessionId: optionalText(payload.sessionId),
           sessionFile: optionalText(payload.sessionFile),
           chatDeliveryContext: optionalChatDeliveryContext(
@@ -333,6 +337,21 @@ export function projectRinFrontendLifecycleEvent(
           ),
           terminalRecord: optionalTerminalRecord(payload.terminalRecord),
           ...requestTag,
+        };
+        if (terminalOutcome.kind === "error") {
+          return {
+            kind: "turn_terminal",
+            outcome: "error",
+            error: terminalOutcome.error || RIN_EMPTY_AGENT_RESPONSE_ERROR,
+            ...terminalContext,
+          };
+        }
+        return {
+          kind: "turn_terminal",
+          outcome: "complete",
+          finalText: safeString(payload.finalText).trim(),
+          result: payload.result,
+          ...terminalContext,
         };
       }
       if (payload.event === "error") {

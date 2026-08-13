@@ -124,6 +124,7 @@ export {
   areRinTurnTerminalOutcomesConsistent,
   classifyRinTurnMessage,
   isRinTerminalAssistantMessage,
+  RIN_EMPTY_AGENT_RESPONSE_ERROR,
   RIN_TURN_TERMINAL_ABSENT,
   RinTurnSettlementProjector,
   resolveRinAuthoritativeTurnTerminalOutcome,

@@ -2428,8 +2428,8 @@ test("chat controller delivers immediate passive errors as non-terminal errors",
 
   assert.deepEqual(deliveries, [
     {
-      text: "rin error: Compaction failed: summary backend unavailable",
-      kind: "passive_notice",
+      text: "Error: Compaction failed: summary backend unavailable",
+      kind: "error",
     },
   ]);
   assert.deepEqual(
@@ -2777,7 +2777,7 @@ test("chat controller restores fallback revision from a Todo error", async () =>
     .all(claim.itemId);
   assert.deepEqual(
     rows.map((row) => row.delivery_kind),
-    ["passive_notice", "passive_notice", "passive_notice"],
+    ["passive_notice", "error", "passive_notice"],
   );
   assert.deepEqual(
     rows.map((row) => JSON.parse(row.idempotency_key)[4]),
@@ -2946,7 +2946,7 @@ test("chat controller binds an empty-state Todo error without refreshing Working
   assert.equal(controller.latestTodoNoticeText, "");
   assert.deepEqual(contexts, []);
   assert.deepEqual(deliveries, [
-    { text: "rin error: invalid todo list", kind: "passive_notice" },
+    { text: "Error: invalid todo list", kind: "error" },
   ]);
 });
 
@@ -3094,8 +3094,8 @@ test("chat controller keeps todo errors outside editable progress", async () => 
       coalesce: true,
     },
     {
-      text: "rin error: failed to persist todo state",
-      kind: "passive_notice",
+      text: "Error: failed to persist todo state",
+      kind: "error",
       coalesce: false,
     },
   ]);
@@ -3106,7 +3106,7 @@ test("chat controller keeps todo errors outside editable progress", async () => 
       .all(),
     [
       { delivery_kind: "passive_notice", turn_id: claim.itemId },
-      { delivery_kind: "passive_notice", turn_id: claim.itemId },
+      { delivery_kind: "error", turn_id: claim.itemId },
     ],
   );
   assert.deepEqual(
@@ -3137,7 +3137,7 @@ test("chat controller attempts independent todo errors when progress delivery fa
     });
 
     assert.equal(delivered, false);
-    assert.deepEqual(attempts, ["passive_notice", "passive_notice"]);
+    assert.deepEqual(attempts, ["passive_notice", "error"]);
   }
 });
 
@@ -3359,7 +3359,7 @@ test("chat controller quiet mode still sends independent errors", async () => {
   await assert.rejects(controller.runCommand("/reload"), /quiet failure/);
 
   assert.deepEqual(deliveries, [
-    { text: "rin error: quiet failure", kind: "error" },
+    { text: "Error: quiet failure", kind: "error" },
   ]);
 });
 
@@ -5190,7 +5190,7 @@ test("chat controller stages raw non-transient command errors for the outbox", a
   );
   const contentHash = crypto
     .createHash("sha256")
-    .update(JSON.stringify({ text: "rin error: boom", parts: [] }))
+    .update(JSON.stringify({ text: "Error: boom", parts: [] }))
     .digest("hex");
   const idempotencyKey = JSON.stringify([
     "error",
@@ -7680,7 +7680,7 @@ test("chat controller keeps the turn active while final reply delivery is still 
   }
 });
 
-test("chat controller settles an empty rpc completion without reusing observed assistant text", async () => {
+test("chat controller renders an empty rpc terminal as the shared frontend error", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.commitPendingDelivery = async function (clearProcessing = false) {
@@ -7718,20 +7718,27 @@ test("chat controller settles an empty rpc completion without reusing observed a
     switchSession: async () => {},
   };
 
-  const result = await controller.runTurn({
-    text: "hello",
-    attachments: [],
-    incomingMessageId: "m-turn-observed-final",
-    replyToMessageId: "m-turn-observed-final",
-  });
-  assert.equal(result.finalText, "");
-  assert.deepEqual(deliveries, []);
+  await assert.rejects(
+    controller.runTurn({
+      text: "hello",
+      attachments: [],
+      incomingMessageId: "m-turn-observed-final",
+      replyToMessageId: "m-turn-observed-final",
+    }),
+    /Agent returned an empty response/,
+  );
+  assert.deepEqual(deliveries, [
+    {
+      text: "Agent returned an empty response.",
+      replyToMessageId: "m-turn-observed-final",
+    },
+  ]);
   assert.equal(controller.currentTurn, null);
   assert.equal(controller.awaitingTurnSettle, false);
   assert.equal(await controller.pollTyping(), false);
 });
 
-test("chat controller settles an empty rpc completion without scanning session messages", async () => {
+test("chat controller never scans stale session text to repair an empty producer result", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   controller.commitPendingDelivery = async function (clearProcessing = false) {
@@ -7770,14 +7777,21 @@ test("chat controller settles an empty rpc completion without scanning session m
     switchSession: async () => {},
   };
 
-  const result = await controller.runTurn({
-    text: "hello",
-    attachments: [],
-    incomingMessageId: "m-turn-empty-final",
-    replyToMessageId: "m-turn-empty-final",
-  });
-  assert.equal(result.finalText, "");
-  assert.deepEqual(deliveries, []);
+  await assert.rejects(
+    controller.runTurn({
+      text: "hello",
+      attachments: [],
+      incomingMessageId: "m-turn-empty-final",
+      replyToMessageId: "m-turn-empty-final",
+    }),
+    /Agent returned an empty response/,
+  );
+  assert.deepEqual(deliveries, [
+    {
+      text: "Agent returned an empty response.",
+      replyToMessageId: "m-turn-empty-final",
+    },
+  ]);
   assert.equal(controller.currentTurn, null);
   assert.equal(controller.awaitingTurnSettle, false);
   assert.equal(await controller.pollTyping(), false);

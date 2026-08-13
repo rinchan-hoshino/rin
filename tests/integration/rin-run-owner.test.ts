@@ -285,10 +285,13 @@ test("non-interactive Rin run owns argument normalization, standalone session li
 
     resetOwnerState();
     owner.__rinRunOwnerPromptResult = { result: null, finalText: "" };
-    const missingFinalLogs = await captureLogs(() =>
-      run.runNonInteractive(parsed(root), ["-p", "missing final"]),
+    await assert.rejects(
+      () =>
+        captureLogs(() =>
+          run.runNonInteractive(parsed(root), ["-p", "missing final"]),
+        ),
+      /Agent returned an empty response/,
     );
-    assert.deepEqual(missingFinalLogs, []);
 
     resetOwnerState();
     owner.__rinRunOwnerPromptFailure = "owner prompt failed";

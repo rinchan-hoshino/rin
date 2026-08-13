@@ -8,9 +8,8 @@ import {
 import { validateChatOutboxPayloadParts } from "../chat/outbox-payload-validation.js";
 import { safeString } from "../text-utils.js";
 import {
-  formatRuntimeErrorForChat,
-  formatRuntimeErrorForChatBody,
-  preGovernanceChatErrorTextForIdempotency,
+  formatRuntimeErrorForFrontend,
+  formatRuntimeErrorForFrontendDisplay,
 } from "./user-facing-errors.js";
 
 export type ChatMessagePart =
@@ -569,7 +568,7 @@ export function hashPreGovernanceChatErrorDeliveryContent(
     .createHash("sha256")
     .update(
       JSON.stringify({
-        text: preGovernanceChatErrorTextForIdempotency(text),
+        text: formatRuntimeErrorForFrontend(text),
         parts,
       }),
     )
@@ -591,12 +590,12 @@ function formatChatOutboxErrorParts(parts: ChatMessagePart[]) {
       if (!primaryTextPart) {
         primaryTextPart = {
           ...part,
-          text: formatRuntimeErrorForChat(part.text),
+          text: formatRuntimeErrorForFrontend(part.text),
         };
       } else {
         contentParts.push({
           ...part,
-          text: formatRuntimeErrorForChatBody(part.text),
+          text: formatRuntimeErrorForFrontendDisplay(part.text),
         });
       }
       continue;
@@ -610,7 +609,7 @@ function formatChatOutboxErrorParts(parts: ChatMessagePart[]) {
   if (!contentParts.length) return quoteParts;
   const errorPart: ChatMessagePart = {
     type: "text",
-    text: formatRuntimeErrorForChat(""),
+    text: formatRuntimeErrorForFrontend(""),
   };
   return [...quoteParts, errorPart, ...contentParts];
 }

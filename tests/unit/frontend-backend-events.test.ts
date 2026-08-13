@@ -766,6 +766,24 @@ test("frontend backend event translator treats overflow compaction as ordinary b
       },
     ],
   );
+
+  assert.deepEqual(
+    translator.translate({
+      type: "rpc_turn_event",
+      event: "complete",
+      finalText: "",
+      result: { messages: [] },
+    }),
+    [
+      {
+        type: "turn_error",
+        error: "Agent returned an empty response.",
+        sessionId: undefined,
+        sessionFile: undefined,
+        requestTag: undefined,
+      },
+    ],
+  );
 });
 
 test("frontend backend event translator preserves producer request tags on progress", () => {

@@ -6154,7 +6154,7 @@ test("frontend SDK turn driver does not complete from agent_end before rpc final
   assert.equal(result.finalText, "rpc final");
 });
 
-test("frontend SDK turn driver accepts an empty rpc completion without scanning session history", async () => {
+test("frontend SDK turn driver rejects an empty rpc completion without scanning session history", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   client.getMessages = async () => [
@@ -6167,8 +6167,10 @@ test("frontend SDK turn driver accepts an empty rpc completion without scanning 
     return { outcome: "terminalOwner", requestTag: options.requestTag };
   };
 
-  const result = await driver.runTurn({ text: "hello" });
-  assert.equal(result.finalText, "");
+  await assert.rejects(
+    driver.runTurn({ text: "hello" }),
+    /Agent returned an empty response/,
+  );
 });
 
 test("frontend SDK turn driver does not emit text-only assistant messages as interim", async () => {
@@ -6343,10 +6345,11 @@ test("frontend SDK turn driver does not reuse an older final when the current tu
     promptSource: "chat-bridge",
   });
 
-  const result = await driver.runTurn({ text: "new prompt" });
-  assert.equal(result.finalText, "");
-  assert.deepEqual(result.result, { messages: [] });
-  assert.notEqual(result.finalText, oldFinal);
+  await assert.rejects(
+    driver.runTurn({ text: "new prompt" }),
+    /Agent returned an empty response/,
+  );
+  assert.notEqual("", oldFinal);
 });
 
 test("frontend projects an authoritative terminal without current-session filtering", async () => {

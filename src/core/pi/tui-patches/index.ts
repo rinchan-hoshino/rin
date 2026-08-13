@@ -32,7 +32,10 @@ import {
   type RinGitChangelogNotice,
   type RinUpdateNotice,
 } from "../../rin-lib/update-notices.js";
-import { formatRuntimeErrorForFrontendDisplay } from "../../rin-lib/user-facing-errors.js";
+import {
+  formatRuntimeErrorForFrontend,
+  formatRuntimeErrorForFrontendDisplay,
+} from "../../rin-lib/user-facing-errors.js";
 import { extractMessageText } from "../../message-content.js";
 import {
   listBoundSessionPage,
@@ -1187,6 +1190,23 @@ export async function applyRinTuiOverrides() {
         if (line) nextLines.push(line);
       }
       return nextLines;
+    };
+  }
+
+  const originalShowError = interactiveModeProto?.showError;
+  if (typeof originalShowError === "function") {
+    interactiveModeProto.showError = function showSharedFrontendError(
+      error: unknown,
+    ) {
+      this.chatContainer.addChild(new Spacer(1));
+      this.chatContainer.addChild(
+        new Text(
+          theme.fg("error", formatRuntimeErrorForFrontend(error)),
+          this.outputPad,
+          0,
+        ),
+      );
+      this.ui.requestRender();
     };
   }
 

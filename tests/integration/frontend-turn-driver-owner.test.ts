@@ -435,7 +435,10 @@ test("frontend turn owner translates backend events and preserves terminal owner
     sessionId: client.sessionId,
     sessionFile: client.sessionFile,
   });
-  assert.equal((await within(emptyFinal, "empty-final")).finalText, "");
+  await assert.rejects(
+    within(emptyFinal, "empty-final"),
+    /Agent returned an empty response/,
+  );
 
   client.promptFinal = "unused";
   const failed = driver.runTurn({

@@ -512,17 +512,17 @@ test("chat outbox persists canonical Chat error text exactly once", async () => 
       outbox.readChatOutboxItemById(dir, markerId).item.payload.parts,
       [
         { type: "quote", id: "owner-message" },
-        { type: "text", text: "rin error: turn result recovery timeout" },
+        { type: "text", text: "Error: turn result recovery timeout" },
       ],
     );
     assert.deepEqual(
       outbox.readChatOutboxItemById(dir, prefixedId).item.payload.parts,
-      [{ type: "text", text: "rin error: request failed" }],
+      [{ type: "text", text: "Error: request failed" }],
     );
     assert.deepEqual(
       outbox.readChatOutboxItemById(dir, multipartId).item.payload.parts,
       [
-        { type: "text", text: "rin error: request failed" },
+        { type: "text", text: "Error: request failed" },
         { type: "markdown", text: "turn result recovery timeout" },
       ],
     );
@@ -530,7 +530,7 @@ test("chat outbox persists canonical Chat error text exactly once", async () => 
       outbox.readChatOutboxItemById(dir, structuredFirstId).item.payload.parts,
       [
         { type: "quote", id: "owner-message" },
-        { type: "text", text: "rin error: turn result recovery timeout" },
+        { type: "text", text: "Error: turn result recovery timeout" },
         { type: "image", url: "https://example.com/context.png" },
         { type: "at", id: "operator" },
         { type: "markdown", text: "follow-up failed" },
@@ -542,7 +542,7 @@ test("chat outbox persists canonical Chat error text exactly once", async () => 
       outbox.readChatOutboxItemById(dir, mediaOnlyId).item.payload.parts,
       [
         { type: "quote", id: "owner-message" },
-        { type: "text", text: "rin error: unknown error" },
+        { type: "text", text: "Error: unknown error" },
         { type: "image", url: "https://example.com/error.png" },
       ],
     );
@@ -554,7 +554,7 @@ test("chat outbox persists canonical Chat error text exactly once", async () => 
       const item = outbox.readChatOutboxItemById(dir, id).item;
       assert.equal(item.deliveryKind, "error");
       assert.equal(item.payload.deliveryKind, "error");
-      assert.match(item.payload.parts[0].text, /^rin error: /);
+      assert.match(item.payload.parts[0].text, /^Error: /);
     }
     assert.deepEqual(
       outbox.readChatOutboxItemById(dir, finalId).item.payload.parts,

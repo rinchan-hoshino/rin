@@ -28,6 +28,28 @@ test("Rin turn completion resolves explicit TurnResult payloads", () => {
   assert.equal(completion.finalText, "explicit final");
 });
 
+test("Rin rejects an empty producer result as a terminal error", () => {
+  assert.deepEqual(
+    resolveRinTurnTerminalOutcomeFromTurnResult({ messages: [] }),
+    {
+      kind: "error",
+      resolution: {
+        messages: [],
+        completion: { finalText: "", result: { messages: [] } },
+      },
+      error: "Agent returned an empty response.",
+    },
+  );
+  assert.equal(
+    resolveRinTurnTerminalOutcomeFromAssistantMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "" }],
+      stopReason: "stop",
+    }).kind,
+    "error",
+  );
+});
+
 test("Rin turn completion resolves the current assistant message_end", () => {
   const resolution = resolveRinTurnCompletionFromAssistantMessage({
     role: "assistant",
@@ -88,8 +110,8 @@ test("Rin turn settlement projector owns session observation and settled authori
   for (const message of messages) listener?.({ type: "message_end", message });
 
   const beforeSettlement = projector.resolve({ kind: "absent" }, messages);
-  assert.equal(beforeSettlement.kind, "complete");
-  assert.equal(beforeSettlement.resolution.completion.finalText, "");
+  assert.equal(beforeSettlement.kind, "error");
+  assert.equal(beforeSettlement.error, "Agent returned an empty response.");
 
   listener?.({ type: "agent_settled" });
   assert.equal(settledOutcomes.length, 1);
@@ -282,10 +304,10 @@ test("Rin settled completion promotes a successful durable tool preface only whe
   ]) {
     const aroundUnknownRecord =
       resolveRinSettledTurnTerminalOutcomeFromMessages(messages);
-    assert.equal(aroundUnknownRecord.kind, "complete");
-    assert.deepEqual(
-      aroundUnknownRecord.resolution.completion.result.messages,
-      [],
+    assert.equal(aroundUnknownRecord.kind, "error");
+    assert.equal(
+      aroundUnknownRecord.error,
+      "Agent returned an empty response.",
     );
   }
 
@@ -306,6 +328,10 @@ test("Rin settled completion promotes a successful durable tool preface only whe
 });
 
 test("Rin settled completion preserves error, media, summary, and failed-tool boundaries", () => {
+  const assertEmptyResponseError = (outcome: any) => {
+    assert.equal(outcome.kind, "error");
+    assert.equal(outcome.error, "Agent returned an empty response.");
+  };
   const preface = {
     role: "assistant",
     content: [
@@ -336,8 +362,8 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
     },
     { role: "assistant", content: [], stopReason: "stop" },
   ]);
-  assert.equal(failed.kind, "complete");
-  assert.deepEqual(failed.resolution.completion.result.messages, []);
+  assert.equal(failed.kind, "error");
+  assert.equal(failed.error, "Agent returned an empty response.");
 
   for (const stopReason of [undefined, " stop "]) {
     const implicitOrMalformedEmptyTerminal =
@@ -355,11 +381,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
           ...(stopReason === undefined ? {} : { stopReason }),
         },
       ]);
-    assert.equal(implicitOrMalformedEmptyTerminal.kind, "complete");
-    assert.deepEqual(
-      implicitOrMalformedEmptyTerminal.resolution.completion.result.messages,
-      [],
-    );
+    assertEmptyResponseError(implicitOrMalformedEmptyTerminal);
   }
 
   for (const isError of [undefined, "false"]) {
@@ -374,11 +396,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
         },
         { role: "assistant", content: [], stopReason: "stop" },
       ]);
-    assert.equal(implicitOrMalformedToolSuccess.kind, "complete");
-    assert.deepEqual(
-      implicitOrMalformedToolSuccess.resolution.completion.result.messages,
-      [],
-    );
+    assertEmptyResponseError(implicitOrMalformedToolSuccess);
   }
 
   for (const stopReason of [undefined, "stop", " toolUse "]) {
@@ -397,11 +415,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
         },
         { role: "assistant", content: [], stopReason: "stop" },
       ]);
-    assert.equal(implicitOrMalformedToolUse.kind, "complete");
-    assert.deepEqual(
-      implicitOrMalformedToolUse.resolution.completion.result.messages,
-      [],
-    );
+    assertEmptyResponseError(implicitOrMalformedToolUse);
   }
 
   const earlierEmptyTerminal = resolveRinSettledTurnTerminalOutcomeFromMessages(
@@ -417,11 +431,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
       { role: "assistant", content: [], stopReason: "stop" },
     ],
   );
-  assert.equal(earlierEmptyTerminal.kind, "complete");
-  assert.deepEqual(
-    earlierEmptyTerminal.resolution.completion.result.messages,
-    [],
-  );
+  assertEmptyResponseError(earlierEmptyTerminal);
 
   const emptyToolUseContinuation =
     resolveRinSettledTurnTerminalOutcomeFromMessages([
@@ -435,11 +445,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
       { role: "assistant", content: [], stopReason: "toolUse" },
       { role: "assistant", content: [], stopReason: "stop" },
     ]);
-  assert.equal(emptyToolUseContinuation.kind, "complete");
-  assert.deepEqual(
-    emptyToolUseContinuation.resolution.completion.result.messages,
-    [],
-  );
+  assertEmptyResponseError(emptyToolUseContinuation);
 
   const errorThenEmpty = resolveRinSettledTurnTerminalOutcomeFromMessages([
     preface,
@@ -457,8 +463,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
     },
     { role: "assistant", content: [], stopReason: "stop" },
   ]);
-  assert.equal(errorThenEmpty.kind, "complete");
-  assert.deepEqual(errorThenEmpty.resolution.completion.result.messages, []);
+  assertEmptyResponseError(errorThenEmpty);
 
   const resultAfterTerminal = resolveRinSettledTurnTerminalOutcomeFromMessages([
     preface,
@@ -476,11 +481,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
       isError: false,
     },
   ]);
-  assert.equal(resultAfterTerminal.kind, "complete");
-  assert.deepEqual(
-    resultAfterTerminal.resolution.completion.result.messages,
-    [],
-  );
+  assertEmptyResponseError(resultAfterTerminal);
 
   const outOfOrderToolResults =
     resolveRinSettledTurnTerminalOutcomeFromMessages([
@@ -507,11 +508,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
       },
       { role: "assistant", content: [], stopReason: "stop" },
     ]);
-  assert.equal(outOfOrderToolResults.kind, "complete");
-  assert.deepEqual(
-    outOfOrderToolResults.resolution.completion.result.messages,
-    [],
-  );
+  assertEmptyResponseError(outOfOrderToolResults);
 
   const overlappingToolCycles =
     resolveRinSettledTurnTerminalOutcomeFromMessages([
@@ -542,11 +539,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
       },
       { role: "assistant", content: [], stopReason: "stop" },
     ]);
-  assert.equal(overlappingToolCycles.kind, "complete");
-  assert.deepEqual(
-    overlappingToolCycles.resolution.completion.result.messages,
-    [],
-  );
+  assertEmptyResponseError(overlappingToolCycles);
 
   const normalizedToolIdMismatch =
     resolveRinSettledTurnTerminalOutcomeFromMessages([
@@ -566,11 +559,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
       },
       { role: "assistant", content: [], stopReason: "stop" },
     ]);
-  assert.equal(normalizedToolIdMismatch.kind, "complete");
-  assert.deepEqual(
-    normalizedToolIdMismatch.resolution.completion.result.messages,
-    [],
-  );
+  assertEmptyResponseError(normalizedToolIdMismatch);
 
   const distinctWhitespaceToolIds =
     resolveRinSettledTurnTerminalOutcomeFromMessages([
@@ -624,11 +613,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
     },
     { role: "assistant", content: [], stopReason: "stop" },
   ]);
-  assert.equal(duplicateToolCallId.kind, "complete");
-  assert.deepEqual(
-    duplicateToolCallId.resolution.completion.result.messages,
-    [],
-  );
+  assertEmptyResponseError(duplicateToolCallId);
 
   const orphanFailedResult = resolveRinSettledTurnTerminalOutcomeFromMessages([
     preface,
@@ -646,11 +631,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
     },
     { role: "assistant", content: [], stopReason: "stop" },
   ]);
-  assert.equal(orphanFailedResult.kind, "complete");
-  assert.deepEqual(
-    orphanFailedResult.resolution.completion.result.messages,
-    [],
-  );
+  assertEmptyResponseError(orphanFailedResult);
 
   const toolTerminated = resolveRinSettledTurnTerminalOutcomeFromMessages([
     preface,
@@ -701,11 +682,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
       },
       { role: "assistant", content: [], stopReason: "stop" },
     ]);
-  assert.equal(toolCallWithStopReasonStop.kind, "complete");
-  assert.deepEqual(
-    toolCallWithStopReasonStop.resolution.completion.result.messages,
-    [],
-  );
+  assertEmptyResponseError(toolCallWithStopReasonStop);
 
   const emptyToolUseWithoutCall =
     resolveRinSettledTurnTerminalOutcomeFromMessages([
@@ -719,11 +696,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
       { role: "assistant", content: [], stopReason: "toolUse" },
       { role: "assistant", content: [], stopReason: "stop" },
     ]);
-  assert.equal(emptyToolUseWithoutCall.kind, "complete");
-  assert.deepEqual(
-    emptyToolUseWithoutCall.resolution.completion.result.messages,
-    [],
-  );
+  assertEmptyResponseError(emptyToolUseWithoutCall);
 
   const unsupportedEmptyTerminalContent =
     resolveRinSettledTurnTerminalOutcomeFromMessages([
@@ -740,11 +713,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
         stopReason: "stop",
       },
     ]);
-  assert.equal(unsupportedEmptyTerminalContent.kind, "complete");
-  assert.deepEqual(
-    unsupportedEmptyTerminalContent.resolution.completion.result.messages,
-    [],
-  );
+  assertEmptyResponseError(unsupportedEmptyTerminalContent);
 
   const ordinaryTextThenEmpty =
     resolveRinSettledTurnTerminalOutcomeFromMessages([
@@ -755,11 +724,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
       },
       { role: "assistant", content: [], stopReason: "stop" },
     ]);
-  assert.equal(ordinaryTextThenEmpty.kind, "complete");
-  assert.deepEqual(
-    ordinaryTextThenEmpty.resolution.completion.result.messages,
-    [],
-  );
+  assertEmptyResponseError(ordinaryTextThenEmpty);
 
   const providerError = resolveRinSettledTurnTerminalOutcomeFromMessages([
     preface,
@@ -794,8 +759,7 @@ test("Rin settled completion preserves error, media, summary, and failed-tool bo
     },
     { role: "assistant", content: [], stopReason: "stop" },
   ]);
-  assert.equal(summaryOnly.kind, "complete");
-  assert.deepEqual(summaryOnly.resolution.completion.result.messages, []);
+  assertEmptyResponseError(summaryOnly);
 });
 
 test("Rin turn completion classifies structured summaries before assistant terminals", () => {
@@ -896,7 +860,7 @@ test("Rin turn terminal outcomes distinguish absent from explicit empty and medi
   });
   assert.equal(
     resolveRinTurnTerminalOutcomeFromTurnResult({ messages: [] }).kind,
-    "complete",
+    "error",
   );
   assert.equal(
     resolveRinTurnTerminalOutcomeFromTurnResult({

@@ -42,6 +42,24 @@ export const RIN_TURN_TERMINAL_ABSENT: RinTurnTerminalOutcome = {
   kind: "absent",
 };
 
+export const RIN_EMPTY_AGENT_RESPONSE_ERROR =
+  "Agent returned an empty response.";
+
+function rejectEmptyRinTurnCompletion(
+  resolution: RinTurnCompletionResolution,
+  comparison: "structured" | "text",
+): RinTurnTerminalOutcome {
+  const messages = resolution.completion.result.messages;
+  if (resolution.completion.finalText || messages.length > 0) {
+    return { kind: "complete", resolution, comparison };
+  }
+  return {
+    kind: "error",
+    resolution,
+    error: RIN_EMPTY_AGENT_RESPONSE_ERROR,
+  };
+}
+
 export function areRinTurnTerminalOutcomesConsistent(
   authoritative: RinTurnTerminalOutcome,
   evidence: RinTurnTerminalOutcome,
@@ -134,11 +152,10 @@ export function resolveRinTurnTerminalOutcomeFromTurnResult(
   ) {
     return resolveRinTurnTerminalOutcomeFromMessages(result.messages);
   }
-  return {
-    kind: "complete",
-    resolution: resolveRinTurnCompletionFromTurnResult(value),
-    comparison: hasStructuredResult ? "structured" : "text",
-  };
+  return rejectEmptyRinTurnCompletion(
+    resolveRinTurnCompletionFromTurnResult(value),
+    hasStructuredResult ? "structured" : "text",
+  );
 }
 
 export function resolveRinTurnTerminalOutcomeFromAssistantMessage(
@@ -154,7 +171,7 @@ export function resolveRinTurnTerminalOutcomeFromAssistantMessage(
         resolution,
         error: messageFailureError(messageValue),
       }
-    : { kind: "complete", resolution, comparison: "structured" };
+    : rejectEmptyRinTurnCompletion(resolution, "structured");
 }
 
 export function resolveRinTurnTerminalOutcomeFromMessages(
@@ -278,8 +295,11 @@ export function resolveRinSettledTurnTerminalOutcomeFromMessages(
   const terminalIndex = lastRinTerminalMessageIndex(messages);
   const terminalMessage =
     terminalIndex < 0 ? null : rinTurnMessageValue(messages[terminalIndex]);
+  const isEmptyTerminalError =
+    terminalOutcome.kind === "error" &&
+    terminalOutcome.error === RIN_EMPTY_AGENT_RESPONSE_ERROR;
   if (
-    terminalOutcome.kind !== "complete" ||
+    (terminalOutcome.kind !== "complete" && !isEmptyTerminalError) ||
     terminalOutcome.resolution.completion.result.messages.length > 0 ||
     !terminalMessage ||
     terminalMessage.stopReason !== "stop" ||

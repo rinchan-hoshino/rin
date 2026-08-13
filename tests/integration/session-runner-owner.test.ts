@@ -139,17 +139,19 @@ test("session runner returns the final assistant text and releases resources", a
   ]);
 });
 
-test("session runner returns an empty final while cleanup failures stay contained", async () => {
+test("session runner rejects an empty final while cleanup failures stay contained", async () => {
   const { calls } = installFixture({
     finalContent: [{ type: "text", text: "   " }],
     cleanupThrows: true,
   });
-  const result = await runner.runSessionPrompt({
-    cwd: "/work/demo",
-    agentDir: "/tmp/agent",
-    prompt: "no final",
-  });
-  assert.equal(result.finalText, "");
+  await assert.rejects(
+    runner.runSessionPrompt({
+      cwd: "/work/demo",
+      agentDir: "/tmp/agent",
+      prompt: "no final",
+    }),
+    /Agent returned an empty response/,
+  );
   assert.deepEqual(calls, [
     "subscribe",
     "prompt:no final",

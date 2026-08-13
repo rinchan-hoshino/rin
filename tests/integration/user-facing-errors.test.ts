@@ -5,11 +5,10 @@ import test from "node:test";
 
 import { runFrontendEntrypoint } from "../../src/core/rin-frontend-sdk/entrypoint.js";
 import {
-  formatRuntimeErrorForChat,
+  formatRuntimeErrorForFrontend,
   formatRuntimeErrorForFrontendDisplay,
   formatRuntimeErrorForUser,
   hasUserFacingRuntimeErrorMapping,
-  preGovernanceChatErrorTextForIdempotency,
 } from "../../src/core/rin-lib/user-facing-errors.js";
 
 test("runtime error formatter keeps human messages", () => {
@@ -61,48 +60,34 @@ test("frontend display error formatter keeps terse marker-derived errors", () =>
   assert.equal(formatRuntimeErrorForFrontendDisplay(""), "unknown error");
 });
 
-test("chat error formatter prefixes terse Rin errors", () => {
+test("frontend error formatter matches Pi TUI Error rendering", () => {
   assert.equal(
-    formatRuntimeErrorForChat("rin_request_failed"),
-    "rin error: request failed",
+    formatRuntimeErrorForFrontend("rin_request_failed"),
+    "Error: request failed",
   );
   assert.equal(
-    formatRuntimeErrorForChat("prompt is too long"),
-    "rin error: prompt is too long",
+    formatRuntimeErrorForFrontend("prompt is too long"),
+    "Error: prompt is too long",
   );
   assert.equal(
-    formatRuntimeErrorForChat("rin error: request failed"),
-    "rin error: request failed",
-  );
-  assert.equal(
-    formatRuntimeErrorForChat("Rin error: rin_turn_result_recovery_timeout"),
-    "rin error: turn result recovery timeout",
-  );
-  assert.equal(
-    formatRuntimeErrorForChat("rin error: rin error: request failed"),
-    "rin error: request failed",
-  );
-  assert.equal(
-    preGovernanceChatErrorTextForIdempotency(
-      "RIN ERROR: RIN ERROR: request failed",
-    ),
-    "RIN ERROR: RIN ERROR: request failed",
+    formatRuntimeErrorForFrontend("Error: request failed"),
+    "Error: request failed",
   );
   assert.deepEqual(
     [
       "frontend session terminated",
       "rin_turn_result_invariant_failed",
       "provider response headers timed out after 300000ms",
-    ].map((message) => formatRuntimeErrorForChat(message)),
+    ].map((message) => formatRuntimeErrorForFrontend(message)),
     [
-      "rin error: frontend session terminated",
-      "rin error: turn result invariant failed",
-      "rin error: provider response headers timed out after 300000ms",
+      "Error: frontend session terminated",
+      "Error: turn result invariant failed",
+      "Error: provider response headers timed out after 300000ms",
     ],
   );
 });
 
-test("Chat outbox is the only production owner of Chat error formatting", () => {
+test("Chat outbox reuses the frontend Error renderer", () => {
   const repoRoot = path.resolve(import.meta.dirname, "../..");
   for (const relative of [
     "src/core/chat/controller.ts",
@@ -116,7 +101,8 @@ test("Chat outbox is the only production owner of Chat error formatting", () => 
     path.join(repoRoot, "src/core/rin-lib/chat-outbox.ts"),
     "utf8",
   );
-  assert.match(outbox, /formatRuntimeErrorForChat\(part\.text\)/);
+  assert.match(outbox, /formatRuntimeErrorForFrontend\(part\.text\)/);
+  assert.doesNotMatch(outbox, /rin error:/i);
 });
 
 test("runtime error formatter maps known internal markers to actionable messages", () => {
