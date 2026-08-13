@@ -12,7 +12,6 @@ const ownerGlobal = globalThis as any;
 const fixture = ownerGlobal.__rinTuiRuntimeOwner as {
   profile: { cwd: string; agentDir: string };
   events: any[];
-  capabilityContext?: any;
 };
 
 type Handler =
@@ -170,7 +169,6 @@ async function flush() {
 
 test("rpc runtime composes real local session, resource, and capability contracts", async () => {
   fixture.events.length = 0;
-  fixture.capabilityContext = undefined;
   const flags = new Map([["owner-flag", "enabled"]]);
   const { session, client } = makeSession(new OwnerRpcClient(), {
     tools: ["read", "bash"],
@@ -190,12 +188,8 @@ test("rpc runtime composes real local session, resource, and capability contract
     appendSystemPrompt: ["owner append"],
   });
 
-  assert.equal(session.getToolDefinition("owner_tool")?.label, "Owner tool");
   assert.equal(session.getToolDefinition("missing"), undefined);
   assert.equal(session.getToolDefinition(""), undefined);
-  assert.equal(fixture.capabilityContext.cwd, "/owner/work");
-  assert.equal(fixture.capabilityContext.agentDir, "/owner/agent");
-  assert.equal(fixture.capabilityContext.getThinkingLevel(), "medium");
   assert.equal(session.sessionManager.getCwd(), "/owner/work");
   assert.equal(session.sessionManager.getSessionDir(), "/owner/agent/sessions");
   assert.deepEqual(fixture.events, [
@@ -910,22 +904,6 @@ test("rpc runtime exposes bound Pi facades, model mutations, and refresh queues"
     skills: [{ name: "owner-skill" }],
     diagnostics: ["skill-ok"],
   });
-
-  fixture.capabilityContext.sendMessage(
-    { role: "assistant", content: "capability owner" },
-    { triggerTurn: false },
-  );
-  fixture.capabilityContext.emitEvent({
-    type: "status",
-    level: "info",
-    text: "capability event",
-  });
-  await flush();
-  assert.equal(sentOf(client, "send_custom_message").length > 0, true);
-  assert.equal(
-    events.some((event) => event.text === "capability event"),
-    true,
-  );
 
   assert.equal(session.extensionRunner.getMessageRenderer("owner"), undefined);
   assert.deepEqual(session.extensionRunner.getMarkdownTransformers(), []);

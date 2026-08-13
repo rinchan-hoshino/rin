@@ -4,7 +4,7 @@ import type { AuthResult } from "@earendil-works/pi-ai";
 import { compact } from "@earendil-works/pi-coding-agent";
 
 import { updateSessionCatalogFromSessionManagerSync } from "../session/catalog.js";
-import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
+import { normalizeFrontendIdentity } from "../rin-lib/frontend-identity.js";
 
 // This file is Rin's controlled seam for Pi AgentSession/SessionManager
 // implementation details. Product code should call these semantic helpers

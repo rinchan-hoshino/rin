@@ -6,23 +6,21 @@
  * memory.
  */
 
-import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type {
   RinCapabilityContext,
   RinCapabilityDefinition,
 } from "./capability-types.js";
+import type { NoteToolDetails } from "./core-tool-contracts.js";
 import {
   createItemToolParameters,
   formatItemReadWindowContent,
   normalizeItemId,
-  normalizeNextItemId,
   resolveInsertIndex,
   resolveItemReadWindow,
   resolveSelectedItemIds,
   type ItemAction,
   type ItemReadWindow,
-  updateItemToolText,
   validateItemActionParams,
 } from "./item-tool.js";
 import {
@@ -33,13 +31,6 @@ import {
 
 export { RIN_NOTE_CUSTOM_ENTRY_TYPE } from "./note-state.js";
 export { readNoteSnapshotFromSession } from "./note-state.js";
-
-interface NoteDetails {
-  action: ItemAction;
-  items: RinNoteItem[];
-  nextId: number;
-  error?: string;
-}
 
 const NoteAddItemParams: any = Type.Object(
   {
@@ -107,39 +98,6 @@ function formatNoteContent(items: RinNoteItem[]) {
   return items.map((item) => `#${item.id} ${item.text}`).join("\n");
 }
 
-function formatNoteRender(items: RinNoteItem[], theme: Theme) {
-  if (items.length === 0) return theme.fg("dim", "○ No notes");
-  return items
-    .map(
-      (item) =>
-        `${theme.fg("accent", `#${item.id}`)} ${theme.fg("text", item.text)}`,
-    )
-    .join("\n");
-}
-
-function parseDetails(value: unknown): NoteDetails | undefined {
-  const details = value && typeof value === "object" ? (value as any) : null;
-  if (!details || !Array.isArray(details.items)) return undefined;
-  const items = details.items
-    .map((item: any) => {
-      const id = normalizeItemId(item?.id);
-      const text = typeof item?.text === "string" ? item.text.trim() : "";
-      return id === undefined || !text ? undefined : { id, text };
-    })
-    .filter((item: RinNoteItem | undefined): item is RinNoteItem =>
-      Boolean(item),
-    );
-  const action = NOTE_ACTIONS.includes(details.action)
-    ? details.action
-    : "read";
-  return {
-    action,
-    items,
-    nextId: normalizeNextItemId(items, details.nextId),
-    ...(typeof details.error === "string" ? { error: details.error } : {}),
-  };
-}
-
 export default function noteCapability(): RinCapabilityDefinition {
   let items: RinNoteItem[] = [];
   let nextId = 1;
@@ -149,7 +107,7 @@ export default function noteCapability(): RinCapabilityDefinition {
     action: ItemAction,
     error?: string,
     readWindow?: ItemReadWindow<RinNoteItem>,
-  ): NoteDetails => ({
+  ): NoteToolDetails => ({
     action,
     items: (readWindow?.items ?? items).map((item) => ({ ...item })),
     nextId,
@@ -274,36 +232,6 @@ export default function noteCapability(): RinCapabilityDefinition {
         .filter((item) => !removal.ids!.includes(item.id))
         .map((item) => ({ ...item }));
       return commit("remove", nextItems, nextId);
-    },
-
-    renderCall(args: any, theme: Theme, context: any) {
-      const action = String(args?.action || "").trim();
-      return updateItemToolText(
-        context?.isPartial === false
-          ? ""
-          : theme.fg("toolTitle", action ? `note ${action}` : "note …"),
-        context,
-      );
-    },
-
-    renderResult(value: any, _options: any, theme: Theme, context: any) {
-      const parsed = parseDetails(value.details);
-      if (!parsed) {
-        const text = value.content?.[0];
-        return updateItemToolText(
-          text?.type === "text" ? text.text : "",
-          context,
-        );
-      }
-      const notes = formatNoteRender(parsed.items, theme);
-      return updateItemToolText(
-        parsed.error
-          ? [theme.fg("error", `Error: ${parsed.error}`), notes]
-              .filter(Boolean)
-              .join("\n")
-          : notes,
-        context,
-      );
     },
   };
 

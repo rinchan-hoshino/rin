@@ -37,6 +37,11 @@ const chatRuntime = await import(
 const todoModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "todo.js")).href
 );
+const tuiRenderers = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-tui", "tool-renderers", "index.js"),
+  ).href
+);
 
 function createCapabilities(agentDir: string) {
   return capabilitySession.createRinCapabilitySet({
@@ -140,8 +145,14 @@ test("core todo loads from configured runtime without extension paths", async ()
       const commandNames = configured.session.extensionRunner
         .getRegisteredCommands()
         .map((command: any) => command.invocationName);
-      assert.equal(commandNames.includes("todos"), true);
-      assert.equal(commandNames.includes("notes"), true);
+      assert.equal(commandNames.includes("todos"), false);
+      assert.equal(commandNames.includes("notes"), false);
+      assert.equal(typeof todoTool.execute, "function");
+      assert.equal(todoTool.renderCall, undefined);
+      assert.equal(todoTool.renderResult, undefined);
+      const todoRenderer = tuiRenderers.getCoreToolRenderer("todo");
+      assert.equal(typeof todoRenderer.renderCall, "function");
+      assert.equal(typeof todoRenderer.renderResult, "function");
       assert.match(todoTool.description, /stable item ID/);
       assert.equal(
         todoTool.promptSnippet,

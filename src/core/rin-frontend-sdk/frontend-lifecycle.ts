@@ -10,7 +10,7 @@ import type {
 import {
   RIN_EMPTY_AGENT_RESPONSE_ERROR,
   resolveRinTurnTerminalOutcomeFromTurnResult,
-} from "./turn-completion.js";
+} from "../session/turn-completion.js";
 
 export type RinFrontendInterruptIntent =
   | "stop_turn"

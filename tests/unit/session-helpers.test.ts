@@ -4,8 +4,8 @@ import test from "node:test";
 import { importBuiltModule } from "../support/import-built-module.js";
 
 const sessionHelpers = await importBuiltModule<
-  typeof import("../../src/core/rin-frontend-sdk/session-helpers.js")
->("dist/core/rin-frontend-sdk/session-helpers.js");
+  typeof import("../../src/core/session/helpers.js")
+>("dist/core/session/helpers.js");
 
 test("assistant text selection includes thinking and skips empty or non-assistant messages", () => {
   assert.equal(

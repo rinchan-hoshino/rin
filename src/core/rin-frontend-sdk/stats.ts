@@ -4,7 +4,7 @@ import { buildProviderBoundContextMessages } from "../rin-lib/provider-context.j
 import {
   calculateContextTokens,
   estimateContextTokens,
-} from "./session-helpers.js";
+} from "../session/helpers.js";
 
 export function getContextUsage(model: any, messages: any[], branch: any[]) {
   const contextWindow = Number(model?.contextWindow || 0);

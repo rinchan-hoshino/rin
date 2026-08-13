@@ -25,6 +25,17 @@ const worker = await import(
     path.join(rootDir, "dist", "core", "rin-daemon", "worker-helpers.js"),
   ).href
 );
+const commandPresentation = await import(
+  pathToFileURL(
+    path.join(
+      rootDir,
+      "dist",
+      "core",
+      "rin-frontend-sdk",
+      "command-result-presentation.js",
+    ),
+  ).href
+);
 
 test("builtin command discovery does not require an ExtensionRunner", () => {
   const commands = catalog.getSessionSlashCommands({
@@ -85,7 +96,9 @@ test("builtin command execution does not call the extension API", async () => {
     (await worker.runBuiltinCommand(runtime, "/reload", {})).handled,
     true,
   );
-  const sessionResult = await worker.runBuiltinCommand(runtime, "/session", {});
+  const sessionResult = commandPresentation.presentBuiltinCommandResult(
+    await worker.runBuiltinCommand(runtime, "/session", {}),
+  );
   assert.equal(sessionResult.handled, true);
   assert.match(sessionResult.text, /session-1/);
   assert.deepEqual(calls, [

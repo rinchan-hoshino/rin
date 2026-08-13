@@ -35,12 +35,13 @@ import {
 import {
   formatRuntimeErrorForFrontend,
   formatRuntimeErrorForFrontendDisplay,
-} from "../../rin-lib/user-facing-errors.js";
+} from "../../presentation/error.js";
 import { extractMessageText } from "../../message-content.js";
 import {
   listBoundSessionPage,
   renameBoundSession,
 } from "../../session/factory.js";
+import { RIN_TUI_BUILTIN_COMMAND_REGISTRY } from "../../rin-tui/builtin-command-registry.js";
 import {
   getRinTuiRuntimeRole,
   RIN_TUI_MAINTENANCE_ROLE,
@@ -415,8 +416,8 @@ function shouldSyncLocalWorkingAfterEvent(instance: any, event: any) {
 }
 
 type LocalUserEcho = {
+  requestTag: string;
   text: string;
-  renderedChildren: unknown[];
 };
 
 function getLocalUserEchoQueue(instance: any): LocalUserEcho[] {
@@ -432,37 +433,27 @@ async function renderLocalUserEcho(
   localEcho: LocalUserEcho,
   handleEvent: (...args: any[]) => unknown,
 ) {
-  const children = Array.isArray(instance.chatContainer?.children)
-    ? instance.chatContainer.children
-    : [];
-  const previousChildren = new Set(children);
   await handleEvent.call(instance, {
     type: "message_start",
+    requestTag: localEcho.requestTag,
     message: {
       role: "user",
       content: [{ type: "text", text: localEcho.text }],
     },
   });
-  localEcho.renderedChildren = children.filter(
-    (child: unknown) => !previousChildren.has(child),
-  );
 }
 
-function takeMatchingLocalUserEcho(instance: any, event: any) {
-  if (event?.type !== "message_start") return undefined;
-  const nextText = extractUserTextFromEvent(event);
-  if (!nextText) return undefined;
-  const queue = getLocalUserEchoQueue(instance);
-  if (queue[0]?.text !== nextText) return undefined;
-  return queue.shift();
-}
-
-function removeRenderedLocalUserEcho(instance: any, echo?: LocalUserEcho) {
-  const container = instance?.chatContainer;
-  if (!echo || typeof container?.removeChild !== "function") return;
-  for (const child of echo.renderedChildren) {
-    container.removeChild(child);
+function consumeMatchingLocalUserEcho(instance: any, event: any) {
+  if (event?.type !== "message_start" || event?.message?.role !== "user") {
+    return false;
   }
+  const requestTag = String(event?.requestTag || "").trim();
+  if (!requestTag) return false;
+  const queue = getLocalUserEchoQueue(instance);
+  const index = queue.findIndex((echo) => echo.requestTag === requestTag);
+  if (index < 0) return false;
+  queue.splice(index, 1);
+  return true;
 }
 
 function shouldIgnoreInteractiveSigint(instance: any) {
@@ -1210,12 +1201,50 @@ export async function applyRinTuiOverrides() {
     };
   }
 
+  const originalCreateBaseAutocompleteProvider =
+    interactiveModeProto?.createBaseAutocompleteProvider;
+  if (typeof originalCreateBaseAutocompleteProvider === "function") {
+    interactiveModeProto.createBaseAutocompleteProvider =
+      function createRinAutocompleteProvider(...args: any[]) {
+        const provider = originalCreateBaseAutocompleteProvider.apply(
+          this,
+          args,
+        );
+        if (Array.isArray(provider?.commands)) {
+          for (const command of RIN_TUI_BUILTIN_COMMAND_REGISTRY.commands) {
+            const existingIndex = provider.commands.findIndex(
+              (candidate: any) =>
+                (candidate?.name || candidate?.value) === command.name,
+            );
+            if (existingIndex === -1) provider.commands.push(command);
+            else provider.commands[existingIndex] = command;
+          }
+        }
+        return provider;
+      };
+  }
+
   const originalInit = interactiveModeProto?.init;
   if (typeof originalInit === "function") {
     interactiveModeProto.init = async function initWithRinStartupBranding(
       ...args: any[]
     ) {
       await runPiInteractiveModeInit(originalInit, this, args);
+      if (this.defaultEditor && !this.defaultEditor.__rinBuiltinCommandsBound) {
+        const originalSubmit = this.defaultEditor.onSubmit;
+        this.defaultEditor.onSubmit = async (text: string) => {
+          const handled = await RIN_TUI_BUILTIN_COMMAND_REGISTRY.execute(text, {
+            sessionManager: this.sessionManager,
+            ui: this.createExtensionUIContext(),
+          });
+          if (handled) {
+            this.defaultEditor.setText("");
+            return;
+          }
+          return originalSubmit?.(text);
+        };
+        this.defaultEditor.__rinBuiltinCommandsBound = true;
+      }
       applyRinStartupHeaderBranding(this);
     };
   }
@@ -1523,11 +1552,9 @@ export async function applyRinTuiOverrides() {
 
       if (event?.type === "rpc_local_user_message") {
         const text = String(event.text || "").trim();
-        if (!text) return;
-        const localEcho: LocalUserEcho = {
-          text,
-          renderedChildren: [],
-        };
+        const requestTag = String(event.requestTag || "").trim();
+        if (!text || !requestTag) return;
+        const localEcho: LocalUserEcho = { requestTag, text };
         getLocalUserEchoQueue(this).push(localEcho);
         await renderLocalUserEcho(this, localEcho, originalHandleEvent);
         return;
@@ -1546,7 +1573,7 @@ export async function applyRinTuiOverrides() {
         return;
       }
 
-      removeRenderedLocalUserEcho(this, takeMatchingLocalUserEcho(this, event));
+      if (consumeMatchingLocalUserEcho(this, event)) return;
 
       const shouldSyncLocalWorking = shouldSyncLocalWorkingAfterEvent(
         this,

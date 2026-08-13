@@ -6,6 +6,9 @@ import { importBuiltModule } from "../support/import-built-module.js";
 const todoModule = await importBuiltModule<
   typeof import("../../src/core/rin-lib/todo.js")
 >("dist/core/rin-lib/todo.js");
+const { todoToolRenderer } = await importBuiltModule<
+  typeof import("../../src/core/rin-tui/tool-renderers/todo.js")
+>("dist/core/rin-tui/tool-renderers/todo.js");
 
 const theme = {
   fg(_color: string, text: unknown) {
@@ -84,7 +87,8 @@ test("todo owner reports thrown persistence values without mutating accepted sta
 });
 
 test("todo owner updates one TUI component and hides an empty checklist", async () => {
-  const { tool } = await setup();
+  await setup();
+  const tool = todoToolRenderer as any;
   const pending = tool.renderCall({ action: "add" }, theme, {
     isPartial: true,
     lastComponent: undefined,

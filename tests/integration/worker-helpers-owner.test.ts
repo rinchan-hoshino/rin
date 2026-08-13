@@ -8,6 +8,14 @@ import { pathToFileURL } from "node:url";
 const helpers = await import(
   pathToFileURL(path.resolve("dist/core/rin-daemon/worker-helpers.js")).href
 );
+const commandPresentation = await import(
+  pathToFileURL(
+    path.resolve("dist/core/rin-frontend-sdk/command-result-presentation.js"),
+  ).href
+);
+function present(result: unknown) {
+  return commandPresentation.presentBuiltinCommandResult(result);
+}
 
 function createRuntime(agentDir: string) {
   const calls: unknown[][] = [];
@@ -280,10 +288,10 @@ test("worker helpers own RPC-safe state, diagnostics, completion, and built-in c
     );
     assert.deepEqual(helpers.splitCommandArgs('"" \'open'), ["", "open"]);
     assert.match(
-      helpers.formatSessionStats(session.getSessionStats()),
+      commandPresentation.formatSessionStats(session.getSessionStats()),
       /Session File: In-memory/,
     );
-    const emptyStats = helpers.formatSessionStats({});
+    const emptyStats = commandPresentation.formatSessionStats({});
     assert.match(emptyStats, /Tool Calls: 0/);
     assert.doesNotMatch(emptyStats, /Tokens:|Cost:/);
 
@@ -338,28 +346,30 @@ test("worker helpers own RPC-safe state, diagnostics, completion, and built-in c
     );
     assert.match(
       String(
-        (
+        present(
           await helpers.runBuiltinCommand(runtime, "/session", {
             SessionManager: {},
-          })
+          }),
         ).text,
       ),
       /Tool Calls: 3/,
     );
 
-    const listed = await helpers.runBuiltinCommand(runtime, "/resume", {
-      listSessions: async () => [
-        { id: "s1", name: "First", path: "/sessions/s1.jsonl" },
-        { id: "s2", path: "/sessions/s2.jsonl" },
-      ],
-    });
+    const listed = present(
+      await helpers.runBuiltinCommand(runtime, "/resume", {
+        listSessions: async () => [
+          { id: "s1", name: "First", path: "/sessions/s1.jsonl" },
+          { id: "s2", path: "/sessions/s2.jsonl" },
+        ],
+      }),
+    );
     assert.match(String(listed.text), /s1 — First/);
     assert.match(String(listed.text), /s2 — s2/);
     assert.equal(
-      (
+      present(
         await helpers.runBuiltinCommand(runtime, "/resume", {
           listSessions: async () => [],
-        })
+        }),
       ).text,
       "No sessions available.",
     );
@@ -368,23 +378,23 @@ test("worker helpers own RPC-safe state, diagnostics, completion, and built-in c
         helpers.runBuiltinCommand(runtime, "/resume missing", {
           listSessions: async () => [{ id: "s1" }],
         }),
-      /session not found: missing/,
+      /command_session_not_found:missing/,
     );
     assert.equal(
-      (
+      present(
         await helpers.runBuiltinCommand(runtime, "/resume s1", {
           listSessions: async () => [{ id: "s1", path: "/sessions/s1.jsonl" }],
-        })
+        }),
       ).text,
       "Resumed session: s1",
     );
 
     assert.match(
       String(
-        (
+        present(
           await helpers.runBuiltinCommand(runtime, "/model", {
             SessionManager: {},
-          })
+          }),
         ).text,
       ),
       /owner\/small/,
@@ -394,19 +404,19 @@ test("worker helpers own RPC-safe state, diagnostics, completion, and built-in c
       getAvailable: async () => [null, { provider: "owner" }, { id: "small" }],
     };
     assert.equal(
-      (
+      present(
         await helpers.runBuiltinCommand(runtime, "/model", {
           SessionManager: {},
-        })
+        }),
       ).text,
       "No models available.",
     );
     session.modelRegistry = { getAvailable: async () => [] };
     assert.equal(
-      (
+      present(
         await helpers.runBuiltinCommand(runtime, "/model", {
           SessionManager: {},
-        })
+        }),
       ).text,
       "No models available.",
     );
@@ -416,21 +426,21 @@ test("worker helpers own RPC-safe state, diagnostics, completion, and built-in c
         helpers.runBuiltinCommand(runtime, "/model owner", {
           SessionManager: {},
         }),
-      /usage: \/model/,
+      /command_model_usage/,
     );
     await assert.rejects(
       () =>
         helpers.runBuiltinCommand(runtime, "/model owner/missing", {
           SessionManager: {},
         }),
-      /model not found/,
+      /command_model_not_found/,
     );
     assert.match(
       String(
-        (
+        present(
           await helpers.runBuiltinCommand(runtime, "/model owner/large high", {
             SessionManager: {},
-          })
+          }),
         ).text,
       ),
       /owner\/large \(high\)/,
@@ -439,9 +449,11 @@ test("worker helpers own RPC-safe state, diagnostics, completion, and built-in c
       SessionManager: {},
     });
 
-    const changelog = await helpers.runBuiltinCommand(runtime, "/changelog", {
-      SessionManager: {},
-    });
+    const changelog = present(
+      await helpers.runBuiltinCommand(runtime, "/changelog", {
+        SessionManager: {},
+      }),
+    );
     assert.equal(changelog.handled, true);
     assert.equal(String(changelog.text).length > 0, true);
     assert.deepEqual(

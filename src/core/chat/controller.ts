@@ -19,7 +19,7 @@ import {
   createRinFrontendTurnCancelledError,
   isRinFrontendTurnCancelledError,
 } from "../rin-frontend-sdk/lifecycle-errors.js";
-import type { PromptContextMeta } from "../rin-frontend-sdk/prompt-context.js";
+import type { PromptContextMeta } from "../rin-lib/prompt-context.js";
 import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
 import { nowIso } from "../time-utils.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
@@ -58,7 +58,6 @@ import {
 import {
   enqueueChatOutboxPayload,
   getActiveChatOutboxTurnFence,
-  hashPreGovernanceChatErrorDeliveryContent,
   isChatOutboxTurnFenceActive,
   withChatQuotePart,
   readChatOutboxItemById,
@@ -66,6 +65,11 @@ import {
   type ChatOutboxTurnFence,
 } from "../rin-lib/chat-outbox.js";
 import { applyPostDelivery, drainChatOutbox } from "./boot.js";
+import {
+  formatChatErrorDelivery,
+  formatChatErrorParts,
+  hashChatErrorDeliveryContent,
+} from "./error-presentation.js";
 import { assistantDeliveryParts } from "./terminal-delivery.js";
 import {
   advanceChatGeneration,
@@ -1927,9 +1931,7 @@ export class ChatController {
     bindSession?: boolean;
     deliveryKind?: "final" | "error";
   }) {
-    const text = safeString(input.text).trim();
     this.stagedDelivery = this.buildAssistantDelivery(input);
-    return text;
   }
 
   private async waitForOutboxDelivery(
@@ -2007,10 +2009,19 @@ export class ChatController {
     const effectiveDeliveryKind = safeString(
       normalizedPayload?.deliveryKind || deliveryKind,
     ).trim();
+    const presentedPayload =
+      effectiveDeliveryKind === "error"
+        ? {
+            ...normalizedPayload,
+            parts: formatChatErrorDelivery({
+              parts: normalizedPayload.parts,
+            }).parts,
+          }
+        : normalizedPayload;
     if (this.shouldSuppressQuietDelivery(effectiveDeliveryKind)) {
       return chatDeliveryOutcome([], { accepted: false });
     }
-    await validateChatOutboxPayloadForDispatch(normalizedPayload, this.h);
+    await validateChatOutboxPayloadForDispatch(presentedPayload, this.h);
     let outboxId: string;
     if (options.terminalTurn) {
       if (deliveryKind !== "final" && deliveryKind !== "error") {
@@ -2022,10 +2033,11 @@ export class ChatController {
         throw new Error("chat_terminal_record_missing");
       }
       const terminalOutboxId = `chat-${terminalRecordId}`;
-      outboxId = enqueueChatOutboxPayload(this.agentDir, normalizedPayload, {
+      outboxId = enqueueChatOutboxPayload(this.agentDir, presentedPayload, {
         id: terminalOutboxId,
         idempotencyKey: terminalOutboxId,
         deliveryKind: deliveryKind as any,
+        normalizeExistingErrorParts: formatChatErrorParts,
         postDelivery: options.postDelivery,
         terminalTurn: options.terminalTurn,
         terminalRecordId,
@@ -2063,8 +2075,9 @@ export class ChatController {
         );
       }
     } else {
-      outboxId = enqueueChatOutboxPayload(this.agentDir, normalizedPayload, {
+      outboxId = enqueueChatOutboxPayload(this.agentDir, presentedPayload, {
         ...options,
+        normalizeExistingErrorParts: formatChatErrorParts,
         turnFence:
           options.turnFence ||
           getActiveChatOutboxTurnFence() ||
@@ -2079,7 +2092,7 @@ export class ChatController {
       this.h,
       this.logger,
       {
-        chatKey: safeString(normalizedPayload?.chatKey).trim(),
+        chatKey: safeString(presentedPayload?.chatKey).trim(),
         itemId: outboxId,
       },
     );
@@ -2202,7 +2215,7 @@ export class ChatController {
     const linkSession =
       input.bindSession !== false && this.linkDeliveriesToSession;
     const bindSession = linkSession && this.affectChatBinding;
-    const text = this.stageAssistantDelivery({
+    this.stageAssistantDelivery({
       ...input,
       bindSession: linkSession,
     });
@@ -2221,11 +2234,16 @@ export class ChatController {
             incomingMessageId,
             replyToMessageId,
             deliveryKind === "error"
-              ? hashPreGovernanceChatErrorDeliveryContent(
-                  text,
+              ? hashChatErrorDeliveryContent(
+                  safeString(input.text).trim(),
                   input.parts || [],
                 )
-              : sha256Hex(JSON.stringify({ text, parts: input.parts || [] })),
+              : sha256Hex(
+                  JSON.stringify({
+                    text: safeString(input.text).trim(),
+                    parts: input.parts || [],
+                  }),
+                ),
           ])
         : "");
     const id = idempotencyKey
@@ -2271,7 +2289,7 @@ export class ChatController {
     if (delivery?.accepted !== false && delivery?.settled !== false) {
       this.markProcessedMessage(input.incomingMessageId, bindSession);
     }
-    return text;
+    return safeString(input.text).trim();
   }
 
   private async deliverAssistantInterim(text: string) {

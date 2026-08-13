@@ -1,6 +1,7 @@
 import { isJsonRecord } from "../json-utils.js";
 import { safeString } from "../text-utils.js";
 import { formatCompactionSummaryCollapsedText } from "./compaction-summary-format.js";
+import { presentBuiltinCommandResult } from "./command-result-presentation.js";
 
 export type RinFrontendCommandResponses = {
   abort: string;
@@ -90,7 +91,7 @@ export function applyFrontendBuiltinCommandText(
     preferConfiguredText?: boolean;
   } = {},
 ) {
-  const result = isJsonRecord(data) ? { ...data } : {};
+  const result = presentBuiltinCommandResult(data);
   const existingText = safeString(result.text).trim();
   const useConfiguredText = options.preferConfiguredText === true;
   switch (safeString(commandName).trim()) {

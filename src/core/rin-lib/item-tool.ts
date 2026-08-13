@@ -1,4 +1,3 @@
-import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 export type ItemAction =
@@ -8,18 +7,6 @@ export type ItemAction =
   | "remove"
   | "toggle"
   | "clear";
-
-export function updateItemToolText(
-  text: string,
-  context?: { lastComponent?: unknown },
-) {
-  const component =
-    context?.lastComponent instanceof Text
-      ? context.lastComponent
-      : new Text("", 0, 0);
-  component.setText(text);
-  return component;
-}
 
 export const ITEM_ACTIONS: readonly ItemAction[] = [
   "read",

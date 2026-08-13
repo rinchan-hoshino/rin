@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { startInstaller } from "../../core/rin-install/main.js";
-import { formatRuntimeErrorForUser } from "../../core/rin-lib/user-facing-errors.js";
+import { formatRuntimeErrorForUser } from "../../core/presentation/error.js";
 
 startInstaller().catch((error: any) => {
   if (

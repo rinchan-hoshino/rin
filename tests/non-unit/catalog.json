@@ -58,6 +58,12 @@
       "tests": ["tests/system/update-job-entrypoint-owner.test.ts"]
     },
     {
+      "source": "src/app/rin-install/update-payload.ts",
+      "built": "dist/app/rin-install/update-payload.js",
+      "suite": "system",
+      "tests": ["tests/system/update-payload-entrypoint-owner.test.ts"]
+    },
+    {
       "source": "src/app/rin-tui/main.ts",
       "built": "dist/app/rin-tui/main.js",
       "suite": "system",
@@ -327,13 +333,6 @@
       "tests": ["tests/integration/transcript-install-migration-owner.test.ts"]
     },
     {
-      "source": "src/core/memory/transcript-search.ts",
-      "built": "dist/core/memory/transcript-search.js",
-      "suite": "integration",
-      "tests": ["tests/integration/transcript-search-owner.test.ts"],
-      "preloads": ["tests/support/register-transcript-search-owner-fixture.ts"]
-    },
-    {
       "source": "src/core/memory/transcript-search-task-worker.ts",
       "built": "dist/core/memory/transcript-search-task-worker.js",
       "suite": "integration",
@@ -344,6 +343,13 @@
       "built": "dist/core/memory/transcript-search-task.js",
       "suite": "integration",
       "tests": ["tests/integration/transcript-search-task-owner.test.ts"]
+    },
+    {
+      "source": "src/core/memory/transcript-search.ts",
+      "built": "dist/core/memory/transcript-search.js",
+      "suite": "integration",
+      "tests": ["tests/integration/transcript-search-owner.test.ts"],
+      "preloads": ["tests/support/register-transcript-search-owner-fixture.ts"]
     },
     {
       "source": "src/core/memory/transcript-types.ts",
@@ -524,6 +530,12 @@
       "built": "dist/core/rin-daemon/worker.js",
       "suite": "system",
       "tests": ["tests/system/daemon-worker-core-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-frontend-sdk/command-result-presentation.ts",
+      "built": "dist/core/rin-frontend-sdk/command-result-presentation.js",
+      "suite": "integration",
+      "tests": ["tests/integration/worker-helpers-owner.test.ts"]
     },
     {
       "source": "src/core/rin-frontend-sdk/daemon-client.ts",
@@ -754,6 +766,12 @@
       "tests": ["tests/integration/rin-agent-runtime-owner.test.ts"]
     },
     {
+      "source": "src/core/rin-lib/builtin-command-result.ts",
+      "built": "dist/core/rin-lib/builtin-command-result.js",
+      "suite": "integration",
+      "tests": ["tests/integration/worker-helpers-owner.test.ts"]
+    },
+    {
       "source": "src/core/rin-lib/capability-session.ts",
       "built": "dist/core/rin-lib/capability-session.js",
       "suite": "integration",
@@ -787,10 +805,10 @@
       "tests": ["tests/integration/rin-lib-common-owner.test.ts"]
     },
     {
-      "source": "src/core/rin-lib/item-commands.ts",
-      "built": "dist/core/rin-lib/item-commands.js",
+      "source": "src/core/rin-lib/core-tool-contracts.ts",
+      "built": "dist/core/rin-lib/core-tool-contracts.js",
       "suite": "integration",
-      "tests": ["tests/integration/item-commands.test.ts"]
+      "tests": ["tests/integration/rpc-runtime-binding.test.ts"]
     },
     {
       "source": "src/core/rin-lib/item-tool.ts",
@@ -815,7 +833,7 @@
       "suite": "integration",
       "tests": [
         "tests/integration/note-tool.test.ts",
-        "tests/integration/item-commands.test.ts"
+        "tests/integration/builtin-command-registry.test.ts"
       ]
     },
     {
@@ -874,6 +892,12 @@
       ]
     },
     {
+      "source": "src/core/rin-lib/tool-result-text.ts",
+      "built": "dist/core/rin-lib/tool-result-text.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rpc-runtime-binding.test.ts"]
+    },
+    {
       "source": "src/core/rin-lib/update-notices.ts",
       "built": "dist/core/rin-lib/update-notices.js",
       "suite": "integration",
@@ -896,6 +920,12 @@
       "built": "dist/core/rin-tui/frontend-extension-adapter.js",
       "suite": "integration",
       "tests": ["tests/integration/rin-extension-loader-superset.test.ts"]
+    },
+    {
+      "source": "src/core/rin-tui/builtin-command-registry.ts",
+      "built": "dist/core/rin-tui/builtin-command-registry.js",
+      "suite": "integration",
+      "tests": ["tests/integration/builtin-command-registry.test.ts"]
     },
     {
       "source": "src/core/rin-tui/launcher.ts",
@@ -921,6 +951,36 @@
       "preloads": ["tests/support/register-rin-tui-runtime-owner-fixture.ts"]
     },
     {
+      "source": "src/core/rin-tui/tool-renderers/index.ts",
+      "built": "dist/core/rin-tui/tool-renderers/index.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rpc-runtime-binding.test.ts"]
+    },
+    {
+      "source": "src/core/rin-tui/tool-renderers/item.ts",
+      "built": "dist/core/rin-tui/tool-renderers/item.js",
+      "suite": "integration",
+      "tests": ["tests/integration/todo-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-tui/tool-renderers/note.ts",
+      "built": "dist/core/rin-tui/tool-renderers/note.js",
+      "suite": "integration",
+      "tests": ["tests/integration/note-tool.test.ts"]
+    },
+    {
+      "source": "src/core/rin-tui/tool-renderers/recall.ts",
+      "built": "dist/core/rin-tui/tool-renderers/recall.js",
+      "suite": "integration",
+      "tests": ["tests/integration/memory-index-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin-tui/tool-renderers/todo.ts",
+      "built": "dist/core/rin-tui/tool-renderers/todo.js",
+      "suite": "integration",
+      "tests": ["tests/integration/todo-owner.test.ts"]
+    },
+    {
       "source": "src/core/rin/control.ts",
       "built": "dist/core/rin/control.js",
       "suite": "integration",
@@ -933,6 +993,12 @@
       "tests": ["tests/integration/rin-doctor-owner.test.ts"]
     },
     {
+      "source": "src/core/rin/extension-command-adapter.ts",
+      "built": "dist/core/rin/extension-command-adapter.js",
+      "tests": ["tests/integration/extension-command-adapter-owner.test.ts"],
+      "suite": "integration"
+    },
+    {
       "source": "src/core/rin/interactive-list.ts",
       "built": "dist/core/rin/interactive-list.js",
       "suite": "integration",
@@ -943,12 +1009,6 @@
       "built": "dist/core/rin/launch.js",
       "suite": "integration",
       "tests": ["tests/integration/rin-launch-owner.test.ts"]
-    },
-    {
-      "source": "src/core/rin/pi-command-adapter.ts",
-      "built": "dist/core/rin/pi-command-adapter.js",
-      "suite": "integration",
-      "tests": ["tests/integration/rin-cli-pi-superset.test.ts"]
     },
     {
       "source": "src/core/rin/main.ts",
@@ -967,6 +1027,12 @@
       "built": "dist/core/rin/memory-index.js",
       "suite": "integration",
       "tests": ["tests/integration/rin-memory-index-owner.test.ts"]
+    },
+    {
+      "source": "src/core/rin/pi-command-adapter.ts",
+      "built": "dist/core/rin/pi-command-adapter.js",
+      "suite": "integration",
+      "tests": ["tests/integration/rin-cli-pi-superset.test.ts"]
     },
     {
       "source": "src/core/rin/run.ts",
@@ -1125,18 +1191,6 @@
       "built": "dist/core/session/runner.js",
       "suite": "integration",
       "tests": ["tests/integration/session-runner-owner.test.ts"]
-    },
-    {
-      "source": "src/app/rin-install/update-payload.ts",
-      "built": "dist/app/rin-install/update-payload.js",
-      "suite": "system",
-      "tests": ["tests/system/update-payload-entrypoint-owner.test.ts"]
-    },
-    {
-      "source": "src/core/rin/extension-command-adapter.ts",
-      "built": "dist/core/rin/extension-command-adapter.js",
-      "tests": ["tests/integration/extension-command-adapter-owner.test.ts"],
-      "suite": "integration"
     }
   ]
 }

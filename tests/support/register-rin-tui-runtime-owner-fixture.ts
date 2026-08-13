@@ -11,20 +11,6 @@ const sources: Record<string, string> = {
       return agentDir + "/sessions";
     }
   `,
-  "dist/core/rin-lib/runtime.js": `
-    export function createRinCapabilityDefinitions(context) {
-      globalThis.__rinTuiRuntimeOwner.capabilityContext = context;
-      return [{
-        tools: [{
-          name: "owner_tool",
-          label: "Owner tool",
-          description: "Fixture boundary tool",
-          parameters: { type: "object", properties: {} },
-          execute: async () => ({ content: [{ type: "text", text: "owner result" }] }),
-        }],
-      }];
-    }
-  `,
 };
 const urls = Object.fromEntries(
   Object.entries(sources).map(([key, source]) => [
@@ -48,5 +34,4 @@ register(`data:text/javascript,${encodeURIComponent(hook)}`, import.meta.url);
 (globalThis as any).__rinTuiRuntimeOwner ||= {
   profile: { cwd: "/owner/work", agentDir: "/owner/agent" },
   events: [],
-  capabilityContext: undefined,
 };

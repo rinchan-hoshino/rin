@@ -3,19 +3,11 @@ import type {
   RinCapabilityOptions,
 } from "../rin-lib/capability-types.js";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
+import type { RecallToolDetails } from "../rin-lib/core-tool-contracts.js";
+import { prepareTruncatedText } from "../rin-lib/tool-result-text.js";
 import { nowIso } from "../time-utils.js";
-import { type TruncationResult } from "@earendil-works/pi-coding-agent";
-import {
-  buildUserFacingTextResult,
-  formatHiddenResultsNotice,
-  formatToolCallLine,
-  formatToolDuration,
-  prepareTruncatedText,
-  renderTextToolResult,
-} from "../pi/render-utils.js";
 
 import {
   appendTranscriptArchiveEntry,
@@ -25,21 +17,6 @@ import {
 } from "./transcripts.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { parseTimestampMs } from "./utils.js";
-
-type MemoryToolDetails = {
-  truncation?: TruncationResult;
-  emptyMessage?: string;
-  hiddenCount?: number;
-  totalResults?: number;
-  userText?: string;
-  phase?: "search" | "recent" | "summarize";
-};
-
-type MemoryRenderState = {
-  startedAt: number | undefined;
-  endedAt: number | undefined;
-  interval: NodeJS.Timeout | undefined;
-};
 
 const recallParams = Type.Object({
   query: Type.Optional(
@@ -217,11 +194,11 @@ function emitRecallUpdate(
   onUpdate:
     | ((value: {
         content: Array<{ type: "text"; text: string }>;
-        details: MemoryToolDetails;
+        details: RecallToolDetails;
       }) => void)
     | undefined,
   userText: string,
-  details: Partial<MemoryToolDetails> = {},
+  details: Partial<RecallToolDetails> = {},
 ) {
   onUpdate?.({
     content: [{ type: "text", text: userText }],
@@ -229,29 +206,6 @@ function emitRecallUpdate(
       ...details,
       userText,
     },
-  });
-}
-
-function formatMemoryResult(
-  result: {
-    content: Array<{
-      type: string;
-      text?: string;
-      data?: string;
-      mimeType?: string;
-    }>;
-    details?: MemoryToolDetails;
-  },
-  options: { expanded: boolean },
-  theme: any,
-  showImages: boolean,
-) {
-  const topResultsNotice = formatHiddenResultsNotice(
-    result.details?.totalResults ?? 0,
-    result.details?.hiddenCount ?? 0,
-  );
-  return renderTextToolResult(result, options, theme, showImages, {
-    extraMutedLines: topResultsNotice ? [topResultsNotice] : [],
   });
 }
 
@@ -267,7 +221,7 @@ export async function executeRecall(
   signal?: AbortSignal,
   onUpdate?: (value: {
     content: Array<{ type: "text"; text: string }>;
-    details: MemoryToolDetails;
+    details: RecallToolDetails;
   }) => void,
 ) {
   try {
@@ -310,7 +264,7 @@ export async function executeRecall(
     const agentText = formatAgentSearchResult(response);
     const userText = formatSearchResult(response);
     const truncated = prepareTruncatedText(agentText);
-    const details: MemoryToolDetails = {
+    const details: RecallToolDetails = {
       hiddenCount: 0,
       totalResults: results.length,
       userText,
@@ -343,73 +297,6 @@ export async function executeRecall(
   }
 }
 
-export function formatRenderedMemoryResult(
-  result: any,
-  options: any,
-  theme: any,
-  showImages: boolean,
-  startedAt?: number,
-  endedAt?: number,
-) {
-  const details = (result.details as MemoryToolDetails | undefined) || {};
-  const userResult = buildUserFacingTextResult(result, showImages, {
-    userText: details.userText,
-    details: {
-      truncation: details.truncation,
-      emptyMessage: details.emptyMessage,
-      hiddenCount: details.hiddenCount,
-      totalResults: details.totalResults,
-    },
-  });
-  let text = formatMemoryResult(userResult, options, theme, showImages);
-  const duration = formatToolDuration(startedAt, endedAt);
-  if (duration) {
-    const durationText = theme.fg("muted", duration);
-    text = text ? `${text}\n${durationText}` : `\n${durationText}`;
-  }
-  return text;
-}
-
-function renderMemoryResult(
-  result: any,
-  options: any,
-  theme: any,
-  context: any,
-) {
-  const state = (context.state ||= {}) as MemoryRenderState;
-  if (state.startedAt !== undefined && options.isPartial && !state.interval) {
-    state.interval = setInterval(() => context.invalidate(), 1000);
-  }
-  if (!options.isPartial || context.isError) {
-    state.endedAt ??= Date.now();
-    if (state.interval) {
-      clearInterval(state.interval);
-      state.interval = undefined;
-    }
-  }
-
-  const text =
-    (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-  text.setText(
-    formatRenderedMemoryResult(
-      result,
-      options,
-      theme,
-      context.showImages,
-      state.startedAt,
-      state.endedAt,
-    ),
-  );
-  return text;
-}
-
-export function formatRecallCall(args: any, theme: any) {
-  const query = String(args?.query || "").trim();
-  return formatToolCallLine("recall", query || "recent", theme, {
-    detailStyle: query ? "accent" : "muted",
-  });
-}
-
 export default function memoryModule(
   options: RinCapabilityOptions,
 ): RinCapabilityDefinition {
@@ -433,18 +320,6 @@ export default function memoryModule(
             signal,
             onUpdate as any,
           )) as any,
-        renderCall: (args, theme, context) => {
-          const state = context.state as MemoryRenderState;
-          if (context.executionStarted && state.startedAt === undefined) {
-            state.startedAt = Date.now();
-            state.endedAt = undefined;
-          }
-          const text =
-            (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-          text.setText(formatRecallCall(args, theme));
-          return text;
-        },
-        renderResult: renderMemoryResult,
       },
     ],
     hooks: {

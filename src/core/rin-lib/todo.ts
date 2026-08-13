@@ -6,12 +6,12 @@
  * selected session branch.
  */
 
-import type { Theme } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type {
   RinCapabilityContext,
   RinCapabilityDefinition,
 } from "./capability-types.js";
+import type { TodoToolDetails } from "./core-tool-contracts.js";
 import {
   createItemToolParameters,
   formatItemReadWindowContent,
@@ -22,7 +22,6 @@ import {
   resolveSelectedItemIds,
   type ItemAction,
   type ItemReadWindow,
-  updateItemToolText,
   validateItemActionParams,
 } from "./item-tool.js";
 import {
@@ -35,13 +34,6 @@ export interface Todo {
   id: number;
   text: string;
   done: boolean;
-}
-
-interface TodoDetails {
-  action: ItemAction;
-  items: Todo[];
-  nextId: number;
-  error?: string;
 }
 
 const TodoAddItemParams: any = Type.Object(
@@ -79,15 +71,6 @@ const TodoParams: any = createItemToolParameters(
   { actions: TODO_ACTIONS },
 );
 
-function cloneTodo(value: unknown): Todo | undefined {
-  const item = value && typeof value === "object" ? (value as any) : null;
-  if (!item) return undefined;
-  const id = normalizeItemId(item.id);
-  const text = typeof item.text === "string" ? item.text.trim() : "";
-  if (id === undefined || !text) return undefined;
-  return { id, text, done: Boolean(item.done) };
-}
-
 function normalizeAddItems(
   value: unknown,
 ): Array<Omit<Todo, "id">> | undefined {
@@ -116,23 +99,6 @@ function normalizeEdit(value: unknown): { text: string } | undefined {
   return text ? { text } : undefined;
 }
 
-function readTodoDetails(value: unknown): TodoDetails | undefined {
-  const details = value && typeof value === "object" ? (value as any) : null;
-  if (!details || !Array.isArray(details.items)) return undefined;
-  const items = details.items
-    .map(cloneTodo)
-    .filter((item): item is Todo => Boolean(item));
-  const action = TODO_ACTIONS.includes(details.action)
-    ? details.action
-    : "read";
-  return {
-    action,
-    items,
-    nextId: normalizeNextItemId(items, details.nextId),
-    ...(typeof details.error === "string" ? { error: details.error } : {}),
-  };
-}
-
 function formatTodoContent(items: Todo[]) {
   if (items.length === 0) return "";
   return items
@@ -140,19 +106,6 @@ function formatTodoContent(items: Todo[]) {
       (item) =>
         `[${item.done ? "x" : " "}] #${item.id} ${formatRinTodoItemText(item)}`,
     )
-    .join("\n");
-}
-
-function formatTodoRender(items: Todo[], theme: Theme): string {
-  if (items.length === 0) return "";
-  return items
-    .map((item) => {
-      const check = item.done ? theme.fg("success", "✓") : theme.fg("dim", "○");
-      const text = item.done
-        ? theme.fg("dim", item.text)
-        : theme.fg("text", item.text);
-      return `${check} ${text}`;
-    })
     .join("\n");
 }
 
@@ -165,7 +118,7 @@ export default function todoCapability(): RinCapabilityDefinition {
     action: ItemAction,
     error?: string,
     readWindow?: ItemReadWindow<Todo>,
-  ): TodoDetails => ({
+  ): TodoToolDetails => ({
     action,
     items: (readWindow?.items ?? items).map((item) => ({ ...item })),
     nextId,
@@ -300,36 +253,6 @@ export default function todoCapability(): RinCapabilityDefinition {
         .filter((item) => !removal.ids!.includes(item.id))
         .map((item) => ({ ...item }));
       return commit("remove", nextItems, nextId);
-    },
-
-    renderCall(args: any, theme: Theme, context: any) {
-      const action = String(args?.action || "").trim();
-      return updateItemToolText(
-        context?.isPartial === false
-          ? ""
-          : theme.fg("toolTitle", action ? `todo ${action}` : "todo …"),
-        context,
-      );
-    },
-
-    renderResult(value: any, _options: any, theme: Theme, context: any) {
-      const parsed = readTodoDetails(value.details);
-      if (!parsed) {
-        const text = value.content?.[0];
-        return updateItemToolText(
-          text?.type === "text" ? text.text : "",
-          context,
-        );
-      }
-      const checklist = formatTodoRender(parsed.items, theme);
-      return updateItemToolText(
-        parsed.error
-          ? [theme.fg("error", `Error: ${parsed.error}`), checklist]
-              .filter(Boolean)
-              .join("\n")
-          : checklist,
-        context,
-      );
     },
   };
 

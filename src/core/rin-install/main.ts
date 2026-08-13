@@ -39,7 +39,7 @@ import { startLegacyPreparedUpdatePayload } from "./update-payload.js";
 import { detectCurrentUser, repoRootFromHere, runCommand } from "./common.js";
 import { finalizeCoreUpdate, finalizeInstallPlan } from "./finalize.js";
 import { releaseInfoFromFile } from "../rin-lib/release.js";
-import { formatRuntimeErrorForUser } from "../rin-lib/user-facing-errors.js";
+import { formatRuntimeErrorForUser } from "../presentation/error.js";
 import {
   describeOwnership,
   isSameSystemUser,

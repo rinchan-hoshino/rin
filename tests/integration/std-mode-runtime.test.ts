@@ -97,11 +97,12 @@ test("std configured session composes Pi and Rin core extensions", async () => {
       ),
       true,
     );
-    const itemCommands = loadedExtensions.find(
-      (entry: any) => entry.path === "<inline:rin-core-items>",
+    assert.equal(
+      loadedExtensions.some(
+        (entry: any) => entry.path === "<inline:rin-core-items>",
+      ),
+      false,
     );
-    assert.equal(itemCommands?.hidden, true);
-    assert.deepEqual([...itemCommands.commands.keys()], ["todos", "notes"]);
 
     const memoryTool = session.getToolDefinition("recall");
     assert.equal(

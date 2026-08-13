@@ -85,7 +85,7 @@ test("CLI preserves its error formatter after its installed release is pruned", 
     await fs.mkdir(path.join(releaseRoot, "dist", "core", "rin"), {
       recursive: true,
     });
-    await fs.mkdir(path.join(releaseRoot, "dist", "core", "rin-lib"), {
+    await fs.mkdir(path.join(releaseRoot, "dist", "core", "presentation"), {
       recursive: true,
     });
     await fs.writeFile(
@@ -112,13 +112,7 @@ export async function startRinCli() {
       "utf8",
     );
     await fs.writeFile(
-      path.join(
-        releaseRoot,
-        "dist",
-        "core",
-        "rin-lib",
-        "user-facing-errors.js",
-      ),
+      path.join(releaseRoot, "dist", "core", "presentation", "error.js"),
       `export function formatRuntimeErrorForUser(error) {
   return "formatted:" + String(error?.message || error);
 }

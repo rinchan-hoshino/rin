@@ -63,11 +63,6 @@
       "subject": "fix(chat): split oversized telegram sends"
     },
     {
-      "file": "tests/characterization/chat-scheduled-task-prompt-context.test.ts",
-      "introducedBy": "8fe1545c",
-      "subject": "fix: preserve chat context for scheduled task turns"
-    },
-    {
       "file": "tests/characterization/chat-settings.test.ts",
       "introducedBy": "5381217a",
       "subject": "refactor: centralize stored chat settings normalization"
@@ -351,11 +346,6 @@
       "file": "tests/characterization/worker-cgroup-isolation.test.ts",
       "introducedBy": "f6406420",
       "subject": "fix(daemon): contain worker OOM failures"
-    },
-    {
-      "file": "tests/characterization/worker-helpers.test.ts",
-      "introducedBy": "70addd7a",
-      "subject": "refactor: stabilize runtime boundaries and dist-only flow"
     }
   ]
 }

@@ -1,6 +1,6 @@
 import { requestDaemonCommand } from "../rin-daemon/client.js";
 import type { ChatMessageRead } from "../chat/message-query.js";
-import type { RinFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
+import type { RinFrontendIdentity } from "../rin-lib/frontend-identity.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 
 export type RinAgentSdkOptions = {

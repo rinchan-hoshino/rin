@@ -14,14 +14,13 @@ import {
   getRuntimeSessionDir,
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
-import { createRinCapabilityDefinitions } from "../rin-lib/runtime.js";
 import { serializeRinToolStartupOptions } from "../rin-lib/tool-options.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
 import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
 import {
   formatRuntimeErrorForFrontendDisplay,
   rawErrorMessage,
-} from "../rin-lib/user-facing-errors.js";
+} from "../presentation/error.js";
 import {
   applyFrontendBuiltinCommandText,
   parseFrontendCompactCommand,
@@ -47,7 +46,7 @@ import {
   computeAvailableThinkingLevels,
   extractText,
   getLastAssistantText,
-} from "../rin-frontend-sdk/session-helpers.js";
+} from "../session/helpers.js";
 import {
   computeSessionStats,
   getContextUsage,
@@ -57,9 +56,10 @@ import {
   applyRpcSessionTree,
   getSessionBranch,
 } from "../rin-frontend-sdk/state-utils.js";
-import { TUI_FRONTEND_IDENTITY } from "../rin-frontend-sdk/frontend-identity.js";
+import { TUI_FRONTEND_IDENTITY } from "../rin-lib/frontend-identity.js";
 import { submitNativeFrontendPromptTurn } from "../rin-frontend-sdk/turn-driver.js";
 import { handleRpcSessionEvent } from "./events.js";
+import { getCoreToolRenderer } from "./tool-renderers/index.js";
 import type { TuiResourceOptions } from "./cli-options.js";
 type PendingRpcOperation = {
   mode: "prompt";
@@ -353,6 +353,7 @@ export class RpcInteractiveSession {
   private extensionBindings: RpcExtensionBindings = {};
   public extensionOptions: TuiResourceOptions;
   private commandCatalog: any[] = [];
+  private commandResponses = resolveRinFrontendCommandResponses();
   private reconnecting = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectPromise: Promise<void> | null = null;
@@ -376,7 +377,6 @@ export class RpcInteractiveSession {
   private clearQueuePromise: Promise<void> | null = null;
   private lastFrontendPhase: RpcFrontendPhase | null = null;
   private nextRequestTagId = 0;
-  private coreToolDefinitions = new Map<string, any>();
   private frontendNativeExtensionRunner?: any;
 
   constructor(
@@ -445,7 +445,6 @@ export class RpcInteractiveSession {
       appendSessionInfo: (name: string) =>
         void this.setSessionName(name).catch(() => {}),
     };
-    this.coreToolDefinitions = this.createCoreToolDefinitions();
     if (frontendExtensions) {
       this.frontendNativeExtensionRunner = new ExtensionRunner(
         frontendExtensions.extensions,
@@ -894,7 +893,7 @@ export class RpcInteractiveSession {
 
   async runCommand(commandLine: string) {
     const trimmed = String(commandLine || "").trim();
-    const commandResponses = resolveRinFrontendCommandResponses();
+    const commandResponses = this.commandResponses;
     if (trimmed === "/abort") {
       await this.abort();
       return applyFrontendBuiltinCommandText(
@@ -942,7 +941,12 @@ export class RpcInteractiveSession {
     await this.ensureRemoteSession({ persist: true });
     const data = await this.call("run_command", { commandLine });
     await this.refreshState(REFRESH_MESSAGES_AND_SESSION);
-    return data;
+    return applyFrontendBuiltinCommandText(
+      String(data?.command || ""),
+      data,
+      commandResponses,
+      { preferConfiguredText: true },
+    );
   }
 
   async shutdownSession() {
@@ -1080,34 +1084,9 @@ export class RpcInteractiveSession {
   getToolDefinition(toolName: string) {
     const name = String(toolName || "").trim();
     return (
-      this.coreToolDefinitions.get(name) ??
+      getCoreToolRenderer(name) ??
       this.frontendNativeExtensionRunner?.getToolDefinition(name)
     );
-  }
-
-  private createCoreToolDefinitions() {
-    const profile = getRuntimeProfile();
-    const definitions = [
-      ...createRinCapabilityDefinitions({
-        cwd: profile.cwd,
-        agentDir: profile.agentDir,
-        getThinkingLevel: () => this.thinkingLevel,
-        sendMessage: (message, messageOptions) => {
-          this.sendCustomMessage?.(message, messageOptions).catch?.(() => {});
-        },
-        emitEvent: (event) => {
-          this.emitEvent(event);
-        },
-      }),
-    ];
-    const tools = new Map<string, any>();
-    for (const definition of definitions) {
-      for (const tool of definition.tools || []) {
-        const name = String(tool?.name || "").trim();
-        if (name && !tools.has(name)) tools.set(name, tool);
-      }
-    }
-    return tools;
   }
 
   private buildSessionContext() {
@@ -1350,6 +1329,9 @@ export class RpcInteractiveSession {
         return;
       }
       case "rinChatPresentation":
+        this.commandResponses = resolveRinFrontendCommandResponses(
+          payload.presentation?.commandResponses,
+        );
         return;
       case "setStatus":
         ui?.setStatus?.(String(payload.statusKey || ""), payload.statusText);
@@ -1456,10 +1438,15 @@ export class RpcInteractiveSession {
     this.emitEvent({ type: "rpc_session_resynced" } as any);
   }
 
-  private emitLocalUserMessage(text: string) {
+  private emitLocalUserMessage(text: string, requestTag: string) {
     const nextText = String(text || "").trim();
-    if (!nextText) return;
-    this.emitEvent({ type: "rpc_local_user_message", text: nextText } as any);
+    const identity = String(requestTag || "").trim();
+    if (!nextText || !identity) return;
+    this.emitEvent({
+      type: "rpc_local_user_message",
+      text: nextText,
+      requestTag: identity,
+    } as any);
   }
 
   private setRpcConnected(connected: boolean) {
@@ -1558,7 +1545,7 @@ export class RpcInteractiveSession {
     const tracksTurn =
       operation.mode === "prompt" && !operation.streamingBehavior;
     if (tracksTurn) {
-      this.emitLocalUserMessage(operation.message);
+      this.emitLocalUserMessage(operation.message, operation.requestTag);
     }
 
     if (
@@ -1786,6 +1773,14 @@ export class RpcInteractiveSession {
     };
   }
 
+  applyBuiltinCommandText(commandName: string, result: unknown) {
+    return applyFrontendBuiltinCommandText(
+      commandName,
+      result,
+      this.commandResponses,
+    );
+  }
+
   private parseSlashCommandName(text: string) {
     const trimmed = String(text || "").trim();
     if (!trimmed.startsWith("/")) return "";
@@ -1795,7 +1790,7 @@ export class RpcInteractiveSession {
 
   private async refreshDaemonCommandCatalog() {
     const data = await this.call("get_commands");
-    this.commandCatalog = asArray(data?.commands);
+    this.commandCatalog = asArray<any>(data?.commands);
     return this.commandCatalog;
   }
 

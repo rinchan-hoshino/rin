@@ -10,13 +10,7 @@ const rootDir = path.resolve(
 );
 const frontendIdentityMod = await import(
   pathToFileURL(
-    path.join(
-      rootDir,
-      "dist",
-      "core",
-      "rin-frontend-sdk",
-      "frontend-identity.js",
-    ),
+    path.join(rootDir, "dist", "core", "rin-lib", "frontend-identity.js"),
   ).href
 );
 

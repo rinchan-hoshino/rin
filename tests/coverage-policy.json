@@ -58,6 +58,12 @@
       "status": "strict"
     },
     {
+      "source": "src/app/rin-install/update-payload.ts",
+      "built": "dist/app/rin-install/update-payload.js",
+      "ownerSuite": "system",
+      "status": "strict"
+    },
+    {
       "source": "src/app/rin-tui/main.ts",
       "built": "dist/app/rin-tui/main.js",
       "ownerSuite": "system",
@@ -208,6 +214,18 @@
       "status": "strict"
     },
     {
+      "source": "src/core/chat/error-presentation.ts",
+      "built": "dist/core/chat/error-presentation.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/chat/extension-api.ts",
+      "built": "dist/core/chat/extension-api.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
       "source": "src/core/chat/extension-ui.ts",
       "built": "dist/core/chat/extension-ui.js",
       "ownerSuite": "integration",
@@ -298,12 +316,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/chat/extension-api.ts",
-      "built": "dist/core/chat/extension-api.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
       "source": "src/core/chat/settings.ts",
       "built": "dist/core/chat/settings.js",
       "ownerSuite": "unit",
@@ -382,12 +394,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/memory/transcript-search.ts",
-      "built": "dist/core/memory/transcript-search.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/memory/transcript-search-task-worker.ts",
       "built": "dist/core/memory/transcript-search-task-worker.js",
       "ownerSuite": "integration",
@@ -396,6 +402,12 @@
     {
       "source": "src/core/memory/transcript-search-task.ts",
       "built": "dist/core/memory/transcript-search-task.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/memory/transcript-search.ts",
+      "built": "dist/core/memory/transcript-search.js",
       "ownerSuite": "integration",
       "status": "strict"
     },
@@ -480,6 +492,12 @@
     {
       "source": "src/core/platform/rpc-socket.ts",
       "built": "dist/core/platform/rpc-socket.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/presentation/error.ts",
+      "built": "dist/core/presentation/error.js",
       "ownerSuite": "unit",
       "status": "strict"
     },
@@ -640,6 +658,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin-frontend-sdk/command-result-presentation.ts",
+      "built": "dist/core/rin-frontend-sdk/command-result-presentation.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin-frontend-sdk/compaction-summary-format.ts",
       "built": "dist/core/rin-frontend-sdk/compaction-summary-format.js",
       "ownerSuite": "unit",
@@ -654,12 +678,6 @@
     {
       "source": "src/core/rin-frontend-sdk/entrypoint.ts",
       "built": "dist/core/rin-frontend-sdk/entrypoint.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-frontend-sdk/frontend-identity.ts",
-      "built": "dist/core/rin-frontend-sdk/frontend-identity.js",
       "ownerSuite": "unit",
       "status": "strict"
     },
@@ -706,12 +724,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-frontend-sdk/prompt-context.ts",
-      "built": "dist/core/rin-frontend-sdk/prompt-context.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
       "source": "src/core/rin-frontend-sdk/rpc-auth.ts",
       "built": "dist/core/rin-frontend-sdk/rpc-auth.js",
       "ownerSuite": "integration",
@@ -730,12 +742,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-frontend-sdk/session-helpers.ts",
-      "built": "dist/core/rin-frontend-sdk/session-helpers.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
       "source": "src/core/rin-frontend-sdk/state-utils.ts",
       "built": "dist/core/rin-frontend-sdk/state-utils.js",
       "ownerSuite": "unit",
@@ -744,12 +750,6 @@
     {
       "source": "src/core/rin-frontend-sdk/stats.ts",
       "built": "dist/core/rin-frontend-sdk/stats.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-frontend-sdk/turn-completion.ts",
-      "built": "dist/core/rin-frontend-sdk/turn-completion.js",
       "ownerSuite": "unit",
       "status": "strict"
     },
@@ -898,6 +898,18 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin-install/update-job-auth.ts",
+      "built": "dist/core/rin-install/update-job-auth.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-install/update-payload.ts",
+      "built": "dist/core/rin-install/update-payload.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin-install/update-targets.ts",
       "built": "dist/core/rin-install/update-targets.js",
       "ownerSuite": "unit",
@@ -924,6 +936,12 @@
     {
       "source": "src/core/rin-lib/agent-runtime.ts",
       "built": "dist/core/rin-lib/agent-runtime.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-lib/builtin-command-result.ts",
+      "built": "dist/core/rin-lib/builtin-command-result.js",
       "ownerSuite": "integration",
       "status": "strict"
     },
@@ -964,15 +982,27 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-lib/interruption.ts",
-      "built": "dist/core/rin-lib/interruption.js",
+      "source": "src/core/rin-lib/core-tool-contracts.ts",
+      "built": "dist/core/rin-lib/core-tool-contracts.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-lib/error-facts.ts",
+      "built": "dist/core/rin-lib/error-facts.js",
       "ownerSuite": "unit",
       "status": "strict"
     },
     {
-      "source": "src/core/rin-lib/item-commands.ts",
-      "built": "dist/core/rin-lib/item-commands.js",
-      "ownerSuite": "integration",
+      "source": "src/core/rin-lib/frontend-identity.ts",
+      "built": "dist/core/rin-lib/frontend-identity.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-lib/interruption.ts",
+      "built": "dist/core/rin-lib/interruption.js",
+      "ownerSuite": "unit",
       "status": "strict"
     },
     {
@@ -1021,6 +1051,12 @@
       "source": "src/core/rin-lib/profile.ts",
       "built": "dist/core/rin-lib/profile.js",
       "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-lib/prompt-context.ts",
+      "built": "dist/core/rin-lib/prompt-context.js",
+      "ownerSuite": "unit",
       "status": "strict"
     },
     {
@@ -1096,15 +1132,15 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-lib/update-notices.ts",
-      "built": "dist/core/rin-lib/update-notices.js",
+      "source": "src/core/rin-lib/tool-result-text.ts",
+      "built": "dist/core/rin-lib/tool-result-text.js",
       "ownerSuite": "integration",
       "status": "strict"
     },
     {
-      "source": "src/core/rin-lib/user-facing-errors.ts",
-      "built": "dist/core/rin-lib/user-facing-errors.js",
-      "ownerSuite": "unit",
+      "source": "src/core/rin-lib/update-notices.ts",
+      "built": "dist/core/rin-lib/update-notices.js",
+      "ownerSuite": "integration",
       "status": "strict"
     },
     {
@@ -1144,9 +1180,21 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin-tui/builtin-command-registry.ts",
+      "built": "dist/core/rin-tui/builtin-command-registry.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin-tui/launcher.ts",
       "built": "dist/core/rin-tui/launcher.js",
       "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-tui/local-session-presentation.ts",
+      "built": "dist/core/rin-tui/local-session-presentation.js",
+      "ownerSuite": "unit",
       "status": "strict"
     },
     {
@@ -1168,6 +1216,36 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin-tui/tool-renderers/index.ts",
+      "built": "dist/core/rin-tui/tool-renderers/index.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-tui/tool-renderers/item.ts",
+      "built": "dist/core/rin-tui/tool-renderers/item.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-tui/tool-renderers/note.ts",
+      "built": "dist/core/rin-tui/tool-renderers/note.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-tui/tool-renderers/recall.ts",
+      "built": "dist/core/rin-tui/tool-renderers/recall.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-tui/tool-renderers/todo.ts",
+      "built": "dist/core/rin-tui/tool-renderers/todo.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin/control.ts",
       "built": "dist/core/rin/control.js",
       "ownerSuite": "integration",
@@ -1180,6 +1258,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin/extension-command-adapter.ts",
+      "built": "dist/core/rin/extension-command-adapter.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin/interactive-list.ts",
       "built": "dist/core/rin/interactive-list.js",
       "ownerSuite": "integration",
@@ -1188,12 +1272,6 @@
     {
       "source": "src/core/rin/launch.ts",
       "built": "dist/core/rin/launch.js",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin/pi-command-adapter.ts",
-      "built": "dist/core/rin/pi-command-adapter.js",
       "ownerSuite": "integration",
       "status": "strict"
     },
@@ -1212,6 +1290,12 @@
     {
       "source": "src/core/rin/memory-index.ts",
       "built": "dist/core/rin/memory-index.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin/pi-command-adapter.ts",
+      "built": "dist/core/rin/pi-command-adapter.js",
       "ownerSuite": "integration",
       "status": "strict"
     },
@@ -1456,6 +1540,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/session/helpers.ts",
+      "built": "dist/core/session/helpers.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
       "source": "src/core/session/listing.ts",
       "built": "dist/core/session/listing.js",
       "ownerSuite": "unit",
@@ -1498,6 +1588,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/session/turn-completion.ts",
+      "built": "dist/core/session/turn-completion.js",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
       "source": "src/core/session/turn-message.ts",
       "built": "dist/core/session/turn-message.js",
       "ownerSuite": "unit",
@@ -1531,30 +1627,6 @@
       "source": "src/core/tui-runtime-env.ts",
       "built": "dist/core/tui-runtime-env.js",
       "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-install/update-job-auth.ts",
-      "built": "dist/core/rin-install/update-job-auth.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-install/update-payload.ts",
-      "built": "dist/core/rin-install/update-payload.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
-      "source": "src/app/rin-install/update-payload.ts",
-      "built": "dist/app/rin-install/update-payload.js",
-      "ownerSuite": "system",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin/extension-command-adapter.ts",
-      "built": "dist/core/rin/extension-command-adapter.js",
-      "ownerSuite": "integration",
       "status": "strict"
     }
   ]

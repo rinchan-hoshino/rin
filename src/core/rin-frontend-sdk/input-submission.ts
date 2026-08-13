@@ -3,7 +3,7 @@ import { safeString } from "../text-utils.js";
 import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
-} from "./frontend-identity.js";
+} from "../rin-lib/frontend-identity.js";
 import type {
   RinChatDeliveryContext,
   RinFrontendClient,

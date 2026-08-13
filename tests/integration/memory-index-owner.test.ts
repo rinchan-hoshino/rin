@@ -7,6 +7,9 @@ await import("../support/register-memory-index-owner-fixture.ts");
 const memory = await import(
   pathToFileURL(path.resolve("dist/core/memory/index.js")).href
 );
+const recallPresentation = await import(
+  pathToFileURL(path.resolve("dist/core/rin-tui/tool-renderers/recall.js")).href
+);
 const owner = globalThis as any;
 
 const theme = {
@@ -194,11 +197,11 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
   );
 
   assert.equal(
-    memory.formatRecallCall({ query: " owner " }, theme),
+    recallPresentation.formatRecallCall({ query: " owner " }, theme),
     "recall owner",
   );
-  assert.equal(memory.formatRecallCall({}, theme), "recall recent");
-  const rendered = memory.formatRenderedMemoryResult(
+  assert.equal(recallPresentation.formatRecallCall({}, theme), "recall recent");
+  const rendered = recallPresentation.formatRenderedRecallResult(
     {
       content: [{ type: "text", text: "agent-only" }],
       details: {
@@ -219,19 +222,22 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
   const definition = memory.default({ getThinkingLevel: () => "high" });
   assert.equal(definition.tools.length, 1);
   assert.equal(definition.tools[0].name, "recall");
+  assert.equal(definition.tools[0].renderCall, undefined);
+  assert.equal(definition.tools[0].renderResult, undefined);
+  const presentation = recallPresentation.recallToolRenderer;
   const callContext: any = {
     state: {},
     executionStarted: true,
     lastComponent: undefined,
   };
-  const callComponent = definition.tools[0].renderCall(
+  const callComponent = presentation.renderCall(
     { query: "owner" },
     theme,
     callContext,
   );
   assert.equal(callContext.state.startedAt > 0, true);
   assert.match(callComponent.render(80).join("\n"), /recall owner/);
-  const reusedCall = definition.tools[0].renderCall({}, theme, {
+  const reusedCall = presentation.renderCall({}, theme, {
     ...callContext,
     lastComponent: callComponent,
   });
@@ -246,7 +252,7 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
     showImages: false,
     isError: false,
   };
-  const partialComponent = definition.tools[0].renderResult(
+  const partialComponent = presentation.renderResult(
     {
       content: [{ type: "text", text: "partial" }],
       details: { userText: "partial" },
@@ -256,7 +262,7 @@ test("memory capability owns recall merging, formatting, rendering, updates, err
     renderContext,
   );
   assert.ok(renderContext.state.interval);
-  const finalComponent = definition.tools[0].renderResult(
+  const finalComponent = presentation.renderResult(
     {
       content: [{ type: "text", text: "done" }],
       details: { userText: "done" },

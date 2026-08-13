@@ -30,6 +30,9 @@ const sources: Record<string, string> = {
       updateTerminalTitle() { globalThis.__rinTuiPatchesOwner.events.push(["original-title"]); }
       async shutdown() { process.stdout.write("To resume this session:\\n  pi --session owner\\n"); return "shutdown-owner"; }
       async run() { globalThis.__rinTuiPatchesOwner.events.push(["original-run"]); }
+      createBaseAutocompleteProvider() {
+        return { commands: [...globalThis.__rinTuiPatchesOwner.baseCommands] };
+      }
       getChangelogForDisplay() { return "original changelog"; }
       handleChangelogCommand() { globalThis.__rinTuiPatchesOwner.events.push(["original-changelog"]); }
       handleFatalRuntimeError() { globalThis.__rinTuiPatchesOwner.events.push(["original-fatal"]); }
@@ -141,6 +144,7 @@ register(`data:text/javascript,${encodeURIComponent(hook)}`, import.meta.url);
   pages: [],
   extensionStates: [],
   extensionError: undefined,
+  baseCommands: [],
   footerLines: ["cwd", "stats", "tail"],
   selector: undefined,
   classes: undefined,

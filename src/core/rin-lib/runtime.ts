@@ -3,7 +3,6 @@ import path from "node:path";
 
 import { isContextOverflow } from "@earendil-works/pi-ai/compat";
 
-import itemCommandsExtension from "./item-commands.js";
 import noteCapability from "./note.js";
 import todoCapability from "./todo.js";
 import { loadRinAgentRuntime } from "./agent-runtime.js";
@@ -16,7 +15,7 @@ import {
 import memoryModule from "../memory/index.js";
 import selfImproveModule from "../self-improve/index.js";
 import chatModule from "../chat/index.js";
-import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
+import { normalizeFrontendIdentity } from "../rin-lib/frontend-identity.js";
 import type {
   RinCapabilityDefinition,
   RinCapabilityOptions,
@@ -31,7 +30,7 @@ import { buildSystemPromptSelfImprove } from "../self-improve/format.js";
 import {
   formatPromptContext,
   formatPromptContextSystemPromptBlock,
-} from "../rin-frontend-sdk/prompt-context.js";
+} from "../rin-lib/prompt-context.js";
 import type { RinToolStartupOptions } from "./tool-options.js";
 import type { RinPiPassthroughOptions } from "./pi-passthrough.js";
 import {
@@ -1296,11 +1295,6 @@ export async function createConfiguredAgentSession(
       resourceLoaderOptions: {
         ...piResourceLoaderOptions,
         extensionFactories: [
-          {
-            name: "rin-core-items",
-            factory: itemCommandsExtension,
-            hidden: true,
-          },
           ...((piResourceLoaderOptions.extensionFactories as any[]) || []),
         ],
         additionalExtensionPaths: options.additionalExtensionPaths ?? [],

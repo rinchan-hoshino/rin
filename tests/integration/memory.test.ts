@@ -25,6 +25,18 @@ const transcriptArchiveModule = await import(
 const memoryExtensionModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "memory", "index.js")).href
 );
+const recallPresentation = await import(
+  pathToFileURL(
+    path.join(
+      rootDir,
+      "dist",
+      "core",
+      "rin-tui",
+      "tool-renderers",
+      "recall.js",
+    ),
+  ).href
+);
 const transcriptInstallMigration = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "memory", "install-migration.js"),
@@ -2514,7 +2526,7 @@ test("recall call formatting keeps tool name and query in the TUI tool title", (
     fg: (_name, value) => value,
     bold: (value) => value,
   };
-  const rendered = memoryExtensionModule.formatRecallCall(
+  const rendered = recallPresentation.formatRecallCall(
     { query: "recall hang" },
     theme,
   );
@@ -2526,7 +2538,7 @@ test("recall rendered result appends timing info", () => {
     fg: (_name, value) => value,
     bold: (value) => value,
   };
-  const rendered = memoryExtensionModule.formatRenderedMemoryResult(
+  const rendered = recallPresentation.formatRenderedRecallResult(
     {
       details: {
         userText: 'Searching archived sessions for "recall hang"...',

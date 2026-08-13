@@ -542,16 +542,7 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
   const resourceLoaderOptions = owner.events.find(
     ([name]: any[]) => name === "create-services",
   )[1].resourceLoaderOptions;
-  assert.equal(resourceLoaderOptions.extensionFactories.length, 1);
-  assert.equal(
-    resourceLoaderOptions.extensionFactories[0].name,
-    "rin-core-items",
-  );
-  assert.equal(resourceLoaderOptions.extensionFactories[0].hidden, true);
-  assert.equal(
-    typeof resourceLoaderOptions.extensionFactories[0].factory,
-    "function",
-  );
+  assert.deepEqual(resourceLoaderOptions.extensionFactories, []);
   const { extensionFactories: _extensionFactories, ...ordinaryResources } =
     resourceLoaderOptions;
   assert.deepEqual(ordinaryResources, {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { startUpdatePayload } from "../../core/rin-install/update-payload.js";
-import { formatRuntimeErrorForUser } from "../../core/rin-lib/user-facing-errors.js";
+import { formatRuntimeErrorForUser } from "../../core/presentation/error.js";
 
 startUpdatePayload().catch((error: any) => {
   console.error(

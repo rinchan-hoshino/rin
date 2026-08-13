@@ -11,7 +11,7 @@ import { safeString } from "../platform/process.js";
 import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
-} from "../rin-frontend-sdk/frontend-identity.js";
+} from "../rin-lib/frontend-identity.js";
 import { shellQuote } from "../rin-lib/system.js";
 import {
   normalizeScheduledTaskSessionMode,

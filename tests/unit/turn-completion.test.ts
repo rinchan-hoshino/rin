@@ -17,8 +17,8 @@ const {
   resolveRinTurnTerminalOutcomeFromMessages,
   resolveRinTurnTerminalOutcomeFromTurnResult,
 } = await importBuiltModule<
-  typeof import("../../src/core/rin-frontend-sdk/turn-completion.js")
->("dist/core/rin-frontend-sdk/turn-completion.js");
+  typeof import("../../src/core/session/turn-completion.js")
+>("dist/core/session/turn-completion.js");
 
 test("Rin turn completion resolves explicit TurnResult payloads", () => {
   const { completion } = resolveRinTurnCompletionFromTurnResult({

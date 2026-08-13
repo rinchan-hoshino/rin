@@ -4,7 +4,7 @@ import {
   launchWindowsDetachedUpdateJob,
   runUpdateJobExecutor,
 } from "../../core/rin/update-job.js";
-import { formatRuntimeErrorForUser } from "../../core/rin-lib/user-facing-errors.js";
+import { formatRuntimeErrorForUser } from "../../core/presentation/error.js";
 
 const modeOrJobPath = String(process.argv[2] || "").trim();
 if (!modeOrJobPath) throw new Error("Rin update job file was not provided.");

@@ -4,7 +4,7 @@ import test from "node:test";
 import { pathToFileURL } from "node:url";
 
 const errors = await import(
-  pathToFileURL(path.resolve("dist/core/rin-lib/user-facing-errors.js")).href
+  pathToFileURL(path.resolve("dist/core/presentation/error.js")).href
 );
 
 const OWNED_MARKERS = `daemon_extension_entrypoint_missing

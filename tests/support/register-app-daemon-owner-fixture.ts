@@ -27,7 +27,7 @@ const replacements: Record<string, string> = {
   "dist/core/rin-lib/common.js": `
     export function defaultDaemonSocketPath() { return "/owner/default-daemon.sock"; }
   `,
-  "dist/core/rin-lib/user-facing-errors.js": `
+  "dist/core/presentation/error.js": `
     export function formatRuntimeErrorForUser(error) {
       return "formatted:" + String(error?.message || error || "empty");
     }

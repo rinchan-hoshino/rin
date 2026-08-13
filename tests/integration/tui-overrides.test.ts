@@ -2561,7 +2561,7 @@ test("rpc startup submission uses an already waiting input callback", async () =
   assert.deepEqual(history, ["ready"]);
 });
 
-test("rpc backend user message replaces its matching local echo", async () => {
+test("rpc backend user identity confirms its matching local echo without mutating rendered children", async () => {
   await overrides.applyRinTuiOverrides();
 
   const messages = [];
@@ -2592,9 +2592,11 @@ test("rpc backend user message replaces its matching local echo", async () => {
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "rpc_local_user_message",
     text: "hello",
+    requestTag: "local-hello",
   });
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "message_start",
+    requestTag: "local-hello",
     message: {
       id: "backend-owner",
       role: "user",
@@ -2613,7 +2615,6 @@ test("rpc backend user message replaces its matching local echo", async () => {
     messages.map((message) => [message.id, message.content[0]?.text]),
     [
       [undefined, "hello"],
-      ["backend-owner", "hello"],
       [undefined, "different"],
     ],
   );
@@ -2623,14 +2624,14 @@ test("rpc backend user message replaces its matching local echo", async () => {
       message.content[0]?.text,
     ]),
     [
-      ["backend-owner", "hello"],
+      [undefined, "hello"],
       [undefined, "different"],
     ],
   );
-  assert.equal(renders, 3);
+  assert.equal(renders, 2);
 });
 
-test("rpc session resync preserves a pending local echo until backend replacement", async () => {
+test("rpc session resync preserves a pending local echo until backend identity confirms it", async () => {
   await overrides.applyRinTuiOverrides();
 
   const messages = [];
@@ -2667,6 +2668,7 @@ test("rpc session resync preserves a pending local echo until backend replacemen
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "rpc_local_user_message",
     text: "hello",
+    requestTag: "local-hello",
   });
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "rpc_session_resynced",
@@ -2678,6 +2680,7 @@ test("rpc session resync preserves a pending local echo until backend replacemen
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "message_start",
+    requestTag: "local-hello",
     message: {
       id: "backend-owner",
       role: "user",
@@ -2687,13 +2690,13 @@ test("rpc session resync preserves a pending local echo until backend replacemen
 
   assert.deepEqual(
     messages.map((message) => message.content[0]?.text),
-    ["hello", "hello", "hello"],
+    ["hello", "hello"],
   );
   assert.deepEqual(
     chatContainer.children.map(({ message }) => message.id),
-    ["backend-owner"],
+    [undefined],
   );
-  assert.ok(renders >= 3);
+  assert.ok(renders >= 2);
 });
 
 test("rpc compaction start keeps the dedicated compaction status indicator", async () => {

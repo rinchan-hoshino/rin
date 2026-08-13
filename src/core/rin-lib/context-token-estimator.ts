@@ -4,7 +4,7 @@ import {
   estimateTokens as estimatePiMessageTokens,
 } from "@earendil-works/pi-coding-agent";
 
-import { estimateContextTokensWithHelpers } from "../rin-frontend-sdk/session-helpers.js";
+import { estimateContextTokensWithHelpers } from "../session/helpers.js";
 
 function normalizeTokenCount(value: unknown) {
   const tokens = Number(value);

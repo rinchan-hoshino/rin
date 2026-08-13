@@ -1,4 +1,4 @@
-import { formatRuntimeErrorForFrontendDisplay } from "../rin-lib/user-facing-errors.js";
+import { formatRuntimeErrorForFrontendDisplay } from "../presentation/error.js";
 
 export type RinFrontendEntrypointStart = () => Promise<unknown> | unknown;
 

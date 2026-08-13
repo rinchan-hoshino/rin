@@ -1,4 +1,4 @@
-import type { PromptContextMeta } from "../rin-frontend-sdk/prompt-context.js";
+import type { PromptContextMeta } from "../rin-lib/prompt-context.js";
 
 export type ChatInboxAdmissionState =
   | "unclassified"

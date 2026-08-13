@@ -11,7 +11,7 @@ import { describeBoundSessions } from "../session/listing.js";
 import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
-} from "./frontend-identity.js";
+} from "../rin-lib/frontend-identity.js";
 import type {
   RinExtensionUiRequest,
   RinExtensionUiResponse,

@@ -2,7 +2,7 @@ import {
   RinTurnSettlementProjector,
   resolveRinTurnFailureMessage,
   resolveRinTurnTerminalOutcomeFromTurnResult,
-} from "../rin-frontend-sdk/turn-completion.js";
+} from "../session/turn-completion.js";
 
 import { openBoundSession } from "./factory.js";
 import { readSessionMetadata } from "./metadata.js";

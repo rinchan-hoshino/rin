@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assertNoDaemonUpdateInProgress } from "../../core/rin-daemon/lock.js";
-import { formatRuntimeErrorForUser } from "../../core/rin-lib/user-facing-errors.js";
+import { formatRuntimeErrorForUser } from "../../core/presentation/error.js";
 import { socketPathForUser } from "../../core/rin-lib/system.js";
 
 export async function main(argv = process.argv.slice(2)) {

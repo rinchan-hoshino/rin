@@ -14,6 +14,10 @@ const privateApi = await import(
 const runtimeEnv = await import(
   pathToFileURL(path.resolve("dist/core/tui-runtime-env.js")).href
 );
+const localPresentation = await import(
+  pathToFileURL(path.resolve("dist/core/rin-tui/local-session-presentation.js"))
+    .href
+);
 
 const fixture = (globalThis as any).__rinTuiPatchesOwner as {
   events: any[];
@@ -35,6 +39,7 @@ function resetFixture() {
   fixture.entries = [];
   fixture.newEntries = [];
   fixture.pages = [];
+  fixture.baseCommands = [];
   fixture.footerLines = ["cwd", "stats", "tail"];
   fixture.selector = undefined;
 }
@@ -367,6 +372,126 @@ test("patched Pi initialization preserves native lifecycle additions before appl
   assert.match(instance.builtInHeader.text, /Rin can explain its own features/);
 });
 
+test("local TUI owns core item command completion and dispatch without extension registration", async () => {
+  resetFixture();
+  await patches.applyRinTuiOverrides();
+  const originalSubmissions: string[] = [];
+  let renderedComponent: any;
+  const session: any = {
+    getToolDefinition: () => undefined,
+    extensionRunner: {
+      getRegisteredCommands: () => [],
+    },
+  };
+  localPresentation.installLocalTuiPresentation(session);
+  const instance: any = {
+    session,
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "custom",
+          customType: "rin.todo",
+          data: { todos: [{ id: 1, text: "owner", done: false }] },
+        },
+      ],
+    },
+    defaultEditor: {
+      async onSubmit(text: string) {
+        originalSubmissions.push(text);
+      },
+      setText() {},
+    },
+    editor: { setText() {} },
+    createExtensionUIContext() {
+      return {
+        async custom(factory: any) {
+          renderedComponent = factory(
+            {},
+            { fg: (_color: string, text: unknown) => String(text) },
+            {},
+            () => {},
+          );
+        },
+      };
+    },
+  };
+
+  fixture.baseCommands = [
+    { name: "todos", description: "Extension collision" },
+    { name: "owner", description: "Owner extension" },
+  ];
+  const provider =
+    InteractiveMode.prototype.createBaseAutocompleteProvider.call(instance);
+  assert.deepEqual(
+    provider.commands.map((command: any) => [
+      command.name,
+      command.description,
+    ]),
+    [
+      ["todos", "Show all todos on the current branch"],
+      ["owner", "Owner extension"],
+      ["notes", "Show all notes on the current branch"],
+    ],
+  );
+  await InteractiveMode.prototype.init.call(instance);
+  await instance.defaultEditor.onSubmit("/todos");
+  assert.match(renderedComponent.render(80).join("\n"), /owner/);
+  assert.deepEqual(originalSubmissions, []);
+  await instance.defaultEditor.onSubmit("todos");
+  await instance.defaultEditor.onSubmit("/owner");
+  assert.deepEqual(originalSubmissions, ["todos", "/owner"]);
+  assert.deepEqual(session.extensionRunner.getRegisteredCommands(), []);
+});
+
+test("RPC TUI uses the same frontend builtin registry", async () => {
+  resetFixture();
+  await patches.applyRinTuiOverrides();
+  const originalSubmissions: string[] = [];
+  let renderedComponent: any;
+  const instance: any = {
+    session: {},
+    sessionManager: {
+      getBranch: () => [
+        {
+          type: "custom",
+          customType: "rin.note",
+          data: { items: [{ id: 1, text: "rpc owner" }], nextId: 2 },
+        },
+      ],
+    },
+    defaultEditor: {
+      async onSubmit(text: string) {
+        originalSubmissions.push(text);
+      },
+      setText() {},
+    },
+    editor: { setText() {} },
+    createExtensionUIContext() {
+      return {
+        async custom(factory: any) {
+          renderedComponent = factory(
+            {},
+            { fg: (_color: string, text: unknown) => String(text) },
+            {},
+            () => {},
+          );
+        },
+      };
+    },
+  };
+
+  const provider =
+    InteractiveMode.prototype.createBaseAutocompleteProvider.call(instance);
+  assert.deepEqual(
+    provider.commands.map((command: any) => command.name),
+    ["todos", "notes"],
+  );
+  await InteractiveMode.prototype.init.call(instance);
+  await instance.defaultEditor.onSubmit("/notes");
+  assert.match(renderedComponent.render(80).join("\n"), /rpc owner/);
+  assert.deepEqual(originalSubmissions, []);
+});
+
 test("patched Pi lifecycle presents Rin identity, changelog, settings, and prompt flow", async (t) => {
   resetFixture();
   await patches.applyRinTuiOverrides();
@@ -691,6 +816,7 @@ test("patched event bridge coordinates RPC transport, resync, local echo, and th
   await proto.handleEvent.call(instance, {
     type: "rpc_local_user_message",
     text: " owner local ",
+    requestTag: "owner-local",
   });
   assert.equal(
     fixture.events.some(
@@ -703,13 +829,10 @@ test("patched event bridge coordinates RPC transport, resync, local echo, and th
   const beforeEcho = fixture.events.length;
   await proto.handleEvent.call(instance, {
     type: "message_start",
-    message: { role: "user", content: [{ type: "text", text: "owner local" }] },
+    requestTag: "owner-local",
+    message: { role: "user", content: [{ type: "text", text: "changed" }] },
   });
-  assert.equal(fixture.events.length, beforeEcho + 1);
-  assert.equal(
-    fixture.events.at(-1)?.[1]?.message?.content?.[0]?.text,
-    "owner local",
-  );
+  assert.equal(fixture.events.length, beforeEcho);
   await proto.handleEvent.call(instance, { type: "rpc_session_resynced" });
   assert.equal(renders.includes("session-change"), true);
   assert.equal(renders.includes("history:true"), true);
@@ -785,6 +908,7 @@ test("patched event bridge coordinates RPC transport, resync, local echo, and th
   await proto.handleEvent.call(instance, {
     type: "rpc_local_user_message",
     text: "   ",
+    requestTag: "blank-local",
   });
   assert.equal(fixture.events.length, beforeBlankLocal);
 

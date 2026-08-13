@@ -7,10 +7,6 @@ import {
 } from "../chat/database.js";
 import { validateChatOutboxPayloadParts } from "../chat/outbox-payload-validation.js";
 import { safeString } from "../text-utils.js";
-import {
-  formatRuntimeErrorForFrontend,
-  formatRuntimeErrorForFrontendDisplay,
-} from "./user-facing-errors.js";
 
 export type ChatMessagePart =
   | { type: "text"; text: string }
@@ -145,6 +141,7 @@ export type EnqueueChatOutboxOptions = {
   id?: string;
   idempotencyKey?: string;
   deliveryKind?: ChatOutboxDeliveryKind;
+  normalizeExistingErrorParts?: (parts: ChatMessagePart[]) => ChatMessagePart[];
   postDelivery?: ChatOutboxPostDelivery;
   turnFence?: ChatOutboxTurnFence;
   terminalTurn?: ChatTerminalTurn;
@@ -560,60 +557,6 @@ function settlingTurnForPostDelivery(
   );
 }
 
-export function hashPreGovernanceChatErrorDeliveryContent(
-  text: unknown,
-  parts: ChatMessagePart[] = [],
-) {
-  return crypto
-    .createHash("sha256")
-    .update(
-      JSON.stringify({
-        text: formatRuntimeErrorForFrontend(text),
-        parts,
-      }),
-    )
-    .digest("hex");
-}
-
-function formatChatOutboxErrorParts(parts: ChatMessagePart[]) {
-  const quoteParts: ChatMessagePart[] = [];
-  const contentParts: ChatMessagePart[] = [];
-  let primaryTextPart: ChatMessagePart | null = null;
-
-  for (const part of parts) {
-    if (part.type === "quote") {
-      quoteParts.push(part);
-      continue;
-    }
-    if (part.type === "text" || part.type === "markdown") {
-      if (!safeString(part.text).trim()) continue;
-      if (!primaryTextPart) {
-        primaryTextPart = {
-          ...part,
-          text: formatRuntimeErrorForFrontend(part.text),
-        };
-      } else {
-        contentParts.push({
-          ...part,
-          text: formatRuntimeErrorForFrontendDisplay(part.text),
-        });
-      }
-      continue;
-    }
-    contentParts.push(part);
-  }
-
-  if (primaryTextPart) {
-    return [...quoteParts, primaryTextPart, ...contentParts];
-  }
-  if (!contentParts.length) return quoteParts;
-  const errorPart: ChatMessagePart = {
-    type: "text",
-    text: formatRuntimeErrorForFrontend(""),
-  };
-  return [...quoteParts, errorPart, ...contentParts];
-}
-
 export function enqueueChatOutboxPayload(
   agentDir: string,
   payload: ChatOutboxPayloadInput,
@@ -625,18 +568,19 @@ export function enqueueChatOutboxPayload(
     createdAt,
   });
   if (!normalizedPayload) throw new Error("chat_outbox_invalid_payload");
-  let deliveryKind = normalizeDeliveryKind(options.deliveryKind);
-  if (
-    deliveryKind === "error" ||
+  const deliveryKind =
+    normalizeDeliveryKind(options.deliveryKind) === "error" ||
     normalizeDeliveryKind(normalizedPayload.deliveryKind) === "error"
-  ) {
-    deliveryKind = "error";
-    normalizedPayload = {
-      ...normalizedPayload,
-      deliveryKind,
-      parts: formatChatOutboxErrorParts(normalizedPayload.parts),
-    };
-  }
+      ? "error"
+      : normalizeDeliveryKind(
+          options.deliveryKind || normalizedPayload.deliveryKind,
+        );
+  normalizedPayload = {
+    ...normalizedPayload,
+    ...(deliveryKind === "command_ack" || deliveryKind === "generic"
+      ? {}
+      : { deliveryKind }),
+  };
   validateChatOutboxPayloadParts(normalizedPayload);
   const executionSessionFile =
     safeString(normalizedPayload.sessionFile).trim() || null;
@@ -733,8 +677,9 @@ export function enqueueChatOutboxPayload(
           }) || {};
         const existingParts = existingPayload.parts || [];
         const comparableExistingParts =
-          normalizeDeliveryKind(row.delivery_kind) === "error"
-            ? formatChatOutboxErrorParts(existingParts)
+          normalizeDeliveryKind(row.delivery_kind) === "error" &&
+          typeof options.normalizeExistingErrorParts === "function"
+            ? options.normalizeExistingErrorParts(existingParts)
             : existingParts;
         const existingPostDelivery = parseJson<any>(
           row.post_delivery_json,

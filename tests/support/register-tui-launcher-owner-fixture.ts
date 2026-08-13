@@ -24,7 +24,7 @@ const sources: Record<string, string> = {
   "dist/core/rin-daemon/client.js": `
     export async function requestDaemonCommand(command, options) { globalThis.__rinTuiOwnerEvents.push(["daemon-command", command, options]); const result = globalThis.__rinTuiOwnerScenario.daemonResults.shift(); if (result instanceof Error) throw result; return result; }
   `,
-  "dist/core/rin-lib/user-facing-errors.js": `
+  "dist/core/presentation/error.js": `
     export function rawErrorMessage(error) { return error instanceof Error ? error.message : error == null ? "" : String(error); }
     export function formatRuntimeErrorForFrontendDisplay(error) { return globalThis.__rinTuiOwnerScenario.formattedError ?? (error instanceof Error ? error.message : String(error || "")); }
   `,
@@ -34,7 +34,7 @@ const sources: Record<string, string> = {
   "dist/core/rin-frontend-sdk/daemon-client.js": `
     export class RinDaemonFrontendClient { constructor(options) { this.options = options; globalThis.__rinTuiOwnerEvents.push(["client", options]); } }
   `,
-  "dist/core/rin-frontend-sdk/frontend-identity.js": `export const TUI_FRONTEND_IDENTITY = { kind: "tui", id: "owner" };`,
+  "dist/core/rin-lib/frontend-identity.js": `export const TUI_FRONTEND_IDENTITY = { kind: "tui", id: "owner" };`,
   "dist/core/rin-frontend-sdk/runtime-wrapper.js": `export function createFrontendSdkRuntimeWrapper(runtime) { globalThis.__rinTuiOwnerEvents.push(["wrap", runtime]); return runtime; }`,
   "dist/core/rin-tui/runtime.js": `
     export class RpcInteractiveSession {
@@ -55,7 +55,7 @@ const sources: Record<string, string> = {
     export function buildOnboardingPrompt(mode) { globalThis.__rinTuiOwnerEvents.push(["onboarding-prompt", mode]); return "owner onboarding"; }
   `,
   "dist/core/rin-lib/runtime.js": `
-    export async function createConfiguredAgentSession(options) { globalThis.__rinTuiOwnerEvents.push(["configured-session", options]); return { runtime: { session: { settingsManager: { getQuietStartup: () => globalThis.__rinTuiOwnerScenario.quiet } }, async dispose() { globalThis.__rinTuiOwnerEvents.push(["configured-dispose"]); } } }; }
+    export async function createConfiguredAgentSession(options) { globalThis.__rinTuiOwnerEvents.push(["configured-session", options]); return { runtime: { session: { settingsManager: { getQuietStartup: () => globalThis.__rinTuiOwnerScenario.quiet }, getToolDefinition() { return undefined; } }, async dispose() { globalThis.__rinTuiOwnerEvents.push(["configured-dispose"]); } } }; }
   `,
 };
 const urls = Object.fromEntries(

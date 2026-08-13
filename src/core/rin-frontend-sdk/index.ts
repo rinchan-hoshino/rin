@@ -95,13 +95,13 @@ export {
   sameFrontendIdentity,
   sourceFrontendIdentity,
   type RinFrontendIdentity,
-} from "./frontend-identity.js";
+} from "../rin-lib/frontend-identity.js";
 
 export {
   formatPromptContext,
   formatPromptContextSystemPromptBlock,
   type PromptContextMeta,
-} from "./prompt-context.js";
+} from "../rin-lib/prompt-context.js";
 
 export {
   handleRinRpcSessionEvent,
@@ -137,7 +137,7 @@ export {
   resolveRinTurnTerminalOutcomeFromTurnResult,
   type RinTurnCompletionResolution,
   type RinTurnTerminalOutcome,
-} from "./turn-completion.js";
+} from "../session/turn-completion.js";
 
 export {
   RinDaemonFrontendClient,
@@ -167,7 +167,7 @@ export {
   estimateMessageTokens,
   extractText,
   getLastAssistantText,
-} from "./session-helpers.js";
+} from "../session/helpers.js";
 
 export { computeSessionStats, getContextUsage } from "./stats.js";
 

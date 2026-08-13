@@ -125,7 +125,7 @@ const sources: Record<string, string> = {
   "../memory/index.js": `export default function memory(options) { globalThis.__rinRuntimeOwner.moduleOptions.memory = options; return { name: "memory-owner" }; }`,
   "../self-improve/index.js": `export default function selfImprove(options) { globalThis.__rinRuntimeOwner.moduleOptions.selfImprove = options; return { name: "self-improve-owner" }; }`,
   "../chat/index.js": `export default function chat() { return { name: "chat-owner" }; }`,
-  "../rin-frontend-sdk/frontend-identity.js": `
+  "../rin-lib/frontend-identity.js": `
     export function normalizeFrontendIdentity(value) {
       globalThis.__rinRuntimeOwner.events.push(["normalize-frontend", value]);
       return value?.kind && value?.key ? { kind: String(value.kind), key: String(value.key) } : undefined;
@@ -168,7 +168,7 @@ const sources: Record<string, string> = {
       return compiled?.prompt || "";
     }
   `,
-  "../rin-frontend-sdk/prompt-context.js": `
+  "../rin-lib/prompt-context.js": `
     export function formatPromptContextSystemPromptBlock(value) {
       if (!value || typeof value !== "object" || !Object.keys(value).length) return "";
       return "Prompt context owner: " + JSON.stringify(value);

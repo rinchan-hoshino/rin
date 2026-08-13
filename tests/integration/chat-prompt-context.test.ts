@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import {
   formatPromptContext,
   formatPromptContextSystemPromptBlock,
-} from "../../src/core/rin-frontend-sdk/prompt-context.js";
+} from "../../src/core/rin-lib/prompt-context.js";
 import { appendPromptContextSystemPrompt } from "../../src/core/rin-lib/runtime.js";
 
 test("chat prompt context persists dynamic sender metadata in the prompt text", () => {
@@ -127,6 +127,24 @@ test("scheduled task prompt context renders a task block without pretending to b
   assert.equal(systemBlock.includes("operational rule:"), false);
   assert.equal(systemBlock.includes("Chat context:"), false);
   assert.equal(systemBlock.includes("Chat binding context:"), false);
+});
+
+test("scheduled chat-bound prompt context renders task and chat binding blocks", () => {
+  const meta = {
+    source: "scheduled-task",
+    chatKey: "telegram/demo:1",
+    taskId: "cron_demo",
+    taskName: "Demo Task",
+    taskContextKind: "scheduled-task",
+  } as const;
+  assert.equal(formatPromptContext(meta, "scheduled hello"), "scheduled hello");
+  const systemBlock = formatPromptContextSystemPromptBlock(meta);
+  assert.ok(systemBlock.includes("Scheduled task context:"));
+  assert.ok(systemBlock.includes("- task id: cron_demo"));
+  assert.ok(systemBlock.includes("- task name: Demo Task"));
+  assert.ok(systemBlock.includes("Chat binding context:"));
+  assert.ok(systemBlock.includes("- chatKey: telegram/demo:1"));
+  assert.equal(systemBlock.includes("Chat context:"), false);
 });
 
 test("scheduled task prompt context can describe a non-chat frontend binding", () => {

@@ -1,7 +1,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 import { resolveRuntimeProfile } from "../rin-lib/profile.js";
-import { computeAvailableThinkingLevels } from "./session-helpers.js";
+import { computeAvailableThinkingLevels } from "../session/helpers.js";
 
 const RPC_MODE_VALUES = ["all", "one-at-a-time"] as const;
 type RpcModeValue = (typeof RPC_MODE_VALUES)[number];

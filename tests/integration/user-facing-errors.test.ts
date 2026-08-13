@@ -9,7 +9,7 @@ import {
   formatRuntimeErrorForFrontendDisplay,
   formatRuntimeErrorForUser,
   hasUserFacingRuntimeErrorMapping,
-} from "../../src/core/rin-lib/user-facing-errors.js";
+} from "../../src/core/presentation/error.js";
 
 test("runtime error formatter keeps human messages", () => {
   assert.equal(formatRuntimeErrorForUser("fetch failed"), "fetch failed");
@@ -87,21 +87,19 @@ test("frontend error formatter matches Pi TUI Error rendering", () => {
   );
 });
 
-test("Chat outbox reuses the frontend Error renderer", () => {
+test("Chat presentation reuses the frontend Error renderer without leaking into storage", () => {
   const repoRoot = path.resolve(import.meta.dirname, "../..");
-  for (const relative of [
-    "src/core/chat/controller.ts",
-    "src/core/chat/main.ts",
-  ]) {
-    const text = fs.readFileSync(path.join(repoRoot, relative), "utf8");
-    assert.doesNotMatch(text, /formatRuntimeErrorForChat/);
-  }
+  const presentation = fs.readFileSync(
+    path.join(repoRoot, "src/core/chat/error-presentation.ts"),
+    "utf8",
+  );
+  assert.match(presentation, /formatRuntimeErrorForFrontend\(part\.text\)/);
 
   const outbox = fs.readFileSync(
     path.join(repoRoot, "src/core/rin-lib/chat-outbox.ts"),
     "utf8",
   );
-  assert.match(outbox, /formatRuntimeErrorForFrontend\(part\.text\)/);
+  assert.doesNotMatch(outbox, /formatRuntimeErrorForFrontend/);
   assert.doesNotMatch(outbox, /rin error:/i);
 });
 

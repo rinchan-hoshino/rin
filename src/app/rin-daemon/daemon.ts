@@ -14,7 +14,7 @@ import {
   listChatMessageReads,
 } from "../../core/chat/message-query.js";
 import { defaultDaemonSocketPath } from "../../core/rin-lib/common.js";
-import { formatRuntimeErrorForUser } from "../../core/rin-lib/user-facing-errors.js";
+import { formatRuntimeErrorForUser } from "../../core/presentation/error.js";
 import { startDaemon } from "../../core/rin-daemon/daemon.js";
 import { RinDaemonExtensionManager } from "../../core/rin-daemon/extensions.js";
 import { createWorkerCgroupIsolation } from "../../core/rin-daemon/worker-cgroup-isolation.js";

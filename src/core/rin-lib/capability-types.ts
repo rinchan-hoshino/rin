@@ -1,5 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { RinFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
+import type { RinFrontendIdentity } from "../rin-lib/frontend-identity.js";
 
 export type RinHookHandler = (event: any, ctx: any) => Promise<any> | any;
 

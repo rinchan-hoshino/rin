@@ -1,4 +1,4 @@
-import type { RinFrontendIdentity } from "./frontend-identity.js";
+import type { RinFrontendIdentity } from "../rin-lib/frontend-identity.js";
 import type {
   RinExtensionUiRequest,
   RinExtensionUiResponse,

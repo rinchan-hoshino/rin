@@ -15,22 +15,22 @@ import {
   readTurnMessages,
   type RinTurnScope,
 } from "../session/turn-scope.js";
-import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
-import type { RinFrontendRetryFailure } from "../rin-frontend-sdk/types.js";
+import { normalizeFrontendIdentity } from "../rin-lib/frontend-identity.js";
+type RetryFailure = { attempt: number; finalError: string };
 import {
   RIN_TURN_TERMINAL_ABSENT,
   RinTurnSettlementProjector,
   resolveRinTurnFailureMessage,
   resolveRinTurnTerminalOutcomeFromTurnResult,
   type RinTurnTerminalOutcome,
-} from "../rin-frontend-sdk/turn-completion.js";
+} from "../session/turn-completion.js";
 import {
   emitPiSessionEvent,
   refreshPiSessionToolRegistry,
   resumePiSessionTurn,
 } from "../pi/session-host.js";
 import { safeString } from "../text-utils.js";
-import { rawErrorMessage } from "../rin-lib/user-facing-errors.js";
+import { rawErrorMessage } from "../rin-lib/error-facts.js";
 import {
   RpcTurnCoordinator,
   type RpcTurnInterrupt,
@@ -865,7 +865,6 @@ export async function runCustomRpcMode(
         result,
       }),
     rinChatPresentation: (presentation: unknown) => {
-      runtime.rinChatPresentation = presentation;
       output({
         type: "extension_ui_request",
         id: createExtensionUiRequestId(),
@@ -1003,7 +1002,7 @@ export async function runCustomRpcMode(
   let pendingNativeInputSubmission: NativeInputSubmission | undefined;
   let nativeInputAdmissionTail: Promise<void> = Promise.resolve();
   let gracefulSessionShutdown = false;
-  let latestAutoRetryFailure: RinFrontendRetryFailure | undefined;
+  let latestAutoRetryFailure: RetryFailure | undefined;
   const emitTurnEvent = (
     event: string,
     requestTag: string,

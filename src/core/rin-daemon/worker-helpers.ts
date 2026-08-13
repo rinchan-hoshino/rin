@@ -1,7 +1,6 @@
-import { resolveChatCommandResponses } from "../chat/command-responses.js";
 import { asArray } from "../json-utils.js";
+import { builtinCommandResult } from "../rin-lib/builtin-command-result.js";
 import { loadRinChangelogModule } from "../rin-lib/loader.js";
-import type { ChatMessagePart } from "../rin-lib/chat-outbox.js";
 import { BUILTIN_SLASH_COMMANDS } from "../rin-lib/rpc.js";
 import { listBoundSessions } from "../session/factory.js";
 
@@ -255,39 +254,18 @@ export function splitCommandArgs(text: string) {
   return args;
 }
 
-type BuiltinCommandResult = {
-  handled: boolean;
-  text?: string;
-  parts?: ChatMessagePart[];
-};
-
 type ParsedBuiltinCommand = {
   command: string;
   args: string[];
   argsText: string;
 };
 
-function handledText(
-  text: string,
-  parts?: ChatMessagePart[],
-): BuiltinCommandResult {
-  return { handled: true, text, ...(parts?.length ? { parts } : {}) };
-}
-
 function runtimeServicesAgentDir(runtime: any) {
   return String(runtime?.services?.agentDir || "").trim();
 }
 
-function throwCommandError(message: string): never {
-  throw new Error(message);
-}
-
-function formatLabelValueLine(label: string, value: string) {
-  return `${label}: ${value}`;
-}
-
-function formatSectionList(title: string, lines: string[], emptyText: string) {
-  return lines.length ? [title, ...lines].join("\n") : emptyText;
+function throwCommandError(code: string, detail = ""): never {
+  throw new Error(`${code}${detail ? `:${detail}` : ""}`);
 }
 
 function parseBuiltinCommand(commandLine: string): ParsedBuiltinCommand | null {
@@ -303,12 +281,6 @@ function parseBuiltinCommand(commandLine: string): ParsedBuiltinCommand | null {
   };
 }
 
-function formatSessionListItem(item: any) {
-  const id = String(item?.id || "").trim();
-  const label = String(item?.name || item?.id || "").trim() || id;
-  return `${id} — ${label}`;
-}
-
 function findSessionById(sessions: any[], targetId: string) {
   const nextTargetId = String(targetId || "").trim();
   return sessions.find(
@@ -316,37 +288,21 @@ function findSessionById(sessions: any[], targetId: string) {
   );
 }
 
-function formatModelRef(model: any) {
+function modelRef(model: any) {
   const provider = String(model?.provider || "").trim();
   const id = String(model?.id || "").trim();
   return provider && id ? `${provider}/${id}` : "";
 }
 
 function findModelByRef(models: any[], targetRef: string) {
-  return models.find((model: any) => formatModelRef(model) === targetRef);
+  return models.find((model: any) => modelRef(model) === targetRef);
 }
 
-function formatModelList(models: any[]) {
-  return formatSectionList(
-    "Available models:",
-    models.slice(0, 50).map(formatModelRef).filter(Boolean),
-    "No models available.",
-  );
-}
-
-export function formatSessionStats(stats: any) {
-  return [
-    formatLabelValueLine("Session ID", String(stats?.sessionId || "")),
-    formatLabelValueLine(
-      "Session File",
-      String(stats?.sessionFile || "In-memory"),
-    ),
-    formatLabelValueLine(
-      "Messages",
-      `${String(stats?.totalMessages || 0)} (user=${String(stats?.userMessages || 0)}, assistant=${String(stats?.assistantMessages || 0)}, toolResults=${String(stats?.toolResults || 0)})`,
-    ),
-    formatLabelValueLine("Tool Calls", String(stats?.toolCalls || 0)),
-  ].join("\n");
+function sessionListFacts(sessions: any[]) {
+  return sessions.slice(0, 20).map((item: any) => ({
+    id: String(item?.id || "").trim(),
+    name: String(item?.name || item?.id || "").trim(),
+  }));
 }
 
 export async function runBuiltinCommand(
@@ -365,45 +321,44 @@ export async function runBuiltinCommand(
 
   const { command, args, argsText } = parsedCommand;
   const agentDir = runtimeServicesAgentDir(runtime);
-  const commandResponses = () =>
-    resolveChatCommandResponses(runtime.rinChatPresentation?.commandResponses);
   switch (command) {
     case "abort":
       session.abortCompaction?.();
       await session.abort();
-      return handledText(commandResponses().abort);
-    case "new":
+      return builtinCommandResult("abort", {});
+    case "new": {
       session.abortCompaction?.();
       await session.abort();
-      await runtime.newSession();
-      return handledText(commandResponses().new);
+      const result = await runtime.newSession();
+      return builtinCommandResult("new", {
+        cancelled: Boolean(result?.cancelled),
+      });
+    }
     case "compact":
       await session.compact(argsText || undefined);
-      return handledText(commandResponses().compact);
+      return builtinCommandResult("compact", {});
     case "reload":
       if (deps.promptContext !== undefined && session.sessionManager) {
         session.sessionManager.__rinLastPromptContext = deps.promptContext;
       }
       await session.reload();
-      return handledText(commandResponses().reload);
+      return builtinCommandResult("reload", {});
     case "session":
-      return handledText(formatSessionStats(session.getSessionStats()));
+      return builtinCommandResult("session", {
+        stats: session.getSessionStats(),
+      });
     case "changelog": {
       const { getChangelogPath, parseChangelog }: any =
         await loadRinChangelogModule();
       const changelogPath = getChangelogPath();
       const entries = parseChangelog(changelogPath);
-      if (entries.length === 0) {
-        return handledText("No changelog entries found.");
-      }
-      return handledText(
-        entries
+      return builtinCommandResult("changelog", {
+        entries: entries
           .slice()
           .reverse()
           .map((entry: any) => String(entry?.content || "").trim())
-          .filter(Boolean)
-          .join("\n\n"),
-      );
+          .filter(Boolean),
+      });
     }
     case "resume": {
       const sessions = await (deps.listSessions || listBoundSessions)({
@@ -411,42 +366,42 @@ export async function runBuiltinCommand(
         sessionDir: session.sessionManager.getSessionDir(),
       });
       if (!argsText) {
-        return handledText(
-          formatSectionList(
-            "Available sessions:",
-            sessions.slice(0, 20).map(formatSessionListItem),
-            "No sessions available.",
-          ),
-        );
+        return builtinCommandResult("resume", {
+          sessions: sessionListFacts(sessions),
+        });
       }
       const match = findSessionById(sessions, argsText);
-      if (!match) {
-        throwCommandError(`session not found: ${argsText}`);
-      }
-      await runtime.switchSession(String(match.path || ""));
-      return handledText(`Resumed session: ${String(match.id || "").trim()}`);
+      if (!match) throwCommandError("command_session_not_found", argsText);
+      const result = await runtime.switchSession(String(match.path || ""));
+      return builtinCommandResult("resume", {
+        resumedSessionId: String(match.id || "").trim(),
+        cancelled: Boolean(result?.cancelled),
+      });
     }
     case "model": {
       const models = await (
         session.modelRuntime || session.modelRegistry
       ).getAvailable();
       if (!args.length) {
-        return handledText(formatModelList(models));
+        return builtinCommandResult("model", {
+          models: models.slice(0, 50).map(modelRef).filter(Boolean),
+        });
       }
       const [targetRef = "", thinkingLevel = ""] = args;
       const nextTargetRef = String(targetRef || "").trim();
       if (!nextTargetRef.includes("/")) {
-        throwCommandError("usage: /model <provider/model> [thinking-level]");
+        throwCommandError("command_model_usage");
       }
       const match = findModelByRef(models, nextTargetRef);
       if (!match) {
-        throwCommandError(`model not found: ${nextTargetRef}`);
+        throwCommandError("command_model_not_found", nextTargetRef);
       }
       await session.setModel(match);
       if (thinkingLevel) await session.setThinkingLevel(thinkingLevel);
-      return handledText(
-        `Model set to: ${formatModelRef(match)}${thinkingLevel ? ` (${thinkingLevel})` : ""}`,
-      );
+      return builtinCommandResult("model", {
+        selectedModel: modelRef(match),
+        thinkingLevel,
+      });
     }
     default:
       return { handled: false };

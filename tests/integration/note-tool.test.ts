@@ -15,6 +15,11 @@ const noteStateModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "note-state.js"))
     .href
 );
+const { noteToolRenderer } = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-tui", "tool-renderers", "note.js"),
+  ).href
+);
 
 async function setup(
   initialEntries: any[] = [],
@@ -314,7 +319,8 @@ test("note restores the selected branch and keeps state unchanged on abort or pe
 });
 
 test("note updates the same TUI call and result components", async () => {
-  const { tool } = await setup();
+  await setup();
+  const tool = noteToolRenderer as any;
   const theme = { fg: (_color: string, text: unknown) => String(text) };
   const pending = tool.renderCall({ action: "add" }, theme, {
     isPartial: true,

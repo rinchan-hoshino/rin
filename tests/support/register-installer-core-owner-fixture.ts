@@ -81,7 +81,7 @@ const replacements: Record<string, string> = {
   "dist/core/rin-lib/release.js": `
     export function releaseInfoFromFile(file) { return { file: file || "default-release" }; }
   `,
-  "dist/core/rin-lib/user-facing-errors.js": `
+  "dist/core/presentation/error.js": `
     export function formatRuntimeErrorForUser(error) { return "formatted:" + String(error?.message || error || "empty"); }
   `,
   "dist/core/rin-install/users.js": `

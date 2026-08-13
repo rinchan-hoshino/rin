@@ -1,4 +1,4 @@
-import { normalizeFrontendIdentity } from "../rin-frontend-sdk/frontend-identity.js";
+import { normalizeFrontendIdentity } from "../rin-lib/frontend-identity.js";
 import { getPiExtensionRunner } from "./session-host.js";
 
 type RinCapabilityBridgeSet = {

@@ -5,8 +5,8 @@ import { importBuiltModule } from "../support/import-built-module.js";
 
 const { formatPromptContext, formatPromptContextSystemPromptBlock } =
   await importBuiltModule<
-    typeof import("../../src/core/rin-frontend-sdk/prompt-context.js")
-  >("dist/core/rin-frontend-sdk/prompt-context.js");
+    typeof import("../../src/core/rin-lib/prompt-context.js")
+  >("dist/core/rin-lib/prompt-context.js");
 const { appendPromptContextSystemPrompt } = await importBuiltModule<
   typeof import("../../src/core/rin-lib/runtime.js")
 >("dist/core/rin-lib/runtime.js");

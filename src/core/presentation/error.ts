@@ -3,6 +3,10 @@ import * as nodeUtil from "node:util";
 
 import { Errno, strerror } from "kerium";
 
+import { rawErrorMessage } from "../rin-lib/error-facts.js";
+
+export { rawErrorMessage } from "../rin-lib/error-facts.js";
+
 const INTERNAL_RUNTIME_ERROR_RE =
   /^([a-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+)(?::\s*(.*))?$/;
 
@@ -391,6 +395,10 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   external_chat_adapter_return_requires_adapter_and_bot: () =>
     "External chat adapter must return both an adapter and a bot. Fix the adapter implementation.",
 
+  command_model_not_found: modelNotFound,
+  command_model_usage: () => "Usage: /model <provider/model> [thinking-level].",
+  command_session_not_found: (detail) =>
+    withDetail("Session not found", detail),
   frontend_model_not_found: modelNotFound,
   frontend_session_not_connected: () =>
     "Rin is not connected to a session yet. Reconnect or start a new session.",
@@ -858,10 +866,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   fetch_failed: () => "The network request failed.",
   unknown_error: () => "Rin hit an unexpected problem before it could finish.",
 };
-
-export function rawErrorMessage(error: unknown) {
-  return String((error as any)?.message || error || "").trim();
-}
 
 function positiveErrno(value: unknown) {
   if (typeof value !== "number" || !Number.isFinite(value)) return 0;

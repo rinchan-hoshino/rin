@@ -380,11 +380,13 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
 
   assert.equal(session.getToolDefinition("browse"), undefined);
 
-  for (const name of ["recall", "todo"]) {
+  for (const name of ["recall", "todo", "note"]) {
     const tool = session.getToolDefinition(name);
     assert.ok(tool, `${name} should be available in the RPC frontend`);
     assert.equal(typeof tool.renderCall, "function");
     assert.equal(typeof tool.renderResult, "function");
+    assert.equal(tool.execute, undefined);
+    assert.equal(tool.parameters, undefined);
   }
 
   const longToolResultLines = session
@@ -912,6 +914,25 @@ test("rpc runtime answers daemon extension UI requests through the bound UI cont
     method: "setToolsExpanded",
     expanded: true,
   });
+  await session.handleExtensionUiRequest({
+    type: "extension_ui_request",
+    id: "presentation-1",
+    method: "rinChatPresentation",
+    presentation: {
+      commandResponses: {
+        new: "Localized new",
+        newCancelled: "Localized cancelled",
+      },
+    },
+  });
+  assert.equal(
+    session.applyBuiltinCommandText("new", {
+      handled: true,
+      command: "new",
+      data: { cancelled: true },
+    }).text,
+    "Localized cancelled",
+  );
 
   assert.deepEqual(sent, [
     { type: "extension_ui_response", id: "select-1", value: "Allow" },
@@ -2073,7 +2094,10 @@ test("rpc runtime renders a connecting prompt locally and submits it after recov
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(seen, [{ type: "rpc_local_user_message", text: "hello" }]);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0]?.type, "rpc_local_user_message");
+  assert.equal(seen[0]?.text, "hello");
+  assert.match(seen[0]?.requestTag || "", /^rin-tui-/);
   assert.equal(sent.length, 0);
 
   releaseRecovery();
@@ -2131,8 +2155,10 @@ test("rpc runtime emits the local user message before remote prompt submission f
     label: "Sending",
     connected: true,
   });
-  assert.deepEqual(seen, [
-    { type: "rpc_local_user_message", text: "hello" },
+  assert.equal(seen[0]?.type, "rpc_local_user_message");
+  assert.equal(seen[0]?.text, "hello");
+  assert.match(seen[0]?.requestTag || "", /^rin-tui-/);
+  assert.deepEqual(seen.slice(1), [
     {
       type: "rpc_frontend_status",
       phase: "sending",

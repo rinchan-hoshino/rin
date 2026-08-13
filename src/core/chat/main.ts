@@ -64,6 +64,10 @@ import {
   isReplyToLatestAssistantMessage,
   markProcessedChatMessage,
 } from "./chat-helpers.js";
+import {
+  formatChatErrorDelivery,
+  formatChatErrorParts,
+} from "./error-presentation.js";
 import { buildInboundChatLogInput } from "./inbound-normalization.js";
 import { withoutChatQuoteNodes } from "./rich-text.js";
 import { buildChatMessageRecordKey } from "./message-store.js";
@@ -122,11 +126,11 @@ import {
 } from "./runtime-config.js";
 import { composeChatKeyForBot, loadIdentity, trustOf } from "./support.js";
 import { RinDaemonFrontendClient } from "../rin-frontend-sdk/daemon-client.js";
-import type { PromptContextMeta } from "../rin-frontend-sdk/prompt-context.js";
+import type { PromptContextMeta } from "../rin-lib/prompt-context.js";
 import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
-} from "../rin-frontend-sdk/frontend-identity.js";
+} from "../rin-lib/frontend-identity.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
@@ -484,8 +488,12 @@ export async function startChatBridge(
       safeString(options.id).trim() ||
       `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2)}`;
     const deliveryPayload =
-      deliveryKind === "error" && !payload.deliveryKind
-        ? { ...payload, deliveryKind }
+      deliveryKind === "error"
+        ? {
+            ...payload,
+            deliveryKind,
+            parts: formatChatErrorDelivery({ parts: payload.parts }).parts,
+          }
         : payload;
     await validateChatOutboxPayloadForDispatch(deliveryPayload, h);
     const outboxId = enqueueChatOutboxPayload(
@@ -495,6 +503,7 @@ export async function startChatBridge(
         id,
         idempotencyKey: options.idempotencyKey,
         deliveryKind,
+        normalizeExistingErrorParts: formatChatErrorParts,
         postDelivery: options.postDelivery,
       },
     );

@@ -5,7 +5,7 @@ import {
   RinTurnSettlementProjector,
   resolveRinTurnFailureMessage,
   resolveRinTurnTerminalOutcomeFromTurnResult,
-} from "../rin-frontend-sdk/turn-completion.js";
+} from "../session/turn-completion.js";
 import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
 import {
   getRuntimeSessionDir,

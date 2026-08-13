@@ -6,6 +6,9 @@ import { importBuiltModule } from "../support/import-built-module.js";
 const responsesModule = await importBuiltModule<
   typeof import("../../src/core/rin-frontend-sdk/command-responses.js")
 >("dist/core/rin-frontend-sdk/command-responses.js");
+const presentationModule = await importBuiltModule<
+  typeof import("../../src/core/rin-frontend-sdk/command-result-presentation.js")
+>("dist/core/rin-frontend-sdk/command-result-presentation.js");
 
 test("frontend command responses parse builtin command lines", () => {
   assert.equal(
@@ -89,6 +92,22 @@ test("frontend command responses render abort, session, and reload states", () =
       { preferConfiguredText: true },
     ).text,
     "Reloaded extensions, prompts, skills, and themes.",
+  );
+});
+
+test("frontend command responses render nested backend facts with frontend-owned text", () => {
+  const responses = responsesModule.resolveRinFrontendCommandResponses({
+    newCancelled: "CUSTOM-CANCEL",
+  });
+  const presented = presentationModule.presentBuiltinCommandResult({
+    handled: true,
+    command: "new",
+    data: { cancelled: true },
+  });
+  assert.equal(
+    responsesModule.applyFrontendBuiltinCommandText("new", presented, responses)
+      .text,
+    "CUSTOM-CANCEL",
   );
 });
 
