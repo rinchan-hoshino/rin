@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { writeJsonAtomic } from "../platform/fs.js";
 import { nowIso } from "./core/utils.js";
 import { initStatePath } from "./paths.js";
 
@@ -38,14 +39,7 @@ function writeInitState(
   resolveAgentDir: () => string,
   next: Record<string, any>,
 ) {
-  fs.mkdirSync(path.dirname(resolveInitStatePath(resolveAgentDir)), {
-    recursive: true,
-  });
-  fs.writeFileSync(
-    resolveInitStatePath(resolveAgentDir),
-    JSON.stringify(next, null, 2),
-    "utf8",
-  );
+  writeJsonAtomic(resolveInitStatePath(resolveAgentDir), next, 0o600, true);
 }
 
 export function buildOnboardingPrompt(
@@ -66,55 +60,11 @@ export function buildOnboardingPrompt(
   return [
     initiation,
     `Use ${manualPath} as the initialization contract for this flow.`,
-    "The initialization completed state is false; follow the initialization document through its completion-state update step.",
   ].join("\n");
 }
 
 export function getOnboardingState(resolveAgentDir: () => string) {
   return readInitState(resolveAgentDir);
-}
-
-export function isOnboardingActive(
-  resolveAgentDir: () => string,
-  state = readInitState(resolveAgentDir),
-) {
-  return Boolean(state?.pending);
-}
-
-export function setOnboardingInitialized(
-  resolveAgentDir: () => string,
-  initialized: boolean,
-  trigger: string,
-) {
-  const state = readInitState(resolveAgentDir);
-  const next = {
-    ...state,
-    version: 2,
-    completedAt: initialized ? state.completedAt || nowIso() : "",
-    lastTrigger: trigger,
-    pending: false,
-    initialized,
-  };
-  writeInitState(resolveAgentDir, next);
-  return next;
-}
-
-export async function markOnboardingPrompted(
-  resolveAgentDir: () => string,
-  trigger: string,
-) {
-  const state = readInitState(resolveAgentDir);
-  const next = {
-    ...state,
-    version: 2,
-    promptedAt: nowIso(),
-    completedAt: "",
-    lastTrigger: trigger,
-    pending: true,
-    initialized: false,
-  };
-  writeInitState(resolveAgentDir, next);
-  return next;
 }
 
 export async function prepareOnboardingStartup(
@@ -123,12 +73,17 @@ export async function prepareOnboardingStartup(
 ) {
   const current = readInitState(resolveAgentDir);
   if (current.initialized) {
-    return { state: current, shouldStart: false, complete: true };
+    return { state: current, shouldStart: false };
   }
-  const state = await markOnboardingPrompted(resolveAgentDir, trigger);
-  return {
-    state,
-    shouldStart: true,
-    complete: false,
+  const state = {
+    ...current,
+    version: 2,
+    promptedAt: nowIso(),
+    completedAt: "",
+    lastTrigger: trigger,
+    pending: false,
+    initialized: true,
   };
+  writeInitState(resolveAgentDir, state);
+  return { state, shouldStart: true };
 }

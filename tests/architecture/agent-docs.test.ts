@@ -230,8 +230,9 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(initialization, /Learn how to address the user/);
   assert.match(initialization, /Learn the desired presence/);
   assert.match(initialization, /Save, summarize, and continue/);
-  assert.match(initialization, /init-state\.json/);
-  assert.match(initialization, /initialization_completed/);
+  assert.doesNotMatch(initialization, /init-state\.json/);
+  assert.doesNotMatch(initialization, /initialization_completed/);
+  assert.doesNotMatch(initialization, /initialized.*true|completedAt/);
   assert.match(initialization, /agent_profile/);
   assert.match(initialization, /user_profile/);
   assert.match(

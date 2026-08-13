@@ -23,12 +23,6 @@ const sdk = await import(
     path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
   ).href
 );
-const onboarding = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "self-improve", "onboarding.js"),
-  ).href
-);
-
 test("tui launcher exports frontend SDK wrappers for both rpc and std TUI paths", () => {
   assert.equal(typeof sdk.createFrontendSdkRuntimeWrapper, "function");
   assert.equal(typeof sdk.createFrontendSdkSessionWrapper, "function");
@@ -322,68 +316,6 @@ test("tui startup treats missing initialization state as incomplete", async () =
         path.join(dir, "docs", "rin", "docs", "initialization.md"),
       ),
     );
-  } finally {
-    await fs.rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("tui startup enters initialization from persisted state and waits for document-driven completion", async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-tui-init-test-"));
-  try {
-    await fs.mkdir(path.join(dir, "self_improve", "state"), {
-      recursive: true,
-    });
-    await fs.writeFile(
-      path.join(dir, "self_improve", "state", "init-state.json"),
-      JSON.stringify({ version: 2, initialized: false, pending: false }),
-      "utf8",
-    );
-    const resourceOptions: any = {};
-    const interactiveOptions: any = { initialMessage: "hello" };
-
-    const startup = await launcher.applyTuiOnboardingStartupState(
-      dir,
-      resourceOptions,
-      interactiveOptions,
-    );
-
-    assert.equal(startup.shouldStart, true);
-    assert.equal(interactiveOptions.initialMessage, undefined);
-    assert.equal(interactiveOptions.rinStartHiddenInitialization, true);
-    assert.equal(interactiveOptions.initialMessages, undefined);
-    assert.match(
-      resourceOptions.appendSystemPrompt[0],
-      /Rin detected that initialization is incomplete/,
-    );
-    assert.ok(
-      resourceOptions.appendSystemPrompt[0].includes(
-        path.join(dir, "docs", "rin", "docs", "initialization.md"),
-      ),
-    );
-
-    assert.equal(interactiveOptions.rinOnPromptComplete, undefined);
-    let state = JSON.parse(
-      await fs.readFile(
-        path.join(dir, "self_improve", "state", "init-state.json"),
-        "utf8",
-      ),
-    );
-    assert.equal(state.initialized, false);
-    assert.equal(state.pending, true);
-
-    onboarding.setOnboardingInitialized(
-      () => dir,
-      true,
-      "initialization_completed",
-    );
-    state = JSON.parse(
-      await fs.readFile(
-        path.join(dir, "self_improve", "state", "init-state.json"),
-        "utf8",
-      ),
-    );
-    assert.equal(state.initialized, true);
-    assert.equal(state.pending, false);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

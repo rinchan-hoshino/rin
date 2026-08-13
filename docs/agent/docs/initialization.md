@@ -60,20 +60,3 @@ For initialization, emphasize these expected baseline destinations:
 - `user_profile`: the user's preferred address and any stable identity or background facts the user chose to share.
 
 Do not persist the inferred language. Persist a language only when the user explicitly asks the agent to remember it as a standing preference, and store that as user-authored guidance rather than runtime language configuration.
-
-## Mark initialization complete
-
-When the first-meeting flow has been saved, update `~/.rin/self_improve/state/init-state.json`:
-
-```json
-{
-  "version": 2,
-  "promptedAt": "<keep existing promptedAt if present>",
-  "completedAt": "<current ISO timestamp>",
-  "lastTrigger": "initialization_completed",
-  "pending": false,
-  "initialized": true
-}
-```
-
-Preserve unrelated existing fields if the state file already has them.

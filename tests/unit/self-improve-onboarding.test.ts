@@ -34,7 +34,6 @@ test("onboarding state defaults safely and accepts legacy completion evidence", 
       pending: false,
       initialized: false,
     });
-    assert.equal(onboarding.isOnboardingActive(resolve), false);
 
     const statePath = path.join(
       agentDir,
@@ -61,11 +60,10 @@ test("onboarding state defaults safely and accepts legacy completion evidence", 
     assert.equal(legacy.initialized, true);
     assert.equal(legacy.pending, true);
     assert.equal(legacy.custom, "preserved");
-    assert.equal(onboarding.isOnboardingActive(resolve, legacy), true);
   });
 });
 
-test("prompt, prompted, initialized, and startup transitions persist their contract", async () => {
+test("runtime records initialization when it starts and does not ask the model to complete lifecycle state", async () => {
   await withAgentDir(async (agentDir) => {
     const resolve = resolveAgentDir(agentDir);
     const manualPrompt = onboarding.buildOnboardingPrompt("manual");
@@ -74,55 +72,25 @@ test("prompt, prompted, initialized, and startup transitions persist their contr
     assert.match(automaticPrompt, /initialization is incomplete/);
     for (const prompt of [manualPrompt, automaticPrompt]) {
       assert.match(prompt, /initialization\.md/);
-      assert.match(prompt, /completed state is false/);
+      assert.doesNotMatch(prompt, /completed state|init-state\.json/i);
     }
-
-    const prompted = await onboarding.markOnboardingPrompted(
-      resolve,
-      "manual_command",
-    );
-    assert.equal(prompted.pending, true);
-    assert.equal(prompted.initialized, false);
-    assert.equal(prompted.lastTrigger, "manual_command");
-    assert.match(prompted.promptedAt, /^\d{4}-\d{2}-\d{2}T/);
-
-    const completed = onboarding.setOnboardingInitialized(
-      resolve,
-      true,
-      "owner_complete",
-    );
-    assert.equal(completed.pending, false);
-    assert.equal(completed.initialized, true);
-    assert.equal(completed.lastTrigger, "owner_complete");
-    assert.match(completed.completedAt, /^\d{4}-\d{2}-\d{2}T/);
-
-    const preserved = onboarding.setOnboardingInitialized(
-      resolve,
-      true,
-      "repeat_complete",
-    );
-    assert.equal(preserved.completedAt, completed.completedAt);
-
-    const reset = onboarding.setOnboardingInitialized(
-      resolve,
-      false,
-      "owner_reset",
-    );
-    assert.equal(reset.completedAt, "");
-    assert.equal(reset.initialized, false);
 
     const startup = await onboarding.prepareOnboardingStartup(resolve);
     assert.equal(startup.shouldStart, true);
-    assert.equal(startup.complete, false);
+    assert.equal(startup.state.pending, false);
+    assert.equal(startup.state.initialized, true);
     assert.equal(startup.state.lastTrigger, "tui_startup");
+    assert.match(startup.state.promptedAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(startup.state.completedAt, "");
 
-    onboarding.setOnboardingInitialized(resolve, true, "finished");
-    const complete = await onboarding.prepareOnboardingStartup(
+    const persisted = onboarding.getOnboardingState(resolve);
+    assert.deepEqual(persisted, startup.state);
+
+    const repeated = await onboarding.prepareOnboardingStartup(
       resolve,
       "unused_trigger",
     );
-    assert.equal(complete.shouldStart, false);
-    assert.equal(complete.complete, true);
-    assert.equal(complete.state.lastTrigger, "finished");
+    assert.equal(repeated.shouldStart, false);
+    assert.deepEqual(repeated.state, startup.state);
   });
 });
