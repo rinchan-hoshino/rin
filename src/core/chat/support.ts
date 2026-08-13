@@ -2,10 +2,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 
-import { ensureDir, readJsonFile, writeJsonFile } from "../platform/fs.js";
+import {
+  ensureDir,
+  readJsonFileOrDefault,
+  writeJsonFile,
+} from "../platform/fs.js";
 import { safeString } from "../text-utils.js";
 
-export { ensureDir, readJsonFile, writeJsonFile } from "../platform/fs.js";
+export {
+  ensureDir,
+  readJsonFileOrDefault,
+  writeJsonFile,
+} from "../platform/fs.js";
 export {
   ensureExtension,
   ensureFileName,
@@ -153,7 +161,12 @@ export function listDetachedControllerStateFiles(cronTurnsRoot: string) {
     for (const controllerKey of entries) {
       const statePath = path.join(cronTurnsRoot, controllerKey, "state.json");
       if (!fs.existsSync(statePath)) continue;
-      const state = readJsonFile<any>(statePath, {}) || {};
+      let state: any = {};
+      try {
+        state = readJsonFileOrDefault<any>(statePath, {});
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+      }
       out.push({
         controllerKey,
         statePath,
@@ -182,7 +195,7 @@ export function ensureIdentitySeed(dataDir: string) {
 
 export function loadIdentity(dataDir: string) {
   ensureIdentitySeed(dataDir);
-  const identity = readJsonFile<any>(identityPath(dataDir), {
+  const identity = readJsonFileOrDefault<any>(identityPath(dataDir), {
     persons: {},
     aliases: [],
     trusted: [],

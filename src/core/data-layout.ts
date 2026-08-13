@@ -20,10 +20,6 @@ export function schedulerDataPath(agentDir: string, ...segments: string[]) {
   return dataPath(agentDir, "scheduler", ...segments);
 }
 
-export function sidecarDataPath(agentDir: string, ...segments: string[]) {
-  return dataPath(agentDir, "sidecars", ...segments);
-}
-
 export function extensionDataPath(agentDir: string, ...segments: string[]) {
   return dataPath(agentDir, "extensions", ...segments);
 }
@@ -90,11 +86,6 @@ export const LEGACY_DATA_LAYOUT_MOVES: Array<{
     id: "runtime-update",
     from: "runtime-update",
     to: path.join("core", "updates"),
-  },
-  {
-    id: "browse",
-    from: "browse",
-    to: path.join("sidecars", "browse"),
   },
   {
     id: "extension-runtime",

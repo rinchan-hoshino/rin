@@ -1528,12 +1528,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/sidecar/common.ts",
-      "built": "dist/core/sidecar/common.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
       "source": "src/core/task/index.ts",
       "built": "dist/core/task/index.js",
       "ownerSuite": "unit",

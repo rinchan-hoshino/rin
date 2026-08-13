@@ -7,7 +7,14 @@ export function loadFirstValidCandidate<T>(
     try {
       const candidate = normalizeCandidate(readCandidate(filePath), filePath);
       if (candidate != null) return candidate;
-    } catch {}
+    } catch (error) {
+      if (
+        (error as NodeJS.ErrnoException)?.code !== "ENOENT" &&
+        !(error instanceof SyntaxError)
+      ) {
+        throw error;
+      }
+    }
   }
   return null;
 }

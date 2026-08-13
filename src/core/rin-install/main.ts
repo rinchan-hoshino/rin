@@ -20,7 +20,7 @@ import {
   runFinalizeInstallPlanInChild,
   type FinalizeInstallOptions,
 } from "./apply-plan.js";
-import { readJsonFile } from "./fs-utils.js";
+import { readJsonFileOrDefault } from "./fs-utils.js";
 import {
   buildFinalRequirements,
   buildInstallPlanText,
@@ -266,7 +266,13 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     : await promptDefaultTargetUser(promptApi, targetUser, i18n);
 
   const { provider, modelId, thinkingLevel, authResult } =
-    await promptProviderSetup(promptApi, installDir, readJsonFile, {}, i18n);
+    await promptProviderSetup(
+      promptApi,
+      installDir,
+      readJsonFileOrDefault,
+      {},
+      i18n,
+    );
   note(
     wrapInstallerNoteText(
       buildInstallPlanText(

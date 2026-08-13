@@ -452,11 +452,6 @@
       "built": "dist/core/session/turn-scope.js"
     },
     {
-      "test": "tests/unit/sidecar-common.test.ts",
-      "source": "src/core/sidecar/common.ts",
-      "built": "dist/core/sidecar/common.js"
-    },
-    {
       "test": "tests/unit/task-capability.test.ts",
       "source": "src/core/task/index.ts",
       "built": "dist/core/task/index.js"

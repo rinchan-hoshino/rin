@@ -39,7 +39,10 @@ test("runtime settings and extension roots clone valid persisted configuration",
   await withAgentDir(async (agentDir) => {
     assert.deepEqual(extensionSettings.readRuntimeSettings(agentDir), {});
     await fs.writeFile(path.join(agentDir, "settings.json"), "invalid", "utf8");
-    assert.deepEqual(extensionSettings.readRuntimeSettings(agentDir), {});
+    assert.throws(
+      () => extensionSettings.readRuntimeSettings(agentDir),
+      SyntaxError,
+    );
     await fs.writeFile(
       path.join(agentDir, "settings.json"),
       JSON.stringify(settings),

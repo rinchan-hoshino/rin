@@ -5,7 +5,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 import { cancel, confirm, isCancel, select, text } from "@clack/prompts";
 
-import { readJsonFile } from "../platform/fs.js";
+import { readJsonFileOrDefault } from "../platform/fs.js";
 import { canConnectDaemonSocket } from "../rin-daemon/client.js";
 import { defaultDaemonSocketPath } from "../rin-lib/common.js";
 import { PI_CODING_AGENT_DIR_ENV, RIN_DIR_ENV } from "../rin-lib/profile.js";
@@ -126,7 +126,10 @@ async function resolveExistingQuickRunProviderSetup(
 ) {
   const models = await runInstallerProgress(
     i18n.loadingModelChoicesMessage,
-    () => loadModelChoices(installDir, readJsonFile),
+    () =>
+      loadModelChoices(installDir, (filePath, fallback) =>
+        readJsonFileOrDefault(filePath, fallback),
+      ),
     {
       successMessage: i18n.installStepComplete,
       failureMessage: i18n.installStepFailed,
@@ -134,8 +137,8 @@ async function resolveExistingQuickRunProviderSetup(
   );
   return pickQuickRunExistingProvider({
     models,
-    settings: readJsonFile<any>(installSettingsPath(installDir), {}),
-    authData: readJsonFile<any>(installAuthPath(installDir), {}),
+    settings: readJsonFileOrDefault<any>(installSettingsPath(installDir), {}),
+    authData: readJsonFileOrDefault<any>(installAuthPath(installDir), {}),
   });
 }
 
@@ -318,7 +321,13 @@ async function prepareQuickRunInstallPlan() {
 
   const setup =
     (await resolveExistingQuickRunProviderSetup(installDir, i18n)) ||
-    (await promptProviderSetup(promptApi, installDir, readJsonFile, {}, i18n));
+    (await promptProviderSetup(
+      promptApi,
+      installDir,
+      readJsonFileOrDefault,
+      {},
+      i18n,
+    ));
   const { provider, modelId, thinkingLevel, authResult } = setup;
   return {
     currentUser,

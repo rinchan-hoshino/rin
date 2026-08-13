@@ -62,9 +62,10 @@ export function runCommand(...args) { globalThis.__rinSharedOwnerEvents.push(["r
 `)}`;
 
 const privilegedUrl = `data:text/javascript,${encodeURIComponent(`
-export function readJsonFileWithPrivilege(filePath, fallback) {
-  globalThis.__rinSharedOwnerEvents.push(["privileged-json", filePath, fallback]);
-  return globalThis.__rinSharedOwnerPrivilegedValue ?? fallback;
+export function readJsonFileWithPrivilege(filePath) {
+  globalThis.__rinSharedOwnerEvents.push(["privileged-json", filePath]);
+  if (globalThis.__rinSharedOwnerPrivilegedError) throw globalThis.__rinSharedOwnerPrivilegedError;
+  return globalThis.__rinSharedOwnerPrivilegedValue;
 }
 `)}`;
 

@@ -9,7 +9,6 @@ import {
   extensionDataPath,
   LEGACY_DATA_LAYOUT_MOVES,
   schedulerDataPath,
-  sidecarDataPath,
 } from "../../src/core/data-layout.js";
 
 test("data layout helpers group runtime state by owner", () => {
@@ -25,10 +24,6 @@ test("data layout helpers group runtime state by owner", () => {
   assert.equal(
     schedulerDataPath(root, "turns"),
     path.join(root, "data", "scheduler", "turns"),
-  );
-  assert.equal(
-    sidecarDataPath(root, "browse"),
-    path.join(root, "data", "sidecars", "browse"),
   );
   assert.equal(
     extensionDataPath(root, "runtime"),

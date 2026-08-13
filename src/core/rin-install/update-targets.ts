@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { readJsonFile } from "../platform/fs.js";
+import { readJsonFileOrDefault } from "../platform/fs.js";
 import { resolveInstallRecordTargetFromCandidates } from "./install-record.js";
 import {
   installDirFromManagedLaunchdPlist,
@@ -128,7 +128,7 @@ function discoverInstallRecordTarget(
     homeDir,
     userName,
     filePaths,
-    (filePath) => readJsonFile<any>(filePath, null),
+    (filePath) => readJsonFileOrDefault<any>(filePath, null),
   );
   return normalizeInstalledTarget(
     target?.targetUser,

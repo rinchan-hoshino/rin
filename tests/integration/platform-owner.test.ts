@@ -22,7 +22,29 @@ async function withTempDir(run: (dir: string) => Promise<void>) {
   }
 }
 
-test("platform filesystem helpers preserve fallback and cleanup contracts", async () => {
+test("platform JSON reads default only when the file is missing", async () => {
+  await withTempDir(async (dir) => {
+    assert.deepEqual(
+      platformFs.readJsonFileOrDefault(path.join(dir, "missing.json"), {
+        missing: true,
+      }),
+      { missing: true },
+    );
+
+    const malformed = path.join(dir, "malformed.json");
+    await fs.writeFile(malformed, "{", "utf8");
+    assert.throws(
+      () => platformFs.readJsonFileOrDefault(malformed, {}),
+      SyntaxError,
+    );
+
+    const directory = path.join(dir, "directory.json");
+    await fs.mkdir(directory);
+    assert.throws(() => platformFs.readJsonFileOrDefault(directory, {}));
+  });
+});
+
+test("platform filesystem helpers preserve cleanup contracts", async () => {
   await withTempDir(async (dir) => {
     const privateDir = path.join(dir, "private");
     platformFs.ensurePrivateDir(privateDir);
@@ -31,12 +53,6 @@ test("platform filesystem helpers preserve fallback and cleanup contracts", asyn
     assert.equal(
       platformFs.stringifyJson({ ok: true }, false),
       '{\n  "ok": true\n}',
-    );
-    assert.deepEqual(
-      platformFs.readJsonFile(path.join(dir, "missing.json"), {
-        fallback: true,
-      }),
-      { fallback: true },
     );
     assert.deepEqual(platformFs.listJsonFiles(path.join(dir, "missing")), []);
 

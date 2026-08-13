@@ -60,7 +60,7 @@ Common top-level paths under the agent directory:
 - `memory/`: markdown-backed memory data.
 - `self_improve/`: prompt baselines, skills, indexes, and distilled guidance.
 - `routines/`: routine prompts and task files.
-- `data/`: runtime state grouped by owner, including `core/`, `chat/`, `scheduler/`, `sidecars/`, `extensions/`, `features/`, and shared `runtime/` helpers.
+- `data/`: runtime state grouped by owner, including `core/`, `chat/`, `scheduler/`, `extensions/`, `features/`, and shared `runtime/` helpers.
 - `docs/rin/`: installed Rin-specific agent docs.
 - `docs/pi/`: installed upstream Pi reference docs.
 - `docs/release/`: release-note metadata used by `/changelog`.

@@ -4329,7 +4329,7 @@ test("chat main owner directly covers private telegram and command normalization
     await (await import("node:fs/promises")).mkdir(path.join(alternateAgentDir, "data"), { recursive: true });
     await (await import("node:fs/promises")).writeFile(path.join(alternateAgentDir, "data", "chat-runtime"), "dependency obstacle");
     const alternateSettings = path.join(alternateAgentDir, "owner-settings.json");
-    await (await import("node:fs/promises")).writeFile(alternateSettings, "{}\\n");
+    await (await import("node:fs/promises")).writeFile(alternateSettings, "{}\n");
     process.env.RIN_DIR = alternateAgentDir;
     const alternateBridge = await mod.startChatBridge({
       hosted: true,

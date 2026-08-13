@@ -10,7 +10,6 @@ const layout = await importBuiltModule<{
   coreDataPath(root: string, ...parts: string[]): string;
   chatDataPath(root: string, ...parts: string[]): string;
   schedulerDataPath(root: string, ...parts: string[]): string;
-  sidecarDataPath(root: string, ...parts: string[]): string;
   extensionDataPath(root: string, ...parts: string[]): string;
   sharedRuntimeDataPath(root: string, ...parts: string[]): string;
 }>("dist/core/data-layout.js");
@@ -28,10 +27,6 @@ test("data layout groups runtime state by its owning subsystem", () => {
   assert.equal(
     layout.schedulerDataPath(root, "turns"),
     path.join(root, "data", "scheduler", "turns"),
-  );
-  assert.equal(
-    layout.sidecarDataPath(root, "browse"),
-    path.join(root, "data", "sidecars", "browse"),
   );
   assert.equal(
     layout.extensionDataPath(root, "runtime"),

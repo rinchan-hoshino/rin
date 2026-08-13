@@ -303,11 +303,6 @@
       "subject": "refactor(session): centralize session ref normalization"
     },
     {
-      "file": "tests/characterization/sidecar-common.test.ts",
-      "introducedBy": "70addd7a",
-      "subject": "refactor: stabilize runtime boundaries and dist-only flow"
-    },
-    {
       "file": "tests/characterization/task-tools.test.ts",
       "introducedBy": "01672ff8",
       "subject": "fix(task): support updating tasks by id"

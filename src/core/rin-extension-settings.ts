@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import { cloneJson, isJsonRecord } from "./json-utils.js";
-import { readJsonFile } from "./platform/fs.js";
+import { readJsonFileOrDefault } from "./platform/fs.js";
 import { safeString } from "./text-utils.js";
 
 export type RinDaemonExtensionConfig = {
@@ -15,7 +15,7 @@ export type RinDaemonExtensionConfig = {
 
 export function readRuntimeSettings(agentDir: string): Record<string, any> {
   const settingsPath = path.join(agentDir, "settings.json");
-  return readJsonFile<Record<string, any>>(settingsPath, {}) || {};
+  return readJsonFileOrDefault<Record<string, any>>(settingsPath, {});
 }
 
 export function getRinExtensionRoot(settings: unknown): Record<string, any> {

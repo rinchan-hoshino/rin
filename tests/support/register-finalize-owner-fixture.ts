@@ -16,7 +16,8 @@ const sources: Record<string, string> = {
     export function publishManagedNodeRuntime(sourceRoot, installDir, user, elevated, options) { event("managed-node", sourceRoot, installDir, user, elevated, options); return { nodeExecutable: path.join(installDir, "runtime/node/current/bin/node") }; }
     export function pruneInstalledReleases(...args) { event("prune", ...args); return ["old-release"]; }
     export function readInstallerJson(file, fallback) { event("read-installer", file); return fallback; }
-    export function readJsonFile(file, fallback) { event("read-json", file); return globalThis.__rinFinalizeScenario.launcherMetadata ?? fallback; }
+    export function readJsonFile(file) { event("read-json-strict", file); return globalThis.__rinFinalizeScenario.launcherMetadata; }
+    export function readJsonFileOrDefault(file, fallback) { event("read-json", file); return globalThis.__rinFinalizeScenario.launcherMetadata ?? fallback; }
     export function runCommandAsUser(...args) { event("as-user", ...args); }
     export function runPrivileged(...args) { event("privileged", ...args); }
     export function captureCommandAsUser(...args) { event("capture-user", ...args); return ""; }

@@ -45,7 +45,7 @@ import {
   chatStatePath,
   findBot,
   parseChatKey,
-  readJsonFile,
+  readJsonFileOrDefault,
   writeJsonFile,
 } from "./support.js";
 import {
@@ -422,7 +422,7 @@ export class ChatController {
       deps.linkDeliveriesToSession ?? this.affectChatBinding;
     this.statePath =
       deps.statePath || statePathForControllerKey(dataDir, chatKey);
-    this.state = readJsonFile<ChatState>(this.statePath, { chatKey });
+    this.state = readJsonFileOrDefault<ChatState>(this.statePath, { chatKey });
     const persistedChatKey = safeString(this.state.chatKey).trim();
     if (persistedChatKey && persistedChatKey !== chatKey) {
       this.state = { chatKey };
@@ -1253,7 +1253,7 @@ export class ChatController {
   private isQuietModeEnabled() {
     if (this.quietModeOverride !== undefined) return this.quietModeOverride;
     return resolveChatQuietModeEnabled(
-      readJsonFile(path.join(this.agentDir, "settings.json"), {}),
+      readJsonFileOrDefault(path.join(this.agentDir, "settings.json"), {}),
       this.chatKey,
     );
   }
@@ -3793,7 +3793,7 @@ export class ChatController {
 }
 
 export function loadChatSettings(settingsPath: string) {
-  const settings: any = readJsonFile(settingsPath, {}) || {};
+  const settings: any = readJsonFileOrDefault(settingsPath, {});
   if (settings.enableSkillCommands == null) settings.enableSkillCommands = true;
   return settings;
 }

@@ -17,6 +17,7 @@ const replacements: Record<string, string> = {
       return globalThis.__rinInstallerOwnerScenario.settings ?? fallback;
     }
     export function readJsonFile() { return {}; }
+    export function readJsonFileOrDefault(file, fallback) { return fallback; }
   `,
   "dist/core/rin-install/interactive.js": `
     const i = (name, value = name) => (...args) => { globalThis.__rinInstallerOwnerEvents.push([name, ...args]); return value; };

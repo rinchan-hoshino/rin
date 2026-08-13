@@ -50,15 +50,15 @@ test("installer JSON and text helpers preserve fallback, privilege, modes, and e
     );
 
     scenario.exec = () => '{"privileged":true}';
-    assert.deepEqual(fsUtils.readJsonFileWithPrivilege("/owner/value", {}), {
+    assert.deepEqual(fsUtils.readJsonFileWithPrivilege("/owner/value"), {
       privileged: true,
     });
     scenario.exec = () => {
       throw new Error("denied");
     };
-    assert.deepEqual(
-      fsUtils.readJsonFileWithPrivilege("/owner/value", { safe: true }),
-      { safe: true },
+    assert.throws(
+      () => fsUtils.readJsonFileWithPrivilege("/owner/value"),
+      /denied/,
     );
 
     scenario.readFileSync = () => {
@@ -665,16 +665,14 @@ test("runtime publication and release switching preserve current-link ownership"
 test("remaining installer branches preserve defaults and failure isolation", async () => {
   reset();
   scenario.exec = () => "";
-  assert.deepEqual(
-    fsUtils.readJsonFileWithPrivilege("/empty", { empty: true }),
-    { empty: true },
-  );
+  assert.throws(() => fsUtils.readJsonFileWithPrivilege("/empty"), SyntaxError);
   scenario.readFileSync = () => {
     throw new Error("plain failure");
   };
-  assert.deepEqual(fsUtils.readInstallerJson("/plain", { plain: true }), {
-    plain: true,
-  });
+  assert.throws(
+    () => fsUtils.readInstallerJson("/plain", { plain: true }),
+    /plain failure/,
+  );
   delete scenario.readFileSync;
   assert.throws(
     () => fsUtils.launcherScript(["/owner"]),

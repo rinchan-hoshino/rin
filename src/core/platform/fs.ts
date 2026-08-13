@@ -22,11 +22,16 @@ export function stringifyJsonLine(value: unknown) {
   return `${JSON.stringify(value)}\n`;
 }
 
-export function readJsonFile<T>(filePath: string, fallback: T): T {
+export function readJsonFile<T>(filePath: string): T {
+  return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
+}
+
+export function readJsonFileOrDefault<T>(filePath: string, fallback: T): T {
   try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
-  } catch {
-    return fallback;
+    return readJsonFile<T>(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return fallback;
+    throw error;
   }
 }
 

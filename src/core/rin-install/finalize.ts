@@ -16,7 +16,7 @@ import {
   publishInstalledRuntime,
   publishManagedNodeRuntime,
   readInstallerJson,
-  readJsonFile,
+  readJsonFileOrDefault,
   rollbackInstalledRuntimeReplacement,
   runCommandAsUser,
   runPrivileged,
@@ -199,7 +199,7 @@ export function refreshCoreUpdateLaunchers(
   const resolveHomeForUser = deps.homeForUser || homeForUser;
   const resolveLauncherMetadataPath =
     deps.launcherMetadataPathForUser || launcherMetadataPathForUser;
-  const readLauncherJson = deps.readJsonFile || readJsonFile;
+  const readLauncherJson = deps.readJsonFile || readJsonFileOrDefault;
   const writeUserLaunchers =
     deps.writeLaunchersForUser || writeLaunchersForUser;
   const findUser = deps.findSystemUser || findSystemUser;
@@ -615,7 +615,7 @@ async function applyInstalledRuntime(
               writeJsonFile,
               launcherMetadataPathForUser: (user) =>
                 launcherMetadataPathForUser(user, homeForUser),
-              readJsonFile,
+              readJsonFile: readJsonFileOrDefault,
               writeLaunchersForUser: (user, dir, launcherOptions) =>
                 writeLaunchersForUser(user, dir, homeForUser, {
                   ...launcherOptions,

@@ -11,7 +11,7 @@ import { reportSelfImproveAuditObservationError } from "./audit-observer.js";
 import { runMaintainerUnderMaintenanceLock } from "./maintainer.js";
 import { asArray } from "../json-utils.js";
 import {
-  readJsonFile,
+  readJsonFileOrDefault,
   stringifyJson,
   writeJsonAtomic,
 } from "../platform/fs.js";
@@ -125,7 +125,10 @@ async function withQueueMutationLock<T>(
 }
 
 async function loadQueue(agentDir: string): Promise<MaintenanceJob[]> {
-  const parsed = readJsonFile<unknown>(maintenanceQueuePath(agentDir), []);
+  const parsed = readJsonFileOrDefault<unknown>(
+    maintenanceQueuePath(agentDir),
+    [],
+  );
   return asArray<Record<string, unknown>>(parsed)
     .filter(
       (item) =>

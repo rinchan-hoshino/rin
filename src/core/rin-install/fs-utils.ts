@@ -12,6 +12,7 @@ import {
   ensureDir,
   preferredTempRootCandidates,
   readJsonFile,
+  readJsonFileOrDefault,
   stringifyJson,
   writeJsonFile,
 } from "../platform/fs.js";
@@ -38,18 +39,14 @@ import {
 import { pruneDuplicatePiCodingAgentDependencies } from "./runtime-dependency-prune.js";
 import { provisionPreparedCurrentNodeRuntime } from "./update-workflow.js";
 
-export { ensureDir, readJsonFile, writeJsonFile };
+export { ensureDir, readJsonFile, readJsonFileOrDefault, writeJsonFile };
 
-export function readJsonFileWithPrivilege<T>(filePath: string, fallback: T): T {
+export function readJsonFileWithPrivilege<T>(filePath: string): T {
   const privilegeCommand = pickPrivilegeCommand();
-  try {
-    const raw = execFileSync(privilegeCommand, ["cat", filePath], {
-      encoding: "utf8",
-    });
-    return JSON.parse(String(raw || "")) as T;
-  } catch {
-    return fallback;
-  }
+  const raw = execFileSync(privilegeCommand, ["cat", filePath], {
+    encoding: "utf8",
+  });
+  return JSON.parse(String(raw || "")) as T;
 }
 
 export function readInstallerJson<T>(
@@ -61,11 +58,12 @@ export function readInstallerJson<T>(
     return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
   } catch (error: any) {
     const code = String(error?.code || "");
+    if (code === "ENOENT") return fallback;
     if (code === "EACCES" || code === "EPERM") {
       if (!elevated) throw error;
-      return readJsonFileWithPrivilege(filePath, fallback);
+      return readJsonFileWithPrivilege<T>(filePath);
     }
-    return fallback;
+    throw error;
   }
 }
 

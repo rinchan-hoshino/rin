@@ -76,8 +76,8 @@ export function captureInternalRinCommand(
 type TargetJsonReadOptions = {
   targetUser?: string;
   currentUser?: string;
-  readJson?: typeof readJsonFile;
-  readPrivilegedJson?: typeof readJsonFileWithPrivilege;
+  readJson?: <T>(filePath: string, fallback: T) => T;
+  readPrivilegedJson?: <T>(filePath: string, fallback: T) => T;
 };
 
 function shouldUsePrivilegedTargetRead(options: TargetJsonReadOptions = {}) {
@@ -93,10 +93,24 @@ export function readTargetJsonFile<T>(
   fallback: T,
   options: TargetJsonReadOptions = {},
 ): T {
-  const reader = shouldUsePrivilegedTargetRead(options)
-    ? options.readPrivilegedJson || readJsonFileWithPrivilege
-    : options.readJson || readJsonFile;
-  return reader<T>(filePath, fallback);
+  if (shouldUsePrivilegedTargetRead(options)) {
+    if (options.readPrivilegedJson) {
+      return options.readPrivilegedJson<T>(filePath, fallback);
+    }
+    try {
+      return readJsonFileWithPrivilege<T>(filePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return fallback;
+      throw error;
+    }
+  }
+  if (options.readJson) return options.readJson<T>(filePath, fallback);
+  try {
+    return readJsonFile<T>(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return fallback;
+    throw error;
+  }
 }
 
 export function readInstallerManifestForTarget<T = any>(

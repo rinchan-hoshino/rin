@@ -49,7 +49,7 @@ test("platform/fs writeJsonAtomic and readJsonFile roundtrip", async () => {
   await withTempDir(async (dir) => {
     const filePath = path.join(dir, "nested", "state.json");
     fsMod.writeJsonAtomic(filePath, { ok: true, count: 2 });
-    const parsed = fsMod.readJsonFile(filePath, null);
+    const parsed = fsMod.readJsonFile(filePath);
     assert.deepEqual(parsed, { ok: true, count: 2 });
     assert.equal(
       await fs.readFile(filePath, "utf8"),

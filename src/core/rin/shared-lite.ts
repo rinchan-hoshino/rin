@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { readJsonFile } from "../platform/fs.js";
+import { readJsonFileOrDefault } from "../platform/fs.js";
 import { type ReleaseChannel } from "../rin-lib/release.js";
 import {
   defaultInstallDirForHome,
@@ -97,7 +97,7 @@ export function loadInstallConfigForHome(home = os.homedir()): InstallConfig {
     loadInstallRecordFromCandidates(
       home,
       installRecordCandidatesForHome(home),
-      (filePath) => readJsonFile(filePath, null),
+      (filePath) => readJsonFileOrDefault(filePath, null),
     ) || {}
   );
 }

@@ -533,7 +533,7 @@ test("install-record normalizes launcher metadata and installer manifests", () =
       ["broken", "empty", "manifest", "unused"],
       (filePath) => {
         readCalls.push(filePath);
-        if (filePath === "broken") throw new Error("broken json");
+        if (filePath === "broken") throw new SyntaxError("broken json");
         if (filePath === "empty") return [];
         if (filePath === "manifest") return { targetUser: "candidate-demo" };
         return { targetUser: "unused-demo" };

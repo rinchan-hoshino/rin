@@ -504,7 +504,7 @@ export async function setupIsolatedInstalledRuntime(tempDir: string) {
       writeJsonFile: fsUtils.writeJsonFile,
       launcherMetadataPathForUser: () =>
         fsUtils.launcherMetadataPathForUser(currentUser, () => home),
-      readJsonFile: fsUtils.readJsonFile,
+      readJsonFile: fsUtils.readJsonFileOrDefault,
       writeLaunchersForUser: (_userName: string, dir: string, options: any) =>
         fsUtils.writeLaunchersForUser(currentUser, dir, () => home, {
           ...options,

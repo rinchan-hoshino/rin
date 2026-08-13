@@ -19,7 +19,7 @@ import {
 } from "../rin-lib/release.js";
 import { type InstallerI18n } from "./i18n.js";
 import { restoreTerminalCursor, runInstallerProgress } from "./progress.js";
-import { readJsonFile } from "../platform/fs.js";
+import { readJsonFileOrDefault } from "../platform/fs.js";
 import {
   appendDependencyPruneLog,
   pruneDuplicatePiCodingAgentDependencies,
@@ -275,7 +275,7 @@ export function cleanupStaleUpdateWorkDirs(
 
 export function disablePackageRootPrepareScript(sourceRoot: string) {
   const packageJsonPath = path.join(sourceRoot, "package.json");
-  const parsed = readJsonFile<any>(packageJsonPath, null);
+  const parsed = readJsonFileOrDefault<any>(packageJsonPath, null);
   if (!parsed?.scripts?.prepare) return;
   delete parsed.scripts.prepare;
   fs.writeFileSync(packageJsonPath, `${JSON.stringify(parsed, null, 2)}\n`);

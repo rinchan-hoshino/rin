@@ -17,7 +17,9 @@ test("candidate loader returns the first normalized candidate and stops reading"
     ["missing", "invalid", "valid", "unused"],
     (file) => {
       reads.push(file);
-      if (file === "missing") throw new Error("missing");
+      if (file === "missing") {
+        throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      }
       return file;
     },
     (value, file) => (file === "valid" ? { value, file } : null),
@@ -26,7 +28,7 @@ test("candidate loader returns the first normalized candidate and stops reading"
   assert.deepEqual(reads, ["missing", "invalid", "valid"]);
 });
 
-test("candidate loader returns null for empty, rejected, and throwing candidates", () => {
+test("candidate loader skips missing and malformed candidates but surfaces I/O failures", () => {
   assert.equal(
     candidates.loadFirstValidCandidate(
       [],
@@ -37,13 +39,35 @@ test("candidate loader returns null for empty, rejected, and throwing candidates
   );
   assert.equal(
     candidates.loadFirstValidCandidate(
-      ["one", "two"],
-      (file) => file,
-      (_value, file) => {
-        if (file === "two") throw new Error("invalid");
-        return null;
+      ["malformed"],
+      () => {
+        throw new SyntaxError("malformed");
       },
+      () => ({ value: true }),
     ),
     null,
+  );
+  assert.throws(
+    () =>
+      candidates.loadFirstValidCandidate(
+        ["unreadable"],
+        () => {
+          throw Object.assign(new Error("unreadable"), { code: "EACCES" });
+        },
+        () => ({ value: true }),
+      ),
+    /unreadable/,
+  );
+  assert.throws(
+    () =>
+      candidates.loadFirstValidCandidate(
+        ["one", "two"],
+        (file) => file,
+        (_value, file) => {
+          if (file === "two") throw new Error("invalid");
+          return null;
+        },
+      ),
+    /invalid/,
   );
 });
