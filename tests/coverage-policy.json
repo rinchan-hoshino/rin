@@ -1348,6 +1348,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin/target-user-execution.ts",
+      "built": "dist/core/rin/target-user-execution.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin/targets.ts",
       "built": "dist/core/rin/targets.js",
       "ownerSuite": "integration",

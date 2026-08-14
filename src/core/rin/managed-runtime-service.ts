@@ -1,28 +1,16 @@
-import fs from "node:fs";
 import os from "node:os";
-import { execFileSync } from "node:child_process";
 
 import { sleep } from "../platform/process.js";
-import { canConnectDaemonSocket } from "../rin-daemon/client.js";
 import { readDaemonInstanceLockOwner } from "../rin-daemon/lock.js";
-import { bridgeDaemonSocketPath } from "../rin-lib/common.js";
-import { RIN_DIR_ENV } from "../rin-lib/runtime.js";
-import {
-  isSameSystemUser,
-  socketPathForUser,
-  targetUserRuntimeEnv,
-  buildUserShell,
-} from "../rin-lib/system.js";
 import { tryManagedSystemdAction } from "../rin-install/managed-service.js";
 import { startWindowsDaemonProcess } from "../rin-install/service.js";
-import { defaultInstallDirForHome } from "../rin-install/paths.js";
 import { findSystemUser, targetHomeForUser } from "../rin-install/users.js";
 import {
   readInstallerManifestForTarget,
-  resolveRuntimeAgentDirForTarget,
   targetPathExists,
   type TargetExecutionContext,
 } from "./shared.js";
+import { createTargetUserExecutionContext } from "./target-user-execution.js";
 
 export type ManagedRuntimeService = {
   kind: "systemd" | "launchd" | "windows-startup";
@@ -55,57 +43,10 @@ export function createManagedRuntimeServiceActionContext(options: {
   installDir: string;
   currentUser?: string;
 }): ManagedRuntimeServiceActionContext {
-  const currentUser = String(options.currentUser || os.userInfo().username);
-  const targetUser = String(options.targetUser || currentUser);
-  const targetHome = findSystemUser(targetUser)?.home || os.homedir();
-  const installDir = options.installDir || defaultInstallDirForHome(targetHome);
-  const agentDir = resolveRuntimeAgentDirForTarget(
-    targetUser,
-    currentUser,
-    installDir,
-  );
-  const runtimeEnv = targetUserRuntimeEnv(targetUser, {
-    [RIN_DIR_ENV]: agentDir,
+  return createTargetUserExecutionContext({
+    ...options,
+    targetHome: findSystemUser(options.targetUser)?.home || os.homedir(),
   });
-  const systemctl =
-    process.platform === "linux"
-      ? fs.existsSync("/usr/bin/systemctl")
-        ? "/usr/bin/systemctl"
-        : fs.existsSync("/bin/systemctl")
-          ? "/bin/systemctl"
-          : ""
-      : "";
-  const isTargetUser = !targetUser || isSameSystemUser(targetUser, currentUser);
-  const socketPath = isTargetUser
-    ? socketPathForUser(targetUser)
-    : bridgeDaemonSocketPath(installDir);
-  const exec = (argv: string[], execOptions: any = {}) => {
-    const launch = buildUserShell(targetUser, argv, runtimeEnv);
-    execFileSync(launch.command, launch.args, {
-      stdio: "inherit",
-      env: launch.env,
-      ...execOptions,
-    });
-  };
-  const capture = (argv: string[], captureOptions: any = {}) => {
-    const launch = buildUserShell(targetUser, argv, runtimeEnv);
-    return execFileSync(launch.command, launch.args, {
-      encoding: "utf8",
-      env: launch.env,
-      ...captureOptions,
-    });
-  };
-  return {
-    installDir,
-    targetUser,
-    currentUser,
-    isTargetUser,
-    agentDir,
-    systemctl,
-    exec,
-    capture,
-    canConnectSocket: async () => await canConnectDaemonSocket(socketPath, 500),
-  };
 }
 
 export function readManagedRuntimeService(

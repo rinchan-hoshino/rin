@@ -1077,6 +1077,12 @@
       "preloads": ["tests/support/register-rin-status-owner-fixture.ts"]
     },
     {
+      "source": "src/core/rin/target-user-execution.ts",
+      "built": "dist/core/rin/target-user-execution.js",
+      "suite": "integration",
+      "tests": ["tests/integration/target-user-execution-owner.test.ts"]
+    },
+    {
       "source": "src/core/rin/targets.ts",
       "built": "dist/core/rin/targets.js",
       "suite": "integration",

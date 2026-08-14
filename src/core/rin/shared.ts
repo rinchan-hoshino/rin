@@ -1,36 +1,30 @@
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 
-import { bridgeDaemonSocketPath } from "../rin-lib/common.js";
 import { readJsonFile } from "../platform/fs.js";
 import {
-  buildDaemonSocketProbeScript,
   buildDaemonStatusScript,
-  canConnectDaemonSocket,
   requestDaemonCommand,
 } from "../rin-daemon/client.js";
-import { RIN_DIR_ENV } from "../rin-lib/runtime.js";
-import {
-  buildUserShell,
-  isSameSystemUser,
-  readPasswdUser,
-  socketPathForUser,
-  targetUserRuntimeEnv,
-} from "../rin-lib/system.js";
+import { isSameSystemUser } from "../rin-lib/system.js";
 import { repoRootFromHere, runCommand } from "../rin-install/common.js";
 import { createInstallerI18n } from "../rin-install/i18n.js";
 import { readJsonFileWithPrivilege } from "../rin-install/fs-utils.js";
 import { assertUpdateConfirmationAvailable } from "../rin-install/update-confirmation.js";
 import {
-  defaultInstallDirForHome,
   installerManifestPath,
   managedNodeExecutablePath,
   managedSystemdUnitCandidates,
 } from "../rin-install/paths.js";
 import { type ReleaseChannel } from "../rin-lib/release.js";
 import { launchIndependentUpdateJob } from "./update-job.js";
+import {
+  createTargetUserExecutionContext,
+  resolveRuntimeAgentDirForTarget,
+} from "./target-user-execution.js";
+export { resolveRuntimeAgentDirForTarget } from "./target-user-execution.js";
 import {
   extractSubcommandArgv,
   safeString,
@@ -130,86 +124,18 @@ export function createUpdateI18n() {
 
 type TargetExecutionContextBase = ReturnType<typeof daemonControlContext>;
 export type TargetExecutionContext = TargetExecutionContextBase & {
-  currentUser: string;
-  isTargetUser: boolean;
-  exec: (argv: string[], options?: any) => void;
-  capture: (argv: string[], options?: any) => string;
-  canConnectSocket: () => Promise<boolean>;
   queryDaemonStatus: () => Promise<any>;
 };
-
-export function resolveRuntimeAgentDirForTarget(
-  targetUser: string,
-  currentUser: string,
-  installDir: string,
-  env: NodeJS.ProcessEnv = process.env,
-) {
-  const normalizedTargetUser = safeString(targetUser).trim();
-  const processUser = os.userInfo().username;
-  const normalizedCurrentUser = safeString(currentUser || processUser).trim();
-  const normalizedProcessUser = safeString(processUser).trim();
-  const normalizedInstallDir = safeString(installDir).trim();
-  const explicitRinDir = safeString(env[RIN_DIR_ENV]).trim();
-  if (
-    explicitRinDir &&
-    (!normalizedTargetUser ||
-      isSameSystemUser(normalizedTargetUser, normalizedCurrentUser) ||
-      isSameSystemUser(normalizedTargetUser, normalizedProcessUser))
-  ) {
-    return explicitRinDir;
-  }
-  return normalizedInstallDir || explicitRinDir;
-}
 
 export function createTargetExecutionContext(
   parsed: ParsedArgs,
 ): TargetExecutionContext {
   const base = daemonControlContext(parsed);
-  const currentUser = os.userInfo().username;
-  const isTargetUser =
-    !base.targetUser || isSameSystemUser(base.targetUser, currentUser);
-
-  const exec = (argv: string[], options: any = {}) => {
-    const launch = buildUserShell(base.targetUser, argv, base.runtimeEnv);
-    execFileSync(launch.command, launch.args, {
-      stdio: "inherit",
-      env: launch.env,
-      cwd: base.repoRoot,
-      ...options,
-    });
-  };
-
-  const capture = (argv: string[], options: any = {}) => {
-    const launch = buildUserShell(base.targetUser, argv, base.runtimeEnv);
-    return execFileSync(launch.command, launch.args, {
-      encoding: "utf8",
-      env: launch.env,
-      cwd: base.repoRoot,
-      ...options,
-    });
-  };
-
-  const canConnectSocketInContext = async () => {
-    if (isTargetUser) return await canConnectDaemonSocket(base.socketPath, 500);
-    try {
-      capture(
-        [
-          process.execPath,
-          "-e",
-          buildDaemonSocketProbeScript(base.socketPath, 500),
-        ],
-        { stdio: "ignore" },
-      );
-      return true;
-    } catch {
-      return false;
-    }
-  };
 
   const queryDaemonStatusInContext = async () => {
-    if (!isTargetUser) {
+    if (!base.isTargetUser) {
       try {
-        const raw = capture([
+        const raw = base.capture([
           process.execPath,
           "-e",
           buildDaemonStatusScript(base.socketPath, 5000, "doctor_1"),
@@ -233,11 +159,6 @@ export function createTargetExecutionContext(
 
   return {
     ...base,
-    currentUser,
-    isTargetUser,
-    exec,
-    capture,
-    canConnectSocket: canConnectSocketInContext,
     queryDaemonStatus: queryDaemonStatusInContext,
   };
 }
@@ -316,47 +237,23 @@ async function runInteractiveCommand(
 }
 
 export function resolveInstallDirForTarget(parsed: ParsedArgs) {
-  const target = readPasswdUser(parsed.targetUser);
-  return (
-    parsed.installDir || defaultInstallDirForHome(target?.home || os.homedir())
-  );
+  return createTargetUserExecutionContext({
+    targetUser: parsed.targetUser,
+    installDir: parsed.installDir,
+  }).installDir;
 }
 
 function daemonControlContext(parsed: ParsedArgs) {
   const repoRoot = repoRootFromHere();
-  const targetUser = parsed.targetUser;
-  const currentUser = os.userInfo().username;
-  const targetHome = readPasswdUser(targetUser)?.home || os.homedir();
-  const installDir = parsed.installDir || defaultInstallDirForHome(targetHome);
-  const runtimeAgentDir = resolveRuntimeAgentDirForTarget(
-    targetUser,
-    currentUser,
-    installDir,
-  );
-  const runtimeEnv = targetUserRuntimeEnv(targetUser, {
-    [RIN_DIR_ENV]: runtimeAgentDir,
+  const execution = createTargetUserExecutionContext({
+    targetUser: parsed.targetUser,
+    installDir: parsed.installDir,
+    cwd: repoRoot,
   });
-  const systemctl =
-    process.platform === "linux"
-      ? fs.existsSync("/usr/bin/systemctl")
-        ? "/usr/bin/systemctl"
-        : fs.existsSync("/bin/systemctl")
-          ? "/bin/systemctl"
-          : ""
-      : "";
-  const socketPath = isSameSystemUser(targetUser, currentUser)
-    ? socketPathForUser(targetUser)
-    : bridgeDaemonSocketPath(installDir);
   return {
+    ...execution,
     repoRoot,
-    installDir,
-    agentDir: runtimeAgentDir,
-    targetUser,
-    targetHome,
-    runtimeEnv,
-    systemctl,
-    socketPath,
-    managedServiceUnits: managedSystemdUnitCandidates(targetUser),
+    managedServiceUnits: managedSystemdUnitCandidates(execution.targetUser),
   };
 }
 
