@@ -54,7 +54,7 @@ test("daemon preserves command identity when a local command throws", async () =
   await fs.writeFile(
     launcherPath,
     `import { startDaemon } from ${JSON.stringify(daemonModuleUrl)};\n` +
-      `await startDaemon({ socketPath: ${JSON.stringify(socketPath)}, handleLocalCommand: async (command) => { if (command?.type === "diagnostic_failure") throw new Error("diagnostic_failure_detail"); } });\n`,
+      `await startDaemon({ socketPath: ${JSON.stringify(socketPath)}, additionalCommandRouter: async (command) => { if (command?.type === "diagnostic_failure") throw new Error("diagnostic_failure_detail"); } });\n`,
   );
   const child = spawn(process.execPath, [launcherPath], {
     cwd: rootDir,

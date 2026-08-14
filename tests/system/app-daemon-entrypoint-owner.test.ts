@@ -10,6 +10,7 @@ import { createTestSandbox } from "../support/test-sandbox.js";
 
 const execFileAsync = promisify(execFile);
 const entrypoint = path.resolve("dist/app/rin-daemon/daemon.js");
+const entrypointSource = path.resolve("src/app/rin-daemon/daemon.ts");
 const registerFixture = path.resolve(
   "tests/support/register-app-daemon-owner-fixture.ts",
 );
@@ -36,7 +37,22 @@ async function runDaemon(
   );
 }
 
-test("app daemon assembles hosted services, local commands, and failure cleanup", async () => {
+test("app daemon entrypoint only assembles the typed Chat integration", async () => {
+  const source = await fs.readFile(entrypointSource, "utf8");
+  assert.match(source, /createChatDaemonIntegration/);
+  assert.match(
+    source,
+    /additionalCommandRouter:\s*chatIntegration\.commandRouter/,
+  );
+  assert.doesNotMatch(source, /handleLocalCommand/);
+  assert.doesNotMatch(
+    source,
+    /chat_(?:send|run_turn|typing|react|terminate_turn|message_get|message_list|bridge_eval)/,
+  );
+  assert.doesNotMatch(source, /command\?\.type|command\.type/);
+});
+
+test("app daemon assembles hosted services and failure cleanup", async () => {
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-app-daemon-owner-"),
   );
@@ -50,9 +66,23 @@ test("app daemon assembles hosted services, local commands, and failure cleanup"
     assert.deepEqual(summary.ready, {
       chat: { status: "ready", owner: true },
     });
-    assert.equal(summary.results.length, 14);
-    assert.equal(summary.results[12], null);
-    assert.equal(summary.results[13], null);
+    assert.deepEqual(summary.routed, {
+      data: { routed: { owner: true } },
+    });
+    assert.equal(summary.unknown, null);
+    assert.deepEqual(summary.extensionApi, { ownerExtensionApi: true });
+    const chatApiIndex = summary.events.findIndex(
+      (event: unknown[]) => event[0] === "manager-chat-api",
+    );
+    const managerStartIndex = summary.events.findIndex(
+      (event: unknown[]) => event[0] === "manager-start",
+    );
+    assert.ok(chatApiIndex >= 0);
+    assert.ok(managerStartIndex > chatApiIndex);
+    assert.deepEqual(summary.events[managerStartIndex], [
+      "manager-start",
+      true,
+    ]);
     assert.match(success.stderr, /owner cgroup warning/);
 
     const defaultSocket = await runDaemon(root, "success");

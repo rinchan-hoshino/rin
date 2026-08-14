@@ -69,7 +69,7 @@ async function startOwnerDaemon(
         `  workerGcIdleMs: 17, workerSweepIntervalMs: 19, shutdownGraceMs: 40,\n` +
         `  chat: { send: async (payload) => payload },\n` +
         `  getExtraStatus: async () => ({ extraOwner: true }),\n` +
-        `  handleLocalCommand: async (command) => command.type === "owner_local" ? { data: { local: true } } : command.type === "owner_local_error" ? { success: false, error: "owner-local-error" } : undefined,\n` +
+        `  additionalCommandRouter: async (command) => command.type === "owner_local" ? { data: { local: true } } : command.type === "owner_local_error" ? { success: false, error: "owner-local-error" } : undefined,\n` +
         `  onShutdown: async () => {},\n` +
         `  registerLocalFrontendConnector: (connect) => { const socket = connect(); socket.on("data", () => socket.destroy()); socket.write(JSON.stringify({ id: "local-status", type: "daemon_status" }) + "\\n"); },\n` +
         `});\n`,

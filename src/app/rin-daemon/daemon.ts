@@ -8,11 +8,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createChatDaemonIntegration } from "../../core/chat/daemon-integration.js";
 import { startChatBridge } from "../../core/chat/main.js";
-import {
-  getChatMessageRead,
-  listChatMessageReads,
-} from "../../core/chat/message-query.js";
 import { defaultDaemonSocketPath } from "../../core/rin-lib/common.js";
 import { formatRuntimeErrorForUser } from "../../core/presentation/error.js";
 import { startDaemon } from "../../core/rin-daemon/daemon.js";
@@ -52,6 +49,11 @@ async function main() {
   let daemonLock: DaemonInstanceLock | null = null;
   let daemonExtensionManager: RinDaemonExtensionManager | null = null;
   const hostedChatService = createHostedChatService({ logger: console });
+  const getHostedChatBridge = async () => await hostedChatService.getBridge();
+  const chatIntegration = createChatDaemonIntegration({
+    agentDir: runtime.agentDir,
+    getBridge: getHostedChatBridge,
+  });
 
   const stopHostedServices = async () => {
     await hostedChatService.stop();
@@ -72,6 +74,7 @@ async function main() {
       agentDir: runtime.agentDir,
       logger: console,
     });
+    daemonExtensionManager.setChatApi(chatIntegration.extensionApi);
     const daemonExtensionStartPromise = daemonExtensionManager.start();
     void hostedChatService.start(async () => {
       await daemonExtensionStartPromise;
@@ -85,7 +88,6 @@ async function main() {
           }),
       });
     });
-    const getHostedChatBridge = async () => await hostedChatService.getBridge();
 
     await startDaemon({
       daemonExtensionManager,
@@ -93,92 +95,10 @@ async function main() {
       socketPath: daemonSocketPath,
       workerPath,
       workerCgroupIsolation,
-      chat: {
-        send: async (payload) =>
-          await (await getHostedChatBridge()).send(payload),
-        runTurn: async (payload) =>
-          await (await getHostedChatBridge()).runTurn(payload),
-        typing: async (payload) =>
-          await (await getHostedChatBridge()).typing(payload),
-        react: async (payload) =>
-          await (await getHostedChatBridge()).react(payload),
-        terminateTurn: async (payload) =>
-          await (await getHostedChatBridge()).terminateTurn(payload),
-      },
+      chat: chatIntegration.delivery,
+      chatExtensionApi: chatIntegration.extensionApi,
+      additionalCommandRouter: chatIntegration.commandRouter,
       getExtraStatus: () => ({ chat: hostedChatService.getStatus() }),
-      handleLocalCommand: async (command) => {
-        const type = String(command?.type || "").trim();
-        if (type === "chat_send") {
-          return {
-            success: true,
-            data: await (
-              await getHostedChatBridge()
-            ).send(command?.payload || {}),
-          };
-        }
-        if (type === "chat_run_turn") {
-          return {
-            success: true,
-            data: await (
-              await getHostedChatBridge()
-            ).runTurn(command?.payload || {}),
-          };
-        }
-        if (type === "chat_typing") {
-          return {
-            success: true,
-            data: await (
-              await getHostedChatBridge()
-            ).typing(command?.payload || {}),
-          };
-        }
-        if (type === "chat_react") {
-          return {
-            success: true,
-            data: await (
-              await getHostedChatBridge()
-            ).react(command?.payload || {}),
-          };
-        }
-        if (type === "chat_terminate_turn") {
-          return {
-            success: true,
-            data: await (
-              await getHostedChatBridge()
-            ).terminateTurn(command?.payload || {}),
-          };
-        }
-        if (type === "chat_message_get") {
-          const payload = command?.payload || {};
-          return {
-            success: true,
-            data:
-              getChatMessageRead(
-                runtime.agentDir,
-                String(payload.chatKey || ""),
-                String(payload.messageId || ""),
-              ) || null,
-          };
-        }
-        if (type === "chat_message_list") {
-          return {
-            success: true,
-            data: listChatMessageReads(
-              runtime.agentDir,
-              command?.payload || {},
-            ),
-          };
-        }
-        if (type === "chat_bridge_eval") {
-          return {
-            success: true,
-            data: await (
-              await getHostedChatBridge()
-            ).evalBridge(command?.payload || {}),
-          };
-        }
-        return undefined;
-      },
       registerLocalFrontendConnector: (connector) => {
         localFrontendConnectorResolver?.(connector);
         localFrontendConnectorResolver = null;

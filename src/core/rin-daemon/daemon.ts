@@ -18,7 +18,10 @@ import {
   isWindowsNamedPipePath,
   safeString,
 } from "../rin-lib/common.js";
-import type { RinRpcCommandType } from "../rin-lib/rpc-types.js";
+import type {
+  RinRpcCommandRouter,
+  RinRpcCommandType,
+} from "../rin-lib/rpc-types.js";
 import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
 import {
   emptySessionState,
@@ -30,6 +33,7 @@ import {
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
 import { createDaemonChatAPI } from "../chat/extension-api.js";
+import type { RinDaemonChatAPI } from "../rin-extension-api.js";
 import {
   listBoundSessionPage,
   listBoundSessions,
@@ -100,21 +104,8 @@ export async function startDaemon(
     getExtraStatus?:
       | (() => Promise<Record<string, unknown> | undefined>)
       | (() => Record<string, unknown> | undefined);
-    handleLocalCommand?: (command: any) =>
-      | Promise<
-          | {
-              success?: boolean;
-              data?: unknown;
-              error?: string;
-            }
-          | undefined
-        >
-      | {
-          success?: boolean;
-          data?: unknown;
-          error?: string;
-        }
-      | undefined;
+    additionalCommandRouter?: RinRpcCommandRouter;
+    chatExtensionApi?: RinDaemonChatAPI;
     onShutdown?: () => Promise<void> | void;
     registerLocalFrontendConnector?: (connector: RpcSocketConnector) => void;
     daemonExtensionManager?: RinDaemonExtensionManager;
@@ -186,7 +177,8 @@ export async function startDaemon(
       logger: console,
     });
   daemonExtensionManager.setChatApi(
-    createDaemonChatAPI({ agentDir: runtime.agentDir }),
+    options.chatExtensionApi ||
+      createDaemonChatAPI({ agentDir: runtime.agentDir }),
   );
   daemonExtensionManager.setSessionApi(
     createDaemonSessionAPI({
@@ -632,9 +624,9 @@ export async function startDaemon(
       sendCommandResult(connection, id, type, await cronHandler(command));
       return true;
     }
-    const localResult = await options.handleLocalCommand?.(command);
-    if (localResult) {
-      sendCommandResult(connection, id, type, localResult);
+    const additionalResult = await options.additionalCommandRouter?.(command);
+    if (additionalResult) {
+      sendCommandResult(connection, id, type, additionalResult);
       return true;
     }
     return false;

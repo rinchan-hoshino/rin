@@ -220,6 +220,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/chat/daemon-integration.ts",
+      "built": "dist/core/chat/daemon-integration.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/chat/extension-api.ts",
       "built": "dist/core/chat/extension-api.js",
       "ownerSuite": "unit",

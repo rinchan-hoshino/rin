@@ -213,6 +213,12 @@
       ]
     },
     {
+      "source": "src/core/chat/daemon-integration.ts",
+      "built": "dist/core/chat/daemon-integration.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-daemon-integration.test.ts"]
+    },
+    {
       "source": "src/core/chat/extension-ui.ts",
       "built": "dist/core/chat/extension-ui.js",
       "suite": "integration",

@@ -1,6 +1,23 @@
 import { register } from "node:module";
 
 const replacements: Record<string, string> = {
+  "dist/core/chat/daemon-integration.js": `
+    export function createChatDaemonIntegration(options) {
+      globalThis.__rinAppDaemonOwnerEvents.push(["chat-integration", options.agentDir]);
+      const call = async (name, payload) => (await options.getBridge())[name](payload);
+      return {
+        delivery: {
+          send: (payload) => call("send", payload),
+          runTurn: (payload) => call("runTurn", payload),
+          typing: (payload) => call("typing", payload),
+          react: (payload) => call("react", payload),
+          terminateTurn: (payload) => call("terminateTurn", payload),
+        },
+        commandRouter: async (command) => command.type === "owner-command" ? { data: { routed: command.payload } } : undefined,
+        extensionApi: { ownerExtensionApi: true },
+      };
+    }
+  `,
   "dist/core/chat/main.js": `
     export async function startChatBridge(options) {
       globalThis.__rinAppDaemonOwnerEvents.push(["chat-start", options.hosted, options.chatAdapterProviders]);
@@ -49,32 +66,17 @@ const replacements: Record<string, string> = {
       await options.chat.typing(payload);
       await options.chat.react(payload);
       await options.chat.terminateTurn(payload);
-      const commands = [
-        { type: "chat_send", payload },
-        { type: "chat_send" },
-        { type: "chat_run_turn", payload },
-        { type: "chat_run_turn" },
-        { type: "chat_typing", payload },
-        { type: "chat_typing" },
-        { type: "chat_react", payload },
-        { type: "chat_react" },
-        { type: "chat_terminate_turn", payload },
-        { type: "chat_terminate_turn" },
-        { type: "chat_bridge_eval", payload },
-        { type: "chat_bridge_eval" },
-        { type: "owner-unknown" },
-        {},
-      ];
-      const results = [];
-      for (const command of commands) results.push(await options.handleLocalCommand(command));
+      const routed = await options.additionalCommandRouter({ type: "owner-command", payload });
+      const unknown = await options.additionalCommandRouter({ type: "owner-unknown" });
       await options.onShutdown();
-      console.log(JSON.stringify({ socketPath: options.socketPath, starting, ready, results }));
+      console.log(JSON.stringify({ socketPath: options.socketPath, starting, ready, routed, unknown: unknown ?? null, extensionApi: options.chatExtensionApi, events: globalThis.__rinAppDaemonOwnerEvents }));
     }
   `,
   "dist/core/rin-daemon/extensions.js": `
     export class RinDaemonExtensionManager {
       constructor(options) { this.options = options; globalThis.__rinAppDaemonOwnerEvents.push(["manager-new", options.cwd, options.agentDir]); }
-      async start() { globalThis.__rinAppDaemonOwnerEvents.push(["manager-start"]); }
+      setChatApi(api) { this.chatApi = api; globalThis.__rinAppDaemonOwnerEvents.push(["manager-chat-api", api.ownerExtensionApi]); }
+      async start() { globalThis.__rinAppDaemonOwnerEvents.push(["manager-start", this.chatApi?.ownerExtensionApi]); }
       async stop() { globalThis.__rinAppDaemonOwnerEvents.push(["manager-stop"]); }
       getChatAdapterProviders() { return [{ id: "owner-provider" }]; }
     }

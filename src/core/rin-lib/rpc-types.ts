@@ -84,6 +84,21 @@ export type RinRpcCommandType =
   | "shutdown_session"
   | "terminate_session";
 
+export type RinRpcCommandEnvelope = Readonly<{
+  id?: unknown;
+  type?: unknown;
+  [key: string]: unknown;
+}>;
+
+export type RinRpcCommandResult = Readonly<
+  | { success?: true; data?: unknown; error?: never }
+  | { success: false; error: string; data?: never }
+>;
+
+export type RinRpcCommandRouter = (
+  command: unknown,
+) => Promise<RinRpcCommandResult | undefined> | RinRpcCommandResult | undefined;
+
 export type RinRpcResponseEnvelope = {
   id?: string;
   type: "response";
