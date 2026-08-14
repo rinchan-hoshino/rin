@@ -3,16 +3,6 @@
   "policy": "Pre-restructure behavior coverage awaiting semantic extraction. Files in this bucket retain their historical checks but do not count as module unit tests or concrete bug regressions.",
   "files": [
     {
-      "file": "tests/characterization/changelog.test.ts",
-      "introducedBy": "53e86fa9",
-      "subject": "refactor(rin-lib): harden changelog parsing"
-    },
-    {
-      "file": "tests/characterization/chat-bridge-adapters.test.ts",
-      "introducedBy": "10607ed1",
-      "subject": "feat(chat): unify guided chat setup and custom adapters"
-    },
-    {
       "file": "tests/characterization/chat-bridge-tool.test.ts",
       "introducedBy": "01672ff8",
       "subject": "fix(task): support updating tasks by id"
@@ -46,11 +36,6 @@
       "file": "tests/characterization/chat-key-worker.test.ts",
       "introducedBy": "d0a12ef7",
       "subject": "fix(chat): make abort interrupt active turns promptly (#284)"
-    },
-    {
-      "file": "tests/characterization/chat-message-store-layout.test.ts",
-      "introducedBy": "99a1b9d2",
-      "subject": "refactor: streamline chat message store layout"
     },
     {
       "file": "tests/characterization/chat-runtime-discord.test.ts",
@@ -113,21 +98,6 @@
       "subject": "fix(installer): launch Windows cmd shims through shell"
     },
     {
-      "file": "tests/characterization/installer-finalize.test.ts",
-      "introducedBy": "7f97cedb",
-      "subject": "fix: refresh launchers during core updates"
-    },
-    {
-      "file": "tests/characterization/installer-interactive.test.ts",
-      "introducedBy": "70addd7a",
-      "subject": "refactor: stabilize runtime boundaries and dist-only flow"
-    },
-    {
-      "file": "tests/characterization/installer-paths.test.ts",
-      "introducedBy": "e3a8c085",
-      "subject": "refactor(install): centralize installed runtime entry paths"
-    },
-    {
       "file": "tests/characterization/installer-progress.test.ts",
       "introducedBy": "d538ff4f",
       "subject": "fix(installer): make system errors readable"
@@ -183,11 +153,6 @@
       "subject": "refactor: prefer public Pi integration seams"
     },
     {
-      "file": "tests/characterization/platform.test.ts",
-      "introducedBy": "70addd7a",
-      "subject": "refactor: stabilize runtime boundaries and dist-only flow"
-    },
-    {
       "file": "tests/characterization/release.test.ts",
       "introducedBy": "b9e33edd",
       "subject": "feat(release): add channel-aware distribution flows"
@@ -228,11 +193,6 @@
       "subject": "test: finish test convergence migration"
     },
     {
-      "file": "tests/characterization/rpc-auth.test.ts",
-      "introducedBy": "37022db6",
-      "subject": "refactor(rin-tui): normalize rpc oauth auth proxy state"
-    },
-    {
       "file": "tests/characterization/rpc-events.test.ts",
       "introducedBy": "48e6b845",
       "subject": "Fix RPC refresh thrash and installer guidance"
@@ -243,29 +203,9 @@
       "subject": "Unify Koishi session bootstrap with TUI"
     },
     {
-      "file": "tests/characterization/rpc-restore.test.ts",
-      "introducedBy": "a7647e6c",
-      "subject": "Reduce TUI flicker after daemon reconnect"
-    },
-    {
-      "file": "tests/characterization/rpc-runtime-host.test.ts",
-      "introducedBy": "97ac210b",
-      "subject": "fix(rin-tui): adapt rpc session to InteractiveMode runtime host"
-    },
-    {
-      "file": "tests/characterization/rpc-settings-persistence.test.ts",
-      "introducedBy": "31c0636a",
-      "subject": "fix(tui): confirm durable rpc settings"
-    },
-    {
       "file": "tests/characterization/run-format-check-script.test.ts",
       "introducedBy": "4d1eef01",
       "subject": "refactor(scripts): isolate format check arguments"
-    },
-    {
-      "file": "tests/characterization/running-workers.test.ts",
-      "introducedBy": "f047e118",
-      "subject": "fix(chat): rejoin restarted turns in backend"
     },
     {
       "file": "tests/characterization/session-factory.test.ts",
@@ -336,11 +276,6 @@
       "file": "tests/characterization/update-targets.test.ts",
       "introducedBy": "b5d7b8af",
       "subject": "refactor(install): unify bootstrap entrypoints and path helpers"
-    },
-    {
-      "file": "tests/characterization/update-workflow.test.ts",
-      "introducedBy": "91e0d2a9",
-      "subject": "fix: apply managed runtime consistently"
     },
     {
       "file": "tests/characterization/worker-cgroup-isolation.test.ts",

@@ -899,6 +899,20 @@ export function verifyTestArchitecture() {
   }
 
   const allTests = listFiles("tests", ".test.ts");
+  const testsByDigest = new Map<string, string[]>();
+  for (const file of allTests) {
+    const digest = createHash("sha256")
+      .update(fs.readFileSync(path.join(rootDir, file)))
+      .digest("hex");
+    const matchingFiles = testsByDigest.get(digest) ?? [];
+    matchingFiles.push(file);
+    testsByDigest.set(digest, matchingFiles);
+  }
+  for (const matchingFiles of testsByDigest.values()) {
+    if (matchingFiles.length > 1) {
+      errors.push(`duplicate_test_files:${matchingFiles.join(",")}`);
+    }
+  }
   for (const file of listFiles("tests", ".ts")) {
     const content = fs.readFileSync(path.join(rootDir, file), "utf8");
     if (content.includes("new URL(import.meta.url).pathname")) {

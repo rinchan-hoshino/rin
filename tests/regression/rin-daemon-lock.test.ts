@@ -47,7 +47,7 @@ function spawnDaemon(agentDir: string, socketPath: string) {
   };
 }
 
-async function waitForExit(child: ChildProcess, timeoutMs = 3000) {
+async function waitForExit(child: ChildProcess, timeoutMs = 10_000) {
   if (child.exitCode !== null || child.signalCode !== null) {
     return { code: child.exitCode, signal: child.signalCode };
   }

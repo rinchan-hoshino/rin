@@ -216,7 +216,12 @@ test("strict coverage gates exclude immutable characterization evidence", () => 
   );
   assert.equal(
     isCharacterizationModuleUrl(
-      path.join(rootDir, "tests", "characterization", "changelog.test.ts"),
+      path.join(
+        rootDir,
+        "tests",
+        "characterization",
+        "chat-file-utils.test.ts",
+      ),
     ),
     true,
   );
@@ -229,7 +234,7 @@ test("strict coverage gates exclude immutable characterization evidence", () => 
       path.join(rootDir, "scripts", "test", "owner-characterization-guard.ts"),
       "--input-type=module",
       "-e",
-      'const bucket="characterization"; await import(`./tests/${bucket}/changelog.test.ts`);',
+      'const bucket="characterization"; await import(`./tests/${bucket}/chat-file-utils.test.ts`);',
     ],
     { cwd: rootDir, encoding: "utf8" },
   );

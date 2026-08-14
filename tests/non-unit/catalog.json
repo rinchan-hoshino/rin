@@ -185,10 +185,7 @@
     {
       "source": "src/core/chat/decision.ts",
       "suite": "integration",
-      "tests": [
-        "tests/integration/chat-decision-current-main-owner.test.ts",
-        "tests/integration/chat-decision-owner.test.ts"
-      ]
+      "tests": ["tests/integration/chat-decision-owner.test.ts"]
     },
     {
       "source": "src/core/chat/daemon-integration.ts",
