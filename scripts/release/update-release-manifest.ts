@@ -19,7 +19,6 @@ function parseArgs(argv) {
     packageName: "",
     repoUrl: "",
     branch: "",
-    series: "",
     fromBetaVersion: "",
     promotionVersion: "",
     assetPlatform: "",
@@ -50,9 +49,6 @@ function parseArgs(argv) {
     } else if (arg === "--branch") {
       args.branch = argValue(argv, index, arg);
       index += 1;
-    } else if (arg === "--series") {
-      args.series = argValue(argv, index, arg);
-      index += 1;
     } else if (arg === "--from-beta-version") {
       args.fromBetaVersion = argValue(argv, index, arg);
       index += 1;
@@ -73,7 +69,7 @@ function parseArgs(argv) {
       index += 1;
     } else if (arg === "-h" || arg === "--help") {
       console.log(
-        "Usage: npx tsx scripts/release/update-release-manifest.ts --channel stable|beta|nightly --version <value> [--ref <sha>] [--branch <name>] [--series <major.minor>] [--from-beta-version <value>] [--promotion-version <x.y.z>] [--asset-platform <os-arch> --asset-url <url> --asset-sha256 <sha256>] [--asset-node-version <version>] [--package-name <name>] [--repo-url <url>] [--manifest <path>]",
+        "Usage: npx tsx scripts/release/update-release-manifest.ts --channel stable|beta|nightly --version <value> [--ref <sha>] [--branch <name>] [--from-beta-version <value>] [--promotion-version <x.y.z>] [--asset-platform <os-arch> --asset-url <url> --asset-sha256 <sha256>] [--asset-node-version <version>] [--package-name <name>] [--repo-url <url>] [--manifest <path>]",
       );
       process.exit(0);
     } else {
@@ -159,7 +155,6 @@ const channel = trim(args.channel || "stable");
 const version = trim(args.version);
 const ref = trim(args.ref);
 const branch = trim(args.branch);
-const series = trim(args.series);
 const packageName =
   trim(args.packageName) || trim(manifest.packageName) || "@hoshinorin/rin";
 const repoUrl =
@@ -180,7 +175,6 @@ manifest.packageName = packageName;
 manifest.repoUrl = repoUrl;
 manifest.bootstrapBranch = trim(manifest.bootstrapBranch) || "bootstrap";
 manifest.train ||= {};
-manifest.train.series = series || trim(manifest.train.series) || "0.0";
 manifest.train.nightlyBranch =
   branch || trim(manifest.train.nightlyBranch) || "main";
 manifest.stable ||= {};

@@ -101,11 +101,6 @@ function nextRegularStableVersion(manifest) {
   });
 }
 
-function versionSeries(version) {
-  const core = parseCore(version);
-  return `${core.major}.${core.minor}`;
-}
-
 const args = parseArgs(process.argv.slice(2));
 const manifestPath = path.resolve(process.cwd(), args.manifest);
 const manifest = readJson(manifestPath);
@@ -118,14 +113,12 @@ let result;
 if (channel === "nightly") {
   const promotionVersion = nextRegularStableVersion(manifest);
   result = {
-    series: versionSeries(promotionVersion),
     promotionVersion,
     version: `${promotionVersion}-nightly.${date}+${shortRef}`,
   };
 } else if (channel === "beta") {
   const promotionVersion = nextRegularStableVersion(manifest);
   result = {
-    series: versionSeries(promotionVersion),
     promotionVersion,
     version: `${promotionVersion}-beta.${date}`,
   };
@@ -142,7 +135,6 @@ if (channel === "nightly") {
       ? incrementPatch(currentStableVersion)
       : basePromotionVersion;
   result = {
-    series: versionSeries(targetVersion),
     promotionVersion: basePromotionVersion,
     version: targetVersion,
   };

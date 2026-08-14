@@ -59,7 +59,6 @@ export type ReleaseManifest = {
   repoUrl?: string;
   bootstrapBranch?: string;
   train?: {
-    series?: string;
     nightlyBranch?: string;
   };
   stable?: {
@@ -124,7 +123,6 @@ export type InstalledReleaseInfo = ResolvedRelease & {
 const DEFAULT_PACKAGE_NAME = "@hoshinorin/rin";
 const DEFAULT_REPO_URL = "https://github.com/rinchan-hoshino/rin";
 const DEFAULT_BOOTSTRAP_BRANCH = "bootstrap";
-const DEFAULT_TRAIN_SERIES = "0.0";
 const DEFAULT_STABLE_VERSION = "0.0.0";
 const DEFAULT_BETA_PROMOTION_VERSION = "0.1.0";
 const DEFAULT_BETA_VERSION = `${DEFAULT_BETA_PROMOTION_VERSION}-beta.0`;
@@ -235,7 +233,6 @@ function defaultReleaseManifest(): ReleaseManifest {
     repoUrl: DEFAULT_REPO_URL,
     bootstrapBranch: DEFAULT_BOOTSTRAP_BRANCH,
     train: {
-      series: DEFAULT_TRAIN_SERIES,
       nightlyBranch: "main",
     },
     stable: {

@@ -139,7 +139,6 @@ async function createReleaseManifest(tempDir) {
       repoUrl: "https://example.invalid/rin",
       bootstrapBranch: "bootstrap",
       train: {
-        series: "1.2",
         nightlyBranch: "main",
       },
       stable: {

@@ -260,7 +260,6 @@ test("resolveReleaseRequest resolves stable beta nightly and git sources", () =>
     packageName: "@hoshinorin/rin",
     repoUrl: "https://github.com/rinchan-hoshino/rin",
     train: {
-      series: "1.3",
       nightlyBranch: "main",
     },
     stable: {
@@ -410,7 +409,6 @@ test("readBundledReleaseManifest falls back to bundled defaults", () => {
   );
   assert.equal(manifest.packageName, "@hoshinorin/rin");
   assert.equal(manifest.bootstrapBranch, "bootstrap");
-  assert.equal(manifest.train.series, "0.0");
   assert.equal(manifest.stable.version, "0.0.0");
   assert.equal(manifest.beta.version, "0.1.0-beta.0");
   assert.equal(manifest.nightly.version, "0.1.0-nightly.0");

@@ -54,7 +54,7 @@ test("update-release-manifest script writes stable npm tarball metadata", () => 
         schemaVersion: 2,
         packageName: "@hoshinorin/rin",
         repoUrl: "https://github.com/rinchan-hoshino/rin",
-        train: { series: "1.2", nightlyBranch: "main" },
+        train: { nightlyBranch: "main" },
         stable: { version: "1.2.2", archiveUrl: "https://example.com/old.tgz" },
         beta: {
           version: "1.2.3-beta.20260420",
@@ -136,7 +136,7 @@ test("update-release-manifest script writes beta and nightly pinned ref metadata
         schemaVersion: 2,
         packageName: "@hoshinorin/rin",
         repoUrl: "https://github.com/rinchan-hoshino/rin",
-        train: { series: "1.2", nightlyBranch: "main" },
+        train: { nightlyBranch: "main" },
         stable: {
           version: "1.2.3",
           archiveUrl:
@@ -237,7 +237,7 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       manifestPath,
       JSON.stringify({
         schemaVersion: 2,
-        train: { series: "1.2", nightlyBranch: "main" },
+        train: { nightlyBranch: "main" },
         stable: { version: "1.2.3" },
         beta: { version: "1.3.0-beta.20260420" },
       }),
@@ -258,7 +258,6 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       ),
     );
     assert.deepEqual(betaPlan, {
-      series: "1.3",
       promotionVersion: "1.3.0",
       version: "1.3.0-beta.20260427",
     });
@@ -281,7 +280,6 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       ),
     );
     assert.deepEqual(nightlyPlan, {
-      series: "1.3",
       promotionVersion: "1.3.0",
       version: "1.3.0-nightly.20260427+deadbee",
     });
@@ -302,7 +300,6 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       ),
     );
     assert.deepEqual(stablePlan, {
-      series: "1.3",
       promotionVersion: "1.3.0",
       version: "1.3.0",
     });
@@ -311,7 +308,7 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       manifestPath,
       JSON.stringify({
         schemaVersion: 2,
-        train: { series: "1.2", nightlyBranch: "main" },
+        train: { nightlyBranch: "main" },
         stable: { version: "1.3.0" },
       }),
     );
@@ -331,7 +328,6 @@ test("plan-release script computes beta nightly and stable promotion versions", 
       ),
     );
     assert.deepEqual(hotfixAwareStablePlan, {
-      series: "1.3",
       promotionVersion: "1.3.0",
       version: "1.3.1",
     });
@@ -343,7 +339,7 @@ test("plan-release script computes beta nightly and stable promotion versions", 
         stable: { version: "2.3.4" },
       }),
     );
-    const implicitSeriesBetaPlan = JSON.parse(
+    const nextMinorBetaPlan = JSON.parse(
       execFileSync(
         process.execPath,
         [
@@ -358,8 +354,7 @@ test("plan-release script computes beta nightly and stable promotion versions", 
         { cwd: rootDir, stdio: "pipe", encoding: "utf8" },
       ),
     );
-    assert.deepEqual(implicitSeriesBetaPlan, {
-      series: "2.4",
+    assert.deepEqual(nextMinorBetaPlan, {
       promotionVersion: "2.4.0",
       version: "2.4.0-beta.20260427",
     });

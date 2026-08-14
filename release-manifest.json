@@ -4,7 +4,6 @@
   "repoUrl": "https://github.com/rinchan-hoshino/rin",
   "bootstrapBranch": "bootstrap",
   "train": {
-    "series": "0.5",
     "nightlyBranch": "main"
   },
   "stable": {
