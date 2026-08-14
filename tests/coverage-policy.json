@@ -310,6 +310,12 @@
       "status": "strict"
     },
     {
+      "source": "src/core/chat/outbox.ts",
+      "built": "dist/core/chat/outbox.js",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/chat/outbox-payload-validation.ts",
       "built": "dist/core/chat/outbox-payload-validation.js",
       "ownerSuite": "unit",
@@ -982,8 +988,8 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-lib/chat-outbox.ts",
-      "built": "dist/core/rin-lib/chat-outbox.js",
+      "source": "src/core/rin-lib/chat-outbox-contract.ts",
+      "built": "dist/core/rin-lib/chat-outbox-contract.js",
       "ownerSuite": "integration",
       "status": "strict"
     },

@@ -13,7 +13,7 @@ import {
 import type {
   ChatMessagePart,
   ChatOutboxPayload,
-} from "../rin-lib/chat-outbox.js";
+} from "../rin-lib/chat-outbox-contract.js";
 import { formatRinTodoChecklistCharacterContent } from "../rin-lib/todo-state.js";
 import { validateChatOutboxPayloadParts } from "./outbox-payload-validation.js";
 import {

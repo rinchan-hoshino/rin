@@ -1,11 +1,11 @@
 import path from "node:path";
 
 import { chatDataPath } from "../data-layout.js";
+import type { ChatMessagePart } from "../rin-lib/chat-outbox-contract.js";
 import {
   enqueueChatOutboxPayload,
   readChatOutboxItemById,
-  type ChatMessagePart,
-} from "../rin-lib/chat-outbox.js";
+} from "../chat/outbox.js";
 import { formatLocalDateOnly } from "../chat/date.js";
 import { readChatLog } from "../chat/chat-log.js";
 import { normalizeChatMessageLookup } from "../chat/message-store.js";

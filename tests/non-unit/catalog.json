@@ -284,6 +284,12 @@
       "tests": ["tests/integration/chat-message-store-owner.test.ts"]
     },
     {
+      "source": "src/core/chat/outbox.ts",
+      "built": "dist/core/chat/outbox.js",
+      "suite": "integration",
+      "tests": ["tests/integration/chat-outbox-and-binding.test.ts"]
+    },
+    {
       "source": "src/core/chat/runtime-config.ts",
       "built": "dist/core/chat/runtime-config.js",
       "suite": "integration",
@@ -808,8 +814,8 @@
       "tests": ["tests/integration/changelog.test.ts"]
     },
     {
-      "source": "src/core/rin-lib/chat-outbox.ts",
-      "built": "dist/core/rin-lib/chat-outbox.js",
+      "source": "src/core/rin-lib/chat-outbox-contract.ts",
+      "built": "dist/core/rin-lib/chat-outbox-contract.js",
       "suite": "integration",
       "tests": ["tests/integration/chat-outbox-and-binding.test.ts"]
     },

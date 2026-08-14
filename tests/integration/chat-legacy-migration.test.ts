@@ -39,8 +39,7 @@ const inbox = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
 );
 const outbox = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
-    .href
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "outbox.js")).href
 );
 const messageStore = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))

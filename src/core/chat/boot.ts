@@ -1,5 +1,5 @@
+import type { ChatOutboxItem } from "../rin-lib/chat-outbox-contract.js";
 import {
-  type ChatOutboxItem,
   claimChatOutboxItem,
   listChatOutboxItems,
   listCommittedChatOutboxItems,
@@ -8,7 +8,7 @@ import {
   markChatOutboxPostDeliveryApplied,
   readChatOutboxItemById,
   writeChatOutboxItem,
-} from "../rin-lib/chat-outbox.js";
+} from "./outbox.js";
 import { createRinI18n } from "../rin-install/i18n.js";
 import {
   isInboundChatMessageProcessed,

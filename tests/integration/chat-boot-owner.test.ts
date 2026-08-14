@@ -12,8 +12,8 @@ const boot = await importBuiltModule<
   typeof import("../../src/core/chat/boot.js")
 >("dist/core/chat/boot.js");
 const outbox = await importBuiltModule<
-  typeof import("../../src/core/rin-lib/chat-outbox.js")
->("dist/core/rin-lib/chat-outbox.js");
+  typeof import("../../src/core/chat/outbox.js")
+>("dist/core/chat/outbox.js");
 const messageStore = await importBuiltModule<
   typeof import("../../src/core/chat/message-store.js")
 >("dist/core/chat/message-store.js");

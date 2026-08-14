@@ -22,8 +22,7 @@ const recovery = await import(
   ).href
 );
 const outbox = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
-    .href
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "outbox.js")).href
 );
 const boot = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "boot.js")).href

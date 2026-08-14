@@ -55,15 +55,17 @@ import {
   markProcessedChatMessage,
   safeString,
 } from "./chat-helpers.js";
+import type {
+  ChatMessagePart,
+  ChatOutboxTurnFence,
+} from "../rin-lib/chat-outbox-contract.js";
 import {
   enqueueChatOutboxPayload,
   getActiveChatOutboxTurnFence,
   isChatOutboxTurnFenceActive,
   withChatQuotePart,
   readChatOutboxItemById,
-  type ChatMessagePart,
-  type ChatOutboxTurnFence,
-} from "../rin-lib/chat-outbox.js";
+} from "./outbox.js";
 import { applyPostDelivery, drainChatOutbox } from "./boot.js";
 import {
   formatChatErrorDelivery,

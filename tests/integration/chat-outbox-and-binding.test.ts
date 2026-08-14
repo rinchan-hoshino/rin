@@ -11,8 +11,7 @@ const rootDir = path.resolve(
   "..",
 );
 const outbox = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
-    .href
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "outbox.js")).href
 );
 const boot = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "boot.js")).href
@@ -1922,7 +1921,7 @@ test("chat assistant delivery stores session only for conversation binding", asy
 
 test("outbox implementation has no JSON file authority", async () => {
   const source = await fs.readFile(
-    path.join(rootDir, "src", "core", "rin-lib", "chat-outbox.ts"),
+    path.join(rootDir, "src", "core", "chat", "outbox.ts"),
     "utf8",
   );
   assert.doesNotMatch(source, /writeJsonAtomic|readJsonFile|readdirSync/);

@@ -96,7 +96,7 @@ test("Chat presentation reuses the frontend Error renderer without leaking into 
   assert.match(presentation, /formatRuntimeErrorForFrontend\(part\.text\)/);
 
   const outbox = fs.readFileSync(
-    path.join(repoRoot, "src/core/rin-lib/chat-outbox.ts"),
+    path.join(repoRoot, "src/core/chat/outbox.ts"),
     "utf8",
   );
   assert.doesNotMatch(outbox, /formatRuntimeErrorForFrontend/);

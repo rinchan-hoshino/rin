@@ -1,6 +1,6 @@
 import fs from "node:fs";
 
-import type { ChatMessagePart } from "../rin-lib/chat-outbox.js";
+import type { ChatMessagePart } from "../rin-lib/chat-outbox-contract.js";
 import { safeString } from "../text-utils.js";
 
 export function validateChatOutboxPayloadParts(

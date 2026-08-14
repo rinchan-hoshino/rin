@@ -6,7 +6,7 @@ import type { RinTodoItem } from "../rin-lib/todo-state.js";
 import type { RinFrontendIdentity } from "../rin-lib/frontend-identity.js";
 import type { PromptContextMeta } from "../rin-lib/prompt-context.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
-import type { ChatMessagePart } from "../rin-lib/chat-outbox.js";
+import type { ChatMessagePart } from "../rin-lib/chat-outbox-contract.js";
 
 export type RinRpcCommand = {
   id?: string;

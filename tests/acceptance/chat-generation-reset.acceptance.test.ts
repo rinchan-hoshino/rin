@@ -21,7 +21,7 @@ const database = await import(
   pathToFileURL(path.join(distRoot, "core/chat/database.js")).href
 );
 const outbox = await import(
-  pathToFileURL(path.join(distRoot, "core/rin-lib/chat-outbox.js")).href
+  pathToFileURL(path.join(distRoot, "core/chat/outbox.js")).href
 );
 const feature = loadGherkinFeature(
   process.env.RIN_ACCEPTANCE_FEATURE_PATH?.trim() ||

@@ -136,16 +136,18 @@ import {
   projectAndAcknowledgeChatTerminalEvent,
   reconcileChatTerminalEvents,
 } from "./terminal-reconciler.js";
+import type {
+  ChatOutboxPayloadInput,
+  ChatOutboxTurnFence,
+  EnqueueChatOutboxOptions,
+} from "../rin-lib/chat-outbox-contract.js";
 import {
   cleanupChatOutboxHistory,
   enqueueChatOutboxPayload,
   hasCommittedTerminalChatOutbox,
   withChatQuotePart,
   runWithChatOutboxTurnFence,
-  type ChatOutboxPayloadInput,
-  type ChatOutboxTurnFence,
-  type EnqueueChatOutboxOptions,
-} from "../rin-lib/chat-outbox.js";
+} from "./outbox.js";
 import {
   sendReaction,
   sendTyping,

@@ -7,7 +7,7 @@ import path from "node:path";
 
 const HOME_DIR = os.homedir();
 
-import type { ChatOutboxPayload } from "../rin-lib/chat-outbox.js";
+import type { ChatOutboxPayload } from "../rin-lib/chat-outbox-contract.js";
 import {
   MANAGED_TASK_SESSION_LEAF,
   getManagedTaskSessionFile,

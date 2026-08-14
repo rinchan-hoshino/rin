@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import type { ChatMessagePart } from "../../dist/core/rin-lib/chat-outbox.js";
+import type { ChatMessagePart } from "../../dist/core/rin-lib/chat-outbox-contract.js";
 import { listChatMessages } from "../../dist/core/chat/message-store.js";
 import * as transport from "../../dist/core/chat/transport.js";
 

@@ -38,8 +38,7 @@ const durableAdmission = await import(
   ).href
 );
 const chatOutbox = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
-    .href
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "outbox.js")).href
 );
 
 function runNodeProcess(code, env) {

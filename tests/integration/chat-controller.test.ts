@@ -72,8 +72,7 @@ const {
   readChatOutboxItemById,
   writeChatOutboxItem,
 } = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
-    .href
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "outbox.js")).href
 );
 async function readOnlyChatOutboxHistoryItem(agentDir, status) {
   const items = listChatOutboxHistoryItems(agentDir, status);

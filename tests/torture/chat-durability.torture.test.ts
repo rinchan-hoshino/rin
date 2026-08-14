@@ -23,7 +23,7 @@ const database = await import(
   pathToFileURL(path.join(rootDir, "dist/core/chat/database.js")).href
 );
 const outbox = await import(
-  pathToFileURL(path.join(rootDir, "dist/core/rin-lib/chat-outbox.js")).href
+  pathToFileURL(path.join(rootDir, "dist/core/chat/outbox.js")).href
 );
 
 async function makeTempDir(label: string) {

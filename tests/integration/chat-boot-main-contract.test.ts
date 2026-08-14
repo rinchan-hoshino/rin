@@ -14,8 +14,7 @@ const boot = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "boot.js")).href
 );
 const outbox = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
-    .href
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "outbox.js")).href
 );
 const database = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href

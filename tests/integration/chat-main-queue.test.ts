@@ -387,7 +387,7 @@ test("chat send reports adapter dispatch as pending until delivery settles", asy
       const rootDir = process.env.RIN_REPO_ROOT;
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
-      const outboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js")).href);
+      const outboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "outbox.js")).href);
       const bridge = await mainMod.startChatBridge({ hosted: true, commandRows: [] });
       bridge.app.bots.push({
         platform: "telegram",
@@ -2111,7 +2111,7 @@ test("chat main finalizes once after controller reinbox_jobs from canonical term
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const chatHelpersMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js")).href);
-      const outbox = await import(pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js")).href);
+      const outbox = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "outbox.js")).href);
       const inbox = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
       const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
 
@@ -3010,7 +3010,7 @@ test("chat startup honors terminal outbox ownership before orphan inbox recovery
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
-      const outboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js")).href);
+      const outboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "outbox.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
         persons: { owner: { trust: "OWNER" } },

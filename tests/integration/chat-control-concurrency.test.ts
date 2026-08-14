@@ -17,8 +17,7 @@ const inbox = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href
 );
 const outbox = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "chat-outbox.js"))
-    .href
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "outbox.js")).href
 );
 
 async function runClaim(agentDir, modulePath, expression) {
@@ -81,7 +80,7 @@ test("cross-process inbox and outbox claims each elect one fenced owner", async 
       Array.from({ length: 8 }, () =>
         runClaim(
           agentDir,
-          ["core", "rin-lib", "chat-outbox.js"],
+          ["core", "chat", "outbox.js"],
           `mod.claimChatOutboxItem(process.env.AGENT_DIR, ${JSON.stringify(outboxId)}, { leaseUntil: new Date(Date.now() + 60000).toISOString() })`,
         ),
       ),

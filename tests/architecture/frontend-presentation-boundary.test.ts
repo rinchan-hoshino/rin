@@ -102,7 +102,7 @@ test("error presentation is frontend-neutral and not owned by a backend module",
 });
 
 test("neutral backend storage does not own runtime or chat error presentation", () => {
-  const outbox = read("src/core/rin-lib/chat-outbox.ts");
+  const outbox = read("src/core/chat/outbox.ts");
   assert.doesNotMatch(outbox, /formatRuntimeErrorForFrontend/);
   assert.doesNotMatch(outbox, /formatChatOutboxErrorParts/);
 });

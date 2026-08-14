@@ -1,4 +1,4 @@
-import type { ChatMessagePart } from "../rin-lib/chat-outbox.js";
+import type { ChatMessagePart } from "../rin-lib/chat-outbox-contract.js";
 import type {
   RinExtensionUiRequest,
   RinExtensionUiResponse,

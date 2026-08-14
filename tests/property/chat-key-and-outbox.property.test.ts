@@ -15,7 +15,7 @@ const support = await import(
   pathToFileURL(path.join(distRoot, "core/chat/support.js")).href
 );
 const outbox = await import(
-  pathToFileURL(path.join(distRoot, "core/rin-lib/chat-outbox.js")).href
+  pathToFileURL(path.join(distRoot, "core/chat/outbox.js")).href
 );
 
 const identifier = fc
