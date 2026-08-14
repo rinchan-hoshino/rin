@@ -93,12 +93,21 @@ function removePiCwd(prompt: string, options: RinSystemPromptOptions) {
     throw new Error("pi_prompt_shape_changed:cwd_options");
   }
   const normalizedCwd = options.cwd.replace(/\\/g, "/");
-  const suffix = `\nCurrent working directory: ${normalizedCwd}`;
-  if (!prompt.endsWith(suffix)) {
+  const anchor = `\nCurrent working directory: ${normalizedCwd}`;
+  const cwdAt = prompt.indexOf(anchor);
+  if (cwdAt < 0) {
     throw new Error("pi_prompt_shape_changed:cwd");
   }
-  const cwdAt = prompt.length - suffix.length;
-  return { prompt: prompt.slice(0, cwdAt), cwdAt };
+  if (prompt.indexOf(anchor, cwdAt + anchor.length) >= 0) {
+    throw new Error("pi_prompt_shape_changed:duplicate:cwd");
+  }
+  const lineEnd = prompt.startsWith("\n", cwdAt + anchor.length)
+    ? cwdAt + anchor.length + 1
+    : cwdAt + anchor.length;
+  return {
+    prompt: `${prompt.slice(0, cwdAt)}${prompt.slice(lineEnd)}`,
+    cwdAt,
+  };
 }
 
 function findPiDataBoundary(
@@ -246,10 +255,10 @@ export function applyRinSystemPromptOverlay(
   let prompt = customPrompt
     ? [withoutCwd.prompt, docsBlock].filter(Boolean).join("\n\n")
     : overlayDefaultPiPrompt(
-        input.piPrompt,
+        withoutCwd.prompt,
         input.piOptions,
         activeToolNames,
-        withoutCwd.cwdAt,
+        withoutCwd.prompt.length,
         docsBlock,
       );
 
