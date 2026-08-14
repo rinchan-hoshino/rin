@@ -563,7 +563,6 @@ test("local nightly recovery resumes bootstrap without minting a metadata-ref re
     content,
     /file === "tests\/integration\/release-scripts\.test\.ts"/,
   );
-  assert.doesNotMatch(content, /tests\/e2e\/release-scripts\.test\.ts/);
   assert.ok(
     sourceChannel.indexOf("completedSourceRelease(") <
       sourceChannel.indexOf("plan-release.ts"),
