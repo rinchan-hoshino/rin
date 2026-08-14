@@ -7,7 +7,6 @@ export type CoverageMetricName = "lines" | "functions" | "branches";
 export type CoverageThresholds = Record<CoverageMetricName, number>;
 type CoverageModuleBase = {
   source: string;
-  built: string;
   ownerSuite: CoverageOwnerSuite;
 };
 export type StrictCoverageModule = CoverageModuleBase & {
@@ -19,7 +18,7 @@ export type RatchetCoverageModule = CoverageModuleBase & {
 };
 export type CoverageModule = StrictCoverageModule | RatchetCoverageModule;
 export type CoveragePolicy = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   productionSourceRef: "fa644064";
   baselineHarnessVersion: 3;
   baselineCommand: "npm run test:coverage";
@@ -27,8 +26,9 @@ export type CoveragePolicy = {
   modules: CoverageModule[];
 };
 export type UnitCatalog = {
+  schemaVersion: 2;
   thresholds: CoverageThresholds;
-  modules: Array<{ source: string; built: string; test: string }>;
+  modules: Array<{ source: string; test: string }>;
 };
 export type CoverageMetric = { total: number; covered: number; pct: number };
 export type CoverageSummaryEntry = Record<CoverageMetricName, CoverageMetric>;
@@ -71,7 +71,7 @@ function duplicateValues(values: string[]) {
   ];
 }
 
-function expectedBuiltPath(source: string) {
+export function builtPathForSource(source: string) {
   return source.startsWith("src/") && source.endsWith(".ts")
     ? `dist/${source.slice("src/".length).replace(/\.ts$/, ".js")}`
     : "";
@@ -96,7 +96,7 @@ export function validateCoveragePolicy(
   ) {
     errors.push("coverage_policy_fields_invalid");
   }
-  if (value.schemaVersion !== 2) errors.push("unsupported_schema:coverage");
+  if (value.schemaVersion !== 3) errors.push("unsupported_schema:coverage");
   if (
     value.productionSourceRef !== "fa644064" ||
     value.baselineHarnessVersion !== 3 ||
@@ -116,7 +116,6 @@ export function validateCoveragePolicy(
   }
 
   const sources: string[] = [];
-  const builtPaths: string[] = [];
   const unitOwners: string[] = [];
   for (const rawModule of value.modules) {
     if (!isRecord(rawModule)) {
@@ -128,25 +127,20 @@ export function validateCoveragePolicy(
     const status = rawModule.status;
     const expectedFields =
       status === "ratchet"
-        ? ["source", "built", "ownerSuite", "status", "baseline"]
-        : ["source", "built", "ownerSuite", "status"];
+        ? ["source", "ownerSuite", "status", "baseline"]
+        : ["source", "ownerSuite", "status"];
     if (!hasExactFields(rawModule, expectedFields)) {
       errors.push(`coverage_module_fields_invalid:${source}`);
     }
     if (status !== "strict" && status !== "ratchet") {
       errors.push(`coverage_status_invalid:${source}:${String(status)}`);
     }
-    const built = typeof rawModule.built === "string" ? rawModule.built : "";
     const owner = rawModule.ownerSuite;
     sources.push(source);
-    builtPaths.push(built);
     if (!COVERAGE_OWNER_SUITES.includes(owner as CoverageOwnerSuite)) {
       errors.push(`coverage_owner_invalid:${source}:${String(owner)}`);
     } else if (owner === "unit" && status === "strict") {
       unitOwners.push(source);
-    }
-    if (built !== expectedBuiltPath(source)) {
-      errors.push(`coverage_built_path_mismatch:${source}`);
     }
     if (status === "ratchet") {
       if (!isRecord(rawModule.baseline)) {
@@ -183,9 +177,6 @@ export function validateCoveragePolicy(
   for (const source of duplicateValues(sources)) {
     errors.push(`coverage_source_duplicates:${source}`);
   }
-  for (const built of duplicateValues(builtPaths)) {
-    errors.push(`coverage_built_duplicates:${built}`);
-  }
   if (!sameMembers(sources, sourceFiles)) {
     errors.push("coverage_policy_does_not_match_source_modules");
   }
@@ -217,7 +208,7 @@ export function buildCoverageOwnerPlans(
       .filter(
         (module) => module.ownerSuite === suite && module.status === "strict",
       )
-      .map((module) => module.built)
+      .map((module) => builtPathForSource(module.source))
       .sort(),
   })).filter((plan) => plan.includes.length > 0);
 }
@@ -229,9 +220,9 @@ export function ratchetBaselineDigest(policy: CoveragePolicy) {
     baselineCommand: policy.baselineCommand,
     modules: policy.modules
       .filter((module) => module.status === "ratchet")
-      .map(({ source, built, ownerSuite, status, baseline }) => ({
+      .map(({ source, ownerSuite, status, baseline }) => ({
         source,
-        built,
+        built: builtPathForSource(source),
         ownerSuite,
         status,
         baseline,
@@ -298,28 +289,27 @@ export function verifyOwnedCoverage(
   const failures: string[] = [];
   const plannedIncludes = new Set(plan.includes);
   for (const module of modules) {
+    const built = builtPathForSource(module.source);
     if (module.ownerSuite !== plan.suite) {
       failures.push(
-        `coverage_owner_plan_mismatch:${module.built}:${module.ownerSuite}:${plan.suite}`,
+        `coverage_owner_plan_mismatch:${built}:${module.ownerSuite}:${plan.suite}`,
       );
       continue;
     }
-    if (!plannedIncludes.has(module.built)) {
-      failures.push(
-        `coverage_owner_plan_missing:${plan.suite}:${module.built}`,
-      );
+    if (!plannedIncludes.has(built)) {
+      failures.push(`coverage_owner_plan_missing:${plan.suite}:${built}`);
       continue;
     }
-    const actual = summary[module.built];
+    const actual = summary[built];
     if (!actual) {
-      failures.push(`${module.built} coverage summary missing`);
+      failures.push(`${built} coverage summary missing`);
       continue;
     }
     for (const name of metricNames) {
       const pct = actual[name]?.pct ?? 0;
       if (pct + 0.005 < thresholds[name]) {
         failures.push(
-          `${module.built} ${name} ${pct.toFixed(2)}% < ${thresholds[name].toFixed(2)}% (strict ${module.ownerSuite} threshold)`,
+          `${built} ${name} ${pct.toFixed(2)}% < ${thresholds[name].toFixed(2)}% (strict ${module.ownerSuite} threshold)`,
         );
       }
     }

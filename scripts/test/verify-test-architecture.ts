@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 import {
+  builtPathForSource,
   type CoveragePolicy,
   ratchetBaselineDigest,
   type UnitCatalog,
@@ -12,13 +13,12 @@ import {
 } from "./coverage-ownership.js";
 import { TEST_SUITES, type TestSuite } from "./run-test-suite.js";
 
-type RepoUnitCatalog = UnitCatalog & { schemaVersion: number };
+type RepoUnitCatalog = UnitCatalog;
 type NonUnitCatalog = {
-  schemaVersion: number;
+  schemaVersion: 2;
   thresholds: CoveragePolicy["thresholds"];
   modules: Array<{
     source: string;
-    built: string;
     suite: "integration" | "system";
     tests: string[];
     preloads?: string[];
@@ -848,18 +848,21 @@ export function verifyTestArchitecture() {
     "tests/torture/risk-register.json",
   );
 
-  for (const [name, schemaVersion] of [
-    ["unit", unitCatalog.schemaVersion],
-    ["non-unit", nonUnitCatalog.schemaVersion],
-    ["regression", regressionCatalog.schemaVersion],
-    ["characterization", characterizationCatalog.schemaVersion],
-    ["characterization-baseline", characterizationBaseline.schemaVersion],
+  for (const [name, schemaVersion, expectedSchemaVersion] of [
+    ["unit", unitCatalog.schemaVersion, 2],
+    ["non-unit", nonUnitCatalog.schemaVersion, 2],
+    ["regression", regressionCatalog.schemaVersion, 1],
+    ["characterization", characterizationCatalog.schemaVersion, 1],
+    ["characterization-baseline", characterizationBaseline.schemaVersion, 1],
     [
       "characterization-case-baseline",
       characterizationCaseBaseline.schemaVersion,
+      1,
     ],
   ] as const) {
-    if (schemaVersion !== 1) errors.push(`unsupported_schema:${name}`);
+    if (schemaVersion !== expectedSchemaVersion) {
+      errors.push(`unsupported_schema:${name}`);
+    }
   }
   if (
     characterizationBaseline.baselineRef !== "fa644064" ||
@@ -1129,7 +1132,6 @@ export function verifyTestArchitecture() {
     );
     if (
       !owner ||
-      owner.built !== entry.built ||
       owner.ownerSuite !== entry.suite ||
       entry.tests.length === 0
     ) {
@@ -1212,9 +1214,6 @@ export function verifyTestArchitecture() {
         errors.push(`missing_unit_path:${relativePath}`);
       }
     }
-    const expectedBuilt = `dist/${module.source.slice("src/".length).replace(/\.ts$/, ".js")}`;
-    if (module.built !== expectedBuilt)
-      errors.push(`unit_built_path_mismatch:${module.built}`);
     const content = fs.readFileSync(path.join(rootDir, module.test), "utf8");
     if (testUsesAmbientProcess(module.test)) {
       errors.push(`unit_boundary:${module.test}:ambient_process_dependency`);
@@ -1317,8 +1316,9 @@ export function verifyTestArchitecture() {
     ...validateCoveragePolicy(coveragePolicy, sourceFiles, unitCatalog),
   );
   for (const module of coveragePolicy.modules) {
-    if (!fs.existsSync(path.join(rootDir, module.built))) {
-      errors.push(`coverage_built_module_missing:${module.built}`);
+    const built = builtPathForSource(module.source);
+    if (!fs.existsSync(path.join(rootDir, built))) {
+      errors.push(`coverage_built_module_missing:${built}`);
     }
   }
   for (const source of listFiles("src/app", ".ts")) {
@@ -1347,7 +1347,7 @@ export function verifyTestArchitecture() {
         | undefined;
       return (
         !original ||
-        original.built !== module.built ||
+        original.built !== builtPathForSource(module.source) ||
         JSON.stringify(original.baseline) !== JSON.stringify(module.baseline)
       );
     });

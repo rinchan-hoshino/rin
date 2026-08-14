@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  builtPathForSource,
   type CoverageMetric,
   type CoverageMetricName,
   type CoveragePolicy,
@@ -198,8 +199,9 @@ async function runUnitCoverage(selectedTest?: string) {
     selectedTest ? 1 : coverageJobs,
     async (module) => {
       const failures: string[] = [];
-      if (!fs.existsSync(path.join(rootDir, module.built))) {
-        return [`${module.built} built module missing`];
+      const built = builtPathForSource(module.source);
+      if (!fs.existsSync(path.join(rootDir, built))) {
+        return [`${built} built module missing`];
       }
       const reportName = `unit/${module.source
         .slice("src/".length)
@@ -208,16 +210,16 @@ async function runUnitCoverage(selectedTest?: string) {
       const summary = await runCoverage({
         name: reportName,
         tests: [module.test],
-        includes: [module.built],
+        includes: [built],
         concurrency: 1,
         detailed: selectedTest !== undefined,
       });
-      const actual = summaryFor(summary, module.built);
-      if (!actual) return [`${module.built} coverage summary missing`];
+      const actual = summaryFor(summary, built);
+      if (!actual) return [`${built} coverage summary missing`];
       for (const name of metricNames) {
         verifyMetric(
           failures,
-          module.built,
+          built,
           name,
           actual[name],
           catalog.thresholds[name],
@@ -243,7 +245,6 @@ async function runNonUnitOwnerCoverage(
 ) {
   type NonUnitEntry = {
     source: string;
-    built: string;
     suite: "integration" | "system";
     tests: string[];
     preloads?: string[];
@@ -286,18 +287,18 @@ async function runNonUnitOwnerCoverage(
         const module = strictModules.find(
           (candidate) =>
             candidate.source === entry.source &&
-            candidate.built === entry.built &&
             candidate.ownerSuite === entry.suite,
         );
         if (!module) {
           failures.push(`non_unit_catalog_owner_mismatch:${entry.source}`);
           return [];
         }
-        if (!fs.existsSync(path.join(rootDir, entry.built))) {
-          failures.push(`${entry.built} built module missing`);
+        const built = builtPathForSource(entry.source);
+        if (!fs.existsSync(path.join(rootDir, built))) {
+          failures.push(`${built} built module missing`);
           return [];
         }
-        return [{ entry, module }];
+        return [{ entry, module, built }];
       });
       if (owned.length === 0) return failures;
 
@@ -305,7 +306,7 @@ async function runNonUnitOwnerCoverage(
       const plan = {
         suite: first.suite,
         tests: first.tests,
-        includes: owned.map(({ entry }) => entry.built),
+        includes: owned.map(({ built }) => built),
       };
       const summary = relativeCoverageSummary(
         await runCoverage({
@@ -317,15 +318,15 @@ async function runNonUnitOwnerCoverage(
           detailed: selectedSource !== undefined,
         }),
       );
-      for (const { entry } of owned) {
+      for (const { entry, built } of owned) {
         const node22Allowance = entry.node22DynamicImportUncoveredBranches ?? 0;
         if (
           node22Allowance > 0 &&
           Number(process.versions.node.split(".")[0]) === 22
         ) {
-          const actual = summary[entry.built];
+          const actual = summary[built];
           if (!actual) {
-            failures.push(`${entry.built} coverage summary missing`);
+            failures.push(`${built} coverage summary missing`);
           } else {
             try {
               actual.branches = normalizeNode22DynamicImportBranches(
@@ -334,11 +335,11 @@ async function runNonUnitOwnerCoverage(
                 22,
               );
               console.log(
-                `${entry.built}: normalized ${node22Allowance} Node 22 V8 dynamic-import branch artifacts.`,
+                `${built}: normalized ${node22Allowance} Node 22 V8 dynamic-import branch artifacts.`,
               );
             } catch (error) {
               failures.push(
-                `${entry.built} ${error instanceof Error ? error.message : String(error)}`,
+                `${built} ${error instanceof Error ? error.message : String(error)}`,
               );
             }
           }
@@ -434,13 +435,14 @@ async function runCombinedRatchetCoverage(policy: CoveragePolicy) {
 
   for (const module of policy.modules) {
     if (module.status !== "ratchet") continue;
-    if (!fs.existsSync(path.join(rootDir, module.built))) {
-      failures.push(`${module.built} built module missing`);
+    const built = builtPathForSource(module.source);
+    if (!fs.existsSync(path.join(rootDir, built))) {
+      failures.push(`${built} built module missing`);
       continue;
     }
-    const actual = summaryFor(summary, module.built);
+    const actual = summaryFor(summary, built);
     if (!actual) {
-      failures.push(`${module.built} coverage summary missing`);
+      failures.push(`${built} coverage summary missing`);
       continue;
     }
     for (const name of metricNames) {
@@ -449,7 +451,7 @@ async function runCombinedRatchetCoverage(policy: CoveragePolicy) {
         actual[name],
         module.baseline[name],
       );
-      if (failure) failures.push(`${module.built} ${failure}`);
+      if (failure) failures.push(`${built} ${failure}`);
     }
   }
 

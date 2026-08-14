@@ -18,7 +18,7 @@ const sources = [
   "src/core/protocol.ts",
 ];
 const policy: CoveragePolicy = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   productionSourceRef: "fa644064",
   baselineHarnessVersion: 3,
   baselineCommand: "npm run test:coverage",
@@ -26,19 +26,16 @@ const policy: CoveragePolicy = {
   modules: [
     {
       source: sources[0],
-      built: "dist/app/rin/main.js",
       ownerSuite: "system",
       status: "strict",
     },
     {
       source: sources[1],
-      built: "dist/core/example.js",
       ownerSuite: "unit",
       status: "strict",
     },
     {
       source: sources[2],
-      built: "dist/core/protocol.js",
       ownerSuite: "integration",
       status: "strict",
     },
@@ -46,11 +43,11 @@ const policy: CoveragePolicy = {
 };
 
 const unitCatalog = {
+  schemaVersion: 2,
   thresholds,
   modules: [
     {
       source: "src/core/example.ts",
-      built: "dist/core/example.js",
       test: "tests/unit/example.test.ts",
     },
   ],
@@ -89,7 +86,7 @@ test("coverage policy rejects legacy fields and an incomplete source inventory",
   const legacy = structuredClone(policy) as unknown as {
     modules: Array<Record<string, unknown>>;
   };
-  legacy.modules[0].owner = "system";
+  legacy.modules[0].built = "dist/app/rin/main.js";
   assert.match(
     validateCoveragePolicy(legacy, sources, unitCatalog).join("\n"),
     /coverage_module_fields_invalid:src\/app\/rin\/main\.ts/,
