@@ -1,16 +1,14 @@
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+
 import {
   defaultInstallDirForHome,
   installAuthPath,
   installSettingsPath,
 } from "./paths.js";
-import {
-  configureProviderAuth,
-  computeAvailableThinkingLevels,
-  loadModelChoices,
-} from "./provider-auth.js";
+import { configureProviderAuth, loadModelChoices } from "./provider-auth.js";
 import { createInstallerI18n, type InstallerI18n } from "./i18n.js";
 import { normalizeTargetName } from "../rin-targets/registry.js";
 import type { InstallTargetSelection } from "./deployment-targets.js";
@@ -415,7 +413,7 @@ export async function promptProviderSetup(
     );
     if (
       existingModel &&
-      computeAvailableThinkingLevels(existingModel).includes(
+      getSupportedThinkingLevels(existingModel).includes(
         existingDefaults.thinkingLevel as any,
       )
     ) {
@@ -490,7 +488,7 @@ export async function promptProviderSetup(
     prompt.ensureNotCancelled(
       await prompt.select({
         message: i18n.chooseThinkingLevelMessage,
-        options: computeAvailableThinkingLevels(model).map((level) => ({
+        options: getSupportedThinkingLevels(model).map((level) => ({
           value: level,
           label: level,
         })),

@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 
 import { cancel, confirm, isCancel, select, text } from "@clack/prompts";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 
 import { readJsonFileOrDefault } from "../platform/fs.js";
 import { requestProcessTermination } from "../platform/process-lifetime.js";
@@ -21,7 +22,6 @@ import {
   installSettingsPath,
 } from "./paths.js";
 import {
-  computeAvailableThinkingLevels,
   loadModelChoices,
   type InstallerModelChoice,
 } from "./provider-auth.js";
@@ -71,7 +71,7 @@ function quickRunChoiceFromModel(
   authData: Record<string, any>,
   thinkingLevel = "",
 ) {
-  const levels = computeAvailableThinkingLevels(model);
+  const levels = getSupportedThinkingLevels(model);
   return {
     provider: model.provider,
     modelId: model.id,

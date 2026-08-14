@@ -162,7 +162,6 @@ export {
 
 export {
   calculateContextTokens,
-  computeAvailableThinkingLevels,
   estimateContextTokens,
   estimateMessageTokens,
   extractText,

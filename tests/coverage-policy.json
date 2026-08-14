@@ -454,12 +454,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/model-thinking-levels.ts",
-      "built": "dist/core/model-thinking-levels.js",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
       "source": "src/core/pi/internal-extension-bridge.ts",
       "built": "dist/core/pi/internal-extension-bridge.js",
       "ownerSuite": "integration",

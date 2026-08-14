@@ -1,21 +1,16 @@
 import path from "node:path";
 
 import { select, spinner, text } from "@clack/prompts";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
-import { computeAvailableThinkingLevels } from "../model-thinking-levels.js";
 import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
 import { createInstallerI18n, type InstallerI18n } from "./i18n.js";
 import { installAuthPath } from "./paths.js";
 import { runInstallerProgress } from "./progress.js";
 
-export { computeAvailableThinkingLevels };
-
-export type InstallerModelChoice = {
-  provider: string;
+export type InstallerModelChoice = Model<Api> & {
   providerLabel: string;
   authKind: "subscription" | "api";
-  id: string;
-  reasoning: boolean;
   available: boolean;
 };
 
@@ -75,6 +70,7 @@ export async function loadModelChoices(
     const id = String((model as any).id || "").trim();
     if (!provider || !id) continue;
     merged.set(`${provider}/${id}`, {
+      ...(model as Model<Api>),
       provider,
       providerLabel: providerLabel(provider),
       authKind: providerAuthKind(provider),

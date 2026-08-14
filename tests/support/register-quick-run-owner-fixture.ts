@@ -106,9 +106,6 @@ const sources: Record<string, string> = {
     }
   `,
   "dist/core/rin-install/provider-auth.js": `
-    export function computeAvailableThinkingLevels(model) {
-      return model.reasoning ? ["off", "low", "medium", "high"] : ["off"];
-    }
     export async function loadModelChoices(installDir, readJsonFile) {
       globalThis.__rinQuickRunEvents.push(["load-models", installDir]);
       return globalThis.__rinQuickRunScenario.models;

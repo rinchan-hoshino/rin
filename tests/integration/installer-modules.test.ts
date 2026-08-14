@@ -123,67 +123,6 @@ test("updater renders install-style note boxes", () => {
   assert.match(rendered, /├─+╯/);
 });
 
-test("provider-auth computes available thinking levels deterministically", () => {
-  assert.deepEqual(
-    provider.computeAvailableThinkingLevels({
-      provider: "openai",
-      id: "codex-max",
-      reasoning: true,
-    }),
-    ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-  );
-  assert.deepEqual(
-    provider.computeAvailableThinkingLevels({
-      provider: " anthropic ",
-      id: " claude ",
-      reasoning: true,
-    }),
-    ["off", "minimal", "low", "medium", "high"],
-  );
-  assert.deepEqual(
-    provider.computeAvailableThinkingLevels({
-      provider: "x",
-      id: "y",
-      reasoning: false,
-    }),
-    ["off"],
-  );
-
-  assert.deepEqual(
-    provider.computeAvailableThinkingLevels({
-      provider: "deepseek",
-      id: "deepseek-reasoner",
-      reasoning: true,
-      thinkingLevelMap: { off: null, xhigh: "max" },
-    }),
-    ["minimal", "low", "medium", "high", "xhigh"],
-  );
-  assert.deepEqual(
-    provider.computeAvailableThinkingLevels({
-      provider: "openai",
-      id: "gpt-5.6-sol",
-      reasoning: true,
-      thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
-    }),
-    ["minimal", "low", "medium", "high", "xhigh", "max"],
-  );
-
-  const first = provider.computeAvailableThinkingLevels({
-    provider: "openai",
-    id: "codex-max",
-    reasoning: true,
-  });
-  first.pop();
-  assert.deepEqual(
-    provider.computeAvailableThinkingLevels({
-      provider: "openai",
-      id: "codex-max",
-      reasoning: true,
-    }),
-    ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-  );
-});
-
 test("provider-auth loads installer model choices through the shared model registry", async () => {
   await withTempDir(async (dir) => {
     await fs.writeFile(
@@ -199,7 +138,13 @@ test("provider-auth loads installer model choices through the shared model regis
             baseUrl: "http://127.0.0.1:11434/v1",
             apiKey: "literal:test-key",
             api: "openai",
-            models: [{ id: "llama-test", reasoning: true }],
+            models: [
+              {
+                id: "llama-test",
+                reasoning: true,
+                thinkingLevelMap: { xhigh: "xhigh", max: null },
+              },
+            ],
           },
         },
       })}\n`,
@@ -233,15 +178,15 @@ test("provider-auth loads installer model choices through the shared model regis
           String(model.providerLabel || "").includes("Codex"),
       ),
     );
-    assert.ok(
-      choices.some(
-        (model) =>
-          model.provider === "local-test" &&
-          model.id === "llama-test" &&
-          model.reasoning === true &&
-          model.available === true,
-      ),
+    const localModel = choices.find(
+      (model) => model.provider === "local-test" && model.id === "llama-test",
     );
+    assert.equal(localModel?.reasoning, true);
+    assert.equal(localModel?.available, true);
+    assert.deepEqual(localModel?.thinkingLevelMap, {
+      xhigh: "xhigh",
+      max: null,
+    });
   });
 });
 

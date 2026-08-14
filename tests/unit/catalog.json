@@ -97,11 +97,6 @@
       "built": "dist/core/message-content.js"
     },
     {
-      "test": "tests/unit/model-thinking-levels.test.ts",
-      "source": "src/core/model-thinking-levels.ts",
-      "built": "dist/core/model-thinking-levels.js"
-    },
-    {
       "test": "tests/unit/tool-continuation.test.ts",
       "source": "src/core/pi/tool-continuation.ts",
       "built": "dist/core/pi/tool-continuation.js"

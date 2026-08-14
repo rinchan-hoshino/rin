@@ -90,6 +90,29 @@ test("Pi private imports stay centralized", () => {
   assert.deepEqual(violations, []);
 });
 
+test("Pi owns model thinking capability resolution", () => {
+  const retiredOwner = "src/core/model-thinking-levels.ts";
+  assert.equal(
+    fs.existsSync(path.join(rootDir, retiredOwner)),
+    false,
+    `${retiredOwner} must stay retired`,
+  );
+
+  const forbiddenPatterns = [
+    /computeAvailableThinkingLevels/,
+    /supportsMaxReasoningThinkingLevels/,
+    /codex-max/i,
+  ];
+  const violations: string[] = [];
+  for (const filePath of listSourceFiles(path.join(rootDir, "src", "core"))) {
+    const text = fs.readFileSync(filePath, "utf8");
+    if (forbiddenPatterns.some((pattern) => pattern.test(text))) {
+      violations.push(relativePath(filePath));
+    }
+  }
+  assert.deepEqual(violations, []);
+});
+
 test("Pi session private members stay behind Rin's session host", () => {
   const allowed = new Set([
     "src/core/pi/session-host.ts",

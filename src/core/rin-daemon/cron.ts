@@ -1,11 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+
 import { cloneJson } from "../json-utils.js";
-import {
-  ALL_THINKING_LEVELS,
-  type AvailableThinkingLevel,
-} from "../model-thinking-levels.js";
 import { writeJsonAtomic } from "../platform/fs.js";
 import { safeString } from "../platform/process.js";
 import {
@@ -80,7 +78,17 @@ export type CronTaskFrontendBinding = {
   key: string;
 };
 
-export type CronTaskThinkingLevel = AvailableThinkingLevel;
+const CRON_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const satisfies readonly ThinkingLevel[];
+
+export type CronTaskThinkingLevel = ThinkingLevel;
 
 export type CronSessionInvocation = {
   id: string;
@@ -172,7 +180,7 @@ function normalizeThinkingLevel(
   value: unknown,
 ): CronTaskThinkingLevel | undefined {
   const level = safeString(value).trim();
-  return ALL_THINKING_LEVELS.includes(level as CronTaskThinkingLevel)
+  return CRON_THINKING_LEVELS.includes(level as CronTaskThinkingLevel)
     ? (level as CronTaskThinkingLevel)
     : undefined;
 }

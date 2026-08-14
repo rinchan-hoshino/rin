@@ -3,8 +3,6 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { asArray } from "../json-utils.js";
 import { extractMessageText } from "../message-content.js";
 
-export { computeAvailableThinkingLevels } from "../model-thinking-levels.js";
-
 export function extractText(value: any): string {
   return extractMessageText(value, { includeThinking: true });
 }

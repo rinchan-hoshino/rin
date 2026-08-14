@@ -3,6 +3,7 @@ import type {
   AgentMessage,
   ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import {
   buildContextEntries,
   ExtensionRunner,
@@ -42,11 +43,7 @@ import {
   setRpcSteeringMode,
   setRpcThinkingLevel,
 } from "../rin-frontend-sdk/model-settings.js";
-import {
-  computeAvailableThinkingLevels,
-  extractText,
-  getLastAssistantText,
-} from "../session/helpers.js";
+import { extractText, getLastAssistantText } from "../session/helpers.js";
 import {
   computeSessionStats,
   getContextUsage,
@@ -776,7 +773,7 @@ export class RpcInteractiveSession {
   }
 
   getAvailableThinkingLevels() {
-    return computeAvailableThinkingLevels(this.model);
+    return getSupportedThinkingLevels(this.model);
   }
 
   setSteeringMode(mode: "all" | "one-at-a-time") {

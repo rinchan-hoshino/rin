@@ -12,68 +12,7 @@ const sessionHelpers = await import(
     path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
   ).href
 );
-const providerAuth = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "rin-install", "provider-auth.js"),
-  ).href
-);
 const piCodingAgent = await import("@earendil-works/pi-coding-agent");
-
-test("session helpers share deterministic thinking-level availability", () => {
-  const codexMax = {
-    provider: "openai",
-    id: "Codex-Max-Latest",
-    reasoning: true,
-  };
-  const standard = {
-    provider: "anthropic",
-    id: "claude-sonnet",
-    reasoning: true,
-  };
-  const noReasoning = { provider: "openai", id: "gpt-4.1", reasoning: false };
-
-  assert.deepEqual(
-    sessionHelpers.computeAvailableThinkingLevels(codexMax),
-    providerAuth.computeAvailableThinkingLevels(codexMax),
-  );
-  assert.deepEqual(sessionHelpers.computeAvailableThinkingLevels(codexMax), [
-    "off",
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max",
-  ]);
-  assert.deepEqual(sessionHelpers.computeAvailableThinkingLevels(standard), [
-    "off",
-    "minimal",
-    "low",
-    "medium",
-    "high",
-  ]);
-  assert.deepEqual(sessionHelpers.computeAvailableThinkingLevels(noReasoning), [
-    "off",
-  ]);
-  assert.deepEqual(
-    sessionHelpers.computeAvailableThinkingLevels({
-      provider: "deepseek",
-      id: "deepseek-reasoner",
-      reasoning: true,
-      thinkingLevelMap: { off: null, xhigh: "max" },
-    }),
-    ["minimal", "low", "medium", "high", "xhigh"],
-  );
-  assert.deepEqual(
-    sessionHelpers.computeAvailableThinkingLevels({
-      provider: "openai",
-      id: "gpt-5.6-sol",
-      reasoning: true,
-      thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
-    }),
-    ["minimal", "low", "medium", "high", "xhigh", "max"],
-  );
-});
 
 test("getLastAssistantText scans backward without requiring a copied array", () => {
   const messages = [

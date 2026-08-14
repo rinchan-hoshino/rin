@@ -72,7 +72,13 @@ test("provider auth discovers configured API, subscription, and custom models", 
             baseUrl: "http://127.0.0.1:11434/v1",
             apiKey: "literal:owner-test",
             api: "openai",
-            models: [{ id: "local-reasoner", reasoning: true }],
+            models: [
+              {
+                id: "local-reasoner",
+                reasoning: true,
+                thinkingLevelMap: { xhigh: "xhigh", max: null },
+              },
+            ],
           },
         },
       }),
@@ -82,13 +88,18 @@ test("provider auth discovers configured API, subscription, and custom models", 
     const custom = choices.find(
       (choice) => choice.provider === "local" && choice.id === "local-reasoner",
     );
-    assert.deepEqual(custom, {
-      provider: "local",
-      providerLabel: "local",
-      authKind: "api",
-      id: "local-reasoner",
-      reasoning: true,
-      available: true,
+    assert.ok(custom);
+    assert.equal(custom.provider, "local");
+    assert.equal(custom.providerLabel, "local");
+    assert.equal(custom.authKind, "api");
+    assert.equal(custom.id, "local-reasoner");
+    assert.equal(custom.reasoning, true);
+    assert.equal(custom.available, true);
+    assert.equal(custom.api, "openai");
+    assert.equal(custom.baseUrl, "http://127.0.0.1:11434/v1");
+    assert.deepEqual(custom.thinkingLevelMap, {
+      xhigh: "xhigh",
+      max: null,
     });
     assert.ok(
       choices.some(

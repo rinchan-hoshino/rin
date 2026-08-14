@@ -83,6 +83,21 @@ test("RPC model settings mutate daemon state before mirroring local state", asyn
   ]);
 });
 
+test("RPC thinking levels follow Pi metadata instead of model names", async () => {
+  const target = createTarget({
+    model: {
+      provider: "openai",
+      id: "gpt-codex-max-latest",
+      reasoning: true,
+    },
+  });
+
+  assert.equal(await settings.setRpcThinkingLevel(target, "max"), "high");
+  assert.deepEqual(target.calls, [
+    ["set_thinking_level", { type: "set_thinking_level", level: "high" }],
+  ]);
+});
+
 test("RPC settings use the dedicated mutation transport when available", async () => {
   const commands: unknown[] = [];
   const target = createTarget({

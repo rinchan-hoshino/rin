@@ -1,7 +1,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 
 import { resolveRuntimeProfile } from "../rin-lib/profile.js";
-import { computeAvailableThinkingLevels } from "../session/helpers.js";
 
 const RPC_MODE_VALUES = ["all", "one-at-a-time"] as const;
 type RpcModeValue = (typeof RPC_MODE_VALUES)[number];
@@ -65,7 +65,7 @@ function normalizeRpcMode(
 }
 
 function resolveRpcThinkingLevel(target: any, level: ThinkingLevel) {
-  const available = computeAvailableThinkingLevels(target?.model);
+  const available = getSupportedThinkingLevels(target.model);
   return (
     available.find((item) => item === level) ??
     available[available.length - 1] ??
@@ -175,7 +175,7 @@ export async function cycleRpcThinkingLevel(
   target: any,
 ): Promise<ThinkingLevel | undefined> {
   return await applyRpcThinkingLevel(target, () => {
-    const levels = computeAvailableThinkingLevels(target.model);
+    const levels = getSupportedThinkingLevels(target.model);
     if (levels.length <= 1) return undefined;
     return levels[
       (Math.max(0, levels.indexOf(target.thinkingLevel)) + 1) % levels.length
