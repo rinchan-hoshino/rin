@@ -12,12 +12,12 @@ const rootDir = path.resolve(
 const testsDir = path.join(rootDir, "tests");
 const cjkPattern = /[\u3400-\u9fff\uf900-\ufaff]/u;
 
-async function listTestFiles(dir: string): Promise<string[]> {
+async function listFiles(dir: string): Promise<string[]> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const files = await Promise.all(
     entries.map(async (entry) => {
       const entryPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) return listTestFiles(entryPath);
+      if (entry.isDirectory()) return listFiles(entryPath);
       if (entry.isFile()) return [entryPath];
       return [];
     }),
@@ -26,7 +26,7 @@ async function listTestFiles(dir: string): Promise<string[]> {
 }
 
 test("repository tests avoid CJK characters in source fixtures", async () => {
-  const files = await listTestFiles(testsDir);
+  const files = await listFiles(testsDir);
   const offenders: string[] = [];
 
   for (const file of files) {
@@ -37,4 +37,23 @@ test("repository tests avoid CJK characters in source fixtures", async () => {
   }
 
   assert.deepEqual(offenders, []);
+});
+
+test("repository-owned source uses TypeScript instead of mjs or cjs", async () => {
+  const sourceDirectories = ["src", "scripts", "tests"];
+  const files = (
+    await Promise.all(
+      sourceDirectories.map((directory) =>
+        listFiles(path.join(rootDir, directory)),
+      ),
+    )
+  ).flat();
+
+  assert.deepEqual(
+    files
+      .filter((file) => /\.(?:mjs|cjs)$/u.test(file))
+      .map((file) => path.relative(rootDir, file))
+      .sort(),
+    [],
+  );
 });

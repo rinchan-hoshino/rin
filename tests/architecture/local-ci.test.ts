@@ -612,6 +612,13 @@ test("local CI runner preserves staged format target filtering", () => {
   assert.match(runner, /No staged files need format checking\./);
 });
 
+test("pre-commit delegates staged file type decisions to Prettier", () => {
+  const hook = readRepoFile(".githooks/pre-commit");
+
+  assert.match(hook, /git diff --cached --name-only --diff-filter=ACMR\s*\)/);
+  assert.doesNotMatch(hook, /grep -E|ts\|md\|json\|yml\|yaml/);
+});
+
 test("pre-commit is the sole complete repository gate", () => {
   const hook = readRepoFile(".githooks/pre-commit");
 

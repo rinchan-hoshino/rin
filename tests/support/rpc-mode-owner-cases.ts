@@ -7489,7 +7489,7 @@ test("rpc mode owner directly covers response parsing and outcome normalization 
         rootDir,
         "tests",
         "support",
-        "register-rpc-mode-private-owner-fixture.mjs",
+        "register-rpc-mode-private-owner-fixture.ts",
       ),
       "--input-type=module",
       "-e",

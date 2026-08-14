@@ -409,7 +409,7 @@ test("daemon lock owner directly covers marker validation branches", async () =>
         rootDir,
         "tests",
         "support",
-        "register-daemon-lock-private-owner-fixture.mjs",
+        "register-daemon-lock-private-owner-fixture.ts",
       ),
       "--input-type=module",
       "-e",

@@ -10,7 +10,7 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-await import("../support/register-updater-private-owner-fixture.mjs");
+await import("../support/register-updater-private-owner-fixture.ts");
 const updater = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "updater.js"))
     .href

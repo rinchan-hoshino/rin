@@ -141,7 +141,7 @@ function spawnDaemon(agentDir, socketPath, workerPath) {
   return spawn(
     process.execPath,
     [
-      path.join(rootDir, "tests", "support", "daemon-process-host.mjs"),
+      path.join(rootDir, "tests", "support", "daemon-process-host.ts"),
       socketPath,
       workerPath,
     ],

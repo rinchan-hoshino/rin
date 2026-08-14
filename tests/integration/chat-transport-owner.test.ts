@@ -865,7 +865,7 @@ test("chat transport owner directly covers outbound record and image sizing help
         rootDir,
         "tests",
         "support",
-        "register-chat-transport-private-owner-fixture.mjs",
+        "register-chat-transport-private-owner-fixture.ts",
       ),
       "--input-type=module",
       "-e",

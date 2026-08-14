@@ -9,9 +9,7 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-format_targets="$({
-  git diff --cached --name-only --diff-filter=ACMR
-} | grep -E '^(src|tests|scripts|extensions|docs)/.*\.(ts|md|json|yml|yaml)$|^\.github/workflows/.*\.(yml|yaml)$|^(README\.md|package(-lock)?\.json|tsconfig.*\.json|eslint\.config\.ts)$' || true)"
+format_targets="$(git diff --cached --name-only --diff-filter=ACMR)"
 
 tree_id="$(git write-tree)"
 image_tag="rin-local-ci:staged-${tree_id}"

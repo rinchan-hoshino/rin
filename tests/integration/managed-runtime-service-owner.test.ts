@@ -6,7 +6,7 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createTestSandbox } from "../support/test-sandbox.js";
-import "../support/register-managed-runtime-private-owner-fixture.mjs";
+import "../support/register-managed-runtime-private-owner-fixture.ts";
 
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
