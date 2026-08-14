@@ -15,6 +15,12 @@
       "failure": "Persisted inbound chat events must recover after runtime interruption without being lost."
     },
     {
+      "file": "tests/regression/rin-compaction-latest-correction.test.ts",
+      "introducedBy": "24836935",
+      "subject": "refactor: delegate compaction to Pi native",
+      "failure": "Split-turn compaction must not preserve an obsolete reporting cadence alongside the user's latest correction."
+    },
+    {
       "file": "tests/regression/rin-daemon-lock.test.ts",
       "introducedBy": "a208674e",
       "subject": "fix: prevent multiple rin daemons (#409)",

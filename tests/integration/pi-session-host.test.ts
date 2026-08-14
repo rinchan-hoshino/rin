@@ -5,10 +5,12 @@ import { AgentSession } from "@earendil-works/pi-coding-agent";
 import { importBuiltModule } from "../support/import-built-module.js";
 
 const {
+  buildRinCompactionRequest,
   getPiExtensionRunner,
   getPiSessionExtensionMode,
   getPiSessionResourcePromptState,
   resumePiSessionTurn,
+  RIN_COMPACTION_INSTRUCTIONS,
   runPiNativeCompactionWithoutFileSummary,
 } = await importBuiltModule<typeof import("../../src/core/pi/session-host.js")>(
   "dist/core/pi/session-host.js",
@@ -183,6 +185,8 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
   assert.equal(requestOptions.cacheRetention, "none");
   assert.match(prompt, /## Goal/);
   assert.match(prompt, /## Constraints & Preferences/);
+  assert.match(prompt, /reconstruct the task state at its end/i);
+  assert.match(prompt, /latest unresolved user request/i);
   assert.doesNotMatch(prompt, /## Active Task/);
   assert.equal(result.summary, "## Goal\nKeep native compaction.");
   assert.doesNotMatch(result.summary, /<read-files>|<modified-files>/);
@@ -203,6 +207,37 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
     event,
   );
   assert.equal(proxyResult.summary, "## Goal\nKeep native compaction.");
+});
+
+test("Rin compaction policy preserves native preparation while adding one canonical instruction owner", () => {
+  const preparation = {
+    firstKeptEntryId: "keep",
+    messagesToSummarize: [{ role: "user", content: "new correction" }],
+    turnPrefixMessages: [],
+    isSplitTurn: false,
+    previousSummary: "stale requirement",
+  };
+  const event = {
+    reason: "manual",
+    preparation,
+    customInstructions: "Preserve exact units.",
+  };
+
+  const result = buildRinCompactionRequest(event);
+
+  assert.equal(result.preparation, preparation);
+  assert.match(
+    result.customInstructions,
+    /reconstruct the task state at its end/i,
+  );
+  assert.match(result.customInstructions, /Preserve exact units/);
+  assert.doesNotMatch(result.customInstructions, /reporting cadence/i);
+  assert.doesNotMatch(result.customInstructions, /owner communication/i);
+  assert.equal(
+    result.customInstructions.startsWith(RIN_COMPACTION_INSTRUCTIONS),
+    true,
+  );
+  assert.equal(event.customInstructions, "Preserve exact units.");
 });
 
 test("Pi session host prefers public resource and extension getters", () => {

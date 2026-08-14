@@ -51,6 +51,10 @@ The core todo capability registers the `todo` tool and `/todos` command from Rin
 
 The core `note` tool uses `read`, `add`, `edit`, `remove`, and `clear` with the same stable-ID item operations and optional read range as todo, but it has no completion state or `toggle` action. Clear removes every note and resets ID allocation. Keep each item as short as possible and focused on exact cross-compaction state; rely on files or tools for recoverable context, and todo for plans and pending actions. Clean up notes promptly as work advances. Note snapshots are stored in session custom entries, so they survive compaction and follow branch reconstruction without becoming cross-session memory or compaction-summary content; agents read them through the tool when needed. Existing text-buffer snapshots migrate to one note item when reconstructed; retired whole-buffer writes, appends, and exact-text edits are not exposed. The TUI `/notes` command displays all note items on the current branch.
 
+## Compaction summary policy
+
+Rin keeps Pi's compaction model, authentication, retry, and file-detail pipeline while adding one Rin-owned continuation policy. The summary reconstructs the task state at the end of the source material: unresolved user requests, effective constraints, verified outcomes, active work, blockers, governing decisions, and the exact remaining action. Later user changes replace incompatible earlier state instead of leaving both versions active. When Pi selects a cut inside one tool-using turn, Rin summarizes the older history and the cut turn prefix together in one chronological pass instead of concatenating two independently generated summaries. Todo and note remain tool-owned branch state and are not copied into the summary.
+
 ## Chat bridge
 
 Rin's direct built-in chat bridge currently includes Telegram, OneBot, Feishu / Lark, Discord, and Slack.

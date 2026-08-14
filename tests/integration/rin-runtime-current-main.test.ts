@@ -336,7 +336,7 @@ test("Rin provider context keeps earlier context-hook output when no pruning or 
   );
 });
 
-test("Rin delegates compaction generation to native Pi without file XML", async () => {
+test("Rin delegates policy-guided compaction to Pi without file XML", async () => {
   const nativeResult = {
     summary: "native summary",
     firstKeptEntryId: "keep",
@@ -367,11 +367,18 @@ test("Rin delegates compaction generation to native Pi without file XML", async 
     path.join(rootDir, "dist", "core", "rin-lib", "runtime.js"),
     "utf8",
   );
+  const sessionHostText = await fs.readFile(
+    path.join(rootDir, "dist", "core", "pi", "session-host.js"),
+    "utf8",
+  );
   assert.equal(runtimeText.includes("RIN_COMPACTION_SYSTEM_PROMPT"), false);
   assert.equal(
     runtimeText.includes("completeRinCompactionSummaryBudgeted"),
     false,
   );
+  assert.match(sessionHostText, /RIN_COMPACTION_INSTRUCTIONS/);
+  assert.match(sessionHostText, /reconstruct the task state at its end/);
+  assert.match(sessionHostText, /latest unresolved user request/);
 });
 
 test("compaction reason tracking annotates native before-compact hooks", async () => {
