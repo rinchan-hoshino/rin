@@ -250,7 +250,7 @@ function completedSourceRelease(root, channel, manifest, head) {
   const releasePathOnly = recoveryFiles.every(
     (file) =>
       file.startsWith("scripts/release/") ||
-      file === "tests/e2e/release-scripts.test.ts",
+      file === "tests/integration/release-scripts.test.ts",
   );
   if (
     metadataParent !== release.ref ||

@@ -559,6 +559,11 @@ test("local nightly recovery resumes bootstrap without minting a metadata-ref re
   assert.match(content, /metadataFiles !== "release-manifest\.json"/);
   assert.match(content, /metadataParent !== release\.ref/);
   assert.match(content, /file\.startsWith\("scripts\/release\/"\)/);
+  assert.match(
+    content,
+    /file === "tests\/integration\/release-scripts\.test\.ts"/,
+  );
+  assert.doesNotMatch(content, /tests\/e2e\/release-scripts\.test\.ts/);
   assert.ok(
     sourceChannel.indexOf("completedSourceRelease(") <
       sourceChannel.indexOf("plan-release.ts"),
