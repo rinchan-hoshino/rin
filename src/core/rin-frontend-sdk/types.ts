@@ -130,7 +130,6 @@ export type RinFrontendBackendEvent =
       deferDuringTurn?: boolean;
       noticeKind?: "compaction_end" | "lifecycle_error" | "todo";
       todoItems?: RinTodoItem[];
-      todoError?: string;
       sourceEventId?: string;
       requestTag?: string;
     }

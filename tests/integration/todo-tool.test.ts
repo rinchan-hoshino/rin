@@ -158,6 +158,61 @@ test("shared item helpers validate operation shapes, IDs, insertion, and removal
   );
 });
 
+test("todo uses current-order numbers consistently for reads and mutations", async () => {
+  const initialEntries = [
+    {
+      type: "custom",
+      customType: "rin.todo",
+      data: {
+        todos: [
+          { id: 97, text: "First", done: false },
+          { id: 101, text: "Third", done: false },
+        ],
+        nextId: 102,
+      },
+    },
+  ];
+  const { tool } = await setup(initialEntries);
+
+  const read = await execute(tool, { action: "read" });
+  assert.equal(read.content[0].text, "[ ] #1 First\n[ ] #2 Third");
+  assert.deepEqual(
+    read.details.items.map((item: any) => item.id),
+    [1, 2],
+  );
+
+  const toggled = await execute(tool, { action: "toggle", ids: [1] });
+  assert.equal(toggled.details.error, undefined);
+  assert.equal(toggled.details.items[0].done, true);
+
+  const inserted = await execute(tool, {
+    action: "add",
+    beforeId: 2,
+    items: [{ text: "Second" }],
+  });
+  assert.deepEqual(inserted.details.items, [
+    { id: 1, text: "First", done: true },
+    { id: 2, text: "Second", done: false },
+    { id: 3, text: "Third", done: false },
+  ]);
+
+  const removed = await execute(tool, { action: "remove", ids: [1] });
+  assert.deepEqual(removed.details.items, [
+    { id: 1, text: "Second", done: false },
+    { id: 2, text: "Third", done: false },
+  ]);
+
+  const edited = await execute(tool, {
+    action: "edit",
+    id: 2,
+    item: { text: "Third updated" },
+  });
+  assert.deepEqual(edited.details.items, [
+    { id: 1, text: "Second", done: false },
+    { id: 2, text: "Third updated", done: false },
+  ]);
+});
+
 test("todo exposes ranged reads and item-level mutation inputs", async () => {
   const { tool } = await setup();
   assert.equal(tool.name, "todo");
@@ -185,10 +240,19 @@ test("todo exposes ranged reads and item-level mutation inputs", async () => {
   assert.equal(tool.parameters.properties.item.properties.done, undefined);
   assert.equal(tool.parameters.properties.offset.minimum, 1);
   assert.equal(tool.parameters.properties.limit.minimum, 1);
+  assert.match(tool.parameters.properties.id.description, /Current 1-based/);
+  assert.match(
+    tool.parameters.properties.ids.items.description,
+    /Current 1-based/,
+  );
+  assert.match(
+    tool.parameters.properties.beforeId.description,
+    /current 1-based/,
+  );
   assert.equal(tool.parameters.properties.todos, undefined);
 });
 
-test("todo adds one or many items and inserts a group before a stable id", async () => {
+test("todo adds one or many items and inserts a group before a current number", async () => {
   const { tool, entries } = await setup();
 
   const added = await execute(tool, {
@@ -208,12 +272,12 @@ test("todo adds one or many items and inserts a group before a stable id", async
   });
   assert.deepEqual(inserted.details.items, [
     { id: 1, text: "First", done: false },
-    { id: 3, text: "Second A", done: false },
-    { id: 4, text: "Second B", done: false },
-    { id: 2, text: "Third", done: true },
+    { id: 2, text: "Second A", done: false },
+    { id: 3, text: "Second B", done: false },
+    { id: 4, text: "Third", done: true },
   ]);
   assert.equal(inserted.details.nextId, 5);
-  assert.match(inserted.content[0].text, /#3 Second A/);
+  assert.match(inserted.content[0].text, /#2 Second A/);
   assert.equal(entries.length, 2);
 });
 
@@ -279,8 +343,8 @@ test("todo removes selected ids atomically and clears the whole checklist explic
   assert.equal(entries.length, 1);
 
   const removed = await execute(tool, { action: "remove", ids: [1, 3] });
-  assert.deepEqual(removed.details.items, [{ id: 2, text: "B", done: false }]);
-  assert.equal(removed.details.nextId, 4);
+  assert.deepEqual(removed.details.items, [{ id: 1, text: "B", done: false }]);
+  assert.equal(removed.details.nextId, 2);
 
   const cleared = await execute(tool, { action: "clear" });
   assert.equal(cleared.details.action, "clear");

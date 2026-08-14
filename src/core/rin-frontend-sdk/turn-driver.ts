@@ -2725,7 +2725,6 @@ export class RinFrontendTurnDriver {
               : {}),
             ...(event.noticeKind ? { noticeKind: event.noticeKind } : {}),
             ...(event.todoItems ? { todoItems: event.todoItems } : {}),
-            ...(event.todoError ? { todoError: event.todoError } : {}),
             ...(event.sourceEventId
               ? { sourceEventId: event.sourceEventId }
               : {}),

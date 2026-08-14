@@ -2473,8 +2473,7 @@ export class ChatController {
       .prepare(
         `SELECT MAX(sequence) AS sequence FROM outbox
          WHERE turn_id = ?
-           AND json_extract(idempotency_key, '$[0]')
-               IN ('todo_notice', 'todo_error')`,
+           AND json_extract(idempotency_key, '$[0]') = 'todo_notice'`,
       )
       .get(todoOwner) as { sequence?: number | null };
     const keys = idempotencyKeys.filter(Boolean);
@@ -2502,7 +2501,7 @@ export class ChatController {
         const identity = JSON.parse(safeString(row.idempotency_key));
         if (
           Array.isArray(identity) &&
-          (identity[0] === "todo_notice" || identity[0] === "todo_error") &&
+          identity[0] === "todo_notice" &&
           identity[1] === this.chatKey &&
           identity[2] === todoOwner &&
           identity[3] === "fallback"
@@ -2556,7 +2555,6 @@ export class ChatController {
       return true;
     }
     const todos = normalizeRinTodoItems(event?.todoItems);
-    const error = safeString(event?.todoError).trim();
     const mode = todoNoticeRenderModeForChatKey(this.chatKey);
     const noticeText = todos
       ? todos.length > 0
@@ -2609,15 +2607,6 @@ export class ChatController {
       todoOwner,
       ...todoIdempotencyIdentity,
     ]);
-    const errorIdempotencyKey = JSON.stringify([
-      "todo_error",
-      this.chatKey,
-      todoOwner,
-      ...todoIdempotencyIdentity,
-      ...(sourceEventId
-        ? []
-        : [crypto.createHash("sha256").update(error).digest("hex")]),
-    ]);
     const todoDeliveryOptions = {
       waitUntilDeliverySettled: true,
       requireDelivery: true,
@@ -2625,23 +2614,12 @@ export class ChatController {
       turnFence,
       idempotencyKey: todoIdempotencyKey,
     };
-    const errorDeliveryOptions = {
-      turnFence,
-      idempotencyKey: errorIdempotencyKey,
-    };
-
     if (!this.canDeliverReplies()) return true;
 
     if (todos?.length === 0) {
       // An empty Todo snapshot has no durable delivery to fence. Do not let it
       // mutate or refresh presentation state; final settlement clears Working.
-      if (!error) return true;
-      const errorDelivered = await this.sendErrorNoticeNow(
-        error,
-        errorDeliveryOptions,
-      );
-      if (errorDelivered) commitTodoDisplayState([errorIdempotencyKey]);
-      return errorDelivered;
+      return true;
     }
 
     let todoDelivery: Promise<boolean>;
@@ -2679,20 +2657,9 @@ export class ChatController {
         }
       })();
     }
-    const errorDelivery = error
-      ? this.sendErrorNoticeNow(error, errorDeliveryOptions)
-      : Promise.resolve(true);
-    const [todoDelivered, errorDelivered] = await Promise.all([
-      todoDelivery,
-      errorDelivery,
-    ]);
-    if (todoDelivered) {
-      commitTodoDisplayState([
-        todoIdempotencyKey,
-        ...(error ? [errorIdempotencyKey] : []),
-      ]);
-    }
-    return todoDelivered && errorDelivered;
+    const todoDelivered = await todoDelivery;
+    if (todoDelivered) commitTodoDisplayState([todoIdempotencyKey]);
+    return todoDelivered;
   }
 
   private async deliverPassiveNotice(text: string) {

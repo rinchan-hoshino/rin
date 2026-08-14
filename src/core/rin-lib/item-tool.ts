@@ -35,18 +35,28 @@ function createItemActionSchema(actions: readonly ItemAction[]) {
 
 export const ItemActionSchema = createItemActionSchema(DEFAULT_ITEM_ACTIONS);
 
-const PositiveIdSchema = Type.Integer({
-  minimum: 1,
-  description: "Stable item ID returned by a read.",
-});
+function createPositiveItemNumberSchema(
+  numbering: "stable-id" | "current-order",
+) {
+  return Type.Integer({
+    minimum: 1,
+    description:
+      numbering === "current-order"
+        ? "Current 1-based item number returned by a read."
+        : "Stable item ID returned by a read.",
+  });
+}
 
 export function createItemToolParameters(
   addItemSchema: any,
   editItemSchema: any,
   options: {
     actions?: readonly ItemAction[];
+    numbering?: "stable-id" | "current-order";
   } = {},
 ) {
+  const numbering = options.numbering ?? "stable-id";
+  const positiveItemNumberSchema = createPositiveItemNumberSchema(numbering);
   return Type.Object(
     {
       action: createItemActionSchema(options.actions ?? DEFAULT_ITEM_ACTIONS),
@@ -74,15 +84,20 @@ export function createItemToolParameters(
         Type.Integer({
           minimum: 1,
           description:
-            "Insert added items immediately before this stable ID. Omit to append.",
+            numbering === "current-order"
+              ? "Insert added items immediately before this current 1-based item number. Omit to append."
+              : "Insert added items immediately before this stable ID. Omit to append.",
         }),
       ),
-      id: Type.Optional(PositiveIdSchema),
+      id: Type.Optional(positiveItemNumberSchema),
       item: Type.Optional(editItemSchema),
       ids: Type.Optional(
-        Type.Array(PositiveIdSchema, {
+        Type.Array(positiveItemNumberSchema, {
           minItems: 1,
-          description: "One or more stable IDs selected for this operation.",
+          description:
+            numbering === "current-order"
+              ? "One or more current 1-based item numbers selected for this operation."
+              : "One or more stable IDs selected for this operation.",
         }),
       ),
     },

@@ -76,7 +76,6 @@ function completedAssistantSummary(payload: any) {
 type TodoNotice = {
   text: string;
   todos: RinTodoItem[];
-  error?: string;
   sourceEventId?: string;
 };
 
@@ -125,17 +124,12 @@ function toolNameFromRecord(value: Record<string, any>) {
 function todoNoticeFromDetails(details: unknown): TodoNotice | null {
   const value =
     details && typeof details === "object" ? (details as any) : null;
-  if (!value) return null;
+  if (!value || safeString(value.error).trim()) return null;
   const todos = normalizeRinTodoItems(value.items);
   if (!todos) return null;
-  const checklist = todos.length ? formatRinTodoChecklistContent(todos) : "";
-  const error = safeString(value.error).trim();
   return {
-    text: error
-      ? `Error: ${error}${checklist ? `\n${checklist}` : ""}`
-      : checklist,
+    text: todos.length ? formatRinTodoChecklistContent(todos) : "",
     todos,
-    ...(error ? { error } : {}),
   };
 }
 
@@ -208,7 +202,6 @@ function todoPassiveNotice(notice: TodoNotice) {
     deferDuringTurn: false,
     noticeKind: "todo",
     todoItems: notice.todos.map((todo) => ({ ...todo })),
-    ...(notice.error ? { todoError: notice.error } : {}),
     ...(notice.sourceEventId ? { sourceEventId: notice.sourceEventId } : {}),
   } satisfies RinFrontendBackendEvent;
 }

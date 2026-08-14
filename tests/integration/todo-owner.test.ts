@@ -37,7 +37,7 @@ async function setup(
   };
 }
 
-test("todo owner preserves insertion order while reconstructing branch checkpoints", async () => {
+test("todo owner renumbers reconstructed branch checkpoints in insertion order", async () => {
   const entries = [
     {
       type: "custom",
@@ -60,12 +60,12 @@ test("todo owner preserves insertion order while reconstructing branch checkpoin
     {},
   );
   assert.deepEqual(read.details.items, [
-    { id: 3, text: "inserted first", done: false },
-    { id: 1, text: "older second", done: true },
+    { id: 1, text: "inserted first", done: false },
+    { id: 2, text: "older second", done: true },
   ]);
   assert.equal(
     read.content[0].text,
-    "[ ] #3 inserted first\n[x] #1 older second",
+    "[ ] #1 inserted first\n[x] #2 older second",
   );
 });
 

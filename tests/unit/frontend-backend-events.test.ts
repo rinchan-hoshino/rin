@@ -508,7 +508,7 @@ test("frontend backend event translator displays todo reads", () => {
   );
 });
 
-test("frontend backend event translator emits empty todo notices as clears", () => {
+test("frontend backend event translator emits empty clears and ignores failed todo mutations", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
 
   assert.deepEqual(
@@ -554,19 +554,7 @@ test("frontend backend event translator emits empty todo notices as clears", () 
       },
       isError: true,
     }),
-    [
-      { type: "turn_accepted" },
-      {
-        type: "passive_notice",
-        text: "Error: invalid todo list",
-        level: "info",
-        deferDuringTurn: false,
-        noticeKind: "todo",
-        todoItems: [],
-        todoError: "invalid todo list",
-        sourceEventId: "todo-2",
-      },
-    ],
+    [{ type: "turn_accepted" }],
   );
 });
 
@@ -1027,19 +1015,7 @@ test("frontend backend event translator covers wrapper, optional-status, and unt
         },
       },
     }),
-    [
-      { type: "turn_accepted" },
-      {
-        type: "passive_notice",
-        text: "Error: owner error",
-        level: "info",
-        deferDuringTurn: false,
-        noticeKind: "todo",
-        todoItems: [],
-        todoError: "owner error",
-        sourceEventId: "todo-untagged",
-      },
-    ],
+    [{ type: "turn_accepted" }],
   );
   translator.resetAssistantSegments();
   assert.deepEqual(translator.translate(null), []);

@@ -153,13 +153,13 @@ test("core todo loads from configured runtime without extension paths", async ()
       const todoRenderer = tuiRenderers.getCoreToolRenderer("todo");
       assert.equal(typeof todoRenderer.renderCall, "function");
       assert.equal(typeof todoRenderer.renderResult, "function");
-      assert.match(todoTool.description, /stable item ID/);
+      assert.match(todoTool.description, /current 1-based item number/);
       assert.equal(
         todoTool.promptSnippet,
         "Current-branch execution checklist.",
       );
       assert.deepEqual(todoTool.promptGuidelines, [
-        "Use todo when current-branch work has multiple concrete execution steps that benefit from a visible checklist.",
+        "Use todo when current-branch work has multiple concrete execution steps that benefit from a visible checklist; use the current numbers returned by the latest tool result for later mutations.",
       ]);
 
       const added = await todoTool.execute(

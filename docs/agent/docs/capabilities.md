@@ -45,7 +45,7 @@ Read `docs/memory-layering.md` before choosing a destination. Read `docs/self-im
 
 ## Core todo
 
-The core todo capability registers the `todo` tool and `/todos` command from Rin core. It stores the checklist as stable-ID session-branch items without copying it into compaction summaries; agents read it through the tool when needed. Its operations are `read`, `add`, `edit`, `remove`, `toggle`, and `clear`: reads return the complete list by default or a positional item range with 1-based `offset` and positive `limit`; adds accept one or more items and optional `beforeId`; edits replace the text of exactly one `id`; removals target one or more `ids`; toggles atomically change the completion state of one or more selected `ids`; clear removes every item and resets ID allocation.
+The core todo capability registers the `todo` tool and `/todos` command from Rin core. It stores the checklist as session-branch items without copying it into compaction summaries; agents read it through the tool when needed. Its operations are `read`, `add`, `edit`, `remove`, `toggle`, and `clear`: read and every mutation use the same dense current-order numbering `1..n`, with the first item always numbered `1`; reads return the complete list by default or a positional item range with 1-based `offset` and positive `limit`; adds accept one or more items and optional `beforeId`; edits replace the text of exactly one current `id`; removals target one or more current `ids`; toggles atomically change the completion state of one or more selected current `ids`; insertion and removal immediately renumber the returned list; clear removes every item.
 
 ## Core note
 

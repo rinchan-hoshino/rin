@@ -2591,11 +2591,10 @@ test("chat controller does not mutate Todo state when delivery is unavailable", 
 
   await controller.handleFrontendEvent({
     type: "passive_notice",
-    text: "Error: unavailable",
+    text: "[ ] Unavailable state",
     noticeKind: "todo",
     deferDuringTurn: false,
-    todoItems: [],
-    todoError: "unavailable",
+    todoItems: [{ id: 1, text: "Unavailable state", done: false }],
   });
 
   assert.equal(controller.latestTodoNoticeText, "⬜ Current state");
@@ -2742,50 +2741,6 @@ test("chat controller restores fallback Todo deduplication across restart", asyn
   ]);
 });
 
-test("chat controller restores fallback revision from a Todo error", async () => {
-  const controller = await createController("telegram/1:2");
-  const claim = setDurableCurrentTurn(controller, "m-todo-error-restart");
-  const stateA = {
-    type: "passive_notice",
-    text: "[x] Error restart state",
-    noticeKind: "todo",
-    deferDuringTurn: false,
-    todoItems: [{ id: 1, text: "Error restart state", done: true }],
-  };
-  await controller.handleFrontendEvent(stateA);
-  await controller.handleFrontendEvent({
-    type: "passive_notice",
-    text: "Error: todo write failed",
-    noticeKind: "todo",
-    deferDuringTurn: false,
-    todoItems: [],
-    todoError: "todo write failed",
-  });
-
-  const recovered = createRecoveredController(controller);
-  recovered.currentTurn = {
-    ...controller.currentTurn,
-    outboxTurnFence: { ...controller.currentTurn.outboxTurnFence },
-  };
-  await recovered.handleFrontendEvent(stateA);
-
-  const rows = openChatDatabase(recovered.agentDir)
-    .prepare(
-      `SELECT delivery_kind, idempotency_key FROM outbox
-       WHERE turn_id = ? ORDER BY sequence`,
-    )
-    .all(claim.itemId);
-  assert.deepEqual(
-    rows.map((row) => row.delivery_kind),
-    ["passive_notice", "error", "passive_notice"],
-  );
-  assert.deepEqual(
-    rows.map((row) => JSON.parse(row.idempotency_key)[4]),
-    [1, 2, 3],
-  );
-  assert.equal(recovered.latestTodoNoticeText, "✅ ~~Error restart state~~");
-});
-
 test("chat controller serializes concurrent fallback Todo A to B to A", async () => {
   const controller = await createController("telegram/1:2");
   const claim = setDurableCurrentTurn(controller, "m-todo-concurrent");
@@ -2902,54 +2857,6 @@ test("chat controller leaves empty Todo clear to canonical final settlement", as
   assert.deepEqual(contexts, []);
 });
 
-test("chat controller binds an empty-state Todo error without refreshing Working", async () => {
-  const controller = await createController("discord/1:2");
-  const contexts = [];
-  const deliveries = [];
-  controller.app.bots[0].platform = "discord";
-  controller.app.bots[0].getWorkingIndicators = () => [
-    {
-      type: "polling",
-      presentation: "editable-message",
-      async tick(context) {
-        contexts.push(context);
-        return true;
-      },
-      async end() {
-        return true;
-      },
-    },
-  ];
-  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
-    deliveries.push({
-      text: nodes.map((node) => node?.attrs?.content || "").join(""),
-      kind: options?.deliveryKind,
-    });
-    return [`m-out-${deliveries.length}`];
-  };
-  controller.driver.frontendPhase = "working";
-  controller.driver.frontendState = { isStreaming: true, turnActive: true };
-  setDurableCurrentTurn(controller, "m-owner-error");
-  controller.currentTurn.workingNoticeSent = true;
-  controller.awaitingTurnSettle = true;
-  controller.latestTodoNoticeText = "⬜ Keep working";
-
-  await controller.handleFrontendEvent({
-    type: "passive_notice",
-    text: "Error: invalid todo list",
-    noticeKind: "todo",
-    deferDuringTurn: false,
-    todoItems: [],
-    todoError: "invalid todo list",
-  });
-
-  assert.equal(controller.latestTodoNoticeText, "");
-  assert.deepEqual(contexts, []);
-  assert.deepEqual(deliveries, [
-    { text: "Error: invalid todo list", kind: "error" },
-  ]);
-});
-
 test("chat controller does not replay todo after a new user message", async () => {
   const controller = await createController("onebot/1:2");
   const deliveries = [];
@@ -3054,91 +2961,6 @@ test("chat controller ignores persisted-user events instead of replaying session
 
   assert.equal(controller.latestTodoNoticeText, "");
   assert.deepEqual(deliveries, []);
-});
-
-test("chat controller keeps todo errors outside editable progress", async () => {
-  const controller = await createController("discord/1:2");
-  const deliveries = [];
-  const claim = setDurableCurrentTurn(controller);
-  controller.app.bots[0].platform = "discord";
-  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
-    const text = nodes
-      .map((node) => node?.attrs?.content || "")
-      .filter(Boolean)
-      .join("\n");
-    deliveries.push({
-      text,
-      kind: options?.deliveryKind,
-      coalesce: options?.coalesceWithWorkingMessage === true,
-    });
-    return [`m-out-${deliveries.length}`];
-  };
-
-  await controller.handleClientEvent({
-    type: "backend_event",
-    payload: {
-      type: "passive_notice",
-      text: "Error: failed to persist todo state\n[ ] Keep working",
-      noticeKind: "todo",
-      deferDuringTurn: false,
-      todoItems: [{ id: 1, text: "Keep working", done: false }],
-      todoError: "failed to persist todo state",
-    },
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(deliveries, [
-    {
-      text: "⬜ Keep working",
-      kind: "passive_notice",
-      coalesce: true,
-    },
-    {
-      text: "Error: failed to persist todo state",
-      kind: "error",
-      coalesce: false,
-    },
-  ]);
-  assert.equal(controller.latestTodoNoticeText, "⬜ Keep working");
-  assert.deepEqual(
-    openChatDatabase(controller.agentDir)
-      .prepare(`SELECT delivery_kind, turn_id FROM outbox ORDER BY sequence`)
-      .all(),
-    [
-      { delivery_kind: "passive_notice", turn_id: claim.itemId },
-      { delivery_kind: "error", turn_id: claim.itemId },
-    ],
-  );
-  assert.deepEqual(
-    openChatDatabase(controller.agentDir)
-      .prepare(`SELECT state, terminal_kind FROM inbox_jobs WHERE turn_id = ?`)
-      .get(claim.itemId),
-    { state: "running", terminal_kind: null },
-  );
-});
-
-test("chat controller attempts independent todo errors when progress delivery fails", async () => {
-  for (const platform of ["discord", "slack"]) {
-    const controller = await createController(`${platform}/1:2`);
-    controller.app.bots[0].platform = platform;
-    setDurableCurrentTurn(controller);
-    const attempts = [];
-    controller.enqueueAndDrainDelivery = async (_payload, options) => {
-      attempts.push(options?.deliveryKind);
-      if (options?.deliveryKind === "passive_notice") {
-        throw new Error("progress delivery failed");
-      }
-      return { messageIds: ["m-error"], accepted: true, settled: true };
-    };
-
-    const delivered = await controller.sendTodoPassiveNoticeNow({
-      todoItems: [{ id: 1, text: "Keep working", done: false }],
-      todoError: "failed to persist todo state",
-    });
-
-    assert.equal(delivered, false);
-    assert.deepEqual(attempts, ["passive_notice", "error"]);
-  }
 });
 
 test("chat controller sends structured todo nodes to native todo chats", async () => {

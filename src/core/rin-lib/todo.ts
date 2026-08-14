@@ -1,9 +1,9 @@
 /**
  * Rin core todo capability.
  *
- * The agent mutates one stable-ID item at a time (or an explicit add/remove
- * group). State is checkpointed in Pi session custom entries and follows the
- * selected session branch.
+ * The agent mutates items by their current 1-based list numbers. Every accepted
+ * mutation reindexes the list densely, while state remains checkpointed in Pi
+ * session custom entries and follows the selected session branch.
  */
 
 import { Type } from "typebox";
@@ -16,7 +16,6 @@ import {
   createItemToolParameters,
   formatItemReadWindowContent,
   normalizeItemId,
-  normalizeNextItemId,
   resolveInsertIndex,
   resolveItemReadWindow,
   resolveSelectedItemIds,
@@ -68,7 +67,7 @@ const TODO_ACTIONS: readonly ItemAction[] = [
 const TodoParams: any = createItemToolParameters(
   TodoAddItemParams,
   TodoEditItemParams,
-  { actions: TODO_ACTIONS },
+  { actions: TODO_ACTIONS, numbering: "current-order" },
 );
 
 function normalizeAddItems(
@@ -97,6 +96,10 @@ function normalizeEdit(value: unknown): { text: string } | undefined {
   }
   const text = typeof item.text === "string" ? item.text.trim() : "";
   return text ? { text } : undefined;
+}
+
+function renumberTodoItems(items: ReadonlyArray<Todo>): Todo[] {
+  return items.map((item, index) => ({ ...item, id: index + 1 }));
 }
 
 function formatTodoContent(items: Todo[]) {
@@ -144,26 +147,24 @@ export default function todoCapability(): RinCapabilityDefinition {
     details: details(action, error, readWindow),
   });
 
-  const persist = (nextItems: Todo[], nextItemId: number) => {
+  const persist = (nextItems: Todo[]) => {
     const appendCustomEntry = activeSessionManager?.appendCustomEntry;
     if (typeof appendCustomEntry !== "function") {
       throw new Error("session custom entries are not available");
     }
+    const numberedItems = renumberTodoItems(nextItems);
+    const nextItemId = numberedItems.length + 1;
     appendCustomEntry.call(activeSessionManager, RIN_TODO_CUSTOM_ENTRY_TYPE, {
-      todos: nextItems.map((item) => ({ ...item })),
+      todos: numberedItems.map((item) => ({ ...item })),
       nextId: nextItemId,
     });
-    items = nextItems;
+    items = numberedItems;
     nextId = nextItemId;
   };
 
-  const commit = (
-    action: ItemAction,
-    nextItems: Todo[],
-    nextItemId: number,
-  ) => {
+  const commit = (action: ItemAction, nextItems: Todo[]) => {
     try {
-      persist(nextItems, nextItemId);
+      persist(nextItems);
       return result(action);
     } catch (error: any) {
       return result(
@@ -178,18 +179,18 @@ export default function todoCapability(): RinCapabilityDefinition {
     const state = readTodoSnapshotFromSession({
       sessionManager: activeSessionManager,
     });
-    items = state.todos.map((item) => ({ ...item }));
-    nextId = normalizeNextItemId(items, state.nextId);
+    items = renumberTodoItems(state.todos);
+    nextId = items.length + 1;
   };
 
   const tool: any = {
     name: "todo",
     label: "Checklist",
     description:
-      "Maintain the current-branch execution checklist by stable item ID. Read returns the full list by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit changes item text; remove deletes selected IDs; toggle changes the completion state of one or more selected IDs atomically; clear removes every item.",
+      "Maintain the current-branch execution checklist by current 1-based item number. Read and every mutation use the same dense 1..n numbering, with the first item always numbered 1; insertion and removal immediately renumber the returned full list. Add accepts one or more items and can insert before a current number; edit changes item text; remove deletes selected numbers; toggle changes the completion state of one or more selected numbers atomically; clear removes every item.",
     promptSnippet: "Current-branch execution checklist.",
     promptGuidelines: [
-      "Use todo when current-branch work has multiple concrete execution steps that benefit from a visible checklist.",
+      "Use todo when current-branch work has multiple concrete execution steps that benefit from a visible checklist; use the current numbers returned by the latest tool result for later mutations.",
     ],
     parameters: TodoParams,
 
@@ -209,11 +210,10 @@ export default function todoCapability(): RinCapabilityDefinition {
         }
         const insertion = resolveInsertIndex(items, params.beforeId);
         if (insertion.error) return result("add", insertion.error);
-        let allocatedId = nextId;
-        const added = additions.map((item) => ({ id: allocatedId++, ...item }));
+        const added = additions.map((item) => ({ id: 0, ...item }));
         const nextItems = items.map((item) => ({ ...item }));
         nextItems.splice(insertion.index!, 0, ...added);
-        return commit("add", nextItems, allocatedId);
+        return commit("add", nextItems);
       }
 
       if (action === "edit") {
@@ -229,7 +229,7 @@ export default function todoCapability(): RinCapabilityDefinition {
         if (index < 0) return result("edit", `#${id} not found`);
         const nextItems = items.map((item) => ({ ...item }));
         nextItems[index] = { ...nextItems[index]!, text: edit.text };
-        return commit("edit", nextItems, nextId);
+        return commit("edit", nextItems);
       }
 
       if (action === "toggle") {
@@ -240,11 +240,11 @@ export default function todoCapability(): RinCapabilityDefinition {
           ...item,
           done: selected.has(item.id) ? !item.done : item.done,
         }));
-        return commit("toggle", nextItems, nextId);
+        return commit("toggle", nextItems);
       }
 
       if (action === "clear") {
-        return commit("clear", [], 1);
+        return commit("clear", []);
       }
 
       const removal = resolveSelectedItemIds("remove", params, items);
@@ -252,7 +252,7 @@ export default function todoCapability(): RinCapabilityDefinition {
       const nextItems = items
         .filter((item) => !removal.ids!.includes(item.id))
         .map((item) => ({ ...item }));
-      return commit("remove", nextItems, nextId);
+      return commit("remove", nextItems);
     },
   };
 
