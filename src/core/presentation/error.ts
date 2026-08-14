@@ -543,6 +543,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   rin_container_name_required: () =>
     "Target operation needs a container name. Provide the container name.",
   rin_daemon_failed: () => "Rin's background service failed to start.",
+  rin_daemon_worker_entrypoint_required: () =>
+    "Rin daemon needs its app-owned worker entrypoints before it can start.",
   rin_daemon_lock_owner_pending: () =>
     "Rin found incomplete background-service ownership state and stopped safely.",
   rin_daemon_lock_release_identity_changed: () =>

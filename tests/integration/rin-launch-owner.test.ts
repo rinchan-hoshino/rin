@@ -256,17 +256,13 @@ test("default launch runs the selected TUI command and returns its exit code", a
     queueMicrotask(() => child.emit("exit", 7, null));
     return child as any;
   });
-  const exits: number[] = [];
-  const exit = mock.method(process, "exit", ((code?: number) => {
-    exits.push(code ?? 0);
-  }) as never);
   syncBuiltinESMExports();
+  let exitCode: number;
   try {
-    await launch.launchDefaultRin(args);
+    exitCode = await launch.launchDefaultRin(args);
   } finally {
     spawn.mock.restore();
     syncBuiltinESMExports();
-    exit.mock.restore();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await socketSandbox.removeOwnedSocket(socketPath);
     await fs.rm(installDir, { recursive: true, force: true });
@@ -279,5 +275,5 @@ test("default launch runs the selected TUI command and returns its exit code", a
       value.endsWith("dist/app/rin-tui/main.js"),
     ),
   );
-  assert.deepEqual(exits, [7]);
+  assert.equal(exitCode!, 7);
 });

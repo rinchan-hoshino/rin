@@ -11,6 +11,7 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
+const nativeProcessExit = process.exit;
 const { runCustomRpcMode: runProductionRpcMode } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "rpc-mode.js"))
     .href
@@ -92,7 +93,13 @@ function runCustomRpcMode(runtime, dependencies) {
       }
     };
   }
-  return runProductionRpcMode(runtime, dependencies);
+  return runProductionRpcMode(runtime, {
+    ...dependencies,
+    terminateProcess: (code) => {
+      if (process.exit !== nativeProcessExit) return process.exit(code);
+      return undefined;
+    },
+  });
 }
 const { attachRinCapabilityExtensionBridge } = await import(
   pathToFileURL(

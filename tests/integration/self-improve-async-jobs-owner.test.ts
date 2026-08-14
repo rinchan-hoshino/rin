@@ -180,24 +180,38 @@ test("maintenance private normalizers cover sparse lock and history boundaries",
 
 test("queued worker supervisor is bounded when no runnable queue exists", async () => {
   await withTempRoot(async (root) => {
-    assert.equal(asyncJobs.spawnQueuedMemoryWorker(root), false);
+    const workerPath = path.join(root, "missing-worker.js");
+    assert.equal(
+      asyncJobs.spawnQueuedMemoryWorker(root, { workerPath }),
+      false,
+    );
     const queuePath = selfImprovePaths.maintenanceQueuePath(root);
     await fs.mkdir(path.dirname(queuePath), { recursive: true });
     await fs.writeFile(queuePath, "not-json");
-    assert.equal(asyncJobs.spawnQueuedMemoryWorker(root), false);
+    assert.equal(
+      asyncJobs.spawnQueuedMemoryWorker(root, { workerPath }),
+      false,
+    );
     await fs.writeFile(
       queuePath,
       JSON.stringify([{ kind: "session_summary" }, null]),
     );
-    assert.equal(asyncJobs.spawnQueuedMemoryWorker(root), false);
+    assert.equal(
+      asyncJobs.spawnQueuedMemoryWorker(root, { workerPath }),
+      false,
+    );
 
     const supervisor = asyncJobs.startQueuedMemoryWorkerSupervisor(root, {
       intervalMs: 1,
+      workerPath,
     });
     assert.equal(supervisor.wake(), false);
     supervisor.stop();
     assert.equal(supervisor.wake(), false);
-    const defaultSupervisor = asyncJobs.startQueuedMemoryWorkerSupervisor(root);
+    const defaultSupervisor = asyncJobs.startQueuedMemoryWorkerSupervisor(
+      root,
+      { workerPath },
+    );
     defaultSupervisor.stop();
     defaultSupervisor.stop();
   });
@@ -466,7 +480,10 @@ test("synchronous maintenance validates sessions before entering its processor",
       ],
     );
   });
-  assert.equal(asyncJobs.spawnQueuedMemoryWorker("  "), false);
+  assert.equal(
+    asyncJobs.spawnQueuedMemoryWorker("  ", { workerPath: "/missing" }),
+    false,
+  );
 });
 
 const childScript = String.raw`
@@ -587,7 +604,7 @@ assert.deepEqual(
     { trigger: "requeue-missing", sessionFile: sessionC },
   ],
 );
-assert.equal(jobs.spawnQueuedMemoryWorker(""), false);
+assert.equal(jobs.spawnQueuedMemoryWorker("", { workerPath: "/missing" }), false);
 console.log(JSON.stringify({ processed, history: history.length, calls: globalThis.__rinAsyncJobsOwnerCalls.length }));
 `;
 

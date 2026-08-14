@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 
 import { readJsonFile } from "../platform/fs.js";
+import { requestProcessTermination } from "../platform/process-lifetime.js";
 import {
   buildDaemonStatusScript,
   requestDaemonCommand,
@@ -222,8 +223,12 @@ async function runInteractiveCommand(
       child.once("error", reject);
       child.once("exit", (code, signal) => resolve({ code, signal }));
     });
-    if (forwardedSignal) process.exit(signalExitCode(forwardedSignal));
-    if (result.signal) process.exit(signalExitCode(result.signal));
+    if (forwardedSignal) {
+      requestProcessTermination(signalExitCode(forwardedSignal));
+    }
+    if (result.signal) {
+      requestProcessTermination(signalExitCode(result.signal));
+    }
     if (result.code && result.code !== 0) {
       const error: any = new Error(`rin_child_command_failed:${result.code}`);
       error.status = result.code;

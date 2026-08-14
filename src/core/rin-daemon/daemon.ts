@@ -1,8 +1,6 @@
-#!/usr/bin/env node
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 
 import { coreDataPath } from "../data-layout.js";
 import { ensureDir } from "../platform/fs.js";
@@ -82,39 +80,38 @@ function clearLegacyRestartState(agentDir: string) {
   } catch {}
 }
 
-export async function startDaemon(
-  options: {
-    socketPath?: string;
-    workerPath?: string;
-    additionalExtensionPaths?: string[];
-    chat?: {
-      send?: (payload: any) => Promise<any>;
-      runTurn?: (payload: any) => Promise<any>;
-      typing?: (payload: { chatKey?: string }) => Promise<any>;
-      react?: (payload: {
-        chatKey?: string;
-        messageId?: string;
-        emoji?: string;
-      }) => Promise<any>;
-      terminateTurn?: (payload: {
-        controllerKey?: string;
-        chatKey?: string;
-      }) => Promise<any>;
-    };
-    getExtraStatus?:
-      | (() => Promise<Record<string, unknown> | undefined>)
-      | (() => Record<string, unknown> | undefined);
-    additionalCommandRouter?: RinRpcCommandRouter;
-    chatExtensionApi?: RinDaemonChatAPI;
-    onShutdown?: () => Promise<void> | void;
-    registerLocalFrontendConnector?: (connector: RpcSocketConnector) => void;
-    daemonExtensionManager?: RinDaemonExtensionManager;
-    instanceLock?: DaemonInstanceLock;
-    workerGcIdleMs?: number;
-    workerSweepIntervalMs?: number;
-    workerCgroupIsolation?: WorkerCgroupIsolation;
-  } = {},
-) {
+export async function startDaemon(options: {
+  socketPath?: string;
+  workerPath: string;
+  selfImproveWorkerPath: string;
+  additionalExtensionPaths?: string[];
+  chat?: {
+    send?: (payload: any) => Promise<any>;
+    runTurn?: (payload: any) => Promise<any>;
+    typing?: (payload: { chatKey?: string }) => Promise<any>;
+    react?: (payload: {
+      chatKey?: string;
+      messageId?: string;
+      emoji?: string;
+    }) => Promise<any>;
+    terminateTurn?: (payload: {
+      controllerKey?: string;
+      chatKey?: string;
+    }) => Promise<any>;
+  };
+  getExtraStatus?:
+    | (() => Promise<Record<string, unknown> | undefined>)
+    | (() => Record<string, unknown> | undefined);
+  additionalCommandRouter?: RinRpcCommandRouter;
+  chatExtensionApi?: RinDaemonChatAPI;
+  onShutdown?: () => Promise<void> | void;
+  registerLocalFrontendConnector?: (connector: RpcSocketConnector) => void;
+  daemonExtensionManager?: RinDaemonExtensionManager;
+  instanceLock?: DaemonInstanceLock;
+  workerGcIdleMs?: number;
+  workerSweepIntervalMs?: number;
+  workerCgroupIsolation?: WorkerCgroupIsolation;
+}) {
   const runtime = resolveRuntimeProfile();
   applyRuntimeProfileEnvironment(runtime);
   const workerCgroupIsolation =
@@ -124,15 +121,16 @@ export async function startDaemon(
   const bridgeSocketPath = bridgeDaemonSocketPath(
     process.env.RIN_DIR || runtime.agentDir,
   );
-  const workerPath =
-    options.workerPath ||
-    path.join(path.dirname(new URL(import.meta.url).pathname), "worker.js");
+  const workerPath = safeString(options.workerPath).trim();
+  const selfImproveWorkerPath = safeString(
+    options.selfImproveWorkerPath,
+  ).trim();
+  if (!workerPath || !selfImproveWorkerPath) {
+    throw new Error("rin_daemon_worker_entrypoint_required");
+  }
   const instanceLock =
     options.instanceLock ||
     (await acquireDaemonInstanceLock(runtime.agentDir, { socketPath }));
-  process.once("exit", () => {
-    void instanceLock.release();
-  });
   let sessionManagerModulePromise:
     | ReturnType<typeof loadRinSessionManagerModule>
     | undefined;
@@ -167,6 +165,7 @@ export async function startDaemon(
   cronScheduler.start();
   const selfImproveMaintenanceSupervisor = startQueuedMemoryWorkerSupervisor(
     runtime.agentDir,
+    { workerPath: selfImproveWorkerPath },
   );
 
   const daemonExtensionManager =
@@ -806,56 +805,7 @@ export async function startDaemon(
       } catch {}
     }
     await instanceLock.release().catch(() => {});
-    process.exit(0);
   };
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
-}
-
-function parseDaemonCliArgs(argv: string[]) {
-  let socketPath = "";
-  let workerPath = "";
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = String(argv[index] || "").trim();
-    if (!arg) continue;
-    if (arg === "--socket") {
-      socketPath = String(argv[++index] || "").trim() || socketPath;
-      continue;
-    }
-    if (arg.startsWith("--socket=")) {
-      socketPath = arg.slice("--socket=".length).trim() || socketPath;
-      continue;
-    }
-    if (arg === "--worker") {
-      workerPath = String(argv[++index] || "").trim() || workerPath;
-      continue;
-    }
-    if (arg.startsWith("--worker=")) {
-      workerPath = arg.slice("--worker=".length).trim() || workerPath;
-      continue;
-    }
-    if (!arg.startsWith("-") && !socketPath) socketPath = arg;
-  }
-  return {
-    socketPath: socketPath || undefined,
-    workerPath: workerPath || undefined,
-  };
-}
-
-async function main() {
-  await startDaemon(parseDaemonCliArgs(process.argv.slice(2)));
-}
-
-const isDirectEntry =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (isDirectEntry) {
-  main().catch((error: any) => {
-    console.error(
-      safeString(error && error.message ? error.message : error) ||
-        "rin_daemon_failed",
-    );
-    process.exit(1);
-  });
+  return { shutdown };
 }

@@ -71,6 +71,12 @@ test("app daemon assembles hosted services and failure cleanup", async () => {
     });
     assert.equal(summary.unknown, null);
     assert.deepEqual(summary.extensionApi, { ownerExtensionApi: true });
+    const daemonStart = summary.events.find(
+      (event: unknown[]) => event[0] === "daemon-start",
+    );
+    assert.ok(daemonStart);
+    assert.match(daemonStart[2], /\/rin-daemon\/worker\.js$/);
+    assert.match(daemonStart[3], /\/rin-daemon\/self-improve-worker\.js$/);
     const chatApiIndex = summary.events.findIndex(
       (event: unknown[]) => event[0] === "manager-chat-api",
     );

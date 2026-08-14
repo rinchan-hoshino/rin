@@ -173,7 +173,6 @@ export async function delegateRinCliToTarget(
     runtimeEnv as Record<string, string>,
     context.repoRoot,
   );
-  process.exitCode = code;
   return code;
 }
 
@@ -192,5 +191,5 @@ export async function launchDefaultRin(parsed: ParsedArgs) {
     runtimeEnv as Record<string, string>,
     repoRoot,
   );
-  process.exit(code);
+  return code;
 }

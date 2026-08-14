@@ -1,6 +1,4 @@
-#!/usr/bin/env node
 import fs from "node:fs";
-import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 import {
@@ -39,7 +37,7 @@ import { startLegacyPreparedUpdatePayload } from "./update-payload.js";
 import { detectCurrentUser, repoRootFromHere, runCommand } from "./common.js";
 import { finalizeCoreUpdate, finalizeInstallPlan } from "./finalize.js";
 import { releaseInfoFromFile } from "../rin-lib/release.js";
-import { formatRuntimeErrorForUser } from "../presentation/error.js";
+import { requestProcessTermination } from "../platform/process-lifetime.js";
 import {
   describeOwnership,
   isSameSystemUser,
@@ -60,7 +58,7 @@ function ensureNotCancelled<T>(value: T | symbol): T {
   if (isCancel(value)) {
     const i18n = createInstallerI18n();
     cancel(i18n.installerCancelled);
-    process.exit(1);
+    requestProcessTermination(1);
   }
   return value as T;
 }
@@ -168,10 +166,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     }
   }
 
-  if (cli.quickRun) {
-    await runQuickRun();
-    return;
-  }
+  if (cli.quickRun) return await runQuickRun();
 
   const i18n = createInstallerI18n();
 
@@ -435,23 +430,4 @@ export async function startInstaller(argv = process.argv.slice(2)) {
       i18n,
     ),
   );
-}
-
-async function main() {
-  await startInstaller();
-}
-
-const isDirectEntry =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (isDirectEntry) {
-  main().catch((error: any) => {
-    if (
-      !error?.rinApplyPlanErrorHandoffWritten &&
-      !error?.suppressUserFacingPrint
-    ) {
-      console.error(formatRuntimeErrorForUser(error || "rin_installer_failed"));
-    }
-    process.exit(1);
-  });
 }

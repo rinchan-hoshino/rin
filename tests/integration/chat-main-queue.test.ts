@@ -4067,8 +4067,7 @@ test("chat main owner exercises bridge status, eval, termination, detached clean
         localBridge.runTurn({ chatKey: "telegram/1:local-stop", text: "local stop coverage" }),
         localBridge.runTurn({ controllerKey: "local-detached", text: "local detached stop coverage" }),
       ]);
-      process.emit("SIGTERM");
-      await new Promise(() => {});
+      await localBridge.stop();
     `;
     await execFileAsync(
       process.execPath,
@@ -4359,68 +4358,4 @@ test("chat main owner directly covers private telegram and command normalization
     },
   );
   await fs.rm(agentDir, { recursive: true, force: true });
-});
-
-test("chat main direct entrypoint reports startup failure", async () => {
-  const rootFile = path.join(
-    os.tmpdir(),
-    `rin-chat-main-owner-file-${process.pid}-${Date.now()}`,
-  );
-  await fs.writeFile(rootFile, "not a directory", "utf8");
-  try {
-    await assert.rejects(
-      execFileAsync(
-        process.execPath,
-        [path.join(rootDir, "dist", "core", "chat", "main.js")],
-        {
-          cwd: rootDir,
-          env: { ...process.env, RIN_DIR: rootFile },
-          timeout: 10_000,
-        },
-      ),
-      (error: unknown) => {
-        const failure = error as { code?: number; stderr?: string };
-        assert.equal(failure.code, 1);
-        assert.match(String(failure.stderr), /ENOTDIR|not a directory/i);
-        return true;
-      },
-    );
-  } finally {
-    await fs.rm(rootFile, { force: true });
-  }
-});
-
-test("chat main direct entrypoint starts and handles a termination signal", async () => {
-  const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-chat-main-direct-owner-"),
-  );
-  try {
-    await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
-    const { stdout, stderr } = await execFileAsync(
-      "/bin/bash",
-      [
-        "-lc",
-        '"$RIN_OWNER_NODE" --import "$RIN_OWNER_FIXTURE" "$RIN_OWNER_MAIN" & child=$!; sleep 3; kill -TERM "$child" 2>/dev/null || true; wait "$child"',
-      ],
-      {
-        cwd: rootDir,
-        env: {
-          ...process.env,
-          RIN_DIR: agentDir,
-          RIN_OWNER_NODE: process.execPath,
-          RIN_OWNER_FIXTURE: path.join(
-            rootDir,
-            "tests",
-            "support",
-            "register-chat-main-private-owner-fixture.mjs",
-          ),
-          RIN_OWNER_MAIN: path.join(rootDir, "dist", "core", "chat", "main.js"),
-        },
-        timeout: 10_000,
-      },
-    );
-    assert.equal(typeof `${stdout}\n${stderr}`, "string");
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
 });

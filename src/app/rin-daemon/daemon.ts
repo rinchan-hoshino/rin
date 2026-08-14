@@ -31,6 +31,7 @@ async function main() {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const ext = path.extname(fileURLToPath(import.meta.url)) || ".js";
   const workerPath = path.join(here, `worker${ext}`);
+  const selfImproveWorkerPath = path.join(here, `self-improve-worker${ext}`);
 
   let localFrontendConnectorResolver:
     | ((connector: RpcSocketConnector) => void)
@@ -89,11 +90,12 @@ async function main() {
       });
     });
 
-    await startDaemon({
+    const daemon = await startDaemon({
       daemonExtensionManager,
       instanceLock: daemonLock,
       socketPath: daemonSocketPath,
       workerPath,
+      selfImproveWorkerPath,
       workerCgroupIsolation,
       chat: chatIntegration.delivery,
       chatExtensionApi: chatIntegration.extensionApi,
@@ -105,6 +107,20 @@ async function main() {
       },
       onShutdown: stopHostedServices,
     });
+    let stopping = false;
+    const shutdown = async () => {
+      if (stopping) return;
+      stopping = true;
+      try {
+        await daemon.shutdown();
+        process.exit(0);
+      } catch (error) {
+        console.error(formatRuntimeErrorForUser(error));
+        process.exit(1);
+      }
+    };
+    process.on("SIGINT", () => void shutdown());
+    process.on("SIGTERM", () => void shutdown());
   } catch (error) {
     await stopAllServices().catch(() => {});
     await daemonLock?.release().catch(() => {});

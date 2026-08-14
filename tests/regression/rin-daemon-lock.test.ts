@@ -27,7 +27,7 @@ async function makeTempDir(prefix: string) {
 function spawnDaemon(agentDir: string, socketPath: string) {
   const child = spawn(
     process.execPath,
-    [path.join(rootDir, "dist", "core", "rin-daemon", "daemon.js"), socketPath],
+    [path.join(rootDir, "dist", "app", "rin-daemon", "daemon.js"), socketPath],
     {
       cwd: rootDir,
       env: {
@@ -148,7 +148,7 @@ test("daemon instance lock rejects a second daemon without unlinking the active 
     const exit = await waitForExit(daemon.child);
 
     assert.equal(exit.code, 1);
-    assert.match(daemon.stderr(), /rin_daemon_already_running/);
+    assert.match(daemon.stderr(), /daemon already running/);
     assert.equal(await connectAndRead(socketPath), "ok\n");
   } finally {
     await terminateChild(daemon.child);

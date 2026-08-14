@@ -193,7 +193,7 @@ test("update commands preserve exit, signal, logging, and listener behavior", as
           ["-e", `process.kill(process.pid, '${signal}')`],
           { stdio: "ignore" },
         ),
-        new RegExp(`owner-exit:${exitCode}`),
+        new RegExp(`rin_process_termination_requested:${exitCode}`),
       );
     }
     await assert.rejects(
@@ -202,7 +202,7 @@ test("update commands preserve exit, signal, logging, and listener behavior", as
         ["-e", "process.kill(process.pid, 'SIGKILL')"],
         { stdio: "ignore" },
       ),
-      /owner-exit:1/,
+      /rin_process_termination_requested:1/,
     );
     const forwarded = workflow.runUpdateCommand(
       process.execPath,
@@ -210,7 +210,7 @@ test("update commands preserve exit, signal, logging, and listener behavior", as
       { stdio: "ignore" },
     );
     setTimeout(() => process.emit("SIGHUP"), 20);
-    await assert.rejects(forwarded, /owner-exit:129/);
+    await assert.rejects(forwarded, /rin_process_termination_requested:129/);
   } finally {
     (process as any).exit = originalExit;
   }

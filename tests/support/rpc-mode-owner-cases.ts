@@ -20,7 +20,15 @@ const rpcModeModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "rpc-mode.js"))
     .href
 );
-const { runCustomRpcMode } = rpcModeModule;
+const nativeProcessExit = process.exit;
+const runCustomRpcMode = (runtime: any, dependencies: any) =>
+  rpcModeModule.runCustomRpcMode(runtime, {
+    ...dependencies,
+    terminateProcess: (code: number) => {
+      if (process.exit !== nativeProcessExit) return process.exit(code);
+      return undefined as never;
+    },
+  });
 await Promise.all([
   import("../integration/rpc-mode.test.js"),
   import("../integration/rpc-auth.test.js"),

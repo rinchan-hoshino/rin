@@ -88,6 +88,9 @@ test("CLI preserves its error formatter after its installed release is pruned", 
     await fs.mkdir(path.join(releaseRoot, "dist", "core", "presentation"), {
       recursive: true,
     });
+    await fs.mkdir(path.join(releaseRoot, "dist", "core", "platform"), {
+      recursive: true,
+    });
     await fs.writeFile(
       path.join(releaseRoot, "package.json"),
       `${JSON.stringify({ type: "module" })}\n`,
@@ -96,6 +99,10 @@ test("CLI preserves its error formatter after its installed release is pruned", 
     await fs.copyFile(
       path.join(rootDir, "dist", "app", "rin", "main.js"),
       entrypoint,
+    );
+    await fs.copyFile(
+      path.join(rootDir, "dist", "core", "platform", "process-lifetime.js"),
+      path.join(releaseRoot, "dist", "core", "platform", "process-lifetime.js"),
     );
     await fs.writeFile(
       path.join(releaseRoot, "dist", "core", "rin", "main.js"),

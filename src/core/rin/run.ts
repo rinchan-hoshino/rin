@@ -11,6 +11,7 @@ import {
   getRuntimeSessionDir,
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
+import { requestProcessTermination } from "../platform/process-lifetime.js";
 import { createConfiguredAgentSession } from "../rin-lib/runtime.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
@@ -442,6 +443,10 @@ async function runStandaloneTurn(
 
   const signalCleanupHandlers: Array<() => void> = [];
   let signalShutdownStarted = false;
+  let rejectSignalShutdown!: (error: Error) => void;
+  const signalShutdown = new Promise<never>((_resolve, reject) => {
+    rejectSignalShutdown = reject;
+  });
   const registerSignalHandlers = () => {
     const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
     if (process.platform !== "win32") signals.push("SIGHUP");
@@ -451,7 +456,13 @@ async function runStandaloneTurn(
         signalShutdownStarted = true;
         const exitCode =
           signal === "SIGINT" ? 130 : signal === "SIGHUP" ? 129 : 143;
-        void disposeAfterAbort().finally(() => process.exit(exitCode));
+        void disposeAfterAbort().finally(() => {
+          try {
+            requestProcessTermination(exitCode);
+          } catch (error) {
+            rejectSignalShutdown(error as Error);
+          }
+        });
       };
       process.on(signal, handler);
       signalCleanupHandlers.push(() => process.off(signal, handler));
@@ -460,49 +471,52 @@ async function runStandaloneTurn(
   registerSignalHandlers();
 
   try {
-    const turnScope = captureTurnScope(session);
-    const promptResult: any = await withRunTimeout(
-      (async () => {
-        const result = await session.prompt(text, { source: "cli" as any });
-        await session.agent?.waitForIdle?.();
-        return result;
-      })(),
-      options.timeoutMs,
-    );
-    const terminalOutcome = turnSettlement.resolve(
-      resolveRinTurnTerminalOutcomeFromTurnResult(promptResult),
-      readTurnMessages(session, turnScope),
-    );
-    if (terminalOutcome.kind === "absent") {
-      throw new Error("rin_turn_settled_without_terminal");
-    }
-    if (terminalOutcome.kind === "error") {
-      const producerError =
-        resolveRinTurnFailureMessage(
-          session,
-          terminalOutcome.resolution.messages,
-        ) || terminalOutcome.error;
-      throw new Error(producerError || "Agent prompt failed.");
-    }
-    const completion = terminalOutcome.resolution.completion;
-    const sessionMeta = readSessionMetadata(session);
-    const result = {
-      finalText: completion.finalText,
-      result: completion.result,
-      ...(keepSession
-        ? {
-            sessionFile: sessionMeta.sessionFile || undefined,
-            sessionId: sessionMeta.sessionId || undefined,
-          }
-        : {}),
-    };
-    if (!keepSession) {
-      await removeTransientSessionFile(
-        profile.agentDir,
-        sessionMeta.sessionFile,
+    const runTurn = async () => {
+      const turnScope = captureTurnScope(session);
+      const promptResult: any = await withRunTimeout(
+        (async () => {
+          const result = await session.prompt(text, { source: "cli" as any });
+          await session.agent?.waitForIdle?.();
+          return result;
+        })(),
+        options.timeoutMs,
       );
-    }
-    return result;
+      const terminalOutcome = turnSettlement.resolve(
+        resolveRinTurnTerminalOutcomeFromTurnResult(promptResult),
+        readTurnMessages(session, turnScope),
+      );
+      if (terminalOutcome.kind === "absent") {
+        throw new Error("rin_turn_settled_without_terminal");
+      }
+      if (terminalOutcome.kind === "error") {
+        const producerError =
+          resolveRinTurnFailureMessage(
+            session,
+            terminalOutcome.resolution.messages,
+          ) || terminalOutcome.error;
+        throw new Error(producerError || "Agent prompt failed.");
+      }
+      const completion = terminalOutcome.resolution.completion;
+      const sessionMeta = readSessionMetadata(session);
+      const result = {
+        finalText: completion.finalText,
+        result: completion.result,
+        ...(keepSession
+          ? {
+              sessionFile: sessionMeta.sessionFile || undefined,
+              sessionId: sessionMeta.sessionId || undefined,
+            }
+          : {}),
+      };
+      if (!keepSession) {
+        await removeTransientSessionFile(
+          profile.agentDir,
+          sessionMeta.sessionFile,
+        );
+      }
+      return result;
+    };
+    return await Promise.race([runTurn(), signalShutdown]);
   } finally {
     for (const cleanup of signalCleanupHandlers) {
       try {

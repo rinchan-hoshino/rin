@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
+import { requestProcessTermination } from "../platform/process-lifetime.js";
 import { buildUserShell, targetUserRuntimeEnv } from "../rin-lib/system.js";
 
 const HOLDER_READY_TIMEOUT_MS = 10_000;
@@ -193,9 +194,8 @@ async function acquireTargetDaemonHeldLock(
       process.stderr.write(`${message}\n`);
       // The child was the kernel-lease owner. Continuing even one mutation
       // step would be unsafe, and promises cannot cancel an in-flight
-      // filesystem migration. Process teardown also closes every other holder
-      // pipe, so fail-stop is the recoverable ownership boundary.
-      process.exit(70);
+      // filesystem migration. The app boundary performs the physical exit.
+      requestProcessTermination(70);
     };
     child.once("exit", failStopUpdater);
     if (child.exitCode != null || child.signalCode != null) {

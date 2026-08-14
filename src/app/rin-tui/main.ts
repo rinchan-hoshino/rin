@@ -7,4 +7,6 @@
 import { runFrontendEntrypoint } from "../../core/rin-frontend-sdk/entrypoint.js";
 import { startTui } from "../../core/rin-tui/launcher.js";
 
-runFrontendEntrypoint(startTui);
+runFrontendEntrypoint(startTui, {
+  exit: (code) => process.exit(code),
+});

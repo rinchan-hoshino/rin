@@ -107,6 +107,11 @@
       "built": "dist/core/pi/tool-continuation.js"
     },
     {
+      "test": "tests/unit/process-lifetime.test.ts",
+      "source": "src/core/platform/process-lifetime.ts",
+      "built": "dist/core/platform/process-lifetime.js"
+    },
+    {
       "test": "tests/unit/rpc-socket.test.ts",
       "source": "src/core/platform/rpc-socket.ts",
       "built": "dist/core/platform/rpc-socket.js"

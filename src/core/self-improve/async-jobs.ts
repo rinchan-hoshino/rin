@@ -3,7 +3,6 @@ import fssync from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
 
 import lockfile from "proper-lockfile";
 
@@ -985,18 +984,22 @@ function hasQueuedSelfImproveJobs(agentDir: string) {
   }
 }
 
-export function spawnQueuedMemoryWorker(agentDir: string) {
+export function spawnQueuedMemoryWorker(
+  agentDir: string,
+  options: { workerPath: string },
+) {
   const resolvedAgentDir = resolveAgentDir(agentDir);
-  if (!resolvedAgentDir || !hasQueuedSelfImproveJobs(resolvedAgentDir)) {
+  const workerPath = safeString(options.workerPath).trim();
+  if (
+    !resolvedAgentDir ||
+    !workerPath ||
+    !hasQueuedSelfImproveJobs(resolvedAgentDir)
+  ) {
     return false;
   }
   const existing = queuedMemoryWorkers.get(resolvedAgentDir);
   if (existing && existing.exitCode === null && !existing.killed) return false;
 
-  const workerPath = path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "worker.js",
-  );
   if (!fssync.existsSync(workerPath)) return false;
   const child = spawn(
     process.execPath,
@@ -1021,11 +1024,13 @@ export function spawnQueuedMemoryWorker(agentDir: string) {
 
 export function startQueuedMemoryWorkerSupervisor(
   agentDir: string,
-  options: { intervalMs?: number } = {},
+  options: { intervalMs?: number; workerPath: string },
 ) {
   const intervalMs = Math.max(10, Number(options.intervalMs) || 15_000);
   let stopped = false;
-  const wake = () => !stopped && spawnQueuedMemoryWorker(agentDir);
+  const wake = () =>
+    !stopped &&
+    spawnQueuedMemoryWorker(agentDir, { workerPath: options.workerPath });
   wake();
   const timer = setInterval(wake, intervalMs);
   timer.unref();

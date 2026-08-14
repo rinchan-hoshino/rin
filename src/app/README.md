@@ -1,33 +1,19 @@
 # app
 
-This directory is the product assembly layer.
-
-It intentionally contains only thin executable entrypoints and product-shell wiring.
+This directory is Rin's production executable and assembly boundary.
 
 ## Responsibilities
 
-- keep `src/core/` independently runnable and free of app-specific policy
-- provide app-specific executable entrypoints for:
-  - daemon
-  - worker
-  - TUI
-  - Chat
+- own physical process termination and user-facing startup diagnostics
+- wire executable arguments, signals, and dependencies into callable core runtimes
+- provide executable entrypoints for the CLI, installer, daemon, workers, TUI, migrations, and updater payloads
+- assemble app-specific capabilities around callable implementations from `src/core/`
 
-## Non-goals
+## Invariants
 
-- no RPC protocol logic
-- no session/runtime business logic
-- no duplicate implementation of core features
+- keep domain and protocol logic in `src/core/`
+- keep core modules callable from tests or alternate hosts
+- never make a core module terminate its importing process
+- keep `src/app/` as the only production executable boundary
 
-Those belong in `src/core/`.
-
-## Why there are still a few files here
-
-Because `core` must remain independently runnable.
-The app build still provides a few very small wrappers that only do product assembly:
-
-- `rin-daemon/daemon.ts` points the daemon at the app worker and assembles product-only capabilities
-- `rin-daemon/worker.ts` starts the shared core worker
-- `rin-tui/main.ts` starts the shared TUI launcher
-
-Builtin Rin capabilities are now owned and registered from `src/core/`.
+Builtin Rin capabilities remain implemented and registered from `src/core/`.

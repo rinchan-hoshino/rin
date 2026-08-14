@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { cancel, confirm, isCancel, select, text } from "@clack/prompts";
 
 import { readJsonFileOrDefault } from "../platform/fs.js";
+import { requestProcessTermination } from "../platform/process-lifetime.js";
 import { canConnectDaemonSocket } from "../rin-daemon/client.js";
 import { defaultDaemonSocketPath } from "../rin-lib/common.js";
 import { PI_CODING_AGENT_DIR_ENV, RIN_DIR_ENV } from "../rin-lib/profile.js";
@@ -145,7 +146,7 @@ async function resolveExistingQuickRunProviderSetup(
 function ensureNotCancelled<T>(value: T | symbol): T {
   if (isCancel(value)) {
     cancel("Rin quick run cancelled.");
-    process.exit(1);
+    requestProcessTermination(1);
   }
   return value as T;
 }
@@ -266,12 +267,13 @@ async function launchQuickRunTui(plan: {
 
   let daemon: ChildProcess | undefined;
   let tui: ChildProcess | undefined;
+  let exitCode = 0;
   let resolveShutdown: ((trigger: string) => void) | undefined;
   const shutdownRequested = new Promise<string>((resolve) => {
     resolveShutdown = resolve;
   });
   const cleanupShutdownTrigger = waitForQuickRunShutdownTrigger((trigger) => {
-    process.exitCode = exitCodeFromShutdownTrigger(trigger);
+    exitCode = exitCodeFromShutdownTrigger(trigger);
     resolveShutdown?.(trigger);
     void stopQuickRunChildren(tui, daemon);
   });
@@ -294,12 +296,13 @@ async function launchQuickRunTui(plan: {
         signal: null,
       })),
     ]);
-    if (result.signal) process.exitCode = exitCodeFromSignal(result.signal);
-    else process.exitCode = result.code ?? 0;
+    if (result.signal) exitCode = exitCodeFromSignal(result.signal);
+    else exitCode = result.code ?? 0;
   } finally {
     cleanupShutdownTrigger();
     await stopQuickRunChildren(tui, daemon);
   }
+  return exitCode;
 }
 
 async function prepareQuickRunInstallPlan() {
@@ -354,5 +357,5 @@ export async function runQuickRun() {
     },
   );
 
-  await launchQuickRunTui(plan);
+  return await launchQuickRunTui(plan);
 }

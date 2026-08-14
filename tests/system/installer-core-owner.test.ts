@@ -12,8 +12,6 @@ const execFileAsync = promisify(execFile);
 const registerFixture = path.resolve(
   "tests/support/register-installer-core-owner-fixture.ts",
 );
-const entrypoint = path.resolve("dist/core/rin-install/main.js");
-
 const childScript = String.raw`
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -148,36 +146,6 @@ test("installer core orchestrates apply, deployment, and local install system pa
     assert.equal(summary.events > 40, true);
     assert.equal(summary.updater, 1);
     assert.equal(result.stderr, "");
-
-    for (const [argv, scenario, expected] of [
-      [["--quick-run", "--update"], {}, "--update"],
-    ] as const) {
-      await assert.rejects(
-        () =>
-          execFileAsync(
-            process.execPath,
-            [
-              "--import",
-              "tsx",
-              "--import",
-              registerFixture,
-              entrypoint,
-              ...argv,
-            ],
-            {
-              env: {
-                ...sandbox.env,
-                RIN_TEST_INSTALLER_SCENARIO: JSON.stringify(scenario),
-              },
-            },
-          ),
-        (error: any) => {
-          assert.equal(error.code, 1);
-          assert.match(`${error.stdout}${error.stderr}`, new RegExp(expected));
-          return true;
-        },
-      );
-    }
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { fileURLToPath } from "node:url";
+
 /**
  * App worker entrypoint.
  *
@@ -8,7 +10,10 @@ import { startWorkerProcess } from "../../core/rin-daemon/worker.js";
 import { formatRuntimeErrorForUser } from "../../core/presentation/error.js";
 
 async function main() {
-  await startWorkerProcess();
+  await startWorkerProcess({
+    executionPath: fileURLToPath(import.meta.url),
+    terminateProcess: (code) => process.exit(code),
+  });
 }
 
 main().catch((error: any) => {

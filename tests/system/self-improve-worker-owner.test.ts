@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { createTestSandbox } from "../support/test-sandbox.js";
 
 const execFileAsync = promisify(execFile);
-const entrypoint = path.resolve("dist/core/self-improve/worker.js");
+const entrypoint = path.resolve("dist/app/rin-daemon/self-improve-worker.js");
 
 async function runWorker(args: string[], env: NodeJS.ProcessEnv = {}) {
   return await execFileAsync(process.execPath, [entrypoint, ...args], {

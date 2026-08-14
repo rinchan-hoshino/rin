@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { printRunHelp, shouldRunNonInteractive } from "./run-lite.js";
 import {
   hasSubcommandHelpFlag,
@@ -212,8 +211,10 @@ export async function startRinCli() {
     shouldDelegateCandidate &&
     launchModule.shouldDelegateCrossUserCli(preliminaryParsed)
   ) {
-    await launchModule.delegateRinCliToTarget(preliminaryParsed, strippedArgv);
-    return;
+    return await launchModule.delegateRinCliToTarget(
+      preliminaryParsed,
+      strippedArgv,
+    );
   }
 
   const { tryRunPiCliCommand } = await import("./pi-command-adapter.js");
@@ -244,16 +245,14 @@ export async function startRinCli() {
     loadSessionManager: loaderModule.loadRinSessionManagerModule,
     createSession: runtimeModule.createConfiguredAgentSession,
   };
-  if (
+  const extensionCommandExitCode =
     await extensionCommandAdapter.tryRunExtensionCommandCli({
       argv: strippedArgv,
       stdout: process.stdout,
       stderr: process.stderr,
       dependencies: extensionCommandDependencies,
-    })
-  ) {
-    return;
-  }
+    });
+  if (extensionCommandExitCode !== null) return extensionCommandExitCode;
 
   const command = candidateCommand;
   if (!command) {
@@ -320,9 +319,7 @@ export async function startRinCli() {
       await import("../rin-targets/runner.js");
     const target = resolveTargetForName(parsed.targetName);
     if (!target) throw new Error(`rin_target_not_found:${parsed.targetName}`);
-    const status = runRinOnTarget(target, rawArgv);
-    process.exitCode = status;
-    return;
+    return runRinOnTarget(target, rawArgv);
   }
 
   if (parsed.command === "update") {
@@ -375,5 +372,5 @@ export async function startRinCli() {
   }
 
   const { launchDefaultRin } = await import("./launch.js");
-  await launchDefaultRin(parsed);
+  return await launchDefaultRin(parsed);
 }

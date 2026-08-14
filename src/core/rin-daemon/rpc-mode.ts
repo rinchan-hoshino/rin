@@ -2,6 +2,10 @@ import {
   extractPiContinuableToolCallIds,
   extractPiContinuableToolCallParts,
 } from "../pi/tool-continuation.js";
+import {
+  requestProcessTermination,
+  type ProcessTermination,
+} from "../platform/process-lifetime.js";
 import { parseJsonl } from "../rin-lib/common.js";
 import { createInterruptedToolResultMessage } from "../rin-lib/interruption.js";
 import { fail, ok } from "../rin-lib/rpc.js";
@@ -743,9 +747,11 @@ export async function runCustomRpcMode(
   runtimeOrSession: any,
   deps: {
     SessionManager: any;
+    terminateProcess?: ProcessTermination;
   },
 ) {
   const { SessionManager } = deps;
+  const terminateProcess = deps.terminateProcess ?? requestProcessTermination;
   const runtime =
     runtimeOrSession && runtimeOrSession.session
       ? runtimeOrSession
@@ -1856,7 +1862,7 @@ export async function runCustomRpcMode(
             } catch {}
             await runtime.dispose();
             output(done(id, type, { shutdown: true }));
-            return process.exit(0);
+            return terminateProcess(0);
           },
           { invalidate: true },
         );
@@ -1874,7 +1880,7 @@ export async function runCustomRpcMode(
             } catch {}
             session.dispose();
             output(done(id, type, { sleeping: true }));
-            return process.exit(0);
+            return terminateProcess(0);
           },
           { invalidate: true },
         );

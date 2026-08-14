@@ -1,8 +1,6 @@
-#!/usr/bin/env node
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 
 import {
   applyRuntimeProfileEnvironment,
@@ -561,9 +559,7 @@ export async function startChatBridge(
   >();
   let inboxPollTimer: NodeJS.Timeout | null = null;
   let outboxPollTimer: NodeJS.Timeout | null = null;
-  const terminalRecoveryClient =
-    options.frontendClientFactory?.() ||
-    (isDirectEntry ? new RinDaemonFrontendClient() : null);
+  const terminalRecoveryClient = options.frontendClientFactory?.() || null;
   let terminalListInFlight: Promise<void> | null = null;
   const terminalProjectionInFlight = new Set<string>();
   let outboxHistoryCleanupTimer: NodeJS.Timeout | null = null;
@@ -1967,16 +1963,6 @@ export async function startChatBridge(
     };
   };
 
-  if (!options.hosted) {
-    const handleSignal = (code = 0) => {
-      void stop().finally(() => {
-        process.exit(code);
-      });
-    };
-    process.on("SIGINT", () => handleSignal(0));
-    process.on("SIGTERM", () => handleSignal(0));
-  }
-
   return {
     app,
     options,
@@ -1989,18 +1975,4 @@ export async function startChatBridge(
     terminateTurn,
     evalBridge,
   };
-}
-
-async function main() {
-  await startChatBridge();
-}
-
-const isDirectEntry =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (isDirectEntry) {
-  main().catch((error: any) => {
-    logger.error(String(error?.message || error || "rin_chat_failed"));
-    process.exit(1);
-  });
 }

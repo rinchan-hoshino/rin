@@ -140,7 +140,7 @@ test("daemon worker core consumes one-shot resource options and selects each ses
     assert.deepEqual(JSON.parse(result.stdout), { configured: 8, rpc: 8 });
     assert.equal(result.stderr, "");
 
-    const entrypoint = path.resolve("dist/core/rin-daemon/worker.js");
+    const entrypoint = path.resolve("dist/app/rin-daemon/worker.js");
     const executionEntrypoint = [
       "--import",
       "tsx",
@@ -172,7 +172,7 @@ test("daemon worker core consumes one-shot resource options and selects each ses
         }),
       (error: any) => {
         assert.equal(error.code, 1);
-        assert.match(error.stderr, /rin_worker_failed/);
+        assert.match(error.stderr, /Rin worker failed before it could start/);
         return true;
       },
     );
@@ -187,7 +187,7 @@ test("daemon worker process keeps RPC in a supervisor and exits its execution ch
   );
   const sandbox = await createTestSandbox(root);
   try {
-    const entrypoint = path.resolve("dist/core/rin-daemon/worker.js");
+    const entrypoint = path.resolve("dist/app/rin-daemon/worker.js");
     const resourceOptionsFile = path.join(root, "resource-options.json");
     await fs.writeFile(
       resourceOptionsFile,

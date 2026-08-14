@@ -50,15 +50,15 @@ export async function listExtensionCliCommands(
 
 export async function tryRunExtensionCommandCli(
   options: ExtensionCommandCliOptions,
-): Promise<boolean> {
+): Promise<number | null> {
   const name = String(options.argv[0] || "").trim();
-  if (!name || name.startsWith("-")) return false;
+  if (!name || name.startsWith("-")) return null;
   const stdout = options.stdout;
   const stderr = options.stderr;
   const { session, runtime } = await createExtensionCommandSession(options);
   try {
     const command = session.extensionRunner?.getCommand?.(name);
-    if (!command) return false;
+    if (!command) return null;
     const output: string[] = [];
     session.extensionRunner.setUIContext({
       hasUI: false,
@@ -71,11 +71,10 @@ export async function tryRunExtensionCommandCli(
       await session.prompt(`/${options.argv.join(" ")}`, { source: "cli" });
     } catch (error) {
       stderr.write(`${String((error as Error)?.message || error)}\n`);
-      process.exitCode = 1;
-      return true;
+      return 1;
     }
     if (output.length > 0) stdout.write(`${output.join("\n")}\n`);
-    return true;
+    return 0;
   } finally {
     await runtime.dispose?.();
   }

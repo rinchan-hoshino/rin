@@ -79,7 +79,7 @@ try {
   await run(["usage", "--days", "7"]);
   globalThis.__rinMainOwnerCrossUser = false;
   await run(["target", "list"]);
-  await run(["version", "--target=remote"]);
+  assert.equal(await run(["version", "--target=remote"]), 23);
   await assert.rejects(() => run(["status", "--target=missing"]), /rin_target_not_found:missing/);
   for (const command of [
     "update", "start", "stop", "restart", "doctor", "status", "tasks",
@@ -108,8 +108,7 @@ assert.deepEqual(
   logs.filter((value) => value === "9.8.7-owner"),
   ["9.8.7-owner", "9.8.7-owner"],
 );
-assert.equal(process.exitCode, 23);
-process.exitCode = 0;
+assert.equal(process.exitCode, undefined);
 const names = globalThis.__rinMainOwnerEvents.map(([name]) => name);
 for (const expected of [
   "print-help", "extension-command-list", "delegate-target", "run", "target", "resolve-target", "run-target",

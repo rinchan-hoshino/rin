@@ -1,3 +1,4 @@
+import { requestProcessTermination } from "../platform/process-lifetime.js";
 import { formatRuntimeErrorForFrontendDisplay } from "../presentation/error.js";
 
 export type RinFrontendEntrypointStart = () => Promise<unknown> | unknown;
@@ -12,7 +13,7 @@ export function runFrontendEntrypoint(
   host: RinFrontendEntrypointHost = {},
 ) {
   const stderr = host.stderr ?? console;
-  const exit = host.exit ?? process.exit.bind(process);
+  const exit = host.exit ?? requestProcessTermination;
   return Promise.resolve()
     .then(start)
     .catch((error: unknown) => {

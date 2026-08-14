@@ -139,18 +139,6 @@ test("installer consumes external apply plans with owned handoff cleanup", () =>
   assert.match(branch, /cleanupConsumedFinalizeInstallPlan/);
 });
 
-test("runFinalizeInstallPlanInChild wires parent signal forwarding", () => {
-  const source = fs.readFileSync(
-    path.join(rootDir, "src", "core", "rin-install", "apply-plan.ts"),
-    "utf8",
-  );
-
-  assert.match(source, /FORWARDED_CHILD_SIGNALS/);
-  assert.match(source, /process\.once\(signal, handler\)/);
-  assert.match(source, /child\.kill\(signal\)/);
-  assert.match(source, /process\.exit\(signalExitCode/);
-});
-
 test("runFinalizeInstallPlanInChild surfaces child error output on failure", async () => {
   await assert.rejects(
     applyPlan.runFinalizeInstallPlanInChild(

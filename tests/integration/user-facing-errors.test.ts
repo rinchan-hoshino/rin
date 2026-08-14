@@ -254,10 +254,10 @@ function collectRinOwnedErrorMarkers() {
 
 test("tui entrypoints delegate caught-error display to the shared frontend boundary", () => {
   const repoRoot = path.resolve(import.meta.dirname, "../..");
-  const entrypoints = ["src/app/rin-tui/main.ts", "src/core/rin-tui/main.ts"];
+  const entrypoints = ["src/app/rin-tui/main.ts"];
   for (const relative of entrypoints) {
     const text = fs.readFileSync(path.join(repoRoot, relative), "utf8");
-    assert.match(text, /runFrontendEntrypoint\(startTui\)/);
+    assert.match(text, /runFrontendEntrypoint\(startTui,/);
     assert.match(text, /rin-frontend-sdk\/entrypoint\.js/);
     assert.doesNotMatch(text, /formatRuntimeErrorFor/);
     assert.doesNotMatch(text, /console\.error\(/);

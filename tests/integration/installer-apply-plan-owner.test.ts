@@ -294,7 +294,7 @@ test("installer apply-plan forwards parent termination with the shell exit code"
           return child;
         },
       }),
-      /exit:130/,
+      /rin_process_termination_requested:130/,
     );
     assert.equal(killedWith, "SIGINT");
 
@@ -314,7 +314,7 @@ test("installer apply-plan forwards parent termination with the shell exit code"
           return child;
         },
       }),
-      /exit:1/,
+      /rin_process_termination_requested:1/,
     );
   } finally {
     (process as any).exit = originalExit;

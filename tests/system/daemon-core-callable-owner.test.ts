@@ -42,71 +42,40 @@ async function waitForSocket(socketPath: string, child: ChildProcess) {
   throw new Error(`daemon_socket_timeout:${socketPath}`);
 }
 
-async function startOwnerDaemon(
-  root: string,
-  options: {
-    custom?: boolean;
-    cliStyle?: "equals" | "separate" | "positional";
-    env?: NodeJS.ProcessEnv;
-  } = {},
-): Promise<RunningDaemon> {
+async function startOwnerDaemon(root: string): Promise<RunningDaemon> {
   const sandbox = await createTestSandbox(root);
   const socketPath = path.join(
     os.tmpdir(),
     `rin-do-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.sock`,
   );
-  let executable = daemonEntry;
-  let args: string[];
-  if (options.custom) {
-    executable = path.join(root, `launcher-${Date.now()}-${Math.random()}.mjs`);
-    await fs.writeFile(
-      executable,
-      `import { startDaemon } from ${JSON.stringify(daemonUrl)};\n` +
-        `await startDaemon({\n` +
-        `  socketPath: ${JSON.stringify(socketPath)},\n` +
-        `  workerPath: ${JSON.stringify(path.join(root, "owner-worker"))},\n` +
-        `  additionalExtensionPaths: ["/owner/extensions"],\n` +
-        `  workerGcIdleMs: 17, workerSweepIntervalMs: 19, shutdownGraceMs: 40,\n` +
-        `  chat: { send: async (payload) => payload },\n` +
-        `  getExtraStatus: async () => ({ extraOwner: true }),\n` +
-        `  additionalCommandRouter: async (command) => command.type === "owner_local" ? { data: { local: true } } : command.type === "owner_local_error" ? { success: false, error: "owner-local-error" } : undefined,\n` +
-        `  onShutdown: async () => {},\n` +
-        `  registerLocalFrontendConnector: (connect) => { const socket = connect(); socket.on("data", () => socket.destroy()); socket.write(JSON.stringify({ id: "local-status", type: "daemon_status" }) + "\\n"); },\n` +
-        `});\n`,
-    );
-    args = ["--import", "tsx", "--import", registerFixture, executable];
-  } else {
-    const style = options.cliStyle || "separate";
-    const daemonArgs =
-      style === "equals"
-        ? [
-            `--socket=${socketPath}`,
-            `--worker=${path.join(root, "owner-worker")}`,
-            "--shutdown-grace-ms=30",
-          ]
-        : style === "positional"
-          ? [socketPath, "--shutdown-grace-ms", "not-a-number"]
-          : [
-              "--socket",
-              socketPath,
-              "--worker",
-              path.join(root, "owner-worker"),
-              "--shutdown-grace-ms",
-              "30",
-            ];
-    args = [
-      "--import",
-      "tsx",
-      "--import",
-      registerFixture,
-      executable,
-      ...daemonArgs,
-    ];
-  }
+  const executable = path.join(
+    root,
+    `launcher-${Date.now()}-${Math.random()}.mjs`,
+  );
+  await fs.writeFile(
+    executable,
+    `import { startDaemon } from ${JSON.stringify(daemonUrl)};\n` +
+      `const daemon = await startDaemon({\n` +
+      `  socketPath: ${JSON.stringify(socketPath)},\n` +
+      `  workerPath: ${JSON.stringify(path.join(root, "owner-worker"))},\n` +
+      `  selfImproveWorkerPath: ${JSON.stringify(path.join(root, "owner-self-improve-worker"))},\n` +
+      `  additionalExtensionPaths: ["/owner/extensions"],\n` +
+      `  workerGcIdleMs: 17, workerSweepIntervalMs: 19, shutdownGraceMs: 40,\n` +
+      `  chat: { send: async (payload) => payload },\n` +
+      `  getExtraStatus: async () => ({ extraOwner: true }),\n` +
+      `  additionalCommandRouter: async (command) => command.type === "owner_local" ? { data: { local: true } } : command.type === "owner_local_error" ? { success: false, error: "owner-local-error" } : undefined,\n` +
+      `  onShutdown: async () => {},\n` +
+      `  registerLocalFrontendConnector: (connect) => { const socket = connect(); socket.on("data", () => socket.destroy()); socket.write(JSON.stringify({ id: "local-status", type: "daemon_status" }) + "\\n"); },\n` +
+      `});\n` +
+      `let stopping = false;\n` +
+      `const shutdown = async () => { if (stopping) return; stopping = true; await daemon.shutdown(); process.exit(0); };\n` +
+      `process.on("SIGINT", () => void shutdown());\n` +
+      `process.on("SIGTERM", () => void shutdown());\n`,
+  );
+  const args = ["--import", "tsx", "--import", registerFixture, executable];
   const child = spawn(process.execPath, args, {
     env: {
       ...sandbox.env,
-      ...options.env,
       RIN_TEST_DAEMON_CWD: root,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -171,13 +140,13 @@ function connectRpc(socketPath: string) {
   return { socket, next };
 }
 
-test("core daemon routes the complete system-owned RPC and lifecycle contract", async () => {
+test("callable core daemon routes the complete system-owned RPC while its host owns shutdown", async () => {
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-daemon-core-owner-"),
   );
   let daemon: RunningDaemon | undefined;
   try {
-    daemon = await startOwnerDaemon(root, { custom: true });
+    daemon = await startOwnerDaemon(root);
     const rpc = connectRpc(daemon.socketPath);
     await new Promise<void>((resolve, reject) => {
       rpc.socket.once("connect", resolve);
@@ -427,11 +396,6 @@ test("core daemon routes the complete system-owned RPC and lifecycle contract", 
     await stopOwnerDaemon(daemon);
     assert.match(daemon.stdout(), /rin daemon listening on/);
     daemon = undefined;
-
-    for (const cliStyle of ["equals", "separate", "positional"] as const) {
-      const direct = await startOwnerDaemon(root, { cliStyle });
-      await stopOwnerDaemon(direct);
-    }
   } finally {
     if (daemon?.child.exitCode === null) daemon.child.kill("SIGKILL");
     await fs.rm(root, { recursive: true, force: true });

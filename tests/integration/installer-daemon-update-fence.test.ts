@@ -233,6 +233,11 @@ test("updater fail-stops when a ready holder loses its kernel lease", async () =
   );
   const script = String.raw`
 import { pathToFileURL } from "node:url";
+process.on("uncaughtException", (error) => {
+  if (Number.isInteger(error?.exitCode)) process.exit(error.exitCode);
+  console.error(error);
+  process.exit(1);
+});
 const [holderModulePath, lockModulePath, agentDir, socketPath, targetUser, nodePath] = process.argv.slice(1);
 const { acquireTargetDaemonUpdateFence } = await import(pathToFileURL(holderModulePath).href);
 await acquireTargetDaemonUpdateFence({ targetUser, nodePath, lockModulePath, agentDir, socketPath });

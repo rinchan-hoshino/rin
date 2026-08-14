@@ -9,12 +9,12 @@ import { promisify } from "node:util";
 import { createTestSandbox } from "../support/test-sandbox.js";
 
 const execFileAsync = promisify(execFile);
-const entrypoint = path.resolve("dist/core/rin-tui/main.js");
+const entrypoint = path.resolve("dist/app/rin-tui/main.js");
 const failureRegister = path.resolve(
   "tests/support/register-entrypoint-failure.ts",
 );
 
-test("core TUI entrypoint delegates failures to the frontend display boundary", async () => {
+test("app TUI entrypoint delegates failures to the frontend display boundary", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-tui-entry-"));
   const sandbox = await createTestSandbox(root);
   try {

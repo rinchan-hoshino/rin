@@ -94,9 +94,8 @@ async function withDaemon(workerScript, options, fn) {
   const child = spawn(
     process.execPath,
     [
-      path.join(rootDir, "dist", "core", "rin-daemon", "daemon.js"),
+      path.join(rootDir, "tests", "support", "daemon-process-host.mjs"),
       socketPath,
-      "--worker",
       workerPath,
     ],
     {

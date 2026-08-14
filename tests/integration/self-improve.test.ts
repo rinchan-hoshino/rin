@@ -1259,6 +1259,7 @@ test("daemon-owned supervisor retries queued distillation after an active lock c
 
     const supervisor = asyncJobs.startQueuedMemoryWorkerSupervisor(root, {
       intervalMs: 25,
+      workerPath: path.resolve("dist/app/rin-daemon/self-improve-worker.js"),
     });
     try {
       await new Promise((resolve) => setTimeout(resolve, 500));

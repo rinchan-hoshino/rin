@@ -55,7 +55,7 @@ const replacements: Record<string, string> = {
   "dist/core/rin/status.js": `export async function runStatusInternal(args){globalThis.__rinMainOwnerEvents.push(["status-internal",args])} export async function runStatus(parsed,args){globalThis.__rinMainOwnerEvents.push(["status",parsed.command,args])}`,
   "dist/core/rin/tasks.js": `export async function runTasksInternal(args){globalThis.__rinMainOwnerEvents.push(["tasks-internal",args])} export async function runTasks(parsed,args){globalThis.__rinMainOwnerEvents.push(["tasks",parsed.command,args])}`,
   "dist/core/rin/run.js": `export async function runNonInteractive(parsed,args){globalThis.__rinMainOwnerEvents.push(["run",parsed.command,args])}`,
-  "dist/core/rin/extension-command-adapter.js": `export async function tryRunExtensionCommandCli(options){globalThis.__rinMainOwnerEvents.push(["extension-command",options.argv]); return options.argv[0] === "ext-owner"} export async function listExtensionCliCommands(){globalThis.__rinMainOwnerEvents.push(["extension-command-list"]); return [["usage","Show ChatGPT Codex usage and quota"]]}`,
+  "dist/core/rin/extension-command-adapter.js": `export async function tryRunExtensionCommandCli(options){globalThis.__rinMainOwnerEvents.push(["extension-command",options.argv]); return options.argv[0] === "ext-owner" ? 0 : null} export async function listExtensionCliCommands(){globalThis.__rinMainOwnerEvents.push(["extension-command-list"]); return [["usage","Show ChatGPT Codex usage and quota"]]}`,
   "dist/core/rin/targets.js": `export async function runTargetCommand(args){globalThis.__rinMainOwnerEvents.push(["target",args])}`,
   "dist/core/rin-targets/runner.js": `
     export function resolveTargetForName(name){globalThis.__rinMainOwnerEvents.push(["resolve-target",name]); return name === "missing" ? undefined : {name};}
@@ -67,8 +67,8 @@ const replacements: Record<string, string> = {
   "dist/core/rin/versions.js": `export function runVersions(parsed){globalThis.__rinMainOwnerEvents.push(["versions",parsed.command])} export async function runRollback(parsed){globalThis.__rinMainOwnerEvents.push(["rollback",parsed.command])}`,
   "dist/core/rin/launch.js": `
     export function shouldDelegateCrossUserCli(){return Boolean(globalThis.__rinMainOwnerCrossUser)}
-    export async function delegateRinCliToTarget(parsed, argv){globalThis.__rinMainOwnerEvents.push(["delegate-target",parsed.targetUser,argv])}
-    export async function launchDefaultRin(parsed){globalThis.__rinMainOwnerEvents.push(["launch",parsed.command,parsed.maintenanceMode,parsed.passthrough])}
+    export async function delegateRinCliToTarget(parsed, argv){globalThis.__rinMainOwnerEvents.push(["delegate-target",parsed.targetUser,argv]); return 0}
+    export async function launchDefaultRin(parsed){globalThis.__rinMainOwnerEvents.push(["launch",parsed.command,parsed.maintenanceMode,parsed.passthrough]); return 0}
   `,
 };
 

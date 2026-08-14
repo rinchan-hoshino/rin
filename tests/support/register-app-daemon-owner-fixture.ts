@@ -51,7 +51,7 @@ const replacements: Record<string, string> = {
   `,
   "dist/core/rin-daemon/daemon.js": `
     export async function startDaemon(options) {
-      globalThis.__rinAppDaemonOwnerEvents.push(["daemon-start", options.socketPath, options.workerPath]);
+      globalThis.__rinAppDaemonOwnerEvents.push(["daemon-start", options.socketPath, options.workerPath, options.selfImproveWorkerPath]);
       if (process.env.RIN_TEST_APP_DAEMON_MODE === "daemon-fail") {
         throw new Error("owner daemon failed");
       }
@@ -70,6 +70,7 @@ const replacements: Record<string, string> = {
       const unknown = await options.additionalCommandRouter({ type: "owner-unknown" });
       await options.onShutdown();
       console.log(JSON.stringify({ socketPath: options.socketPath, starting, ready, routed, unknown: unknown ?? null, extensionApi: options.chatExtensionApi, events: globalThis.__rinAppDaemonOwnerEvents }));
+      return { shutdown: options.onShutdown };
     }
   `,
   "dist/core/rin-daemon/extensions.js": `

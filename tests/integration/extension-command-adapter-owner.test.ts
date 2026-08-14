@@ -76,7 +76,7 @@ function harness(
 
 test("extension command adapter exposes Pi extension commands as rin CLI commands", async () => {
   const run = harness(true);
-  assert.equal(await tryRunExtensionCommandCli(run.options), true);
+  assert.equal(await tryRunExtensionCommandCli(run.options), 0);
   assert.deepEqual(run.finish(), {
     stdout: ["Codex usage history\n"],
     stderr: [],
@@ -115,7 +115,7 @@ test("extension command catalog normalizes fallback metadata and sorts names", a
 
 test("extension command adapter leaves unknown commands to Rin parsing", async () => {
   const run = harness(false);
-  assert.equal(await tryRunExtensionCommandCli(run.options), false);
+  assert.equal(await tryRunExtensionCommandCli(run.options), null);
   assert.deepEqual(run.finish(), {
     stdout: [],
     stderr: [],
@@ -127,15 +127,15 @@ test("extension command adapter leaves unknown commands to Rin parsing", async (
 
 test("extension command adapter reports extension command failures", async () => {
   const run = harness(true, true);
-  assert.equal(await tryRunExtensionCommandCli(run.options), true);
+  assert.equal(await tryRunExtensionCommandCli(run.options), 1);
   const result = run.finish();
   assert.deepEqual(result.stderr, ["usage failed\n"]);
-  assert.equal(result.exitCode, 1);
+  assert.equal(result.exitCode, undefined);
   assert.equal(result.disposed, true);
 });
 
 test("extension command adapter ignores an empty command without loading resources", async () => {
-  assert.equal(await tryRunExtensionCommandCli({ argv: [] }), false);
+  assert.equal(await tryRunExtensionCommandCli({ argv: [] }), null);
 });
 
 test("extension command adapter ignores wrapper flags", async () => {
@@ -146,6 +146,6 @@ test("extension command adapter ignores wrapper flags", async () => {
       stderr: process.stderr,
       dependencies: {} as any,
     }),
-    false,
+    null,
   );
 });

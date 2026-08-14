@@ -19,6 +19,12 @@
       "tests": ["tests/system/hosted-chat-service.test.ts"]
     },
     {
+      "source": "src/app/rin-daemon/self-improve-worker.ts",
+      "built": "dist/app/rin-daemon/self-improve-worker.js",
+      "suite": "system",
+      "tests": ["tests/system/self-improve-worker-owner.test.ts"]
+    },
+    {
       "source": "src/app/rin-daemon/worker.ts",
       "built": "dist/app/rin-daemon/worker.js",
       "suite": "system",
@@ -67,7 +73,10 @@
       "source": "src/app/rin-tui/main.ts",
       "built": "dist/app/rin-tui/main.js",
       "suite": "system",
-      "tests": ["tests/system/install-to-tui-user-flow.test.ts"]
+      "tests": [
+        "tests/system/install-to-tui-user-flow.test.ts",
+        "tests/system/tui-app-entrypoint-owner.test.ts"
+      ]
     },
     {
       "source": "src/app/rin/main.ts",
@@ -470,7 +479,7 @@
       "source": "src/core/rin-daemon/daemon.ts",
       "built": "dist/core/rin-daemon/daemon.js",
       "suite": "system",
-      "tests": ["tests/system/daemon-core-entrypoint-owner.test.ts"]
+      "tests": ["tests/system/daemon-core-callable-owner.test.ts"]
     },
     {
       "source": "src/core/rin-daemon/extensions.ts",
@@ -939,12 +948,6 @@
       "suite": "integration",
       "tests": ["tests/integration/rin-tui-launcher-owner.test.ts"],
       "preloads": ["tests/support/register-tui-launcher-owner-fixture.ts"]
-    },
-    {
-      "source": "src/core/rin-tui/main.ts",
-      "built": "dist/core/rin-tui/main.js",
-      "suite": "system",
-      "tests": ["tests/system/tui-core-entrypoint-owner.test.ts"]
     },
     {
       "source": "src/core/rin-tui/runtime.ts",

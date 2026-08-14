@@ -1,7 +1,6 @@
-#!/usr/bin/env node
 import fs from "node:fs";
-import { fileURLToPath, pathToFileURL } from "node:url";
 
+import type { ProcessTermination } from "../platform/process-lifetime.js";
 import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
 import { createConfiguredAgentSession } from "../rin-lib/runtime.js";
 import {
@@ -102,7 +101,10 @@ function createInitialWorkerSessionManager(
   return sessionManager;
 }
 
-export async function startWorker(options: WorkerResourceOptions = {}) {
+export async function startWorker(
+  options: WorkerResourceOptions = {},
+  host: { terminateProcess?: ProcessTermination } = {},
+) {
   const sessionManagerModule = await loadRinSessionManagerModule();
   const runtimeProfile = resolveRuntimeProfile();
   const mergedOptions = { ...readWorkerResourceOptions(), ...options };
@@ -138,6 +140,7 @@ export async function startWorker(options: WorkerResourceOptions = {}) {
   });
   await runCustomRpcMode(runtime, {
     SessionManager: sessionManagerModule.SessionManager,
+    terminateProcess: host.terminateProcess,
   });
 }
 
@@ -145,11 +148,14 @@ function hasArg(argv: string[], name: string) {
   return argv.some((value) => value === name);
 }
 
-export async function startWorkerProcess() {
+export async function startWorkerProcess(host: {
+  executionPath: string;
+  terminateProcess: ProcessTermination;
+}) {
   const argv = process.argv.slice(2);
   const resourceOptions = readWorkerResourceOptions(argv);
   if (hasArg(argv, "--execution-plane")) {
-    await startWorker(resourceOptions);
+    await startWorker(resourceOptions, host);
     return;
   }
   const shutdown = new AbortController();
@@ -158,24 +164,11 @@ export async function startWorkerProcess() {
   process.once("SIGINT", requestShutdown);
   try {
     await runWorkerSupervisor(resourceOptions, {
-      executionPath: fileURLToPath(import.meta.url),
+      executionPath: host.executionPath,
       signal: shutdown.signal,
     });
   } finally {
     process.off("SIGTERM", requestShutdown);
     process.off("SIGINT", requestShutdown);
   }
-}
-
-const isDirectEntry =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-
-if (isDirectEntry) {
-  startWorkerProcess().catch((error: any) => {
-    const message = String(
-      error && error.message ? error.message : error || "rin_worker_failed",
-    );
-    console.error(message);
-    process.exit(1);
-  });
 }

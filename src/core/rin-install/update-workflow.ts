@@ -8,6 +8,7 @@ import {
   createRinHttpTransport,
   discardRinHttpResponseBody,
 } from "../http/transport.js";
+import { requestProcessTermination } from "../platform/process-lifetime.js";
 import { safeString } from "../text-utils.js";
 import { shellQuote } from "../rin-lib/system.js";
 import {
@@ -113,8 +114,12 @@ export async function runUpdateCommand(
       child.once("error", reject);
       child.once("exit", (code, signal) => resolve({ code, signal }));
     });
-    if (forwardedSignal) process.exit(signalExitCode(forwardedSignal));
-    if (result.signal) process.exit(signalExitCode(result.signal));
+    if (forwardedSignal) {
+      requestProcessTermination(signalExitCode(forwardedSignal));
+    }
+    if (result.signal) {
+      requestProcessTermination(signalExitCode(result.signal));
+    }
     if (result.code && result.code !== 0) {
       const error: any = new Error(`rin_update_command_failed:${result.code}`);
       error.status = result.code;

@@ -54,7 +54,9 @@ test("daemon preserves command identity when a local command throws", async () =
   await fs.writeFile(
     launcherPath,
     `import { startDaemon } from ${JSON.stringify(daemonModuleUrl)};\n` +
-      `await startDaemon({ socketPath: ${JSON.stringify(socketPath)}, additionalCommandRouter: async (command) => { if (command?.type === "diagnostic_failure") throw new Error("diagnostic_failure_detail"); } });\n`,
+      `const daemon = await startDaemon({ socketPath: ${JSON.stringify(socketPath)}, workerPath: ${JSON.stringify(launcherPath)}, selfImproveWorkerPath: ${JSON.stringify(launcherPath)}, additionalCommandRouter: async (command) => { if (command?.type === "diagnostic_failure") throw new Error("diagnostic_failure_detail"); } });\n` +
+      `const shutdown = async () => { await daemon.shutdown(); process.exit(0); };\n` +
+      `process.on("SIGINT", () => void shutdown()); process.on("SIGTERM", () => void shutdown());\n`,
   );
   const child = spawn(process.execPath, [launcherPath], {
     cwd: rootDir,
@@ -116,7 +118,9 @@ test("daemon bounds local teardown when a hosted shutdown hook never settles", a
   await fs.writeFile(
     launcherPath,
     `import { startDaemon } from ${JSON.stringify(daemonModuleUrl)};\n` +
-      `await startDaemon({ socketPath: ${JSON.stringify(socketPath)}, onShutdown: async () => await new Promise(() => {}) });\n`,
+      `const daemon = await startDaemon({ socketPath: ${JSON.stringify(socketPath)}, workerPath: ${JSON.stringify(launcherPath)}, selfImproveWorkerPath: ${JSON.stringify(launcherPath)}, onShutdown: async () => await new Promise(() => {}) });\n` +
+      `const shutdown = async () => { await daemon.shutdown(); process.exit(0); };\n` +
+      `process.on("SIGINT", () => void shutdown()); process.on("SIGTERM", () => void shutdown());\n`,
   );
   const child = spawn(process.execPath, [launcherPath], {
     cwd: rootDir,
@@ -156,7 +160,7 @@ test("daemon exits promptly on SIGTERM even with connected rpc clients", async (
   const socketPath = path.join(agentDir, "daemon.sock");
   const child = spawn(
     process.execPath,
-    [path.join(rootDir, "dist", "core", "rin-daemon", "daemon.js"), socketPath],
+    [path.join(rootDir, "dist", "app", "rin-daemon", "daemon.js"), socketPath],
     {
       cwd: rootDir,
       env: { ...process.env, RIN_DIR: agentDir },
@@ -193,11 +197,7 @@ test("daemon exits promptly on SIGTERM even with connected rpc clients", async (
       ),
     ]);
 
-    assert.equal(
-      result.code === 0 || result.signal === "SIGTERM",
-      true,
-      JSON.stringify(result),
-    );
+    assert.deepEqual(result, { code: 0, signal: null });
     assert.equal(client.destroyed, true);
   } catch (error) {
     throw new Error(`${error.message}\nstdout=${stdout}\nstderr=${stderr}`);

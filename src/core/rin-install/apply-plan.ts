@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
+import { ProcessTerminationRequest } from "../platform/process-lifetime.js";
 import { type InstalledReleaseInfo } from "../rin-lib/release.js";
 import { shellQuote } from "../rin-lib/system.js";
 
@@ -154,9 +155,17 @@ export async function runFinalizeInstallPlanInChild(
         for (const [registeredSignal, handler] of handlers) {
           process.off(registeredSignal, handler);
         }
-        if (forwardedSignal) process.exit(signalExitCode(forwardedSignal));
-        if (signal) process.exit(signalExitCode(signal));
-        else resolve(code ?? 1);
+        if (forwardedSignal) {
+          reject(
+            new ProcessTerminationRequest(signalExitCode(forwardedSignal)),
+          );
+          return;
+        }
+        if (signal) {
+          reject(new ProcessTerminationRequest(signalExitCode(signal)));
+          return;
+        }
+        resolve(code ?? 1);
       });
     });
 

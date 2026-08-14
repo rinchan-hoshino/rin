@@ -148,7 +148,7 @@ test("quick run prepares only sandbox state and launches temporary daemon then T
     );
     scenario.tuiCode = 7;
 
-    await quickRun.runQuickRun();
+    const exitCode = await quickRun.runQuickRun();
 
     assert.equal(quickRun.quickRunInstallDirForCurrentUser(home), installDir);
     const finalized = JSON.parse(
@@ -187,7 +187,7 @@ test("quick run prepares only sandbox state and launches temporary daemon then T
     assert.equal(spawns[0][4].env.PI_CODING_AGENT_DIR, installDir);
     assert.equal(spawns[0][4].env.RIN_QUICK_RUN, "1");
     assert.equal(spawns[0][4].env.RIN_SKIP_VERSION_CHECK, "1");
-    assert.equal(process.exitCode, 7);
+    assert.equal(exitCode, 7);
   });
 });
 
@@ -240,8 +240,7 @@ test("quick run rejects an occupied socket and a daemon that exits before readin
 test("quick run forwards TUI and shutdown signals and removes temporary listeners", async () => {
   await withQuickRunSandbox(async () => {
     scenario.tuiSignal = "SIGTERM";
-    await quickRun.runQuickRun();
-    assert.equal(process.exitCode, 143);
+    assert.equal(await quickRun.runQuickRun(), 143);
   });
 
   await withQuickRunSandbox(async () => {
@@ -256,9 +255,9 @@ test("quick run forwards TUI and shutdown signals and removes temporary listener
     scenario.holdTui = true;
     scenario.shutdownTrigger = "SIGHUP";
 
-    await quickRun.runQuickRun();
+    const exitCode = await quickRun.runQuickRun();
 
-    assert.equal(process.exitCode, 129);
+    assert.equal(exitCode, 129);
     for (const name of ["SIGINT", "SIGTERM", "SIGHUP"]) {
       assert.equal(process.listenerCount(name), beforeSignals[name]);
     }
@@ -273,8 +272,7 @@ test("quick run forwards TUI and shutdown signals and removes temporary listener
   await withQuickRunSandbox(async () => {
     scenario.holdTui = true;
     scenario.shutdownTrigger = "stdin";
-    await quickRun.runQuickRun();
-    assert.equal(process.exitCode, 129);
+    assert.equal(await quickRun.runQuickRun(), 129);
   });
 });
 
