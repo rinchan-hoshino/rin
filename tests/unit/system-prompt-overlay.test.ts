@@ -334,4 +334,6 @@ test("runtime preserves six structured prompt scenarios", async () => {
   );
   assert.match(actual.noTools, /Available tools:\n\(none\)/);
   assert.doesNotMatch(actual.noTools, /Use bash /);
+  assert.doesNotMatch(actual.noTools, /chatKey/);
+  assert.doesNotMatch(actual.noTools, /rin\.chat\.messages\.get/);
 });

@@ -21,6 +21,8 @@ export type PromptContextMeta = {
 };
 
 const PROMPT_CONTEXT_HEADER_MARKER = "runtime metadata: rin prompt context v1";
+const CHAT_QUOTE_GUIDANCE =
+  "- In chat input, `[quote:<message-id>]` is a lazy reference under the current `chatKey`; call `rin.chat.messages.get({ chatKey, messageId })` only when the request depends on it, and follow nested quote nodes only as needed.";
 
 function pad2(value: number) {
   return String(value).padStart(2, "0");
@@ -140,6 +142,8 @@ function formatChatSystemPromptBlock(
   if (chatName) lines.push(`- chat name: ${chatName}`);
   if (chatType) lines.push(`- chat type: ${chatType}`);
   appendRuntimeMetadata(lines, meta || {}, "- ");
+
+  if (chatKey) lines.push(CHAT_QUOTE_GUIDANCE);
 
   if (hasPromptHeaderContext) {
     lines.push(

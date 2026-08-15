@@ -94,7 +94,7 @@ test("chat prompt context omits privacy reminder when the chat does not require 
   );
 });
 
-test("chat prompt context leaves quote semantics in the rich message body", () => {
+test("chat-bound prompt context owns lazy quote lookup guidance", () => {
   const meta = {
     source: "chat-bridge",
     chatKey: "onebot/100:200",
@@ -109,10 +109,20 @@ test("chat prompt context leaves quote semantics in the rich message body", () =
 
   assert.equal(promptText.includes("reply to message id:"), false);
   assert.ok(promptText.endsWith("---\n[quote:m1]\nreplying"));
+  const unboundSystemBlock = formatPromptContextSystemPromptBlock({
+    source: "chat-bridge",
+    chatType: "group",
+    userId: "u3",
+    nickname: "other-user",
+    identity: "TRUSTED",
+  });
+
   assert.equal(systemBlock.includes("quoted platform message id"), false);
   assert.equal(systemBlock.includes("replied message"), false);
-  assert.equal(systemBlock.includes("[quote:"), false);
-  assert.equal(systemBlock.includes("rin.chat.messages.get"), false);
+  assert.equal(systemBlock.match(/\[quote:<message-id>\]/g)?.length, 1);
+  assert.ok(systemBlock.includes("rin.chat.messages.get"));
+  assert.ok(systemBlock.includes("nested quote nodes only as needed"));
+  assert.equal(unboundSystemBlock.includes("rin.chat.messages.get"), false);
   assert.equal(systemBlock.includes("docs/chat-bridge.md"), false);
 });
 

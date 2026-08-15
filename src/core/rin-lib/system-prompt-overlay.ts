@@ -80,7 +80,7 @@ function buildRinDocsBlock(agentDir: string) {
     "- Read only the narrow Rin topic documents needed for the task, following the routes below.",
     "- Topic routes: execution target or live capability uncertainty -> docs/execution-environment.md; Rin/Pi behavior differences -> docs/pi-overrides.md; session awareness -> docs/session-awareness.md; subagents -> docs/non-interactive-cli.md; scheduled tasks -> docs/scheduled-tasks.md; SDK imports, execution, and generic errors -> docs/agent-sdk.md; rich chat output -> docs/rich-text-output-format.md; chat bridge -> docs/chat-bridge.md; runtime layout -> docs/runtime-layout.md; capabilities/update/rollback -> docs/capabilities.md.",
     "- Core scheduled tasks: use real scheduled/background tasks for reminders, delayed follow-ups, recurring work, polling/watch work, and work that must continue after the current turn.",
-    "- Core rich text: use Rin rich text for native mentions, replies/quotes, images, files, audio, video, stickers, and chat attachments. In chat input, `[quote:<message-id>]` is a lazy reference under the current `chatKey`; call `rin.chat.messages.get({ chatKey, messageId })` only when the request depends on it, and follow nested quote nodes only as needed.",
+    "- Core rich text: use Rin rich text for native mentions, replies/quotes, images, files, audio, video, stickers, and chat attachments.",
     "- Use Pi docs only for topics not covered by Rin docs, after applying Rin overrides.",
   ].join("\n");
 }
