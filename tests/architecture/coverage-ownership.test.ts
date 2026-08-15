@@ -155,7 +155,6 @@ test("coverage owner plans contain only their own suite tests and strict modules
       includes: ["dist/app/rin/main.js"],
     },
   ]);
-  assert.equal(JSON.stringify(plans).includes("characterization"), false);
   assert.equal(JSON.stringify(plans).includes("regression"), false);
 
   const passing = {

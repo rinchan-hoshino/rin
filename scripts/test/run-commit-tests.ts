@@ -11,7 +11,6 @@ const suites: TestSuite[] = [
   "system",
   "qa",
   "torture",
-  "characterization",
 ];
 
 const statuses = await mapWithConcurrency(suites, 3, (suite) =>

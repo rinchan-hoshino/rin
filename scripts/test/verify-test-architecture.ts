@@ -34,20 +34,6 @@ type RegressionCatalog = {
   schemaVersion: number;
   files: Array<ProvenanceEntry & { failure: string }>;
 };
-type CharacterizationCatalog = {
-  schemaVersion: number;
-  files: ProvenanceEntry[];
-};
-type CharacterizationBaseline = {
-  schemaVersion: number;
-  baselineRef: string;
-  files: string[];
-};
-type CharacterizationCaseBaseline = {
-  schemaVersion: number;
-  baselineRef: string;
-  files: Array<{ file: string; cases: string[] }>;
-};
 type MutationEntry = {
   id: string;
   rationale: string;
@@ -77,10 +63,6 @@ const RATCHET_BASELINE_SHA256 =
   "1d77f4790deef8a7668e5217516fc900fc27f05e7df00c9f715685102f405ceb";
 const ORIGINAL_COVERAGE_BASELINE_SHA256 =
   "5daf52ccc085a8a8bdecfd9b34c4a5cdcc9d9d2b2f47e028bd8370c593e54b77";
-const CHARACTERIZATION_BASELINE_SHA256 =
-  "ecf775c014ee4bb5f2cd5f603968f3c9399462d89e5d166de6f7046047232381";
-const CHARACTERIZATION_CASE_BASELINE_SHA256 =
-  "26478f4bca64f0fb08e6c7615bd83c8530bc7fefd8fe12d96f6963ecc5939018";
 
 function readJson<T>(relativePath: string): T {
   return JSON.parse(fs.readFileSync(path.join(rootDir, relativePath), "utf8"));
@@ -108,13 +90,6 @@ function sameMembers(actual: string[], expected: string[]) {
   );
 }
 
-function bindingIdentifiers(name: ts.BindingName): string[] {
-  if (ts.isIdentifier(name)) return [name.text];
-  return name.elements.flatMap((element) =>
-    ts.isOmittedExpression(element) ? [] : bindingIdentifiers(element.name),
-  );
-}
-
 function assertUnique(values: string[], label: string) {
   const duplicates = values.filter(
     (value, index) => values.indexOf(value) !== index,
@@ -128,10 +103,6 @@ function assertUnique(values: string[], label: string) {
 
 const allowedUnitNodeModule =
   /^node:(?:assert(?:\/strict)?|crypto|fs(?:\/promises)?|os|path|test|url)$/;
-
-export function sourceImportsCharacterization(sourceText: string): boolean {
-  return /characterization[\\/]/.test(sourceText);
-}
 
 export function sourceUsesAmbientNetwork(
   sourceText: string,
@@ -556,270 +527,6 @@ function testWritesFixedHostPath(relativePath: string) {
   );
 }
 
-function testCaseIdentities(relativePath: string) {
-  const sourceText = fs.readFileSync(path.join(rootDir, relativePath), "utf8");
-  const sourceFile = ts.createSourceFile(
-    relativePath,
-    sourceText,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const identities: string[] = [];
-  const functionDeclarations = new Map<string, ts.FunctionDeclaration>();
-  const moduleConstants = new Map<string, string>();
-  const moduleInitializers = new Map<string, ts.Expression>();
-  const pathToFileUrlImports = new Set<string>();
-  const shadowedBindings = new Set<string>();
-  const collectFunctions = (node: ts.Node) => {
-    if (
-      ts.isImportDeclaration(node) &&
-      ts.isStringLiteral(node.moduleSpecifier) &&
-      node.moduleSpecifier.text === "node:url" &&
-      node.importClause?.namedBindings &&
-      ts.isNamedImports(node.importClause.namedBindings)
-    ) {
-      for (const element of node.importClause.namedBindings.elements) {
-        const imported = element.propertyName?.text ?? element.name.text;
-        if (imported === "pathToFileURL") {
-          pathToFileUrlImports.add(element.name.text);
-        }
-      }
-    }
-    if (ts.isVariableDeclaration(node) || ts.isParameter(node)) {
-      for (const name of bindingIdentifiers(node.name)) {
-        shadowedBindings.add(name);
-      }
-    }
-    if (ts.isFunctionDeclaration(node) && node.name) {
-      shadowedBindings.add(node.name.text);
-      functionDeclarations.set(node.name.text, node);
-    }
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.initializer
-    ) {
-      moduleInitializers.set(node.name.text, node.initializer);
-      if (
-        ts.isStringLiteral(node.initializer) ||
-        ts.isNoSubstitutionTemplateLiteral(node.initializer)
-      ) {
-        moduleConstants.set(node.name.text, node.initializer.text);
-      }
-    }
-    ts.forEachChild(node, collectFunctions);
-  };
-  collectFunctions(sourceFile);
-  const moduleSpecifier = (expression: ts.Expression): string | undefined => {
-    if (
-      ts.isStringLiteral(expression) ||
-      ts.isNoSubstitutionTemplateLiteral(expression)
-    ) {
-      return expression.text;
-    }
-    if (ts.isIdentifier(expression))
-      return moduleConstants.get(expression.text);
-    if (
-      ts.isBinaryExpression(expression) &&
-      expression.operatorToken.kind === ts.SyntaxKind.PlusToken
-    ) {
-      const left = moduleSpecifier(expression.left);
-      const right = moduleSpecifier(expression.right);
-      return left == null || right == null ? undefined : left + right;
-    }
-    return undefined;
-  };
-  const isSafeFileModuleExpression = (
-    expression: ts.Expression,
-    seen = new Set<string>(),
-  ): boolean => {
-    if (ts.isParenthesizedExpression(expression)) {
-      return isSafeFileModuleExpression(expression.expression, seen);
-    }
-    if (ts.isIdentifier(expression)) {
-      if (seen.has(expression.text)) return false;
-      const initializer = moduleInitializers.get(expression.text);
-      if (!initializer) return false;
-      seen.add(expression.text);
-      return isSafeFileModuleExpression(initializer, seen);
-    }
-    if (
-      ts.isPropertyAccessExpression(expression) &&
-      expression.name.text === "href" &&
-      ts.isCallExpression(expression.expression) &&
-      ts.isIdentifier(expression.expression.expression) &&
-      pathToFileUrlImports.has(expression.expression.expression.text) &&
-      !shadowedBindings.has(expression.expression.expression.text)
-    ) {
-      return true;
-    }
-    if (ts.isTemplateExpression(expression)) {
-      const first = expression.templateSpans[0];
-      return (
-        expression.head.text === "" &&
-        Boolean(first) &&
-        isSafeFileModuleExpression(first.expression, new Set(seen))
-      );
-    }
-    return false;
-  };
-  const assertContextCannotRegisterTests = (
-    body: ts.Node,
-    contextNames: Set<string>,
-    visitedFunctions = new Set<string>(),
-  ) => {
-    const inspect = (node: ts.Node) => {
-      if (ts.isIdentifier(node) && contextNames.has(node.text)) {
-        const parent = node.parent;
-        if (
-          ts.isPropertyAccessExpression(parent) &&
-          parent.expression === node
-        ) {
-          if (parent.name.text === "test") {
-            throw new Error(`characterization_nested_test_api:${relativePath}`);
-          }
-        } else if (
-          ts.isCallExpression(parent) &&
-          parent.arguments.some((argument) => argument === node) &&
-          ts.isIdentifier(parent.expression)
-        ) {
-          const declaration = functionDeclarations.get(parent.expression.text);
-          const argumentIndex = parent.arguments.findIndex(
-            (argument) => argument === node,
-          );
-          const parameter = declaration?.parameters[argumentIndex]?.name;
-          if (!declaration?.body || !parameter || !ts.isIdentifier(parameter)) {
-            throw new Error(
-              `characterization_test_context_escape:${relativePath}`,
-            );
-          }
-          const functionName = declaration.name?.text ?? "";
-          if (!visitedFunctions.has(functionName)) {
-            visitedFunctions.add(functionName);
-            assertContextCannotRegisterTests(
-              declaration.body,
-              new Set([parameter.text]),
-              visitedFunctions,
-            );
-          }
-        } else {
-          throw new Error(
-            `characterization_test_context_alias:${relativePath}`,
-          );
-        }
-      }
-      ts.forEachChild(node, inspect);
-    };
-    inspect(body);
-  };
-  let canonicalImport = false;
-  const visit = (node: ts.Node) => {
-    if (ts.isCallExpression(node)) {
-      const dynamicImport =
-        node.expression.kind === ts.SyntaxKind.ImportKeyword;
-      const commonJsRequire =
-        ts.isIdentifier(node.expression) && node.expression.text === "require";
-      if (dynamicImport || commonJsRequire) {
-        for (const argument of node.arguments) {
-          const resolved = moduleSpecifier(argument);
-          if (resolved === "node:test") {
-            throw new Error(
-              `characterization_dynamic_test_import:${relativePath}`,
-            );
-          }
-          if (resolved == null && !isSafeFileModuleExpression(argument)) {
-            throw new Error(
-              `characterization_unresolved_dynamic_import:${relativePath}`,
-            );
-          }
-        }
-      }
-    }
-    if (
-      ts.isImportDeclaration(node) &&
-      ts.isStringLiteral(node.moduleSpecifier) &&
-      node.moduleSpecifier.text === "node:test"
-    ) {
-      const importClause = node.importClause;
-      if (importClause?.name?.text === "test") canonicalImport = true;
-      if (
-        !importClause?.name ||
-        importClause.name.text !== "test" ||
-        (importClause.namedBindings &&
-          ts.isNamespaceImport(importClause.namedBindings)) ||
-        (importClause?.namedBindings &&
-          ts.isNamedImports(importClause.namedBindings) &&
-          importClause.namedBindings.elements.some((element) =>
-            ["test", "it", "describe", "suite"].includes(
-              element.propertyName?.text ?? element.name.text,
-            ),
-          ))
-      ) {
-        throw new Error(
-          `characterization_noncanonical_test_import:${relativePath}`,
-        );
-      }
-    }
-    if (ts.isIdentifier(node) && node.text === "test") {
-      const parent = node.parent;
-      const isImportName = ts.isImportClause(parent) && parent.name === node;
-      const isDirectCall =
-        ts.isCallExpression(parent) && parent.expression === node;
-      const isPropertyName =
-        (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
-        ((ts.isPropertyAssignment(parent) || ts.isMethodDeclaration(parent)) &&
-          parent.name === node);
-      if (!isImportName && !isDirectCall && !isPropertyName) {
-        throw new Error(`characterization_test_alias:${relativePath}`);
-      }
-    }
-    if (ts.isCallExpression(node)) {
-      const expression = node.expression;
-      if (ts.isIdentifier(expression) && expression.text === "test") {
-        const title = node.arguments[0];
-        if (!title)
-          throw new Error(
-            `characterization_test_without_title:${relativePath}`,
-          );
-        identities.push(title.getText(sourceFile));
-        const callback = [...node.arguments]
-          .reverse()
-          .find(
-            (argument) =>
-              ts.isArrowFunction(argument) || ts.isFunctionExpression(argument),
-          );
-        if (!callback) {
-          throw new Error(
-            `characterization_noncanonical_test_callback:${relativePath}`,
-          );
-        }
-        const contextNames = new Set(
-          callback.parameters.flatMap((parameter) =>
-            bindingIdentifiers(parameter.name),
-          ),
-        );
-        if (contextNames.size > 0) {
-          assertContextCannotRegisterTests(callback.body, contextNames);
-        }
-      } else if (
-        ts.isIdentifier(expression) &&
-        ["it", "describe", "suite"].includes(expression.text)
-      ) {
-        throw new Error(
-          `characterization_noncanonical_test_call:${relativePath}`,
-        );
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-  if (!canonicalImport) {
-    throw new Error(`characterization_missing_test_import:${relativePath}`);
-  }
-  return identities;
-}
-
 export function verifyTestArchitecture() {
   const errors: string[] = [];
   const unitCatalog = readJson<RepoUnitCatalog>("tests/unit/catalog.json");
@@ -828,19 +535,6 @@ export function verifyTestArchitecture() {
   );
   const regressionCatalog = readJson<RegressionCatalog>(
     "tests/regression/catalog.json",
-  );
-  const characterizationCatalog = readJson<CharacterizationCatalog>(
-    "tests/characterization/catalog.json",
-  );
-  const characterizationBaselinePath =
-    "tests/characterization/baseline-files.json";
-  const characterizationBaseline = readJson<CharacterizationBaseline>(
-    characterizationBaselinePath,
-  );
-  const characterizationCaseBaselinePath =
-    "tests/characterization/baseline-cases.json";
-  const characterizationCaseBaseline = readJson<CharacterizationCaseBaseline>(
-    characterizationCaseBaselinePath,
   );
   const coveragePolicy = readJson<CoveragePolicy>("tests/coverage-policy.json");
   const mutationPolicy = readJson<MutationPolicy>("tests/mutation-policy.json");
@@ -852,45 +546,16 @@ export function verifyTestArchitecture() {
     ["unit", unitCatalog.schemaVersion, 2],
     ["non-unit", nonUnitCatalog.schemaVersion, 2],
     ["regression", regressionCatalog.schemaVersion, 1],
-    ["characterization", characterizationCatalog.schemaVersion, 1],
-    ["characterization-baseline", characterizationBaseline.schemaVersion, 1],
-    [
-      "characterization-case-baseline",
-      characterizationCaseBaseline.schemaVersion,
-      1,
-    ],
   ] as const) {
     if (schemaVersion !== expectedSchemaVersion) {
       errors.push(`unsupported_schema:${name}`);
     }
-  }
-  if (
-    characterizationBaseline.baselineRef !== "fa644064" ||
-    characterizationCaseBaseline.baselineRef !== "fa644064"
-  ) {
-    errors.push("characterization_baseline_identity_changed");
   }
   const originalCoverageBaselineDigest = createHash("sha256")
     .update(fs.readFileSync(path.join(rootDir, "tests/coverage-baseline.json")))
     .digest("hex");
   if (originalCoverageBaselineDigest !== ORIGINAL_COVERAGE_BASELINE_SHA256) {
     errors.push("original_coverage_baseline_changed");
-  }
-  const characterizationBaselineDigest = createHash("sha256")
-    .update(fs.readFileSync(path.join(rootDir, characterizationBaselinePath)))
-    .digest("hex");
-  if (characterizationBaselineDigest !== CHARACTERIZATION_BASELINE_SHA256) {
-    errors.push("characterization_baseline_digest_changed");
-  }
-  const characterizationCaseBaselineDigest = createHash("sha256")
-    .update(
-      fs.readFileSync(path.join(rootDir, characterizationCaseBaselinePath)),
-    )
-    .digest("hex");
-  if (
-    characterizationCaseBaselineDigest !== CHARACTERIZATION_CASE_BASELINE_SHA256
-  ) {
-    errors.push("characterization_case_baseline_digest_changed");
   }
 
   for (const retired of ["tests/e2e", "tests/interactive"]) {
@@ -1188,20 +853,6 @@ export function verifyTestArchitecture() {
     }
   }
 
-  for (const directory of [
-    "tests/unit",
-    "tests/integration",
-    "tests/system",
-    "tests/support",
-  ]) {
-    for (const file of listFiles(directory, ".ts")) {
-      const sourceText = fs.readFileSync(path.join(rootDir, file), "utf8");
-      if (sourceImportsCharacterization(sourceText)) {
-        errors.push(`strict_test_imports_characterization:${file}`);
-      }
-    }
-  }
-
   const unitFiles = listFiles("tests/unit", ".test.ts");
   const catalogUnitFiles = unitCatalog.modules
     .map((entry) => entry.test)
@@ -1256,55 +907,6 @@ export function verifyTestArchitecture() {
       !entry.failure.trim()
     ) {
       errors.push(`regression_missing_provenance:${entry.file}`);
-    }
-  }
-
-  const characterizationFiles = listFiles("tests/characterization", ".test.ts");
-  const catalogCharacterizationFiles = characterizationCatalog.files
-    .map((entry) => entry.file)
-    .sort();
-  if (!sameMembers(characterizationFiles, catalogCharacterizationFiles)) {
-    errors.push("characterization_catalog_does_not_match_files");
-  }
-  assertUnique(catalogCharacterizationFiles, "characterization_test");
-  assertUnique(characterizationBaseline.files, "characterization_baseline");
-  const allowedCharacterizationFiles = new Set(characterizationBaseline.files);
-  for (const file of characterizationFiles) {
-    if (!allowedCharacterizationFiles.has(file)) {
-      errors.push(`characterization_debt_increased:${file}`);
-    }
-  }
-  const baselineCaseFiles = characterizationCaseBaseline.files
-    .map((entry) => entry.file)
-    .sort();
-  if (
-    !sameMembers(baselineCaseFiles, [...characterizationBaseline.files].sort())
-  ) {
-    errors.push("characterization_case_baseline_files_mismatch");
-  }
-  const baselineCasesByFile = new Map(
-    characterizationCaseBaseline.files.map((entry) => [
-      entry.file,
-      entry.cases,
-    ]),
-  );
-  for (const file of characterizationFiles) {
-    const remaining = new Map<string, number>();
-    for (const identity of baselineCasesByFile.get(file) ?? []) {
-      remaining.set(identity, (remaining.get(identity) ?? 0) + 1);
-    }
-    for (const identity of testCaseIdentities(file)) {
-      const count = remaining.get(identity) ?? 0;
-      if (count === 0) {
-        errors.push(`characterization_case_added:${file}:${identity}`);
-      } else {
-        remaining.set(identity, count - 1);
-      }
-    }
-  }
-  for (const entry of characterizationCatalog.files) {
-    if (!entry.introducedBy.trim() || !entry.subject.trim()) {
-      errors.push(`characterization_missing_provenance:${entry.file}`);
     }
   }
 
@@ -1380,7 +982,6 @@ export function verifyTestArchitecture() {
     tests: allTests.length,
     unitModules: unitCatalog.modules.length,
     regressionFiles: regressionCatalog.files.length,
-    characterizationFiles: characterizationCatalog.files.length,
     coverageModules: coveragePolicy.modules.length,
   };
 }

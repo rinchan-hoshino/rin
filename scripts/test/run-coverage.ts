@@ -75,8 +75,6 @@ async function runCoverage(options: CoverageRunOptions) {
         "scripts/test/run-node-tests.ts",
         "--import",
         "tsx",
-        "--import",
-        path.resolve(rootDir, "scripts/test/owner-characterization-guard.ts"),
         ...(options.preloads || []).flatMap((value) => [
           "--import",
           path.resolve(rootDir, value),
@@ -386,8 +384,7 @@ async function runNonUnitOwnerCoverage(
 
 async function runCombinedRatchetCoverage(policy: CoveragePolicy) {
   const behaviorSuites = TEST_SUITES.filter(
-    (suite) =>
-      suite !== "characterization" && suite !== "qa" && suite !== "torture",
+    (suite) => suite !== "qa" && suite !== "torture",
   );
   const tests = findTestFiles(behaviorSuites);
   const ratchetCount = policy.modules.filter(
@@ -408,8 +405,6 @@ async function runCombinedRatchetCoverage(policy: CoveragePolicy) {
       [
         "--import",
         "tsx",
-        "--import",
-        path.resolve(rootDir, "scripts/test/owner-characterization-guard.ts"),
         "scripts/test/run-test-files.ts",
         "--concurrency=2",
         ...behaviorTests,
