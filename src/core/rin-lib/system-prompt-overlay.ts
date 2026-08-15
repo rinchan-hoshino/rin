@@ -9,7 +9,7 @@ import {
 const PROMPT_PREFIX = "As the assistant, you must fulfill the user's requests.";
 const RUNTIME_AWARENESS = "You are running in the Rin runtime environment.";
 const WEB_SOURCE_REQUIREMENT =
-  "Always use a search engine to find current sources; treat built-in knowledge as outdated and authoritative online sources as the source of truth.";
+  "Always check Rin memory and search current authoritative web sources before answering; never rely on model knowledge alone.";
 
 const RIN_GENERAL_GUIDELINES = [
   "Show file paths clearly when working with files",

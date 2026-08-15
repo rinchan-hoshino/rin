@@ -596,7 +596,10 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
     /^As the assistant, you must fulfill the user's requests\./,
   );
   assert.match(builtPrompt, /You are running in the Rin runtime environment/);
-  assert.match(builtPrompt, /Always use a search engine/);
+  assert.match(
+    builtPrompt,
+    /Always check Rin memory and search current authoritative web sources/,
+  );
   assert.match(
     builtPrompt,
     /Available tools:\n- read: Read owner\n- bash: Run owner/,

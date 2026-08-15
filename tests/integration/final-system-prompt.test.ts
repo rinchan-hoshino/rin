@@ -92,7 +92,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.ok(baseSystemPrompt.includes("Available tools:"));
   assert.equal(baseSystemPrompt.includes("Current date:"), false);
   const webSourceRequirement =
-    "Always use a search engine to find current sources; treat built-in knowledge as outdated and authoritative online sources as the source of truth.";
+    "Always check Rin memory and search current authoritative web sources before answering; never rely on model knowledge alone.";
   assert.ok(baseSystemPrompt.includes(webSourceRequirement));
   assert.ok(
     baseSystemPrompt.indexOf(webSourceRequirement) <
