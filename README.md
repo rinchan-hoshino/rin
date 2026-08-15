@@ -27,7 +27,9 @@ If Rin saves you time, you can support its maintenance on [Ko-fi](https://ko-fi.
 > [!TIP]
 > Most users should start with the stable install command below. Use the install commands directly; the installer sets up the `rin` command. Pre-release and git channels are available in the folded sections.
 
-Rin requires Node.js 22.19.0 or newer and npm on every platform. Check your local version before installing:
+On Linux x64, stable, beta, and nightly installs use a matching platform bundle when one is available. The bundle includes Rin's managed Node.js and npm runtime, so those installs do not require system Node.js or npm.
+
+Other platforms, git or direct-version installs, and any source fallback require Node.js 22.19.0 or newer plus npm. Check your local version before installing:
 
 ```bash
 node -v

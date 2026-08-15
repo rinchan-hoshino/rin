@@ -5,15 +5,15 @@
 > **あなたのコンピューターに住む個人向け AI アシスタント。**<br>
 > Rin は重要なことを覚え、実際の作業を手伝い、使うほど賢くなります。
 
-Rin はローカルで動く汎用 AI アシスタントです。記憶、ツール、スケジュール、UI 入口、チャット連携を備えています。文書、Web 調査、ファイル、リマインダー、コード、接続サービス、繰り返し作業を支援し、ターミナル、デスクトップ、自動化、チャット入口で同じアシスタント状態を共有できます。
+Rin はローカルで動く汎用 AI アシスタントです。記憶、ツール、スケジュール、ターミナルワークフロー、チャット連携を備えています。文書、Web 調査、ファイル、リマインダー、コード、接続サービス、繰り返し作業を支援し、ターミナル、自動化、チャット入口で同じアシスタント状態を共有できます。
 
-| 重要な点                       | Rin が提供するもの                                                     |
-| ------------------------------ | ---------------------------------------------------------------------- |
-| グローバルメモリ               | 有用な事実、好み、学びを単一のチャットの外に残せます。                 |
-| 繰り返し利用から学習           | 修正や成功した手順を短い指示やスキルにできます。                       |
-| ローカルのバックグラウンド動作 | 複数の入口が孤立したチャット窓ではなく、同じアシスタントに接続します。 |
-| すぐ使える製品                 | 記憶、スケジュール、ツール、チャット連携、UI が含まれます。            |
-| 自己ブートストラップ           | Rin は Rin の開発に使われ、このリポジトリ自体が実地テストです。        |
+| 重要な点                       | Rin が提供するもの                                                             |
+| ------------------------------ | ------------------------------------------------------------------------------ |
+| グローバルメモリ               | 有用な事実、好み、学びを単一のチャットの外に残せます。                         |
+| 繰り返し利用から学習           | 修正や成功した手順を短い指示やスキルにできます。                               |
+| ローカルのバックグラウンド動作 | 複数の入口が孤立したチャット窓ではなく、同じアシスタントに接続します。         |
+| すぐ使える製品                 | 記憶、スケジュール、ツール、ターミナルワークフロー、チャット連携が含まれます。 |
+| 自己ブートストラップ           | Rin は Rin の開発に使われ、このリポジトリ自体が実地テストです。                |
 
 > [!WARNING]
 > Rin はまだ若いソフトウェアです。日常利用でも実験的なものとして扱ってください。粗い部分、不足しているドキュメント、不安定な挙動、トークン/API コスト、破壊的変更に出会う可能性があります。
@@ -27,7 +27,16 @@ Rin が時間の節約に役立ったなら、[Ko-fi](https://ko-fi.com/THE_catt
 > [!TIP]
 > 多くのユーザーは下の stable インストールコマンドから始めてください。これらのインストールコマンドをそのまま使えば、インストーラーが `rin` コマンドをセットアップします。プレリリースと git チャンネルは折りたたみ内にあります。
 
-Rin はすべてのプラットフォームで Node.js 22.19.0 以降と npm を必要とします。
+Linux x64 では、stable、beta、nightly のインストール時に、対応するプラットフォーム bundle が利用できればそれを使用します。bundle には Rin が管理する Node.js と npm のランタイムが含まれるため、この経路ではシステムの Node.js や npm は不要です。
+
+その他のプラットフォーム、git またはバージョンを直接指定するインストール、ソースにフォールバックする場合は、Node.js 22.19.0 以降と npm が必要です。インストール前にローカルのバージョンを確認してください：
+
+```bash
+node -v
+npm -v
+```
+
+インストーラーに `rin installer requires Node.js >= 22.19.0` と表示された場合は、Node.js を更新し、新しいターミナルを開いてからインストールコマンドをもう一度実行してください。
 
 ### Linux と macOS
 
@@ -39,11 +48,11 @@ curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/insta
 <summary>その他のリリースチャンネル</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --beta
+curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --beta
 curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --nightly
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --git
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --git main
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --git deadbeef
+curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --git
+curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --git main
+curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --git deadbeef
 ```
 
 </details>
@@ -51,6 +60,16 @@ curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/insta
 ### Windows
 
 PowerShell または Windows Terminal からインストールします。
+
+Windows で `node -v` が 22.19.0 より古い場合は、先に Node.js をインストールまたは更新してください：
+
+```powershell
+winget upgrade OpenJS.NodeJS.LTS
+# winget が Node.js は未インストールだと表示した場合：
+winget install OpenJS.NodeJS.LTS
+```
+
+その後、新しい PowerShell または Windows Terminal を開いて Rin をインストールします：
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1)))
@@ -60,11 +79,11 @@ PowerShell または Windows Terminal からインストールします。
 <summary>その他のリリースチャンネル</summary>
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --beta
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --beta
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --nightly
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --git
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --git main
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --git deadbeef
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --git
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --git main
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --git deadbeef
 ```
 
 </details>

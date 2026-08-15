@@ -5,15 +5,15 @@
 > **Votre assistant IA personnel, vivant sur votre ordinateur.**<br>
 > Rin se souvient de ce qui compte, aide sur de vraies tâches et s'améliore avec l'usage.
 
-Rin est un assistant IA local et généraliste avec mémoire, outils, planification, interfaces et passerelles de chat intégrés. Il peut aider avec les documents, la recherche web, les fichiers, les rappels, le code, les services connectés et les workflows répétés, tout en partageant un même état d'assistant entre terminal, bureau, automatisation et chat.
+Rin est un assistant IA local et généraliste avec mémoire, outils, planification, workflows de terminal et passerelles de chat intégrés. Il peut aider avec les documents, la recherche web, les fichiers, les rappels, le code, les services connectés et les workflows répétés, tout en partageant un même état d'assistant entre terminal, automatisation et chat.
 
-| Ce qui compte                 | Ce que Rin fournit                                                               |
-| ----------------------------- | -------------------------------------------------------------------------------- |
-| Mémoire globale               | Faits, préférences et apprentissages utiles peuvent survivre à un seul chat.     |
-| Apprend par l'usage répété    | Corrections et workflows réussis peuvent devenir consignes et compétences.       |
-| Runtime local en arrière-plan | Plusieurs entrées se connectent au même assistant, pas à des fenêtres isolées.   |
-| Produit prêt à l'emploi       | Mémoire, planification, outils, chat bridges et interfaces sont inclus.          |
-| Auto-amorçage                 | Rin sert à construire Rin ; le dépôt est un test vivant de l'assistant lui-même. |
+| Ce qui compte                 | Ce que Rin fournit                                                                        |
+| ----------------------------- | ----------------------------------------------------------------------------------------- |
+| Mémoire globale               | Faits, préférences et apprentissages utiles peuvent survivre à un seul chat.              |
+| Apprend par l'usage répété    | Corrections et workflows réussis peuvent devenir consignes et compétences.                |
+| Runtime local en arrière-plan | Plusieurs entrées se connectent au même assistant, pas à des fenêtres isolées.            |
+| Produit prêt à l'emploi       | Mémoire, planification, outils, workflows de terminal et passerelles de chat sont inclus. |
+| Auto-amorçage                 | Rin sert à construire Rin ; le dépôt est un test vivant de l'assistant lui-même.          |
 
 > [!WARNING]
 > Rin est encore jeune. Considérez l'usage quotidien comme expérimental : vous pouvez rencontrer des zones rugueuses, une documentation incomplète, des comportements instables, des coûts de tokens/API ou parfois des changements incompatibles.
@@ -27,7 +27,16 @@ Si Rin vous fait gagner du temps, vous pouvez soutenir sa maintenance sur [Ko-fi
 > [!TIP]
 > La plupart des utilisateurs devraient commencer par la commande stable ci-dessous. Utilisez directement ces commandes d'installation ; l'installateur configure la commande `rin`. Les canaux préversion et git sont dans les sections pliées.
 
-Rin nécessite Node.js 22.19.0 ou une version ultérieure et npm sur toutes les plateformes.
+Sous Linux x64, les installations stable, beta et nightly utilisent un bundle de plateforme correspondant lorsqu'il est disponible. Ce bundle comprend le runtime Node.js et npm géré par Rin ; ces installations n'ont donc pas besoin de Node.js ni de npm au niveau du système.
+
+Sur les autres plateformes, les installations git ou avec une version indiquée directement, ainsi que tout repli vers les sources, nécessitent Node.js 22.19.0 ou une version ultérieure et npm. Vérifiez vos versions locales avant l'installation :
+
+```bash
+node -v
+npm -v
+```
+
+Si l'installateur affiche `rin installer requires Node.js >= 22.19.0`, mettez Node.js à niveau, ouvrez un nouveau terminal, puis relancez la commande d'installation.
 
 ### Linux et macOS
 
@@ -39,11 +48,11 @@ curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/insta
 <summary>Autres canaux de publication</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --beta
+curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --beta
 curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --nightly
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --git
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --git main
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --git deadbeef
+curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --git
+curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --git main
+curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --git deadbeef
 ```
 
 </details>
@@ -51,6 +60,16 @@ curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/insta
 ### Windows
 
 Installez depuis PowerShell ou Windows Terminal.
+
+Si `node -v` est antérieur à 22.19.0 sous Windows, installez ou mettez d'abord Node.js à niveau :
+
+```powershell
+winget upgrade OpenJS.NodeJS.LTS
+# Si winget indique que Node.js n'est pas installé :
+winget install OpenJS.NodeJS.LTS
+```
+
+Ouvrez ensuite une nouvelle fenêtre PowerShell ou Windows Terminal et installez Rin :
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1)))
@@ -60,11 +79,11 @@ Installez depuis PowerShell ou Windows Terminal.
 <summary>Autres canaux de publication</summary>
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --beta
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --beta
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --nightly
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --git
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --git main
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --git deadbeef
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --git
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --git main
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --git deadbeef
 ```
 
 </details>

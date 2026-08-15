@@ -5,14 +5,14 @@
 > **住在你电脑里的个人 AI 助手。**<br>
 > Rin 会记住重要的事，帮你处理真实任务，并在使用中变得更懂你。
 
-Rin 是一个本地运行的通用 AI 助手，内置记忆、工具、定时任务、界面入口和聊天桥接。它可以协助文档、网页调研、文件、提醒、代码、连接服务和重复流程，并让终端、桌面应用、自动化与聊天入口共享同一个助手状态。
+Rin 是一个本地运行的通用 AI 助手，内置记忆、工具、定时任务、终端工作流和聊天桥接。它可以协助文档、网页调研、文件、提醒、代码、连接服务和重复流程，并让终端、自动化与聊天入口共享同一个助手状态。
 
 | 重点             | Rin 提供什么                                               |
 | ---------------- | ---------------------------------------------------------- |
 | 全局记忆         | 有用的事实、偏好和经验可以跨越单次聊天保留下来。           |
 | 从重复使用中学习 | 纠正和成功流程可以沉淀为简短指令与技能。                   |
 | 本地后台运行时   | 多个入口连接到同一个助手，而不是彼此孤立的聊天窗口。       |
-| 开箱即用的产品   | 记忆、定时、工具、聊天桥接和 UI 路径已经内置。             |
+| 开箱即用的产品   | 记忆、定时、工具、终端工作流和聊天桥接已经内置。           |
 | 自举式开发       | Rin 被用于开发 Rin，这个仓库本身就是助手能力的真实测试场。 |
 
 > [!WARNING]
@@ -27,7 +27,16 @@ Rin 是一个本地运行的通用 AI 助手，内置记忆、工具、定时任
 > [!TIP]
 > 大多数用户应从下面的 stable 安装命令开始。直接使用这些安装命令即可；安装器会装好 `rin` 命令。预发布和 git 通道放在折叠区域中。
 
-Rin 在所有平台上都需要 Node.js 22.19.0 或更新版本，以及 npm。
+在 Linux x64 上，stable、beta 和 nightly 安装会在有匹配的平台 bundle 时使用它。bundle 已包含由 Rin 管理的 Node.js 和 npm 运行时，因此这些安装不需要系统预装 Node.js 或 npm。
+
+其他平台、git 或指定版本安装，以及任何回退到源码的安装，都需要 Node.js 22.19.0 或更新版本和 npm。安装前请检查本地版本：
+
+```bash
+node -v
+npm -v
+```
+
+如果安装器显示 `rin installer requires Node.js >= 22.19.0`，请升级 Node.js，重新打开终端，然后再次运行安装命令。
 
 ### Linux 和 macOS
 
@@ -39,11 +48,11 @@ curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/insta
 <summary>其他发布通道</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --beta
+curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --beta
 curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --nightly
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --git
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --git main
-curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.sh | sh -s -- --git deadbeef
+curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --git
+curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --git main
+curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.sh | sh -s -- --git deadbeef
 ```
 
 </details>
@@ -51,6 +60,16 @@ curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/insta
 ### Windows
 
 从 PowerShell 或 Windows Terminal 安装。
+
+如果 Windows 上的 `node -v` 低于 22.19.0，请先安装或升级 Node.js：
+
+```powershell
+winget upgrade OpenJS.NodeJS.LTS
+# 如果 winget 提示尚未安装 Node.js：
+winget install OpenJS.NodeJS.LTS
+```
+
+然后打开新的 PowerShell 或 Windows Terminal 窗口并安装 Rin：
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1)))
@@ -60,11 +79,11 @@ curl -fsSL https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/insta
 <summary>其他发布通道</summary>
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --beta
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --beta
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --nightly
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --git
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --git main
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/bootstrap/install.ps1))) --git deadbeef
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --git
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --git main
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/rinchan-hoshino/rin/main/install.ps1))) --git deadbeef
 ```
 
 </details>
