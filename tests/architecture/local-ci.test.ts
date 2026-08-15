@@ -157,6 +157,27 @@ test("repository test scripts route classified buckets through the shared runner
   assert.match(runner, /suites\.includes\("system"\) \? 2 : 4/);
 });
 
+test("selected suite routes reference existing package scripts", () => {
+  const packageJson = JSON.parse(readRepoFile("package.json")) as {
+    scripts: Record<string, string>;
+  };
+  const selectedRunner = readRepoFile(".ci/local-ci/run-selected.sh");
+  const suiteCase = selectedRunner.match(/case "\$2" in\s+([^)]*)\)/);
+  assert.ok(suiteCase, "selected suite case is missing");
+
+  const selectedSuites = suiteCase[1]
+    .trim()
+    .split("|")
+    .map((suite) => suite.trim());
+  for (const suite of selectedSuites) {
+    assert.equal(
+      typeof packageJson.scripts[`test:${suite}:run`],
+      "string",
+      `selected suite has no package script: ${suite}`,
+    );
+  }
+});
+
 test("package scripts reference only existing explicit test targets", () => {
   const packageJson = JSON.parse(readRepoFile("package.json")) as {
     scripts: Record<string, string>;

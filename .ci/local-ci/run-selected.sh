@@ -43,7 +43,7 @@ if [[ "${1:-}" == "--suite" ]]; then
     exit 2
   fi
   case "$2" in
-    types|release|architecture|unit|unit:coverage|acceptance|property|mutation|qa|torture|regression|characterization|integration|system|coverage)
+    types|release|architecture|unit|unit:coverage|acceptance|property|mutation|qa|torture|regression|integration|system|coverage)
       exec npm run "test:$2:run"
       ;;
     *)
