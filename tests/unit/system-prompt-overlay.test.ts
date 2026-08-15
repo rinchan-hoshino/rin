@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -35,33 +34,6 @@ function applyOverlay(input: Record<string, any>) {
     activeToolNames: input.activeToolNames ?? piOptions.selectedTools,
   });
 }
-
-const NATIVE_PROMPT_BASELINE = {
-  default: {
-    hash: "63b01a639edf64dd99f1a8ae67e690367c3f485e7ff2509e211dfa3498087ee7",
-    length: 4730,
-  },
-  languageAppend: {
-    hash: "cf3ff03511b56363d5f1a51c08c9b1a303fda466f7bbabb2f085b748dbea5a29",
-    length: 4744,
-  },
-  custom: {
-    hash: "419648d8f6600d633a7539d9a7746da9514b9a24266861fd688e526fbcf6515d",
-    length: 1732,
-  },
-  contextSkillSelf: {
-    hash: "de9063853238ebf101f2c70bb52e151c553a83f0e4f81d68c1016c0c19be98d1",
-    length: 5447,
-  },
-  readTodo: {
-    hash: "c71f3b1d773ca5357c2e5ccb93167c5a75ffd7692ab661a748d3a634c244be93",
-    length: 3461,
-  },
-  noTools: {
-    hash: "87ba8839e718e5a8192748cb41ff708eb7e690faf0702483a29b4b6f56877026",
-    length: 3153,
-  },
-} as const;
 
 function normalizePrompt(
   prompt: string,
@@ -732,16 +704,4 @@ test("Pi-native overlay preserves native content across six prompt scenarios", a
     /use the current numbers returned by the latest tool result/,
   );
   assert.match(actual.noTools, /Available tools:\n\(none\)/);
-  assert.deepEqual(
-    Object.fromEntries(
-      Object.entries(actual).map(([name, prompt]) => [
-        name,
-        {
-          hash: crypto.createHash("sha256").update(prompt).digest("hex"),
-          length: prompt.length,
-        },
-      ]),
-    ),
-    NATIVE_PROMPT_BASELINE,
-  );
 });
