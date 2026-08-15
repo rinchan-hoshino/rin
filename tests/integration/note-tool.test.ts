@@ -64,16 +64,18 @@ test("note exposes ranged reads and item-level mutation inputs", async () => {
     "limit",
     "offset",
   ]);
-  assert.equal(
-    tool.parameters.properties.action.anyOf.find(
-      (entry: any) => entry.const === "remove",
-    ).description,
-    undefined,
-  );
   assert.deepEqual(tool.parameters.required, ["action"]);
-  assert.deepEqual(
-    tool.parameters.properties.action.anyOf.map((entry: any) => entry.const),
-    ["read", "add", "edit", "remove", "clear"],
+  assert.equal(tool.parameters.properties.action.type, "string");
+  assert.deepEqual(tool.parameters.properties.action.enum, [
+    "read",
+    "add",
+    "edit",
+    "remove",
+    "clear",
+  ]);
+  assert.match(
+    tool.parameters.properties.action.description,
+    /Item-level operation/,
   );
   assert.equal(tool.parameters.properties.offset.minimum, 1);
   assert.equal(tool.parameters.properties.limit.minimum, 1);

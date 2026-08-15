@@ -2,6 +2,7 @@ import type {
   RinCapabilityDefinition,
   RinCapabilityOptions,
 } from "../rin-lib/capability-types.js";
+import { StringEnum } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 
@@ -26,7 +27,7 @@ const recallParams = Type.Object({
     }),
   ),
   order: Type.Optional(
-    Type.Union([Type.Literal("relevance"), Type.Literal("newest")], {
+    StringEnum(["relevance", "newest"] as const, {
       description:
         "Result order for queried recall. Defaults to relevance; use newest to inspect current state or read matching history from new to old.",
     }),

@@ -2515,10 +2515,11 @@ test("recall tool schema exposes relevance and newest ordering", () => {
     getThinkingLevel: () => "medium",
   });
   const recallTool = definition.tools.find((tool) => tool.name === "recall");
-  assert.deepEqual(
-    recallTool.parameters.properties.order.anyOf.map((item) => item.const),
-    ["relevance", "newest"],
-  );
+  assert.equal(recallTool.parameters.properties.order.type, "string");
+  assert.deepEqual(recallTool.parameters.properties.order.enum, [
+    "relevance",
+    "newest",
+  ]);
 });
 
 test("recall call formatting keeps tool name and query in the TUI tool title", () => {

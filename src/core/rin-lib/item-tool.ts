@@ -1,3 +1,4 @@
+import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
 export type ItemAction =
@@ -25,15 +26,10 @@ export const DEFAULT_ITEM_ACTIONS: readonly ItemAction[] = [
 ];
 
 function createItemActionSchema(actions: readonly ItemAction[]) {
-  return Type.Union(
-    actions.map((action) => Type.Literal(action)),
-    {
-      description: "Item-level operation to perform.",
-    },
-  );
+  return StringEnum(actions, {
+    description: "Item-level operation to perform.",
+  });
 }
-
-export const ItemActionSchema = createItemActionSchema(DEFAULT_ITEM_ACTIONS);
 
 function createPositiveItemNumberSchema(
   numbering: "stable-id" | "current-order",
