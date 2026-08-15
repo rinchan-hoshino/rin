@@ -175,11 +175,11 @@ export default function noteCapability(): RinCapabilityDefinition {
     name: "note",
     label: "Notes",
     description:
-      "Maintain a minimal scratchpad of verified content that must survive compaction exactly as stable-ID items scoped to the session branch. Read returns every item by default or a 1-based offset/limit range; add accepts one or more items and can insert before an ID; edit replaces one item; remove deletes selected IDs; clear removes every item.",
+      "Maintain minimal verified session-branch notes that survive compaction.",
     promptSnippet:
       "Session-branch scratchpad for exact cross-compaction state.",
     promptGuidelines: [
-      "Use note when minimal verified state must survive compaction exactly; use todo for execution checklists and files or tools for recoverable context.",
+      "Use note for verified state that must survive compaction; use todo for execution checklists.",
     ],
     parameters: NoteParams,
 

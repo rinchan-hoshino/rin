@@ -186,11 +186,10 @@ export default function todoCapability(): RinCapabilityDefinition {
   const tool: any = {
     name: "todo",
     label: "Checklist",
-    description:
-      "Maintain the current-branch execution checklist by current 1-based item number. Read and every mutation use the same dense 1..n numbering, with the first item always numbered 1; insertion and removal immediately renumber the returned full list. Add accepts one or more items and can insert before a current number; edit changes item text; remove deletes selected numbers; toggle changes the completion state of one or more selected numbers atomically; clear removes every item.",
+    description: "Maintain the current-branch execution checklist.",
     promptSnippet: "Current-branch execution checklist.",
     promptGuidelines: [
-      "Use todo when current-branch work has multiple concrete execution steps that benefit from a visible checklist; use the current numbers returned by the latest tool result for later mutations.",
+      "Use todo when current-branch work has multiple concrete execution steps that benefit from a visible checklist.",
     ],
     parameters: TodoParams,
 

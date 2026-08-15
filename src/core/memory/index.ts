@@ -306,8 +306,7 @@ export default function memoryModule(
       {
         name: "recall",
         label: "Recall",
-        description:
-          "Search archived session history by query, or browse recent sessions when query is omitted.",
+        description: "Search or browse archived session history.",
         promptSnippet: "Archived session-history search.",
         promptGuidelines: [
           "Use recall when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters.",

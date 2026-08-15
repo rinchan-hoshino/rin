@@ -107,7 +107,7 @@ test("std configured session composes Pi and Rin core extensions", async () => {
     const memoryTool = session.getToolDefinition("recall");
     assert.equal(
       memoryTool.description,
-      "Search archived session history by query, or browse recent sessions when query is omitted.",
+      "Search or browse archived session history.",
     );
     assert.equal(memoryTool.promptSnippet, "Archived session-history search.");
     assert.deepEqual(memoryTool.promptGuidelines, [

@@ -121,7 +121,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.ok(
     baseSystemPrompt.includes(
-      "Use note when minimal verified state must survive compaction exactly; use todo for execution checklists and files or tools for recoverable context.",
+      "Use note for verified state that must survive compaction; use todo for execution checklists.",
     ),
   );
   assert.equal(baseSystemPrompt.includes("Omit todos to read"), false);

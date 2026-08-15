@@ -117,16 +117,28 @@ test("Rin note guidance limits the scratchpad to exact minimal cross-compaction 
     .find((definition) => definition.name === "note")
     ?.tools?.find((tool) => tool.name === "note");
 
-  assert.match(note?.description, /minimal scratchpad/);
-  assert.match(note?.description, /must survive compaction exactly/);
-  assert.match(note?.description, /stable-ID items/);
-  assert.match(note?.description, /1-based offset\/limit range/);
+  assert.equal(
+    note?.description,
+    "Maintain minimal verified session-branch notes that survive compaction.",
+  );
+  assert.match(
+    note?.parameters.properties.offset.description,
+    /1-based item position/,
+  );
+  assert.match(
+    note?.parameters.properties.id.description,
+    /Stable item ID returned by a read/,
+  );
+  assert.match(
+    note?.parameters.properties.items.items.properties.text.description,
+    /survive compaction exactly/,
+  );
   assert.equal(
     note?.promptSnippet,
     "Session-branch scratchpad for exact cross-compaction state.",
   );
   assert.deepEqual(note?.promptGuidelines, [
-    "Use note when minimal verified state must survive compaction exactly; use todo for execution checklists and files or tools for recoverable context.",
+    "Use note for verified state that must survive compaction; use todo for execution checklists.",
   ]);
 });
 

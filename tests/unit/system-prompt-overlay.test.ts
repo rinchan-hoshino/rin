@@ -330,7 +330,7 @@ test("runtime preserves six structured prompt scenarios", async () => {
   assert.match(actual.readTodo, /- todo:/);
   assert.match(
     actual.readTodo,
-    /use the current numbers returned by the latest tool result/,
+    /multiple concrete execution steps that benefit from a visible checklist/,
   );
   assert.match(actual.noTools, /Available tools:\n\(none\)/);
   assert.doesNotMatch(actual.noTools, /Use bash /);

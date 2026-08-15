@@ -54,6 +54,13 @@ async function execute(tool: any, params: any, signal?: AbortSignal) {
 test("note exposes ranged reads and item-level mutation inputs", async () => {
   const { tool } = await setup();
   assert.equal(tool.name, "note");
+  assert.equal(
+    tool.description,
+    "Maintain minimal verified session-branch notes that survive compaction.",
+  );
+  assert.deepEqual(tool.promptGuidelines, [
+    "Use note for verified state that must survive compaction; use todo for execution checklists.",
+  ]);
   assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
     "action",
     "beforeId",

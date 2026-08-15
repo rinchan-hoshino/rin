@@ -216,6 +216,13 @@ test("todo uses current-order numbers consistently for reads and mutations", asy
 test("todo exposes ranged reads and item-level mutation inputs", async () => {
   const { tool } = await setup();
   assert.equal(tool.name, "todo");
+  assert.equal(
+    tool.description,
+    "Maintain the current-branch execution checklist.",
+  );
+  assert.deepEqual(tool.promptGuidelines, [
+    "Use todo when current-branch work has multiple concrete execution steps that benefit from a visible checklist.",
+  ]);
   assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
     "action",
     "beforeId",
