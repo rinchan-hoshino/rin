@@ -16,10 +16,10 @@ Keep changes aligned with that shape. Prefer one clear runtime path over compati
 
 ## Source layout
 
-- `src/app/`: executable entrypoints and product assembly.
+- `src/app/`: executable entrypoints and thin assembly wrappers.
   - `rin`: CLI entrypoint and command routing.
   - `rin-daemon`: daemon process and worker process entrypoints.
-  - `rin-tui`: terminal frontend implementation used by the `rin` command.
+  - `rin-tui`: thin wrapper over the core terminal frontend launcher.
   - `rin-install`: installer entrypoint.
 - `src/core/`: reusable implementation modules used by the app entrypoints.
   - `rin-lib`: shared runtime prompt, changelog, model, update, and system helpers.
@@ -28,7 +28,7 @@ Keep changes aligned with that shape. Prefer one clear runtime path over compati
   - `memory`, `task`, `chat`, `chat-bridge`, and `self-improve`: first-party capability domains.
   - `platform`: shared filesystem, process, and OS utilities.
   - `pi`: Pi integration shims and helpers.
-- `tests/`: TypeScript tests split into `unit`, `e2e`, and `interactive` buckets.
+- `tests/`: TypeScript test source and support; the test taxonomy and validation rules are owned by `testing.md`.
 - `upstream/`: tracked upstream Pi and builtin skill mirrors; refresh with the sync scripts instead of editing mirrored content casually.
 
 ## Runtime layering

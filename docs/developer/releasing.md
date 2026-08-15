@@ -18,6 +18,12 @@ This document describes the operator workflow for Rin's fixed-cadence release tr
 - nightly: explicit opt-in only; `--nightly` means the current nightly build pinned from `main`
 - git: explicit opt-in only; `--git` means `main` and `--git <name>` resolves that branch or ref directly
 
+## Source of truth
+
+- `main` is the development source of truth.
+- `release-manifest.json` is the selection and asset-metadata source for stable, beta, and nightly.
+- `bootstrap` is generated release output; it is never a development branch.
+
 ## Cadence
 
 The default cadence is:
@@ -124,18 +130,7 @@ Stable, beta, nightly, and hotfix release executors publish a `linux-x64` platfo
 
 ## Bootstrap branch
 
-`bootstrap` is generated output, not a development branch.
-
-It should contain only:
-
-- `install.sh`
-- `install.ps1`
-- `scripts/bootstrap-entrypoint.sh`
-- `scripts/bootstrap-entrypoint.ps1`
-- `release-manifest.json`
-- generated `release-assets.env`
-- `docs/release/CHANGELOG.md`
-- generated bootstrap `README.md`
+`bootstrap` is generated output, not a development branch. `scripts/release/export-bootstrap-branch.ts` owns the exact payload and generates its README from the same file set. Do not maintain a second file list or hand-edit the branch.
 
 To regenerate locally:
 
