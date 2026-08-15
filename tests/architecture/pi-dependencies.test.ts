@@ -119,7 +119,7 @@ test("Pi session private members stay behind Rin's session host", () => {
     "src/core/pi/internal-extension-bridge.ts",
   ]);
   const memberPattern =
-    /(?:\.|\[\s*["'])_(?:baseSystemPrompt|baseSystemPromptOptions|buildIndex|checkCompaction|emit|extensionCommandContextActions|extensionMode|extensionRunner|extensionShutdownHandler|extensionUIContext|getCompactionRequestAuth|persist|rebuildSystemPrompt|refreshToolRegistry|resourceLoader|rewriteFile|runAutoCompaction|toolPromptGuidelines|toolPromptSnippets|toolRegistry)\b/;
+    /(?:\.|\[\s*["'])_(?:buildIndex|checkCompaction|emit|extensionCommandContextActions|extensionMode|extensionRunner|extensionShutdownHandler|extensionUIContext|getCompactionRequestAuth|persist|refreshToolRegistry|resourceLoader|rewriteFile|runAutoCompaction|toolPromptGuidelines|toolPromptSnippets|toolRegistry)\b/;
   const violations: string[] = [];
   for (const filePath of listSourceFiles(path.join(rootDir, "src", "core"))) {
     const relative = relativePath(filePath);
@@ -128,6 +128,17 @@ test("Pi session private members stay behind Rin's session host", () => {
     if (memberPattern.test(text)) violations.push(relative);
   }
   assert.deepEqual(violations, []);
+});
+
+test("Rin system prompt uses Pi's public extension contract", () => {
+  const sessionHost = fs.readFileSync(
+    path.join(rootDir, "src/core/pi/session-host.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(
+    sessionHost,
+    /_baseSystemPrompt(?:Options)?|_rebuildSystemPrompt/,
+  );
 });
 
 test("Pi upstream mirror metadata follows the package version", () => {

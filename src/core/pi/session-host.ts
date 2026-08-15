@@ -13,8 +13,6 @@ import { normalizeFrontendIdentity } from "../rin-lib/frontend-identity.js";
 type AnyFn = (...args: any[]) => any;
 
 const PI_SESSION_PRIVATE = {
-  baseSystemPrompt: "_baseSystemPrompt",
-  baseSystemPromptOptions: "_baseSystemPromptOptions",
   buildIndex: "_buildIndex",
   checkCompaction: "_checkCompaction",
   emit: "_emit",
@@ -24,7 +22,6 @@ const PI_SESSION_PRIVATE = {
   extensionShutdownHandler: "_extensionShutdownHandler",
   extensionUIContext: "_extensionUIContext",
   persist: "_persist",
-  rebuildSystemPrompt: "_rebuildSystemPrompt",
   refreshToolRegistry: "_refreshToolRegistry",
   resourceLoader: "_resourceLoader",
   runAgentPrompt: "_runAgentPrompt",
@@ -62,71 +59,6 @@ function normalizePiExtensionMode(value: unknown): PiExtensionMode {
   return PI_EXTENSION_MODES.has(text as PiExtensionMode)
     ? (text as PiExtensionMode)
     : "print";
-}
-
-export function readPiSessionBaseSystemPrompt(session: any) {
-  return String(
-    session?.[PI_SESSION_PRIVATE.baseSystemPrompt] ||
-      session?.agent?.state?.systemPrompt ||
-      "",
-  );
-}
-
-export function readPiSessionBaseSystemPromptOptions(
-  session: any,
-  fallbackCwd = "",
-) {
-  const value = session?.[PI_SESSION_PRIVATE.baseSystemPromptOptions];
-  if (value && typeof value === "object") return value;
-  const cwd = String(fallbackCwd || "").trim();
-  return cwd ? { cwd } : {};
-}
-
-export function writePiSessionBaseSystemPrompt(
-  session: any,
-  systemPrompt: string,
-) {
-  if (!session || typeof session !== "object") return;
-  const next = String(systemPrompt || "");
-  session[PI_SESSION_PRIVATE.baseSystemPrompt] = next;
-  if (session.agent?.state && typeof session.agent.state === "object") {
-    session.agent.state.systemPrompt = next;
-  }
-  if (typeof session.agent?.setSystemPrompt === "function") {
-    session.agent.setSystemPrompt(next);
-  }
-}
-
-export function getPiSessionResourcePromptState(session: any) {
-  const resourceLoader =
-    session?.resourceLoader ?? session?.[PI_SESSION_PRIVATE.resourceLoader];
-  const appendSystemPrompt = resourceLoader?.getAppendSystemPrompt?.();
-  const skills = resourceLoader?.getSkills?.()?.skills;
-  const agentsFiles = resourceLoader?.getAgentsFiles?.()?.agentsFiles;
-  return {
-    agentDir: String(resourceLoader?.agentDir || ""),
-    systemPrompt: String(resourceLoader?.getSystemPrompt?.() || ""),
-    appendSystemPrompt: Array.isArray(appendSystemPrompt)
-      ? appendSystemPrompt
-      : [],
-    skills: Array.isArray(skills) ? skills : [],
-    agentsFiles: Array.isArray(agentsFiles) ? agentsFiles : [],
-  };
-}
-
-export function bindPiSessionSystemPromptRebuilder(session: any) {
-  return bindMethod(session, PI_SESSION_PRIVATE.rebuildSystemPrompt);
-}
-
-export function replacePiSessionSystemPromptRebuilder(
-  session: any,
-  replacement: AnyFn,
-) {
-  return replaceMethod(
-    session,
-    PI_SESSION_PRIVATE.rebuildSystemPrompt,
-    replacement,
-  );
 }
 
 export function bindPiSessionCompactionChecker(session: any) {

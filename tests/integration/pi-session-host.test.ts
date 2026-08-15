@@ -8,7 +8,6 @@ const {
   buildRinCompactionRequest,
   getPiExtensionRunner,
   getPiSessionExtensionMode,
-  getPiSessionResourcePromptState,
   resumePiSessionTurn,
   RIN_COMPACTION_INSTRUCTIONS,
   runPiNativeCompactionWithoutFileSummary,
@@ -240,42 +239,16 @@ test("Rin compaction policy preserves native preparation while adding one canoni
   assert.equal(event.customInstructions, "Preserve exact units.");
 });
 
-test("Pi session host prefers public resource and extension getters", () => {
+test("Pi session host prefers the public extension getter", () => {
   const privateRunner = { mode: "print" };
   const publicRunner = { mode: "rpc" };
-  const privateResourceLoader = {
-    agentDir: "private-agent",
-    getSystemPrompt: () => "private-system",
-    getAppendSystemPrompt: () => ["private-append"],
-    getSkills: () => ({ skills: ["private-skill"] }),
-    getAgentsFiles: () => ({ agentsFiles: ["private-agent-file"] }),
-  };
-  const publicResourceLoader = {
-    agentDir: "public-agent",
-    getSystemPrompt: () => "public-system",
-    getAppendSystemPrompt: () => ["public-append"],
-    getSkills: () => ({ skills: ["public-skill"] }),
-    getAgentsFiles: () => ({ agentsFiles: ["public-agent-file"] }),
-  };
-
   const session = {
     _extensionRunner: privateRunner,
-    _resourceLoader: privateResourceLoader,
     get extensionRunner() {
       return publicRunner;
-    },
-    get resourceLoader() {
-      return publicResourceLoader;
     },
   };
 
   assert.equal(getPiExtensionRunner(session), publicRunner);
   assert.equal(getPiSessionExtensionMode(session), "rpc");
-  assert.deepEqual(getPiSessionResourcePromptState(session), {
-    agentDir: "public-agent",
-    systemPrompt: "public-system",
-    appendSystemPrompt: ["public-append"],
-    skills: ["public-skill"],
-    agentsFiles: ["public-agent-file"],
-  });
 });

@@ -13,86 +13,14 @@ const host = await importBuiltModule<
 >("dist/core/pi/session-host.js");
 await import("./pi-session-host.test.js");
 
-test("Pi session host reads and updates prompt state through the controlled seam", () => {
-  const calls: string[] = [];
+test("Pi session host normalizes modes, auth, and extension context", async () => {
   const session: any = {
-    _baseSystemPrompt: "base",
-    _baseSystemPromptOptions: { cwd: "/workspace" },
-    agent: {
-      state: { systemPrompt: "agent" },
-      setSystemPrompt(value: string) {
-        calls.push(value);
-      },
-    },
-    _toolRegistry: new Set(["read", "bash"]),
-    _toolPromptSnippets: new Map([["read", "read files"]]),
-    _toolPromptGuidelines: new Map([["read", new Set(["be exact"])]]),
-  };
-
-  assert.equal(host.readPiSessionBaseSystemPrompt(session), "base");
-  assert.equal(
-    host.readPiSessionBaseSystemPrompt({
-      agent: { state: { systemPrompt: "agent" } },
-    }),
-    "agent",
-  );
-  assert.equal(host.readPiSessionBaseSystemPrompt({}), "");
-  assert.deepEqual(host.readPiSessionBaseSystemPromptOptions(session), {
-    cwd: "/workspace",
-  });
-  assert.deepEqual(host.readPiSessionBaseSystemPromptOptions({}, "/fallback"), {
-    cwd: "/fallback",
-  });
-  assert.deepEqual(host.readPiSessionBaseSystemPromptOptions({}), {});
-  host.writePiSessionBaseSystemPrompt(session, "updated");
-  const minimal: any = {};
-  host.writePiSessionBaseSystemPrompt(minimal, undefined as any);
-  assert.equal(minimal._baseSystemPrompt, "");
-  host.writePiSessionBaseSystemPrompt(null, "ignored");
-  assert.equal(session._baseSystemPrompt, "updated");
-  assert.equal(session.agent.state.systemPrompt, "updated");
-  assert.deepEqual(calls, ["updated"]);
-});
-
-test("Pi session host normalizes resources, modes, auth, and extension context", async () => {
-  const resourceLoader = {
-    agentDir: "/agent",
-    getSystemPrompt: () => "system",
-    getAppendSystemPrompt: () => ["append"],
-    getSkills: () => ({ skills: [{ name: "skill" }] }),
-    getAgentsFiles: () => ({ agentsFiles: ["AGENTS.md"] }),
-  };
-  const session: any = {
-    resourceLoader,
     extensionRunner: { mode: "rpc" },
     _extensionShutdownHandler: () => "closed",
     _extensionUIContext: { ui: true },
     _extensionCommandContextActions: { action: true },
   };
 
-  assert.deepEqual(host.getPiSessionResourcePromptState(session), {
-    agentDir: "/agent",
-    systemPrompt: "system",
-    appendSystemPrompt: ["append"],
-    skills: [{ name: "skill" }],
-    agentsFiles: ["AGENTS.md"],
-  });
-  assert.deepEqual(
-    host.getPiSessionResourcePromptState({
-      _resourceLoader: {
-        getAppendSystemPrompt: () => "invalid",
-        getSkills: () => ({}),
-        getAgentsFiles: () => ({}),
-      },
-    }),
-    {
-      agentDir: "",
-      systemPrompt: "",
-      appendSystemPrompt: [],
-      skills: [],
-      agentsFiles: [],
-    },
-  );
   assert.equal(
     host.getPiExtensionRunner({ _extensionRunner: "private" }),
     "private",
@@ -117,10 +45,6 @@ test("Pi session host binds, replaces, and invokes private semantic methods", ()
   const calls: string[] = [];
   const session: any = {
     value: "bound",
-    _rebuildSystemPrompt() {
-      calls.push(`rebuild:${this.value}`);
-      return 1;
-    },
     _checkCompaction() {
       calls.push("check");
       return 2;
@@ -139,7 +63,6 @@ test("Pi session host binds, replaces, and invokes private semantic methods", ()
     },
   };
 
-  assert.equal(host.bindPiSessionSystemPromptRebuilder(session)?.(), 1);
   assert.equal(host.bindPiSessionCompactionChecker(session)?.(), 2);
   assert.equal(host.bindPiSessionAutoCompactor(session)?.("manual", false), 3);
   assert.equal(host.runPiSessionAutoCompaction(session, "retry", true), 3);
@@ -147,10 +70,6 @@ test("Pi session host binds, replaces, and invokes private semantic methods", ()
   assert.equal(host.refreshPiSessionToolRegistry(session), 4);
   assert.equal(host.emitPiSessionEvent(session, { type: "done" }), 5);
 
-  assert.equal(
-    host.replacePiSessionSystemPromptRebuilder(session, () => 10),
-    true,
-  );
   assert.equal(
     host.replacePiSessionCompactionChecker(session, () => 20),
     true,
@@ -163,13 +82,7 @@ test("Pi session host binds, replaces, and invokes private semantic methods", ()
     host.replacePiSessionToolRegistryRefresher(session, () => 40),
     true,
   );
-  assert.equal(
-    host.replacePiSessionSystemPromptRebuilder(null, () => 0),
-    false,
-  );
-  assert.equal(host.bindPiSessionSystemPromptRebuilder({}), undefined);
   assert.deepEqual(calls, [
-    "rebuild:bound",
     "check",
     "compact:manual:false",
     "compact:retry:true",

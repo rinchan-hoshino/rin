@@ -192,7 +192,6 @@ onebot_reaction_requires_group_chat
 onebot_send_message_empty
 onebot_send_message_empty_result
 onebot_upload_file_empty_result
-pi_prompt_shape_changed
 recall_aborted
 rin_agent_sdk_task_id_required
 rin_app_cli_failed
@@ -202,6 +201,7 @@ rin_app_install_failed
 rin_app_tui_failed
 rin_app_worker_failed
 rin_beta_selector_not_supported
+rin_system_prompt_extension_missing
 rin_command_failed
 rin_container_name_required
 rin_current_release_missing

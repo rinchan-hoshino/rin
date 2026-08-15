@@ -38,23 +38,23 @@ import {
   buildProviderBoundContextEvent,
   estimateProviderBoundContextTokens,
 } from "./provider-context.js";
-import { applyRinSystemPromptOverlay } from "./system-prompt-overlay.js";
+import {
+  buildRinSystemPrompt,
+  createRinSystemPromptExtension,
+  readPiPublicSystemPromptOptions,
+  RIN_SYSTEM_PROMPT_EXTENSION_NAME,
+  type RinSystemPromptOptions,
+} from "./system-prompt-overlay.js";
 import {
   bindPiSessionAutoCompactor,
   bindPiSessionCompactionChecker,
-  bindPiSessionSystemPromptRebuilder,
   bindPiSessionToolRegistryRefresher,
-  getPiSessionResourcePromptState,
   patchPiSessionManagerConversationPersistence,
-  readPiSessionBaseSystemPrompt,
-  readPiSessionBaseSystemPromptOptions,
   replacePiSessionAutoCompactor,
   replacePiSessionCompactionChecker,
-  replacePiSessionSystemPromptRebuilder,
   replacePiSessionToolRegistryRefresher,
   runPiNativeCompactionWithoutFileSummary,
   runPiSessionAutoCompaction,
-  writePiSessionBaseSystemPrompt,
 } from "../pi/session-host.js";
 
 export function createRinCapabilityDefinitions(
@@ -135,19 +135,11 @@ const LEGACY_LANGUAGE_ONLY_DEFAULTS: Record<string, string> = {
 
 type LazySystemPromptState = {
   materialized: boolean;
-  compute: (toolNames: string[]) => string;
+  systemPrompt: string;
   ignorePersistedPrompt: boolean;
+  promptContext?: unknown;
+  agentDir: string;
 };
-
-function getSessionActiveToolNames(session: any): string[] {
-  try {
-    if (typeof session?.getActiveToolNames === "function") {
-      const toolNames = session.getActiveToolNames();
-      return Array.isArray(toolNames) ? toolNames : [];
-    }
-  } catch {}
-  return [];
-}
 
 function isLegacyGeneratedLanguageTag(value: string) {
   const languageTag = String(value || "");
@@ -412,8 +404,8 @@ function appendSystemPromptBlocks(prompt: string, blocks: string[]) {
   return next;
 }
 
-function readPersistedSessionBaseSystemPrompt(session: any) {
-  const entries = session?.sessionManager?.getBranch?.();
+function readPersistedSessionBaseSystemPrompt(sessionManager: any) {
+  const entries = sessionManager?.getBranch?.();
   const persisted = findPersistedSessionBaseSystemPromptEntry(entries);
   if (!persisted) return { prompt: "", needsLegacySeal: false };
   const legacyBlocks = readUnsealedLegacySystemPromptBlocks(
@@ -426,25 +418,64 @@ function readPersistedSessionBaseSystemPrompt(session: any) {
   };
 }
 
-function persistSessionBaseSystemPrompt(session: any, systemPrompt: string) {
+function persistSessionBaseSystemPrompt(
+  sessionManager: any,
+  systemPrompt: string,
+) {
   const prompt = String(systemPrompt || "");
   if (!prompt.trim()) return;
-  if (typeof session?.sessionManager?.appendCustomEntry !== "function") return;
+  if (typeof sessionManager?.appendCustomEntry !== "function") return;
   const current = findPersistedSessionBaseSystemPrompt(
-    session.sessionManager.getBranch?.(),
+    sessionManager.getBranch?.(),
   );
   if (current === prompt) return;
-  session.sessionManager.appendCustomEntry(SESSION_SYSTEM_PROMPT_ENTRY_TYPE, {
+  sessionManager.appendCustomEntry(SESSION_SYSTEM_PROMPT_ENTRY_TYPE, {
     version: 1,
     systemPrompt: prompt,
   });
 }
 
-export function applySessionBaseSystemPrompt(
-  session: any,
-  systemPrompt: string,
+function buildOptionalSelfImprovePromptBlock(agentDir: string) {
+  try {
+    return buildSelfImprovePromptBlock(agentDir);
+  } catch {
+    return "";
+  }
+}
+
+function materializeRinSystemPrompt(
+  state: LazySystemPromptState,
+  sessionManager: any,
+  piOptions: RinSystemPromptOptions,
+  initialPromptContext?: unknown,
 ) {
-  writePiSessionBaseSystemPrompt(session, systemPrompt);
+  if (state.materialized) return state.systemPrompt;
+  if (!state.ignorePersistedPrompt) {
+    const persisted = readPersistedSessionBaseSystemPrompt(sessionManager);
+    if (persisted.prompt) {
+      state.materialized = true;
+      state.systemPrompt = persisted.prompt;
+      if (persisted.needsLegacySeal) {
+        persistSessionBaseSystemPrompt(sessionManager, persisted.prompt);
+      }
+      return persisted.prompt;
+    }
+  }
+  const next = appendPromptContextSystemPrompt(
+    buildRinSystemPrompt({
+      piOptions,
+      agentDir: state.agentDir,
+      selfImprovePromptBlock: buildOptionalSelfImprovePromptBlock(
+        state.agentDir,
+      ),
+    }),
+    initialPromptContext,
+  );
+  state.materialized = true;
+  state.systemPrompt = next;
+  state.ignorePersistedPrompt = false;
+  persistSessionBaseSystemPrompt(sessionManager, next);
+  return next;
 }
 
 export function clearSessionBaseSystemPrompt(
@@ -455,13 +486,12 @@ export function clearSessionBaseSystemPrompt(
   const state = session[LAZY_SYSTEM_PROMPT_STATE_KEY] as
     | LazySystemPromptState
     | undefined;
-  if (state && typeof state === "object") {
-    state.materialized = false;
-    if (options.ignorePersistedPrompt) {
-      state.ignorePersistedPrompt = true;
-    }
+  if (!state) return;
+  state.materialized = false;
+  state.systemPrompt = "";
+  if (options.ignorePersistedPrompt) {
+    state.ignorePersistedPrompt = true;
   }
-  applySessionBaseSystemPrompt(session, "");
 }
 
 export function ensureSessionBaseSystemPrompt(
@@ -472,32 +502,16 @@ export function ensureSessionBaseSystemPrompt(
   const state = session[LAZY_SYSTEM_PROMPT_STATE_KEY] as
     | LazySystemPromptState
     | undefined;
-  if (!state || typeof state.compute !== "function") {
-    return readPiSessionBaseSystemPrompt(session);
+  if (!state) return String(session.systemPrompt || "");
+  if (initialPromptContext !== undefined) {
+    state.promptContext = initialPromptContext;
   }
-  if (state.materialized) {
-    return readPiSessionBaseSystemPrompt(session);
-  }
-  if (!state.ignorePersistedPrompt) {
-    const persisted = readPersistedSessionBaseSystemPrompt(session);
-    if (persisted.prompt) {
-      state.materialized = true;
-      applySessionBaseSystemPrompt(session, persisted.prompt);
-      if (persisted.needsLegacySeal) {
-        persistSessionBaseSystemPrompt(session, persisted.prompt);
-      }
-      return persisted.prompt;
-    }
-  }
-  const next = appendPromptContextSystemPrompt(
-    state.compute(getSessionActiveToolNames(session)),
-    initialPromptContext,
+  return materializeRinSystemPrompt(
+    state,
+    session.sessionManager,
+    readPiPublicSystemPromptOptions(session),
+    state.promptContext,
   );
-  state.materialized = true;
-  state.ignorePersistedPrompt = false;
-  applySessionBaseSystemPrompt(session, next);
-  persistSessionBaseSystemPrompt(session, next);
-  return next;
 }
 
 export function appendPromptContextSystemPrompt(
@@ -511,41 +525,9 @@ export function appendPromptContextSystemPrompt(
   return base ? `${base}\n\n${block}` : block;
 }
 
-function applyRinPromptBuilder(session: any) {
+function applyRinPromptBuilder(session: any, state: LazySystemPromptState) {
   if (!session || typeof session !== "object") return;
-  const originalRebuild = bindPiSessionSystemPromptRebuilder(session);
-  if (!originalRebuild) return;
-
-  const computePrompt = (toolNames: string[]) => {
-    const activeToolNames = Array.isArray(toolNames) ? toolNames : [];
-    const piPrompt = originalRebuild(activeToolNames);
-    const piOptions = readPiSessionBaseSystemPromptOptions(session);
-    const resourcePromptState = getPiSessionResourcePromptState(session);
-    const promptAgentDir =
-      resourcePromptState.agentDir ||
-      process.env.RIN_DIR ||
-      resolveRuntimeProfile().agentDir;
-    return applyRinSystemPromptOverlay({
-      piPrompt,
-      piOptions,
-      activeToolNames,
-      agentDir: promptAgentDir,
-      selfImprovePromptBlock: buildSelfImprovePromptBlock(promptAgentDir),
-    });
-  };
-
-  const state: LazySystemPromptState = {
-    materialized: false,
-    compute: computePrompt,
-    ignorePersistedPrompt: false,
-  };
   session[LAZY_SYSTEM_PROMPT_STATE_KEY] = state;
-
-  replacePiSessionSystemPromptRebuilder(session, (toolNames: string[] = []) => {
-    originalRebuild(Array.isArray(toolNames) ? toolNames : []);
-    if (!state.materialized) return "";
-    return readPiSessionBaseSystemPrompt(session);
-  });
 
   const originalPrompt =
     typeof session.prompt === "function" ? session.prompt.bind(session) : null;
@@ -1173,6 +1155,28 @@ export function patchRinRuntimeSessionShutdown(runtime: any) {
   };
 }
 
+function prioritizeRinSystemPromptExtension(
+  loaded: any,
+  configuredOverride?: (base: any) => any,
+) {
+  const targetPath = `<inline:${RIN_SYSTEM_PROMPT_EXTENSION_NAME}>`;
+  const coreExtension = loaded?.extensions?.find(
+    (extension: any) =>
+      extension?.path === targetPath || extension?.resolvedPath === targetPath,
+  );
+  if (!coreExtension) throw new Error("rin_system_prompt_extension_missing");
+  const configured = configuredOverride ? configuredOverride(loaded) : loaded;
+  const extensions = Array.isArray(configured?.extensions)
+    ? configured.extensions.filter(
+        (extension: any) =>
+          extension !== coreExtension &&
+          extension?.path !== targetPath &&
+          extension?.resolvedPath !== targetPath,
+      )
+    : [];
+  return { ...configured, extensions: [coreExtension, ...extensions] };
+}
+
 function normalizeQueueMode(value: unknown, fallback: "all" | "one-at-a-time") {
   return value === "all" || value === "one-at-a-time" ? value : fallback;
 }
@@ -1283,10 +1287,29 @@ export async function createConfiguredAgentSession(
     patchPiSessionManagerConversationPersistence(sessionManager);
 
     const settingsManager = SettingsManager.create(runtimeCwd, runtimeAgentDir);
+    const promptState: LazySystemPromptState = {
+      materialized: false,
+      systemPrompt: "",
+      ignorePersistedPrompt: false,
+      agentDir: runtimeAgentDir,
+    };
+    const rinSystemPromptExtension = createRinSystemPromptExtension(
+      (piOptions, context) =>
+        materializeRinSystemPrompt(
+          promptState,
+          context?.sessionManager ?? sessionManager,
+          piOptions,
+          promptState.promptContext,
+        ),
+    );
 
     const piServiceOptions = options.piAgentSessionServicesOptions ?? {};
     const piResourceLoaderOptions =
       (piServiceOptions.resourceLoaderOptions as Record<string, unknown>) ?? {};
+    const configuredExtensionsOverride =
+      piResourceLoaderOptions.extensionsOverride as
+        | ((base: any) => any)
+        | undefined;
     const services = await createAgentSessionServices({
       ...piServiceOptions,
       cwd: runtimeCwd,
@@ -1296,7 +1319,13 @@ export async function createConfiguredAgentSession(
         ...piResourceLoaderOptions,
         extensionFactories: [
           ...((piResourceLoaderOptions.extensionFactories as any[]) || []),
+          rinSystemPromptExtension,
         ],
+        extensionsOverride: (loaded: any) =>
+          prioritizeRinSystemPromptExtension(
+            loaded,
+            configuredExtensionsOverride,
+          ),
         additionalExtensionPaths: options.additionalExtensionPaths ?? [],
         noExtensions: options.noExtensions,
         additionalSkillPaths,
@@ -1411,7 +1440,7 @@ export async function createConfiguredAgentSession(
     });
 
     applyRinExtensionContextApi(result.session, agentDir);
-    applyRinPromptBuilder(result.session);
+    applyRinPromptBuilder(result.session, promptState);
     applyAutoReloadAfterCompaction(result.session);
     return {
       ...result,

@@ -15,10 +15,10 @@ import {
   getPiSessionExtensionCommandContextActions,
   getPiSessionExtensionMode,
   getPiSessionExtensionUIContext,
-  readPiSessionBaseSystemPromptOptions,
   refreshPiSessionToolRegistry,
   shutdownPiSessionExtensionHost,
 } from "../pi/session-host.js";
+import { readPiPublicSystemPromptOptions } from "./system-prompt-overlay.js";
 
 type SessionStartReason = "startup" | "reload" | "new" | "resume" | "fork";
 
@@ -416,7 +416,7 @@ function bindCapabilitySetToSession(
       },
       getSystemPrompt: () => session.systemPrompt,
       getSystemPromptOptions: () =>
-        readPiSessionBaseSystemPromptOptions(session, capabilitySet.cwd),
+        readPiPublicSystemPromptOptions(session, capabilitySet.cwd),
     },
   );
   capabilitySet.setUIContext(

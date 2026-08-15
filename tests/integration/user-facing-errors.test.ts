@@ -174,10 +174,6 @@ test("runtime error formatter maps known internal markers to actionable messages
     ),
     "Rin's background service is not available: managed daemon service did not become available.",
   );
-  assert.equal(
-    formatRuntimeErrorForUser("pi_prompt_shape_changed:Guidelines"),
-    "Rin stopped because Pi's system prompt structure changed and Rin could not apply its prompt overlay safely.",
-  );
 });
 
 test("runtime error formatter keeps unmapped internal marker detail readable", () => {

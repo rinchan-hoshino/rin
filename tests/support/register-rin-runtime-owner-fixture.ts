@@ -198,28 +198,8 @@ const sources: Record<string, string> = {
   `,
   "../pi/session-host.js": `
     function owner() { return globalThis.__rinRuntimeOwner; }
-    export function getPiSessionPromptToolState(session, toolNames) {
-      owner().events.push(["prompt-tool-state", session, toolNames]);
-      if (owner().promptToolStateError) throw owner().promptToolStateError;
-      return owner().promptToolState;
-    }
-    export function getPiSessionResourcePromptState(session) {
-      owner().events.push(["resource-prompt-state", session]);
-      return owner().resourcePromptState;
-    }
-    export function bindPiSessionSystemPromptRebuilder(session) {
-      if (typeof session?._rebuildSystemPrompt !== "function") return undefined;
-      return session._rebuildSystemPrompt.bind(session);
-    }
-    export function replacePiSessionSystemPromptRebuilder(session, fn) { session._rebuildSystemPrompt = fn.bind(session); }
     export function bindPiSessionToolRegistryRefresher(session) { return typeof session?._refreshToolRegistry === "function" ? session._refreshToolRegistry.bind(session) : undefined; }
     export function replacePiSessionToolRegistryRefresher(session, fn) { session._refreshToolRegistry = fn.bind(session); }
-    export function readPiSessionBaseSystemPrompt(session) { return String(session?._baseSystemPrompt || ""); }
-    export function readPiSessionBaseSystemPromptOptions(session, fallbackCwd = "") { return session?._baseSystemPromptOptions || (fallbackCwd ? { cwd: fallbackCwd } : {}); }
-    export function writePiSessionBaseSystemPrompt(session, prompt) {
-      owner().events.push(["write-base-prompt", prompt]);
-      session._baseSystemPrompt = String(prompt || "");
-    }
     export function bindPiSessionCompactionChecker(session) {
       return typeof session?._checkCompaction === "function" ? session._checkCompaction.bind(session) : undefined;
     }
@@ -262,7 +242,7 @@ export async function load(url, context, nextLoad) {
   if (!url.endsWith(target)) return loaded;
   return {
     ...loaded,
-    source: String(loaded.source) + "\\nexport { isLegacyGeneratedLanguageTag as __rinOwnerIsLegacyGeneratedLanguageTag, isInsideMarkdownFence as __rinOwnerIsInsideMarkdownFence, historicalPromptLineValue as __rinOwnerHistoricalPromptLineValue, historicalReadmeRoot as __rinOwnerHistoricalReadmeRoot, historicalJoinedRoot as __rinOwnerHistoricalJoinedRoot, historicalAgentRoot as __rinOwnerHistoricalAgentRoot, stripLegacyConfiguredLanguagePrompt as __rinOwnerStripLegacyConfiguredLanguagePrompt, findPersistedSessionBaseSystemPrompt as __rinOwnerFindPersistedSessionBaseSystemPrompt, hasLegacyPromptLayerBoundary as __rinOwnerHasLegacyPromptLayerBoundary, getSessionActiveToolNames as __rinOwnerGetSessionActiveToolNames };\\n",
+    source: String(loaded.source) + "\\nexport { isLegacyGeneratedLanguageTag as __rinOwnerIsLegacyGeneratedLanguageTag, isInsideMarkdownFence as __rinOwnerIsInsideMarkdownFence, historicalPromptLineValue as __rinOwnerHistoricalPromptLineValue, historicalReadmeRoot as __rinOwnerHistoricalReadmeRoot, historicalJoinedRoot as __rinOwnerHistoricalJoinedRoot, historicalAgentRoot as __rinOwnerHistoricalAgentRoot, stripLegacyConfiguredLanguagePrompt as __rinOwnerStripLegacyConfiguredLanguagePrompt, findPersistedSessionBaseSystemPrompt as __rinOwnerFindPersistedSessionBaseSystemPrompt, hasLegacyPromptLayerBoundary as __rinOwnerHasLegacyPromptLayerBoundary, };\\n",
     shortCircuit: true,
   };
 }`;
@@ -312,7 +292,21 @@ register(`data:text/javascript,${encodeURIComponent(hook)}`, import.meta.url);
   },
   knownModels: new Map(),
   diagnostics: [{ level: "owner" }],
-  resourceLoader: { getExtensions: () => [{ id: "owner-extension" }] },
+  resourceLoader: {
+    getExtensions: () => [{ id: "owner-extension" }],
+    getSystemPrompt: () =>
+      (globalThis as any).__rinRuntimeOwner.resourcePromptState.systemPrompt,
+    getAppendSystemPrompt: () =>
+      (globalThis as any).__rinRuntimeOwner.resourcePromptState
+        .appendSystemPrompt,
+    getSkills: () => ({
+      skills: (globalThis as any).__rinRuntimeOwner.resourcePromptState.skills,
+    }),
+    getAgentsFiles: () => ({
+      agentsFiles: (globalThis as any).__rinRuntimeOwner.resourcePromptState
+        .agentsFiles,
+    }),
+  },
   toolDefinitions: [{ name: "owner_tool" }],
   capabilityHandlerTypes: new Set(["session_shutdown"]),
   sessionStartEvent: {
@@ -352,12 +346,6 @@ register(`data:text/javascript,${encodeURIComponent(hook)}`, import.meta.url);
       model: options.model || owner.sessionModel,
       thinkingLevel: options.thinkingLevel || "medium",
       messages: owner.sessionMessages || [],
-      _baseSystemPromptOptions: {
-        selectedTools: [...(owner.activeToolNames || ["read", "bash"])],
-        toolSnippets: { read: "Read owner", bash: "Run owner" },
-        promptGuidelines: ["Owner guideline."],
-        cwd: options.cwd || process.cwd(),
-      },
       agent: {
         state: {
           messages: owner.providerMessages || [],
@@ -377,26 +365,14 @@ register(`data:text/javascript,${encodeURIComponent(hook)}`, import.meta.url);
         return Boolean(owner.isCompacting);
       },
       getActiveToolNames: () => owner.activeToolNames || ["read", "bash"],
-      getContextUsage: () => owner.contextUsage,
-      _rebuildSystemPrompt(toolNames: string[]) {
-        owner.events.push(["native-rebuild", toolNames]);
-        this._baseSystemPromptOptions.selectedTools = [...toolNames];
-        const snippets = this._baseSystemPromptOptions.toolSnippets;
-        const tools =
-          toolNames
-            .filter((name: string) => snippets[name])
-            .map((name: string) => `- ${name}: ${snippets[name]}`)
-            .join("\n") || "(none)";
-        const prompt = [
-          "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.",
-          `Available tools:\n${tools}`,
-          "Guidelines:\n- Owner guideline.",
-          "Pi documentation owner",
-          `Current working directory: ${String(this._baseSystemPromptOptions.cwd).replace(/\\\\/g, "/")}`,
-        ].join("\n\n");
-        this._baseSystemPrompt = prompt;
-        return prompt;
+      getToolDefinition(name: string) {
+        const toolState = owner.promptToolState;
+        return {
+          promptSnippet: toolState.toolSnippets[name],
+          promptGuidelines: toolState.promptGuidelines,
+        };
       },
+      getContextUsage: () => owner.contextUsage,
       async _checkCompaction(message: any, skip?: boolean) {
         owner.events.push(["native-check", message, skip]);
         return owner.nativeCheckResult;
@@ -452,7 +428,6 @@ register(`data:text/javascript,${encodeURIComponent(hook)}`, import.meta.url);
     reasoning: true,
   },
   activeToolNames: ["read", "bash"],
-  nativePrompt: "native owner prompt",
   nativeCheckResult: "native-check-owner",
   autoCompactionResult: "owner-compacted",
   promptResult: "owner-prompted",

@@ -59,30 +59,30 @@ function legacyConfiguredLanguageBlock(languageTag: string) {
   ].join("\n");
 }
 
-test("createConfiguredAgentSession keeps system prompt empty until first turn", async (t) => {
+test("Rin materializes its prompt without mutating Pi's base prompt", async (t) => {
   const cwd = makeTempDir(t, "rin-lazy-prompt-cwd-");
   const agentDir = makeTempDir(t, "rin-lazy-prompt-agent-");
 
-  const { session } = await runtimeMod.createConfiguredAgentSession({
+  const configured = await runtimeMod.createConfiguredAgentSession({
     cwd,
     agentDir,
   });
+  t.after(() => configured.runtime.dispose());
 
-  assert.equal(String(session._baseSystemPrompt || ""), "");
-  assert.equal(String(session.agent?.state?.systemPrompt || ""), "");
+  const piBasePrompt = String(configured.session.systemPrompt || "");
+  assert.match(piBasePrompt, /expert coding assistant operating inside pi/);
 
-  const baseSystemPrompt = runtimeMod.ensureSessionBaseSystemPrompt(session);
+  const baseSystemPrompt = runtimeMod.ensureSessionBaseSystemPrompt(
+    configured.session,
+  );
   assert.ok(
     baseSystemPrompt.startsWith(
       "As the assistant, you must fulfill the user's requests.",
     ),
   );
   assert.ok(baseSystemPrompt.includes("Available tools:"));
-  assert.equal(String(session._baseSystemPrompt || ""), baseSystemPrompt);
-  assert.equal(
-    String(session.agent?.state?.systemPrompt || ""),
-    baseSystemPrompt,
-  );
+  assert.doesNotMatch(baseSystemPrompt, /expert coding assistant/);
+  assert.equal(String(configured.session.systemPrompt || ""), piBasePrompt);
 });
 
 test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
@@ -655,7 +655,7 @@ test("a cleaned latest persisted prompt does not revive older state", async (t) 
   await runtime.dispose();
 });
 
-test("Pi system prompt options track Rin lazy prompt tool changes", async (t) => {
+test("Pi public system prompt options track Rin lazy prompt tool changes", async (t) => {
   const cwd = makeTempDir(t, "rin-prompt-options-cwd-");
   const agentDir = makeTempDir(t, "rin-prompt-options-agent-");
 
@@ -669,7 +669,10 @@ test("Pi system prompt options track Rin lazy prompt tool changes", async (t) =>
     .createCommandContext()
     .getSystemPromptOptions();
   assert.deepEqual(options.selectedTools, ["read"]);
-  assert.equal(String(session._baseSystemPrompt || ""), "");
+  assert.deepEqual(
+    runtimeMod.ensureSessionBaseSystemPrompt(session).match(/^- read:/gm),
+    ["- read:"],
+  );
   await runtime.dispose();
 });
 
@@ -696,16 +699,16 @@ test("system prompt stays frozen until reload", async (t) => {
   );
   session.setActiveToolsByName(session.getActiveToolNames());
 
-  assert.equal(String(session._baseSystemPrompt || ""), firstPrompt);
+  assert.equal(runtimeMod.ensureSessionBaseSystemPrompt(session), firstPrompt);
   assert.equal(
-    String(session._baseSystemPrompt || "").includes(
-      "Updated preference after materialization.",
-    ),
+    runtimeMod
+      .ensureSessionBaseSystemPrompt(session)
+      .includes("Updated preference after materialization."),
     false,
   );
 
   await session.reload();
-  const reloadedPrompt = String(session._baseSystemPrompt || "");
+  const reloadedPrompt = runtimeMod.ensureSessionBaseSystemPrompt(session);
   assert.ok(
     reloadedPrompt.includes("Updated preference after materialization."),
   );
@@ -774,7 +777,9 @@ test("persisted system prompt restores across resume and refreshes on reload", a
   assert.equal(resumedPrompt.includes("Updated method after resume."), false);
 
   await resumedRuntime.session.reload();
-  const reloadedPrompt = String(resumedRuntime.session._baseSystemPrompt || "");
+  const reloadedPrompt = runtimeMod.ensureSessionBaseSystemPrompt(
+    resumedRuntime.session,
+  );
   assert.notEqual(reloadedPrompt, firstPrompt);
   assert.ok(reloadedPrompt.includes("Updated method after resume."));
   await resumedRuntime.runtime.dispose();
@@ -941,7 +946,7 @@ test("forked sessions restore the source persisted system prompt", async (t) => 
   await forkRuntime.runtime.dispose();
 });
 
-test("buildFinalAppSystemPrompt keeps Pi-native context and skills before self-improve prompts", async (t) => {
+test("buildFinalAppSystemPrompt keeps structured context and skills before self-improve prompts", async (t) => {
   const cwd = makeTempDir(t, "rin-final-prompt-cwd-");
   const agentDir = makeTempDir(t, "rin-final-prompt-agent-");
   fs.writeFileSync(

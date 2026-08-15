@@ -10,30 +10,15 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const piPackageRoot = path.resolve(
-  path.dirname(
-    fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")),
-  ),
-  "..",
-);
 const runtimeMod = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "runtime.js"))
     .href
 );
-const overlayMod = await import(
+const promptMod = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-lib", "system-prompt-overlay.js"),
   ).href
 );
-
-function applyOverlay(input: Record<string, any>) {
-  const piOptions = { cwd: "/tmp/project", ...input.piOptions };
-  return overlayMod.applyRinSystemPromptOverlay({
-    ...input,
-    piOptions,
-    activeToolNames: input.activeToolNames ?? piOptions.selectedTools,
-  });
-}
 
 function normalizePrompt(
   prompt: string,
@@ -42,13 +27,8 @@ function normalizePrompt(
   return String(prompt)
     .split(options.agentDir)
     .join("<AGENT_DIR>")
-    .split(piPackageRoot)
-    .join("<PI_PACKAGE>")
-    .split(rootDir)
-    .join("<REPO>")
     .split(options.cwd)
-    .join("<CWD>")
-    .replace(/Current date: \d{4}-\d{2}-\d{2}/g, "Current date: <DATE>");
+    .join("<CWD>");
 }
 
 async function buildPromptScenario(
@@ -64,9 +44,9 @@ async function buildPromptScenario(
     appendSystemPrompt?: string;
   } = {},
 ) {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), `rin-parity-${name}-cwd-`));
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), `rin-prompt-${name}-cwd-`));
   const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `rin-parity-${name}-agent-`),
+    path.join(os.tmpdir(), `rin-prompt-${name}-agent-`),
   );
   try {
     if (setup.settings) {
@@ -123,491 +103,133 @@ async function buildPromptScenario(
   }
 }
 
-const PI_GENERIC_OPENING =
-  "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.";
-
-const SAMPLE_PI_PROMPT = `${PI_GENERIC_OPENING}
-
-Available tools:
-- read: Read files
-
-In addition to the tools above, you may have access to other custom tools depending on the project.
-
-Guidelines:
-- Use bash for file operations like ls, rg, find
-- Tool rule.
-- Future Pi default
-- Be concise in your responses
-- Show file paths clearly when working with files
-
-Pi documentation:
-- upstream docs
-Current working directory: /tmp/project`;
-
-test("Rin overlay preserves Pi-owned sections and adds only Rin-owned layers", () => {
-  const result = applyOverlay({
-    piPrompt: SAMPLE_PI_PROMPT,
+test("Rin owns a canonical prompt built only from structured resources", () => {
+  const prompt = promptMod.buildRinSystemPrompt({
     piOptions: {
+      cwd: "/private/process/path",
       selectedTools: ["read"],
       toolSnippets: { read: "Read files" },
-      promptGuidelines: ["Tool rule."],
-    },
-    agentDir: "/tmp/rin-agent",
-    selfImprovePromptBlock: "SELF-IMPROVE BLOCK",
-  });
-
-  assert.match(result, /- Future Pi default/);
-  assert.match(result, /- Be concise in your responses/);
-  assert.match(result, /- Show file paths clearly when working with files/);
-  assert.match(result, /Use bash for file operations like ls, rg, find/);
-  assert.match(result, /- Tool rule\.\n/);
-  assert.match(result, /Pi documentation:\n- upstream docs/);
-  assert.match(result, /Rin and Pi documentation:/);
-  assert.ok(
-    result.indexOf("Pi documentation:\n- upstream docs") <
-      result.indexOf("Rin and Pi documentation:"),
-  );
-  assert.match(result, /SELF-IMPROVE BLOCK/);
-  assert.doesNotMatch(result, /Current date:/);
-  assert.doesNotMatch(result, /Current working directory:/);
-  assert.ok(
-    result.indexOf("- Tool rule.") < result.indexOf("- Future Pi default"),
-  );
-  assert.ok(
-    result.indexOf("- Show file paths clearly when working with files") <
-      result.indexOf(
-        "- Do not stop after one action if the user's request obviously requires multiple concrete steps",
-      ),
-  );
-});
-
-test("Rin overlay fails closed when Pi's generic opening changes", () => {
-  assert.throws(
-    () =>
-      applyOverlay({
-        piPrompt: SAMPLE_PI_PROMPT.replace(PI_GENERIC_OPENING, "Pi changed."),
-        piOptions: {
-          cwd: "/tmp/project",
-          selectedTools: ["read"],
-          toolSnippets: { read: "Read files" },
-          promptGuidelines: ["Tool rule."],
-        },
-        agentDir: "/tmp/rin-agent",
-      }),
-    /pi_prompt_shape_changed/,
-  );
-});
-
-test("Rin overlay requires the exact Pi cwd suffix", () => {
-  assert.throws(
-    () =>
-      applyOverlay({
-        piPrompt: SAMPLE_PI_PROMPT.replace(
-          "Current working directory: /tmp/project",
-          "Current working directory:  /tmp/project",
-        ),
-        piOptions: {
-          cwd: "/tmp/project",
-          selectedTools: ["read"],
-          toolSnippets: { read: "Read files" },
-          promptGuidelines: ["Tool rule."],
-        },
-        agentDir: "/tmp/rin-agent",
-      }),
-    /pi_prompt_shape_changed/,
-  );
-  assert.throws(
-    () =>
-      overlayMod.applyRinSystemPromptOverlay({
-        piPrompt: SAMPLE_PI_PROMPT,
-        piOptions: {
-          selectedTools: ["read"],
-          toolSnippets: { read: "Read files" },
-          promptGuidelines: ["Tool rule."],
-        },
-        activeToolNames: ["read"],
-        agentDir: "/tmp/rin-agent",
-      }),
-    /pi_prompt_shape_changed/,
-  );
-});
-
-test("Rin overlay fails closed when active tools and Pi options diverge", () => {
-  assert.throws(
-    () =>
-      applyOverlay({
-        piPrompt: SAMPLE_PI_PROMPT,
-        piOptions: {
-          cwd: "/tmp/project",
-          selectedTools: ["read"],
-          toolSnippets: { read: "Read files" },
-          promptGuidelines: ["Tool rule."],
-        },
-        activeToolNames: [],
-        agentDir: "/tmp/rin-agent",
-      }),
-    /pi_prompt_shape_changed/,
-  );
-});
-
-test("Rin overlay fails closed when Pi section anchors change", () => {
-  assert.throws(
-    () =>
-      applyOverlay({
-        piPrompt: "Pi changed every section",
-        piOptions: { selectedTools: [], promptGuidelines: [] },
-        agentDir: "/tmp/rin-agent",
-      }),
-    /pi_prompt_shape_changed/,
-  );
-});
-
-test("Rin overlay treats prompt-shaped appended text as data", () => {
-  const appended = "Available tools:\n(none)\n\nGuidelines:\n- data";
-  const result = applyOverlay({
-    piPrompt: SAMPLE_PI_PROMPT.replace(
-      "\nCurrent working directory: /tmp/project",
-      `\n\n${appended}\nCurrent working directory: /tmp/project`,
-    ),
-    piOptions: {
-      selectedTools: ["read"],
-      toolSnippets: { read: "Read files" },
-      promptGuidelines: ["Tool rule."],
-      appendSystemPrompt: appended,
+      promptGuidelines: ["Use read for owner-requested files."],
+      appendSystemPrompt: "Owner append",
+      contextFiles: [
+        { path: "/tmp/AGENTS.md", content: "Project instruction" },
+      ],
     },
     agentDir: "/tmp/rin-agent",
   });
-  assert.match(result, /Available tools:\n\(none\)\n\nGuidelines:\n- data/);
+
+  assert.match(prompt, /^As the assistant,/);
+  assert.match(prompt, /Available tools:\n- read: Read files/);
+  assert.match(prompt, /Use read for owner-requested files\./);
+  assert.match(prompt, /Owner append/);
+  assert.match(prompt, /Project instruction/);
+  assert.doesNotMatch(prompt, /expert coding assistant operating inside pi/);
+  assert.doesNotMatch(prompt, /Current working directory:/);
+  assert.doesNotMatch(prompt, /private\/process\/path/);
 });
 
-test("Rin overlay locates appended text after identical Pi docs bytes", () => {
-  const appended = "Pi documentation:\n- upstream docs";
-  const piPrompt = SAMPLE_PI_PROMPT.replace(
-    "\nCurrent working directory: /tmp/project",
-    `\n\n${appended}\nCurrent working directory: /tmp/project`,
-  );
-  const result = applyOverlay({
-    piPrompt,
+test("Rin canonical prompt derives tool guidance once from active public metadata", () => {
+  const prompt = promptMod.buildRinSystemPrompt({
     piOptions: {
-      cwd: "/tmp/project",
-      selectedTools: ["read"],
-      toolSnippets: { read: "Read files" },
-      promptGuidelines: ["Tool rule."],
-      appendSystemPrompt: appended,
+      cwd: "/ignored",
+      selectedTools: ["bash", "read"],
+      toolSnippets: { bash: "Run commands", read: "Read files" },
+      promptGuidelines: [
+        "Use read to examine files instead of cat or sed.",
+        "Use read to examine files instead of cat or sed.",
+      ],
     },
     agentDir: "/tmp/rin-agent",
   });
-  assert.equal(result.match(/Pi documentation:\n- upstream docs/g)?.length, 2);
-  assert.ok(
-    result.indexOf("Rin and Pi documentation:") < result.lastIndexOf(appended),
+
+  assert.equal(
+    prompt.match(/Use read to examine files instead of cat or sed\./g)?.length,
+    1,
   );
+  assert.match(prompt, /Use bash for file operations like ls, rg, find/);
+  assert.match(prompt, /- bash: Run commands/);
+  assert.match(prompt, /- read: Read files/);
 });
 
-test("Rin overlay preserves Pi-owned trailing whitespace before cwd", () => {
-  const appended = "APPEND WITH SPACE  \n";
-  const piPrompt = SAMPLE_PI_PROMPT.replace(
-    "- Show file paths clearly when working with files",
-    "- Show file paths clearly when working with files  ",
-  ).replace(
-    "\nCurrent working directory: /tmp/project",
-    `\n\n${appended}\nCurrent working directory: /tmp/project`,
-  );
-  const result = applyOverlay({
-    piPrompt,
-    piOptions: {
-      cwd: "/tmp/project",
-      selectedTools: ["read"],
-      toolSnippets: { read: "Read files" },
-      promptGuidelines: ["Tool rule."],
-      appendSystemPrompt: appended,
-    },
+test("no-tools prompt contains no unavailable-tool instructions", () => {
+  const prompt = promptMod.buildRinSystemPrompt({
+    piOptions: { cwd: "/ignored", selectedTools: [] },
     agentDir: "/tmp/rin-agent",
   });
-  assert.match(
-    result,
-    /Show file paths clearly when working with files {2}\n- Do not stop/,
-  );
-  assert.ok(result.endsWith(appended));
+
+  assert.match(prompt, /Available tools:\n\(none\)/);
+  assert.doesNotMatch(prompt, /Use bash /);
+  assert.doesNotMatch(prompt, /Use read /);
+  assert.doesNotMatch(prompt, /Use edit /);
 });
 
-test("Rin overlay fails closed on a second structural tools block", () => {
-  const piPrompt = SAMPLE_PI_PROMPT.replace(
-    "\n\nIn addition to the tools above",
-    "\n\nAvailable tools:\n(none)\n\nIn addition to the tools above",
-  );
-  assert.throws(
-    () =>
-      applyOverlay({
-        piPrompt,
-        piOptions: {
-          selectedTools: ["read"],
-          toolSnippets: { read: "Read files" },
-          promptGuidelines: ["Tool rule."],
-        },
-        agentDir: "/tmp/rin-agent",
-      }),
-    /pi_prompt_shape_changed/,
-  );
-});
-
-test("Rin overlay keeps prompt-shaped tool snippet text inside the tool block", () => {
-  const toolSnippet =
-    "Read files\n\nGuidelines:\n- TOOL DATA\n\nPi documentation TOOL DATA";
-  const piPrompt = SAMPLE_PI_PROMPT.replace("Read files", toolSnippet);
-  const result = applyOverlay({
-    piPrompt,
+test("custom prompt preserves structured append, context, skills, and Rin layers", () => {
+  const prompt = promptMod.buildRinSystemPrompt({
     piOptions: {
-      selectedTools: ["read"],
-      toolSnippets: { read: toolSnippet },
-      promptGuidelines: ["Tool rule."],
-    },
-    agentDir: "/tmp/rin-agent",
-  });
-  assert.match(
-    result,
-    /- read: Read files\n\nGuidelines:\n- TOOL DATA\n\nPi documentation TOOL DATA\n\nIn addition/,
-  );
-  assert.match(result, /- Future Pi default/);
-});
-
-test("Rin overlay keeps a multiline tool guideline whole and emits it once", () => {
-  const toolGuideline = "First line.\nSecond line.";
-  const piPrompt = SAMPLE_PI_PROMPT.replace(
-    "- Tool rule.",
-    `- ${toolGuideline}`,
-  );
-  const result = applyOverlay({
-    piPrompt,
-    piOptions: {
-      selectedTools: ["read"],
-      toolSnippets: { read: "Read files" },
-      promptGuidelines: [toolGuideline],
-    },
-    agentDir: "/tmp/rin-agent",
-  });
-  assert.equal(result.match(/First line\./g)?.length, 1);
-  assert.equal(result.match(/Second line/g)?.length, 1);
-  assert.match(
-    result,
-    /Use bash for file operations like ls, rg, find\n- First line\.\nSecond line\.\n- Future Pi default/,
-  );
-});
-
-test("Rin overlay keeps an exact Pi-default/tool duplicate at the Pi position", () => {
-  const duplicate = "Be concise in your responses";
-  const piPrompt = SAMPLE_PI_PROMPT.replace("Tool rule.", duplicate).replace(
-    "- Future Pi default\n- Be concise in your responses\n- Show file paths",
-    "- Future Pi default\n- Show file paths",
-  );
-  const result = applyOverlay({
-    piPrompt,
-    piOptions: {
-      selectedTools: ["read"],
-      toolSnippets: { read: "Read files" },
-      promptGuidelines: [duplicate],
-    },
-    agentDir: "/tmp/rin-agent",
-  });
-  assert.equal(result.match(/Be concise in your responses/g)?.length, 1);
-  assert.ok(
-    result.indexOf("- Be concise in your responses") <
-      result.indexOf("- Future Pi default"),
-  );
-});
-
-test("Rin overlay preserves Pi's period-distinct guideline entries", () => {
-  const duplicate = "Be concise in your responses.";
-  const piPrompt = SAMPLE_PI_PROMPT.replace("Tool rule.", duplicate);
-  const result = applyOverlay({
-    piPrompt,
-    piOptions: {
-      selectedTools: ["read"],
-      toolSnippets: { read: "Read files" },
-      promptGuidelines: [duplicate],
-    },
-    agentDir: "/tmp/rin-agent",
-  });
-  assert.equal(result.match(/Be concise in your responses/g)?.length, 2);
-  assert.match(result, /Be concise in your responses\./);
-});
-
-test("Rin overlay keeps a multiline Pi-default/tool duplicate at the Pi position", () => {
-  const duplicate = "Shared first line\nShared second line";
-  const piPrompt = SAMPLE_PI_PROMPT.replace("Tool rule.", duplicate);
-  const result = applyOverlay({
-    piPrompt,
-    piOptions: {
-      selectedTools: ["read"],
-      toolSnippets: { read: "Read files" },
-      promptGuidelines: [duplicate],
-    },
-    agentDir: "/tmp/rin-agent",
-  });
-  assert.equal(result.match(/Shared first line/g)?.length, 1);
-  assert.equal(result.match(/Shared second line/g)?.length, 1);
-  assert.ok(
-    result.indexOf("- Shared first line\nShared second line") <
-      result.indexOf("- Future Pi default"),
-  );
-});
-
-test("Rin overlay fails closed on ambiguous prompt-shaped tool guideline data", () => {
-  const toolGuideline =
-    "Tool rule.\n\nGuidelines:\n- TOOL DATA\n\nPi documentation TOOL DATA";
-  const piPrompt = SAMPLE_PI_PROMPT.replace(
-    "- Tool rule.",
-    `- ${toolGuideline}`,
-  );
-  assert.throws(
-    () =>
-      applyOverlay({
-        piPrompt,
-        piOptions: {
-          selectedTools: ["read"],
-          toolSnippets: { read: "Read files" },
-          promptGuidelines: [toolGuideline],
-        },
-        agentDir: "/tmp/rin-agent",
-      }),
-    /pi_prompt_shape_changed/,
-  );
-});
-
-test("Rin overlay consumes Pi's complete custom-prompt output except cwd", () => {
-  const nativePrompt = `CUSTOM BASE
-
-APPEND BLOCK
-
-<project_context>
-
-Project-specific instructions and guidelines:
-
-<project_instructions path="/tmp/AGENTS.md">
-Project rule.
-</project_instructions>
-
-</project_context>
-
-NATIVE SKILLS BLOCK
-Current working directory: /tmp`;
-  const result = applyOverlay({
-    piPrompt: nativePrompt,
-    piOptions: {
+      cwd: "/ignored",
       customPrompt: "CUSTOM BASE",
+      selectedTools: ["read"],
       appendSystemPrompt: "APPEND BLOCK",
-      cwd: "/tmp",
-      selectedTools: ["read"],
-      promptGuidelines: [],
+      contextFiles: [{ path: "/repo/AGENTS.md", content: "Project rule." }],
+      skills: [
+        {
+          name: "demo",
+          description: "Demo skill",
+          filePath: "/skills/demo/SKILL.md",
+          baseDir: "/skills/demo",
+          sourceInfo: { source: "test", level: "explicit" },
+          disableModelInvocation: false,
+        },
+      ],
     },
     agentDir: "/tmp/rin-agent",
-    selfImprovePromptBlock: "SELF-IMPROVE BLOCK",
+    selfImprovePromptBlock: "Stable preference.",
   });
-  assert.match(
-    result,
-    /CUSTOM BASE\n\nAPPEND BLOCK\n\n<project_context>[\s\S]*NATIVE SKILLS BLOCK/,
-  );
-  assert.match(result, /NATIVE SKILLS BLOCK\n\nRin and Pi documentation:/);
-  assert.match(result, /SELF-IMPROVE BLOCK$/);
-  assert.doesNotMatch(result, /Current working directory:/);
-  assert.doesNotMatch(result, /Current date:/);
+
+  assert.match(prompt, /CUSTOM BASE/);
+  assert.match(prompt, /APPEND BLOCK/);
+  assert.match(prompt, /<project_instructions path="\/repo\/AGENTS\.md">/);
+  assert.match(prompt, /The following skills provide/);
+  assert.match(prompt, /Stable preference\./);
+  assert.doesNotMatch(prompt, /Available tools:/);
 });
 
-test("Rin overlay follows Pi truthiness for a whitespace-only custom prompt", () => {
-  const result = applyOverlay({
-    piPrompt: " \nCurrent working directory: /tmp",
-    piOptions: {
-      customPrompt: " ",
-      cwd: "/tmp",
-      selectedTools: ["read"],
-      promptGuidelines: [],
+test("public Pi session data produces the structured Rin prompt options", () => {
+  const options = promptMod.readPiPublicSystemPromptOptions(
+    {
+      getActiveToolNames: () => ["read"],
+      getToolDefinition: () => ({
+        promptSnippet: "Read files",
+        promptGuidelines: ["Read only what is needed."],
+      }),
+      resourceLoader: {
+        getSystemPrompt: () => "CUSTOM",
+        getAppendSystemPrompt: () => ["A", "B"],
+        getAgentsFiles: () => ({
+          agentsFiles: [{ path: "/repo/AGENTS.md", content: "Rule" }],
+        }),
+        getSkills: () => ({ skills: [{ name: "demo" }] }),
+      },
     },
-    agentDir: "/tmp/rin-agent",
+    "/runtime/cwd",
+  );
+
+  assert.deepEqual(options, {
+    cwd: "/runtime/cwd",
+    customPrompt: "CUSTOM",
+    selectedTools: ["read"],
+    toolSnippets: { read: "Read files" },
+    promptGuidelines: ["Read only what is needed."],
+    appendSystemPrompt: "A\n\nB",
+    contextFiles: [{ path: "/repo/AGENTS.md", content: "Rule" }],
+    skills: [{ name: "demo" }],
   });
-  assert.match(result, /\n\n \n\nRin and Pi documentation:/);
-  assert.doesNotMatch(result, /Current working directory:/);
 });
 
-test("Rin runtime no longer copies Pi default guidelines", () => {
-  const source = fs.readFileSync(
-    path.join(rootDir, "src", "core", "rin-lib", "runtime.ts"),
-    "utf8",
-  );
-  const sessionHostSource = fs.readFileSync(
-    path.join(rootDir, "src", "core", "pi", "session-host.ts"),
-    "utf8",
-  );
-  const overlaySource = fs.readFileSync(
-    path.join(rootDir, "src", "core", "rin-lib", "system-prompt-overlay.ts"),
-    "utf8",
-  );
-  assert.doesNotMatch(source, /DEFAULT_PI_GUIDELINES/);
-  assert.doesNotMatch(source, /piReference|formatCurrentDateForSystemPrompt/);
-  assert.doesNotMatch(
-    overlaySource,
-    /piReference|currentDate|SUPPRESSED_PI_GUIDELINES/,
-  );
-  assert.doesNotMatch(source, /getPiSessionPromptToolState/);
-  assert.doesNotMatch(sessionHostSource, /getPiSessionPromptToolState/);
-  assert.doesNotMatch(sessionHostSource, /_toolPromptGuidelines/);
-  assert.doesNotMatch(sessionHostSource, /_toolPromptSnippets/);
-  assert.doesNotMatch(source, /originalRebuild\(\[\]\)/);
-  assert.match(source, /originalRebuild\(activeToolNames\)/);
-  assert.match(source, /readPiSessionBaseSystemPromptOptions\(session\)/);
-  assert.match(source, /applyRinSystemPromptOverlay/);
-});
-
-test("runtime keeps a tool/default duplicate at the Pi-owned position", async () => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "rin-overlay-dupe-cwd-"));
+test("user extensions receive the Rin-owned prompt first", async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "rin-prompt-ext-cwd-"));
   const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-overlay-dupe-agent-"),
-  );
-  const extensionDir = path.join(cwd, ".pi", "extensions");
-  fs.mkdirSync(extensionDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(extensionDir, "duplicate-guideline.mjs"),
-    `import { Type } from "typebox";
-export default function (pi) {
-  pi.registerTool({
-    name: "duplicate_guideline",
-    label: "Duplicate guideline",
-    description: "Test duplicate guideline ownership",
-    promptSnippet: "Test duplicate guideline ownership",
-    promptGuidelines: ["Be concise in your responses"],
-    parameters: Type.Object({}),
-    async execute() { return { content: [{ type: "text", text: "ok" }] }; }
-  });
-}
-`,
-  );
-  const configured = await runtimeMod.createConfiguredAgentSession({
-    cwd,
-    agentDir,
-    noPromptTemplates: true,
-    noThemes: true,
-    noContextFiles: true,
-    noSkills: true,
-    tools: ["duplicate_guideline"],
-  });
-  try {
-    const prompt = runtimeMod.ensureSessionBaseSystemPrompt(configured.session);
-    assert.equal(prompt.match(/Be concise in your responses/g)?.length, 1);
-    assert.ok(
-      prompt.indexOf("Be concise in your responses") <
-        prompt.indexOf(
-          "Do not stop after one action if the user's request obviously requires multiple concrete steps",
-        ),
-    );
-  } finally {
-    await configured.runtime.dispose();
-    fs.rmSync(cwd, { recursive: true, force: true });
-    fs.rmSync(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("user extensions receive the overlaid Rin prompt", async () => {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "rin-overlay-ext-cwd-"));
-  const agentDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), "rin-overlay-ext-agent-"),
+    path.join(os.tmpdir(), "rin-prompt-ext-agent-"),
   );
   const extensionPath = path.join(cwd, "observe-system-prompt.mjs");
   fs.writeFileSync(
@@ -615,7 +237,7 @@ test("user extensions receive the overlaid Rin prompt", async () => {
     `export default function (pi) {
   pi.on("before_agent_start", (event) => {
     if (!event.systemPrompt.startsWith("As the assistant, you must fulfill the user's requests.")) {
-      throw new Error("rin_overlay_missing_before_user_extension");
+      throw new Error("rin_prompt_missing_before_user_extension");
     }
     return { systemPrompt: event.systemPrompt + "\\n\\nUSER EXTENSION BLOCK" };
   });
@@ -640,13 +262,14 @@ test("user extensions receive the overlaid Rin prompt", async () => {
       const result = await runner.emitBeforeAgentStart(
         "probe",
         undefined,
-        basePrompt,
+        "PI PROSE MUST NOT SURVIVE",
         options,
       );
       assert.equal(
         result.systemPrompt,
         `${basePrompt}\n\nUSER EXTENSION BLOCK`,
       );
+      assert.doesNotMatch(result.systemPrompt, /PI PROSE MUST NOT SURVIVE/);
     } finally {
       await configured.runtime.dispose();
     }
@@ -656,7 +279,7 @@ test("user extensions receive the overlaid Rin prompt", async () => {
   }
 });
 
-test("Pi-native overlay preserves native content across six prompt scenarios", async () => {
+test("runtime preserves six structured prompt scenarios", async () => {
   const actual = {
     default: await buildPromptScenario("default"),
     languageAppend: await buildPromptScenario("languageAppend", {
@@ -680,17 +303,19 @@ test("Pi-native overlay preserves native content across six prompt scenarios", a
     noTools: await buildPromptScenario("noTools", { noTools: "all" }),
   };
   for (const prompt of Object.values(actual)) {
+    assert.match(prompt, /^As the assistant,/);
+    assert.doesNotMatch(prompt, /expert coding assistant operating inside pi/);
     assert.doesNotMatch(prompt, /Current working directory:/);
     assert.doesNotMatch(prompt, /Current date:/);
     assert.doesNotMatch(prompt, /Preferred language:/);
-    assert.doesNotMatch(prompt, /practices\/README\.md/);
   }
   assert.match(
     actual.default,
     /Use bash for file operations like ls, rg, find/,
   );
   assert.match(actual.languageAppend, /APPEND BLOCK/);
-  assert.match(actual.custom, /CUSTOM BASE\n\nAPPEND BLOCK/);
+  assert.match(actual.custom, /CUSTOM BASE/);
+  assert.match(actual.custom, /APPEND BLOCK/);
   assert.match(actual.contextSkillSelf, /<project_context>/);
   assert.match(
     actual.contextSkillSelf,
@@ -704,4 +329,5 @@ test("Pi-native overlay preserves native content across six prompt scenarios", a
     /use the current numbers returned by the latest tool result/,
   );
   assert.match(actual.noTools, /Available tools:\n\(none\)/);
+  assert.doesNotMatch(actual.noTools, /Use bash /);
 });

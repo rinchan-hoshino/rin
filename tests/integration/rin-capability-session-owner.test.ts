@@ -341,7 +341,7 @@ test("session attachment adapters resolve the current session methods and manage
     pendingMessageCount: 2,
     systemPrompt: "system-before",
     agent: { signal: new AbortController().signal },
-    _baseSystemPromptOptions: { cwd: "/prompt-cwd", tools: ["read"] },
+    resourceLoader: {},
     _extensionMode: "tui",
     _extensionUIContext: uiBefore,
     _extensionCommandContextActions: commandBefore,
@@ -498,10 +498,10 @@ test("session attachment adapters resolve the current session methods and manage
   capturedContext.shutdown();
   assert.deepEqual(capturedContext.getContextUsage(), { tokens: 42 });
   assert.equal(capturedContext.getSystemPrompt(), "system-after");
-  assert.deepEqual(capturedContext.getSystemPromptOptions(), {
-    cwd: "/prompt-cwd",
-    tools: ["read"],
-  });
+  assert.equal(capturedContext.getSystemPromptOptions().cwd, "/workspace");
+  assert.deepEqual(capturedContext.getSystemPromptOptions().selectedTools, [
+    "read-after",
+  ]);
 
   const complete = new Promise<any>((resolve, reject) => {
     capturedContext.compact({
@@ -610,7 +610,8 @@ test("session attachment tolerates missing optional surfaces", async () => {
   assert.equal(context.getContextUsage(), undefined);
   context.compact();
   assert.equal(context.getSystemPrompt(), undefined);
-  assert.deepEqual(context.getSystemPromptOptions(), { cwd: "/workspace" });
+  assert.equal(context.getSystemPromptOptions().cwd, "/workspace");
+  assert.deepEqual(context.getSystemPromptOptions().selectedTools, []);
 
   await assert.rejects(
     () =>

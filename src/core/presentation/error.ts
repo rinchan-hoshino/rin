@@ -513,8 +513,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   onebot_upload_file_empty_result: () =>
     "OneBot accepted the file upload but returned no file identifier. Check NapCat/OneBot.",
 
-  pi_prompt_shape_changed: () =>
-    "Rin stopped because Pi's system prompt structure changed and Rin could not apply its prompt overlay safely.",
+  rin_system_prompt_extension_missing: () =>
+    "Rin's core system prompt extension did not load. Reload Rin; if this persists, repair the runtime installation.",
 
   daemon_extension_entrypoint_missing: () =>
     'Daemon extension entry point is missing. Export the named "rinDaemonExtension" factory.',

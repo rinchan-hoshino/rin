@@ -38,7 +38,6 @@ function resetOwner() {
     apiKey: "owner-key",
     headers: { owner: "yes" },
   };
-  owner.promptToolStateError = undefined;
   owner.promptToolState = {
     validToolNames: ["read", "bash", "unknown"],
     toolSnippets: { read: "Read owner", bash: "Run owner" },
@@ -57,14 +56,29 @@ function resetOwner() {
         name: "owner<&\"'",
         description: "description<&\"'",
         baseDir: "/owner/skill<&\"'",
+        filePath: "/owner/skill<&\"'/SKILL.md",
+        sourceInfo: {
+          source: "user",
+          level: "agent",
+          sourcePath: "/owner/skill<&\"'/SKILL.md",
+        },
       },
-      { name: "hidden", disableModelInvocation: true },
-      {},
-      null,
+      {
+        name: "hidden",
+        description: "Hidden owner skill",
+        baseDir: "/owner/hidden",
+        filePath: "/owner/hidden/SKILL.md",
+        sourceInfo: {
+          source: "user",
+          level: "agent",
+          sourcePath: "/owner/hidden/SKILL.md",
+        },
+        disableModelInvocation: true,
+      },
     ],
     agentsFiles: [
       { path: "/owner/AGENTS.md", content: " Owner project " },
-      { path: "/owner/EMPTY.md" },
+      { path: "/owner/EMPTY.md", content: "" },
     ],
   };
   owner.servicesSettingsManager = {
@@ -75,6 +89,12 @@ function resetOwner() {
   owner.diagnostics = [{ level: "owner" }];
   owner.resourceLoader = {
     getExtensions: () => [{ id: "owner-extension" }],
+    getSystemPrompt: () => owner.resourcePromptState.systemPrompt,
+    getAppendSystemPrompt: () => owner.resourcePromptState.appendSystemPrompt,
+    getSkills: () => ({ skills: owner.resourcePromptState.skills }),
+    getAgentsFiles: () => ({
+      agentsFiles: owner.resourcePromptState.agentsFiles,
+    }),
   };
   owner.toolDefinitions = [{ name: "owner_tool" }];
   owner.capabilityHandlerTypes = new Set(["session_shutdown"]);
@@ -97,7 +117,6 @@ function resetOwner() {
     reasoning: true,
   };
   owner.activeToolNames = ["read", "bash"];
-  owner.nativePrompt = "native owner prompt";
   owner.nativeCheckResult = "native-check-owner";
   owner.autoCompactionResult = "owner-compacted";
   owner.autoCompactionError = undefined;
@@ -263,28 +282,6 @@ test("runtime private compatibility guards cover locale, fence, and active-tool 
     seam.__rinOwnerHasLegacyPromptLayerBoundary("abc\nnext", 0, 3),
     false,
   );
-
-  assert.deepEqual(seam.__rinOwnerGetSessionActiveToolNames(null), []);
-  assert.deepEqual(
-    seam.__rinOwnerGetSessionActiveToolNames({
-      getActiveToolNames: () => ["read"],
-    }),
-    ["read"],
-  );
-  assert.deepEqual(
-    seam.__rinOwnerGetSessionActiveToolNames({
-      getActiveToolNames: () => "read",
-    }),
-    [],
-  );
-  assert.deepEqual(
-    seam.__rinOwnerGetSessionActiveToolNames({
-      getActiveToolNames() {
-        throw new Error("owner");
-      },
-    }),
-    [],
-  );
 });
 
 test("runtime capability definitions integrate owner modules and hook payloads", async () => {
@@ -373,16 +370,14 @@ test("configured compaction sends the provider-bound event to native Pi", async 
   owner.compactionEvent = undefined;
 });
 
-test("prompt exports preserve empty, duplicate, and lazy fallback behavior", () => {
+test("prompt exports preserve empty, duplicate, and public fallback behavior", () => {
   resetOwner();
-  const plain: any = { _baseSystemPrompt: "base" };
-  runtime.applySessionBaseSystemPrompt(plain, "next");
-  assert.equal(plain._baseSystemPrompt, "next");
+  const plain: any = { systemPrompt: "base" };
   assert.equal(runtime.ensureSessionBaseSystemPrompt(null), "");
-  assert.equal(runtime.ensureSessionBaseSystemPrompt(plain), "next");
+  assert.equal(runtime.ensureSessionBaseSystemPrompt(plain), "base");
   runtime.clearSessionBaseSystemPrompt(null);
   runtime.clearSessionBaseSystemPrompt(plain, { ignorePersistedPrompt: true });
-  assert.equal(plain._baseSystemPrompt, "");
+  assert.equal(plain.systemPrompt, "base");
 
   assert.equal(runtime.appendPromptContextSystemPrompt("base", null), "base");
   const withBlock = runtime.appendPromptContextSystemPrompt("base ", {
@@ -425,12 +420,15 @@ test("configured runtime freezes the initial prompt binding until reload", async
   };
 
   await first.session.prompt("from A", { promptContext: contextA });
-  const frozenPrompt = String(first.session._baseSystemPrompt || "");
+  const frozenPrompt = runtime.ensureSessionBaseSystemPrompt(first.session);
   assert.match(frozenPrompt, /Room A/);
   assert.doesNotMatch(frozenPrompt, /Room B/);
 
   await first.session.prompt("from B", { promptContext: contextB });
-  assert.equal(String(first.session._baseSystemPrompt || ""), frozenPrompt);
+  assert.equal(
+    runtime.ensureSessionBaseSystemPrompt(first.session),
+    frozenPrompt,
+  );
   assert.equal(
     manager.__ownerBranch.filter(
       (entry: any) => entry.customType === "rin-system-prompt-blocks",
@@ -458,11 +456,14 @@ test("configured runtime freezes the initial prompt binding until reload", async
   await resumed.session.prompt("rejected", {
     promptContext: rejectedContext,
   });
-  assert.equal(String(resumed.session._baseSystemPrompt || ""), frozenPrompt);
+  assert.equal(
+    runtime.ensureSessionBaseSystemPrompt(resumed.session),
+    frozenPrompt,
+  );
 
   owner.promptPreflightResult = true;
   await first.session.reload();
-  const reloadedPrompt = String(first.session._baseSystemPrompt || "");
+  const reloadedPrompt = runtime.ensureSessionBaseSystemPrompt(first.session);
   assert.doesNotMatch(reloadedPrompt, /Room A/);
   assert.match(reloadedPrompt, /Room B/);
 
@@ -542,9 +543,17 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
   const resourceLoaderOptions = owner.events.find(
     ([name]: any[]) => name === "create-services",
   )[1].resourceLoaderOptions;
-  assert.deepEqual(resourceLoaderOptions.extensionFactories, []);
-  const { extensionFactories: _extensionFactories, ...ordinaryResources } =
-    resourceLoaderOptions;
+  assert.equal(resourceLoaderOptions.extensionFactories.length, 1);
+  assert.equal(
+    resourceLoaderOptions.extensionFactories[0].name,
+    "rin-system-prompt",
+  );
+  assert.equal(typeof resourceLoaderOptions.extensionsOverride, "function");
+  const {
+    extensionFactories: _extensionFactories,
+    extensionsOverride: _extensionsOverride,
+    ...ordinaryResources
+  } = resourceLoaderOptions;
   assert.deepEqual(ordinaryResources, {
     ownerResource: true,
     additionalExtensionPaths: ["/owner/extension"],
@@ -573,7 +582,6 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
   configured.session.settingsManager.settings.steeringMode = "bad";
   assert.equal(configured.session.settingsManager.getSteeringMode(), "all");
 
-  assert.equal(configured.session._baseSystemPrompt, "");
   assert.equal(
     await configured.session.prompt("hello", {
       source: "chat",
@@ -582,7 +590,7 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
     }),
     "owner-prompted",
   );
-  const builtPrompt = configured.session._baseSystemPrompt;
+  const builtPrompt = runtime.ensureSessionBaseSystemPrompt(configured.session);
   assert.match(
     builtPrompt,
     /^As the assistant, you must fulfill the user's requests\./,
@@ -595,10 +603,14 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
   );
   assert.match(builtPrompt, /Rin and Pi documentation/);
   assert.doesNotMatch(builtPrompt, /Language owner: zh_CN/);
-  assert.doesNotMatch(builtPrompt, /Appended owner/);
-  assert.doesNotMatch(builtPrompt, /# Project Context/);
+  assert.match(builtPrompt, /Appended owner/);
+  assert.match(builtPrompt, /<project_context>/);
   assert.match(builtPrompt, /Self improve owner/);
-  assert.doesNotMatch(builtPrompt, /<name>owner&lt;&amp;&quot;&apos;<\/name>/);
+  assert.match(builtPrompt, /<name>owner&lt;&amp;&quot;&apos;<\/name>/);
+  assert.match(
+    builtPrompt,
+    /<location>\/owner\/skill&lt;&amp;&quot;&apos;\/SKILL\.md<\/location>/,
+  );
   assert.doesNotMatch(builtPrompt, /<name>hidden<\/name>/);
   assert.doesNotMatch(builtPrompt, /Current date: \d{4}-\d{2}-\d{2}/);
   assert.match(builtPrompt, /Prompt context owner/);
@@ -621,12 +633,11 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
     frontendIdentity: { kind: "missing-key" },
   });
   assert.equal(manager.__rinFrontend, undefined);
-  assert.match(
-    await configured.session._rebuildSystemPrompt(["read"]),
-    /Available tools:\n- read: Read owner/,
-  );
   assert.equal(await configured.session.reload("owner"), "owner-reloaded");
-  assert.match(configured.session._baseSystemPrompt, /Available tools/);
+  assert.match(
+    runtime.ensureSessionBaseSystemPrompt(configured.session),
+    /Available tools/,
+  );
   assert.equal(configured.session[lazyPromptKey].ignorePersistedPrompt, false);
   assert.match(
     runtime.ensureSessionBaseSystemPrompt(configured.session),
@@ -668,7 +679,7 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
   );
 });
 
-test("configured prompt reuses persisted state and falls back to Pi rebuild on Rin prompt failure", async () => {
+test("configured prompt reuses persisted state and rebuilds from public resources", async () => {
   resetOwner();
   const manager = makeManager();
   manager.__ownerBranch.push(
@@ -699,45 +710,29 @@ test("configured prompt reuses persisted state and falls back to Pi rebuild on R
       .at(-1)?.data?.systemPrompt,
     sealedPrompt,
   );
-  const promptToolCalls = owner.events.filter(
-    ([name]: any[]) => name === "prompt-tool-state",
-  ).length;
-  assert.equal(promptToolCalls, 0);
   runtime.clearSessionBaseSystemPrompt(configured.session, {
     ignorePersistedPrompt: true,
   });
-  owner.promptToolStateError = new Error("owner prompt builder failed");
-  const fallbackPrompt = runtime.ensureSessionBaseSystemPrompt(
+  const rebuiltPrompt = runtime.ensureSessionBaseSystemPrompt(
     configured.session,
   );
   assert.match(
-    fallbackPrompt,
+    rebuiltPrompt,
     /^As the assistant, you must fulfill the user's requests\./,
   );
-  assert.doesNotMatch(fallbackPrompt, /persisted block/);
-  assert.equal(eventNames().includes("native-rebuild"), true);
+  assert.doesNotMatch(rebuiltPrompt, /persisted block/);
+  assert.equal(eventNames().includes("native-rebuild"), false);
 
-  const noRebuilder = { _baseSystemPrompt: "kept" } as any;
-  assert.equal(runtime.ensureSessionBaseSystemPrompt(noRebuilder), "kept");
-  runtime.clearSessionBaseSystemPrompt(noRebuilder);
-  assert.equal(noRebuilder._baseSystemPrompt, "");
+  const unbound = { systemPrompt: "kept" } as any;
+  assert.equal(runtime.ensureSessionBaseSystemPrompt(unbound), "kept");
+  runtime.clearSessionBaseSystemPrompt(unbound);
+  assert.equal(unbound.systemPrompt, "kept");
 });
 
-test("configured prompt keeps loader-owned minimal and missing optional resource fallbacks", async (t) => {
+test("configured prompt handles minimal and unavailable public resources", async () => {
   resetOwner();
-  const previousRinDir = process.env.RIN_DIR;
-  t.after(() => {
-    if (previousRinDir === undefined) delete process.env.RIN_DIR;
-    else process.env.RIN_DIR = previousRinDir;
-  });
-  process.env.RIN_DIR = "/owner/env-agent";
   owner.language = "";
   owner.selfImproveError = new Error("optional self improve unavailable");
-  owner.promptToolState = {
-    validToolNames: ["unknown"],
-    toolSnippets: {},
-    promptGuidelines: [null, "", "."],
-  };
   owner.resourcePromptState = {
     agentDir: "",
     systemPrompt: "Loader owner prompt",
@@ -751,30 +746,15 @@ test("configured prompt keeps loader-owned minimal and missing optional resource
     agentDir: "/owner/agent",
   });
   configured.session.getActiveToolNames = () => "not-an-array";
-  const minimalPrompt =
-    configured.session[lazyPromptKey].compute("not-an-array");
-  assert.match(minimalPrompt, /Available tools:\n\(none\)/);
-  assert.match(minimalPrompt, /\/owner\/env-agent\/docs\/rin/);
-  assert.doesNotMatch(minimalPrompt, /Loader owner prompt/);
-  assert.equal(await configured.session._rebuildSystemPrompt(), "");
-  assert.equal(
-    await configured.session.prompt("minimal owner"),
-    "owner-prompted",
+  const minimalPrompt = runtime.ensureSessionBaseSystemPrompt(
+    configured.session,
   );
-  assert.doesNotMatch(
-    configured.session._baseSystemPrompt,
-    /Loader owner prompt/,
-  );
-  assert.match(
-    configured.session._baseSystemPrompt,
-    /\/owner\/env-agent\/docs\/rin/,
-  );
-  assert.doesNotMatch(configured.session._baseSystemPrompt, /Language owner/);
-  assert.doesNotMatch(
-    configured.session._baseSystemPrompt,
-    /Self improve owner/,
-  );
-  assert.doesNotMatch(configured.session._baseSystemPrompt, /available_skills/);
+  assert.match(minimalPrompt, /Loader owner prompt/);
+  assert.match(minimalPrompt, /\/owner\/agent\/docs\/rin/);
+  assert.doesNotMatch(minimalPrompt, /Available tools:/);
+  assert.doesNotMatch(minimalPrompt, /Language owner/);
+  assert.doesNotMatch(minimalPrompt, /Self improve owner/);
+  assert.doesNotMatch(minimalPrompt, /available_skills/);
   assert.equal(owner.attachOptions.reason, "startup");
   assert.equal(
     runtime.getManagedSkillPaths(" ")[0],
@@ -788,9 +768,9 @@ test("configured prompt keeps loader-owned minimal and missing optional resource
     throw new Error("owner active tools unavailable");
   };
   configured.session.sessionManager = undefined;
-  assert.equal(
-    await configured.session.prompt("without manager"),
-    "owner-prompted",
+  await assert.rejects(
+    () => configured.session.prompt("without manager"),
+    /owner active tools unavailable/,
   );
 });
 

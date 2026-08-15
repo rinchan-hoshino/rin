@@ -1,168 +1,71 @@
 import path from "node:path";
 
+import {
+  formatSkillsForPrompt,
+  type BuildSystemPromptOptions,
+  type InlineExtension,
+} from "@earendil-works/pi-coding-agent";
+
 const PROMPT_PREFIX = "As the assistant, you must fulfill the user's requests.";
 const RUNTIME_AWARENESS = "You are running in the Rin runtime environment.";
 const WEB_SOURCE_REQUIREMENT =
   "Always use a search engine to find current sources; treat built-in knowledge as outdated and authoritative online sources as the source of truth.";
-const PI_GENERIC_OPENING =
-  "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.";
 
-const RIN_EXTRA_GUIDELINES = [
+const RIN_GENERAL_GUIDELINES = [
+  "Show file paths clearly when working with files",
   "Do not stop after one action if the user's request obviously requires multiple concrete steps",
+];
+const RIN_BASH_GUIDELINES = [
+  "Use bash for file operations like ls, rg, find",
   "When using bash, explain meaningful findings instead of pasting excessive raw output",
 ];
 
-export type RinSystemPromptOptions = {
-  customPrompt?: string;
-  selectedTools?: string[];
-  toolSnippets?: Record<string, string>;
-  promptGuidelines?: string[];
-  appendSystemPrompt?: string;
-  cwd?: string;
-  contextFiles?: Array<{ path: string; content: string }>;
-  skills?: Array<{
-    name?: string;
-    description?: string;
-    baseDir?: string;
-    disableModelInvocation?: boolean;
-  }>;
-};
+export const RIN_SYSTEM_PROMPT_EXTENSION_NAME = "rin-system-prompt";
 
-export type RinSystemPromptOverlayInput = {
-  piPrompt: string;
+export type RinSystemPromptOptions = BuildSystemPromptOptions;
+
+export type RinSystemPromptInput = {
   piOptions: RinSystemPromptOptions;
-  activeToolNames: string[];
   agentDir: string;
   selfImprovePromptBlock?: string;
 };
 
-function findRequiredAnchor(prompt: string, anchor: string, fromIndex = 0) {
-  const index = prompt.indexOf(anchor, fromIndex);
-  if (index < 0) throw new Error(`pi_prompt_shape_changed:${anchor}`);
-  return index;
+function uniqueNonempty(values: readonly unknown[]) {
+  const unique = new Map<string, string>();
+  for (const value of values) {
+    const text = String(value || "").trim();
+    const key = text.replace(/[.!?]+$/u, "").toLowerCase();
+    if (key && !unique.has(key)) unique.set(key, text);
+  }
+  return [...unique.values()];
 }
 
-function findUniqueAnchorBefore(
-  prompt: string,
-  anchor: string,
-  fromIndex: number,
-  beforeIndex: number,
-) {
-  const first = prompt.indexOf(anchor, fromIndex);
-  if (first < 0 || first >= beforeIndex) {
-    throw new Error(`pi_prompt_shape_changed:${anchor}`);
-  }
-  const duplicate = prompt.indexOf(anchor, first + anchor.length);
-  if (duplicate >= 0 && duplicate < beforeIndex) {
-    throw new Error(`pi_prompt_shape_changed:duplicate:${anchor}`);
-  }
-  return first;
-}
-
-function validateActiveTools(
-  options: RinSystemPromptOptions,
-  activeToolNames: string[],
-) {
-  if (
-    !Array.isArray(options.selectedTools) ||
-    !Array.isArray(activeToolNames) ||
-    options.selectedTools.length !== activeToolNames.length ||
-    options.selectedTools.some((name, index) => name !== activeToolNames[index])
-  ) {
-    throw new Error("pi_prompt_shape_changed:selected_tools");
-  }
-  return activeToolNames;
-}
-
-function buildExpectedPiToolsPrefix(
-  options: RinSystemPromptOptions,
-  activeToolNames: string[],
-) {
+function buildToolsBlock(options: RinSystemPromptOptions) {
   const snippets = options.toolSnippets || {};
-  const visibleTools = activeToolNames.filter((name) =>
-    Boolean(snippets[name]),
+  const visibleTools = (options.selectedTools || []).filter((name) =>
+    Boolean(String(snippets[name] || "").trim()),
   );
-  const toolsList = visibleTools.length
-    ? visibleTools.map((name) => `- ${name}: ${snippets[name]}`).join("\n")
+  const tools = visibleTools.length
+    ? visibleTools
+        .map((name) => `- ${name}: ${String(snippets[name]).trim()}`)
+        .join("\n")
     : "(none)";
-  return `Available tools:\n${toolsList}`;
+  return [
+    `Available tools:\n${tools}`,
+    "In addition to the tools above, you may have access to other custom tools depending on the project.",
+  ].join("\n\n");
 }
 
-function removePiCwd(prompt: string, options: RinSystemPromptOptions) {
-  if (typeof options.cwd !== "string" || !options.cwd) {
-    throw new Error("pi_prompt_shape_changed:cwd_options");
-  }
-  const normalizedCwd = options.cwd.replace(/\\/g, "/");
-  const anchor = `\nCurrent working directory: ${normalizedCwd}`;
-  const cwdAt = prompt.indexOf(anchor);
-  if (cwdAt < 0) {
-    throw new Error("pi_prompt_shape_changed:cwd");
-  }
-  if (prompt.indexOf(anchor, cwdAt + anchor.length) >= 0) {
-    throw new Error("pi_prompt_shape_changed:duplicate:cwd");
-  }
-  const lineEnd = prompt.startsWith("\n", cwdAt + anchor.length)
-    ? cwdAt + anchor.length + 1
-    : cwdAt + anchor.length;
-  return {
-    prompt: `${prompt.slice(0, cwdAt)}${prompt.slice(lineEnd)}`,
-    cwdAt,
-  };
-}
-
-function findPiDataBoundary(
-  prompt: string,
-  options: RinSystemPromptOptions,
-  activeToolNames: string[],
-  fromIndex: number,
-  cwdAt: number,
-) {
-  if (cwdAt < fromIndex) {
-    throw new Error("pi_prompt_shape_changed:data_boundary");
-  }
-  let boundary = cwdAt;
-  const hasVisibleSkills = (options.skills || []).some(
-    (skill) => skill && !skill.disableModelInvocation,
-  );
-  if (activeToolNames.includes("read") && hasVisibleSkills) {
-    boundary = findUniqueAnchorBefore(
-      prompt,
-      "\n\nThe following skills provide specialized instructions for specific tasks.",
-      fromIndex,
-      boundary,
-    );
-  }
-  if (Array.isArray(options.contextFiles) && options.contextFiles.length) {
-    boundary = findUniqueAnchorBefore(
-      prompt,
-      "\n\n<project_context>\n\n",
-      fromIndex,
-      boundary,
-    );
-  }
-  const appendSystemPrompt = String(options.appendSystemPrompt || "");
-  if (appendSystemPrompt) {
-    const anchor = `\n\n${appendSystemPrompt}`;
-    const appendAt = prompt.lastIndexOf(
-      anchor,
-      Math.max(fromIndex, boundary - anchor.length),
-    );
-    if (appendAt < fromIndex || appendAt >= boundary) {
-      throw new Error(`pi_prompt_shape_changed:${anchor}`);
-    }
-    boundary = appendAt;
-  }
-  return boundary;
-}
-
-function hasGuideline(block: string, guideline: string) {
-  const rendered = `- ${guideline}`;
-  return (
-    block === rendered ||
-    block.startsWith(`${rendered}\n`) ||
-    block.endsWith(`\n${rendered}`) ||
-    block.includes(`\n${rendered}\n`)
-  );
+function buildGuidelinesBlock(options: RinSystemPromptOptions) {
+  const activeTools = new Set(options.selectedTools || []);
+  const guidelines = uniqueNonempty([
+    ...RIN_GENERAL_GUIDELINES,
+    ...(activeTools.has("bash") ? RIN_BASH_GUIDELINES : []),
+    ...(options.promptGuidelines || []),
+  ]);
+  return guidelines.length
+    ? `Guidelines:\n${guidelines.map((line) => `- ${line}`).join("\n")}`
+    : "";
 }
 
 function buildRinDocsBlock(agentDir: string) {
@@ -182,88 +85,96 @@ function buildRinDocsBlock(agentDir: string) {
   ].join("\n");
 }
 
-function overlayDefaultPiPrompt(
-  piPrompt: string,
-  piOptions: RinSystemPromptOptions,
-  activeToolNames: string[],
-  cwdAt: number,
-  docsBlock: string,
-) {
-  const toolsAnchor = "Available tools:\n";
-  const guidelinesAnchor = "\n\nGuidelines:\n";
-  const docsAnchor = "\n\nPi documentation";
-  const expectedOpening = `${PI_GENERIC_OPENING}\n\n`;
-  if (!piPrompt.startsWith(`${expectedOpening}${toolsAnchor}`)) {
-    throw new Error("pi_prompt_shape_changed:generic_opening");
-  }
-  const toolsAt = expectedOpening.length;
-  const expectedToolsPrefix = buildExpectedPiToolsPrefix(
-    piOptions,
-    activeToolNames,
-  );
-  if (!piPrompt.startsWith(expectedToolsPrefix, toolsAt)) {
-    throw new Error("pi_prompt_shape_changed:tools_block");
-  }
-  const toolsPrefixEnd = toolsAt + expectedToolsPrefix.length;
-  const dataAt = findPiDataBoundary(
-    piPrompt,
-    piOptions,
-    activeToolNames,
-    toolsPrefixEnd,
-    cwdAt,
-  );
-  const duplicateToolsAt = piPrompt.indexOf(toolsAnchor, toolsPrefixEnd);
-  if (duplicateToolsAt >= 0 && duplicateToolsAt < dataAt) {
-    throw new Error("pi_prompt_shape_changed:duplicate:Available tools");
-  }
-  const guidelinesAt = findUniqueAnchorBefore(
-    piPrompt,
-    guidelinesAnchor,
-    toolsPrefixEnd,
-    dataAt,
-  );
-  const guidelinesContentAt = guidelinesAt + guidelinesAnchor.length;
-  const docsAt = findUniqueAnchorBefore(
-    piPrompt,
-    docsAnchor,
-    guidelinesContentAt,
-    dataAt,
-  );
-  const nativeGuidelines = piPrompt.slice(guidelinesContentAt, docsAt);
-  const rinGuidelines = RIN_EXTRA_GUIDELINES.filter(
-    (guideline) => !hasGuideline(nativeGuidelines, guideline),
-  );
-  const promptThroughGuidelines = [
-    piPrompt.slice(toolsAt, docsAt),
-    ...rinGuidelines.map((guideline) => `- ${guideline}`),
+function buildContextFilesBlock(options: RinSystemPromptOptions) {
+  const contextFiles = options.contextFiles || [];
+  if (contextFiles.length === 0) return "";
+  return [
+    "<project_context>",
+    "",
+    "Project-specific instructions and guidelines:",
+    "",
+    ...contextFiles.flatMap(({ path: filePath, content }) => [
+      `<project_instructions path="${filePath}">`,
+      content,
+      "</project_instructions>",
+      "",
+    ]),
+    "</project_context>",
   ].join("\n");
-  const nativeDocs = piPrompt.slice(docsAt, dataAt);
-  const nativeDataTail = piPrompt.slice(dataAt, cwdAt);
-  return `${promptThroughGuidelines}${nativeDocs}\n\n${docsBlock}${nativeDataTail}`;
 }
 
-export function applyRinSystemPromptOverlay(
-  input: RinSystemPromptOverlayInput,
-) {
-  const activeToolNames = validateActiveTools(
-    input.piOptions,
-    input.activeToolNames,
-  );
-  const withoutCwd = removePiCwd(input.piPrompt, input.piOptions);
-  const docsBlock = buildRinDocsBlock(input.agentDir);
-  const customPrompt = input.piOptions.customPrompt;
-  let prompt = customPrompt
-    ? [withoutCwd.prompt, docsBlock].filter(Boolean).join("\n\n")
-    : overlayDefaultPiPrompt(
-        withoutCwd.prompt,
-        input.piOptions,
-        activeToolNames,
-        withoutCwd.prompt.length,
-        docsBlock,
-      );
+function buildSkillsBlock(options: RinSystemPromptOptions) {
+  if (!(options.selectedTools || []).includes("read")) return "";
+  return formatSkillsForPrompt(options.skills || []).trim();
+}
 
-  if (input.selfImprovePromptBlock) {
-    prompt += `\n\n${input.selfImprovePromptBlock}`;
+export function buildRinSystemPrompt(input: RinSystemPromptInput) {
+  const options = input.piOptions;
+  const sections = [
+    [PROMPT_PREFIX, RUNTIME_AWARENESS, WEB_SOURCE_REQUIREMENT].join("\n"),
+  ];
+
+  if (options.customPrompt) {
+    sections.push(options.customPrompt);
+  } else {
+    sections.push(buildToolsBlock(options), buildGuidelinesBlock(options));
   }
-  return `${PROMPT_PREFIX}\n${RUNTIME_AWARENESS}\n${WEB_SOURCE_REQUIREMENT}\n\n${prompt}`;
+
+  sections.push(
+    buildRinDocsBlock(input.agentDir),
+    String(options.appendSystemPrompt || ""),
+    buildContextFilesBlock(options),
+    buildSkillsBlock(options),
+    String(input.selfImprovePromptBlock || ""),
+  );
+
+  return sections.filter((section) => section !== "").join("\n\n");
+}
+
+export function readPiPublicSystemPromptOptions(
+  session: any,
+  fallbackCwd = "",
+): RinSystemPromptOptions {
+  const activeTools = session?.getActiveToolNames?.();
+  const selectedTools = Array.isArray(activeTools) ? activeTools : [];
+  const toolSnippets: Record<string, string> = {};
+  const promptGuidelines: string[] = [];
+  for (const name of selectedTools) {
+    const definition = session?.getToolDefinition?.(name);
+    const snippet = String(definition?.promptSnippet || "").trim();
+    if (snippet) toolSnippets[name] = snippet;
+    if (Array.isArray(definition?.promptGuidelines)) {
+      promptGuidelines.push(...definition.promptGuidelines);
+    }
+  }
+
+  const resourceLoader = session?.resourceLoader;
+  const appendSystemPrompt = resourceLoader?.getAppendSystemPrompt?.();
+  const skills = resourceLoader?.getSkills?.()?.skills;
+  const contextFiles = resourceLoader?.getAgentsFiles?.()?.agentsFiles;
+  return {
+    cwd: String(fallbackCwd || ""),
+    customPrompt: resourceLoader?.getSystemPrompt?.(),
+    selectedTools,
+    toolSnippets,
+    promptGuidelines,
+    appendSystemPrompt: Array.isArray(appendSystemPrompt)
+      ? appendSystemPrompt.join("\n\n") || undefined
+      : undefined,
+    contextFiles: Array.isArray(contextFiles) ? contextFiles : [],
+    skills: Array.isArray(skills) ? skills : [],
+  };
+}
+
+export function createRinSystemPromptExtension(
+  resolvePrompt: (options: RinSystemPromptOptions, context: any) => string,
+): InlineExtension {
+  return {
+    name: RIN_SYSTEM_PROMPT_EXTENSION_NAME,
+    factory: (pi) => {
+      pi.on("before_agent_start", (event, context) => ({
+        systemPrompt: resolvePrompt(event.systemPromptOptions, context),
+      }));
+    },
+  };
 }
