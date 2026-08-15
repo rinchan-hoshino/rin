@@ -2,61 +2,55 @@
 
 Use Rin's local Agent SDK when an agent needs daemon-backed operations from a short Node script.
 
-The SDK is an installed-runtime helper. Import it from the active installed runtime under `~/.rin/app/current/dist` so scripts target the same code that the running Rin installation uses.
+The SDK is an installed-runtime entrypoint. Import it from the active installation under `~/.rin/app/current/dist` so the script targets the same code as the running Rin daemon.
 
 ## Prompt brief
 
 Target surface:
 
 - installed runtime SDK module: `dist/core/rin-agent-sdk/index.js`;
-- daemon-backed task, chat, status, and built-in-extension operations;
+- the daemon socket selected by the active installation;
 - short local scripts run with `tsx`.
 
 Goal:
 
-- perform a structured daemon operation, re-read the changed or inspected object, and report the verified state.
+- import the active SDK, execute the domain operation, verify its result through the owning domain surface, and report only proven state.
 
 Trusted inputs:
 
 - active installed runtime path;
-- task/chat/extension ids supplied by the user or read from daemon state;
-- SDK return values;
-- `rin status` / `rin status --json` for operator-facing status and liveness.
+- target ids supplied by the user or read from daemon state;
+- SDK return values and errors;
+- the narrow domain document for the requested operation.
 
 Output contract:
 
-- operation and target id;
-- SDK helper used;
-- verification read/result;
-- active producer state when the operation changes running work;
-- follow-up boundary such as restart, adapter action, or owner confirmation when the SDK operation is only one step.
+- SDK target and operation;
+- result or error observed;
+- verification read for mutations;
+- remaining runtime, adapter, account, or approval boundary.
 
 ## Success criteria
 
 An SDK script is complete when:
 
 - it imports from the active installed runtime;
-- it uses the high-level helper for the target surface;
-- write operations are followed by a re-read through SDK or status command;
-- active work changes verify liveness as well as record state;
-- the final report names the object id, operation, verification source, and remaining boundary.
+- it uses the high-level operation defined by the domain document;
+- a mutation is followed by a domain read that proves the resulting state;
+- an error or timeout is classified without guessing whether a mutation completed;
+- the final report names the operation, verification source, and remaining boundary.
 
-## When to use it
+## Domain routes
 
-Use the SDK for:
+Read the document that owns the requested behavior before writing the script:
 
-- scheduled-task create/read/update/reload/run/pause/resume/delete operations;
-- chat bridge sends, agent turns, typing, reactions, turn termination, and bridge-local evals;
-- daemon status/activity checks when a script needs structured daemon data;
+- status, doctor, and self-improve diagnostics: `docs/diagnostic-commands.md`;
+- session and process inspection: `docs/session-awareness.md`;
+- scheduled task operations: `docs/scheduled-tasks.md`;
+- chat delivery, stored messages, bridge state, and chat-bound turns: `docs/chat-bridge.md`;
+- rich chat objects and attachments: `docs/rich-text-output-format.md`.
 
-Prefer direct turn tools when the current turn already has a purpose-built tool. Use the SDK when the operation must be scripted, repeated, or composed with local verification.
-
-Read the topic document before changing that surface:
-
-- status/doctor/self-improve command split: `docs/diagnostic-commands.md`;
-- scheduled tasks: `docs/scheduled-tasks.md`;
-- chat bridge behavior: `docs/chat-bridge.md`;
-- rich chat output syntax: `docs/rich-text-output-format.md`;
+Prefer a purpose-built live tool when the current turn provides one. Use the SDK when the operation must be scripted, repeated, or composed with local verification.
 
 ## Import pattern
 
@@ -80,134 +74,33 @@ const rin = createRinAgentSdk({
 Options:
 
 - `timeoutMs`: daemon request timeout for SDK calls.
-- `socketPath`: override when intentionally targeting a non-default daemon socket.
+- `socketPath`: override only when intentionally targeting a non-default daemon socket.
 
-Each helper also accepts an optional final override argument with the same options.
+Each SDK operation also accepts an optional final override argument with the same options.
 
-## Scheduled task helpers
+## Execution contract
 
-Use these helpers for scheduler records. Read `docs/scheduled-tasks.md` for task-shape, session-mode, trigger, condition, prompt, and verification contracts.
+- Resolve the SDK module through `~/.rin/app/current/`; do not import a source checkout when operating the installed daemon.
+- Use the high-level operation and payload defined by the owning domain document.
+- Treat the returned payload as the result for that request, not proof of unrelated runtime or recipient state.
+- After a mutation, re-read through the owning domain API or its documented status surface.
+- When active work changes, verify both the durable record and the active producer state.
 
-```js
-const { tasks } = await rin.tasks.list();
-const { task } = await rin.tasks.get("cron_example");
+## Error contract
 
-await rin.tasks.upsert({
-  id: "cron_example",
-  name: "Example",
-  enabled: true,
-  trigger: { expression: "0 9 * * *", timezone: "local" },
-  session: { mode: "none" },
-  target: { kind: "agent_prompt", prompt: "Run the check and report changes." },
-});
+SDK operations reject on local input validation, socket failures, daemon error responses, malformed responses, and request timeouts.
 
-await rin.tasks.reload();
-await rin.tasks.run("cron_example");
-await rin.tasks.wake("cron_example");
-await rin.tasks.rescheduleOnce("cron_example", "2026-05-08T15:00:00+08:00");
-await rin.tasks.pause("cron_example");
-await rin.tasks.resume("cron_example");
-await rin.tasks.complete("cron_example", "finished");
-await rin.tasks.delete("cron_example");
-```
-
-Helper contract:
-
-- Scheduled task records are persisted in `~/.rin/data/scheduler/tasks.json`; use `rin.tasks.reload()` or `rin tasks reload` to explicitly load valid direct file edits, additions, and removals into the running daemon without restart.
-- `rin.tasks.list()` returns agent-visible scheduled tasks.
-- `rin.tasks.get(taskId)` reads one agent-visible task.
-- `rin.tasks.upsert(task, defaults?)` creates or updates a task; pass `condition: null`, `termination: null`, or `frontend: null` to remove optional fields. Root `quiet` defaults to `false`; when enabled, the task runs without a bound delivery frontend and emits no automatic working, interim, error, or final messages.
-- `rin.tasks.reload()` reloads the persisted task file into the running daemon; invalid JSON or task data leaves current daemon state unchanged and fails the reload.
-- `rin.tasks.run(taskId)` starts the existing task through scheduler semantics, including condition evaluation.
-- `rin.tasks.wake(taskId)` moves the next run to now; the scheduler still evaluates the task normally.
-- `rin.tasks.rescheduleOnce(taskId, runAt)` sets the next run time and updates one-time `trigger.runAt` while preserving recurring cron expressions.
-- `rin.tasks.pause(taskId)` disables future runs, records pause state, clears next-run state, and asks Rin to stop applicable active task turns.
-- `rin.tasks.resume(taskId)` enables the task and recomputes next-run state.
-- `rin.tasks.complete(taskId, reason?)` disables future runs while keeping the task record and reason.
-- `rin.tasks.delete(taskId)` removes the task record.
-- `rin.tasks.control("pause" | "resume", taskId)` is the low-level pause/resume helper; the named helpers are the normal script surface.
-
-After any SDK write, re-read with `rin.tasks.get()`, `rin.tasks.list()`, or `rin status --json`. After any direct-file edit, call `rin.tasks.reload()` or `rin tasks reload` first, then re-read daemon state. Invalid manual JSON edits make reload fail and leave current daemon state unchanged.
-
-## Chat helpers
-
-Use `rin.chat.send` for direct outbox delivery. Use `rin.chat.runTurn` when Rin should run an assistant turn for a chat or frontend identity.
-
-```js
-await rin.chat.send({
-  chatKey: "telegram/123456:7890",
-  text: "Ready.",
-});
-
-const result = await rin.chat.runTurn({
-  chatKey: "telegram/123456:7890",
-  text: "Write a short status update for this room.",
-  controllerKey: `agent-${Date.now()}`,
-  affectChatBinding: false,
-  disposeAfterTurn: true,
-});
-
-await rin.chat.typing("telegram/123456:7890");
-await rin.chat.react({
-  chatKey: "telegram/123456:7890",
-  messageId: "message-id",
-  emoji: "👍",
-});
-await rin.chat.terminateTurn("agent-controller-key");
-
-const quoted = await rin.chat.messages.get({
-  chatKey: "telegram/123456:7890",
-  messageId: "message-id",
-});
-const recent = await rin.chat.messages.list({
-  chatKey: "telegram/123456:7890",
-  before: "message-id",
-  limit: 20,
-});
-
-const bridgeResult = await rin.chat.evalBridge({
-  currentChatKey: "telegram/123456:7890",
-  requestId: "agent-example",
-  code: "return { ok: true, chatKey: currentChatKey };",
-});
-```
-
-Chat helper contract:
-
-- `send(payload)` posts explicit text or adapter parts to a chat target.
-- `runTurn(payload)` runs an assistant turn; set `affectChatBinding`, `disposeAfterTurn`, `shutdownAfterTurn`, and `deliverFinal` deliberately.
-- `typing(target)` sends a typing indicator when the adapter supports it.
-- `react(payload)` sends a platform reaction when the adapter supports it.
-- `terminateTurn(target)` stops the active turn by controller key or chat key.
-- `messages.get({ chatKey, messageId })` returns one stored rich message without expanding its quote node.
-- `messages.list({ chatKey, before?, after?, limit? })` returns a chronological window; `before` and `after` are message-id cursors within that chat, and `limit` is clamped to 1-100 with a default of 20.
-- Stored-message writes remain intent APIs such as `send(...)` and `runTurn(...)`; there is no raw message-row write API.
-- `evalBridge(payload)` evaluates code inside the chat bridge context for bridge-local inspection or repair.
-
-For native mentions, quotes/replies, files, images, or attachment syntax, read `docs/rich-text-output-format.md` before sending. For stored chat logs, identities, adapters, and bridge state, read `docs/chat-bridge.md`.
-
-## Daemon helpers
-
-```js
-const status = await rin.daemon.status();
-const activity = await rin.daemon.activity();
-const sessions = await rin.sessions.list({ limit: 100, offset: 0 });
-```
-
-Use daemon helpers for structured inspection inside scripts:
-
-- `rin.daemon.activity()` is the SDK form of the `daemon_activity` RPC. Use it for live session work state, workers, and scheduled-task activity.
-- `rin.daemon.status()` is the SDK form of the `daemon_status` RPC and includes daemon health extras such as chat bridge status.
-- `rin.sessions.list({ limit, offset })` is the SDK form of the `list_sessions` RPC. Use it when ended or detached sessions matter.
-
-Use `rin status --json` when a CLI backend should combine daemon activity and session listing. Use `rin doctor --json` when service-manager state or recent service logs are needed; that evidence is CLI-backed rather than SDK-backed. Use `rin self-improve --json` for self-improve history because it reads a local history store rather than daemon RPC state. Optional Codex quota comes from the first-party `/usage` extension.
+- Preserve the original error and operation name when reporting or diagnosing failure.
+- A timeout proves that no response arrived before the deadline; it does not prove that a submitted mutation did not run. Read the owning state before deciding whether to retry.
+- For import or connection failures, verify `~/.rin/app/current/`, the intended user and daemon, and the active socket. Use `docs/runtime-layout.md` for installation paths and `docs/diagnostic-commands.md` for daemon health.
+- Do not silently switch to a source checkout, another user's daemon, or a different socket to make a request succeed.
 
 ## Final report contract
 
 For scripted SDK work, report:
 
-- helper surface and target id;
+- active installed runtime and target surface;
 - requested operation;
-- verification read and key fields returned;
-- active producer state for pause/resume/delete/complete/terminate operations;
-- follow-up boundary when another runtime, adapter, account, or deployment action remains.
+- returned result or exact error;
+- verification read and key state observed;
+- remaining boundary when another runtime, adapter, account, deployment, or owner decision is still required.

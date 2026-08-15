@@ -35,6 +35,15 @@ test("agent docs expose scheduled task operation workflow", () => {
   const richText = readAgentDoc("docs/rich-text-output-format.md");
   const initialization = readAgentDoc("docs/initialization.md");
 
+  assert.match(readme, /Choose the narrow topic document/);
+  assert.match(
+    readme,
+    /execution-environment\.md` only when the live target or capability surface is unclear/,
+  );
+  assert.match(
+    readme,
+    /pi-overrides\.md` only when upstream Pi behavior is relevant/,
+  );
   assert.match(readme, /docs\/agent-sdk\.md/);
   assert.match(readme, /docs\/scheduled-tasks\.md/);
   assert.match(readme, /docs\/chat-bridge\.md/);
@@ -124,6 +133,18 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.doesNotMatch(builtinCapabilities, /provides `run_subagent`/);
   assert.doesNotMatch(capabilities, /bundled `browser_use`/);
 
+  const helperOwnerDocs = [
+    ["agent-sdk.md", agentSdk],
+    ["scheduled-tasks.md", scheduledTasks],
+    ["chat-bridge.md", chatBridge],
+  ] as const;
+  const assertHelperOwner = (helper: string, expectedOwner: string) => {
+    const owners = helperOwnerDocs
+      .filter(([, content]) => content.includes(helper))
+      .map(([name]) => name);
+    assert.deepEqual(owners, [expectedOwner], `${helper} has one doc owner`);
+  };
+
   for (const helper of [
     "rin.tasks.list",
     "rin.tasks.get",
@@ -137,8 +158,20 @@ test("agent docs expose scheduled task operation workflow", () => {
     "rin.tasks.run",
     "rin.tasks.wake",
   ]) {
-    assert.match(scheduledTasks, new RegExp(helper.replace(/\./g, "\\.")));
-    assert.match(agentSdk, new RegExp(helper.replace(/\./g, "\\.")));
+    assertHelperOwner(helper, "scheduled-tasks.md");
+  }
+
+  for (const helper of [
+    "rin.chat.send",
+    "rin.chat.runTurn",
+    "rin.chat.typing",
+    "rin.chat.react",
+    "rin.chat.terminateTurn",
+    "rin.chat.messages.get",
+    "rin.chat.messages.list",
+    "rin.chat.evalBridge",
+  ]) {
+    assertHelperOwner(helper, "chat-bridge.md");
   }
 
   for (const command of [
@@ -204,6 +237,11 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(richText, /## Attachment delivery contract/);
   assert.match(richText, /## Validation checks/);
   assert.match(richText, /chat identity\/log lookup path/);
+  assert.match(richText, /SDK import: `docs\/agent-sdk\.md`/);
+  assert.match(
+    richText,
+    /Chat identity, SDK operations, logs, adapters, outbox, and delivery troubleshooting: `docs\/chat-bridge\.md`/,
+  );
   assert.match(initialization, /meets a user for the first time/);
   assert.match(initialization, /Success means the user feels welcomed/);
   assert.match(initialization, /current agent role in the user's language/);

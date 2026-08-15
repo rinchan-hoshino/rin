@@ -193,6 +193,17 @@ await rin.chat.evalBridge({
 });
 ```
 
+Helper contract:
+
+- `rin.chat.send(payload)` posts explicit text or structured parts to one `chatKey`.
+- `rin.chat.runTurn(payload)` starts an assistant turn; choose binding, disposal, shutdown, and final-delivery options deliberately.
+- `rin.chat.typing(target)` and `rin.chat.react(payload)` send adapter-supported transient signals.
+- `rin.chat.terminateTurn(target)` stops the active turn selected by controller key or chat key.
+- `rin.chat.messages.get({ chatKey, messageId })` returns one stored rich message without expanding its quote node.
+- `rin.chat.messages.list({ chatKey, before?, after?, limit? })` returns a chronological window. Cursors are message ids in that chat; `limit` defaults to 20 and is clamped to 1-100.
+- Stored-message writes remain intent APIs such as send and run-turn operations; there is no raw message-row write API.
+- `rin.chat.evalBridge(payload)` evaluates code inside the chat bridge context for bridge-local inspection or repair.
+
 EvalBridge contract:
 
 - Return a small filtered result.

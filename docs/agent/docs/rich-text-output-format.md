@@ -198,6 +198,6 @@ Before sending rich output, check:
 
 ## Read next
 
-- Chat identity, logs, adapters, outbox, and delivery troubleshooting: `docs/chat-bridge.md`.
-- SDK import and `rin.chat.send` / `rin.chat.evalBridge`: `docs/agent-sdk.md`.
+- Chat identity, SDK operations, logs, adapters, outbox, and delivery troubleshooting: `docs/chat-bridge.md`.
+- SDK import: `docs/agent-sdk.md`.
 - Scheduled chat delivery: `docs/scheduled-tasks.md`.

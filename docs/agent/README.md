@@ -12,12 +12,11 @@ Use these docs as the Rin-specific layer above upstream Pi docs.
 
 ## Reading path
 
-1. Start here.
-2. Read `docs/execution-environment.md` to identify the live runtime, loop boundary, tools, paths, and environment ownership.
-3. Read `docs/pi-overrides.md` before relying on upstream Pi docs.
-4. Read the narrow topic document for the task.
-5. Read a practice page only when the task needs browser or desktop operation.
-6. Consult upstream Pi docs only for uncovered topics, with Rin overrides applied.
+1. Choose the narrow topic document for the task from the map below.
+2. Read `docs/execution-environment.md` only when the live target or capability surface is unclear.
+3. Read `docs/pi-overrides.md` only when upstream Pi behavior is relevant.
+4. Read a practice page only when the task needs browser or desktop operation.
+5. Consult upstream Pi docs only for uncovered topics, with Rin overrides applied.
 
 ## Topic map
 
@@ -32,7 +31,7 @@ Use these docs as the Rin-specific layer above upstream Pi docs.
 - `docs/memory-layering.md`: choosing between memory evidence/retrieval and distilled self-improve guidance.
 - `docs/self-improve-distillation.md`: prompt-engineering contract for self-improve distillation passes.
 - `docs/initialization.md`: initialization flow for durable user and assistant preferences.
-- `docs/agent-sdk.md`: local SDK helpers for daemon-backed task and chat operations.
+- `docs/agent-sdk.md`: local SDK import, execution, and generic error handling.
 - `docs/scheduled-tasks.md`: scheduled task creation, inspection, update, deletion, and verification.
 - `docs/chat-bridge.md`: chat bridge SDK/configuration workflows, stored chat paths, and adapter notes.
 - `docs/rich-text-output-format.md`: native mentions, quotes/replies, attachments, files/images, and fallback syntax.

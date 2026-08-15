@@ -151,7 +151,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.ok(baseSystemPrompt.includes("Rin and Pi documentation:"));
   assert.ok(
     baseSystemPrompt.includes(
-      "Start runtime work with Rin README.md, docs/execution-environment.md, and docs/pi-overrides.md; then read only the narrow topic doc needed for the task.",
+      "Read only the narrow Rin topic documents needed for the task, following the routes below.",
     ),
   );
   assert.equal(baseSystemPrompt.includes("Session awareness guidance:"), false);
@@ -160,7 +160,12 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   assert.equal(baseSystemPrompt.includes("Rich text guidance:"), false);
   assert.ok(
     baseSystemPrompt.includes(
-      "session awareness -> docs/session-awareness.md; subagents -> docs/non-interactive-cli.md; scheduled tasks -> docs/agent-sdk.md + docs/scheduled-tasks.md",
+      "execution target or live capability uncertainty -> docs/execution-environment.md; Rin/Pi behavior differences -> docs/pi-overrides.md",
+    ),
+  );
+  assert.ok(
+    baseSystemPrompt.includes(
+      "session awareness -> docs/session-awareness.md; subagents -> docs/non-interactive-cli.md; scheduled tasks -> docs/scheduled-tasks.md; SDK imports, execution, and generic errors -> docs/agent-sdk.md",
     ),
   );
   assert.ok(
