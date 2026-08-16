@@ -392,13 +392,6 @@ test("detached delivery links its session without changing chat binding", async 
   );
   let deliveryIndex = 0;
   detached.app.bots[0].sendMessage = async () => [`m${++deliveryIndex}`];
-  assert.equal(
-    detached.buildAssistantDelivery({
-      text: "early scheduled error",
-      bindSession: true,
-    }).sessionBinding,
-    undefined,
-  );
   await detached.deliverAssistantReply({ text: "early scheduled error" });
   assert.equal(
     lookupReplySession(owner.agentDir, owner.chatKey, "m1")?.sessionFile,
@@ -3065,10 +3058,6 @@ test("chat controller quiet mode suppresses progress deliveries", async () => {
     }),
     "utf8",
   );
-  assert.equal(controller.shouldSuppressQuietDelivery("final"), false);
-  assert.equal(controller.shouldSuppressQuietDelivery("error"), false);
-  assert.equal(controller.shouldSuppressQuietDelivery("generic"), true);
-
   const deliveries = [];
   controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
     const text = nodes
@@ -4220,7 +4209,6 @@ test("chat controller adopts a backend-accepted pending presentation before inte
   controller.awaitingTurnSettle = true;
   controller.driver.isWorking = () => true;
   controller.canDeliverReplies = () => true;
-  controller.shouldSuppressQuietDelivery = () => false;
   controller.enqueueAndDrainDelivery = async (payload) => {
     interimDeliveries.push(payload);
     return { accepted: true, delivered: true, settled: true };
@@ -9355,12 +9343,6 @@ test("chat controller internal ownership helpers normalize durable and display s
   );
   assert.equal(controller.canDeliverReplies(), true);
   assert.equal(controller.chatPlatform(), "telegram");
-  assert.equal(controller.isTypingHeartbeatDue(0, 1), true);
-  assert.equal(controller.isTypingHeartbeatDue(1, 2), false);
-  assert.equal(controller.isTypingHeartbeatDue(1, 60_000), true);
-  assert.equal(controller.isVisibleWorkingPollDue(0, 1), true);
-  assert.equal(controller.isVisibleWorkingPollDue(1_000, 1_100), false);
-  assert.equal(controller.isVisibleWorkingPollDue(1_000, 60_000), true);
   controller.warnTypingIndicatorFailure(new Error("first"), 10);
   controller.warnTypingIndicatorFailure("suppressed", 11);
   assert.equal(controller.getWorkingIndicators().length, 1);
@@ -9504,10 +9486,6 @@ test("chat controller internal ownership helpers normalize durable and display s
   };
   const polling = testPollingIndicator([], []);
   controller.app.bots[0].workingIndicators = [marker, polling];
-  assert.deepEqual(controller.getWorkingIndicatorPolicy(), {
-    polling: false,
-    marker: true,
-  });
   assert.equal(await controller.startWorkingMarker(), true);
   const editable = {
     type: "polling",

@@ -26,6 +26,14 @@ export function resolveSessionValue(primary: unknown, fallback?: unknown) {
   return normalizeSessionValue(primary) ?? normalizeSessionValue(fallback);
 }
 
+export function firstSessionValue(...candidates: unknown[]) {
+  for (const candidate of candidates) {
+    const value = normalizeSessionValue(candidate);
+    if (value) return value;
+  }
+  return undefined;
+}
+
 function getAgentSessionDir(agentDir: string) {
   return getRuntimeSessionDir(process.cwd(), agentDir);
 }
@@ -69,6 +77,22 @@ export function resolveStoredSessionFile(agentDir: string, value: unknown) {
   const relative = normalizeStoredSessionPath(sessionFile);
   if (!relative) return undefined;
   return path.resolve(getAgentSessionDir(agentDir), relative);
+}
+
+export function resolveSessionFileForUse(agentDir: string, value: unknown) {
+  return resolveStoredSessionFile(agentDir, value) || safeString(value).trim();
+}
+
+export function sessionFilesMatch(
+  agentDir: string,
+  left: unknown,
+  right: unknown,
+) {
+  const resolvedLeft = resolveSessionFileForUse(agentDir, left);
+  const resolvedRight = resolveSessionFileForUse(agentDir, right);
+  return Boolean(
+    resolvedLeft && resolvedRight && resolvedLeft === resolvedRight,
+  );
 }
 
 export function normalizeSessionRef(

@@ -145,9 +145,9 @@ import {
   cleanupChatOutboxHistory,
   enqueueChatOutboxPayload,
   hasCommittedTerminalChatOutbox,
-  withChatQuotePart,
   runWithChatOutboxTurnFence,
 } from "./outbox.js";
+import { withChatQuotePart } from "./delivery-presentation.js";
 import {
   sendReaction,
   sendTyping,

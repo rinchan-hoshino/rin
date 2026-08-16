@@ -35,3 +35,26 @@ test("chat command responses accept partial extension contributions", () => {
   assert.equal(responses.compactionStart, "Compacting locally");
   assert.equal(responses.abort, "Aborted current operation.");
 });
+
+test("chat command response presentation localizes builtin results", () => {
+  const responses = commandResponses.resolveChatCommandResponses({
+    new: "Localized new session",
+    newCancelled: "Localized cancellation",
+  });
+  assert.equal(
+    commandResponses.localizeChatBuiltinCommandResult(
+      "new",
+      { text: "frontend text", cancelled: false },
+      responses,
+    ).text,
+    "Localized new session",
+  );
+  assert.equal(
+    commandResponses.localizeChatBuiltinCommandResult(
+      "new",
+      { cancelled: true },
+      responses,
+    ).text,
+    "Localized cancellation",
+  );
+});

@@ -4,7 +4,6 @@ import path from "node:path";
 import {
   RinDaemonFrontendClient,
   RinFrontendTurnDriver,
-  applyFrontendBuiltinCommandText,
   chatFrontendIdentity,
   frontendCommandNameFromLine,
   getRinNonInteractiveCommandInteractionPolicy,
@@ -23,23 +22,20 @@ import type { PromptContextMeta } from "../rin-lib/prompt-context.js";
 import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
 import { nowIso } from "../time-utils.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
-import {
-  formatRinTodoChecklistCharacterContent,
-  formatRinTodoChecklistMarkdownContent,
-  normalizeRinTodoItems,
-  type RinTodoItem,
-} from "../rin-lib/todo-state.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
 import {
+  localizeChatBuiltinCommandResult,
   resolveChatCommandResponses,
   type ChatCommandResponses,
 } from "./command-responses.js";
-import { stripMarkdownFormatting } from "./rich-text.js";
 import {
+  firstSessionValue,
   missingSessionFileError,
   normalizeSessionRef,
+  resolveSessionFileForUse,
   resolveStoredSessionFile,
   sessionFileExists,
+  sessionFilesMatch,
   toStoredSessionFile,
 } from "../session/ref.js";
 import {
@@ -63,7 +59,6 @@ import {
   enqueueChatOutboxPayload,
   getActiveChatOutboxTurnFence,
   isChatOutboxTurnFenceActive,
-  withChatQuotePart,
   readChatOutboxItemById,
 } from "./outbox.js";
 import { applyPostDelivery, drainChatOutbox } from "./boot.js";
@@ -73,6 +68,12 @@ import {
   hashChatErrorDeliveryContent,
 } from "./error-presentation.js";
 import { assistantDeliveryParts } from "./terminal-delivery.js";
+import {
+  buildChatAssistantDelivery,
+  conversationSessionPayload,
+  withChatQuotePart,
+  type ChatAssistantDelivery,
+} from "./delivery-presentation.js";
 import {
   advanceChatGeneration,
   markChatMessageAcceptedWithFence,
@@ -91,33 +92,28 @@ import {
 } from "./transport.js";
 import { resolveChatQuietModeEnabled } from "./settings.js";
 import { projectChatExtensionUiRequest } from "./extension-ui.js";
+import {
+  chatDeliveryOutcome,
+  normalizeAssistantSummaryText,
+  presentInterimText,
+  shouldDeferPassiveNotice,
+  shouldSuppressQuietDelivery,
+  type ChatDeliveryOutcome,
+} from "./delivery-policy.js";
+import { presentTodoNotice } from "./todo-presentation.js";
+import {
+  findEditableWorkingIndicator,
+  isWorkingIndicatorPollDue,
+  normalizeWorkingIndicators,
+  selectTypingIndicatorsForKind,
+  selectVisibleWorkingIndicatorsForKind,
+  selectWorkingIndicatorsForEnd,
+  selectWorkingIndicatorsForKind,
+  workingIndicatorPolicy,
+  workingIndicatorPresentation,
+  type WorkingIndicator,
+} from "./working-indicator-policy.js";
 
-const INTERMEDIATE_PREFIX = "... ";
-
-type ChatDeliveryOutcome = {
-  messageIds: string[];
-  accepted: boolean;
-  settled: boolean;
-};
-
-function chatDeliveryOutcome(
-  messageIds: string[] = [],
-  options: { accepted?: boolean; settled?: boolean } = {},
-): ChatDeliveryOutcome {
-  return {
-    messageIds,
-    accepted: options.accepted !== false,
-    settled: options.settled !== false,
-  };
-}
-
-const PLATFORM_TYPING_POLL_INTERVAL_MS: Record<string, number> = {
-  // Telegram Bot API sendChatAction expires after 5 seconds.
-  telegram: 4_000,
-  // Discord typing indicators expire after 10 seconds.
-  discord: 9_000,
-};
-const DEFAULT_TYPING_POLL_INTERVAL_MS = 30_000;
 const TYPING_FAILURE_WARNING_INTERVAL_MS = 30_000;
 
 function detachedControllerStatePath(dataDir: string, chatKey: string) {
@@ -166,179 +162,6 @@ type ChatTurnMeta = ChatTurnTarget & {
   frontendReadyAt?: number;
   startupTimingLogged?: boolean;
 };
-
-type ChatAssistantDelivery = {
-  chatKey: string;
-  deliveryKind?: "final" | "interim" | "passive_notice" | "error";
-  parts: ChatMessagePart[];
-  coalesceWithWorkingMessage?: boolean;
-  exclusiveProgressMessage?: boolean;
-  sessionFile?: string;
-  sessionBinding?: "conversation";
-};
-
-type TodoNoticeRenderMode = "native" | "markdown" | "characters";
-
-const NATIVE_TODO_NOTICE_PLATFORMS = new Set(["slack"]);
-const MARKDOWN_TODO_NOTICE_PLATFORMS = new Set([
-  "discord",
-  "feishu",
-  "lark",
-  "telegram",
-]);
-
-function todoNoticeRenderModeForChatKey(chatKey: string): TodoNoticeRenderMode {
-  const parsed = parseChatKey(chatKey);
-  const platform = safeString(parsed?.platform).trim().toLowerCase();
-  if (NATIVE_TODO_NOTICE_PLATFORMS.has(platform)) return "native";
-  if (MARKDOWN_TODO_NOTICE_PLATFORMS.has(platform)) return "markdown";
-  return "characters";
-}
-
-function formatTodoNoticeText(
-  todos: ReadonlyArray<Pick<RinTodoItem, "text" | "done">>,
-  mode: Exclude<TodoNoticeRenderMode, "native"> = "characters",
-) {
-  return mode === "markdown"
-    ? formatRinTodoChecklistMarkdownContent(todos)
-    : formatRinTodoChecklistCharacterContent(todos);
-}
-
-type WorkingIndicatorKind = "polling" | "marker";
-type WorkingIndicatorPresentation =
-  | "typing"
-  | "editable-message"
-  | "reaction"
-  | "message"
-  | "legacy";
-
-type WorkingIndicator = {
-  type?: string;
-  kind?: string;
-  name?: string;
-  presentation?: string;
-  capability?: string;
-  priority?: number;
-  tick?: (context: Record<string, any>) => Promise<unknown> | unknown;
-  end?: (context: Record<string, any>) => Promise<unknown> | unknown;
-  start?: (context: Record<string, any>) => Promise<unknown> | unknown;
-  onTick?: (context: Record<string, any>) => Promise<unknown> | unknown;
-  onEnd?: (context: Record<string, any>) => Promise<unknown> | unknown;
-  onStart?: (context: Record<string, any>) => Promise<unknown> | unknown;
-};
-
-const WORKING_PRESENTATION_PRIORITY: Record<
-  WorkingIndicatorPresentation,
-  number
-> = {
-  typing: -1,
-  "editable-message": 300,
-  reaction: 200,
-  message: 100,
-  legacy: 0,
-};
-
-function workingIndicatorKind(indicator: WorkingIndicator) {
-  const kind = safeString(indicator?.type || indicator?.kind).trim();
-  return kind === "polling" || kind === "marker" ? kind : "";
-}
-
-function workingIndicatorPresentation(
-  indicator: WorkingIndicator,
-): WorkingIndicatorPresentation {
-  const value = safeString(
-    indicator?.presentation || indicator?.capability,
-  ).trim();
-  if (
-    value === "typing" ||
-    value === "editable-message" ||
-    value === "reaction" ||
-    value === "message"
-  ) {
-    return value;
-  }
-  return "legacy";
-}
-
-function workingIndicatorPriority(indicator: WorkingIndicator) {
-  const explicit = Number(indicator?.priority);
-  if (Number.isFinite(explicit)) return explicit;
-  return WORKING_PRESENTATION_PRIORITY[workingIndicatorPresentation(indicator)];
-}
-
-function pickVisibleWorkingIndicator(indicators: WorkingIndicator[]) {
-  const visible = indicators.filter(
-    (indicator) => workingIndicatorPresentation(indicator) !== "typing",
-  );
-  if (!visible.length) return null;
-  const typed = visible.filter(
-    (indicator) => workingIndicatorPresentation(indicator) !== "legacy",
-  );
-  const candidates = typed.length ? typed : visible;
-  return candidates.reduce((best, indicator) =>
-    workingIndicatorPriority(indicator) > workingIndicatorPriority(best)
-      ? indicator
-      : best,
-  );
-}
-
-function selectTypingIndicatorsForKind(
-  indicators: WorkingIndicator[],
-  kind: WorkingIndicatorKind,
-) {
-  return indicators.filter(
-    (indicator) =>
-      workingIndicatorKind(indicator) === kind &&
-      workingIndicatorPresentation(indicator) === "typing",
-  );
-}
-
-function selectVisibleWorkingIndicatorsForKind(
-  indicators: WorkingIndicator[],
-  kind: WorkingIndicatorKind,
-) {
-  const visible = pickVisibleWorkingIndicator(indicators);
-  return visible && workingIndicatorKind(visible) === kind ? [visible] : [];
-}
-
-function selectWorkingIndicatorsForKind(
-  indicators: WorkingIndicator[],
-  kind: WorkingIndicatorKind,
-) {
-  return [
-    ...selectTypingIndicatorsForKind(indicators, kind),
-    ...selectVisibleWorkingIndicatorsForKind(indicators, kind),
-  ];
-}
-
-function selectWorkingIndicatorsForEnd(indicators: WorkingIndicator[]) {
-  const visible = pickVisibleWorkingIndicator(indicators);
-  return visible ? [visible] : [];
-}
-
-function normalizeWorkingIndicators(value: unknown): WorkingIndicator[] {
-  const raw = Array.isArray(value) ? value : [];
-  return raw.filter(
-    (indicator): indicator is WorkingIndicator =>
-      indicator &&
-      typeof indicator === "object" &&
-      Boolean(workingIndicatorKind(indicator as WorkingIndicator)),
-  );
-}
-
-function resolveComparableSessionFile(agentDir: string, sessionFile: unknown) {
-  const value = safeString(sessionFile).trim();
-  if (!value) return "";
-  return resolveStoredSessionFile(agentDir, value) || value;
-}
-
-function sameSessionFile(agentDir: string, left: unknown, right: unknown) {
-  const resolvedLeft = resolveComparableSessionFile(agentDir, left);
-  const resolvedRight = resolveComparableSessionFile(agentDir, right);
-  return Boolean(
-    resolvedLeft && resolvedRight && resolvedLeft === resolvedRight,
-  );
-}
 
 export class ChatController {
   app: any;
@@ -494,7 +317,7 @@ export class ChatController {
       options.restoreSession === false
         ? ""
         : options.restoreSessionFile !== undefined
-          ? this.resolveSessionFileForUse(options.restoreSessionFile)
+          ? resolveSessionFileForUse(this.agentDir, options.restoreSessionFile)
           : this.getRecoverableSessionFile();
     const connected = await this.driver.connect({ restoreSessionFile });
     if (this.affectChatBinding && restoreSessionFile) {
@@ -932,7 +755,7 @@ export class ChatController {
       (!sessionFile ||
         (input.sessionFile &&
           pending.sessionFile &&
-          !sameSessionFile(
+          !sessionFilesMatch(
             this.agentDir,
             input.sessionFile,
             pending.sessionFile,
@@ -1203,23 +1026,6 @@ export class ChatController {
     return parseChatKey(this.chatKey)?.platform.toLowerCase() || "";
   }
 
-  private typingPollIntervalMs() {
-    return (
-      PLATFORM_TYPING_POLL_INTERVAL_MS[this.chatPlatform()] ||
-      DEFAULT_TYPING_POLL_INTERVAL_MS
-    );
-  }
-
-  private isTypingHeartbeatDue(lastPolledAt: number, now = Date.now()) {
-    return (
-      lastPolledAt <= 0 || now - lastPolledAt >= this.typingPollIntervalMs()
-    );
-  }
-
-  private isVisibleWorkingPollDue(lastPolledAt: number, now = Date.now()) {
-    return this.isTypingHeartbeatDue(lastPolledAt, now);
-  }
-
   private warnTypingIndicatorFailure(error: unknown, now = Date.now()) {
     if (
       this.lastTypingFailureWarningAt > 0 &&
@@ -1356,14 +1162,6 @@ export class ChatController {
     return results.some(Boolean);
   }
 
-  private getWorkingIndicatorPolicy() {
-    const indicators = this.getWorkingIndicators();
-    return {
-      polling: selectWorkingIndicatorsForKind(indicators, "polling").length > 0,
-      marker: selectWorkingIndicatorsForKind(indicators, "marker").length > 0,
-    };
-  }
-
   private async startWorkingMarker(indicators = this.getWorkingIndicators()) {
     if (!this.canDeliverReplies()) return false;
     const selected = selectWorkingIndicatorsForKind(indicators, "marker");
@@ -1426,10 +1224,18 @@ export class ChatController {
     );
     const typingDue =
       typingIndicators.length > 0 &&
-      this.isTypingHeartbeatDue(this.lastCompactionTypingIndicatorAt, now);
+      isWorkingIndicatorPollDue(
+        this.chatPlatform(),
+        this.lastCompactionTypingIndicatorAt,
+        now,
+      );
     const visibleDue =
       visibleIndicators.length > 0 &&
-      this.isVisibleWorkingPollDue(this.lastCompactionIndicatorAt, now);
+      isWorkingIndicatorPollDue(
+        this.chatPlatform(),
+        this.lastCompactionIndicatorAt,
+        now,
+      );
     if (!typingDue && !visibleDue) return false;
 
     const context = this.compactionWorkingIndicatorContext({
@@ -1482,7 +1288,7 @@ export class ChatController {
       !turn ||
       turn.workingNoticeSent ||
       this.hasUnacceptedPendingPresentationReplacement() ||
-      !this.getWorkingIndicatorPolicy().marker
+      !workingIndicatorPolicy(this.getWorkingIndicators()).marker
     ) {
       return false;
     }
@@ -1517,17 +1323,6 @@ export class ChatController {
     return this.driver.isWorking();
   }
 
-  private editableWorkingIndicator(indicators = this.getWorkingIndicators()) {
-    return selectVisibleWorkingIndicatorsForKind(indicators, "polling").find(
-      (indicator) =>
-        workingIndicatorPresentation(indicator) === "editable-message",
-    );
-  }
-
-  private hasEditableWorkingIndicator() {
-    return Boolean(this.editableWorkingIndicator());
-  }
-
   private async refreshEditableWorkingNotice(
     options: { force?: boolean } = {},
   ) {
@@ -1536,13 +1331,16 @@ export class ChatController {
       !this.awaitingTurnSettle ||
       this.hasUnacceptedPendingPresentationReplacement() ||
       !this.canDeliverReplies() ||
-      this.shouldSuppressQuietDelivery("passive_notice") ||
+      shouldSuppressQuietDelivery(
+        this.isQuietModeEnabled(),
+        "passive_notice",
+      ) ||
       this.ownsManualCompactionPresentation() ||
       (!options.force && !this.shouldShowTypingIndicator())
     ) {
       return false;
     }
-    const editable = this.editableWorkingIndicator();
+    const editable = findEditableWorkingIndicator(this.getWorkingIndicators());
     if (!editable) return false;
 
     const now = Date.now();
@@ -1561,16 +1359,7 @@ export class ChatController {
   }
 
   private async showAssistantSummary(text: unknown) {
-    const latestSummary = safeString(text)
-      .replace(/\r\n?/g, "\n")
-      .trim()
-      .split(/\n\s*\n/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .at(-1);
-    const summary = stripMarkdownFormatting(latestSummary)
-      .replace(/\s+/g, " ")
-      .trim();
+    const summary = normalizeAssistantSummaryText(text);
     if (!summary || !this.currentTurn || !this.awaitingTurnSettle) {
       return false;
     }
@@ -1597,10 +1386,18 @@ export class ChatController {
         : selectVisibleWorkingIndicatorsForKind(indicators, "polling");
     const typingDue =
       typingIndicators.length > 0 &&
-      this.isTypingHeartbeatDue(this.lastTypingIndicatorAt, now);
+      isWorkingIndicatorPollDue(
+        this.chatPlatform(),
+        this.lastTypingIndicatorAt,
+        now,
+      );
     const visibleDue =
       visibleIndicators.length > 0 &&
-      this.isVisibleWorkingPollDue(this.lastWorkingIndicatorAt, now);
+      isWorkingIndicatorPollDue(
+        this.chatPlatform(),
+        this.lastWorkingIndicatorAt,
+        now,
+      );
     if (!typingDue && !visibleDue) return false;
 
     const context = this.workingIndicatorContext({
@@ -1661,25 +1458,8 @@ export class ChatController {
     return this.commandResponses || resolveChatCommandResponses();
   }
 
-  private localizeBuiltinCommandResult(commandName: string, data: any) {
-    return applyFrontendBuiltinCommandText(
-      commandName,
-      data,
-      this.getCommandResponses(),
-      { preferConfiguredText: true },
-    );
-  }
-
-  private pickStoredValue(...candidates: unknown[]) {
-    for (const candidate of candidates) {
-      const value = safeString(candidate).trim();
-      if (value) return value;
-    }
-    return undefined;
-  }
-
   private replaceStoredSessionFile(...candidates: unknown[]) {
-    const picked = this.pickStoredValue(...candidates);
+    const picked = firstSessionValue(...candidates);
     this.state.sessionFile = toStoredSessionFile(this.agentDir, picked);
     return this.state.sessionFile;
   }
@@ -1694,7 +1474,7 @@ export class ChatController {
     const options = hasOptions
       ? (args.pop() as { persist?: boolean })
       : undefined;
-    const picked = this.pickStoredValue(...args, this.state.sessionFile);
+    const picked = firstSessionValue(...args, this.state.sessionFile);
     this.state.sessionFile = toStoredSessionFile(this.agentDir, picked);
     if (
       this.affectChatBinding &&
@@ -1732,21 +1512,19 @@ export class ChatController {
     resultSessionFile: unknown,
   ) {
     if (!restoreSessionFile) return;
-    if (sameSessionFile(this.agentDir, restoreSessionFile, resultSessionFile)) {
+    if (
+      sessionFilesMatch(this.agentDir, restoreSessionFile, resultSessionFile)
+    ) {
       return;
     }
     throw new Error("chat_restored_session_mismatch");
   }
 
-  private resolveSessionFileForUse(sessionFile?: string) {
-    return (
-      resolveStoredSessionFile(this.agentDir, sessionFile) ||
-      safeString(sessionFile).trim()
-    );
-  }
-
   private getRecoverableSessionFile() {
-    const wanted = this.resolveSessionFileForUse(this.state.sessionFile);
+    const wanted = resolveSessionFileForUse(
+      this.agentDir,
+      this.state.sessionFile,
+    );
     if (!wanted) return "";
     if (sessionFileExists(wanted)) return wanted;
     if (this.affectChatBinding && parseChatKey(this.chatKey)) {
@@ -1758,7 +1536,8 @@ export class ChatController {
         if (!writeChatSessionBindingWithFence(this.agentDir, fence, "")) {
           this.state.sessionFile =
             readChatSessionBinding(this.agentDir, this.chatKey) || undefined;
-          const authoritative = this.resolveSessionFileForUse(
+          const authoritative = resolveSessionFileForUse(
+            this.agentDir,
             this.state.sessionFile,
           );
           this.saveState();
@@ -1882,49 +1661,6 @@ export class ChatController {
     return true;
   }
 
-  private currentConversationSessionPayload() {
-    if (!this.linkDeliveriesToSession) return {};
-    const sessionFile = this.currentSessionFile();
-    if (!sessionFile) return {};
-    return {
-      sessionFile,
-      sessionBinding: "conversation" as const,
-    };
-  }
-
-  private buildAssistantDelivery(input: {
-    text?: string;
-    parts?: ChatMessagePart[];
-    replyToMessageId?: string;
-    sessionFile?: string;
-    bindSession?: boolean;
-    deliveryKind?: "final" | "error";
-  }): ChatAssistantDelivery {
-    const text = safeString(input.text).trim();
-    const parts = Array.isArray(input.parts) ? input.parts.filter(Boolean) : [];
-    const sessionFile = toStoredSessionFile(
-      this.agentDir,
-      input.sessionFile || this.currentSessionFile(),
-    );
-    const sessionPayload =
-      input.bindSession === false || !sessionFile
-        ? {}
-        : {
-            sessionFile,
-            sessionBinding: "conversation" as const,
-          };
-    const replyToMessageId = safeString(input.replyToMessageId || "").trim();
-    return {
-      chatKey: this.chatKey,
-      deliveryKind: input.deliveryKind || "final",
-      parts: withChatQuotePart(
-        parts.length ? parts : [{ type: "text" as const, text }],
-        replyToMessageId,
-      ),
-      ...sessionPayload,
-    };
-  }
-
   private stageAssistantDelivery(input: {
     text?: string;
     parts?: ChatMessagePart[];
@@ -1933,7 +1669,14 @@ export class ChatController {
     bindSession?: boolean;
     deliveryKind?: "final" | "error";
   }) {
-    this.stagedDelivery = this.buildAssistantDelivery(input);
+    this.stagedDelivery = buildChatAssistantDelivery(
+      {
+        agentDir: this.agentDir,
+        chatKey: this.chatKey,
+        currentSessionFile: this.currentSessionFile(),
+      },
+      input,
+    );
   }
 
   private async waitForOutboxDelivery(
@@ -1960,14 +1703,6 @@ export class ChatController {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     return null;
-  }
-
-  private shouldSuppressQuietDelivery(deliveryKind: string) {
-    return (
-      this.isQuietModeEnabled() &&
-      deliveryKind !== "final" &&
-      deliveryKind !== "error"
-    );
   }
 
   private async enqueueAndDrainDelivery(
@@ -2020,7 +1755,12 @@ export class ChatController {
             }).parts,
           }
         : normalizedPayload;
-    if (this.shouldSuppressQuietDelivery(effectiveDeliveryKind)) {
+    if (
+      shouldSuppressQuietDelivery(
+        this.isQuietModeEnabled(),
+        effectiveDeliveryKind,
+      )
+    ) {
       return chatDeliveryOutcome([], { accepted: false });
     }
     await validateChatOutboxPayloadForDispatch(presentedPayload, this.h);
@@ -2312,15 +2052,21 @@ export class ChatController {
             [
               {
                 type: "text",
-                text: this.hasEditableWorkingIndicator()
-                  ? trimmed
-                  : `${INTERMEDIATE_PREFIX}${trimmed}`,
+                text: presentInterimText(
+                  trimmed,
+                  Boolean(
+                    findEditableWorkingIndicator(this.getWorkingIndicators()),
+                  ),
+                ),
               },
             ],
             replyToMessageId,
           ),
           coalesceWithWorkingMessage: true,
-          ...this.currentConversationSessionPayload(),
+          ...conversationSessionPayload(
+            this.linkDeliveriesToSession,
+            this.currentSessionFile(),
+          ),
         },
         { deliveryKind: "interim" },
       );
@@ -2329,14 +2075,6 @@ export class ChatController {
     } catch {
       return false;
     }
-  }
-
-  private shouldDeferPassiveNotice() {
-    return (
-      this.hasActiveTurn() ||
-      this.awaitingTurnSettle ||
-      Boolean(this.stagedDelivery)
-    );
   }
 
   private async sendProgressNoticeNow(
@@ -2377,7 +2115,10 @@ export class ChatController {
           ...(options.exclusiveProgressMessage
             ? { exclusiveProgressMessage: true }
             : {}),
-          ...this.currentConversationSessionPayload(),
+          ...conversationSessionPayload(
+            this.linkDeliveriesToSession,
+            this.currentSessionFile(),
+          ),
         },
         { deliveryKind, ...options },
       );
@@ -2451,7 +2192,10 @@ export class ChatController {
             [{ type: "text", text: trimmed }],
             this.currentReplyToMessageId(),
           ),
-          ...this.currentConversationSessionPayload(),
+          ...conversationSessionPayload(
+            this.linkDeliveriesToSession,
+            this.currentSessionFile(),
+          ),
         },
         {
           deliveryKind: "error",
@@ -2556,13 +2300,11 @@ export class ChatController {
     ) {
       return true;
     }
-    const todos = normalizeRinTodoItems(event?.todoItems);
-    const mode = todoNoticeRenderModeForChatKey(this.chatKey);
-    const noticeText = todos
-      ? todos.length > 0
-        ? formatTodoNoticeText(todos, mode === "native" ? "characters" : mode)
-        : ""
-      : safeString(event?.text).trim();
+    const {
+      todos,
+      mode,
+      text: noticeText,
+    } = presentTodoNotice(this.chatKey, event?.todoItems, event?.text);
     const todoHash = crypto
       .createHash("sha256")
       .update(noticeText)
@@ -2649,7 +2391,10 @@ export class ChatController {
                 ],
                 this.currentReplyToMessageId(),
               ),
-              ...this.currentConversationSessionPayload(),
+              ...conversationSessionPayload(
+                this.linkDeliveriesToSession,
+                this.currentSessionFile(),
+              ),
             },
             { deliveryKind: "passive_notice", ...todoDeliveryOptions },
           );
@@ -2667,8 +2412,18 @@ export class ChatController {
   private async deliverPassiveNotice(text: string) {
     const trimmed = safeString(text).trim();
     if (!trimmed) return false;
-    if (this.shouldSuppressQuietDelivery("passive_notice")) return true;
-    if (this.shouldDeferPassiveNotice()) {
+    if (
+      shouldSuppressQuietDelivery(this.isQuietModeEnabled(), "passive_notice")
+    ) {
+      return true;
+    }
+    if (
+      shouldDeferPassiveNotice({
+        hasActiveTurn: this.hasActiveTurn(),
+        awaitingTurnSettle: this.awaitingTurnSettle,
+        hasStagedDelivery: Boolean(this.stagedDelivery),
+      })
+    ) {
       this.pendingPassiveNotices.push(trimmed);
       return true;
     }
@@ -2747,7 +2502,10 @@ export class ChatController {
       this.currentReplyToMessageId() || commandReplyToMessageId || undefined;
 
     const manualCompaction = this.ownsManualCompactionPresentation();
-    if (!manualCompaction && this.hasEditableWorkingIndicator()) {
+    if (
+      !manualCompaction &&
+      findEditableWorkingIndicator(this.getWorkingIndicators())
+    ) {
       this.ensureVisibleCommandTurn();
       const incomingMessageId =
         this.currentIncomingMessageId() || commandIncomingMessageId;
@@ -2779,7 +2537,10 @@ export class ChatController {
             [{ type: "text", text: trimmed }],
             coalesceReplyToMessageId,
           ),
-          ...this.currentConversationSessionPayload(),
+          ...conversationSessionPayload(
+            this.linkDeliveriesToSession,
+            this.currentSessionFile(),
+          ),
         },
         {
           deliveryKind: "interim",
@@ -2969,7 +2730,7 @@ export class ChatController {
         assumeConnected: frontendReady === true,
         assumeSessionReady:
           frontendReady === true &&
-          sameSessionFile(
+          sessionFilesMatch(
             this.agentDir,
             this.driver.currentSessionFile(),
             restoreSessionFile,
@@ -3009,7 +2770,11 @@ export class ChatController {
         });
       }
       this.saveState();
-      data = this.localizeBuiltinCommandResult(commandName, data);
+      data = localizeChatBuiltinCommandResult(
+        commandName,
+        data,
+        this.getCommandResponses(),
+      );
       const text = [
         safeString(data?.text || "").trim(),
         ...this.commandUiMessages,
@@ -3090,7 +2855,10 @@ export class ChatController {
       ) || undefined;
     return await (async () => {
       const requestTag = safeString(input.requestTag).trim();
-      const sessionFile = this.resolveSessionFileForUse(input.sessionFile);
+      const sessionFile = resolveSessionFileForUse(
+        this.agentDir,
+        input.sessionFile,
+      );
       const messageId = safeString(input.incomingMessageId).trim();
       if (!requestTag) throw new Error("chat_turn_request_tag_missing");
       if (!sessionFile || !sessionFileExists(sessionFile)) {
@@ -3166,8 +2934,10 @@ export class ChatController {
       );
       const turnAbortGeneration = this.turnAbortGeneration;
       const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
-      const wantedSessionFile =
-        this.resolveSessionFileForUse(rawWantedSessionFile);
+      const wantedSessionFile = resolveSessionFileForUse(
+        this.agentDir,
+        rawWantedSessionFile,
+      );
       if (
         wantedSessionFile &&
         !input.createSessionFileIfMissing &&
@@ -3228,7 +2998,7 @@ export class ChatController {
           assumeConnected: frontendReady === true,
           assumeSessionReady:
             frontendReady === true &&
-            sameSessionFile(
+            sessionFilesMatch(
               this.agentDir,
               this.driver.currentSessionFile(),
               restoreSessionFile,
@@ -3271,7 +3041,7 @@ export class ChatController {
                 }
                 if (
                   !pendingPresentation.sessionFile ||
-                  !sameSessionFile(
+                  !sessionFilesMatch(
                     this.agentDir,
                     acceptance.sessionFile,
                     pendingPresentation.sessionFile,

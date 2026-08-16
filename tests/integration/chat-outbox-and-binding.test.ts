@@ -379,18 +379,6 @@ test("chat outbox persists only in chat.sqlite and requires structured parts", a
   });
 });
 
-test("Chat quote helper preserves one canonical quote", () => {
-  assert.deepEqual(outbox.withChatQuotePart(undefined as any, "quoted"), [
-    { type: "quote", id: "quoted" },
-  ]);
-  const textPart = { type: "text" as const, text: "owner" };
-  assert.deepEqual(outbox.withChatQuotePart([textPart], " "), [textPart]);
-  const quotePart = { type: "quote" as const, id: "existing" };
-  assert.deepEqual(outbox.withChatQuotePart([quotePart], "replacement"), [
-    quotePart,
-  ]);
-});
-
 test("chat outbox persists presentation-ready error payloads without rewriting them", async () => {
   await withTempDir(async (dir) => {
     const id = outbox.enqueueChatOutboxPayload(

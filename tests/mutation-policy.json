@@ -31,7 +31,7 @@
     {
       "id": "legacy-reply-quote-precedes-content",
       "rationale": "Migrated reply metadata must become one leading quote rather than trailing metadata.",
-      "file": "src/core/chat/outbox.ts",
+      "file": "src/core/chat/delivery-presentation.ts",
       "search": "return [{ type: \"quote\" as const, id }, ...nodes];",
       "replacement": "return [...nodes, { type: \"quote\" as const, id }];",
       "tests": ["tests/property/chat-key-and-outbox.property.test.ts"]

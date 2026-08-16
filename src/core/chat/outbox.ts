@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 
 import { CHAT_TERMINAL_OUTBOX_ID_GLOB, openChatDatabase } from "./database.js";
 import { validateChatOutboxPayloadParts } from "./outbox-payload-validation.js";
+import { withChatQuotePart } from "./delivery-presentation.js";
 import { safeString } from "../text-utils.js";
 
 import type {
@@ -72,16 +73,6 @@ function normalizeDeliveryKind(value: unknown): ChatOutboxDeliveryKind {
     return text as ChatOutboxDeliveryKind;
   }
   return "generic";
-}
-
-export function withChatQuotePart(
-  parts: ChatMessagePart[],
-  replyToMessageId: unknown,
-) {
-  const nodes = Array.isArray(parts) ? parts.filter(Boolean) : [];
-  const id = safeString(replyToMessageId).trim();
-  if (!id || nodes.some((part) => part.type === "quote")) return nodes;
-  return [{ type: "quote" as const, id }, ...nodes];
 }
 
 export function normalizeChatOutboxPayload(

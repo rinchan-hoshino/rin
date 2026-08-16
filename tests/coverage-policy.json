@@ -160,6 +160,16 @@
       "status": "strict"
     },
     {
+      "source": "src/core/chat/delivery-policy.ts",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/chat/delivery-presentation.ts",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
       "source": "src/core/chat/database-install-migration.ts",
       "ownerSuite": "integration",
       "status": "strict"
@@ -300,6 +310,11 @@
       "status": "strict"
     },
     {
+      "source": "src/core/chat/todo-presentation.ts",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
       "source": "src/core/chat/terminal-reconciler.ts",
       "ownerSuite": "integration",
       "status": "strict"
@@ -307,6 +322,11 @@
     {
       "source": "src/core/chat/transport.ts",
       "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/chat/working-indicator-policy.ts",
+      "ownerSuite": "unit",
       "status": "strict"
     },
     {

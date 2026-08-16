@@ -200,4 +200,24 @@ test("session ref helpers store session files relative to agent sessions dir and
     sessionRef.resolveStoredSessionFile(agentDir, "/tmp/outside/demo.jsonl"),
     "/tmp/outside/demo.jsonl",
   );
+  assert.equal(
+    sessionRef.firstSessionValue(" ", undefined, " chat/demo.jsonl "),
+    "chat/demo.jsonl",
+  );
+  assert.equal(
+    sessionRef.resolveSessionFileForUse(agentDir, "chat/demo.jsonl"),
+    path.join(agentDir, "sessions", "chat", "demo.jsonl"),
+  );
+  assert.equal(
+    sessionRef.sessionFilesMatch(
+      agentDir,
+      "chat/demo.jsonl",
+      path.join(agentDir, "sessions", "chat", "demo.jsonl"),
+    ),
+    true,
+  );
+  assert.equal(
+    sessionRef.sessionFilesMatch(agentDir, "chat/demo.jsonl", "other.jsonl"),
+    false,
+  );
 });

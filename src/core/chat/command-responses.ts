@@ -1,4 +1,5 @@
 import {
+  applyFrontendBuiltinCommandText,
   DEFAULT_RIN_FRONTEND_COMMAND_RESPONSES,
   type RinFrontendCommandResponses,
 } from "../rin-frontend-sdk/command-responses.js";
@@ -23,4 +24,14 @@ export function resolveChatCommandResponses(
       ];
     }),
   ) as ChatCommandResponses;
+}
+
+export function localizeChatBuiltinCommandResult(
+  commandName: string,
+  data: unknown,
+  responses: ChatCommandResponses,
+) {
+  return applyFrontendBuiltinCommandText(commandName, data, responses, {
+    preferConfiguredText: true,
+  });
 }
