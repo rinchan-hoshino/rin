@@ -384,6 +384,14 @@ test("working-tree test wrapper enters a networkless container without host moun
   assert.match(wrapper, /rin-local-ci:source-/);
   assert.doesNotMatch(wrapper, /docker image rm/);
   assert.match(wrapper, /docker_args=\(run --rm --network none/);
+  for (const name of [
+    "RIN_TEST_SUITE_CONCURRENCY",
+    "RIN_TEST_FILE_CONCURRENCY",
+  ]) {
+    assert.match(wrapper, new RegExp(`test_env_name in[\\s\\S]*${name}`));
+  }
+  assert.match(wrapper, /docker_args\+=\(--env "\$test_env_name"\)/);
+  assert.doesNotMatch(wrapper, /--env-file/);
   assert.match(wrapper, /docker "\$\{docker_args\[@\]\}"/);
   assert.doesNotMatch(wrapper, /--volume|^\s+-v(?:\s|=)|\/run\/user|\.rin:/m);
   const dockerfile = readRepoFile(".ci/local-ci/Dockerfile");
