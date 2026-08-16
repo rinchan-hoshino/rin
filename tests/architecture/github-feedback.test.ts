@@ -32,6 +32,10 @@ test("GitHub runs the complete commit gate for pull requests and main", () => {
   assert.equal(job.name, "Networkless commit gate");
   assert.equal(job["runs-on"], "ubuntu-24.04");
   assert.equal(job["timeout-minutes"], 30);
+  assert.deepEqual(job.env, {
+    RIN_TEST_SUITE_CONCURRENCY: "1",
+    RIN_TEST_FILE_CONCURRENCY: "2",
+  });
 
   const checkout = job.steps.find(
     (step: Record<string, unknown>) => step.name === "Checkout",

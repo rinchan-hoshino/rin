@@ -112,7 +112,11 @@ test("the commit gate runs isolated suites concurrently and keeps slow calibrati
   ]) {
     assert.match(commitRunner, new RegExp(`"${suite}"`));
   }
-  assert.match(commitRunner, /mapWithConcurrency\(suites, 3/);
+  assert.match(commitRunner, /RIN_TEST_SUITE_CONCURRENCY/);
+  assert.match(
+    commitRunner,
+    /mapWithConcurrency\(\s*suites,\s*suiteConcurrency/,
+  );
   assert.match(packageJson.scripts["test:inner"], /test:current:run/);
   assert.doesNotMatch(
     packageJson.scripts["test:inner"],

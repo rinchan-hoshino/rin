@@ -18,6 +18,9 @@ jobs:
     name: Networkless commit gate
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      RIN_TEST_SUITE_CONCURRENCY: "1"
+      RIN_TEST_FILE_CONCURRENCY: "2"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

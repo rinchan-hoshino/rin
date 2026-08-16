@@ -1,7 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mapWithConcurrency } from "../../scripts/test/parallel.js";
+import {
+  mapWithConcurrency,
+  resolveTestConcurrency,
+} from "../../scripts/test/parallel.js";
+
+test("test concurrency keeps local defaults and validates remote overrides", () => {
+  assert.equal(resolveTestConcurrency(undefined, 3, "suite"), 3);
+  assert.equal(resolveTestConcurrency("1", 3, "suite"), 1);
+  assert.equal(resolveTestConcurrency("2", 4, "file"), 2);
+  for (const invalid of ["", "0", "-1", "1.5", "two"]) {
+    assert.throws(
+      () => resolveTestConcurrency(invalid, 3, "suite"),
+      new RegExp(`test_concurrency_invalid:suite:${invalid}`),
+    );
+  }
+});
 
 test("parallel test scheduling respects its limit and preserves result order", async () => {
   let active = 0;
