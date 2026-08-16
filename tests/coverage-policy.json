@@ -490,7 +490,37 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin-daemon/rpc-auth-command-handler.ts",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-daemon/rpc-command-dispatcher.ts",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-daemon/rpc-extension-ui-command-handler.ts",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin-daemon/rpc-mode.ts",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-daemon/rpc-resource-command-handler.ts",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-daemon/rpc-session-command-handler.ts",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/rin-daemon/rpc-turn-command-handler.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },

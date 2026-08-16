@@ -448,9 +448,57 @@
       "tests": ["tests/integration/rin-daemon-lock-owner.test.ts"]
     },
     {
+      "source": "src/core/rin-daemon/rpc-auth-command-handler.ts",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/rpc-mode-owner-wrapper.test.ts",
+        "tests/integration/rpc-command-handlers.test.ts"
+      ],
+      "preloads": ["tests/support/register-rpc-mode-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin-daemon/rpc-extension-ui-command-handler.ts",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/rpc-mode-owner-wrapper.test.ts",
+        "tests/integration/rpc-command-handlers.test.ts"
+      ],
+      "preloads": ["tests/support/register-rpc-mode-owner-fixture.ts"]
+    },
+    {
       "source": "src/core/rin-daemon/rpc-mode.ts",
       "suite": "integration",
-      "tests": ["tests/integration/rpc-mode-owner-wrapper.test.ts"],
+      "tests": [
+        "tests/integration/rpc-mode-owner-wrapper.test.ts",
+        "tests/integration/rpc-command-handlers.test.ts"
+      ],
+      "preloads": ["tests/support/register-rpc-mode-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin-daemon/rpc-resource-command-handler.ts",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/rpc-mode-owner-wrapper.test.ts",
+        "tests/integration/rpc-command-handlers.test.ts"
+      ],
+      "preloads": ["tests/support/register-rpc-mode-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin-daemon/rpc-session-command-handler.ts",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/rpc-mode-owner-wrapper.test.ts",
+        "tests/integration/rpc-command-handlers.test.ts"
+      ],
+      "preloads": ["tests/support/register-rpc-mode-owner-fixture.ts"]
+    },
+    {
+      "source": "src/core/rin-daemon/rpc-turn-command-handler.ts",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/rpc-mode-owner-wrapper.test.ts",
+        "tests/integration/rpc-command-handlers.test.ts"
+      ],
       "preloads": ["tests/support/register-rpc-mode-owner-fixture.ts"]
     },
     {

@@ -39,6 +39,12 @@ import {
   RpcTurnCoordinator,
   type RpcTurnInterrupt,
 } from "./rpc-turn-coordinator.js";
+import { createRpcAuthCommandHandlers } from "./rpc-auth-command-handler.js";
+import { createRpcCommandDispatcher } from "./rpc-command-dispatcher.js";
+import { createRpcExtensionUiCommandHandlers } from "./rpc-extension-ui-command-handler.js";
+import { createRpcResourceCommandHandlers } from "./rpc-resource-command-handler.js";
+import { createRpcSessionCommandHandlers } from "./rpc-session-command-handler.js";
+import { createRpcTurnCommandHandlers } from "./rpc-turn-command-handler.js";
 import { canInvokeRuntimeSlashCommand } from "./catalog-helpers.js";
 import {
   getCommandArgumentCompletions,
@@ -1005,9 +1011,14 @@ export async function runCustomRpcMode(
     resolveObserved: (outcome: NativeInputOutcome) => void;
     observed: Promise<NativeInputOutcome>;
   };
-  let pendingNativeInputSubmission: NativeInputSubmission | undefined;
-  let nativeInputAdmissionTail: Promise<void> = Promise.resolve();
-  let gracefulSessionShutdown = false;
+  const turnState: {
+    pendingNativeInputSubmission?: NativeInputSubmission;
+    nativeInputAdmissionTail: Promise<void>;
+    gracefulSessionShutdown: boolean;
+  } = {
+    nativeInputAdmissionTail: Promise.resolve(),
+    gracefulSessionShutdown: false,
+  };
   let latestAutoRetryFailure: RetryFailure | undefined;
   const emitTurnEvent = (
     event: string,
@@ -1029,8 +1040,8 @@ export async function runCustomRpcMode(
   ) => {
     if (submission.outcome) return;
     submission.outcome = outcome;
-    if (pendingNativeInputSubmission === submission) {
-      pendingNativeInputSubmission = undefined;
+    if (turnState.pendingNativeInputSubmission === submission) {
+      turnState.pendingNativeInputSubmission = undefined;
     }
     submission.resolveObserved(outcome);
   };
@@ -1255,7 +1266,7 @@ export async function runCustomRpcMode(
         }
         commitTurnTerminal(terminalOutcome);
       } catch (error: any) {
-        if (gracefulSessionShutdown) {
+        if (turnState.gracefulSessionShutdown) {
           let recoveredMessages: any[] = [];
           try {
             recoveredMessages = readTurnMessages(turnSession, terminalScope);
@@ -1352,25 +1363,30 @@ export async function runCustomRpcMode(
         interrupt,
       });
     });
-  let loginSeq = 0;
-  const activeLogins = new Map<
-    string,
-    {
-      abort: AbortController;
-      waits: Map<
-        string,
-        { resolve: (value: string) => void; reject: (error: Error) => void }
-      >;
-      nextWaitSeq: number;
-    }
-  >();
+  const authState: {
+    loginSeq: number;
+    activeLogins: Map<
+      string,
+      {
+        abort: AbortController;
+        waits: Map<
+          string,
+          { resolve: (value: string) => void; reject: (error: Error) => void }
+        >;
+        nextWaitSeq: number;
+      }
+    >;
+  } = {
+    loginSeq: 0,
+    activeLogins: new Map(),
+  };
   const emitLoginEvent = (
     loginId: string,
     event: string,
     payload: Record<string, unknown> = {},
   ) => output({ type: "oauth_login_event", loginId, event, ...payload });
   const ensureLogin = (loginId: string) => {
-    const login = activeLogins.get(loginId);
+    const login = authState.activeLogins.get(loginId);
     if (!login) throw new Error(`Unknown OAuth login: ${loginId}`);
     return login;
   };
@@ -1407,11 +1423,11 @@ export async function runCustomRpcMode(
     });
   };
   const finishLogin = (loginId: string) => {
-    const login = activeLogins.get(loginId);
+    const login = authState.activeLogins.get(loginId);
     if (!login) return;
     for (const pending of login.waits.values())
       pending.reject(new Error("OAuth login cancelled"));
-    activeLogins.delete(loginId);
+    authState.activeLogins.delete(loginId);
   };
 
   let unsubscribeSessionEvents: (() => void) | undefined;
@@ -1496,7 +1512,7 @@ export async function runCustomRpcMode(
       restoreSessionAppendMessage = undefined;
     }
     unsubscribeSessionEvents = session.subscribe(async (event: any) => {
-      const nativeSubmission = pendingNativeInputSubmission;
+      const nativeSubmission = turnState.pendingNativeInputSubmission;
       if (event?.type === "agent_start" && nativeSubmission) {
         const ownerBarrier = observeNativeTerminalOwner(nativeSubmission);
         if (ownerBarrier) await ownerBarrier;
@@ -1562,818 +1578,95 @@ export async function runCustomRpcMode(
 
   await bindCurrentSession();
 
-  const handleCommand = async (command: any) => {
-    const session = getSession();
-    const id = command?.id;
-    const type = String(command?.type || "unknown");
-    switch (type) {
-      case "extension_ui_response":
-        resolvePendingExtensionUiRequest(command);
-        return done(id, type);
-      case "prompt": {
-        const requestTag = rpcRequestTag(command.requestTag);
-        const persistedOutcome = persistedNativeRequestOutcome(
-          session,
-          requestTag,
-        );
-        if (persistedOutcome) {
-          return done(
-            id,
-            "prompt",
-            nativeInputOutcome(session, "rejoined", requestTag, {
-              originalOutcome: persistedOutcome,
-              turnActive: turnCoordinator.isActive,
-            }),
-          );
-        }
-        if (
-          requestTag &&
-          nativeRequestReceiptState(session, requestTag) === "conflict"
-        ) {
-          return done(
-            id,
-            "prompt",
-            nativeInputOutcome(session, "indeterminate", requestTag, {
-              turnActive: turnCoordinator.isActive,
-            }),
-          );
-        }
-        turnCoordinator.assertAdmissionOpen();
-        if (
-          turnCoordinator.isActive &&
-          requestTag &&
-          requestTag === turnCoordinator.activeRequestTag
-        ) {
-          await waitForPersistedUserRequestTag(session, requestTag);
-          const durableOutcome = persistedNativeRequestOutcome(
-            session,
-            requestTag,
-          );
-          if (!durableOutcome)
-            throw new Error("rin_prompt_outcome_indeterminate");
-          return done(
-            id,
-            "prompt",
-            nativeInputOutcome(session, "rejoined", requestTag, {
-              originalOutcome: durableOutcome,
-              turnActive: true,
-            }),
-          );
-        }
-        const observedRole = turnCoordinator.observedRole(requestTag);
-        if (requestTag && observedRole) {
-          await waitForPersistedUserRequestTag(session, requestTag);
-          const durableOutcome = persistedNativeRequestOutcome(
-            session,
-            requestTag,
-          );
-          if (!durableOutcome)
-            throw new Error("rin_prompt_outcome_indeterminate");
-          return done(
-            id,
-            "prompt",
-            nativeInputOutcome(session, "rejoined", requestTag, {
-              originalOutcome: durableOutcome,
-              turnActive: turnCoordinator.isActive,
-            }),
-          );
-        }
-
-        const previousAdmission = nativeInputAdmissionTail;
-        let releaseAdmission!: () => void;
-        nativeInputAdmissionTail = new Promise<void>((resolve) => {
-          releaseAdmission = resolve;
-        });
-        await previousAdmission;
-        const serializedPersistedOutcome = persistedNativeRequestOutcome(
-          session,
-          requestTag,
-        );
-        if (serializedPersistedOutcome) {
-          releaseAdmission();
-          return done(
-            id,
-            "prompt",
-            nativeInputOutcome(session, "rejoined", requestTag, {
-              originalOutcome: serializedPersistedOutcome,
-              turnActive: turnCoordinator.isActive,
-            }),
-          );
-        }
-        if (
-          requestTag &&
-          nativeRequestReceiptState(session, requestTag) === "conflict"
-        ) {
-          releaseAdmission();
-          return done(
-            id,
-            "prompt",
-            nativeInputOutcome(session, "indeterminate", requestTag, {
-              turnActive: turnCoordinator.isActive,
-            }),
-          );
-        }
-        const serializedOutcome = turnCoordinator.observedRole(requestTag);
-        if (
-          requestTag &&
-          (serializedOutcome || requestTag === turnCoordinator.activeRequestTag)
-        ) {
-          await waitForPersistedUserRequestTag(session, requestTag);
-          const durableOutcome = persistedNativeRequestOutcome(
-            session,
-            requestTag,
-          );
-          releaseAdmission();
-          if (!durableOutcome)
-            throw new Error("rin_prompt_outcome_indeterminate");
-          return done(
-            id,
-            "prompt",
-            nativeInputOutcome(session, "rejoined", requestTag, {
-              originalOutcome: durableOutcome,
-              turnActive: turnCoordinator.isActive,
-            }),
-          );
-        }
-
-        captureTurnScope(session);
-        const streamingBehavior =
-          command.streamingBehavior === "followUp" ? "followUp" : "steer";
-        const promptOptions: Record<string, unknown> = {
-          images: command.images,
-          streamingBehavior,
-          source: command.source || "rpc",
-        };
-        if (typeof command.requestTag === "string") {
-          promptOptions.requestTag = command.requestTag;
-        }
-        if (command.promptContext !== undefined) {
-          promptOptions.promptContext = command.promptContext;
-        }
-        const frontendIdentity = normalizeFrontendIdentity(
-          command.frontendIdentity,
-        );
-        if (frontendIdentity !== undefined) {
-          promptOptions.frontendIdentity = frontendIdentity;
-        }
-        let resolveObserved!: (outcome: NativeInputOutcome) => void;
-        const observed = new Promise<NativeInputOutcome>((resolve) => {
-          resolveObserved = resolve;
-        });
-        let resolvePromptTaskReady!: () => void;
-        const promptTaskReady = new Promise<void>((resolve) => {
-          resolvePromptTaskReady = resolve;
-        });
-        const submission: NativeInputSubmission = {
-          requestTag,
-          streamingBehavior,
-          turnScope: captureTurnScope(session),
-          promptTaskReady,
-          resolvePromptTaskReady,
-          resolveObserved,
-          observed,
-        };
-        promptOptions.preflightResult = (accepted: boolean) => {
-          if (!accepted) submission.resolveObserved("rejected");
-        };
-        let promptTask: Promise<unknown> | undefined;
-        try {
-          pendingNativeInputSubmission = submission;
-          promptTask = session.prompt(command.message, promptOptions);
-          submission.promptTask = promptTask;
-          submission.resolvePromptTaskReady();
-          const firstResult = await Promise.race([
-            observed.then((outcome) => ({
-              type: "observed" as const,
-              outcome,
-            })),
-            promptTask.then(() => ({ type: "settled" as const })),
-          ]);
-          const outcome =
-            firstResult.type === "observed"
-              ? firstResult.outcome
-              : "indeterminate";
-          if (outcome === "nonterminal") await promptTask;
-          if (
-            requestTag &&
-            (outcome === "terminalOwner" || outcome === "nonterminal")
-          ) {
-            await waitForPersistedUserRequestTag(session, requestTag);
-          }
-          if (
-            (outcome === "rejected" || outcome === "indeterminate") &&
-            !persistNativeRequestOutcome(session, requestTag, outcome)
-          ) {
-            throw new Error("rin_prompt_outcome_indeterminate");
-          }
-          releaseAdmission();
-          observeNativeInput(submission, outcome);
-          return done(
-            id,
-            "prompt",
-            nativeInputOutcome(session, outcome, requestTag, {
-              turnActive:
-                outcome === "terminalOwner" || turnCoordinator.isActive,
-            }),
-          );
-        } catch (error) {
-          if (pendingNativeInputSubmission === submission) {
-            pendingNativeInputSubmission = undefined;
-          }
-          releaseAdmission();
-          if (submission.admissionToken) {
-            turnCoordinator.removeAdmission(submission.admissionToken);
-          }
-          throw error;
-        }
-      }
-      case "resume_interrupted_turn": {
-        const requestTag = rpcRequestTag(command.requestTag);
-        startInterruptTurnTask(
-          requestTag,
-          async () => await resumeInterruptedTurn(session, command),
-        );
-        return done(id, type, { resumed: true, requestTag });
-      }
-      case "clear_queue":
-        turnCoordinator.clearTrackedAdmissions();
-        return done(id, type, session.clearQueue());
-      case "abort_interrupted_turn": {
-        const requestTag = rpcRequestTag(command.requestTag);
-        if (!requestTag) throw new Error("requestTag is required");
-        startTurnTask(
-          requestTag,
-          async () => await abortInterruptedTurnAfterExecutionLoss(session),
-          { forceTurnEvents: true },
-        );
-        await turnCoordinator.waitForIdle();
-        return done(id, type, {
-          sessionFile: session.sessionFile,
-          sessionId: session.sessionId,
-        });
-      }
-      case "abort":
-        return run(id, type, () =>
-          turnCoordinator.runInterrupt(
-            async () => {
-              output({
-                type: "rpc_control_event",
-                event: "abort_started",
-                id,
-              });
-              const activeTurnToSettle = turnCoordinator.completion;
-              try {
-                Promise.resolve(session.abortCompaction?.()).catch(() => {});
-              } catch {}
-              let abortFailed = false;
-              let abortError: unknown;
-              try {
-                await session.abort();
-              } catch (error) {
-                abortFailed = true;
-                abortError = error;
-              }
-              if (abortFailed) throw abortError;
-              turnCoordinator.cancelActiveTurn();
-              try {
-                await activeTurnToSettle;
-              } catch {}
-            },
-            { invalidate: true },
-          ),
-        );
-      case "shutdown_session":
-        return turnCoordinator.runInterrupt(
-          async () => {
-            gracefulSessionShutdown = true;
-            const activeTurnToSettle = turnCoordinator.completion;
-            const frontendIdentity = normalizeFrontendIdentity(
-              command.frontendIdentity,
-            );
-            if (frontendIdentity && session.sessionManager) {
-              session.sessionManager.__rinFrontend = frontendIdentity;
-            }
-            turnCoordinator.cancelActiveTurn();
-            try {
-              await session.abort();
-            } catch {}
-            try {
-              await activeTurnToSettle;
-            } catch {}
-            await runtime.dispose();
-            output(done(id, type, { shutdown: true }));
-            return terminateProcess(0);
-          },
-          { invalidate: true },
-        );
-      case "sleep_session":
-        return turnCoordinator.runInterrupt(
-          async () => {
-            gracefulSessionShutdown = true;
-            const activeTurnToSettle = turnCoordinator.completion;
-            turnCoordinator.cancelActiveTurn();
-            try {
-              await session.abort();
-            } catch {}
-            try {
-              await activeTurnToSettle;
-            } catch {}
-            session.dispose();
-            output(done(id, type, { sleeping: true }));
-            return terminateProcess(0);
-          },
-          { invalidate: true },
-        );
-      case "attach_session":
-        return done(
-          id,
-          type,
-          getSessionState(session, {
-            turnActive: turnCoordinator.isActive,
-          }),
-        );
-      case "get_state": {
-        const trackedTurnActive = turnCoordinator.isActive;
-        return done(id, type, {
-          ...getSessionState(session, {
-            turnActive: trackedTurnActive,
-          }),
-          piActiveRun: Boolean(session.agent?.signal),
-          ...(trackedTurnActive
-            ? {
-                requestTag: turnCoordinator.activeRequestTag,
-                turnGeneration: turnCoordinator.turnGeneration,
-              }
-            : {}),
-        });
-      }
-      case "cycle_model":
-        return run(
-          id,
-          type,
-          () =>
-            runPersistedSessionMutation(session, () => session.cycleModel()),
-          (value) => value ?? null,
-        );
-      case "get_all_models":
-        return done(id, type, { models: sessionAllModels(session) });
-      case "get_available_models":
-        return run(
-          id,
-          type,
-          () => sessionAvailableModels(session),
-          (models) => ({ models }),
-        );
-      case "get_oauth_state":
-        return run(id, type, () => getOAuthState(session));
-      case "get_resource_diagnostics":
-        return done(id, type, getResourceDiagnostics(session));
-      case "get_command_argument_completions":
-        return run(id, type, () =>
-          getCommandArgumentCompletions(
-            session,
-            safeString(command.commandName).trim(),
-            safeString(command.argumentPrefix),
-          ),
-        );
-      case "set_thinking_level":
-        return run(id, type, () => {
-          const level = safeString(command.level).trim();
-          return command.persistSettings === false
-            ? setSessionThinkingLevel(session, level, {
-                persistSettings: false,
-              })
-            : setPersistentSessionThinkingLevel(session, level);
-        });
-      case "reset_model_options_from_settings":
-        return run(id, type, () =>
-          resetSessionModelOptionsFromSettings(session),
-        );
-      case "cycle_thinking_level":
-        return run(
-          id,
-          type,
-          () =>
-            runPersistedSessionMutation(session, () =>
-              session.cycleThinkingLevel(),
-            ),
-          (level) => (level ? { level } : null),
-        );
-      case "get_available_thinking_levels":
-        return done(id, type, {
-          levels: Array.isArray(session?.getAvailableThinkingLevels?.())
-            ? session.getAvailableThinkingLevels()
-            : [],
-        });
-      case "set_steering_mode":
-        return run(id, type, () =>
-          runPersistedSessionMutation(session, () =>
-            session.setSteeringMode(command.mode),
-          ),
-        );
-      case "set_follow_up_mode":
-        return run(id, type, () =>
-          runPersistedSessionMutation(session, () =>
-            session.setFollowUpMode(command.mode),
-          ),
-        );
-      case "compact":
-        return run(id, type, async () => {
-          const value = await session.compact(command.customInstructions);
-          return value && typeof value === "object" ? value : {};
-        });
-      case "set_auto_compaction":
-        return run(id, type, () =>
-          runPersistedSessionMutation(session, () =>
-            session.setAutoCompactionEnabled(Boolean(command.enabled)),
-          ),
-        );
-      case "set_auto_retry":
-        return run(id, type, () =>
-          runPersistedSessionMutation(session, () =>
-            session.setAutoRetryEnabled(Boolean(command.enabled)),
-          ),
-        );
-      case "abort_retry":
-        return run(id, type, () => session.abortRetry());
-      case "abort_compaction":
-        return run(id, type, () => session.abortCompaction());
-      case "bash":
-        return run(id, type, () =>
-          session.executeBash(command.command, undefined, {
-            excludeFromContext: command.excludeFromContext,
-            id,
-          }),
-        );
-      case "abort_bash":
-        return run(id, type, () => session.abortBash());
-      case "get_session_stats":
-        return done(id, type, session.getSessionStats());
-      case "get_session_snapshot":
-        return done(id, type, {
-          entries: getSessionEntries(session),
-          leafId: getSessionLeafId(session),
-        });
-      case "get_entries": {
-        const result = getSessionEntriesSince(session, command.since);
-        if (result.error) return fail(id, type, result.error);
-        return done(id, type, {
-          entries: result.entries,
-          leafId: getSessionLeafId(session),
-        });
-      }
-      case "get_tree":
-        return done(id, type, {
-          tree: getSessionTree(session),
-          leafId: getSessionLeafId(session),
-        });
-      case "set_entry_label":
-        return run(id, type, () =>
-          session.sessionManager.appendLabelChange(
-            command.entryId,
-            command.label?.trim() || undefined,
-          ),
-        );
-      case "navigate_tree":
-        return run(id, type, () =>
-          session.navigateTree(command.targetId, {
-            summarize: command.summarize,
-            customInstructions: command.customInstructions,
-            replaceInstructions: command.replaceInstructions,
-            label: command.label,
-          }),
-        );
-      case "export_html":
-        return run(
-          id,
-          type,
-          () => session.exportToHtml(command.outputPath),
-          (path) => ({ path }),
-        );
-      case "export_jsonl":
-        return done(id, type, {
-          path: session.exportToJsonl(command.outputPath),
-        });
-      case "import_jsonl":
-        return run(
-          id,
-          type,
-          async () => {
-            const value = await runtime.importFromJsonl(command.inputPath);
-            await bindCurrentSession();
-            return value;
-          },
-          (value) => ({ cancelled: Boolean(value?.cancelled) }),
-        );
-      case "get_fork_messages":
-        return done(id, type, {
-          messages: session.getUserMessagesForForking(),
-        });
-      case "get_last_assistant_text":
-        return done(id, type, { text: session.getLastAssistantText() });
-      case "get_messages":
-        return done(id, type, { messages: session.messages });
-      case "get_active_tools":
-        return done(id, type, {
-          tools: session.getActiveToolNames?.() || [],
-        });
-      case "get_all_tools":
-        return done(id, type, {
-          tools: session.getAllTools?.() || [],
-        });
-      case "set_active_tools": {
-        const toolNames = Array.isArray(command.toolNames)
-          ? command.toolNames
-              .map((name: unknown) => safeString(name).trim())
-              .filter(Boolean)
-          : [];
-        session.setActiveToolsByName?.(toolNames);
-        return done(id, type, {
-          tools: session.getActiveToolNames?.() || toolNames,
-        });
-      }
-      case "refresh_tools":
-        refreshPiSessionToolRegistry(session);
-        return done(id, type, {
-          tools: session.getAllTools?.() || [],
-        });
-      case "append_custom_entry": {
-        const customType = safeString(command.customType).trim();
-        if (!customType) throw new Error("customType is required");
-        session.sessionManager?.appendCustomEntry?.(customType, command.data);
-        return done(id, type);
-      }
-      case "send_custom_message":
-        return run(id, type, async () => {
-          await session.sendCustomMessage(command.message, command.options);
-          return { sent: true };
-        });
-      case "send_user_message":
-        if (turnCoordinator.isActive || session.agent?.signal) {
-          throw new Error("rpc_turn_already_active");
-        }
-        startTurnTask(rpcRequestTag(command.requestTag), async () =>
-          session.sendUserMessage(command.content, command.options),
-        );
-        return done(id, type, { sent: true });
-      case "get_commands":
-        return done(id, type, {
-          commands: getSlashCommands(session),
-        });
-      case "run_command": {
-        const commandLine = String(command.commandLine || "").trim();
-        const commandName = commandLine.startsWith("/")
-          ? commandLine.split(/\s+/, 1)[0]?.slice(1) || ""
-          : "";
-        return run(
-          id,
-          type,
-          async () => {
-            if (isWorkerLocalSessionReplacementCommand(commandLine)) {
-              throw new Error(
-                "session replacement commands must be routed through the frontend",
-              );
-            }
-            const frontendKind =
-              normalizeFrontendIdentity(command.frontendIdentity)?.kind ||
-              "rpc";
-            if (
-              commandName &&
-              !canInvokeRuntimeSlashCommand(
-                getSlashCommands(session),
-                commandName,
-                frontendKind,
-              )
-            ) {
-              return { handled: false };
-            }
-            const builtinResult = await runBuiltinCommand(
-              runtime,
-              commandLine,
-              {
-                SessionManager,
-                uiContext: createExtensionUiContext(),
-                promptContext: command.promptContext,
-              },
-            );
-            if (builtinResult.handled) return builtinResult;
-            if (
-              commandName &&
-              session.extensionRunner?.getCommand?.(commandName)
-            ) {
-              turnCoordinator.assertAdmissionOpen();
-              await session.prompt(commandLine);
-              return { handled: true };
-            }
-            return builtinResult;
-          },
-          (value) => value,
-        );
-      }
-      case "fork":
-        return run(
-          id,
-          type,
-          () =>
-            runtime.fork(command.entryId).then(async (value: any) => {
-              await bindCurrentSession();
-              return value;
-            }),
-          (value) => ({ text: value.selectedText, cancelled: value.cancelled }),
-        );
-      case "list_sessions": {
-        if (command.limit !== undefined || command.offset !== undefined) {
-          const currentSession = getSession();
-          return done(
-            id,
-            type,
-            await listBoundSessionPage({
-              cwd:
-                safeString(runtime.cwd).trim() ||
-                safeString(currentSession?.sessionManager?.getCwd?.()).trim(),
-              agentDir: safeString(runtime.services?.agentDir).trim(),
-              limit: command.limit,
-              offset: command.offset,
-            }),
-          );
-        }
-        const sessions = await listBoundSessions();
-        return done(id, type, { sessions });
-      }
-      case "set_model": {
-        const models = await sessionAvailableModels(session);
-        const model = models.find(
-          (m: any) =>
-            m.provider === command.provider && m.id === command.modelId,
-        );
-        if (!model)
-          throw new Error(
-            `Model not found: ${command.provider}/${command.modelId}`,
-          );
-        const persistSettings = command.persistSettings !== false;
-        const mutate = () =>
-          setSessionModel(session, model, {
-            persistSettings: persistSettings ? undefined : false,
-          });
-        if (persistSettings) {
-          await runPersistedSessionMutation(session, mutate);
-        } else {
-          await mutate();
-        }
-        return done(id, type, model);
-      }
-      case "rename_session": {
-        await renameBoundSession(command, command.name, {
-          SessionManager,
-        });
-        return done(id, type);
-      }
-      case "set_session_name": {
-        const name = String(command.name || "").trim();
-        if (!name) throw new Error("Session name cannot be empty");
-        session.setSessionName(name);
-        return done(id, type);
-      }
-      case "oauth_login_start": {
-        const providerId = String(command.providerId || "").trim();
-        if (!providerId) throw new Error("providerId is required");
-        const authType =
-          String(command.authType || "oauth").trim() === "api_key"
-            ? "api_key"
-            : "oauth";
-        const loginId = `login_${++loginSeq}`;
-        const abort = new AbortController();
-        activeLogins.set(loginId, {
-          abort,
-          waits: new Map(),
-          nextWaitSeq: 0,
-        });
-        // Let the start response reach the frontend before a provider can
-        // synchronously emit its first auth prompt.
-        deferOAuthLoginStart(async () => {
-          try {
-            await loginSessionProvider(session, providerId, {
-              authType,
-              onAuth: (info: { url: string; instructions?: string }) =>
-                emitLoginEvent(loginId, "auth", {
-                  url: info.url,
-                  instructions: info.instructions,
-                }),
-              onDeviceCode: (info: {
-                userCode: string;
-                verificationUri: string;
-                intervalSeconds?: number;
-                expiresInSeconds?: number;
-              }) =>
-                emitLoginEvent(loginId, "device_code", {
-                  userCode: info.userCode,
-                  verificationUri: info.verificationUri,
-                  intervalSeconds: info.intervalSeconds,
-                  expiresInSeconds: info.expiresInSeconds,
-                }),
-              onPrompt: (prompt: {
-                type?: string;
-                message: string;
-                placeholder?: string;
-                allowEmpty?: boolean;
-                signal?: AbortSignal;
-              }) =>
-                waitForLoginInput(
-                  loginId,
-                  "prompt",
-                  {
-                    promptType: prompt.type,
-                    message: prompt.message,
-                    placeholder: prompt.placeholder,
-                    allowEmpty: prompt.allowEmpty,
-                  },
-                  prompt.signal,
-                ),
-              onSelect: (prompt: {
-                message: string;
-                options: readonly { id: string; label: string }[];
-                signal?: AbortSignal;
-              }) =>
-                waitForLoginInput(
-                  loginId,
-                  "select",
-                  {
-                    message: prompt.message,
-                    options: prompt.options,
-                  },
-                  prompt.signal,
-                ),
-              onProgress: (message: string) =>
-                emitLoginEvent(loginId, "progress", { message }),
-              onInfo: (info: { message: string; links?: unknown[] }) =>
-                emitLoginEvent(loginId, "info", info),
-              onManualCodeInput: (prompt: {
-                message?: string;
-                placeholder?: string;
-                signal?: AbortSignal;
-              }) =>
-                waitForLoginInput(
-                  loginId,
-                  "manual_code",
-                  {
-                    message: prompt.message,
-                    placeholder: prompt.placeholder,
-                  },
-                  prompt.signal,
-                ),
-              signal: abort.signal,
-            });
-            await refreshSessionModels(session);
-            emitLoginEvent(loginId, "complete", {
-              success: true,
-              state: await getOAuthState(session),
-            });
-          } catch (error: any) {
-            emitLoginEvent(loginId, "complete", {
-              success: false,
-              error: String(error?.message || error || "oauth_login_failed"),
-            });
-          } finally {
-            finishLogin(loginId);
-          }
-        });
-        return done(id, type, { loginId });
-      }
-      case "oauth_login_respond": {
-        const login = ensureLogin(String(command.loginId || ""));
-        const requestId = String(command.requestId || "");
-        const pending = login.waits.get(requestId);
-        if (!pending)
-          throw new Error(`Unknown OAuth login request: ${requestId}`);
-        login.waits.delete(requestId);
-        pending.resolve(String(command.value || ""));
-        return done(id, type);
-      }
-      case "oauth_login_cancel": {
-        const loginId = String(command.loginId || "");
-        const login = ensureLogin(loginId);
-        login.abort.abort();
-        finishLogin(loginId);
-        return done(id, type);
-      }
-      case "oauth_set_api_key": {
-        const providerId = String(command.providerId || "").trim();
-        const key = String(command.key || "").trim();
-        if (!providerId) throw new Error("providerId is required");
-        if (!key) throw new Error("key is required");
-        await setSessionApiKey(session, providerId, key);
-        return done(id, type, await getOAuthState(session));
-      }
-      case "oauth_logout": {
-        const providerId = String(command.providerId || "").trim();
-        if (!providerId) throw new Error("providerId is required");
-        await logoutSessionProvider(session, providerId);
-        return done(id, type, await getOAuthState(session));
-      }
-      default:
-        throw new Error(`Unknown command: ${type}`);
-    }
+  const commandHandlers = {
+    extensionUi: createRpcExtensionUiCommandHandlers({
+      resolvePendingExtensionUiRequest,
+      done,
+    }),
+    turn: createRpcTurnCommandHandlers({
+      getSession,
+      rpcRequestTag,
+      persistedNativeRequestOutcome,
+      persistNativeRequestOutcome,
+      nativeRequestReceiptState,
+      nativeInputOutcome,
+      turnCoordinator,
+      waitForPersistedUserRequestTag,
+      turnState,
+      captureTurnScope,
+      normalizeFrontendIdentity,
+      observeNativeInput,
+      startInterruptTurnTask,
+      resumeInterruptedTurn,
+      startTurnTask,
+      abortInterruptedTurnAfterExecutionLoss,
+      output,
+      terminateProcess,
+      getSessionState,
+      runtime,
+      done,
+      run,
+    }),
+    resource: createRpcResourceCommandHandlers({
+      getSession,
+      turnCoordinator,
+      normalizeFrontendIdentity,
+      getResourceDiagnostics,
+      getCommandArgumentCompletions,
+      refreshPiSessionToolRegistry,
+      getSlashCommands,
+      isWorkerLocalSessionReplacementCommand,
+      canInvokeRuntimeSlashCommand,
+      runBuiltinCommand,
+      createExtensionUiContext,
+      SessionManager,
+      safeString,
+      runtime,
+      done,
+      run,
+    }),
+    auth: createRpcAuthCommandHandlers({
+      getSession,
+      getOAuthState,
+      authState,
+      deferOAuthLoginStart,
+      loginSessionProvider,
+      emitLoginEvent,
+      waitForLoginInput,
+      refreshSessionModels,
+      finishLogin,
+      ensureLogin,
+      setSessionApiKey,
+      logoutSessionProvider,
+      done,
+      run,
+    }),
+    session: createRpcSessionCommandHandlers({
+      runPersistedSessionMutation,
+      sessionAllModels,
+      sessionAvailableModels,
+      setSessionThinkingLevel,
+      setPersistentSessionThinkingLevel,
+      resetSessionModelOptionsFromSettings,
+      getSessionEntries,
+      getSessionLeafId,
+      getSessionEntriesSince,
+      fail,
+      getSessionTree,
+      SessionManager,
+      bindCurrentSession,
+      listBoundSessionPage,
+      safeString,
+      listBoundSessions,
+      setSessionModel,
+      renameBoundSession,
+      runtime,
+      getSession,
+      done,
+      run,
+    }),
   };
+  const handleCommand = createRpcCommandDispatcher(commandHandlers);
 
   const state = { buffer: "" };
   process.stdin.on("data", (chunk) => {
