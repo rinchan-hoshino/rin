@@ -26,7 +26,11 @@ test("local TUI adds presentation without changing core execution ownership", ()
       sessionManager: {},
       extensionRunner: runner,
       getToolDefinition: (name: string) =>
-        name === "todo" ? nativeTodo : undefined,
+        name === "todo"
+          ? nativeTodo
+          : name === "owner"
+            ? { name: "owner", execute() {} }
+            : undefined,
     },
   };
 
@@ -45,5 +49,7 @@ test("local TUI adds presentation without changing core execution ownership", ()
   );
   assert.deepEqual(runner.getRegisteredCommands(), extensionCommands);
   assert.equal(runner.getCommand("todos"), undefined);
+  assert.equal(runtime.session.getToolDefinition("owner").name, "owner");
+  assert.equal(runtime.session.getToolDefinition("missing"), undefined);
   assert.equal(nativeTodo.renderCall, undefined);
 });

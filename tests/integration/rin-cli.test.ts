@@ -687,6 +687,10 @@ test("status, self-improve, and memory-index parsers ignore wrapper args around 
   assert.equal(selfImproveArgs.watch, false);
   assert.equal(selfImproveArgs.intervalMs, 2000);
   assert.equal(selfImproveArgs.help, false);
+  assert.equal(
+    selfImprove.parseSelfImproveArgs(["self-improve", "--from", ""]).from,
+    undefined,
+  );
 
   assert.deepEqual(memoryIndex.parseMemoryIndexArgs(["memory-index"]), {
     action: "repair",

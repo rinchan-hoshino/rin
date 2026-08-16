@@ -388,6 +388,15 @@ test("Rin shared boundary owns target reads, execution context, daemon readiness
         }),
       /rin_child_command_failed:5/,
     );
+    owner.__rinSharedOwnerSpawnResult = { code: null, signal: "SIGTERM" };
+    await assert.rejects(
+      () =>
+        shared.runUpdate(parsed({ targetUser: "target", installDir }), {
+          stdinIsTTY: true,
+          stdoutIsTTY: true,
+        }),
+      /rin_process_termination_requested:143/,
+    );
     owner.__rinSharedOwnerSpawnResult = { code: 0, signal: null };
   } finally {
     await fs.rm(installDir, { recursive: true, force: true });

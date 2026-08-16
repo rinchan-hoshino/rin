@@ -14,5 +14,7 @@ test("error facts preserve raw identity without presentation", () => {
   );
   assert.equal(errors.rawErrorMessage("plain"), "plain");
   assert.equal(errors.rawErrorMessage({}), "[object Object]");
+  assert.equal(errors.rawErrorMessage(null), "");
+  assert.equal(errors.rawErrorMessage({ message: "" }), "[object Object]");
   assert.equal(Object.keys(errors).sort().join(","), "rawErrorMessage");
 });

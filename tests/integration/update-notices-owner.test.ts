@@ -11,9 +11,6 @@ import { importBuiltModule } from "../support/import-built-module.js";
 const notices = await importBuiltModule<
   typeof import("../../src/core/rin-lib/update-notices.js")
 >("dist/core/rin-lib/update-notices.js");
-// Keep the current-main git startup/changelog contracts in this isolated owner
-// process so c8 sees one canonical source map for the production module.
-await import("./update-notices.test.js");
 const execFileAsync = promisify(execFile);
 
 async function withTempDir(run: (directory: string) => Promise<void>) {

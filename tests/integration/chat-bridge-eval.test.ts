@@ -186,6 +186,50 @@ test("chat bridge send requires structured at parts to include ids", async () =>
   });
 });
 
+test("chat bridge helpers reject known partial delivery despite delivered fragments", async () => {
+  await withTempDir(async (agentDir) => {
+    const runtime = runtimeModule.createChatBridgeRuntime({
+      app: {
+        bots: [
+          {
+            platform: "telegram",
+            selfId: "1",
+            status: 1,
+            sendMessage() {
+              const error = Object.assign(
+                new Error("chat_delivery_partial:upload"),
+                {
+                  deliveredMessageIds: ["placeholder-1"],
+                  partialDelivery: true,
+                },
+              );
+              const delivery = Promise.reject(error);
+              delivery.dispatched = Promise.resolve();
+              return delivery;
+            },
+            internal: {},
+          },
+        ],
+      },
+      agentDir,
+      dataDir: path.join(agentDir, "data"),
+      currentChatKey: "telegram/1:2",
+      h: createH(),
+    });
+
+    await assert.rejects(
+      () =>
+        evalModule.executeChatBridgeCode({
+          code: `return await helpers.send("upload");`,
+          context: runtime,
+          timeoutMs: 5_000,
+          filename: "chat-bridge-partial-delivery.test.ts",
+        }),
+      /chat_delivery_partial:upload/,
+    );
+  });
+});
+
 test("chat bridge eval reports the actual omitted string length", () => {
   const serialized = evalModule.serializeBridgeValue("x".repeat(4100));
   assert.equal(typeof serialized, "string");

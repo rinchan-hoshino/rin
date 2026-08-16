@@ -11,7 +11,6 @@ import { importBuiltModule } from "../support/import-built-module.js";
 const host = await importBuiltModule<
   typeof import("../../src/core/pi/session-host.js")
 >("dist/core/pi/session-host.js");
-await import("./pi-session-host.test.js");
 
 test("Pi session host normalizes modes, auth, and extension context", async () => {
   const session: any = {
@@ -39,6 +38,39 @@ test("Pi session host normalizes modes, auth, and extension context", async () =
   assert.deepEqual(host.getPiSessionExtensionCommandContextActions(session), {
     action: true,
   });
+});
+
+test("Pi session host sparse private boundaries remain inert", () => {
+  assert.equal(host.bindPiSessionCompactionChecker(null), undefined);
+  assert.equal(
+    host.replacePiSessionCompactionChecker(null, () => 1),
+    false,
+  );
+  assert.equal(
+    host.replacePiSessionCompactionChecker("scalar", () => 1),
+    false,
+  );
+  assert.equal(host.runPiSessionAutoCompaction({}, "manual", false), undefined);
+  assert.equal(host.refreshPiSessionToolRegistry({}), undefined);
+  assert.equal(host.buildRinCompactionRequest(null), null);
+  assert.deepEqual(
+    host.buildRinCompactionRequest({
+      preparation: {
+        isSplitTurn: true,
+        messagesToSummarize: null,
+        turnPrefixMessages: null,
+      },
+      customInstructions: "   ",
+    }),
+    {
+      preparation: {
+        isSplitTurn: true,
+        messagesToSummarize: null,
+        turnPrefixMessages: null,
+      },
+      customInstructions: host.RIN_COMPACTION_INSTRUCTIONS,
+    },
+  );
 });
 
 test("Pi session host binds, replaces, and invokes private semantic methods", () => {

@@ -146,7 +146,7 @@ test("daemon workers spawn through the isolated Node lifecycle without a console
   assert.ok(Number.isInteger(worker.child.pid) && worker.child.pid > 0);
 });
 
-test("worker cgroup attachment completes before the worker is returned", async () => {
+test("worker-pool injected-spawn branch: worker cgroup attachment completes before the worker is returned", async () => {
   const dir = await makeTempDir("rin-worker-pool-cgroup-order-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -182,7 +182,7 @@ test("worker cgroup attachment completes before the worker is returned", async (
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("worker creation fails closed when cgroup attachment fails", async () => {
+test("worker-pool injected-spawn branch: worker creation fails closed when cgroup attachment fails", async () => {
   const dir = await makeTempDir("rin-worker-pool-cgroup-failure-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -230,7 +230,7 @@ async function makeTempDir(prefix) {
   return dir;
 }
 
-test("new session workers receive rpc resource options through a private file", async () => {
+test("worker-pool injected-spawn branch: new session workers receive rpc resource options through a private file", async () => {
   const dir = await makeTempDir("rin-worker-pool-resources-");
   const outputPath = path.join(dir, "resource-options.json");
   const workerPath = path.join(dir, "worker-source");
@@ -298,7 +298,7 @@ test("new session workers receive rpc resource options through a private file", 
   }
 });
 
-test("getRestorableSessionSelectors keeps live session workers and remembers turn state", async () => {
+test("worker-pool injected-spawn branch: getRestorableSessionSelectors keeps live session workers and remembers turn state", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -336,7 +336,7 @@ test("getRestorableSessionSelectors keeps live session workers and remembers tur
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("getRestorableSessionSelectors normalizes duplicate session files and preserves resume intent", async () => {
+test("worker-pool injected-spawn branch: getRestorableSessionSelectors normalizes duplicate session files and preserves resume intent", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -366,7 +366,7 @@ test("getRestorableSessionSelectors normalizes duplicate session files and prese
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("restoreSessionWorker only attaches the session worker", async () => {
+test("worker-pool injected-spawn branch: restoreSessionWorker only attaches the session worker", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   const logPath = path.join(dir, "commands.log");
@@ -478,7 +478,7 @@ test("an idle worker rejects an unowned versioned start without metadata changes
   assert.equal(writes.length, 0);
 });
 
-test("non-turn resumable worker commands persist a running record until they finish", async () => {
+test("worker-pool injected-spawn branch: non-turn resumable worker commands persist a running record until they finish", async () => {
   const dir = await makeTempDir("rin-worker-pool-running-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = path.join(dir, "session.jsonl");
@@ -556,7 +556,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("detached worker survives eviction while response is pending", async () => {
+test("worker-pool injected-spawn branch: detached worker survives eviction while response is pending", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -627,7 +627,7 @@ setInterval(() => {}, 1000);
   assert.equal(pool.getStatusSnapshot().workerCount, 0);
 });
 
-test("attached idle worker sleeps while preserving the selected session", async () => {
+test("worker-pool injected-spawn branch: attached idle worker sleeps while preserving the selected session", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   const commandPath = path.join(dir, "attached-idle-commands.jsonl");
@@ -775,7 +775,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("detached idle worker sleeps instead of terminating the session", async () => {
+test("worker-pool injected-spawn branch: detached idle worker sleeps instead of terminating the session", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   const commandPath = path.join(dir, "commands.jsonl");
@@ -818,7 +818,7 @@ test("detached idle worker sleeps instead of terminating the session", async () 
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("detached worker stays alive while turnActive is true even if streaming is false", async () => {
+test("worker-pool injected-spawn branch: detached worker stays alive while turnActive is true even if streaming is false", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -851,7 +851,7 @@ test("detached worker stays alive while turnActive is true even if streaming is 
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("remembered session selection can pull a replacement worker without an explicit switch", async () => {
+test("worker-pool injected-spawn branch: remembered session selection can pull a replacement worker without an explicit switch", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   const logPath = path.join(dir, "commands.log");
@@ -918,7 +918,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("selectSession shuts down the previous session before resuming another session", async () => {
+test("worker-pool injected-spawn branch: selectSession shuts down the previous session before resuming another session", async () => {
   const dir = await makeTempDir("rin-worker-pool-select-shutdown-");
   const workerPath = path.join(dir, "worker-source");
   const logPath = path.join(dir, "commands.log");
@@ -985,7 +985,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("selectSession keeps a previous session alive while another connection is still attached", async () => {
+test("worker-pool injected-spawn branch: selectSession keeps a previous session alive while another connection is still attached", async () => {
   const dir = await makeTempDir("rin-worker-pool-select-shared-");
   const workerPath = path.join(dir, "worker-source");
   const logPath = path.join(dir, "commands.log");
@@ -1056,7 +1056,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("selectSession lazily restores the chosen session worker", async () => {
+test("worker-pool injected-spawn branch: selectSession lazily restores the chosen session worker", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -1108,7 +1108,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("concurrent selectSession calls reuse one worker for the same session", async () => {
+test("worker-pool injected-spawn branch: concurrent selectSession calls reuse one worker for the same session", async () => {
   const dir = await makeTempDir("rin-worker-pool-concurrent-select-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = "/tmp/concurrent-selected.jsonl";
@@ -1141,7 +1141,7 @@ test("concurrent selectSession calls reuse one worker for the same session", asy
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("duplicate restoreSessionWorker calls converge to one session worker", async () => {
+test("worker-pool injected-spawn branch: duplicate restoreSessionWorker calls converge to one session worker", async () => {
   const dir = await makeTempDir("rin-worker-pool-restore-dedupe-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = "/tmp/restore-dedupe.jsonl";
@@ -1163,7 +1163,7 @@ test("duplicate restoreSessionWorker calls converge to one session worker", asyn
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("restoreSessionWorker indexes the session when creating an initial-session worker", async () => {
+test("worker-pool injected-spawn branch: restoreSessionWorker indexes the session when creating an initial-session worker", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   const sessionFile = "/tmp/restored-initial-session.jsonl";
@@ -1187,7 +1187,7 @@ test("restoreSessionWorker indexes the session when creating an initial-session 
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("worker events are forwarded only to matching selected session", async () => {
+test("worker-pool injected-spawn branch: worker events are forwarded only to matching selected session", async () => {
   const dir = await makeTempDir("rin-worker-pool-session-filter-");
   const workerPath = path.join(dir, "worker-source");
   const sessionA = path.join(dir, "a.jsonl");
@@ -1240,7 +1240,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("selectSession with only sessionId ignores stale remembered sessionFile", async () => {
+test("worker-pool injected-spawn branch: selectSession with only sessionId ignores stale remembered sessionFile", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -1283,7 +1283,7 @@ test("selectSession with only sessionId ignores stale remembered sessionFile", a
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("worker session ref updates clear stale attached connection selectors", async () => {
+test("worker-pool injected-spawn branch: worker session ref updates clear stale attached connection selectors", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -1318,7 +1318,7 @@ test("worker session ref updates clear stale attached connection selectors", asy
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("worker OOM is reported without turning it into an ordinary exit", async () => {
+test("worker-pool injected-spawn branch: worker OOM is reported without turning it into an ordinary exit", async () => {
   const dir = await makeTempDir("rin-worker-pool-oom-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -1372,7 +1372,7 @@ test("worker OOM is reported without turning it into an ordinary exit", async ()
   assert.deepEqual(cleaned, [worker.id]);
 });
 
-test("graceful worker commands destroy workers with closed stdin", async () => {
+test("worker-pool injected-spawn branch: graceful worker commands destroy workers with closed stdin", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -1397,7 +1397,7 @@ test("graceful worker commands destroy workers with closed stdin", async () => {
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("internal worker commands time out cleanly without leaking late responses", async () => {
+test("worker-pool injected-spawn branch: internal worker commands time out cleanly without leaking late responses", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -1466,7 +1466,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("internal worker commands reject closed stdin without unhandled stream errors", async () => {
+test("worker-pool injected-spawn branch: internal worker commands reject closed stdin without unhandled stream errors", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -1502,7 +1502,7 @@ test("internal worker commands reject closed stdin without unhandled stream erro
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("internal worker commands handle async stdin write errors", async () => {
+test("worker-pool injected-spawn branch: internal worker commands handle async stdin write errors", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -1543,7 +1543,7 @@ test("internal worker commands handle async stdin write errors", async () => {
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("switch_session internal commands can outlive the generic internal timeout", async () => {
+test("worker-pool injected-spawn branch: switch_session internal commands can outlive the generic internal timeout", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(
@@ -1602,7 +1602,7 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test("worker status snapshot exposes graceful shutdown state", async () => {
+test("worker-pool injected-spawn branch: worker status snapshot exposes graceful shutdown state", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   await fs.writeFile(

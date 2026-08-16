@@ -5,6 +5,7 @@ import test from "node:test";
 import { initTheme } from "@earendil-works/pi-coding-agent";
 
 import * as render from "../../dist/core/pi/render-utils.js";
+import { getCoreToolRenderer } from "../../dist/core/rin-tui/tool-renderers/index.js";
 
 initTheme("dark", false);
 
@@ -64,6 +65,9 @@ test("render utilities normalize paths, scalar text, and call headers", () => {
     "<toolTitle>**read**</toolTitle>",
   );
   assert.equal(render.invalidArgText(theme), "<error>[invalid arg]</error>");
+  assert.equal(getCoreToolRenderer(undefined), undefined);
+  assert.equal(getCoreToolRenderer(" missing "), undefined);
+  assert.equal(getCoreToolRenderer("todo")?.name, "todo");
 });
 
 test("render utilities collect safe text and image fallbacks", () => {

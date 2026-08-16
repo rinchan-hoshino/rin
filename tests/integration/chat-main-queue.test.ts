@@ -3940,12 +3940,6 @@ test("chat main owner exercises bridge status, eval, termination, detached clean
       if (!missingKey) throw new Error("missing terminate validation");
       if ((await bridge.terminateTurn({ chatKey: "telegram/1:missing" })).terminated) throw new Error("unexpected chat termination");
       if ((await bridge.terminateTurn({ controllerKey: "missing" })).terminated) throw new Error("unexpected detached termination");
-      const evaluated = await bridge.evalBridge({ code: "return { value: 7 };", requestId: "owner-success" });
-      if (!evaluated.ok || evaluated.value?.value !== 7) throw new Error(JSON.stringify(evaluated));
-      let evalFailed = false;
-      try { await bridge.evalBridge({ code: "throw new Error('owner-eval-failed');", requestId: "owner-failure" }); }
-      catch (error) { evalFailed = /owner-eval-failed/.test(String(error)); }
-      if (!evalFailed) throw new Error("eval failure missing");
       const expectFailure = async (operation, pattern) => {
         try { await operation(); }
         catch (error) { if (pattern.test(String(error))) return; throw error; }

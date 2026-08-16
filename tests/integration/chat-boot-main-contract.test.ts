@@ -24,32 +24,67 @@ const messageStore = await import(
     .href
 );
 
-const chatCommandCatalog = [
-  { name: "help", chat: true },
-  { name: "abort", chat: true },
-  { name: "new", chat: true },
-  { name: "compact", chat: true },
-  { name: "reload", chat: true },
-  { name: "usage", description: "Show Codex quota status", chat: true },
-  { name: "init", chat: false },
-  { name: "status" },
-];
+test("chat boot projects chat-enabled commands from the runtime catalog", () => {
+  const rows = boot.getChatCommandRows([
+    {
+      name: "hello",
+      description: "Say hello",
+      source: "extension",
+      chat: true,
+    },
+    {
+      name: "terminal-only",
+      description: "TUI only",
+      source: "extension",
+      chat: false,
+    },
+    {
+      name: "usage",
+      description: "Show Codex quota status",
+      source: "builtin",
+      chat: true,
+    },
+  ]);
+  assert.deepEqual(rows, [
+    { name: "hello", description: "Say hello" },
+    { name: "usage", description: "Show Codex quota status" },
+  ]);
+});
 
-function getOwnerChatCommandRows() {
-  return boot.getChatCommandRows(chatCommandCatalog);
-}
+test("chat boot refreshes a live command projection after reload", async () => {
+  const current = [{ name: "old", description: "Old" }];
+  await boot.refreshChatCommandRows(current, {
+    async connect() {},
+    async getCommands() {
+      return [
+        { id: "new", name: "new", description: "New", chat: true },
+        { id: "hidden", name: "hidden", description: "Hidden", chat: false },
+      ];
+    },
+    async disconnect() {},
+  });
+  assert.deepEqual(current, [{ name: "new", description: "New" }]);
+});
 
-test("chat boot exposes the dedicated chat command registry", () => {
-  const rows = getOwnerChatCommandRows();
-  assert.equal(rows[0].name, "help");
-  assert.deepEqual(
-    rows.map((row) => row.name),
-    ["help", "abort", "new", "compact", "reload", "usage"],
-  );
-  assert.ok(!rows.some((row) => row.name === "init"));
-  assert.ok(!rows.some((row) => row.name === "status"));
-  assert.ok(!rows.some((row) => row.name === "session"));
-  assert.ok(!rows.some((row) => row.name === "model"));
+test("chat boot loads its command projection from the daemon catalog", async () => {
+  const calls: string[] = [];
+  const rows = await boot.loadChatCommandRows({
+    async connect() {
+      calls.push("connect");
+    },
+    async getCommands() {
+      calls.push("getCommands");
+      return [
+        { id: "visible", name: "visible", description: "Visible", chat: true },
+        { id: "hidden", name: "hidden", description: "Hidden", chat: false },
+      ];
+    },
+    async disconnect() {
+      calls.push("disconnect");
+    },
+  });
+  assert.deepEqual(rows, [{ name: "visible", description: "Visible" }]);
+  assert.deepEqual(calls, ["connect", "getCommands", "disconnect"]);
 });
 
 async function withTempDir(fn) {
@@ -75,8 +110,18 @@ async function waitFor(assertion, timeoutMs = 1000) {
   if (lastError) throw lastError;
 }
 
-test("chat boot command descriptions use the fixed English catalog", () => {
-  const rows = getOwnerChatCommandRows();
+const chatBuiltinCatalog = [
+  { name: "help", chat: true },
+  { name: "abort", chat: true },
+  { name: "new", chat: true },
+  { name: "compact", chat: true },
+  { name: "reload", chat: true },
+  { name: "usage", description: "Show Codex quota status", chat: true },
+  { name: "status", chat: true },
+];
+
+test("chat boot falls back to English descriptions for catalog rows", () => {
+  const rows = boot.getChatCommandRows(chatBuiltinCatalog);
   assert.deepEqual(
     rows.map((row) => row.description),
     [
@@ -86,6 +131,7 @@ test("chat boot command descriptions use the fixed English catalog", () => {
       "Compact the current session",
       "Reload extensions, prompts, skills, and themes",
       "Show Codex quota status",
+      "Show this chat session status",
     ],
   );
 });
@@ -101,7 +147,7 @@ test("chat boot builds and syncs Discord application commands", async () => {
       },
     },
   };
-  const rows = getOwnerChatCommandRows();
+  const rows = boot.getChatCommandRows(chatBuiltinCatalog);
   const expectedPayload = [
     {
       name: "help",
@@ -146,6 +192,14 @@ test("chat boot builds and syncs Discord application commands", async () => {
     {
       name: "usage",
       description: "Show Codex quota status",
+      type: 1,
+      options: [
+        { name: "input", description: "Arguments", type: 3, required: false },
+      ],
+    },
+    {
+      name: "status",
+      description: "Show this chat session status",
       type: 1,
       options: [
         { name: "input", description: "Arguments", type: 3, required: false },
@@ -206,7 +260,7 @@ test("chat boot clears common telegram scopes before syncing default commands", 
     },
   };
 
-  const rows = getOwnerChatCommandRows();
+  const rows = boot.getChatCommandRows(chatBuiltinCatalog);
   const expectedPayload = [
     { command: "help", description: "Show available commands" },
     { command: "abort", description: "Abort current operation" },
@@ -217,6 +271,7 @@ test("chat boot clears common telegram scopes before syncing default commands", 
       description: "Reload extensions, prompts, skills, and themes",
     },
     { command: "usage", description: "Show Codex quota status" },
+    { command: "status", description: "Show this chat session status" },
   ];
 
   assert.deepEqual(boot.buildTelegramCommandPayload(rows), expectedPayload);

@@ -360,11 +360,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/memory/transcript-types.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/memory/transcripts.ts",
       "ownerSuite": "integration",
       "status": "strict"
@@ -590,11 +585,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-frontend-sdk/frontend-surface.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/rin-frontend-sdk/index.ts",
       "ownerSuite": "integration",
       "status": "strict"
@@ -646,11 +636,6 @@
     },
     {
       "source": "src/core/rin-frontend-sdk/turn-driver.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-frontend-sdk/types.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },
@@ -810,17 +795,7 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-lib/capability-types.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/rin-lib/changelog.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-lib/chat-outbox-contract.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },
@@ -832,11 +807,6 @@
     {
       "source": "src/core/rin-lib/context-token-estimator.ts",
       "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-lib/core-tool-contracts.ts",
-      "ownerSuite": "integration",
       "status": "strict"
     },
     {
@@ -885,11 +855,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-lib/pi-passthrough.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/rin-lib/profile.ts",
       "ownerSuite": "integration",
       "status": "strict"
@@ -912,11 +877,6 @@
     {
       "source": "src/core/rin-lib/rpc-response.ts",
       "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-lib/rpc-types.ts",
-      "ownerSuite": "integration",
       "status": "strict"
     },
     {

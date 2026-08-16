@@ -10,9 +10,6 @@ await import("../support/register-chat-runtime-adapters-owner-fixture.ts");
 const adapters = await import(
   pathToFileURL(path.resolve("dist/core/chat-runtime/adapters.js")).href
 );
-// Reuse the current integration contracts from the shared adapter suites.
-await import("./chat-runtime-discord.test.ts");
-await import("./chat-runtime-send.test.ts");
 
 const owner = (globalThis as any).__chatRuntimeAdaptersOwner as Record<
   string,

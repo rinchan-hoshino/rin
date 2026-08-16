@@ -21,7 +21,9 @@ const failureRegister = path.resolve(
   "tests/support/register-entrypoint-failure.ts",
 );
 
-async function runFixture(mode: "resolve" | "empty" | "error") {
+async function runFixture(
+  mode: "resolve" | "number" | "termination" | "empty" | "error",
+) {
   return await execFileAsync(
     process.execPath,
     [
@@ -46,6 +48,23 @@ test("Rin CLI entrypoint delegates successful startup without diagnostics", asyn
   const result = await runFixture("resolve");
   assert.equal(result.stdout, "");
   assert.equal(result.stderr, "");
+});
+
+test("Rin CLI entrypoint preserves numeric and requested termination exit codes", async () => {
+  await assert.rejects(
+    () => runFixture("number"),
+    (error: any) => {
+      assert.equal(error.code, 19);
+      return true;
+    },
+  );
+  await assert.rejects(
+    () => runFixture("termination"),
+    (error: any) => {
+      assert.equal(error.code, 23);
+      return true;
+    },
+  );
 });
 
 test("Rin CLI entrypoint completes its caught-error boundary after requesting exit", async () => {

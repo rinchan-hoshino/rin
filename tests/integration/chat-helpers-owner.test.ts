@@ -8,8 +8,6 @@ import test from "node:test";
 import * as helpers from "../../dist/core/chat/chat-helpers.js";
 import * as store from "../../dist/core/chat/message-store.js";
 
-await import("./chat-helpers.test.js");
-
 async function withTempDir(run: (root: string) => Promise<void>) {
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-helper-owner-"),

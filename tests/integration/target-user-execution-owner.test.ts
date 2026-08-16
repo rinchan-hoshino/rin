@@ -117,3 +117,90 @@ test("managed runtime service projects the canonical target-user execution owner
   assert.doesNotMatch(source, /buildUserShell/);
   assert.doesNotMatch(source, /execFileSync/);
 });
+
+test("target-user execution covers fallback identities, systemctl paths, and failed remote probes", async () => {
+  assert.equal(
+    resolveRuntimeAgentDirForTarget("", "", "", { RIN_DIR: "/explicit" }),
+    "/explicit",
+  );
+  assert.equal(
+    resolveRuntimeAgentDirForTarget("owner", "launcher", "", {}),
+    "",
+  );
+  assert.equal(
+    resolveRuntimeAgentDirForTarget("owner", "launcher", "", {
+      RIN_DIR: "/fallback",
+    }),
+    "/fallback",
+  );
+
+  const baseDependencies = {
+    buildUserShell(
+      targetUser: string,
+      argv: string[],
+      env: Record<string, string>,
+    ) {
+      return { command: "shell", args: [targetUser, ...argv], env };
+    },
+    canConnectDaemonSocket: async () => false,
+  };
+  const binSystemctl = createTargetUserExecutionContext(
+    {
+      targetUser: "owner",
+      currentUser: "launcher",
+      targetHome: "/home/owner",
+      installDir: "/srv/rin",
+    },
+    {
+      ...baseDependencies,
+      fileExists: (filePath: string) => filePath === "/bin/systemctl",
+      execFileSync() {
+        throw new Error("unreachable");
+      },
+    },
+  );
+  assert.equal(binSystemctl.systemctl, "/bin/systemctl");
+  assert.equal(await binSystemctl.canConnectSocket(), false);
+
+  const defaults = createTargetUserExecutionContext(
+    {
+      targetUser: "",
+      currentUser: "",
+      targetHome: "",
+      installDir: "",
+      cwd: "",
+    },
+    {
+      ...baseDependencies,
+      fileExists: () => false,
+      execFileSync: () => undefined,
+    },
+  );
+  assert.equal(defaults.targetUser, defaults.currentUser);
+  assert.ok(defaults.targetHome);
+  assert.ok(defaults.installDir);
+
+  const nativeDependencies = createTargetUserExecutionContext({
+    targetUser: process.env.USER || process.env.LOGNAME || "rin",
+    currentUser: process.env.USER || process.env.LOGNAME || "rin",
+    targetHome: "/home/rin",
+    installDir: "/home/rin/.rin",
+  });
+  assert.equal(nativeDependencies.isTargetUser, true);
+
+  const noSystemctl = createTargetUserExecutionContext(
+    {
+      targetUser: "launcher",
+      currentUser: "launcher",
+      targetHome: "/home/launcher",
+    },
+    {
+      ...baseDependencies,
+      fileExists: () => false,
+      execFileSync: () => undefined,
+    },
+  );
+  assert.equal(noSystemctl.systemctl, "");
+  assert.equal(noSystemctl.capture(["empty"]), "");
+  assert.equal(await noSystemctl.canConnectSocket(), false);
+});

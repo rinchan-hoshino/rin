@@ -18,7 +18,6 @@ const archiveModule = await import(
     path.join(rootDir, "dist", "core", "chat", "archive-prototype.js"),
   ).href
 );
-await import("./memory.test.js");
 
 async function withTempRoot(fn) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-chat-archive-"));

@@ -288,3 +288,23 @@ test("prompt binding composes into the initial whole system prompt", () => {
   assert.match(combined, /chat name: Original room/);
   assert.equal(combined.includes("- sender user id:"), false);
 });
+
+test("scheduled chat-bound prompt context renders task and chat binding blocks", () => {
+  const meta = {
+    source: "scheduled-task",
+    chatKey: "telegram/demo:1",
+    taskId: "cron_demo",
+    taskName: "Demo Task",
+    taskContextKind: "scheduled-task",
+  } as const;
+  assert.equal(formatPromptContext(meta, "scheduled hello"), "scheduled hello");
+  const systemBlock = formatPromptContextSystemPromptBlock(meta);
+  assert.ok(systemBlock.includes("Scheduled task context:"));
+  assert.ok(systemBlock.includes("- task id: cron_demo"));
+  assert.ok(systemBlock.includes("- task name: Demo Task"));
+  assert.ok(systemBlock.includes("Chat binding context:"));
+  assert.ok(systemBlock.includes("- chatKey: telegram/demo:1"));
+  assert.ok(systemBlock.includes("rin.chat.messages.get"));
+  assert.equal(systemBlock.match(/\[quote:<message-id>\]/g)?.length, 1);
+  assert.equal(systemBlock.includes("Chat context:"), false);
+});

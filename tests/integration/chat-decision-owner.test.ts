@@ -6,7 +6,6 @@ import { importBuiltModule } from "../support/import-built-module.js";
 const decision = await importBuiltModule<
   typeof import("../../src/core/chat/decision.js")
 >("dist/core/chat/decision.js");
-await import("./chat-decision.test.js");
 
 const identity = {
   aliases: [

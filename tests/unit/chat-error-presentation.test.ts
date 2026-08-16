@@ -46,4 +46,24 @@ test("Chat error presentation preserves structured context and formats text once
     ]),
     [{ type: "text", text: "Error: request failed" }],
   );
+
+  const parts = [{ type: "quote" as const, id: "owner-message" }];
+  assert.equal(
+    presentation.hashChatErrorDeliveryContent("request failed", parts),
+    presentation.hashChatErrorDeliveryContent("request failed", parts),
+  );
+  assert.notEqual(
+    presentation.hashChatErrorDeliveryContent("request failed", parts),
+    presentation.hashChatErrorDeliveryContent("different failure", parts),
+  );
+  assert.deepEqual(presentation.formatChatErrorDelivery({ text: null }), {
+    parts: [],
+  });
+  assert.deepEqual(
+    presentation.formatChatErrorDelivery({
+      text: "ignored fallback",
+      parts: [undefined as never, { type: "text", text: "explicit failure" }],
+    }),
+    { parts: [{ type: "text", text: "Error: explicit failure" }] },
+  );
 });

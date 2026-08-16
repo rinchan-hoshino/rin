@@ -90,15 +90,19 @@
     {
       "source": "src/core/chat-runtime/adapters.ts",
       "suite": "integration",
-      "tests": ["tests/integration/chat-runtime-adapters-owner.test.ts"],
-      "preloads": [
-        "tests/support/register-chat-runtime-adapters-owner-fixture.ts"
+      "tests": [
+        "tests/integration/chat-runtime-adapters-owner.test.ts",
+        "tests/integration/chat-runtime-discord.test.ts",
+        "tests/integration/chat-runtime-send.test.ts"
       ]
     },
     {
       "source": "src/core/chat-runtime/common.ts",
       "suite": "integration",
-      "tests": ["tests/integration/chat-runtime-common-owner.test.ts"]
+      "tests": [
+        "tests/integration/chat-runtime-common-owner.test.ts",
+        "tests/integration/chat-runtime-common.test.ts"
+      ]
     },
     {
       "source": "src/core/chat-runtime/editable-text-message-group.ts",
@@ -113,27 +117,36 @@
     {
       "source": "src/core/chat-runtime/index.ts",
       "suite": "integration",
-      "tests": ["tests/integration/chat-runtime-index-owner.test.ts"],
-      "preloads": ["tests/support/register-chat-runtime-index-owner-fixture.ts"]
+      "tests": [
+        "tests/integration/chat-runtime-index-owner.test.ts",
+        "tests/integration/chat-runtime-ingress.test.ts",
+        "tests/integration/chat-runtime-send.test.ts",
+        "tests/integration/chat-runtime-lifecycle.test.ts"
+      ]
     },
     {
       "source": "src/core/chat/archive-prototype.ts",
       "suite": "integration",
-      "tests": ["tests/integration/chat-archive-prototype.test.ts"]
+      "tests": [
+        "tests/integration/chat-archive-prototype.test.ts",
+        "tests/integration/memory.test.ts"
+      ]
     },
     {
       "source": "src/core/chat/boot.ts",
       "suite": "integration",
       "tests": [
         "tests/integration/chat-boot-owner.test.ts",
-        "tests/integration/chat-boot-current-main.test.ts"
-      ],
-      "preloads": ["tests/support/register-chat-boot-owner-fixture.ts"]
+        "tests/integration/chat-boot-main-contract.test.ts"
+      ]
     },
     {
       "source": "src/core/chat/chat-helpers.ts",
       "suite": "integration",
-      "tests": ["tests/integration/chat-helpers-owner.test.ts"]
+      "tests": [
+        "tests/integration/chat-helpers-owner.test.ts",
+        "tests/integration/chat-helpers.test.ts"
+      ]
     },
     {
       "source": "src/core/chat/chat-key-migration.ts",
@@ -150,6 +163,7 @@
       "suite": "integration",
       "tests": [
         "tests/integration/chat-log.test.ts",
+        "tests/integration/chat-log-format.test.ts",
         "tests/integration/chat-local-date.test.ts"
       ]
     },
@@ -185,7 +199,10 @@
     {
       "source": "src/core/chat/decision.ts",
       "suite": "integration",
-      "tests": ["tests/integration/chat-decision-owner.test.ts"]
+      "tests": [
+        "tests/integration/chat-decision-owner.test.ts",
+        "tests/integration/chat-decision.test.ts"
+      ]
     },
     {
       "source": "src/core/chat/daemon-integration.ts",
@@ -205,12 +222,12 @@
     {
       "source": "src/core/chat/inbox-drain.ts",
       "suite": "integration",
-      "tests": ["tests/integration/chat-inbox-current-main-owner.test.ts"]
+      "tests": ["tests/integration/chat-inbox-owner.test.ts"]
     },
     {
       "source": "src/core/chat/inbox.ts",
       "suite": "integration",
-      "tests": ["tests/integration/chat-inbox-current-main-owner.test.ts"]
+      "tests": ["tests/integration/chat-inbox-owner.test.ts"]
     },
     {
       "source": "src/core/chat/install-migration.ts",
@@ -233,7 +250,10 @@
     {
       "source": "src/core/chat/main.ts",
       "suite": "integration",
-      "tests": ["tests/integration/chat-main-queue.test.ts"]
+      "tests": [
+        "tests/integration/chat-main-queue.test.ts",
+        "tests/integration/chat-main-startup-owner.test.ts"
+      ]
     },
     {
       "source": "src/core/chat/message-store.ts",
@@ -243,7 +263,10 @@
     {
       "source": "src/core/chat/outbox.ts",
       "suite": "integration",
-      "tests": ["tests/integration/chat-outbox-and-binding.test.ts"]
+      "tests": [
+        "tests/integration/chat-outbox-and-binding.test.ts",
+        "tests/integration/chat-boot-owner.test.ts"
+      ]
     },
     {
       "source": "src/core/chat/runtime-config.ts",
@@ -312,13 +335,10 @@
     {
       "source": "src/core/memory/transcript-search.ts",
       "suite": "integration",
-      "tests": ["tests/integration/transcript-search-owner.test.ts"],
-      "preloads": ["tests/support/register-transcript-search-owner-fixture.ts"]
-    },
-    {
-      "source": "src/core/memory/transcript-types.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/type-contracts.test.ts"]
+      "tests": [
+        "tests/integration/transcript-search-owner.test.ts",
+        "tests/integration/memory.test.ts"
+      ]
     },
     {
       "source": "src/core/memory/transcripts.ts",
@@ -346,7 +366,10 @@
     {
       "source": "src/core/pi/session-host.ts",
       "suite": "integration",
-      "tests": ["tests/integration/pi-session-host-owner.test.ts"]
+      "tests": [
+        "tests/integration/pi-session-host-owner.test.ts",
+        "tests/integration/pi-session-host.test.ts"
+      ]
     },
     {
       "source": "src/core/pi/tui-patches/index.ts",
@@ -435,7 +458,7 @@
       "suite": "integration",
       "tests": [
         "tests/integration/rpc-turn-coordinator-owner.test.ts",
-        "tests/integration/rpc-mode-current-main-owner.test.ts"
+        "tests/integration/rpc-mode.test.ts"
       ]
     },
     {
@@ -473,7 +496,7 @@
     {
       "source": "src/core/rin-frontend-sdk/command-result-presentation.ts",
       "suite": "integration",
-      "tests": ["tests/integration/worker-helpers-owner.test.ts"]
+      "tests": ["tests/integration/command-result-presentation-owner.test.ts"]
     },
     {
       "source": "src/core/rin-frontend-sdk/daemon-client.ts",
@@ -487,11 +510,6 @@
         "tests/integration/frontend-lifecycle-policy.test.ts",
         "tests/integration/frontend-turn-driver.test.ts"
       ]
-    },
-    {
-      "source": "src/core/rin-frontend-sdk/frontend-surface.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/type-contracts.test.ts"]
     },
     {
       "source": "src/core/rin-frontend-sdk/index.ts",
@@ -530,11 +548,6 @@
       ]
     },
     {
-      "source": "src/core/rin-frontend-sdk/types.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/type-contracts.test.ts"]
-    },
-    {
       "source": "src/core/rin-install/apply-plan.ts",
       "suite": "integration",
       "tests": ["tests/integration/installer-apply-plan-owner.test.ts"]
@@ -566,16 +579,15 @@
       "source": "src/core/rin-install/finalize.ts",
       "suite": "integration",
       "tests": [
-        "tests/integration/installer-finalize-current-main-owner.test.ts",
+        "tests/integration/installer-finalize.test.ts",
         "tests/integration/installer-finalize-owner.test.ts"
-      ],
-      "preloads": ["tests/support/register-finalize-owner-fixture.ts"]
+      ]
     },
     {
       "source": "src/core/rin-install/fs-utils.ts",
       "suite": "integration",
       "tests": [
-        "tests/integration/installer-fs-utils-current-main-owner.test.ts",
+        "tests/integration/installer-fs-utils-contract.test.ts",
         "tests/integration/installer-fs-utils-owner.test.ts"
       ],
       "preloads": ["tests/support/register-fs-utils-owner-fixture.ts"]
@@ -589,7 +601,7 @@
       "source": "src/core/rin-install/interactive.ts",
       "suite": "integration",
       "tests": [
-        "tests/integration/installer-interactive-current-main-owner.test.ts",
+        "tests/integration/installer-interactive.test.ts",
         "tests/integration/installer-interactive-owner.test.ts"
       ]
     },
@@ -659,7 +671,7 @@
       "suite": "integration",
       "tests": [
         "tests/integration/installer-updater-owner.test.ts",
-        "tests/integration/updater-current-main-owner.test.ts"
+        "tests/integration/updater.test.ts"
       ]
     },
     {
@@ -682,13 +694,8 @@
       "suite": "integration",
       "tests": [
         "tests/integration/rin-capability-session-owner.test.ts",
-        "tests/integration/rin-cli-capability-current-main-owner.test.ts"
+        "tests/integration/rin-cli.test.ts"
       ]
-    },
-    {
-      "source": "src/core/rin-lib/capability-types.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/type-contracts.test.ts"]
     },
     {
       "source": "src/core/rin-lib/changelog.ts",
@@ -696,19 +703,9 @@
       "tests": ["tests/integration/changelog.test.ts"]
     },
     {
-      "source": "src/core/rin-lib/chat-outbox-contract.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/chat-outbox-and-binding.test.ts"]
-    },
-    {
       "source": "src/core/rin-lib/common.ts",
       "suite": "integration",
       "tests": ["tests/integration/rin-lib-common-owner.test.ts"]
-    },
-    {
-      "source": "src/core/rin-lib/core-tool-contracts.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/rpc-runtime-binding.test.ts"]
     },
     {
       "source": "src/core/rin-lib/item-tool.ts",
@@ -739,11 +736,6 @@
       "tests": ["tests/integration/note-tool.test.ts"]
     },
     {
-      "source": "src/core/rin-lib/pi-passthrough.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/type-contracts.test.ts"]
-    },
-    {
       "source": "src/core/rin-lib/profile.ts",
       "suite": "integration",
       "tests": ["tests/integration/runtime-profile.test.ts"]
@@ -752,11 +744,6 @@
       "source": "src/core/rin-lib/release.ts",
       "suite": "integration",
       "tests": ["tests/integration/rin-release-owner.test.ts"]
-    },
-    {
-      "source": "src/core/rin-lib/rpc-types.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/type-contracts.test.ts"]
     },
     {
       "source": "src/core/rin-lib/runtime.ts",
@@ -783,12 +770,15 @@
     {
       "source": "src/core/rin-lib/tool-result-text.ts",
       "suite": "integration",
-      "tests": ["tests/integration/rpc-runtime-binding.test.ts"]
+      "tests": ["tests/integration/pi-render-utils-owner.test.ts"]
     },
     {
       "source": "src/core/rin-lib/update-notices.ts",
       "suite": "integration",
-      "tests": ["tests/integration/update-notices-owner.test.ts"]
+      "tests": [
+        "tests/integration/update-notices-owner.test.ts",
+        "tests/integration/update-notices.test.ts"
+      ]
     },
     {
       "source": "src/core/rin-targets/runner.ts",
@@ -828,7 +818,7 @@
     {
       "source": "src/core/rin-tui/tool-renderers/index.ts",
       "suite": "integration",
-      "tests": ["tests/integration/rpc-runtime-binding.test.ts"]
+      "tests": ["tests/integration/pi-render-utils-owner.test.ts"]
     },
     {
       "source": "src/core/rin-tui/tool-renderers/item.ts",
@@ -905,7 +895,7 @@
       "source": "src/core/rin/self-improve.ts",
       "suite": "integration",
       "tests": [
-        "tests/integration/rin-cli-current-main-owner.test.ts",
+        "tests/integration/rin-cli.test.ts",
         "tests/integration/rin-self-improve-cli-owner.test.ts"
       ]
     },
@@ -917,8 +907,10 @@
     {
       "source": "src/core/rin/shared.ts",
       "suite": "integration",
-      "tests": ["tests/integration/rin-shared-owner.test.ts"],
-      "preloads": ["tests/support/register-rin-shared-owner-fixture.ts"]
+      "tests": [
+        "tests/integration/rin-shared-owner.test.ts",
+        "tests/integration/rin-tasks-owner.test.ts"
+      ]
     },
     {
       "source": "src/core/rin/status.ts",

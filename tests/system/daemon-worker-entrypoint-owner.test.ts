@@ -14,7 +14,7 @@ const failureRegister = path.resolve(
   "tests/support/register-entrypoint-failure.ts",
 );
 
-async function runWorker(mode: "resolve" | "error" | "empty") {
+async function runWorker(mode: "resolve" | "error" | "empty" | "terminate") {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-worker-entry-"));
   const sandbox = await createTestSandbox(root);
   try {
@@ -45,6 +45,14 @@ test("daemon worker entrypoint completes success and formats dependency failures
     (error: any) => {
       assert.equal(error.code, 1);
       assert.match(error.stderr, /worker fixture failure/);
+      return true;
+    },
+  );
+
+  await assert.rejects(
+    () => runWorker("terminate"),
+    (error: any) => {
+      assert.equal(error.code, 23);
       return true;
     },
   );

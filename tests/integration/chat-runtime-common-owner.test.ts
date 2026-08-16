@@ -10,7 +10,6 @@ import { importBuiltModule } from "../support/import-built-module.js";
 const common = await importBuiltModule<
   typeof import("../../src/core/chat-runtime/common.js")
 >("dist/core/chat-runtime/common.js");
-await import("./chat-runtime-common.test.js");
 
 test("rich delivery fallback preserves heterogeneous source nodes", () => {
   assert.equal(

@@ -17,7 +17,6 @@ const outbox = await importBuiltModule<
 const messageStore = await importBuiltModule<
   typeof import("../../src/core/chat/message-store.js")
 >("dist/core/chat/message-store.js");
-await import("./chat-boot-main-contract.test.js");
 
 async function withTempDir(run: (directory: string) => Promise<void>) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "rin-boot-owner-"));

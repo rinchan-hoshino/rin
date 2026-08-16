@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
+import { importBuiltModule } from "../support/import-built-module.js";
+
+const {
   ProcessTerminationRequest,
   processTerminationExitCode,
   requestProcessTermination,
-} from "../../src/core/platform/process-lifetime.js";
+} = await importBuiltModule<
+  typeof import("../../src/core/platform/process-lifetime.js")
+>("dist/core/platform/process-lifetime.js");
 
 test("process termination requests carry only a validated host exit intent", () => {
   assert.throws(
@@ -17,8 +21,10 @@ test("process termination requests carry only a validated host exit intent", () 
     },
   );
   assert.equal(processTerminationExitCode(new Error("ordinary")), undefined);
-  assert.throws(
-    () => new ProcessTerminationRequest(-1),
-    /exit code must be an integer from 0 to 255/i,
-  );
+  for (const invalidExitCode of [-1, 256, 1.5]) {
+    assert.throws(
+      () => new ProcessTerminationRequest(invalidExitCode),
+      /exit code must be an integer from 0 to 255/i,
+    );
+  }
 });

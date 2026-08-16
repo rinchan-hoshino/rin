@@ -12,11 +12,6 @@ const runtime = await import(
 const inbox = await import(
   pathToFileURL(path.resolve("dist/core/chat/inbox.js")).href
 );
-// Preserve the immutable runtime scenarios while this owner lane adds direct
-// provider startup, cursor, registration, and fallback contracts.
-await import("./chat-runtime-ingress.test.ts");
-await import("./chat-runtime-send.test.ts");
-await import("./chat-runtime-lifecycle.test.ts");
 
 const owner = (globalThis as any).__chatRuntimeIndexOwner as Record<
   string,

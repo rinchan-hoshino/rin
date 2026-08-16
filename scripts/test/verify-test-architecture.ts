@@ -173,6 +173,76 @@ export function sourceUsesAmbientNetwork(
   return found;
 }
 
+type TestSourceFacts = {
+  titles: string[];
+  importedTests: string[];
+};
+
+function testSourceFacts(relativePath: string): TestSourceFacts {
+  const sourceFile = ts.createSourceFile(
+    relativePath,
+    fs.readFileSync(path.join(rootDir, relativePath), "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const facts: TestSourceFacts = { titles: [], importedTests: [] };
+  const recordImportedTest = (specifier: ts.Expression | undefined) => {
+    if (
+      specifier &&
+      ts.isStringLiteralLike(specifier) &&
+      /\.test\.(?:[cm]?[jt]s)$/.test(specifier.text)
+    ) {
+      facts.importedTests.push(specifier.text);
+    }
+  };
+  const inspect = (node: ts.Node) => {
+    if (ts.isImportDeclaration(node)) {
+      recordImportedTest(node.moduleSpecifier);
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword
+    ) {
+      recordImportedTest(node.arguments[0]);
+    }
+    if (ts.isCallExpression(node)) {
+      const isTestCall =
+        (ts.isIdentifier(node.expression) && node.expression.text === "test") ||
+        (ts.isPropertyAccessExpression(node.expression) &&
+          ts.isIdentifier(node.expression.expression) &&
+          node.expression.expression.text === "test");
+      const title = node.arguments[0];
+      if (isTestCall && title && ts.isStringLiteralLike(title)) {
+        facts.titles.push(title.text);
+      }
+    }
+    ts.forEachChild(node, inspect);
+  };
+  inspect(sourceFile);
+  return facts;
+}
+
+function isCoverageBearingBuiltModule(source: string) {
+  const built = builtPathForSource(source);
+  const sourceFile = ts.createSourceFile(
+    built,
+    fs.readFileSync(path.join(rootDir, built), "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.JS,
+  );
+  return sourceFile.statements.some(
+    (statement) =>
+      !(
+        ts.isExportDeclaration(statement) &&
+        !statement.moduleSpecifier &&
+        statement.exportClause &&
+        ts.isNamedExports(statement.exportClause) &&
+        statement.exportClause.elements.length === 0
+      ),
+  );
+}
+
 function testUsesAmbientNetwork(relativePath: string) {
   return sourceUsesAmbientNetwork(
     fs.readFileSync(path.join(rootDir, relativePath), "utf8"),
@@ -565,6 +635,7 @@ export function verifyTestArchitecture() {
 
   const allTests = listFiles("tests", ".test.ts");
   const testsByDigest = new Map<string, string[]>();
+  const filesByTitle = new Map<string, Set<string>>();
   for (const file of allTests) {
     const digest = createHash("sha256")
       .update(fs.readFileSync(path.join(rootDir, file)))
@@ -572,10 +643,29 @@ export function verifyTestArchitecture() {
     const matchingFiles = testsByDigest.get(digest) ?? [];
     matchingFiles.push(file);
     testsByDigest.set(digest, matchingFiles);
+    if (/(?:^|[-/])(?:current-main|graduated)(?:[-.]|$)/.test(file)) {
+      errors.push(`transitional_test_file:${file}`);
+    }
+    const facts = testSourceFacts(file);
+    for (const importedTest of facts.importedTests) {
+      errors.push(`test_file_import:${file}:${importedTest}`);
+    }
+    for (const title of facts.titles) {
+      const matchingTitleFiles = filesByTitle.get(title) ?? new Set<string>();
+      matchingTitleFiles.add(file);
+      filesByTitle.set(title, matchingTitleFiles);
+    }
   }
   for (const matchingFiles of testsByDigest.values()) {
     if (matchingFiles.length > 1) {
       errors.push(`duplicate_test_files:${matchingFiles.join(",")}`);
+    }
+  }
+  for (const [title, matchingFiles] of filesByTitle) {
+    if (matchingFiles.size > 1) {
+      errors.push(
+        `duplicate_test_title:${title}:${[...matchingFiles].sort().join(",")}`,
+      );
     }
   }
   for (const file of listFiles("tests", ".ts")) {
@@ -928,8 +1018,15 @@ export function verifyTestArchitecture() {
   }
 
   const sourceFiles = listFiles("src", ".ts");
+  const coverageBearingSources = sourceFiles.filter(
+    isCoverageBearingBuiltModule,
+  );
   errors.push(
-    ...validateCoveragePolicy(coveragePolicy, sourceFiles, unitCatalog),
+    ...validateCoveragePolicy(
+      coveragePolicy,
+      coverageBearingSources,
+      unitCatalog,
+    ),
   );
   for (const module of coveragePolicy.modules) {
     const built = builtPathForSource(module.source);

@@ -22,8 +22,6 @@ const {
 const { getTranscriptArchivePath, resolveTranscriptSearchDbPath } =
   await import("../../dist/core/memory/transcript-archive.js");
 
-await import("./memory.test.js");
-
 async function withSearchRoot(run: (root: string) => Promise<void>) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "rin-search-owner-"));
   try {

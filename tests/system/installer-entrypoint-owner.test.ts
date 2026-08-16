@@ -91,6 +91,72 @@ test("installer entrypoint formats ordinary errors and honors apply-error handof
       },
     );
 
+    await assert.rejects(
+      () =>
+        execFileAsync(
+          process.execPath,
+          ["--import", "tsx", "--import", failureRegister, entrypoint],
+          {
+            env: {
+              ...sandbox.env,
+              RIN_TEST_ENTRYPOINT_FAILURE_TARGET:
+                "dist/core/rin-install/main.js",
+              RIN_TEST_ENTRYPOINT_FAILURE_MODE: "resolve",
+            },
+          },
+        ),
+      (error: any) => {
+        assert.equal(error.code, 17);
+        return true;
+      },
+    );
+
+    for (const [mode, code] of [
+      ["termination", 23],
+      ["uncaught-termination", 29],
+    ] as const) {
+      await assert.rejects(
+        () =>
+          execFileAsync(
+            process.execPath,
+            ["--import", "tsx", "--import", failureRegister, entrypoint],
+            {
+              env: {
+                ...sandbox.env,
+                RIN_TEST_ENTRYPOINT_FAILURE_TARGET:
+                  "dist/core/rin-install/main.js",
+                RIN_TEST_ENTRYPOINT_FAILURE_MODE: mode,
+              },
+            },
+          ),
+        (error: any) => {
+          assert.equal(error.code, code);
+          return true;
+        },
+      );
+    }
+
+    await assert.rejects(
+      () =>
+        execFileAsync(
+          process.execPath,
+          ["--import", "tsx", "--import", failureRegister, entrypoint],
+          {
+            env: {
+              ...sandbox.env,
+              RIN_TEST_ENTRYPOINT_FAILURE_TARGET:
+                "dist/core/rin-install/main.js",
+              RIN_TEST_ENTRYPOINT_FAILURE_MODE: "uncaught",
+            },
+          },
+        ),
+      (error: any) => {
+        assert.equal(error.code, 1);
+        assert.match(error.stderr, /owner installer uncaught/);
+        return true;
+      },
+    );
+
     const errorFile = path.join(root, "apply-error.txt");
     await assert.rejects(
       () =>

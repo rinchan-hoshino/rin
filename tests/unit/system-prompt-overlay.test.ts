@@ -230,6 +230,32 @@ test("public Pi session data produces the structured Rin prompt options", () => 
   });
 });
 
+test("sparse public prompt metadata stays empty without inventing tools or resources", () => {
+  const prompt = promptMod.buildRinSystemPrompt({
+    piOptions: {
+      cwd: "",
+      selectedTools: ["ghost"],
+      toolSnippets: { ghost: "   " },
+      promptGuidelines: ["Keep facts!", "keep facts."],
+    },
+    agentDir: "/tmp/rin-agent",
+  });
+  assert.match(prompt, /Available tools:\n\(none\)/);
+  assert.equal(prompt.match(/Keep facts[!.]/gi)?.length, 1);
+  assert.doesNotMatch(prompt, /<project_context>/);
+
+  assert.deepEqual(promptMod.readPiPublicSystemPromptOptions(undefined), {
+    cwd: "",
+    customPrompt: undefined,
+    selectedTools: [],
+    toolSnippets: {},
+    promptGuidelines: [],
+    appendSystemPrompt: undefined,
+    contextFiles: [],
+    skills: [],
+  });
+});
+
 test("user extensions receive the Rin-owned prompt first", async () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "rin-prompt-ext-cwd-"));
   const agentDir = fs.mkdtempSync(
