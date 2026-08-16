@@ -1,16 +1,3 @@
-export function resolveTestConcurrency(
-  rawValue: string | undefined,
-  fallback: number,
-  label: string,
-) {
-  if (rawValue === undefined) return fallback;
-  const value = Number(rawValue);
-  if (!/^[1-9]\d*$/.test(rawValue) || !Number.isSafeInteger(value)) {
-    throw new Error(`test_concurrency_invalid:${label}:${rawValue}`);
-  }
-  return value;
-}
-
 export async function mapWithConcurrency<T, R>(
   values: readonly T[],
   concurrency: number,

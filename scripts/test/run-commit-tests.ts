@@ -1,4 +1,4 @@
-import { mapWithConcurrency, resolveTestConcurrency } from "./parallel.js";
+import { mapWithConcurrency } from "./parallel.js";
 import { runTestSuites, type TestSuite } from "./run-test-suite.js";
 
 const suites: TestSuite[] = [
@@ -13,12 +13,7 @@ const suites: TestSuite[] = [
   "torture",
 ];
 
-const suiteConcurrency = resolveTestConcurrency(
-  process.env.RIN_TEST_SUITE_CONCURRENCY,
-  3,
-  "suite",
-);
-const statuses = await mapWithConcurrency(suites, suiteConcurrency, (suite) =>
+const statuses = await mapWithConcurrency(suites, 3, (suite) =>
   runTestSuites([suite]),
 );
 const failedSuite = suites.find((_, index) => statuses[index] !== 0);

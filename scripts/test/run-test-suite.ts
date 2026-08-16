@@ -4,7 +4,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { networkIsolatedNodeInvocation } from "./network-isolated-process.js";
-import { resolveTestConcurrency } from "./parallel.js";
 import { requireTestContainer } from "./require-test-container.js";
 import { createTestProcessEnvironment } from "./test-process-environment.js";
 
@@ -53,13 +52,6 @@ export async function runTestSuites(
     throw new Error(`test_suite_empty:${suites.join(",")}`);
 
   const sandbox = createTestProcessEnvironment(`test-${suites.join("-")}`);
-  const testConcurrency =
-    options.concurrency ??
-    resolveTestConcurrency(
-      process.env.RIN_TEST_FILE_CONCURRENCY,
-      suites.includes("system") ? 2 : 4,
-      "file",
-    );
   let result: { status: number | null; stdout: string; stderr: string };
   try {
     const invocation = networkIsolatedNodeInvocation(
@@ -71,7 +63,7 @@ export async function runTestSuites(
         "tsx",
         "--test",
         "--test-reporter=tap",
-        `--test-concurrency=${testConcurrency}`,
+        `--test-concurrency=${options.concurrency ?? (suites.includes("system") ? 2 : 4)}`,
         ...(options.extraNodeArgs ?? []),
         ...files,
       ],

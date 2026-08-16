@@ -31,13 +31,6 @@ scripts/test/build-test-image.sh "$archive_file" "$image_tag"
 image_id="$(docker image inspect --format '{{.Id}}' "$image_tag")"
 
 docker_args=(run --rm --network none --memory 4g --memory-swap 4g)
-for test_env_name in \
-  RIN_TEST_SUITE_CONCURRENCY \
-  RIN_TEST_FILE_CONCURRENCY; do
-  if [[ -v $test_env_name ]]; then
-    docker_args+=(--env "$test_env_name")
-  fi
-done
 if (($# > 0)); then
   echo "rin tests: running a selected test target in a networkless container..."
   docker_args+=(--entrypoint /opt/rin/source/.ci/local-ci/run-selected.sh)
