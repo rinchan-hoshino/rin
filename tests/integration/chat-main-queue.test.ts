@@ -31,7 +31,7 @@ test("chat main consumes inbound help messages through the inbox path only once"
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const databaseMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
         persons: { owner: { trust: "OWNER" } },
@@ -151,7 +151,7 @@ test("chat main answers /status locally while the same chat turn is running", as
       const inboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
         persons: { owner: { trust: "OWNER" } },
@@ -270,7 +270,7 @@ test("chat main lets an authorized /abort bypass a running same-chat turn", asyn
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const inboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
         persons: { owner: { trust: "OWNER" } },
@@ -512,7 +512,7 @@ test("telegram topic commands use the thread-scoped chat key", async () => {
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -616,7 +616,7 @@ test("chat main ignores private help commands from untrusted senders", async () 
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
 
       const { app } = await mainMod.startChatBridge({ commandRows: [] });
       let sentCount = 0;
@@ -925,7 +925,7 @@ test("chat main records record-only chat messages without starting an agent turn
       installChatControllerSessionClient(controllerMod.ChatController);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -1024,7 +1024,7 @@ test("chat main records record-only chat commands without running command handle
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -1137,7 +1137,7 @@ test("chat main applies per-chat model options to inbound prompt inbox_jobs", as
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -1306,7 +1306,7 @@ test("chat main silently drops the removed private /session command", async () =
       installChatControllerSessionClient(controllerMod.ChatController);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -1403,7 +1403,7 @@ test("chat main reports unmatched slash commands in owner-only Lark groups", asy
       installChatControllerSessionClient(controllerMod.ChatController);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -1522,7 +1522,7 @@ test("chat main silently consumes unmatched group slash commands", async () => {
       installChatControllerSessionClient(controllerMod.ChatController);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -1612,7 +1612,7 @@ test("chat main lets trusted group commands run only when an owner is present", 
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -1738,7 +1738,7 @@ test("chat main rejects trusted private commands while allowing owner private co
       installChatControllerSessionClient(controllerMod.ChatController);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -1882,7 +1882,7 @@ test("chat main ignores removed /auth private commands from untrusted senders wi
       const agentDir = process.env.RIN_DIR;
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
 
       const { app } = await mainMod.startChatBridge({ commandRows: [] });
       let sentCount = 0;
@@ -1959,7 +1959,7 @@ test("chat main does not retry a queued prompt while the controller is already h
       installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
         persons: { owner: { trust: "OWNER" } },
@@ -2113,7 +2113,7 @@ test("chat main finalizes once after controller reinbox_jobs from canonical term
       const chatHelpersMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat-helpers.js")).href);
       const outbox = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "outbox.js")).href);
       const inbox = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
         persons: { owner: { trust: "OWNER" } },
@@ -2231,7 +2231,7 @@ test("chat main leaves daemon startup failure pending without an error outbox", 
       installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
         persons: { owner: { trust: "OWNER" } },
@@ -2622,7 +2622,7 @@ test("hosted chat bridge shutdown preserves active inbox_jobs for daemon recover
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const inbox = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
         persons: { owner: { trust: "OWNER" } },
@@ -2739,7 +2739,7 @@ test("hard Chat process death leaves the claimed inbox lifecycle active", async 
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       supportMod.saveIdentity(path.join(agentDir, "data"), {
         persons: { owner: { trust: "OWNER" } },
         aliases: [{ platform: "telegram", userId: "owner-1", personId: "owner" }],
@@ -2857,7 +2857,7 @@ test("chat main resumes joined acceptance across restart without prompt replay o
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const databaseMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
         persons: { owner: { trust: "OWNER" } },
@@ -3135,7 +3135,7 @@ test("chat main leaves every local turn error pending until durable acceptance",
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
       const databaseMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href);
       const inboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
         persons: { owner: { trust: "OWNER" } },
@@ -3293,7 +3293,7 @@ test("chat main passes quoted reply rich text through one normal prompt submissi
       installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const chatKey = "telegram/1:2";
       const replySessionFile = path.join(agentDir, "sessions", "linked", "reply-history.jsonl");
       const seen = [];
@@ -3423,7 +3423,7 @@ test("chat main omits quote rich text when quoting the latest assistant message"
       installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const chatKey = "telegram/1:2";
       const replySessionFile = path.join(agentDir, "sessions", "linked", "latest.jsonl");
       const seen = [];
@@ -3547,7 +3547,7 @@ test("chat main inlines own unsessioned quoted content into the prompt", async (
       installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const chatKey = "telegram/1:-10042";
       const seen = [];
 
@@ -3677,7 +3677,7 @@ test("chat main keeps another sender's unsessioned quoted content lazy", async (
       installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const chatKey = "telegram/1:-10042";
       const seen = [];
 
@@ -3802,7 +3802,7 @@ test("chat main does not downgrade a quoted reply to a plain turn when linked se
       installChatControllerSessionClient(controllerMod.ChatController);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
       const storeMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
       const chatKey = "telegram/1:2";
       const replySessionFile = path.join(agentDir, "sessions", "linked", "reply-history.jsonl");
       const seen = [];

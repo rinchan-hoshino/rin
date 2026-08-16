@@ -12,7 +12,7 @@ const rootDir = path.resolve(
 );
 const adapters = await import(
   pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat-runtime", "adapters.js"),
+    path.join(rootDir, "dist", "core", "chat-runtime", "discord.js"),
   ).href
 );
 const messageStore = await import(

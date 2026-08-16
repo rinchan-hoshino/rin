@@ -9,21 +9,16 @@ import {
   isImageMimeType,
   isImageName,
 } from "../chat/file-utils.js";
+import { WORKING_REACTION_EMOJI } from "../chat/transport.js";
 import {
   renderChatNodesMarkdown,
   renderChatNodesPlain,
   expandRichTextSyntaxNodes,
   normalizeRenderedText,
-  renderChatNodesTelegramHtml,
   extractChatQuoteMessageId,
   withoutChatQuoteNodes,
   type RenderChatNodesOptions,
 } from "../chat/rich-text.js";
-import {
-  createRinHttpTransport,
-  discardRinHttpResponseBody,
-  type RinHttpTransport,
-} from "../http/transport.js";
 import { ensureDir } from "../platform/fs.js";
 import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
@@ -350,30 +345,6 @@ export function splitPlainText(text: string, maxLength: number) {
   return chunks;
 }
 
-export async function downloadToFile(
-  filePath: string,
-  url: string,
-  headers?: Record<string, string>,
-  transport?: RinHttpTransport,
-) {
-  const requestTransport = transport || createRinHttpTransport();
-  try {
-    const response = await requestTransport.fetch(url, { headers });
-    try {
-      if (!response.ok) {
-        throw new Error(`download_failed:${response.status}`);
-      }
-      const buffer = Buffer.from(await response.arrayBuffer());
-      await fs.promises.writeFile(filePath, buffer);
-      return buffer;
-    } finally {
-      await discardRinHttpResponseBody(response);
-    }
-  } finally {
-    if (!transport) await requestTransport.close();
-  }
-}
-
 export function compactObject<T extends Record<string, any>>(value: T) {
   const next: Record<string, any> = {};
   for (const [key, item] of Object.entries(value)) {
@@ -457,13 +428,6 @@ export function renderMarkdownFromNodes(
   options: RenderPlainTextOptions = {},
 ) {
   return renderChatNodesMarkdown(nodes, options);
-}
-
-export function renderTelegramHtmlFromNodes(
-  nodes: any[],
-  options: RenderPlainTextOptions = {},
-) {
-  return renderChatNodesTelegramHtml(nodes, options);
 }
 
 export function isEditableProgressDeliveryKind(value: unknown) {
@@ -638,3 +602,117 @@ export async function readBinaryFromNode(node: any) {
 }
 
 export const extractQuoteMessageId = extractChatQuoteMessageId;
+
+export function sanitizeCacheScope(value: unknown, fallback: string) {
+  return (
+    safeString(value)
+      .trim()
+      .replace(/[^A-Za-z0-9._-]+/g, "_") || fallback
+  );
+}
+
+export function markProviderRejection(
+  error: unknown,
+  predicate: (error: unknown) => boolean,
+) {
+  return predicate(error) ? confirmedChatDeliveryError(error) : error;
+}
+
+export function isOutboundMediaNodeType(type: string) {
+  return ["image", "file", "video", "audio", "sticker"].includes(type);
+}
+
+export function createTypingWorkingIndicator(getBot: () => any) {
+  return {
+    type: "polling",
+    presentation: "typing",
+    async tick(context: any) {
+      const bot = getBot();
+      const chatId = safeString(context?.chatId).trim();
+      if (!chatId) return false;
+      if (typeof bot?.internal?.sendChatAction === "function") {
+        const result = await bot.internal.sendChatAction({
+          chat_id: chatId,
+          action: "typing",
+        });
+        return result !== false;
+      }
+      if (typeof bot?.internal?.sendTyping === "function") {
+        const result = await bot.internal.sendTyping(chatId);
+        return result !== false;
+      }
+      return false;
+    },
+  };
+}
+
+export function createReactionWorkingIndicator(getBot: () => any) {
+  const reactions = new Map<string, string>();
+  return {
+    type: "polling",
+    presentation: "reaction",
+    async tick(context: any) {
+      const bot = getBot();
+      const chatId = safeString(context?.chatId).trim();
+      if (!chatId) return false;
+      let sent = false;
+      const messageId = safeString(context?.messageId).trim();
+      const createReaction =
+        typeof bot?.createReaction === "function"
+          ? bot.createReaction.bind(bot)
+          : typeof bot?.internal?.createReaction === "function"
+            ? bot.internal.createReaction.bind(bot.internal)
+            : null;
+      if (messageId && createReaction && context?.workingStarted !== false) {
+        const key = `${chatId}:${messageId}`;
+        if (!reactions.has(key)) {
+          await createReaction(chatId, messageId, WORKING_REACTION_EMOJI);
+          reactions.set(key, WORKING_REACTION_EMOJI);
+          sent = true;
+        }
+      }
+      return sent;
+    },
+    async end(context: any) {
+      const bot = getBot();
+      const chatId = safeString(context?.chatId).trim();
+      const messageId = safeString(context?.messageId).trim();
+      if (!chatId) return false;
+      const deleteReaction =
+        typeof bot?.deleteReaction === "function"
+          ? bot.deleteReaction.bind(bot)
+          : typeof bot?.internal?.deleteOwnReaction === "function"
+            ? bot.internal.deleteOwnReaction.bind(bot.internal)
+            : typeof bot?.internal?.deleteReaction === "function"
+              ? bot.internal.deleteReaction.bind(bot.internal)
+              : null;
+      if (!deleteReaction) return false;
+      const prefix = `${chatId}:`;
+      const entries = messageId
+        ? [
+            [
+              `${chatId}:${messageId}`,
+              reactions.get(`${chatId}:${messageId}`) || "",
+            ],
+          ]
+        : [...reactions.entries()].filter(([key]) => key.startsWith(prefix));
+      let deletedAny = false;
+      for (const [key, emoji] of entries) {
+        const targetMessageId = key.slice(prefix.length);
+        if (!targetMessageId || !emoji) {
+          reactions.delete(key);
+          continue;
+        }
+        await deleteReaction(
+          chatId,
+          targetMessageId,
+          emoji,
+          safeString(bot?.selfId).trim() || undefined,
+        );
+        reactions.delete(key);
+        deletedAny = true;
+      }
+      return deletedAny;
+    },
+  };
+}

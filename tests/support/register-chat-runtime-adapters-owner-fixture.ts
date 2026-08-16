@@ -1,6 +1,18 @@
 import { register } from "node:module";
 
-const target = "dist/core/chat-runtime/adapters.js";
+const targets = [
+  "dist/core/chat-runtime/discord.js",
+  "dist/core/chat-runtime/slack.js",
+  "dist/core/chat-runtime/lark.js",
+];
+const ownerExports: Record<string, string> = {
+  "dist/core/chat-runtime/discord.js":
+    "export { compareDiscordMessageIds as __rinOwnerCompareDiscordMessageIds, isOutboundMediaNodeType as __rinOwnerIsOutboundMediaNodeType, collectionValues as __rinOwnerCollectionValues, permissionSetHasFlag as __rinOwnerPermissionSetHasFlag, discordChannelDisplayName as __rinOwnerDiscordChannelDisplayName, findDiscordChannelById as __rinOwnerFindDiscordChannelById, resolveDiscordParentChannel as __rinOwnerResolveDiscordParentChannel };",
+  "dist/core/chat-runtime/slack.js":
+    "export { truncateSlackPlainText as __rinOwnerTruncateSlackPlainText, todoNodeItems as __rinOwnerTodoNodeItems, todoNodeTitle as __rinOwnerTodoNodeTitle, downloadToFile as __rinOwnerDownloadToFile };",
+  "dist/core/chat-runtime/lark.js":
+    "export { larkFileType as __rinOwnerLarkFileType };",
+};
 const sources: Record<string, string> = {
   "discord.js": `
     import { EventEmitter } from "node:events";
@@ -102,15 +114,16 @@ const urls = Object.fromEntries(
   ]),
 );
 const hook = `
-const target=${JSON.stringify(target)};const urls=${JSON.stringify(urls)};
+const targets=${JSON.stringify(targets)};const ownerExports=${JSON.stringify(ownerExports)};const urls=${JSON.stringify(urls)};
 export async function resolve(specifier,context,nextResolve){
- if(context.parentURL?.endsWith(target) && urls[specifier]) return {url:urls[specifier],shortCircuit:true};
+ if(targets.some((target)=>context.parentURL?.endsWith(target)) && urls[specifier]) return {url:urls[specifier],shortCircuit:true};
  return nextResolve(specifier,context);
 }
 export async function load(url,context,nextLoad){
  const loaded=await nextLoad(url,context);
- if(!url.endsWith(target)) return loaded;
- return {...loaded,source:String(loaded.source)+"\\nexport { compareDiscordMessageIds as __rinOwnerCompareDiscordMessageIds, isOutboundMediaNodeType as __rinOwnerIsOutboundMediaNodeType, larkFileType as __rinOwnerLarkFileType, truncateSlackPlainText as __rinOwnerTruncateSlackPlainText, todoNodeItems as __rinOwnerTodoNodeItems, todoNodeTitle as __rinOwnerTodoNodeTitle, collectionValues as __rinOwnerCollectionValues, permissionSetHasFlag as __rinOwnerPermissionSetHasFlag };\\n",shortCircuit:true};
+ const target=targets.find((candidate)=>url.endsWith(candidate));
+ if(!target) return loaded;
+ return {...loaded,source:String(loaded.source)+"\\n"+ownerExports[target]+"\\n",shortCircuit:true};
 }`;
 register(`data:text/javascript,${encodeURIComponent(hook)}`, import.meta.url);
 

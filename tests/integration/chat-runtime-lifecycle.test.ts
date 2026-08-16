@@ -9,7 +9,7 @@ const rootDir = path.resolve(
   "..",
 );
 const chatRuntime = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js"))
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "app.js"))
     .href
 );
 

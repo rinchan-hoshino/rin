@@ -111,13 +111,13 @@ import {
   resolveChatInputAccess,
   shouldProcessText,
 } from "./decision.js";
+import { createChatRuntimeApp } from "../chat-runtime/app.js";
 import {
-  createChatRuntimeApp,
   createChatRuntimeH,
   instantiateChatRuntimeAdapters,
   instantiateExternalChatRuntimeAdapters,
   type ChatRuntimeExternalAdapterEntry,
-} from "../chat-runtime/index.js";
+} from "../chat-runtime/registry.js";
 import {
   ensureChatRuntimeDependencies,
   listChatRuntimeAdapterEntries,

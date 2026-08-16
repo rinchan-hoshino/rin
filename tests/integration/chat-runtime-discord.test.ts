@@ -11,10 +11,22 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const adapters = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat-runtime", "adapters.js"),
-  ).href
+const adapters = Object.assign(
+  {},
+  await import(
+    pathToFileURL(
+      path.join(rootDir, "dist", "core", "chat-runtime", "discord.js"),
+    ).href
+  ),
+  await import(
+    pathToFileURL(
+      path.join(rootDir, "dist", "core", "chat-runtime", "slack.js"),
+    ).href
+  ),
+  await import(
+    pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "lark.js"))
+      .href
+  ),
 );
 const messageStore = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))

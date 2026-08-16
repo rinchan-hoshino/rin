@@ -30,9 +30,17 @@ const backgroundExtensions = await import(
     path.join(rootDir, "dist", "core", "rin-daemon", "extensions.js"),
   ).href
 );
-const chatRuntime = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js"))
-    .href
+const chatRuntime = Object.assign(
+  {},
+  await import(
+    pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "app.js"))
+      .href
+  ),
+  await import(
+    pathToFileURL(
+      path.join(rootDir, "dist", "core", "chat-runtime", "registry.js"),
+    ).href
+  ),
 );
 const todoModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-lib", "todo.js")).href

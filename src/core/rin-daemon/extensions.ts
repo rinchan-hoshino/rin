@@ -13,7 +13,7 @@ import { resolveRuntimePackageAliases } from "../rin-lib/jiti-aliases.js";
 import type {
   ChatRuntimeExternalAdapterEntry,
   ChatRuntimeExternalAdapterProvider,
-} from "../chat-runtime/index.js";
+} from "../chat-runtime/registry.js";
 import { sleep } from "../platform/process.js";
 import { safeString } from "../text-utils.js";
 import type {

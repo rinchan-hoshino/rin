@@ -11,14 +11,21 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const runtime = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js"))
-    .href
+const runtime = Object.assign(
+  {},
+  await import(
+    pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "app.js"))
+      .href
+  ),
+  await import(
+    pathToFileURL(
+      path.join(rootDir, "dist", "core", "chat-runtime", "registry.js"),
+    ).href
+  ),
 );
 const adapters = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat-runtime", "adapters.js"),
-  ).href
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "lark.js"))
+    .href
 );
 const inbox = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href

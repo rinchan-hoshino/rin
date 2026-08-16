@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import http from "node:http";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -74,14 +73,6 @@ test("chat runtime common helpers normalize and render nodes consistently", () =
     ),
     "**bold**",
   );
-  assert.match(
-    chatRuntimeCommon.renderTelegramHtmlFromNodes([
-      chatRuntimeCommon.normalizeNode("markdown", {
-        content: "**bold** [link](https://example.com)",
-      }),
-    ]),
-    /<b>bold<\/b> <a href="https:\/\/example\.com">link<\/a>/,
-  );
   assert.equal(
     chatRuntimeCommon.renderPlainTextFromNodes(
       [
@@ -131,7 +122,6 @@ test("chat runtime renderers preserve shared whitespace semantics", () => {
     chatRuntimeCommon.renderPlainTextFromNodes(nodes),
     "    root  code\n\n- parent\n  - child\n    continuation",
   );
-  assert.equal(chatRuntimeCommon.renderTelegramHtmlFromNodes(nodes), markdown);
   assert.deepEqual(
     chatRuntimeCommon.splitPlainText(`${"x".repeat(8)}\n  child`, 10),
     ["x".repeat(8), "  child"],
@@ -286,76 +276,4 @@ test("chat runtime common helper utilities share adapter concerns", async () => 
     chatRuntimeCommon.stripMentionTokens("  <@42>, hello <@42>  ", ["<@42>"]),
     "hello",
   );
-
-  const tempDir = await fs.mkdtemp(
-    path.join(rootDir, ".tmp-rin-chat-runtime-"),
-  );
-  const server = http.createServer((request, response) => {
-    assert.equal(request.headers.authorization, "Bearer demo");
-    response.writeHead(200, { "content-type": "text/plain" });
-    response.end("downloaded payload");
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  try {
-    const address = server.address();
-    const url = `http://127.0.0.1:${address.port}/demo.txt`;
-    const filePath = path.join(tempDir, "download.txt");
-    const buffer = await chatRuntimeCommon.downloadToFile(filePath, url, {
-      Authorization: "Bearer demo",
-    });
-    assert.equal(buffer.toString("utf8"), "downloaded payload");
-    assert.equal(await fs.readFile(filePath, "utf8"), "downloaded payload");
-  } finally {
-    await new Promise((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    );
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
-});
-
-test("chat runtime downloader discards failed response bodies", async () => {
-  for (const response of [
-    {
-      ok: false,
-      status: 503,
-      bodyError: "download_failed:503",
-      async arrayBuffer() {
-        throw new Error("arrayBuffer should not run");
-      },
-    },
-    {
-      ok: true,
-      status: 200,
-      bodyError: "body_read_failed",
-      async arrayBuffer() {
-        throw new Error("body_read_failed");
-      },
-    },
-  ]) {
-    let cancelled = 0;
-    const transport = {
-      async fetch() {
-        return {
-          ...response,
-          body: {
-            async cancel() {
-              cancelled += 1;
-            },
-          },
-        };
-      },
-      async close() {},
-    };
-
-    await assert.rejects(
-      chatRuntimeCommon.downloadToFile(
-        "/tmp/rin-download-should-not-exist",
-        "https://example.com/failure",
-        undefined,
-        transport,
-      ),
-      new RegExp(response.bodyError),
-    );
-    assert.equal(cancelled, 1);
-  }
 });

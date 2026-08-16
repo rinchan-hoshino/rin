@@ -90,7 +90,37 @@
       "status": "strict"
     },
     {
-      "source": "src/core/chat-runtime/adapters.ts",
+      "source": "src/core/chat-runtime/app.ts",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/chat-runtime/discord.ts",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/chat-runtime/lark.ts",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/chat-runtime/onebot.ts",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/chat-runtime/registry.ts",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/chat-runtime/slack.ts",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
+      "source": "src/core/chat-runtime/telegram.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },
@@ -106,11 +136,6 @@
     },
     {
       "source": "src/core/chat-runtime/inbound-recovery.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/chat-runtime/index.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },

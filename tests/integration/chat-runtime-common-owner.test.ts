@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
-import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -260,13 +259,12 @@ test("chat runtime utility helpers cover text, logging, and structured delivery"
     "hello [quote:m1]@Owner",
   );
   assert.match(common.renderMarkdownFromNodes(prepared.nodes), /quote:m1/);
-  assert.match(common.renderTelegramHtmlFromNodes(prepared.nodes), /hello/);
   assert.equal(common.isEditableProgressDeliveryKind(" interim "), true);
   assert.equal(common.isEditableProgressDeliveryKind("passive_notice"), true);
   assert.equal(common.isEditableProgressDeliveryKind("final"), false);
 });
 
-test("chat runtime binary and download helpers keep real I/O boundaries", async () => {
+test("chat runtime binary helpers keep real I/O boundaries", async () => {
   await withTempDir(async (directory) => {
     const local = path.join(directory, "note");
     await fs.writeFile(local, "owner data");
@@ -313,33 +311,81 @@ test("chat runtime binary and download helpers keep real I/O boundaries", async 
         }),
       /chat_media_file_missing/,
     );
-
-    const server = http.createServer((request, response) => {
-      if (request.url === "/bad") {
-        response.writeHead(503).end("no");
-        return;
-      }
-      assert.equal(request.headers.authorization, "Bearer owner");
-      response.writeHead(200).end("downloaded");
-    });
-    await new Promise<void>((resolve) =>
-      server.listen(0, "127.0.0.1", resolve),
-    );
-    try {
-      const address = server.address();
-      assert.ok(address && typeof address === "object");
-      const base = `http://127.0.0.1:${address.port}`;
-      const target = path.join(directory, "downloaded.txt");
-      const body = await common.downloadToFile(target, `${base}/ok`, {
-        Authorization: "Bearer owner",
-      });
-      assert.equal(body.toString(), "downloaded");
-      await assert.rejects(
-        () => common.downloadToFile(target, `${base}/bad`),
-        /download_failed:503/,
-      );
-    } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
   });
+});
+
+test("shared adapter policies normalize scopes, media, and provider rejections", () => {
+  assert.equal(common.sanitizeCacheScope(" a/b:c ", "fallback"), "a_b_c");
+  assert.equal(common.sanitizeCacheScope("", "fallback"), "fallback");
+  for (const type of ["image", "file", "video", "audio", "sticker"]) {
+    assert.equal(common.isOutboundMediaNodeType(type), true);
+  }
+  assert.equal(common.isOutboundMediaNodeType("text"), false);
+
+  const error = new Error("provider rejected");
+  assert.equal(
+    common.markProviderRejection(error, () => false),
+    error,
+  );
+  const marked = common.markProviderRejection(error, () => true) as Error & {
+    chatOutboxConfirmedNotDelivered?: boolean;
+  };
+  assert.equal(marked.chatOutboxConfirmedNotDelivered, true);
+});
+
+test("shared typing and reaction indicators keep provider effects explicit", async () => {
+  const typingCalls: unknown[] = [];
+  let bot: any = {
+    internal: {
+      sendChatAction: async (payload: unknown) => {
+        typingCalls.push(payload);
+        return true;
+      },
+    },
+  };
+  const typing = common.createTypingWorkingIndicator(() => bot);
+  assert.equal(await typing.tick({ chatId: "" }), false);
+  assert.equal(await typing.tick({ chatId: "room" }), true);
+  assert.deepEqual(typingCalls, [{ chat_id: "room", action: "typing" }]);
+  bot = { internal: { sendTyping: async () => false } };
+  assert.equal(await typing.tick({ chatId: "room" }), false);
+  bot = {};
+  assert.equal(await typing.tick({ chatId: "room" }), false);
+
+  const created: unknown[][] = [];
+  const deleted: unknown[][] = [];
+  bot = {
+    selfId: "bot",
+    createReaction: async (...args: unknown[]) => created.push(args),
+    deleteReaction: async (...args: unknown[]) => deleted.push(args),
+  };
+  const reaction = common.createReactionWorkingIndicator(() => bot);
+  assert.equal(await reaction.tick({ chatId: "" }), false);
+  assert.equal(
+    await reaction.tick({
+      chatId: "room",
+      messageId: "m1",
+      workingStarted: false,
+    }),
+    false,
+  );
+  assert.equal(await reaction.tick({ chatId: "room", messageId: "m1" }), true);
+  assert.equal(await reaction.tick({ chatId: "room", messageId: "m1" }), false);
+  assert.equal(await reaction.end({ chatId: "room", messageId: "m1" }), true);
+  assert.deepEqual(created, [["room", "m1", "🤔"]]);
+  assert.deepEqual(deleted, [["room", "m1", "🤔", "bot"]]);
+  assert.equal(await reaction.end({ chatId: "room", messageId: "m1" }), false);
+
+  bot = {
+    internal: {
+      createReaction: async (...args: unknown[]) => created.push(args),
+      deleteOwnReaction: async (...args: unknown[]) => deleted.push(args),
+    },
+  };
+  assert.equal(await reaction.tick({ chatId: "room", messageId: "m2" }), true);
+  assert.equal(await reaction.end({ chatId: "room" }), true);
+
+  bot = {};
+  assert.equal(await reaction.tick({ chatId: "room", messageId: "m3" }), false);
+  assert.equal(await reaction.end({ chatId: "room" }), false);
 });

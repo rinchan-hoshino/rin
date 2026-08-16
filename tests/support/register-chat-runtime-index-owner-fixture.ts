@@ -1,6 +1,15 @@
 import { register } from "node:module";
 
-const target = "dist/core/chat-runtime/index.js";
+const targets = [
+  "dist/core/chat-runtime/telegram.js",
+  "dist/core/chat-runtime/onebot.js",
+];
+const ownerExports: Record<string, string> = {
+  "dist/core/chat-runtime/telegram.js":
+    "export { renderTelegramHtmlFromNodes as __rinOwnerRenderTelegramHtmlFromNodes, isTelegramMediaNodeType as __rinOwnerIsTelegramMediaNodeType, telegramMediaMethod as __rinOwnerTelegramMediaMethod, decodeTelegramThreadId as __rinOwnerDecodeTelegramThreadId, splitTelegramChatThread as __rinOwnerSplitTelegramChatThread, telegramThreadPayload as __rinOwnerTelegramThreadPayload, isTelegramPhotoDimensionError as __rinOwnerIsTelegramPhotoDimensionError, isTelegramProviderRejection as __rinOwnerIsTelegramProviderRejection };",
+  "dist/core/chat-runtime/onebot.js":
+    "export { oneBotNodesContainMedia as __rinOwnerOneBotNodesContainMedia };",
+};
 const sources: Record<string, string> = {
   grammy: `
     export class InputFile {
@@ -72,10 +81,16 @@ const urls = Object.fromEntries(
   ]),
 );
 const hook = `
-const target=${JSON.stringify(target)};const urls=${JSON.stringify(urls)};
+const targets=${JSON.stringify(targets)};const ownerExports=${JSON.stringify(ownerExports)};const urls=${JSON.stringify(urls)};
 export async function resolve(specifier,context,nextResolve){
- if(context.parentURL?.endsWith(target) && urls[specifier]) return {url:urls[specifier],shortCircuit:true};
+ if(targets.some((target)=>context.parentURL?.endsWith(target)) && urls[specifier]) return {url:urls[specifier],shortCircuit:true};
  return nextResolve(specifier,context);
+}
+export async function load(url,context,nextLoad){
+ const loaded=await nextLoad(url,context);
+ const target=targets.find((candidate)=>url.endsWith(candidate));
+ if(!target || !ownerExports[target]) return loaded;
+ return {...loaded,source:String(loaded.source)+"\\n"+ownerExports[target]+"\\n",shortCircuit:true};
 }`;
 register(`data:text/javascript,${encodeURIComponent(hook)}`, import.meta.url);
 

@@ -88,11 +88,75 @@
       "tests": ["tests/integration/chat-bridge-runtime-owner.test.ts"]
     },
     {
-      "source": "src/core/chat-runtime/adapters.ts",
+      "source": "src/core/chat-runtime/app.ts",
       "suite": "integration",
       "tests": [
-        "tests/integration/chat-runtime-adapters-owner.test.ts",
+        "tests/integration/chat-runtime-app-owner.test.ts",
+        "tests/integration/chat-runtime-registry-owner.test.ts",
+        "tests/integration/chat-runtime-ingress.test.ts",
+        "tests/integration/chat-runtime-lifecycle.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/chat-runtime/discord.ts",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-runtime-discord-owner.test.ts",
+        "tests/integration/chat-runtime-platform-boundaries.test.ts",
         "tests/integration/chat-runtime-discord.test.ts",
+        "tests/integration/chat-runtime-ingress.test.ts",
+        "tests/integration/chat-runtime-send.test.ts",
+        "tests/integration/chat-runtime-standard-recovery.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/chat-runtime/lark.ts",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-runtime-lark-owner.test.ts",
+        "tests/integration/chat-runtime-platform-boundaries.test.ts",
+        "tests/integration/chat-runtime-discord.test.ts",
+        "tests/integration/chat-runtime-ingress.test.ts",
+        "tests/integration/chat-runtime-send.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/chat-runtime/onebot.ts",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-runtime-onebot-owner.test.ts",
+        "tests/integration/chat-runtime-platform-fallbacks.test.ts",
+        "tests/integration/chat-runtime-ingress.test.ts",
+        "tests/integration/chat-runtime-send.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/chat-runtime/registry.ts",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-runtime-registry-owner.test.ts",
+        "tests/integration/chat-runtime-ingress.test.ts",
+        "tests/integration/chat-runtime-send.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/chat-runtime/slack.ts",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-runtime-slack-owner.test.ts",
+        "tests/integration/chat-runtime-platform-boundaries.test.ts",
+        "tests/integration/chat-runtime-discord.test.ts",
+        "tests/integration/chat-runtime-ingress.test.ts",
+        "tests/integration/chat-runtime-send.test.ts"
+      ]
+    },
+    {
+      "source": "src/core/chat-runtime/telegram.ts",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/chat-runtime-telegram-owner.test.ts",
+        "tests/integration/chat-runtime-platform-fallbacks.test.ts",
+        "tests/integration/chat-runtime-ingress.test.ts",
         "tests/integration/chat-runtime-send.test.ts"
       ]
     },
@@ -113,16 +177,6 @@
       "source": "src/core/chat-runtime/inbound-recovery.ts",
       "suite": "integration",
       "tests": ["tests/integration/inbound-recovery-owner.test.ts"]
-    },
-    {
-      "source": "src/core/chat-runtime/index.ts",
-      "suite": "integration",
-      "tests": [
-        "tests/integration/chat-runtime-index-owner.test.ts",
-        "tests/integration/chat-runtime-ingress.test.ts",
-        "tests/integration/chat-runtime-send.test.ts",
-        "tests/integration/chat-runtime-lifecycle.test.ts"
-      ]
     },
     {
       "source": "src/core/chat/archive-prototype.ts",

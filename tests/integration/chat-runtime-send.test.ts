@@ -10,9 +10,22 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const runtime = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "index.js"))
-    .href
+const runtime = Object.assign(
+  {},
+  await import(
+    pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "app.js"))
+      .href
+  ),
+  await import(
+    pathToFileURL(
+      path.join(rootDir, "dist", "core", "chat-runtime", "registry.js"),
+    ).href
+  ),
+  await import(
+    pathToFileURL(
+      path.join(rootDir, "dist", "core", "chat-runtime", "onebot.js"),
+    ).href
+  ),
 );
 const { EditableTextMessageGroup } = await import(
   pathToFileURL(
