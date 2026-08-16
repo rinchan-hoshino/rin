@@ -111,6 +111,10 @@
       "source": "src/core/rin-daemon/rpc-command-dispatcher.ts"
     },
     {
+      "test": "tests/unit/rpc-command-handler-context.test.ts",
+      "source": "src/core/rin-daemon/rpc-command-handler-context.ts"
+    },
+    {
       "test": "tests/unit/running-workers.test.ts",
       "source": "src/core/rin-daemon/running-workers.ts"
     },

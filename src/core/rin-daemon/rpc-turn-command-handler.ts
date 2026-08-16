@@ -1,14 +1,362 @@
-import type {
-  RpcCommandRequest,
-  RpcDone,
-  RpcRun,
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { extractPiContinuableToolCallParts } from "../pi/tool-continuation.js";
+import { resumePiSessionTurn } from "../pi/session-host.js";
+import type { ProcessTermination } from "../platform/process-lifetime.js";
+import { normalizeFrontendIdentity } from "../rin-lib/frontend-identity.js";
+import { createInterruptedToolResultMessage } from "../rin-lib/interruption.js";
+import { safeString } from "../text-utils.js";
+import { captureTurnScope, type RinTurnScope } from "../session/turn-scope.js";
+import type { RinTurnTerminalOutcome } from "../session/turn-completion.js";
+import {
+  rpcDone as done,
+  rpcRun as run,
+  type RpcCommandRequest,
 } from "./rpc-command-handler-context.js";
+import {
+  RpcTurnCoordinator,
+  type RpcTurnInterrupt,
+} from "./rpc-turn-coordinator.js";
+import { getSessionState } from "./worker-helpers.js";
+import { getSessionEntries } from "./rpc-session-command-handler.js";
 
-type NativeInputOutcome =
+export function stableJson(value: any) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+}
+
+export function rpcRequestTag(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+export type NativeInputOutcome =
   | "terminalOwner"
   | "nonterminal"
   | "rejected"
   | "indeterminate";
+
+export function nativeInputOutcome(
+  session: any,
+  outcome: NativeInputOutcome | "rejoined",
+  requestTag: unknown,
+  options: {
+    turnActive: boolean;
+    originalOutcome?: NativeInputOutcome;
+  },
+) {
+  const normalizedRequestTag = rpcRequestTag(requestTag);
+  return {
+    outcome,
+    ...(options.originalOutcome
+      ? { originalOutcome: options.originalOutcome }
+      : {}),
+    ...(normalizedRequestTag.length > 0
+      ? { requestTag: normalizedRequestTag }
+      : {}),
+    sessionFile: session?.sessionFile,
+    sessionId: session?.sessionId,
+    turnActive: options.turnActive,
+    isStreaming: Boolean(session?.isStreaming),
+  };
+}
+
+export function persistedNativeIdentityOutcome(
+  session: any,
+  requestTag: string,
+): "terminalOwner" | "nonterminal" | undefined {
+  if (!requestTag) return undefined;
+  const entries = getSessionEntries(session);
+  const userEntryIndexes = new Map<string, number[]>();
+  entries.forEach((entry: any, index: number) => {
+    if (entry?.type !== "message" || entry?.message?.role !== "user") return;
+    const entryId = safeString(entry.id).trim();
+    if (!entryId) return;
+    const indexes = userEntryIndexes.get(entryId) || [];
+    indexes.push(index);
+    userEntryIndexes.set(entryId, indexes);
+  });
+  const identities = entries
+    .map((entry: any, index: number) => ({ entry, index }))
+    .filter(
+      ({ entry }) =>
+        entry?.type === "custom" &&
+        entry?.customType === "rin_request_identity" &&
+        safeString(entry?.data?.requestId).trim() === requestTag,
+    );
+  if (identities.length !== 1) return undefined;
+  const identity = identities[0];
+  const messageEntryId = safeString(
+    identity.entry?.data?.messageEntryId,
+  ).trim();
+  const messageIndexes = userEntryIndexes.get(messageEntryId) || [];
+  if (messageIndexes.length !== 1 || messageIndexes[0] >= identity.index) {
+    return undefined;
+  }
+  const observedRole = safeString(identity.entry?.data?.observedRole).trim();
+  return observedRole === "terminalOwner" || observedRole === "nonterminal"
+    ? observedRole
+    : undefined;
+}
+
+export function persistedNativeRequestOutcome(
+  session: any,
+  requestTag: string,
+): NativeInputOutcome | undefined {
+  const entries = getSessionEntries(session);
+  const identityEntries = entries.filter(
+    (entry: any) =>
+      entry?.type === "custom" &&
+      entry?.customType === "rin_request_identity" &&
+      safeString(entry?.data?.requestId).trim() === requestTag,
+  );
+  const identityOutcome = persistedNativeIdentityOutcome(session, requestTag);
+  const outcomeEntries = entries.filter(
+    (entry: any) =>
+      entry?.type === "custom" &&
+      entry?.customType === "rin_request_outcome" &&
+      safeString(entry?.data?.requestId).trim() === requestTag,
+  );
+  if (identityEntries.length && outcomeEntries.length) return undefined;
+  if (identityEntries.length) return identityOutcome;
+  if (outcomeEntries.length !== 1) return undefined;
+  const outcome = safeString(outcomeEntries[0]?.data?.outcome).trim();
+  return outcome === "rejected" || outcome === "indeterminate"
+    ? outcome
+    : undefined;
+}
+
+export function nativeRequestReceiptState(
+  session: any,
+  requestTag: string,
+): "missing" | "valid" | "conflict" {
+  const receipts = getSessionEntries(session).filter(
+    (entry: any) =>
+      entry?.type === "custom" &&
+      (entry?.customType === "rin_request_identity" ||
+        entry?.customType === "rin_request_outcome") &&
+      safeString(entry?.data?.requestId).trim() === requestTag,
+  );
+  if (!receipts.length) return "missing";
+  return persistedNativeRequestOutcome(session, requestTag)
+    ? "valid"
+    : "conflict";
+}
+
+export function persistNativeRequestOutcome(
+  session: any,
+  requestTag: string,
+  outcome: "rejected" | "indeterminate",
+) {
+  if (!requestTag) return true;
+  if (persistedNativeRequestOutcome(session, requestTag) === outcome) {
+    return true;
+  }
+  session?.sessionManager?.appendCustomEntry?.("rin_request_outcome", {
+    requestId: requestTag,
+    outcome,
+  });
+  return persistedNativeRequestOutcome(session, requestTag) === outcome;
+}
+
+export function hasPersistedUserRequestTag(session: any, requestTag: string) {
+  return Boolean(
+    requestTag && persistedNativeIdentityOutcome(session, requestTag),
+  );
+}
+
+export async function waitForPersistedUserRequestTag(
+  session: any,
+  requestTag: string,
+) {
+  if (hasPersistedUserRequestTag(session, requestTag)) return;
+  await new Promise<void>((resolve, reject) => {
+    const check = () => {
+      const receiptState = nativeRequestReceiptState(session, requestTag);
+      if (receiptState === "missing") return;
+      clearInterval(pollTimer);
+      if (receiptState === "conflict") {
+        reject(new Error("rin_prompt_outcome_indeterminate"));
+        return;
+      }
+      resolve();
+    };
+    const pollTimer = setInterval(check, 10);
+    pollTimer.unref();
+    check();
+  });
+}
+
+export function ensureInterruptedAssistantPersisted(
+  session: any,
+  message: any,
+) {
+  const manager = session?.sessionManager;
+  if (typeof manager?.appendMessage !== "function") return;
+  const serialized = stableJson(message);
+  const persisted = getSessionEntries(session).some(
+    (entry: any) =>
+      entry?.type === "message" && stableJson(entry.message) === serialized,
+  );
+  if (!persisted) manager.appendMessage(message);
+}
+
+export function appendInterruptedToolResults(
+  session: any,
+  options: { persistToSession?: boolean } = {},
+) {
+  const messages = Array.isArray(session?.agent?.state?.messages)
+    ? session.agent.state.messages
+    : [];
+  let assistantIndex = messages.length - 1;
+  while (
+    assistantIndex >= 0 &&
+    messages[assistantIndex]?.role === "toolResult"
+  ) {
+    assistantIndex -= 1;
+  }
+  if (assistantIndex < 0) return false;
+  const toolCalls = extractPiContinuableToolCallParts(messages[assistantIndex]);
+  if (!toolCalls.length) return false;
+  const completedToolCallIds = new Set(
+    messages
+      .slice(assistantIndex + 1)
+      .filter((message: any) => message?.role === "toolResult")
+      .map((message: any) => safeString(message?.toolCallId).trim())
+      .filter(Boolean),
+  );
+  const interruptedToolCalls = toolCalls.filter(
+    (toolCall) => !completedToolCallIds.has(safeString(toolCall?.id).trim()),
+  );
+  if (!interruptedToolCalls.length) return false;
+
+  const persistToSession = options.persistToSession !== false;
+  if (persistToSession) {
+    ensureInterruptedAssistantPersisted(session, messages[assistantIndex]);
+  }
+
+  for (const toolCall of interruptedToolCalls) {
+    const message = createInterruptedToolResultMessage(toolCall);
+    session.agent.state.messages.push(message);
+    if (persistToSession) session.sessionManager.appendMessage(message);
+  }
+  return true;
+}
+
+export function isAssistantFailureMessage(message: any) {
+  if (safeString(message?.role).trim() !== "assistant") return false;
+  const stopReason = safeString(message?.stopReason).trim();
+  return stopReason === "error" || stopReason === "aborted";
+}
+
+export function discardInterruptedAssistantFailures(session: any) {
+  const messages = Array.isArray(session?.agent?.state?.messages)
+    ? session.agent.state.messages
+    : [];
+  while (isAssistantFailureMessage(messages.at(-1))) messages.pop();
+}
+
+export async function resumeInterruptedTurn(
+  session: any,
+  invocationContext?: {
+    source?: unknown;
+    frontendIdentity?: unknown;
+    promptContext?: unknown;
+  },
+) {
+  const messages = Array.isArray(session?.agent?.state?.messages)
+    ? session.agent.state.messages
+    : [];
+  if (!messages.length) return;
+  if (isAssistantFailureMessage(messages.at(-1))) {
+    // A persisted failure without a daemon terminal is not a settled result.
+    // Pi owns retry policy for the new continuation; Rin only restores a
+    // provider-valid context and never replays the accepted user input.
+    discardInterruptedAssistantFailures(session);
+    await resumePiSessionTurn(session, invocationContext);
+    return;
+  }
+
+  const appendedInterruption = appendInterruptedToolResults(session);
+  const lastMessage = session.agent.state.messages.at(-1);
+  if (!appendedInterruption && lastMessage?.role === "assistant") {
+    return {
+      finalText: safeString(session.getLastAssistantText?.()),
+      result: { messages: [lastMessage] },
+    };
+  }
+  await resumePiSessionTurn(session);
+}
+
+export async function abortInterruptedTurnAfterExecutionLoss(session: any) {
+  const messages = Array.isArray(session?.agent?.state?.messages)
+    ? session.agent.state.messages
+    : [];
+  if (!messages.length) {
+    await session.abort();
+    return;
+  }
+  const appendedInterruption = appendInterruptedToolResults(session);
+  const lastMessage = session.agent.state.messages.at(-1);
+  if (!appendedInterruption && lastMessage?.role === "assistant") {
+    return {
+      finalText: safeString(session.getLastAssistantText?.()),
+      result: { messages: [lastMessage] },
+    };
+  }
+  const continuation = resumePiSessionTurn(session);
+  await session.abort();
+  await continuation;
+}
+
+export function captureTurnScopeBeforeUserMessage(
+  session: any,
+  userMessage: any,
+  previousScope: RinTurnScope,
+): RinTurnScope {
+  const currentScope = captureTurnScope(session);
+  if (currentScope.sessionManager !== previousScope.sessionManager) {
+    return previousScope;
+  }
+  const branch = currentScope.sessionManager.getBranch();
+  const previousBaselineIndex = previousScope.baselineLeafId
+    ? branch.findIndex(
+        (entry: any) => entry?.id === previousScope.baselineLeafId,
+      )
+    : -1;
+  if (previousScope.baselineLeafId && previousBaselineIndex < 0) {
+    return previousScope;
+  }
+  const requestTag = safeString(userMessage?.requestTag).trim();
+  let userEntryIndex = -1;
+  for (
+    let index = branch.length - 1;
+    index > previousBaselineIndex;
+    index -= 1
+  ) {
+    const entry = branch[index];
+    if (entry?.type !== "message" || entry.message?.role !== "user") continue;
+    if (
+      entry.message === userMessage ||
+      (requestTag &&
+        safeString(entry.message?.requestTag).trim() === requestTag)
+    ) {
+      userEntryIndex = index;
+      break;
+    }
+  }
+  if (userEntryIndex < 0) return currentScope;
+  const userEntry = branch[userEntryIndex];
+  const baselineLeafId =
+    safeString(userEntry?.parentId).trim() ||
+    safeString(branch[userEntryIndex - 1]?.id).trim() ||
+    null;
+  return {
+    sessionManager: currentScope.sessionManager,
+    baselineLeafId,
+  };
+}
 
 type NativeInputSubmission = {
   requestTag: string;
@@ -16,66 +364,56 @@ type NativeInputSubmission = {
   promptTask?: Promise<unknown>;
   promptTaskReady: Promise<void>;
   resolvePromptTaskReady: () => void;
-  turnScope: any;
-  admissionToken?: any;
+  turnScope: RinTurnScope;
+  admissionToken?: ReturnType<
+    RpcTurnCoordinator<RinTurnTerminalOutcome>["admit"]
+  >;
   outcome?: NativeInputOutcome;
   resolveObserved: (outcome: NativeInputOutcome) => void;
   observed: Promise<NativeInputOutcome>;
 };
 
 export type RpcTurnCommandContext = {
-  getSession: () => any;
-  rpcRequestTag: (...args: any[]) => any;
-  persistedNativeRequestOutcome: (...args: any[]) => any;
-  persistNativeRequestOutcome: (...args: any[]) => any;
-  nativeRequestReceiptState: (...args: any[]) => any;
-  nativeInputOutcome: (...args: any[]) => any;
-  turnCoordinator: any;
-  waitForPersistedUserRequestTag: (...args: any[]) => any;
+  getSession: () => AgentSession;
+  turnCoordinator: RpcTurnCoordinator<RinTurnTerminalOutcome>;
   turnState: {
-    pendingNativeInputSubmission?: any;
+    pendingNativeInputSubmission?: NativeInputSubmission;
     nativeInputAdmissionTail: Promise<void>;
     gracefulSessionShutdown: boolean;
   };
-  captureTurnScope: (...args: any[]) => any;
-  normalizeFrontendIdentity: (...args: any[]) => any;
-  observeNativeInput: (...args: any[]) => any;
-  startInterruptTurnTask: (...args: any[]) => any;
-  resumeInterruptedTurn: (...args: any[]) => any;
-  startTurnTask: (...args: any[]) => any;
-  abortInterruptedTurnAfterExecutionLoss: (...args: any[]) => any;
-  output: (...args: any[]) => any;
-  terminateProcess: (...args: any[]) => any;
-  getSessionState: (...args: any[]) => any;
-  runtime: any;
-  done: RpcDone;
-  run: RpcRun;
+  observeNativeInput: (
+    submission: NativeInputSubmission,
+    outcome: NativeInputOutcome,
+  ) => void;
+  startInterruptTurnTask: (
+    requestTag: string,
+    task: () => Promise<unknown>,
+  ) => Promise<unknown>;
+  startTurnTask: (
+    requestTag: string,
+    task: () => Promise<unknown>,
+    options?: {
+      forceTurnEvents?: boolean;
+      interrupt?: RpcTurnInterrupt;
+      turnScope?: RinTurnScope;
+    },
+  ) => void;
+  output: (value: unknown) => void;
+  terminateProcess: ProcessTermination;
+  runtime: { dispose: () => void | Promise<void> };
 };
 
 export function createRpcTurnCommandHandlers(context: RpcTurnCommandContext) {
   const {
     getSession,
-    rpcRequestTag,
-    persistedNativeRequestOutcome,
-    persistNativeRequestOutcome,
-    nativeRequestReceiptState,
-    nativeInputOutcome,
     turnCoordinator,
-    waitForPersistedUserRequestTag,
     turnState,
-    captureTurnScope,
-    normalizeFrontendIdentity,
     observeNativeInput,
     startInterruptTurnTask,
-    resumeInterruptedTurn,
     startTurnTask,
-    abortInterruptedTurnAfterExecutionLoss,
     output,
     terminateProcess,
-    getSessionState,
     runtime,
-    done,
-    run,
   } = context;
   return {
     async prompt({ command, id, type }: RpcCommandRequest) {
@@ -250,7 +588,10 @@ export function createRpcTurnCommandHandlers(context: RpcTurnCommandContext) {
         let promptTask: Promise<unknown> | undefined;
         try {
           turnState.pendingNativeInputSubmission = submission;
-          promptTask = session.prompt(command.message, promptOptions);
+          promptTask = session.prompt(
+            command.message as Parameters<AgentSession["prompt"]>[0],
+            promptOptions,
+          );
           submission.promptTask = promptTask;
           submission.resolvePromptTaskReady();
           const firstResult = await Promise.race([
@@ -306,7 +647,11 @@ export function createRpcTurnCommandHandlers(context: RpcTurnCommandContext) {
         const requestTag = rpcRequestTag(command.requestTag);
         startInterruptTurnTask(
           requestTag,
-          async () => await resumeInterruptedTurn(session, command),
+          async () =>
+            await resumeInterruptedTurn(
+              session,
+              command as Parameters<typeof resumeInterruptedTurn>[1],
+            ),
         );
         return done(id, type, { resumed: true, requestTag });
       }
@@ -379,7 +724,11 @@ export function createRpcTurnCommandHandlers(context: RpcTurnCommandContext) {
             command.frontendIdentity,
           );
           if (frontendIdentity && session.sessionManager) {
-            session.sessionManager.__rinFrontend = frontendIdentity;
+            const manager =
+              session.sessionManager as typeof session.sessionManager & {
+                __rinFrontend?: ReturnType<typeof normalizeFrontendIdentity>;
+              };
+            manager.__rinFrontend = frontendIdentity;
           }
           turnCoordinator.cancelActiveTurn();
           try {
@@ -453,7 +802,10 @@ export function createRpcTurnCommandHandlers(context: RpcTurnCommandContext) {
         throw new Error("rpc_turn_already_active");
       }
       startTurnTask(rpcRequestTag(command.requestTag), async () =>
-        session.sendUserMessage(command.content, command.options),
+        session.sendUserMessage(
+          command.content as Parameters<AgentSession["sendUserMessage"]>[0],
+          command.options as Parameters<AgentSession["sendUserMessage"]>[1],
+        ),
       );
       return done(id, type, { sent: true });
     },

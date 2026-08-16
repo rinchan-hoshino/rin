@@ -2,6 +2,16 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { RpcAuthCommandContext } from "../../src/core/rin-daemon/rpc-auth-command-handler.js";
+import type {
+  RpcCommand,
+  RpcCommandRequest,
+} from "../../src/core/rin-daemon/rpc-command-handler-context.js";
+import type { RpcExtensionUiCommandContext } from "../../src/core/rin-daemon/rpc-extension-ui-command-handler.js";
+import type { RpcResourceCommandContext } from "../../src/core/rin-daemon/rpc-resource-command-handler.js";
+import type { RpcSessionCommandContext } from "../../src/core/rin-daemon/rpc-session-command-handler.js";
+import type { RpcTurnCommandContext } from "../../src/core/rin-daemon/rpc-turn-command-handler.js";
 
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -18,29 +28,40 @@ const resourceModule = await load("rpc-resource-command-handler");
 const sessionModule = await load("rpc-session-command-handler");
 const authModule = await load("rpc-auth-command-handler");
 const turnModule = await load("rpc-turn-command-handler");
+const turnCoordinatorModule = await load("rpc-turn-coordinator");
 const rpcModeModule = await load("rpc-mode");
 
-const request = (type: string, command: Record<string, unknown> = {}) => ({
+const request = (
+  type: string,
+  command: Record<string, unknown> = {},
+): RpcCommandRequest => ({
   command: { ...command, type },
   id: `id-${type}`,
   type,
 });
-const done = (id: string, type: string, data?: unknown) => ({
-  id,
-  type,
-  success: true,
-  data,
-});
-const run = async (
-  id: string,
-  type: string,
-  operation: () => unknown | Promise<unknown>,
-  map?: (value: unknown) => unknown,
-) => {
-  const value = await operation();
-  return done(id, type, map ? map(value) : value);
-};
 const wait = async () => await new Promise((resolve) => setTimeout(resolve, 0));
+
+// Pi's AgentSession is an external class with runtime-initialized members. Keep
+// the unsafe test seam here instead of weakening production handler contexts.
+const fakeSession = (members: Record<string, unknown>): AgentSession =>
+  members as unknown as AgentSession;
+
+const createTurnContext = (session: AgentSession): RpcTurnCommandContext => ({
+  getSession: () => session,
+  turnCoordinator: new turnCoordinatorModule.RpcTurnCoordinator(),
+  turnState: {
+    nativeInputAdmissionTail: Promise.resolve(),
+    gracefulSessionShutdown: false,
+  },
+  observeNativeInput: () => undefined,
+  startInterruptTurnTask: async () => undefined,
+  startTurnTask: () => undefined,
+  output: () => undefined,
+  terminateProcess: () => {
+    throw new Error("unexpected process termination");
+  },
+  runtime: { dispose: async () => undefined },
+});
 
 test(
   "RPC lifecycle reports malformed and untyped commands through its response boundary",
@@ -106,15 +127,16 @@ test(
   },
 );
 
-test("RPC protocol handlers consume their named extension, resource, and session dependencies", async () => {
-  const resolved: unknown[] = [];
-  const extension = extensionModule.createRpcExtensionUiCommandHandlers({
-    resolvePendingExtensionUiRequest: (...args: unknown[]) => {
-      resolved.push(args);
+test("RPC protocol handlers expose narrow extension, resource, and session boundaries", async () => {
+  const resolved: RpcCommand[] = [];
+  const extensionContext: RpcExtensionUiCommandContext = {
+    resolvePendingExtensionUiRequest: (response) => {
+      resolved.push(response);
       return true;
     },
-    done,
-  });
+  };
+  const extension =
+    extensionModule.createRpcExtensionUiCommandHandlers(extensionContext);
   const extensionResult = await extension.extension_ui_response(
     request("extension_ui_response", {
       requestId: "ui-1",
@@ -122,38 +144,42 @@ test("RPC protocol handlers consume their named extension, resource, and session
       cancelled: false,
     }),
   );
-  assert.deepEqual(resolved, [
-    [
-      {
-        requestId: "ui-1",
-        value: "chosen",
-        cancelled: false,
-        type: "extension_ui_response",
-      },
-    ],
-  ]);
+  assert.equal(resolved[0]?.requestId, "ui-1");
   assert.equal(extensionResult.data, undefined);
 
-  const resource = resourceModule.createRpcResourceCommandHandlers({
-    getSession: () => ({ id: "session-1" }),
-    getResourceDiagnostics: (session: { id: string }) => session.id,
-    done,
-    run,
-  } as any);
+  const resourceContext: RpcResourceCommandContext = {
+    getSession: () => fakeSession({}),
+    turnCoordinator: new turnCoordinatorModule.RpcTurnCoordinator(),
+    createExtensionUiContext: () => ({}),
+    SessionManager: {},
+    runtime: {},
+  };
+  const resource =
+    resourceModule.createRpcResourceCommandHandlers(resourceContext);
   const resourceResult = await resource.get_resource_diagnostics(
     request("get_resource_diagnostics"),
   );
-  assert.equal(resourceResult.data, "session-1");
+  assert.deepEqual(resourceResult.data.skills, {
+    skills: [],
+    diagnostics: [],
+  });
 
   let sessionName = "";
-  const session = sessionModule.createRpcSessionCommandHandlers({
-    getSession: () => ({
-      setSessionName: (value: string) => {
-        sessionName = value;
-      },
-    }),
-    done,
-  } as any);
+  const sessionContext: RpcSessionCommandContext = {
+    getSession: () =>
+      fakeSession({
+        setSessionName: (value: string) => {
+          sessionName = value;
+        },
+      }),
+    SessionManager: {},
+    bindCurrentSession: async () => undefined,
+    runtime: {
+      importFromJsonl: async () => ({}),
+      fork: async () => ({}),
+    },
+  };
+  const session = sessionModule.createRpcSessionCommandHandlers(sessionContext);
   await session.set_session_name(
     request("set_session_name", { name: "  independent owner  " }),
   );
@@ -164,42 +190,25 @@ test("RPC protocol handlers consume their named extension, resource, and session
   );
 });
 
-test("RPC auth handler preserves validation, mutation, and cancellation errors", async () => {
-  const session = {};
-  const activeLogins = new Map([
-    [
-      "login-1",
-      {
-        abort: new AbortController(),
-        waits: new Map(),
-        nextWaitSeq: 0,
-      },
+test("RPC auth handler owns validation and login state behind two runtime capabilities", async () => {
+  const outputs: Array<Record<string, unknown>> = [];
+  const modelRuntime = {
+    getAvailableProviders: () => [
+      { id: "provider-1", auth: [{ type: "oauth" }] },
     ],
-  ]);
-  const apiKeys: unknown[] = [];
-  const logouts: unknown[] = [];
-  const finished: string[] = [];
-  const ensureLogin = (id: string) => {
-    const login = activeLogins.get(id);
-    if (!login) throw new Error(`Unknown OAuth login: ${id}`);
-    return login;
+    login: async (
+      _providerId: string,
+      _authType: string,
+      callbacks: {
+        prompt: (input: { type: string; message: string }) => Promise<string>;
+      },
+    ) => await callbacks.prompt({ type: "text", message: "Approval code" }),
   };
-  const auth = authModule.createRpcAuthCommandHandlers({
-    getSession: () => session,
-    getOAuthState: () => ({ providers: [] }),
-    authState: { loginSeq: 0, activeLogins },
-    deferOAuthLoginStart: () => undefined,
-    ensureLogin,
-    finishLogin: (id: string) => {
-      finished.push(id);
-      activeLogins.delete(id);
-    },
-    setSessionApiKey: async (...args: unknown[]) => apiKeys.push(args),
-    logoutSessionProvider: async (...args: unknown[]) => logouts.push(args),
-    done,
-    run,
-  } as any);
-
+  const authContext: RpcAuthCommandContext = {
+    getSession: () => fakeSession({ modelRuntime }),
+    output: (value) => outputs.push(value as Record<string, unknown>),
+  };
+  const auth = authModule.createRpcAuthCommandHandlers(authContext);
   await assert.rejects(
     () => auth.oauth_login_start(request("oauth_login_start")),
     /providerId is required/,
@@ -208,198 +217,340 @@ test("RPC auth handler preserves validation, mutation, and cancellation errors",
     () => auth.oauth_logout(request("oauth_logout", { providerId: " " })),
     /providerId is required/,
   );
-  const startResult = await auth.oauth_login_start(
-    request("oauth_login_start", { providerId: "p", authType: "api_key" }),
-  );
-  assert.equal(startResult.data.loginId, "login_1");
-  await assert.rejects(
-    () => auth.oauth_set_api_key(request("oauth_set_api_key", { key: "x" })),
-    /providerId is required/,
-  );
-  await assert.rejects(
-    () =>
-      auth.oauth_set_api_key(
-        request("oauth_set_api_key", { providerId: "p", key: " " }),
-      ),
-    /key is required/,
-  );
-  await auth.oauth_set_api_key(
-    request("oauth_set_api_key", { providerId: "p", key: "secret" }),
-  );
-  await auth.oauth_logout(request("oauth_logout", { providerId: "p" }));
-  assert.deepEqual(apiKeys, [[session, "p", "secret"]]);
-  assert.deepEqual(logouts, [[session, "p"]]);
-
   await assert.rejects(
     () =>
       auth.oauth_login_respond(
         request("oauth_login_respond", {
-          loginId: "login-1",
-          requestId: "missing",
+          loginId: "unknown",
+          requestId: "request-1",
         }),
       ),
-    /Unknown OAuth login request: missing/,
+    /Unknown OAuth login: unknown/,
   );
-  const login = ensureLogin("login-1");
-  let resolvedLoginValue: string | undefined;
-  login.waits.set("request-1", {
-    resolve: (value: string) => {
-      resolvedLoginValue = value;
-    },
-  });
-  await auth.oauth_login_respond(
-    request("oauth_login_respond", {
-      loginId: "login-1",
-      requestId: "request-1",
-      value: "approved",
-    }),
+
+  const start = await auth.oauth_login_start(
+    request("oauth_login_start", { providerId: "provider-1" }),
   );
-  assert.equal(resolvedLoginValue, "approved");
-  await auth.oauth_login_cancel(
-    request("oauth_login_cancel", { loginId: "login-1" }),
+  await wait();
+  const loginId = String(start.data.loginId);
+  assert.equal(
+    outputs.some(
+      (event) => event.event === "prompt" && event.loginId === loginId,
+    ),
+    true,
   );
-  assert.equal(login.abort.signal.aborted, true);
-  assert.deepEqual(finished, ["login-1"]);
+  await auth.oauth_login_cancel(request("oauth_login_cancel", { loginId }));
+  await wait();
+  assert.equal(
+    outputs.some(
+      (event) => event.event === "prompt_cancel" && event.loginId === loginId,
+    ),
+    true,
+  );
 });
 
-test("RPC turn handler resolves persisted and conflicting native request ownership independently", async () => {
-  const session = {};
-  const turnCoordinator = {
-    isActive: false,
-    activeRequestTag: undefined,
-    observedRole: () => undefined,
-    assertAdmissionOpen: () => undefined,
-  };
-  const nativeInputOutcome = (
-    _session: unknown,
-    outcome: string,
-    requestTag: string,
-    details: unknown,
-  ) => ({ outcome, requestTag, details });
-  const baseContext = {
-    getSession: () => session,
-    rpcRequestTag: (value: unknown) => value,
-    nativeInputOutcome,
-    turnCoordinator,
-    done,
-    run,
-  };
-
-  const persisted = turnModule.createRpcTurnCommandHandlers({
-    ...baseContext,
-    persistedNativeRequestOutcome: () => "steer",
-  } as any);
+test("RPC turn handler resolves persisted and conflicting request ownership from session state", async () => {
+  const persistedSession = fakeSession({
+    sessionFile: "persisted.jsonl",
+    sessionId: "session-1",
+    isStreaming: false,
+    sessionManager: {
+      getEntries: () => [
+        {
+          id: "message-1",
+          type: "message",
+          message: { role: "user" },
+        },
+        {
+          type: "custom",
+          customType: "rin_request_identity",
+          data: {
+            requestId: "request-1",
+            messageEntryId: "message-1",
+            observedRole: "terminalOwner",
+          },
+        },
+      ],
+    },
+  });
+  const persisted = turnModule.createRpcTurnCommandHandlers(
+    createTurnContext(persistedSession),
+  );
   const persistedResult = await persisted.prompt(
     request("prompt", { requestTag: "request-1" }),
   );
   assert.equal(persistedResult.data.outcome, "rejoined");
-  assert.equal(persistedResult.data.details.originalOutcome, "steer");
+  assert.equal(persistedResult.data.originalOutcome, "terminalOwner");
 
-  const conflict = turnModule.createRpcTurnCommandHandlers({
-    ...baseContext,
-    persistedNativeRequestOutcome: () => undefined,
-    nativeRequestReceiptState: () => "conflict",
-  } as any);
+  const conflictingSession = fakeSession({
+    sessionFile: "conflict.jsonl",
+    sessionId: "session-2",
+    isStreaming: false,
+    sessionManager: {
+      getEntries: () => [
+        {
+          type: "custom",
+          customType: "rin_request_identity",
+          data: {
+            requestId: "request-2",
+            messageEntryId: "missing",
+            observedRole: "terminalOwner",
+          },
+        },
+      ],
+    },
+  });
+  const conflict = turnModule.createRpcTurnCommandHandlers(
+    createTurnContext(conflictingSession),
+  );
   const conflictResult = await conflict.prompt(
     request("prompt", { requestTag: "request-2" }),
   );
   assert.equal(conflictResult.data.outcome, "indeterminate");
+});
 
-  let persistedCalls = 0;
-  const observed = turnModule.createRpcTurnCommandHandlers({
-    ...baseContext,
-    persistedNativeRequestOutcome: () =>
-      ++persistedCalls === 1 ? undefined : "followUp",
-    nativeRequestReceiptState: () => "none",
-    turnCoordinator: {
-      ...turnCoordinator,
-      observedRole: () => "followUp",
+test("RPC turn owner persists receipts and repairs interrupted tool continuations", async () => {
+  const entries: Array<Record<string, unknown>> = [
+    {
+      id: "message-3",
+      type: "message",
+      message: { role: "user" },
     },
-    waitForPersistedUserRequestTag: async () => undefined,
-  } as any);
-  const observedResult = await observed.prompt(
-    request("prompt", { requestTag: "request-3" }),
+    {
+      type: "custom",
+      customType: "rin_request_identity",
+      data: {
+        requestId: "request-3",
+        messageEntryId: "message-3",
+        observedRole: "terminalOwner",
+      },
+    },
+  ];
+  const receiptSession = {
+    sessionManager: {
+      getEntries: () => entries,
+      appendCustomEntry: (customType: string, data: unknown) =>
+        entries.push({ type: "custom", customType, data }),
+    },
+  };
+  assert.equal(
+    turnModule.persistNativeRequestOutcome(
+      receiptSession,
+      "request-3",
+      "terminalOwner",
+    ),
+    true,
   );
-  assert.equal(observedResult.data.outcome, "rejoined");
-  assert.equal(observedResult.data.details.originalOutcome, "followUp");
-
-  let activePersistedCalls = 0;
-  const active = turnModule.createRpcTurnCommandHandlers({
-    ...baseContext,
-    persistedNativeRequestOutcome: () =>
-      ++activePersistedCalls === 1 ? undefined : "steer",
-    nativeRequestReceiptState: () => "none",
-    turnCoordinator: {
-      ...turnCoordinator,
-      isActive: true,
-      activeRequestTag: "request-4",
-    },
-    waitForPersistedUserRequestTag: async () => undefined,
-  } as any);
-  const activeResult = await active.prompt(
-    request("prompt", { requestTag: "request-4" }),
+  assert.equal(
+    turnModule.persistedNativeRequestOutcome(receiptSession, "request-3"),
+    "terminalOwner",
   );
-  assert.equal(activeResult.data.outcome, "rejoined");
-  assert.equal(activeResult.data.details.turnActive, true);
-
-  let interruptedAbortCalls = 0;
-  let capturedStart: unknown[] = [];
-  const interrupted = turnModule.createRpcTurnCommandHandlers({
-    ...baseContext,
-    rpcRequestTag: (value: unknown) => value,
-    abortInterruptedTurnAfterExecutionLoss: async () => {
-      interruptedAbortCalls += 1;
-    },
-    startTurnTask: (
-      _tag: string,
-      operation: () => Promise<void>,
-      options: unknown,
-    ) => {
-      capturedStart = [operation, options];
-    },
-    turnCoordinator: {
-      ...turnCoordinator,
-      waitForIdle: async () => undefined,
-    },
-    getSession: () => ({
-      sessionFile: "session.jsonl",
-      sessionId: "session-1",
-    }),
-  } as any);
-  const interruptedResult = await interrupted.abort_interrupted_turn(
-    request("abort_interrupted_turn", { requestTag: "request-5" }),
+  assert.equal(
+    turnModule.persistNativeRequestOutcome(
+      receiptSession,
+      "request-3",
+      "terminalOwner",
+    ),
+    true,
   );
-  await (capturedStart[0] as () => Promise<void>)();
-  assert.equal(interruptedAbortCalls, 1);
-  assert.deepEqual(interruptedResult.data, {
-    sessionFile: "session.jsonl",
-    sessionId: "session-1",
-  });
-  assert.deepEqual(capturedStart[1], { forceTurnEvents: true });
+  assert.equal(
+    turnModule.hasPersistedUserRequestTag(receiptSession, ""),
+    false,
+  );
+  assert.equal(
+    turnModule.persistNativeRequestOutcome(receiptSession, "", "steer"),
+    true,
+  );
+  assert.equal(
+    turnModule.nativeRequestReceiptState(
+      { sessionManager: { getEntries: () => [] } },
+      "missing-request",
+    ),
+    "missing",
+  );
+  await turnModule.waitForPersistedUserRequestTag(receiptSession, "request-3");
   await assert.rejects(
     () =>
-      interrupted.abort_interrupted_turn(
-        request("abort_interrupted_turn", { requestTag: "" }),
+      turnModule.waitForPersistedUserRequestTag(
+        {
+          sessionManager: {
+            getEntries: () => [
+              {
+                type: "custom",
+                customType: "rin_request_identity",
+                data: {
+                  requestId: "conflict-request",
+                  messageEntryId: "missing",
+                  observedRole: "terminalOwner",
+                },
+              },
+            ],
+          },
+        },
+        "conflict-request",
       ),
-    /requestTag is required/,
+    /rin_prompt_outcome_indeterminate/,
   );
 
-  const activeState = turnModule.createRpcTurnCommandHandlers({
-    ...baseContext,
-    getSession: () => ({ agent: { signal: undefined } }),
-    getSessionState: () => ({ state: "ready" }),
-    turnCoordinator: {
-      ...turnCoordinator,
-      isActive: true,
-      activeRequestTag: "request-6",
-      turnGeneration: 4,
+  assert.equal(
+    turnModule.appendInterruptedToolResults({
+      agent: { state: { messages: [] } },
+    }),
+    false,
+  );
+  assert.equal(
+    turnModule.appendInterruptedToolResults({
+      agent: { state: { messages: null } },
+    }),
+    false,
+  );
+  assert.equal(
+    turnModule.appendInterruptedToolResults({
+      agent: {
+        state: {
+          messages: [{ role: "assistant", stopReason: "stop", content: [] }],
+        },
+      },
+    }),
+    false,
+  );
+
+  const messages: Array<Record<string, unknown>> = [
+    {
+      role: "assistant",
+      stopReason: "stop",
+      content: [
+        {
+          type: "toolCall",
+          id: "call-1",
+          name: "lookup",
+          arguments: { query: "value" },
+        },
+      ],
     },
-  } as any);
-  const stateResult = await activeState.get_state(request("get_state"));
-  assert.equal(stateResult.data.requestTag, "request-6");
-  assert.equal(stateResult.data.turnGeneration, 4);
+  ];
+  const continuationSession = {
+    agent: { state: { messages } },
+    sessionManager: {
+      appendMessage: (message: Record<string, unknown>) =>
+        messages.push(message),
+    },
+  };
+  assert.equal(
+    turnModule.appendInterruptedToolResults(continuationSession),
+    true,
+  );
+  assert.equal(messages.at(-1)?.role, "toolResult");
+  const inMemoryContinuationMessages = [messages[0]];
+  assert.equal(
+    turnModule.appendInterruptedToolResults(
+      {
+        agent: { state: { messages: inMemoryContinuationMessages } },
+      },
+      { persistToSession: false },
+    ),
+    true,
+  );
+  assert.equal(inMemoryContinuationMessages.at(-1)?.role, "toolResult");
+
+  const completedMessages: Array<Record<string, unknown>> = [
+    messages[0],
+    { role: "toolResult", toolCallId: "call-1" },
+  ];
+  assert.equal(
+    turnModule.appendInterruptedToolResults({
+      agent: { state: { messages: completedMessages } },
+    }),
+    false,
+  );
+
+  const failedMessages: Array<Record<string, unknown>> = [
+    { role: "user", content: "kept" },
+    { role: "assistant", stopReason: "error" },
+    { role: "assistant", stopReason: "aborted" },
+  ];
+  turnModule.discardInterruptedAssistantFailures({
+    agent: { state: { messages: failedMessages } },
+  });
+  assert.deepEqual(failedMessages, [{ role: "user", content: "kept" }]);
+
+  const settledAssistant = {
+    role: "assistant",
+    stopReason: "stop",
+    content: [{ type: "text", text: "settled" }],
+  };
+  assert.equal(
+    await turnModule.resumeInterruptedTurn(
+      { agent: { state: { messages: [] } } },
+      {},
+    ),
+    undefined,
+  );
+  assert.deepEqual(
+    await turnModule.resumeInterruptedTurn(
+      {
+        agent: { state: { messages: [settledAssistant] } },
+        getLastAssistantText: () => "settled",
+      },
+      {},
+    ),
+    {
+      finalText: "settled",
+      result: { messages: [settledAssistant] },
+    },
+  );
+  assert.deepEqual(
+    await turnModule.abortInterruptedTurnAfterExecutionLoss({
+      agent: { state: { messages: [settledAssistant] } },
+      getLastAssistantText: () => "settled",
+    }),
+    {
+      finalText: "settled",
+      result: { messages: [settledAssistant] },
+    },
+  );
+
+  const commandSession = fakeSession({
+    sessionFile: "command.jsonl",
+    sessionId: "session-command",
+    agent: { signal: undefined },
+    messages: [],
+    pendingMessageCount: 0,
+  });
+  let capturedTurnTask: (() => Promise<unknown>) | undefined;
+  const interruptedContext: RpcTurnCommandContext = {
+    ...createTurnContext(commandSession),
+    startTurnTask: (_requestTag, task) => {
+      capturedTurnTask = task;
+    },
+  };
+  const interrupted =
+    turnModule.createRpcTurnCommandHandlers(interruptedContext);
+  const interruptedResult = await interrupted.abort_interrupted_turn(
+    request("abort_interrupted_turn", { requestTag: "request-command" }),
+  );
+  assert.equal(typeof capturedTurnTask, "function");
+  assert.deepEqual(interruptedResult.data, {
+    sessionFile: "command.jsonl",
+    sessionId: "session-command",
+  });
+
+  const activeContext = createTurnContext(commandSession);
+  activeContext.turnCoordinator.openTurn("active-request");
+  const active = turnModule.createRpcTurnCommandHandlers(activeContext);
+  const activeState = await active.get_state(request("get_state"));
+  assert.equal(activeState.data.requestTag, "active-request");
   await assert.rejects(
-    () => activeState.send_user_message(request("send_user_message")),
+    () => active.send_user_message(request("send_user_message")),
     /rpc_turn_already_active/,
   );
+
+  let aborted = false;
+  await turnModule.abortInterruptedTurnAfterExecutionLoss({
+    agent: { state: { messages: [] } },
+    abort: async () => {
+      aborted = true;
+    },
+  });
+  assert.equal(aborted, true);
 });

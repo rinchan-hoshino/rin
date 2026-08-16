@@ -1,26 +1,34 @@
-import type {
-  RpcCommandRequest,
-  RpcDone,
-  RpcRun,
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { refreshPiSessionToolRegistry } from "../pi/session-host.js";
+import { normalizeFrontendIdentity } from "../rin-lib/frontend-identity.js";
+import { safeString } from "../text-utils.js";
+import { canInvokeRuntimeSlashCommand } from "./catalog-helpers.js";
+import {
+  rpcDone as done,
+  rpcRun as run,
+  type RpcCommandRequest,
 } from "./rpc-command-handler-context.js";
+import type { RpcTurnCoordinator } from "./rpc-turn-coordinator.js";
+import {
+  getCommandArgumentCompletions,
+  getResourceDiagnostics,
+  getSlashCommands,
+  runBuiltinCommand,
+} from "./worker-helpers.js";
+
+export function isWorkerLocalSessionReplacementCommand(commandLine: string) {
+  const trimmed = safeString(commandLine).trim();
+  if (trimmed === "/new") return true;
+  if (!trimmed.startsWith("/resume ")) return false;
+  return Boolean(trimmed.slice("/resume ".length).trim());
+}
 
 export type RpcResourceCommandContext = {
-  getSession: () => any;
-  turnCoordinator: any;
-  normalizeFrontendIdentity: (...args: any[]) => any;
-  getResourceDiagnostics: (...args: any[]) => any;
-  getCommandArgumentCompletions: (...args: any[]) => any;
-  refreshPiSessionToolRegistry: (...args: any[]) => any;
-  getSlashCommands: (...args: any[]) => any;
-  isWorkerLocalSessionReplacementCommand: (...args: any[]) => any;
-  canInvokeRuntimeSlashCommand: (...args: any[]) => any;
-  runBuiltinCommand: (...args: any[]) => any;
-  createExtensionUiContext: (...args: any[]) => any;
-  SessionManager: any;
-  safeString: (...args: any[]) => any;
-  runtime: any;
-  done: RpcDone;
-  run: RpcRun;
+  getSession: () => AgentSession;
+  turnCoordinator: Pick<RpcTurnCoordinator<unknown>, "assertAdmissionOpen">;
+  createExtensionUiContext: () => unknown;
+  SessionManager: unknown;
+  runtime: unknown;
 };
 
 export function createRpcResourceCommandHandlers(
@@ -29,20 +37,9 @@ export function createRpcResourceCommandHandlers(
   const {
     getSession,
     turnCoordinator,
-    normalizeFrontendIdentity,
-    getResourceDiagnostics,
-    getCommandArgumentCompletions,
-    refreshPiSessionToolRegistry,
-    getSlashCommands,
-    isWorkerLocalSessionReplacementCommand,
-    canInvokeRuntimeSlashCommand,
-    runBuiltinCommand,
     createExtensionUiContext,
     SessionManager,
-    safeString,
     runtime,
-    done,
-    run,
   } = context;
   return {
     async get_resource_diagnostics({ command, id, type }: RpcCommandRequest) {

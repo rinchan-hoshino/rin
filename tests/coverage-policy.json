@@ -500,6 +500,11 @@
       "status": "strict"
     },
     {
+      "source": "src/core/rin-daemon/rpc-command-handler-context.ts",
+      "ownerSuite": "unit",
+      "status": "strict"
+    },
+    {
       "source": "src/core/rin-daemon/rpc-extension-ui-command-handler.ts",
       "ownerSuite": "integration",
       "status": "strict"

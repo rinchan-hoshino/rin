@@ -120,3 +120,58 @@ test("RPC mode owns lifecycle while one dispatcher owns command registration", (
     );
   }
 });
+
+test("RPC command handlers expose narrow typed contexts without test-only injection bags", () => {
+  const handlerFiles = [
+    "src/core/rin-daemon/rpc-extension-ui-command-handler.ts",
+    "src/core/rin-daemon/rpc-turn-command-handler.ts",
+    "src/core/rin-daemon/rpc-session-command-handler.ts",
+    "src/core/rin-daemon/rpc-resource-command-handler.ts",
+    "src/core/rin-daemon/rpc-auth-command-handler.ts",
+  ];
+  const sharedContextPath =
+    "src/core/rin-daemon/rpc-command-handler-context.ts";
+  const sharedContext = ts.createSourceFile(
+    sharedContextPath,
+    readSource(sharedContextPath),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  assert.equal(
+    descendantsOfKind(sharedContext, ts.SyntaxKind.AnyKeyword).length,
+    0,
+    `${sharedContextPath} must own concrete request and response contracts`,
+  );
+  assert.doesNotMatch(readSource(sharedContextPath), /RpcInjectedFunction/);
+
+  for (const relativePath of handlerFiles) {
+    const source = ts.createSourceFile(
+      relativePath,
+      readSource(relativePath),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    const contexts = source.statements.filter(
+      (statement): statement is ts.TypeAliasDeclaration =>
+        ts.isTypeAliasDeclaration(statement) &&
+        statement.name.text.endsWith("CommandContext"),
+    );
+    assert.equal(contexts.length, 1, `${relativePath} needs one context owner`);
+    assert.equal(
+      descendantsOfKind(contexts[0], ts.SyntaxKind.AnyKeyword).length,
+      0,
+      `${relativePath} context must use concrete dependency contracts`,
+    );
+  }
+
+  const directHandlerTests = readSource(
+    "tests/integration/rpc-command-handlers.test.ts",
+  );
+  assert.doesNotMatch(
+    directHandlerTests,
+    /\bas any\b/,
+    "direct handler tests must construct the real context contracts",
+  );
+});

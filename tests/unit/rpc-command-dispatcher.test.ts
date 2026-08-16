@@ -19,6 +19,17 @@ const dispatcherModule = await import(
   ).href
 );
 
+const inertHandlers = () => {
+  const category = new Proxy({}, { get: () => () => undefined });
+  return {
+    extensionUi: category,
+    turn: category,
+    resource: category,
+    auth: category,
+    session: category,
+  };
+};
+
 test("RPC command dispatcher routes every registered command exactly once", async () => {
   const calls: Array<{
     category: string;
@@ -61,7 +72,7 @@ test("RPC command dispatcher routes every registered command exactly once", asyn
 });
 
 test("RPC command dispatcher preserves the unknown-command error contract", async () => {
-  const dispatch = dispatcherModule.createRpcCommandDispatcher({} as any);
+  const dispatch = dispatcherModule.createRpcCommandDispatcher(inertHandlers());
   await assert.rejects(
     () => dispatch({ id: "missing", type: "not_registered" }),
     /Unknown command: not_registered/,

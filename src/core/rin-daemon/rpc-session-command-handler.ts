@@ -1,61 +1,270 @@
-import type {
-  RpcCommandRequest,
-  RpcDone,
-  RpcRun,
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { emitPiSessionEvent } from "../pi/session-host.js";
+import { rawErrorMessage } from "../rin-lib/error-facts.js";
+import { fail } from "../rin-lib/rpc.js";
+import {
+  listBoundSessionPage,
+  listBoundSessions,
+  renameBoundSession,
+} from "../session/factory.js";
+import { safeString } from "../text-utils.js";
+import {
+  rpcDone as done,
+  rpcRun as run,
+  type RpcCommandRequest,
 } from "./rpc-command-handler-context.js";
 
+const THINKING_LEVEL_ORDER = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+const sessionSettingsMutationQueues = new WeakMap<object, Promise<unknown>>();
+
+export function getSessionEntries(session: any) {
+  return Array.isArray(session?.sessionManager?.getEntries?.())
+    ? session.sessionManager.getEntries()
+    : [];
+}
+
+export function getSessionEntriesSince(session: any, since: unknown) {
+  const entries = getSessionEntries(session);
+  const cursor = safeString(since).trim();
+  if (!cursor) return { entries };
+  const index = entries.findIndex((entry: any) => entry?.id === cursor);
+  if (index < 0) return { error: `Unknown session entry cursor: ${cursor}` };
+  return { entries: entries.slice(index + 1) };
+}
+
+export function getSessionLeafId(session: any) {
+  return session?.sessionManager?.getLeafId?.() ?? null;
+}
+
+export function getSessionTree(session: any) {
+  const tree = session?.sessionManager?.getTree?.();
+  return Array.isArray(tree) ? tree : [];
+}
+
+export function clampSessionThinkingLevel(session: any, level: string) {
+  const availableLevels = Array.isArray(session?.getAvailableThinkingLevels?.())
+    ? session
+        .getAvailableThinkingLevels()
+        .map((item: unknown) => safeString(item).trim())
+    : [];
+  if (availableLevels.includes(level)) return level;
+  if (!availableLevels.length) return level;
+  const requestedIndex = THINKING_LEVEL_ORDER.indexOf(level);
+  if (requestedIndex < 0) return availableLevels[0];
+  for (let i = requestedIndex; i < THINKING_LEVEL_ORDER.length; i += 1) {
+    if (availableLevels.includes(THINKING_LEVEL_ORDER[i])) {
+      return THINKING_LEVEL_ORDER[i];
+    }
+  }
+  for (let i = requestedIndex - 1; i >= 0; i -= 1) {
+    if (availableLevels.includes(THINKING_LEVEL_ORDER[i])) {
+      return THINKING_LEVEL_ORDER[i];
+    }
+  }
+  return availableLevels[0];
+}
+
+export function setSessionThinkingLevel(
+  session: any,
+  level: string,
+  options: { persistSettings?: boolean } = {},
+) {
+  if (options.persistSettings !== false) {
+    return session.setThinkingLevel(level);
+  }
+  const requested = safeString(level).trim();
+  if (!session?.agent?.state || !requested) {
+    return session.setThinkingLevel(level);
+  }
+  const effectiveLevel = clampSessionThinkingLevel(session, requested);
+  const previousLevel = session.agent.state.thinkingLevel;
+  session.agent.state.thinkingLevel = effectiveLevel;
+  if (effectiveLevel !== previousLevel) {
+    session.sessionManager?.appendThinkingLevelChange?.(effectiveLevel);
+    emitPiSessionEvent(session, {
+      type: "thinking_level_changed",
+      level: effectiveLevel,
+    });
+  }
+  return { level: effectiveLevel };
+}
+
+export async function flushSessionSettings(session: any) {
+  const settings = session?.settingsManager;
+  await settings?.flush?.();
+  const errors = settings?.drainErrors?.();
+  if (!Array.isArray(errors) || errors.length === 0) return;
+  const detail = errors
+    .map((item: any) => rawErrorMessage(item?.error ?? item))
+    .filter(Boolean)
+    .join("; ");
+  throw new Error(`rin_settings_write_failed${detail ? `: ${detail}` : ""}`);
+}
+
+export async function runPersistedSessionMutation<T>(
+  session: any,
+  mutate: () => T | Promise<T>,
+) {
+  const settings = session?.settingsManager;
+  if (!settings || typeof settings !== "object") {
+    const value = await mutate();
+    await flushSessionSettings(session);
+    return value;
+  }
+  const previous = sessionSettingsMutationQueues.get(settings);
+  const ready = previous
+    ? previous.then(
+        () => undefined,
+        () => undefined,
+      )
+    : Promise.resolve();
+  const current = ready.then(async () => {
+    const value = await mutate();
+    await flushSessionSettings(session);
+    return value;
+  });
+  sessionSettingsMutationQueues.set(settings, current);
+  try {
+    return await current;
+  } finally {
+    if (sessionSettingsMutationQueues.get(settings) === current) {
+      sessionSettingsMutationQueues.delete(settings);
+    }
+  }
+}
+
+export async function setPersistentSessionThinkingLevel(
+  session: any,
+  level: string,
+) {
+  return await runPersistedSessionMutation(session, async () => {
+    const result = await setSessionThinkingLevel(session, level);
+    const effectiveLevel = safeString(
+      result?.level || session?.thinkingLevel || level,
+    ).trim();
+    const settings = session?.settingsManager;
+    if (
+      effectiveLevel &&
+      settings?.getDefaultThinkingLevel?.() !== effectiveLevel
+    ) {
+      settings?.setDefaultThinkingLevel?.(effectiveLevel);
+    }
+    return result ?? (effectiveLevel ? { level: effectiveLevel } : undefined);
+  });
+}
+
+export async function setSessionModel(
+  session: any,
+  model: any,
+  options: { persistSettings?: boolean } = {},
+) {
+  if (options.persistSettings !== false) {
+    await session.setModel(model);
+    return model;
+  }
+  if (!session?.agent?.state) {
+    await session.setModel(model);
+    return model;
+  }
+  const models = sessionModelRuntime(session);
+  const authTarget = session?.modelRuntime ? model?.provider : model;
+  if (
+    typeof models.hasConfiguredAuth === "function" &&
+    !models.hasConfiguredAuth(authTarget)
+  ) {
+    throw new Error(`No API key for ${model.provider}/${model.id}`);
+  }
+  const thinkingLevel = safeString(session.thinkingLevel).trim() || "medium";
+  session.agent.state.model = model;
+  session.sessionManager?.appendModelChange?.(model.provider, model.id);
+  setSessionThinkingLevel(session, thinkingLevel, { persistSettings: false });
+  return model;
+}
+
+export function sessionModelRuntime(session: any) {
+  const runtime = session?.modelRuntime || session?.modelRegistry;
+  if (!runtime) throw new Error("rin_session_model_runtime_unavailable");
+  return runtime;
+}
+
+export function sessionAllModels(session: any) {
+  const runtime = sessionModelRuntime(session);
+  const models =
+    typeof runtime.getModels === "function"
+      ? runtime.getModels()
+      : runtime.getAll?.();
+  return Array.isArray(models) ? [...models] : [];
+}
+
+export async function sessionAvailableModels(session: any) {
+  const models = await sessionModelRuntime(session).getAvailable();
+  return Array.isArray(models) ? [...models] : [];
+}
+
+export async function resetSessionModelOptionsFromSettings(session: any) {
+  if (typeof session?.settingsManager?.reload === "function") {
+    await session.settingsManager.reload();
+  }
+
+  const provider = safeString(
+    session?.settingsManager?.getDefaultProvider?.() ||
+      session?.settingsManager?.settings?.defaultProvider,
+  ).trim();
+  const modelId = safeString(
+    session?.settingsManager?.getDefaultModel?.() ||
+      session?.settingsManager?.settings?.defaultModel,
+  ).trim();
+  const thinkingLevel = safeString(
+    session?.settingsManager?.getDefaultThinkingLevel?.() ||
+      session?.settingsManager?.settings?.defaultThinkingLevel,
+  ).trim();
+
+  let model: any;
+  if (provider && modelId) {
+    const models = await sessionAvailableModels(session);
+    model = models.find(
+      (item: any) => item?.provider === provider && item?.id === modelId,
+    );
+    if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
+    await setSessionModel(session, model, { persistSettings: false });
+  }
+  if (thinkingLevel) {
+    setSessionThinkingLevel(session, thinkingLevel, { persistSettings: false });
+  }
+  return {
+    model: model || session.model,
+    thinkingLevel: session.thinkingLevel,
+  };
+}
+
+type RpcSessionRuntime = {
+  importFromJsonl: (inputPath: unknown) => Promise<{ cancelled?: unknown }>;
+  fork: (
+    entryId: unknown,
+  ) => Promise<{ selectedText?: unknown; cancelled?: unknown }>;
+  cwd?: unknown;
+  services?: { agentDir?: unknown };
+};
+
 export type RpcSessionCommandContext = {
-  runPersistedSessionMutation: (...args: any[]) => any;
-  sessionAllModels: (...args: any[]) => any;
-  sessionAvailableModels: (...args: any[]) => any;
-  setSessionThinkingLevel: (...args: any[]) => any;
-  setPersistentSessionThinkingLevel: (...args: any[]) => any;
-  resetSessionModelOptionsFromSettings: (...args: any[]) => any;
-  getSessionEntries: (...args: any[]) => any;
-  getSessionLeafId: (...args: any[]) => any;
-  getSessionEntriesSince: (...args: any[]) => any;
-  fail: (...args: any[]) => any;
-  getSessionTree: (...args: any[]) => any;
-  SessionManager: any;
-  bindCurrentSession: (...args: any[]) => any;
-  listBoundSessionPage: (...args: any[]) => any;
-  safeString: (...args: any[]) => any;
-  listBoundSessions: (...args: any[]) => any;
-  setSessionModel: (...args: any[]) => any;
-  renameBoundSession: (...args: any[]) => any;
-  runtime: any;
-  getSession: () => any;
-  done: RpcDone;
-  run: RpcRun;
+  SessionManager: unknown;
+  bindCurrentSession: () => Promise<void>;
+  runtime: RpcSessionRuntime;
+  getSession: () => AgentSession;
 };
 
 export function createRpcSessionCommandHandlers(
   context: RpcSessionCommandContext,
 ) {
-  const {
-    runPersistedSessionMutation,
-    sessionAllModels,
-    sessionAvailableModels,
-    setSessionThinkingLevel,
-    setPersistentSessionThinkingLevel,
-    resetSessionModelOptionsFromSettings,
-    getSessionEntries,
-    getSessionLeafId,
-    getSessionEntriesSince,
-    fail,
-    getSessionTree,
-    SessionManager,
-    bindCurrentSession,
-    listBoundSessionPage,
-    safeString,
-    listBoundSessions,
-    setSessionModel,
-    renameBoundSession,
-    runtime,
-    getSession,
-    done,
-    run,
-  } = context;
+  const { SessionManager, bindCurrentSession, runtime, getSession } = context;
   return {
     async cycle_model({ command, id, type }: RpcCommandRequest) {
       const session = getSession();
@@ -134,7 +343,7 @@ export function createRpcSessionCommandHandlers(
 
       return run(id, type, () =>
         runPersistedSessionMutation(session, () =>
-          session.setSteeringMode(command.mode),
+          session.setSteeringMode(command.mode as "all" | "one-at-a-time"),
         ),
       );
     },
@@ -143,7 +352,7 @@ export function createRpcSessionCommandHandlers(
 
       return run(id, type, () =>
         runPersistedSessionMutation(session, () =>
-          session.setFollowUpMode(command.mode),
+          session.setFollowUpMode(command.mode as "all" | "one-at-a-time"),
         ),
       );
     },
@@ -151,7 +360,9 @@ export function createRpcSessionCommandHandlers(
       const session = getSession();
 
       return run(id, type, async () => {
-        const value = await session.compact(command.customInstructions);
+        const value = await session.compact(
+          command.customInstructions as string | undefined,
+        );
         return value && typeof value === "object" ? value : {};
       });
     },
@@ -187,8 +398,8 @@ export function createRpcSessionCommandHandlers(
       const session = getSession();
 
       return run(id, type, () =>
-        session.executeBash(command.command, undefined, {
-          excludeFromContext: command.excludeFromContext,
+        session.executeBash(command.command as string, undefined, {
+          excludeFromContext: command.excludeFromContext as boolean | undefined,
           id,
         }),
       );
@@ -236,8 +447,8 @@ export function createRpcSessionCommandHandlers(
 
       return run(id, type, () =>
         session.sessionManager.appendLabelChange(
-          command.entryId,
-          command.label?.trim() || undefined,
+          command.entryId as string,
+          (command.label as string | undefined)?.trim() || undefined,
         ),
       );
     },
@@ -245,11 +456,13 @@ export function createRpcSessionCommandHandlers(
       const session = getSession();
 
       return run(id, type, () =>
-        session.navigateTree(command.targetId, {
-          summarize: command.summarize,
-          customInstructions: command.customInstructions,
-          replaceInstructions: command.replaceInstructions,
-          label: command.label,
+        session.navigateTree(command.targetId as string, {
+          summarize: command.summarize as boolean | undefined,
+          customInstructions: command.customInstructions as string | undefined,
+          replaceInstructions: command.replaceInstructions as
+            | boolean
+            | undefined,
+          label: command.label as string | undefined,
         }),
       );
     },
@@ -259,7 +472,7 @@ export function createRpcSessionCommandHandlers(
       return run(
         id,
         type,
-        () => session.exportToHtml(command.outputPath),
+        () => session.exportToHtml(command.outputPath as string),
         (path) => ({ path }),
       );
     },
@@ -267,7 +480,7 @@ export function createRpcSessionCommandHandlers(
       const session = getSession();
 
       return done(id, type, {
-        path: session.exportToJsonl(command.outputPath),
+        path: session.exportToJsonl(command.outputPath as string),
       });
     },
     async import_jsonl({ command, id, type }: RpcCommandRequest) {
@@ -313,7 +526,10 @@ export function createRpcSessionCommandHandlers(
       const session = getSession();
 
       return run(id, type, async () => {
-        await session.sendCustomMessage(command.message, command.options);
+        await session.sendCustomMessage(
+          command.message as Parameters<AgentSession["sendCustomMessage"]>[0],
+          command.options as Parameters<AgentSession["sendCustomMessage"]>[1],
+        );
         return { sent: true };
       });
     },
@@ -378,9 +594,13 @@ export function createRpcSessionCommandHandlers(
     },
     async rename_session({ command, id, type }: RpcCommandRequest) {
       {
-        await renameBoundSession(command, command.name, {
-          SessionManager,
-        });
+        await renameBoundSession(
+          command as Parameters<typeof renameBoundSession>[0],
+          command.name as string,
+          {
+            SessionManager,
+          },
+        );
         return done(id, type);
       }
     },

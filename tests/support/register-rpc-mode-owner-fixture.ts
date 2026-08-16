@@ -50,10 +50,17 @@ const replacements = Object.fromEntries(
 
 const hook = `
 const target = ${JSON.stringify(target)};
+const ownerTargets = [
+  target,
+  "dist/core/rin-daemon/rpc-auth-command-handler.js",
+  "dist/core/rin-daemon/rpc-resource-command-handler.js",
+  "dist/core/rin-daemon/rpc-session-command-handler.js",
+  "dist/core/rin-daemon/rpc-turn-command-handler.js",
+];
 const replacements = ${JSON.stringify(replacements)};
 export async function resolve(specifier, context, nextResolve) {
   const resolved = await nextResolve(specifier, context);
-  if (!context.parentURL?.endsWith(target)) return resolved;
+  if (!ownerTargets.some((suffix) => context.parentURL?.endsWith(suffix))) return resolved;
   for (const [suffix, replacement] of Object.entries(replacements)) {
     if (resolved.url.endsWith(suffix)) return { url: replacement, shortCircuit: true };
   }
@@ -64,7 +71,7 @@ export async function load(url, context, nextLoad) {
   if (!url.endsWith(target)) return loaded;
   return {
     ...loaded,
-    source: String(loaded.source) + "\\nexport { createExtensionUiResponseParser as __rinOwnerCreateExtensionUiResponseParser, stableJson as __rinOwnerStableJson, rpcRequestTag as __rinOwnerRpcRequestTag, getSessionEntries as __rinOwnerGetSessionEntries, getSessionEntriesSince as __rinOwnerGetSessionEntriesSince, getSessionLeafId as __rinOwnerGetSessionLeafId, getSessionTree as __rinOwnerGetSessionTree, clampSessionThinkingLevel as __rinOwnerClampSessionThinkingLevel, combinedLoginPromptSignal as __rinOwnerCombinedLoginPromptSignal, isWorkerLocalSessionReplacementCommand as __rinOwnerIsWorkerLocalSessionReplacementCommand, logoutSessionProvider as __rinOwnerLogoutSessionProvider };\\n",
+    source: String(loaded.source) + "\\nexport { createExtensionUiResponseParser as __rinOwnerCreateExtensionUiResponseParser };\\nexport { stableJson as __rinOwnerStableJson, rpcRequestTag as __rinOwnerRpcRequestTag } from './rpc-turn-command-handler.js';\\nexport { getSessionEntries as __rinOwnerGetSessionEntries, getSessionEntriesSince as __rinOwnerGetSessionEntriesSince, getSessionLeafId as __rinOwnerGetSessionLeafId, getSessionTree as __rinOwnerGetSessionTree, clampSessionThinkingLevel as __rinOwnerClampSessionThinkingLevel } from './rpc-session-command-handler.js';\\nexport { combinedLoginPromptSignal as __rinOwnerCombinedLoginPromptSignal, logoutSessionProvider as __rinOwnerLogoutSessionProvider } from './rpc-auth-command-handler.js';\\nexport { isWorkerLocalSessionReplacementCommand as __rinOwnerIsWorkerLocalSessionReplacementCommand } from './rpc-resource-command-handler.js';\\n",
     shortCircuit: true,
   };
 }

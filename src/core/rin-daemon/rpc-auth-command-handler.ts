@@ -1,46 +1,191 @@
-import type {
-  RpcCommandRequest,
-  RpcDone,
-  RpcRun,
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import {
+  rpcDone as done,
+  rpcRun as run,
+  type RpcCommandRequest,
 } from "./rpc-command-handler-context.js";
+import { sessionModelRuntime } from "./rpc-session-command-handler.js";
+import { getOAuthState } from "./worker-helpers.js";
+
+export function combinedLoginPromptSignal(
+  promptSignal?: AbortSignal,
+  loginSignal?: AbortSignal,
+) {
+  const signals = [promptSignal, loginSignal].filter(Boolean) as AbortSignal[];
+  if (!signals.length) return undefined;
+  if (signals.length === 1) return signals[0];
+  return AbortSignal.any(signals);
+}
+
+export async function loginSessionProvider(
+  session: any,
+  providerId: string,
+  callbacks: any,
+) {
+  const runtime = sessionModelRuntime(session);
+  const authType = callbacks.authType === "api_key" ? "api_key" : "oauth";
+  if (authType === "oauth" && runtime.authStorage?.login) {
+    return await runtime.authStorage.login(providerId, callbacks);
+  }
+  return await runtime.login(providerId, authType, {
+    signal: callbacks.signal,
+    prompt: async (prompt: any) => {
+      const signal = combinedLoginPromptSignal(prompt.signal, callbacks.signal);
+      if (prompt.type === "select") {
+        return await callbacks.onSelect({ ...prompt, signal });
+      }
+      if (prompt.type === "manual_code") {
+        return await callbacks.onManualCodeInput({ ...prompt, signal });
+      }
+      return await callbacks.onPrompt({
+        type: prompt.type,
+        message: prompt.message,
+        placeholder: prompt.placeholder,
+        // Current Pi AuthPrompt leaves blank-input policy to the provider.
+        // Preserve flows such as GitHub Enterprise's blank-for-default host.
+        allowEmpty: true,
+        signal,
+      });
+    },
+    notify: (event: any) => {
+      if (event.type === "auth_url") return callbacks.onAuth(event);
+      if (event.type === "device_code") return callbacks.onDeviceCode(event);
+      if (event.type === "info") return callbacks.onInfo(event);
+      if (event.type === "progress") return callbacks.onProgress(event.message);
+    },
+  });
+}
+
+export async function refreshSessionModels(session: any) {
+  const runtime = sessionModelRuntime(session);
+  await runtime.refresh?.();
+}
+
+export async function setSessionApiKey(
+  session: any,
+  providerId: string,
+  key: string,
+) {
+  const runtime = sessionModelRuntime(session);
+  if (runtime.authStorage?.set) {
+    runtime.authStorage.set(providerId, { type: "api_key", key });
+  } else {
+    let promptAnswered = false;
+    await runtime.login(providerId, "api_key", {
+      prompt: async (prompt: any) => {
+        if (promptAnswered || prompt?.type !== "secret") {
+          throw new Error(
+            `Provider ${providerId} requires interactive API-key setup`,
+          );
+        }
+        promptAnswered = true;
+        return key;
+      },
+      notify: () => {},
+    });
+  }
+  await refreshSessionModels(session);
+}
+
+export async function logoutSessionProvider(session: any, providerId: string) {
+  const runtime = sessionModelRuntime(session);
+  if (runtime.authStorage?.logout) {
+    await runtime.authStorage.logout(providerId);
+  } else {
+    await runtime.logout(providerId);
+  }
+  await refreshSessionModels(session);
+}
+
+export function nextOAuthLoginRequestId(
+  login: { nextWaitSeq: number },
+  loginId: string,
+  kind: string,
+) {
+  return `${loginId}:${kind}:${++login.nextWaitSeq}`;
+}
+
+export function deferOAuthLoginStart(task: () => void | Promise<void>) {
+  setImmediate(() => {
+    void Promise.resolve()
+      .then(task)
+      .catch(() => {});
+  });
+}
 
 export type RpcAuthCommandContext = {
-  getSession: () => any;
-  getOAuthState: (...args: any[]) => any;
-  authState: {
-    loginSeq: number;
-    activeLogins: Map<string, any>;
-  };
-  deferOAuthLoginStart: (...args: any[]) => any;
-  loginSessionProvider: (...args: any[]) => any;
-  emitLoginEvent: (...args: any[]) => any;
-  waitForLoginInput: (...args: any[]) => any;
-  refreshSessionModels: (...args: any[]) => any;
-  finishLogin: (...args: any[]) => any;
-  ensureLogin: (...args: any[]) => any;
-  setSessionApiKey: (...args: any[]) => any;
-  logoutSessionProvider: (...args: any[]) => any;
-  done: RpcDone;
-  run: RpcRun;
+  getSession: () => AgentSession;
+  output: (value: unknown) => void;
 };
 
 export function createRpcAuthCommandHandlers(context: RpcAuthCommandContext) {
-  const {
-    getSession,
-    getOAuthState,
-    authState,
-    deferOAuthLoginStart,
-    loginSessionProvider,
-    emitLoginEvent,
-    waitForLoginInput,
-    refreshSessionModels,
-    finishLogin,
-    ensureLogin,
-    setSessionApiKey,
-    logoutSessionProvider,
-    done,
-    run,
-  } = context;
+  const { getSession, output } = context;
+  const authState: {
+    loginSeq: number;
+    activeLogins: Map<
+      string,
+      {
+        abort: AbortController;
+        waits: Map<
+          string,
+          { resolve: (value: string) => void; reject: (error: Error) => void }
+        >;
+        nextWaitSeq: number;
+      }
+    >;
+  } = {
+    loginSeq: 0,
+    activeLogins: new Map(),
+  };
+  const emitLoginEvent = (
+    loginId: string,
+    event: string,
+    payload: Record<string, unknown> = {},
+  ) => output({ type: "oauth_login_event", loginId, event, ...payload });
+  const ensureLogin = (loginId: string) => {
+    const login = authState.activeLogins.get(loginId);
+    if (!login) throw new Error(`Unknown OAuth login: ${loginId}`);
+    return login;
+  };
+  const waitForLoginInput = (
+    loginId: string,
+    kind: string,
+    payload: Record<string, unknown> = {},
+    signal?: AbortSignal,
+  ) => {
+    const login = ensureLogin(loginId);
+    const requestId = nextOAuthLoginRequestId(login, loginId, kind);
+    emitLoginEvent(loginId, kind, { requestId, ...payload });
+    return new Promise<string>((resolve, reject) => {
+      const cleanup = () => signal?.removeEventListener("abort", onAbort);
+      const resolveInput = (value: string) => {
+        cleanup();
+        resolve(value);
+      };
+      const rejectInput = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+      const onAbort = () => {
+        login.waits.delete(requestId);
+        emitLoginEvent(loginId, "prompt_cancel", { requestId });
+        rejectInput(new Error("OAuth login prompt cancelled"));
+      };
+      if (signal?.aborted) return onAbort();
+      signal?.addEventListener("abort", onAbort, { once: true });
+      login.waits.set(requestId, {
+        resolve: resolveInput,
+        reject: rejectInput,
+      });
+    });
+  };
+  const finishLogin = (loginId: string) => {
+    const login = authState.activeLogins.get(loginId);
+    if (!login) return;
+    for (const pending of login.waits.values())
+      pending.reject(new Error("OAuth login cancelled"));
+    authState.activeLogins.delete(loginId);
+  };
   return {
     async get_oauth_state({ command, id, type }: RpcCommandRequest) {
       const session = getSession();

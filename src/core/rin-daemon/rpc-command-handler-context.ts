@@ -1,4 +1,10 @@
-export type RpcCommand = Record<string, any>;
+import { ok } from "../rin-lib/rpc.js";
+import type {
+  RinRpcCommandEnvelope,
+  RinRpcResponseEnvelope,
+} from "../rin-lib/rpc-types.js";
+
+export type RpcCommand = RinRpcCommandEnvelope;
 
 export type RpcCommandRequest = {
   command: RpcCommand;
@@ -6,17 +12,20 @@ export type RpcCommandRequest = {
   type: string;
 };
 
-export type RpcDone = (
+export function rpcDone(
   id: string | undefined,
   type: string,
   value?: unknown,
-) => unknown;
+): RinRpcResponseEnvelope {
+  return ok(id, type, value);
+}
 
-export type RpcRun = (
+export async function rpcRun<Value, Projected = Value>(
   id: string | undefined,
   type: string,
-  task: () => any,
-  project?: (value: any) => any,
-) => Promise<unknown>;
-
-export type RpcInjectedFunction = (...args: any[]) => any;
+  task: () => Value | PromiseLike<Value>,
+  project?: (value: Value) => Projected,
+): Promise<RinRpcResponseEnvelope> {
+  const value = await task();
+  return rpcDone(id, type, project ? project(value) : value);
+}

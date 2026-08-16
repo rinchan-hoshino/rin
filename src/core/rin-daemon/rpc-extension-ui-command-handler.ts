@@ -1,17 +1,17 @@
-import type {
-  RpcCommandRequest,
-  RpcDone,
+import {
+  rpcDone as done,
+  type RpcCommandRequest,
+  type RpcCommand,
 } from "./rpc-command-handler-context.js";
 
 export type RpcExtensionUiCommandContext = {
-  resolvePendingExtensionUiRequest: (...args: any[]) => any;
-  done: RpcDone;
+  resolvePendingExtensionUiRequest: (response: RpcCommand) => boolean;
 };
 
 export function createRpcExtensionUiCommandHandlers(
   context: RpcExtensionUiCommandContext,
 ) {
-  const { resolvePendingExtensionUiRequest, done } = context;
+  const { resolvePendingExtensionUiRequest } = context;
   return {
     async extension_ui_response({ command, id, type }: RpcCommandRequest) {
       resolvePendingExtensionUiRequest(command);

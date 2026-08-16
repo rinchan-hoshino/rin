@@ -132,7 +132,7 @@ export function createRpcCommandDispatcher(handlers: RpcModeCommandHandlers) {
     if (!handler) throw new Error(`Unknown command: ${type}`);
     return await handler(handlers, {
       command,
-      id: command?.id,
+      id: command?.id as string | undefined,
       type,
     });
   };
