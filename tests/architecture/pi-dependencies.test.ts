@@ -9,12 +9,12 @@ const rootDir = path.resolve(
   "../..",
 );
 
-const piDependencyNames = [
-  "@earendil-works/pi-agent-core",
-  "@earendil-works/pi-ai",
-  "@earendil-works/pi-coding-agent",
-  "@earendil-works/pi-tui",
-];
+const piDependencySections = new Map([
+  ["@earendil-works/pi-agent-core", "devDependencies"],
+  ["@earendil-works/pi-ai", "dependencies"],
+  ["@earendil-works/pi-coding-agent", "dependencies"],
+  ["@earendil-works/pi-tui", "dependencies"],
+]);
 
 function readJson(relativePath: string) {
   return JSON.parse(fs.readFileSync(path.join(rootDir, relativePath), "utf8"));
@@ -58,13 +58,13 @@ test("Pi package dependencies stay version-aligned", () => {
   const rootLockPackage = packageLock.packages?.[""];
   const expectedVersion = currentPiVersion();
 
-  for (const name of piDependencyNames) {
+  for (const [name, section] of piDependencySections) {
     assert.equal(
-      normalizeVersionSpec(packageJson.dependencies?.[name]),
+      normalizeVersionSpec(packageJson[section]?.[name]),
       expectedVersion,
     );
     assert.equal(
-      normalizeVersionSpec(rootLockPackage?.dependencies?.[name]),
+      normalizeVersionSpec(rootLockPackage?.[section]?.[name]),
       expectedVersion,
     );
     assert.equal(
