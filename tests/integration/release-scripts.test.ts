@@ -507,10 +507,19 @@ test("verify-changelog script checks release-note commit coverage", () => {
   }
 });
 
-test("local release executor owns all four channels without GitHub Actions", () => {
+test("local release executor owns all four channels without a GitHub release workflow", () => {
   const content = readLocalPublisher();
   const workflowsDir = path.join(rootDir, ".github", "workflows");
-  assert.equal(fs.existsSync(workflowsDir), false);
+  for (const workflowFile of fs.readdirSync(workflowsDir)) {
+    const workflow = fs.readFileSync(
+      path.join(workflowsDir, workflowFile),
+      "utf8",
+    );
+    assert.doesNotMatch(
+      workflow,
+      /publish-local|npm publish|release\/publish|workflow_dispatch|schedule:/,
+    );
+  }
   assert.match(content, /"nightly", "beta", "stable", "hotfix"/);
   assert.match(content, /--no-publish/);
   assert.match(content, /process\.versions\.node !== "24\.18\.0"/);
