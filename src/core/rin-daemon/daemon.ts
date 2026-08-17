@@ -53,7 +53,6 @@ import { startQueuedMemoryWorkerSupervisor } from "../self-improve/async-jobs.js
 import { RinDaemonExtensionManager } from "./extensions.js";
 import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
 import { ConnectionState, WorkerPool } from "./worker-pool.js";
-import { INITIAL_WORKER_STATE_TIMEOUT_MS } from "./worker-supervisor.js";
 import {
   acknowledgeDaemonTurnTerminal,
   closeDaemonTurnLedger,
@@ -396,9 +395,7 @@ export async function startDaemon(options: {
           );
           return true;
         }
-        const state = await workerPool.readWorkerState(worker, {
-          timeoutMs: INITIAL_WORKER_STATE_TIMEOUT_MS,
-        });
+        const state = await workerPool.readWorkerState(worker);
         workerPool.attachWorkerToConnection(connection, worker);
         writeLine(
           connection.socket,

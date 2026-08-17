@@ -76,6 +76,48 @@ test("session worker supervisor bootstrap stays independent from Pi execution mo
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
+test("session worker bootstrap defers Pi execution modules until the execution plane", () => {
+  const blockedSuffixes = [
+    "/dist/core/rin-lib/loader.js",
+    "/dist/core/rin-lib/runtime.js",
+    "/dist/core/rin-daemon/rpc-mode.js",
+  ];
+  const hookSource = `
+    const blockedSuffixes = ${JSON.stringify(blockedSuffixes)};
+    export async function resolve(specifier, context, nextResolve) {
+      const resolved = await nextResolve(specifier, context);
+      if (blockedSuffixes.some((suffix) => resolved.url.endsWith(suffix))) {
+        throw new Error("supervisor_loaded_execution_module:" + resolved.url);
+      }
+      return resolved;
+    }
+  `;
+  const registerSource = `
+    import { register } from "node:module";
+    register(
+      "data:text/javascript," + encodeURIComponent(${JSON.stringify(hookSource)}),
+      import.meta.url,
+    );
+  `;
+  const registerUrl = `data:text/javascript,${encodeURIComponent(registerSource)}`;
+  const workerUrl = pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-daemon", "worker.js"),
+  ).href;
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      registerUrl,
+      "--input-type=module",
+      "-e",
+      `await import(${JSON.stringify(workerUrl)})`,
+    ],
+    { cwd: rootDir, encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+});
+
 test("session worker supervisor replaces a synchronously blocked execution plane and reaches native abort without replaying the prompt", async () => {
   const root = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-worker-supervisor-owner-"),
