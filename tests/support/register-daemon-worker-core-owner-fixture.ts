@@ -58,6 +58,11 @@ const replacements = {
       globalThis.__rinWorkerCoreOwnerEvents.push(["rpc", runtime, options]);
     }
   `,
+  "dist/core/rin-daemon/worker-supervisor.js": `
+    export async function runWorkerSupervisor(options, host) {
+      globalThis.__rinWorkerCoreOwnerEvents.push(["supervisor", options, host.signal.aborted]);
+    }
+  `,
 };
 
 const replacementUrls = Object.fromEntries(

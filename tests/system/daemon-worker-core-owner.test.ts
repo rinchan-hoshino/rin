@@ -94,9 +94,41 @@ process.argv = [process.execPath, "worker", "--resource-options-file", directory
 await worker.startWorker();
 assert.equal(fs.existsSync(directory), true);
 
+const signalEvents = [];
+process.argv = [process.execPath, "worker"];
+await worker.startWorkerProcess({
+  executionPath: "/owner/execution-worker.js",
+  terminateProcess() {},
+  signals: {
+    once(signal, listener) {
+      signalEvents.push(["once", signal]);
+      if (signal === "SIGTERM") listener();
+    },
+    off(signal) {
+      signalEvents.push(["off", signal]);
+    },
+  },
+});
+assert.deepEqual(signalEvents, [
+  ["once", "SIGTERM"],
+  ["once", "SIGINT"],
+  ["off", "SIGTERM"],
+  ["off", "SIGINT"],
+]);
+process.argv = [process.execPath, "worker"];
+await worker.startWorkerProcess({
+  executionPath: "/owner/execution-worker.js",
+  terminateProcess() {},
+});
+process.argv = [process.execPath, "worker", "--execution-plane"];
+await worker.startWorkerProcess({
+  executionPath: "/owner/execution-worker.js",
+  terminateProcess() {},
+});
+
 const events = globalThis.__rinWorkerCoreOwnerEvents;
 const configured = events.filter(([name]) => name === "configured");
-assert.equal(configured.length, 8);
+assert.equal(configured.length, 9);
 assert.equal(configured[0][1].cwd, "/workspace/owner");
 assert.equal(configured[0][1].agentDir, "/agent/owner");
 assert.equal(configured[0][1].sessionManager.kind, "create");
@@ -113,8 +145,12 @@ assert.deepEqual(
   events.filter(([name]) => name === "newSession").map(([, value]) => value),
   [{ parentSession: { id: "parent-managed" } }, { parentSession: { id: "parent-new" } }],
 );
-assert.equal(events.filter(([name]) => name === "rpc").length, 8);
-console.log(JSON.stringify({ configured: configured.length, rpc: 8 }));
+assert.equal(events.filter(([name]) => name === "rpc").length, 9);
+assert.deepEqual(events.filter(([name]) => name === "supervisor"), [
+  ["supervisor", {}, true],
+  ["supervisor", {}, false],
+]);
+console.log(JSON.stringify({ configured: configured.length, rpc: 9, supervisor: 2 }));
 `;
 
 test("daemon worker core consumes one-shot resource options and selects each session ownership mode", async () => {
@@ -138,7 +174,11 @@ test("daemon worker core consumes one-shot resource options and selects each ses
         env: { ...sandbox.env, RIN_TEST_WORKER_CORE_ROOT: root },
       },
     );
-    assert.deepEqual(JSON.parse(result.stdout), { configured: 8, rpc: 8 });
+    assert.deepEqual(JSON.parse(result.stdout), {
+      configured: 9,
+      rpc: 9,
+      supervisor: 2,
+    });
     assert.equal(result.stderr, "");
 
     const entrypoint = path.resolve("dist/app/rin-daemon/worker.js");

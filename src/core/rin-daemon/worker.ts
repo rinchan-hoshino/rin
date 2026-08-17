@@ -158,9 +158,15 @@ function hasArg(argv: string[], name: string) {
   return argv.some((value) => value === name);
 }
 
+type WorkerSignalHost = {
+  once(signal: "SIGTERM" | "SIGINT", listener: () => void): unknown;
+  off(signal: "SIGTERM" | "SIGINT", listener: () => void): unknown;
+};
+
 export async function startWorkerProcess(host: {
   executionPath: string;
   terminateProcess: ProcessTermination;
+  signals?: WorkerSignalHost;
 }) {
   const argv = process.argv.slice(2);
   const resourceOptions = readWorkerResourceOptions(argv);
@@ -170,15 +176,16 @@ export async function startWorkerProcess(host: {
   }
   const shutdown = new AbortController();
   const requestShutdown = () => shutdown.abort();
-  process.once("SIGTERM", requestShutdown);
-  process.once("SIGINT", requestShutdown);
+  const signals = host.signals ?? process;
+  signals.once("SIGTERM", requestShutdown);
+  signals.once("SIGINT", requestShutdown);
   try {
     await runWorkerSupervisor(resourceOptions, {
       executionPath: host.executionPath,
       signal: shutdown.signal,
     });
   } finally {
-    process.off("SIGTERM", requestShutdown);
-    process.off("SIGINT", requestShutdown);
+    signals.off("SIGTERM", requestShutdown);
+    signals.off("SIGINT", requestShutdown);
   }
 }
