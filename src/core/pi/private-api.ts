@@ -23,7 +23,6 @@ export {
   handleConfigCommand as handlePiConfigCommand,
   handlePackageCommand as handlePiPackageCommand,
 } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/package-manager-cli.js";
-export { printHelp as printPiCliHelp } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js";
 import { str } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/render-utils.js";
 
 export { initTheme } from "@earendil-works/pi-coding-agent";

@@ -37,6 +37,8 @@ test("run-lite help documents managed sessions and bounded execution", () => {
     console.log = original;
   }
   assert.equal(lines.length, 1);
+  assert.match(lines[0], /^rin - Local, general-purpose AI assistant/m);
+  assert.doesNotMatch(lines[0], /coding assistant/i);
   assert.match(lines[0], /--managed-session <leaf>/);
   assert.match(lines[0], /--timeout <seconds>/);
   assert.match(lines[0], /--no-builtin-tools/);

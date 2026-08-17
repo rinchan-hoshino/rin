@@ -3,8 +3,8 @@ import { main as runPiCli } from "@earendil-works/pi-coding-agent";
 import {
   handlePiConfigCommand,
   handlePiPackageCommand,
-  printPiCliHelp,
 } from "../pi/private-api.js";
+import { printRunHelp } from "./run-lite.js";
 import {
   applyRuntimeProfileEnvironment,
   resolveRuntimeProfile,
@@ -77,17 +77,8 @@ export function printRinCliHelp(
   rinCommands: ReadonlyArray<readonly [string, string]>,
   extensionCommands: ReadonlyArray<readonly [string, string]> = [],
 ) {
-  printPiCliHelp();
-  process.stdout.write(
-    "\nRin options (in addition to Pi):\n" +
-      "  --managed-session <leaf>  Attach non-interactive work to a managed session leaf\n" +
-      "  --timeout <seconds>       Set the Rin frontend request timeout\n" +
-      "  --yes                     Confirm Rin update/install prompts non-interactively\n" +
-      "  --user <name>             Run against another local user's Rin runtime\n" +
-      "  --target <name>           Run against a configured Rin deployment target\n" +
-      "  --maint                   Start the TUI directly in maintenance mode\n" +
-      "\nRin commands (in addition to Pi):\n",
-  );
+  printRunHelp();
+  process.stdout.write("\nRin commands:\n");
   const width = Math.max(...rinCommands.map(([name]) => name.length));
   for (const [name, description] of rinCommands) {
     process.stdout.write(`  ${name.padEnd(width)}  ${description}\n`);

@@ -1,106 +1,52 @@
 # Agent SDK
 
-Use Rin's local Agent SDK when an agent needs daemon-backed operations from a short Node script.
+Use Rin's local Agent SDK for daemon-backed operations that are not resident tools. For routine calls, this page is sufficient; read a domain document only for the complex cases listed below.
 
-The SDK is an installed-runtime entrypoint. Import it from the active installation under `~/.rin/app/current/dist` so the script targets the same code as the running Rin daemon.
+## Load the active SDK
 
-## Prompt brief
-
-Target surface:
-
-- installed runtime SDK module: `dist/core/rin-agent-sdk/index.js`;
-- the daemon socket selected by the active installation;
-- short local scripts run with `tsx`.
-
-Goal:
-
-- import the active SDK, execute the domain operation, verify its result through the owning domain surface, and report only proven state.
-
-Trusted inputs:
-
-- active installed runtime path;
-- target ids supplied by the user or read from daemon state;
-- SDK return values and errors;
-- the narrow domain document for the requested operation.
-
-Output contract:
-
-- SDK target and operation;
-- result or error observed;
-- verification read for mutations;
-- remaining runtime, adapter, account, or approval boundary.
-
-## Success criteria
-
-An SDK script is complete when:
-
-- it imports from the active installed runtime;
-- it uses the high-level operation defined by the domain document;
-- a mutation is followed by a domain read that proves the resulting state;
-- an error or timeout is classified without guessing whether a mutation completed;
-- the final report names the operation, verification source, and remaining boundary.
-
-## Domain routes
-
-Read the document that owns the requested behavior before writing the script:
-
-- status, doctor, and self-improve diagnostics: `docs/diagnostic-commands.md`;
-- session and process inspection: `docs/session-awareness.md`;
-- scheduled task operations: `docs/scheduled-tasks.md`;
-- chat delivery, stored messages, bridge state, and chat-bound turns: `docs/chat-bridge.md`;
-- rich chat objects and attachments: `docs/rich-text-output-format.md`.
-
-Prefer a purpose-built live tool when the current turn provides one. Use the SDK when the operation must be scripted, repeated, or composed with local verification.
-
-## Import pattern
-
-Run local scripts with `tsx script.ts`.
+Run the script with Node or `tsx`. Always import from `~/.rin/app/current`, never from a source checkout.
 
 ```js
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const rinAppDir = path.join(process.env.HOME, ".rin", "app", "current");
 const sdkUrl = pathToFileURL(
-  path.join(rinAppDir, "dist", "core", "rin-agent-sdk", "index.js"),
+  path.join(
+    process.env.HOME,
+    ".rin/app/current/dist/core/rin-agent-sdk/index.js",
+  ),
 ).href;
-const { createRinAgentSdk } = await import(sdkUrl);
-
-const rin = createRinAgentSdk({
-  timeoutMs: 30_000,
-});
+const { rinAgentSdk: rin } = await import(sdkUrl);
 ```
 
-Options:
+Use `createRinAgentSdk({ timeoutMs, socketPath })` instead of the singleton only when a non-default timeout or an intentionally different daemon socket is required.
 
-- `timeoutMs`: daemon request timeout for SDK calls.
-- `socketPath`: override only when intentionally targeting a non-default daemon socket.
+## Method map
 
-Each SDK operation also accepts an optional final override argument with the same options.
+- `rin.daemon`: `status()`, `activity()`.
+- `rin.sessions`: `list({ limit?, offset? })`.
+- `rin.tasks` reads: `list()`, `get(taskId)`.
+- `rin.tasks` writes: `upsert(task, defaults?)`, `delete(taskId)`, `complete(taskId, reason?)`, `pause(taskId)`, `resume(taskId)`, `rescheduleOnce(taskId, runAt)`, `run(taskId)`, `wake(taskId)`, `reload()`.
+- `rin.chat` delivery: `send({ chatKey, text })` or `send({ chatKey, content })`, `typing(chatKey)`, `react(payload)`.
+- `rin.chat` turns: `runTurn(payload)`, `terminateTurn(controllerKey)` or `terminateTurn(payload)`.
+- `rin.chat.messages`: `get({ chatKey, messageId })`, `list({ chatKey, before?, after?, limit? })`.
+- `rin.chat` bridge-local: `evalBridge({ currentChatKey, requestId, code })`.
 
-## Execution contract
+Every call accepts an optional final `{ timeoutMs, socketPath }` override.
 
-- Resolve the SDK module through `~/.rin/app/current/`; do not import a source checkout when operating the installed daemon.
-- Use the high-level operation and payload defined by the owning domain document.
-- Treat the returned payload as the result for that request, not proof of unrelated runtime or recipient state.
-- After a mutation, re-read through the owning domain API or its documented status surface.
-- When active work changes, verify both the durable record and the active producer state.
+## Read more only when needed
 
-## Error contract
+- recurring schedules, task schema, delivery, or lifecycle: `docs/scheduled-tasks.md`;
+- rich chat parts, attachments, quotes, reactions, or delivery verification: `docs/chat-bridge.md` and `docs/rich-text-output-format.md`;
+- bridge internals or platform actions through `evalBridge`: `docs/chat-bridge.md`;
+- daemon/process diagnosis: `docs/diagnostic-commands.md` and `docs/session-awareness.md`;
+- install paths or target-user ambiguity: `docs/runtime-layout.md` and `docs/execution-environment.md`.
 
-SDK operations reject on local input validation, socket failures, daemon error responses, malformed responses, and request timeouts.
+Do not read those larger documents for a simple status, list, get, pause/resume, plain-text send, or stored-message lookup.
 
-- Preserve the original error and operation name when reporting or diagnosing failure.
-- A timeout proves that no response arrived before the deadline; it does not prove that a submitted mutation did not run. Read the owning state before deciding whether to retry.
-- For import or connection failures, verify `~/.rin/app/current/`, the intended user and daemon, and the active socket. Use `docs/runtime-layout.md` for installation paths and `docs/diagnostic-commands.md` for daemon health.
-- Do not silently switch to a source checkout, another user's daemon, or a different socket to make a request succeed.
+## Result and error rules
 
-## Final report contract
-
-For scripted SDK work, report:
-
-- active installed runtime and target surface;
-- requested operation;
-- returned result or exact error;
-- verification read and key state observed;
-- remaining boundary when another runtime, adapter, account, deployment, or owner decision is still required.
+- A mutation is complete only after a read from the owning domain proves the new state.
+- A timeout proves only that no response arrived in time; read current state before retrying.
+- Preserve the operation name and original error. Do not silently switch source checkout, user, daemon, or socket.
+- Treat the returned payload as evidence for that request, not proof of recipient-visible delivery or unrelated runtime state.

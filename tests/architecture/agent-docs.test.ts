@@ -189,11 +189,18 @@ test("agent docs expose scheduled task operation workflow", () => {
     assert.doesNotMatch(capabilities, new RegExp(command));
   }
 
-  assert.match(agentSdk, /## Prompt brief/);
-  assert.match(agentSdk, /## Success criteria/);
-  assert.match(agentSdk, /## Final report contract/);
-  assert.match(agentSdk, /"dist", "core", "rin-agent-sdk", "index\.js"/);
-  assert.doesNotMatch(agentSdk, /"src", "core", "rin-agent-sdk", "index\.ts"/);
+  assert.match(agentSdk, /## Method map/);
+  assert.match(agentSdk, /## Read more only when needed/);
+  assert.match(agentSdk, /Do not read those larger documents for a simple/);
+  assert.match(
+    agentSdk,
+    /\.rin\/app\/current\/dist\/core\/rin-agent-sdk\/index\.js/,
+  );
+  assert.doesNotMatch(agentSdk, /src\/core\/rin-agent-sdk\/index\.ts/);
+  assert.ok(
+    agentSdk.length <= 3_200,
+    `Agent SDK quick reference is ${agentSdk.length} characters`,
+  );
   assert.match(
     chatBridge,
     /The model-level chat bridge tool surface is unavailable/,

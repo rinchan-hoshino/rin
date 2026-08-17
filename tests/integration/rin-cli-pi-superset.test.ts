@@ -106,8 +106,11 @@ test("rin auth check maps RIN_DIR into Pi's credential directory", async () => {
   }
 });
 
-test("rin top-level help includes Pi options and adds Rin commands", async () => {
+test("rin top-level help owns its general-assistant identity and keeps shared options", async () => {
   const result = await runCli(rinEntry, ["--help"]);
+  assert.match(result.stdout, /^rin - Local, general-purpose AI assistant/m);
+  assert.doesNotMatch(result.stdout, /coding assistant/i);
+  assert.doesNotMatch(result.stdout, /^pi -/m);
   assert.match(result.stdout, /--api-key <key>/);
   assert.match(result.stdout, /--session-id <id>/);
   assert.match(result.stdout, /--maint/);
