@@ -413,10 +413,13 @@ test("startup recovery overlaps session opens only inside available headroom", a
   assert.deepEqual(events, ["large-start", "large-end", "small-start"]);
 });
 
-test("startup recovery serializes memory-heavy opens even when memory is available", async () => {
+test("startup recovery preserves high parallelism when memory is available", async () => {
   const gib = 1024 ** 3;
   const events: string[] = [];
-  const releases = new Map<string, () => void>();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   const admission = createStartupRecoveryAdmission({
     availableMemoryBytes: () => 12 * gib,
     reserveBytes: 2 * gib,
@@ -425,36 +428,13 @@ test("startup recovery serializes memory-heavy opens even when memory is availab
   const tasks = ["first", "second", "third"].map((name) =>
     admission.run(gib, async () => {
       events.push(`${name}-start`);
-      await new Promise<void>((resolve) => releases.set(name, resolve));
-      events.push(`${name}-end`);
+      await gate;
     }),
   );
-  await waitUntil(() => events.length > 0, "first open did not start");
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.deepEqual(events, ["first-start"]);
-
-  releases.get("first")?.();
-  await waitUntil(
-    () => events.includes("second-start"),
-    "second open did not start",
-  );
-  assert.deepEqual(events, ["first-start", "first-end", "second-start"]);
-
-  releases.get("second")?.();
-  await waitUntil(
-    () => events.includes("third-start"),
-    "third open did not start",
-  );
-  releases.get("third")?.();
+  await waitUntil(() => events.length === 3, "opens did not overlap");
+  release();
   await Promise.all(tasks);
-  assert.deepEqual(events, [
-    "first-start",
-    "first-end",
-    "second-start",
-    "second-end",
-    "third-start",
-    "third-end",
-  ]);
+  assert.deepEqual(events, ["first-start", "second-start", "third-start"]);
 });
 
 test("startup recovery releases admission after session open while resumed turns overlap", async () => {
