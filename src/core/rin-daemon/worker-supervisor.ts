@@ -7,8 +7,11 @@ import type { Readable, Writable } from "node:stream";
 import { parseJsonl } from "../rin-lib/common.js";
 import { fail } from "../rin-lib/rpc-response.js";
 
+export const EXECUTION_STARTUP_TIMEOUT_MS = 30_000;
+export const INITIAL_WORKER_STATE_TIMEOUT_MS =
+  EXECUTION_STARTUP_TIMEOUT_MS + 5_000;
+
 const DEFAULT_ABORT_CONTROL_GRACE_MS = 250;
-const DEFAULT_EXECUTION_STARTUP_TIMEOUT_MS = 30_000;
 const EXECUTION_STOP_GRACE_MS = 250;
 
 type WorkerResourceOptions = Record<string, unknown> & {
@@ -100,7 +103,7 @@ export async function runWorkerSupervisor(
   );
   const executionStartupTimeoutMs = positiveDuration(
     options.executionStartupTimeoutMs,
-    DEFAULT_EXECUTION_STARTUP_TIMEOUT_MS,
+    EXECUTION_STARTUP_TIMEOUT_MS,
   );
   let executionGeneration = 0;
   let execution: ExecutionPlane | undefined;

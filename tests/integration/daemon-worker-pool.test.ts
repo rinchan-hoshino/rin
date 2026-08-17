@@ -3071,6 +3071,56 @@ setInterval(() => {}, 1000);
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test("initial worker state reads can outlive the generic internal timeout", async () => {
+  const dir = await makeTempDir("rin-worker-pool-initial-state-");
+  const workerPath = path.join(dir, "worker-source");
+  await fs.writeFile(
+    workerPath,
+    String.raw`process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    setTimeout(() => {
+      process.stdout.write(JSON.stringify({
+        id: command.id,
+        type: 'response',
+        command: command.type,
+        success: true,
+        data: { sessionFile: '/tmp/slow-start.jsonl', sessionId: 'slow-start' },
+      }) + '\n');
+    }, 80);
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    gcIdleMs: 50,
+    internalCommandTimeoutMs: 20,
+  });
+  const worker = pool.resolveWorkerForCommand(
+    { socket: { destroyed: false, write() {} }, clientBuffer: "" },
+    { type: "new_session" },
+  );
+
+  const state = await pool.readWorkerState(worker, { timeoutMs: 200 });
+  assert.equal(state.sessionFile, "/tmp/slow-start.jsonl");
+  assert.equal(state.sessionId, "slow-start");
+
+  pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test("worker status snapshot exposes the canonical backend Working state", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");

@@ -78,6 +78,7 @@ export function createStartupRecoveryAdmission(deps: {
     ? Math.max(0, Number(deps.reserveBytes))
     : STARTUP_RECOVERY_MEMORY_RESERVE_BYTES;
   let activeEstimatedBytes = 0;
+  let activeOpenCount = 0;
   let pumpScheduled = false;
 
   const availableMemoryBytes = () => {
@@ -95,6 +96,7 @@ export function createStartupRecoveryAdmission(deps: {
     queueMicrotask(() => {
       pumpScheduled = false;
       while (queue.length) {
+        if (activeOpenCount > 0) return;
         const availableBytes = availableMemoryBytes();
         const headroomBytes = Math.max(
           0,
@@ -109,6 +111,7 @@ export function createStartupRecoveryAdmission(deps: {
         }
         const entry = queue.splice(index, 1)[0]!;
         activeEstimatedBytes += entry.estimatedBytes;
+        activeOpenCount += 1;
         deps.logger?.info?.(
           `chat startup recovery admitted session=${entry.label || "unknown"} estimatedBytes=${entry.estimatedBytes} availableBytes=${availableBytes} activeEstimatedBytes=${activeEstimatedBytes} queued=${queue.length}`,
         );
@@ -120,6 +123,7 @@ export function createStartupRecoveryAdmission(deps: {
               0,
               activeEstimatedBytes - entry.estimatedBytes,
             );
+            activeOpenCount = Math.max(0, activeOpenCount - 1);
             schedulePump();
           });
       }

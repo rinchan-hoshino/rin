@@ -667,7 +667,7 @@ export class WorkerPool {
 
   async readWorkerState(
     worker: WorkerHandle,
-    options: { lifecycleRecoveryProbe?: boolean } = {},
+    options: { lifecycleRecoveryProbe?: boolean; timeoutMs?: number } = {},
   ) {
     const payload = await this.sendInternalCommand(
       worker,
@@ -2439,7 +2439,8 @@ export class WorkerPool {
     setRunningWorkerSession(this.options.agentDir, sessionFile, false);
   }
 
-  private getInternalCommandTimeoutMs(command: any) {
+  private getInternalCommandTimeoutMs(command: any, override?: number) {
+    if (Number.isFinite(override)) return Math.max(1, Number(override));
     const commandType = String(command?.type || "unknown");
     if (commandType === "switch_session") {
       return this.switchSessionCommandTimeoutMs;
@@ -2561,6 +2562,7 @@ export class WorkerPool {
     options: {
       lifecycleRecoveryProbe?: boolean;
       frontendOwner?: boolean;
+      timeoutMs?: number;
     } = {},
   ) {
     const id = `rin_internal_${++this.internalRequestSeq}`;
@@ -2581,17 +2583,20 @@ export class WorkerPool {
     });
     pendingCommand.catch(() => {});
 
-    const timeout = setTimeout(() => {
-      const pending = worker.pendingResponses.get(id);
-      worker.pendingResponses.delete(id);
-      worker.ignoredResponseIds.add(id);
-      if (!pending || pending.expectsTerminalTurnEvent !== true) {
-        this.syncRunningWorkerRecord(worker);
-      }
-      this.publishWorkerWorkingState(worker);
-      this.maybeReleaseWorker(worker);
-      rejectCommand(new Error(`rin_internal_timeout:${commandType}`));
-    }, this.getInternalCommandTimeoutMs(command));
+    const timeout = setTimeout(
+      () => {
+        const pending = worker.pendingResponses.get(id);
+        worker.pendingResponses.delete(id);
+        worker.ignoredResponseIds.add(id);
+        if (!pending || pending.expectsTerminalTurnEvent !== true) {
+          this.syncRunningWorkerRecord(worker);
+        }
+        this.publishWorkerWorkingState(worker);
+        this.maybeReleaseWorker(worker);
+        rejectCommand(new Error(`rin_internal_timeout:${commandType}`));
+      },
+      this.getInternalCommandTimeoutMs(command, options.timeoutMs),
+    );
     timeout.unref?.();
 
     const finalize = () => clearTimeout(timeout);
