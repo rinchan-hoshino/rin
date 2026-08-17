@@ -916,13 +916,11 @@ test("rpc runtime answers daemon extension UI requests through the bound UI cont
   });
   await session.handleExtensionUiRequest({
     type: "extension_ui_request",
-    id: "presentation-1",
-    method: "rinChatPresentation",
-    presentation: {
-      commandResponses: {
-        new: "Localized new",
-        newCancelled: "Localized cancelled",
-      },
+    id: "catalog-1",
+    method: "setMessageCatalog",
+    catalog: {
+      "session.new.completed": "Localized new",
+      "session.new.cancelled": "Localized cancelled",
     },
   });
   assert.equal(

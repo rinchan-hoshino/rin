@@ -132,26 +132,26 @@ test("shared frontend translation exposes extension UI requests", () => {
   );
 });
 
-test("shared frontend translation applies dynamic presentation to lifecycle copy", () => {
-  const translator = sdk.createRinFrontendBackendEventTranslator();
-  const presentation = {
-    commandResponses: {
-      compactionStart: "Localized compacting",
-      compactionSummaryLine: "Localized {tokens}",
-    },
+test("shared frontend translation applies a message catalog without replacing frontend chrome", () => {
+  const translator = sdk.createRinFrontendBackendEventTranslator({
+    commandResponses: { compactionSummaryText: "{summary}" },
+  });
+  const catalog = {
+    "session.compaction.started": "Localized compacting",
+    "session.compaction.summary": "Localized {tokens}",
   };
 
   assert.deepEqual(
     translator.translate({
       type: "extension_ui_request",
-      method: "rinChatPresentation",
-      presentation,
+      method: "setMessageCatalog",
+      catalog,
     }),
     [
       {
         type: "extension_ui_request",
-        method: "rinChatPresentation",
-        presentation,
+        method: "setMessageCatalog",
+        catalog,
       },
     ],
   );
@@ -167,13 +167,22 @@ test("shared frontend translation applies dynamic presentation to lifecycle copy
     [
       {
         type: "passive_notice",
-        text: "[compaction]\n\nLocalized 1,234",
+        text: "Localized 1,234",
         level: "info",
         deferDuringTurn: false,
         noticeKind: "compaction_end",
       },
     ],
   );
+
+  translator.translate({
+    type: "extension_ui_request",
+    method: "setMessageCatalog",
+    catalog: {},
+  });
+  assert.deepEqual(translator.translate({ type: "compaction_start" }), [
+    { type: "compaction_start_notice", text: "Compacting..." },
+  ]);
 });
 
 test("shared frontend translation ignores TUI visibility preferences", () => {

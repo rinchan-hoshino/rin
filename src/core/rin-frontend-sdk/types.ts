@@ -28,7 +28,7 @@ export type RinExtensionUiMethod =
   | "editor"
   | "notify"
   | "rinCommandResult"
-  | "rinChatPresentation"
+  | "setMessageCatalog"
   | "setStatus"
   | "setWorkingMessage"
   | "setWorkingVisible"
@@ -41,10 +41,17 @@ export type RinExtensionUiMethod =
   | "setToolsExpanded"
   | "set_editor_text";
 
-export type RinChatPresentation = {
-  commandResponses?: Record<string, string>;
-  workingText?: string;
-};
+export type RinMessageKey =
+  | "command.abort.completed"
+  | "session.new.completed"
+  | "session.new.cancelled"
+  | "session.compaction.completed"
+  | "extensions.reload.completed"
+  | "session.compaction.busy"
+  | "session.compaction.started"
+  | "session.compaction.summary";
+
+export type RinMessageCatalog = Partial<Record<RinMessageKey, string>>;
 
 export type RinExtensionCommandResult = {
   text?: string;
@@ -72,7 +79,7 @@ export type RinExtensionUiRequest = {
   expanded?: boolean;
   text?: string;
   result?: RinExtensionCommandResult;
-  presentation?: RinChatPresentation;
+  catalog?: RinMessageCatalog;
   [key: string]: unknown;
 };
 

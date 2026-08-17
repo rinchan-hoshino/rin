@@ -6,16 +6,16 @@ import type {
   RegisteredCommand,
 } from "@earendil-works/pi-coding-agent";
 import type {
-  RinChatPresentation,
   RinExtensionCommandResult,
+  RinMessageCatalog,
 } from "./rin-frontend-sdk/types.js";
 
-export type { RinChatPresentation, RinExtensionCommandResult };
+export type { RinExtensionCommandResult, RinMessageCatalog };
 
-/** Cross-frontend result channel added by Rin where the active frontend supports it. */
+/** Cross-frontend capabilities added by Rin where the active frontend supports them. */
 export type RinExtensionUIContext = ExtensionUIContext & {
   rinCommandResult?: (result: RinExtensionCommandResult) => void;
-  rinChatPresentation?: (presentation: RinChatPresentation) => void;
+  setMessageCatalog?: (catalog: RinMessageCatalog) => void;
 };
 
 export type RinExtensionCommandContext = Omit<ExtensionCommandContext, "ui"> & {

@@ -179,12 +179,12 @@ export async function runCustomRpcMode(
         method: "rinCommandResult",
         result,
       }),
-    rinChatPresentation: (presentation: unknown) => {
+    setMessageCatalog: (catalog: unknown) => {
       output({
         type: "extension_ui_request",
         id: createExtensionUiRequestId(),
-        method: "rinChatPresentation",
-        presentation,
+        method: "setMessageCatalog",
+        catalog,
       });
     },
     onTerminalInput: () => () => {},

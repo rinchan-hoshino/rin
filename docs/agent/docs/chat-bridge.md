@@ -277,7 +277,7 @@ Configure a chat-specific model or thinking level under `settings.json -> chat.b
 
 ## Command acknowledgement text
 
-Routine chat command acknowledgements such as `/new`, `/abort`, and `/reload` use stable built-in English text and avoid temporary agent turns. Discord acknowledges a slash command immediately with a fixed `Working...` before the session extension starts. Rin core accepts only one current `workingText` and never selects or rotates frames. The optional first-party `i18n` Pi extension owns the frame list and animation timer from `~/.rin/i18n.json`, publishing each current text through the generic presentation API. `/compact` uses the same contributed command presentation.
+Routine chat command acknowledgements such as `/new`, `/abort`, and `/reload` use stable built-in English text and avoid temporary agent turns. Discord acknowledges a slash command immediately with a fixed `Working...` before the session extension starts. The optional first-party `i18n` Pi extension publishes one semantic message-catalog snapshot from `~/.rin/i18n.json`, then owns its frame list and animation timer through Pi's native `setWorkingMessage`. Rin core owns lifecycle facts and frontend chrome; catalog updates cannot replace Chat or TUI wrappers. `/compact` uses the same contributed semantic messages.
 
 Install the `i18n` extension package, then create or edit its catalog:
 
@@ -304,7 +304,7 @@ Nested JSON is also accepted:
 }
 ```
 
-All entries are optional. Missing or blank entries fall back to the built-in English text. The extension owns catalog loading and hot reload; Rin core only accepts the generic chat-presentation contribution.
+All entries are optional. Missing or blank entries fall back to the built-in English text. The extension owns catalog loading and hot reload; Rin accepts only stable semantic message keys, while each frontend retains its own layout and wrapper text.
 
 ## Rich message delivery
 

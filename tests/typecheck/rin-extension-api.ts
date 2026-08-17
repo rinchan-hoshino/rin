@@ -18,10 +18,10 @@ defineRinExtension((rin) => {
     chat: true,
     async handler(args, ctx) {
       ctx.ui.notify(args || "ok", "info");
-      ctx.ui.rinChatPresentation?.({
-        commandResponses: { new: "Started." },
-        workingText: "Working",
+      ctx.ui.setMessageCatalog?.({
+        "session.new.completed": "Started.",
       });
+      ctx.ui.setWorkingMessage("Working");
       ctx.ui.rinCommandResult?.({
         fallbackText: args || "ok",
         parts: [{ type: "image", path: "/tmp/result.png" }],

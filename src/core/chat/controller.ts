@@ -4,13 +4,13 @@ import path from "node:path";
 import {
   RinDaemonFrontendClient,
   RinFrontendTurnDriver,
+  applyRinMessageCatalog,
   chatFrontendIdentity,
   frontendCommandNameFromLine,
   getRinNonInteractiveCommandInteractionPolicy,
   RIN_EMPTY_AGENT_RESPONSE_ERROR,
   type RinFrontendEventHandlingFailure,
   type RinFrontendIdentity,
-  type RinChatPresentation,
   type RinFrontendTurnClient,
   type RinChatDeliveryContext,
 } from "../rin-frontend-sdk/index.js";
@@ -220,8 +220,11 @@ export class ChatController {
   intentionallyAbortedTurnGenerations = new Set<number>();
   sleepAfterIdleMs = 0;
   lastActivityAt = Date.now();
-  commandResponses?: ChatCommandResponses;
-  onChatPresentation?: (presentation: RinChatPresentation) => void;
+  commandResponses: {
+    baseline: ChatCommandResponses;
+    current: ChatCommandResponses;
+  };
+  onWorkingMessage?: (message: string) => void;
   quietModeOverride?: boolean;
 
   constructor(
@@ -239,7 +242,7 @@ export class ChatController {
       commandResponses?: Partial<ChatCommandResponses>;
       frontendIdentity?: RinFrontendIdentity;
       useChatFrontendIdentity?: boolean;
-      onChatPresentation?: (presentation: RinChatPresentation) => void;
+      onWorkingMessage?: (message: string) => void;
     },
   ) {
     this.app = app;
@@ -266,10 +269,14 @@ export class ChatController {
     this.h = deps.h;
     this.sleepAfterIdleMs = Math.max(0, Number(deps.sleepAfterIdleMs || 0));
     this.frontendClientFactory = deps.frontendClientFactory;
-    this.commandResponses = deps.commandResponses
-      ? resolveChatCommandResponses(deps.commandResponses)
-      : undefined;
-    this.onChatPresentation = deps.onChatPresentation;
+    const commandResponseBaseline = resolveChatCommandResponses(
+      deps.commandResponses,
+    );
+    this.commandResponses = {
+      baseline: commandResponseBaseline,
+      current: commandResponseBaseline,
+    };
+    this.onWorkingMessage = deps.onWorkingMessage;
     if (!this.state.chatKey) this.state.chatKey = chatKey;
     const frontendIdentity =
       deps.frontendIdentity ||
@@ -1455,7 +1462,7 @@ export class ChatController {
   }
 
   private getCommandResponses() {
-    return this.commandResponses || resolveChatCommandResponses();
+    return this.commandResponses.current;
   }
 
   private replaceStoredSessionFile(...candidates: unknown[]) {
@@ -3285,16 +3292,15 @@ export class ChatController {
   private async handleFrontendEvent(event: any) {
     if (!event || typeof event !== "object") return;
     if (event.type === "extension_ui_request") {
-      if (event.method === "rinChatPresentation") {
-        const presentation = event.presentation || {};
-        const commandResponses =
-          presentation.commandResponses &&
-          typeof presentation.commandResponses === "object"
-            ? presentation.commandResponses
-            : {};
-        const workingText = safeString(presentation.workingText).trim();
-        this.commandResponses = resolveChatCommandResponses(commandResponses);
-        this.onChatPresentation?.({ commandResponses, workingText });
+      if (event.method === "setMessageCatalog") {
+        this.commandResponses.current = applyRinMessageCatalog(
+          this.commandResponses.baseline,
+          event.catalog,
+        );
+        return;
+      }
+      if (event.method === "setWorkingMessage") {
+        this.onWorkingMessage?.(safeString(event.message).trim());
         if (!this.ownsManualCompactionPresentation()) {
           await this.refreshEditableWorkingNotice().catch(() => false);
         }

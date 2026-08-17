@@ -1620,28 +1620,25 @@ test("chat controller rejects rich command results outside command execution", a
   );
 });
 
-test("chat controller accepts generic presentation from an extension", async () => {
-  const presentations = [];
+test("chat controller keeps message catalogs separate from Pi-native Working copy", async () => {
+  const workingMessages = [];
   const controller = await createController("telegram/1:2", {
-    onChatPresentation(presentation) {
-      presentations.push(presentation);
+    onWorkingMessage(message) {
+      workingMessages.push(message);
     },
   });
   await controller.handleFrontendEvent({
     type: "extension_ui_request",
-    method: "rinChatPresentation",
-    presentation: {
-      commandResponses: { new: "Localized new session" },
-      workingText: " Frame A ",
-    },
+    method: "setMessageCatalog",
+    catalog: { "session.new.completed": "Localized new session" },
+  });
+  await controller.handleFrontendEvent({
+    type: "extension_ui_request",
+    method: "setWorkingMessage",
+    message: " Frame A ",
   });
   assert.equal(controller.getCommandResponses().new, "Localized new session");
-  assert.deepEqual(presentations, [
-    {
-      commandResponses: { new: "Localized new session" },
-      workingText: "Frame A",
-    },
-  ]);
+  assert.deepEqual(workingMessages, ["Frame A"]);
 });
 
 test("chat controller cancels unsupported extension dialogs", async () => {
@@ -1974,11 +1971,13 @@ test("chat controller suppresses ordinary Working for manual compaction", async 
   deliveries.length = 0;
   await controller.handleFrontendEvent({
     type: "extension_ui_request",
-    method: "rinChatPresentation",
-    presentation: {
-      commandResponses: { compactionStart: "Localized compacting" },
-      workingText: "Localized Working",
-    },
+    method: "setMessageCatalog",
+    catalog: { "session.compaction.started": "Localized compacting" },
+  });
+  await controller.handleFrontendEvent({
+    type: "extension_ui_request",
+    method: "setWorkingMessage",
+    message: "Localized Working",
   });
 
   assert.deepEqual(actions, []);
@@ -3480,7 +3479,8 @@ test("chat controller ignores replied session files for non-new commands", async
 
 test("chat controller uses configured command response overrides", async () => {
   const controller = await createController();
-  controller.commandResponses = {
+  controller.commandResponses.current = {
+    ...controller.commandResponses.current,
     new: "\u5df2\u5f00\u59cb\u65b0\u4f1a\u8bdd\u3002",
   };
   const deliveries = [];

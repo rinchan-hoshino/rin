@@ -592,8 +592,8 @@ export async function startChatBridge(
     await app.stop().catch(() => {});
     await inboundHttpTransport?.close().catch(() => {});
   };
-  const onChatPresentation = (presentation: { workingText?: string }) => {
-    app.setWorkingText(presentation.workingText || "");
+  const onWorkingMessage = (message: string) => {
+    app.setWorkingText(message);
   };
   const frontendClientFactory = options.frontendClientFactory;
   let commandRows: Awaited<ReturnType<typeof loadChatCommandRows>>;
@@ -626,7 +626,7 @@ export async function startChatBridge(
         logger,
         h,
         frontendClientFactory,
-        onChatPresentation,
+        onWorkingMessage,
       });
       controllers.set(chatKey, controller);
     }
@@ -694,7 +694,7 @@ export async function startChatBridge(
         statePath,
         frontendClientFactory,
         sleepAfterIdleMs: DETACHED_CONTROLLER_SLEEP_IDLE_MS,
-        onChatPresentation,
+        onWorkingMessage,
         frontendIdentity: detachedOptions?.frontendIdentity,
         useChatFrontendIdentity,
       });

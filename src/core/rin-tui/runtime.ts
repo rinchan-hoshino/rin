@@ -24,6 +24,7 @@ import {
 } from "../presentation/error.js";
 import {
   applyFrontendBuiltinCommandText,
+  applyRinMessageCatalog,
   parseFrontendCompactCommand,
   resolveRinFrontendCommandResponses,
 } from "../rin-frontend-sdk/command-responses.js";
@@ -350,7 +351,9 @@ export class RpcInteractiveSession {
   private extensionBindings: RpcExtensionBindings = {};
   public extensionOptions: TuiResourceOptions;
   private commandCatalog: any[] = [];
-  private commandResponses = resolveRinFrontendCommandResponses();
+  private readonly commandResponseBaseline =
+    resolveRinFrontendCommandResponses();
+  private commandResponses = this.commandResponseBaseline;
   private reconnecting = false;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectPromise: Promise<void> | null = null;
@@ -1325,9 +1328,10 @@ export class RpcInteractiveSession {
         if (fallbackText) ui?.notify?.(fallbackText, "info");
         return;
       }
-      case "rinChatPresentation":
-        this.commandResponses = resolveRinFrontendCommandResponses(
-          payload.presentation?.commandResponses,
+      case "setMessageCatalog":
+        this.commandResponses = applyRinMessageCatalog(
+          this.commandResponseBaseline,
+          payload.catalog,
         );
         return;
       case "setStatus":

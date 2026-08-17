@@ -13,6 +13,8 @@ import {
 } from "../rin-lib/todo-state.js";
 import { safeString } from "../text-utils.js";
 import {
+  applyRinMessageCatalog,
+  normalizeRinMessageCatalog,
   resolveRinFrontendCommandResponses,
   type RinFrontendCommandResponses,
 } from "./command-responses.js";
@@ -232,9 +234,10 @@ export function createRinFrontendBackendEventTranslator(
     compactionExpandKeyText?: string;
   } = {},
 ): RinFrontendBackendEventTranslator {
-  let commandResponses = resolveRinFrontendCommandResponses(
+  const commandResponseBaseline = resolveRinFrontendCommandResponses(
     options.commandResponses,
   );
+  let commandResponses = commandResponseBaseline;
   let latestAssistantText = "";
   let latestAssistantFinalText = "";
   let activeToolBatch: ActiveToolBatch | null = null;
@@ -320,10 +323,20 @@ export function createRinFrontendBackendEventTranslator(
 
       if (payload.type === "extension_ui_request") {
         const method = safeString(payload.method).trim();
-        if (method === "rinChatPresentation") {
-          commandResponses = resolveRinFrontendCommandResponses(
-            payload.presentation?.commandResponses,
+        if (method === "setMessageCatalog") {
+          const catalog = normalizeRinMessageCatalog(payload.catalog);
+          commandResponses = applyRinMessageCatalog(
+            commandResponseBaseline,
+            catalog,
           );
+          return [
+            {
+              ...payload,
+              type: "extension_ui_request",
+              method,
+              catalog,
+            },
+          ];
         }
         if (
           [
@@ -333,7 +346,7 @@ export function createRinFrontendBackendEventTranslator(
             "editor",
             "notify",
             "rinCommandResult",
-            "rinChatPresentation",
+            "setWorkingMessage",
           ].includes(method)
         ) {
           return [{ ...payload, type: "extension_ui_request", method }];

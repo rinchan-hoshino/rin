@@ -277,6 +277,9 @@ test(
         fallbackText: "Codex usage",
         parts: [{ type: "image", path: "/tmp/codex-usage.png" }],
       });
+      boundUiContext.setMessageCatalog({
+        "session.compaction.summary": "Localized {tokens}",
+      });
       session.isStreaming = true;
       emitSessionEvent?.({ type: "agent_start" });
 
@@ -294,7 +297,11 @@ test(
             event.type === "agent_start" ||
             event.type === "agent_end" ||
             (event.type === "extension_ui_request" &&
-              ["setWorkingVisible", "rinCommandResult"].includes(event.method)),
+              [
+                "setWorkingVisible",
+                "rinCommandResult",
+                "setMessageCatalog",
+              ].includes(event.method)),
         )
         .map((event) =>
           event.type === "extension_ui_request"
@@ -303,6 +310,7 @@ test(
                 method: event.method,
                 visible: event.visible,
                 result: event.result,
+                catalog: event.catalog,
               }
             : { type: event.type },
         );
@@ -315,6 +323,7 @@ test(
           method: "setWorkingVisible",
           visible: false,
           result: undefined,
+          catalog: undefined,
         },
         {
           type: "extension_ui_request",
@@ -323,6 +332,16 @@ test(
           result: {
             fallbackText: "Codex usage",
             parts: [{ type: "image", path: "/tmp/codex-usage.png" }],
+          },
+          catalog: undefined,
+        },
+        {
+          type: "extension_ui_request",
+          method: "setMessageCatalog",
+          visible: undefined,
+          result: undefined,
+          catalog: {
+            "session.compaction.summary": "Localized {tokens}",
           },
         },
         { type: "agent_start" },
