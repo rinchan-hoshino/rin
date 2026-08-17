@@ -6,10 +6,11 @@
 - Chat integrations now provide static queued/working reactions, an authoritative session-status command and API, safer owner-presence trust checks, clearer extension notifications, and more reliable Lark, OneBot, and shutdown behavior.
 - Extensions now share one loading and command-registration model, can expose lifecycle context, CLI commands, and rich command results, and own more presentation such as chat localization and quota reporting.
 - Updates and installs now preserve exact release and channel selections across prepared and cross-user handoffs, enforce one updater path, support explicit source selectors, and recover or restage interrupted releases more safely.
-- Context, memory, compaction, and self-improvement now retain branch state and verifiable history while pruning bounded tool-result buckets, optimizing explicit recall, scheduling reviews at safer boundaries, and exposing session-scoped notes.
+- Context, memory, compaction, and self-improvement now retain branch state and verifiable history while pruning bounded tool-result buckets, optimizing explicit recall, and scheduling reviews at safer boundaries.
 - The runtime now follows Pi 0.84.1 with native prompt admission and compaction ownership, latest-binding isolation, durable restart recovery, and restored prompt ownership.
 - The dormant GUI implementation and obsolete bootstrap updater surface were removed, while TUI Markdown, command discovery, release bundle staging, and release recovery behavior were tightened.
-- Todo and note tools now use stable item-level operations, and the autonomous test system adds isolated architecture, provider-prefix, release-target, and parallel coverage safeguards.
+- Todo now uses stable item-level operations, and the autonomous test system adds isolated architecture, provider-prefix, release-target, and parallel coverage safeguards.
+- The session-scoped note scratchpad and `/notes` viewer were removed because stored notes did not preserve post-compaction behavior.
 <!-- rin-changelog-coverage
  2f1337b2 fix(update): reinstall the current release
  eed671f3 fix(chat): close terminal settlement after final

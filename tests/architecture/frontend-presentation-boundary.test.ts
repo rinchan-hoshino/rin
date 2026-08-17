@@ -47,7 +47,6 @@ test("backend core tools do not own TUI presentation", () => {
   const backendFiles = [
     "src/core/memory/index.ts",
     "src/core/rin-lib/item-tool.ts",
-    "src/core/rin-lib/note.ts",
     "src/core/rin-lib/todo.ts",
   ];
 

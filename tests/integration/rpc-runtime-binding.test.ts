@@ -381,7 +381,7 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
 
   assert.equal(session.getToolDefinition("browse"), undefined);
 
-  for (const name of ["recall", "todo", "note"]) {
+  for (const name of ["recall", "todo"]) {
     const tool = session.getToolDefinition(name);
     assert.ok(tool, `${name} should be available in the RPC frontend`);
     assert.equal(typeof tool.renderCall, "function");
@@ -412,35 +412,7 @@ test("rpc frontend exposes local Rin capability renderers for tool cards", async
     `expected wrapped tool result lines, got ${JSON.stringify(longToolResultLines)}`,
   );
 
-  const noteTool = session.getToolDefinition("note");
-  assert.ok(noteTool, "note should be available in the RPC frontend");
-  assert.equal(noteTool.renderShell, undefined);
-  assert.match(
-    noteTool
-      .renderCall({ action: "read" }, theme, renderContext)
-      .render(80)
-      .join("\n"),
-    /note read/,
-  );
-  assert.match(
-    noteTool
-      .renderResult(
-        {
-          content: [{ type: "text", text: "" }],
-          details: {
-            action: "read",
-            items: [{ id: 3, text: "Keep exact state" }],
-            nextId: 4,
-          },
-        },
-        { expanded: false },
-        theme,
-        renderContext,
-      )
-      .render(80)
-      .join("\n"),
-    /#3 Keep exact state/,
-  );
+  assert.equal(session.getToolDefinition("note"), undefined);
 
   const todoTool = session.getToolDefinition("todo");
   assert.equal(todoTool.renderShell, undefined);
@@ -500,7 +472,7 @@ test("rpc zero-extension frontend provides Pi's custom entry renderer lookup", (
 
   assert.equal(session.extensionOptions.noExtensions, true);
   assert.ok(session.getToolDefinition("todo"));
-  assert.ok(session.getToolDefinition("note"));
+  assert.equal(session.getToolDefinition("note"), undefined);
   assert.ok(session.getToolDefinition("recall"));
   assert.equal(typeof session.extensionRunner.getEntryRenderer, "function");
   assert.equal(

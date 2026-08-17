@@ -739,10 +739,7 @@
     {
       "source": "src/core/rin-lib/item-tool.ts",
       "suite": "integration",
-      "tests": [
-        "tests/integration/todo-tool.test.ts",
-        "tests/integration/note-tool.test.ts"
-      ]
+      "tests": ["tests/integration/todo-tool.test.ts"]
     },
     {
       "source": "src/core/rin-lib/loader.ts",
@@ -750,19 +747,6 @@
       "tests": ["tests/integration/rin-lib-loader-owner.test.ts"],
       "preloads": ["tests/support/register-rin-lib-loader-owner-fixture.ts"],
       "node22DynamicImportUncoveredBranches": 6
-    },
-    {
-      "source": "src/core/rin-lib/note-state.ts",
-      "suite": "integration",
-      "tests": [
-        "tests/integration/note-tool.test.ts",
-        "tests/integration/builtin-command-registry.test.ts"
-      ]
-    },
-    {
-      "source": "src/core/rin-lib/note.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/note-tool.test.ts"]
     },
     {
       "source": "src/core/rin-lib/profile.ts",
@@ -853,11 +837,6 @@
       "source": "src/core/rin-tui/tool-renderers/item.ts",
       "suite": "integration",
       "tests": ["tests/integration/todo-owner.test.ts"]
-    },
-    {
-      "source": "src/core/rin-tui/tool-renderers/note.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/note-tool.test.ts"]
     },
     {
       "source": "src/core/rin-tui/tool-renderers/recall.ts",

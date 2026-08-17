@@ -90,7 +90,7 @@ test("getManagedSkillPaths includes agent memory skills and builtin skills", () 
   ]);
 });
 
-test("Rin core registers the private session note capability", () => {
+test("Rin core does not register a session note capability", () => {
   const definitions = runtimeMod.createRinCapabilityDefinitions({
     cwd: "/tmp/rin-note-capability",
     agentDir: "/tmp/rin-note-capability-agent",
@@ -98,52 +98,13 @@ test("Rin core registers the private session note capability", () => {
     sendMessage: () => {},
   });
 
-  const note = definitions.find((definition) => definition.name === "note");
-  assert.ok(note);
-  assert.deepEqual(
-    note.tools?.map((tool) => tool.name),
-    ["note"],
+  assert.equal(
+    definitions.some((definition) => definition.name === "note"),
+    false,
   );
 });
 
-test("Rin note guidance limits the scratchpad to exact minimal cross-compaction state", () => {
-  const definitions = runtimeMod.createRinCapabilityDefinitions({
-    cwd: "/tmp/rin-note-guidance",
-    agentDir: "/tmp/rin-note-guidance-agent",
-    getThinkingLevel: () => "medium",
-    sendMessage: () => {},
-  });
-
-  const note = definitions
-    .find((definition) => definition.name === "note")
-    ?.tools?.find((tool) => tool.name === "note");
-
-  assert.equal(
-    note?.description,
-    "Maintain minimal verified session-branch notes that survive compaction.",
-  );
-  assert.match(
-    note?.parameters.properties.offset.description,
-    /1-based item position/,
-  );
-  assert.match(
-    note?.parameters.properties.id.description,
-    /Stable item ID returned by a read/,
-  );
-  assert.match(
-    note?.parameters.properties.items.items.properties.text.description,
-    /survive compaction exactly/,
-  );
-  assert.equal(
-    note?.promptSnippet,
-    "Session-branch scratchpad for exact cross-compaction state.",
-  );
-  assert.deepEqual(note?.promptGuidelines, [
-    "Use note for verified state that must survive compaction; use todo for execution checklists.",
-  ]);
-});
-
-test("Rin native compaction leaves Todo and note state tool-owned", async () => {
+test("Rin native compaction leaves Todo state tool-owned", async () => {
   let branchReads = 0;
   const sessionManager = {
     getBranch() {
@@ -154,14 +115,6 @@ test("Rin native compaction leaves Todo and note state tool-owned", async () => 
           customType: "rin.todo",
           data: {
             todos: [{ id: 1, text: "tool-owned todo", done: false }],
-            nextId: 2,
-          },
-        },
-        {
-          type: "custom",
-          customType: "rin.note",
-          data: {
-            items: [{ id: 1, text: "tool-owned note" }],
             nextId: 2,
           },
         },
@@ -285,11 +238,6 @@ test("Rin provider context preserves an append-only prefix between expected buck
           todos: [{ id: 1, text: "keep prefix stable", done: false }],
           nextId: 2,
         },
-      },
-      {
-        type: "custom",
-        customType: "rin.note",
-        data: { content: "stable branch state" },
       },
     ],
   };

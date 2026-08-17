@@ -67,8 +67,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(capabilities, /memory preserves original evidence/);
   assert.match(capabilities, /self-improve stores distilled guidance/);
   assert.match(capabilities, /docs\/self-improve-distillation\.md/);
-  assert.match(capabilities, /same stable-ID item operations/);
-  assert.match(capabilities, /TUI `\/notes` command/);
+  assert.doesNotMatch(capabilities, /TUI `\/notes` command/);
   assert.doesNotMatch(capabilities, /scratch work|scratch text buffer/i);
   assert.match(sessionAwareness, /## Prompt brief/);
   assert.match(sessionAwareness, /## Owner evidence map/);

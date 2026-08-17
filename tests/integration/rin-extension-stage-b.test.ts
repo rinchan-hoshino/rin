@@ -138,7 +138,6 @@ test("core todo loads from configured runtime without extension paths", async ()
         .getRegisteredCommands()
         .map((command: any) => command.invocationName);
       assert.equal(commandNames.includes("todos"), false);
-      assert.equal(commandNames.includes("notes"), false);
       assert.equal(typeof todoTool.execute, "function");
       assert.equal(todoTool.renderCall, undefined);
       assert.equal(todoTool.renderResult, undefined);

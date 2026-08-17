@@ -295,7 +295,6 @@ test("runtime capability definitions integrate owner modules and hook payloads",
   assert.deepEqual(
     definitions.map((definition: any) => definition.name),
     [
-      "note",
       "todo-owner",
       "memory-owner",
       "self-improve-owner",

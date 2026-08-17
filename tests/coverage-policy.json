@@ -860,16 +860,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-lib/note-state.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-lib/note.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/rin-lib/profile.ts",
       "ownerSuite": "integration",
       "status": "strict"
@@ -1006,11 +996,6 @@
     },
     {
       "source": "src/core/rin-tui/tool-renderers/item.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-tui/tool-renderers/note.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },

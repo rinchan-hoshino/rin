@@ -431,7 +431,6 @@ test("local TUI owns core item command completion and dispatch without extension
     [
       ["todos", "Show all todos on the current branch"],
       ["owner", "Owner extension"],
-      ["notes", "Show all notes on the current branch"],
     ],
   );
   await InteractiveMode.prototype.init.call(instance);
@@ -455,8 +454,8 @@ test("RPC TUI uses the same frontend builtin registry", async () => {
       getBranch: () => [
         {
           type: "custom",
-          customType: "rin.note",
-          data: { items: [{ id: 1, text: "rpc owner" }], nextId: 2 },
+          customType: "rin.todo",
+          data: { todos: [{ id: 1, text: "rpc owner", done: false }] },
         },
       ],
     },
@@ -485,12 +484,14 @@ test("RPC TUI uses the same frontend builtin registry", async () => {
     InteractiveMode.prototype.createBaseAutocompleteProvider.call(instance);
   assert.deepEqual(
     provider.commands.map((command: any) => command.name),
-    ["todos", "notes"],
+    ["todos"],
   );
   await InteractiveMode.prototype.init.call(instance);
-  await instance.defaultEditor.onSubmit("/notes");
+  await instance.defaultEditor.onSubmit("/todos");
   assert.match(renderedComponent.render(80).join("\n"), /rpc owner/);
   assert.deepEqual(originalSubmissions, []);
+  await instance.defaultEditor.onSubmit("/notes");
+  assert.deepEqual(originalSubmissions, ["/notes"]);
 });
 
 test("patched Pi lifecycle presents Rin identity, changelog, settings, and prompt flow", async (t) => {

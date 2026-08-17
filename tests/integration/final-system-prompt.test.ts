@@ -120,11 +120,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     baseSystemPrompt.includes("When modifying files, prefer targeted edits"),
     false,
   );
-  assert.ok(
-    baseSystemPrompt.includes(
-      "Use note for verified state that must survive compaction; use todo for execution checklists.",
-    ),
-  );
+  assert.equal(baseSystemPrompt.includes("Use note for verified state"), false);
   assert.equal(baseSystemPrompt.includes("Omit todos to read"), false);
   assert.equal(
     baseSystemPrompt.includes("complete desired todos array"),

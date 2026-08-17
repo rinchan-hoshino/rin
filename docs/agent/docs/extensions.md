@@ -6,11 +6,11 @@ The live tool list remains authoritative for the current turn.
 
 ## Capability source map
 
-| Source                                   | Provides                                                                                                                                                                     | Configuration surface                                       | Agent route                                     |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------- |
-| Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, note, scheduled-task SDK workflows, agent-owned chat setup | built into Rin                                              | use live tools, CLI, SDK, or topic docs         |
-| Browser/computer/mobile/search operation | browser, computer, mobile, or search tools supplied by the live runtime                                                                                                      | live tool list or external Pi extension config              | follow the live tool schema                     |
-| Optional Chat platform extension         | trusted external Chat platform implementations                                                                                                                               | ordinary Pi extension entries using the Chat platform event | inspect Chat state and relevant platform config |
+| Source                                   | Provides                                                                                                                                                               | Configuration surface                                       | Agent route                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------- |
+| Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, scheduled-task SDK workflows, agent-owned chat setup | built into Rin                                              | use live tools, CLI, SDK, or topic docs         |
+| Browser/computer/mobile/search operation | browser, computer, mobile, or search tools supplied by the live runtime                                                                                                | live tool list or external Pi extension config              | follow the live tool schema                     |
+| Optional Chat platform extension         | trusted external Chat platform implementations                                                                                                                         | ordinary Pi extension entries using the Chat platform event | inspect Chat state and relevant platform config |
 
 ## Rin core capabilities
 
@@ -23,7 +23,6 @@ These capabilities are native Rin behavior rather than optional Pi extensions:
 - frozen session runtime: the complete effective system prompt has one durable owner and remains byte-stable until explicit reload; ordinary turns and group-name changes cannot update it.
 - TUI input compatibility: Rin-owned compatibility handling for interactive input.
 - todo: `todo` tool and `/todos` command.
-- note: stable-ID session-branch continuity items, plus the `/notes` TUI viewer.
 - task: scheduled task workflows through the local Rin Agent SDK.
 - chat: agent-owned platform setup, SDK/file workflows, stored-message lookup, and identity/trust data paths.
 
@@ -42,10 +41,6 @@ Rin core always provides todo support. It registers:
 - `/todos`: interactive TUI command for the current checklist.
 
 Todo state is checkpointed in Pi session custom entries and reconstructed from the current session branch, so forks and session branches can recover the matching checklist without relying on context-visible tool-result details or compaction summaries. Rin does not copy the checklist into compaction summaries; agents read it through the tool when needed. The tool exposes item-level `read`, `add`, `edit`, `remove`, `toggle`, and `clear`; read and every mutation use the same dense current-order numbering `1..n`, with the first item always numbered `1`. Reads return the full list by default or accept a 1-based item `offset` and positive `limit`; adds can insert before a current number; edits change text only; removals and toggles atomically target one or more current numbers; insertion and removal immediately renumber the returned list; clear removes every item. In daemon/RPC chat turns, Rin may continue hidden work when a final answer appears while todo items remain incomplete; hidden continuations end when todos complete, when todo state stops changing, or after the continuation limit.
-
-## Core note
-
-Rin core registers the `note` tool and `/notes` TUI command as a minimal scratchpad for verified content that must survive compaction exactly. Note exposes full-or-ranged `read` plus item-level `add`, `edit`, `remove`, and `clear`; it has no completion state or `toggle` action. Clear removes every note and resets ID allocation. Keep each item as short as possible and focused on exact cross-compaction state; rely on files or tools for recoverable context, and todo for plans and pending actions. Clean up notes promptly as work advances. Its stable-ID snapshots use session custom entries, preserving the selected branch across compaction without creating cross-session memory or summary injection; agents read note state through the tool when needed. Existing text-buffer snapshots reconstruct as one item; retired whole-buffer operations are not exposed.
 
 ## Extension loading
 

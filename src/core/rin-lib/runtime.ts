@@ -3,7 +3,6 @@ import path from "node:path";
 
 import { isContextOverflow } from "@earendil-works/pi-ai/compat";
 
-import noteCapability from "./note.js";
 import todoCapability from "./todo.js";
 import { loadRinAgentRuntime } from "./agent-runtime.js";
 import {
@@ -61,7 +60,6 @@ export function createRinCapabilityDefinitions(
   options: RinCapabilityOptions,
 ): RinCapabilityDefinition[] {
   return [
-    noteCapability(),
     todoCapability(),
     memoryModule(options),
     selfImproveModule(options),

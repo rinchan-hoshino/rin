@@ -2,7 +2,6 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 
 import type { PiBuiltinSlashCommand } from "../pi/private-api.js";
-import { readNoteSnapshotFromSession } from "../rin-lib/note-state.js";
 import { readTodoSnapshotFromSession } from "../rin-lib/todo-state.js";
 
 export type RinTuiBuiltinCommandContext = {
@@ -17,24 +16,19 @@ type RinTuiBuiltinCommandDefinition = PiBuiltinSlashCommand & {
   ) => Promise<void>;
 };
 
-type DisplayItem = {
-  id: number;
+type DisplayTodo = {
   text: string;
-  done?: boolean;
+  done: boolean;
 };
 
-class BranchItemListComponent {
+class BranchTodoListComponent {
   private cachedWidth?: number;
   private cachedLines?: string[];
 
   constructor(
-    private readonly title: string,
-    private readonly items: DisplayItem[],
+    private readonly todos: DisplayTodo[],
     private readonly theme: Theme,
     private readonly onClose: () => void,
-    private readonly emptyText: string,
-    private readonly showProgress: boolean,
-    private readonly showStableIds: boolean,
   ) {}
 
   handleInput(data: string): void {
@@ -46,41 +40,37 @@ class BranchItemListComponent {
   render(width: number): string[] {
     if (this.cachedLines && this.cachedWidth === width) return this.cachedLines;
     const lines = [""];
-    const title = this.theme.fg("accent", ` ${this.title} `);
+    const title = this.theme.fg("accent", " Todos ");
     const header =
       this.theme.fg("borderMuted", "─".repeat(3)) +
       title +
-      this.theme.fg(
-        "borderMuted",
-        "─".repeat(Math.max(0, width - this.title.length - 5)),
-      );
+      this.theme.fg("borderMuted", "─".repeat(Math.max(0, width - 10)));
     lines.push(truncateToWidth(header, width), "");
 
-    if (this.items.length === 0) {
+    if (this.todos.length === 0) {
       lines.push(
-        truncateToWidth(`  ${this.theme.fg("dim", this.emptyText)}`, width),
+        truncateToWidth(
+          `  ${this.theme.fg("dim", "No todos yet. Ask the agent to add some!")}`,
+          width,
+        ),
       );
     } else {
-      const summary = this.showProgress
-        ? `${this.items.filter((item) => item.done).length}/${this.items.length} completed`
-        : `${this.items.length} ${this.items.length === 1 ? "note" : "notes"}`;
+      const completed = this.todos.filter((todo) => todo.done).length;
       lines.push(
-        truncateToWidth(`  ${this.theme.fg("muted", summary)}`, width),
+        truncateToWidth(
+          `  ${this.theme.fg("muted", `${completed}/${this.todos.length} completed`)}`,
+          width,
+        ),
         "",
       );
-      for (const item of this.items) {
-        const marker = this.showProgress
-          ? item.done
-            ? this.theme.fg("success", "✓")
-            : this.theme.fg("dim", "○")
-          : this.theme.fg("dim", "•");
-        const id = this.showStableIds
-          ? `${this.theme.fg("accent", `#${item.id}`)} `
-          : "";
-        const text = item.done
-          ? this.theme.fg("dim", item.text)
-          : this.theme.fg("text", item.text);
-        lines.push(truncateToWidth(`  ${marker} ${id}${text}`, width));
+      for (const todo of this.todos) {
+        const marker = todo.done
+          ? this.theme.fg("success", "✓")
+          : this.theme.fg("dim", "○");
+        const text = todo.done
+          ? this.theme.fg("dim", todo.text)
+          : this.theme.fg("text", todo.text);
+        lines.push(truncateToWidth(`  ${marker} ${text}`, width));
       }
     }
 
@@ -103,27 +93,10 @@ class BranchItemListComponent {
   }
 }
 
-async function showItems(
-  ui: any,
-  input: {
-    title: string;
-    items: DisplayItem[];
-    emptyText: string;
-    showProgress: boolean;
-    showStableIds: boolean;
-  },
-) {
+async function showTodos(ui: any, todos: DisplayTodo[]) {
   await ui?.custom?.(
     (_tui: unknown, theme: Theme, _keybindings: unknown, done: () => void) =>
-      new BranchItemListComponent(
-        input.title,
-        input.items,
-        theme,
-        done,
-        input.emptyText,
-        input.showProgress,
-        input.showStableIds,
-      ),
+      new BranchTodoListComponent(todos, theme, done),
   );
 }
 
@@ -161,30 +134,12 @@ export const RIN_TUI_BUILTIN_COMMAND_REGISTRY = createBuiltinCommandRegistry([
     name: "todos",
     description: "Show all todos on the current branch",
     async execute(_args, context) {
-      await showItems(context.ui, {
-        title: "Todos",
-        items: readTodoSnapshotFromSession({
+      await showTodos(
+        context.ui,
+        readTodoSnapshotFromSession({
           sessionManager: context.sessionManager,
         }).todos,
-        emptyText: "No todos yet. Ask the agent to add some!",
-        showProgress: true,
-        showStableIds: false,
-      });
-    },
-  },
-  {
-    name: "notes",
-    description: "Show all notes on the current branch",
-    async execute(_args, context) {
-      await showItems(context.ui, {
-        title: "Notes",
-        items: readNoteSnapshotFromSession({
-          sessionManager: context.sessionManager,
-        }).items,
-        emptyText: "No notes yet. Ask the agent to add verified facts!",
-        showProgress: false,
-        showStableIds: true,
-      });
+      );
     },
   },
 ]);
