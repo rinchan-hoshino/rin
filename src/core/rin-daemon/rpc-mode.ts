@@ -16,6 +16,7 @@ import {
 import { safeString } from "../text-utils.js";
 import {
   RpcTurnCoordinator,
+  type RpcInputObservedRole,
   type RpcTurnInterrupt,
 } from "./rpc-turn-coordinator.js";
 import { createRpcAuthCommandHandlers } from "./rpc-auth-command-handler.js";
@@ -701,31 +702,60 @@ export async function runCustomRpcMode(
 
     unsubscribeSessionEvents?.();
     restoreSessionAppendMessage?.();
-    const userMessageRequestTags = new WeakMap<object, string>();
+    type UserMessageRequestIdentity = {
+      requestTag: string;
+      observedRole: RpcInputObservedRole;
+    };
+    const userMessageRequestIdentities = new WeakMap<
+      object,
+      UserMessageRequestIdentity
+    >();
+    const resolveUserMessageRequestIdentity = (
+      message: any,
+      hintedRequestTag = "",
+    ) => {
+      if (message?.role !== "user" || typeof message !== "object") {
+        return undefined;
+      }
+      const cached = userMessageRequestIdentities.get(message);
+      if (cached) return cached;
+      const match = turnCoordinator.observeUserStart({
+        requestTag: hintedRequestTag,
+        message,
+      });
+      const requestTag =
+        match?.requestTag || safeString(hintedRequestTag).trim();
+      let observedRole = match?.admission.observedRole;
+      if (
+        requestTag &&
+        !observedRole &&
+        turnCoordinator.phase !== "interrupting"
+      ) {
+        observedRole = turnCoordinator.observedRole(requestTag);
+      }
+      if (!requestTag || !observedRole) return undefined;
+      const identity = { requestTag, observedRole };
+      userMessageRequestIdentities.set(message, identity);
+      return identity;
+    };
     const sessionManager = session.sessionManager;
     const originalAppendMessage = sessionManager?.appendMessage;
     if (typeof originalAppendMessage === "function") {
       const wrappedAppendMessage = function (this: any, message: any) {
-        const requestTag =
-          message?.role === "user" && typeof message === "object"
-            ? userMessageRequestTags.get(message)
-            : undefined;
+        const requestIdentity = resolveUserMessageRequestIdentity(message);
         const result = originalAppendMessage.call(this, message);
         const sessionLeafId = safeString(result).trim();
         if (message?.role === "user" && sessionLeafId) {
-          if (requestTag) {
-            const observedRole = turnCoordinator.observedRole(requestTag);
-            if (observedRole) {
-              sessionManager.appendCustomEntry?.("rin_request_identity", {
-                requestId: requestTag,
-                messageEntryId: sessionLeafId,
-                observedRole,
-              });
-              turnCoordinator.observePersistedUser(requestTag);
-            }
+          if (requestIdentity) {
+            sessionManager.appendCustomEntry?.("rin_request_identity", {
+              requestId: requestIdentity.requestTag,
+              messageEntryId: sessionLeafId,
+              observedRole: requestIdentity.observedRole,
+            });
+            turnCoordinator.observePersistedUser(requestIdentity.requestTag);
           }
           if (message && typeof message === "object") {
-            userMessageRequestTags.delete(message);
+            userMessageRequestIdentities.delete(message);
           }
         }
         return result;
@@ -767,12 +797,12 @@ export async function runCustomRpcMode(
         if (ownerBarrier) await ownerBarrier;
       }
       if (event?.type === "message_start" && event.message?.role === "user") {
-        const match = turnCoordinator.observeUserStart({
-          requestTag: producerRequestTag,
-          message: event.message,
-        });
+        const requestIdentity = resolveUserMessageRequestIdentity(
+          event.message,
+          producerRequestTag,
+        );
         producerRequestTag =
-          match?.requestTag ||
+          requestIdentity?.requestTag ||
           producerRequestTag ||
           safeString(nativeSubmission?.requestTag).trim();
       }
@@ -794,9 +824,6 @@ export async function runCustomRpcMode(
             : undefined;
       }
       if (event?.type === "message_start" && event.message?.role === "user") {
-        if (producerRequestTag) {
-          userMessageRequestTags.set(event.message, producerRequestTag);
-        }
         output(taggedEvent);
         return;
       }

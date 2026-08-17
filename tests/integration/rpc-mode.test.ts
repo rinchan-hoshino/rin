@@ -4963,7 +4963,7 @@ test(
 );
 
 test(
-  "rpc mode attributes queued steer acceptance despite stale terminal-owner async context",
+  "rpc mode attributes queued steer acceptance from native start or durable append",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -5205,6 +5205,58 @@ test(
 
       onData(
         Buffer.from(
+          `${JSON.stringify({ id: "turn-steer-without-start", type: "prompt", message: "steer appended without start", streamingBehavior: "steer", requestTag: "tag-steer-without-start", promptContext: { source: "chat-bridge" } })}\n`,
+        ),
+      );
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (promptStreamingStates.length === 3) break;
+        await wait(10);
+      }
+      const steeredUserWithoutStart = {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "runtime metadata: rin prompt context v1\n---\nsteer appended without start",
+          },
+        ],
+      };
+      session.sessionManager.appendMessage(steeredUserWithoutStart);
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (
+          parseRpcOutput(lines).some(
+            (event) =>
+              event.type === "response" &&
+              event.id === "turn-steer-without-start",
+          )
+        ) {
+          break;
+        }
+        await wait(10);
+      }
+      assert.deepEqual(
+        durableEntries.find(
+          (entry) =>
+            entry.customType === "rin_request_identity" &&
+            entry.data?.requestId === "tag-steer-without-start",
+        )?.data,
+        {
+          requestId: "tag-steer-without-start",
+          messageEntryId: "message-4",
+          observedRole: "nonterminal",
+        },
+      );
+      assert.equal(
+        parseRpcOutput(lines).find(
+          (event) =>
+            event.type === "response" &&
+            event.id === "turn-steer-without-start",
+        )?.data?.outcome,
+        "nonterminal",
+      );
+
+      onData(
+        Buffer.from(
           `${JSON.stringify({ id: "turn-steer-retry", type: "prompt", message: "steer now", streamingBehavior: "steer", requestTag: "tag-steer" })}\n`,
         ),
       );
@@ -5214,7 +5266,7 @@ test(
       );
       assert.equal(retriedAdmission?.data?.outcome, "rejoined");
       assert.equal(retriedAdmission?.data?.originalOutcome, "nonterminal");
-      assert.deepEqual(promptStreamingStates, [false, true]);
+      assert.deepEqual(promptStreamingStates, [false, true, true]);
 
       const projectedUserStart = parseRpcOutput(lines).find(
         (event) =>
