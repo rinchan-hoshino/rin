@@ -322,9 +322,17 @@ test("callable core daemon routes the complete system-owned RPC while its host o
     );
 
     assert.equal(
-      (await request({ type: "daemon_status" })).data.extraOwner,
+      (
+        await request({
+          type: "get_state",
+          frontendIdentity: { kind: "tui" },
+        })
+      ).success,
       true,
     );
+    const daemonStatus = await request({ type: "daemon_status" });
+    assert.equal(daemonStatus.data.extraOwner, true);
+    assert.equal(daemonStatus.data.frontendKind, "tui");
     assert.equal(
       (await request({ type: "daemon_activity" })).data.extraOwner,
       undefined,

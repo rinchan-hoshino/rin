@@ -26,6 +26,7 @@ import {
   isSessionScopedCommand,
   response,
 } from "../rin-lib/rpc.js";
+import { normalizeFrontendIdentity } from "../rin-lib/frontend-identity.js";
 import {
   applyRuntimeProfileEnvironment,
   resolveRuntimeProfile,
@@ -640,6 +641,11 @@ export async function startDaemon(options: {
             );
             return;
           }
+
+          const frontendIdentity = normalizeFrontendIdentity(
+            command?.frontendIdentity,
+          );
+          if (frontendIdentity) connection.frontendIdentity = frontendIdentity;
 
           if (await selfHandleCommand(connection, command)) {
             workerPool.evictDetachedWorkers();

@@ -137,7 +137,7 @@ const replacements: Record<string, string> = {
       terminateWorkerGracefully() {}
       replayPendingTerminalTurnEvent(connection, selector) { return Boolean(selector.sessionFile || selector.sessionId); }
       async awaitTerminalTurnEvent(connection, selector, requestTag) { return { sessionFile: selector.sessionFile || "", sessionId: selector.sessionId || "", requestTag: requestTag || null }; }
-      getStatusSnapshot() { return { workerCount: 2, busyWorkerCount: 1 }; }
+      getStatusSnapshot() { return { workerCount: 2, busyWorkerCount: 1, frontendKind: this.connection?.frontendIdentity?.kind }; }
       continueInterruptedTurnSessionWorker(session) { if (session.sessionId === "continue-fails") throw new Error("continue failed"); }
       async ensureSelectedWorker(connection, selector) {
         if (selector.sessionId === "ensure-missing") return undefined;

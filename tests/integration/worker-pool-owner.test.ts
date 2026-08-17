@@ -628,7 +628,7 @@ setInterval(() => {}, 1000);
   assert.equal(pool.getStatusSnapshot().workerCount, 0);
 });
 
-test("worker-pool injected-spawn branch: attached idle worker sleeps while preserving the selected session", async () => {
+test("worker-pool injected-spawn branch: attached chat worker sleeps while preserving the selected session", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   const commandPath = path.join(dir, "attached-idle-commands.jsonl");
@@ -665,6 +665,7 @@ setInterval(() => {}, 1000);
   const connection = {
     socket: { destroyed: false, write() {} },
     clientBuffer: "",
+    frontendIdentity: { kind: "chat", key: "discord/owner:chat" },
   };
 
   const pool = new WorkerPool({
@@ -703,6 +704,76 @@ setInterval(() => {}, 1000);
   );
 
   pool.destroyAll();
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("worker-pool injected-spawn branch: TUI connection holds its persisted worker until detach", async () => {
+  const dir = await makeTempDir("rin-worker-pool-");
+  const workerPath = path.join(dir, "worker-source");
+  const commandPath = path.join(dir, "tui-idle-commands.jsonl");
+  const sessionFile = "/tmp/tui-idle.jsonl";
+  await fs.writeFile(
+    workerPath,
+    String.raw`import fs from 'node:fs';
+process.stdin.setEncoding('utf8');
+let buffer='';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  while (true) {
+    const idx = buffer.indexOf('\n');
+    if (idx < 0) break;
+    const line = buffer.slice(0, idx);
+    buffer = buffer.slice(idx + 1);
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    fs.appendFileSync(${JSON.stringify(commandPath)}, command.type + '\n');
+    if (command.type === 'sleep_session') process.exit(0);
+  }
+});
+setInterval(() => {}, 1000);
+`,
+  );
+
+  const connection = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+    frontendIdentity: { kind: "tui" },
+  };
+
+  const pool = new WorkerPool({
+    workerPath,
+    cwd: dir,
+    gcIdleMs: 20,
+    sweepIntervalMs: 10,
+  });
+  const worker = pool.resolveWorkerForCommand(connection, {
+    type: "new_session",
+  });
+  pool.setWorkerSessionRefs(worker, {
+    sessionFile,
+    sessionId: "tui-idle",
+  });
+  pool.attachWorker(connection, worker);
+
+  pool.evictDetachedWorkers();
+  await sleep(30);
+  pool.evictDetachedWorkers();
+
+  assert.equal(pool.getStatusSnapshot().workerCount, 1);
+  assert.equal(connection.attachedWorker, worker);
+  assert.deepEqual(await readCommandLog(commandPath), []);
+
+  pool.detachWorker(connection);
+  await sleep(30);
+  pool.evictDetachedWorkers();
+  for (let i = 0; i < 100; i += 1) {
+    if (pool.getStatusSnapshot().workerCount === 0) break;
+    await sleep(10);
+  }
+
+  assert.equal(pool.getStatusSnapshot().workerCount, 0);
+  assert.deepEqual(await readCommandLog(commandPath), ["sleep_session"]);
+
   await fs.rm(dir, { recursive: true, force: true });
 });
 

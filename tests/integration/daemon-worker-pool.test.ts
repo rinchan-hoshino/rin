@@ -2110,7 +2110,7 @@ setInterval(() => {}, 1000);
   assert.equal(pool.getStatusSnapshot().workerCount, 0);
 });
 
-test("attached idle worker sleeps while preserving the selected session", async () => {
+test("attached chat worker sleeps while preserving the selected session", async () => {
   const dir = await makeTempDir("rin-worker-pool-");
   const workerPath = path.join(dir, "worker-source");
   const commandPath = path.join(dir, "attached-idle-commands.jsonl");
@@ -2147,6 +2147,7 @@ setInterval(() => {}, 1000);
   const connection = {
     socket: { destroyed: false, write() {} },
     clientBuffer: "",
+    frontendIdentity: { kind: "chat", key: "discord/owner:chat" },
   };
 
   const pool = new WorkerPool({

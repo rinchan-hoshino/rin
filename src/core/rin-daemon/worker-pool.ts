@@ -23,6 +23,7 @@ import {
 } from "./worker-cgroup-isolation.js";
 import { parseJsonl } from "../rin-lib/common.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
+import type { RinFrontendIdentity } from "../rin-lib/frontend-identity.js";
 import { RIN_DAEMON_WORKER_OWNER_ENV } from "../rin-lib/profile.js";
 import {
   hasSessionRef as hasSessionSelector,
@@ -42,6 +43,7 @@ export type ConnectionState = {
   sessionFile?: string;
   sessionId?: string;
   resourceOptions?: Record<string, unknown>;
+  frontendIdentity?: RinFrontendIdentity;
 };
 
 type PendingResponse = {
@@ -1945,6 +1947,13 @@ export class WorkerPool {
       worker.isStreaming ||
       worker.isCompacting
     ) {
+      worker.idleSince = null;
+      return;
+    }
+    const heldByNonChatFrontend = Array.from(worker.connections).some(
+      (connection) => connection.frontendIdentity?.kind !== "chat",
+    );
+    if (heldByNonChatFrontend) {
       worker.idleSince = null;
       return;
     }
