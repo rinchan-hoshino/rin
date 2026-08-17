@@ -659,19 +659,31 @@ test("self-improve distillation manual is the concise canonical contract", async
   assert.match(manual, /Memory preserves evidence/);
   assert.match(manual, /Self-improve stores the smallest future behavior/);
   assert.match(manual, /Evidence, trigger, behavior, and owner/);
-  assert.match(manual, /Every pass performs garbage collection/);
+  assert.match(manual, /Every pass inspects .* for garbage collection/);
+  assert.match(manual, /may simplify, add, or make no change/);
   assert.match(manual, /Turn-window/);
   assert.match(manual, /local garbage collection/);
   assert.match(manual, /even when the candidate is already covered/);
-  assert.match(manual, /A pass that only appends.*is incomplete/);
+  assert.match(manual, /without losing live behavior/);
+  assert.match(manual, /If nothing is removable, leave .* unchanged/);
+  assert.doesNotMatch(manual, /A pass that only appends.*is incomplete/);
   assert.match(manual, /Nightly owns global prompt and skill entropy/);
   assert.match(manual, /state\/skill-usage\.json/);
   assert.match(manual, /startedAt/);
   assert.match(manual, /Usage is a signal, never a deletion verdict/);
   assert.match(manual, /fully absorbed by another owner|retired mechanism/);
   assert.match(manual, /Every changed pass reports before\/after bytes/);
-  assert.match(manual, /net growth names the deletion, merge, or replacement/);
-  assert.match(manual, /pure or unexplained append fails/);
+  assert.match(
+    manual,
+    /Prefer deleting, merging, moving, or rewriting when existing guidance can absorb the candidate/,
+  );
+  assert.doesNotMatch(manual, /Delete, merge, move, or rewrite before adding/);
+  assert.match(
+    manual,
+    /net growth explains why existing guidance could not absorb missing behavior/,
+  );
+  assert.match(manual, /unexplained growth fails/);
+  assert.doesNotMatch(manual, /pure or unexplained append fails/);
   assert.match(manual, /before\/after bytes.*skill count/);
   assert.match(manual, /one-in-one-out/);
   assert.doesNotMatch(

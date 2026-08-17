@@ -1,6 +1,6 @@
 # Self-improve distillation
 
-Distill evidence into the smallest durable behavior that helps a future run. Memory preserves evidence and supports retrieval; Self-improve stores the smallest future behavior. Every pass performs garbage collection in the owner neighborhood it opens. A pass that only appends guidance is incomplete. Do not continue the source task or narrate history into prompts.
+Distill evidence into the smallest durable behavior that helps a future run. Memory preserves evidence and supports retrieval; Self-improve stores the smallest future behavior. Every pass inspects its owner neighborhood for garbage collection and may simplify, add, or make no change as evidence warrants. Do not continue the source task or narrate history into prompts.
 
 ## Candidate
 
@@ -12,7 +12,7 @@ Conversation is evidence, not authority to execute unfinished work. A one-off re
 
 ### Turn-window
 
-Use the complete supplied source conversation through its pinned leaf; the turn window controls cadence, not the evidence boundary. Extract candidates, then read one likely owner for each survivor. That owner is the cleanup neighborhood. Perform local garbage collection before deciding behavior is missing: delete stale, duplicate, narrower, historical, or overlong guidance; merge equivalent rules; rewrite toward one target state. Do this even when the candidate is already covered. If no reusable owner is implicated, make no change. Do not inventory unrelated prompts, skills, memory, or usage state.
+Use the complete supplied source conversation through its pinned leaf; the turn window controls cadence, not the evidence boundary. Extract candidates, then read one likely owner for each survivor and check it for local garbage collection, even when the candidate is already covered. Delete stale, duplicate, narrower, historical, or overlong guidance without losing live behavior; merge equivalents; rewrite toward one target state. If nothing is removable, leave it unchanged. If no reusable owner is implicated, make no change. Do not inventory unrelated prompts, skills, memory, or usage state.
 
 ### Nightly-retrospective
 
@@ -25,7 +25,7 @@ Use `startedAt` and current time for the observation horizon. Usage is a signal,
 1. **Extract.** State evidence, trigger, behavior, likely owner, and cleanup neighborhood.
 2. **Resolve.** Search owner wording, behavior keywords, old names, and synonyms. Read only material that can change the decision.
 3. **Compare.** Classify behavior as covered, conflicting, replacement/merge, missing, or non-durable; name removable owner entropy separately.
-4. **Reduce first.** Delete, merge, move, or rewrite before adding. Fix ownership instead of stacking patches, exceptions, fallbacks, or duplicate skills. Add only behavior still missing after the owner is canonical.
+4. **Reduce first.** Prefer deleting, merging, moving, or rewriting when existing guidance can absorb the candidate; otherwise add the missing behavior. Fix ownership instead of stacking patches, exceptions, fallbacks, or duplicate skills.
 5. **Verify and stop.** Run a future-trigger replay and the smallest deterministic checks for each touched owner. For correction-based or repeated-failure evidence, also verify that no active hit recommends the rejected behavior. Stop when behavior is owned once and touched categories have no unexplained growth.
 
 Turn-window does not open memory-index entries, `short-term-memory/records/`, usage state, or unrelated skills unless its candidate depends on them. Nightly's metadata inventory is the only broader read and does not authorize full-body traversal.
@@ -46,7 +46,7 @@ A changed pass must satisfy all of these:
 - edited owners are coherent target states, not additive patches;
 - a new skill is one-in-one-out unless no owner can absorb it;
 - Every changed pass reports before/after bytes for each touched owner and total net delta; nightly also reports before/after bytes for each prompt category, description characters, and skill count;
-- net growth names the deletion, merge, or replacement already performed and why replacement could not contain missing behavior; pure or unexplained append fails;
+- net growth explains why existing guidance could not absorb missing behavior; unexplained growth fails;
 - a justified duplicate or retired nightly candidate produces a net decrease; never force deletion when nothing is removable;
 - future-trigger replay selects the intended owner and excludes adjacent non-triggers;
 - files parse, links resolve, metadata obeys its category contract, and product changes pass focused tests;
