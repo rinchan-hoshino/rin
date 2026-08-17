@@ -229,6 +229,63 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
 });
 
+test("resumed sessions retire persisted prompts that advertise the removed note tool", async (t) => {
+  const cwd = makeTempDir(t, "rin-retired-note-prompt-cwd-");
+  const agentDir = makeTempDir(t, "rin-retired-note-prompt-agent-");
+  const { session, runtime } = await runtimeMod.createConfiguredAgentSession({
+    cwd,
+    agentDir,
+  });
+  t.after(() => runtime.dispose());
+  const retiredPrompt = [
+    "Frozen prompt.",
+    "Available tools:",
+    "- note: Session-branch scratchpad for exact cross-compaction state.",
+    "",
+    "Guidelines:",
+    "- Use note for verified state that must survive compaction; use todo for execution checklists.",
+  ].join("\n");
+  session.sessionManager.appendCustomEntry("rin-system-prompt-state", {
+    version: 1,
+    systemPrompt: retiredPrompt,
+  });
+
+  const prompt = runtimeMod.ensureSessionBaseSystemPrompt(session);
+
+  assert.notEqual(prompt, retiredPrompt);
+  assert.match(prompt, /Available tools:/);
+  assert.doesNotMatch(prompt, /^- note:/m);
+  assert.doesNotMatch(prompt, /^- Use note /m);
+  assert.equal(
+    session.sessionManager
+      .getBranch()
+      .filter((entry: any) => entry.customType === "rin-system-prompt-state")
+      .at(-1)?.data?.systemPrompt,
+    prompt,
+  );
+});
+
+test("persisted prompts preserve copied retired note text outside generated contract sections", async (t) => {
+  const cwd = makeTempDir(t, "rin-copied-note-prompt-cwd-");
+  const agentDir = makeTempDir(t, "rin-copied-note-prompt-agent-");
+  const { session, runtime } = await runtimeMod.createConfiguredAgentSession({
+    cwd,
+    agentDir,
+  });
+  t.after(() => runtime.dispose());
+  const copiedPrompt = [
+    "User-provided copy:",
+    "- note: Session-branch scratchpad for exact cross-compaction state.",
+    "- Use note for verified state that must survive compaction; use todo for execution checklists.",
+  ].join("\n");
+  session.sessionManager.appendCustomEntry("rin-system-prompt-state", {
+    version: 1,
+    systemPrompt: copiedPrompt,
+  });
+
+  assert.equal(runtimeMod.ensureSessionBaseSystemPrompt(session), copiedPrompt);
+});
+
 test("buildFinalAppSystemPrompt ignores legacy language settings", async (t) => {
   const cwd = makeTempDir(t, "rin-lang-prompt-cwd-");
   const agentDir = makeTempDir(t, "rin-lang-prompt-agent-");

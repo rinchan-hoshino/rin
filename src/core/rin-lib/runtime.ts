@@ -131,6 +131,41 @@ const LEGACY_LANGUAGE_ONLY_DEFAULTS: Record<string, string> = {
   zh: "zh_CN",
 };
 
+const RETIRED_NOTE_PROMPT_CONTRACTS = [
+  {
+    tool: "- note: Read or mutate the current session-branch scratch note.",
+    guideline:
+      "- Use note for model-only scratch work that should survive compaction within the current session, not for user-facing output or cross-session memory.",
+  },
+  {
+    tool: "- note: Read all continuity items or add, edit, and remove verified facts by stable ID.",
+    guideline:
+      "- Use note only for concise, verified facts that must survive compaction; keep plans, pending actions, and checklists in todo.",
+  },
+  {
+    tool: "- note: Read or minimally update exact cross-compaction scratchpad items by stable ID.",
+    guideline:
+      "- Use note as a minimal scratchpad for verified content that must survive compaction exactly. Keep each item as short as possible and focused on exact cross-compaction state; rely on files or tools for recoverable context, and todo for plans, pending actions, and checklists. Clean up notes promptly as work advances.",
+  },
+  {
+    tool: "- note: Session-branch scratchpad for exact cross-compaction state.",
+    guideline:
+      "- Use note for verified state that must survive compaction; use todo for execution checklists.",
+  },
+] as const;
+
+function hasRetiredNotePromptContract(prompt: string) {
+  const availableToolsAt = prompt.indexOf("Available tools:\n");
+  const guidelinesAt = prompt.indexOf("\nGuidelines:\n", availableToolsAt);
+  if (availableToolsAt < 0 || guidelinesAt < 0) return false;
+  const toolLines = prompt.slice(availableToolsAt, guidelinesAt).split("\n");
+  const guidelineLines = prompt.slice(guidelinesAt).split("\n");
+  return RETIRED_NOTE_PROMPT_CONTRACTS.some(
+    ({ tool, guideline }) =>
+      toolLines.includes(tool) && guidelineLines.includes(guideline),
+  );
+}
+
 type LazySystemPromptState = {
   materialized: boolean;
   systemPrompt: string;
@@ -345,8 +380,10 @@ function findPersistedSessionBaseSystemPromptEntry(entries: any[]) {
     }
     const storedPrompt = String(entry?.data?.systemPrompt || "");
     if (!storedPrompt.trim()) continue;
+    const prompt = stripLegacyConfiguredLanguagePrompt(storedPrompt);
+    if (hasRetiredNotePromptContract(prompt)) return null;
     return {
-      prompt: stripLegacyConfiguredLanguagePrompt(storedPrompt),
+      prompt,
       entryIndex: index,
     } satisfies PersistedSessionSystemPrompt;
   }
