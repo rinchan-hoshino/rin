@@ -84,6 +84,14 @@ type ActiveToolBatch = {
   latestTodoNotice: TodoNotice | null;
 };
 
+const TODO_NOTICE_ACTIONS = new Set([
+  "add",
+  "edit",
+  "remove",
+  "toggle",
+  "clear",
+]);
+
 const NESTED_TOOL_RESULT_KEYS = [
   "result",
   "results",
@@ -124,7 +132,13 @@ function toolNameFromRecord(value: Record<string, any>) {
 function todoNoticeFromDetails(details: unknown): TodoNotice | null {
   const value =
     details && typeof details === "object" ? (details as any) : null;
-  if (!value || safeString(value.error).trim()) return null;
+  if (
+    !value ||
+    safeString(value.error).trim() ||
+    !TODO_NOTICE_ACTIONS.has(safeString(value.action).trim())
+  ) {
+    return null;
+  }
   const todos = normalizeRinTodoItems(value.items);
   if (!todos) return null;
   return {

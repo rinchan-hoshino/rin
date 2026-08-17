@@ -476,8 +476,9 @@ test("frontend backend event translator emits todo notice for single todo execut
   );
 });
 
-test("frontend backend event translator displays todo reads", () => {
+test("frontend backend event translator does not display todo reads or unclassified snapshots", () => {
   const translator = sdk.createRinFrontendBackendEventTranslator();
+  const snapshot = [{ id: 1, text: "Keep working", done: false }];
 
   assert.deepEqual(
     translator.translate({
@@ -487,24 +488,23 @@ test("frontend backend event translator displays todo reads", () => {
       result: {
         details: {
           action: "read",
-          items: [{ id: 1, text: "Keep working", done: false }],
+          items: snapshot,
           nextId: 2,
         },
       },
       isError: false,
     }),
-    [
-      { type: "turn_accepted" },
-      {
-        type: "passive_notice",
-        text: "[ ] Keep working",
-        level: "info",
-        deferDuringTurn: false,
-        noticeKind: "todo",
-        todoItems: [{ id: 1, text: "Keep working", done: false }],
-        sourceEventId: "todo-read",
-      },
-    ],
+    [{ type: "turn_accepted" }],
+  );
+  assert.deepEqual(
+    translator.translate({
+      type: "tool_execution_end",
+      toolCallId: "todo-unclassified",
+      toolName: "todo",
+      result: { details: { items: snapshot, nextId: 2 } },
+      isError: false,
+    }),
+    [{ type: "turn_accepted" }],
   );
 });
 
