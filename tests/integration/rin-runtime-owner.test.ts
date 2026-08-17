@@ -1246,18 +1246,25 @@ test("runtime exposes Rin metadata on extension lifecycle and command contexts",
     createContext: () => ({ kind: "lifecycle" }),
     createCommandContext: () => ({ kind: "command" }),
   };
+  const sessionManager = {
+    __rinFrontend: { kind: "chat", key: "discord/1:2" },
+  };
   runtime.applyRinExtensionContextApi(
     {
       extensionRunner: runner,
-      sessionManager: {
-        __rinFrontend: { kind: "chat", key: "discord/1:2" },
-      },
+      sessionManager,
     },
     "/agent",
   );
-  assert.deepEqual(runner.createContext().rin, {
+  const lifecycleContext = runner.createContext();
+  assert.deepEqual(lifecycleContext.rin, {
     agentDir: "/agent",
     frontendIdentity: { kind: "chat", key: "discord/1:2" },
+  });
+  sessionManager.__rinFrontend = { kind: "chat", key: "discord/3:4" };
+  assert.deepEqual(lifecycleContext.rin.frontendIdentity, {
+    kind: "chat",
+    key: "discord/3:4",
   });
   assert.equal(runner.createCommandContext().rin.agentDir, "/agent");
   runtime.applyRinExtensionContextApi({}, "/agent");

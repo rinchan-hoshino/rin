@@ -1259,10 +1259,12 @@ export function applyRinExtensionContextApi(session: any, agentDir: string) {
     const original = runner[method].bind(runner);
     runner[method] = (...args: unknown[]) => {
       const context = original(...args);
-      context.rin = {
-        agentDir,
-        frontendIdentity: session.sessionManager?.__rinFrontend,
-      };
+      const rinContext: Record<string, unknown> = { agentDir };
+      Object.defineProperty(rinContext, "frontendIdentity", {
+        enumerable: true,
+        get: () => session.sessionManager?.__rinFrontend,
+      });
+      context.rin = rinContext;
       return context;
     };
   }
