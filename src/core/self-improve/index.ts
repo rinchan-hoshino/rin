@@ -6,7 +6,7 @@ import type {
 } from "../rin-lib/capability-types.js";
 import { isAssistantFinalMessage } from "../message-content.js";
 import { normalizeSelfImproveTurnWindowTurns } from "./constants.js";
-import { enqueueSelfImproveMaintenanceJob } from "./async-jobs.js";
+import { enqueueSelfImproveMaintenanceJob } from "./maintenance-queue.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { recordSelfImproveSkillReadEvent } from "./skill-usage.js";
 

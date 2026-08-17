@@ -12,7 +12,7 @@ export async function enqueueSelfImproveMaintenanceJob(job) {
 const hook = `
 export async function resolve(specifier, context, nextResolve) {
   const resolved = await nextResolve(specifier, context);
-  if (resolved.url.includes("dist/core/self-improve/async-jobs.js")) {
+  if (resolved.url.includes("dist/core/self-improve/maintenance-queue.js")) {
     return { url: ${JSON.stringify(replacement)}, shortCircuit: true };
   }
   return resolved;

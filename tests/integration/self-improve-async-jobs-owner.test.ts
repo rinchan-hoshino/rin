@@ -10,9 +10,13 @@ import { importBuiltModule } from "../support/import-built-module.js";
 
 const execFileAsync = promisify(execFile);
 await import("../support/register-async-jobs-private-owner-fixture.ts");
-const asyncJobs = await importBuiltModule<
+const asyncJobsModule = await importBuiltModule<
   typeof import("../../src/core/self-improve/async-jobs.js")
 >("dist/core/self-improve/async-jobs.js");
+const maintenanceQueue = await importBuiltModule<
+  typeof import("../../src/core/self-improve/maintenance-queue.js")
+>("dist/core/self-improve/maintenance-queue.js");
+const asyncJobs = Object.assign({}, asyncJobsModule, maintenanceQueue);
 const selfImprovePaths = await importBuiltModule<
   typeof import("../../src/core/self-improve/paths.js")
 >("dist/core/self-improve/paths.js");
@@ -194,6 +198,19 @@ test("queued worker supervisor is bounded when no runnable queue exists", async 
     );
     await fs.writeFile(
       queuePath,
+      JSON.stringify([
+        {
+          kind: "self_improve_review",
+          agentDir: root,
+          sessionFile: "/tmp/worker-session.jsonl",
+        },
+      ]),
+    );
+    await fs.writeFile(workerPath, "process.exit(0);\n");
+    assert.equal(asyncJobs.spawnQueuedMemoryWorker(root, { workerPath }), true);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await fs.writeFile(
+      queuePath,
       JSON.stringify([{ kind: "session_summary" }, null]),
     );
     assert.equal(
@@ -214,104 +231,6 @@ test("queued worker supervisor is bounded when no runnable queue exists", async 
     );
     defaultSupervisor.stop();
     defaultSupervisor.stop();
-  });
-});
-
-test("maintenance queue normalizes identities and keeps leaf jobs distinct", async () => {
-  await withTempRoot(async (root) => {
-    const queuePath = selfImprovePaths.maintenanceQueuePath(root);
-    await fs.mkdir(path.dirname(queuePath), { recursive: true });
-    await fs.writeFile(
-      queuePath,
-      JSON.stringify([
-        {
-          id: "legacy-summary",
-          kind: "session_summary",
-          agentDir: root,
-          sessionFile: "/tmp/legacy.jsonl",
-        },
-      ]),
-    );
-
-    await asyncJobs.enqueueSelfImproveMaintenanceJob({
-      agentDir: ` ${root} `,
-      sessionFile: " /tmp/owner-session.jsonl ",
-      trigger: "",
-      leafId: " leaf-before ",
-      additionalExtensionPaths: [
-        " /tmp/ext-a.ts ",
-        "/tmp/ext-a.ts",
-        "",
-        " /tmp/ext-b.ts ",
-      ],
-    });
-    let queue = await readJson(queuePath);
-    assert.equal(queue.length, 1);
-    assert.match(queue[0].id, /^maintenance_job_/);
-    assert.equal(queue[0].kind, "self_improve_review");
-    assert.equal(queue[0].trigger, "self_improve:review");
-    assert.equal(queue[0].agentDir, path.resolve(root));
-    assert.equal(queue[0].sessionFile, "/tmp/owner-session.jsonl");
-    assert.equal(queue[0].leafId, "leaf-before");
-    assert.deepEqual(queue[0].additionalExtensionPaths, [
-      "/tmp/ext-a.ts",
-      "/tmp/ext-b.ts",
-    ]);
-
-    queue[0].attempts = 4;
-    queue[0].lastError = "stale";
-    queue[0].lastAttemptAt = "2026-01-01T00:00:00.000Z";
-    await fs.writeFile(queuePath, JSON.stringify(queue));
-    await asyncJobs.enqueueSelfImproveMaintenanceJob({
-      agentDir: root,
-      sessionFile: "/tmp/owner-session.jsonl",
-      trigger: "owner refresh",
-      leafId: "leaf-before",
-      additionalExtensionPaths: [],
-    });
-    queue = await readJson(queuePath);
-    assert.equal(queue.length, 1);
-    assert.equal(queue[0].trigger, "owner refresh");
-    assert.equal(queue[0].leafId, "leaf-before");
-    assert.equal(queue[0].additionalExtensionPaths, undefined);
-    assert.equal(queue[0].attempts, undefined);
-    assert.equal(queue[0].lastError, undefined);
-    assert.equal(queue[0].lastAttemptAt, undefined);
-
-    await asyncJobs.enqueueSelfImproveMaintenanceJob({
-      agentDir: root,
-      sessionFile: "/tmp/owner-session.jsonl",
-      trigger: "leaf a",
-      leafId: " leaf-a ",
-    });
-    await asyncJobs.enqueueSelfImproveMaintenanceJob({
-      agentDir: root,
-      sessionFile: "/tmp/owner-session.jsonl",
-      trigger: "leaf b",
-      leafId: "leaf-b",
-    });
-    queue = await readJson(queuePath);
-    assert.deepEqual(
-      queue.map((job: any) => job.leafId),
-      ["leaf-before", "leaf-a", "leaf-b"],
-    );
-
-    await assert.rejects(
-      () =>
-        asyncJobs.enqueueSelfImproveMaintenanceJob({
-          agentDir: " ",
-          sessionFile: "/tmp/session.jsonl",
-        }),
-      /maintenance_job_invalid_input/,
-    );
-    await assert.rejects(
-      () =>
-        asyncJobs.enqueueSelfImproveMaintenanceJob({
-          agentDir: root,
-          sessionFile: " ",
-        }),
-      /maintenance_job_invalid_input/,
-    );
   });
 });
 
@@ -496,7 +415,11 @@ const root = process.env.RIN_TEST_ASYNC_JOBS_ROOT;
 const paths = await import(pathToFileURL(path.resolve("dist/core/self-improve/paths.js")).href);
 globalThis.__rinAsyncJobsOwnerCalls = [];
 globalThis.__rinAsyncJobsOwnerBehaviors = [];
-const jobs = await import(pathToFileURL(path.resolve("dist/core/self-improve/async-jobs.js")).href);
+const jobs = Object.assign(
+  {},
+  await import(pathToFileURL(path.resolve("dist/core/self-improve/async-jobs.js")).href),
+  await import(pathToFileURL(path.resolve("dist/core/self-improve/maintenance-queue.js")).href),
+);
 const sessionA = path.join(root, "session-a.jsonl");
 const sessionB = path.join(root, "session-b.jsonl");
 const sessionC = path.join(root, "session-c.jsonl");

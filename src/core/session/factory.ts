@@ -1,4 +1,5 @@
 import { loadRinSessionManagerModule } from "../rin-lib/loader.js";
+import { createConfiguredAgentSession } from "../rin-lib/runtime.js";
 import {
   getRuntimeSessionDir,
   resolveRuntimeProfile,
@@ -39,8 +40,6 @@ export async function openBoundSession(options: {
     (sessionFile
       ? SessionManager.open(requireExistingSessionFile(sessionFile), sessionDir)
       : SessionManager.create(options.cwd, sessionDir));
-  const { createConfiguredAgentSession } =
-    await import("../rin-lib/runtime.js");
   return await createConfiguredAgentSession({
     cwd: options.cwd,
     agentDir: options.agentDir,

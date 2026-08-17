@@ -1081,6 +1081,13 @@
       ]
     },
     {
+      "source": "src/core/self-improve/maintenance-queue.ts",
+      "suite": "integration",
+      "tests": [
+        "tests/integration/self-improve-maintenance-queue-owner.test.ts"
+      ]
+    },
+    {
       "source": "src/core/self-improve/maintainer.ts",
       "suite": "integration",
       "tests": ["tests/integration/self-improve-maintainer-owner.test.ts"]

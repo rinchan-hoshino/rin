@@ -28,10 +28,24 @@ const selfImproveDocs = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "self-improve", "docs.js"))
     .href
 );
-const asyncJobs = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "self-improve", "async-jobs.js"),
-  ).href
+const asyncJobs = Object.assign(
+  {},
+  await import(
+    pathToFileURL(
+      path.join(rootDir, "dist", "core", "self-improve", "async-jobs.js"),
+    ).href
+  ),
+  await import(
+    pathToFileURL(
+      path.join(
+        rootDir,
+        "dist",
+        "core",
+        "self-improve",
+        "maintenance-queue.js",
+      ),
+    ).href
+  ),
 );
 const selfImprovePaths = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "self-improve", "paths.js"))

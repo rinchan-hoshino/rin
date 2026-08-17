@@ -1265,6 +1265,11 @@
       "status": "strict"
     },
     {
+      "source": "src/core/self-improve/maintenance-queue.ts",
+      "ownerSuite": "integration",
+      "status": "strict"
+    },
+    {
       "source": "src/core/self-improve/maintainer.ts",
       "ownerSuite": "integration",
       "status": "strict"
