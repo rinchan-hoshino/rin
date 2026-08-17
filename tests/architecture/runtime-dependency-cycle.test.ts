@@ -96,18 +96,8 @@ function stronglyConnectedComponents(graph: Map<string, Set<string>>) {
   return components.sort((left, right) => left[0].localeCompare(right[0]));
 }
 
-test("session runtime and self-improve imports form an acyclic graph", () => {
-  const targetFiles = new Set([
-    "src/core/session/factory.ts",
-    "src/core/rin-lib/runtime.ts",
-    "src/core/self-improve/index.ts",
-    "src/core/self-improve/async-jobs.ts",
-    "src/core/self-improve/maintainer.ts",
-  ]);
-  const targetComponents = stronglyConnectedComponents(importGraph()).filter(
-    (component) => component.some((file) => targetFiles.has(file)),
-  );
-  assert.deepEqual(targetComponents, []);
+test("core static imports form an acyclic graph", () => {
+  assert.deepEqual(stronglyConnectedComponents(importGraph()), []);
 });
 
 test("maintenance queue is the terminal self-improve enqueue owner", () => {

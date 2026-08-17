@@ -7,7 +7,7 @@ import { schedulerDataPath } from "../data-layout.js";
 import { safeString } from "../platform/process.js";
 export { nowIso } from "../time-utils.js";
 
-import type { CronTaskRecord, CronTaskTrigger } from "./cron.js";
+import type { CronTaskRecord, CronTaskTrigger } from "./cron-contract.js";
 
 function normalizeCronText(
   value: unknown,

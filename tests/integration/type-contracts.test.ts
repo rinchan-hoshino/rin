@@ -99,6 +99,46 @@ function compileFixtures(directory: string, kind: "valid" | "invalid") {
   return { diagnostics, fixtures };
 }
 
+function compileStandaloneFixture(fixture: string) {
+  const directory = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-cron-contract-"),
+  );
+  const file = path.join(directory, "fixture.ts");
+  const contract = fs
+    .readFileSync(
+      path.join(rootDir, "src/core/rin-daemon/cron-contract.ts"),
+      "utf8",
+    )
+    .replace(
+      'import type { ThinkingLevel } from "@earendil-works/pi-agent-core";',
+      'type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";',
+    )
+    .replace(
+      'import type { RinFrontendIdentity } from "../rin-lib/frontend-identity.js";',
+      "type RinFrontendIdentity = { kind?: string; key?: string };",
+    )
+    .replace(
+      /import type \{\n {2}ScheduledTaskSessionMode,\n {2}ScheduledTaskTargetKind,\n\} from "\.\.\/scheduled-task-options\.js";/,
+      'type ScheduledTaskSessionMode = "none" | "dedicated";\ntype ScheduledTaskTargetKind = "agent_prompt" | "shell_command";',
+    );
+  fs.writeFileSync(file, `${contract}\n${fixture}\n`);
+  try {
+    return ts.getPreEmitDiagnostics(
+      ts.createProgram([file], {
+        strict: true,
+        noEmit: true,
+        skipLibCheck: true,
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.NodeNext,
+        moduleResolution: ts.ModuleResolutionKind.NodeNext,
+        types: [],
+      }),
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 test("type-only production modules enforce positive and negative compile contracts", async () => {
   const directory = fs.mkdtempSync(
     path.join(os.tmpdir(), "rin-type-contract-"),
@@ -130,4 +170,22 @@ test("type-only production modules enforce positive and negative compile contrac
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("cron DTO contract enforces scheduler records without runtime exports", async () => {
+  const record =
+    '{ id: "task", createdAt: "2026-08-17T00:00:00.000Z", updatedAt: "2026-08-17T00:00:00.000Z", enabled: true, trigger: { runAt: "2026-08-17T01:00:00.000Z" }, session: { mode: "none" }, target: { kind: "agent_prompt", prompt: "hello" }, runCount: 0, running: false }';
+  assert.deepEqual(
+    compileStandaloneFixture(`const value: CronTaskRecord = ${record};`),
+    [],
+  );
+  assert.ok(
+    compileStandaloneFixture(
+      `const value: CronTaskRecord = { ...${record}, session: { mode: "invalid" } };`,
+    ).length > 0,
+  );
+  const runtime = await importBuiltModule(
+    "dist/core/rin-daemon/cron-contract.js",
+  );
+  assert.deepEqual(Object.keys(runtime), []);
 });

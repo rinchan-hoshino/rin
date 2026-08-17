@@ -33,7 +33,7 @@ import type {
   CronSessionInvocation,
   CronTaskFrontendBinding,
   CronTaskRecord,
-} from "./cron.js";
+} from "./cron-contract.js";
 
 type CronChatCapability = {
   send?: (payload: ChatOutboxPayload) => Promise<any>;

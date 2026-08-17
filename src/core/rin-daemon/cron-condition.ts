@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 
 import { safeString } from "../platform/process.js";
 
-import type { CronTaskCondition, CronTaskRecord } from "./cron.js";
+import type { CronTaskCondition, CronTaskRecord } from "./cron-contract.js";
 
 export type CronConditionEvaluation = {
   passed: boolean;
