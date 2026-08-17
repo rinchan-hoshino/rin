@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import { registerHooks } from "node:module";
 
 const source = `

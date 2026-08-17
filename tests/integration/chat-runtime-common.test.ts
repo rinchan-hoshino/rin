@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -10,8 +11,9 @@ const rootDir = path.resolve(
   "..",
 );
 const chatRuntimeCommon = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "common.js"))
-    .href
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "chat", "platform", "common.js"),
+  ).href
 );
 
 test("chat runtime common helpers normalize and render nodes consistently", () => {

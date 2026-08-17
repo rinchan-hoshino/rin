@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
@@ -38,11 +39,11 @@ test("data layout groups runtime state by its owning subsystem", () => {
   );
 });
 
-test("legacy data moves keep migrations global and owners explicit", () => {
+test("legacy data moves stay outside Chat ownership", () => {
   const byFrom = new Map(
     layout.LEGACY_DATA_LAYOUT_MOVES.map((move) => [move.from, move]),
   );
-  assert.equal(byFrom.get("chat-inbox")?.to, path.join("chat", "inbox"));
+  assert.equal(byFrom.has("chat-inbox"), false);
   assert.equal(byFrom.get("cron")?.to, "scheduler");
   assert.equal(
     byFrom.get("extension-runtime")?.to,

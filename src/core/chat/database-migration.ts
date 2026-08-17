@@ -15,14 +15,10 @@ import {
   chatDatabaseSchemaFingerprint,
   closeChatDatabase,
   configureChatDatabase,
-  openChatDatabaseForInstall,
+  openChatDatabaseForMigration,
   readChatDatabaseTables,
   validateRecordedChatDatabaseSchema,
 } from "./database.js";
-import {
-  migrateLegacyChatControlData,
-  readLegacyControlMigrationPreservedSummary,
-} from "./legacy-migration.js";
 
 function retireLegacyTerminalWal(agentDir: string) {
   const source = path.join(agentDir, "data", "chat", "terminal-wal");
@@ -284,7 +280,7 @@ function recordCanonicalReconciliation(
   ).run(CANONICAL_RECONCILIATION_SCHEMA_META_KEY, value);
 }
 
-export function readCanonicalReconciliationInstallState(
+export function readCanonicalReconciliationMigrationState(
   db: BetterSqlite3.Database,
 ) {
   const row = db
@@ -330,10 +326,10 @@ export function readCanonicalReconciliationInstallState(
   };
 }
 
-export function completeCanonicalReconciliationInstallState(
+export function completeCanonicalReconciliationMigrationState(
   db: BetterSqlite3.Database,
 ) {
-  const state = readCanonicalReconciliationInstallState(db);
+  const state = readCanonicalReconciliationMigrationState(db);
   if (!state || state.state === "complete") return state;
   const completed = {
     ...state,
@@ -857,7 +853,7 @@ function assertNoActiveOldAdmissionOwner(
         )
         .get(timestamp);
   if (active) {
-    throw new Error("chat_install_migration_active_legacy_turn");
+    throw new Error("chat_database_migration_active_legacy_turn");
   }
 }
 
@@ -886,7 +882,7 @@ function assertNoUnfencedRunningTurns(
   }
 }
 
-function terminalOutboxKindForInstall(
+function terminalOutboxKindForMigration(
   db: BetterSqlite3.Database,
   turnId: string,
 ) {
@@ -905,7 +901,7 @@ function terminalOutboxKindForInstall(
   return row ? "outbox_terminal" : "";
 }
 
-function hasAssistantReplyForInstall(
+function hasAssistantReplyForMigration(
   db: BetterSqlite3.Database,
   chatKey: string,
   messageId: string,
@@ -924,7 +920,7 @@ function hasAssistantReplyForInstall(
   );
 }
 
-function hasLaterHandledUserMessageForInstall(
+function hasLaterHandledUserMessageForMigration(
   db: BetterSqlite3.Database,
   chatKey: string,
   sequence: number,
@@ -941,7 +937,7 @@ function hasLaterHandledUserMessageForInstall(
   );
 }
 
-function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
+function consumeOldAdmissionRowsForMigration(db: BetterSqlite3.Database) {
   return db
     .transaction(() => {
       const timestamp = nowIso();
@@ -994,18 +990,18 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
           let disposition = "record_only";
           if (!recordOnly) {
             disposition = "actionable";
-            const outboxKind = terminalOutboxKindForInstall(
+            const outboxKind = terminalOutboxKindForMigration(
               db,
               safeString(row.turn_id),
             );
             if (outboxKind) {
               terminalKind = outboxKind;
               historyResolved += 1;
-            } else if (hasAssistantReplyForInstall(db, chatKey, messageId)) {
+            } else if (hasAssistantReplyForMigration(db, chatKey, messageId)) {
               terminalKind = "legacy_reply_observed";
               historyResolved += 1;
             } else if (
-              hasLaterHandledUserMessageForInstall(
+              hasLaterHandledUserMessageForMigration(
                 db,
                 chatKey,
                 Number(row.sequence),
@@ -1071,14 +1067,14 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
         const chatKey = safeString(row.chat_key).trim();
         const messageId = safeString(row.message_id).trim();
         if (!chatKey || !messageId) {
-          throw new Error("chat_install_migration_invalid_accepted_orphan");
+          throw new Error("chat_database_migration_invalid_accepted_orphan");
         }
-        const replyBoundary = hasAssistantReplyForInstall(
+        const replyBoundary = hasAssistantReplyForMigration(
           db,
           chatKey,
           messageId,
         );
-        const laterHandled = hasLaterHandledUserMessageForInstall(
+        const laterHandled = hasLaterHandledUserMessageForMigration(
           db,
           chatKey,
           Number(row.sequence),
@@ -1123,7 +1119,7 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
         interruptedUnknown += 1;
         orphanedMessages += 1;
       }
-      const previous = readAdmissionModelInstallMigrationSummary(db);
+      const previous = readAdmissionModelSchemaMigrationSummary(db);
       const summary = {
         turns: previous.turns + migratedTurns,
         orphanedMessages: previous.orphanedMessages + orphanedMessages,
@@ -1147,13 +1143,7 @@ function consumeOldAdmissionRowsForInstall(db: BetterSqlite3.Database) {
     .immediate();
 }
 
-function discardUnsupportedOneBotRecoveryHeadsForInstall(
-  db: BetterSqlite3.Database,
-) {
-  db.prepare(`DELETE FROM inbound_heads WHERE platform = 'onebot'`).run();
-}
-
-function releaseCurrentClaimsForInstall(db: BetterSqlite3.Database) {
+function releaseCurrentClaimsForMigration(db: BetterSqlite3.Database) {
   const timestamp = nowIso();
   const hasRunId = tableHasColumn(db, "inbox_jobs", "run_id");
   const releasedCurrentClaims = db
@@ -1168,7 +1158,7 @@ function releaseCurrentClaimsForInstall(db: BetterSqlite3.Database) {
     .run(timestamp).changes;
   if (releasedCurrentClaims === 0) return;
 
-  const previous = readAdmissionModelInstallMigrationSummary(db);
+  const previous = readAdmissionModelSchemaMigrationSummary(db);
   db.prepare(
     `INSERT INTO schema_meta (key, value)
      VALUES ('admission_model_migration_summary', ?)
@@ -1182,7 +1172,7 @@ function releaseCurrentClaimsForInstall(db: BetterSqlite3.Database) {
   );
 }
 
-export function readAdmissionModelInstallMigrationSummary(
+export function readAdmissionModelSchemaMigrationSummary(
   db: BetterSqlite3.Database,
 ) {
   const text = safeString(
@@ -1222,7 +1212,7 @@ export function readAdmissionModelInstallMigrationSummary(
   };
 }
 
-export function preflightChatDatabaseMigrationForInstall(
+export function preflightChatDatabaseMigration(
   agentDir: string,
   options: { runtimeWillBeQuiesced?: boolean } = {},
 ) {
@@ -1249,7 +1239,6 @@ export function preflightChatDatabaseMigrationForInstall(
       }
     } else {
       validateRecordedChatDatabaseSchema(db, currentVersion);
-      readLegacyControlMigrationPreservedSummary(db);
       if (options.runtimeWillBeQuiesced !== true) {
         assertNoActiveOldAdmissionOwner(db, currentVersion);
         assertNoUnfencedRunningTurns(db, currentVersion);
@@ -1265,7 +1254,7 @@ export function preflightChatDatabaseMigrationForInstall(
   }
 }
 
-export function migrateChatDatabaseForInstall(
+export function migrateChatDatabase(
   agentDir: string,
   options: { runtimeQuiesced?: boolean } = {},
 ) {
@@ -1285,7 +1274,7 @@ export function migrateChatDatabaseForInstall(
     }
   }
   if (needsInitialization) {
-    openChatDatabaseForInstall(agentDir);
+    openChatDatabaseForMigration(agentDir);
     closeChatDatabase(agentDir);
   }
 
@@ -1305,18 +1294,6 @@ export function migrateChatDatabaseForInstall(
           assertNoUnfencedRunningTurns(migrationDb, currentVersion);
         }
         upgradeRecordedChatDatabase(migrationDb, options);
-        const legacyMigrationMarker = migrationDb
-          .prepare(
-            `SELECT value FROM schema_meta
-              WHERE key = 'legacy_control_migration'`,
-          )
-          .get() as { value?: string } | undefined;
-        const legacyMigrationComplete =
-          legacyMigrationMarker?.value === "complete_v1";
-        if (needsInitialization || !legacyMigrationComplete) {
-          migrateLegacyChatControlData(agentDir, migrationDb);
-        }
-        discardUnsupportedOneBotRecoveryHeadsForInstall(migrationDb);
         const admissionModelVersion = safeString(
           (
             migrationDb
@@ -1328,10 +1305,10 @@ export function migrateChatDatabaseForInstall(
           )?.value,
         ).trim();
         if (admissionModelVersion !== CHAT_ADMISSION_MODEL_VERSION) {
-          consumeOldAdmissionRowsForInstall(migrationDb);
+          consumeOldAdmissionRowsForMigration(migrationDb);
         }
         if (options.runtimeQuiesced === true) {
-          releaseCurrentClaimsForInstall(migrationDb);
+          releaseCurrentClaimsForMigration(migrationDb);
         }
         const foreignKeyViolations = migrationDb.pragma(
           "foreign_key_check",
@@ -1346,5 +1323,5 @@ export function migrateChatDatabaseForInstall(
     migrationDb.close();
   }
   retireLegacyTerminalWal(agentDir);
-  return openChatDatabaseForInstall(agentDir);
+  return openChatDatabaseForMigration(agentDir);
 }

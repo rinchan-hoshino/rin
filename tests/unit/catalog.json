@@ -43,10 +43,6 @@
       "source": "src/core/chat/error-presentation.ts"
     },
     {
-      "test": "tests/unit/chat-extension-api.test.ts",
-      "source": "src/core/chat/extension-api.ts"
-    },
-    {
       "test": "tests/unit/chat-file-utils.test.ts",
       "source": "src/core/chat/file-utils.ts"
     },
@@ -141,10 +137,6 @@
     {
       "test": "tests/unit/rin-extension-api.test.ts",
       "source": "src/core/rin-extension-api.ts"
-    },
-    {
-      "test": "tests/unit/rin-extension-settings.test.ts",
-      "source": "src/core/rin-extension-settings.ts"
     },
     {
       "test": "tests/unit/frontend-backend-events.test.ts",
@@ -357,10 +349,6 @@
     {
       "test": "tests/unit/session-activity-status.test.ts",
       "source": "src/core/session/activity-status.ts"
-    },
-    {
-      "test": "tests/unit/session-extension-api.test.ts",
-      "source": "src/core/session/extension-api.ts"
     },
     {
       "test": "tests/unit/session-fork.test.ts",

@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
@@ -7,9 +8,10 @@ import { importBuiltModule } from "../support/import-built-module.js";
 const interactive = await importBuiltModule<
   typeof import("../../src/core/rin-install/interactive.js")
 >("dist/core/rin-install/interactive.js");
-const i18nModule = await importBuiltModule<
-  typeof import("../../src/core/rin-install/i18n.js")
->("dist/core/rin-install/i18n.js");
+const i18nModule =
+  await importBuiltModule<typeof import("../../src/core/i18n.js")>(
+    "dist/core/i18n.js",
+  );
 const paths = await importBuiltModule<
   typeof import("../../src/core/rin-install/paths.js")
 >("dist/core/rin-install/paths.js");

@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";

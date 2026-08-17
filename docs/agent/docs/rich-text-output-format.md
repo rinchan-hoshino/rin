@@ -14,7 +14,7 @@ Target surface:
 
 Goal:
 
-- express native chat objects in a format Rin can parse and adapters can deliver, while keeping recipient-visible text useful across fallback paths.
+- express native chat objects in a format Rin can parse and platform implementations can deliver, while keeping recipient-visible text useful across fallback paths.
 
 Trusted inputs:
 
@@ -43,18 +43,18 @@ A rich output is correct when:
 
 ## Markdown rich-object syntax
 
-| Intent         | Syntax                                | Contract                                                                                |
-| -------------- | ------------------------------------- | --------------------------------------------------------------------------------------- |
-| Native mention | `[@name](at:<platform-user-id>)`      | `platform-user-id` is the exact platform user id.                                       |
-| Native mention | `[@name](mention:<platform-user-id>)` | Alias for `at:`. Prefer `at:` in new examples.                                          |
-| Quote reply    | `[quote:<message-id>]`                | `message-id` is the exact platform message id.                                          |
-| Quote reply    | `[label](quote:<message-id>)`         | Link-form quote; the link target supplies the reply id.                                 |
-| Image          | `[image: name](url-or-local-path)`    | `name` is a readable label or filename; target is local path or URL.                    |
-| Image          | `![alt](url-or-local-path)`           | Standard Markdown image syntax also creates an image object.                            |
-| File           | `[file: name](url-or-local-path)`     | Generic attachment object.                                                              |
-| Video          | `[video: name](url-or-local-path)`    | Video attachment object for adapters that support video.                                |
-| Audio          | `[audio: name](url-or-local-path)`    | Audio attachment object for adapters that support audio.                                |
-| Sticker        | `[sticker: name](url-or-local-path)`  | Sticker attachment object for adapters that support the target sticker resource format. |
+| Intent         | Syntax                                | Contract                                                                                 |
+| -------------- | ------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Native mention | `[@name](at:<platform-user-id>)`      | `platform-user-id` is the exact platform user id.                                        |
+| Native mention | `[@name](mention:<platform-user-id>)` | Alias for `at:`. Prefer `at:` in new examples.                                           |
+| Quote reply    | `[quote:<message-id>]`                | `message-id` is the exact platform message id.                                           |
+| Quote reply    | `[label](quote:<message-id>)`         | Link-form quote; the link target supplies the reply id.                                  |
+| Image          | `[image: name](url-or-local-path)`    | `name` is a readable label or filename; target is local path or URL.                     |
+| Image          | `![alt](url-or-local-path)`           | Standard Markdown image syntax also creates an image object.                             |
+| File           | `[file: name](url-or-local-path)`     | Generic attachment object.                                                               |
+| Video          | `[video: name](url-or-local-path)`    | Video attachment object for platforms that support video.                                |
+| Audio          | `[audio: name](url-or-local-path)`    | Audio attachment object for platforms that support audio.                                |
+| Sticker        | `[sticker: name](url-or-local-path)`  | Sticker attachment object for platforms that support the target sticker resource format. |
 
 Example:
 
@@ -75,7 +75,7 @@ Markdown contract:
 
 - Raw `@name` is visible text; native mention syntax supplies the platform id.
 - A bare `file://` URL or ordinary Markdown link is text, not attachment authorization. Use explicit `[file: name](path)` / `[image: name](path)` syntax or structured `parts` to send local resources.
-- Quote is part of the ordered rich message, not separate message metadata. The first quote object supplies the reply target for adapters that support reply/quote delivery.
+- Quote is part of the ordered rich message, not separate message metadata. The first quote object supplies the reply target for platforms that support reply/quote delivery.
 - An inbound quote node is an ID-only lazy reference under the current `chatKey`. Do not inject the referenced message body into the current prompt; call `rin.chat.messages.get({ chatKey, messageId })` only when the request depends on it, and follow any nested quote node only as needed.
 - For outbound delivery, quote context belongs in visible text only when recipient understanding depends on it.
 - Local paths refer to files on the machine running Rin. Prefer absolute paths for generated artifacts.
@@ -158,9 +158,9 @@ Adapters choose the best native representation they support:
 
 - Telegram renders supported Markdown as HTML and native mentions as `tg://user?id=...` links.
 - OneBot renders native mentions as CQ at elements, strips unsupported Markdown formatting from plain text, and embeds local media as `base64://` CQ payloads.
-- Discord and Slack generally preserve Markdown-style text and map reply/thread behavior through their adapter APIs.
+- Discord generally preserves Markdown-style text and maps reply/thread behavior through its platform API.
 - Feishu/Lark serializes blank-line-separated Markdown blocks as native post paragraphs, and uploads local or remote image content to obtain an `image_key` before sending a native image message.
-- Other adapters may strip Markdown formatting or send readable fallback text.
+- Other platforms may strip Markdown formatting or send readable fallback text.
 
 Fallback contract:
 
@@ -198,6 +198,6 @@ Before sending rich output, check:
 
 ## Read next
 
-- Chat identity, SDK operations, logs, adapters, outbox, and delivery troubleshooting: `docs/chat-bridge.md`.
+- Chat identity, SDK operations, logs, platforms, outbox, and delivery troubleshooting: `docs/chat-bridge.md`.
 - SDK import: `docs/agent-sdk.md`.
 - Scheduled chat delivery: `docs/scheduled-tasks.md`.

@@ -21,14 +21,10 @@ export {
   fileNameFromUrl,
 } from "./file-utils.js";
 export {
-  buildChatConfigFromSettings,
-  buildChatRuntimePackageJson,
-  ensureChatRuntimeDependencies,
-  listChatRuntimeAdapterEntries,
-  materializeChatConfig,
-  shouldInstallChatRuntimeDependencies,
+  listBuiltInChatPlatformEntries,
+  listChatPlatformEntries,
 } from "./runtime-config.js";
-export type { ChatRuntimeAdapterEntry } from "./runtime-config.js";
+export type { ChatPlatformEntry } from "./runtime-config.js";
 
 export type ParsedChatKey = {
   platform: string;

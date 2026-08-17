@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -16,7 +17,7 @@ const database = await import(
 );
 const databaseMigration = await import(
   pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat", "database-install-migration.js"),
+    path.join(rootDir, "dist", "core", "chat", "database-migration.js"),
   ).href
 );
 
@@ -30,6 +31,33 @@ function createDatabase(agentDir: string) {
     .mkdir(path.dirname(dbPath), { recursive: true })
     .then(() => new BetterSqlite3(dbPath));
 }
+
+test("chat database upgrade rejects a recorded future schema", () => {
+  assert.throws(
+    () =>
+      (databaseMigration as any).__rinOwnerUpgradeRecordedChatDatabase({
+        pragma: () => 11,
+      }),
+    /chat_database_future_schema:11/,
+  );
+});
+
+test("chat database migration retires a legacy terminal WAL only when present", async () => {
+  const agentDir = await tempAgent("rin-chat-terminal-wal-");
+  try {
+    const terminalWal = path.join(agentDir, "data", "chat", "terminal-wal");
+    (databaseMigration as any).__rinOwnerRetireLegacyTerminalWal(agentDir);
+    await fs.mkdir(terminalWal, { recursive: true });
+    (databaseMigration as any).__rinOwnerRetireLegacyTerminalWal(agentDir);
+    const names = await fs.readdir(path.dirname(terminalWal));
+    assert.equal(
+      names.some((name) => name.startsWith("terminal-wal-retired-")),
+      true,
+    );
+  } finally {
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
 
 test("chat database private normalizers preserve required text, WAL retry, and state floors", () => {
   const seam = database as any;
@@ -165,39 +193,39 @@ test("chat database migration private probes classify schema and history termina
     },
   });
   assert.equal(
-    seam.__rinOwnerTerminalOutboxKindForInstall(
+    seam.__rinOwnerTerminalOutboxKindForMigration(
       dbWith({ delivery_kind: "final" }),
       "turn",
     ),
     "outbox_final",
   );
   assert.equal(
-    seam.__rinOwnerTerminalOutboxKindForInstall(
+    seam.__rinOwnerTerminalOutboxKindForMigration(
       dbWith({ delivery_kind: "error" }),
       "turn",
     ),
     "outbox_error",
   );
   assert.equal(
-    seam.__rinOwnerTerminalOutboxKindForInstall(
+    seam.__rinOwnerTerminalOutboxKindForMigration(
       dbWith({ delivery_kind: "command_ack" }),
       "turn",
     ),
     "command_ack",
   );
   assert.equal(
-    seam.__rinOwnerTerminalOutboxKindForInstall(
+    seam.__rinOwnerTerminalOutboxKindForMigration(
       dbWith({ delivery_kind: "working" }),
       "turn",
     ),
     "outbox_terminal",
   );
   assert.equal(
-    seam.__rinOwnerTerminalOutboxKindForInstall(dbWith(undefined), "turn"),
+    seam.__rinOwnerTerminalOutboxKindForMigration(dbWith(undefined), "turn"),
     "",
   );
   assert.equal(
-    seam.__rinOwnerHasAssistantReplyForInstall(
+    seam.__rinOwnerHasAssistantReplyForMigration(
       dbWith({ one: 1 }),
       "chat",
       "message",
@@ -205,7 +233,7 @@ test("chat database migration private probes classify schema and history termina
     true,
   );
   assert.equal(
-    seam.__rinOwnerHasAssistantReplyForInstall(
+    seam.__rinOwnerHasAssistantReplyForMigration(
       dbWith(undefined),
       "chat",
       "message",
@@ -213,7 +241,7 @@ test("chat database migration private probes classify schema and history termina
     false,
   );
   assert.equal(
-    seam.__rinOwnerHasLaterHandledUserMessageForInstall(
+    seam.__rinOwnerHasLaterHandledUserMessageForMigration(
       dbWith({ one: 1 }),
       "chat",
       1,
@@ -221,7 +249,7 @@ test("chat database migration private probes classify schema and history termina
     true,
   );
   assert.equal(
-    seam.__rinOwnerHasLaterHandledUserMessageForInstall(
+    seam.__rinOwnerHasLaterHandledUserMessageForMigration(
       dbWith(undefined),
       "chat",
       1,
@@ -277,7 +305,7 @@ test("chat database migration private probes classify schema and history termina
         guardDb(["lease_until"], { active: true }),
         5,
       ),
-    /chat_install_migration_active_legacy_turn/,
+    /chat_database_migration_active_legacy_turn/,
   );
   assert.throws(
     () =>
@@ -285,7 +313,7 @@ test("chat database migration private probes classify schema and history termina
         guardDb(["lease_until", "admission_json"], { active: true }),
         6,
       ),
-    /chat_install_migration_active_legacy_turn/,
+    /chat_database_migration_active_legacy_turn/,
   );
   assert.doesNotThrow(() =>
     seam.__rinOwnerAssertNoActiveOldAdmissionOwner(
@@ -329,7 +357,7 @@ test("chat database migration private probes classify schema and history termina
     },
   });
   assert.deepEqual(
-    databaseMigration.readAdmissionModelInstallMigrationSummary(
+    databaseMigration.readAdmissionModelSchemaMigrationSummary(
       summaryDb() as any,
     ),
     {
@@ -342,7 +370,7 @@ test("chat database migration private probes classify schema and history termina
     },
   );
   assert.deepEqual(
-    databaseMigration.readAdmissionModelInstallMigrationSummary(
+    databaseMigration.readAdmissionModelSchemaMigrationSummary(
       summaryDb("{}") as any,
     ),
     {
@@ -355,7 +383,7 @@ test("chat database migration private probes classify schema and history termina
     },
   );
   assert.deepEqual(
-    databaseMigration.readAdmissionModelInstallMigrationSummary(
+    databaseMigration.readAdmissionModelSchemaMigrationSummary(
       summaryDb(
         JSON.stringify({
           turns: -1,
@@ -377,7 +405,7 @@ test("chat database migration private probes classify schema and history termina
     },
   );
   assert.equal(
-    databaseMigration.readAdmissionModelInstallMigrationSummary(
+    databaseMigration.readAdmissionModelSchemaMigrationSummary(
       summaryDb(JSON.stringify({ legacyNotices: 5, notices: 4 })) as any,
     ).legacyNotices,
     5,
@@ -392,15 +420,13 @@ test("chat database install preflight distinguishes absent, empty, partial, and 
   const current = await tempAgent("rin-chat-db-current-");
   try {
     assert.equal(
-      databaseMigration.preflightChatDatabaseMigrationForInstall(absent)
-        .fromVersion,
+      databaseMigration.preflightChatDatabaseMigration(absent).fromVersion,
       0,
     );
 
     (await createDatabase(empty)).close();
     assert.equal(
-      databaseMigration.preflightChatDatabaseMigrationForInstall(empty)
-        .fromVersion,
+      databaseMigration.preflightChatDatabaseMigration(empty).fromVersion,
       0,
     );
 
@@ -408,7 +434,7 @@ test("chat database install preflight distinguishes absent, empty, partial, and 
     partialDb.exec("CREATE TABLE stray (id TEXT)");
     partialDb.close();
     assert.throws(
-      () => databaseMigration.preflightChatDatabaseMigrationForInstall(partial),
+      () => databaseMigration.preflightChatDatabaseMigration(partial),
       /chat_database_partial_schema/,
     );
 
@@ -416,15 +442,14 @@ test("chat database install preflight distinguishes absent, empty, partial, and 
     futureDb.pragma("user_version = 999");
     futureDb.close();
     assert.throws(
-      () => databaseMigration.preflightChatDatabaseMigrationForInstall(future),
+      () => databaseMigration.preflightChatDatabaseMigration(future),
       /chat_database_future_schema:999/,
     );
 
     database.openChatDatabase(current);
     database.closeChatDatabase(current);
     assert.equal(
-      databaseMigration.preflightChatDatabaseMigrationForInstall(current)
-        .fromVersion > 0,
+      databaseMigration.preflightChatDatabaseMigration(current).fromVersion > 0,
       true,
     );
   } finally {
@@ -440,7 +465,7 @@ test("chat database session state APIs preserve cache and conditional writes", a
   try {
     const first = database.openChatDatabase(agentDir);
     assert.equal(database.openChatDatabase(agentDir), first);
-    const migrated = databaseMigration.migrateChatDatabaseForInstall(agentDir);
+    const migrated = databaseMigration.migrateChatDatabase(agentDir);
     assert.notEqual(migrated, first);
     assert.equal(first.open, false);
     assert.equal(database.openChatDatabase(agentDir), migrated);
@@ -580,11 +605,11 @@ test("chat install reconciliation state validates and completes durably", async 
         .run(key, JSON.stringify(value));
 
     assert.equal(
-      databaseMigration.readCanonicalReconciliationInstallState(db),
+      databaseMigration.readCanonicalReconciliationMigrationState(db),
       null,
     );
     assert.equal(
-      databaseMigration.completeCanonicalReconciliationInstallState(db),
+      databaseMigration.completeCanonicalReconciliationMigrationState(db),
       null,
     );
     const pending = {
@@ -598,7 +623,7 @@ test("chat install reconciliation state validates and completes durably", async 
     };
     writeState(pending);
     assert.deepEqual(
-      databaseMigration.readCanonicalReconciliationInstallState(db),
+      databaseMigration.readCanonicalReconciliationMigrationState(db),
       {
         version: 1,
         state: "pending_session_retirement",
@@ -610,11 +635,11 @@ test("chat install reconciliation state validates and completes durably", async 
       },
     );
     const completed =
-      databaseMigration.completeCanonicalReconciliationInstallState(db);
+      databaseMigration.completeCanonicalReconciliationMigrationState(db);
     assert.equal(completed.state, "complete");
     assert.match(completed.completedAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.deepEqual(
-      databaseMigration.completeCanonicalReconciliationInstallState(db),
+      databaseMigration.completeCanonicalReconciliationMigrationState(db),
       completed,
     );
 
@@ -627,7 +652,7 @@ test("chat install reconciliation state validates and completes durably", async 
     ]) {
       writeState(invalid);
       assert.throws(
-        () => databaseMigration.readCanonicalReconciliationInstallState(db),
+        () => databaseMigration.readCanonicalReconciliationMigrationState(db),
         /chat_database_invalid_canonical_reconciliation_state/,
       );
     }

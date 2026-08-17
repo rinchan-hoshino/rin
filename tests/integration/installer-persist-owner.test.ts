@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
@@ -16,7 +17,7 @@ const persistOwner = await import("../../dist/core/rin-install/persist.js");
 const {
   applyInstallUpgradeMigrations,
   finalizeInstallUpgradeMigrations,
-  normalizeInstalledChatSettings,
+  normalizeInstalledSettings,
   persistInstallerOutputs,
   preflightInstallUpgradeMigrations,
   reconcileInstallerManifest,
@@ -40,6 +41,112 @@ function writeJson(filePath: string, value: unknown) {
 function readJson<T = any>(filePath: string): T {
   return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
 }
+
+test("persist private file helpers preserve elevated and owner-local boundaries", async () => {
+  const owner = persistOwner as any;
+  const writes: unknown[][] = [];
+  owner.__rinOwnerWriteInstallerJson(
+    "/owner/elevated.json",
+    { owner: true },
+    { elevated: true, ownerUser: "alice", ownerGroup: 42 },
+    {
+      writeJsonFileWithPrivilege: (...args: unknown[]) => writes.push(args),
+      writeJsonFile: (...args: unknown[]) => writes.push(args),
+    },
+  );
+  owner.__rinOwnerWriteInstallerJson(
+    "/owner/local.json",
+    { owner: false },
+    {},
+    {
+      writeJsonFileWithPrivilege: (...args: unknown[]) => writes.push(args),
+      writeJsonFile: (...args: unknown[]) => writes.push(args),
+    },
+  );
+  assert.deepEqual(writes, [
+    ["/owner/elevated.json", { owner: true }, "alice", 42],
+    ["/owner/local.json", { owner: false }],
+  ]);
+
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "rin-persist-helper-"));
+  try {
+    const localFile = path.join(root, "local");
+    await fsp.writeFile(localFile, "owner");
+    owner.__rinOwnerRemoveFile(localFile, false, () => {});
+    assert.equal(fs.existsSync(localFile), false);
+    const removals: unknown[][] = [];
+    owner.__rinOwnerRemoveFile(
+      "/owner/elevated",
+      true,
+      (...args: unknown[]) => {
+        removals.push(args);
+      },
+    );
+    owner.__rinOwnerRemoveFile("/owner/ignored", true, () => {
+      throw new Error("ignored cleanup failure");
+    });
+    assert.deepEqual(removals, [["rm", ["-f", "/owner/elevated"]]]);
+
+    const dirs: string[] = [];
+    owner.__rinOwnerEnsureRuntimeUserDirs(
+      { targetUser: "alice", installDir: root },
+      { ensureDir: (dir: string) => dirs.push(dir) },
+    );
+    const commands: unknown[][] = [];
+    owner.__rinOwnerEnsureRuntimeUserDirs(
+      { targetUser: "alice", installDir: root, elevated: true },
+      {
+        ensureDir: (dir: string) => dirs.push(dir),
+        runCommandAsUser: (...args: unknown[]) => commands.push(args),
+      },
+    );
+    assert.deepEqual(dirs, [path.join(root, "self_improve", "skills")]);
+    assert.deepEqual(commands, [
+      ["alice", "mkdir", ["-p", path.join(root, "self_improve", "skills")]],
+    ]);
+
+    const migrationCommands: unknown[][] = [];
+    const migrationDeps = {
+      runCommandAsUser: (...args: unknown[]) => migrationCommands.push(args),
+    };
+    const migrationOptions = { targetUser: "alice", elevated: true };
+    owner.__rinOwnerWriteTextFileAsTargetUser(
+      path.join(root, "elevated", "owner.txt"),
+      "owner",
+      migrationOptions,
+      migrationDeps,
+    );
+    const localOps = owner.__rinOwnerCreateSchemaMigrationFileOps(
+      { targetUser: "alice" },
+      {},
+    );
+    const source = path.join(root, "source.json");
+    const renamed = path.join(root, "renamed.json");
+    localOps.writeJsonObject(source, { owner: true });
+    assert.equal(localOps.pathExists(source), true);
+    assert.equal(localOps.pathExists(path.join(root, "missing")), false);
+    assert.deepEqual(localOps.readJsonObject(source), { owner: true });
+    assert.equal(localOps.readJsonObject(path.join(root, "missing")), null);
+    localOps.ensureDir(path.join(root, "local-dir"));
+    localOps.rename(source, renamed);
+    localOps.remove(renamed);
+    assert.equal(fs.existsSync(renamed), false);
+
+    const elevatedOps = owner.__rinOwnerCreateSchemaMigrationFileOps(
+      migrationOptions,
+      migrationDeps,
+    );
+    elevatedOps.writeJsonObject(path.join(root, "remote.json"), {
+      elevated: true,
+    });
+    elevatedOps.ensureDir(path.join(root, "remote-dir"));
+    elevatedOps.rename("/owner/from", "/owner/to");
+    elevatedOps.remove("/owner/remove");
+    assert.equal(migrationCommands.length, 7);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
 
 test("persist private normalizers reject malformed objects and fill owner defaults", () => {
   const owner = persistOwner as typeof persistOwner & {
@@ -203,256 +310,6 @@ function createFsDeps(home: string) {
   };
   return { deps, privilegedWrites, privilegedCommands, launcherWrites };
 }
-
-test("install upgrade migrations move owned data and rewrite persisted chat history", async () => {
-  await withInstallRoot(async (root) => {
-    const installDir = path.join(root, "install");
-    const dataDir = path.join(installDir, "data");
-    fs.mkdirSync(path.join(dataDir, "chat-inbox"), { recursive: true });
-    fs.writeFileSync(path.join(dataDir, "chat-inbox", "inbox.json"), "owner");
-    fs.mkdirSync(path.join(dataDir, "chat-outbox"), { recursive: true });
-    fs.mkdirSync(path.join(dataDir, "chat", "outbox"), { recursive: true });
-    fs.writeFileSync(path.join(dataDir, "chat-outbox", "kept.txt"), "legacy");
-    fs.mkdirSync(path.join(dataDir, "browse"), { recursive: true });
-    fs.mkdirSync(path.join(dataDir, "sidecars", "browse"), {
-      recursive: true,
-    });
-
-    const statePath = path.join(
-      dataDir,
-      "chats",
-      "telegram",
-      "owner-bot",
-      "owner-chat",
-      "state.json",
-    );
-    writeJson(statePath, {
-      chatKey: "telegram:owner-chat:owner-bot",
-      piSessionFile: "owner.jsonl",
-    });
-    const sessionPath = path.join(installDir, "sessions", "owner.jsonl");
-    fs.mkdirSync(path.dirname(sessionPath), { recursive: true });
-    fs.writeFileSync(sessionPath, '{"type":"session"}\n');
-    const managedCollision = path.join(
-      installDir,
-      "sessions",
-      "managed",
-      "chat",
-      "owner.jsonl",
-    );
-    fs.mkdirSync(path.dirname(managedCollision), { recursive: true });
-    fs.writeFileSync(managedCollision, "existing\n");
-
-    const deliveredPath = path.join(
-      dataDir,
-      "chat",
-      "outbox",
-      "history",
-      "delivered",
-      "2026",
-      "owner.json",
-    );
-    writeJson(deliveredPath, {
-      payload: { deliveryKind: "final" },
-      deliveryResult: ["message-owner", "message-owner"],
-    });
-    writeJson(path.join(path.dirname(deliveredPath), "without-kind.json"), {
-      deliveryResult: ["ignored-message"],
-    });
-    const messagePath = path.join(
-      dataDir,
-      "chat",
-      "message-store",
-      "records",
-      "owner.json",
-    );
-    writeJson(messagePath, {
-      role: "assistant",
-      messageId: "message-owner",
-      text: "owner reply",
-    });
-    writeJson(
-      path.join(dataDir, "chat", "message-store", "records", "already.json"),
-      {
-        role: "assistant",
-        messageId: "already",
-        deliveryKind: "interim",
-      },
-    );
-    writeJson(
-      path.join(dataDir, "chat", "message-store", "records", "user.json"),
-      { role: "user", messageId: "message-owner" },
-    );
-    writeJson(
-      path.join(dataDir, "chat", "message-store", "records", "unmapped.json"),
-      { role: "assistant", messageId: "unmapped" },
-    );
-
-    const migrations = applyInstallUpgradeMigrations(
-      { targetUser: "owner", installDir },
-      { runPrivileged() {} },
-    );
-    const dataLayout = migrations.find((item) => item.id === "data-layout-v1");
-    assert.ok(dataLayout);
-    assert.equal(dataLayout?.moved >= 2, true);
-    assert.equal(dataLayout?.skippedExistingTarget >= 1, true);
-    assert.equal(
-      fs.existsSync(path.join(dataDir, "chat", "inbox", "inbox.json")),
-      true,
-    );
-    assert.equal(fs.existsSync(path.join(dataDir, "browse")), false);
-    assert.equal(
-      fs.existsSync(path.join(dataDir, "sidecars", "browse")),
-      false,
-    );
-    assert.equal(
-      fs.existsSync(path.join(dataDir, "chat-outbox", "kept.txt")),
-      true,
-    );
-
-    const migratedStatePath = path.join(
-      dataDir,
-      "chat",
-      "session-state",
-      "telegram",
-      "owner-bot",
-      "owner-chat",
-      "state.json",
-    );
-    const state = readJson<any>(migratedStatePath);
-    assert.equal(Object.hasOwn(state, "piSessionFile"), false);
-    assert.equal(state.sessionFile, "managed/chat/owner-2.jsonl");
-    assert.equal(
-      fs.existsSync(
-        path.join(installDir, "sessions", "managed", "chat", "owner-2.jsonl"),
-      ),
-      true,
-    );
-    assert.equal(readJson<any>(messagePath).deliveryKind, "final");
-    const repeated = applyInstallUpgradeMigrations(
-      { targetUser: "owner", installDir },
-      { runPrivileged() {} },
-    );
-    const stateRewrite = repeated.find(
-      (item) => item.id === "chat-state-session-file-v1",
-    );
-    const managedRewrite = repeated.find(
-      (item) => item.id === "chat-session-managed-file-v1",
-    );
-    assert.equal((stateRewrite as any)?.alreadyApplied, true);
-    assert.equal((managedRewrite as any)?.alreadyApplied, true);
-  });
-});
-
-test("install migrations skip ineligible chat state", async () => {
-  await withInstallRoot(async (installDir) => {
-    const stateRoot = path.join(
-      installDir,
-      "data",
-      "chat",
-      "session-state",
-      "onebot",
-      "owner-bot",
-    );
-    writeJson(path.join(stateRoot, "missing", "state.json"), {
-      sessionFile: "missing.jsonl",
-    });
-    writeJson(path.join(stateRoot, "managed", "state.json"), {
-      sessionFile: "managed/chat/existing.jsonl",
-    });
-    writeJson(path.join(stateRoot, "outside", "state.json"), {
-      sessionFile: "../outside.jsonl",
-    });
-    writeJson(path.join(stateRoot, "wrong-extension", "state.json"), {
-      sessionFile: "owner.txt",
-    });
-    const absoluteSession = path.join(installDir, "sessions", "absolute.jsonl");
-    fs.mkdirSync(path.dirname(absoluteSession), { recursive: true });
-    fs.writeFileSync(absoluteSession, "absolute\n");
-    writeJson(path.join(stateRoot, "absolute", "state.json"), {
-      sessionFile: absoluteSession,
-    });
-    writeJson(path.join(stateRoot, "no-legacy-key", "state.json"), {
-      current: true,
-    });
-
-    const migrations = applyInstallUpgradeMigrations(
-      { targetUser: "owner", installDir },
-      { runPrivileged() {} },
-    );
-    const managed = migrations.find(
-      (item) => item.id === "chat-session-managed-file-v1",
-    ) as any;
-    assert.equal(managed.scanned, 6);
-    assert.equal(managed.migrated, 1);
-    assert.equal(managed.skipped, false);
-    assert.equal(
-      fs.existsSync(
-        path.join(installDir, "sessions", "managed", "chat", "absolute.jsonl"),
-      ),
-      true,
-    );
-  });
-});
-
-test("elevated install migrations execute file ownership changes as the target user", async () => {
-  await withInstallRoot(async (root) => {
-    const installDir = path.join(root, "install");
-    fs.mkdirSync(path.join(installDir, "data", "chat-inbox"), {
-      recursive: true,
-    });
-    fs.writeFileSync(
-      path.join(installDir, "data", "chat-inbox", "owner.txt"),
-      "owner",
-    );
-    fs.mkdirSync(path.join(installDir, "data", "browse"), {
-      recursive: true,
-    });
-    const commands: Array<[string, string[]]> = [];
-    const runCommandAsUser = (
-      targetUser: string,
-      command: string,
-      args: string[],
-    ) => {
-      assert.equal(targetUser, "owner");
-      commands.push([command, [...args]]);
-      if (command === "mkdir") {
-        fs.mkdirSync(args.at(-1)!, { recursive: true });
-      } else if (command === "mv") {
-        fs.renameSync(args[0], args[1]);
-      } else if (command === "rm") {
-        fs.rmSync(args.at(-1)!, { recursive: true, force: true });
-      } else if (command === "install") {
-        fs.mkdirSync(path.dirname(args[3]), { recursive: true });
-        fs.copyFileSync(args[2], args[3]);
-        fs.chmodSync(args[3], Number.parseInt(args[1], 8));
-      } else if (command === "test") {
-        if (!fs.existsSync(args.at(-1)!)) throw new Error("missing");
-      } else {
-        throw new Error(`unexpected target-user command:${command}`);
-      }
-    };
-    const migrations = applyInstallUpgradeMigrations(
-      { targetUser: "owner", installDir, elevated: true },
-      { runPrivileged() {}, runCommandAsUser },
-    );
-    assert.equal(
-      fs.existsSync(
-        path.join(installDir, "data", "chat", "inbox", "owner.txt"),
-      ),
-      true,
-    );
-    assert.equal(fs.existsSync(path.join(installDir, "data", "browse")), false);
-    assert.equal(
-      commands.some(([command]) => command === "mv"),
-      true,
-    );
-    assert.equal(
-      commands.some(([command]) => command === "rm"),
-      true,
-    );
-  });
-});
 
 test("installer manifest reconciliation preserves recovery metadata and normalizes releases", async () => {
   await withInstallRoot(async (root) => {
@@ -675,7 +532,8 @@ test("installer outputs persist settings, auth, initialization, launchers, and c
     );
     assert.equal(Object.hasOwn(withoutLaunchers, "launcherPath"), false);
     const settings = readJson<any>(withoutLaunchers.settingsPath);
-    assert.equal(settings.koishi, undefined);
+    assert.deepEqual(settings.koishi, { removed: true });
+    assert.deepEqual(settings.chat, { quietMode: { default: true } });
     assert.equal(settings.defaultProvider, "owner-provider");
     assert.equal(settings.defaultModel, "owner-model");
     assert.equal(settings.defaultThinkingLevel, "high");
@@ -773,7 +631,7 @@ test("installer outputs persist settings, auth, initialization, launchers, and c
   });
 });
 
-test("install migration phases delegate memory and chat authority to the target user", async () => {
+test("install migration phases delegate memory ownership to the target user", async () => {
   await withInstallRoot(async (installDir) => {
     const commands: Array<{ command: string; args: string[] }> = [];
     const options = {
@@ -782,7 +640,6 @@ test("install migration phases delegate memory and chat authority to the target 
       elevated: true,
       migrationRuntimeRoot: "/runtime",
       targetNodePath: "/runtime/node",
-      chatRuntimeWillBeQuiesced: true,
     };
     const deps = {
       runPrivileged() {},
@@ -793,13 +650,25 @@ test("install migration phases delegate memory and chat authority to the target 
         return "0";
       },
     };
-    const preflight = preflightInstallUpgradeMigrations(options, deps);
     assert.deepEqual(
-      preflight.map((item) => item.id),
-      [
-        "transcript-search-schema-v6-preflight",
-        "chat-authority-install-migration-v1-preflight",
-      ],
+      preflightInstallUpgradeMigrations(options, deps).map((item) => item.id),
+      ["transcript-search-schema-v6-preflight"],
+    );
+    const applied = applyInstallUpgradeMigrations(
+      { ...options, runtimeQuiesced: true },
+      deps,
+    );
+    assert.equal(
+      applied.some((item) => item.id === "transcript-search-schema-v6"),
+      true,
+    );
+    assert.equal(
+      commands.some((entry) => entry.args.join(" ").includes("chat")),
+      false,
+    );
+    assert.equal(
+      commands.some((entry) => entry.args.includes("--runtime-quiesced")),
+      true,
     );
     assert.equal(
       finalizeInstallUpgradeMigrations(options, deps)?.skipped,
@@ -808,75 +677,6 @@ test("install migration phases delegate memory and chat authority to the target 
     assert.equal(
       rollbackInstallUpgradeMigrations(options, deps)?.skipped,
       false,
-    );
-    assert.equal(commands.length, 4);
-    const applied = applyInstallUpgradeMigrations(
-      { ...options, chatRuntimeQuiesced: false },
-      deps,
-    );
-    assert.equal(
-      applied.some((item) => item.id === "transcript-search-schema-v6"),
-      true,
-    );
-    assert.equal(
-      applied.some((item) => item.id === "chat-authority-install-migration-v1"),
-      true,
-    );
-    preflightInstallUpgradeMigrations(
-      {
-        ...options,
-        targetNodePath: undefined,
-        chatRuntimeWillBeQuiesced: false,
-      },
-      deps,
-    );
-    applyInstallUpgradeMigrations(
-      {
-        ...options,
-        targetNodePath: undefined,
-        chatRuntimeQuiesced: true,
-      },
-      deps,
-    );
-    const memoryApplyCommands = commands.filter(
-      (entry) =>
-        entry.args[0]?.endsWith("memory-migrations.js") &&
-        entry.args.includes("--apply"),
-    );
-    assert.equal(memoryApplyCommands.length, 2);
-    assert.equal(
-      memoryApplyCommands[0].args.includes("--runtime-quiesced"),
-      false,
-    );
-    assert.equal(
-      memoryApplyCommands[1].args.includes("--runtime-quiesced"),
-      true,
-    );
-    assert.deepEqual(commands[0], {
-      command: "/runtime/node",
-      args: [
-        "/runtime/dist/app/rin-install/memory-migrations.js",
-        "--preflight",
-        path.resolve(installDir),
-      ],
-    });
-    assert.match(commands[1].args.join(" "), /chat-migrations\.js --preflight/);
-    assert.equal(
-      preflightInstallUpgradeMigrations(
-        { targetUser: "owner", installDir },
-        deps,
-      ).length,
-      0,
-    );
-    fs.mkdirSync(path.join(installDir, "memory"), { recursive: true });
-    fs.writeFileSync(path.join(installDir, "memory", "search.db"), "legacy");
-    assert.throws(
-      () =>
-        finalizeInstallUpgradeMigrations(
-          { targetUser: "owner", installDir },
-          deps,
-        ),
-      /memory_install_migration_runtime_required/,
     );
   });
 });
@@ -901,7 +701,7 @@ test("elevated migrations reject owned data moves without target-user command su
   });
 });
 
-test("elevated installer writes use target ownership and normalize chat settings", async () => {
+test("elevated installer writes use target ownership without interpreting settings", async () => {
   await withInstallRoot(async (root) => {
     const installDir = path.join(root, "install");
     const home = path.join(root, "home");
@@ -912,12 +712,15 @@ test("elevated installer writes use target ownership and normalize chat settings
       chat: { quietMode: "quiet" },
     });
 
-    const normalized = normalizeInstalledChatSettings(
+    const normalized = normalizeInstalledSettings(
       { targetUser: "owner", installDir, elevated: true },
       deps,
     );
     assert.equal(normalized.settingsPath, installSettingsPath(installDir));
-    assert.equal(readJson<any>(normalized.settingsPath).koishi, undefined);
+    assert.deepEqual(readJson<any>(normalized.settingsPath), {
+      koishi: { removed: true },
+      chat: { quietMode: "quiet" },
+    });
     assert.equal(privilegedWrites.length, 1);
     assert.deepEqual(privilegedWrites[0], {
       filePath: installSettingsPath(installDir),

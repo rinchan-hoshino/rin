@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import { register } from "node:module";
 
 const target = "/dist/core/chat/main.js";

@@ -1,11 +1,9 @@
-import type { RinDaemonChatAPI } from "../rin-extension-api.js";
 import type {
   RinRpcCommandEnvelope,
   RinRpcCommandResult,
   RinRpcCommandRouter,
   RinRpcCommandType,
 } from "../rin-lib/rpc-types.js";
-import { createDaemonChatAPI } from "./extension-api.js";
 import type { ChatBridgeHandle } from "./main.js";
 import { getChatMessageRead, listChatMessageReads } from "./message-query.js";
 import type { ChatMessageListWindow } from "./message-store.js";
@@ -23,7 +21,6 @@ export type ChatDaemonDeliveryPort = Pick<
 export type ChatDaemonIntegration = {
   delivery: ChatDaemonDeliveryPort;
   commandRouter: RinRpcCommandRouter;
-  extensionApi: RinDaemonChatAPI;
 };
 
 type ChatDaemonRpcHandler = (
@@ -98,9 +95,5 @@ export function createChatDaemonIntegration(options: {
     return handler ? await handler(command) : undefined;
   };
 
-  return {
-    delivery,
-    commandRouter,
-    extensionApi: createDaemonChatAPI({ agentDir: options.agentDir }),
-  };
+  return { delivery, commandRouter };
 }

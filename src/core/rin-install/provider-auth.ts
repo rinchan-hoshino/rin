@@ -4,7 +4,7 @@ import { select, spinner, text } from "@clack/prompts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { loadRinAgentRuntime } from "../rin-lib/agent-runtime.js";
-import { createInstallerI18n, type InstallerI18n } from "./i18n.js";
+import { createInstallerI18n, type InstallerI18n } from "../i18n.js";
 import { installAuthPath } from "./paths.js";
 import { runInstallerProgress } from "./progress.js";
 

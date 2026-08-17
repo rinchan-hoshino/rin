@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import { register } from "node:module";
 
 const replacements: Record<string, string> = {
@@ -38,7 +39,7 @@ const replacements: Record<string, string> = {
       return { kind: "local", targetUser: scenario.targetUser || "other", installDir: scenario.installDir || "/owner/install" };
     }
   `,
-  "dist/core/rin-install/i18n.js": `
+  "dist/core/i18n.js": `
     export function createInstallerI18n(language) {
       const fn = (name) => (...args) => name + ":" + args.map(String).join(",");
       return new Proxy({

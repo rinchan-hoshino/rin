@@ -11,7 +11,7 @@ import {
 } from "../rin-daemon/client.js";
 import { isSameSystemUser } from "../rin-lib/system.js";
 import { repoRootFromHere, runCommand } from "../rin-install/common.js";
-import { createInstallerI18n } from "../rin-install/i18n.js";
+import { createInstallerI18n } from "../i18n.js";
 import { readJsonFileWithPrivilege } from "../rin-install/fs-utils.js";
 import { assertUpdateConfirmationAvailable } from "../rin-install/update-confirmation.js";
 import {

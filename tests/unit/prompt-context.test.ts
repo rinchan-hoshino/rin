@@ -1,15 +1,26 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { importBuiltModule } from "../support/import-built-module.js";
 
-const { formatPromptContext, formatPromptContextSystemPromptBlock } =
-  await importBuiltModule<
-    typeof import("../../src/core/rin-lib/prompt-context.js")
-  >("dist/core/rin-lib/prompt-context.js");
+const {
+  formatPromptContext,
+  formatPromptContextSystemPromptBlock,
+  formatPromptTimeContext,
+} = await importBuiltModule<
+  typeof import("../../src/core/rin-lib/prompt-context.js")
+>("dist/core/rin-lib/prompt-context.js");
 const { appendPromptContextSystemPrompt } = await importBuiltModule<
   typeof import("../../src/core/rin-lib/runtime.js")
 >("dist/core/rin-lib/runtime.js");
+
+test("prompt time context adds one valid runtime header", () => {
+  assert.equal(formatPromptTimeContext("body", Number.NaN), "body");
+  const formatted = formatPromptTimeContext("body", 1710000000000);
+  assert.match(formatted, /^time: .*\n---\nbody$/);
+  assert.equal(formatPromptTimeContext(formatted, 1710000000001), formatted);
+});
 
 test("chat prompt context persists dynamic sender metadata in the prompt text", () => {
   const meta = {

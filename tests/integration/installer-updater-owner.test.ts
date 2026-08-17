@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
@@ -21,7 +22,7 @@ globalThis.__rinUpdaterOwnerEvents=[];
 globalThis.__rinUpdaterOwnerTargets=[];
 globalThis.__rinUpdaterOwnerCurrent=false;
 const updater=await import(pathToFileURL(path.resolve("dist/core/rin-install/updater.js")).href);
-const i18nModule=await import(pathToFileURL(path.resolve("dist/core/rin-install/i18n.js")).href);
+const i18nModule=await import(pathToFileURL(path.resolve("dist/core/i18n.js")).href);
 const i18n=i18nModule.createInstallerI18n("en_US");
 const root=process.env.RIN_TEST_UPDATER_ROOT;
 const installDir=path.join(root,"install");

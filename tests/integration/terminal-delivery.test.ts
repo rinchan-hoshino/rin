@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { assistantDeliveryParts } from "../../dist/core/chat/terminal-delivery.js";

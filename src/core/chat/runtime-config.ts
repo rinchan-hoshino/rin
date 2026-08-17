@@ -1,47 +1,21 @@
-import fs from "node:fs";
-import path from "node:path";
-
-import YAML from "yaml";
-
-import { listChatBridgeAdapterSpecs } from "../chat-bridge/adapters.js";
 import { cloneJson, isJsonRecord } from "../json-utils.js";
-import { ensureDir, writeJsonFile } from "../platform/fs.js";
 import { safeString } from "../text-utils.js";
 import { getStoredChatConfigRoot } from "./settings.js";
 
-type AdapterEntry = {
+export type ChatPlatformEntry<Platform extends string = string> = {
+  platform: Platform;
   name: string;
-  config: Record<string, any>;
+  config: Record<string, unknown>;
 };
 
-type NormalizedChatRuntimeAdapter = {
-  key: string;
-  pluginKey: string;
-  entries: AdapterEntry[];
-};
-
-type ChatRuntimePackageJson = {
-  name: string;
-  private: boolean;
-  version: string;
-  dependencies: Record<string, string>;
-};
-
-type ChatRuntimeAdapterSource = {
-  key: string;
-  pluginKey: string;
-  value: unknown;
-  defaults: Record<string, any>;
-};
-
-const SETUP_ONLY_ADAPTER_FIELDS = new Set([
+const SETUP_ONLY_PLATFORM_FIELDS = new Set([
   "name",
   "owners",
   "ownerUserIds",
   "botId",
 ]);
 
-const SINGLE_ADAPTER_CONFIG_KEYS = new Set([
+const SINGLE_PLATFORM_CONFIG_KEYS = new Set([
   "name",
   "enabled",
   "endpoint",
@@ -54,230 +28,92 @@ const SINGLE_ADAPTER_CONFIG_KEYS = new Set([
   "botId",
 ]);
 
-function normalizeChatAdapterConfig(
-  value: unknown,
-  defaults: Record<string, any> = {},
-) {
-  const current = isJsonRecord(value) ? cloneJson(value) : {};
-  return { ...defaults, ...current };
-}
-
-function stripAdapterSetupFields(config: Record<string, any>) {
-  const normalized = { ...config };
-  for (const key of SETUP_ONLY_ADAPTER_FIELDS) {
-    delete normalized[key];
-  }
-  return normalized;
-}
-
-function sanitizeAdapterName(value: unknown, fallback: string) {
+function sanitizePlatformName(value: unknown, fallback: string) {
   const raw = safeString(value)
     .trim()
     .replace(/[^A-Za-z0-9._-]+/g, "-");
   return raw || fallback;
 }
 
-function looksLikeSingleAdapterConfig(value: unknown) {
+function looksLikeSinglePlatformConfig(value: unknown) {
   if (!isJsonRecord(value)) return false;
   const keys = Object.keys(value);
   if (!keys.length) return true;
-  if (keys.some((key) => SINGLE_ADAPTER_CONFIG_KEYS.has(key))) return true;
+  if (keys.some((key) => SINGLE_PLATFORM_CONFIG_KEYS.has(key))) return true;
   return keys.some((key) => !isJsonRecord(value[key]));
 }
 
-function collectRawAdapterEntries(
-  value: unknown,
-  fallbackPrefix: string,
-): AdapterEntry[] {
-  const rawEntries: AdapterEntry[] = [];
-
+function rawPlatformEntries(value: unknown, platform: string) {
   if (Array.isArray(value)) {
-    value.forEach((entry, index) => {
-      if (!isJsonRecord(entry)) return;
-      rawEntries.push({
-        name: sanitizeAdapterName(entry.name, `${fallbackPrefix}-${index + 1}`),
-        config: cloneJson(entry),
-      });
-    });
-    return rawEntries;
-  }
-
-  if (looksLikeSingleAdapterConfig(value)) {
-    rawEntries.push({
-      name: sanitizeAdapterName(
-        isJsonRecord(value) ? value.name : undefined,
-        fallbackPrefix,
-      ),
-      config: isJsonRecord(value) ? cloneJson(value) : {},
-    });
-    return rawEntries;
-  }
-
-  if (isJsonRecord(value)) {
-    for (const [name, entry] of Object.entries(value)) {
-      if (!isJsonRecord(entry)) continue;
-      rawEntries.push({
-        name: sanitizeAdapterName(
-          entry.name || name,
-          safeString(name) || fallbackPrefix,
-        ),
-        config: cloneJson(entry),
-      });
-    }
-  }
-
-  return rawEntries;
-}
-
-function normalizeAdapterEntries(
-  value: unknown,
-  defaults: Record<string, any>,
-  fallbackPrefix: string,
-): AdapterEntry[] {
-  return collectRawAdapterEntries(value, fallbackPrefix)
-    .filter((entry) => entry.config.enabled !== false)
-    .map((entry) => ({
-      name: entry.name,
-      config: stripAdapterSetupFields(
-        normalizeChatAdapterConfig(entry.config, defaults),
-      ),
-    }));
-}
-
-function applyNormalizedAdapterEntries(
-  plugins: Record<string, any>,
-  baseName: string,
-  entries: AdapterEntry[],
-) {
-  if (!entries.length) return;
-  entries.forEach((entry, index) => {
-    const key =
-      index === 0 ? baseName : `${baseName}:${entry.name || index + 1}`;
-    plugins[key] = entry.config;
-  });
-}
-
-function collectBuiltInChatAdapterSources(
-  chat: Record<string, any> | undefined,
-): ChatRuntimeAdapterSource[] {
-  return listChatBridgeAdapterSpecs().map((adapter) => ({
-    key: adapter.key,
-    pluginKey: adapter.pluginKey,
-    value: chat?.[adapter.key],
-    defaults: adapter.defaults,
-  }));
-}
-
-function normalizeChatRuntimeAdapter(
-  source: ChatRuntimeAdapterSource,
-): NormalizedChatRuntimeAdapter {
-  return {
-    key: source.key,
-    pluginKey: source.pluginKey,
-    entries: normalizeAdapterEntries(source.value, source.defaults, source.key),
-  };
-}
-
-function collectRuntimeDependencies(): Record<string, string> {
-  return {};
-}
-
-function buildNormalizedChatRuntime(settings: unknown) {
-  const chat = getStoredChatConfigRoot(settings);
-  const adapters = collectBuiltInChatAdapterSources(chat).map((adapter) =>
-    normalizeChatRuntimeAdapter(adapter),
-  );
-
-  return {
-    adapters,
-    dependencies: collectRuntimeDependencies(),
-  };
-}
-
-export function buildChatConfigFromSettings(settings: unknown) {
-  const config = {
-    name: "rin",
-    prefix: ["/"],
-    prefixMode: "strict",
-    plugins: {
-      "proxy-agent": {},
-      http: {},
-    } as Record<string, any>,
-  };
-  const runtime = buildNormalizedChatRuntime(settings);
-
-  for (const adapter of runtime.adapters) {
-    applyNormalizedAdapterEntries(
-      config.plugins,
-      adapter.pluginKey,
-      adapter.entries,
+    return value.flatMap((entry, index) =>
+      isJsonRecord(entry)
+        ? [
+            {
+              name: sanitizePlatformName(
+                entry.name,
+                `${platform}-${index + 1}`,
+              ),
+              config: cloneJson(entry),
+            },
+          ]
+        : [],
     );
   }
 
-  return config;
-}
+  if (looksLikeSinglePlatformConfig(value)) {
+    return [
+      {
+        name: sanitizePlatformName(
+          isJsonRecord(value) ? value.name : undefined,
+          platform,
+        ),
+        config: isJsonRecord(value) ? cloneJson(value) : {},
+      },
+    ];
+  }
 
-export type ChatRuntimeAdapterEntry = {
-  key: string;
-  name: string;
-  config: Record<string, any>;
-};
-
-export function listChatRuntimeAdapterEntries(settings: unknown) {
-  return buildNormalizedChatRuntime(settings).adapters.flatMap((adapter) =>
-    adapter.entries.map((entry) => ({
-      key: adapter.key,
-      name: entry.name,
-      config: entry.config,
-    })),
+  if (!isJsonRecord(value)) return [];
+  return Object.entries(value).flatMap(([name, entry]) =>
+    isJsonRecord(entry)
+      ? [
+          {
+            name: sanitizePlatformName(
+              entry.name || name,
+              safeString(name) || platform,
+            ),
+            config: cloneJson(entry),
+          },
+        ]
+      : [],
   );
 }
 
-export function buildChatRuntimePackageJson(
+export function listChatPlatformEntries<Platform extends string>(
   settings: unknown,
-): ChatRuntimePackageJson {
-  return {
-    name: "rin-chat-runtime",
-    private: true,
-    version: "0.0.0",
-    dependencies: buildNormalizedChatRuntime(settings).dependencies,
-  };
+  platform: Platform,
+  defaults: Record<string, unknown> = {},
+): ChatPlatformEntry<Platform>[] {
+  const key = safeString(platform).trim().toLowerCase() as Platform;
+  if (!key) return [];
+  const value = getStoredChatConfigRoot(settings)[key];
+  return rawPlatformEntries(value, key)
+    .filter((entry) => entry.config.enabled !== false)
+    .map((entry) => {
+      const config = { ...defaults, ...entry.config };
+      for (const field of SETUP_ONLY_PLATFORM_FIELDS) delete config[field];
+      return { platform: key, name: entry.name, config };
+    });
 }
 
-function shouldInstallChatRuntimePackage(
-  _rootDir: string,
-  _runtimePackage: ChatRuntimePackageJson,
-) {
-  return false;
-}
-
-export function shouldInstallChatRuntimeDependencies(
-  rootDir: string,
+export function listBuiltInChatPlatformEntries(
   settings: unknown,
-) {
-  return shouldInstallChatRuntimePackage(
-    rootDir,
-    buildChatRuntimePackageJson(settings),
-  );
-}
-
-export function ensureChatRuntimeDependencies(
-  rootDir: string,
-  settings: unknown,
-) {
-  return {
-    installed: false,
-    dependencies: buildChatRuntimePackageJson(settings).dependencies,
-    rootDir,
-  };
-}
-
-export function materializeChatConfig(configPath: string, settings: unknown) {
-  const rootDir = path.dirname(configPath);
-  ensureDir(rootDir);
-  const config = buildChatConfigFromSettings(settings);
-  fs.writeFileSync(configPath, YAML.stringify(config), "utf8");
-  const packageJsonPath = path.join(rootDir, "package.json");
-  writeJsonFile(packageJsonPath, buildChatRuntimePackageJson(settings));
-  return { configPath, config };
+): ChatPlatformEntry<"telegram" | "discord">[] {
+  return [
+    ...listChatPlatformEntries(settings, "telegram", {
+      protocol: "polling",
+      slash: false,
+      request: { timeout: 30000 },
+    }),
+    ...listChatPlatformEntries(settings, "discord"),
+  ];
 }

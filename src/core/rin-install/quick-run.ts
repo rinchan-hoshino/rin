@@ -14,7 +14,7 @@ import { PI_CODING_AGENT_DIR_ENV, RIN_DIR_ENV } from "../rin-lib/profile.js";
 import { safeString } from "../text-utils.js";
 import { detectCurrentUser, repoRootFromHere } from "./common.js";
 import { finalizeQuickRunInstall } from "./finalize.js";
-import { createInstallerI18n } from "./i18n.js";
+import { createInstallerI18n } from "../i18n.js";
 import { promptProviderSetup } from "./interactive.js";
 import {
   defaultInstallDirForHome,

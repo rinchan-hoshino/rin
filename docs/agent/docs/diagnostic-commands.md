@@ -118,4 +118,4 @@ When reporting from these commands, name:
 - time range and filters, if any;
 - key state observed;
 - whether the evidence came from CLI output, RPC, SDK, service logs, or the self-improve store;
-- remaining boundary before changing source, installed runtime, tasks, or chat adapters.
+- remaining boundary before changing source, installed runtime, tasks, or Chat platforms.

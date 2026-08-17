@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -13,14 +14,10 @@ import {
 
 const runtime = Object.assign(
   {},
+  await import(pathToFileURL(path.resolve("dist/core/chat/chat.js")).href),
+  await import(pathToFileURL(path.resolve("dist/core/chat/chat.js")).href),
   await import(
-    pathToFileURL(path.resolve("dist/core/chat-runtime/app.js")).href
-  ),
-  await import(
-    pathToFileURL(path.resolve("dist/core/chat-runtime/registry.js")).href
-  ),
-  await import(
-    pathToFileURL(path.resolve("dist/core/chat-runtime/telegram.js")).href
+    pathToFileURL(path.resolve("dist/core/chat/platform/telegram.js")).href
   ),
 );
 const inbox = await import(
@@ -67,7 +64,7 @@ test("telegram adapter owns bootstrap, cursor recovery, parsing, media cache, an
     owner.apiHandlers.getChatMember = async (payload: any) => payload;
 
     const { app, adapter, bot } = makeRuntime(runtime, directory, {
-      key: "telegram",
+      platform: "telegram",
       name: "Telegram",
       config: { token: "1:owner" },
     });
@@ -269,7 +266,7 @@ test("telegram adapter owns bootstrap, cursor recovery, parsing, media cache, an
     assert.equal(bot.status, 0);
 
     const failed = makeRuntime(runtime, directory, {
-      key: "telegram",
+      platform: "telegram",
       name: "Telegram",
       config: { token: "2:owner" },
     });

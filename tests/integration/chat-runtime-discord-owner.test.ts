@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
@@ -13,7 +14,7 @@ import {
 const adapters = Object.assign(
   {},
   await import(
-    pathToFileURL(path.resolve("dist/core/chat-runtime/discord.js")).href
+    pathToFileURL(path.resolve("dist/core/chat/platform/discord.js")).href
   ),
 );
 
@@ -22,7 +23,7 @@ test("discord adapter owns SDK lifecycle, native wrappers, indicators, and ingre
   await withTempDir(async (directory) => {
     const log = logger();
     const targetApp = app();
-    const missing = new adapters.DiscordAdapter(targetApp, directory, {}, log);
+    const missing = new adapters.DiscordPlatform(targetApp, directory, {}, log);
     await assert.rejects(missing.start(), /discord_token_required/);
     assert.deepEqual(
       (missing as any)
@@ -70,7 +71,7 @@ test("discord adapter owns SDK lifecycle, native wrappers, indicators, and ingre
     owner.discordChannelById["channel-1"] = channel;
     owner.discordGuildById["guild-1"] = channel.guild;
 
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       targetApp,
       directory,
       { token: "discord-token" },
@@ -182,7 +183,7 @@ test("discord adapter reports failed catch-up without hiding client cleanup", as
   resetOwner();
   await withTempDir(async (directory) => {
     const targetApp = app();
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       targetApp,
       directory,
       { token: "discord-token" },

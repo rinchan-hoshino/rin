@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
@@ -7,8 +8,7 @@ const errors = await import(
   pathToFileURL(path.resolve("dist/core/presentation/error.js")).href
 );
 
-const OWNED_MARKERS = `daemon_extension_entrypoint_missing
-chat_accepted_inbound_turn_not_active
+const OWNED_MARKERS = `chat_accepted_inbound_turn_not_active
 chat_archive_header_compare_and_swap_failed
 chat_archive_hot_delete_failed
 chat_archive_hot_payload_missing
@@ -60,14 +60,14 @@ chat_inbox_messageId_required
 chat_inbox_message_commit_failed
 chat_inbox_message_identity_required
 chat_inbox_turn_commit_failed
-chat_install_migration_active_legacy_turn
-chat_install_migration_canonical_reconciliation_backup_exists
-chat_install_migration_canonical_reconciliation_binding_remains
-chat_install_migration_install_dir_required
-chat_install_migration_invalid_accepted_orphan
-chat_install_migration_invalid_session_state
-chat_install_migration_invalid_settings
-chat_install_migration_session_state_read_failed
+chat_database_migration_active_legacy_turn
+chat_database_migration_canonical_reconciliation_backup_exists
+chat_database_migration_canonical_reconciliation_binding_remains
+chat_database_migration_install_dir_required
+chat_database_migration_invalid_accepted_orphan
+chat_database_migration_invalid_session_state
+chat_database_migration_invalid_settings
+chat_database_migration_session_state_read_failed
 chat_key_migration_invalid_marker
 chat_key_migration_invalid_marker_state
 chat_key_migration_invalid_resolved_ledger
@@ -166,10 +166,6 @@ invalid_self_improve_interval
 invalid_status_interval
 invalid_status_limit
 invalid_status_offset
-lark_app_id_required
-lark_app_secret_required
-lark_reaction_emoji_required
-lark_send_message_empty
 maintenance_job_failed
 maintenance_job_invalid_input
 maintenance_job_invalid_payload
@@ -183,15 +179,6 @@ missing_status_offset
 new_session_session_file_unsupported
 oauth_login_failed
 oauth_provider_id_required
-onebot_disconnected
-onebot_endpoint_required
-onebot_file_source_empty
-onebot_not_connected
-onebot_reaction_emoji_unsupported
-onebot_reaction_requires_group_chat
-onebot_send_message_empty
-onebot_send_message_empty_result
-onebot_upload_file_empty_result
 recall_aborted
 rin_agent_sdk_task_id_required
 rin_app_cli_failed
@@ -346,10 +333,6 @@ self_improve_maintenance_lock_required
 self_improve_maintenance_lock_timeout
 session_file_required
 session_fork_unsupported
-slack_app_token_required
-slack_bot_token_required
-slack_reaction_emoji_required
-slack_send_message_empty
 telegram_api_failed
 telegram_media_source_missing
 telegram_send_message_empty
@@ -369,7 +352,7 @@ web_fetch_invalid_url`
   .split(/\s+/);
 
 test("every owned runtime marker has a human-facing formatter", () => {
-  assert.equal(OWNED_MARKERS.length, 358);
+  assert.equal(OWNED_MARKERS.length, 340);
   assert.equal(new Set(OWNED_MARKERS).size, OWNED_MARKERS.length);
   for (const marker of OWNED_MARKERS) {
     assert.equal(errors.hasUserFacingRuntimeErrorMapping(marker), true, marker);

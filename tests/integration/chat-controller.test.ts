@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
@@ -2849,7 +2850,7 @@ test("chat controller leaves empty Todo clear to canonical final settlement", as
 });
 
 test("chat controller does not replay todo after a new user message", async () => {
-  const controller = await createController("onebot/1:2");
+  const controller = await createController("example/1:2");
   const deliveries = [];
   controller.currentTurn = {
     startedAt: Date.now(),
@@ -2876,7 +2877,7 @@ test("chat controller does not replay todo after a new user message", async () =
 });
 
 test("chat controller ignores persisted-user events instead of replaying session todo", async () => {
-  const controller = await createController("onebot/1:2");
+  const controller = await createController("example/1:2");
   const sessionFile = path.join(
     controller.agentDir,
     "sessions",
@@ -2952,50 +2953,6 @@ test("chat controller ignores persisted-user events instead of replaying session
 
   assert.equal(controller.latestTodoNoticeText, "");
   assert.deepEqual(deliveries, []);
-});
-
-test("chat controller sends structured todo nodes to native todo chats", async () => {
-  const controller = await createController("slack/B1:C1");
-  controller.app.bots[0].platform = "slack";
-  setDurableCurrentTurn(controller);
-  controller.app.bots[0].selfId = "B1";
-  const deliveries = [];
-  controller.app.bots[0].sendMessage = async (chatId, nodes, options) => {
-    deliveries.push({ chatId, nodes, kind: options?.deliveryKind });
-    return [`m-out-${deliveries.length}`];
-  };
-
-  await controller.handleClientEvent({
-    type: "backend_event",
-    payload: {
-      type: "passive_notice",
-      text: "[ ] Keep working\n[x] Ship renderer",
-      noticeKind: "todo",
-      deferDuringTurn: false,
-      todoItems: [
-        { id: 1, text: "Keep working", done: false },
-        { id: 2, text: "Ship renderer", done: true },
-      ],
-    },
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(deliveries.length, 1);
-  assert.equal(deliveries[0].chatId, "C1");
-  assert.equal(deliveries[0].kind, "passive_notice");
-  assert.deepEqual(deliveries[0].nodes, [
-    {
-      type: "todo",
-      attrs: {
-        title: "Todo",
-        items: [
-          { text: "Keep working", done: false },
-          { text: "Ship renderer", done: true },
-        ],
-      },
-      children: [],
-    },
-  ]);
 });
 
 test("chat controller binds passive notices to the current session for quote resume", async () => {
@@ -5506,47 +5463,6 @@ test("chat controller stops typing at agent end while final delivery remains in 
   }
 });
 
-test("chat controller uses adapter reaction capability for lark working indicators", async () => {
-  const controller = await createController("lark/bot-1:chat-1");
-  const reactions = [];
-  let noticeSent = false;
-  controller.app = {
-    bots: [
-      {
-        platform: "lark",
-        selfId: "bot-1",
-        workingIndicators: [testReactionPollingIndicator(reactions, "bot-1")],
-        async createReaction(chatId, messageId, emoji) {
-          reactions.push(["create", chatId, messageId, emoji]);
-        },
-      },
-    ],
-  };
-  controller.sendWorkingNotice = async function () {
-    noticeSent = true;
-    return true;
-  };
-
-  controller.currentTurn = {
-    startedAt: Date.now(),
-    incomingMessageId: "m-lark",
-    workingNoticeSent: false,
-  };
-  const liveTurn = controller.startLiveTurn();
-  liveTurn.promise.catch(() => {});
-  controller.driver.frontendState.turnActive = true;
-  controller.driver.frontendState.working = true;
-
-  assert.equal(await controller.pollTyping(), true);
-  assert.deepEqual(reactions, [["create", "chat-1", "m-lark", "🤔"]]);
-  assert.equal(await controller.pollTyping(), false);
-  assert.deepEqual(reactions, [["create", "chat-1", "m-lark", "🤔"]]);
-  controller.lastWorkingIndicatorAt -= 30_000;
-  assert.equal(await controller.pollTyping(), true);
-  assert.deepEqual(reactions, [["create", "chat-1", "m-lark", "🤔"]]);
-  assert.equal(noticeSent, false);
-});
-
 test("chat controller uses discord typing and reaction capabilities together", async () => {
   const controller = await createController("discord/bot-1:channel-1");
   const actions = [];
@@ -6651,161 +6567,6 @@ test("chat controller does not emit growing final-answer prefixes as interim rep
       replyToMessageId: "m-prefixes",
     },
   ]);
-});
-
-test("chat controller does not invent a onebot private notice without an explicit marker", async () => {
-  const controller = await createController("onebot/1:private:2");
-  const deliveries = [];
-  controller.sendWorkingNotice = async function () {
-    if (this.currentTurn?.workingNoticeSent) return false;
-    deliveries.push({
-      replyToMessageId: this.currentTurn?.incomingMessageId,
-      text: "Working...",
-    });
-    if (this.currentTurn) this.currentTurn.workingNoticeSent = true;
-    return true;
-  };
-
-  controller.currentTurn = {
-    startedAt: Date.now(),
-    incomingMessageId: "m1",
-    workingNoticeSent: false,
-  };
-  const liveTurn = controller.startLiveTurn();
-  liveTurn.promise.catch(() => {});
-
-  assert.equal(await controller.pollTyping(), false);
-  assert.equal(await controller.pollTyping(), false);
-  assert.equal(controller.currentTurn.workingNoticeSent, false);
-  assert.deepEqual(deliveries, []);
-});
-
-test("chat controller sends no onebot Working notice when polls overlap", async () => {
-  const controller = await createController("onebot/1:private:2");
-  const deliveries = [];
-  let releaseDelivery;
-  const deliveryGate = new Promise((resolve) => {
-    releaseDelivery = resolve;
-  });
-  controller.app = {
-    bots: [
-      {
-        platform: "onebot",
-        selfId: "1",
-        async sendMessage(chatId, content) {
-          deliveries.push({ chatId, content });
-          await deliveryGate;
-          return [`out-${deliveries.length}`];
-        },
-      },
-    ],
-  };
-  controller.currentTurn = {
-    startedAt: Date.now(),
-    incomingMessageId: "m-overlap",
-    workingNoticeSent: false,
-  };
-  const liveTurn = controller.startLiveTurn();
-  liveTurn.promise.catch(() => {});
-
-  const firstPoll = controller.pollTyping();
-  const secondPoll = controller.pollTyping();
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(deliveries.length, 0);
-  releaseDelivery();
-  assert.deepEqual(await Promise.all([firstPoll, secondPoll]), [false, false]);
-  assert.equal(controller.currentTurn.workingNoticeSent, false);
-});
-
-test("chat controller starts one explicit onebot private marker from backend Working", async () => {
-  const controller = await createController("onebot/1:private:2");
-  const starts = [];
-  controller.app.bots[0].platform = "onebot";
-  controller.app.bots[0].getWorkingIndicators = () => [
-    {
-      type: "marker",
-      presentation: "text-marker",
-      async start(context) {
-        starts.push({
-          chatId: context.chatId,
-          messageId: context.messageId,
-        });
-        return true;
-      },
-    },
-  ];
-  controller.currentTurn = {
-    startedAt: Date.now(),
-    incomingMessageId: "m-private-working",
-    replyToMessageId: "m-private-working",
-    workingNoticeSent: false,
-  };
-  controller.awaitingTurnSettle = true;
-  controller.driver.isWorking = () => true;
-
-  assert.deepEqual(starts, []);
-  await controller.handleFrontendEvent({
-    type: "working_state",
-    working: false,
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(starts, []);
-
-  await controller.handleFrontendEvent({
-    type: "working_state",
-    working: true,
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-  await controller.handleFrontendEvent({
-    type: "working_state",
-    working: true,
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(starts, [
-    { chatId: "private:2", messageId: "m-private-working" },
-  ]);
-});
-
-test("chat controller ignores dynamic onebot private working actions without explicit marker", async () => {
-  const controller = await createController("onebot/1:private:2");
-  const deliveries = [];
-  const internalActions = [];
-  controller.app = {
-    bots: [
-      {
-        platform: "onebot",
-        selfId: "1",
-        async sendMessage(chatId, content) {
-          deliveries.push({ chatId, content });
-          return [`out-${deliveries.length}`];
-        },
-        internal: new Proxy(
-          {},
-          {
-            get(_target, property) {
-              if (typeof property !== "string") return undefined;
-              return async (...args) => {
-                internalActions.push([property, ...args]);
-              };
-            },
-          },
-        ),
-      },
-    ],
-  };
-  controller.currentTurn = {
-    startedAt: Date.now(),
-    incomingMessageId: "m-private",
-    workingNoticeSent: false,
-  };
-  const liveTurn = controller.startLiveTurn();
-  liveTurn.promise.catch(() => {});
-
-  assert.equal(await controller.pollTyping(), false);
-  assert.deepEqual(internalActions, []);
-  assert.deepEqual(deliveries, []);
 });
 
 test("chat controller does not type from local live turn state without worker activity", async () => {
@@ -7924,7 +7685,7 @@ test("chat controller submits the prompt without waiting for editable Working an
 });
 
 test("chat controller does not let presentation polling block prompt submission", async () => {
-  const controller = await createController("onebot/1:2");
+  const controller = await createController("example/1:2");
   const calls = [];
   controller.pollTyping = async function () {
     calls.push("pollTyping");

@@ -4,7 +4,7 @@ import { cancel, confirm, isCancel, select } from "@clack/prompts";
 
 import { requestProcessTermination } from "../platform/process-lifetime.js";
 import { repoRootFromHere, detectExecutorUser } from "./common.js";
-import { createInstallerI18n } from "./i18n.js";
+import { createInstallerI18n } from "../i18n.js";
 import {
   releaseInfoFromFile,
   type ReleaseChannel,

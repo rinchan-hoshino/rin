@@ -1,14 +1,13 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  defineRinDaemonExtension,
+  RIN_CHAT_PLATFORM_EVENT,
   defineRinExtension,
 } from "../../dist/core/rin-extension-api.js";
 
-test("Rin extension API definition helpers preserve factory identity", () => {
-  const foreground = () => undefined;
-  const daemon = async () => undefined;
-
-  assert.equal(defineRinExtension(foreground), foreground);
-  assert.equal(defineRinDaemonExtension(daemon), daemon);
+test("Rin keeps Pi factory identity and one optional Chat event", () => {
+  const factory = () => undefined;
+  assert.equal(defineRinExtension(factory), factory);
+  assert.equal(RIN_CHAT_PLATFORM_EVENT, "rin.chat.platform.v1");
 });

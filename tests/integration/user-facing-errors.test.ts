@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -161,11 +162,13 @@ test("runtime error formatter maps known internal markers to actionable messages
     "The chat database update migration did not complete.",
   );
   assert.equal(
-    formatRuntimeErrorForUser("chat_install_migration_active_legacy_turn"),
+    formatRuntimeErrorForUser("chat_database_migration_active_legacy_turn"),
     "Rin update cannot continue while a chat turn from the current version is still active.",
   );
   assert.equal(
-    formatRuntimeErrorForUser("chat_install_migration_invalid_accepted_orphan"),
+    formatRuntimeErrorForUser(
+      "chat_database_migration_invalid_accepted_orphan",
+    ),
     "Chat migration found an accepted legacy message with incomplete identity.",
   );
   assert.equal(

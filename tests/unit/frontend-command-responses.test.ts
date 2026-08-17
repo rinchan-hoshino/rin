@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -48,6 +49,31 @@ test("frontend command responses normalize configured text", () => {
   assert.equal(responses.compact, "done");
   assert.equal(responses.reload, "loaded");
   assert.equal(responses.new, "Started a new session.");
+});
+
+test("frontend command responses project only valid message catalog entries", () => {
+  const baseline = responsesModule.resolveRinFrontendCommandResponses();
+  assert.deepEqual(
+    responsesModule.applyRinMessageCatalog(baseline, null),
+    baseline,
+  );
+  const catalog = {
+    "command.abort.completed": "Stopped.",
+    "session.new.completed": "   ",
+    unknown: "ignored",
+  };
+  assert.equal(
+    responsesModule.applyRinMessageCatalog(baseline, catalog).abort,
+    "Stopped.",
+  );
+  assert.equal(
+    responsesModule.applyRinMessageCatalog(baseline, catalog).new,
+    baseline.new,
+  );
+  assert.deepEqual(responsesModule.normalizeRinMessageCatalog(null), {});
+  assert.deepEqual(responsesModule.normalizeRinMessageCatalog(catalog), {
+    "command.abort.completed": "Stopped.",
+  });
 });
 
 test("frontend command responses render abort, session, and reload states", () => {

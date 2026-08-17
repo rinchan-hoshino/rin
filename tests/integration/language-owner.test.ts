@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -9,8 +10,7 @@ const rootDir = path.resolve(
   "../..",
 );
 const installerI18n = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "i18n.js"))
-    .href
+  pathToFileURL(path.join(rootDir, "dist", "core", "i18n.js")).href
 );
 const chatBoot = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "boot.js")).href
@@ -45,13 +45,13 @@ test("installer copy factories keep instances isolated", () => {
 
   first.introTitle = "Changed locally";
   first.chatCommandDescriptions.help = "Changed help";
-  first.chatRuntime.telegramWorking.prompts[0] = "Changed working frame";
+  first.chat.telegramWorking.prompts[0] = "Changed working frame";
   first.installSafetyBoundaryLines[0] = "Changed boundary";
 
   assert.equal(second.introTitle, "Rin Installer");
   assert.equal(second.chatCommandDescriptions.help, "Show available commands");
   assert.notEqual(
-    second.chatRuntime.telegramWorking.prompts[0],
+    second.chat.telegramWorking.prompts[0],
     "Changed working frame",
   );
   assert.equal(second.installSafetyBoundaryLines[0], "Rin safety boundary:");
@@ -86,7 +86,7 @@ test("language configuration and CLI localization producers are removed", () => 
     "src/core/rin/shared.ts",
     "src/core/rin-install/apply-plan.ts",
     "src/core/rin-install/finalize.ts",
-    "src/core/rin-install/i18n.ts",
+    "src/core/i18n.ts",
     "src/core/rin-install/interactive.ts",
     "src/core/rin-install/main.ts",
     "src/core/rin-install/persist.ts",
@@ -118,7 +118,7 @@ test("language configuration and CLI localization producers are removed", () => 
   assert.match(runtimeSource, /stripLegacyConfiguredLanguagePrompt/);
 
   const installerCopy = fs.readFileSync(
-    path.join(rootDir, "src", "core", "rin-install", "i18n.ts"),
+    path.join(rootDir, "src", "core", "i18n.ts"),
     "utf8",
   );
   assert.doesNotMatch(installerCopy, /[\u3400-\u9fff]/u);

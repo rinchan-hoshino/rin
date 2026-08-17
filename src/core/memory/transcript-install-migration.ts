@@ -94,7 +94,7 @@ export function isConfirmedInterleavedTranscriptLine(rawLine: string): boolean {
   );
 }
 
-export function sanitizeTranscriptArchiveEntryForInstall(
+export function sanitizeTranscriptArchiveEntryForMigration(
   input: Record<string, unknown>,
 ): TranscriptArchiveEntry | null {
   if (isLegacySyntheticSessionSummaryEntry(input)) return null;
@@ -217,7 +217,7 @@ async function sanitizeTranscriptArchiveFile(
         }
         continue;
       }
-      const sanitized = sanitizeTranscriptArchiveEntryForInstall(
+      const sanitized = sanitizeTranscriptArchiveEntryForMigration(
         parsed as Record<string, unknown>,
       );
       if (!sanitized) {
@@ -299,7 +299,7 @@ async function sourceTranscriptFiles(sourceRoot: string): Promise<string[]> {
   return collectTranscriptFiles(sourceRoot);
 }
 
-export async function sanitizeTranscriptArchiveTreeForInstall(
+export async function sanitizeTranscriptArchiveTreeForMigration(
   sourceRoot: string,
   targetRoot: string,
   options: TranscriptArchiveMigrationOptions = {},
@@ -335,7 +335,7 @@ export async function sanitizeTranscriptArchiveTreeForInstall(
   return buildManifest(files);
 }
 
-export async function synchronizeSanitizedTranscriptArchiveTreeForInstall(
+export async function synchronizeSanitizedTranscriptArchiveTreeForMigration(
   sourceRoot: string,
   targetRoot: string,
   previous: TranscriptArchiveMigrationManifest,

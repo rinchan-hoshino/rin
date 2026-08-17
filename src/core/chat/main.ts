@@ -3,6 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 
 import {
+  createEventBus,
+  DefaultResourceLoader,
+} from "@earendil-works/pi-coding-agent";
+
+import {
   applyRuntimeProfileEnvironment,
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
@@ -111,18 +116,31 @@ import {
   resolveChatInputAccess,
   shouldProcessText,
 } from "./decision.js";
-import { createChatRuntimeApp } from "../chat-runtime/app.js";
 import {
-  createChatRuntimeH,
-  instantiateChatRuntimeAdapters,
-  instantiateExternalChatRuntimeAdapters,
-  type ChatRuntimeExternalAdapterEntry,
-} from "../chat-runtime/registry.js";
+  addBuiltInPlatforms,
+  createChat,
+  createChatNodes,
+  type Chat,
+} from "./chat.js";
 import {
-  ensureChatRuntimeDependencies,
-  listChatRuntimeAdapterEntries,
+  listBuiltInChatPlatformEntries,
+  listChatPlatformEntries,
 } from "./runtime-config.js";
-import { composeChatKeyForBot, loadIdentity, trustOf } from "./support.js";
+import {
+  composeChatKey,
+  composeChatKeyForBot,
+  loadIdentity,
+  trustOf,
+} from "./support.js";
+import { recoverInboundHeads } from "./inbound-recovery.js";
+import { migrateChatDatabase } from "./database-migration.js";
+import { openChatDatabase } from "./database.js";
+import {
+  RIN_CHAT_PLATFORM_EVENT,
+  type RinChatPlatform,
+  type RinChatPlatformBot,
+  type RinChatPlatformContribution,
+} from "../rin-extension-api.js";
 import { RinDaemonFrontendClient } from "../rin-frontend-sdk/daemon-client.js";
 import type { PromptContextMeta } from "../rin-lib/prompt-context.js";
 import {
@@ -131,11 +149,7 @@ import {
 } from "../rin-lib/frontend-identity.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 import type { RinPiPassthroughOptions } from "../rin-lib/pi-passthrough.js";
-import {
-  listUnacknowledgedChatTerminalEvents,
-  projectAndAcknowledgeChatTerminalEvent,
-  reconcileChatTerminalEvents,
-} from "./terminal-reconciler.js";
+import { createChatTerminalReconciliationLoop } from "./terminal-reconciler.js";
 import type {
   ChatOutboxPayloadInput,
   ChatOutboxTurnFence,
@@ -176,6 +190,146 @@ const CHAT_OUTBOX_HISTORY_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const CHAT_INBOX_PROCESSING_HEARTBEAT_MS = 30 * 1000;
 const DETACHED_CONTROLLER_SLEEP_IDLE_MS = 60_000;
 const TELEGRAM_CHAT_THREAD_MARKER = "?thread=";
+
+function isChatPlatformContribution(
+  value: unknown,
+): value is RinChatPlatformContribution {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<RinChatPlatformContribution>;
+  return (
+    candidate.apiVersion === 1 &&
+    /^[a-z][a-z0-9_-]*$/.test(safeString(candidate.platform).trim()) &&
+    typeof candidate.create === "function"
+  );
+}
+
+async function loadExternalChatPlatformContributions(input: {
+  cwd: string;
+  agentDir: string;
+  additionalExtensionPaths?: string[];
+}) {
+  const eventBus = createEventBus();
+  const contributions: RinChatPlatformContribution[] = [];
+  const unsubscribe = eventBus.on(RIN_CHAT_PLATFORM_EVENT, (value) => {
+    if (isChatPlatformContribution(value)) {
+      contributions.push(value);
+    } else {
+      logger.warn("ignored invalid rin.chat.platform.v1 contribution");
+    }
+  });
+  try {
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: input.cwd,
+      agentDir: input.agentDir,
+      eventBus,
+      additionalExtensionPaths: input.additionalExtensionPaths || [],
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+    });
+    await resourceLoader.reload();
+    const loaded = resourceLoader.getExtensions();
+    for (const failure of loaded.errors) {
+      logger.warn(
+        `Pi extension load failed path=${failure.path} err=${failure.error}`,
+      );
+    }
+  } finally {
+    unsubscribe();
+    eventBus.clear();
+  }
+
+  const unique = new Map<string, RinChatPlatformContribution>();
+  for (const contribution of contributions) {
+    const key = safeString(contribution.platform).trim();
+    if (unique.has(key)) {
+      logger.warn(`ignored duplicate Chat platform contribution=${key}`);
+      continue;
+    }
+    unique.set(key, contribution);
+  }
+  return [...unique.values()];
+}
+
+function isChatPlatform(value: unknown): value is RinChatPlatform {
+  if (!value || typeof value !== "object") return false;
+  const platform = value as Partial<RinChatPlatform>;
+  const bot = platform.bot as Partial<RinChatPlatformBot> | undefined;
+  return (
+    Boolean(bot) &&
+    typeof bot?.platform === "string" &&
+    typeof bot?.selfId === "string" &&
+    typeof bot?.sendMessage === "function" &&
+    typeof platform.start === "function" &&
+    typeof platform.stop === "function"
+  );
+}
+
+async function addExternalChatPlatforms(
+  chat: Chat,
+  input: {
+    cwd: string;
+    agentDir: string;
+    dataDir: string;
+    settings: unknown;
+    additionalExtensionPaths?: string[];
+  },
+) {
+  const contributions = await loadExternalChatPlatformContributions(input);
+  for (const contribution of contributions) {
+    const platformName = safeString(contribution.platform).trim();
+    const entries = listChatPlatformEntries(
+      input.settings,
+      platformName,
+      contribution.defaults,
+    );
+    for (const entry of entries) {
+      try {
+        const platform = await contribution.create({
+          agentDir: input.agentDir,
+          dataDir: input.dataDir,
+          config: entry.config,
+          logger,
+          receive: (session) => chat.emit("message", session),
+          updateStatus: (bot, status) => chat.updateStatus(bot, status),
+          composeKey: (chatId, botId) =>
+            composeChatKey(platformName, chatId, botId),
+          beginRecovery: (chatKey) => chat.beginInboundRecoveryChat(chatKey),
+          completeRecovery: (chatKey) =>
+            chat.completeInboundRecoveryChat(chatKey),
+          recoverInbound: async (botId, recover, options) =>
+            await recoverInboundHeads(
+              input.agentDir,
+              platformName,
+              botId,
+              recover,
+              options,
+            ),
+        });
+        if (!isChatPlatform(platform)) {
+          throw new Error(
+            "Chat platform did not return a usable implementation",
+          );
+        }
+        if (safeString(platform.bot.platform).trim() !== platformName) {
+          throw new Error(
+            "Chat platform identity does not match its registration",
+          );
+        }
+        chat.addPlatform(platform);
+      } catch (error) {
+        chat.registerPlatformFailure(
+          { platform: platformName, selfId: entry.name },
+          error,
+        );
+        logger.warn(
+          `external Chat platform init failed platform=${platformName} name=${entry.name} err=${safeString((error as any)?.message || error)}`,
+        );
+      }
+    }
+  }
+}
 
 function appendTelegramThreadToChatKey(chatKey: string, session: any) {
   const nextChatKey = safeString(chatKey).trim();
@@ -408,12 +562,11 @@ export type ChatBridgeStatus = {
 };
 
 export type ChatBridgeHandle = {
-  app: any;
+  app: Chat;
   options: {
     additionalExtensionPaths?: string[];
     hosted?: boolean;
     frontendClientFactory?: () => RinFrontendTurnClient;
-    chatAdapterProviders?: ChatRuntimeExternalAdapterEntry[];
   };
   stop: () => Promise<void>;
   getStatus: () => ChatBridgeStatus;
@@ -441,7 +594,6 @@ export async function startChatBridge(
     additionalExtensionPaths?: string[];
     hosted?: boolean;
     frontendClientFactory?: () => RinFrontendTurnClient;
-    chatAdapterProviders?: ChatRuntimeExternalAdapterEntry[];
     settingsPath?: string;
     /** Explicit catalog injection for hosted and test environments. */
     commandRows?: ChatCommandRow[];
@@ -455,6 +607,19 @@ export async function startChatBridge(
   applyRuntimeProfileEnvironment(runtime);
   if (process.cwd() !== runtime.cwd) process.chdir(runtime.cwd);
   ensureDir(dataDir);
+  try {
+    openChatDatabase(runtime.agentDir);
+  } catch (error: any) {
+    const message = safeString(error?.message || error);
+    if (
+      !/^chat_database_(?:schema_upgrade_required|incomplete_schema)/.test(
+        message,
+      )
+    ) {
+      throw error;
+    }
+    migrateChatDatabase(runtime.agentDir, { runtimeQuiesced: true });
+  }
 
   const settings = loadChatSettings(settingsPath);
   const startupRecoveryAdmission = createStartupRecoveryAdmission({
@@ -462,8 +627,8 @@ export async function startChatBridge(
     logger,
   });
 
-  const h = createChatRuntimeH();
-  const app = createChatRuntimeApp(runtime.agentDir);
+  const h = createChatNodes();
+  const app = createChat(runtime.agentDir);
   let inboundHttpTransport: RinHttpTransport | null = null;
   const getInboundHttpTransport = () => {
     inboundHttpTransport ||= createRinHttpTransport();
@@ -529,26 +694,17 @@ export async function startChatBridge(
     }
     return { ...own, id: outboxId };
   };
-  const chatRuntimeRoot = path.join(dataDir, "chat-runtime");
-  try {
-    ensureChatRuntimeDependencies(chatRuntimeRoot, settings);
-  } catch (error: any) {
-    logger.warn(
-      `chat runtime dependency install failed err=${String(error?.message || error)}`,
-    );
-  }
-  await instantiateChatRuntimeAdapters(app, {
+  addBuiltInPlatforms(app, {
     dataDir,
-    adapterEntries: listChatRuntimeAdapterEntries(settings),
+    entries: listBuiltInChatPlatformEntries(settings),
     logger,
   });
-  await instantiateExternalChatRuntimeAdapters(app, {
+  await addExternalChatPlatforms(app, {
+    cwd: runtime.cwd,
     agentDir: runtime.agentDir,
     dataDir,
-    runtimeRoot: chatRuntimeRoot,
-    h,
-    adapterEntries: options.chatAdapterProviders || [],
-    logger,
+    settings,
+    additionalExtensionPaths: options.additionalExtensionPaths,
   });
   const controllers = new Map<string, ChatController>();
   const detachedControllers = new Map<string, ChatController>();
@@ -562,8 +718,7 @@ export async function startChatBridge(
   let inboxPollTimer: NodeJS.Timeout | null = null;
   let outboxPollTimer: NodeJS.Timeout | null = null;
   const terminalRecoveryClient = options.frontendClientFactory?.() || null;
-  let terminalListInFlight: Promise<void> | null = null;
-  const terminalProjectionInFlight = new Set<string>();
+  let chatBridgeStopping = false;
   let outboxHistoryCleanupTimer: NodeJS.Timeout | null = null;
   const runOutboxHistoryCleanup = () => {
     const result = cleanupChatOutboxHistory(runtime.agentDir);
@@ -703,97 +858,16 @@ export async function startChatBridge(
     }
     return controller;
   };
-  const requestReconcileChatTerminals = () => {
-    if (chatBridgeStopping || terminalListInFlight || !terminalRecoveryClient) {
-      return;
-    }
-    const recoveryClient = terminalRecoveryClient;
-    terminalListInFlight = (async () => {
-      const terminals =
-        await listUnacknowledgedChatTerminalEvents(recoveryClient);
-      let scheduled = 0;
-      await reconcileChatTerminalEvents(
-        terminals,
-        async (chatKey, terminal) => {
-          const terminalRecord = terminal?.terminalRecord as
-            | Record<string, unknown>
-            | undefined;
-          const terminalId = safeString(
-            terminalRecord?.terminalId ||
-              terminal?.chatTerminalRecordId ||
-              terminal?.terminalId,
-          ).trim();
-          if (!terminalId) return;
-          if (terminalProjectionInFlight.has(terminalId)) return;
-          terminalProjectionInFlight.add(terminalId);
-          scheduled += 1;
-          void (async () => {
-            const activeController = controllers.get(chatKey);
-            if (
-              activeController?.ownsAuthoritativeTerminalProjection(terminal)
-            ) {
-              await projectAndAcknowledgeChatTerminalEvent(
-                recoveryClient,
-                terminal,
-                async () => {
-                  await activeController.driver.projectAuthoritativeTerminal(
-                    terminal,
-                  );
-                },
-              );
-              return;
-            }
-            const controllerKey = `terminal-reconcile:${terminalId}`;
-            const controller = getDetachedController(controllerKey, {
-              chatKey,
-              affectChatBinding: false,
-              useChatFrontendIdentity: false,
-            });
-            try {
-              await controller.connect({
-                restoreSession: false,
-                recoverTerminals: false,
-              });
-              await projectAndAcknowledgeChatTerminalEvent(
-                recoveryClient,
-                terminal,
-                async () => {
-                  await controller.driver.projectAuthoritativeTerminal(
-                    terminal,
-                  );
-                },
-              );
-            } finally {
-              controller.dispose();
-              detachedControllers.delete(controllerKey);
-              detachedControllerSignatures.delete(controllerKey);
-            }
-          })()
-            .catch((error) => {
-              logger.warn(
-                `chat terminal projection failed terminalId=${terminalId} err=${safeString((error as any)?.message || error)}`,
-              );
-            })
-            .finally(() => {
-              terminalProjectionInFlight.delete(terminalId);
-            });
-        },
-      );
-      if (scheduled) {
-        logger.info(
-          `chat terminal reconciliation scheduled projections=${scheduled}`,
-        );
-      }
-    })()
-      .catch((error) => {
-        logger.warn(
-          `chat terminal reconciliation failed err=${safeString((error as any)?.message || error)}`,
-        );
-      })
-      .finally(() => {
-        terminalListInFlight = null;
-      });
-  };
+  const terminalReconciliation = createChatTerminalReconciliationLoop({
+    client: terminalRecoveryClient,
+    isStopping: () => chatBridgeStopping,
+    controllers,
+    detachedControllers,
+    detachedControllerSignatures,
+    getDetachedController,
+    logger,
+  });
+  const requestReconcileChatTerminals = terminalReconciliation.request;
   const findRuntimeBot = (platform: string, selfId: string) =>
     (Array.isArray(app.bots) ? app.bots : []).find(
       (bot: any) =>
@@ -1120,7 +1194,6 @@ export async function startChatBridge(
     return { disposition: "actionable" as const };
   };
 
-  let chatBridgeStopping = false;
   let requestReconcileChatInbox: () => void = () => {};
   const claimedInboxJobs = new Map<string, ClaimedChatInboxJob>();
   const forgetClaimedInboxJob = (job: ClaimedChatInboxJob) => {
@@ -1948,7 +2021,7 @@ export async function startChatBridge(
     return await stoppingPromise;
   };
   const getStatus = (): ChatBridgeStatus => {
-    const adapters = app.getAdapterStatuses();
+    const adapters = app.getPlatformStatuses();
     return {
       ready: true,
       status: adapters.some((adapter: any) => adapter.status === "degraded")

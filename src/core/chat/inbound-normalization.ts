@@ -225,9 +225,7 @@ export function getChatId(session: any) {
   if (channelId) return channelId;
   const userId = pickUserId(session);
   if (!userId) return "";
-  return safeString(session?.platform) === "onebot"
-    ? `private:${userId}`
-    : userId;
+  return userId;
 }
 
 export function getChatType(session: any): "private" | "group" {

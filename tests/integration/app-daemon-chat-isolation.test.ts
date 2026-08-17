@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -18,13 +19,7 @@ const database = {
   )),
   ...(await import(
     pathToFileURL(
-      path.join(
-        rootDir,
-        "dist",
-        "core",
-        "chat",
-        "database-install-migration.js",
-      ),
+      path.join(rootDir, "dist", "core", "chat", "database-migration.js"),
     ).href
   )),
 };
@@ -57,7 +52,7 @@ test("app daemon stays available when the hosted chat service cannot start", asy
   );
   const socketPath = path.join(agentDir, "daemon.sock");
   await fs.writeFile(path.join(agentDir, "settings.json"), "{}\n", "utf8");
-  const db = database.migrateChatDatabaseForInstall(agentDir);
+  const db = database.migrateChatDatabase(agentDir);
   db.pragma("user_version = 3");
   database.closeChatDatabase(agentDir);
 
@@ -82,10 +77,7 @@ test("app daemon stays available when the hosted chat service cannot start", asy
   try {
     const status = await waitForDegradedChat(socketPath);
     assert.equal(status.chat.ready, false);
-    assert.match(
-      status.chat.error,
-      /chat_database_schema_upgrade_required:3:10/,
-    );
+    assert.match(status.chat.error, /chat_database_incomplete_schema/);
     assert.equal(child.exitCode, null);
   } catch (error: any) {
     throw new Error(

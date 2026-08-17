@@ -9,7 +9,7 @@ import {
   installSettingsPath,
 } from "./paths.js";
 import { configureProviderAuth, loadModelChoices } from "./provider-auth.js";
-import { createInstallerI18n, type InstallerI18n } from "./i18n.js";
+import { createInstallerI18n, type InstallerI18n } from "../i18n.js";
 import { normalizeTargetName } from "../rin-targets/registry.js";
 import type { InstallTargetSelection } from "./deployment-targets.js";
 import { runInstallerProgress } from "./progress.js";

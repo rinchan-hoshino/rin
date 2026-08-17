@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { spawn as realSpawn } from "node:child_process";

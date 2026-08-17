@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -52,6 +53,9 @@ export async function createTestSandbox(
     "CI",
     "GITHUB_ACTIONS",
     "NODE_V8_COVERAGE",
+    "RIN_INSTALL_TUI_CONTAINER_INNER",
+    "RIN_SYSTEM_TEST_CONTAINER_INNER",
+    "RIN_TEST_NETWORK_NAMESPACE_INNER",
   ];
   const inherited = Object.fromEntries(
     inheritedNames.flatMap((name) =>
@@ -71,6 +75,9 @@ export async function createTestSandbox(
     XDG_RUNTIME_DIR: runtimeDir,
     DBUS_SESSION_BUS_ADDRESS: `unix:path=${path.join(runtimeDir, "bus")}`,
     RIN_DIR: agentDir,
+    RIN_AGENT_DIR: agentDir,
+    RIN_DAEMON_SOCKET_PATH: path.join(runtimeDir, "rin-daemon", "daemon.sock"),
+    RIN_TEST_SANDBOX_ROOT: root,
     RIN_OFFLINE: "1",
     RIN_SKIP_VERSION_CHECK: "1",
     HTTP_PROXY: "http://127.0.0.1:9",
@@ -97,6 +104,8 @@ export function assertTestSandbox(env: NodeJS.ProcessEnv, root: string) {
     "XDG_CONFIG_HOME",
     "XDG_RUNTIME_DIR",
     "RIN_DIR",
+    "RIN_AGENT_DIR",
+    "RIN_DAEMON_SOCKET_PATH",
   ]) {
     const value = env[name];
     assert.ok(value, `sandbox environment is missing ${name}`);
@@ -111,6 +120,7 @@ export function assertTestSandbox(env: NodeJS.ProcessEnv, root: string) {
     path.resolve(String(env.HOME)),
     path.resolve(process.env.HOME || ""),
   );
+  assert.equal(path.resolve(String(env.RIN_TEST_SANDBOX_ROOT)), sandboxRoot);
   assert.equal(env.RIN_OFFLINE, "1");
   assert.equal(env.RIN_SKIP_VERSION_CHECK, "1");
   assert.equal(env.NO_PROXY, "");

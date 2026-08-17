@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -7,8 +8,8 @@ import test from "node:test";
 import { importBuiltModule } from "../support/import-built-module.js";
 
 const recovery = await importBuiltModule<
-  typeof import("../../src/core/chat-runtime/inbound-recovery.js")
->("dist/core/chat-runtime/inbound-recovery.js");
+  typeof import("../../src/core/chat/inbound-recovery.js")
+>("dist/core/chat/inbound-recovery.js");
 const messageStore = await importBuiltModule<
   typeof import("../../src/core/chat/message-store.js")
 >("dist/core/chat/message-store.js");

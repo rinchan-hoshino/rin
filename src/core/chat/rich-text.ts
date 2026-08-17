@@ -16,7 +16,7 @@ export function chatMarkdownPolicyForPlatform(
 ): ChatMarkdownPolicy {
   const value = safeString(platform).trim().toLowerCase();
   if (value === "telegram") return "render";
-  if (value === "discord" || value === "slack") return "preserve";
+  if (value === "discord") return "preserve";
   return "strip";
 }
 

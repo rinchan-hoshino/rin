@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import { register } from "node:module";
 
 const target = "dist/core/rin-install/quick-run.js";
@@ -83,7 +84,7 @@ const sources: Record<string, string> = {
       return { plan };
     }
   `,
-  "dist/core/rin-install/i18n.js": `
+  "dist/core/i18n.js": `
     export function createInstallerI18n(language) {
       return {
         language,

@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -23,10 +24,14 @@ test("Rin memory has no retired external provider surface", () => {
     false,
   );
 
+  assert.equal(
+    fs.existsSync(path.join(rootDir, "src/core/rin-daemon/extensions.ts")),
+    false,
+  );
+
   for (const relativePath of [
     "src/core/memory/index.ts",
     "src/core/rin-extension-api.ts",
-    "src/core/rin-daemon/extensions.ts",
     "src/core/rin-daemon/daemon.ts",
     "src/core/rin-lib/rpc-types.ts",
   ]) {

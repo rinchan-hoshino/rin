@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -49,16 +50,16 @@ export function makeRuntime(
   directory: string,
   entry: Record<string, any>,
 ) {
-  const target = runtime.createChatRuntimeApp(directory);
-  const created = runtime.instantiateBuiltInChatRuntimeAdapters(target, {
+  const target = runtime.createChat(directory);
+  const created = runtime.addBuiltInPlatforms(target, {
     dataDir: path.join(directory, "data"),
-    adapterEntries: [entry],
+    entries: [entry],
     logger: logger(),
   });
   assert.equal(created.length, 1);
   return {
     app: target as any,
-    adapter: [...(target as any).adapters][0] as any,
+    adapter: [...(target as any).platforms][0] as any,
     bot: target.bots[0] as any,
   };
 }

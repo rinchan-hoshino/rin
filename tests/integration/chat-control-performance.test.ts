@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -18,7 +19,7 @@ const inbox = await import(
 );
 const recovery = await import(
   pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat-runtime", "inbound-recovery.js"),
+    path.join(rootDir, "dist", "core", "chat", "inbound-recovery.js"),
   ).href
 );
 const outbox = await import(
@@ -53,9 +54,9 @@ test("180k archived messages do not enter inbox or recovery control paths", asyn
       SELECT
         printf('history-%06d', value),
         printf('history-%06d', value),
-        'onebot/1:private:history',
+        'example/1:private:history',
         printf('%d', value),
-        'onebot',
+        'example',
         '1',
         'private:history',
         CASE WHEN value % 2 = 0 THEN 'user' ELSE 'assistant' END,
@@ -66,9 +67,9 @@ test("180k archived messages do not enter inbox or recovery control paths", asyn
         json_object(
           'version', 1,
           'recordKey', printf('history-%06d', value),
-          'chatKey', 'onebot/1:private:history',
+          'chatKey', 'example/1:private:history',
           'messageId', printf('%d', value),
-          'platform', 'onebot',
+          'platform', 'example',
           'botId', '1',
           'chatId', 'private:history',
           'receivedAt', strftime('%Y-%m-%dT%H:%M:%fZ', 1700000000 + value, 'unixepoch')
@@ -79,13 +80,13 @@ test("180k archived messages do not enter inbox or recovery control paths", asyn
       FROM numbers;
 
       INSERT INTO chat_state (chat_key, current_generation, next_sequence, updated_at)
-      VALUES ('onebot/1:private:history', 0, 180001, '2026-07-14T00:00:00.000Z');
+      VALUES ('example/1:private:history', 0, 180001, '2026-07-14T00:00:00.000Z');
 
       INSERT INTO inbound_heads (
         platform, bot_id, chat_key, chat_id, message_id, platform_timestamp,
         received_at, provider_cursor, sequence, updated_at
       ) VALUES (
-        'onebot', '1', 'onebot/1:private:history', 'private:history',
+        'example', '1', 'example/1:private:history', 'private:history',
         '180000', 1700180000000, '2023-11-16T00:00:00.000Z',
         'cursor-180000', 180000, '2026-07-14T00:00:00.000Z'
       );
@@ -102,11 +103,11 @@ test("180k archived messages do not enter inbox or recovery control paths", asyn
       )
       SELECT
         printf('delivered-%06d', value),
-        'onebot/1:private:history',
+        'example/1:private:history',
         'generic',
         'delivered',
-        '{"createdAt":"2026-07-14T00:00:00.000Z","chatKey":"onebot/1:private:history","parts":[{"type":"text","text":"archived"}]}',
-        'onebot',
+        '{"createdAt":"2026-07-14T00:00:00.000Z","chatKey":"example/1:private:history","parts":[{"type":"text","text":"archived"}]}',
+        'example',
         '1',
         'planned',
         value,
@@ -120,10 +121,10 @@ test("180k archived messages do not enter inbox or recovery control paths", asyn
     `);
 
     const enqueued = inbox.enqueueChatInboxItem(agentDir, {
-      chatKey: "onebot/1:private:history",
+      chatKey: "example/1:private:history",
       messageId: "180001",
       session: {
-        platform: "onebot",
+        platform: "example",
         selfId: "1",
         channelId: "private:history",
         userId: "owner",
@@ -140,9 +141,9 @@ test("180k archived messages do not enter inbox or recovery control paths", asyn
     const started = performance.now();
     const pending = inbox.listPendingChatInboxItems(agentDir);
     const claim = inbox.claimChatInboxItem(agentDir, enqueued.itemId);
-    const heads = recovery.listInboundRecoveryHeads(agentDir, "onebot", "1");
+    const heads = recovery.listInboundRecoveryHeads(agentDir, "example", "1");
     const newOutboxId = outbox.enqueueChatOutboxPayload(agentDir, {
-      chatKey: "onebot/1:private:history",
+      chatKey: "example/1:private:history",
       parts: [{ type: "text", text: "new outbound control item" }],
     });
     const activeOutbox = outbox.listChatOutboxItems(agentDir);
@@ -152,7 +153,7 @@ test("180k archived messages do not enter inbox or recovery control paths", asyn
     assert.equal(pending.length, 1);
     assert.equal(claim.messageId, "180001");
     assert.equal(heads.length, 1);
-    assert.equal(heads[0].messageId, "180000");
+    assert.equal(heads[0].messageId, "180001");
     assert.equal(activeOutbox.length, 1);
     assert.equal(activeOutbox[0].item.id, newOutboxId);
     assert.equal(activeOutbox[0].item.sequence, 180001);
@@ -174,7 +175,7 @@ test("180k archived messages do not enter inbox or recovery control paths", asyn
         .prepare(
           `EXPLAIN QUERY PLAN
          SELECT * FROM inbound_heads
-         WHERE platform = 'onebot' AND bot_id = '1'`,
+         WHERE platform = 'example' AND bot_id = '1'`,
         )
         .all(),
     );

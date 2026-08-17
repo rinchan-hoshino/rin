@@ -8,7 +8,7 @@ import {
   ensureDir,
   ensureFileName,
   isEditableWorkingText,
-  resolveChatRuntimeWorkingCopy,
+  resolveChatWorkingCopy,
   safeString,
   splitPlainText,
   updateEditableMessageSections,
@@ -78,7 +78,7 @@ export class EditableTextMessageGroup {
   private progressTexts: string[];
 
   constructor(private readonly options: EditableTextMessageGroupOptions) {
-    const copy = resolveChatRuntimeWorkingCopy();
+    const copy = resolveChatWorkingCopy();
     this.workingText = editableIntermediateHeadText(
       safeString(options.workingText).trim() || copy.workingText,
     );
@@ -93,7 +93,7 @@ export class EditableTextMessageGroup {
   }
 
   setWorkingText(text: string) {
-    const copy = resolveChatRuntimeWorkingCopy();
+    const copy = resolveChatWorkingCopy();
     const nextText = editableIntermediateHeadText(
       safeString(text).trim() || copy.workingText,
     );

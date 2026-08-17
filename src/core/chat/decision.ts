@@ -69,237 +69,29 @@ function uniqueMemberIds(values: unknown[]) {
   return Array.from(new Set(ids));
 }
 
-function canonicalDecimalCount(value: unknown) {
-  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) {
-    return null;
-  }
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : null;
-}
-
-async function listLarkChatMembers(
-  internal: any,
-  chatId: string,
-): Promise<ChatMemberProof> {
-  // Lark's chat-members endpoint returns users and explicitly omits bots.
-  const nonAgentUserIds: string[] = [];
-  const seenPageTokens = new Set<string>();
-  let expectedMemberTotal: number | null = null;
-  let pageToken = "";
-  for (;;) {
-    const response = await internal.listChatMembers({
-      path: { chat_id: chatId },
-      params: {
-        member_id_type: "open_id",
-        page_size: 100,
-        ...(pageToken ? { page_token: pageToken } : {}),
-      },
-    });
-    if (response?.code !== 0) return { complete: false };
-    const data = response?.data;
-    if (!data || typeof data !== "object") return { complete: false };
-    if (data.trigger_security_conf_limit) return { complete: false };
-    if (!("member_total" in data)) return { complete: false };
-    const memberTotal = data.member_total;
-    if (!Number.isSafeInteger(memberTotal) || memberTotal < 0) {
-      return { complete: false };
-    }
-    if (expectedMemberTotal !== null && expectedMemberTotal !== memberTotal) {
-      return { complete: false };
-    }
-    expectedMemberTotal = memberTotal;
-    if (!Array.isArray(data.items)) return { complete: false };
-    const pageIds = uniqueMemberIds(
-      data.items.map((item: any) => item?.member_id),
-    );
-    if (!pageIds) return { complete: false };
-    nonAgentUserIds.push(...pageIds);
-    if (typeof data.has_more !== "boolean") return { complete: false };
-    if (!data.has_more) {
-      const uniqueNonAgentUserIds = Array.from(new Set(nonAgentUserIds));
-      if (
-        expectedMemberTotal !== null &&
-        uniqueNonAgentUserIds.length !== expectedMemberTotal
-      ) {
-        return { complete: false };
-      }
-      const chatResponse = await internal.getChat({
-        path: { chat_id: chatId },
-      });
-      if (chatResponse?.code !== 0) return { complete: false };
-      const userCount = canonicalDecimalCount(chatResponse?.data?.user_count);
-      const botCount = canonicalDecimalCount(chatResponse?.data?.bot_count);
-      if (userCount !== uniqueNonAgentUserIds.length || botCount !== 1) {
-        return { complete: false };
-      }
-      return {
-        complete: true,
-        nonAgentUserIds: uniqueNonAgentUserIds,
-      };
-    }
-    const rawNextPageToken = data.page_token;
-    if (typeof rawNextPageToken !== "string") return { complete: false };
-    const nextPageToken = rawNextPageToken.trim();
-    if (!nextPageToken || seenPageTokens.has(nextPageToken)) {
-      return { complete: false };
-    }
-    seenPageTokens.add(nextPageToken);
-    pageToken = nextPageToken;
-  }
-}
-
-function telegramMemberPresence(member: any, expectedUserId: string) {
-  if (!member || typeof member !== "object") return null;
-  const actualUserId = safeString(member?.user?.id).trim();
-  if (!actualUserId || actualUserId !== expectedUserId) return null;
-  const status = safeString(member.status).trim().toLowerCase();
-  if (["creator", "administrator", "member"].includes(status)) return true;
-  if (["left", "kicked", "banned"].includes(status)) return false;
-  if (status === "restricted") {
-    return typeof member.is_member === "boolean" ? member.is_member : null;
-  }
-  return null;
-}
-
-async function getTelegramChatMemberProof(
-  internal: any,
-  chatId: string,
-  botId: string,
-  ownerUserId: string,
-): Promise<ChatMemberProof> {
-  if (!botId || !ownerUserId || botId === ownerUserId) {
-    return { complete: false };
-  }
-  const memberCount = await internal.getChatMemberCount({ chat_id: chatId });
-  if (!Number.isSafeInteger(memberCount) || memberCount < 0) {
-    return { complete: false };
-  }
-  if (memberCount !== 2) return { complete: true, privateLike: false };
-
-  const [ownerMember, agentMember] = await Promise.all([
-    internal.getChatMember({ chat_id: chatId, user_id: ownerUserId }),
-    internal.getChatMember({ chat_id: chatId, user_id: botId }),
-  ]);
-  const ownerPresent = telegramMemberPresence(ownerMember, ownerUserId);
-  const agentPresent = telegramMemberPresence(agentMember, botId);
-  if (ownerPresent === null || agentPresent === null) {
-    return { complete: false };
-  }
-  if (!ownerPresent || !agentPresent) {
-    return { complete: true, privateLike: false };
-  }
-  return { complete: true, nonAgentUserIds: [ownerUserId] };
-}
-
-async function listOneBotChatMembers(
-  internal: any,
-  chatId: string,
-  botId: string,
-): Promise<ChatMemberProof> {
-  if (!botId) return { complete: false };
-  const response = await internal.getGroupMemberList(chatId);
-  if (!Array.isArray(response)) return { complete: false };
-  const memberIds = uniqueMemberIds(
-    response.map((member: any) => member?.user_id),
-  );
-  if (!memberIds || !memberIds.includes(botId)) return { complete: false };
-  return {
-    complete: true,
-    nonAgentUserIds: memberIds.filter((userId) => userId !== botId),
-  };
-}
-
-async function listSlackChatMembers(
-  internal: any,
-  chatId: string,
-  botId: string,
-): Promise<ChatMemberProof> {
-  if (!botId) return { complete: false };
-  const memberIds: string[] = [];
-  const seenCursors = new Set<string>();
-  let cursor = "";
-  for (;;) {
-    const response = await internal.conversationsMembers({
-      channel: chatId,
-      limit: 200,
-      ...(cursor ? { cursor } : {}),
-    });
-    if (
-      !response ||
-      response.ok !== true ||
-      !Array.isArray(response.members) ||
-      !response.response_metadata ||
-      typeof response.response_metadata.next_cursor !== "string"
-    ) {
-      return { complete: false };
-    }
-    const pageIds = uniqueMemberIds(response.members);
-    if (!pageIds) return { complete: false };
-    memberIds.push(...pageIds);
-    const nextCursor = response.response_metadata.next_cursor.trim();
-    if (!nextCursor) break;
-    if (seenCursors.has(nextCursor)) return { complete: false };
-    seenCursors.add(nextCursor);
-    cursor = nextCursor;
-  }
-  const uniqueIds = Array.from(new Set(memberIds));
-  if (!uniqueIds.includes(botId)) return { complete: false };
-  return {
-    complete: true,
-    nonAgentUserIds: uniqueIds.filter((userId) => userId !== botId),
-  };
-}
-
 async function getCompleteChatMemberProof(
   session: any,
   context: ReturnType<typeof normalizeDecisionSessionContext>,
 ): Promise<ChatMemberProof> {
-  if (!["lark", "onebot", "slack", "telegram"].includes(context.platform)) {
+  const getProof = session?.bot?.getCompleteMemberProof;
+  if (typeof getProof !== "function") return { complete: false };
+  try {
+    const proof = await getProof({
+      chatId: context.chatId,
+      botId: context.botId,
+      senderId: pickUserId(session),
+    });
+    if (proof?.complete !== true) return { complete: false };
+    if (proof.privateLike === false) {
+      return { complete: true, privateLike: false };
+    }
+    const nonAgentUserIds = uniqueMemberIds(proof.nonAgentUserIds || []);
+    return nonAgentUserIds
+      ? { complete: true, nonAgentUserIds }
+      : { complete: false };
+  } catch {
     return { complete: false };
   }
-  try {
-    const internal = session?.bot?.internal;
-    if (
-      context.platform === "telegram" &&
-      typeof internal?.getChatMemberCount === "function" &&
-      typeof internal?.getChatMember === "function"
-    ) {
-      return await getTelegramChatMemberProof(
-        internal,
-        context.chatId,
-        context.botId,
-        pickUserId(session),
-      );
-    }
-    if (
-      context.platform === "lark" &&
-      typeof internal?.listChatMembers === "function" &&
-      typeof internal?.getChat === "function"
-    ) {
-      return await listLarkChatMembers(internal, context.chatId);
-    }
-    if (
-      context.platform === "onebot" &&
-      typeof internal?.getGroupMemberList === "function"
-    ) {
-      return await listOneBotChatMembers(
-        internal,
-        context.chatId,
-        context.botId,
-      );
-    }
-    if (
-      context.platform === "slack" &&
-      typeof internal?.conversationsMembers === "function"
-    ) {
-      return await listSlackChatMembers(
-        internal,
-        context.chatId,
-        context.botId,
-      );
-    }
-  } catch {}
-  return { complete: false };
 }
 
 function ownerAliasesForPlatform(identity: any, platform: string) {
@@ -315,68 +107,19 @@ function ownerAliasesForPlatform(identity: any, platform: string) {
   });
 }
 
-function isPresentMemberRecord(member: any) {
-  if (!member || typeof member !== "object") return false;
-  const status = safeString(
-    member.status || member.role || member.memberStatus || "",
-  )
-    .trim()
-    .toLowerCase();
-  if (["left", "kicked", "banned"].includes(status)) return false;
-  if (status === "restricted" && "is_member" in member) {
-    return Boolean(member.is_member);
-  }
-  if (status) {
-    return [
-      "creator",
-      "administrator",
-      "member",
-      "restricted",
-      "owner",
-    ].includes(status);
-  }
-  return Boolean(
-    member.user ||
-    member.user_id ||
-    member.userId ||
-    member.memberId ||
-    member.id ||
-    member.card ||
-    member.nickname,
-  );
-}
-
 async function isGroupMember(
   session: any,
-  platform: string,
+  _platform: string,
   chatId: string,
   userId: string,
 ) {
-  const internal = session?.bot?.internal;
+  const isChatMember = session?.bot?.isChatMember;
+  if (typeof isChatMember !== "function") return false;
   try {
-    if (
-      platform === "telegram" &&
-      typeof internal?.getChatMember === "function"
-    ) {
-      return isPresentMemberRecord(
-        await internal.getChatMember({ chat_id: chatId, user_id: userId }),
-      );
-    }
-    if (
-      platform === "onebot" &&
-      typeof internal?.getGroupMemberInfo === "function"
-    ) {
-      return isPresentMemberRecord(
-        await internal.getGroupMemberInfo(chatId, userId, true),
-      );
-    }
-    if (typeof session?.bot?.getGuildMember === "function") {
-      return isPresentMemberRecord(
-        await session.bot.getGuildMember(chatId, userId),
-      );
-    }
-  } catch {}
-  return false;
+    return Boolean(await isChatMember(chatId, userId));
+  } catch {
+    return false;
+  }
 }
 
 async function isOwnerPresentInChatSession(

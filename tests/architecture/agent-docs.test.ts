@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -209,7 +210,7 @@ test("agent docs expose scheduled task operation workflow", () => {
     /Do not introduce platform-specific unqualified forms/,
   );
   assert.match(chatBridge, /Treat platform metadata as authoritative/);
-  assert.match(chatBridge, /Chat bridge configuration is agent-owned/);
+  assert.match(chatBridge, /Chat configuration is agent-owned/);
   assert.match(chatBridge, /restart the target daemon/);
   assert.doesNotMatch(chatBridge, /runtime reload\/restart/);
   assert.match(
@@ -240,7 +241,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(richText, /SDK import: `docs\/agent-sdk\.md`/);
   assert.match(
     richText,
-    /Chat identity, SDK operations, logs, adapters, outbox, and delivery troubleshooting: `docs\/chat-bridge\.md`/,
+    /Chat identity, SDK operations, logs, platforms, outbox, and delivery troubleshooting: `docs\/chat-bridge\.md`/,
   );
   assert.match(initialization, /meets a user for the first time/);
   assert.match(initialization, /Success means the user feels welcomed/);

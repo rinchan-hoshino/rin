@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -7,8 +8,8 @@ import test from "node:test";
 import { importBuiltModule } from "../support/import-built-module.js";
 
 const { EditableTextMessageGroup } = await importBuiltModule<
-  typeof import("../../src/core/chat-runtime/editable-text-message-group.js")
->("dist/core/chat-runtime/editable-text-message-group.js");
+  typeof import("../../src/core/chat/platform/editable-text-message-group.js")
+>("dist/core/chat/platform/editable-text-message-group.js");
 
 async function fixture(overrides: Record<string, unknown> = {}) {
   const cacheDir = await fs.mkdtemp(

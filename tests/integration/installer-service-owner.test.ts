@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fsSync from "node:fs";
@@ -162,17 +163,17 @@ test("service specs bind managed runtimes and escape each platform configuration
     assert.deepEqual(launch.env, { RIN_DIR: fixture.installDir });
 
     assert.equal(
-      service.resolveDaemonEntryForInstall(fixture.installDir),
+      service.resolveDaemonEntryForMigration(fixture.installDir),
       fixture.daemonEntry,
     );
     await fs.rm(fixture.daemonEntry);
     assert.equal(
-      service.resolveDaemonEntryForInstall(fixture.installDir),
+      service.resolveDaemonEntryForMigration(fixture.installDir),
       fixture.legacyEntry,
     );
     await fs.rm(fixture.legacyEntry);
     assert.throws(
-      () => service.resolveDaemonEntryForInstall(fixture.installDir),
+      () => service.resolveDaemonEntryForMigration(fixture.installDir),
       /rin_installed_daemon_entry_missing:/,
     );
   });

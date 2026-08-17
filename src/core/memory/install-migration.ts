@@ -7,14 +7,14 @@ import {
   resolveTranscriptSearchDbPath,
 } from "./transcript-archive.js";
 import {
-  sanitizeTranscriptArchiveTreeForInstall,
-  synchronizeSanitizedTranscriptArchiveTreeForInstall,
+  sanitizeTranscriptArchiveTreeForMigration,
+  synchronizeSanitizedTranscriptArchiveTreeForMigration,
   type TranscriptArchiveMigrationManifest,
 } from "./transcript-install-migration.js";
 import {
   readTranscriptSearchSchemaMarker,
-  rebuildTranscriptSearchIndexAtPathForInstall,
-  synchronizeTranscriptSearchIndexAtPathForInstall,
+  rebuildTranscriptSearchIndexAtPathForMigration,
+  synchronizeTranscriptSearchIndexAtPathForMigration,
   transcriptSearchSchemaMarkerPath,
   TRANSCRIPT_SEARCH_SCHEMA_VERSION,
   writeTranscriptSearchSchemaMarker,
@@ -336,7 +336,7 @@ async function prepareTranscriptArchiveStaging(
   const stagingRoot = transcriptMigrationStagingRoot(dbPath);
   let manifest: TranscriptArchiveMigrationManifest;
   if (reuse) {
-    manifest = await synchronizeSanitizedTranscriptArchiveTreeForInstall(
+    manifest = await synchronizeSanitizedTranscriptArchiveTreeForMigration(
       sourceRoot,
       stagingRoot,
       readTranscriptStagingManifest(dbPath),
@@ -344,7 +344,7 @@ async function prepareTranscriptArchiveStaging(
     );
   } else {
     durableRemove(stagingRoot);
-    manifest = await sanitizeTranscriptArchiveTreeForInstall(
+    manifest = await sanitizeTranscriptArchiveTreeForMigration(
       sourceRoot,
       stagingRoot,
       { quarantineRoot: transcriptMigrationQuarantineRoot(rootOverride) },
@@ -542,7 +542,7 @@ export function preflightTranscriptSearchMigration(
   };
 }
 
-export async function prepareTranscriptSearchMigrationForInstall(
+export async function prepareTranscriptSearchMigrationForMigration(
   rootOverride = "",
 ) {
   const preflight = preflightTranscriptSearchMigration(rootOverride);
@@ -586,13 +586,13 @@ export async function prepareTranscriptSearchMigrationForInstall(
       logicalTranscriptRoot: resolveTranscriptRoot(rootOverride),
     };
     if (reusable) {
-      await synchronizeTranscriptSearchIndexAtPathForInstall(
+      await synchronizeTranscriptSearchIndexAtPathForMigration(
         stagingDbPath,
         rootOverride,
         indexOptions,
       );
     } else {
-      await rebuildTranscriptSearchIndexAtPathForInstall(
+      await rebuildTranscriptSearchIndexAtPathForMigration(
         stagingDbPath,
         rootOverride,
         indexOptions,
@@ -786,7 +786,7 @@ function completedMigrationResult(
   };
 }
 
-export async function migrateTranscriptSearchIndexForInstall(
+export async function migrateTranscriptSearchIndexForMigration(
   rootOverride = "",
   options: {
     runtimeQuiesced?: boolean;
@@ -845,7 +845,7 @@ export async function migrateTranscriptSearchIndexForInstall(
     };
   } else {
     const preparedMigration =
-      await prepareTranscriptSearchMigrationForInstall(rootOverride);
+      await prepareTranscriptSearchMigrationForMigration(rootOverride);
     if (
       !preparedMigration.prepared ||
       !("stagingTranscriptRoot" in preparedMigration)
@@ -867,7 +867,7 @@ export async function migrateTranscriptSearchIndexForInstall(
     enterTranscriptPublishGuard(rootOverride, transcriptBackupRoot);
     options.onPublishGuard?.();
     const synchronizedManifest =
-      await synchronizeSanitizedTranscriptArchiveTreeForInstall(
+      await synchronizeSanitizedTranscriptArchiveTreeForMigration(
         transcriptBackupRoot,
         prepared.stagingTranscriptRoot,
         prepared.transcriptManifest,
@@ -882,7 +882,7 @@ export async function migrateTranscriptSearchIndexForInstall(
       stagingTranscriptRoot: prepared.stagingTranscriptRoot,
       transcriptManifest: synchronizedManifest,
     };
-    await synchronizeTranscriptSearchIndexAtPathForInstall(
+    await synchronizeTranscriptSearchIndexAtPathForMigration(
       stagingDbPath,
       rootOverride,
       {
@@ -916,7 +916,9 @@ export async function migrateTranscriptSearchIndexForInstall(
   }
 }
 
-export function finalizeTranscriptSearchMigrationForInstall(rootOverride = "") {
+export function finalizeTranscriptSearchMigrationForMigration(
+  rootOverride = "",
+) {
   const dbPath = resolveTranscriptSearchDbPath(rootOverride);
   const backupDir = transcriptSearchMigrationBackupDir(dbPath);
   const transcriptBackupRoot = transcriptMigrationBackupRoot(rootOverride);
@@ -974,7 +976,9 @@ export function finalizeTranscriptSearchMigrationForInstall(rootOverride = "") {
   return { skipped: false, cleanupPending };
 }
 
-export function rollbackTranscriptSearchMigrationForInstall(rootOverride = "") {
+export function rollbackTranscriptSearchMigrationForMigration(
+  rootOverride = "",
+) {
   const dbPath = resolveTranscriptSearchDbPath(rootOverride);
   const backupDir = transcriptSearchMigrationBackupDir(dbPath);
   const transcriptBackupRoot = transcriptMigrationBackupRoot(rootOverride);

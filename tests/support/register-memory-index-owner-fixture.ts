@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import { register } from "node:module";
 
 const transcriptsTarget = "dist/core/memory/transcripts.js";

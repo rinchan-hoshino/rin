@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -81,31 +82,20 @@ test("daemon preserves command identity when a local command throws", async () =
   }
 });
 
-test("daemon shutdown stops hosted services before daemon extension wait", async () => {
+test("daemon shutdown has one hosted-service teardown owner", async () => {
   const daemonSource = await fs.readFile(
     path.join(rootDir, "src", "core", "rin-daemon", "daemon.ts"),
     "utf8",
   );
-  const hostedStop = daemonSource.indexOf("options.onShutdown?.()");
-  const daemonExtensionStop = daemonSource.indexOf(
-    "daemonExtensionManager.stop",
-  );
-  assert.ok(hostedStop >= 0, "hosted shutdown hook missing");
-  assert.ok(daemonExtensionStop >= 0, "daemon extension stop missing");
-  assert.ok(
-    hostedStop < daemonExtensionStop,
-    "chat/hosted shutdown must run before daemon extension wait",
-  );
+  assert.match(daemonSource, /options\.onShutdown\?\.\(\)/);
+  assert.doesNotMatch(daemonSource, /daemonExtensionManager/);
+
   const appSource = await fs.readFile(
     path.join(rootDir, "src", "app", "rin-daemon", "daemon.ts"),
     "utf8",
   );
   assert.match(appSource, /onShutdown: stopHostedServices/);
-  const hostedBody = new RegExp(
-    String.raw`const stopHostedServices = async \(\) => \{([\s\S]*?)\n {2}\};`,
-  ).exec(appSource)?.[1];
-  assert.ok(hostedBody, "stopHostedServices missing");
-  assert.equal(hostedBody.includes("daemonExtensionManager"), false);
+  assert.doesNotMatch(appSource, /daemonExtensionManager/);
 });
 
 test("daemon bounds local teardown when a hosted shutdown hook never settles", async () => {

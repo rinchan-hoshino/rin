@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -11,23 +12,12 @@ const rootDir = path.resolve(
   "..",
   "..",
 );
-const adapters = Object.assign(
-  {},
-  await import(
-    pathToFileURL(
-      path.join(rootDir, "dist", "core", "chat-runtime", "discord.js"),
-    ).href
-  ),
-  await import(
-    pathToFileURL(
-      path.join(rootDir, "dist", "core", "chat-runtime", "slack.js"),
-    ).href
-  ),
-  await import(
-    pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "lark.js"))
-      .href
-  ),
+const adapters = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "chat", "platform", "discord.js"),
+  ).href
 );
+
 const messageStore = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "chat", "message-store.js"))
     .href
@@ -176,7 +166,7 @@ test("discord REST strategies and adapter cleanup own their dispatchers", async 
     path.join(os.tmpdir(), "rin-chat-discord-rest-cleanup-"),
   );
   try {
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       { register() {}, emit() {} },
       agentDir,
       {},
@@ -226,32 +216,6 @@ function discordInboundMessage(
   };
 }
 
-test("Slack and Lark adapters close their Rin-owned HTTP transports", async () => {
-  const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-chat-http-cleanup-"),
-  );
-  try {
-    for (const Adapter of [adapters.SlackAdapter, adapters.LarkAdapter]) {
-      const adapter = new Adapter(
-        { register() {}, emit() {} },
-        agentDir,
-        {},
-        { warn() {}, info() {}, error() {}, debug() {} },
-      );
-      let closed = 0;
-      const closeTransport = (adapter as any).httpTransport.close;
-      (adapter as any).httpTransport.close = async () => {
-        closed += 1;
-        await closeTransport();
-      };
-      await adapter.stop();
-      assert.equal(closed, 1);
-    }
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
 test("discord adapter catches up native history before buffered live messages", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-chat-discord-recovery-"),
@@ -269,12 +233,13 @@ test("discord adapter catches up native history before buffered live messages", 
         return true;
       },
     };
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       app,
       agentDir,
       {},
       { warn() {}, info() {}, error() {}, debug() {} },
     );
+    bot = adapter.bot;
     bot.selfId = "bot-discord";
     messageStore.saveChatMessage(agentDir, {
       role: "user",
@@ -342,12 +307,13 @@ test("discord adapter releases unrelated chats while one history fetch is still 
         return true;
       },
     };
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       app,
       agentDir,
       {},
       { warn() {}, info() {}, error() {}, debug() {} },
     );
+    bot = adapter.bot;
     bot.selfId = "bot-discord";
     messageStore.saveChatMessage(agentDir, {
       role: "user",
@@ -446,7 +412,7 @@ test("discord adapter retries partial history without blocking buffered live ing
   try {
     const seen: string[] = [];
     let bot: any = null;
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       {
         agentDir,
         register(_adapter: unknown, registeredBot: any) {
@@ -461,6 +427,7 @@ test("discord adapter retries partial history without blocking buffered live ing
       {},
       { warn() {}, info() {}, error() {}, debug() {} },
     );
+    bot = adapter.bot;
     bot.selfId = "bot-discord";
     messageStore.saveChatMessage(agentDir, {
       role: "user",
@@ -508,7 +475,7 @@ test("discord recovery requeues only the unhandled buffered suffix", async () =>
     path.join(os.tmpdir(), "rin-chat-discord-requeue-"),
   );
   try {
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       { register() {} },
       agentDir,
       {},
@@ -555,7 +522,7 @@ test("discord adapter syncs application commands through the Discord client", as
   );
   try {
     let bot: any = null;
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       {
         register(_adapter: unknown, registeredBot: any) {
           bot = registeredBot;
@@ -565,6 +532,7 @@ test("discord adapter syncs application commands through the Discord client", as
       { commandGuildIds: ["guild-1", " guild-2 "] },
       { warn() {}, info() {}, error() {}, debug() {} },
     );
+    bot = adapter.bot;
     assert.ok(bot);
     const calls: any[] = [];
     (adapter as any).client = {
@@ -602,7 +570,7 @@ test("discord adapter falls back to Discord REST for command sync", async () => 
   );
   try {
     let bot: any = null;
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       {
         register(_adapter: unknown, registeredBot: any) {
           bot = registeredBot;
@@ -612,7 +580,9 @@ test("discord adapter falls back to Discord REST for command sync", async () => 
       {},
       { warn() {}, info() {}, error() {}, debug() {} },
     );
+    bot = adapter.bot;
     assert.ok(bot);
+    bot = adapter.bot;
     bot.selfId = "bot-discord";
     const calls: any[] = [];
     (adapter as any).client = {
@@ -647,16 +617,14 @@ test("discord adapter treats command sync before ready as a no-op", async () => 
   );
   try {
     let bot: any = null;
-    new adapters.DiscordAdapter(
-      {
-        register(_adapter: unknown, registeredBot: any) {
-          bot = registeredBot;
-        },
-      },
+    const adapter = new adapters.DiscordPlatform(
+      {},
       agentDir,
       {},
       { warn() {}, info() {}, error() {}, debug() {} },
     );
+    bot = adapter.bot;
+    bot = adapter.bot;
     assert.ok(bot);
 
     assert.equal(
@@ -676,7 +644,7 @@ test("discord adapter maps chat input interactions to Rin slash messages", async
   );
   try {
     const emitted: any[] = [];
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       {
         register() {},
         emit(eventName: string, payload: any) {
@@ -756,7 +724,7 @@ test("discord adapter edits one quoted non-final message and deletes it only on 
   );
   try {
     let bot: any = null;
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       {
         register(_adapter: unknown, registeredBot: any) {
           bot = registeredBot;
@@ -766,6 +734,7 @@ test("discord adapter edits one quoted non-final message and deletes it only on 
       {},
       { warn() {}, info() {}, error() {}, debug() {} },
     );
+    bot = adapter.bot;
     assert.ok(bot);
 
     const sends: any[] = [];
@@ -875,7 +844,7 @@ test("discord adapter retries a transient progress edit instead of leaking a new
   );
   try {
     let bot: any = null;
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       {
         register(_adapter: unknown, registeredBot: any) {
           bot = registeredBot;
@@ -885,6 +854,7 @@ test("discord adapter retries a transient progress edit instead of leaking a new
       {},
       { warn() {}, info() {}, error() {}, debug() {} },
     );
+    bot = adapter.bot;
     assert.ok(bot);
 
     const sends: any[] = [];
@@ -959,7 +929,7 @@ test("discord adapter acknowledges chat input interactions with callback endpoin
     const emitted: any[] = [];
     const warnings: string[] = [];
     const events: string[] = [];
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       {
         register() {},
         emit(eventName: string, payload: any) {

@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -145,6 +146,131 @@ test("terminal reconciliation acknowledges only after the durable projection suc
     /ack_failed/,
   );
   assert.equal(disconnectCalls, 1);
+});
+
+test("terminal reconciliation loop deduplicates active and detached projections", async () => {
+  const requests: any[] = [];
+  const warnings: string[] = [];
+  const infos: string[] = [];
+  const disposed: string[] = [];
+  const terminals = ["active", "detached", "failed"].map((kind) => ({
+    requestTag: `chat-inbox-${kind}`,
+    chatDeliveryContext: { chatKey: `discord/1:${kind}` },
+    terminalRecord: { terminalId: `terminal-${kind}` },
+  }));
+  const client = {
+    isConnected: () => true,
+    connect: async () => {},
+    async request(command: any) {
+      requests.push(command);
+      return command.type === "list_unacknowledged_chat_terminals"
+        ? { terminals }
+        : {};
+    },
+    disconnect: async () => {},
+  };
+  const controllers = new Map([
+    [
+      "discord/1:active",
+      {
+        ownsAuthoritativeTerminalProjection: () => true,
+        driver: { projectAuthoritativeTerminal: async () => {} },
+      },
+    ],
+  ]);
+  const detachedControllers = new Map<string, any>();
+  const detachedControllerSignatures = new Map<string, string>();
+  const loop = reconciler.createChatTerminalReconciliationLoop({
+    client,
+    isStopping: () => false,
+    controllers,
+    detachedControllers,
+    detachedControllerSignatures,
+    getDetachedController(controllerKey: string) {
+      const failed = controllerKey.endsWith("failed");
+      const controller = {
+        async connect() {},
+        driver: {
+          async projectAuthoritativeTerminal() {
+            if (failed) throw new Error("owner projection failed");
+          },
+        },
+        dispose() {
+          disposed.push(controllerKey);
+        },
+      };
+      detachedControllers.set(controllerKey, controller);
+      detachedControllerSignatures.set(controllerKey, controllerKey);
+      return controller;
+    },
+    logger: {
+      info(message: string) {
+        infos.push(message);
+      },
+      warn(message: string) {
+        warnings.push(message);
+      },
+    },
+  });
+
+  await loop.request();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(
+    requests.filter((row) => row.type === "ack_turn_terminal").length,
+    2,
+  );
+  assert.equal(disposed.length, 2);
+  assert.equal(detachedControllers.size, 0);
+  assert.equal(detachedControllerSignatures.size, 0);
+  assert.equal(
+    infos.some((message) => message.includes("projections=3")),
+    true,
+  );
+  assert.equal(
+    warnings.some((message) => message.includes("owner projection failed")),
+    true,
+  );
+
+  const stopped = reconciler.createChatTerminalReconciliationLoop({
+    client,
+    isStopping: () => true,
+    controllers: new Map(),
+    detachedControllers: new Map(),
+    detachedControllerSignatures: new Map(),
+    getDetachedController() {
+      throw new Error("unexpected detached controller");
+    },
+    logger: { info() {}, warn() {} },
+  });
+  assert.equal(stopped.request(), null);
+
+  const listingWarnings: string[] = [];
+  const failing = reconciler.createChatTerminalReconciliationLoop({
+    client: {
+      ...client,
+      async request() {
+        throw new Error("owner listing failed");
+      },
+    },
+    isStopping: () => false,
+    controllers: new Map(),
+    detachedControllers: new Map(),
+    detachedControllerSignatures: new Map(),
+    getDetachedController() {
+      throw new Error("unexpected detached controller");
+    },
+    logger: {
+      info() {},
+      warn(message: string) {
+        listingWarnings.push(message);
+      },
+    },
+  });
+  await failing.request();
+  assert.equal(
+    listingWarnings.some((message) => message.includes("owner listing failed")),
+    true,
+  );
 });
 
 test("terminal reconciler disconnects a failed global ledger client", async () => {

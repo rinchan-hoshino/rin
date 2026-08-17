@@ -1,14 +1,10 @@
+import "./require-test-sandbox.ts";
 import { register } from "node:module";
 
-const targets = [
-  "dist/core/chat-runtime/telegram.js",
-  "dist/core/chat-runtime/onebot.js",
-];
+const targets = ["dist/core/chat/platform/telegram.js"];
 const ownerExports: Record<string, string> = {
-  "dist/core/chat-runtime/telegram.js":
+  "dist/core/chat/platform/telegram.js":
     "export { renderTelegramHtmlFromNodes as __rinOwnerRenderTelegramHtmlFromNodes, isTelegramMediaNodeType as __rinOwnerIsTelegramMediaNodeType, telegramMediaMethod as __rinOwnerTelegramMediaMethod, decodeTelegramThreadId as __rinOwnerDecodeTelegramThreadId, splitTelegramChatThread as __rinOwnerSplitTelegramChatThread, telegramThreadPayload as __rinOwnerTelegramThreadPayload, isTelegramPhotoDimensionError as __rinOwnerIsTelegramPhotoDimensionError, isTelegramProviderRejection as __rinOwnerIsTelegramProviderRejection };",
-  "dist/core/chat-runtime/onebot.js":
-    "export { oneBotNodesContainMedia as __rinOwnerOneBotNodesContainMedia };",
 };
 const sources: Record<string, string> = {
   grammy: `
@@ -41,36 +37,6 @@ const sources: Record<string, string> = {
   undici: `
     export class Agent {
       constructor(options) { this.options = options; globalThis.__chatRuntimeIndexOwner.agents.push(this); }
-    }
-  `,
-  ws: `
-    import { EventEmitter } from "node:events";
-    export default class OwnerWebSocket extends EventEmitter {
-      static OPEN = 1;
-      constructor(url, options) {
-        super();
-        this.url = url;
-        this.options = options;
-        this.readyState = OwnerWebSocket.OPEN;
-        globalThis.__chatRuntimeIndexOwner.webSockets.push(this);
-        globalThis.__chatRuntimeIndexOwner.events.push(["ws-construct", url, options]);
-        queueMicrotask(() => {
-          const error = globalThis.__chatRuntimeIndexOwner.wsOpenError;
-          if (error) this.emit("error", error);
-          else this.emit("open");
-        });
-      }
-      send(text, callback) {
-        const payload = JSON.parse(text);
-        globalThis.__chatRuntimeIndexOwner.events.push(["ws-send", payload]);
-        const error = globalThis.__chatRuntimeIndexOwner.wsSendError;
-        callback?.(error);
-        if (!error && globalThis.__chatRuntimeIndexOwner.wsAutoReply !== false) {
-          const response = globalThis.__chatRuntimeIndexOwner.wsReply?.(payload) ?? { echo: payload.echo, status: "ok", retcode: 0, data: { message_id: "owner-message", user_id: 7 } };
-          queueMicrotask(() => this.emit("message", Buffer.from(JSON.stringify(response))));
-        }
-      }
-      close() { this.readyState = 3; queueMicrotask(() => this.emit("close")); }
     }
   `,
 };

@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";

@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fsSync from "node:fs";
@@ -166,7 +167,7 @@ test("runtime node and launcher contracts select managed executables on Unix and
       /start ""/,
     );
 
-    const targets = fsUtils.launcherTargetsForInstallDir(root);
+    const targets = fsUtils.launcherTargetsForMigrationDir(root);
     assert.match(targets.rin[0], /dist[\\/]app[\\/]rin[\\/]main\.js/);
     assert.match(targets.rinInstall[0], /rin-install/);
     assert.equal(

@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import { strict as assert } from "node:assert";
 import crypto from "node:crypto";
 import fs from "node:fs";

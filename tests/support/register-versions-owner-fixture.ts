@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import fs from "node:fs";
 import { register } from "node:module";
 import path from "node:path";

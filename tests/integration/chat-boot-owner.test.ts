@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -238,17 +239,29 @@ test("chat boot validates command payload boundaries and adapter sync failures",
   await boot.syncDiscordCommands({ bots: null }, { warn() {} });
 });
 
-test("chat boot normalizes timeout configuration for text and OneBot media", () => {
+test("chat boot normalizes timeout configuration and platform media bounds", () => {
   const item = {
     payload: {
       createdAt: new Date().toISOString(),
-      chatKey: "onebot/bot:chat",
+      chatKey: "example/bot:chat",
       parts: [{ type: "IMAGE" as const, path: "/tmp/image.png" }],
     },
   };
   assert.equal(
-    boot.getChatOutboxSendTimeoutMs(item as any),
-    boot.DEFAULT_ONEBOT_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS,
+    boot.getChatOutboxSendTimeoutMs(
+      item as any,
+      {},
+      {
+        bots: [
+          {
+            platform: "example",
+            selfId: "bot",
+            outboxMediaSendTimeoutMs: 600_000,
+          },
+        ],
+      },
+    ),
+    600_000,
   );
   assert.equal(
     boot.getChatOutboxSendTimeoutMs(undefined, { sendTimeoutMs: 1.9 }),
@@ -414,6 +427,7 @@ test("chat boot settles late dispatched success and failure", async () => {
             {
               platform: "telegram",
               selfId: "bot",
+              outboxUsesDispatchSignal: true,
               sendMessage() {
                 const delivery: any = new Promise<string[]>(
                   (resolve, reject) => {
@@ -479,6 +493,7 @@ test("chat boot handles direct-dispatch success, timeout, and ambiguous failure"
             {
               platform: "custom",
               selfId: "bot",
+              outboxUsesDispatchSignal: false,
               sendMessage() {
                 if (outcome === "success") return ["direct-message"];
                 if (outcome === "failure") {

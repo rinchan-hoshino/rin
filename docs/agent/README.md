@@ -6,7 +6,7 @@ This directory is the source for Rin-installed agent guidance. It is installed a
 
 Use these docs as the Rin-specific layer above upstream Pi docs.
 
-- For Rin runtime behavior, launcher layout, daemon behavior, memory, scheduled tasks, chat bridge behavior, extension adapters, and other Rin-owned features, read Rin docs first.
+- For Rin runtime behavior, launcher layout, daemon behavior, memory, scheduled tasks, Chat behavior, optional platform extensions, and other Rin-owned features, read Rin docs first.
 - Use upstream Pi docs as the base reference for topics not covered by Rin.
 - When Rin docs and Pi docs conflict on Rin behavior, Rin docs take precedence.
 
@@ -27,7 +27,7 @@ Use these docs as the Rin-specific layer above upstream Pi docs.
 - `docs/non-interactive-cli.md`: spawning isolated delegated child runs with managed sessions.
 - `docs/runtime-layout.md`: stable paths, launcher ownership, app releases, and paths safe for agents to reference.
 - `docs/capabilities.md`: compact behavior and conventions for Rin agent-facing features.
-- `docs/extensions.md`: Pi extension loading plus Rin frontend/backend adapters and core capability boundaries.
+- `docs/extensions.md`: Pi extension loading, optional Chat platform contributions, and core capability boundaries.
 - `docs/memory-layering.md`: choosing between memory evidence/retrieval and distilled self-improve guidance.
 - `docs/self-improve-distillation.md`: prompt-engineering contract for self-improve distillation passes.
 - `docs/initialization.md`: initialization flow for durable user and assistant preferences.

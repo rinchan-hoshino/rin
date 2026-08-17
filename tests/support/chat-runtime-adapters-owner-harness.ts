@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -60,16 +61,6 @@ export function resetOwner() {
   owner.discordGuildById = {};
   owner.discordLoginError = undefined;
   owner.discordDestroyError = undefined;
-  owner.slackWeb = undefined;
-  owner.slackSocket = undefined;
-  owner.larkClient = undefined;
-  owner.larkWs = undefined;
-  owner.larkDispatcher = undefined;
-  owner.webSockets = [];
-  owner.wsOpenError = undefined;
-  owner.wsSendError = undefined;
-  owner.wsAutoReply = true;
-  owner.wsReply = undefined;
 }
 
 export async function withTempDir(run: (directory: string) => Promise<void>) {

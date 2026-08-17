@@ -840,7 +840,7 @@ f803ef5 fix(release): keep nightly metadata commits hook-independent
 
 - Chat and daemon sessions reuse workers more safely across reconnects, session switches, and restored turns, so frontends are less likely to attach to stale or duplicate session state.
 - Chat bridge delivery is more reliable for reply-bound steering and control messages: visible processing replies can be retargeted, restored provider errors are completed cleanly, and cross-user `rin` commands keep the right install metadata.
-- OneBot/NapCat media sending now stages local media through Rin's chat-media area and reports clearer Docker mount guidance when NapCat cannot read a file.
+- OneBot media sending now stages local media through Rin's chat-media area and reports clearer mount guidance when the protocol server cannot read a file.
 - GitHub-backed beta, nightly, and git updates now prefer codeload archives, and release executors can run candidate metadata/bootstrap scripts without relying on preinstalled local dependencies.
 
 ## 0.3.0

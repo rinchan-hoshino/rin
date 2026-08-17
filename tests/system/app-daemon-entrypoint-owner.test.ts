@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
@@ -17,7 +18,13 @@ const registerFixture = path.resolve(
 
 async function runDaemon(
   root: string,
-  mode: "success" | "daemon-fail" | "lock-fail" | "services-fail",
+  mode:
+    | "success"
+    | "daemon-fail"
+    | "lock-fail"
+    | "services-fail"
+    | "shutdown"
+    | "shutdown-fail",
   socketPath = "",
 ) {
   const sandbox = await createTestSandbox(root);
@@ -70,31 +77,32 @@ test("app daemon assembles hosted services and failure cleanup", async () => {
       data: { routed: { owner: true } },
     });
     assert.equal(summary.unknown, null);
-    assert.deepEqual(summary.extensionApi, { ownerExtensionApi: true });
     const daemonStart = summary.events.find(
       (event: unknown[]) => event[0] === "daemon-start",
     );
     assert.ok(daemonStart);
     assert.match(daemonStart[2], /\/rin-daemon\/worker\.js$/);
     assert.match(daemonStart[3], /\/rin-daemon\/self-improve-worker\.js$/);
-    const chatApiIndex = summary.events.findIndex(
-      (event: unknown[]) => event[0] === "manager-chat-api",
-    );
-    const managerStartIndex = summary.events.findIndex(
-      (event: unknown[]) => event[0] === "manager-start",
-    );
-    assert.ok(chatApiIndex >= 0);
-    assert.ok(managerStartIndex > chatApiIndex);
-    assert.deepEqual(summary.events[managerStartIndex], [
-      "manager-start",
-      true,
-    ]);
     assert.match(success.stderr, /owner cgroup warning/);
 
     const defaultSocket = await runDaemon(root, "success");
     assert.equal(
       JSON.parse(defaultSocket.stdout.trim().split("\n").at(-1)!).socketPath,
       "/owner/default-daemon.sock",
+    );
+
+    const shutdown = await runDaemon(root, "shutdown");
+    assert.match(shutdown.stdout, /"process-exit",0/);
+    await assert.rejects(
+      () => runDaemon(root, "shutdown-fail"),
+      (error: any) => {
+        assert.match(String(error?.stdout || ""), /"process-exit",1/);
+        assert.match(
+          String(error?.stderr || ""),
+          /formatted:owner shutdown failed/,
+        );
+        return true;
+      },
     );
 
     for (const [mode, message] of [

@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import { register } from "node:module";
 
 const target = "dist/core/rin-install/finalize.js";
@@ -37,7 +38,7 @@ const sources: Record<string, string> = {
     export function installedReleaseRoot(dir, name) { return path.join(dir, "app/releases", name); }
   `,
   "dist/core/rin-install/persist.js": `
-    export function normalizeInstalledChatSettings(options) { globalThis.__rinFinalizeEvents.push(["normalize", options]); return { mode: "normalized", options }; }
+    export function normalizeInstalledSettings(options) { globalThis.__rinFinalizeEvents.push(["normalize", options]); return { mode: "normalized", options }; }
     export function preflightInstallUpgradeMigrations(options, deps) { globalThis.__rinFinalizeEvents.push(["preflight-migrations", options, deps]); }
     export function finalizeInstallUpgradeMigrations(options, deps) { globalThis.__rinFinalizeEvents.push(["finalize-migrations", options, deps]); }
     export function rollbackInstallUpgradeMigrations(options, deps) { globalThis.__rinFinalizeEvents.push(["rollback-migrations", options, deps]); }

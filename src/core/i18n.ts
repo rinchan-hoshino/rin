@@ -5,7 +5,7 @@ type ChatCommandDescriptions = Record<
   string
 >;
 
-type ChatRuntimeCopy = {
+type ChatCopy = {
   telegramWorking: {
     workingInitial: string;
     workingSuffix: string;
@@ -18,7 +18,7 @@ type ChatRuntimeCopy = {
 
 type InstallerDisplayCopy = {
   chatCommandDescriptions: ChatCommandDescriptions;
-  chatRuntime: ChatRuntimeCopy;
+  chat: ChatCopy;
   installerCancelled: string;
   introTitle: string;
   safetyBoundaryTitle: string;
@@ -225,7 +225,7 @@ const INSTALLER_DISPLAY_COPY: InstallerDisplayCopy = {
     reload: "Reload extensions, prompts, skills, and themes",
     status: "Show this chat session status",
   },
-  chatRuntime: {
+  chat: {
     telegramWorking: {
       workingInitial: "Working...",
       workingSuffix: "Working",
@@ -574,12 +574,10 @@ export function createRinI18n() {
     chatCommandDescriptions: {
       ...INSTALLER_DISPLAY_COPY.chatCommandDescriptions,
     },
-    chatRuntime: {
+    chat: {
       telegramWorking: {
-        ...INSTALLER_DISPLAY_COPY.chatRuntime.telegramWorking,
-        prompts: [
-          ...INSTALLER_DISPLAY_COPY.chatRuntime.telegramWorking.prompts,
-        ],
+        ...INSTALLER_DISPLAY_COPY.chat.telegramWorking,
+        prompts: [...INSTALLER_DISPLAY_COPY.chat.telegramWorking.prompts],
       },
     },
     installSafetyBoundaryLines: [

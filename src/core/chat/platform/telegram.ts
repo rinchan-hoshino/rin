@@ -5,11 +5,11 @@ import {
   createRinHttpTransport,
   discardRinHttpResponseBody,
   type RinHttpTransport,
-} from "../http/transport.js";
+} from "../../http/transport.js";
 import {
   renderChatNodesTelegramHtml,
   type RenderChatNodesOptions,
-} from "../chat/rich-text.js";
+} from "../rich-text.js";
 import {
   compactObject,
   confirmedChatDeliveryError,
@@ -36,7 +36,6 @@ import {
   EditableTextMessageGroup,
   type EditableTextMessageIndicatorTickInput,
 } from "./editable-text-message-group.js";
-import type { ChatRuntimeApp } from "./app.js";
 
 function renderTelegramHtmlFromNodes(
   nodes: any[],
@@ -155,8 +154,20 @@ function translateAbortSignal(signal: any) {
   return controller.signal;
 }
 
-export class TelegramAdapter {
-  private readonly app: ChatRuntimeApp;
+function isPresentTelegramMember(member: any, expectedUserId: string) {
+  const status = safeString(member?.status).trim().toLowerCase();
+  return (
+    !["left", "kicked"].includes(status) &&
+    safeString(member?.user?.id).trim() === expectedUserId
+  );
+}
+
+type TelegramChat = {
+  emit(event: string, ...args: unknown[]): boolean;
+};
+
+export class TelegramPlatform {
+  private readonly app: TelegramChat;
   private readonly config: Record<string, any>;
   private readonly logger: any;
   private readonly cacheDir: string;
@@ -179,14 +190,14 @@ export class TelegramAdapter {
   readonly bot: any;
 
   constructor(
-    app: ChatRuntimeApp,
+    app: TelegramChat,
     dataDir: string,
     config: Record<string, any>,
     logger: any,
   ) {
     this.app = app;
     this.config = config;
-    this.logger = createPrefixedLogger("chat-runtime:telegram", logger);
+    this.logger = createPrefixedLogger("chat:telegram", logger);
     this.cacheDir = path.join(dataDir, "chat", "runtime-cache", "telegram");
     this.botCacheKey =
       safeString(config?.token)
@@ -227,6 +238,43 @@ export class TelegramAdapter {
       platform: "telegram",
       selfId: "",
       status: 0,
+      outboxUsesDispatchSignal: true,
+      getCompleteMemberProof: async ({ chatId, botId, senderId }: any) => {
+        const memberCount = Number(
+          await this.callApi("getChatMemberCount", { chat_id: chatId }),
+        );
+        if (!Number.isSafeInteger(memberCount) || memberCount < 1) {
+          return { complete: false };
+        }
+        const botMember = await this.callApi("getChatMember", {
+          chat_id: chatId,
+          user_id: botId,
+        });
+        if (!isPresentTelegramMember(botMember, botId)) {
+          return { complete: false };
+        }
+        if (memberCount === 1) {
+          return { complete: true, nonAgentUserIds: [] };
+        }
+        if (memberCount !== 2 || !senderId || senderId === botId) {
+          return { complete: true, privateLike: false };
+        }
+        const senderMember = await this.callApi("getChatMember", {
+          chat_id: chatId,
+          user_id: senderId,
+        });
+        return isPresentTelegramMember(senderMember, senderId)
+          ? { complete: true, nonAgentUserIds: [senderId] }
+          : { complete: false };
+      },
+      isChatMember: async (chatId: string, userId: string) =>
+        isPresentTelegramMember(
+          await this.callApi("getChatMember", {
+            chat_id: chatId,
+            user_id: userId,
+          }),
+          userId,
+        ),
       username: "",
       name: "",
       user: {},
@@ -275,7 +323,6 @@ export class TelegramAdapter {
           user_id: userId,
         }),
     };
-    this.app.register(this, this.bot);
   }
 
   setWorkingText(text: string) {

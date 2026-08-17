@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -97,7 +98,7 @@ test("working indicator policy normalizes capabilities and honors explicit prior
 test("working indicator heartbeat policy applies platform cadence without hidden clocks", () => {
   assert.equal(policy.workingIndicatorPollIntervalMs("telegram"), 4_000);
   assert.equal(policy.workingIndicatorPollIntervalMs("discord"), 9_000);
-  assert.equal(policy.workingIndicatorPollIntervalMs("slack"), 30_000);
+  assert.equal(policy.workingIndicatorPollIntervalMs("external"), 30_000);
   assert.equal(policy.isWorkingIndicatorPollDue("discord", 0, 1), true);
   assert.equal(
     policy.isWorkingIndicatorPollDue("discord", 1_000, 9_999),

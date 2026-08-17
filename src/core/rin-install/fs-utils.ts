@@ -198,7 +198,7 @@ function shellCommandEnv(extraEnv: Record<string, string>) {
   );
 }
 
-export function launcherTargetsForInstallDir(installDir: string) {
+export function launcherTargetsForMigrationDir(installDir: string) {
   return {
     rin: installedAppEntryCandidates(installDir, "rin"),
     rinInstall: installedAppEntryCandidates(installDir, "rin-install"),
@@ -370,7 +370,7 @@ export function writeLaunchersForUser(
 ) {
   const home = homeForUser(userName);
   const platform = options.platform || process.platform;
-  const targets = launcherTargetsForInstallDir(installDir);
+  const targets = launcherTargetsForMigrationDir(installDir);
   const nodeCommandArgs = installedRuntimeNodeCommandArgs({
     installDir,
     platform,

@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -142,11 +143,6 @@ test("Chat daemon integration owns delivery and every chat RPC command", async (
     );
     assert.deepEqual(calls[6], ["send", {}]);
     assert.deepEqual(calls.at(-1), ["evalBridge", {}]);
-    assert.equal(typeof integration.extensionApi.listKeys, "function");
-    assert.equal(
-      typeof integration.extensionApi.getSessionBindings,
-      "function",
-    );
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

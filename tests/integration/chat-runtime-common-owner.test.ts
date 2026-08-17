@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -7,8 +8,8 @@ import test from "node:test";
 import { importBuiltModule } from "../support/import-built-module.js";
 
 const common = await importBuiltModule<
-  typeof import("../../src/core/chat-runtime/common.js")
->("dist/core/chat-runtime/common.js");
+  typeof import("../../src/core/chat/platform/common.js")
+>("dist/core/chat/platform/common.js");
 
 test("rich delivery fallback preserves heterogeneous source nodes", () => {
   assert.equal(
@@ -55,7 +56,7 @@ async function withTempDir(run: (directory: string) => Promise<void>) {
 
 test("chat runtime working copy and editable sections preserve explicit ownership", async () => {
   await withTempDir(async () => {
-    assert.deepEqual(common.resolveChatRuntimeWorkingCopy(), {
+    assert.deepEqual(common.resolveChatWorkingCopy(), {
       workingText: "Working...",
       progressTexts: ["Working...", "Working", "Working.", "Working.."],
     });

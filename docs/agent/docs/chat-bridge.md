@@ -8,7 +8,7 @@ The model-level chat bridge tool surface is unavailable. The operative surfaces 
 
 Target surface:
 
-- built-in direct chat runtime adapters;
+- Chat and its platform implementations;
 - chat/frontend bindings;
 - Agent SDK `rin.chat.*` helpers;
 - local message store;
@@ -58,21 +58,15 @@ Classify the task before acting:
 6. **Identity/trust:** platform `userId`, nickname, trust records, and quote rich nodes.
 7. **Adapter liveness:** login state, WebSocket/API connection, platform-specific probe.
 
-## Built-in direct runtime adapters
+## Chat platform implementations
 
-Rin's built-in direct chat runtime supports these adapter families:
+Rin core provides Telegram and Discord as platform implementations owned by Chat. OneBot and Feishu / Lark are ordinary Pi extensions from the private `rin-extensions` package; install that package through Pi's native package system before configuring either platform.
 
-- Telegram
-- OneBot
-- Feishu / Lark
-- Discord
-- Slack
+Platform lifecycle failures are isolated. If one configured platform cannot initialize or connect, its status is `degraded`; other platforms continue starting and the core daemon remains available. If the whole Chat service cannot start, daemon status reports Chat as degraded and Chat commands fail explicitly without taking down TUI, scheduler, workers, or daemon RPC.
 
-Adapter lifecycle failures are isolated. If one configured adapter cannot initialize or connect, its status is `degraded`; other adapters continue starting and the core daemon remains available. If the whole hosted Chat service cannot start, daemon status reports Chat as degraded and Chat commands fail explicitly without taking down TUI, scheduler, workers, or daemon RPC.
+Chat configuration is agent-owned: edit `settings.json -> chat` directly, validate the JSON, then restart the target daemon so Chat reloads platform entries. The installer does not inspect or modify Chat configuration.
 
-Chat bridge configuration is agent-owned: edit `settings.json -> chat` directly, validate the JSON, then restart the target daemon so the hosted chat runtime reloads adapter entries. Do not rely on installer or TUI interactive adapter setup; those flows are intentionally absent.
-
-Minimal built-in adapter examples:
+Minimal platform configuration examples:
 
 ```json
 {
@@ -89,13 +83,12 @@ Minimal built-in adapter examples:
       "token": ""
     },
     "lark": { "platform": "feishu", "appId": "cli_xxx", "appSecret": "secret" },
-    "discord": { "token": "bot-token" },
-    "slack": { "protocol": "ws", "token": "xapp-...", "botToken": "xoxb-..." }
+    "discord": { "token": "bot-token" }
   }
 }
 ```
 
-Use only the adapter entries the owner requested. For multiple accounts of the same adapter, use an array of entries with `name` fields under that adapter key. After writing settings, restart with the target-aware launcher, for example `rin restart` or `rin -u <user> restart`, then verify with `rin status --json` and an adapter-specific send or stored-message check.
+Use only the platform entries the owner requested. For multiple accounts of the same platform, use an array of entries with `name` fields under that platform key. After writing settings, restart with the target-aware launcher, for example `rin restart` or `rin -u <user> restart`, then verify with `rin status --json` and a platform-specific send or stored-message check.
 
 ## Chat key and identity contract
 
@@ -119,7 +112,7 @@ lark/cli_xxx:oc_xxx
 Rules:
 
 - Every platform chat key uses the same bot-qualified shape: `platform/botId:chatId`.
-- `botId` is the stable account/bot identity for the adapter instance, such as Telegram bot id, OneBot selfId, Discord bot id, Lark appId, or Slack bot user id.
+- `botId` is the stable account/bot identity for the platform instance, such as Telegram bot id, OneBot selfId, Discord bot id, or Lark appId.
 - Do not introduce platform-specific unqualified forms such as `platform:chatId`; migrate stored files and settings to the single canonical shape instead.
 - Telegram private/group shape is inferred from `chatId`; negative ids are groups/channels.
 - OneBot private chats commonly use `private:<userId>`; group chats use the group id.
@@ -350,7 +343,7 @@ Lookup contract:
 5. Treat direct database access as read-only diagnosis. Runtime writes must use the owning chat APIs so transactions, generations, and fencing stay intact.
 6. An inbound quote node contains only the referenced message id. Resolve it with `rin.chat.messages.get({ chatKey, messageId })` only when the current request depends on that context; inspect the retrieved message's rich elements and follow its nested quote node only as far as needed.
 
-Install and update own every Chat authority migration. Before restarting the daemon, the installer stops the old runtime, rewrites legacy chat keys, creates or upgrades `chat.sqlite`, transactionally imports legacy message/inbox/outbox authority, imports legacy `state.json` session bindings, and archives old control directories under `data/chat/legacy-migrated-v1/`. Invalid or incomplete legacy data fails the install/update instead of starting a partially migrated runtime. Runtime database opens only validate the current schema and never import legacy authority or upgrade an old schema; an unmet migration therefore degrades Chat while the core daemon remains available. Migration retries serialize through SQLite, and a crash after import reimports any pre-archive legacy writes before completing the one-way archive.
+Chat startup owns every Chat database upgrade. Before platform startup, Chat opens `chat.sqlite` and runs its own migration when the schema is old or incomplete. That migration rewrites legacy chat keys, transactionally imports legacy message/inbox/outbox authority and `state.json` session bindings, and archives old control directories under `data/chat/legacy-migrated-v1/`. Invalid or incomplete legacy data degrades Chat instead of starting a partially migrated runtime. Migration retries serialize through SQLite, and a crash after import reimports any pre-archive legacy writes before completing the one-way archive. The installer does not inspect, normalize, or migrate Chat state.
 
 ## Troubleshooting contract
 
@@ -365,7 +358,7 @@ Common boundary checks:
 - **Message stored but turn idle:** inspect `turnPolicy`, trust/allow rules, inbox state, active turn state, and controller errors.
 - **Record-only chat idle:** confirm the scheduled task/background producer that reads stored messages.
 - **Slash command mismatch:** command acknowledgements are config/i18n output; verify the command path switched sessions for `/new`.
-- **OneBot/QQ after NapCat relogin:** separate platform login from Rin bridge connectivity; check Rin runtime status, WebSocket connection, and an adapter-level login probe.
+- **OneBot/QQ after platform relogin:** separate platform login from Rin bridge connectivity; check Rin runtime status, WebSocket connection, and an adapter-level login probe.
 - **Outbound text queued:** inspect the outbox quote part, platform error, and message-store accepted/processed state.
 - **Attachment missing:** verify the file exists, rich-object or structured `parts` attachment was sent, and the adapter produced a delivery result.
 - **Config change idle:** confirm the target daemon restarted and loaded the active `~/.rin/settings.json`, then verify the adapter entries and running app path.

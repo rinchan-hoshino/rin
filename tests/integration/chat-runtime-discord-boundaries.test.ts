@@ -1,5 +1,5 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
-import { EventEmitter } from "node:events";
 import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
@@ -11,20 +11,11 @@ import {
   withTempDir,
 } from "../support/chat-runtime-adapters-owner-harness.ts";
 
-const adapters = Object.assign(
-  {},
-  await import(
-    pathToFileURL(path.resolve("dist/core/chat-runtime/discord.js")).href
-  ),
-  await import(
-    pathToFileURL(path.resolve("dist/core/chat-runtime/slack.js")).href
-  ),
-  await import(
-    pathToFileURL(path.resolve("dist/core/chat-runtime/lark.js")).href
-  ),
+const adapters = await import(
+  pathToFileURL(path.resolve("dist/core/chat/platform/discord.js")).href
 );
 
-test("adapter private normalizers preserve defensive collection and media boundaries", () => {
+test("Discord private helpers preserve defensive collection and media boundaries", () => {
   const seam = adapters as any;
   assert.equal(seam.__rinOwnerCompareDiscordMessageIds("2", "10"), -1);
   assert.equal(seam.__rinOwnerCompareDiscordMessageIds("10", "2"), 1);
@@ -40,35 +31,8 @@ test("adapter private normalizers preserve defensive collection and media bounda
   assert.equal(seam.__rinOwnerIsOutboundMediaNodeType("image"), true);
   assert.equal(seam.__rinOwnerIsOutboundMediaNodeType("text"), false);
 
-  for (const [name, mime, expected] of [
-    ["a.opus", "", "opus"],
-    ["a", "audio/opus", "opus"],
-    ["a.mp4", "", "mp4"],
-    ["a.pdf", "", "pdf"],
-    ["a.docx", "", "doc"],
-    ["a.xlsx", "", "xls"],
-    ["a.pptx", "", "ppt"],
-    ["a.bin", "", "stream"],
-  ])
-    assert.equal(seam.__rinOwnerLarkFileType(name, mime), expected);
-  assert.equal(seam.__rinOwnerTruncateSlackPlainText(" short ", 10), "short");
-  assert.equal(seam.__rinOwnerTruncateSlackPlainText("owner text", 5), "owne…");
-
-  assert.deepEqual(seam.__rinOwnerTodoNodeItems(null), []);
-  assert.deepEqual(
-    seam.__rinOwnerTodoNodeItems({
-      attrs: { todos: [null, {}, { text: " owner ", done: 1 }] },
-    }),
-    [{ text: "owner", done: true }],
-  );
-  assert.equal(seam.__rinOwnerTodoNodeTitle(null), "Todo");
-  assert.equal(
-    seam.__rinOwnerTodoNodeTitle({ attrs: { title: " Owner " } }),
-    "Owner",
-  );
-
   const array = [1, 2];
-  assert.equal(seam.__rinOwnerCollectionValues(null).length, 0);
+  assert.deepEqual(seam.__rinOwnerCollectionValues(null), []);
   assert.equal(seam.__rinOwnerCollectionValues(array), array);
   assert.deepEqual(seam.__rinOwnerCollectionValues(new Map([["a", 1]])), [1]);
   assert.deepEqual(seam.__rinOwnerCollectionValues({ cache: [3] }), [3]);
@@ -107,7 +71,7 @@ test("adapter private normalizers preserve defensive collection and media bounda
   assert.equal(
     seam.__rinOwnerPermissionSetHasFlag(
       {
-        has: () => {
+        has() {
           throw new Error("owner");
         },
         bitfield: "invalid",
@@ -144,7 +108,7 @@ test("adapter private normalizers preserve defensive collection and media bounda
   assert.equal(
     seam.__rinOwnerFindDiscordChannelById(
       {
-        get: () => {
+        get() {
           throw new Error("owner");
         },
         values: () => [][Symbol.iterator](),
@@ -157,12 +121,12 @@ test("adapter private normalizers preserve defensive collection and media bounda
   assert.equal(seam.__rinOwnerResolveDiscordParentChannel({}), null);
 });
 
-test("discord and slack preserve fallback, authorization, and delivery error branches", async () => {
+test("Discord preserves fallback, authorization, and delivery error branches", async () => {
   resetOwner();
   await withTempDir(async (directory) => {
     const discordLog = logger();
     const discordApp = app();
-    const discord = new adapters.DiscordAdapter(
+    const discord = new adapters.DiscordPlatform(
       discordApp,
       directory,
       { token: "token with spaces", applicationCommandGuildIds: " g1, ,g2 " },
@@ -369,138 +333,15 @@ test("discord and slack preserve fallback, authorization, and delivery error bra
       content: "plain",
       reference: { messageId: "quoted" },
     });
-
-    const slackLog = logger();
-    const slackApp = app();
-    const slack = new adapters.SlackAdapter(
-      slackApp,
-      directory,
-      { token: "xapp", botToken: "xoxb" },
-      slackLog,
-    ) as any;
-    const slackCalls: any[] = [];
-    slack.web = {
-      chat: {
-        postMessage: async (payload: any) => {
-          slackCalls.push(["post", payload]);
-          return {
-            ts: payload.text === "no-id" ? "" : `s${slackCalls.length}`,
-          };
-        },
-        update: async () => ({}),
-        delete: async () => true,
-      },
-      reactions: { add: async () => true, remove: async () => true },
-      files: { uploadV2: async () => ({ file: { id: "file-one" } }) },
-      users: {
-        info: async () => {
-          throw new Error("user unavailable");
-        },
-      },
-    };
-    slack.bot.selfId = "B1";
-    await assert.rejects(
-      slack.deleteReaction("C", "1", "::"),
-      /emoji_required/,
-    );
-    assert.deepEqual(await slack.postText("C", "no-id"), []);
-    assert.equal(slack.buildTodoBlocks({ attrs: {} }), null);
-    const longItems = Array.from({ length: 11 }, (_, index) => ({
-      text: index === 0 ? "x".repeat(100) : `task ${index}`,
-      done: index % 2 === 0,
-    }));
-    const blocks = slack.buildTodoBlocks({
-      attrs: { todos: [null, { text: "" }, ...longItems] },
-    });
-    assert.equal(blocks.blocks.length, 3);
-    assert.equal(
-      blocks.blocks[1].elements[0].options[0].text.text.length <= 75,
-      true,
-    );
-    assert.deepEqual(
-      await slack.sendMedia("C", { type: "file", attrs: {} }),
-      [],
-    );
-    assert.deepEqual(
-      await slack.sendMedia(
-        "C",
-        { type: "file", attrs: { src: "https://owner/file" } },
-        "thread",
-      ),
-      ["s2"],
-    );
-    assert.deepEqual(
-      await slack.sendMedia("C", {
-        type: "file",
-        attrs: { data: Buffer.from("x"), name: "x.txt" },
-      }),
-      ["file-one"],
-    );
-
-    for (const envelope of [
-      {
-        type: "events_api",
-        body: { event: { type: "message", subtype: "edited", user: "U" } },
-      },
-      { type: "events_api", body: { event: { type: "message", user: "B1" } } },
-      { type: "events_api", body: { event: { type: "message" } } },
-    ]) {
-      await slack.handleSlackEvent(envelope);
-    }
-    const eventFetch = slack.httpTransport.fetch;
-    try {
-      slack.httpTransport.fetch = async () =>
-        new Response(Buffer.from("image"));
-      await slack.handleSlackEvent({
-        type: "events_api",
-        body: {
-          authorizations: [{ team_id: "T2" }],
-          event: {
-            type: "message",
-            subtype: "file_share",
-            user: "U2",
-            channel: "D1",
-            ts: "bad",
-            text: "",
-            thread_ts: "thread",
-            files: [{ url_private: "https://owner/image", name: "image.png" }],
-          },
-        },
-      });
-    } finally {
-      slack.httpTransport.fetch = eventFetch;
-    }
-    assert.equal(slackApp.records.at(-1)[1].isDirect, true);
-    assert.deepEqual(slackApp.records.at(-1)[1].elements[0], {
-      type: "quote",
-      attrs: { id: "thread" },
-      children: [],
-    });
-
-    slack.web.chat.postMessage = async () => {
-      throw new Error("post failed");
-    };
-    await assert.rejects(
-      slack.bot.sendMessage("C", [
-        { type: "text", attrs: { content: "owner" }, children: [] },
-      ]),
-      /post failed/,
-    );
-    assert.equal(
-      slackLog.records.some((entry: any[]) =>
-        /rich message segment failed/.test(entry.join(" ")),
-      ),
-      true,
-    );
   });
 });
 
-test("adapter platform permutations keep lifecycle, identity, and ingress fallbacks observable", async () => {
+test("Discord lifecycle, identity, and ingress fallbacks remain observable", async () => {
   resetOwner();
   await withTempDir(async (directory) => {
     const discordLog = logger();
     const discordApp = app(directory);
-    const discord = new adapters.DiscordAdapter(
+    const discord = new adapters.DiscordPlatform(
       discordApp,
       directory,
       { token: "discord" },
@@ -688,206 +529,5 @@ test("adapter platform permutations keep lifecycle, identity, and ingress fallba
       client.emit("error", "scalar error");
       await new Promise((resolve) => setImmediate(resolve));
     }
-
-    const slackApp = app();
-    const slackLog = logger();
-    const slack = new adapters.SlackAdapter(
-      slackApp,
-      directory,
-      { token: "xapp", botToken: "xoxb" },
-      slackLog,
-    ) as any;
-    const socket = new EventEmitter() as any;
-    socket.start = async () => {};
-    socket.disconnect = async () => {
-      throw new Error("disconnect failed");
-    };
-    owner.slackSocket = socket;
-    owner.slackWeb = {
-      auth: { test: async () => ({}) },
-      chat: {
-        postMessage: async () => ({ ts: "posted" }),
-        update: async () => ({}),
-        delete: async () => true,
-      },
-      reactions: { add: async () => true, remove: async () => true },
-      files: { uploadV2: async () => ({}) },
-      users: {
-        info: async () => ({ user: { profile: { display_name: "Display" } } }),
-      },
-    };
-    await slack.start();
-    assert.equal(slack.bot.selfId, "");
-    assert.equal(slack.bot.user.name, undefined);
-    socket.emit("connected");
-    socket.emit("disconnected");
-    socket.emit("error", "socket scalar");
-    socket.emit("slack_event", {
-      type: "events_api",
-      body: { event: { type: "message", user: "U", channel: "C" } },
-    });
-    await new Promise((resolve) => setImmediate(resolve));
-    await slack.stop();
-
-    slack.web = owner.slackWeb;
-    assert.equal(await slack.bot.internal.apiCall("method"), undefined);
-    assert.deepEqual(
-      slack.buildTodoBlocks({
-        attrs: { title: "", items: [{ text: "one", done: false }] },
-      }).text,
-      "Todo\n⬜ one",
-    );
-    assert.deepEqual(await slack.postTodo("C", { attrs: { items: [] } }), []);
-    slack.web.chat.postMessage = async () => ({});
-    assert.deepEqual(
-      await slack.postTodo("C", { attrs: { items: [{ text: "one" }] } }),
-      [],
-    );
-    assert.equal(
-      await slack.uploadFile("C", { data: Buffer.from("x"), name: "x" }),
-      "",
-    );
-
-    const larkLog = logger();
-    const larkApp = app();
-    const lark = new adapters.LarkAdapter(
-      larkApp,
-      directory,
-      { appId: "app", appSecret: "secret" },
-      larkLog,
-    ) as any;
-    lark.bot.selfId = "app";
-    lark.client = {
-      im: {
-        message: {
-          get: async () => ({ data: { items: [] } }),
-          create: async () => ({ code: 0 }),
-          reply: async () => ({ code: 0 }),
-        },
-        messageResource: { get: async () => null },
-        chat: { get: async () => null },
-        messageReaction: {
-          create: async () => true,
-          list: async () => ({}),
-          delete: async () => true,
-        },
-        image: { create: async () => ({ image_key: "key" }) },
-      },
-    };
-
-    assert.deepEqual(
-      lark.parseMessageContent('{"mentions":[{"key":"x"}]}').mentions,
-      [{ key: "x" }],
-    );
-    assert.equal(lark.parseMessageContent("{}").text, "{}");
-    assert.deepEqual(lark.parsePostContentNodes(null), []);
-    assert.equal(
-      lark.parseLarkMessageContentNodes("image", '{"key":"k"}')[0].attrs.src,
-      "k",
-    );
-    assert.equal(
-      lark.parseLarkMessageContentNodes("image", "raw")[0].attrs.src,
-      "raw",
-    );
-    assert.equal(
-      lark.parseLarkMessageContentNodes("file", '{"key":"k","name":"n"}')[0]
-        .attrs.name,
-      "n",
-    );
-    assert.equal(
-      lark.parseLarkMessageContentNodes("text", "@_owner", [
-        { key: "@_owner", open_id: "open" },
-      ])[0].attrs.id,
-      "open",
-    );
-    assert.deepEqual(lark.pickLarkMessageItems({ items: [2] }), [2]);
-    assert.equal(lark.larkForwardSenderName({ message_id: "m" }), "m");
-    assert.equal(lark.larkForwardSenderName({}), "unknown");
-    assert.equal(await lark.cacheLarkMessageResource("m", "k", "file"), null);
-    assert.deepEqual(
-      await lark.resolveLarkMessageResources("m", [
-        { type: "image", attrs: null },
-      ]),
-      [{ type: "image", attrs: null }],
-    );
-    assert.equal(await lark.bot.deleteReaction("chat", "m", "custom"), false);
-    assert.equal(
-      lark.renderOutboundText([
-        { type: "at", attrs: { id: "", name: "Owner" }, children: [] },
-      ]),
-      "Owner",
-    );
-    assert.deepEqual(await lark.sendData("chat", { msg_type: "text" }), []);
-
-    const postCases = [
-      "",
-      "[bad]()",
-      "<span>bad</span>",
-      '<at user_id="owner"></at>',
-      '<at user_id="owner">Owner</at>',
-      "```\ncode\n```",
-      "---",
-      "a\n\n\nb",
-      "- one\n\nplain",
-    ];
-    for (const value of postCases) lark.buildPostData(value);
-
-    for (const data of [
-      {},
-      { sender: { sender_type: "app" } },
-      { sender: { sender_type: "bot" } },
-      { sender: { sender_type: "user" } },
-      {
-        sender: { sender_id: { user_id: "user" } },
-        message: {
-          msg_type: "text",
-          chat_id: "group",
-          create_time: "bad",
-          content: '{"text":"hello"}',
-          mentions: [],
-        },
-      },
-      {
-        sender: { id: "id" },
-        message: {
-          message_type: "merge_forward",
-          message_id: "forward",
-          chat_id: "group",
-          parent_id: "parent",
-        },
-      },
-      {
-        sender: { sender_id: "string-user" },
-        message: {
-          message_type: "text",
-          chat_type: "p2p",
-          content: '{"text":""}',
-        },
-      },
-    ]) {
-      await lark.handleMessage(data);
-    }
-    assert.equal(larkApp.records.length, 3);
-
-    lark.client.im.message.create = async () => {
-      throw new Error("text failed");
-    };
-    await assert.rejects(
-      lark.bot.sendMessage("chat", [
-        { type: "text", attrs: { content: "owner" }, children: [] },
-      ]),
-      /text failed/,
-    );
-    lark.client.im.message.create = async () => ({
-      code: 0,
-      data: { message_id: "placeholder" },
-    });
-    assert.deepEqual(
-      await lark.bot.sendMessage("chat", [
-        { type: "image", attrs: {}, children: [] },
-        { type: "text", attrs: { content: "after" }, children: [] },
-      ]),
-      ["placeholder", "placeholder"],
-    );
   });
 });

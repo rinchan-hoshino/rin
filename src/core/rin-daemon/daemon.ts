@@ -30,14 +30,11 @@ import {
   applyRuntimeProfileEnvironment,
   resolveRuntimeProfile,
 } from "../rin-lib/profile.js";
-import { createDaemonChatAPI } from "../chat/extension-api.js";
-import type { RinDaemonChatAPI } from "../rin-extension-api.js";
 import {
   listBoundSessionPage,
   listBoundSessions,
   renameBoundSession,
 } from "../session/factory.js";
-import { createDaemonSessionAPI } from "../session/extension-api.js";
 import { CronScheduler } from "./cron.js";
 import {
   getCatalogOAuthState,
@@ -50,7 +47,6 @@ import {
   normalizeSessionRef as sessionSelectorFromCommand,
 } from "../session/ref.js";
 import { startQueuedMemoryWorkerSupervisor } from "../self-improve/async-jobs.js";
-import { RinDaemonExtensionManager } from "./extensions.js";
 import { acquireDaemonInstanceLock, type DaemonInstanceLock } from "./lock.js";
 import { ConnectionState, WorkerPool } from "./worker-pool.js";
 import {
@@ -103,10 +99,8 @@ export async function startDaemon(options: {
     | (() => Promise<Record<string, unknown> | undefined>)
     | (() => Record<string, unknown> | undefined);
   additionalCommandRouter?: RinRpcCommandRouter;
-  chatExtensionApi?: RinDaemonChatAPI;
   onShutdown?: () => Promise<void> | void;
   registerLocalFrontendConnector?: (connector: RpcSocketConnector) => void;
-  daemonExtensionManager?: RinDaemonExtensionManager;
   instanceLock?: DaemonInstanceLock;
   workerGcIdleMs?: number;
   workerSweepIntervalMs?: number;
@@ -167,27 +161,6 @@ export async function startDaemon(options: {
     runtime.agentDir,
     { workerPath: selfImproveWorkerPath },
   );
-
-  const daemonExtensionManager =
-    options.daemonExtensionManager ||
-    new RinDaemonExtensionManager({
-      cwd: runtime.cwd,
-      agentDir: runtime.agentDir,
-      logger: console,
-    });
-  daemonExtensionManager.setChatApi(
-    options.chatExtensionApi ||
-      createDaemonChatAPI({ agentDir: runtime.agentDir }),
-  );
-  daemonExtensionManager.setSessionApi(
-    createDaemonSessionAPI({
-      agentDir: runtime.agentDir,
-      getActivity: () => workerPool.getStatusSnapshot(),
-    }),
-  );
-  if (!options.daemonExtensionManager) {
-    await daemonExtensionManager.start();
-  }
 
   for (const candidate of [socketPath, bridgeSocketPath]) {
     if (isWindowsNamedPipePath(candidate)) continue;
@@ -785,7 +758,6 @@ export async function startDaemon(options: {
       ]);
     };
     await settleLocalTeardown(() => options.onShutdown?.());
-    await settleLocalTeardown(() => daemonExtensionManager.stop());
     closeDaemonTurnLedger(runtime.agentDir);
     for (const socket of Array.from(activeSockets)) {
       try {

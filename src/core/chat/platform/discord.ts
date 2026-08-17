@@ -5,13 +5,13 @@ import {
   deleteInboundRecoveryHead,
   InboundRecoveryGate,
   recoverInboundHeads,
-} from "./inbound-recovery.js";
-import { composeChatKeyForBot } from "../chat/support.js";
+} from "../inbound-recovery.js";
+import { composeChatKeyForBot } from "../support.js";
 import {
   createRinHttpTransport,
   discardRinHttpResponseBody,
   type RinHttpTransport,
-} from "../http/transport.js";
+} from "../../http/transport.js";
 import {
   compactObject,
   createPrefixedLogger,
@@ -27,7 +27,7 @@ import {
   readBinaryFromNode,
   renderMarkdownFromNodes,
   renderRichDeliveryFallback,
-  resolveChatRuntimeWorkingCopy,
+  resolveChatWorkingCopy,
   richFallbackDeliveryError,
   safeString,
   splitPlainText,
@@ -191,15 +191,26 @@ function formatDiscordChannelPathName(
   return parts.join(" / ");
 }
 
-export class DiscordAdapter {
-  private readonly app: any;
+function isPresentDiscordMember(member: any) {
+  return Boolean(member?.user || member?.id || member?.userId);
+}
+
+type DiscordChat = {
+  agentDir?: string;
+  emit(event: string, ...args: unknown[]): boolean;
+  beginInboundRecoveryChat?(chatKey: string): void;
+  completeInboundRecoveryChat?(chatKey: string): void;
+};
+
+export class DiscordPlatform {
+  private readonly app: DiscordChat;
   private readonly config: Record<string, any>;
   private readonly logger: any;
   private readonly cacheDir: string;
   private readonly editableWorking: EditableTextMessageGroup;
   private readonly inboundGate = new InboundRecoveryGate<any>();
   private readonly deletedChannelIds = new Set<string>();
-  private workingText = resolveChatRuntimeWorkingCopy().workingText;
+  private workingText = resolveChatWorkingCopy().workingText;
   private client: any = null;
   private restRequest: ReturnType<
     typeof createDiscordRestRequestStrategy
@@ -207,14 +218,14 @@ export class DiscordAdapter {
   readonly bot: any;
 
   constructor(
-    app: any,
+    app: DiscordChat,
     dataDir: string,
     config: Record<string, any>,
     logger: any,
   ) {
     this.app = app;
     this.config = config;
-    this.logger = createPrefixedLogger("chat-runtime:discord", logger);
+    this.logger = createPrefixedLogger("chat:discord", logger);
     this.cacheDir = path.join(dataDir, "chat", "runtime-cache", "discord");
     ensureDir(this.cacheDir);
     const internal: any = {
@@ -291,6 +302,8 @@ export class DiscordAdapter {
       platform: "discord",
       selfId: "",
       status: 0,
+      outboxMediaSendTimeoutMs: 180_000,
+      outboxUsesDispatchSignal: true,
       workingIndicators: [
         this.editableWorking.indicator(),
         createReactionWorkingIndicator(() => this.bot),
@@ -319,8 +332,9 @@ export class DiscordAdapter {
         }
         return member;
       },
+      isChatMember: async (chatId: string, userId: string) =>
+        isPresentDiscordMember(await this.bot.getGuildMember(chatId, userId)),
     };
-    this.app.register(this, this.bot);
   }
 
   private async fetchChannel(channelId: string) {
@@ -589,7 +603,7 @@ export class DiscordAdapter {
 
   setWorkingText(text: string) {
     this.workingText =
-      safeString(text).trim() || resolveChatRuntimeWorkingCopy().workingText;
+      safeString(text).trim() || resolveChatWorkingCopy().workingText;
     this.editableWorking.setWorkingText(this.workingText);
   }
 

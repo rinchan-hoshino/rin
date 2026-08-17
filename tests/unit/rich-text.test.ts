@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -10,8 +11,7 @@ const richText = await importBuiltModule<
 test("rich text chooses the platform markdown contract", () => {
   assert.equal(richText.chatMarkdownPolicyForPlatform(" Telegram "), "render");
   assert.equal(richText.chatMarkdownPolicyForPlatform("DISCORD"), "preserve");
-  assert.equal(richText.chatMarkdownPolicyForPlatform("slack"), "preserve");
-  assert.equal(richText.chatMarkdownPolicyForPlatform("onebot"), "strip");
+  assert.equal(richText.chatMarkdownPolicyForPlatform("example"), "strip");
 });
 
 test("rich text removes HTML and Markdown presentation without losing content", () => {

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "../support/require-test-sandbox.ts";
 import {
   isInnerContainerRun,
   runManualHarnessContainer,

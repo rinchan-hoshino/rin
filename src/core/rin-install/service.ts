@@ -153,7 +153,7 @@ function resolveDaemonLaunchContext(
   const targetHome = targetHomeForUser(targetUser);
   return {
     targetHome,
-    daemonEntry: resolveDaemonEntryForInstall(installDir),
+    daemonEntry: resolveDaemonEntryForMigration(installDir),
     runtimePath: installedRuntimePathValue(
       targetHome,
       installedRuntimeNodePathDirs({ installDir, platform }),
@@ -267,7 +267,7 @@ function runSystemdUserCommand(
   });
 }
 
-export function resolveDaemonEntryForInstall(installDir: string) {
+export function resolveDaemonEntryForMigration(installDir: string) {
   const candidates = installedAppEntryCandidates(installDir, "rin-daemon");
   const resolved = resolveInstalledAppEntryPath(
     installDir,

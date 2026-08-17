@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -16,8 +17,7 @@ const updater = await import(
     .href
 );
 const installerI18n = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "i18n.js"))
-    .href
+  pathToFileURL(path.join(rootDir, "dist", "core", "i18n.js")).href
 );
 
 test("updater private release readers preserve installed channel preferences", async () => {

@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -12,34 +13,25 @@ const todos = [
   { id: 2, text: "Completed task", done: true },
 ];
 
-test("todo presenter selects native and markdown surfaces from the chat platform", () => {
-  const native = presentation.presentTodoNotice(
-    "slack/bot:channel",
+test("todo presenter leaves platform rendering to Chat transports", () => {
+  const notice = presentation.presentTodoNotice(
+    "example/bot:channel",
     todos,
     "ignored",
   );
-  assert.equal(native.mode, "native");
-  assert.deepEqual(native.todos, todos);
-  assert.match(native.text, /First task/);
-  assert.match(native.text, /Completed task/);
-
-  const markdown = presentation.presentTodoNotice(
-    "discord/bot:channel",
-    todos,
-    "ignored",
-  );
-  assert.equal(markdown.mode, "markdown");
-  assert.match(markdown.text, /⬜ First task/);
-  assert.match(markdown.text, /✅ ~~Completed task~~/);
+  assert.equal(notice.mode, "markdown");
+  assert.deepEqual(notice.todos, todos);
+  assert.match(notice.text, /⬜ First task/);
+  assert.match(notice.text, /✅ ~~Completed task~~/);
 });
 
 test("todo presenter keeps empty snapshots empty and preserves text-only notices", () => {
   assert.deepEqual(
-    presentation.presentTodoNotice("telegram/bot:chat", [], "ignored"),
+    presentation.presentTodoNotice("example/bot:chat", [], "ignored"),
     { mode: "markdown", todos: [], text: "" },
   );
   assert.deepEqual(
-    presentation.presentTodoNotice("custom/bot:chat", undefined, "  status  "),
-    { mode: "characters", todos: undefined, text: "status" },
+    presentation.presentTodoNotice("example/bot:chat", undefined, "  status  "),
+    { mode: "markdown", todos: undefined, text: "status" },
   );
 });

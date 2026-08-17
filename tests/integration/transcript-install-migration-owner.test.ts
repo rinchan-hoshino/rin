@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
@@ -69,7 +70,7 @@ test("install sanitizer removes binary content and records confirmed interleavin
       `${JSON.stringify(archiveEntry())}\n${confirmedInterleavedLine()}\n${orphanedImageTail}\n${prefixedInterleavedRecord}\n${JSON.stringify(unicodeSeparatorEntry)}\n`,
     );
 
-    const manifest = await migration.sanitizeTranscriptArchiveTreeForInstall(
+    const manifest = await migration.sanitizeTranscriptArchiveTreeForMigration(
       source,
       target,
     );
@@ -115,7 +116,7 @@ test("install sanitizer aborts on unexplained corruption without changing source
     const before = await fs.readFile(file);
 
     await assert.rejects(
-      migration.sanitizeTranscriptArchiveTreeForInstall(source, target),
+      migration.sanitizeTranscriptArchiveTreeForMigration(source, target),
       /transcript_archive_install_unknown_corruption:session\.jsonl:2/,
     );
     assert.deepEqual(await fs.readFile(file), before);
@@ -142,7 +143,7 @@ test("install sanitizer quarantines exact unexplained source bytes", async () =>
       await fs.mkdir(source);
       await fs.writeFile(path.join(source, "session.jsonl"), `${rawLine}\n`);
       await assert.rejects(
-        migration.sanitizeTranscriptArchiveTreeForInstall(source, target),
+        migration.sanitizeTranscriptArchiveTreeForMigration(source, target),
         /transcript_archive_install_unknown_corruption:session\.jsonl:1/,
       );
       const quarantineFiles = await fs.readdir(`${target}.quarantine`);
@@ -178,10 +179,10 @@ test("install sanitizer quarantines exact unexplained source bytes", async () =>
 
 test("install sanitizer keeps searchable metadata without binary fields", () => {
   assert.equal(
-    migration.sanitizeTranscriptArchiveEntryForInstall({ text: "" }),
+    migration.sanitizeTranscriptArchiveEntryForMigration({ text: "" }),
     null,
   );
-  const sanitized = migration.sanitizeTranscriptArchiveEntryForInstall({
+  const sanitized = migration.sanitizeTranscriptArchiveEntryForMigration({
     ...archiveEntry(),
     content: [
       { type: "text", text: "searchable" },
@@ -219,7 +220,7 @@ test("install sanitizer keeps searchable metadata without binary fields", () => 
 test("install sanitizer validates roots and empty migrations", async () => {
   await withTempDir(async (root) => {
     const emptyTarget = path.join(root, "empty-target");
-    const empty = await migration.sanitizeTranscriptArchiveTreeForInstall(
+    const empty = await migration.sanitizeTranscriptArchiveTreeForMigration(
       path.join(root, "missing-source"),
       emptyTarget,
     );
@@ -229,7 +230,7 @@ test("install sanitizer validates roots and empty migrations", async () => {
     await fs.mkdir(nonEmptyTarget);
     await fs.writeFile(path.join(nonEmptyTarget, "owned"), "data");
     await assert.rejects(
-      migration.sanitizeTranscriptArchiveTreeForInstall(
+      migration.sanitizeTranscriptArchiveTreeForMigration(
         path.join(root, "missing-source"),
         nonEmptyTarget,
       ),
@@ -239,7 +240,7 @@ test("install sanitizer validates roots and empty migrations", async () => {
     const invalidSource = path.join(root, "source-file");
     await fs.writeFile(invalidSource, "not-a-directory");
     await assert.rejects(
-      migration.sanitizeTranscriptArchiveTreeForInstall(
+      migration.sanitizeTranscriptArchiveTreeForMigration(
         invalidSource,
         path.join(root, "invalid-source-target"),
       ),
@@ -263,12 +264,12 @@ test("install sanitizer incrementally refreshes changed archive files", async ()
       removed,
       `${JSON.stringify(archiveEntry({ id: "removed" }))}\n`,
     );
-    const initial = await migration.sanitizeTranscriptArchiveTreeForInstall(
+    const initial = await migration.sanitizeTranscriptArchiveTreeForMigration(
       source,
       target,
     );
     const unchanged =
-      await migration.synchronizeSanitizedTranscriptArchiveTreeForInstall(
+      await migration.synchronizeSanitizedTranscriptArchiveTreeForMigration(
         source,
         target,
         initial,
@@ -287,7 +288,7 @@ test("install sanitizer incrementally refreshes changed archive files", async ()
       `${JSON.stringify(archiveEntry({ id: "nested" }))}\n`,
     );
     const refreshed =
-      await migration.synchronizeSanitizedTranscriptArchiveTreeForInstall(
+      await migration.synchronizeSanitizedTranscriptArchiveTreeForMigration(
         source,
         target,
         initial,
@@ -306,7 +307,7 @@ test("install sanitizer incrementally refreshes changed archive files", async ()
     );
 
     await assert.rejects(
-      migration.synchronizeSanitizedTranscriptArchiveTreeForInstall(
+      migration.synchronizeSanitizedTranscriptArchiveTreeForMigration(
         source,
         target,
         { ...refreshed, version: 2 },

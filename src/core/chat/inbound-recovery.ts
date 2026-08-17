@@ -1,5 +1,5 @@
-import { openChatDatabase } from "../chat/database.js";
-import { composeChatKey } from "../chat/support.js";
+import { openChatDatabase } from "./database.js";
+import { composeChatKey } from "./support.js";
 import { safeString } from "../text-utils.js";
 
 export type InboundRecoveryHead = {

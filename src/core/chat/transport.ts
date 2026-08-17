@@ -129,26 +129,22 @@ export async function sendReaction(
   const nextEmoji = safeString(emoji).trim();
   const nextMessageId = safeString(messageId).trim();
   if (!nextEmoji || !nextMessageId) return false;
-  if (parsed.platform === "onebot" && isPrivateChat(parsed)) return false;
-
-  if (
-    parsed.platform !== "onebot" &&
-    typeof bot?.internal?.setMessageReaction === "function"
-  ) {
-    return await withPresentationTimeout(async () => {
-      await bot.internal.setMessageReaction({
-        chat_id: parsed.chatId,
-        message_id: Number(nextMessageId),
-        reaction: [{ type: "emoji", emoji: nextEmoji }],
-      });
-      return true;
-    }, false);
-  }
 
   const createReaction = pickCreateReaction(bot);
-  if (!createReaction) return false;
+  if (createReaction) {
+    const created = await withPresentationTimeout(
+      async () => await createReaction(parsed.chatId, nextMessageId, nextEmoji),
+      false,
+    );
+    if (created !== false) return true;
+  }
+  if (typeof bot?.internal?.setMessageReaction !== "function") return false;
   return await withPresentationTimeout(async () => {
-    await createReaction(parsed.chatId, nextMessageId, nextEmoji);
+    await bot.internal.setMessageReaction({
+      chat_id: parsed.chatId,
+      message_id: Number(nextMessageId),
+      reaction: [{ type: "emoji", emoji: nextEmoji }],
+    });
     return true;
   }, false);
 }
@@ -164,26 +160,22 @@ export async function clearReaction(
   const { parsed, bot } = target;
   const nextEmoji = safeString(emoji).trim();
   if (!nextEmoji) return false;
-  if (parsed.platform === "onebot" && isPrivateChat(parsed)) return false;
 
   const deleteReaction = pickDeleteReaction(bot);
   if (deleteReaction) {
-    const deleted = await withPresentationTimeout(async () => {
-      await deleteReaction(
-        parsed.chatId,
-        messageId,
-        nextEmoji,
-        safeString(bot?.selfId).trim() || undefined,
-      );
-      return true;
-    }, false);
+    const deleted = await withPresentationTimeout(
+      async () =>
+        (await deleteReaction(
+          parsed.chatId,
+          messageId,
+          nextEmoji,
+          safeString(bot?.selfId).trim() || undefined,
+        )) !== false,
+      false,
+    );
     if (deleted) return true;
   }
-
-  if (
-    parsed.platform !== "onebot" &&
-    typeof bot?.internal?.setMessageReaction === "function"
-  ) {
+  if (typeof bot?.internal?.setMessageReaction === "function") {
     return await withPresentationTimeout(async () => {
       await bot.internal.setMessageReaction({
         chat_id: parsed.chatId,
@@ -193,17 +185,16 @@ export async function clearReaction(
       return true;
     }, false);
   }
-
-  const fallbackDeleteReaction = pickDeleteReaction(bot);
-  if (!fallbackDeleteReaction) return false;
+  if (!deleteReaction) return false;
   return await withPresentationTimeout(async () => {
-    await fallbackDeleteReaction(
-      parsed.chatId,
-      messageId,
-      nextEmoji,
-      safeString(bot?.selfId).trim() || undefined,
+    return (
+      (await deleteReaction(
+        parsed.chatId,
+        messageId,
+        nextEmoji,
+        safeString(bot?.selfId).trim() || undefined,
+      )) !== false
     );
-    return true;
   }, false);
 }
 
@@ -274,21 +265,6 @@ function sendChatNodes(
   }
 }
 
-const CHAT_OUTBOX_ASYNC_PLATFORMS = new Set([
-  "discord",
-  "lark",
-  "onebot",
-  "slack",
-  "telegram",
-]);
-
-export function chatOutboxPayloadUsesAsyncDispatch(
-  payload: Pick<ChatOutboxPayload, "chatKey"> | undefined,
-) {
-  const parsed = parseChatKey(safeString(payload?.chatKey));
-  return !!parsed && CHAT_OUTBOX_ASYNC_PLATFORMS.has(parsed.platform);
-}
-
 function normalizeOutboxChatKey(chatKey: string) {
   const nextChatKey = safeString(chatKey).trim();
   if (!nextChatKey) throw new Error("invalid_chatKey:");
@@ -335,7 +311,7 @@ export function getChatOutboxDispatchPromise(
   payload: ChatOutboxPayload,
   task: unknown,
 ): Promise<void> | undefined {
-  if (!chatOutboxPayloadUsesAsyncDispatch(payload)) return undefined;
+  void payload;
   return getChatDeliveryDispatchPromise(task);
 }
 
@@ -690,6 +666,8 @@ export function sendOutboxPayload(
   options: { beforeDispatch?: () => void } = {},
 ) {
   const chatKey = normalizeOutboxChatKey(payload.chatKey);
+  const usesDispatchSignal =
+    tryResolveChatTarget(app, chatKey)?.bot?.outboxUsesDispatchSignal !== false;
   const session =
     payload.sessionBinding === "conversation"
       ? normalizeSessionRef(payload)
@@ -700,6 +678,7 @@ export function sendOutboxPayload(
     resolveDispatched = resolve;
     rejectDispatched = reject;
   });
+  if (!usesDispatchSignal) void dispatched.catch(() => {});
   const delivery = (async () => {
     try {
       const { deliveryParts, nodes } =
@@ -751,7 +730,7 @@ export function sendOutboxPayload(
   })();
   return attachChatDeliveryDispatch(
     delivery,
-    chatOutboxPayloadUsesAsyncDispatch(payload) ? dispatched : undefined,
+    usesDispatchSignal ? dispatched : undefined,
   );
 }
 

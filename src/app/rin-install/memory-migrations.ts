@@ -3,10 +3,10 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
-  finalizeTranscriptSearchMigrationForInstall,
-  migrateTranscriptSearchIndexForInstall,
-  prepareTranscriptSearchMigrationForInstall,
-  rollbackTranscriptSearchMigrationForInstall,
+  finalizeTranscriptSearchMigrationForMigration,
+  migrateTranscriptSearchIndexForMigration,
+  prepareTranscriptSearchMigrationForMigration,
+  rollbackTranscriptSearchMigrationForMigration,
 } from "../../core/memory/install-migration.js";
 
 export async function main(args = process.argv.slice(2)) {
@@ -41,18 +41,18 @@ export async function main(args = process.argv.slice(2)) {
   if (!installDir)
     throw new Error("memory_install_migration_install_dir_required");
   if (mode === "--preflight") {
-    return prepareTranscriptSearchMigrationForInstall(installDir);
+    return prepareTranscriptSearchMigrationForMigration(installDir);
   }
   if (mode === "--finalize") {
-    return finalizeTranscriptSearchMigrationForInstall(installDir);
+    return finalizeTranscriptSearchMigrationForMigration(installDir);
   }
   if (mode === "--rollback") {
-    return rollbackTranscriptSearchMigrationForInstall(installDir);
+    return rollbackTranscriptSearchMigrationForMigration(installDir);
   }
   if (mode !== "--apply") {
     throw new Error(`memory_install_migration_mode_invalid:${mode}`);
   }
-  return migrateTranscriptSearchIndexForInstall(installDir, {
+  return migrateTranscriptSearchIndexForMigration(installDir, {
     runtimeQuiesced: args.includes("--runtime-quiesced"),
   });
 }

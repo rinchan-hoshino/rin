@@ -472,7 +472,7 @@ export function openChatDatabase(agentDir: string): BetterSqlite3.Database {
   return openChatDatabaseWithAdmissionModel(agentDir, true);
 }
 
-export function openChatDatabaseForInstall(
+export function openChatDatabaseForMigration(
   agentDir: string,
 ): BetterSqlite3.Database {
   return openChatDatabaseWithAdmissionModel(agentDir, false);

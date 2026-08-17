@@ -18,7 +18,7 @@ import {
   selectPlatformReleaseAsset,
   type ResolvedRelease,
 } from "../rin-lib/release.js";
-import { type InstallerI18n } from "./i18n.js";
+import { type InstallerI18n } from "../i18n.js";
 import { restoreTerminalCursor, runInstallerProgress } from "./progress.js";
 import { readJsonFileOrDefault } from "../platform/fs.js";
 import {

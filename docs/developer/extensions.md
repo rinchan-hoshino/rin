@@ -43,54 +43,50 @@ support are cancelled explicitly instead of leaving a handler waiting. A
 Chat-enabled command should therefore avoid TUI-only components and guard such
 behavior with Pi's `ctx.mode` contract.
 
-## Daemon extensions
+## External Chat platforms
 
-Long-running services, Chat adapters have a
-different lifetime from Pi session extensions. Declare them through the named
-`rinDaemonExtension` export, never through the default Pi factory:
+Chat platforms outside Rin core are ordinary Pi extensions. Export the usual
+default `ExtensionFactory` and contribute the platform through Pi's public
+EventBus while the extension is loaded:
 
 ```ts
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
-  defineRinDaemonExtension,
-  defineRinExtension,
+  RIN_CHAT_PLATFORM_EVENT,
+  type RinChatPlatformContribution,
 } from "@hoshinorin/rin/extension";
 
-export default defineRinExtension((rin) => {
-  // Session-scoped Pi/Rin registrations.
-});
+const platform: RinChatPlatformContribution = {
+  apiVersion: 1,
+  platform: "example",
+  create(input) {
+    return {
+      bot: {
+        platform: "example",
+        selfId: "example-bot",
+        status: 0,
+        async sendMessage(chatId, content) {
+          return sendToExample(chatId, content);
+        },
+      },
+      async start() {},
+      async stop() {},
+    };
+  },
+};
 
-export const rinDaemonExtension = defineRinDaemonExtension((rin) => {
-  rin.registerBackgroundService({
-    async start(ctx) {
-      ctx.logger.info?.(`starting ${ctx.name}`);
-      return { async stop() {} };
-    },
-  });
-});
-```
-
-The daemon API is registration-only. Runtime work belongs in a background
-service's `start(ctx)` callback, where cancellation, logging, and tracked async
-work are real capabilities. `ctx.chat.listKeys(...)` lists persisted chat
-identities, while `ctx.chat.getSessionBindings(chatKeys)` returns opaque
-references to their current Pi sessions. Pass those references unchanged to
-`ctx.sessions.getStates(refs)` for `idle`, `executing`, or `waiting`. Chat owns
-only the binding; the session subsystem owns lifecycle state. Extensions must
-consume these APIs rather than open Rin's chat database or session files. Pi
-registration methods are intentionally absent from the daemon API, and daemon
-registration methods are absent from the session API. Unsupported methods are
-never installed as silent no-ops.
-
-Only ordinary Pi extension entries are loaded. A matching `rinExtensions.daemon` entry may supply backend configuration, but it cannot discover or install a package:
-
-```json
-{
-  "packages": ["@example/rin-extension"],
-  "rinExtensions": {
-    "daemon": [{ "packageName": "@example/rin-extension", "config": {} }]
-  }
+export default function example(pi: ExtensionAPI) {
+  pi.events.emit(RIN_CHAT_PLATFORM_EVENT, platform);
 }
 ```
+
+Install and enable the package through Pi's native package system. Chat uses
+Pi's `DefaultResourceLoader`; there is no Rin-specific package list, named
+daemon export, background-service registry, or second extension loader.
+Platform configuration remains under `settings.chat.<platform>`, and Chat owns
+lifecycle, storage, inbound recovery, session binding, and outbox semantics.
+The extension implements only its platform transport through the supplied
+`RinChatPlatformInput` capabilities.
 
 ## Command ownership
 

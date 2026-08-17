@@ -9,7 +9,10 @@
     {
       "source": "src/app/rin-daemon/daemon.ts",
       "suite": "system",
-      "tests": ["tests/system/app-daemon-entrypoint-owner.test.ts"]
+      "tests": [
+        "tests/system/app-daemon-entrypoint-owner.test.ts",
+        "tests/system/daemon-core-callable-owner.test.ts"
+      ]
     },
     {
       "source": "src/app/rin-daemon/hosted-chat-service.ts",
@@ -25,11 +28,6 @@
       "source": "src/app/rin-daemon/worker.ts",
       "suite": "system",
       "tests": ["tests/system/daemon-worker-entrypoint-owner.test.ts"]
-    },
-    {
-      "source": "src/app/rin-install/chat-migrations.ts",
-      "suite": "system",
-      "tests": ["tests/system/chat-migrations-entrypoint-owner.test.ts"]
     },
     {
       "source": "src/app/rin-install/main.ts",
@@ -73,11 +71,6 @@
       "tests": ["tests/system/rin-cli-entrypoint-owner.test.ts"]
     },
     {
-      "source": "src/core/chat-bridge/adapters.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/chat-bridge-adapters.test.ts"]
-    },
-    {
       "source": "src/core/chat-bridge/eval.ts",
       "suite": "integration",
       "tests": ["tests/integration/chat-bridge-eval-owner.test.ts"]
@@ -88,21 +81,21 @@
       "tests": ["tests/integration/chat-bridge-runtime-owner.test.ts"]
     },
     {
-      "source": "src/core/chat-runtime/app.ts",
+      "source": "src/core/chat/chat.ts",
       "suite": "integration",
       "tests": [
+        "tests/integration/chat-main-startup-owner.test.ts",
         "tests/integration/chat-runtime-app-owner.test.ts",
-        "tests/integration/chat-runtime-registry-owner.test.ts",
         "tests/integration/chat-runtime-ingress.test.ts",
         "tests/integration/chat-runtime-lifecycle.test.ts"
       ]
     },
     {
-      "source": "src/core/chat-runtime/discord.ts",
+      "source": "src/core/chat/platform/discord.ts",
       "suite": "integration",
       "tests": [
+        "tests/integration/chat-runtime-discord-boundaries.test.ts",
         "tests/integration/chat-runtime-discord-owner.test.ts",
-        "tests/integration/chat-runtime-platform-boundaries.test.ts",
         "tests/integration/chat-runtime-discord.test.ts",
         "tests/integration/chat-runtime-ingress.test.ts",
         "tests/integration/chat-runtime-send.test.ts",
@@ -110,58 +103,17 @@
       ]
     },
     {
-      "source": "src/core/chat-runtime/lark.ts",
+      "source": "src/core/chat/platform/telegram.ts",
       "suite": "integration",
       "tests": [
-        "tests/integration/chat-runtime-lark-owner.test.ts",
-        "tests/integration/chat-runtime-platform-boundaries.test.ts",
-        "tests/integration/chat-runtime-discord.test.ts",
-        "tests/integration/chat-runtime-ingress.test.ts",
-        "tests/integration/chat-runtime-send.test.ts"
-      ]
-    },
-    {
-      "source": "src/core/chat-runtime/onebot.ts",
-      "suite": "integration",
-      "tests": [
-        "tests/integration/chat-runtime-onebot-owner.test.ts",
-        "tests/integration/chat-runtime-platform-fallbacks.test.ts",
-        "tests/integration/chat-runtime-ingress.test.ts",
-        "tests/integration/chat-runtime-send.test.ts"
-      ]
-    },
-    {
-      "source": "src/core/chat-runtime/registry.ts",
-      "suite": "integration",
-      "tests": [
-        "tests/integration/chat-runtime-registry-owner.test.ts",
-        "tests/integration/chat-runtime-ingress.test.ts",
-        "tests/integration/chat-runtime-send.test.ts"
-      ]
-    },
-    {
-      "source": "src/core/chat-runtime/slack.ts",
-      "suite": "integration",
-      "tests": [
-        "tests/integration/chat-runtime-slack-owner.test.ts",
-        "tests/integration/chat-runtime-platform-boundaries.test.ts",
-        "tests/integration/chat-runtime-discord.test.ts",
-        "tests/integration/chat-runtime-ingress.test.ts",
-        "tests/integration/chat-runtime-send.test.ts"
-      ]
-    },
-    {
-      "source": "src/core/chat-runtime/telegram.ts",
-      "suite": "integration",
-      "tests": [
+        "tests/integration/chat-runtime-telegram-fallbacks.test.ts",
         "tests/integration/chat-runtime-telegram-owner.test.ts",
-        "tests/integration/chat-runtime-platform-fallbacks.test.ts",
         "tests/integration/chat-runtime-ingress.test.ts",
         "tests/integration/chat-runtime-send.test.ts"
       ]
     },
     {
-      "source": "src/core/chat-runtime/common.ts",
+      "source": "src/core/chat/platform/common.ts",
       "suite": "integration",
       "tests": [
         "tests/integration/chat-runtime-common-owner.test.ts",
@@ -169,12 +121,12 @@
       ]
     },
     {
-      "source": "src/core/chat-runtime/editable-text-message-group.ts",
+      "source": "src/core/chat/platform/editable-text-message-group.ts",
       "suite": "integration",
       "tests": ["tests/integration/editable-text-message-group-owner.test.ts"]
     },
     {
-      "source": "src/core/chat-runtime/inbound-recovery.ts",
+      "source": "src/core/chat/inbound-recovery.ts",
       "suite": "integration",
       "tests": ["tests/integration/inbound-recovery-owner.test.ts"]
     },
@@ -203,16 +155,6 @@
       ]
     },
     {
-      "source": "src/core/chat/chat-key-migration.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/chat-key-migration-owner.test.ts"]
-    },
-    {
-      "source": "src/core/chat/chat-key-record-resolution.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/chat-key-migration-recovery.test.ts"]
-    },
-    {
       "source": "src/core/chat/chat-log.ts",
       "suite": "integration",
       "tests": [
@@ -233,7 +175,7 @@
       "preloads": ["tests/support/register-chat-controller-owner-fixture.ts"]
     },
     {
-      "source": "src/core/chat/database-install-migration.ts",
+      "source": "src/core/chat/database-migration.ts",
       "suite": "integration",
       "tests": [
         "tests/integration/chat-database.test.ts",
@@ -254,8 +196,8 @@
       "source": "src/core/chat/decision.ts",
       "suite": "integration",
       "tests": [
-        "tests/integration/chat-decision-owner.test.ts",
-        "tests/integration/chat-decision.test.ts"
+        "tests/integration/chat-decision.test.ts",
+        "tests/integration/chat-main-queue.test.ts"
       ]
     },
     {
@@ -284,27 +226,12 @@
       "tests": ["tests/integration/chat-inbox-owner.test.ts"]
     },
     {
-      "source": "src/core/chat/install-migration.ts",
-      "suite": "integration",
-      "tests": [
-        "tests/integration/chat-install-migration-owner.test.ts",
-        "tests/integration/chat-key-migration-recovery.test.ts"
-      ]
-    },
-    {
-      "source": "src/core/chat/legacy-migration.ts",
-      "suite": "integration",
-      "tests": [
-        "tests/integration/chat-legacy-migration.test.ts",
-        "tests/integration/chat-legacy-migration-owner-branches.test.ts",
-        "tests/integration/chat-key-migration-recovery.test.ts",
-        "tests/integration/chat-database.test.ts"
-      ]
-    },
-    {
       "source": "src/core/chat/main.ts",
       "suite": "integration",
       "tests": [
+        "tests/integration/chat-main-external-platform-owner.test.ts",
+        "tests/integration/chat-main-logging.test.ts",
+        "tests/integration/chat-main-prompt-context-owner.test.ts",
         "tests/integration/chat-main-queue.test.ts",
         "tests/integration/chat-main-startup-owner.test.ts"
       ]
@@ -325,7 +252,11 @@
     {
       "source": "src/core/chat/runtime-config.ts",
       "suite": "integration",
-      "tests": ["tests/integration/chat-bridge-adapters.test.ts"]
+      "tests": [
+        "tests/integration/chat-main-startup-owner.test.ts",
+        "tests/integration/chat-runtime-config-owner.test.ts",
+        "tests/integration/chat-runtime-ingress.test.ts"
+      ]
     },
     {
       "source": "src/core/chat/support.ts",
@@ -361,10 +292,7 @@
     {
       "source": "src/core/memory/install-migration.ts",
       "suite": "integration",
-      "tests": [
-        "tests/integration/chat-install-migration-owner.test.ts",
-        "tests/integration/memory.test.ts"
-      ]
+      "tests": ["tests/integration/memory.test.ts"]
     },
     {
       "source": "src/core/memory/transcript-archive.ts",
@@ -490,11 +418,6 @@
       "source": "src/core/rin-daemon/daemon.ts",
       "suite": "system",
       "tests": ["tests/system/daemon-core-callable-owner.test.ts"]
-    },
-    {
-      "source": "src/core/rin-daemon/extensions.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/rin-daemon-extension-adapter.test.ts"]
     },
     {
       "source": "src/core/rin-daemon/lock.ts",
@@ -695,7 +618,7 @@
       "preloads": ["tests/support/register-fs-utils-owner-fixture.ts"]
     },
     {
-      "source": "src/core/rin-install/i18n.ts",
+      "source": "src/core/i18n.ts",
       "suite": "integration",
       "tests": ["tests/integration/installer-i18n-owner.test.ts"]
     },
@@ -728,7 +651,11 @@
     {
       "source": "src/core/rin-install/persist.ts",
       "suite": "integration",
-      "tests": ["tests/integration/installer-persist-owner.test.ts"],
+      "tests": [
+        "tests/integration/installer-interactive.test.ts",
+        "tests/integration/installer-modules.test.ts",
+        "tests/integration/installer-persist-owner.test.ts"
+      ],
       "preloads": ["tests/support/register-persist-owner-fixture.ts"]
     },
     {

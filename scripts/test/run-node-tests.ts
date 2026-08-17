@@ -4,8 +4,10 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { requireTestContainer } from "./require-test-container.js";
+import { assertTestProcessEnvironment } from "./test-process-environment.js";
 
 requireTestContainer();
+assertTestProcessEnvironment(process.env);
 
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

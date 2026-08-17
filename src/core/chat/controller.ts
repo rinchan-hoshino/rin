@@ -2307,11 +2307,11 @@ export class ChatController {
     ) {
       return true;
     }
-    const {
-      todos,
-      mode,
-      text: noticeText,
-    } = presentTodoNotice(this.chatKey, event?.todoItems, event?.text);
+    const { todos, text: noticeText } = presentTodoNotice(
+      this.chatKey,
+      event?.todoItems,
+      event?.text,
+    );
     const todoHash = crypto
       .createHash("sha256")
       .update(noticeText)
@@ -2373,44 +2373,10 @@ export class ChatController {
       return true;
     }
 
-    let todoDelivery: Promise<boolean>;
-    if (!todos || mode !== "native") {
-      todoDelivery = this.sendPassiveNoticeNow(noticeText, todoDeliveryOptions);
-    } else {
-      todoDelivery = (async () => {
-        try {
-          await this.enqueueAndDrainDelivery(
-            {
-              createdAt: nowIso(),
-              chatKey: this.chatKey,
-              deliveryKind: "passive_notice",
-              coalesceWithWorkingMessage: true,
-              parts: withChatQuotePart(
-                [
-                  {
-                    type: "todo" as const,
-                    title: "Todo",
-                    items: todos.map((todo) => ({
-                      text: todo.text,
-                      done: todo.done,
-                    })),
-                  },
-                ],
-                this.currentReplyToMessageId(),
-              ),
-              ...conversationSessionPayload(
-                this.linkDeliveriesToSession,
-                this.currentSessionFile(),
-              ),
-            },
-            { deliveryKind: "passive_notice", ...todoDeliveryOptions },
-          );
-          return true;
-        } catch {
-          return false;
-        }
-      })();
-    }
+    const todoDelivery = this.sendPassiveNoticeNow(
+      noticeText,
+      todoDeliveryOptions,
+    );
     const todoDelivered = await todoDelivery;
     if (todoDelivered) commitTodoDisplayState([todoIdempotencyKey]);
     return todoDelivered;

@@ -33,38 +33,6 @@ export const LEGACY_DATA_LAYOUT_MOVES: Array<{
   from: string;
   to: string;
 }> = [
-  {
-    id: "chat-bridge-eval",
-    from: "chat-bridge-eval",
-    to: path.join("chat", "eval"),
-  },
-  { id: "chat-inbox", from: "chat-inbox", to: path.join("chat", "inbox") },
-  {
-    id: "koishi-message-store",
-    from: "koishi-message-store",
-    to: path.join("chat", "message-store"),
-  },
-  {
-    id: "chat-message-store",
-    from: "chat-message-store",
-    to: path.join("chat", "message-store"),
-  },
-  { id: "chat-outbox", from: "chat-outbox", to: path.join("chat", "outbox") },
-  {
-    id: "chat-runtime-cache",
-    from: "chat-runtime-cache",
-    to: path.join("chat", "runtime-cache"),
-  },
-  {
-    id: "chat-runtime-state",
-    from: "chat-runtime-state",
-    to: path.join("chat", "runtime-state"),
-  },
-  {
-    id: "chat-session-state",
-    from: "chats",
-    to: path.join("chat", "session-state"),
-  },
   { id: "scheduler", from: "cron", to: "scheduler" },
   {
     id: "scheduler-turns",

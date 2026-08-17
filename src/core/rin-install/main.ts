@@ -32,7 +32,7 @@ import {
   promptProviderSetup,
   promptInstallTarget,
 } from "./interactive.js";
-import { createInstallerI18n } from "./i18n.js";
+import { createInstallerI18n } from "../i18n.js";
 import { startLegacyPreparedUpdatePayload } from "./update-payload.js";
 import { detectCurrentUser, repoRootFromHere, runCommand } from "./common.js";
 import { finalizeCoreUpdate, finalizeInstallPlan } from "./finalize.js";

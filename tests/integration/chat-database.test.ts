@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -19,13 +20,7 @@ const chatDatabase = {
   )),
   ...(await import(
     pathToFileURL(
-      path.join(
-        rootDir,
-        "dist",
-        "core",
-        "chat",
-        "database-install-migration.js",
-      ),
+      path.join(rootDir, "dist", "core", "chat", "database-migration.js"),
     ).href
   )),
 };
@@ -279,7 +274,7 @@ test("chat database cutover migrates v8 run ownership to interrupted delivery-on
     chatDatabase.closeChatDatabase(agentDir);
 
     try {
-      chatDatabase.migrateChatDatabaseForInstall(agentDir, {
+      chatDatabase.migrateChatDatabase(agentDir, {
         runtimeQuiesced: true,
       });
     } catch (error) {
@@ -412,7 +407,7 @@ test("quiesced install releases a current running claim without creating a termi
     );
     chatDatabase.closeChatDatabase(agentDir);
 
-    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir, {
+    const migrated = chatDatabase.migrateChatDatabase(agentDir, {
       runtimeQuiesced: true,
     });
     assert.deepEqual(
@@ -459,13 +454,13 @@ test("quiesced install releases a current running claim without creating a termi
       null,
     );
     assert.equal(
-      chatDatabase.readAdmissionModelInstallMigrationSummary(migrated)
+      chatDatabase.readAdmissionModelSchemaMigrationSummary(migrated)
         .releasedCurrentClaims,
       1,
     );
     chatDatabase.closeChatDatabase(agentDir);
 
-    const reopened = chatDatabase.migrateChatDatabaseForInstall(agentDir, {
+    const reopened = chatDatabase.migrateChatDatabase(agentDir, {
       runtimeQuiesced: true,
     });
     assert.equal(
@@ -475,7 +470,7 @@ test("quiesced install releases a current running claim without creating a termi
       "running",
     );
     assert.equal(
-      chatDatabase.readAdmissionModelInstallMigrationSummary(reopened)
+      chatDatabase.readAdmissionModelSchemaMigrationSummary(reopened)
         .releasedCurrentClaims,
       1,
     );
@@ -514,7 +509,7 @@ test("install consumes old admission rows only before recording the current mode
       .run();
     chatDatabase.closeChatDatabase(agentDir);
 
-    const first = chatDatabase.migrateChatDatabaseForInstall(agentDir, {
+    const first = chatDatabase.migrateChatDatabase(agentDir, {
       runtimeQuiesced: true,
     });
     assert.deepEqual(
@@ -543,7 +538,7 @@ test("install consumes old admission rows only before recording the current mode
 
     const preservedAfterMarker = enqueueOldAdmission("old-after-marker");
     chatDatabase.closeChatDatabase(agentDir);
-    const second = chatDatabase.migrateChatDatabaseForInstall(agentDir, {
+    const second = chatDatabase.migrateChatDatabase(agentDir, {
       runtimeQuiesced: true,
     });
     assert.deepEqual(
@@ -746,15 +741,12 @@ test("version 9 index migration preserves historical delivery evidence and admit
     installVersion9TerminalOutboxIndex(db);
     chatDatabase.closeChatDatabase(agentDir);
 
-    assert.deepEqual(
-      chatDatabase.preflightChatDatabaseMigrationForInstall(agentDir),
-      {
-        path: chatDatabase.chatDatabasePath(agentDir),
-        fromVersion: 9,
-        toVersion: 10,
-      },
-    );
-    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
+    assert.deepEqual(chatDatabase.preflightChatDatabaseMigration(agentDir), {
+      path: chatDatabase.chatDatabasePath(agentDir),
+      fromVersion: 9,
+      toVersion: 10,
+    });
+    const migrated = chatDatabase.migrateChatDatabase(agentDir);
     assert.equal(migrated.pragma("user_version", { simple: true }), 10);
     const indexSql = migrated
       .prepare(
@@ -824,7 +816,7 @@ test("version 9 index migration preserves historical delivery evidence and admit
     );
     chatDatabase.closeChatDatabase(agentDir);
 
-    const reopened = chatDatabase.migrateChatDatabaseForInstall(agentDir);
+    const reopened = chatDatabase.migrateChatDatabase(agentDir);
     assert.equal(reopened.pragma("user_version", { simple: true }), 10);
     assert.deepEqual(
       reopened
@@ -897,7 +889,7 @@ test("version 9 terminal index migration rolls back atomically on canonical conf
     chatDatabase.closeChatDatabase(agentDir);
 
     assert.throws(
-      () => chatDatabase.migrateChatDatabaseForInstall(agentDir),
+      () => chatDatabase.migrateChatDatabase(agentDir),
       /UNIQUE constraint failed: outbox.turn_id/,
     );
     const BetterSqlite3 = (await import("better-sqlite3")).default;
@@ -986,7 +978,7 @@ test("version 9 terminal index migration rolls back atomically on foreign key mi
     chatDatabase.closeChatDatabase(agentDir);
 
     assert.throws(
-      () => chatDatabase.migrateChatDatabaseForInstall(agentDir),
+      () => chatDatabase.migrateChatDatabase(agentDir),
       /chat_database_foreign_key_mismatch/,
     );
     const BetterSqlite3 = (await import("better-sqlite3")).default;
@@ -1041,7 +1033,7 @@ test("chat database rejects unknown future and partial schemas instead of relabe
     partial.exec(`CREATE TABLE stray_state (id TEXT PRIMARY KEY)`);
     partial.close();
     assert.throws(
-      () => chatDatabase.migrateChatDatabaseForInstall(partialDir),
+      () => chatDatabase.migrateChatDatabase(partialDir),
       /chat_database_partial_schema/,
     );
   } finally {
@@ -1064,7 +1056,7 @@ test("chat database rejects unknown future and partial schemas instead of relabe
     );
     incomplete.close();
     assert.throws(
-      () => chatDatabase.migrateChatDatabaseForInstall(incompleteDir),
+      () => chatDatabase.migrateChatDatabase(incompleteDir),
       /chat_database_incomplete_schema/,
     );
   } finally {
@@ -1112,7 +1104,7 @@ test("chat database migrates the version 1 terminal outbox index", async () => {
     ).run(fingerprint);
     chatDatabase.closeChatDatabase(agentDir);
 
-    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
+    const migrated = chatDatabase.migrateChatDatabase(agentDir);
     assert.equal(migrated.pragma("user_version", { simple: true }), 10);
     assert.equal(
       migrated
@@ -1164,7 +1156,7 @@ test("chat database migrates version 2 session binding authority", async () => {
     ).run(createHash("sha256").update(JSON.stringify(objects)).digest("hex"));
     chatDatabase.closeChatDatabase(agentDir);
 
-    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
+    const migrated = chatDatabase.migrateChatDatabase(agentDir);
     assert.equal(migrated.pragma("user_version", { simple: true }), 10);
     assert.ok(
       migrated
@@ -1205,7 +1197,7 @@ test("chat database migrates version 3 dispatch evidence", async () => {
     ).run(createHash("sha256").update(JSON.stringify(objects)).digest("hex"));
     chatDatabase.closeChatDatabase(agentDir);
 
-    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
+    const migrated = chatDatabase.migrateChatDatabase(agentDir);
     assert.equal(migrated.pragma("user_version", { simple: true }), 10);
     assert.ok(
       migrated
@@ -1245,7 +1237,7 @@ test("chat database migrates version 4 inbound recovery lease state", async () =
     ).run(createHash("sha256").update(JSON.stringify(objects)).digest("hex"));
     chatDatabase.closeChatDatabase(agentDir);
 
-    const migrated = chatDatabase.migrateChatDatabaseForInstall(agentDir);
+    const migrated = chatDatabase.migrateChatDatabase(agentDir);
     assert.equal(migrated.pragma("user_version", { simple: true }), 10);
     const columns = new Set(
       migrated
@@ -1675,7 +1667,7 @@ test("install migration retires the removed application terminal WAL directory",
     const walDir = path.join(agentDir, "data", "chat", "terminal-wal");
     await fs.mkdir(walDir, { recursive: true });
     await fs.writeFile(path.join(walDir, "legacy.json"), "{legacy-evidence}");
-    chatDatabase.migrateChatDatabaseForInstall(agentDir, {
+    chatDatabase.migrateChatDatabase(agentDir, {
       runtimeQuiesced: true,
     });
     chatDatabase.closeChatDatabase(agentDir);

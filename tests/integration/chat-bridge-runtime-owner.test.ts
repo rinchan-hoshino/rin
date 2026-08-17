@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -5,8 +6,12 @@ import path from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
+await import("../support/register-chat-bridge-runtime-owner-fixture.ts");
 const runtimeModule = await import(
   pathToFileURL(path.resolve("dist/core/chat-bridge/runtime.js")).href
+);
+const outboxModule = await import(
+  pathToFileURL(path.resolve("dist/core/chat/outbox.js")).href
 );
 
 function createH() {
@@ -158,6 +163,42 @@ test("chat bridge runtime owns scoped delivery, safe facades, storage, identity,
     );
     assert.equal(deliveries[3].content[0].attrs.id, "kept-source");
     assert.equal(deliveries[3].content[1].attrs.content, "fallback text");
+    assert.equal(
+      await (runtimeModule as any).__rinOwnerWaitForOutboxDelivery(
+        agentDir,
+        "missing",
+        1,
+      ),
+      null,
+    );
+    const failedId = outboxModule.enqueueChatOutboxPayload(
+      agentDir,
+      {
+        createdAt: new Date().toISOString(),
+        chatKey: "owner/bot-1:room-9",
+        parts: [{ type: "text", text: "owner failed" }],
+      },
+      { id: "owner-failed-outbox", deliveryKind: "generic" },
+    );
+    const failedItem = outboxModule.readChatOutboxItemById(
+      agentDir,
+      failedId,
+    ).item;
+    outboxModule.writeChatOutboxItem(agentDir, {
+      ...failedItem,
+      status: "failed",
+      lastError: "owner outbox failed",
+      failedAt: new Date().toISOString(),
+    });
+    await assert.rejects(
+      () =>
+        (runtimeModule as any).__rinOwnerWaitForOutboxDelivery(
+          agentDir,
+          failedId,
+          10,
+        ),
+      /owner outbox failed/,
+    );
 
     await assert.rejects(
       () => runtime.helpers.send([{ type: "at", name: "missing" }]),

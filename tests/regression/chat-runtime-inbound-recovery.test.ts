@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -12,7 +13,7 @@ const rootDir = path.resolve(
 );
 const recovery = await import(
   pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat-runtime", "inbound-recovery.js"),
+    path.join(rootDir, "dist", "core", "chat", "inbound-recovery.js"),
   ).href
 );
 const messageStore = await import(

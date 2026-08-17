@@ -56,121 +56,97 @@ export type RinExtensionLogger = {
   error?: (message: string) => void;
 };
 
-export type RinChatAdapterProviderInput = {
-  app: unknown;
-  agentDir?: string;
+export type RinChatPlatformBot = {
+  platform: string;
+  selfId: string;
+  status: number;
+  sendMessage(
+    chatId: string,
+    content: unknown,
+    options?: Record<string, unknown>,
+  ): Promise<string[]> | string[];
+  outboxMediaSendTimeoutMs?: number;
+  outboxUsesDispatchSignal?: boolean;
+  getCompleteMemberProof?(input: {
+    chatId: string;
+    botId: string;
+    senderId: string;
+  }): Promise<
+    | { complete: false }
+    | { complete: true; privateLike: false }
+    | { complete: true; nonAgentUserIds: string[] }
+  >;
+  isChatMember?(chatId: string, userId: string): Promise<boolean>;
+  [key: string]: unknown;
+};
+
+export type RinChatInboundRecoveryHead = {
+  chatKey: string;
+  chatId: string;
+  messageId: string;
+  platformTimestamp: number;
+  providerCursor?: string;
+  failureCount?: number;
+  firstFailedAt?: string;
+  lastFailedAt?: string;
+  pausedAt?: string;
+  nextAttemptAt?: string;
+  recoveryVersion?: number;
+};
+
+export type RinChatInboundRecoveryResult<T> = {
+  recovered: T[];
+  failures: string[];
+  deferred: string[];
+  retired: string[];
+  scopeHealthy: boolean;
+};
+
+export type RinChatPlatformInput = {
+  agentDir: string;
   dataDir: string;
-  runtimeRoot?: string;
-  h?: unknown;
-  key: string;
-  name: string;
-  packageName?: string;
   config: Record<string, unknown>;
-  logger?: RinExtensionLogger;
-};
-
-export type RinChatAdapterProviderResult = void | {
-  adapter?: unknown;
-  bot?: unknown;
-};
-
-export type RinChatAdapterProvider =
-  | ((
-      input: RinChatAdapterProviderInput,
-    ) => RinChatAdapterProviderResult | Promise<RinChatAdapterProviderResult>)
-  | {
-      createAdapter(
-        input: RinChatAdapterProviderInput,
-      ): RinChatAdapterProviderResult | Promise<RinChatAdapterProviderResult>;
-    };
-
-export type RinBackgroundServiceStop = {
-  stop?: () => Promise<void> | void;
-};
-
-export type RinChatSessionState = "idle" | "executing" | "waiting";
-
-export type RinDaemonSessionRef = {
-  readonly token: string;
-};
-
-export type RinDaemonChatKeyFilter = {
-  platform?: string;
-  accountIds?: readonly string[];
-};
-
-export type RinDaemonChatAPI = {
-  listKeys(filter?: RinDaemonChatKeyFilter): Promise<string[]>;
-  getSessionBindings(
-    chatKeys: readonly string[],
-  ): Promise<Array<RinDaemonSessionRef | null>>;
-};
-
-export type RinDaemonSessionAPI = {
-  getStates(
-    refs: readonly (RinDaemonSessionRef | null)[],
-  ): Promise<RinChatSessionState[]>;
-};
-
-export type RinBackgroundServiceContext = {
-  readonly cwd: string;
-  readonly agentDir: string;
-  readonly dataDir: string;
-  readonly runtimeRoot: string;
-  readonly name: string;
-  readonly packageName: string;
-  readonly config: Record<string, unknown>;
-  readonly chat: RinDaemonChatAPI;
-  readonly sessions: RinDaemonSessionAPI;
-  readonly signal: AbortSignal;
-  readonly logger: RinExtensionLogger;
-  runAsync(label: string, work: () => Promise<void> | void): void;
-};
-
-export type RinBackgroundServiceProvider = {
-  start?: (
-    context: RinBackgroundServiceContext,
-  ) =>
-    | Promise<void | RinBackgroundServiceStop>
-    | void
-    | RinBackgroundServiceStop;
-};
-
-export type RinBackgroundServiceFactory = NonNullable<
-  RinBackgroundServiceProvider["start"]
->;
-
-/** Registration-only API for an extension module's daemon-scoped export. */
-export type RinDaemonExtensionAPI = Omit<
-  RinBackgroundServiceContext,
-  "signal" | "runAsync"
-> & {
-  registerBackgroundService(
-    provider: RinBackgroundServiceProvider | RinBackgroundServiceFactory,
-  ): void;
-  registerChatAdapter(
-    provider: RinChatAdapterProvider,
+  logger: RinExtensionLogger;
+  receive(session: unknown): void;
+  updateStatus(bot: RinChatPlatformBot, status: number): void;
+  composeKey(chatId: string, botId: string): string;
+  beginRecovery(chatKey: string): void;
+  completeRecovery(chatKey: string): void;
+  recoverInbound<T>(
+    botId: string,
+    recover: (head: RinChatInboundRecoveryHead) => Promise<T[]>,
     options?: {
-      key?: string;
-      name?: string;
-      config?: Record<string, unknown>;
+      concurrency?: number;
+      onHeads?: (heads: RinChatInboundRecoveryHead[]) => void | Promise<void>;
+      onHeadSettled?: (outcome: {
+        head: RinChatInboundRecoveryHead;
+        recovered: T[];
+        error?: unknown;
+      }) => void | Promise<void>;
     },
-  ): void;
+  ): Promise<RinChatInboundRecoveryResult<T>>;
 };
 
-export type RinDaemonExtensionFactory = (
-  rin: RinDaemonExtensionAPI,
-) => Promise<void> | void;
+export type RinChatPlatform = {
+  readonly bot: RinChatPlatformBot;
+  start(): Promise<void> | void;
+  stop(): Promise<void> | void;
+  setWorkingText?(text: string): void;
+};
+
+export type RinChatPlatformContribution = {
+  apiVersion: 1;
+  platform: string;
+  defaults?: Record<string, unknown>;
+  create(
+    input: RinChatPlatformInput,
+  ): RinChatPlatform | Promise<RinChatPlatform>;
+};
+
+export const RIN_CHAT_PLATFORM_EVENT = "rin.chat.platform.v1";
 
 /** Add Rin types to a session extension without adding a runtime wrapper. */
 export function defineRinExtension<T extends RinExtensionFactory>(
-  factory: T,
-): T {
-  return factory;
-}
-
-/** Define the explicit daemon-scoped half of a Rin extension package. */
-export function defineRinDaemonExtension<T extends RinDaemonExtensionFactory>(
   factory: T,
 ): T {
   return factory;

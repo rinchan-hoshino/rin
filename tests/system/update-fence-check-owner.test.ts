@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -112,7 +113,7 @@ test("rin update fences daemon startup without masking the managed service", () 
     stopIndex,
   );
   const quiescedIndex = restartBlock.indexOf(
-    "migrationOptions.chatRuntimeQuiesced = true",
+    "migrationOptions.runtimeQuiesced = true",
   );
   const mutateIndex = restartBlock.indexOf("mutate: writeInstalledState");
   const activateIndex = restartBlock.indexOf("activate:", mutateIndex);
@@ -180,30 +181,35 @@ test("hosted chat bridge has no restart-specific quiescing state", () => {
   const shared = source("src/core/rin/shared.ts");
 
   assert.doesNotMatch(daemon, /daemon_prepare_restart|daemon_cancel_restart/);
-  assert.doesNotMatch(chat, /quiesc/i);
+  assert.doesNotMatch(
+    chat,
+    /daemon_prepare_restart|daemon_cancel_restart|prepareDaemonRestart|cancelDaemonRestart|quiescing/,
+  );
   assert.doesNotMatch(shared, /prepareDaemonRestart|cancelDaemonRestart/);
 });
 
 test("chat terminal backlog is reconciled without waiting for new ingress", () => {
   const chatMain = source("src/core/chat/main.ts");
+  const terminalReconciler = source("src/core/chat/terminal-reconciler.ts");
 
   assert.match(chatMain, /requestReconcileChatTerminals\(\);/);
   assert.match(
     chatMain,
     /inboxPollTimer = setInterval\([\s\S]*requestReconcileChatInbox\(\);[\s\S]*requestReconcileChatTerminals\(\);/,
   );
+  assert.match(chatMain, /createChatTerminalReconciliationLoop\(/);
   assert.match(
-    chatMain,
+    terminalReconciler,
     /listUnacknowledgedChatTerminalEvents\([\s\S]*reconcileChatTerminalEvents/,
   );
   assert.match(
-    chatMain,
+    terminalReconciler,
     /terminalRecord\?\.terminalId[\s\S]*terminal-reconcile:\$\{terminalId\}[\s\S]*affectChatBinding: false[\s\S]*recoverTerminals: false[\s\S]*projectAndAcknowledgeChatTerminalEvent[\s\S]*projectAuthoritativeTerminal\([\s\S]*terminal/,
   );
-  assert.match(chatMain, /terminalProjectionInFlight = new Set<string>\(\)/);
+  assert.match(terminalReconciler, /projectionInFlight = new Set<string>\(\)/);
   assert.match(
-    chatMain,
-    /terminalProjectionInFlight\.has\(terminalId\)[\s\S]*void \(async \(\) =>[\s\S]*terminalProjectionInFlight\.delete\(terminalId\)/,
+    terminalReconciler,
+    /projectionInFlight\.has\(terminalId\)[\s\S]*void \(async \(\) =>[\s\S]*projectionInFlight\.delete\(terminalId\)/,
   );
 });
 

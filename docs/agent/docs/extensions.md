@@ -6,11 +6,11 @@ The live tool list remains authoritative for the current turn.
 
 ## Capability source map
 
-| Source                                   | Provides                                                                                                                                                                     | Configuration surface                                               | Agent route                                         |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------- |
-| Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, note, scheduled-task SDK workflows, agent-owned chat setup | built into Rin                                                      | use live tools, CLI, SDK, or topic docs             |
-| Browser/computer/mobile/search operation | browser, computer, mobile, or search tools supplied by the live runtime                                                                                                      | live tool list or external Pi extension config                      | follow the live tool schema                         |
-| Daemon extension adapter                 | trusted long-running services, chat adapters                                                                                                                                 | ordinary Pi extension entries that also export `rinDaemonExtension` | inspect runtime state and relevant extension config |
+| Source                                   | Provides                                                                                                                                                                     | Configuration surface                                       | Agent route                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------- |
+| Rin core                                 | runtime prompt assembly, memory, self-improve, message metadata, frozen session runtime, TUI compatibility, todo, note, scheduled-task SDK workflows, agent-owned chat setup | built into Rin                                              | use live tools, CLI, SDK, or topic docs         |
+| Browser/computer/mobile/search operation | browser, computer, mobile, or search tools supplied by the live runtime                                                                                                      | live tool list or external Pi extension config              | follow the live tool schema                     |
+| Optional Chat platform extension         | trusted external Chat platform implementations                                                                                                                               | ordinary Pi extension entries using the Chat platform event | inspect Chat state and relevant platform config |
 
 ## Rin core capabilities
 
@@ -25,7 +25,7 @@ These capabilities are native Rin behavior rather than optional Pi extensions:
 - todo: `todo` tool and `/todos` command.
 - note: stable-ID session-branch continuity items, plus the `/notes` TUI viewer.
 - task: scheduled task workflows through the local Rin Agent SDK.
-- chat: agent-owned adapter setup, SDK/file workflows, stored-message lookup, and identity/trust data paths.
+- chat: agent-owned platform setup, SDK/file workflows, stored-message lookup, and identity/trust data paths.
 
 Read the topic document for the capability before operating it:
 
@@ -103,19 +103,10 @@ Trusted third-party Pi extensions for browser or computer control are configured
 
 First-party optional extensions, including Codex-only `/usage` and self-improve result reminders, live in `rinchan-hoshino/rin-extensions` rather than Rin core.
 
-## Background extensions
+## Optional Chat platform extensions
 
-Background extensions run in Rin's daemon runtime as trusted Node.js packages. They are used for long-running async services, chat adapters.
+Telegram and Discord are Chat-owned core platform implementations. Other trusted platforms may be ordinary Pi extensions discovered by `DefaultResourceLoader`.
 
-Only extensions discovered through ordinary Pi extension settings or package configuration are eligible for daemon adaptation. `settings.json -> rinExtensions.daemon` may provide matching backend configuration, but it cannot load an extension by itself.
+An optional platform extension keeps Pi's standard default factory and emits one `rin.chat.platform.v1` contribution through `pi.events`. The contribution receives only the narrow platform context exported by `@hoshinorin/rin/extension`; Chat retains lifecycle, database, inbox/outbox, binding, and recovery ownership. There is no separate daemon extension API, loader, registry, or package format.
 
-The ordinary default export remains Pi's session extension factory and is not replayed by the daemon adapter. Daemon extensions use the separate `rinDaemonExtension(rin)` registration API:
-
-- `rin.registerBackgroundService(...)`;
-- `rin.registerChatAdapter(...)`;
-
-Install and update packages through Pi package commands exposed by the `rin` CLI. Restart or reload Rin after changing extension settings.
-
-A background service may use `ctx.chat.listKeys(...)` and `ctx.chat.getSessionBindings(...)` to discover chats and their opaque current-session references, then pass those references to `ctx.sessions.getStates(...)`. Chat owns the binding, while the session subsystem owns `idle`, `executing`, or `waiting`; extensions receive neither database nor session-file ownership.
-
-Keep normal built-in chat adapter configuration under `settings.json -> chat`. Use background services for intentionally configured background event bridges or custom chat adapters.
+Install and update packages through Pi package commands exposed by the `rin` CLI. Keep each platform's account configuration under `settings.json -> chat`, and restart or reload Rin after changing extension settings.

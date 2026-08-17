@@ -30,7 +30,7 @@ import { createInstallExecutionContext } from "./execution-context.js";
 import { defaultInstallDirForHome, installedReleaseRoot } from "./paths.js";
 import {
   finalizeInstallUpgradeMigrations,
-  normalizeInstalledChatSettings,
+  normalizeInstalledSettings,
   persistInstallerOutputs,
   preflightInstallUpgradeMigrations,
   reconcileInstallerManifest,
@@ -160,7 +160,7 @@ function deriveGitReleaseMetadata(sourceRoot: string, branchHint = "") {
   };
 }
 
-function normalizeReleaseMetadataForInstall(
+function normalizeReleaseMetadataForMigration(
   release: FinalizeInstallOptions["release"],
   sourceRoot: string,
 ) {
@@ -431,7 +431,7 @@ async function applyInstalledRuntime(
   const sourceRoot =
     String(options.sourceRoot || "").trim() || repoRootFromHere();
   const persistInstallerState = Boolean(options.persistInstallerState);
-  const release = normalizeReleaseMetadataForInstall(
+  const release = normalizeReleaseMetadataForMigration(
     options.release,
     sourceRoot,
   );
@@ -562,8 +562,7 @@ async function applyInstalledRuntime(
       currentReleaseRoot: publishedRuntime.releaseRoot,
       migrationRuntimeRoot,
       targetNodePath: executionContext.targetNodePath,
-      chatRuntimeWillBeQuiesced: Boolean(manageDaemon && publishRuntime),
-      chatRuntimeQuiesced: false,
+      runtimeQuiesced: false,
     };
     const migrationDeps = {
       findSystemUser,
@@ -595,9 +594,7 @@ async function applyInstalledRuntime(
               currentReleaseRoot: publishedRuntime.releaseRoot,
               migrationRuntimeRoot,
               targetNodePath: executionContext.targetNodePath,
-              chatRuntimeWillBeQuiesced:
-                migrationOptions.chatRuntimeWillBeQuiesced,
-              chatRuntimeQuiesced: migrationOptions.chatRuntimeQuiesced,
+              runtimeQuiesced: migrationOptions.runtimeQuiesced,
               managedFiles: buildInstalledManagedFilesManifest(sourceRoot),
               previousReleaseName,
               previousReleaseRoot: previousReleaseName
@@ -627,7 +624,7 @@ async function applyInstalledRuntime(
               captureCommandAsUser,
             },
           )
-        : normalizeInstalledChatSettings(migrationOptions, migrationDeps);
+        : normalizeInstalledSettings(migrationOptions, migrationDeps);
 
     const runtimeReplacement = createInstalledRuntimeReplacementLifecycle({
       releaseRoot: publishedRuntime.releaseRoot,
@@ -734,7 +731,7 @@ async function applyInstalledRuntime(
             agentDir: serviceContext.agentDir,
             socketPath: daemonSocketPath,
           });
-          migrationOptions.chatRuntimeQuiesced = true;
+          migrationOptions.runtimeQuiesced = true;
         }
       },
       mutate: writeInstalledState,

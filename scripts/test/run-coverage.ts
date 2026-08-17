@@ -123,6 +123,11 @@ async function runCoverage(options: CoverageRunOptions) {
           s: Record<string, number>;
           branchMap: Record<string, { line: number }>;
           b: Record<string, number[]>;
+          fnMap: Record<
+            string,
+            { name: string; loc: { start: { line: number } } }
+          >;
+          f: Record<string, number>;
         }
       >
     >(path.relative(rootDir, path.join(reportDir, "coverage-final.json")));
@@ -135,8 +140,14 @@ async function runCoverage(options: CoverageRunOptions) {
         .filter(([, counts]) => counts.some((count) => count === 0))
         .map(([id]) => coverage.branchMap[id]?.line)
         .filter((line): line is number => line !== undefined);
+      const uncoveredFunctions = Object.entries(coverage.f)
+        .filter(([, count]) => count === 0)
+        .map(([id]) => {
+          const item = coverage.fnMap[id];
+          return item ? `${item.name}@${item.loc.start.line}` : id;
+        });
       console.log(
-        `Detailed coverage ${path.relative(rootDir, file)}: uncovered lines ${[...new Set(uncoveredLines)].join(",")}; uncovered branches ${[...new Set(uncoveredBranches)].join(",")}`,
+        `Detailed coverage ${path.relative(rootDir, file)}: uncovered lines ${[...new Set(uncoveredLines)].join(",")}; uncovered branches ${[...new Set(uncoveredBranches)].join(",")}; uncovered functions ${uncoveredFunctions.join(",")}`,
       );
     }
   }

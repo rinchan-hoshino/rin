@@ -9,7 +9,8 @@ import {
   readChatOutboxItemById,
   writeChatOutboxItem,
 } from "./outbox.js";
-import { createRinI18n } from "../rin-install/i18n.js";
+import { createRinI18n } from "../i18n.js";
+import { parseChatKey } from "./support.js";
 import {
   isInboundChatMessageProcessed,
   markProcessedChatMessage,
@@ -251,8 +252,6 @@ export async function syncDiscordCommands(
 const CHAT_OUTBOX_MAX_ATTEMPTS = 4;
 const CHAT_OUTBOX_RETRY_DELAYS_MS = [1000, 3000, 10_000] as const;
 export const DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS = 120_000;
-export const DEFAULT_DISCORD_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS = 180_000;
-export const DEFAULT_ONEBOT_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS = 10 * 60_000;
 export const DEFAULT_CHAT_OUTBOX_DISPATCH_TIMEOUT_MS = 30_000;
 export const DEFAULT_CHAT_OUTBOX_MAX_AGE_MS = 60 * 60_000;
 const DEFAULT_CHAT_OUTBOX_RETRY_LEASE_MS = 5 * 60_000;
@@ -337,19 +336,10 @@ function chatOutboxPayloadContainsMedia(payload: ChatOutboxItem["payload"]) {
   );
 }
 
-function isPlatformMediaOutboxItem(
-  item: Pick<ChatOutboxItem, "payload"> | undefined,
-  platform: string,
-) {
-  return (
-    safeString(item?.payload?.chatKey).startsWith(`${platform}/`) &&
-    chatOutboxPayloadContainsMedia(item?.payload)
-  );
-}
-
 export function getChatOutboxSendTimeoutMs(
   item?: Pick<ChatOutboxItem, "payload">,
   options: ChatOutboxDrainOptions = {},
+  app?: any,
 ) {
   const configured =
     options.sendTimeoutMs ?? process.env.RIN_CHAT_OUTBOX_SEND_TIMEOUT_MS;
@@ -359,11 +349,26 @@ export function getChatOutboxSendTimeoutMs(
       DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS,
     );
   }
-  if (isPlatformMediaOutboxItem(item, "onebot")) {
-    return DEFAULT_ONEBOT_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS;
-  }
-  if (isPlatformMediaOutboxItem(item, "discord")) {
-    return DEFAULT_DISCORD_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS;
+  if (app && chatOutboxPayloadContainsMedia(item?.payload)) {
+    const parsed = parseChatKey(safeString(item?.payload?.chatKey));
+    const bots = Array.isArray(app?.bots)
+      ? app.bots
+      : app?.bots && typeof app.bots[Symbol.iterator] === "function"
+        ? Array.from(app.bots)
+        : [];
+    const bot = parsed
+      ? bots.find(
+          (candidate: any) =>
+            safeString(candidate?.platform) === parsed.platform &&
+            (!parsed.botId || safeString(candidate?.selfId) === parsed.botId),
+        )
+      : null;
+    if (bot?.outboxMediaSendTimeoutMs !== undefined) {
+      return normalizePositiveMilliseconds(
+        bot.outboxMediaSendTimeoutMs,
+        DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS,
+      );
+    }
   }
   return DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS;
 }
@@ -759,7 +764,7 @@ async function drainChatOutboxItem(
   if (getChatTransportReadiness(app, item.payload.chatKey) === "unavailable") {
     return null;
   }
-  const timeoutMs = getChatOutboxSendTimeoutMs(item, options);
+  const timeoutMs = getChatOutboxSendTimeoutMs(item, options, app);
   const leaseUntil = new Date(
     Date.now() + timeoutMs + retryLeaseMs(options),
   ).toISOString();

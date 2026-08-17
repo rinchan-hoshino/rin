@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
@@ -138,17 +139,6 @@ test("chat transport resolves reaction capabilities across platform adapters", a
     false,
   );
 
-  const onebotPrivate = createBot({}, "onebot");
-  assert.equal(
-    await transport.sendReaction(
-      onebotPrivate.app,
-      "onebot/owner-bot:private:owner",
-      "42",
-      "🔥",
-    ),
-    false,
-  );
-
   const reaction = createBot({
     async createReaction(...args: unknown[]) {
       reaction.calls.push(["create", ...args]);
@@ -193,16 +183,6 @@ test("chat transport resolves reaction capabilities across platform adapters", a
     ),
     false,
   );
-  assert.equal(
-    await transport.clearReaction(
-      onebotPrivate.app,
-      "onebot/owner-bot:private:owner",
-      "7",
-      "🤔",
-    ),
-    false,
-  );
-
   const internalDelete = createBot();
   internalDelete.bot.internal.deleteOwnReaction = async (
     ...args: unknown[]
@@ -532,24 +512,13 @@ test("chat outbox delivery exposes dispatch, persists records, and validates res
     assert.equal(stored[0].replyToMessageId, "reply-owner");
     assert.equal(stored[0].sessionFile, "owner.jsonl");
 
-    assert.equal(transport.chatOutboxPayloadUsesAsyncDispatch(payload), true);
-    assert.equal(
-      transport.chatOutboxPayloadUsesAsyncDispatch({
-        chatKey: "custom/owner-bot:chat",
-      }),
-      false,
-    );
-    assert.equal(
-      transport.chatOutboxPayloadUsesAsyncDispatch(undefined),
-      false,
-    );
     assert.equal(transport.getChatDeliveryDispatchPromise({}), undefined);
     assert.equal(
       transport.getChatOutboxDispatchPromise(
         { ...payload, chatKey: "custom/owner-bot:chat" },
         delivery,
       ),
-      undefined,
+      dispatch,
     );
 
     await assert.rejects(
@@ -626,6 +595,7 @@ test("chat outbox delivery exposes dispatch, persists records, and validates res
 test("chat outbox supports synchronous adapters and metadata-only native parts", async () => {
   await withTransportRoot(async (root) => {
     const custom = createBot({}, "custom");
+    custom.bot.outboxUsesDispatchSignal = false;
     const payload = {
       createdAt: new Date().toISOString(),
       chatKey: "custom/owner-bot:owner-chat",

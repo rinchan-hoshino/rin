@@ -934,7 +934,7 @@ export async function appendTranscriptArchiveEntry(
   }
 }
 
-export async function synchronizeTranscriptSearchIndexAtPathForInstall(
+export async function synchronizeTranscriptSearchIndexAtPathForMigration(
   dbPath: string,
   rootOverride = "",
   options: TranscriptSearchSyncOptions = {},
@@ -972,7 +972,7 @@ export async function synchronizeTranscriptSearchIndexAtPathForInstall(
   }
 }
 
-export async function rebuildTranscriptSearchIndexAtPathForInstall(
+export async function rebuildTranscriptSearchIndexAtPathForMigration(
   dbPath: string,
   rootOverride = "",
   options: TranscriptSearchSyncOptions = {},
@@ -980,7 +980,7 @@ export async function rebuildTranscriptSearchIndexAtPathForInstall(
   for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
     fssync.rmSync(candidate, { force: true });
   }
-  return synchronizeTranscriptSearchIndexAtPathForInstall(
+  return synchronizeTranscriptSearchIndexAtPathForMigration(
     dbPath,
     rootOverride,
     options,

@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import { register } from "node:module";
 
 const replacements: Record<string, string> = {
@@ -69,17 +70,16 @@ const replacements: Record<string, string> = {
       const routed = await options.additionalCommandRouter({ type: "owner-command", payload });
       const unknown = await options.additionalCommandRouter({ type: "owner-unknown" });
       await options.onShutdown();
-      console.log(JSON.stringify({ socketPath: options.socketPath, starting, ready, routed, unknown: unknown ?? null, extensionApi: options.chatExtensionApi, events: globalThis.__rinAppDaemonOwnerEvents }));
-      return { shutdown: options.onShutdown };
-    }
-  `,
-  "dist/core/rin-daemon/extensions.js": `
-    export class RinDaemonExtensionManager {
-      constructor(options) { this.options = options; globalThis.__rinAppDaemonOwnerEvents.push(["manager-new", options.cwd, options.agentDir]); }
-      setChatApi(api) { this.chatApi = api; globalThis.__rinAppDaemonOwnerEvents.push(["manager-chat-api", api.ownerExtensionApi]); }
-      async start() { globalThis.__rinAppDaemonOwnerEvents.push(["manager-start", this.chatApi?.ownerExtensionApi]); }
-      async stop() { globalThis.__rinAppDaemonOwnerEvents.push(["manager-stop"]); }
-      getChatAdapterProviders() { return [{ id: "owner-provider" }]; }
+      console.log(JSON.stringify({ socketPath: options.socketPath, starting, ready, routed, unknown: unknown ?? null, events: globalThis.__rinAppDaemonOwnerEvents }));
+      if (["shutdown", "shutdown-fail"].includes(process.env.RIN_TEST_APP_DAEMON_MODE || "")) {
+        setImmediate(() => process.listeners("SIGTERM").at(-1)?.());
+      }
+      return {
+        shutdown:
+          process.env.RIN_TEST_APP_DAEMON_MODE === "shutdown-fail"
+            ? async () => { throw new Error("owner shutdown failed"); }
+            : options.onShutdown,
+      };
     }
   `,
   "dist/core/rin-daemon/worker-cgroup-isolation.js": `
@@ -135,3 +135,14 @@ register(
 );
 
 globalThis.__rinAppDaemonOwnerEvents ||= [];
+if (
+  ["shutdown", "shutdown-fail"].includes(
+    process.env.RIN_TEST_APP_DAEMON_MODE || "",
+  )
+) {
+  process.exit = ((code = 0) => {
+    globalThis.__rinAppDaemonOwnerEvents.push(["process-exit", code]);
+    console.log(JSON.stringify(globalThis.__rinAppDaemonOwnerEvents));
+    process.exitCode = code;
+  }) as typeof process.exit;
+}

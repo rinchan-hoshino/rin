@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 import { register } from "node:module";
 
 const replacements: Record<string, string> = {
@@ -61,15 +62,6 @@ const replacements: Record<string, string> = {
     export async function listCatalogAllModels() { return [{ id: "all-owner" }]; }
     export async function listCatalogModels() { return [{ id: "available-owner" }]; }
     export async function getCatalogOAuthState() { return { owner: true }; }
-  `,
-  "dist/core/rin-daemon/extensions.js": `
-    export class RinDaemonExtensionManager {
-      constructor(options) { this.options = options; }
-      setChatApi(chat) { this.chat = chat; }
-      setSessionApi(sessions) { this.sessions = sessions; }
-      async start() { if (process.env.RIN_TEST_DAEMON_MANAGER_START_FAIL) throw new Error("owner manager start failed"); }
-      async stop() { if (process.env.RIN_TEST_DAEMON_MANAGER_STOP_FAIL) throw new Error("owner manager stop failed"); }
-    }
   `,
   "dist/core/rin-daemon/running-workers.js": `
     export function listRunningWorkerSessions() {

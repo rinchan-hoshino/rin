@@ -1,3 +1,4 @@
+import "./require-test-sandbox.ts";
 function sessionState(session) {
   return {
     sessionFile: session?.sessionManager?.getSessionFile?.(),

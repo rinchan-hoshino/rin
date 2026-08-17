@@ -8,8 +8,8 @@ import {
   fileNameFromUrl,
   isImageMimeType,
   isImageName,
-} from "../chat/file-utils.js";
-import { WORKING_REACTION_EMOJI } from "../chat/transport.js";
+} from "../file-utils.js";
+import { WORKING_REACTION_EMOJI } from "../transport.js";
 import {
   renderChatNodesMarkdown,
   renderChatNodesPlain,
@@ -18,10 +18,10 @@ import {
   extractChatQuoteMessageId,
   withoutChatQuoteNodes,
   type RenderChatNodesOptions,
-} from "../chat/rich-text.js";
-import { ensureDir } from "../platform/fs.js";
-import { sleep } from "../platform/process.js";
-import { safeString } from "../text-utils.js";
+} from "../rich-text.js";
+import { ensureDir } from "../../platform/fs.js";
+import { sleep } from "../../platform/process.js";
+import { safeString } from "../../text-utils.js";
 
 const ALL_TEXT_MIME_EXTENSION_OPTIONS = {
   allTextMimeTypes: true,
@@ -84,7 +84,7 @@ const LEGACY_EDITABLE_WORKING_TEXTS = ["Working", "Working.", "Working.."];
 export const EDITABLE_INTERMEDIATE_PREFIX = "...";
 export const EDITABLE_MESSAGE_SECTION_SEPARATOR = "────────";
 
-type ChatRuntimeWorkingCopy = {
+type ChatWorkingCopy = {
   workingText: string;
   progressTexts: string[];
 };
@@ -101,7 +101,7 @@ function uniqueStrings(values: unknown[]) {
   return output;
 }
 
-export function resolveChatRuntimeWorkingCopy(): ChatRuntimeWorkingCopy {
+export function resolveChatWorkingCopy(): ChatWorkingCopy {
   return {
     workingText: DEFAULT_WORKING_TEXT,
     progressTexts: [DEFAULT_WORKING_TEXT, ...LEGACY_EDITABLE_WORKING_TEXTS],
@@ -140,7 +140,7 @@ export function ensureExtension(fileName: string, mimeType = "") {
 }
 
 export function createPrefixedLogger(name: string, fallback: any) {
-  const prefix = `[${safeString(name).trim() || "chat-runtime"}]`;
+  const prefix = `[${safeString(name).trim() || "chat"}]`;
   return {
     debug: (...args: any[]) =>
       fallback?.debug ? fallback.debug(prefix, ...args) : undefined,

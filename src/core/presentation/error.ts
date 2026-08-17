@@ -204,18 +204,18 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Chat inbox write failed because the inbound message identity is incomplete.",
   chat_inbox_turn_commit_failed: () =>
     "Chat inbox write failed while committing the turn ledger.",
-  chat_install_migration_active_legacy_turn: () =>
+  chat_database_migration_active_legacy_turn: () =>
     "Rin update cannot continue while a chat turn from the current version is still active.",
-  chat_install_migration_canonical_reconciliation_backup_exists: (detail) =>
+  chat_database_migration_canonical_reconciliation_backup_exists: (detail) =>
     withDetail("Rin found an existing canonical reconciliation backup", detail),
-  chat_install_migration_canonical_reconciliation_binding_remains: (detail) =>
+  chat_database_migration_canonical_reconciliation_binding_remains: (detail) =>
     withDetail(
       "Rin could not retire a stale canonical chat session binding",
       detail,
     ),
-  chat_install_migration_install_dir_required: () =>
+  chat_database_migration_install_dir_required: () =>
     "Chat migration needs the target Rin install directory.",
-  chat_install_migration_invalid_accepted_orphan: () =>
+  chat_database_migration_invalid_accepted_orphan: () =>
     "Chat migration found an accepted legacy message with incomplete identity.",
   memory_install_migration_install_dir_required: () =>
     "Memory migration needs the target Rin install directory.",
@@ -231,11 +231,11 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Memory migration found inconsistent published payload state.",
   memory_install_migration_runtime_not_quiesced: () =>
     "Memory migration requires the Rin runtime to be fully stopped.",
-  chat_install_migration_invalid_session_state: (detail) =>
+  chat_database_migration_invalid_session_state: (detail) =>
     withDetail("Chat migration found invalid legacy session state", detail),
-  chat_install_migration_session_state_read_failed: (detail) =>
+  chat_database_migration_session_state_read_failed: (detail) =>
     withDetail("Chat migration could not read legacy session state", detail),
-  chat_install_migration_invalid_settings: (detail) =>
+  chat_database_migration_invalid_settings: (detail) =>
     withDetail("Chat migration could not read the installed settings", detail),
   chat_key_migration_invalid_marker: (detail) =>
     withDetail("Chat migration found an invalid progress marker", detail),
@@ -436,15 +436,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   invalid_model: invalidModel,
   invalid_model_ref: invalidModel,
 
-  lark_app_id_required: () =>
-    "Lark adapter needs an app id before it can start. Add the app id.",
-  lark_app_secret_required: () =>
-    "Lark adapter needs an app secret before it can start. Add the app secret.",
-  lark_reaction_emoji_required: () =>
-    "Lark reaction failed because the emoji is missing. Choose an emoji.",
-  lark_send_message_empty: () =>
-    "Lark send failed because the outgoing message is empty. Add text or an attachment.",
-
   maintenance_job_failed: () =>
     "Maintenance job failed. Check the maintenance log.",
   maintenance_job_invalid_input: () =>
@@ -494,30 +485,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   oauth_provider_id_required: () =>
     "OAuth login needs a provider id. Choose a provider.",
 
-  onebot_disconnected: () =>
-    "OneBot adapter disconnected. Check NapCat/OneBot.",
-  onebot_endpoint_required: () =>
-    "OneBot adapter needs an endpoint before it can start. Add the endpoint.",
-  onebot_not_connected: () =>
-    "OneBot adapter is not connected. Check NapCat/OneBot.",
-  onebot_file_source_empty: () =>
-    "OneBot file delivery needs a file source. Add a file source.",
-  onebot_reaction_emoji_unsupported: () =>
-    "OneBot reaction failed because this emoji is not supported. Choose a supported emoji.",
-  onebot_reaction_requires_group_chat: () =>
-    "OneBot reactions are only available in group chats. Use a group chat or skip the reaction.",
-  onebot_send_message_empty: () =>
-    "OneBot send failed because the outgoing message is empty. Add text or an attachment.",
-  onebot_send_message_empty_result: () =>
-    "OneBot accepted the send request but returned no delivered message. Check NapCat/OneBot.",
-  onebot_upload_file_empty_result: () =>
-    "OneBot accepted the file upload but returned no file identifier. Check NapCat/OneBot.",
-
   rin_system_prompt_extension_missing: () =>
     "Rin's core system prompt extension did not load. Reload Rin; if this persists, repair the runtime installation.",
-
-  daemon_extension_entrypoint_missing: () =>
-    'Daemon extension entry point is missing. Export the named "rinDaemonExtension" factory.',
 
   rin_agent_sdk_task_id_required: () =>
     "Agent SDK task operation needs a task id. Provide the task id.",
@@ -834,15 +803,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "This session cannot be forked through that path. Use a supported session type or start a new session.",
   run_chat_key_not_supported_in_print_mode: () =>
     "Print mode cannot deliver chat messages. Use a chat-owned delivery surface instead.",
-
-  slack_app_token_required: () =>
-    "Slack adapter needs an app token before it can start. Add the token.",
-  slack_bot_token_required: () =>
-    "Slack adapter needs a bot token before it can start. Add the token.",
-  slack_reaction_emoji_required: () =>
-    "Slack reaction failed because the emoji is missing. Choose an emoji.",
-  slack_send_message_empty: () =>
-    "Slack send failed because the outgoing message is empty. Add text or an attachment.",
 
   telegram_api_failed: (detail) =>
     withDetail(

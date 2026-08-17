@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -30,7 +31,7 @@ test("chat main carries sender metadata to the controller with the prompt body",
       const mainMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href);
       const controllerMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "controller.js")).href);
       const supportMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "support.js")).href);
-      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat-runtime", "registry.js")).href);
+      const h = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "chat.js")).href);
       const seen = [];
 
       supportMod.saveIdentity(path.join(agentDir, "data"), {
@@ -51,10 +52,8 @@ test("chat main carries sender metadata to the controller with the prompt body",
       app.bots.push({
         platform: "telegram",
         selfId: "1",
-        internal: {
-          async getChatMember({ user_id }) {
-            return user_id === "owner-1" ? { status: "member" } : { status: "left" };
-          },
+        async isChatMember(_chatId, userId) {
+          return userId === "owner-1";
         },
         async sendMessage() {
           return ["assistant-1"];
@@ -88,7 +87,7 @@ test("chat main carries sender metadata to the controller with the prompt body",
         stripped: { content: "my name is?", appel: true },
         elements: [
           { type: "at", attrs: { name: "RinBot" } },
-          h.createChatRuntimeH().text(" my name is?"),
+          h.createChatNodes().text(" my name is?"),
         ],
       });
 

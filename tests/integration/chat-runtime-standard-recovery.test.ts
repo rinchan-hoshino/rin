@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -12,7 +13,7 @@ const rootDir = path.resolve(
 );
 const adapters = await import(
   pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat-runtime", "discord.js"),
+    path.join(rootDir, "dist", "core", "chat", "platform", "discord.js"),
   ).href
 );
 const messageStore = await import(
@@ -21,15 +22,7 @@ const messageStore = await import(
 );
 const inboundRecovery = await import(
   pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat-runtime", "inbound-recovery.js"),
-  ).href
-);
-const database = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "database.js")).href
-);
-const databaseInstallMigration = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "chat", "database-install-migration.js"),
+    path.join(rootDir, "dist", "core", "chat", "inbound-recovery.js"),
   ).href
 );
 
@@ -61,98 +54,13 @@ function saveInboundHead(
   });
 }
 
-function insertLegacyOneBotHead(
-  agentDir: string,
-  botId = "bot-1",
-  chatId = "123",
-) {
-  const db = database.openChatDatabase(agentDir);
-  db.prepare(
-    `INSERT INTO inbound_heads (
-       platform, bot_id, chat_key, chat_id, message_id,
-       platform_timestamp, received_at, provider_cursor,
-       sequence, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    "onebot",
-    botId,
-    `onebot/${botId}:${chatId}`,
-    chatId,
-    "id-old",
-    1,
-    "2026-08-05T00:00:00.000Z",
-    "1",
-    1,
-    "2026-08-05T00:00:00.000Z",
-  );
-}
-
-test("onebot v11 live messages do not create non-standard history checkpoints", async () => {
-  const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-onebot-standard-head-"),
-  );
-  try {
-    saveInboundHead(agentDir, {
-      platform: "onebot",
-      botId: "bot-1",
-      chatId: "123",
-      messageId: "id-live",
-    });
-
-    assert.deepEqual(
-      inboundRecovery.listInboundRecoveryHeads(agentDir, "onebot", "bot-1"),
-      [],
-    );
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("install migration discards legacy OneBot recovery heads only", async () => {
-  const agentDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-onebot-standard-install-"),
-  );
-  try {
-    insertLegacyOneBotHead(agentDir);
-    insertLegacyOneBotHead(agentDir, "bot-2", "456");
-    saveInboundHead(agentDir, {
-      platform: "discord",
-      botId: "bot-discord",
-      chatId: "channel-1",
-      messageId: "100",
-    });
-    database.closeChatDatabase(agentDir);
-
-    databaseInstallMigration.migrateChatDatabaseForInstall(agentDir, {
-      runtimeQuiesced: true,
-    });
-
-    assert.deepEqual(
-      inboundRecovery.listInboundRecoveryHeads(agentDir, "onebot", "bot-1"),
-      [],
-    );
-    assert.deepEqual(
-      inboundRecovery.listInboundRecoveryHeads(agentDir, "onebot", "bot-2"),
-      [],
-    );
-    assert.deepEqual(
-      inboundRecovery
-        .listInboundRecoveryHeads(agentDir, "discord", "bot-discord")
-        .map((head: any) => head.chatKey),
-      ["discord/bot-discord:channel-1"],
-    );
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
 test("discord channel deletion immediately removes its inbound recovery head", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-discord-channel-delete-"),
   );
   try {
     let bot: any;
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       {
         agentDir,
         register(_adapter: unknown, registeredBot: any) {
@@ -163,6 +71,7 @@ test("discord channel deletion immediately removes its inbound recovery head", a
       {},
       logger(),
     ) as any;
+    bot = adapter.bot;
     bot.selfId = "bot-discord";
     saveInboundHead(agentDir, {
       platform: "discord",
@@ -197,7 +106,7 @@ test("discord startup treats API code 10003 as a terminal deleted channel", asyn
   try {
     const warnings: string[] = [];
     let bot: any;
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       {
         agentDir,
         register(_adapter: unknown, registeredBot: any) {
@@ -208,6 +117,7 @@ test("discord startup treats API code 10003 as a terminal deleted channel", asyn
       {},
       logger(warnings),
     ) as any;
+    bot = adapter.bot;
     bot.selfId = "bot-discord";
     saveInboundHead(agentDir, {
       platform: "discord",
@@ -250,7 +160,7 @@ test("discord channel tombstone wins over in-flight recovery", async () => {
   );
   try {
     let bot: any;
-    const adapter = new adapters.DiscordAdapter(
+    const adapter = new adapters.DiscordPlatform(
       {
         agentDir,
         register(_adapter: unknown, registeredBot: any) {
@@ -261,6 +171,7 @@ test("discord channel tombstone wins over in-flight recovery", async () => {
       {},
       logger(),
     ) as any;
+    bot = adapter.bot;
     bot.selfId = "bot-discord";
     for (const [chatId, messageId] of [
       ["channel-1", "100"],

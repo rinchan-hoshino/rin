@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -57,8 +58,8 @@ async function writeExtensionPackage(dir: string) {
   await fs.writeFile(
     path.join(dir, "dist", "index.js"),
     `export default function extension(rin) {
-      if ("registerBackgroundService" in rin || "registerChatAdapter" in rin || "dataDir" in rin) {
-        throw new Error("daemon APIs leaked into the session extension API");
+      if ("dataDir" in rin) {
+        throw new Error("backend state leaked into the session extension API");
       }
       rin.registerCommand("rin_extension_loader_command", {
         description: "Rin chat command",
@@ -210,7 +211,7 @@ test("Rin AuthStorage adapts legacy OAuth callbacks to ModelRuntime interactions
   ]);
 });
 
-test("Rin DefaultResourceLoader keeps daemon APIs out of the session API", async () => {
+test("Rin DefaultResourceLoader keeps backend state out of the session API", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-ext-loader-"));
   const extensionDir = path.join(agentDir, "extension");
   try {

@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -10,8 +11,8 @@ const chatSupport = await importBuiltModule<
   typeof import("../../src/core/chat/support.js")
 >("dist/core/chat/support.js");
 const runtimeCommon = await importBuiltModule<
-  typeof import("../../src/core/chat-runtime/common.js")
->("dist/core/chat-runtime/common.js");
+  typeof import("../../src/core/chat/platform/common.js")
+>("dist/core/chat/platform/common.js");
 
 test("chat file utility re-exports share the canonical implementation", () => {
   assert.equal(

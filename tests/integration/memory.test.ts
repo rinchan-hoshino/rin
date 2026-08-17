@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -37,7 +38,7 @@ const recallPresentation = await import(
     ),
   ).href
 );
-const transcriptInstallMigration = await import(
+const transcriptSchemaMigration = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "memory", "install-migration.js"),
   ).href
@@ -420,7 +421,7 @@ test("installer replaces a schema-v4 transcript index from canonical archives", 
       filesBeforeRuntimeOpen,
     );
     const preflight =
-      transcriptInstallMigration.preflightTranscriptSearchMigration(root);
+      transcriptSchemaMigration.preflightTranscriptSearchMigration(root);
     assert.equal(preflight.action, "rebuild");
     assert.equal(preflight.currentVersion, null);
     assert.equal(preflight.reason, "unmarked");
@@ -429,7 +430,7 @@ test("installer replaces a schema-v4 transcript index from canonical archives", 
       filesBeforeRuntimeOpen,
     );
     const prepared =
-      await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+      await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
         root,
       );
     assert.equal(prepared.prepared, true);
@@ -461,7 +462,7 @@ test("installer replaces a schema-v4 transcript index from canonical archives", 
 
     let publishGuardObserved = false;
     const migration =
-      await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+      await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
         root,
         {
           runtimeQuiesced: true,
@@ -475,7 +476,7 @@ test("installer replaces a schema-v4 transcript index from canonical archives", 
     assert.equal(publishGuardObserved, true);
     assert.equal(migration.action, "rebuilt");
     assert.equal(
-      transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+      transcriptSchemaMigration.finalizeTranscriptSearchMigrationForMigration(
         root,
       ).skipped,
       false,
@@ -580,7 +581,7 @@ test("installer memory-v6 migration sanitizes transcripts without reading manage
     );
 
     const prepared =
-      await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+      await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
         root,
       );
     assert.equal("transcriptManifest" in prepared, false);
@@ -596,13 +597,15 @@ test("installer memory-v6 migration sanitizes transcripts without reading manage
     assert.deepEqual(await fs.readFile(managedSession), managedBefore);
     await assert.rejects(
       () =>
-        transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(root),
+        transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
+          root,
+        ),
       /memory_install_migration_runtime_not_quiesced/,
     );
     assert.equal(await fs.readFile(archivePath, "utf8"), legacyArchive);
     await assert.rejects(
       () =>
-        transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+        transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
           root,
           {
             runtimeQuiesced: true,
@@ -626,11 +629,11 @@ test("installer memory-v6 migration sanitizes transcripts without reading manage
     } finally {
       restoredDb.close();
     }
-    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+    await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
       root,
     );
 
-    await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+    await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
       root,
       { runtimeQuiesced: true },
     );
@@ -638,7 +641,7 @@ test("installer memory-v6 migration sanitizes transcripts without reading manage
     assert.deepEqual(await fs.readFile(managedSession), managedBefore);
 
     const rolledBack =
-      transcriptInstallMigration.rollbackTranscriptSearchMigrationForInstall(
+      transcriptSchemaMigration.rollbackTranscriptSearchMigrationForMigration(
         root,
       );
     assert.equal(rolledBack.skipped, false);
@@ -651,15 +654,15 @@ test("installer memory-v6 migration sanitizes transcripts without reading manage
     );
     assert.deepEqual(await fs.readFile(managedSession), managedBefore);
 
-    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+    await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
       root,
     );
-    await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+    await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
       root,
       { runtimeQuiesced: true },
     );
     assert.equal(
-      transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+      transcriptSchemaMigration.finalizeTranscriptSearchMigrationForMigration(
         root,
       ).cleanupPending,
       false,
@@ -723,12 +726,12 @@ test("installer publish failure restores the live transcript index", async () =>
     ];
     for (const failure of failures) {
       const prepared =
-        await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+        await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
           root,
         );
       assert.equal(prepared.prepared, true, failure.label);
       await assert.rejects(
-        transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+        transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
           root,
           { runtimeQuiesced: true, ...failure.options },
         ),
@@ -761,12 +764,12 @@ test("installer completes recovery after interruption following publish", async 
       INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
     `);
     liveDb.close();
-    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+    await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
       root,
     );
 
     const result =
-      await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+      await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
         root,
         {
           runtimeQuiesced: true,
@@ -782,7 +785,7 @@ test("installer completes recovery after interruption following publish", async 
       { schemaVersion: 6, state: "installer-migrating" },
     );
     const finalized =
-      transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+      transcriptSchemaMigration.finalizeTranscriptSearchMigrationForMigration(
         root,
       );
     assert.equal(finalized.skipped, false);
@@ -806,16 +809,16 @@ test("installer rollback restores legacy bytes before restarting the old runtime
     `);
     liveDb.close();
     const legacyBytes = await fs.readFile(dbPath);
-    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+    await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
       root,
     );
-    await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+    await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
       root,
       { runtimeQuiesced: true },
     );
 
     const rolledBack =
-      transcriptInstallMigration.rollbackTranscriptSearchMigrationForInstall(
+      transcriptSchemaMigration.rollbackTranscriptSearchMigrationForMigration(
         root,
       );
     assert.equal(rolledBack.skipped, false);
@@ -842,7 +845,7 @@ test("installer rollback removes a pre-backup marker before old-runtime restart"
     );
 
     const result =
-      transcriptInstallMigration.rollbackTranscriptSearchMigrationForInstall(
+      transcriptSchemaMigration.rollbackTranscriptSearchMigrationForMigration(
         root,
       );
     assert.equal(result.skipped, true);
@@ -861,7 +864,7 @@ test("installer preserves backup payloads when the backup manifest is invalid", 
       INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
     `);
     liveDb.close();
-    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+    await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
       root,
     );
 
@@ -876,7 +879,7 @@ test("installer preserves backup payloads when the backup manifest is invalid", 
     );
 
     await assert.rejects(
-      transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(root, {
+      transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(root, {
         runtimeQuiesced: true,
       }),
       /transcript_search_install_backup_manifest_invalid/,
@@ -905,7 +908,7 @@ test("installer preserves a guard when a declared backup payload is missing", as
     await fs.writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
 
     await assert.rejects(
-      transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(root, {
+      transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(root, {
         runtimeQuiesced: true,
       }),
       /transcript_search_install_backup_manifest_invalid/,
@@ -932,7 +935,7 @@ test("installer rejects a symlinked staging database before live mutation", asyn
     liveDb.close();
     const legacyBytes = await fs.readFile(dbPath);
     const prepared =
-      await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+      await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
         root,
       );
     const sentinelPath = path.join(root, "sentinel.db");
@@ -940,7 +943,7 @@ test("installer rejects a symlinked staging database before live mutation", asyn
     await fs.symlink(sentinelPath, prepared.stagingDbPath);
 
     await assert.rejects(
-      transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(root),
+      transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(root),
       /transcript_search_install_staging_path_invalid/,
     );
     assert.deepEqual(await fs.readFile(dbPath), legacyBytes);
@@ -964,10 +967,10 @@ test("installer rejects symlink backup payloads before finalization", async (t) 
       INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
     `);
     liveDb.close();
-    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+    await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
       root,
     );
-    await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+    await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
       root,
       { runtimeQuiesced: true },
     );
@@ -979,7 +982,7 @@ test("installer rejects symlink backup payloads before finalization", async (t) 
 
     assert.throws(
       () =>
-        transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+        transcriptSchemaMigration.finalizeTranscriptSearchMigrationForMigration(
           root,
         ),
       /transcript_search_install_backup_manifest_invalid/,
@@ -1019,7 +1022,7 @@ test("installer completes rollback after payload restore but before marker clean
     );
 
     const result =
-      transcriptInstallMigration.rollbackTranscriptSearchMigrationForInstall(
+      transcriptSchemaMigration.rollbackTranscriptSearchMigrationForMigration(
         root,
       );
     assert.equal(result.skipped, false);
@@ -1039,7 +1042,7 @@ test("installer cleans an interrupted manifest temp before retry", async () => {
     );
 
     const result =
-      await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+      await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
         root,
         { runtimeQuiesced: true },
       );
@@ -1056,7 +1059,7 @@ test("installer cleans partial backup deletion after durable current marker", as
     await fs.mkdir(backupDir, { recursive: true });
     await fs.writeFile(path.join(backupDir, "orphaned-payload"), "old");
 
-    await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+    await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
       root,
       { runtimeQuiesced: true },
     );
@@ -1079,13 +1082,13 @@ test("installer preflight reuses and catches up a completed staging index", asyn
     `);
     legacyDb.close();
     const first =
-      await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+      await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
         root,
       );
     const firstInode = (await fs.stat(first.stagingDbPath)).ino;
 
     const second =
-      await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+      await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
         root,
       );
     assert.equal(second.reused, true);
@@ -1105,7 +1108,7 @@ test("installer treats a migration marker without a live index as incomplete", a
       })}\n`,
     );
     assert.deepEqual(
-      transcriptInstallMigration.preflightTranscriptSearchMigration(root),
+      transcriptSchemaMigration.preflightTranscriptSearchMigration(root),
       {
         id: "transcript-search-schema-v6",
         skipped: false,
@@ -1138,22 +1141,21 @@ test("installer retries an interrupted schema-v6 transcript rebuild", async () =
     );
 
     const preflight =
-      transcriptInstallMigration.preflightTranscriptSearchMigration(root);
+      transcriptSchemaMigration.preflightTranscriptSearchMigration(root);
     assert.equal(preflight.skipped, false);
     assert.equal(preflight.reason, "incomplete");
     const result =
-      await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+      await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
         root,
         { runtimeQuiesced: true },
       );
     assert.equal(result.action, "rebuilt");
     assert.equal(result.currentVersion, 6);
-    transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+    transcriptSchemaMigration.finalizeTranscriptSearchMigrationForMigration(
       root,
     );
     assert.equal(
-      transcriptInstallMigration.preflightTranscriptSearchMigration(root)
-        .reason,
+      transcriptSchemaMigration.preflightTranscriptSearchMigration(root).reason,
       "current",
     );
   });
@@ -1174,7 +1176,7 @@ test("runtime leaves a metadata-less legacy transcript index to the installer", 
     );
     assert.deepEqual(await fs.readFile(dbPath), beforeRuntimeOpen);
     const preflight =
-      transcriptInstallMigration.preflightTranscriptSearchMigration(root);
+      transcriptSchemaMigration.preflightTranscriptSearchMigration(root);
     assert.equal(preflight.currentVersion, null);
     assert.equal(preflight.reason, "unmarked");
   });
@@ -2576,7 +2578,7 @@ test("installer restores a transcript guard that predates its backup manifest", 
     await fs.writeFile(liveRoot, "transcript migration guard\n");
 
     const recovered =
-      await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+      await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
         root,
         { runtimeQuiesced: true },
       );
@@ -2590,7 +2592,7 @@ test("installer restores a transcript guard that predates its backup manifest", 
       ),
       /recovered archive/,
     );
-    transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+    transcriptSchemaMigration.finalizeTranscriptSearchMigrationForMigration(
       root,
     );
     assert.equal(fsSync.existsSync(backupRoot), false);
@@ -2605,7 +2607,7 @@ test("installer rejects an unexplained transcript backup beside a live directory
     await fs.mkdir(backupRoot, { recursive: true });
     await fs.writeFile(path.join(backupRoot, "orphan"), "data");
     await assert.rejects(
-      transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(root, {
+      transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(root, {
         runtimeQuiesced: true,
       }),
       /transcript_archive_install_backup_manifest_invalid/,
@@ -2636,10 +2638,10 @@ test("installer recovers a guarded transcript manifest after both payloads publi
       path.join(root, "memory", "search.db.schema.json"),
       `${JSON.stringify({ schemaVersion: 5, state: "current" })}\n`,
     );
-    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+    await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
       root,
     );
-    await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+    await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
       root,
       { runtimeQuiesced: true },
     );
@@ -2652,7 +2654,7 @@ test("installer recovers a guarded transcript manifest after both payloads publi
     );
 
     const recovered =
-      await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+      await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
         root,
         { runtimeQuiesced: true },
       );
@@ -2662,7 +2664,7 @@ test("installer recovers a guarded transcript manifest after both payloads publi
       "published",
     );
     assert.equal(
-      transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+      transcriptSchemaMigration.finalizeTranscriptSearchMigrationForMigration(
         root,
       ).cleanupPending,
       false,
@@ -2692,10 +2694,10 @@ test("installer refuses finalization without the transcript sanitization report"
       path.join(root, "memory", "search.db.schema.json"),
       `${JSON.stringify({ schemaVersion: 5, state: "current" })}\n`,
     );
-    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+    await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
       root,
     );
-    await transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+    await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
       root,
       { runtimeQuiesced: true },
     );
@@ -2708,7 +2710,7 @@ test("installer refuses finalization without the transcript sanitization report"
     await fs.rm(sanitizationPath);
     await assert.rejects(
       Promise.resolve().then(() =>
-        transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+        transcriptSchemaMigration.finalizeTranscriptSearchMigrationForMigration(
           root,
         ),
       ),
@@ -2728,13 +2730,13 @@ test("installer refuses finalization without the transcript sanitization report"
     );
     assert.throws(
       () =>
-        transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+        transcriptSchemaMigration.finalizeTranscriptSearchMigrationForMigration(
           root,
         ),
       /transcript_archive_install_migration_incomplete/,
     );
     assert.equal(
-      transcriptInstallMigration.rollbackTranscriptSearchMigrationForInstall(
+      transcriptSchemaMigration.rollbackTranscriptSearchMigrationForMigration(
         root,
       ).skipped,
       false,
@@ -2750,7 +2752,7 @@ test("installer rejects non-directory transcript backups in every phase", async 
       await fs.writeFile(backupRoot, "not-a-directory");
       if (phase === "apply") {
         await assert.rejects(
-          transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(
+          transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
             root,
             { runtimeQuiesced: true },
           ),
@@ -2760,10 +2762,10 @@ test("installer rejects non-directory transcript backups in every phase", async 
         assert.throws(
           () =>
             phase === "finalize"
-              ? transcriptInstallMigration.finalizeTranscriptSearchMigrationForInstall(
+              ? transcriptSchemaMigration.finalizeTranscriptSearchMigrationForMigration(
                   root,
                 )
-              : transcriptInstallMigration.rollbackTranscriptSearchMigrationForInstall(
+              : transcriptSchemaMigration.rollbackTranscriptSearchMigrationForMigration(
                   root,
                 ),
           /transcript_archive_install_backup_manifest_invalid/,
@@ -2787,11 +2789,11 @@ test("installer requires quiescence even when only an empty legacy index exists"
       `${dbPath}.schema.json`,
       `${JSON.stringify({ schemaVersion: 5, state: "current" })}\n`,
     );
-    await transcriptInstallMigration.prepareTranscriptSearchMigrationForInstall(
+    await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
       root,
     );
     await assert.rejects(
-      transcriptInstallMigration.migrateTranscriptSearchIndexForInstall(root),
+      transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(root),
       /memory_install_migration_runtime_not_quiesced/,
     );
     const unchanged = new BetterSqlite3(dbPath, { readonly: true });

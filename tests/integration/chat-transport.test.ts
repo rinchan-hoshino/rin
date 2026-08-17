@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -687,83 +688,4 @@ test("chat transport sets the fixed Telegram waiting reaction without compatibil
       reaction: [{ type: "emoji", emoji: "⏳" }],
     },
   ]);
-});
-
-test("chat transport uses bot reaction helpers for onebot status reactions", async () => {
-  const calls = [];
-  const app = {
-    bots: [
-      {
-        platform: "onebot",
-        selfId: "2301401877",
-        async createReaction(chatId, messageId, emoji) {
-          calls.push({ kind: "create", chatId, messageId, emoji });
-        },
-        async deleteReaction(chatId, messageId, emoji, userId) {
-          calls.push({ kind: "delete", chatId, messageId, emoji, userId });
-        },
-      },
-    ],
-  };
-
-  const sent = await transport.sendReaction(
-    app,
-    "onebot/2301401877:1067390680",
-    "52",
-    transport.WAITING_REACTION_EMOJI,
-  );
-  const cleared = await transport.clearReaction(
-    app,
-    "onebot/2301401877:1067390680",
-    "52",
-    transport.WAITING_REACTION_EMOJI,
-  );
-
-  assert.equal(sent, true);
-  assert.equal(cleared, true);
-  assert.deepEqual(calls, [
-    { kind: "create", chatId: "1067390680", messageId: "52", emoji: "⏳" },
-    {
-      kind: "delete",
-      chatId: "1067390680",
-      messageId: "52",
-      emoji: "⏳",
-      userId: "2301401877",
-    },
-  ]);
-});
-
-test("chat transport skips onebot status reactions in private chats", async () => {
-  const calls = [];
-  const app = {
-    bots: [
-      {
-        platform: "onebot",
-        selfId: "2301401877",
-        async createReaction() {
-          calls.push("create");
-        },
-        async deleteReaction() {
-          calls.push("delete");
-        },
-      },
-    ],
-  };
-
-  const sent = await transport.sendReaction(
-    app,
-    "onebot/2301401877:private:519418441",
-    "52",
-    transport.WAITING_REACTION_EMOJI,
-  );
-  const cleared = await transport.clearReaction(
-    app,
-    "onebot/2301401877:private:519418441",
-    "52",
-    transport.WAITING_REACTION_EMOJI,
-  );
-
-  assert.equal(sent, false);
-  assert.equal(cleared, false);
-  assert.deepEqual(calls, []);
 });

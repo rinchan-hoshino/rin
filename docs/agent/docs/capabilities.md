@@ -4,19 +4,19 @@ Use this page as Rin's capability index. It tells agents what runtime surfaces e
 
 ## Capability index
 
-| Capability                               | Use when                                                                                                                      | Entry point                                                | Read next                                                      |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------- |
-| Rin launcher                             | Starting, status checks, update, rollback, or installed-runtime maintenance                                                   | `rin`, `rin doctor`, `rin update`, `rin rollback`          | `docs/runtime-layout.md`                                       |
-| Runtime status                           | Checking daemon health, session activity, or self-improve history                                                             | `rin doctor`, `rin status`, `rin self-improve`             | `docs/diagnostic-commands.md`, `docs/runtime-layout.md`        |
-| Memory and self-improve                  | Choosing between original evidence/retrieval and distilled reusable guidance                                                  | `recall`, `rin self-improve`, prompt baselines, skills     | `docs/memory-layering.md`, `docs/self-improve-distillation.md` |
-| Non-interactive child runs               | Isolated scouting, review, verification, comparison, or bounded draft work                                                    | `rin -p`, `--mode json`, `--managed-session`               | `docs/non-interactive-cli.md`, `docs/session-awareness.md`     |
-| Scheduled tasks                          | Reminders, delayed follow-ups, recurring checks, conditional automation, or work after the current turn                       | Rin Agent SDK `rin.tasks.*`                                | `docs/agent-sdk.md`, `docs/scheduled-tasks.md`                 |
-| Chat bridge                              | Agent-owned chat adapter setup, outbound chat operations, stored chat inspection, identity/trust data, or detached chat turns | `settings.json -> chat`, Rin Agent SDK, chat message store | `docs/chat-bridge.md`, `docs/rich-text-output-format.md`       |
-| Todo                                     | Current-branch execution checklist during multi-step work                                                                     | `todo` tool, `/todos`                                      | live tool schema                                               |
-| Note                                     | Session-branch continuity that must survive compaction                                                                        | `note` tool                                                | live tool schema                                               |
-| Browser/computer/mobile/search operation | Web, desktop, mobile, or search work supported by the current runtime                                                         | live tool list                                             | live tool schema                                               |
-| Extensions                               | Pi-native session extensions plus trusted daemon adapters for async services and external events                              | ordinary Pi extension/package configuration                | `docs/extensions.md`                                           |
-| Initialization                           | Owner asks to initialize, reset, or establish preferences                                                                     | initialization prompt flow                                 | `docs/initialization.md`                                       |
+| Capability                               | Use when                                                                                                                  | Entry point                                                | Read next                                                      |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------- |
+| Rin launcher                             | Starting, status checks, update, rollback, or installed-runtime maintenance                                               | `rin`, `rin doctor`, `rin update`, `rin rollback`          | `docs/runtime-layout.md`                                       |
+| Runtime status                           | Checking daemon health, session activity, or self-improve history                                                         | `rin doctor`, `rin status`, `rin self-improve`             | `docs/diagnostic-commands.md`, `docs/runtime-layout.md`        |
+| Memory and self-improve                  | Choosing between original evidence/retrieval and distilled reusable guidance                                              | `recall`, `rin self-improve`, prompt baselines, skills     | `docs/memory-layering.md`, `docs/self-improve-distillation.md` |
+| Non-interactive child runs               | Isolated scouting, review, verification, comparison, or bounded draft work                                                | `rin -p`, `--mode json`, `--managed-session`               | `docs/non-interactive-cli.md`, `docs/session-awareness.md`     |
+| Scheduled tasks                          | Reminders, delayed follow-ups, recurring checks, conditional automation, or work after the current turn                   | Rin Agent SDK `rin.tasks.*`                                | `docs/agent-sdk.md`, `docs/scheduled-tasks.md`                 |
+| Chat                                     | Agent-owned platform setup, outbound chat operations, stored chat inspection, identity/trust data, or detached chat turns | `settings.json -> chat`, Rin Agent SDK, chat message store | `docs/chat-bridge.md`, `docs/rich-text-output-format.md`       |
+| Todo                                     | Current-branch execution checklist during multi-step work                                                                 | `todo` tool, `/todos`                                      | live tool schema                                               |
+| Note                                     | Session-branch continuity that must survive compaction                                                                    | `note` tool                                                | live tool schema                                               |
+| Browser/computer/mobile/search operation | Web, desktop, mobile, or search work supported by the current runtime                                                     | live tool list                                             | live tool schema                                               |
+| Extensions                               | Pi-native session extensions plus optional trusted Chat platforms                                                         | ordinary Pi extension/package configuration                | `docs/extensions.md`                                           |
+| Initialization                           | Owner asks to initialize, reset, or establish preferences                                                                 | initialization prompt flow                                 | `docs/initialization.md`                                       |
 
 ## Launcher, update, and rollback
 
@@ -57,11 +57,11 @@ Rin keeps Pi's compaction model, authentication, retry, and file-detail pipeline
 
 ## Chat bridge
 
-Rin's direct built-in chat bridge currently includes Telegram, OneBot, Feishu / Lark, Discord, and Slack.
+Rin's core Chat capability includes Telegram and Discord platform implementations. OneBot and Feishu / Lark are installed separately as ordinary Pi extensions.
 
 Use `docs/chat-bridge.md` for:
 
-- agent-owned `settings.json -> chat` adapter setup;
+- agent-owned `settings.json -> chat` platform setup;
 - SDK-backed chat sending and detached chat turns;
 - stored message lookup;
 - identity/trust data updates;
@@ -69,11 +69,11 @@ Use `docs/chat-bridge.md` for:
 
 Use `docs/rich-text-output-format.md` for native mentions, quotes/replies, attachments, files/images, and fallback syntax.
 
-## Background extensions
+## Optional Chat platform extensions
 
-Daemon extensions are trusted Node.js packages loaded for long-running async work. Only ordinary Pi extension entries are discovered; entries that expose the named `rinDaemonExtension` factory also receive Rin's backend adapter, while their default Pi session factory is not replayed by that adapter.
+Optional Chat platforms are trusted ordinary Pi extensions discovered by the native loader. Their default factory contributes a narrow platform implementation through Pi events; Rin has no separate daemon extension factory or loader.
 
-Use them for intentionally configured background event bridges, chat adapters. Restart or reload Rin after changing background extension settings.
+Use them for intentionally configured external Chat platforms. Restart or reload Rin after changing platform extension settings.
 
 ## Browser, computer, mobile, and search operation
 

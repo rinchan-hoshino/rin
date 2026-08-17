@@ -30,11 +30,6 @@
       "status": "strict"
     },
     {
-      "source": "src/app/rin-install/chat-migrations.ts",
-      "ownerSuite": "system",
-      "status": "strict"
-    },
-    {
       "source": "src/app/rin-install/main.ts",
       "ownerSuite": "system",
       "status": "strict"
@@ -70,11 +65,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/chat-bridge/adapters.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/chat-bridge/eval.ts",
       "ownerSuite": "integration",
       "status": "strict"
@@ -90,52 +80,32 @@
       "status": "strict"
     },
     {
-      "source": "src/core/chat-runtime/app.ts",
+      "source": "src/core/chat/chat.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },
     {
-      "source": "src/core/chat-runtime/discord.ts",
+      "source": "src/core/chat/platform/discord.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },
     {
-      "source": "src/core/chat-runtime/lark.ts",
+      "source": "src/core/chat/platform/telegram.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },
     {
-      "source": "src/core/chat-runtime/onebot.ts",
+      "source": "src/core/chat/platform/common.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },
     {
-      "source": "src/core/chat-runtime/registry.ts",
+      "source": "src/core/chat/platform/editable-text-message-group.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },
     {
-      "source": "src/core/chat-runtime/slack.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/chat-runtime/telegram.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/chat-runtime/common.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/chat-runtime/editable-text-message-group.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/chat-runtime/inbound-recovery.ts",
+      "source": "src/core/chat/inbound-recovery.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },
@@ -151,16 +121,6 @@
     },
     {
       "source": "src/core/chat/chat-helpers.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/chat/chat-key-migration.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/chat/chat-key-record-resolution.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },
@@ -195,7 +155,7 @@
       "status": "strict"
     },
     {
-      "source": "src/core/chat/database-install-migration.ts",
+      "source": "src/core/chat/database-migration.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },
@@ -230,11 +190,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/chat/extension-api.ts",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
       "source": "src/core/chat/extension-ui.ts",
       "ownerSuite": "integration",
       "status": "strict"
@@ -262,16 +217,6 @@
     {
       "source": "src/core/chat/index.ts",
       "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/chat/install-migration.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/chat/legacy-migration.ts",
-      "ownerSuite": "integration",
       "status": "strict"
     },
     {
@@ -520,11 +465,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-daemon/extensions.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/rin-daemon/lock.ts",
       "ownerSuite": "integration",
       "status": "strict"
@@ -616,11 +556,6 @@
     },
     {
       "source": "src/core/rin-extension-api.ts",
-      "ownerSuite": "unit",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/rin-extension-settings.ts",
       "ownerSuite": "unit",
       "status": "strict"
     },
@@ -760,7 +695,7 @@
       "status": "strict"
     },
     {
-      "source": "src/core/rin-install/i18n.ts",
+      "source": "src/core/i18n.ts",
       "ownerSuite": "integration",
       "status": "strict"
     },
@@ -1327,11 +1262,6 @@
     {
       "source": "src/core/session/catalog.ts",
       "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
-      "source": "src/core/session/extension-api.ts",
-      "ownerSuite": "unit",
       "status": "strict"
     },
     {

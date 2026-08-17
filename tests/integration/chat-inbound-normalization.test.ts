@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -139,8 +140,8 @@ test("chat inbound normalization covers sparse session and legacy quote fallback
   assert.equal(normalization.getChatId({ channelId: " channel " }), "channel");
   assert.equal(normalization.getChatId({}), "");
   assert.equal(
-    normalization.getChatId({ platform: "onebot", userId: "owner" }),
-    "private:owner",
+    normalization.getChatId({ platform: "example", userId: "owner" }),
+    "owner",
   );
   assert.equal(
     normalization.getChatId({ platform: "telegram", userId: "owner" }),
@@ -310,7 +311,7 @@ test("chat inbound normalization renders received rich objects as chat markdown 
 test("chat helpers persist inbound messages with the shared normalized store shape", async () => {
   await withTempDir(async (agentDir) => {
     const session = {
-      platform: "onebot",
+      platform: "example",
       selfId: "2301401877",
       channelId: "private:114514",
       userId: "114514",

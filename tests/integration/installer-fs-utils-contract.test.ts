@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fsSync from "node:fs";
@@ -26,7 +27,7 @@ function escapeRegex(value: string) {
 }
 
 test("installer fs utils compute launcher targets and require managed node", () => {
-  const targets = fsUtils.launcherTargetsForInstallDir("/tmp/rin");
+  const targets = fsUtils.launcherTargetsForMigrationDir("/tmp/rin");
   assert.ok(
     targets.rin[0].endsWith(path.join("dist", "app", "rin", "main.js")),
   );

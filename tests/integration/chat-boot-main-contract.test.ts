@@ -1,3 +1,4 @@
+import "../support/require-test-sandbox.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -508,6 +509,7 @@ test("chat boot releases a timed out outbox send without retrying before its lea
         {
           platform: "telegram",
           selfId: "1",
+          outboxUsesDispatchSignal: true,
           async sendMessage() {
             sends += 1;
             await new Promise(() => {});
@@ -571,6 +573,7 @@ test("chat boot keeps retryable outbox delivery failures queued", async () => {
         {
           platform: "telegram",
           selfId: "1",
+          outboxUsesDispatchSignal: true,
           sendMessage() {
             const error = new Error("boom");
             const delivery = Promise.reject(error);
@@ -605,48 +608,40 @@ test("chat boot keeps retryable outbox delivery failures queued", async () => {
   });
 });
 
-test("chat boot gives platform media outbox items their bounded send timeouts", () => {
-  assert.equal(
-    boot.getChatOutboxSendTimeoutMs({
-      payload: {
-        createdAt: new Date().toISOString(),
-        chatKey: "onebot/1:2",
-        parts: [{ type: "file", path: "/tmp/pack.mrpack" }],
+test("chat boot gets media send bounds from the owning platform", () => {
+  const app = {
+    bots: [
+      {
+        platform: "example",
+        selfId: "1",
+        outboxMediaSendTimeoutMs: 600_000,
       },
-    }),
-    boot.DEFAULT_ONEBOT_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS,
-  );
-  assert.equal(
-    boot.getChatOutboxSendTimeoutMs({
-      payload: {
-        createdAt: new Date().toISOString(),
-        chatKey: "discord/1:2",
-        parts: [{ type: "image", path: "/tmp/preview.png" }],
-      },
-    }),
-    boot.DEFAULT_DISCORD_MEDIA_CHAT_OUTBOX_SEND_TIMEOUT_MS,
-  );
-  assert.equal(
-    boot.getChatOutboxSendTimeoutMs({
-      payload: {
-        createdAt: new Date().toISOString(),
-        chatKey: "discord/1:2",
-        parts: [{ type: "text", text: "plain text" }],
-      },
-    }),
-    boot.DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS,
-  );
+    ],
+  };
+  const mediaItem = {
+    payload: {
+      createdAt: new Date().toISOString(),
+      chatKey: "example/1:2",
+      parts: [{ type: "file", path: "/tmp/pack.mrpack" }],
+    },
+  };
+  assert.equal(boot.getChatOutboxSendTimeoutMs(mediaItem, {}, app), 600_000);
   assert.equal(
     boot.getChatOutboxSendTimeoutMs(
       {
+        ...mediaItem,
         payload: {
-          createdAt: new Date().toISOString(),
-          chatKey: "onebot/1:2",
-          parts: [{ type: "file", path: "/tmp/pack.mrpack" }],
+          ...mediaItem.payload,
+          parts: [{ type: "text", text: "plain" }],
         },
       },
-      { sendTimeoutMs: 42 },
+      {},
+      app,
     ),
+    boot.DEFAULT_CHAT_OUTBOX_SEND_TIMEOUT_MS,
+  );
+  assert.equal(
+    boot.getChatOutboxSendTimeoutMs(mediaItem, { sendTimeoutMs: 42 }, app),
     42,
   );
 });
@@ -674,6 +669,7 @@ test("chat boot dispatches media outbox items asynchronously after starting deli
         {
           platform: "telegram",
           selfId: "1",
+          outboxUsesDispatchSignal: true,
           sendMessage() {
             return new Promise((resolve) => {
               resolveDelivery = resolve;
@@ -709,7 +705,7 @@ test("chat boot dispatches media outbox items asynchronously after starting deli
   });
 });
 
-test("chat boot dispatches non-media outbox items asynchronously by platform list", async () => {
+test("chat boot dispatches non-media outbox items asynchronously when the platform advertises dispatch", async () => {
   await withTempDir(async (agentDir) => {
     outbox.enqueueChatOutboxPayload(agentDir, {
       createdAt: new Date().toISOString(),
@@ -723,6 +719,7 @@ test("chat boot dispatches non-media outbox items asynchronously by platform lis
         {
           platform: "onebot",
           selfId: "1",
+          outboxUsesDispatchSignal: true,
           sendMessage() {
             const delivery = new Promise((resolve) => {
               resolveDelivery = resolve;
@@ -773,6 +770,7 @@ test("chat boot does not retry ambiguous timeout after dispatch", async () => {
         {
           platform: "onebot",
           selfId: "1",
+          outboxUsesDispatchSignal: true,
           sendMessage() {
             const delivery = Promise.reject(
               new Error("onebot_action_timeout:send_group_msg"),

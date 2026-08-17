@@ -1,10 +1,8 @@
+import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  createInstallerI18n,
-  createRinI18n,
-} from "../../dist/core/rin-install/i18n.js";
+import { createInstallerI18n, createRinI18n } from "../../dist/core/i18n.js";
 
 const samplePlan = {
   currentUser: "alice",
