@@ -389,6 +389,10 @@ register(`data:text/javascript,${encodeURIComponent(hook)}`, import.meta.url);
         return owner.autoCompactionResult;
       },
       async prompt(text: string, promptOptions?: any) {
+        owner.events.push([
+          "native-prompt-frontend",
+          this.sessionManager?.__rinFrontend,
+        ]);
         owner.events.push(["native-prompt", text, promptOptions]);
         promptOptions?.preflightResult?.(owner.promptPreflightResult !== false);
         return owner.promptResult;

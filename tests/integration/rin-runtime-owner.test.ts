@@ -623,6 +623,12 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
     kind: "discord",
     key: "owner",
   });
+  assert.deepEqual(
+    owner.events.find(
+      ([name]: any[]) => name === "native-prompt-frontend",
+    )?.[1],
+    { kind: "discord", key: "owner" },
+  );
   assert.equal(
     owner.events.some(
       ([name, text]: any[]) =>
@@ -630,6 +636,14 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
     ),
     true,
   );
+
+  owner.promptPreflightResult = false;
+  await configured.session.prompt("rejected", {
+    source: "chat",
+    frontendIdentity: { kind: "chat", key: "discord/rejected" },
+  });
+  assert.deepEqual(manager.__rinFrontend, { kind: "discord", key: "owner" });
+  owner.promptPreflightResult = true;
 
   await configured.session.prompt("plain", {
     source: "",

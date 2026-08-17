@@ -536,28 +536,47 @@ function applyRinPromptBuilder(session: any, state: LazySystemPromptState) {
         options?.frontendIdentity,
       );
       const callerPreflightResult = options?.preflightResult;
+      const manager = session.sessionManager;
+      const previousFrontendIdentity = manager?.__rinFrontend;
+      const restoreFrontendIdentity = () => {
+        if (!manager) return;
+        if (previousFrontendIdentity) {
+          manager.__rinFrontend = previousFrontendIdentity;
+        } else {
+          delete manager.__rinFrontend;
+        }
+      };
+      if (manager) {
+        if (frontendIdentity) {
+          manager.__rinFrontend = frontendIdentity;
+        } else {
+          delete manager.__rinFrontend;
+        }
+      }
+      let preflightReported = false;
       const promptOptions = {
         ...(options || {}),
         preflightResult(accepted: boolean) {
-          if (accepted && session.sessionManager) {
-            session.sessionManager.__rinLastPromptSource = String(
+          preflightReported = true;
+          if (accepted && manager) {
+            manager.__rinLastPromptSource = String(
               options?.source || "",
             ).trim();
-            session.sessionManager.__rinLastPromptContext =
-              options?.promptContext;
-            if (frontendIdentity) {
-              session.sessionManager.__rinFrontend = frontendIdentity;
-            } else {
-              delete session.sessionManager.__rinFrontend;
-            }
+            manager.__rinLastPromptContext = options?.promptContext;
+          } else if (!accepted) {
+            restoreFrontendIdentity();
           }
           callerPreflightResult?.(accepted);
         },
       };
-      return await originalPrompt(
-        formatPromptContext(options?.promptContext, text),
-        promptOptions,
-      );
+      try {
+        return await originalPrompt(
+          formatPromptContext(options?.promptContext, text),
+          promptOptions,
+        );
+      } finally {
+        if (!preflightReported) restoreFrontendIdentity();
+      }
     };
   }
 
