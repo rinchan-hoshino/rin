@@ -188,6 +188,17 @@ test("prompt context system blocks cover binding-only and empty metadata", () =>
   );
 });
 
+test("non-chat prompt text stays untouched until Pi finishes command expansion", () => {
+  assert.equal(
+    formatPromptContext({ source: "tui" }, "/skill:demo owner input"),
+    "/skill:demo owner input",
+  );
+  assert.equal(
+    formatPromptContext({ source: "scheduled-task" }, "scheduled input"),
+    "scheduled input",
+  );
+});
+
 test("scheduled task prompt context renders a task block without pretending to be chat", () => {
   const systemBlock = formatPromptContextSystemPromptBlock({
     source: "scheduled-task",

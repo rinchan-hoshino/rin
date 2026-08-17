@@ -2,16 +2,58 @@ import {
   pruneSessionContextMessages,
   type SessionPruningOptions,
 } from "./session-pruning.js";
+import { formatPromptTimeContext } from "./prompt-context.js";
 
 type ProviderBoundContextOptions = SessionPruningOptions;
 
 type EstimateContextTokens = (messages: any[]) => any;
 
+function addPromptTimeToUserMessages(messages: any[]) {
+  let changed = false;
+  const next = messages.map((message) => {
+    if (String(message?.role || "").trim() !== "user") return message;
+    const timestamp = readMessageTimestampMs(message);
+    if (timestamp === undefined) return message;
+
+    if (typeof message?.content === "string") {
+      const content = formatPromptTimeContext(message.content, timestamp);
+      if (content === message.content) return message;
+      changed = true;
+      return { ...message, content };
+    }
+
+    if (!Array.isArray(message?.content)) return message;
+    const textIndex = message.content.findIndex(
+      (part: any) => part?.type === "text" && typeof part?.text === "string",
+    );
+    if (textIndex < 0) {
+      changed = true;
+      return {
+        ...message,
+        content: [
+          { type: "text", text: formatPromptTimeContext("", timestamp) },
+          ...message.content,
+        ],
+      };
+    }
+    const part = message.content[textIndex];
+    const text = formatPromptTimeContext(part.text, timestamp);
+    if (text === part.text) return message;
+    const content = message.content.slice();
+    content[textIndex] = { ...part, text };
+    changed = true;
+    return { ...message, content };
+  });
+  return changed ? next : messages;
+}
+
 export function buildProviderBoundContextMessages(
   messages: any[],
   options: ProviderBoundContextOptions = {},
 ) {
-  return pruneSessionContextMessages(messages, options);
+  return addPromptTimeToUserMessages(
+    pruneSessionContextMessages(messages, options),
+  );
 }
 
 export function mapMessagesToProviderBoundContext(

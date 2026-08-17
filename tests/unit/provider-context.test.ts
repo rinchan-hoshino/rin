@@ -71,6 +71,90 @@ test("provider-bound context leaves non-tool rich content unchanged", () => {
   assert.equal(providerMessages[2].content, toolResultContent);
 });
 
+test("provider-bound context injects stable time into every ordinary user input", () => {
+  const firstUser = {
+    role: "user",
+    content: "first",
+    timestamp: 1710000000000,
+  };
+  const image = { type: "image", data: "base64", mimeType: "image/png" };
+  const secondUser = {
+    role: "user",
+    content: [{ type: "text", text: "second" }, image],
+    timestamp: 1710003600000,
+  };
+  const messages = [firstUser, { role: "assistant", content: "done" }];
+
+  const firstPass = providerContext.buildProviderBoundContextMessages(messages);
+  const repeatedPass =
+    providerContext.buildProviderBoundContextMessages(messages);
+  const appendedPass = providerContext.buildProviderBoundContextMessages([
+    ...messages,
+    secondUser,
+  ]);
+
+  assert.notEqual(firstPass, messages);
+  assert.match(
+    firstPass[0].content,
+    /^time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{2}:\d{2}\n---\nfirst$/,
+  );
+  assert.equal(firstUser.content, "first");
+  assert.deepEqual(repeatedPass, firstPass);
+  assert.deepEqual(appendedPass.slice(0, messages.length), firstPass);
+  assert.match(
+    appendedPass[2].content[0].text,
+    /^time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{2}:\d{2}\n---\nsecond$/,
+  );
+  assert.equal(appendedPass[2].content[1], image);
+  assert.equal(secondUser.content[0].text, "second");
+});
+
+test("provider-bound context preserves an existing typed chat header", () => {
+  const chatText = [
+    "time: 2026-08-17 12:43:39 +08:00",
+    "runtime metadata: rin prompt context v1",
+    "sender user id: owner",
+    "sender trust: owner",
+    "---",
+    "hello",
+  ].join("\n");
+  const message = {
+    role: "user",
+    content: [{ type: "text", text: chatText }],
+    timestamp: 1710000000000,
+  };
+
+  const providerMessages = providerContext.buildProviderBoundContextMessages([
+    message,
+  ]);
+
+  assert.equal(providerMessages[0], message);
+  assert.equal(providerMessages[0].content[0].text, chatText);
+  assert.equal(
+    providerMessages[0].content[0].text.match(/^time:/gm)?.length,
+    1,
+  );
+});
+
+test("provider-bound token estimates include injected time text", () => {
+  const messages = [
+    { role: "user", content: "hello", timestamp: 1710000000000 },
+  ];
+  let estimatedMessages: any[] = [];
+
+  const tokens = providerContext.estimateProviderBoundContextTokens(
+    messages,
+    (nextMessages: any[]) => {
+      estimatedMessages = nextMessages;
+      return nextMessages[0].content.length;
+    },
+  );
+
+  assert.match(estimatedMessages[0].content, /^time: /);
+  assert.ok(tokens > messages[0].content.length);
+  assert.equal(messages[0].content, "hello");
+});
+
 test("provider-bound context keeps 63 tool calls before the fourth bucket fills", () => {
   const messages = toolCallPadding(63);
   messages.splice(2, 0, ...padding(300));

@@ -227,6 +227,42 @@ test("Rin provider context never synthesizes post-compaction state", async () =>
   assert.equal(result, undefined);
 });
 
+test("Rin provider context adds deterministic time without changing the cached prefix", async () => {
+  const definitions = runtimeMod.createRinCapabilityDefinitions({
+    cwd: "/tmp/rin-provider-time",
+    agentDir: "/tmp/rin-provider-time-agent",
+    getThinkingLevel: () => "medium",
+    sendMessage: () => {},
+  });
+  const hook = definitions.find(
+    (definition) => definition.name === "rin_provider_bound_context",
+  )?.hooks?.context?.[0];
+  assert.equal(typeof hook, "function");
+
+  const firstUser = {
+    role: "user",
+    content: [{ type: "text", text: "first" }],
+    timestamp: 1710000000000,
+  };
+  const firstInput = [firstUser, { role: "assistant", content: "done" }];
+  const firstResult = await hook?.({ messages: firstInput }, {});
+  const firstProviderContext = firstResult?.messages ?? firstInput;
+  const nextInput = [
+    ...firstInput,
+    { role: "user", content: "second", timestamp: 1710003600000 },
+  ];
+  const nextResult = await hook?.({ messages: nextInput }, {});
+  const nextProviderContext = nextResult?.messages ?? nextInput;
+
+  assert.match(firstProviderContext[0].content[0].text, /^time: /);
+  assert.equal(firstUser.content[0].text, "first");
+  assert.deepEqual(
+    nextProviderContext.slice(0, firstProviderContext.length),
+    firstProviderContext,
+  );
+  assert.match(nextProviderContext.at(-1).content, /^time: /);
+});
+
 test("Rin provider context preserves an append-only prefix between expected bucket rollovers", async () => {
   const definitions = runtimeMod.createRinCapabilityDefinitions({
     cwd: "/tmp/rin-provider-prefix-stability",

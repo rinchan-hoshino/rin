@@ -43,6 +43,19 @@ function formatTimestamp(value: number) {
   return `${year}-${month}-${day} ${hour}:${minute}:${second} ${sign}${offsetHours}:${offsetRemainder}`;
 }
 
+function hasPromptTimeHeader(value: string) {
+  const firstLine = value.split("\n", 1)[0] || "";
+  return /^time: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{2}:\d{2}$/.test(
+    firstLine,
+  );
+}
+
+export function formatPromptTimeContext(body: string, timestamp: number) {
+  const text = safeString(body);
+  if (!Number.isFinite(timestamp) || hasPromptTimeHeader(text)) return text;
+  return `time: ${formatTimestamp(timestamp)}\n---\n${text}`;
+}
+
 function describeSenderTrust(identity: unknown) {
   const value = safeString(identity).trim();
   if (value === "OWNER") return "owner";
