@@ -27,7 +27,20 @@ test("agent docs expose scheduled task operation workflow", () => {
   const nonInteractiveCli = readAgentDoc("docs/non-interactive-cli.md");
   const piOverrides = readAgentDoc("docs/pi-overrides.md");
   const runtimeLayout = readAgentDoc("docs/runtime-layout.md");
-  const scheduledTasks = readAgentDoc("docs/scheduled-tasks.md");
+  const scheduledTaskDocNames = fs
+    .readdirSync(path.join(rootDir, "docs", "agent", "docs"))
+    .filter(
+      (name) => name.startsWith("scheduled-tasks") && name.endsWith(".md"),
+    )
+    .sort();
+  assert.deepEqual(scheduledTaskDocNames, [
+    "scheduled-tasks-reference.md",
+    "scheduled-tasks.md",
+  ]);
+  const scheduledTasksEntry = readAgentDoc("docs/scheduled-tasks.md");
+  const scheduledTasksReference = readAgentDoc(
+    "docs/scheduled-tasks-reference.md",
+  );
   const selfImproveDistillation = readAgentDoc(
     "docs/self-improve-distillation.md",
   );
@@ -135,7 +148,7 @@ test("agent docs expose scheduled task operation workflow", () => {
 
   const helperOwnerDocs = [
     ["agent-sdk.md", agentSdk],
-    ["scheduled-tasks.md", scheduledTasks],
+    ["scheduled-tasks.md", scheduledTasksEntry],
     ["chat-bridge.md", chatBridge],
   ] as const;
   const assertHelperOwner = (helper: string, expectedOwner: string) => {
@@ -284,68 +297,156 @@ test("agent docs expose scheduled task operation workflow", () => {
     initialization,
     /chat-platform interoperation and scheduled tasks/,
   );
-  assert.match(scheduledTasks, /`session\.mode: "dedicated"`/);
-  assert.match(scheduledTasks, /target\.prompt.*target\.continuationPrompt/s);
+  assert.match(scheduledTasksEntry, /## Minimal create/);
+  assert.match(scheduledTasksEntry, /## Method map/);
   assert.match(
-    scheduledTasks,
+    scheduledTasksEntry,
+    /list.*get.*upsert.*run.*wake.*rescheduleOnce.*pause.*resume.*complete.*delete.*reload/s,
+  );
+  assert.match(
+    scheduledTasksEntry,
+    /Read `scheduled-tasks-reference\.md` only for/,
+  );
+  assert.match(
+    scheduledTasksEntry,
+    /For conditional recurrence, all five must be true/,
+  );
+  assert.match(
+    scheduledTasksEntry,
+    /Automatic: set `frontend` and keep `quiet: false`/,
+  );
+  assert.match(scheduledTasksEntry, /Manual: set `frontend` and `quiet: true`/);
+  assert.match(scheduledTasksEntry, /Re-read the task after every mutation/);
+  assert.doesNotMatch(
+    scheduledTasksEntry,
+    /type WritableTaskPatch|type ConditionContext|dedicatedSessionFile/,
+  );
+  assert.doesNotMatch(
+    scheduledTasksEntry,
+    /complex polling|polling\/watch|automation extension/i,
+  );
+  assert.ok(
+    scheduledTasksEntry.length <= 7_000,
+    `Scheduled-task entry guide is ${scheduledTasksEntry.length} characters`,
+  );
+  assert.match(scheduledTasksReference, /`session\.mode: "dedicated"`/);
+  assert.match(
+    scheduledTasksReference,
+    /target\.prompt.*target\.continuationPrompt/s,
+  );
+  assert.match(
+    scheduledTasksReference,
     /Ordinary recurring tasks use external state instead of a dedicated session/,
   );
-  assert.match(scheduledTasks, /Store reliable facts, progress, ledgers/);
-  assert.match(scheduledTasks, /code: string/);
   assert.match(
-    scheduledTasks,
+    scheduledTasksReference,
+    /Store reliable facts, progress, ledgers/,
+  );
+  assert.match(scheduledTasksReference, /code: string/);
+  assert.match(
+    scheduledTasksReference,
     /termination\?: \{ maxRuns\?: number; stopAt\?: string \}/,
   );
-  assert.match(scheduledTasks, /## Prompt brief/);
-  assert.match(scheduledTasks, /## Success criteria/);
-  assert.match(scheduledTasks, /Task prompt contract/);
-  assert.match(scheduledTasks, /Writable task definition/);
-  assert.match(scheduledTasks, /type WritableTaskPatch/);
-  assert.match(scheduledTasks, /disabledRinCapabilities\?: string\[\] \| null/);
-  assert.match(scheduledTasks, /trigger\?: \{/);
-  assert.match(scheduledTasks, /target\?:/);
+  assert.match(scheduledTasksEntry, /## Verification/);
+  assert.match(scheduledTasksEntry, /## Task prompt/);
+  assert.match(scheduledTasksReference, /Writable task definition/);
+  assert.match(scheduledTasksReference, /type WritableTaskPatch/);
   assert.match(
-    scheduledTasks,
+    scheduledTasksReference,
+    /disabledRinCapabilities\?: string\[\] \| null/,
+  );
+  assert.match(scheduledTasksReference, /trigger\?: \{/);
+  assert.match(scheduledTasksReference, /target\?:/);
+  assert.match(
+    scheduledTasksReference,
     /Creating a task requires both `trigger` and `target`; an update with a matching `id` may omit either field/,
   );
-  assert.match(scheduledTasks, /Read-only lifecycle state/);
+  assert.match(scheduledTasksReference, /Read-only lifecycle state/);
   assert.match(
-    scheduledTasks,
+    scheduledTasksReference,
     /condition\?: \{[\s\S]*code: string;[\s\S]*lastEvaluatedAt\?: string;/,
   );
   assert.doesNotMatch(
-    scheduledTasks,
+    scheduledTasksReference,
     /Recurring task is noisy:.*lower `thinkingLevel`/,
   );
-  assert.match(scheduledTasks, /`rin-prompt-engineering`/);
-  assert.match(scheduledTasks, /target\.prompt.*target\.continuationPrompt/s);
+  assert.match(scheduledTasksEntry, /`rin-prompt-engineering`/);
   assert.match(
-    scheduledTasks,
+    scheduledTasksReference,
+    /target\.prompt.*target\.continuationPrompt/s,
+  );
+  assert.match(
+    scheduledTasksReference,
     /TUI frontends have no key and cannot be addressed/,
   );
   assert.match(
-    scheduledTasks,
+    scheduledTasksReference,
     /without reading or changing the chat's current session binding/,
   );
   assert.match(
-    scheduledTasks,
+    scheduledTasksReference,
     /Quoting a delivered task message selects its linked session/,
   );
   assert.doesNotMatch(
-    scheduledTasks,
+    scheduledTasksReference,
     /session_continue|current-session continuation/i,
   );
   assert.match(
-    scheduledTasks,
-    /Use `condition` when the schedule should wake only if agent-authored TypeScript returns true/,
+    scheduledTasksReference,
+    /For conditional recurrence, add it only when all five are true/,
+  );
+  assert.match(scheduledTasksEntry, /## Simple path/);
+  assert.match(scheduledTasksReference, /the event time is unknown/);
+  assert.match(scheduledTasksReference, /must continue after the current turn/);
+  assert.match(
+    scheduledTasksReference,
+    /most scheduled checks should do nothing/,
+  );
+  assert.match(
+    scheduledTasksReference,
+    /the check is cheaper than an agent turn/,
+  );
+  assert.match(
+    scheduledTasksReference,
+    /one target action is needed when it becomes true/,
+  );
+  assert.match(scheduledTasksReference, /## Delivery modes/);
+  assert.match(
+    scheduledTasksReference,
+    /No `frontend`: store the result without automatic delivery/,
+  );
+  assert.match(
+    scheduledTasksReference,
+    /`frontend` with `quiet: false`: automatic delivery/,
+  );
+  assert.match(
+    scheduledTasksReference,
+    /`frontend` with `quiet: true`: no scheduler-managed delivery/,
+  );
+  assert.match(
+    scheduledTasksReference,
+    /Working, interim, independent-error, and final messages are one automatic delivery policy/,
+  );
+  assert.match(
+    scheduledTasksReference,
+    /Quote linkage, delivery idempotency, and chat-session isolation are runtime guarantees, not task options/,
+  );
+  assert.doesNotMatch(
+    scheduledTasksReference,
+    /complex polling|polling\/watch|automation extension/i,
+  );
+  assert.doesNotMatch(
+    scheduledTasksReference,
+    /## Simple path|## Method map|## Minimal create/,
+  );
+  assert.ok(
+    scheduledTasksReference.length <= 15_500,
+    `Scheduled-task reference is ${scheduledTasksReference.length} characters`,
   );
   assert.match(selfImproveDistillation, /Run a future-trigger replay/);
   assert.match(
     selfImproveDistillation,
     /For correction-based or repeated-failure evidence, also verify that no active hit recommends the rejected behavior/,
   );
-  assert.match(
-    scheduledTasks,
-    /Required verification after a create\/update\/run-state change/,
-  );
+  assert.match(scheduledTasksEntry, /## Verification/);
 });
