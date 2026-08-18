@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import { asArray, isJsonRecord } from "../json-utils.js";
 import {
+  inspectTranscriptSearchHealth,
+  type TranscriptSearchHealth,
+} from "../memory/transcript-search.js";
+import {
   findManagedSystemdJournalSnapshot,
   findManagedSystemdStatusSnapshot,
 } from "../rin-install/managed-service.js";
@@ -25,6 +29,7 @@ export type DoctorBackendSnapshot = {
   socketPath: string;
   socketReady: boolean;
   serviceManager: "systemd-user" | "none";
+  memoryIndex: TranscriptSearchHealth;
   daemonStatus?: unknown;
   chatStatus?: unknown;
   systemdLines: string[];
@@ -186,6 +191,12 @@ export function renderDoctorBackendLines(snapshot: DoctorBackendSnapshot) {
     `socketPath=${snapshot.socketPath}`,
     `socketReady=${snapshot.socketReady ? "yes" : "no"}`,
     `serviceManager=${snapshot.serviceManager}`,
+    `memoryIndexStatus=${snapshot.memoryIndex.status}`,
+    `memoryIndexSchema=${String(snapshot.memoryIndex.schemaVersion ?? "-")}/${String(snapshot.memoryIndex.expectedSchemaVersion)}`,
+    `memoryIndexRebuildRequired=${snapshot.memoryIndex.rebuildRequired === null ? "unknown" : snapshot.memoryIndex.rebuildRequired ? "yes" : "no"}`,
+    `memoryIndexDirtyMarkers=${String(snapshot.memoryIndex.dirtyMarkerCount)}`,
+    `memoryIndexStaleDirtyMarkers=${String(snapshot.memoryIndex.staleDirtyMarkerCount)}`,
+    `memoryIndexReasons=${snapshot.memoryIndex.reasons.join(",") || "-"}`,
     ...renderChatBridgeDoctorLines(snapshot.chatStatus),
     ...renderDaemonWorkerDoctorLines(snapshot.daemonStatus),
     ...snapshot.systemdLines,
@@ -204,6 +215,11 @@ export function renderDoctorReport(snapshot: DoctorBackendSnapshot) {
   const active = snapshot.socketReady ? "active (running)" : "inactive (dead)";
   const unit = extractServiceUnit(snapshot.systemdLines);
   const logs = extractServiceLogs(snapshot.systemdLines);
+  const memoryDetail = snapshot.memoryIndex.reasons.length
+    ? snapshot.memoryIndex.reasons.join(", ")
+    : snapshot.memoryIndex.status === "ready"
+      ? `schema ${String(snapshot.memoryIndex.schemaVersion)}`
+      : "not created yet";
   const lines = [
     `● ${unit} - Rin daemon`,
     `   Loaded: ${snapshot.serviceManager === "systemd-user" ? "loaded" : "not-found"} (${snapshot.serviceManager})`,
@@ -212,6 +228,7 @@ export function renderDoctorReport(snapshot: DoctorBackendSnapshot) {
     `   Install: ${formatDoctorValue(snapshot.installDir)} · user ${formatDoctorValue(snapshot.targetUser)}`,
     `   Workers: ${String(daemonStatus.workerCount ?? workers.length)} total, ${String(activeWorkers)} active`,
     `   Chat bridge: ${chatStatus.ready ? "ready" : "not ready"} (${String(chatStatus.botCount ?? 0)} bots, ${String(chatStatus.adapterCount ?? 0)} adapters)`,
+    `   Memory index: ${snapshot.memoryIndex.status} (${memoryDetail})`,
   ];
   if (logs.length) {
     lines.push("", "Logs:", ...logs.map((line) => `   ${line}`));
@@ -232,6 +249,7 @@ async function collectDoctorSnapshot(
     socketPath: context.socketPath,
     socketReady,
     serviceManager: context.systemctl ? "systemd-user" : "none",
+    memoryIndex: inspectTranscriptSearchHealth(context.agentDir),
     daemonStatus,
     chatStatus: asRecord(daemonStatus)?.chat,
     systemdLines: collectSystemdDoctorLines(context),

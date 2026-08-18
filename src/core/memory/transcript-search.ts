@@ -847,6 +847,110 @@ function staleTranscriptWriterMarkers(rootOverride = "") {
     .filter((markerPath) => processMarkerIsStale(markerPath));
 }
 
+export type TranscriptSearchHealth = {
+  status: "ready" | "uninitialized" | "degraded";
+  dbPresent: boolean;
+  schemaVersion: number | null;
+  expectedSchemaVersion: number;
+  schemaMarkerState: TranscriptSearchSchemaMarkerState | "missing" | "invalid";
+  rebuildRequired: boolean | null;
+  dirtyMarkerCount: number;
+  staleDirtyMarkerCount: number;
+  reasons: string[];
+};
+
+export function inspectTranscriptSearchHealth(
+  rootOverride = "",
+): TranscriptSearchHealth {
+  const dbPath = resolveTranscriptSearchDbPath(rootOverride);
+  const markerPath = transcriptSearchSchemaMarkerPath(dbPath);
+  const dbPresent = fssync.existsSync(dbPath);
+  const markerPresent = fssync.existsSync(markerPath);
+  const schemaMarker = readTranscriptSearchSchemaMarker(dbPath);
+  const reasons: string[] = [];
+  let schemaVersion: number | null = null;
+  let rebuildRequired: boolean | null = null;
+  let dirtyMarkerCount = 0;
+  let staleDirtyMarkerCount = 0;
+
+  try {
+    const markerDir = transcriptWriterMarkerDir(rootOverride);
+    const dirtyMarkers = fssync.existsSync(markerDir)
+      ? fssync
+          .readdirSync(markerDir)
+          .filter((name) => name.endsWith(".dirty"))
+          .map((name) => path.join(markerDir, name))
+      : [];
+    dirtyMarkerCount = dirtyMarkers.length;
+    staleDirtyMarkerCount = dirtyMarkers.filter((marker) =>
+      processMarkerIsStale(marker),
+    ).length;
+    if (staleDirtyMarkerCount > 0) reasons.push("stale-writer-marker");
+  } catch {
+    reasons.push("writer-markers-unreadable");
+  }
+
+  if (!dbPresent) {
+    if (markerPresent || dirtyMarkerCount > 0) reasons.push("database-missing");
+  } else {
+    if (!markerPresent) reasons.push("schema-marker-missing");
+    else if (!schemaMarker) reasons.push("schema-marker-invalid");
+    else if (schemaMarker.state !== "current") {
+      reasons.push(`schema-marker-${schemaMarker.state}`);
+    }
+
+    try {
+      const db = new BetterSqlite3(dbPath, {
+        readonly: true,
+        fileMustExist: true,
+      });
+      try {
+        schemaVersion = transcriptSearchSchemaVersion(db);
+        db.prepare("SELECT 1 FROM entries LIMIT 1").get();
+        db.prepare("SELECT 1 FROM file_state LIMIT 1").get();
+        db.prepare("SELECT 1 FROM entries_fts_token LIMIT 1").get();
+        db.prepare("SELECT 1 FROM entries_fts_trigram LIMIT 1").get();
+        const rebuildRow = db
+          .prepare("SELECT value FROM metadata WHERE key = ?")
+          .get("rebuild_required") as { value?: string } | undefined;
+        if (rebuildRow?.value === "0" || rebuildRow?.value === "1") {
+          rebuildRequired = rebuildRow.value === "1";
+        } else {
+          reasons.push("rebuild-state-invalid");
+        }
+      } finally {
+        db.close();
+      }
+      if (schemaVersion !== TRANSCRIPT_SEARCH_SCHEMA_VERSION) {
+        reasons.push("schema-version-mismatch");
+      }
+      if (rebuildRequired) reasons.push("rebuild-required");
+    } catch {
+      reasons.push("database-unreadable");
+    }
+  }
+
+  if (transcriptSearchNeedsSync.has(dbPath)) {
+    reasons.push("synchronization-pending");
+  }
+
+  return {
+    status: reasons.length ? "degraded" : dbPresent ? "ready" : "uninitialized",
+    dbPresent,
+    schemaVersion,
+    expectedSchemaVersion: TRANSCRIPT_SEARCH_SCHEMA_VERSION,
+    schemaMarkerState: schemaMarker
+      ? schemaMarker.state
+      : markerPresent
+        ? "invalid"
+        : "missing",
+    rebuildRequired,
+    dirtyMarkerCount,
+    staleDirtyMarkerCount,
+    reasons,
+  };
+}
+
 function transcriptWriterMarkerContent(failed: boolean) {
   return `${JSON.stringify({
     pid: process.pid,

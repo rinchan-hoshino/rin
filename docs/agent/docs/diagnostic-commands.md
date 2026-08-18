@@ -9,11 +9,11 @@ These commands have two surfaces:
 
 ## Command responsibilities
 
-| Command            | Owns                                                                                                     | Frontend view                                                                              | Backend view                                                                                                          |
-| ------------------ | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `rin doctor`       | Whole Rin health: daemon socket, managed service, chat bridge readiness, worker count, and service logs. | `systemctl`-style health page plus recent logs.                                            | `rin doctor --json` returns the complete health snapshot.                                                             |
-| `rin status`       | Session work state: currently running daemon workers and scheduler activity.                             | Pi-resume-list-style live TUI; `--once` prints a static snapshot.                          | `rin status --json`, RPC `daemon_activity`, or SDK `rin.daemon.activity()` returns the full daemon activity snapshot. |
-| `rin self-improve` | Self-evolution usage: distillation outcomes, changed artifacts, failures, and historical stats.          | Pi-resume-list-style TUI over recent self-improve runs; `--once`/`--id` print static text. | `rin self-improve --json` plus filters returns complete records and stats.                                            |
+| Command            | Owns                                                                                                    | Frontend view                                                                              | Backend view                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `rin doctor`       | Whole Rin health: daemon socket, managed service, chat bridge, workers, recall index, and service logs. | `systemctl`-style health page plus recent logs.                                            | `rin doctor --json` returns the complete health snapshot.                                                             |
+| `rin status`       | Session work state: currently running daemon workers and scheduler activity.                            | Pi-resume-list-style live TUI; `--once` prints a static snapshot.                          | `rin status --json`, RPC `daemon_activity`, or SDK `rin.daemon.activity()` returns the full daemon activity snapshot. |
+| `rin self-improve` | Self-evolution usage: distillation outcomes, changed artifacts, failures, and historical stats.         | Pi-resume-list-style TUI over recent self-improve runs; `--once`/`--id` print static text. | `rin self-improve --json` plus filters returns complete records and stats.                                            |
 
 `memory` is not the self-evolution command name. In Rin terminology, memory means original evidence and retrieval. Use `rin self-improve` for distilled self-improve activity.
 
@@ -37,7 +37,10 @@ Backend output includes:
 
 - target user, install dir, socket path, and socket readiness;
 - service manager and captured managed-service status/journal lines when available;
-- daemon status, worker status, and chat bridge status when the socket answers.
+- daemon status, worker status, and chat bridge status when the socket answers;
+- a lightweight, read-only recall-index check covering the schema marker, SQLite metadata, rebuild flag, and stale dirty-writer markers.
+
+A `memoryIndex.status` of `degraded` means recall indexing needs recovery; it does not mean the canonical transcript archive is absent. Normal recall performs dirty-marker/query-time synchronization. Use `rin memory-index repair` only when that recovery cannot restore the derived index.
 
 Use this backend output for self-repair triage. If daemon socket state and service logs disagree, treat the installed runtime/service boundary as unresolved and inspect `docs/runtime-layout.md` before changing state.
 

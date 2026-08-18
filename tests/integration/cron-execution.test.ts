@@ -2487,7 +2487,7 @@ test("cron task condition accepts function bodies with return", async () => {
   }
 });
 
-test("cron scheduler installs built-in daily memory and self-improve distillation tasks", async () => {
+test("cron scheduler installs self-improve distillation without daily memory repair", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
@@ -2498,14 +2498,12 @@ test("cron scheduler installs built-in daily memory and self-improve distillatio
         .some((task) => task.id === "builtin_memory_index_repair_daily"),
       false,
     );
-    const builtIn = scheduler.getTask("builtin_memory_index_repair_daily", {
-      includeBuiltIn: true,
-    });
-    assert.ok(builtIn);
-    assert.equal(builtIn.builtIn, true);
-    assert.equal(builtIn.trigger.expression, "17 4 * * *");
-    assert.equal(builtIn.target.kind, "shell_command");
-    assert.match(builtIn.target.command, /memory-index repair/);
+    assert.equal(
+      scheduler.getTask("builtin_memory_index_repair_daily", {
+        includeBuiltIn: true,
+      }),
+      undefined,
+    );
 
     const sleep = scheduler.getTask(
       "builtin_self_improve_sleep_consolidation_daily",
@@ -2609,7 +2607,7 @@ test("cron scheduler migrates persisted chatKey tasks to frontend chat bindings"
 test("cron scheduler persists built-in task state across restarts while hiding it publicly", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
-  const builtInId = "builtin_memory_index_repair_daily";
+  const builtInId = "builtin_self_improve_sleep_consolidation_daily";
   try {
     const first = new cronMod.CronScheduler({ agentDir });
     first.start();
@@ -2640,23 +2638,11 @@ test("cron scheduler protects built-in tasks from public mutation", async () => 
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
     scheduler.start();
-    assert.throws(
-      () => scheduler.pauseTask("builtin_memory_index_repair_daily"),
-      /cron_builtin_task_protected:builtin_memory_index_repair_daily/,
-    );
-    assert.throws(
-      () => scheduler.deleteTask("builtin_memory_index_repair_daily"),
-      /cron_builtin_task_protected:builtin_memory_index_repair_daily/,
-    );
-    assert.throws(
-      () =>
-        scheduler.upsertTask({
-          id: "builtin_memory_index_repair_daily",
-          trigger: { expression: "0 0 * * *" },
-          session: { mode: "dedicated" },
-          target: { kind: "shell_command", command: "echo nope" },
-        }),
-      /cron_builtin_task_protected:builtin_memory_index_repair_daily/,
+    assert.equal(
+      scheduler.getTask("builtin_memory_index_repair_daily", {
+        includeBuiltIn: true,
+      }),
+      undefined,
     );
     assert.throws(
       () =>
@@ -2785,31 +2771,14 @@ test("cron scheduler preserves an agent-chosen recurring next run after executio
   }
 });
 
-test("cron scheduler can manually run an existing built-in task", async () => {
+test("cron scheduler does not expose retired daily memory repair for manual runs", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
     scheduler.start();
-    const taskId = "builtin_memory_index_repair_daily";
-    const started = scheduler.runTaskNow(taskId);
-    assert.equal(started.id, taskId);
-    assert.equal(started.runCount, 1);
-    assert.equal(started.running, true);
-    assert.ok(started.lastStartedAt);
-
-    for (let i = 0; i < 50; i += 1) {
-      if (!scheduler.getTask(taskId, { includeBuiltIn: true })?.running) break;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-
-    const finished = scheduler.getTask(taskId, { includeBuiltIn: true });
-    assert.equal(finished?.runCount, 1);
-    assert.equal(finished?.running, false);
-    assert.ok(finished?.lastFinishedAt);
-    assert.match(String(finished?.lastError || ""), /Command:/);
     assert.throws(
-      () => scheduler.pauseTask(taskId),
-      /cron_builtin_task_protected:builtin_memory_index_repair_daily/,
+      () => scheduler.runTaskNow("builtin_memory_index_repair_daily"),
+      /cron_task_not_found:builtin_memory_index_repair_daily/,
     );
   } finally {
     scheduler.stop();

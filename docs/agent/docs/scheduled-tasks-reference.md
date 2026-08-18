@@ -347,7 +347,7 @@ await rin.tasks.upsert({
 
 ## Built-in tasks
 
-Rin installs daemon-owned built-in tasks such as daily memory-index repair and self-improve sleep consolidation. Built-in task definitions are protected from normal mutation/deletion APIs.
+Rin installs the daemon-owned self-improve sleep-consolidation task. Built-in task definitions are protected from normal mutation/deletion APIs. The recall index instead uses incremental writes, dirty-marker/query-time recovery, and the explicit `rin memory-index repair` maintenance command; it does not run a daily rebuild task.
 
 Normal SDK `list()` and `get()` focus on agent-created visible tasks. Use `rin status --json` for built-in counts and redacted scheduler state.
 

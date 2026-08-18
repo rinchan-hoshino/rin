@@ -57,7 +57,7 @@ test("cron scheduler installs protected built-ins and exposes filtered status", 
     try {
       assert.deepEqual(scheduler.listTasks(), []);
       const visibleBuiltIns = scheduler.listTasks({ includeBuiltIn: true });
-      assert.equal(visibleBuiltIns.length, 2);
+      assert.equal(visibleBuiltIns.length, 1);
       assert.equal(
         visibleBuiltIns.every((task) => task.builtIn),
         true,
@@ -66,7 +66,7 @@ test("cron scheduler installs protected built-ins and exposes filtered status", 
         includeBuiltIn: true,
         includeHidden: true,
       });
-      assert.equal(allBuiltIns.length, 2);
+      assert.equal(allBuiltIns.length, 1);
       assert.equal(
         allBuiltIns.some((task) => task.hidden),
         false,
@@ -77,21 +77,20 @@ test("cron scheduler installs protected built-ins and exposes filtered status", 
         includeBuiltIn: true,
         includeHidden: true,
       });
-      assert.equal(status.taskCount, 2);
-      assert.equal(status.enabledTaskCount, 2);
+      assert.equal(status.taskCount, 1);
+      assert.equal(status.enabledTaskCount, 1);
       assert.equal(status.runningTaskCount, 0);
-      assert.equal(status.builtInTaskCount, 2);
+      assert.equal(status.builtInTaskCount, 1);
       assert.ok(status.nextRunAt);
       assert.equal(status.tasks[0].target.kind.length > 0, true);
       assert.equal(Object.hasOwn(status.tasks[0], "lastError"), false);
 
-      assert.throws(
-        () => scheduler.deleteTask("builtin_memory_index_repair_daily"),
-        /cron_builtin_task_protected/,
-      );
-      assert.throws(
-        () => scheduler.pauseTask("builtin_memory_index_repair_daily"),
-        /cron_builtin_task_protected/,
+      assert.equal(
+        scheduler.getTask("builtin_memory_index_repair_daily", {
+          includeBuiltIn: true,
+          includeHidden: true,
+        }),
+        undefined,
       );
     } finally {
       scheduler.stop();
@@ -152,14 +151,20 @@ test("cron reload merges persisted built-in history without accepting stale defi
     first.stop();
     const filePath = cronTasksPath(agentDir);
     const rows = JSON.parse(fs.readFileSync(filePath, "utf8")) as any[];
-    const memory = rows.find(
-      (row) => row.id === "builtin_memory_index_repair_daily",
-    );
-    memory.createdAt = "";
-    memory.updatedAt = "";
-    memory.lastError = "owner previous error";
-    memory.runCount = 0;
-    memory.nextRunAt = futureIso(180);
+    rows.push({
+      id: "builtin_memory_index_repair_daily",
+      builtIn: true,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      name: "Retired daily memory repair",
+      enabled: true,
+      trigger: { expression: "17 4 * * *", timezone: "local" },
+      session: { mode: "none" },
+      target: { kind: "shell_command", command: "rin memory-index repair" },
+      quiet: true,
+      runCount: 9,
+      running: false,
+    });
     const selfImprove = rows.find(
       (row) => row.id === "builtin_self_improve_sleep_consolidation_daily",
     );
@@ -176,10 +181,7 @@ test("cron reload merges persisted built-in history without accepting stale defi
       includeBuiltIn: true,
       includeHidden: true,
     });
-    assert.ok(restoredMemory?.createdAt);
-    assert.ok(restoredMemory?.updatedAt);
-    assert.equal(restoredMemory?.lastError, "owner previous error");
-    assert.equal(restoredMemory?.nextRunAt, memory.nextRunAt);
+    assert.equal(restoredMemory, undefined);
     const restoredSelfImprove = second.getTask(
       "builtin_self_improve_sleep_consolidation_daily",
       { includeBuiltIn: true, includeHidden: true },

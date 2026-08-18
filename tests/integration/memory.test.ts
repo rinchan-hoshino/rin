@@ -1182,6 +1182,40 @@ test("runtime leaves a metadata-less legacy transcript index to the installer", 
   });
 });
 
+test("transcript archive recall survives deletion of its source session file", async () => {
+  await withTempRoot(async (root) => {
+    const sessionFile = await writeSessionFile(
+      root,
+      "disposable-session.jsonl",
+      [{ type: "message", role: "user", content: "session-only source" }],
+    );
+    await transcripts.appendTranscriptArchiveEntry(
+      {
+        timestamp: "2026-04-04T11:11:10.000Z",
+        sessionId: "session-archive-independent",
+        sessionFile,
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "archive remains canonical after session cleanup",
+          },
+        ],
+      },
+      root,
+    );
+    await fs.rm(sessionFile);
+
+    const results = await transcripts.searchTranscriptArchive(
+      "archive remains canonical",
+      { limit: 8 },
+      root,
+    );
+    assert.equal(results.length, 1);
+    assert.equal(results[0].sessionId, "session-archive-independent");
+  });
+});
+
 test("transcript full-session loading reports a missing canonical archive", async () => {
   await withTempRoot(async (root) => {
     await transcripts.appendTranscriptArchiveEntry(
@@ -2147,6 +2181,28 @@ test("recall requires explicit repair for transcript files written outside incre
     );
     assert.equal(afterRepair.length, 1);
     assert.equal(afterRepair[0].sessionId, entry.sessionId);
+  });
+});
+
+test("memory-index repair rebuilds only the derived index", async () => {
+  await withTempRoot(async (root) => {
+    const entry = {
+      id: "repair-derived-only-1",
+      timestamp: "2026-04-08T09:09:09.000Z",
+      sessionId: "session-repair-derived-only",
+      sessionFile: "/tmp/session-repair-derived-only.jsonl",
+      role: "assistant",
+      text: "repair preserves canonical archive bytes",
+    };
+    const archivePath = transcripts.getTranscriptArchivePath(entry, root);
+    await fs.mkdir(path.dirname(archivePath), { recursive: true });
+    await fs.writeFile(archivePath, `${JSON.stringify(entry)}\n`);
+    const before = await fs.readFile(archivePath);
+
+    const repair = await transcripts.repairTranscriptSearchIndex(root);
+
+    assert.equal(repair.fileCount, 1);
+    assert.deepEqual(await fs.readFile(archivePath), before);
   });
 });
 

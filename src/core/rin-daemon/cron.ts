@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
@@ -10,7 +9,6 @@ import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
 } from "../rin-lib/frontend-identity.js";
-import { shellQuote } from "../rin-lib/system.js";
 import { normalizeScheduledTaskSessionMode } from "../scheduled-task-options.js";
 import { getManagedTaskSessionFile } from "../session/managed-paths.js";
 import { buildSelfImproveSleepPrompt } from "../self-improve/prompt.js";
@@ -226,30 +224,6 @@ function resolveDedicatedSessionBinding(options: {
     ),
     dedicatedSessionPersistent: true,
   };
-}
-
-function createBuiltInMemoryIndexRepairTask(agentDir: string): CronTaskRecord {
-  const createdAt = nowIso();
-  const command = `${shellQuote(process.execPath)} ${shellQuote(path.join(agentDir, "app", "current", "dist", "app", "rin", "main.js"))} memory-index repair`;
-  const task: CronTaskRecord = {
-    id: "builtin_memory_index_repair_daily",
-    builtIn: true,
-    createdAt,
-    updatedAt: createdAt,
-    name: "Repair recall index",
-    enabled: true,
-    trigger: {
-      expression: "17 4 * * *",
-      timezone: "local",
-    },
-    session: { mode: "none" },
-    target: { kind: "shell_command", command },
-    quiet: false,
-    runCount: 0,
-    running: false,
-  };
-  task.nextRunAt = computeNextRunAt(task, Date.now());
-  return task;
 }
 
 function createBuiltInSelfImproveSleepConsolidationTask(
@@ -941,7 +915,6 @@ export class CronScheduler {
 
   private reconcileBuiltInTasks() {
     const builtins = [
-      createBuiltInMemoryIndexRepairTask(this.options.agentDir),
       createBuiltInSelfImproveSleepConsolidationTask(this.options.agentDir),
     ];
     const currentIds = new Set(builtins.map((task) => task.id));
