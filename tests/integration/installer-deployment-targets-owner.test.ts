@@ -73,14 +73,14 @@ assert.deepEqual(
       "-o", "ControlMaster=auto",
       "-o", "ControlPersist=10m",
       "-o", "ControlPath=" + controlPath,
-      "alice@example.test", "true",
+      "--", "alice@example.test", "true",
     ]],
     ["ssh", [
       "-tt",
       "-o", "ControlMaster=auto",
       "-o", "ControlPersist=10m",
       "-o", "ControlPath=" + controlPath,
-      "alice@example.test", "sh", "-lc", INSTALL_COMMAND,
+      "--", "alice@example.test", INSTALL_COMMAND,
     ]],
   ],
 );
@@ -107,12 +107,20 @@ assert.throws(
   }),
   /rin_container_name_required/,
 );
+assert.throws(
+  () => targets.installContainerTarget({
+    kind: "container", name: "Owner Box", engine: "docker", image: "--privileged",
+  }),
+  /rin_container_image_invalid/,
+);
 containerExists = false;
 const containerStart = globalThis.__rinDeploymentOwnerEvents.length;
-const container = targets.installContainerTarget({
-  kind: "container", name: "Owner Box", engine: "docker", image: "node:22",
-});
+const container = targets.installContainerTarget(
+  { kind: "container", name: "Owner Box", engine: "docker", image: "node:22" },
+  { stdinIsTTY: true, stdoutIsTTY: true },
+);
 assert.equal(container.runtime.container, "owner-box");
+assert.equal(container.runtime.installDir, "/root/.rin");
 const containerEvents = globalThis.__rinDeploymentOwnerEvents.slice(containerStart);
 assert.deepEqual(
   containerEvents.filter(([name]) => name === "spawn").map(([, command, args]) => [command, args]),
@@ -120,26 +128,28 @@ assert.deepEqual(
     ["docker", ["container", "inspect", "owner-box"]],
     ["docker", [
       "run", "-d", "--name", "owner-box",
-      "-v", "owner-box-rin:/home/rin/.rin",
+      "--user", "root",
+      "-v", "owner-box-rin:/root/.rin",
       "-v", "owner-box-workspace:/workspace",
       "-w", "/workspace", "node:22", "sleep", "infinity",
     ]],
-    ["docker", ["exec", "owner-box", "sh", "-lc", INSTALL_COMMAND]],
+    ["docker", ["exec", "-i", "-t", "-u", "root", "owner-box", "sh", "-lc", INSTALL_COMMAND]],
   ],
 );
 assert.equal(containerEvents.at(-1)[0], "upsert");
 
 containerExists = true;
 const existingStart = globalThis.__rinDeploymentOwnerEvents.length;
-targets.installContainerTarget({
-  kind: "container", name: "Owner Box", engine: "podman", image: "node:22",
-});
+targets.installContainerTarget(
+  { kind: "container", name: "Owner Box", engine: "podman", image: "node:22" },
+  { stdinIsTTY: true, stdoutIsTTY: true },
+);
 const existingEvents = globalThis.__rinDeploymentOwnerEvents.slice(existingStart);
 assert.deepEqual(
   existingEvents.filter(([name]) => name === "spawn").map(([, command, args]) => [command, args]),
   [
     ["podman", ["container", "inspect", "owner-box"]],
-    ["podman", ["exec", "owner-box", "sh", "-lc", INSTALL_COMMAND]],
+    ["podman", ["exec", "-i", "-t", "-u", "root", "owner-box", "sh", "-lc", INSTALL_COMMAND]],
   ],
 );
 
@@ -148,9 +158,10 @@ const upsertsBeforeContainerFailure = globalThis.__rinDeploymentOwnerEvents.filt
 ).length;
 failNextMutation = "error";
 assert.throws(
-  () => targets.installContainerTarget({
-    kind: "container", name: "Broken Box", engine: "docker", image: "node:22",
-  }),
+  () => targets.installContainerTarget(
+    { kind: "container", name: "Broken Box", engine: "docker", image: "node:22" },
+    { stdinIsTTY: true, stdoutIsTTY: true },
+  ),
   /owner isolated spawn failed/,
 );
 assert.equal(

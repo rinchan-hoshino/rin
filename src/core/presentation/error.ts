@@ -509,6 +509,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     withDetail("Rin command failed", detail, ". Check the command output."),
   rin_duplicate_command_id: () =>
     "Rin rejected a duplicate command identifier that is still in use.",
+  rin_container_image_invalid: () =>
+    "Container target needs a valid image reference.",
   rin_container_name_required: () =>
     "Target operation needs a container name. Provide the container name.",
   rin_daemon_failed: () => "Rin's background service failed to start.",
@@ -547,6 +549,20 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     ),
   rin_staged_release_missing: (detail) =>
     withDetail("Rin update could not find its staged release", detail, "."),
+  rin_system_user_creation_unsupported: (detail) =>
+    withDetail("Rin cannot create a system user on this platform", detail, "."),
+  rin_system_user_creation_unverified: () =>
+    "Rin could not verify the new system user after creating it.",
+  rin_system_user_name_invalid: () =>
+    "New system user needs a valid Linux username.",
+  rin_system_useradd_unavailable: () =>
+    "Rin could not find the Linux useradd command needed to create the system user.",
+  rin_systemd_linger_enable_failed: (detail) =>
+    withDetail(
+      "Rin could not enable the persistent Linux user service",
+      detail,
+      ".",
+    ),
   rin_installed_daemon_entry_missing: () =>
     "Rin install is missing the daemon entrypoint. Reinstall or update Rin.",
   rin_installer_apply_result_missing: () =>

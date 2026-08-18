@@ -84,6 +84,7 @@ const sources: Record<string, string> = {
     export async function tryManagedServiceAction(context, action, service) { globalThis.__rinFinalizeEvents.push(["service-action", action, service]); if (globalThis.__rinFinalizeScenario.serviceActionError) throw new Error("owner service action failed"); if (action === "stop") globalThis.__rinFinalizeScenario.socketConnectable = false; if (action === "start" || action === "restart") globalThis.__rinFinalizeScenario.socketConnectable = globalThis.__rinFinalizeScenario.daemonReady !== false; return true; }
   `,
   "dist/core/rin-install/users.js": `
+    export function ensureLocalSystemUser(user) { globalThis.__rinFinalizeEvents.push(["ensure-system-user", user]); return { created: true, user: { name: user, uid: 1001, gid: 1001, home: "/homes/" + user } }; }
     export function describeOwnership(user, dir) { globalThis.__rinFinalizeEvents.push(["ownership", user, dir]); return globalThis.__rinFinalizeScenario.ownership || { ownerMatches: true, writable: true }; }
     export function findSystemUser(user) { return { name: user, uid: 1001, gid: 1001, home: "/homes/" + user }; }
     export function homeForUser(user) { return "/homes/" + user; }

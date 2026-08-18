@@ -22,7 +22,7 @@ const RIN_COMMANDS = [
   ["versions", "List installed Rin runtime versions"],
   ["rollback", "Rollback the installed Rin runtime to the previous version"],
   ["memory-index", "Repair the recall index from archived transcripts"],
-  ["target", "List, select, and inspect configured Rin deployment targets"],
+  ["target", "List and remove configured Rin deployment targets"],
   ["version", "Show Rin version"],
 ] as const satisfies ReadonlyArray<readonly [ParsedArgs["command"], string]>;
 

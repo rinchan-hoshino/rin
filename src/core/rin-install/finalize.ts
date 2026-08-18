@@ -58,6 +58,7 @@ import {
 } from "../rin/managed-runtime-service.js";
 import {
   describeOwnership,
+  ensureLocalSystemUser,
   findSystemUser,
   homeForUser,
   isSameSystemUser,
@@ -414,6 +415,9 @@ async function applyInstalledRuntime(
   const currentUser =
     String(options.currentUser || "").trim() || detectCurrentUser();
   const targetUser = String(options.targetUser || "").trim() || currentUser;
+  if (options.createTargetUser) {
+    ensureLocalSystemUser(targetUser, { runPrivileged });
+  }
   const installDir =
     String(options.installDir || "").trim() ||
     defaultInstallDirForHome(targetHomeForUser(targetUser));

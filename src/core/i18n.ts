@@ -35,8 +35,6 @@ type InstallerDisplayCopy = {
   confirmInactiveLabel: string;
   existingDirectoryTitle: string;
   installDirectoryTitle: string;
-  currentUserLabel: string;
-  existingOtherUserLabel: string;
   newUserLabel: string;
   chooseInstallTargetMessage: string;
   currentInstallTargetLabel: string;
@@ -52,6 +50,7 @@ type InstallerDisplayCopy = {
   targetNameRequired: string;
   containerEngineMessage: string;
   containerImageMessage: string;
+  containerImageInvalid: string;
   noneFoundHint: string;
   usersHint: (count: number) => string;
   newUserHint: string;
@@ -61,7 +60,6 @@ type InstallerDisplayCopy = {
     sample: string[],
   ) => string;
   newDirectoryText: (installDir: string) => string;
-  chooseTargetUserMessage: string;
   chooseExistingUserMessage: string;
   enterNewUsernameMessage: string;
   usernamePlaceholder: string;
@@ -98,6 +96,7 @@ type InstallerDisplayCopy = {
       thinkingLevel: string;
       authAvailable: boolean;
       setDefaultTarget: boolean;
+      createSystemUser?: boolean;
     },
   ) => string;
   updaterIntroTitle: string;
@@ -258,8 +257,6 @@ const INSTALLER_DISPLAY_COPY: InstallerDisplayCopy = {
   confirmInactiveLabel: "No",
   existingDirectoryTitle: "Existing directory",
   installDirectoryTitle: "Local Rin config",
-  currentUserLabel: "Current user",
-  existingOtherUserLabel: "Existing other user",
   newUserLabel: "New user",
   chooseInstallTargetMessage: "Where should Rin be installed?",
   currentInstallTargetLabel: "This user",
@@ -271,10 +268,11 @@ const INSTALLER_DISPLAY_COPY: InstallerDisplayCopy = {
   containerIsolationHint: "Docker or Podman isolation",
   sshTargetMessage: "SSH target (Host alias or user@host)",
   sshTargetRequired: "SSH target is required",
-  targetNameMessage: "Target name for future rin --target use",
+  targetNameMessage: "Target name for future rin --target <name> runs",
   targetNameRequired: "Target name is required",
   containerEngineMessage: "Container engine",
   containerImageMessage: "Base image",
+  containerImageInvalid: "Enter a valid container image reference.",
   noneFoundHint: "none found",
   usersHint: (count: number) => `${count} user(s)`,
   newUserHint: "enter a username",
@@ -304,7 +302,6 @@ const INSTALLER_DISPLAY_COPY: InstallerDisplayCopy = {
       "- create only the files Rin needs",
       "- future updates should preserve unknown files",
     ].join("\n"),
-  chooseTargetUserMessage: "Choose the target user for the Rin daemon.",
   chooseExistingUserMessage: "Choose the existing user to host the Rin daemon.",
   enterNewUsernameMessage:
     "Enter the new username to create for the Rin daemon.",
@@ -364,6 +361,9 @@ const INSTALLER_DISPLAY_COPY: InstallerDisplayCopy = {
     return [
       `Target daemon user: ${options.targetUser}`,
       `Rin home: ${options.installDir}`,
+      options.createSystemUser
+        ? "System user: create locked local account"
+        : "",
       `Provider: ${options.provider || skippedForNow}`,
       `Model: ${options.modelId || skippedForNow}`,
       `Thinking level: ${options.thinkingLevel || skippedForNow}`,

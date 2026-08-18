@@ -248,7 +248,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
     );
     return;
   }
-  const { targetUser, installDir } = target;
+  const { targetUser, installDir, createSystemUser } = target;
   const installDirNote = await runInstallerProgress(
     i18n.inspectingInstallDirectoryMessage,
     () =>
@@ -280,6 +280,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
           thinkingLevel,
           authAvailable: Boolean(authResult.available),
           setDefaultTarget,
+          createSystemUser,
         },
         i18n,
       ),
@@ -343,6 +344,7 @@ export async function startInstaller(argv = process.argv.slice(2)) {
           modelId,
           thinkingLevel,
           setDefaultTarget,
+          createTargetUser: createSystemUser,
           authData: authResult.authData || {},
           release: releaseInfoFromFile(cli.releaseFile),
         },

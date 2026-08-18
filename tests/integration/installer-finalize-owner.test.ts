@@ -175,7 +175,12 @@ test("installer finalization orders restart before durable persistence and retai
       JSON.stringify({ completedAt: "now" }),
     );
     const result = await finalize.finalizeInstallPlan(
-      baseOptions(root, { installDir, daemonReadyTimeoutMs: -4 }),
+      baseOptions(root, {
+        installDir,
+        targetUser: "new_owner",
+        createTargetUser: true,
+        daemonReadyTimeoutMs: -4,
+      }),
     );
 
     assert.equal(result.initializationRequired, false);
@@ -183,6 +188,10 @@ test("installer finalization orders restart before durable persistence and retai
     assert.equal(result.written.options.initializationComplete, true);
     assert.equal(result.daemonReady, true);
     const names = eventNames();
+    assert.equal(
+      names.indexOf("ensure-system-user") < names.indexOf("ownership"),
+      true,
+    );
     assert.equal(
       names.indexOf("service-action") < names.indexOf("persist"),
       true,

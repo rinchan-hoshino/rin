@@ -46,6 +46,8 @@ test("one target-user owner derives identity, environment, commands, and socket 
       return undefined;
     },
     fileExists: (filePath: string) => filePath === "/usr/bin/systemctl",
+    socketPathForUser: (targetUser: string) =>
+      `/run/user/${targetUser}/rin-daemon/daemon.sock`,
   };
 
   const cross = createTargetUserExecutionContext(
@@ -62,7 +64,7 @@ test("one target-user owner derives identity, environment, commands, and socket 
   assert.equal(cross.targetHome, "/home/owner");
   assert.equal(cross.installDir, "/srv/rin");
   assert.equal(cross.agentDir, "/srv/rin");
-  assert.equal(cross.socketPath, "/srv/rin/data/core/daemon/bridge.sock");
+  assert.equal(cross.socketPath, "/run/user/owner/rin-daemon/daemon.sock");
   assert.equal(cross.systemctl, "/usr/bin/systemctl");
   cross.exec(["owner", "exec"]);
   assert.equal(cross.capture(["owner", "capture"]), "captured");

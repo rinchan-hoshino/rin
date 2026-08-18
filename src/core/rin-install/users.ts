@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 
 import { defaultHomeForUser } from "./paths.js";
+import { runPrivileged } from "./fs-utils.js";
 
 type SystemUser = {
   name: string;
@@ -14,6 +15,10 @@ type SystemUser = {
 
 export function normalizeUserName(value: unknown) {
   return String(value || "").trim();
+}
+
+export function isValidNewSystemUserName(value: unknown) {
+  return /^[a-z_][a-z0-9_-]{0,31}$/.test(normalizeUserName(value));
 }
 
 function normalizeComparableUserName(
@@ -220,4 +225,45 @@ export function shouldUseElevatedWrite(
     !ownership.ownerMatches ||
     !ownership.writable
   );
+}
+
+export function ensureLocalSystemUser(
+  userName: string,
+  deps: {
+    platform?: NodeJS.Platform;
+    findSystemUser?: typeof findSystemUser;
+    fileExists?: (filePath: string) => boolean;
+    runPrivileged?: typeof runPrivileged;
+  } = {},
+) {
+  const platform = deps.platform || process.platform;
+  if (platform !== "linux") {
+    throw new Error(`rin_system_user_creation_unsupported:${platform}`);
+  }
+  const normalized = normalizeUserName(userName);
+  if (!isValidNewSystemUserName(normalized)) {
+    throw new Error("rin_system_user_name_invalid");
+  }
+  const lookup = deps.findSystemUser || findSystemUser;
+  const existing = lookup(normalized);
+  if (existing) return { created: false, user: existing };
+
+  const fileExists = deps.fileExists || fs.existsSync;
+  const useradd = ["/usr/sbin/useradd", "/usr/bin/useradd"].find(fileExists);
+  if (!useradd) throw new Error("rin_system_useradd_unavailable");
+  const shell = fileExists("/bin/bash") ? "/bin/bash" : "/bin/sh";
+  const createArgs = [
+    "--create-home",
+    "--user-group",
+    "--shell",
+    shell,
+    normalized,
+  ];
+  if (deps.runPrivileged) deps.runPrivileged(useradd, createArgs);
+  else if (typeof process.getuid === "function" && process.getuid() === 0)
+    execFileSync(useradd, createArgs, { stdio: "inherit" });
+  else runPrivileged(useradd, createArgs);
+  const created = lookup(normalized);
+  if (!created) throw new Error("rin_system_user_creation_unverified");
+  return { created: true, user: created };
 }

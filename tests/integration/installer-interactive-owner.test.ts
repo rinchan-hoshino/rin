@@ -77,7 +77,7 @@ test("install target options preserve platform capabilities", () => {
   const linux = interactive.buildInstallTargetOptions("owner", i18n, "linux");
   assert.deepEqual(
     linux.map((item) => item.value),
-    ["current", "local-user", "ssh", "container"],
+    ["current", "local-user", "new-local-user", "ssh", "container"],
   );
   assert.equal(linux[0].hint, "owner");
   const windows = interactive.buildInstallTargetOptions("owner", i18n, "win32");
@@ -129,8 +129,11 @@ test("local target prompts distinguish current, existing, new, and unavailable u
     "/home/rin · uid 1001",
   );
 
-  const newPrompt = createPrompt({ selects: ["new"], texts: ["new_owner"] });
-  const created = await interactive.promptTargetInstall(
+  const newPrompt = createPrompt({
+    selects: ["new-local-user"],
+    texts: ["new_owner"],
+  });
+  const created = await interactive.promptInstallTarget(
     newPrompt,
     "owner",
     users,
@@ -138,6 +141,7 @@ test("local target prompts distinguish current, existing, new, and unavailable u
     i18n,
   );
   assert.equal(created.targetUser, "new_owner");
+  assert.equal(created.createSystemUser, true);
   const usernameValidator = newPrompt.seen.text[0].validate;
   assert.equal(usernameValidator(""), i18n.usernameRequired);
   assert.equal(usernameValidator("bad name"), i18n.usernameInvalid);

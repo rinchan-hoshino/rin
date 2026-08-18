@@ -1,25 +1,14 @@
 import {
   TARGET_KIND_LABELS,
-  findDeploymentProviders,
   normalizeTargetName,
 } from "../rin-targets/registry.js";
-import {
-  findTarget,
-  listTargets,
-  removeTarget,
-  setDefaultTarget,
-  upsertTarget,
-} from "../rin-targets/store.js";
+import { listTargets, removeTarget } from "../rin-targets/store.js";
 import { safeString } from "../text-utils.js";
 
 function usage() {
-  return [
-    "Usage:",
-    "  rin target list",
-    "  rin target use <name>",
-    "  rin target remove <name>",
-    "  rin target providers [container]",
-  ].join("\n");
+  return ["Usage:", "  rin target list", "  rin target remove <name>"].join(
+    "\n",
+  );
 }
 
 export async function runTargetCommand(rawArgv: string[]) {
@@ -35,20 +24,12 @@ export async function runTargetCommand(rawArgv: string[]) {
       return;
     }
     for (const target of targets) {
-      const marker = target.default ? "*" : " ";
+      const marker = " ";
       const label = TARGET_KIND_LABELS[target.kind] || target.kind;
       console.log(
         `${marker} ${target.name}\t${label}\t${describeRuntime(target.runtime)}`,
       );
     }
-    return;
-  }
-
-  if (subcommand === "use") {
-    const name = normalizeTargetName(subArgs[1] || "");
-    if (!name) throw new Error("rin_target_name_required");
-    setDefaultTarget(name);
-    console.log(`Default Rin target: ${name}`);
     return;
   }
 
@@ -59,39 +40,6 @@ export async function runTargetCommand(rawArgv: string[]) {
     console.log(
       removed ? `Removed Rin target: ${name}` : `Rin target not found: ${name}`,
     );
-    return;
-  }
-
-  if (subcommand === "providers") {
-    const kind = safeString(subArgs[1]).trim();
-    const providers =
-      !kind || kind === "container" ? findDeploymentProviders("container") : [];
-    for (const provider of providers) {
-      console.log(
-        `${provider.kind}/${provider.id}\t${provider.label}\t${provider.recommendedIsolation}`,
-      );
-    }
-    return;
-  }
-
-  if (subcommand === "register-local-user") {
-    const name = normalizeTargetName(subArgs[1] || "");
-    const user = safeString(subArgs[2]).trim();
-    if (!name || !user) throw new Error("rin_target_register_local_user_usage");
-    upsertTarget({
-      name,
-      kind: "local-user",
-      runtime: { kind: "local-user", user },
-    });
-    console.log(`Registered Rin target: ${name}`);
-    return;
-  }
-
-  if (subcommand === "show") {
-    const name = normalizeTargetName(subArgs[1] || "");
-    const target = findTarget(name);
-    if (!target) throw new Error(`rin_target_not_found:${name}`);
-    console.log(JSON.stringify(target, null, 2));
     return;
   }
 

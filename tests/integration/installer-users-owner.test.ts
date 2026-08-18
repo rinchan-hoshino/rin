@@ -222,3 +222,65 @@ test("installer ownership decisions reflect target identity and access", async (
     );
   });
 });
+
+test("Linux system-user creation is real, idempotent, locked, and platform bounded", () => {
+  const calls: unknown[][] = [];
+  let created = false;
+  const deps = {
+    platform: "linux" as NodeJS.Platform,
+    findSystemUser: (name: string) =>
+      created
+        ? {
+            name,
+            uid: 2001,
+            gid: 2001,
+            home: `/home/${name}`,
+            shell: "/bin/bash",
+          }
+        : undefined,
+    fileExists: (filePath: string) =>
+      filePath === "/usr/sbin/useradd" || filePath === "/bin/bash",
+    runPrivileged: (command: string, args: string[]) => {
+      calls.push([command, args]);
+      created = true;
+    },
+  };
+  assert.deepEqual(users.ensureLocalSystemUser("rin_owner", deps), {
+    created: true,
+    user: {
+      name: "rin_owner",
+      uid: 2001,
+      gid: 2001,
+      home: "/home/rin_owner",
+      shell: "/bin/bash",
+    },
+  });
+  assert.deepEqual(calls, [
+    [
+      "/usr/sbin/useradd",
+      ["--create-home", "--user-group", "--shell", "/bin/bash", "rin_owner"],
+    ],
+  ]);
+  assert.deepEqual(users.ensureLocalSystemUser("rin_owner", deps), {
+    created: false,
+    user: {
+      name: "rin_owner",
+      uid: 2001,
+      gid: 2001,
+      home: "/home/rin_owner",
+      shell: "/bin/bash",
+    },
+  });
+  assert.throws(
+    () => users.ensureLocalSystemUser("bad name", deps),
+    /rin_system_user_name_invalid/,
+  );
+  assert.throws(
+    () =>
+      users.ensureLocalSystemUser("rin_owner", {
+        ...deps,
+        platform: "darwin",
+      }),
+    /rin_system_user_creation_unsupported:darwin/,
+  );
+});

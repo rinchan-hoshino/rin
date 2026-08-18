@@ -11,7 +11,6 @@ import {
   type RpcSocketLike,
 } from "../platform/rpc-socket.js";
 import {
-  bridgeDaemonSocketPath,
   defaultDaemonSocketPath,
   isWindowsNamedPipePath,
   safeString,
@@ -113,8 +112,10 @@ export async function startDaemon(options: {
     options.workerCgroupIsolation ||
     createWorkerCgroupIsolation({ warn: (message) => console.warn(message) });
   const socketPath = options.socketPath || defaultDaemonSocketPath();
-  const bridgeSocketPath = bridgeDaemonSocketPath(
+  const legacyBridgeSocketPath = coreDataPath(
     process.env.RIN_DIR || runtime.agentDir,
+    "daemon",
+    "bridge.sock",
   );
   const workerPath = safeString(options.workerPath).trim();
   const selfImproveWorkerPath = safeString(
@@ -163,13 +164,13 @@ export async function startDaemon(options: {
     { workerPath: selfImproveWorkerPath },
   );
 
-  for (const candidate of [socketPath, bridgeSocketPath]) {
+  for (const candidate of [socketPath, legacyBridgeSocketPath]) {
     if (isWindowsNamedPipePath(candidate)) continue;
     try {
       fs.rmSync(candidate, { force: true });
     } catch {}
-    ensureDir(path.dirname(candidate));
   }
+  if (!isWindowsNamedPipePath(socketPath)) ensureDir(path.dirname(socketPath));
 
   type DaemonCommandResult = {
     success?: boolean;
@@ -709,39 +710,26 @@ export async function startDaemon(options: {
     return clientSocket;
   });
 
-  const createSocketServer = () =>
-    net.createServer((socket) => {
-      attachConnectionSocket(socket);
+  const server = net.createServer((socket) => {
+    attachConnectionSocket(socket);
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, () => {
+      server.removeListener("error", reject);
+      if (!isWindowsNamedPipePath(socketPath)) {
+        try {
+          fs.chmodSync(socketPath, 0o600);
+        } catch (error) {
+          server.close(() => reject(error));
+          return;
+        }
+      }
+      resolve();
     });
-
-  const servers = [
-    { server: createSocketServer(), path: socketPath, chmod: null },
-    { server: createSocketServer(), path: bridgeSocketPath, chmod: 0o666 },
-  ];
-
-  await Promise.all(
-    servers.map(
-      ({ server, path: listenPath, chmod }) =>
-        new Promise<void>((resolve, reject) => {
-          server.once("error", reject);
-          server.listen(listenPath, () => {
-            server.removeListener("error", reject);
-            if (
-              typeof chmod === "number" &&
-              !isWindowsNamedPipePath(listenPath)
-            ) {
-              try {
-                fs.chmodSync(listenPath, chmod);
-              } catch {}
-            }
-            resolve();
-          });
-        }),
-    ),
-  );
+  });
 
   console.log(`rin daemon listening on ${socketPath}`);
-  console.log(`rin daemon bridge listening on ${bridgeSocketPath}`);
 
   let shuttingDown = false;
   const shutdown = async () => {
@@ -770,13 +758,8 @@ export async function startDaemon(options: {
         socket.destroy();
       } catch {}
     }
-    await Promise.all(
-      servers.map(
-        ({ server }) =>
-          new Promise<void>((resolve) => server.close(() => resolve())),
-      ),
-    );
-    for (const candidate of [socketPath, bridgeSocketPath]) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    for (const candidate of [socketPath, legacyBridgeSocketPath]) {
       if (isWindowsNamedPipePath(candidate)) continue;
       try {
         fs.rmSync(candidate, { force: true });

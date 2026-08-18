@@ -2,7 +2,10 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { normalizeTargetName } from "../rin-targets/registry.js";
+import {
+  isValidContainerImageReference,
+  normalizeTargetName,
+} from "../rin-targets/registry.js";
 import { upsertTarget } from "../rin-targets/store.js";
 
 export type LocalInstallTarget = {
@@ -10,6 +13,7 @@ export type LocalInstallTarget = {
   targetUser: string;
   installDir: string;
   defaultDir?: string;
+  createSystemUser?: boolean;
 };
 
 export type SshInstallTarget = {
@@ -53,17 +57,16 @@ function run(command: string, args: string[], options: any = {}) {
 
 export function installExistingSshTarget(target: SshInstallTarget) {
   const controlPath = defaultSshControlPath(target.name);
-  const commonArgs = [
+  const commonOptions = [
     "-o",
     "ControlMaster=auto",
     "-o",
     "ControlPersist=10m",
     "-o",
     `ControlPath=${controlPath}`,
-    target.host,
   ];
-  run("ssh", [...commonArgs, "true"]);
-  run("ssh", ["-tt", ...commonArgs, "sh", "-lc", INSTALL_COMMAND]);
+  run("ssh", [...commonOptions, "--", target.host, "true"]);
+  run("ssh", ["-tt", ...commonOptions, "--", target.host, INSTALL_COMMAND]);
   return upsertTarget({
     name: target.name,
     kind: "ssh",
@@ -73,10 +76,17 @@ export function installExistingSshTarget(target: SshInstallTarget) {
   });
 }
 
-export function installContainerTarget(target: ContainerInstallTarget) {
+export function installContainerTarget(
+  target: ContainerInstallTarget,
+  io: { stdinIsTTY?: boolean; stdoutIsTTY?: boolean } = {},
+) {
   const engine = target.engine;
   const container = normalizeTargetName(target.name);
   if (!container) throw new Error("rin_container_name_required");
+  const image = String(target.image || "").trim();
+  if (!isValidContainerImageReference(image)) {
+    throw new Error("rin_container_image_invalid");
+  }
   const exists =
     spawnSync(engine, ["container", "inspect", container], {
       stdio: "ignore",
@@ -87,24 +97,36 @@ export function installContainerTarget(target: ContainerInstallTarget) {
       "-d",
       "--name",
       container,
+      "--user",
+      "root",
       "-v",
-      `${container}-rin:/home/rin/.rin`,
+      `${container}-rin:/root/.rin`,
       "-v",
       `${container}-workspace:/workspace`,
       "-w",
       "/workspace",
-      target.image,
+      image,
       "sleep",
       "infinity",
     ]);
   }
-  run(engine, ["exec", container, "sh", "-lc", INSTALL_COMMAND]);
+  const execArgs = ["exec"];
+  if (io.stdinIsTTY ?? process.stdin.isTTY) execArgs.push("-i");
+  if (io.stdoutIsTTY ?? process.stdout.isTTY) execArgs.push("-t");
+  execArgs.push("-u", "root");
+  run(engine, [...execArgs, container, "sh", "-lc", INSTALL_COMMAND]);
   return upsertTarget({
     name: target.name,
     kind: "container",
     label: `${engine}:${container}`,
-    runtime: { kind: "container", engine, container },
-    metadata: { installedBy: "rin-install", image: target.image },
+    runtime: {
+      kind: "container",
+      engine,
+      container,
+      user: "root",
+      installDir: "/root/.rin",
+    },
+    metadata: { installedBy: "rin-install", image },
   });
 }
 

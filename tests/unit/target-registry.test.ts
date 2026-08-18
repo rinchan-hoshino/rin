@@ -22,34 +22,12 @@ test("target names normalize to stable CLI identifiers", () => {
   assert.equal(registry.isValidTargetName("   "), false);
 });
 
-test("target registry exposes only the three maintained deployment modes", () => {
+test("target registry exposes only the three maintained target transports", () => {
   assert.deepEqual(Object.keys(registry.TARGET_KIND_LABELS).sort(), [
     "container",
     "local-user",
     "ssh",
   ]);
-  assert.deepEqual(
-    registry.DEPLOYMENT_PROVIDERS.map(
-      (provider) => `${provider.kind}/${provider.id}`,
-    ),
-    ["container/docker", "container/podman"],
-  );
-});
-
-test("target registry filters container providers", () => {
-  assert.deepEqual(
-    registry
-      .findDeploymentProviders("container")
-      .map((provider) => provider.id),
-    ["docker", "podman"],
-  );
-  assert.equal(
-    registry.DEPLOYMENT_PROVIDERS.every(
-      (provider) =>
-        provider.requiredInputs.length > 0 && provider.notes.length > 0,
-    ),
-    true,
-  );
   assert.equal(registry.TARGET_KIND_LABELS.ssh, "Existing SSH host");
 });
 

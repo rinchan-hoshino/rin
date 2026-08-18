@@ -185,7 +185,9 @@ test("installer target menu hides cross-user local install on Windows", () => {
     .map((option) => option.value);
 
   assert.ok(linuxValues.includes("local-user"));
+  assert.ok(linuxValues.includes("new-local-user"));
   assert.equal(windowsValues.includes("local-user"), false);
+  assert.equal(windowsValues.includes("new-local-user"), false);
   assert.deepEqual(windowsValues.slice(0, 2), ["current", "ssh"]);
 });
 
@@ -198,7 +200,7 @@ test("promptTargetInstall falls back to all users when no other user exists", as
       },
       async select(options) {
         seen.selects.push(options);
-        return seen.selects.length === 1 ? "existing" : "alice";
+        return "alice";
       },
       async text(options) {
         seen.texts.push(options);
@@ -219,6 +221,8 @@ test("promptTargetInstall falls back to all users when no other user exists", as
       },
     ],
     (user) => `/home/${user}`,
+    undefined,
+    "existing",
   );
 
   assert.equal(result.cancelled, false);
@@ -230,7 +234,7 @@ test("promptTargetInstall falls back to all users when no other user exists", as
     ["alice"],
   );
   assert.deepEqual(
-    seen.selects[1].options.map((option) => option.value),
+    seen.selects[0].options.map((option) => option.value),
     ["alice"],
   );
 });

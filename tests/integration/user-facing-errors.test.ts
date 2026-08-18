@@ -177,6 +177,30 @@ test("runtime error formatter maps known internal markers to actionable messages
     ),
     "Rin's background service is not available: managed daemon service did not become available.",
   );
+  assert.equal(
+    formatRuntimeErrorForUser("rin_container_image_invalid"),
+    "Container target needs a valid image reference.",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser("rin_system_user_creation_unsupported:darwin"),
+    "Rin cannot create a system user on this platform: darwin.",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser("rin_system_user_creation_unverified"),
+    "Rin could not verify the new system user after creating it.",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser("rin_system_user_name_invalid"),
+    "New system user needs a valid Linux username.",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser("rin_system_useradd_unavailable"),
+    "Rin could not find the Linux useradd command needed to create the system user.",
+  );
+  assert.equal(
+    formatRuntimeErrorForUser("rin_systemd_linger_enable_failed:rin-agent"),
+    "Rin could not enable the persistent Linux user service: rin-agent.",
+  );
 });
 
 test("runtime error formatter keeps unmapped internal marker detail readable", () => {

@@ -471,7 +471,11 @@ export function installSystemdUserService(
   if (elevated) {
     try {
       runPrivileged(loginctl, ["enable-linger", targetUser]);
-    } catch {}
+    } catch (cause) {
+      throw new Error(`rin_systemd_linger_enable_failed:${targetUser}`, {
+        cause,
+      });
+    }
   }
   runSystemdUserCommand(
     targetUser,

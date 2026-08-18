@@ -312,15 +312,27 @@ test("systemd installers preserve direct, machine, and elevated command ownershi
         .some((entry) => entry[2]?.includes("--machine")),
       true,
     );
+    assert.equal(
+      events
+        .filter(([name]) => name === "privileged")
+        .some(
+          (entry) =>
+            String(entry[1]).includes("loginctl") &&
+            entry[2]?.join(" ") === "enable-linger other",
+        ),
+      true,
+    );
 
     scenario.privilegedError = true;
-    assert.doesNotThrow(() =>
-      service.installSystemdUserService(
-        "owner",
-        fixture.installDir,
-        true,
-        deps(fixture.home),
-      ),
+    assert.throws(
+      () =>
+        service.installSystemdUserService(
+          "owner",
+          fixture.installDir,
+          true,
+          deps(fixture.home),
+        ),
+      /rin_systemd_linger_enable_failed:owner/,
     );
     scenario.privilegedError = false;
   });

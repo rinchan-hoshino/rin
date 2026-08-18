@@ -179,10 +179,7 @@ test("Rin shared boundary owns target reads, execution context, daemon readiness
     parsed({ targetUser: "target", installDir: "/srv/owner" }),
   );
   assert.equal(crossContext.isTargetUser, false);
-  assert.equal(
-    crossContext.socketPath,
-    "/srv/owner/data/core/daemon/bridge.sock",
-  );
+  assert.equal(crossContext.socketPath, "/socket/target");
   owner.__rinSharedOwnerExec = (_command: string, args: string[]) => {
     const script = String(args[2] || "");
     if (script.startsWith("probe:")) return "";

@@ -4,14 +4,9 @@ import path from "node:path";
 
 import { nowIso } from "../time-utils.js";
 import { safeString } from "../text-utils.js";
-import {
-  isSupportedTargetRecord,
-  normalizeTargetName,
-  type RinTargetRecord,
-} from "./registry.js";
+import { normalizeTargetName, type RinTargetRecord } from "./registry.js";
 
 export type RinTargetStoreData = {
-  defaultTarget?: string;
   targets: RinTargetRecord[];
 };
 
@@ -26,10 +21,14 @@ function emptyStore(): RinTargetStoreData {
 function normalizeStore(value: unknown): RinTargetStoreData {
   const record = value && typeof value === "object" ? (value as any) : {};
   const targets = Array.isArray(record.targets)
-    ? record.targets.filter((target: any) => safeString(target?.name).trim())
+    ? record.targets
+        .filter((target: any) => safeString(target?.name).trim())
+        .map((target: any) => {
+          const { default: _retiredDefault, ...record } = target;
+          return record;
+        })
     : [];
-  const defaultTarget = normalizeTargetName(record.defaultTarget || "");
-  return { defaultTarget: defaultTarget || undefined, targets };
+  return { targets };
 }
 
 export function readTargetStore(
@@ -94,7 +93,6 @@ export function upsertTarget(
     ),
     next,
   ];
-  if (target.default || !store.defaultTarget) store.defaultTarget = name;
   writeTargetStore(store, filePath);
   return next;
 }
@@ -106,35 +104,6 @@ export function removeTarget(name: string, filePath = targetStorePath()) {
   store.targets = store.targets.filter(
     (entry) => normalizeTargetName(entry.name) !== targetName,
   );
-  if (store.defaultTarget === targetName) store.defaultTarget = undefined;
   writeTargetStore(store, filePath);
   return store.targets.length !== before;
-}
-
-export function setDefaultTarget(name: string, filePath = targetStorePath()) {
-  const targetName = normalizeTargetName(name);
-  const store = readTargetStore(filePath);
-  const target = store.targets.find(
-    (entry) => normalizeTargetName(entry.name) === targetName,
-  );
-  if (!target) throw new Error(`rin_target_not_found:${targetName}`);
-  if (!isSupportedTargetRecord(target as unknown)) {
-    throw new Error(
-      `rin_target_unsupported:${safeString((target as any)?.kind)}`,
-    );
-  }
-  store.defaultTarget = targetName;
-  store.targets = store.targets.map((entry) => ({
-    ...entry,
-    default: normalizeTargetName(entry.name) === targetName || undefined,
-  }));
-  writeTargetStore(store, filePath);
-}
-
-export function getDefaultTarget(filePath = targetStorePath()) {
-  const store = readTargetStore(filePath);
-  if (!store.defaultTarget) return undefined;
-  return store.targets.find(
-    (entry) => normalizeTargetName(entry.name) === store.defaultTarget,
-  );
 }

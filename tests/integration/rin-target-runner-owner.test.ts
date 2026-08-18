@@ -55,18 +55,17 @@ test("target runner strips only wrapper target selectors", () => {
   assert.deepEqual(runner.stripTargetWrapperArgs(["--target"]), []);
 });
 
-test("target runner resolves explicit and default target records", () => {
+test("target runner resolves only explicit target records", () => {
   const first = store.upsertTarget({
     name: "runner-owner-explicit",
     kind: "container",
     runtime: { kind: "container", engine: "podman", container: "rin" },
   });
-  store.setDefaultTarget(first.name);
   assert.equal(
     runner.resolveTargetForName(` ${first.name} `)?.name,
     first.name,
   );
-  assert.equal(runner.resolveTargetForName("")?.name, first.name);
+  assert.equal(runner.resolveTargetForName(""), undefined);
   assert.equal(runner.resolveTargetForName("missing-target"), undefined);
 });
 
@@ -82,18 +81,23 @@ test("target runner executes container, ssh, and local-user transports with exac
             engine: probe,
             container: "rin-box",
             user: "bob",
+            installDir: "/root/.rin",
           },
         } as any,
         ["doctor"],
+        { stdinIsTTY: true, stdoutIsTTY: true },
       ),
       0,
     );
     assert.deepEqual((await fs.readFile(output, "utf8")).trim().split("\n"), [
       "exec",
+      "-i",
+      "-t",
       "-u",
       "bob",
       "rin-box",
-      "rin",
+      "/root/.rin/runtime/node/current/bin/node",
+      "/root/.rin/app/current/dist/app/rin/main.js",
       "doctor",
     ]);
 
@@ -118,6 +122,7 @@ test("target runner executes container, ssh, and local-user transports with exac
             },
           } as any,
           ["versions"],
+          { stdinIsTTY: true, stdoutIsTTY: true },
         ),
         0,
       );
@@ -125,15 +130,16 @@ test("target runner executes container, ssh, and local-user transports with exac
       process.env.PATH = previousPath;
     }
     assert.deepEqual((await fs.readFile(output, "utf8")).trim().split("\n"), [
+      "-t",
       "-p",
       "2222",
       "-i",
       "/tmp/key",
       "-o",
       "ControlPath=/tmp/control",
+      "--",
       "rin@example.invalid",
-      "rin",
-      "versions",
+      'exec "$HOME/.rin/runtime/node/current/bin/node" "$HOME/.rin/app/current/dist/app/rin/main.js" \'versions\'',
     ]);
 
     const helper = path.join(path.dirname(probe), "local-helper.mjs");

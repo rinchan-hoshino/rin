@@ -19,6 +19,7 @@ const registerFixture = path.resolve(
 type RunningDaemon = {
   child: ChildProcess;
   socketPath: string;
+  legacyBridgePath: string;
   stdout: () => string;
   stderr: () => string;
 };
@@ -49,6 +50,12 @@ async function startOwnerDaemon(root: string): Promise<RunningDaemon> {
     os.tmpdir(),
     `rin-do-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.sock`,
   );
+  const legacyBridgePath = path.join(
+    sandbox.env.RIN_DIR,
+    "data/core/daemon/bridge.sock",
+  );
+  await fs.mkdir(path.dirname(legacyBridgePath), { recursive: true });
+  await fs.writeFile(legacyBridgePath, "legacy");
   const executable = path.join(
     root,
     `launcher-${Date.now()}-${Math.random()}.mjs`,
@@ -88,7 +95,13 @@ async function startOwnerDaemon(root: string): Promise<RunningDaemon> {
   await waitForSocket(socketPath, child).catch((error) => {
     throw new Error(`${error.message}\nstdout=${stdout}\nstderr=${stderr}`);
   });
-  return { child, socketPath, stdout: () => stdout, stderr: () => stderr };
+  return {
+    child,
+    socketPath,
+    legacyBridgePath,
+    stdout: () => stdout,
+    stderr: () => stderr,
+  };
 }
 
 async function stopOwnerDaemon(daemon: RunningDaemon) {
@@ -148,6 +161,11 @@ test("callable core daemon routes the complete system-owned RPC while its host o
   let daemon: RunningDaemon | undefined;
   try {
     daemon = await startOwnerDaemon(root);
+    const socketStat = await fs.stat(daemon.socketPath);
+    assert.equal(socketStat.mode & 0o777, 0o600);
+    await assert.rejects(fs.access(daemon.legacyBridgePath), {
+      code: "ENOENT",
+    });
     const rpc = connectRpc(daemon.socketPath);
     await new Promise<void>((resolve, reject) => {
       rpc.socket.once("connect", resolve);

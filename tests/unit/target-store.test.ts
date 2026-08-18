@@ -33,7 +33,7 @@ test("target store paths and malformed files resolve to an empty store", () => {
   });
 });
 
-test("target store normalizes persisted defaults, filters nameless rows, and sorts copies", () => {
+test("target store ignores retired defaults, filters nameless rows, and sorts copies", () => {
   withStore((filePath) => {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(
@@ -41,7 +41,7 @@ test("target store normalizes persisted defaults, filters nameless rows, and sor
       JSON.stringify({
         defaultTarget: " Demo Box ",
         targets: [
-          { name: "zeta", marker: 1 },
+          { name: "zeta", marker: 1, default: true },
           { name: "", marker: 2 },
           { marker: 3 },
           { name: "Alpha", marker: 4 },
@@ -51,23 +51,26 @@ test("target store normalizes persisted defaults, filters nameless rows, and sor
     );
 
     assert.deepEqual(store.readTargetStore(filePath), {
-      defaultTarget: "demo-box",
       targets: [
         { name: "zeta", marker: 1 },
         { name: "Alpha", marker: 4 },
       ],
     });
+    store.writeTargetStore(store.readTargetStore(filePath), filePath);
+    assert.equal(
+      "defaultTarget" in JSON.parse(fs.readFileSync(filePath, "utf8")),
+      false,
+    );
     assert.deepEqual(
       store.listTargets(filePath).map((target) => target.name),
       ["Alpha", "zeta"],
     );
     assert.equal(store.findTarget(" alpha ", filePath)?.marker, 4);
     assert.equal(store.findTarget("   ", filePath), undefined);
-    assert.equal(store.getDefaultTarget(filePath), undefined);
   });
 });
 
-test("target store upserts, preserves creation time, defaults, and removes targets", () => {
+test("target store upserts, preserves creation time, and removes targets", () => {
   withStore((filePath) => {
     const first = store.upsertTarget(
       {
@@ -80,7 +83,6 @@ test("target store upserts, preserves creation time, defaults, and removes targe
     );
     assert.equal(first.name, "demo-box");
     assert.equal(first.createdAt, "2026-01-01T00:00:00.000Z");
-    assert.equal(store.getDefaultTarget(filePath)?.name, "demo-box");
 
     const updated = store.upsertTarget(
       {
@@ -93,34 +95,17 @@ test("target store upserts, preserves creation time, defaults, and removes targe
     );
     assert.equal(updated.createdAt, first.createdAt);
     assert.equal(updated.updatedAt, "2026-02-02T00:00:00.000Z");
-    assert.equal(updated.runtime.kind, "ssh");
     assert.equal(
       updated.runtime.kind === "ssh" && updated.runtime.host,
       "new-host",
     );
-
-    store.upsertTarget(
-      {
-        name: "local",
-        kind: "local-user",
-        runtime: { kind: "local-user", user: "rin" },
-        default: true,
-      },
-      filePath,
-    );
-    assert.deepEqual(
-      store.listTargets(filePath).map((target) => target.name),
-      ["demo-box", "local"],
-    );
-    assert.equal(store.getDefaultTarget(filePath)?.name, "local");
     assert.equal(store.removeTarget("missing", filePath), false);
-    assert.equal(store.removeTarget(" LOCAL ", filePath), true);
-    assert.equal(store.getDefaultTarget(filePath), undefined);
-    assert.equal(store.removeTarget("local", filePath), false);
+    assert.equal(store.removeTarget(" DEMO BOX ", filePath), true);
+    assert.equal(store.removeTarget("demo-box", filePath), false);
   });
 });
 
-test("target store validates names and explicit default selection", () => {
+test("target store validates names", () => {
   withStore((filePath) => {
     assert.throws(
       () =>
@@ -133,39 +118,6 @@ test("target store validates names and explicit default selection", () => {
           filePath,
         ),
       /rin_target_name_required/,
-    );
-
-    store.upsertTarget(
-      {
-        name: "one",
-        kind: "ssh",
-        runtime: { kind: "ssh", host: "one" },
-      },
-      filePath,
-    );
-    store.upsertTarget(
-      {
-        name: "two",
-        kind: "ssh",
-        runtime: { kind: "ssh", host: "two" },
-      },
-      filePath,
-    );
-    assert.throws(
-      () => store.setDefaultTarget("missing", filePath),
-      /rin_target_not_found:missing/,
-    );
-
-    store.setDefaultTarget(" TWO ", filePath);
-    assert.equal(store.getDefaultTarget(filePath)?.name, "two");
-    assert.deepEqual(
-      store
-        .listTargets(filePath)
-        .map((target) => [target.name, target.default]),
-      [
-        ["one", undefined],
-        ["two", true],
-      ],
     );
   });
 });

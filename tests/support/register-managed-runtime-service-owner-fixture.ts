@@ -5,7 +5,6 @@ const replacements = {
   "dist/core/platform/process.js": `export async function sleep(ms){globalThis.__rinManagedOwnerEvents.push(["sleep",ms])}`,
   "dist/core/rin-daemon/client.js": `export async function canConnectDaemonSocket(path,timeout){globalThis.__rinManagedOwnerEvents.push(["connect",path,timeout]); return false}`,
   "dist/core/rin-daemon/lock.js": `export function readDaemonInstanceLockOwner(agentDir){globalThis.__rinManagedOwnerEvents.push(["lock",agentDir]); return {pid:globalThis.__rinManagedOwnerPid || 0}}`,
-  "dist/core/rin-lib/common.js": `export function bridgeDaemonSocketPath(dir){return dir+"/bridge.sock"}`,
   "dist/core/rin-lib/runtime.js": `export const RIN_DIR_ENV="RIN_DIR"`,
   "dist/core/rin-lib/system.js": `
     export function isSameSystemUser(a,b){return String(a||"")===String(b||"")}

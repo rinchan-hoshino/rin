@@ -17,6 +17,7 @@ export type RinRuntimeTransport =
       engine: "docker" | "podman";
       container: string;
       user?: string;
+      installDir?: string;
     };
 
 export type RinTargetRecord = {
@@ -25,21 +26,8 @@ export type RinTargetRecord = {
   label?: string;
   createdAt: string;
   updatedAt: string;
-  default?: boolean;
   runtime: RinRuntimeTransport;
   metadata?: Record<string, unknown>;
-};
-
-export type DeploymentProviderKind = "container";
-
-export type DeploymentProviderDescriptor = {
-  kind: DeploymentProviderKind;
-  id: string;
-  label: string;
-  recommendedIsolation: string;
-  requiredInputs: string[];
-  defaultRuntime: "container";
-  notes: string[];
 };
 
 export const TARGET_KIND_LABELS: Record<RinTargetKind, string> = {
@@ -47,33 +35,6 @@ export const TARGET_KIND_LABELS: Record<RinTargetKind, string> = {
   ssh: "Existing SSH host",
   container: "Local container",
 };
-
-export const DEPLOYMENT_PROVIDERS: DeploymentProviderDescriptor[] = [
-  {
-    kind: "container",
-    id: "docker",
-    label: "Docker",
-    recommendedIsolation: "named container + persistent volumes",
-    requiredInputs: ["container name"],
-    defaultRuntime: "container",
-    notes: [
-      "Uses docker exec after installation.",
-      "Does not install host launchers or host user services.",
-    ],
-  },
-  {
-    kind: "container",
-    id: "podman",
-    label: "Podman",
-    recommendedIsolation: "named container + persistent volumes",
-    requiredInputs: ["container name"],
-    defaultRuntime: "container",
-    notes: [
-      "Uses podman exec after installation.",
-      "Rootless Podman is preferred when available.",
-    ],
-  },
-];
 
 export function normalizeTargetName(value: string) {
   const next = safeString(value).trim().toLowerCase();
@@ -85,8 +46,8 @@ export function isValidTargetName(value: string) {
   return /^[a-z0-9][a-z0-9_.-]{0,63}$/i.test(safeString(value).trim());
 }
 
-export function findDeploymentProviders(kind: DeploymentProviderKind) {
-  return DEPLOYMENT_PROVIDERS.filter((provider) => provider.kind === kind);
+export function isValidContainerImageReference(value: unknown) {
+  return /^[A-Za-z0-9][A-Za-z0-9._/@:-]*$/.test(safeString(value).trim());
 }
 
 export function isSupportedTargetRecord(

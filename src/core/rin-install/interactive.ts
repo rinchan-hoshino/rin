@@ -10,10 +10,13 @@ import {
 } from "./paths.js";
 import { configureProviderAuth, loadModelChoices } from "./provider-auth.js";
 import { createInstallerI18n, type InstallerI18n } from "../i18n.js";
-import { normalizeTargetName } from "../rin-targets/registry.js";
+import {
+  isValidContainerImageReference,
+  normalizeTargetName,
+} from "../rin-targets/registry.js";
 import type { InstallTargetSelection } from "./deployment-targets.js";
 import { runInstallerProgress } from "./progress.js";
-import { isSameSystemUser } from "./users.js";
+import { isSameSystemUser, isValidNewSystemUserName } from "./users.js";
 
 export type PromptApi = {
   ensureNotCancelled: <T>(value: T | symbol | undefined | null) => T;
@@ -51,6 +54,15 @@ export function buildInstallTargetOptions(
             hint: i18n.sameMachineHint,
           },
         ]),
+    ...(platform === "linux"
+      ? [
+          {
+            value: "new-local-user",
+            label: i18n.newUserLabel,
+            hint: i18n.newUserHint,
+          },
+        ]
+      : []),
     {
       value: "ssh",
       label: i18n.sshInstallTargetLabel,
@@ -93,6 +105,17 @@ export async function promptInstallTarget(
     );
   }
 
+  if (targetMode === "new-local-user") {
+    return await promptTargetInstall(
+      prompt,
+      currentUser,
+      allUsers,
+      targetHomeForUser,
+      i18n,
+      "new",
+    );
+  }
+
   if (targetMode === "ssh") {
     const host = String(
       prompt.ensureNotCancelled(
@@ -128,6 +151,10 @@ export async function promptInstallTarget(
           message: i18n.containerImageMessage,
           placeholder: "node:22-bookworm",
           defaultValue: "node:22-bookworm",
+          validate(value: string) {
+            if (!isValidContainerImageReference(value))
+              return i18n.containerImageInvalid;
+          },
         }),
       ),
     ).trim();
@@ -163,35 +190,12 @@ export async function promptTargetInstall(
   allUsers: SystemUser[],
   targetHomeForUser: (user: string) => string,
   i18n: InstallerI18n = createInstallerI18n(),
-  forcedMode?: "current" | "existing" | "new",
+  targetMode: "current" | "existing" | "new",
 ) {
   const otherUsers = allUsers.filter(
     (entry) => !isSameSystemUser(entry.name, currentUser),
   );
   const existingCandidates = otherUsers.length ? otherUsers : allUsers;
-
-  const targetMode =
-    forcedMode ||
-    prompt.ensureNotCancelled(
-      await prompt.select({
-        message: i18n.chooseTargetUserMessage,
-        options: [
-          {
-            value: "current",
-            label: i18n.currentUserLabel,
-            hint: currentUser,
-          },
-          {
-            value: "existing",
-            label: i18n.existingOtherUserLabel,
-            hint: existingCandidates.length
-              ? i18n.usersHint(existingCandidates.length)
-              : i18n.noneFoundHint,
-          },
-          { value: "new", label: i18n.newUserLabel, hint: i18n.newUserHint },
-        ],
-      }),
-    );
 
   let targetUser = currentUser;
   if (targetMode === "existing") {
@@ -223,8 +227,7 @@ export async function promptTargetInstall(
         validate(value: string) {
           const next = String(value || "").trim();
           if (!next) return i18n.usernameRequired;
-          if (!/^[a-z_][a-z0-9_-]*[$]?$/i.test(next))
-            return i18n.usernameInvalid;
+          if (!isValidNewSystemUserName(next)) return i18n.usernameInvalid;
         },
       }),
     );
@@ -239,6 +242,7 @@ export async function promptTargetInstall(
     targetUser,
     installDir,
     defaultDir,
+    createSystemUser: targetMode === "new",
     existingCandidates,
     allUsers,
   };
@@ -515,6 +519,7 @@ export function buildInstallPlanText(
     thinkingLevel: string;
     authAvailable: boolean;
     setDefaultTarget?: boolean;
+    createSystemUser?: boolean;
   },
   i18n: InstallerI18n = createInstallerI18n(),
 ) {
@@ -526,6 +531,7 @@ export function buildInstallPlanText(
     thinkingLevel: options.thinkingLevel,
     authAvailable: options.authAvailable,
     setDefaultTarget: options.setDefaultTarget !== false,
+    createSystemUser: options.createSystemUser,
   });
 }
 

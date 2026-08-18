@@ -1,7 +1,6 @@
 import path from "node:path";
 import os from "node:os";
 import { createHash } from "node:crypto";
-import { coreDataPath } from "../data-layout.js";
 import { safeString } from "../text-utils.js";
 
 export { safeString };
@@ -22,12 +21,6 @@ export function windowsNamedPipePath(scope: string, identity: string) {
 
 export function isWindowsNamedPipePath(value: string) {
   return /^\\\\\.\\pipe\\/i.test(safeString(value).trim());
-}
-
-export function bridgeDaemonSocketPath(agentDir: string) {
-  if (process.platform === "win32")
-    return windowsNamedPipePath("bridge", agentDir);
-  return coreDataPath(agentDir, "daemon", "bridge.sock");
 }
 
 function fallbackRuntimeDir() {

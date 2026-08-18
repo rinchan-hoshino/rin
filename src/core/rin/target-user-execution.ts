@@ -2,7 +2,6 @@ import fs from "node:fs";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
 
-import { bridgeDaemonSocketPath } from "../rin-lib/common.js";
 import {
   buildDaemonSocketProbeScript,
   canConnectDaemonSocket,
@@ -27,6 +26,7 @@ type TargetUserExecutionDependencies = {
     options: Record<string, unknown>,
   ) => unknown;
   fileExists?: (filePath: string) => boolean;
+  socketPathForUser?: typeof socketPathForUser;
 };
 
 export function resolveRuntimeAgentDirForTarget(
@@ -91,9 +91,8 @@ export function createTargetUserExecutionContext(
           : ""
       : "";
   const isTargetUser = !targetUser || isSameSystemUser(targetUser, currentUser);
-  const socketPath = isTargetUser
-    ? socketPathForUser(targetUser)
-    : bridgeDaemonSocketPath(installDir);
+  const resolveSocketPath = dependencies.socketPathForUser || socketPathForUser;
+  const socketPath = resolveSocketPath(targetUser);
   const buildShell = dependencies.buildUserShell || buildUserShell;
   const executeFile = dependencies.execFileSync || execFileSync;
 

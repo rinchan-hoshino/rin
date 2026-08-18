@@ -42,10 +42,6 @@ test("shared socket helpers normalize Windows pipe identities", async () => {
 
   await withPlatform("win32", () => {
     assert.equal(
-      common.bridgeDaemonSocketPath("C:\\Users\\owner\\.rin"),
-      common.windowsNamedPipePath("bridge", "C:\\Users\\owner\\.rin"),
-    );
-    assert.equal(
       common.defaultDaemonSocketPath(),
       common.windowsNamedPipePath("daemon", os.homedir()),
     );
@@ -57,10 +53,6 @@ test("shared socket helpers select Unix runtime directories", async () => {
   try {
     process.env.XDG_RUNTIME_DIR = "/tmp/rin-runtime-owner";
     await withPlatform("linux", () => {
-      assert.equal(
-        common.bridgeDaemonSocketPath("/tmp/agent"),
-        path.join("/tmp/agent", "data", "core", "daemon", "bridge.sock"),
-      );
       assert.equal(
         common.defaultDaemonSocketPath(),
         "/tmp/rin-runtime-owner/rin-daemon/daemon.sock",
