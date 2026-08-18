@@ -46,7 +46,7 @@ Examples:
   rin --mode json "Compare these options"
   rin --mode json --managed-session research -p "Check the cited sources"
   rin --name "weekly planning" -p "Draft next week's plan"
-  rin --model openai/gpt-5.5 --thinking low -p "Rewrite this clearly"
+  rin --model provider/model --thinking low -p "Rewrite this clearly"
 `);
 }
 

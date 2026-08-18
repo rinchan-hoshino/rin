@@ -258,7 +258,7 @@ Configure a chat-specific model or thinking level under `settings.json -> chat.b
   "chat": {
     "byChatKey": {
       "telegram/8623230033:7890": {
-        "model": "openai-codex/gpt-5.5",
+        "model": "provider/model",
         "thinkingLevel": "low"
       }
     }

@@ -210,8 +210,6 @@ rin_frontend_disconnected
 rin_install_temp_dir_unavailable
 rin_installed_daemon_entry_missing
 rin_installer_apply_result_missing
-rin_installer_fd_install_dir_missing
-rin_installer_fd_manager_unavailable
 rin_invalid_runtime_replacement_paths
 rin_launchd_daemon_stop_incomplete
 rin_launchd_restart_failed
@@ -354,7 +352,7 @@ web_fetch_invalid_url`
   .split(/\s+/);
 
 test("every owned runtime marker has a human-facing formatter", () => {
-  assert.equal(OWNED_MARKERS.length, 342);
+  assert.equal(OWNED_MARKERS.length, 340);
   assert.equal(new Set(OWNED_MARKERS).size, OWNED_MARKERS.length);
   for (const marker of OWNED_MARKERS) {
     assert.equal(errors.hasUserFacingRuntimeErrorMapping(marker), true, marker);

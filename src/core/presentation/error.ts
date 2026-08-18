@@ -509,10 +509,6 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     withDetail("Rin command failed", detail, ". Check the command output."),
   rin_duplicate_command_id: () =>
     "Rin rejected a duplicate command identifier that is still in use.",
-  rin_installer_fd_install_dir_missing: () =>
-    "Rin installer needs the default local config directory before preparing managed search tools.",
-  rin_installer_fd_manager_unavailable: () =>
-    "Rin installer could not prepare managed search tools.",
   rin_container_name_required: () =>
     "Target operation needs a container name. Provide the container name.",
   rin_daemon_failed: () => "Rin's background service failed to start.",
