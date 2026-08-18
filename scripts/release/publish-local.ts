@@ -216,12 +216,33 @@ function isAncestor(root, ancestor, descendant) {
   );
 }
 
+function nightlyVersionParts(value) {
+  const match = trim(value).match(/^(.+-nightly\.)(\d{8})\+([0-9a-f]{7})$/);
+  if (!match) return null;
+  return {
+    version: match[0],
+    prefix: match[1],
+    date: match[2],
+    shortRef: match[3],
+  };
+}
+
 function interruptedNightlyRelease(root, manifest, plan, head) {
-  const versionPrefix = plan.version.slice(0, -7);
-  const escapedPrefix = versionPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const tagPattern = new RegExp(`^refs/tags/v(${escapedPrefix}[0-9a-f]{7})$`);
+  const planned = nightlyVersionParts(plan.version);
+  if (!planned) throw new Error(`invalid_nightly_plan:${plan.version}`);
+  const manifested = nightlyVersionParts(manifest.nightly?.version);
+  const escapedPrefix = planned.prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const tagPattern = new RegExp(
+    `^refs/tags/v(${escapedPrefix}[0-9]{8}\\+[0-9a-f]{7})$`,
+  );
   const remoteTags = git(
-    ["ls-remote", "--tags", "--refs", "origin", `refs/tags/v${versionPrefix}*`],
+    [
+      "ls-remote",
+      "--tags",
+      "--refs",
+      "origin",
+      `refs/tags/v${planned.prefix}*`,
+    ],
     { cwd: root, capture: true },
   );
   const candidates = [];
@@ -230,6 +251,15 @@ function interruptedNightlyRelease(root, manifest, plan, head) {
     const match = remoteRef.match(tagPattern);
     if (!match) continue;
     const version = match[1];
+    const candidate = nightlyVersionParts(version);
+    if (
+      !candidate ||
+      candidate.date > planned.date ||
+      (manifested?.prefix === planned.prefix &&
+        candidate.date < manifested.date)
+    ) {
+      continue;
+    }
     const tag = `v${version}`;
     git(["fetch", "origin", `refs/tags/${tag}:refs/tags/${tag}`, "--force"], {
       cwd: root,
@@ -239,7 +269,7 @@ function interruptedNightlyRelease(root, manifest, plan, head) {
       capture: true,
     });
     if (
-      target.slice(0, 7) !== version.slice(-7) ||
+      target.slice(0, 7) !== candidate.shortRef ||
       !isAncestor(root, target, head)
     ) {
       continue;

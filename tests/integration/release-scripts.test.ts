@@ -566,16 +566,18 @@ test("local nightly recovery resumes bootstrap without minting a metadata-ref re
   assert.match(sourceChannel, /recovered: true/);
 });
 
-test("local nightly recovery finishes a same-day tag after main advances", () => {
+test("local nightly recovery finishes an unreconciled tag after UTC and main advance", () => {
   const content = readLocalPublisher();
   const sourceStart = content.indexOf("function releaseSourceChannel");
   const sourceEnd = content.indexOf("function releaseCandidateChannel");
   const sourceChannel = content.slice(sourceStart, sourceEnd);
 
   assert.match(content, /function interruptedNightlyRelease/);
-  assert.match(content, /plan\.version\.slice\(0, -7\)/);
+  assert.match(content, /function nightlyVersionParts/);
+  assert.match(content, /candidate\.date > planned\.date/);
+  assert.match(content, /candidate\.date < manifested\.date/);
   assert.match(content, /git\(\["rev-list", "-n", "1", tag\]/);
-  assert.match(content, /target\.slice\(0, 7\) !== version\.slice\(-7\)/);
+  assert.match(content, /target\.slice\(0, 7\) !== candidate\.shortRef/);
   assert.match(content, /isAncestor\(root, target, head\)/);
   assert.match(
     sourceChannel,
