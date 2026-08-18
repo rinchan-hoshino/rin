@@ -566,6 +566,29 @@ test("local nightly recovery resumes bootstrap without minting a metadata-ref re
   assert.match(sourceChannel, /recovered: true/);
 });
 
+test("local nightly recovery finishes a same-day tag after main advances", () => {
+  const content = readLocalPublisher();
+  const sourceStart = content.indexOf("function releaseSourceChannel");
+  const sourceEnd = content.indexOf("function releaseCandidateChannel");
+  const sourceChannel = content.slice(sourceStart, sourceEnd);
+
+  assert.match(content, /function interruptedNightlyRelease/);
+  assert.match(content, /plan\.version\.slice\(0, -7\)/);
+  assert.match(content, /git\(\["rev-list", "-n", "1", tag\]/);
+  assert.match(content, /target\.slice\(0, 7\) !== version\.slice\(-7\)/);
+  assert.match(content, /isAncestor\(root, target, head\)/);
+  assert.match(
+    sourceChannel,
+    /git\(\["worktree", "add", "--detach", sourceRoot, release\.ref\]/,
+  );
+  assert.match(sourceChannel, /npm\(\["ci"\], \{ cwd: sourceRoot \}\)/);
+  assert.ok(
+    sourceChannel.indexOf("interruptedNightlyRelease(") <
+      sourceChannel.indexOf("validateReleaseTree(sourceRoot)"),
+  );
+  assert.match(sourceChannel, /recovered: Boolean\(interrupted\)/);
+});
+
 test("local release executor leaves dependency auditing to integration", () => {
   const content = readLocalPublisher();
   assert.doesNotMatch(content, /npm\(\["audit"/);
@@ -620,7 +643,7 @@ test("local release executor checks changelog before expensive beta and candidat
   const sourceChannel = content.slice(sourceStart, sourceEnd);
   assert.ok(
     sourceChannel.indexOf("verifyChangelog(") <
-      sourceChannel.indexOf("validateReleaseTree(root)"),
+      sourceChannel.indexOf("validateReleaseTree(sourceRoot)"),
   );
 
   const candidate = content.slice(sourceEnd);

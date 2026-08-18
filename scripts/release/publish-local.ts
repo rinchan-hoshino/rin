@@ -207,6 +207,61 @@ function remoteHasTag(root, tag) {
   return result.status === 0;
 }
 
+function isAncestor(root, ancestor, descendant) {
+  return (
+    spawnSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
+      cwd: root,
+      stdio: "ignore",
+    }).status === 0
+  );
+}
+
+function interruptedNightlyRelease(root, manifest, plan, head) {
+  const versionPrefix = plan.version.slice(0, -7);
+  const escapedPrefix = versionPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const tagPattern = new RegExp(`^refs/tags/v(${escapedPrefix}[0-9a-f]{7})$`);
+  const remoteTags = git(
+    ["ls-remote", "--tags", "--refs", "origin", `refs/tags/v${versionPrefix}*`],
+    { cwd: root, capture: true },
+  );
+  const candidates = [];
+  for (const line of remoteTags.split("\n").filter(Boolean)) {
+    const remoteRef = line.split(/\s+/)[1] || "";
+    const match = remoteRef.match(tagPattern);
+    if (!match) continue;
+    const version = match[1];
+    const tag = `v${version}`;
+    git(["fetch", "origin", `refs/tags/${tag}:refs/tags/${tag}`, "--force"], {
+      cwd: root,
+    });
+    const target = git(["rev-list", "-n", "1", tag], {
+      cwd: root,
+      capture: true,
+    });
+    if (
+      target.slice(0, 7) !== version.slice(-7) ||
+      !isAncestor(root, target, head)
+    ) {
+      continue;
+    }
+    if (
+      trim(manifest.nightly?.version) === version &&
+      trim(manifest.nightly?.ref) === target &&
+      manifest.nightly?.assets?.["linux-x64"] &&
+      ghReleaseExists(root, repositorySlug(root), tag)
+    ) {
+      continue;
+    }
+    candidates.push({ version, ref: target });
+  }
+  if (candidates.length > 1) {
+    throw new Error(
+      `ambiguous_interrupted_nightly:${candidates.map((item) => item.version).join(",")}`,
+    );
+  }
+  return candidates[0] || null;
+}
+
 function ghReleaseExists(root, repository, tag) {
   const result = spawnSync(
     "gh",
@@ -430,6 +485,11 @@ function releaseSourceChannel(root, channel, noPublish, tempRoot) {
       capture: true,
     }),
   );
+  const interrupted =
+    channel === "nightly"
+      ? interruptedNightlyRelease(root, manifest, plan, ref)
+      : null;
+  const release = interrupted || { version: plan.version, ref };
   if (channel === "beta") {
     verifyChangelog(
       root,
@@ -439,39 +499,77 @@ function releaseSourceChannel(root, channel, noPublish, tempRoot) {
       ref,
     );
   }
-  validateReleaseTree(root);
-  const bundle = buildBundle(
-    root,
-    root,
-    plan.version,
-    path.join(tempRoot, "bundles"),
-  );
-  if (noPublish)
-    return { channel, version: plan.version, ref, bundle, published: false };
 
-  const repository = repositorySlug(root);
-  publishGitHubBundle(
-    root,
-    repository,
-    plan.version,
-    ref,
-    bundle.bundlePath,
-    channel,
-  );
-  const extra =
-    channel === "nightly"
-      ? ["--branch", "main"]
-      : ["--promotion-version", plan.promotionVersion];
-  updateManifest(root, channel, plan.version, ref, extra, bundle, repository);
-  const action = channel === "nightly" ? "publish nightly" : "cut beta";
-  commitAndPushMain(root, `chore(release): ${action} ${plan.version}`);
-  publishBootstrap(
-    root,
-    git(["remote", "get-url", "origin"], { cwd: root, capture: true }),
-    `chore(release): ${action} ${plan.version}`,
-    tempRoot,
-  );
-  return { channel, version: plan.version, ref, bundle, published: true };
+  let sourceRoot = root;
+  const pinnedSource = release.ref !== ref;
+  if (pinnedSource) {
+    sourceRoot = path.join(tempRoot, "source");
+    git(["worktree", "add", "--detach", sourceRoot, release.ref], {
+      cwd: root,
+    });
+    npm(["ci"], { cwd: sourceRoot });
+  }
+  try {
+    validateReleaseTree(sourceRoot);
+    const bundle = buildBundle(
+      root,
+      sourceRoot,
+      release.version,
+      path.join(tempRoot, "bundles"),
+    );
+    if (noPublish)
+      return {
+        channel,
+        version: release.version,
+        ref: release.ref,
+        bundle,
+        published: false,
+        recovered: Boolean(interrupted),
+      };
+
+    const repository = repositorySlug(root);
+    publishGitHubBundle(
+      root,
+      repository,
+      release.version,
+      release.ref,
+      bundle.bundlePath,
+      channel,
+    );
+    const extra =
+      channel === "nightly"
+        ? ["--branch", "main"]
+        : ["--promotion-version", plan.promotionVersion];
+    updateManifest(
+      root,
+      channel,
+      release.version,
+      release.ref,
+      extra,
+      bundle,
+      repository,
+    );
+    const action = channel === "nightly" ? "publish nightly" : "cut beta";
+    commitAndPushMain(root, `chore(release): ${action} ${release.version}`);
+    publishBootstrap(
+      root,
+      git(["remote", "get-url", "origin"], { cwd: root, capture: true }),
+      `chore(release): ${action} ${release.version}`,
+      tempRoot,
+    );
+    return {
+      channel,
+      version: release.version,
+      ref: release.ref,
+      bundle,
+      published: true,
+      recovered: Boolean(interrupted),
+    };
+  } finally {
+    if (pinnedSource) {
+      git(["worktree", "remove", "--force", sourceRoot], { cwd: root });
+    }
+  }
 }
 
 function releaseCandidateChannel(root, args, tempRoot) {
