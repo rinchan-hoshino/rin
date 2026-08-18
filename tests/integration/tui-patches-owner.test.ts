@@ -500,7 +500,12 @@ test("patched Pi lifecycle presents Rin identity, changelog, settings, and promp
   await patches.applyRinTuiOverrides();
   const proto = InteractiveMode.prototype;
   const previousRuntimeRole = runtimeEnv.getRinTuiRuntimeRole();
-  t.after(() => runtimeEnv.setRinTuiRuntimeRole(previousRuntimeRole));
+  const previousPiOffline = process.env.PI_OFFLINE;
+  t.after(() => {
+    runtimeEnv.setRinTuiRuntimeRole(previousRuntimeRole);
+    if (previousPiOffline === undefined) delete process.env.PI_OFFLINE;
+    else process.env.PI_OFFLINE = previousPiOffline;
+  });
 
   runtimeEnv.setRinTuiRuntimeRole("rpc-frontend");
   fixture.footerLines = ["cwd", "stats", "tail"];
@@ -597,55 +602,89 @@ test("patched Pi lifecycle presents Rin identity, changelog, settings, and promp
     /No changelog entries found\./,
   );
 
+  await flush();
+  fixture.events.length = 0;
+  process.env.PI_OFFLINE = "owner-before-run";
   const prompts: any[] = [];
-  let inputs = 0;
-  const runInstance = {
-    init: async () => prompts.push(["init"]),
+  const getUserInput = async () => "owner input";
+  const checkForPackageUpdates = async () => {
+    fixture.events.push(["original-package-check"]);
+    return [];
+  };
+  const sessionPrompt = async (message: string, options?: any) => {
+    prompts.push(["prompt", message, options, process.env.PI_OFFLINE]);
+  };
+  const runInstance: any = {
     options: {
-      rinStartupWarnings: ["warning owner", ""],
-      migratedProviders: ["openai"],
-      modelFallbackMessage: "fallback owner",
       initialMessage: "initial owner",
-      initialImages: [{ type: "image", data: "owner" }],
-      initialMessages: ["follow one", "follow two"],
+      initialImages: ["owner-image"],
+      initialMessages: ["initial followup"],
+      rinStartupWarnings: ["warning owner", ""],
       rinStartHiddenInitialization: true,
     },
-    session: {
-      modelRegistry: { getError: () => "models owner" },
-      async prompt(message: string, options?: any) {
-        prompts.push(["prompt", message, options]);
-        if (message === "follow one") throw new Error("follow failed");
-      },
-    },
+    session: { prompt: sessionPrompt },
     showWarning: (message: string) => prompts.push(["warning", message]),
     showError: (message: string) => prompts.push(["error", message]),
-    checkTmuxKeyboardSetup: async () => "tmux owner",
-    maybeWarnAboutAnthropicSubscriptionAuth: async () =>
-      prompts.push(["anthropic"]),
-    async getUserInput() {
-      inputs += 1;
-      if (inputs === 1) return "loop owner";
-      throw new Error("stop input loop");
-    },
+    checkForPackageUpdates,
+    getUserInput,
   };
-  await assert.rejects(proto.run.call(runInstance), /stop input loop/);
+  let runInitCalls = 0;
+  const runInit = () => {
+    runInitCalls += 1;
+    return proto.init.call(runInstance);
+  };
+  runInstance.init = runInit;
+  await proto.run.call(runInstance);
   await flush();
+  assert.deepEqual(
+    prompts.filter(([kind]) => kind === "prompt").map(([, value]) => value),
+    ["initial owner", "initial followup", "", "owner input"],
+  );
+  assert.deepEqual(
+    prompts.find(
+      ([kind, value]) => kind === "prompt" && value === "initial owner",
+    )?.[2],
+    { images: ["owner-image"] },
+  );
   assert.equal(
     prompts.some(
-      ([kind, value]) => kind === "prompt" && value === "loop owner",
+      ([kind, value, options]) =>
+        kind === "prompt" &&
+        value === "" &&
+        options?.requestTag === "rin-init-startup" &&
+        options?.source === "rin-init",
     ),
     true,
   );
   assert.equal(
     prompts.some(
-      ([kind, value]) => kind === "error" && value === "follow failed",
+      ([kind, value]) => kind === "warning" && value === "warning owner",
     ),
     true,
   );
+
   assert.equal(
-    prompts.some(([kind, value]) => kind === "warning" && /openai/.test(value)),
+    prompts
+      .filter(([kind]) => kind === "prompt")
+      .every(([, , , piOffline]) => piOffline === "owner-before-run"),
     true,
   );
+  assert.equal(
+    fixture.events.some(([name]) => name === "original-package-check"),
+    false,
+  );
+  assert.equal(
+    fixture.events.find(([name]) => name === "check-update")?.[1],
+    "owner-before-run",
+  );
+  assert.equal(
+    fixture.events.some(([name]) => name === "original-run"),
+    true,
+  );
+  assert.equal(runInitCalls, 1);
+  assert.equal(runInstance.init, runInit);
+  assert.equal(runInstance.checkForPackageUpdates, checkForPackageUpdates);
+  assert.equal(runInstance.getUserInput, getUserInput);
 });
 
 test("patched settings, selectors, signals, and event bridge keep one native owner", async (t) => {
@@ -1058,44 +1097,44 @@ test("patched lifecycle wrappers preserve native fallbacks and cleanup", async (
   assert.equal(proto.getChangelogForDisplay.call(changelogInstance), undefined);
 
   const runEvents: any[] = [];
-  let loopInputs = 0;
-  await assert.rejects(
-    proto.run.call({
-      isInitialized: true,
-      init: async () => runEvents.push(["init"]),
-      options: {
-        initialMessage: "initial-error",
-        initialMessages: ["batch-error"],
-        rinStartHiddenInitialization: true,
+  const previousPiOffline = process.env.PI_OFFLINE;
+  t.after(() => {
+    if (previousPiOffline === undefined) delete process.env.PI_OFFLINE;
+    else process.env.PI_OFFLINE = previousPiOffline;
+  });
+  process.env.PI_OFFLINE = "owner-before-run";
+  await proto.run.call({
+    init: async () => runEvents.push(["init"]),
+    options: {
+      rinStartupWarnings: ["warning owner"],
+      rinStartHiddenInitialization: true,
+    },
+    session: {
+      prompt: async () => {
+        throw new Error("rin_frontend_disconnected");
       },
-      session: {
-        modelRegistry: { getError: () => undefined },
-        prompt: async () => {
-          throw new Error("rin_frontend_disconnected");
-        },
-      },
-      showWarning: (message: string) => runEvents.push(["warning", message]),
-      showError: (message: string) => runEvents.push(["error", message]),
-      checkTmuxKeyboardSetup: async () => undefined,
-      getUserInput: async () => {
-        loopInputs += 1;
-        if (loopInputs === 1) return "loop-error";
-        throw new Error("stop fallback loop");
-      },
-    }),
-    /stop fallback loop/,
-  );
+    },
+    showWarning: (message: string) => runEvents.push(["warning", message]),
+    showError: (message: string) => runEvents.push(["error", message]),
+    checkForPackageUpdates: async () => {
+      fixture.events.push(["original-package-check"]);
+      return [];
+    },
+    getUserInput: async () => "owner input",
+  });
   await flush();
+  assert.equal(process.env.PI_OFFLINE, "owner-before-run");
+  assert.equal(runEvents.filter(([kind]) => kind === "init").length, 1);
   assert.equal(
     runEvents.filter(
       ([kind, message]) =>
         kind === "error" && message === "frontend disconnected",
     ).length,
-    4,
+    1,
   );
   assert.equal(
-    runEvents.some(([, message]) => message === "rin_frontend_disconnected"),
-    false,
+    fixture.events.some(([name]) => name === "original-run"),
+    true,
   );
 });
 

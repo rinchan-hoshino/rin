@@ -5,10 +5,8 @@
 
 import { basename } from "node:path";
 
-import {
-  estimateTokens,
-  prepareCompaction,
-} from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/compaction/index.js";
+import { estimateTokens } from "@earendil-works/pi-coding-agent";
+import { prepareCompaction } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/compaction/index.js";
 import { builtInExtensions } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/extensions/index.js";
 import { resolveToCwd } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
 

@@ -1,22 +1,17 @@
-export type RinRpcCommandType =
+import type { RpcCommand as PiRpcCommand } from "@earendil-works/pi-coding-agent";
+
+type PiRpcCommandType = PiRpcCommand["type"];
+type AssertNever<T extends never> = T;
+
+export type RinPiNativeRpcCommandType =
   | "prompt"
-  | "clear_queue"
   | "abort"
   | "get_state"
   | "cycle_model"
   | "get_messages"
-  | "await_turn_terminal"
-  | "ack_turn_terminal"
-  | "list_unacknowledged_chat_terminals"
-  | "get_session_snapshot"
   | "get_commands"
-  | "get_all_models"
   | "get_available_models"
-  | "get_oauth_state"
-  | "get_resource_diagnostics"
-  | "get_command_argument_completions"
   | "set_thinking_level"
-  | "reset_model_options_from_settings"
   | "cycle_thinking_level"
   | "get_available_thinking_levels"
   | "set_steering_mode"
@@ -25,17 +20,38 @@ export type RinRpcCommandType =
   | "set_auto_compaction"
   | "set_auto_retry"
   | "abort_retry"
-  | "abort_compaction"
   | "bash"
   | "abort_bash"
   | "get_session_stats"
-  | "set_entry_label"
-  | "navigate_tree"
   | "export_html"
-  | "export_jsonl"
-  | "import_jsonl"
   | "get_fork_messages"
   | "get_last_assistant_text"
+  | "set_session_name"
+  | "new_session"
+  | "switch_session"
+  | "fork"
+  | "set_model";
+
+type _RinPiNativeCommandsMustRemainPiCommands = AssertNever<
+  Exclude<RinPiNativeRpcCommandType, PiRpcCommandType>
+>;
+
+export type RinDaemonRpcCommandType =
+  | "clear_queue"
+  | "await_turn_terminal"
+  | "ack_turn_terminal"
+  | "list_unacknowledged_chat_terminals"
+  | "get_session_snapshot"
+  | "get_all_models"
+  | "get_oauth_state"
+  | "get_resource_diagnostics"
+  | "get_command_argument_completions"
+  | "reset_model_options_from_settings"
+  | "abort_compaction"
+  | "set_entry_label"
+  | "navigate_tree"
+  | "export_jsonl"
+  | "import_jsonl"
   | "get_active_tools"
   | "get_all_tools"
   | "set_active_tools"
@@ -48,7 +64,6 @@ export type RinRpcCommandType =
   | "select_session"
   | "detach_session"
   | "rename_session"
-  | "set_session_name"
   | "daemon_status"
   | "daemon_activity"
   | "chat_send"
@@ -70,11 +85,7 @@ export type RinRpcCommandType =
   | "cron_pause_task"
   | "cron_resume_task"
   | "cron_reschedule_once_task"
-  | "new_session"
-  | "switch_session"
-  | "fork"
   | "run_command"
-  | "set_model"
   | "oauth_login_start"
   | "oauth_login_respond"
   | "oauth_login_cancel"
@@ -83,6 +94,14 @@ export type RinRpcCommandType =
   | "reload"
   | "shutdown_session"
   | "terminate_session";
+
+type _RinDaemonCommandsMustNotShadowPiCommands = AssertNever<
+  Extract<RinDaemonRpcCommandType, PiRpcCommandType>
+>;
+
+export type RinRpcCommandType =
+  | RinPiNativeRpcCommandType
+  | RinDaemonRpcCommandType;
 
 export type RinRpcCommandEnvelope = Readonly<{
   id?: unknown;

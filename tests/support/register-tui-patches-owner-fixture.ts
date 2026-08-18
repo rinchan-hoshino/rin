@@ -30,7 +30,40 @@ const sources: Record<string, string> = {
       }
       updateTerminalTitle() { globalThis.__rinTuiPatchesOwner.events.push(["original-title"]); }
       async shutdown() { process.stdout.write("To resume this session:\\n  pi --session owner\\n"); return "shutdown-owner"; }
-      async run() { globalThis.__rinTuiPatchesOwner.events.push(["original-run"]); }
+      async run() {
+        await this.init();
+        void this.checkForPackageUpdates();
+        const { initialMessage, initialImages, initialMessages } = this.options || {};
+        if (initialMessage) {
+          try {
+            await this.session.prompt(initialMessage, { images: initialImages });
+          } catch (error) {
+            this.showError(error instanceof Error ? error.message : "Unknown error occurred");
+          }
+        }
+        if (initialMessages) {
+          for (const message of initialMessages) {
+            try {
+              await this.session.prompt(message);
+            } catch (error) {
+              this.showError(error instanceof Error ? error.message : "Unknown error occurred");
+            }
+          }
+        }
+        const userInput = await this.getUserInput?.();
+        if (userInput !== undefined) {
+          try {
+            await this.session.prompt(userInput);
+          } catch (error) {
+            this.showError(error instanceof Error ? error.message : "Unknown error occurred");
+          }
+        }
+        globalThis.__rinTuiPatchesOwner.events.push(["original-run"]);
+      }
+      async checkForPackageUpdates() {
+        globalThis.__rinTuiPatchesOwner.events.push(["original-package-check"]);
+        return [];
+      }
       createBaseAutocompleteProvider() {
         return { commands: [...globalThis.__rinTuiPatchesOwner.baseCommands] };
       }
@@ -74,7 +107,7 @@ const sources: Record<string, string> = {
   `,
   "dist/core/rin-lib/update-notices.js": `
     export async function checkForRinUpdateNotice() {
-      globalThis.__rinTuiPatchesOwner.events.push(["check-update"]);
+      globalThis.__rinTuiPatchesOwner.events.push(["check-update", process.env.PI_OFFLINE]);
       const value = globalThis.__rinTuiPatchesOwner.notice;
       if (value instanceof Error) throw value;
       return value;

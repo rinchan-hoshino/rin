@@ -328,32 +328,19 @@ async function runInteractiveMode(
   runtime: ConstructorParameters<typeof InteractiveMode>[0],
   interactiveOptions: TuiInteractiveOptions,
 ) {
-  const interactiveMode = new InteractiveMode(runtime, interactiveOptions);
+  await runInteractiveModeInstance(
+    new InteractiveMode(runtime, interactiveOptions),
+  );
+}
+
+export async function runInteractiveModeInstance(
+  interactiveMode: InteractiveMode,
+) {
   try {
     await interactiveMode.run();
   } catch (error) {
     await stopInteractiveModeAfterTerminalQueries(interactiveMode);
-    throw error;
-  }
-}
-
-export async function initializeRpcInteractiveModeForStartup(
-  interactiveMode: InteractiveMode,
-  _rpcSession: RpcInteractiveSession,
-) {
-  await (interactiveMode as any).init();
-}
-
-export async function runPreinitializedInteractiveMode(
-  interactiveMode: InteractiveMode,
-) {
-  const mode = interactiveMode as any;
-  const originalInit = mode.init;
-  mode.init = async () => {};
-  try {
-    await mode.run();
-  } finally {
-    mode.init = originalInit;
+    throw asStartupError(error);
   }
 }
 
@@ -450,7 +437,6 @@ async function startRpcTui(
       runtimeHost as any,
       interactiveOptions,
     );
-    await initializeRpcInteractiveModeForStartup(interactiveMode, rpcSession);
   } catch (error) {
     if (interactiveMode) {
       await stopInteractiveModeAfterTerminalQueries(interactiveMode);
@@ -462,13 +448,8 @@ async function startRpcTui(
     }
     throw asStartupError(error);
   }
-  profile.mark("interactive-mode-and-rpc-ready");
-
   try {
-    await runPreinitializedInteractiveMode(interactiveMode);
-  } catch (error) {
-    interactiveMode.stop?.();
-    throw error;
+    await runInteractiveModeInstance(interactiveMode);
   } finally {
     await runtimeHost.dispose().catch(() => {});
   }

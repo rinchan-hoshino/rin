@@ -1273,82 +1273,99 @@ export async function applyRinTuiOverrides() {
 
   const originalRun = interactiveModeProto?.run;
   if (typeof originalRun === "function") {
-    interactiveModeProto.run = async function runWithRinUpdateNotices() {
-      await this.init();
-      scheduleRinUpdateNotificationWhenReady(this);
-      scheduleRinGitChangelogNotificationWhenReady(this);
-      for (const warning of this.options?.rinStartupWarnings || []) {
-        if (warning) this.showWarning(warning);
-      }
-      runRecoverableRinTuiOperation(
+    interactiveModeProto.run = async function runWithRinStartupPolicy(
+      ...args: any[]
+    ) {
+      const restoreOwnProperty = (
+        name: string,
+        descriptor: PropertyDescriptor | undefined,
+      ) => {
+        if (descriptor) Object.defineProperty(this, name, descriptor);
+        else delete this[name];
+      };
+
+      const ownGetUserInputDescriptor = Object.getOwnPropertyDescriptor(
         this,
-        "Failed to check terminal keyboard support",
-        () =>
-          this.checkTmuxKeyboardSetup?.().then(
-            (warning: string | undefined) => {
-              if (warning) this.showWarning(warning);
-            },
-          ),
+        "getUserInput",
+      );
+      const originalGetUserInput = this.getUserInput;
+      let hiddenInitializationPending = Boolean(
+        this.options?.rinStartHiddenInitialization,
       );
 
-      const {
-        migratedProviders,
-        modelFallbackMessage,
-        initialMessage,
-        initialImages,
-        initialMessages,
-      } = this.options;
-      if (migratedProviders && migratedProviders.length > 0) {
-        this.showWarning(
-          `Migrated credentials to auth.json: ${migratedProviders.join(", ")}`,
-        );
-      }
-      const modelsJsonError =
-        this.session.modelRuntime?.getError?.() ||
-        this.session.modelRegistry?.getError?.();
-      if (modelsJsonError)
-        this.showError(`models.json error: ${modelsJsonError}`);
-      if (modelFallbackMessage) this.showWarning(modelFallbackMessage);
-      runRecoverableRinTuiOperation(
+      // Suppress Pi-only startup network checks, then restore the caller's
+      // environment before warnings, initial prompts, or input can observe it.
+      const ownPackageCheckDescriptor = Object.getOwnPropertyDescriptor(
         this,
-        "Failed to check subscription authentication",
-        () => this.maybeWarnAboutAnthropicSubscriptionAuth?.(),
+        "checkForPackageUpdates",
       );
+      const originalPackageCheck = this.checkForPackageUpdates;
+      let startupPolicyPending = true;
+      const applyStartupPolicy = () => {
+        if (!startupPolicyPending) return;
+        startupPolicyPending = false;
+        if (
+          hiddenInitializationPending &&
+          typeof originalGetUserInput === "function"
+        ) {
+          this.getUserInput = async (...inputArgs: any[]) => {
+            restoreOwnProperty("getUserInput", ownGetUserInputDescriptor);
+            hiddenInitializationPending = false;
+            try {
+              await this.session.prompt("", {
+                requestTag: "rin-init-startup",
+                source: "rin-init",
+              });
+            } catch (error) {
+              this.showError(formatRuntimeErrorForFrontendDisplay(error));
+            }
+            return await originalGetUserInput.apply(this, inputArgs);
+          };
+        }
+        scheduleRinUpdateNotificationWhenReady(this);
+        scheduleRinGitChangelogNotificationWhenReady(this);
+        for (const warning of this.options?.rinStartupWarnings || []) {
+          if (warning) this.showWarning(warning);
+        }
+      };
 
-      if (initialMessage) {
-        try {
-          await this.session.prompt(initialMessage, { images: initialImages });
-        } catch (error) {
-          this.showError(formatRuntimeErrorForFrontendDisplay(error));
-        }
+      const ownInitDescriptor = Object.getOwnPropertyDescriptor(this, "init");
+      const runInit = this.init;
+      if (typeof runInit === "function") {
+        this.init = async (...initArgs: any[]) => {
+          const result = await runInit.apply(this, initArgs);
+          if (typeof originalPackageCheck !== "function") applyStartupPolicy();
+          return result;
+        };
       }
-      if (initialMessages) {
-        for (const message of initialMessages) {
-          try {
-            await this.session.prompt(message);
-          } catch (error) {
-            this.showError(formatRuntimeErrorForFrontendDisplay(error));
-          }
-        }
-      }
-      if (this.options?.rinStartHiddenInitialization) {
-        try {
-          await this.session.prompt("", {
-            requestTag: "rin-init-startup",
-            source: "rin-init",
-          });
-        } catch (error) {
-          this.showError(formatRuntimeErrorForFrontendDisplay(error));
-        }
+      const previousPiOffline = process.env.PI_OFFLINE;
+      let piOfflineRestored = false;
+      const restorePiOffline = () => {
+        if (piOfflineRestored) return;
+        piOfflineRestored = true;
+        if (previousPiOffline === undefined) delete process.env.PI_OFFLINE;
+        else process.env.PI_OFFLINE = previousPiOffline;
+      };
+      if (typeof originalPackageCheck === "function") {
+        this.checkForPackageUpdates = () => {
+          restorePiOffline();
+          restoreOwnProperty(
+            "checkForPackageUpdates",
+            ownPackageCheckDescriptor,
+          );
+          applyStartupPolicy();
+          return Promise.resolve([]);
+        };
+        process.env.PI_OFFLINE = "1";
       }
 
-      while (true) {
-        const userInput = await this.getUserInput();
-        try {
-          await this.session.prompt(userInput);
-        } catch (error) {
-          this.showError(formatRuntimeErrorForFrontendDisplay(error));
-        }
+      try {
+        return await originalRun.apply(this, args);
+      } finally {
+        restoreOwnProperty("init", ownInitDescriptor);
+        restoreOwnProperty("getUserInput", ownGetUserInputDescriptor);
+        restoreOwnProperty("checkForPackageUpdates", ownPackageCheckDescriptor);
+        restorePiOffline();
       }
     };
   }

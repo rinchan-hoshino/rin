@@ -199,7 +199,7 @@ test("launcher owns daemon readiness, option resolution, quiet startup, and onbo
   assert.equal(interactive.rinStartHiddenInitialization, true);
 });
 
-test("launcher owns rpc preparation and preinitialized InteractiveMode lifecycle", async () => {
+test("launcher prepares RPC then delegates the InteractiveMode lifecycle to Pi", async () => {
   reset();
   const calls: string[] = [];
   const rpc = {
@@ -252,21 +252,24 @@ test("launcher owns rpc preparation and preinitialized InteractiveMode lifecycle
       initialized.push("run");
       await this.init();
     },
+    stop() {
+      initialized.push("stop");
+    },
   };
-  await launcher.initializeRpcInteractiveModeForStartup(mode, {} as any);
-  await launcher.runPreinitializedInteractiveMode(mode);
-  await mode.init();
-  assert.deepEqual(initialized, ["init", "run", "init"]);
+  await launcher.runInteractiveModeInstance(mode);
+  assert.deepEqual(initialized, ["run", "init"]);
 
-  const originalInit = mode.init;
-  mode.run = async () => {
+  initialized.length = 0;
+  mode.run = async function () {
+    initialized.push("run");
+    await this.init();
     throw new Error("owner run failed");
   };
   await assert.rejects(
-    launcher.runPreinitializedInteractiveMode(mode),
+    launcher.runInteractiveModeInstance(mode),
     /owner run failed/,
   );
-  assert.equal(mode.init, originalInit);
+  assert.deepEqual(initialized, ["run", "init", "stop"]);
 });
 
 test("startTui owns rpc success, startup cleanup, maintenance fallback, and fatal propagation", async () => {
@@ -311,9 +314,27 @@ test("startTui owns rpc success, startup cleanup, maintenance fallback, and fata
 
   reset();
   scenario.interactiveInitError = new Error("owner init fatal");
-  await assert.rejects(launcher.startTui(), /owner init fatal/);
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = ((handler: any, delay?: number, ...args: any[]) => {
+    if (delay === 150) {
+      events.push(["terminal-query-wait", delay]);
+      return originalSetTimeout(handler, 0, ...args);
+    }
+    return originalSetTimeout(handler, delay, ...args);
+  }) as typeof setTimeout;
+  try {
+    await assert.rejects(launcher.startTui(), /owner init fatal/);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
   assert.equal(names().includes("interactive-stop"), true);
   assert.equal(names().includes("runtime-dispose"), true);
+  assert.equal(names().includes("terminal-query-wait"), true);
+  assert.equal(
+    names().indexOf("terminal-query-wait") <
+      names().indexOf("interactive-stop"),
+    true,
+  );
 
   reset();
   scenario.interactiveRunError = new Error("owner run fatal");

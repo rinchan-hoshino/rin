@@ -50,9 +50,9 @@ const contracts = [
     source: "src/core/rin-lib/rpc-types.ts",
     built: "dist/core/rin-lib/rpc-types.js",
     valid:
-      'import type { RinRpcCommandType } from "SOURCE"; const value: RinRpcCommandType = "prompt";',
+      'import type { RinDaemonRpcCommandType, RinPiNativeRpcCommandType, RinRpcCommandType } from "SOURCE"; const nativeValue: RinPiNativeRpcCommandType = "prompt"; const daemonValue: RinDaemonRpcCommandType = "chat_send"; const value: RinRpcCommandType = daemonValue;',
     invalid:
-      'import type { RinRpcCommandType } from "SOURCE"; const value: RinRpcCommandType = "invalid";',
+      'import type { RinDaemonRpcCommandType, RinPiNativeRpcCommandType } from "SOURCE"; const nativeValue: RinPiNativeRpcCommandType = "chat_send"; const daemonValue: RinDaemonRpcCommandType = "prompt";',
   },
   {
     source: "src/core/memory/transcript-types.ts",
