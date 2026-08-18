@@ -279,17 +279,14 @@ async function runOwnedPiCompaction(
     customInstructions?: string;
     signal: AbortSignal;
     compact: RinCompactionOwner;
+    pathEntries: any[];
+    preparation: any;
   },
 ) {
   if (!session?.model) {
     throw new Error("Pi AgentSession compaction model is unavailable");
   }
-  const { pathEntries, preparation } = readPiCompactionPreparation(session);
-  if (!preparation) {
-    const lastEntry = pathEntries[pathEntries.length - 1];
-    if (lastEntry?.type === "compaction") throw new Error("Already compacted");
-    throw new Error("Nothing to compact (session too small)");
-  }
+  const { pathEntries, preparation } = options;
 
   const event = {
     type: "session_before_compact",
@@ -378,12 +375,21 @@ export function installPiSessionCompactionOwner(
     session[PI_SESSION_PRIVATE.compactionAbortController] = controller;
     emitPiSessionEvent(session, { type: "compaction_start", reason: "manual" });
     try {
+      const { pathEntries, preparation } = readPiCompactionPreparation(session);
+      if (!preparation) {
+        const lastEntry = pathEntries[pathEntries.length - 1];
+        if (lastEntry?.type === "compaction")
+          throw new Error("Already compacted");
+        throw new Error("Nothing to compact (session too small)");
+      }
       const result = await runOwnedPiCompaction(session, {
         reason: "manual",
         willRetry: false,
         customInstructions,
         signal: controller.signal,
         compact: state.compact,
+        pathEntries,
+        preparation,
       });
       session[PI_SESSION_PRIVATE.compactionAbortController] = undefined;
       emitPiSessionEvent(session, {
@@ -414,6 +420,9 @@ export function installPiSessionCompactionOwner(
   replacePiSessionAutoCompactor(
     session,
     async (reason: "threshold" | "overflow", willRetry: boolean) => {
+      const { pathEntries, preparation } = readPiCompactionPreparation(session);
+      if (!preparation) return false;
+
       const controller = new AbortController();
       session[PI_SESSION_PRIVATE.autoCompactionAbortController] = controller;
       let started = false;
@@ -425,6 +434,8 @@ export function installPiSessionCompactionOwner(
           willRetry,
           signal: controller.signal,
           compact: state.compact,
+          pathEntries,
+          preparation,
         });
         emitPiSessionEvent(session, {
           type: "compaction_end",

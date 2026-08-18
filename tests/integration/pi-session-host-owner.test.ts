@@ -279,6 +279,47 @@ test("Pi session host owns compaction without registering core extension handler
   assert.equal(appended[1][4], true);
 });
 
+test("Pi session host silently defers automatic compaction until a cut point exists", async () => {
+  const events: any[] = [];
+  let compactionCalls = 0;
+  const pathEntries = [
+    {
+      id: "u1",
+      parentId: null,
+      type: "message",
+      message: { role: "user", content: "current request", timestamp: 1 },
+    },
+  ];
+  const session: any = {
+    model: { provider: "test", id: "model" },
+    extensionRunner: { hasHandlers: () => false },
+    agent: { state: { messages: [pathEntries[0].message] } },
+    abort: async () => {},
+    _emit(event: any) {
+      events.push(event);
+    },
+    _runAutoCompaction: async () => false,
+    settingsManager: {
+      getCompactionSettings: () => ({ keepRecentTokens: 20_000 }),
+    },
+    sessionManager: {
+      getBranch: () => pathEntries,
+    },
+  };
+
+  assert.equal(
+    host.installPiSessionCompactionOwner(session, async () => {
+      compactionCalls += 1;
+      throw new Error("compaction must wait for a valid cut point");
+    }),
+    true,
+  );
+
+  assert.equal(await session._runAutoCompaction("overflow", true), false);
+  assert.equal(compactionCalls, 0);
+  assert.deepEqual(events, []);
+});
+
 test("Pi session host seeds only non-persisted managers", () => {
   const manager = SessionManager.inMemory("/workspace", {
     id: "019fad2a-b02a-74cc-9d03-56b909f1f929",
