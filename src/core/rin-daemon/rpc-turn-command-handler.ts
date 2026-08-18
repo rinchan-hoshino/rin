@@ -44,6 +44,7 @@ export function nativeInputOutcome(
   options: {
     turnActive: boolean;
     originalOutcome?: NativeInputOutcome;
+    joinedRequestTag?: string;
   },
 ) {
   const normalizedRequestTag = rpcRequestTag(requestTag);
@@ -51,6 +52,9 @@ export function nativeInputOutcome(
     outcome,
     ...(options.originalOutcome
       ? { originalOutcome: options.originalOutcome }
+      : {}),
+    ...(safeString(options.joinedRequestTag).trim()
+      ? { joinedRequestTag: safeString(options.joinedRequestTag).trim() }
       : {}),
     ...(normalizedRequestTag.length > 0
       ? { requestTag: normalizedRequestTag }
@@ -98,6 +102,37 @@ export function persistedNativeIdentityOutcome(
   return observedRole === "terminalOwner" || observedRole === "nonterminal"
     ? observedRole
     : undefined;
+}
+
+export function persistedNativeJoinedRequestTag(
+  session: any,
+  requestTag: string,
+): string | undefined {
+  if (persistedNativeIdentityOutcome(session, requestTag) !== "nonterminal") {
+    return undefined;
+  }
+  const entries = getSessionEntries(session);
+  const matching = entries
+    .map((entry: any, index: number) => ({ entry, index }))
+    .filter(
+      ({ entry }) =>
+        entry?.type === "custom" &&
+        entry?.customType === "rin_request_identity" &&
+        safeString(entry?.data?.requestId).trim() === requestTag,
+    );
+  if (matching.length !== 1) return undefined;
+  for (let index = matching[0].index - 1; index >= 0; index -= 1) {
+    const candidate = entries[index];
+    if (
+      candidate?.type !== "custom" ||
+      candidate?.customType !== "rin_request_identity" ||
+      safeString(candidate?.data?.observedRole).trim() !== "terminalOwner"
+    ) {
+      continue;
+    }
+    return safeString(candidate?.data?.requestId).trim() || undefined;
+  }
+  return undefined;
 }
 
 export function persistedNativeRequestOutcome(
@@ -431,6 +466,10 @@ export function createRpcTurnCommandHandlers(context: RpcTurnCommandContext) {
             "prompt",
             nativeInputOutcome(session, "rejoined", requestTag, {
               originalOutcome: persistedOutcome,
+              joinedRequestTag: persistedNativeJoinedRequestTag(
+                session,
+                requestTag,
+              ),
               turnActive: turnCoordinator.isActive,
             }),
           );
@@ -465,6 +504,10 @@ export function createRpcTurnCommandHandlers(context: RpcTurnCommandContext) {
             "prompt",
             nativeInputOutcome(session, "rejoined", requestTag, {
               originalOutcome: durableOutcome,
+              joinedRequestTag: persistedNativeJoinedRequestTag(
+                session,
+                requestTag,
+              ),
               turnActive: true,
             }),
           );
@@ -483,6 +526,10 @@ export function createRpcTurnCommandHandlers(context: RpcTurnCommandContext) {
             "prompt",
             nativeInputOutcome(session, "rejoined", requestTag, {
               originalOutcome: durableOutcome,
+              joinedRequestTag: persistedNativeJoinedRequestTag(
+                session,
+                requestTag,
+              ),
               turnActive: turnCoordinator.isActive,
             }),
           );
@@ -505,6 +552,10 @@ export function createRpcTurnCommandHandlers(context: RpcTurnCommandContext) {
             "prompt",
             nativeInputOutcome(session, "rejoined", requestTag, {
               originalOutcome: serializedPersistedOutcome,
+              joinedRequestTag: persistedNativeJoinedRequestTag(
+                session,
+                requestTag,
+              ),
               turnActive: turnCoordinator.isActive,
             }),
           );
@@ -540,6 +591,10 @@ export function createRpcTurnCommandHandlers(context: RpcTurnCommandContext) {
             "prompt",
             nativeInputOutcome(session, "rejoined", requestTag, {
               originalOutcome: durableOutcome,
+              joinedRequestTag: persistedNativeJoinedRequestTag(
+                session,
+                requestTag,
+              ),
               turnActive: turnCoordinator.isActive,
             }),
           );

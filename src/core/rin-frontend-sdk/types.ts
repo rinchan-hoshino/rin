@@ -260,6 +260,7 @@ export type RinInputSubmissionOutcome =
   | {
       outcome: "terminalOwner" | "nonterminal" | "rejected" | "indeterminate";
       requestTag?: string;
+      joinedRequestTag?: string;
       sessionFile?: string;
       sessionId?: string;
       turnActive?: boolean;
@@ -270,6 +271,7 @@ export type RinInputSubmissionOutcome =
       outcome: "rejoined";
       originalOutcome: "terminalOwner" | "nonterminal";
       requestTag?: string;
+      joinedRequestTag?: string;
       sessionFile?: string;
       sessionId?: string;
       turnActive?: boolean;

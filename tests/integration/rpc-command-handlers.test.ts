@@ -283,6 +283,45 @@ test("RPC turn handler resolves persisted and conflicting request ownership from
   assert.equal(persistedResult.data.outcome, "rejoined");
   assert.equal(persistedResult.data.originalOutcome, "terminalOwner");
 
+  const joinedSession = fakeSession({
+    sessionFile: "joined.jsonl",
+    sessionId: "session-joined",
+    isStreaming: false,
+    sessionManager: {
+      getEntries: () => [
+        { id: "message-owner", type: "message", message: { role: "user" } },
+        {
+          type: "custom",
+          customType: "rin_request_identity",
+          data: {
+            requestId: "request-owner",
+            messageEntryId: "message-owner",
+            observedRole: "terminalOwner",
+          },
+        },
+        { id: "message-joined", type: "message", message: { role: "user" } },
+        {
+          type: "custom",
+          customType: "rin_request_identity",
+          data: {
+            requestId: "request-joined",
+            messageEntryId: "message-joined",
+            observedRole: "nonterminal",
+          },
+        },
+      ],
+    },
+  });
+  const joined = turnModule.createRpcTurnCommandHandlers(
+    createTurnContext(joinedSession),
+  );
+  const joinedResult = await joined.prompt(
+    request("prompt", { requestTag: "request-joined" }),
+  );
+  assert.equal(joinedResult.data.outcome, "rejoined");
+  assert.equal(joinedResult.data.originalOutcome, "nonterminal");
+  assert.equal(joinedResult.data.joinedRequestTag, "request-owner");
+
   const conflictingSession = fakeSession({
     sessionFile: "conflict.jsonl",
     sessionId: "session-2",

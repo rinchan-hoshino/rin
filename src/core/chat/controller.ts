@@ -588,6 +588,34 @@ export class ChatController {
     )}`;
   }
 
+  private joinedOwnerTurnIdForRequestTag(requestTag: string) {
+    const normalizedRequestTag = safeString(requestTag).trim();
+    if (!normalizedRequestTag) return "";
+    const rows = openChatDatabase(this.agentDir)
+      .prepare(
+        `SELECT record_key, message_id FROM messages
+         WHERE chat_key = ? AND message_id IS NOT NULL`,
+      )
+      .all(this.chatKey) as Array<{
+      record_key?: string;
+      message_id?: string;
+    }>;
+    const matching = rows.filter((row) => {
+      const turnId = safeString(row.record_key).trim();
+      const messageId = safeString(row.message_id).trim();
+      return (
+        turnId &&
+        messageId &&
+        `chat-inbox-${sha256Hex(
+          JSON.stringify([this.chatKey, messageId, turnId]),
+        )}` === normalizedRequestTag
+      );
+    });
+    return matching.length === 1
+      ? safeString(matching[0]?.record_key).trim()
+      : "";
+  }
+
   private authoritativeTerminalEvent(
     event: {
       requestTag?: string;
@@ -3008,6 +3036,12 @@ export class ChatController {
                   ) {
                     pendingPresentation.joinedOwnerTurnId = activeOwnerTurnId;
                   }
+                }
+                if (!pendingPresentation.joinedOwnerTurnId) {
+                  pendingPresentation.joinedOwnerTurnId =
+                    this.joinedOwnerTurnIdForRequestTag(
+                      safeString(acceptance.joinedRequestTag).trim(),
+                    );
                 }
                 if (!pendingPresentation.joinedOwnerTurnId) {
                   throw new Error("chat_turn_fence_lost");

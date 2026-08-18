@@ -203,6 +203,19 @@ function createRecoveredController(previousController) {
   return attachTestChatApp(controller);
 }
 
+test("chat controller resolves a joined owner from its durable request identity", async () => {
+  const controller = await createController();
+  const claim = claimDurableTurnFence(controller, "owner-message").claim;
+  const requestTag = controller.requestTagForInboundMessage(claim.messageId, {
+    turnId: claim.itemId,
+  });
+
+  assert.equal(
+    controller.joinedOwnerTurnIdForRequestTag(requestTag),
+    claim.itemId,
+  );
+});
+
 test("chat frontend event failures are visible without terminating the active turn", async () => {
   const warnings = [];
   let connected = false;
@@ -4249,7 +4262,7 @@ test("chat controller adopts a backend-accepted pending presentation before inte
   );
 });
 
-test("restart recovery joins a native nonterminal accepted after its owner is restored", async () => {
+test("restart recovery joins a native nonterminal from its durable owner request identity", async () => {
   const controller = await createController("telegram/1:2");
   const ownerClaim = claimDurableTurnFence(
     controller,
@@ -4272,17 +4285,14 @@ test("restart recovery joins a native nonterminal accepted after its owner is re
     frontendReady: true,
   });
   controller.driver.currentSessionFile = () => sessionFile;
+  const joinedOwnerRequestTag = controller.requestTagForInboundMessage(
+    ownerClaim.claim.messageId,
+    ownerClaim.fence,
+  );
   controller.driver.runTurn = async (input: any) => {
-    controller.currentTurn = {
-      startedAt: Date.now(),
-      incomingMessageId: ownerClaim.claim.messageId,
-      replyToMessageId: ownerClaim.claim.messageId,
-      requestTag: "request-restart-terminal-owner",
-      outboxTurnFence: ownerClaim.fence,
-      workingNoticeSent: false,
-    };
     await input.commitNonterminalAcceptance?.({
       requestTag: "request-restart-joined-input",
+      joinedRequestTag: joinedOwnerRequestTag,
       sessionFile,
     });
     await controller.handleFrontendEvent({
@@ -4322,14 +4332,7 @@ test("restart recovery joins a native nonterminal accepted after its owner is re
     "managed/chat/restart-joined-input.jsonl",
   );
   assert.equal(joined.joined_turn_id, ownerClaim.claim.itemId);
-  assert.equal(
-    controller.currentTurn.outboxTurnFence.turnId,
-    ownerClaim.claim.itemId,
-  );
-  assert.equal(
-    controller.currentTurn.requestTag,
-    "request-restart-terminal-owner",
-  );
+  assert.equal(controller.currentTurn, null);
   assert.equal(
     controller.presentationIncomingMessageId,
     joinedClaim.claim.messageId,

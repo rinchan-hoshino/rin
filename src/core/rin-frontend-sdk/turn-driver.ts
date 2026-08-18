@@ -75,6 +75,7 @@ export type RinFrontendTurnResult = {
   sessionId?: string;
   sessionFile?: string;
   requestTag?: string;
+  joinedRequestTag?: string;
   chatDeliveryContext?: RinChatDeliveryContext;
   outcome?:
     | "terminalOwner"
@@ -252,6 +253,7 @@ function requireNativeInputOutcome(value: unknown) {
     throw new Error("rin_prompt_outcome_invalid");
   }
   const originalOutcome = safeString((value as any)?.originalOutcome).trim();
+  const joinedRequestTag = safeString((value as any)?.joinedRequestTag).trim();
   if (
     outcome === "rejoined" &&
     !["terminalOwner", "nonterminal", "rejected", "indeterminate"].includes(
@@ -271,6 +273,7 @@ function requireNativeInputOutcome(value: unknown) {
           >,
         }
       : {}),
+    ...(joinedRequestTag ? { joinedRequestTag } : {}),
   };
 }
 
@@ -2133,6 +2136,7 @@ export class RinFrontendTurnDriver {
       disabledRinCapabilities?: string[];
       commitNonterminalAcceptance?: (input: {
         requestTag: string;
+        joinedRequestTag?: string;
         sessionId?: string;
         sessionFile: string;
       }) => Promise<void>;
@@ -2330,6 +2334,9 @@ export class RinFrontendTurnDriver {
           if (input.commitNonterminalAcceptance && acceptedSessionFile) {
             await input.commitNonterminalAcceptance({
               requestTag,
+              ...(observed.joinedRequestTag
+                ? { joinedRequestTag: observed.joinedRequestTag }
+                : {}),
               sessionId: acceptedSessionId,
               sessionFile: acceptedSessionFile,
             });

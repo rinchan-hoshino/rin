@@ -5279,6 +5279,7 @@ test("frontend SDK retries an uncommitted nonterminal acceptance as a native rej
           outcome: "rejoined",
           originalOutcome: "nonterminal",
           requestTag: options.requestTag,
+          joinedRequestTag: "backend-terminal-owner",
         };
   };
   const driver = new RinFrontendTurnDriver({
@@ -5307,12 +5308,14 @@ test("frontend SDK retries an uncommitted nonterminal acceptance as a native rej
   const result = await driver.runTurn({
     text: "joined input",
     requestTag: "stable-nonterminal-input",
-    commitNonterminalAcceptance: async () => {
+    commitNonterminalAcceptance: async (acceptance) => {
+      assert.equal(acceptance.joinedRequestTag, "backend-terminal-owner");
       committed += 1;
     },
   });
   assert.equal(result.outcome, "rejoined");
   assert.equal(result.originalOutcome, "nonterminal");
+  assert.equal(result.joinedRequestTag, "backend-terminal-owner");
   assert.equal(committed, 1);
   assert.equal(
     events.filter((event) => event.type === "turn_accepted").length,
