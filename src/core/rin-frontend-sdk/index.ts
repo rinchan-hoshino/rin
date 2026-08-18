@@ -149,7 +149,11 @@ export {
 
 export { createAuthStorageProxy } from "./rpc-auth.js";
 
-export { createModelRegistry } from "./model-registry.js";
+export {
+  createRpcModelBridge,
+  type RpcModelRegistry,
+  type RpcModelRuntime,
+} from "./model-registry.js";
 
 export {
   cycleRpcModel,

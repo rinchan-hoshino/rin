@@ -33,7 +33,11 @@ type OAuthProviderSummary = {
 
 type ModelProviderAuthSummary = {
   apiKey?: { name: string; interactive: boolean };
-  oauth?: { name: string; loginLabel?: string };
+  oauth?: {
+    name: string;
+    loginLabel?: string;
+    isSubscription?: boolean;
+  };
 };
 
 type ModelProviderSummary = {
@@ -399,6 +403,9 @@ function collectModelProviderSummaries(modelRuntime: any) {
         auth.oauth = {
           name: oauthName || trimText(provider?.name) || id,
           ...(loginLabel ? { loginLabel } : {}),
+          ...(provider.auth.oauth.isSubscription === true
+            ? { isSubscription: true }
+            : {}),
         };
       }
       return [{ id, name: trimText(provider?.name) || id, auth }];

@@ -32,7 +32,11 @@ import { classifyRinFrontendCommand } from "../rin-frontend-sdk/command-dispatch
 import { executeRinFrontendInterruptIntent } from "../rin-frontend-sdk/frontend-lifecycle.js";
 import { waitForFrontendInputSubmissionReady } from "../rin-frontend-sdk/input-submission.js";
 import type { RpcFrontendClient } from "../rin-frontend-sdk/frontend-surface.js";
-import { createModelRegistry } from "../rin-frontend-sdk/model-registry.js";
+import {
+  createRpcModelBridge,
+  type RpcModelRegistry,
+  type RpcModelRuntime,
+} from "../rin-frontend-sdk/model-registry.js";
 import {
   cycleRpcModel,
   cycleRpcThinkingLevel,
@@ -306,8 +310,8 @@ function getRuntimeSessionDirForProfile(profile: {
 export class RpcInteractiveSession {
   public agent: RemoteAgent;
   public settingsManager: any;
-  public modelRegistry: any;
-  public modelRuntime: any;
+  public modelRegistry: RpcModelRegistry;
+  public modelRuntime: RpcModelRuntime;
   public resourceLoader: any;
   public sessionManager: any;
 
@@ -419,8 +423,9 @@ export class RpcInteractiveSession {
     }
     this.agent = new RemoteAgent(client);
     this.settingsManager = undefined;
-    this.modelRegistry = createModelRegistry(client);
-    this.modelRuntime = this.modelRegistry;
+    const modelBridge = createRpcModelBridge(client);
+    this.modelRuntime = modelBridge.modelRuntime;
+    this.modelRegistry = modelBridge.modelRegistry;
     this.resourceLoader = createRpcResourceLoader(() => this.resourceSnapshot);
     this.sessionManager = {
       getSessionFile: () => this.sessionFile,
@@ -496,7 +501,7 @@ export class RpcInteractiveSession {
       const payload: any = event.payload;
       if (!payload || payload.type === "response") return;
       if (payload.type === "oauth_login_event") {
-        this.modelRegistry.authStorage.handleEvent(payload);
+        this.modelRuntime.authStorage.handleEvent(payload);
         return;
       }
       this.handleRpcEvent(payload);
@@ -505,7 +510,7 @@ export class RpcInteractiveSession {
       await this.client.connect();
       this.setRpcConnected(true);
       await this.refreshState(REFRESH_MESSAGES_AND_SESSION).catch(() => {});
-      await this.modelRegistry.sync().catch(() => {});
+      await this.modelRuntime.sync().catch(() => {});
     } catch (error) {
       this.handleConnectionLost();
       throw error;
@@ -1162,7 +1167,7 @@ export class RpcInteractiveSession {
   }
 
   async reload() {
-    await this.modelRegistry.sync();
+    await this.modelRuntime.sync();
     await this.call("reload").catch(() => {});
     await this.refreshDaemonCommandCatalog().catch(() => {});
     await this.refreshResourceDiagnostics().catch(() => {});
@@ -1924,7 +1929,7 @@ export class RpcInteractiveSession {
     this.applyState(await this.call("get_state"));
     const shouldRefreshSessionData = Boolean(flags.messages || flags.session);
     await Promise.all([
-      flags.models ? this.modelRegistry.sync() : Promise.resolve(),
+      flags.models ? this.modelRuntime.sync() : Promise.resolve(),
       shouldRefreshSessionData ? this.refreshSessionData() : Promise.resolve(),
     ]);
     this.lastSessionStats = this.computeSessionStats();

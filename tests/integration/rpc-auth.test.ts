@@ -39,7 +39,11 @@ test("rpc auth proxy normalizes oauth state snapshots", async () => {
                 id: " openai ",
                 name: " OpenAI ",
                 auth: {
-                  oauth: { name: " OpenAI account ", loginLabel: " Sign in " },
+                  oauth: {
+                    name: " OpenAI account ",
+                    loginLabel: " Sign in ",
+                    isSubscription: true,
+                  },
                   apiKey: { name: " OpenAI API key ", interactive: 1 },
                 },
               },
@@ -80,7 +84,11 @@ test("rpc auth proxy normalizes oauth state snapshots", async () => {
       name: "OpenAI",
       auth: {
         apiKey: { name: "OpenAI API key", interactive: true },
-        oauth: { name: "OpenAI account", loginLabel: "Sign in" },
+        oauth: {
+          name: "OpenAI account",
+          loginLabel: "Sign in",
+          isSubscription: true,
+        },
       },
     },
   ]);

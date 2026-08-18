@@ -4,9 +4,71 @@ import test from "node:test";
 
 import { importBuiltModule } from "../support/import-built-module.js";
 
-const { createModelRegistry } = await importBuiltModule<
+const modelRegistryModule = await importBuiltModule<
   typeof import("../../src/core/rin-frontend-sdk/model-registry.js")
 >("dist/core/rin-frontend-sdk/model-registry.js");
+const { createRpcModelBridge } = modelRegistryModule;
+const createRpcModelRuntime = (client: any) =>
+  createRpcModelBridge(client).modelRuntime;
+
+test("RPC model bridge exposes distinct typed runtime and registry views", async () => {
+  const bridge = createRpcModelBridge({
+    async send(payload: { type: string }) {
+      if (payload.type === "get_all_models") {
+        return {
+          success: true,
+          data: { models: [{ provider: "custom", id: "chat" }] },
+        };
+      }
+      if (payload.type === "get_available_models") {
+        return { success: true, data: { models: [] } };
+      }
+      if (payload.type === "get_oauth_state") {
+        return {
+          success: true,
+          data: {
+            credentials: { custom: { type: "oauth" } },
+            modelProviders: [],
+            providerDisplayNames: { custom: "Custom" },
+            providerAuthStatuses: {
+              custom: { configured: true, source: "oauth" },
+            },
+          },
+        };
+      }
+      throw new Error(`unexpected:${payload.type}`);
+    },
+  } as any);
+
+  assert.notEqual(bridge.modelRuntime, bridge.modelRegistry);
+  await bridge.modelRuntime.sync();
+  const model = bridge.modelRegistry.find("custom", "chat");
+  assert.ok(model);
+  assert.equal(bridge.modelRegistry.hasConfiguredAuth(model), true);
+  assert.deepEqual(bridge.modelRuntime.getProviderAuthStatus("custom"), {
+    configured: true,
+    source: "stored",
+  });
+  assert.equal(await bridge.modelRegistry.getProviderAuth("custom"), undefined);
+  assert.throws(
+    () => bridge.modelRegistry.registerProvider("custom", {}),
+    /rin_frontend_provider_mutation_unsupported/,
+  );
+  assert.throws(
+    () => bridge.modelRegistry.getRegisteredProviderIds(),
+    /rin_frontend_provider_registry_details_unavailable/,
+  );
+  await assert.rejects(
+    bridge.modelRegistry.complete({ provider: "custom", id: "chat" } as any, {
+      messages: [],
+    }),
+    /rin_frontend_model_execution_unsupported/,
+  );
+  assert.throws(
+    () => bridge.modelRuntime.registerProvider("custom", {}),
+    /rin_frontend_provider_mutation_unsupported/,
+  );
+});
 
 test("model registry synchronizes model and provider state", async () => {
   const sent: string[] = [];
@@ -18,7 +80,7 @@ test("model registry synchronizes model and provider state", async () => {
   const availableModels = [
     { provider: "openai", id: "gpt-5", source: "available" },
   ];
-  const registry = createModelRegistry({
+  const bridge = createRpcModelBridge({
     async send(payload: { type: string }) {
       sent.push(payload.type);
       if (payload.type === "get_all_models") {
@@ -48,7 +110,11 @@ test("model registry synchronizes model and provider state", async () => {
                 id: "anthropic",
                 name: "Anthropic",
                 auth: {
-                  oauth: { name: "OAuth", loginLabel: "Sign in" },
+                  oauth: {
+                    name: "OAuth",
+                    loginLabel: "Sign in",
+                    isSubscription: true,
+                  },
                 },
               },
             ],
@@ -58,36 +124,47 @@ test("model registry synchronizes model and provider state", async () => {
       throw new Error(`unexpected:${payload.type}`);
     },
   } as any);
+  const { modelRuntime, modelRegistry } = bridge;
 
-  assert.deepEqual(registry.getAll(), []);
-  assert.deepEqual(registry.getAvailable(), []);
-  assert.equal(registry.getError(), undefined);
-  await registry.sync();
+  assert.deepEqual(modelRegistry.getAll(), []);
+  assert.deepEqual(modelRegistry.getAvailable(), []);
+  assert.equal(modelRuntime.getError(), undefined);
+  await modelRuntime.sync();
 
-  assert.deepEqual(registry.getAll(), allModels);
-  assert.notEqual(registry.getAll(), registry.getAll());
-  assert.deepEqual(registry.getAvailable(), [availableModels[0], allModels[1]]);
-  assert.deepEqual(registry.find("anthropic", "claude-sonnet"), allModels[1]);
-  assert.equal(registry.find("missing", "model"), undefined);
-  assert.equal(registry.getProviderDisplayName("anthropic"), "Anthropic");
-  assert.deepEqual(registry.getProviderAuthStatus("openai"), {
-    configured: true,
-    source: "environment",
-  });
-  assert.equal(registry.isUsingOAuth(allModels[1]), true);
-  assert.equal(registry.isUsingOAuth(allModels[0]), false);
-  assert.deepEqual(registry.getModels("anthropic"), [allModels[1]]);
-  assert.deepEqual(registry.getModels({ provider: "openai" } as any), [
-    allModels[0],
-  ]);
-  assert.deepEqual(registry.getAvailable("anthropic"), [allModels[1]]);
-  assert.deepEqual(registry.getAvailableSnapshot(), [
+  assert.deepEqual(modelRegistry.getAll(), allModels);
+  assert.notEqual(modelRegistry.getAll(), modelRegistry.getAll());
+  assert.deepEqual(modelRegistry.getAvailable(), [
     availableModels[0],
     allModels[1],
   ]);
-  assert.equal(registry.getModel("openai", "gpt-5"), allModels[0]);
-  assert.equal(registry.getProvider(" anthropic ")?.name, "Anthropic");
-  const providers = registry.getProviders();
+  assert.deepEqual(
+    modelRegistry.find("anthropic", "claude-sonnet"),
+    allModels[1],
+  );
+  assert.equal(modelRegistry.find("missing", "model"), undefined);
+  assert.equal(modelRuntime.getProviderDisplayName("anthropic"), "Anthropic");
+  assert.deepEqual(modelRuntime.getProviderAuthStatus("openai"), {
+    configured: true,
+    source: "environment",
+  });
+  assert.equal(modelRegistry.isUsingOAuth(allModels[1] as any), true);
+  assert.equal(modelRegistry.isUsingOAuth(allModels[0] as any), false);
+  assert.equal(modelRuntime.isUsingSubscription("anthropic"), true);
+  assert.equal(modelRuntime.isUsingSubscription("openai"), false);
+  assert.deepEqual(modelRuntime.getModels("anthropic"), [allModels[1]]);
+  assert.deepEqual(modelRuntime.getModels({ provider: "openai" } as any), [
+    allModels[0],
+  ]);
+  assert.deepEqual(await modelRuntime.getAvailable("anthropic"), [
+    allModels[1],
+  ]);
+  assert.deepEqual(modelRuntime.getAvailableSnapshot(), [
+    availableModels[0],
+    allModels[1],
+  ]);
+  assert.equal(modelRuntime.getModel("openai", "gpt-5"), allModels[0]);
+  assert.equal(modelRuntime.getProvider(" anthropic ")?.name, "Anthropic");
+  const providers = modelRuntime.getProviders();
   assert.equal(providers.length, 2);
   assert.throws(
     () => providers[0].auth.apiKey?.login?.(),
@@ -97,11 +174,15 @@ test("model registry synchronizes model and provider state", async () => {
     () => providers[1].auth.oauth?.login(),
     /Provider login must be started through modelRuntime.login/,
   );
-  assert.deepEqual(await registry.checkAuth("anthropic"), { type: "oauth" });
-  assert.deepEqual(await registry.checkAuth("openai"), { type: "api_key" });
-  assert.equal(await registry.checkAuth("missing"), undefined);
-  assert.equal(await registry.getAuth("anthropic"), undefined);
-  assert.deepEqual(await registry.listCredentials(), [
+  assert.deepEqual(await modelRuntime.checkAuth("anthropic"), {
+    type: "oauth",
+  });
+  assert.deepEqual(await modelRuntime.checkAuth("openai"), {
+    type: "api_key",
+  });
+  assert.equal(await modelRuntime.checkAuth("missing"), undefined);
+  assert.equal(await modelRuntime.getAuth("anthropic"), undefined);
+  assert.deepEqual(await modelRuntime.listCredentials(), [
     { providerId: "anthropic", type: "oauth" },
   ]);
   assert.deepEqual(sent, [
@@ -123,7 +204,7 @@ test("model registry synchronizes model and provider state", async () => {
 test("model registry tolerates malformed responses and records transport errors", async () => {
   let fail = false;
   let sends = 0;
-  const registry = createModelRegistry({
+  const registry = createRpcModelRuntime({
     async send() {
       sends += 1;
       if (fail) throw new Error("offline");
@@ -132,8 +213,8 @@ test("model registry tolerates malformed responses and records transport errors"
   } as any);
 
   await registry.sync();
-  assert.deepEqual(registry.getAll(), []);
-  assert.deepEqual(registry.getAvailable(), []);
+  assert.deepEqual(registry.getModels(), []);
+  assert.deepEqual(registry.getAvailableSnapshot(), []);
   assert.equal(registry.getError(), "Failed to synchronize model catalog");
 
   fail = true;
@@ -232,7 +313,7 @@ test("model registry refresh, login, and logout preserve daemon authority", asyn
       throw new Error(`unexpected:${payload.type}`);
     },
   } as any;
-  const registry = createModelRegistry(client);
+  const registry = createRpcModelRuntime(client);
   void listener;
 
   assert.deepEqual(await registry.refresh(), {
@@ -268,7 +349,7 @@ test("model registry refresh, login, and logout preserve daemon authority", asyn
 });
 
 test("model registry refresh reports synchronization errors", async () => {
-  const registry = createModelRegistry({
+  const registry = createRpcModelRuntime({
     async send() {
       throw "offline-string";
     },
@@ -282,7 +363,7 @@ test("model registry refresh reports synchronization errors", async () => {
 });
 
 test("model registry normalizes successful non-array model payloads", async () => {
-  const registry = createModelRegistry({
+  const registry = createRpcModelRuntime({
     async send(payload: { type: string }) {
       if (payload.type === "get_all_models") {
         return { success: true, data: { models: null } };
@@ -295,6 +376,6 @@ test("model registry normalizes successful non-array model payloads", async () =
   } as any);
 
   await registry.sync();
-  assert.deepEqual(registry.getAll(), []);
-  assert.deepEqual(registry.getAvailable(), []);
+  assert.deepEqual(registry.getModels(), []);
+  assert.deepEqual(registry.getAvailableSnapshot(), []);
 });

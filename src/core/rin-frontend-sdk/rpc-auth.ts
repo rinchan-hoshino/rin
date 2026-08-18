@@ -12,7 +12,11 @@ type ModelProviderSummary = {
   name: string;
   auth: {
     apiKey?: { name: string; interactive: boolean };
-    oauth?: { name: string; loginLabel?: string };
+    oauth?: {
+      name: string;
+      loginLabel?: string;
+      isSubscription?: boolean;
+    };
   };
 };
 type ProviderAuthStatusSummary = {
@@ -148,6 +152,9 @@ function normalizeModelProviders(input: any) {
       auth.oauth = {
         name: trimText(item.auth.oauth.name) || name,
         ...(loginLabel ? { loginLabel } : {}),
+        ...(item.auth.oauth.isSubscription === true
+          ? { isSubscription: true }
+          : {}),
       };
     }
     providers.push({ id, name, auth });

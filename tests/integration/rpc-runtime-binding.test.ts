@@ -13,11 +13,14 @@ const { RpcInteractiveSession } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-tui", "runtime.js"))
     .href
 );
-const { createModelRegistry } = await import(
+const { createRpcModelBridge } = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "rin-frontend-sdk", "index.js"),
   ).href
 );
+const createRpcModelRuntime = (client) =>
+  createRpcModelBridge(client).modelRuntime;
+
 test("rpc connection loss contains reconnect rejection after disposal", async () => {
   const session = new RpcInteractiveSession({
     send() {
@@ -609,7 +612,7 @@ test("rpc model registry exposes all models for login provider selection", async
     { provider: "anthropic", id: "claude-sonnet" },
   ];
   const availableModels = [{ provider: "openai", id: "gpt-5" }];
-  const registry = createModelRegistry({
+  const bridge = createRpcModelBridge({
     send(payload) {
       sent.push(payload.type);
       switch (payload.type) {
@@ -652,22 +655,32 @@ test("rpc model registry exposes all models for login provider selection", async
       }
     },
   });
+  const { modelRuntime, modelRegistry } = bridge;
 
-  await registry.sync();
+  await modelRuntime.sync();
 
-  assert.deepEqual(registry.getAll(), allModels);
-  assert.deepEqual(registry.getModels(), allModels);
-  assert.deepEqual(registry.getModels("anthropic"), [allModels[1]]);
-  assert.deepEqual(registry.getAvailable(), availableModels);
-  assert.deepEqual(registry.getAvailableSnapshot(), availableModels);
-  assert.deepEqual(registry.find("anthropic", "claude-sonnet"), allModels[1]);
+  assert.deepEqual(modelRegistry.getAll(), allModels);
+  assert.deepEqual(modelRuntime.getModels(), allModels);
+  assert.deepEqual(modelRuntime.getModels("anthropic"), [allModels[1]]);
+  assert.deepEqual(modelRegistry.getAvailable(), availableModels);
+  assert.deepEqual(modelRuntime.getAvailableSnapshot(), availableModels);
   assert.deepEqual(
-    registry.getModel("anthropic", "claude-sonnet"),
+    modelRegistry.find("anthropic", "claude-sonnet"),
     allModels[1],
   );
-  assert.equal(registry.getProviders()[0].auth.oauth.name, "OpenAI account");
-  assert.equal(typeof registry.getProviders()[1].auth.apiKey.login, "function");
-  registry.authStorage.applyState({
+  assert.deepEqual(
+    modelRuntime.getModel("anthropic", "claude-sonnet"),
+    allModels[1],
+  );
+  assert.equal(
+    modelRuntime.getProviders()[0].auth.oauth.name,
+    "OpenAI account",
+  );
+  assert.equal(
+    typeof modelRuntime.getProviders()[1].auth.apiKey.login,
+    "function",
+  );
+  modelRuntime.authStorage.applyState({
     credentials: { anthropic: { type: "api_key" } },
     providers: [],
     providerDisplayNames: { anthropic: "Anthropic" },
@@ -675,14 +688,17 @@ test("rpc model registry exposes all models for login provider selection", async
       openai: { configured: true, source: "environment" },
     },
   });
-  assert.deepEqual(registry.getAvailable(), [...availableModels, allModels[1]]);
-  assert.equal(registry.getProviderDisplayName("anthropic"), "Anthropic");
-  assert.deepEqual(registry.getProviderAuthStatus("openai"), {
+  assert.deepEqual(modelRegistry.getAvailable(), [
+    ...availableModels,
+    allModels[1],
+  ]);
+  assert.equal(modelRuntime.getProviderDisplayName("anthropic"), "Anthropic");
+  assert.deepEqual(modelRuntime.getProviderAuthStatus("openai"), {
     configured: true,
     source: "environment",
   });
-  assert.equal(await registry.getAuth("anthropic"), undefined);
-  assert.deepEqual(await registry.listCredentials(), [
+  assert.equal(await modelRuntime.getAuth("anthropic"), undefined);
+  assert.deepEqual(await modelRuntime.listCredentials(), [
     { providerId: "anthropic", type: "api_key" },
   ]);
   assert.deepEqual(sent, [
@@ -694,7 +710,7 @@ test("rpc model registry exposes all models for login provider selection", async
 
 test("rpc model runtime checks auth against current daemon state", async () => {
   const sent = [];
-  const registry = createModelRegistry({
+  const registry = createRpcModelRuntime({
     send(payload) {
       sent.push(payload.type);
       if (payload.type === "get_oauth_state") {
@@ -717,7 +733,7 @@ test("rpc model runtime checks auth against current daemon state", async () => {
     "get_oauth_state",
   ]);
 
-  const unavailable = createModelRegistry({
+  const unavailable = createRpcModelRuntime({
     send() {
       return Promise.reject(new Error("daemon unavailable"));
     },
@@ -726,7 +742,7 @@ test("rpc model runtime checks auth against current daemon state", async () => {
 });
 
 test("rpc model runtime reports daemon refresh failures", async () => {
-  const registry = createModelRegistry({
+  const registry = createRpcModelRuntime({
     send() {
       return Promise.reject(new Error("daemon unavailable"));
     },
@@ -748,7 +764,7 @@ test("rpc model runtime aborts a pending refresh without committing its snapshot
   const response = new Promise((resolve) => {
     resolveResponse = resolve;
   });
-  const registry = createModelRegistry({
+  const registry = createRpcModelRuntime({
     send() {
       return response;
     },
@@ -767,7 +783,7 @@ test("rpc model runtime aborts a pending refresh without committing its snapshot
     data: { models: [{ provider: "openai", id: "late-model" }] },
   });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(registry.getAll(), []);
+  assert.deepEqual(registry.getModels(), []);
 });
 
 test("rpc interactive session exposes the Pi model runtime read contract", () => {
@@ -780,7 +796,7 @@ test("rpc interactive session exposes the Pi model runtime read contract", () =>
     },
   });
 
-  assert.equal(session.modelRuntime, session.modelRegistry);
+  assert.notEqual(session.modelRuntime, session.modelRegistry);
   assert.equal(typeof session.modelRuntime.getAvailableSnapshot, "function");
   assert.equal(typeof session.modelRuntime.getModel, "function");
   assert.equal(typeof session.modelRuntime.refresh, "function");

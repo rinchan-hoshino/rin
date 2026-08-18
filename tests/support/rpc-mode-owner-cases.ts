@@ -7150,10 +7150,7 @@ test(
   async () => {
     rpcModeOwner.overrides = { getOAuthState: () => ({ authenticated: true }) };
     const harness = await createRpcModeOwnerHarness(({ session }) => {
-      session.modelRegistry.authStorage.login = async (
-        _providerId,
-        options,
-      ) => {
+      session.modelRuntime.authStorage.login = async (_providerId, options) => {
         options.onAuth({
           url: "https://owner.invalid/auth",
           instructions: "owner",
@@ -7250,7 +7247,7 @@ test(
         false,
       );
 
-      harness.session.modelRegistry.authStorage.login = async () => {
+      harness.session.modelRuntime.authStorage.login = async () => {
         throw new Error("login rejected");
       };
       await harness.send({
@@ -7271,7 +7268,7 @@ test(
           ),
       );
 
-      harness.session.modelRegistry.authStorage.login = async (
+      harness.session.modelRuntime.authStorage.login = async (
         _providerId,
         options,
       ) =>
