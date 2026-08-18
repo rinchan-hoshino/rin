@@ -53,6 +53,7 @@ import {
   replacePiSessionCompactionChecker,
   replacePiSessionSystemPromptRebuilder,
   replacePiSessionToolRegistryRefresher,
+  restorePiSessionActiveToolsForReload,
   runPiNativeCompactionWithoutFileSummary,
   runPiSessionAutoCompaction,
   writePiSessionBaseSystemPrompt,
@@ -622,6 +623,7 @@ function applyRinPromptBuilder(session: any, state: LazySystemPromptState) {
         session.sessionManager?.__rinLastPromptContext;
       clearSessionBaseSystemPrompt(session, { ignorePersistedPrompt: true });
       const result = await originalReload(...args);
+      restorePiSessionActiveToolsForReload(session);
       ensureSessionBaseSystemPrompt(session, reloadPromptContext);
       return result;
     };

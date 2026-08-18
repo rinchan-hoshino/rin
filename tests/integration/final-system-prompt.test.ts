@@ -21,6 +21,17 @@ const runtimeMod = await import(
 const sessionForkMod = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "session", "fork.js")).href
 );
+const { createRpcResourceCommandHandlers } = await import(
+  pathToFileURL(
+    path.join(
+      rootDir,
+      "dist",
+      "core",
+      "rin-daemon",
+      "rpc-resource-command-handler.js",
+    ),
+  ).href
+);
 const { SessionManager } = await import("@earendil-works/pi-coding-agent");
 
 function makeTempDir(t: TestContext, prefix: string) {
@@ -742,6 +753,62 @@ test("Pi public system prompt options track Rin lazy prompt tool changes", async
     ["- read:"],
   );
   await runtime.dispose();
+});
+
+test("active tool changes reload the frozen system prompt", async (t) => {
+  const cwd = makeTempDir(t, "rin-tool-reload-cwd-");
+  const agentDir = makeTempDir(t, "rin-tool-reload-agent-");
+  const { session, runtime } = await runtimeMod.createConfiguredAgentSession({
+    cwd,
+    agentDir,
+  });
+  t.after(() => runtime.dispose());
+  const firstPrompt = runtimeMod.ensureSessionBaseSystemPrompt(session);
+  assert.match(firstPrompt, /^- bash:/m);
+
+  const originalReload = session.reload.bind(session);
+  let reloadCount = 0;
+  session.reload = async (...args) => {
+    reloadCount += 1;
+    return await originalReload(...args);
+  };
+  const handlers = createRpcResourceCommandHandlers({
+    getSession: () => session,
+    turnCoordinator: { assertAdmissionOpen() {} },
+    createExtensionUiContext: () => ({}),
+    SessionManager,
+    runtime,
+  });
+
+  const changed = await handlers.set_active_tools({
+    id: "changed",
+    type: "set_active_tools",
+    command: { toolNames: ["read"] },
+  });
+  const reloadedPrompt = runtimeMod.ensureSessionBaseSystemPrompt(session);
+  const unchanged = await handlers.set_active_tools({
+    id: "unchanged",
+    type: "set_active_tools",
+    command: { toolNames: ["read"] },
+  });
+
+  assert.equal(changed.success, true);
+  assert.equal(unchanged.success, true);
+  assert.equal(reloadCount, 1);
+  assert.notEqual(reloadedPrompt, firstPrompt);
+  assert.match(reloadedPrompt, /^- read:/m);
+  assert.doesNotMatch(reloadedPrompt, /^- bash:/m);
+  assert.equal(
+    session.sessionManager
+      .getEntries()
+      .filter(
+        (entry) =>
+          entry.type === "custom" &&
+          entry.customType === "rin-system-prompt-state",
+      )
+      .at(-1)?.data?.systemPrompt,
+    reloadedPrompt,
+  );
 });
 
 test("system prompt stays frozen until reload", async (t) => {

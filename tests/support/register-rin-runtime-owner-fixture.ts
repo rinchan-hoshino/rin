@@ -201,6 +201,7 @@ const sources: Record<string, string> = {
     function owner() { return globalThis.__rinRuntimeOwner; }
     export function bindPiSessionToolRegistryRefresher(session) { return typeof session?._refreshToolRegistry === "function" ? session._refreshToolRegistry.bind(session) : undefined; }
     export function replacePiSessionToolRegistryRefresher(session, fn) { session._refreshToolRegistry = fn.bind(session); }
+    export function restorePiSessionActiveToolsForReload() { return false; }
     export function bindPiSessionCompactionChecker(session) {
       return typeof session?._checkCompaction === "function" ? session._checkCompaction.bind(session) : undefined;
     }

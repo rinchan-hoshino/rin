@@ -1,5 +1,8 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import { refreshPiSessionToolRegistry } from "../pi/session-host.js";
+import {
+  refreshPiSessionToolRegistry,
+  reloadPiSessionWithActiveTools,
+} from "../pi/session-host.js";
 import { normalizeFrontendIdentity } from "../rin-lib/frontend-identity.js";
 import { safeString } from "../text-utils.js";
 import { canInvokeRuntimeSlashCommand } from "./catalog-helpers.js";
@@ -21,6 +24,31 @@ export function isWorkerLocalSessionReplacementCommand(commandLine: string) {
   if (trimmed === "/new") return true;
   if (!trimmed.startsWith("/resume ")) return false;
   return Boolean(trimmed.slice("/resume ".length).trim());
+}
+
+function readActiveToolNames(session: AgentSession): string[] | undefined {
+  const value = session.getActiveToolNames?.();
+  return Array.isArray(value) ? [...value] : undefined;
+}
+
+function equalToolNames(left: string[], right: string[]) {
+  return (
+    left.length === right.length &&
+    left.every((toolName, index) => toolName === right[index])
+  );
+}
+
+async function reloadAfterActiveToolChange(
+  session: AgentSession,
+  previousToolNames: string[] | undefined,
+  fallbackToolNames: string[],
+) {
+  const nextToolNames = readActiveToolNames(session) ?? fallbackToolNames;
+  if (previousToolNames && equalToolNames(previousToolNames, nextToolNames)) {
+    return nextToolNames;
+  }
+  await reloadPiSessionWithActiveTools(session, nextToolNames);
+  return readActiveToolNames(session) ?? nextToolNames;
 }
 
 export type RpcResourceCommandContext = {
@@ -79,24 +107,43 @@ export function createRpcResourceCommandHandlers(
     async set_active_tools({ command, id, type }: RpcCommandRequest) {
       const session = getSession();
 
-      {
+      return run(id, type, async () => {
         const toolNames = Array.isArray(command.toolNames)
           ? command.toolNames
               .map((name: unknown) => safeString(name).trim())
               .filter(Boolean)
           : [];
-        session.setActiveToolsByName?.(toolNames);
-        return done(id, type, {
-          tools: session.getActiveToolNames?.() || toolNames,
-        });
-      }
+        const previousToolNames = readActiveToolNames(session);
+        if (previousToolNames && equalToolNames(previousToolNames, toolNames)) {
+          return { tools: previousToolNames };
+        }
+        if (typeof session.setActiveToolsByName !== "function") {
+          return { tools: previousToolNames ?? toolNames };
+        }
+        turnCoordinator.assertAdmissionOpen();
+        session.setActiveToolsByName(toolNames);
+        return {
+          tools: await reloadAfterActiveToolChange(
+            session,
+            previousToolNames,
+            toolNames,
+          ),
+        };
+      });
     },
     async refresh_tools({ command, id, type }: RpcCommandRequest) {
       const session = getSession();
 
-      refreshPiSessionToolRegistry(session);
-      return done(id, type, {
-        tools: session.getAllTools?.() || [],
+      return run(id, type, async () => {
+        const previousToolNames = readActiveToolNames(session);
+        turnCoordinator.assertAdmissionOpen();
+        refreshPiSessionToolRegistry(session);
+        await reloadAfterActiveToolChange(
+          session,
+          previousToolNames,
+          previousToolNames ?? [],
+        );
+        return { tools: session.getAllTools?.() || [] };
       });
     },
     async get_commands({ command, id, type }: RpcCommandRequest) {

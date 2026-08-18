@@ -17,6 +17,17 @@ const { runCustomRpcMode: runProductionRpcMode } = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "rpc-mode.js"))
     .href
 );
+const { createRpcResourceCommandHandlers } = await import(
+  pathToFileURL(
+    path.join(
+      rootDir,
+      "dist",
+      "core",
+      "rin-daemon",
+      "rpc-resource-command-handler.js",
+    ),
+  ).href
+);
 
 function runCustomRpcMode(runtime, dependencies) {
   const session = runtime?.session || runtime;
@@ -1170,6 +1181,61 @@ test(
     }
   },
 );
+
+test("active tool changes reload the session exactly once", async () => {
+  let activeTools = ["bash"];
+  const calls: any[] = [];
+  const session = {
+    getActiveToolNames: () => [...activeTools],
+    setActiveToolsByName(toolNames: string[]) {
+      calls.push(["set", toolNames]);
+      activeTools = [...toolNames];
+    },
+    _refreshToolRegistry() {
+      calls.push(["refresh"]);
+      activeTools = ["bash"];
+    },
+    getAllTools: () => [{ name: "bash" }, { name: "read" }],
+    async reload() {
+      calls.push(["reload"]);
+    },
+  };
+  const handlers = createRpcResourceCommandHandlers({
+    getSession: () => session,
+    turnCoordinator: { assertAdmissionOpen() {} },
+    createExtensionUiContext: () => ({}),
+    SessionManager: {},
+    runtime: {},
+  });
+
+  const changed = await handlers.set_active_tools({
+    id: "changed",
+    type: "set_active_tools",
+    command: { toolNames: ["read"] },
+  });
+  const unchanged = await handlers.set_active_tools({
+    id: "unchanged",
+    type: "set_active_tools",
+    command: { toolNames: ["read"] },
+  });
+  const refreshed = await handlers.refresh_tools({
+    id: "refreshed",
+    type: "refresh_tools",
+    command: {},
+  });
+
+  assert.deepEqual(changed.data, { tools: ["read"] });
+  assert.deepEqual(unchanged.data, { tools: ["read"] });
+  assert.deepEqual(refreshed.data, {
+    tools: [{ name: "bash" }, { name: "read" }],
+  });
+  assert.deepEqual(calls, [
+    ["set", ["read"]],
+    ["reload"],
+    ["refresh"],
+    ["reload"],
+  ]);
+});
 
 test(
   "rpc mode exposes daemon session tools and extension message actions",

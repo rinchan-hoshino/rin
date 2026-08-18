@@ -42,6 +42,11 @@ const PI_SESSION_PRIVATE = {
 const RIN_SESSION_CONVERSATION_PERSIST_KEY = Symbol.for(
   "rin.sessionConversationPersist",
 );
+const RIN_ACTIVE_TOOLS_RELOAD_KEY = Symbol.for("rin.activeToolsReloadRequest");
+
+type RinActiveToolsReloadRequest = {
+  toolNames: string[];
+};
 
 function bindMethod<T extends AnyFn = AnyFn>(target: any, key: string) {
   const value = target?.[key];
@@ -483,6 +488,37 @@ export function replacePiSessionToolRegistryRefresher(
 
 export function refreshPiSessionToolRegistry(session: any) {
   return session?.[PI_SESSION_PRIVATE.refreshToolRegistry]?.();
+}
+
+export async function reloadPiSessionWithActiveTools(
+  session: any,
+  toolNames: string[],
+) {
+  if (typeof session?.reload !== "function") {
+    throw new Error("Active tool changes require session reload.");
+  }
+  const request: RinActiveToolsReloadRequest = {
+    toolNames: [...toolNames],
+  };
+  session[RIN_ACTIVE_TOOLS_RELOAD_KEY] = request;
+  try {
+    return await session.reload();
+  } finally {
+    if (session[RIN_ACTIVE_TOOLS_RELOAD_KEY] === request) {
+      delete session[RIN_ACTIVE_TOOLS_RELOAD_KEY];
+    }
+  }
+}
+
+export function restorePiSessionActiveToolsForReload(session: any) {
+  const request = session?.[RIN_ACTIVE_TOOLS_RELOAD_KEY] as
+    | RinActiveToolsReloadRequest
+    | undefined;
+  if (!request || typeof session?.setActiveToolsByName !== "function") {
+    return false;
+  }
+  session.setActiveToolsByName([...request.toolNames]);
+  return true;
 }
 
 export function emitPiSessionEvent(session: any, event: any) {

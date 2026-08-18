@@ -41,6 +41,27 @@ test("Pi session host normalizes modes, auth, and extension context", async () =
   });
 });
 
+test("Pi session host clears failed active-tool reload requests", async () => {
+  const session: any = {
+    async reload() {
+      throw new Error("reload failed");
+    },
+    setActiveToolsByName() {
+      throw new Error("stale active-tool request survived");
+    },
+  };
+
+  await assert.rejects(
+    () => host.reloadPiSessionWithActiveTools(session, ["read"]),
+    /reload failed/,
+  );
+  assert.equal(host.restorePiSessionActiveToolsForReload(session), false);
+  await assert.rejects(
+    () => host.reloadPiSessionWithActiveTools({}, ["read"]),
+    /Active tool changes require session reload/,
+  );
+});
+
 test("Pi session host sparse private boundaries remain inert", () => {
   assert.equal(host.bindPiSessionCompactionChecker(null), undefined);
   assert.equal(

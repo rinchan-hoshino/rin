@@ -9,12 +9,32 @@ const {
   buildRinCompactionRequest,
   getPiExtensionRunner,
   getPiSessionExtensionMode,
+  reloadPiSessionWithActiveTools,
+  restorePiSessionActiveToolsForReload,
   resumePiSessionTurn,
   RIN_COMPACTION_INSTRUCTIONS,
   runPiNativeCompactionWithoutFileSummary,
 } = await importBuiltModule<typeof import("../../src/core/pi/session-host.js")>(
   "dist/core/pi/session-host.js",
 );
+
+test("Pi session host restores an active-tool selection inside reload", async () => {
+  const calls: any[] = [];
+  const session: any = {
+    async reload() {
+      calls.push(["reload"]);
+      assert.equal(restorePiSessionActiveToolsForReload(session), true);
+    },
+    setActiveToolsByName(toolNames: string[]) {
+      calls.push(["set", toolNames]);
+    },
+  };
+
+  await reloadPiSessionWithActiveTools(session, ["read"]);
+
+  assert.deepEqual(calls, [["reload"], ["set", ["read"]]]);
+  assert.equal(restorePiSessionActiveToolsForReload(session), false);
+});
 
 test("Pi session host resumes through the session-level runner", async () => {
   assert.equal(
