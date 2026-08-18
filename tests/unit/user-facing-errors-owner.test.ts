@@ -188,7 +188,9 @@ rin_app_install_failed
 rin_app_tui_failed
 rin_app_worker_failed
 rin_beta_selector_not_supported
-rin_system_prompt_extension_missing
+rin_system_prompt_owner_unavailable
+rin_context_transform_owner_unavailable
+rin_compaction_owner_unavailable
 rin_command_failed
 rin_container_name_required
 rin_current_release_missing
@@ -352,7 +354,7 @@ web_fetch_invalid_url`
   .split(/\s+/);
 
 test("every owned runtime marker has a human-facing formatter", () => {
-  assert.equal(OWNED_MARKERS.length, 340);
+  assert.equal(OWNED_MARKERS.length, 342);
   assert.equal(new Set(OWNED_MARKERS).size, OWNED_MARKERS.length);
   for (const marker of OWNED_MARKERS) {
     assert.equal(errors.hasUserFacingRuntimeErrorMapping(marker), true, marker);

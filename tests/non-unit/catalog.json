@@ -328,11 +328,6 @@
       "tests": ["tests/integration/final-system-prompt.test.ts"]
     },
     {
-      "source": "src/core/pi/internal-extension-bridge.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/pi-internal-extension-bridge-owner.test.ts"]
-    },
-    {
       "source": "src/core/pi/private-api.ts",
       "suite": "integration",
       "tests": [

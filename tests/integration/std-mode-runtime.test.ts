@@ -100,7 +100,9 @@ test("std configured session composes Pi and Rin core extensions", async () => {
     );
     assert.equal(
       loadedExtensions.some(
-        (entry: any) => entry.path === "<inline:rin-core-items>",
+        (entry: any) =>
+          entry.path === "<inline:rin-core-items>" ||
+          entry.path === "<inline:rin-system-prompt>",
       ),
       false,
     );

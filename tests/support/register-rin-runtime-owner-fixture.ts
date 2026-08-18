@@ -209,13 +209,25 @@ const sources: Record<string, string> = {
       return typeof session?._runAutoCompaction === "function" ? session._runAutoCompaction.bind(session) : undefined;
     }
     export function replacePiSessionAutoCompactor(session, fn) { session._runAutoCompaction = fn.bind(session); }
+    export function bindPiSessionSystemPromptRebuilder(session) {
+      return typeof session?._rebuildSystemPrompt === "function" ? session._rebuildSystemPrompt.bind(session) : () => "PI PROMPT";
+    }
+    export function replacePiSessionSystemPromptRebuilder(session, fn) { session._rebuildSystemPrompt = fn.bind(session); }
     export async function runPiSessionAutoCompaction(session, reason, retry) {
       return await session._runAutoCompaction(reason, retry);
+    }
+    export function writePiSessionBaseSystemPrompt(session, systemPrompt) {
+      session.systemPrompt = String(systemPrompt || "");
     }
     export async function runPiNativeCompactionWithoutFileSummary(session, event) { owner().events.push(["native-compaction", session, event]); return { compacted: true }; }
     export async function getPiSessionCompactionRequestAuth(session, model) {
       owner().events.push(["compaction-auth", session, model]);
       return owner().compactionAuth;
+    }
+    export function installPiSessionCompactionOwner(session, compact) {
+      owner().events.push(["install-compaction-owner", session]);
+      owner().compactionOwner = compact;
+      return true;
     }
     export function patchPiSessionManagerConversationPersistence(manager) {
       owner().events.push(["patch-persistence", manager]);
@@ -379,12 +391,7 @@ register(`data:text/javascript,${encodeURIComponent(hook)}`, import.meta.url);
         return owner.nativeCheckResult;
       },
       async _runAutoCompaction(reason: string, retry: boolean) {
-        owner.events.push([
-          "native-auto",
-          reason,
-          retry,
-          this.__rinCurrentCompactionReason,
-        ]);
+        owner.events.push(["native-auto", reason, retry]);
         if (owner.autoCompactionError) throw owner.autoCompactionError;
         return owner.autoCompactionResult;
       },
@@ -402,11 +409,7 @@ register(`data:text/javascript,${encodeURIComponent(hook)}`, import.meta.url);
         return owner.reloadResult;
       },
       async compact(...args: any[]) {
-        owner.events.push([
-          "native-compact",
-          ...args,
-          this.__rinCurrentCompactionReason,
-        ]);
+        owner.events.push(["native-compact", ...args]);
         return owner.compactResult;
       },
       subscribe(listener: any) {

@@ -35,6 +35,7 @@ function resetOwner() {
   owner.estimatedContextTokens = { tokens: 12 };
   owner.mappedMessages = undefined;
   owner.compactionEvent = undefined;
+  owner.compactionOwner = undefined;
   owner.compactionAuth = {
     apiKey: "owner-key",
     headers: { owner: "yes" },
@@ -313,17 +314,6 @@ test("runtime capability definitions integrate owner modules and hook payloads",
       (definition: any) => definition.name === "rin_provider_bound_context",
     ),
   );
-
-  const compacting = runtime.createRinCapabilityDefinitions({
-    cwd: "/owner/cwd",
-    agentDir: "/owner/agent",
-    compactWithPiNative: async (event: any) => ({ event, owner: true }),
-  });
-  assert.ok(
-    compacting.some(
-      (definition: any) => definition.name === "rin_provider_bound_context",
-    ),
-  );
 });
 
 test("configured compaction sends the provider-bound event to native Pi", async () => {
@@ -347,11 +337,8 @@ test("configured compaction sends the provider-bound event to native Pi", async 
     cwd: process.cwd(),
     agentDir: "/owner/agent",
   });
-  const definition = owner.capabilityDefinitions.find(
-    (candidate: any) => candidate.name === "rin_native_compaction",
-  );
-
-  await definition.hooks.session_before_compact[0](originalEvent);
+  assert.equal(typeof owner.compactionOwner, "function");
+  await owner.compactionOwner(originalEvent);
 
   const projection = owner.events.find(
     ([name]: any[]) => name === "provider-compaction-event",
@@ -543,18 +530,9 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
   const resourceLoaderOptions = owner.events.find(
     ([name]: any[]) => name === "create-services",
   )[1].resourceLoaderOptions;
-  assert.equal(resourceLoaderOptions.extensionFactories.length, 1);
-  assert.equal(
-    resourceLoaderOptions.extensionFactories[0].name,
-    "rin-system-prompt",
-  );
-  assert.equal(typeof resourceLoaderOptions.extensionsOverride, "function");
-  const {
-    extensionFactories: _extensionFactories,
-    extensionsOverride: _extensionsOverride,
-    ...ordinaryResources
-  } = resourceLoaderOptions;
-  assert.deepEqual(ordinaryResources, {
+  assert.equal(resourceLoaderOptions.extensionFactories, undefined);
+  assert.equal(resourceLoaderOptions.extensionsOverride, undefined);
+  assert.deepEqual(resourceLoaderOptions, {
     ownerResource: true,
     additionalExtensionPaths: ["/owner/extension"],
     noExtensions: false,
@@ -1112,51 +1090,8 @@ test("percent compaction preserves native exits, overflow recovery, thresholds, 
   });
 });
 
-test("compaction reason, reload, shutdown, and settings wrappers remain idempotent and failure-safe", async () => {
+test("reload, shutdown, and settings wrappers remain idempotent and failure-safe", async () => {
   resetOwner();
-  for (const invalid of [null, {}, { compact: "no" }]) {
-    assert.doesNotThrow(() =>
-      runtime.applyRinCompactionReasonTracking(invalid),
-    );
-  }
-  const reasonEvents: any[] = [];
-  const reasonSession: any = {
-    __rinCurrentCompactionReason: "outer",
-    async _runAutoCompaction(reason: string) {
-      reasonEvents.push(["auto", reason, this.__rinCurrentCompactionReason]);
-      throw new Error("owner auto failed");
-    },
-    async compact() {
-      reasonEvents.push(["manual", this.__rinCurrentCompactionReason]);
-      return "manual";
-    },
-  };
-  runtime.applyRinCompactionReasonTracking(reasonSession);
-  runtime.applyRinCompactionReasonTracking(reasonSession);
-  await assert.rejects(
-    reasonSession._runAutoCompaction("overflow"),
-    /owner auto failed/,
-  );
-  assert.equal(reasonSession.__rinCurrentCompactionReason, "outer");
-  assert.equal(await reasonSession.compact(), "manual");
-  assert.equal(reasonSession.__rinCurrentCompactionReason, "outer");
-  assert.deepEqual(reasonEvents, [
-    ["auto", "overflow", "overflow"],
-    ["manual", "manual"],
-  ]);
-  const defaultReasonSession: any = {
-    async _runAutoCompaction() {
-      assert.equal(this.__rinCurrentCompactionReason, "auto");
-      return "default-auto";
-    },
-  };
-  runtime.applyRinCompactionReasonTracking(defaultReasonSession);
-  assert.equal(
-    await defaultReasonSession._runAutoCompaction(""),
-    "default-auto",
-  );
-  assert.equal(defaultReasonSession.__rinCurrentCompactionReason, undefined);
-
   for (const invalid of [null, {}, { subscribe() {} }, { reload() {} }]) {
     assert.doesNotThrow(() => runtime.applyAutoReloadAfterCompaction(invalid));
   }

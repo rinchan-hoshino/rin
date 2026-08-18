@@ -30,6 +30,15 @@ test("Pi private API recognizes skill reads across supported argument shapes", (
   );
 });
 
+test("Pi private API exposes compaction preparation behind one seam", () => {
+  assert.equal(privateApi.preparePiSessionCompaction([], {}), undefined);
+  assert.ok(
+    privateApi.estimatePiMessagesTokens([
+      { role: "user", content: "owner compaction context" },
+    ]) > 0,
+  );
+});
+
 test("Pi private API reuses Pi command routing", async () => {
   assert.equal(await privateApi.handlePiPackageCommand([], {}), false);
   assert.equal(await privateApi.handlePiConfigCommand([], {}), false);

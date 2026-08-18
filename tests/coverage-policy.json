@@ -365,11 +365,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/pi/internal-extension-bridge.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/pi/private-api.ts",
       "ownerSuite": "integration",
       "status": "strict"

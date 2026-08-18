@@ -3,7 +3,6 @@ import path from "node:path";
 import {
   formatSkillsForPrompt,
   type BuildSystemPromptOptions,
-  type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 
 const PROMPT_PREFIX = "As the assistant, you must fulfill the user's requests.";
@@ -19,8 +18,6 @@ const RIN_BASH_GUIDELINES = [
   "Use bash for file operations like ls, rg, find",
   "When using bash, explain meaningful findings instead of pasting excessive raw output",
 ];
-
-export const RIN_SYSTEM_PROMPT_EXTENSION_NAME = "rin-system-prompt";
 
 export type RinSystemPromptOptions = BuildSystemPromptOptions;
 
@@ -163,18 +160,5 @@ export function readPiPublicSystemPromptOptions(
       : undefined,
     contextFiles: Array.isArray(contextFiles) ? contextFiles : [],
     skills: Array.isArray(skills) ? skills : [],
-  };
-}
-
-export function createRinSystemPromptExtension(
-  resolvePrompt: (options: RinSystemPromptOptions, context: any) => string,
-): InlineExtension {
-  return {
-    name: RIN_SYSTEM_PROMPT_EXTENSION_NAME,
-    factory: (pi) => {
-      pi.on("before_agent_start", (event, context) => ({
-        systemPrompt: resolvePrompt(event.systemPromptOptions, context),
-      }));
-    },
   };
 }

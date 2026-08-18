@@ -3,6 +3,10 @@ import fsSync from "node:fs";
 import type { AuthResult } from "@earendil-works/pi-ai";
 import { compact } from "@earendil-works/pi-coding-agent";
 
+import {
+  estimatePiMessagesTokens,
+  preparePiSessionCompaction,
+} from "./private-api.js";
 import { updateSessionCatalogFromSessionManagerSync } from "../session/catalog.js";
 import { normalizeFrontendIdentity } from "../rin-lib/frontend-identity.js";
 
@@ -13,8 +17,12 @@ import { normalizeFrontendIdentity } from "../rin-lib/frontend-identity.js";
 type AnyFn = (...args: any[]) => any;
 
 const PI_SESSION_PRIVATE = {
+  baseSystemPrompt: "_baseSystemPrompt",
+  autoCompactionAbortController: "_autoCompactionAbortController",
+  baseSystemPromptOptions: "_baseSystemPromptOptions",
   buildIndex: "_buildIndex",
   checkCompaction: "_checkCompaction",
+  compactionAbortController: "_compactionAbortController",
   emit: "_emit",
   extensionCommandContextActions: "_extensionCommandContextActions",
   extensionRunner: "_extensionRunner",
@@ -24,6 +32,7 @@ const PI_SESSION_PRIVATE = {
   persist: "_persist",
   refreshToolRegistry: "_refreshToolRegistry",
   resourceLoader: "_resourceLoader",
+  rebuildSystemPrompt: "_rebuildSystemPrompt",
   runAgentPrompt: "_runAgentPrompt",
   rewriteFile: "_rewriteFile",
   runAutoCompaction: "_runAutoCompaction",
@@ -59,6 +68,41 @@ function normalizePiExtensionMode(value: unknown): PiExtensionMode {
   return PI_EXTENSION_MODES.has(text as PiExtensionMode)
     ? (text as PiExtensionMode)
     : "print";
+}
+
+export function readPiSessionBaseSystemPromptOptions(
+  session: any,
+  fallbackCwd = "",
+) {
+  const value = session?.[PI_SESSION_PRIVATE.baseSystemPromptOptions];
+  if (value && typeof value === "object") return value;
+  const cwd = String(fallbackCwd || "").trim();
+  return cwd ? { cwd } : {};
+}
+
+export function writePiSessionBaseSystemPrompt(
+  session: any,
+  systemPrompt: string,
+) {
+  if (!session || typeof session !== "object") return;
+  const next = String(systemPrompt || "");
+  session[PI_SESSION_PRIVATE.baseSystemPrompt] = next;
+  session.agent?.setSystemPrompt?.(next);
+}
+
+export function bindPiSessionSystemPromptRebuilder(session: any) {
+  return bindMethod(session, PI_SESSION_PRIVATE.rebuildSystemPrompt);
+}
+
+export function replacePiSessionSystemPromptRebuilder(
+  session: any,
+  replacement: AnyFn,
+) {
+  return replaceMethod(
+    session,
+    PI_SESSION_PRIVATE.rebuildSystemPrompt,
+    replacement,
+  );
 }
 
 export function bindPiSessionCompactionChecker(session: any) {
@@ -207,6 +251,221 @@ export async function runPiNativeCompactionWithoutFileSummary(
   return { ...result, details };
 }
 
+type RinCompactionOwner = (event: any) => Promise<any>;
+
+const RIN_SESSION_COMPACTION_OWNER_KEY = Symbol.for(
+  "rin.sessionCompactionOwner",
+);
+
+function readPiCompactionPreparation(session: any) {
+  const pathEntries = session?.sessionManager?.getBranch?.() || [];
+  const settings = session?.settingsManager?.getCompactionSettings?.() || {};
+  return {
+    pathEntries,
+    preparation: preparePiSessionCompaction(pathEntries, settings),
+  };
+}
+
+async function runOwnedPiCompaction(
+  session: any,
+  options: {
+    reason: "manual" | "threshold" | "overflow";
+    willRetry: boolean;
+    customInstructions?: string;
+    signal: AbortSignal;
+    compact: RinCompactionOwner;
+  },
+) {
+  if (!session?.model) {
+    throw new Error("Pi AgentSession compaction model is unavailable");
+  }
+  const { pathEntries, preparation } = readPiCompactionPreparation(session);
+  if (!preparation) {
+    const lastEntry = pathEntries[pathEntries.length - 1];
+    if (lastEntry?.type === "compaction") throw new Error("Already compacted");
+    throw new Error("Nothing to compact (session too small)");
+  }
+
+  const event = {
+    type: "session_before_compact",
+    preparation,
+    branchEntries: pathEntries,
+    customInstructions: options.customInstructions,
+    reason: options.reason,
+    willRetry: options.willRetry,
+    signal: options.signal,
+  };
+  const runner = getPiExtensionRunner(session);
+  const extensionResult = runner?.hasHandlers?.("session_before_compact")
+    ? await runner.emit(event)
+    : undefined;
+  if (extensionResult?.cancel) throw new Error("Compaction cancelled");
+
+  const fromExtension = Boolean(extensionResult?.compaction);
+  const compaction =
+    extensionResult?.compaction ?? (await options.compact(event));
+  if (options.signal.aborted) throw new Error("Compaction cancelled");
+
+  const { summary, firstKeptEntryId, tokensBefore, usage, details } =
+    compaction;
+  session.sessionManager.appendCompaction(
+    summary,
+    firstKeptEntryId,
+    tokensBefore,
+    details,
+    fromExtension,
+    usage,
+  );
+  const newEntries = session.sessionManager.getEntries();
+  const sessionContext = session.sessionManager.buildSessionContext();
+  session.agent.state.messages = sessionContext.messages;
+  const estimatedTokensAfter = estimatePiMessagesTokens(
+    sessionContext.messages,
+  );
+  const savedCompactionEntry = newEntries.find(
+    (entry: any) => entry.type === "compaction" && entry.summary === summary,
+  );
+  if (runner && savedCompactionEntry) {
+    await runner.emit({
+      type: "session_compact",
+      compactionEntry: savedCompactionEntry,
+      fromExtension,
+      reason: options.reason,
+      willRetry: options.willRetry,
+    });
+  }
+  return {
+    summary,
+    firstKeptEntryId,
+    tokensBefore,
+    estimatedTokensAfter,
+    usage,
+    details,
+  };
+}
+
+export function installPiSessionCompactionOwner(
+  session: any,
+  compact: RinCompactionOwner,
+) {
+  if (
+    !session ||
+    typeof session !== "object" ||
+    typeof compact !== "function"
+  ) {
+    return false;
+  }
+  const existing = session[RIN_SESSION_COMPACTION_OWNER_KEY] as
+    | { compact: RinCompactionOwner }
+    | undefined;
+  if (existing) {
+    existing.compact = compact;
+    return true;
+  }
+  if (typeof session.abort !== "function") return false;
+  if (!bindPiSessionAutoCompactor(session)) return false;
+
+  const state = { compact };
+  session[RIN_SESSION_COMPACTION_OWNER_KEY] = state;
+  session.compact = async (customInstructions?: string) => {
+    await session.abort();
+    const controller = new AbortController();
+    session[PI_SESSION_PRIVATE.compactionAbortController] = controller;
+    emitPiSessionEvent(session, { type: "compaction_start", reason: "manual" });
+    try {
+      const result = await runOwnedPiCompaction(session, {
+        reason: "manual",
+        willRetry: false,
+        customInstructions,
+        signal: controller.signal,
+        compact: state.compact,
+      });
+      session[PI_SESSION_PRIVATE.compactionAbortController] = undefined;
+      emitPiSessionEvent(session, {
+        type: "compaction_end",
+        reason: "manual",
+        result,
+        aborted: false,
+        willRetry: false,
+      });
+      return result;
+    } catch (error: any) {
+      const message = error instanceof Error ? error.message : String(error);
+      const aborted =
+        message === "Compaction cancelled" || error?.name === "AbortError";
+      session[PI_SESSION_PRIVATE.compactionAbortController] = undefined;
+      emitPiSessionEvent(session, {
+        type: "compaction_end",
+        reason: "manual",
+        result: undefined,
+        aborted,
+        willRetry: false,
+        errorMessage: aborted ? undefined : `Compaction failed: ${message}`,
+      });
+      throw error;
+    }
+  };
+
+  replacePiSessionAutoCompactor(
+    session,
+    async (reason: "threshold" | "overflow", willRetry: boolean) => {
+      const controller = new AbortController();
+      session[PI_SESSION_PRIVATE.autoCompactionAbortController] = controller;
+      let started = false;
+      try {
+        emitPiSessionEvent(session, { type: "compaction_start", reason });
+        started = true;
+        const result = await runOwnedPiCompaction(session, {
+          reason,
+          willRetry,
+          signal: controller.signal,
+          compact: state.compact,
+        });
+        emitPiSessionEvent(session, {
+          type: "compaction_end",
+          reason,
+          result,
+          aborted: false,
+          willRetry,
+        });
+        if (willRetry) {
+          const messages = session.agent.state.messages;
+          const lastMessage = messages[messages.length - 1];
+          if (
+            lastMessage?.role === "assistant" &&
+            (lastMessage.stopReason === "error" ||
+              lastMessage.stopReason === "length")
+          ) {
+            session.agent.state.messages = messages.slice(0, -1);
+          }
+          return true;
+        }
+        return session.agent.hasQueuedMessages();
+      } catch (error: any) {
+        if (started) {
+          const message =
+            error instanceof Error ? error.message : "compaction failed";
+          emitPiSessionEvent(session, {
+            type: "compaction_end",
+            reason,
+            result: undefined,
+            aborted: false,
+            willRetry: false,
+            errorMessage:
+              reason === "overflow"
+                ? `Context overflow recovery failed: ${message}`
+                : `Auto-compaction failed: ${message}`,
+          });
+        }
+        return false;
+      } finally {
+        session[PI_SESSION_PRIVATE.autoCompactionAbortController] = undefined;
+      }
+    },
+  );
+  return true;
+}
+
 export function bindPiSessionToolRegistryRefresher(session: any) {
   return bindMethod(session, PI_SESSION_PRIVATE.refreshToolRegistry);
 }
@@ -290,6 +549,20 @@ export function getPiSessionExtensionUIContext(session: any) {
 
 export function getPiSessionExtensionCommandContextActions(session: any) {
   return session?.[PI_SESSION_PRIVATE.extensionCommandContextActions];
+}
+
+export function bindPiSessionContextTransformer(session: any) {
+  const transform = session?.agent?.transformContext;
+  return typeof transform === "function" ? transform.bind(session.agent) : null;
+}
+
+export function replacePiSessionContextTransformer(
+  session: any,
+  replacement: AnyFn,
+) {
+  if (!session?.agent || typeof replacement !== "function") return false;
+  session.agent.transformContext = replacement;
+  return true;
 }
 
 function hasConversationMessageEntry(entries: unknown) {

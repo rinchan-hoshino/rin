@@ -115,10 +115,7 @@ test("Pi owns model thinking capability resolution", () => {
 });
 
 test("Pi session private members stay behind Rin's session host", () => {
-  const allowed = new Set([
-    "src/core/pi/session-host.ts",
-    "src/core/pi/internal-extension-bridge.ts",
-  ]);
+  const allowed = new Set(["src/core/pi/session-host.ts"]);
   const memberPattern =
     /(?:\.|\[\s*["'])_(?:buildIndex|checkCompaction|emit|extensionCommandContextActions|extensionMode|extensionRunner|extensionShutdownHandler|extensionUIContext|getCompactionRequestAuth|persist|refreshToolRegistry|resourceLoader|rewriteFile|runAutoCompaction|toolPromptGuidelines|toolPromptSnippets|toolRegistry)\b/;
   const violations: string[] = [];
@@ -131,15 +128,23 @@ test("Pi session private members stay behind Rin's session host", () => {
   assert.deepEqual(violations, []);
 });
 
-test("Rin system prompt uses Pi's public extension contract", () => {
+test("Rin has one private Pi session seam and no internal extension bridge", () => {
+  assert.equal(
+    fs.existsSync(
+      path.join(rootDir, "src/core/pi/internal-extension-bridge.ts"),
+    ),
+    false,
+  );
   const sessionHost = fs.readFileSync(
     path.join(rootDir, "src/core/pi/session-host.ts"),
     "utf8",
   );
-  assert.doesNotMatch(
-    sessionHost,
-    /_baseSystemPrompt(?:Options)?|_rebuildSystemPrompt/,
+  assert.match(sessionHost, /_baseSystemPrompt|_rebuildSystemPrompt/);
+  const capabilitySession = fs.readFileSync(
+    path.join(rootDir, "src/core/rin-lib/capability-session.ts"),
+    "utf8",
   );
+  assert.doesNotMatch(capabilitySession, /internal-extension-bridge/);
 });
 
 test("Pi upstream mirror metadata follows the package version", () => {

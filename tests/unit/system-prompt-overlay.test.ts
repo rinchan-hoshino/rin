@@ -257,6 +257,39 @@ test("sparse public prompt metadata stays empty without inventing tools or resou
   });
 });
 
+test("Rin-owned system prompt is not registered as an extension", async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "rin-prompt-core-cwd-"));
+  const agentDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-prompt-core-agent-"),
+  );
+  try {
+    const configured = await runtimeMod.createConfiguredAgentSession({
+      cwd,
+      agentDir,
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+    });
+    try {
+      assert.deepEqual(
+        configured.extensionsResult.extensions
+          .map((extension) => extension.path)
+          .filter((extensionPath) =>
+            extensionPath.includes("rin-system-prompt"),
+          ),
+        [],
+      );
+    } finally {
+      await configured.runtime.dispose();
+    }
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(agentDir, { recursive: true, force: true });
+  }
+});
+
 test("user extensions receive the Rin-owned prompt first", async () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "rin-prompt-ext-cwd-"));
   const agentDir = fs.mkdtempSync(
@@ -290,10 +323,11 @@ test("user extensions receive the Rin-owned prompt first", async () => {
       );
       const runner = configured.session._extensionRunner;
       const options = runner.createCommandContext().getSystemPromptOptions();
+      assert.equal(configured.session._baseSystemPrompt, basePrompt);
       const result = await runner.emitBeforeAgentStart(
         "probe",
         undefined,
-        "PI PROSE MUST NOT SURVIVE",
+        configured.session._baseSystemPrompt,
         options,
       );
       assert.equal(
@@ -301,6 +335,22 @@ test("user extensions receive the Rin-owned prompt first", async () => {
         `${basePrompt}\n\nUSER EXTENSION BLOCK`,
       );
       assert.doesNotMatch(result.systemPrompt, /PI PROSE MUST NOT SURVIVE/);
+
+      await configured.session.reload();
+      const reloadedBasePrompt = runtimeMod.ensureSessionBaseSystemPrompt(
+        configured.session,
+      );
+      const reloadedRunner = configured.session._extensionRunner;
+      const reloadedResult = await reloadedRunner.emitBeforeAgentStart(
+        "probe after reload",
+        undefined,
+        reloadedBasePrompt,
+        reloadedRunner.createCommandContext().getSystemPromptOptions(),
+      );
+      assert.equal(
+        reloadedResult.systemPrompt,
+        `${reloadedBasePrompt}\n\nUSER EXTENSION BLOCK`,
+      );
     } finally {
       await configured.runtime.dispose();
     }

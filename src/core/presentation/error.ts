@@ -485,8 +485,12 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   oauth_provider_id_required: () =>
     "OAuth login needs a provider id. Choose a provider.",
 
-  rin_system_prompt_extension_missing: () =>
-    "Rin's core system prompt extension did not load. Reload Rin; if this persists, repair the runtime installation.",
+  rin_system_prompt_owner_unavailable: () =>
+    "Rin could not bind the session's system prompt owner. Reload Rin; if this persists, repair the runtime installation.",
+  rin_context_transform_owner_unavailable: () =>
+    "Rin could not bind the session context transformer. Reload Rin; if this persists, repair the runtime installation.",
+  rin_compaction_owner_unavailable: () =>
+    "Rin could not bind the session compaction owner. Reload Rin; if this persists, repair the runtime installation.",
 
   rin_agent_sdk_task_id_required: () =>
     "Agent SDK task operation needs a task id. Provide the task id.",

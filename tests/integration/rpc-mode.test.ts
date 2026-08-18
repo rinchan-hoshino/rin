@@ -102,12 +102,6 @@ function runCustomRpcMode(runtime, dependencies) {
     },
   });
 }
-const { attachRinCapabilityExtensionBridge } = await import(
-  pathToFileURL(
-    path.join(rootDir, "dist", "core", "pi", "internal-extension-bridge.js"),
-  ).href
-);
-
 function wait(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -4537,7 +4531,6 @@ test(
     const lines: string[] = [];
     const sessionSubscribers = new Set<(event: any) => void>();
     let extensionObserverStarted = false;
-    let capabilityObserverStarted = false;
     const extensionRunner = {
       hasHandlers: () => false,
       async emit() {
@@ -4607,13 +4600,6 @@ test(
         setSessionName: () => {},
       };
 
-      attachRinCapabilityExtensionBridge(session, {
-        hasHandlers: (type: string) => type === "agent_settled",
-        async emit() {
-          capabilityObserverStarted = true;
-          await new Promise(() => {});
-        },
-      });
       void runCustomRpcMode(session, {
         SessionManager: {
           listAll: async () => [],
@@ -4652,9 +4638,9 @@ test(
         0,
       );
 
-      await extensionRunner.emit({ type: "agent_settled" });
+      void extensionRunner.emit({ type: "agent_settled" });
+      await Promise.resolve();
       assert.equal(extensionObserverStarted, true);
-      assert.equal(capabilityObserverStarted, true);
       for (const handler of sessionSubscribers) {
         handler({ type: "agent_settled" });
       }

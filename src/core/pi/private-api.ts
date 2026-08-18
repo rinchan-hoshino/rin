@@ -5,8 +5,23 @@
 
 import { basename } from "node:path";
 
+import {
+  estimateTokens,
+  prepareCompaction,
+} from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/compaction/index.js";
 import { builtInExtensions } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/extensions/index.js";
 import { resolveToCwd } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
+
+export function preparePiSessionCompaction(pathEntries: any[], settings: any) {
+  return prepareCompaction(pathEntries, settings);
+}
+
+export function estimatePiMessagesTokens(messages: any[]) {
+  return (Array.isArray(messages) ? messages : []).reduce(
+    (total, message) => total + estimateTokens(message),
+    0,
+  );
+}
 
 export function withPiDefaultExtensionFactories<T>(
   options: T,

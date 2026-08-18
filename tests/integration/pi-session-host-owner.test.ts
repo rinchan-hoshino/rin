@@ -78,6 +78,18 @@ test("Pi session host binds, replaces, and invokes private semantic methods", ()
   const calls: string[] = [];
   const session: any = {
     value: "bound",
+    agent: {
+      transformContext: async (messages: any[]) => messages,
+      setSystemPrompt(systemPrompt: string) {
+        calls.push(`prompt:${systemPrompt}`);
+      },
+    },
+    _baseSystemPrompt: "pi",
+    _baseSystemPromptOptions: { cwd: "/workspace" },
+    _rebuildSystemPrompt() {
+      calls.push("rebuild");
+      return "rebuilt";
+    },
     _checkCompaction() {
       calls.push("check");
       return 2;
@@ -96,6 +108,7 @@ test("Pi session host binds, replaces, and invokes private semantic methods", ()
     },
   };
 
+  assert.equal(host.bindPiSessionSystemPromptRebuilder(session)?.(), "rebuilt");
   assert.equal(host.bindPiSessionCompactionChecker(session)?.(), 2);
   assert.equal(host.bindPiSessionAutoCompactor(session)?.("manual", false), 3);
   assert.equal(host.runPiSessionAutoCompaction(session, "retry", true), 3);
@@ -103,6 +116,12 @@ test("Pi session host binds, replaces, and invokes private semantic methods", ()
   assert.equal(host.refreshPiSessionToolRegistry(session), 4);
   assert.equal(host.emitPiSessionEvent(session, { type: "done" }), 5);
 
+  assert.equal(
+    host.replacePiSessionSystemPromptRebuilder(session, () => "rin"),
+    true,
+  );
+  host.writePiSessionBaseSystemPrompt(session, "Rin prompt");
+  assert.equal(session._baseSystemPrompt, "Rin prompt");
   assert.equal(
     host.replacePiSessionCompactionChecker(session, () => 20),
     true,
@@ -116,13 +135,127 @@ test("Pi session host binds, replaces, and invokes private semantic methods", ()
     true,
   );
   assert.deepEqual(calls, [
+    "rebuild",
     "check",
     "compact:manual:false",
     "compact:retry:true",
     "refresh",
     "refresh",
     "emit:done",
+    "prompt:Rin prompt",
   ]);
+});
+
+test("Pi session host owns compaction without registering core extension handlers", async () => {
+  const events: any[] = [];
+  const appended: any[] = [];
+  const pathEntries = [
+    {
+      id: "u1",
+      parentId: null,
+      type: "message",
+      message: { role: "user", content: "old request", timestamp: 1 },
+    },
+    {
+      id: "a1",
+      parentId: "u1",
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "old answer" }],
+        stopReason: "stop",
+        timestamp: 2,
+      },
+    },
+    {
+      id: "u2",
+      parentId: "a1",
+      type: "message",
+      message: { role: "user", content: "recent request", timestamp: 3 },
+    },
+  ];
+  const compactionEntry = {
+    id: "c1",
+    type: "compaction",
+    summary: "Rin summary",
+  };
+  let coreCalls = 0;
+  const runner: any = {
+    hasHandlers: () => false,
+    async emit(event: any) {
+      events.push(event);
+      return undefined;
+    },
+  };
+  const session: any = {
+    model: { provider: "test", id: "model" },
+    extensionRunner: runner,
+    agent: {
+      state: { messages: pathEntries.map((entry) => entry.message) },
+      hasQueuedMessages: () => false,
+    },
+    abort: async () => {},
+    _emit(event: any) {
+      events.push(event);
+    },
+    _runAutoCompaction: async () => false,
+    settingsManager: {
+      getCompactionSettings: () => ({ keepRecentTokens: 1 }),
+    },
+    sessionManager: {
+      getBranch: () => pathEntries,
+      appendCompaction(...args: any[]) {
+        appended.push(args);
+      },
+      getEntries: () => [...pathEntries, compactionEntry],
+      buildSessionContext: () => ({
+        messages: [{ role: "user", content: "recent request" }],
+      }),
+    },
+  };
+
+  assert.equal(
+    host.installPiSessionCompactionOwner(session, async (event: any) => {
+      coreCalls += 1;
+      assert.equal(event.type, "session_before_compact");
+      assert.equal(event.customInstructions, "focus");
+      return {
+        summary: "Rin summary",
+        firstKeptEntryId: "u2",
+        tokensBefore: 10,
+        details: {},
+      };
+    }),
+    true,
+  );
+  const result = await session.compact("focus");
+
+  assert.equal(coreCalls, 1);
+  assert.equal(result.summary, "Rin summary");
+  assert.equal(appended[0][4], false);
+  assert.equal(runner.hasHandlers("session_before_compact"), false);
+  assert.equal(
+    events.some((event) => event.type === "session_compact"),
+    true,
+  );
+
+  runner.hasHandlers = (type: string) => type === "session_before_compact";
+  runner.emit = async (event: any) => {
+    events.push(event);
+    if (event.type !== "session_before_compact") return undefined;
+    return {
+      compaction: {
+        summary: "Extension summary",
+        firstKeptEntryId: "u2",
+        tokensBefore: 11,
+        details: {},
+      },
+    };
+  };
+  const extensionResult = await session.compact("extension first");
+  assert.equal(extensionResult.summary, "Extension summary");
+  assert.equal(coreCalls, 1);
+  assert.equal(appended[1][4], true);
 });
 
 test("Pi session host seeds only non-persisted managers", () => {

@@ -70,25 +70,13 @@ test("Rin context hooks transform provider-bound messages after Pi emitContext",
     ],
   });
 
-  const extensionRunner = {
-    hasHandlers(eventName: string) {
-      calls.push(`pi-has:${eventName}`);
-      return false;
-    },
-    async emit(event: any) {
-      calls.push(`pi-emit:${event.type}`);
-      return { messages: [{ role: "user", content: "pi" }], pi: true };
-    },
-    async emitContext(messages: any[]) {
-      calls.push(`pi-context:${messages[0].content}`);
-      return [{ role: "user", content: "pi" }];
-    },
-    getRegisteredCommands() {
-      return [];
-    },
-  };
   const session = {
-    _extensionRunner: extensionRunner,
+    agent: {
+      async transformContext(messages: any[]) {
+        calls.push(`pi-context:${messages[0].content}`);
+        return [{ role: "user", content: "pi" }];
+      },
+    },
     subscribe() {
       return () => {};
     },
@@ -98,12 +86,11 @@ test("Rin context hooks transform provider-bound messages after Pi emitContext",
     capabilitySet,
   });
 
-  assert.equal(session._extensionRunner.hasHandlers("context"), true);
-  const result = await session._extensionRunner.emitContext([
+  const result = await session.agent.transformContext([
     { role: "user", content: "raw" },
   ]);
 
-  assert.deepEqual(calls, ["pi-has:context", "pi-context:raw", "rin:pi"]);
+  assert.deepEqual(calls, ["pi-context:raw", "rin:pi"]);
   assert.deepEqual(result, [
     { role: "user", content: "pi" },
     { role: "system", content: "rin" },
@@ -161,150 +148,7 @@ test("Rin capability context exposes Pi extension mode and prompt options", asyn
   ]);
 });
 
-test("Rin compaction hook errors propagate instead of falling back to Pi summarization", async () => {
-  const recorded: any[] = [];
-  const capabilitySet = capabilitySession.createRinCapabilitySet({
-    cwd: "/tmp/rin-capability-session-test",
-    agentDir: "/tmp/rin-capability-session-test",
-    sessionManager: {
-      appendCustomEntry(type: string, data: any) {
-        recorded.push({ type, data });
-      },
-    },
-    definitions: [
-      {
-        name: "demo_failing_compaction",
-        hooks: {
-          session_before_compact: [
-            async () => {
-              throw new Error("summary failed");
-            },
-          ],
-        },
-      },
-    ],
-  });
-
-  await assert.rejects(
-    () => capabilitySet.emit({ type: "session_before_compact" }),
-    /summary failed/,
-  );
-  assert.equal(recorded[0].type, "rin_core_capability_error");
-  assert.equal(recorded[0].data.event, "session_before_compact");
-});
-
-test("Rin compaction hooks are exposed through Pi's native before-compact span", async () => {
-  const calls: string[] = [];
-  const capabilitySet = capabilitySession.createRinCapabilitySet({
-    cwd: "/tmp/rin-capability-session-test",
-    agentDir: "/tmp/rin-capability-session-test",
-    sessionManager: {
-      appendCustomEntry() {},
-    },
-    definitions: [
-      {
-        name: "demo_sync_compaction",
-        hooks: {
-          session_before_compact: [
-            async (event: any) => {
-              calls.push(`rin:${event.reason}`);
-              return { rinResult: true };
-            },
-          ],
-        },
-      },
-    ],
-  });
-
-  const extensionRunner = {
-    hasHandlers(eventName: string) {
-      calls.push(`pi-has:${eventName}`);
-      return false;
-    },
-    async emit(event: any) {
-      calls.push(`pi-emit:${event.type}`);
-      return undefined;
-    },
-    getRegisteredCommands() {
-      return [];
-    },
-  };
-  const session = {
-    _extensionRunner: extensionRunner,
-    __rinCurrentCompactionReason: "overflow",
-    sessionManager: {
-      appendCustomEntry() {},
-    },
-    subscribe() {
-      return () => {};
-    },
-  };
-
-  await capabilitySession.attachRinCapabilitiesToSession(session, {
-    capabilitySet,
-  });
-
-  calls.length = 0;
-  assert.equal(
-    session._extensionRunner.hasHandlers("session_before_compact"),
-    true,
-  );
-  const result = await session._extensionRunner.emit({
-    type: "session_before_compact",
-  });
-
-  assert.deepEqual(calls, [
-    "pi-has:session_before_compact",
-    "pi-emit:session_before_compact",
-    "rin:overflow",
-  ]);
-  assert.deepEqual(result, { rinResult: true });
-  assert.equal(session._extensionRunner.hasHandlers("session_shutdown"), false);
-});
-
-test("Pi extension compaction takes precedence over Rin's default delegate", async () => {
-  let rinCalls = 0;
-  const capabilitySet = capabilitySession.createRinCapabilitySet({
-    cwd: "/tmp/rin-capability-session-test",
-    agentDir: "/tmp/rin-capability-session-test",
-    definitions: [
-      {
-        name: "rin_native_compaction",
-        hooks: {
-          session_before_compact: [
-            async () => {
-              rinCalls += 1;
-              return { compaction: { summary: "rin" } };
-            },
-          ],
-        },
-      },
-    ],
-  });
-  const piCompaction = { summary: "pi-extension" };
-  const session = {
-    _extensionRunner: {
-      hasHandlers: () => true,
-      emit: async () => ({ compaction: piCompaction }),
-      getRegisteredCommands: () => [],
-    },
-    sessionManager: { appendCustomEntry() {} },
-    subscribe: () => () => {},
-  };
-
-  await capabilitySession.attachRinCapabilitiesToSession(session, {
-    capabilitySet,
-  });
-  const result = await session._extensionRunner.emit({
-    type: "session_before_compact",
-    reason: "manual",
-  });
-
-  assert.deepEqual(result, { compaction: piCompaction });
-  assert.equal(rinCalls, 0);
-});
-
-test("Rin capability bridge is reattached to Pi extension runner after reload", async () => {
+test("Rin context ownership survives session reload without extension-runner patches", async () => {
   const calls: string[] = [];
   const capabilitySet = capabilitySession.createRinCapabilitySet({
     cwd: "/tmp/rin-capability-session-test",
@@ -328,30 +172,15 @@ test("Rin capability bridge is reattached to Pi extension runner after reload", 
       },
     ],
   });
-
-  const makeRunner = (label: string) => ({
-    hasHandlers(eventName: string) {
-      calls.push(`${label}-has:${eventName}`);
-      return false;
-    },
-    async emit(event: any) {
-      calls.push(`${label}-emit:${event.type}`);
-      return undefined;
-    },
-    async emitContext(messages: any[]) {
-      calls.push(`${label}-context:${messages[0].content}`);
-      return messages;
-    },
-    getRegisteredCommands() {
-      return [];
-    },
-  });
-
   const session = {
-    _extensionRunner: makeRunner("before"),
+    agent: {
+      async transformContext(messages: any[]) {
+        calls.push(`pi:${messages[0].content}`);
+        return messages;
+      },
+    },
     async reload() {
       calls.push("reload");
-      this._extensionRunner = makeRunner("after");
     },
     subscribe() {
       return () => {};
@@ -361,20 +190,14 @@ test("Rin capability bridge is reattached to Pi extension runner after reload", 
   await capabilitySession.attachRinCapabilitiesToSession(session, {
     capabilitySet,
   });
-
-  calls.length = 0;
+  const transform = session.agent.transformContext;
   await session.reload();
-  assert.equal(session._extensionRunner.hasHandlers("context"), true);
-  const result = await session._extensionRunner.emitContext([
+  assert.equal(session.agent.transformContext, transform);
+  const result = await session.agent.transformContext([
     { role: "user", content: "raw" },
   ]);
 
-  assert.deepEqual(calls, [
-    "reload",
-    "after-has:context",
-    "after-context:raw",
-    "rin:raw",
-  ]);
+  assert.deepEqual(calls, ["reload", "pi:raw", "rin:raw"]);
   assert.deepEqual(result, [
     { role: "user", content: "raw" },
     { role: "system", content: "rin" },

@@ -39,21 +39,23 @@ import {
 } from "./provider-context.js";
 import {
   buildRinSystemPrompt,
-  createRinSystemPromptExtension,
   readPiPublicSystemPromptOptions,
-  RIN_SYSTEM_PROMPT_EXTENSION_NAME,
   type RinSystemPromptOptions,
 } from "./system-prompt-overlay.js";
 import {
   bindPiSessionAutoCompactor,
   bindPiSessionCompactionChecker,
+  bindPiSessionSystemPromptRebuilder,
   bindPiSessionToolRegistryRefresher,
+  installPiSessionCompactionOwner,
   patchPiSessionManagerConversationPersistence,
   replacePiSessionAutoCompactor,
   replacePiSessionCompactionChecker,
+  replacePiSessionSystemPromptRebuilder,
   replacePiSessionToolRegistryRefresher,
   runPiNativeCompactionWithoutFileSummary,
   runPiSessionAutoCompaction,
+  writePiSessionBaseSystemPrompt,
 } from "../pi/session-host.js";
 
 export function createRinCapabilityDefinitions(
@@ -64,20 +66,6 @@ export function createRinCapabilityDefinitions(
     memoryModule(options),
     selfImproveModule(options),
     chatModule(),
-    ...(options.compactWithPiNative
-      ? [
-          {
-            name: "rin_native_compaction",
-            hooks: {
-              session_before_compact: [
-                async (event: any) => ({
-                  compaction: await options.compactWithPiNative?.(event),
-                }),
-              ],
-            },
-          },
-        ]
-      : []),
     {
       name: "rin_provider_bound_context",
       hooks: {
@@ -527,6 +515,7 @@ export function clearSessionBaseSystemPrompt(
   if (options.ignorePersistedPrompt) {
     state.ignorePersistedPrompt = true;
   }
+  writePiSessionBaseSystemPrompt(session, "");
 }
 
 export function ensureSessionBaseSystemPrompt(
@@ -541,12 +530,14 @@ export function ensureSessionBaseSystemPrompt(
   if (initialPromptContext !== undefined) {
     state.promptContext = initialPromptContext;
   }
-  return materializeRinSystemPrompt(
+  const prompt = materializeRinSystemPrompt(
     state,
     session.sessionManager,
     readPiPublicSystemPromptOptions(session),
     state.promptContext,
   );
+  writePiSessionBaseSystemPrompt(session, prompt);
+  return prompt;
 }
 
 export function appendPromptContextSystemPrompt(
@@ -562,7 +553,13 @@ export function appendPromptContextSystemPrompt(
 
 function applyRinPromptBuilder(session: any, state: LazySystemPromptState) {
   if (!session || typeof session !== "object") return;
+  const originalRebuild = bindPiSessionSystemPromptRebuilder(session);
+  if (!originalRebuild) throw new Error("rin_system_prompt_owner_unavailable");
   session[LAZY_SYSTEM_PROMPT_STATE_KEY] = state;
+  replacePiSessionSystemPromptRebuilder(session, (toolNames: string[] = []) => {
+    const piPrompt = originalRebuild(Array.isArray(toolNames) ? toolNames : []);
+    return state.materialized ? state.systemPrompt : piPrompt;
+  });
 
   const originalPrompt =
     typeof session.prompt === "function" ? session.prompt.bind(session) : null;
@@ -635,9 +632,6 @@ function applyRinPromptBuilder(session: any, state: LazySystemPromptState) {
 
 const AUTO_RELOAD_AFTER_COMPACTION_KEY = Symbol.for(
   "rin.autoReloadAfterCompaction",
-);
-const COMPACTION_REASON_TRACKING_KEY = Symbol.for(
-  "rin.compactionReasonTracking",
 );
 const COMPACTION_PERCENT_THRESHOLD_KEY = Symbol.for(
   "rin.compactionPercentThreshold",
@@ -997,52 +991,6 @@ export function applyRinCompactionPercentThreshold(
   session[COMPACTION_PERCENT_THRESHOLD_KEY] = { originalCheckCompaction };
 }
 
-export function applyRinCompactionReasonTracking(session: any) {
-  if (!session || typeof session !== "object") return;
-  if ((session as any)[COMPACTION_REASON_TRACKING_KEY]) return;
-  const withReason = async <T>(reason: string, run: () => Promise<T>) => {
-    const previous = session.__rinCurrentCompactionReason;
-    session.__rinCurrentCompactionReason = String(reason || "").trim();
-    try {
-      return await run();
-    } finally {
-      if (previous === undefined) delete session.__rinCurrentCompactionReason;
-      else session.__rinCurrentCompactionReason = previous;
-    }
-  };
-
-  const originalRunAutoCompaction = bindPiSessionAutoCompactor(session);
-  if (originalRunAutoCompaction) {
-    replacePiSessionAutoCompactor(
-      session,
-      async function patchedRunAutoCompaction(reason: string, ...args: any[]) {
-        return await withReason(String(reason || "auto"), () =>
-          originalRunAutoCompaction(reason, ...args),
-        );
-      },
-    );
-  }
-
-  const originalCompact =
-    typeof session.compact === "function"
-      ? session.compact.bind(session)
-      : null;
-  if (originalCompact) {
-    session.compact = async function patchedManualCompactionReason(
-      ...args: any[]
-    ) {
-      return await withReason("manual", () => originalCompact(...args));
-    };
-  }
-
-  if (!originalRunAutoCompaction && !originalCompact) return;
-
-  (session as any)[COMPACTION_REASON_TRACKING_KEY] = {
-    originalRunAutoCompaction,
-    originalCompact,
-  };
-}
-
 export function applyAutoReloadAfterCompaction(session: any) {
   if (!session || typeof session !== "object") return;
   if ((session as any)[AUTO_RELOAD_AFTER_COMPACTION_KEY]) return;
@@ -1209,28 +1157,6 @@ export function patchRinRuntimeSessionShutdown(runtime: any) {
   };
 }
 
-function prioritizeRinSystemPromptExtension(
-  loaded: any,
-  configuredOverride?: (base: any) => any,
-) {
-  const targetPath = `<inline:${RIN_SYSTEM_PROMPT_EXTENSION_NAME}>`;
-  const coreExtension = loaded?.extensions?.find(
-    (extension: any) =>
-      extension?.path === targetPath || extension?.resolvedPath === targetPath,
-  );
-  if (!coreExtension) throw new Error("rin_system_prompt_extension_missing");
-  const configured = configuredOverride ? configuredOverride(loaded) : loaded;
-  const extensions = Array.isArray(configured?.extensions)
-    ? configured.extensions.filter(
-        (extension: any) =>
-          extension !== coreExtension &&
-          extension?.path !== targetPath &&
-          extension?.resolvedPath !== targetPath,
-      )
-    : [];
-  return { ...configured, extensions: [coreExtension, ...extensions] };
-}
-
 function normalizeQueueMode(value: unknown, fallback: "all" | "one-at-a-time") {
   return value === "all" || value === "one-at-a-time" ? value : fallback;
 }
@@ -1349,23 +1275,9 @@ export async function createConfiguredAgentSession(
       ignorePersistedPrompt: false,
       agentDir: runtimeAgentDir,
     };
-    const rinSystemPromptExtension = createRinSystemPromptExtension(
-      (piOptions, context) =>
-        materializeRinSystemPrompt(
-          promptState,
-          context?.sessionManager ?? sessionManager,
-          piOptions,
-          promptState.promptContext,
-        ),
-    );
-
     const piServiceOptions = options.piAgentSessionServicesOptions ?? {};
     const piResourceLoaderOptions =
       (piServiceOptions.resourceLoaderOptions as Record<string, unknown>) ?? {};
-    const configuredExtensionsOverride =
-      piResourceLoaderOptions.extensionsOverride as
-        | ((base: any) => any)
-        | undefined;
     const services = await createAgentSessionServices({
       ...piServiceOptions,
       cwd: runtimeCwd,
@@ -1373,15 +1285,6 @@ export async function createConfiguredAgentSession(
       settingsManager,
       resourceLoaderOptions: {
         ...piResourceLoaderOptions,
-        extensionFactories: [
-          ...((piResourceLoaderOptions.extensionFactories as any[]) || []),
-          rinSystemPromptExtension,
-        ],
-        extensionsOverride: (loaded: any) =>
-          prioritizeRinSystemPromptExtension(
-            loaded,
-            configuredExtensionsOverride,
-          ),
         additionalExtensionPaths: options.additionalExtensionPaths ?? [],
         noExtensions: options.noExtensions,
         additionalSkillPaths,
@@ -1437,15 +1340,6 @@ export async function createConfiguredAgentSession(
         emitEvent: (event) => {
           sessionRef.current?.__rinEmitCoreEvent?.(event);
         },
-        compactWithPiNative: (event) =>
-          runPiNativeCompactionWithoutFileSummary(
-            sessionRef.current,
-            buildProviderBoundCompactionEvent(
-              event,
-              getSessionProviderContextMessages(sessionRef.current),
-              { cwd: runtimeCwd },
-            ),
-          ),
         selfImproveTurnWindowTurns:
           options.selfImproveTurnWindowTurns ??
           services.settingsManager?.settings?.selfImprove?.turnWindowTurns,
@@ -1468,11 +1362,24 @@ export async function createConfiguredAgentSession(
       ],
     });
     sessionRef.current = result.session;
+    if (
+      !installPiSessionCompactionOwner(result.session, (event) =>
+        runPiNativeCompactionWithoutFileSummary(
+          result.session,
+          buildProviderBoundCompactionEvent(
+            event,
+            getSessionProviderContextMessages(result.session),
+            { cwd: runtimeCwd },
+          ),
+        ),
+      )
+    ) {
+      throw new Error("rin_compaction_owner_unavailable");
+    }
     if (sessionManager?.[EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY]) {
       result.session[EPHEMERAL_FORK_DISABLE_ROUTINE_COMPACTION_KEY] = true;
     }
 
-    applyRinCompactionReasonTracking(result.session);
     applyRinPrunedContextUsage(result.session, { estimateContextTokens });
     applyRinCompactionPercentThreshold(result.session, {
       calculateContextTokens,

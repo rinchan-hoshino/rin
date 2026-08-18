@@ -104,47 +104,20 @@ test("Rin core does not register a session note capability", () => {
   );
 });
 
-test("Rin native compaction leaves Todo state tool-owned", async () => {
-  let branchReads = 0;
-  const sessionManager = {
-    getBranch() {
-      branchReads += 1;
-      return [
-        {
-          type: "custom",
-          customType: "rin.todo",
-          data: {
-            todos: [{ id: 1, text: "tool-owned todo", done: false }],
-            nextId: 2,
-          },
-        },
-      ];
-    },
-  };
-  const nativeCompaction = {
-    summary: "native checkpoint",
-    firstKeptEntryId: "keep",
-    tokensBefore: 1234,
-  };
+test("Rin native compaction stays out of the capability graph", () => {
   const definitions = runtimeMod.createRinCapabilityDefinitions({
     cwd: "/tmp/rin-compaction-state",
     agentDir: "/tmp/rin-compaction-state-agent",
     getThinkingLevel: () => "medium",
     sendMessage: () => {},
-    compactWithPiNative: async () => nativeCompaction,
   });
-  const hook = definitions.find(
-    (definition) => definition.name === "rin_native_compaction",
-  )?.hooks?.session_before_compact?.[0];
-  assert.equal(typeof hook, "function");
 
-  const result = await hook(
-    { type: "session_before_compact", reason: "threshold" },
-    { sessionManager },
+  assert.equal(
+    definitions.some(
+      (definition) => definition.name === "rin_native_compaction",
+    ),
+    false,
   );
-
-  assert.deepEqual(result, { compaction: nativeCompaction });
-  assert.equal(branchReads, 0);
 });
 
 test("Rin provider context never synthesizes post-compaction state", async () => {
@@ -333,33 +306,7 @@ test("Rin provider context keeps earlier context-hook output when no pruning or 
   );
 });
 
-test("Rin delegates policy-guided compaction to Pi without file XML", async () => {
-  const nativeResult = {
-    summary: "native summary",
-    firstKeptEntryId: "keep",
-    tokensBefore: 1234,
-    details: { readFiles: ["read.ts"], modifiedFiles: ["edit.ts"] },
-  };
-  const calls: any[] = [];
-  const definitions = runtimeMod.createRinCapabilityDefinitions({
-    cwd: "/tmp/rin-native-compaction",
-    agentDir: "/tmp/rin-native-compaction-agent",
-    getThinkingLevel: () => "medium",
-    sendMessage: () => {},
-    compactWithPiNative: async (event: any) => {
-      calls.push(event);
-      return nativeResult;
-    },
-  });
-  const definition = definitions.find(
-    (entry) => entry.name === "rin_native_compaction",
-  );
-  const hook = definition?.hooks?.session_before_compact?.[0];
-  assert.equal(typeof hook, "function");
-  const event = { type: "session_before_compact", reason: "threshold" };
-  assert.deepEqual(await hook(event), { compaction: nativeResult });
-  assert.deepEqual(calls, [event]);
-
+test("Rin owns policy-guided compaction through the private session host", async () => {
   const runtimeText = await fs.readFile(
     path.join(rootDir, "dist", "core", "rin-lib", "runtime.js"),
     "utf8",
@@ -368,6 +315,7 @@ test("Rin delegates policy-guided compaction to Pi without file XML", async () =
     path.join(rootDir, "dist", "core", "pi", "session-host.js"),
     "utf8",
   );
+  assert.match(runtimeText, /installPiSessionCompactionOwner/);
   assert.equal(runtimeText.includes("RIN_COMPACTION_SYSTEM_PROMPT"), false);
   assert.equal(
     runtimeText.includes("completeRinCompactionSummaryBudgeted"),
@@ -376,27 +324,6 @@ test("Rin delegates policy-guided compaction to Pi without file XML", async () =
   assert.match(sessionHostText, /RIN_COMPACTION_INSTRUCTIONS/);
   assert.match(sessionHostText, /reconstruct the task state at its end/);
   assert.match(sessionHostText, /latest unresolved user request/);
-});
-
-test("compaction reason tracking annotates native before-compact hooks", async () => {
-  const calls = [];
-  const session = {
-    async compact() {
-      calls.push(`manual:${this.__rinCurrentCompactionReason}`);
-    },
-    async _runAutoCompaction(reason, willRetry) {
-      calls.push(
-        `auto:${reason}:${willRetry}:${this.__rinCurrentCompactionReason}`,
-      );
-    },
-  };
-
-  runtimeMod.applyRinCompactionReasonTracking(session);
-  await session.compact();
-  await session._runAutoCompaction("threshold", false);
-
-  assert.deepEqual(calls, ["manual:manual", "auto:threshold:false:threshold"]);
-  assert.equal(session.__rinCurrentCompactionReason, undefined);
 });
 
 test("configured Rin sessions install the native Pi compaction delegate", async () => {
@@ -414,8 +341,10 @@ test("configured Rin sessions install the native Pi compaction delegate", async 
   try {
     assert.equal(
       configured.session.extensionRunner.hasHandlers("session_before_compact"),
-      true,
+      false,
     );
+    assert.equal(typeof configured.session.compact, "function");
+    assert.equal(typeof configured.session._runAutoCompaction, "function");
   } finally {
     try {
       await configured.runtime?.dispose?.();

@@ -8,19 +8,49 @@ import type {
 } from "./capability-types.js";
 import { normalizeStringList } from "../text-utils.js";
 import {
-  attachRinCapabilityExtensionBridge,
-  withRinEventMetadata,
-} from "../pi/internal-extension-bridge.js";
-import {
+  bindPiSessionContextTransformer,
   getPiSessionExtensionCommandContextActions,
   getPiSessionExtensionMode,
   getPiSessionExtensionUIContext,
   refreshPiSessionToolRegistry,
+  replacePiSessionContextTransformer,
   shutdownPiSessionExtensionHost,
 } from "../pi/session-host.js";
 import { readPiPublicSystemPromptOptions } from "./system-prompt-overlay.js";
 
 type SessionStartReason = "startup" | "reload" | "new" | "resume" | "fork";
+
+const RIN_CAPABILITY_CONTEXT_TRANSFORM_KEY = Symbol.for(
+  "rin.capabilityContextTransform",
+);
+const FRONTEND_IDENTITIES = new Set(["tui", "cli", "chat", "cron"]);
+
+function normalizeFrontend(value: unknown) {
+  const frontend = String(value || "").trim();
+  return FRONTEND_IDENTITIES.has(frontend) ? frontend : undefined;
+}
+
+function normalizeCompactionReason(value: unknown) {
+  return value === "overflow" ? "overflow" : "threshold";
+}
+
+function withRinEventMetadata(event: any, session: any) {
+  if (!event || typeof event !== "object") return event;
+  const metadata =
+    event.type === "session_before_compact" || event.type === "session_compact"
+      ? {
+          ...event,
+          reason: normalizeCompactionReason(
+            event.reason ?? session?.__rinCompactionReason,
+          ),
+        }
+      : { ...event };
+  const frontend = normalizeFrontend(
+    metadata.frontend ?? session?.sessionManager?.__rinFrontend,
+  );
+  if (frontend) metadata.frontend = frontend;
+  return metadata;
+}
 
 type RegisteredTool = {
   definition: any;
@@ -441,6 +471,45 @@ async function emitSessionStart(
   });
 }
 
+function attachRinCapabilityContextTransform(
+  session: any,
+  capabilitySet: RinCapabilitySet,
+) {
+  if (!capabilitySet.hasHandlers("context")) return;
+  const existing = session?.[RIN_CAPABILITY_CONTEXT_TRANSFORM_KEY] as
+    | { capabilitySet: RinCapabilitySet }
+    | undefined;
+  if (existing) {
+    existing.capabilitySet = capabilitySet;
+    return;
+  }
+  const originalTransform = bindPiSessionContextTransformer(session);
+  const state = { capabilitySet };
+  if (
+    !replacePiSessionContextTransformer(
+      session,
+      async (messages: any[], signal?: AbortSignal) => {
+        const extensionMessages = originalTransform
+          ? await originalTransform(messages, signal)
+          : messages;
+        if (!state.capabilitySet.hasHandlers("context")) {
+          return extensionMessages;
+        }
+        const result = await state.capabilitySet.emit(
+          withRinEventMetadata(
+            { type: "context", messages: extensionMessages },
+            session,
+          ),
+        );
+        return result?.messages ?? extensionMessages;
+      },
+    )
+  ) {
+    throw new Error("rin_context_transform_owner_unavailable");
+  }
+  session[RIN_CAPABILITY_CONTEXT_TRANSFORM_KEY] = state;
+}
+
 function subscribeRinCapabilityEvents(
   session: any,
   capabilitySet: RinCapabilitySet,
@@ -468,7 +537,7 @@ export async function attachRinCapabilitiesToSession(
   const capabilitySet = options.capabilitySet;
   patchRinCoreEventEmitter(session);
   bindCapabilitySetToSession(capabilitySet, session);
-  attachRinCapabilityExtensionBridge(session, capabilitySet);
+  attachRinCapabilityContextTransform(session, capabilitySet);
   subscribeRinCapabilityEvents(session, capabilitySet);
   session.__rinCapabilities = capabilitySet;
 
@@ -488,7 +557,6 @@ export async function attachRinCapabilitiesToSession(
   if (originalReload) {
     session.reload = async (...args: any[]) => {
       const result = await originalReload(...args);
-      attachRinCapabilityExtensionBridge(session, capabilitySet);
       capabilitySet.setUIContext(
         getPiSessionExtensionUIContext(session),
         getPiSessionExtensionMode(session),
