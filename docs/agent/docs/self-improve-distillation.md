@@ -4,21 +4,13 @@ Distill evidence into the smallest durable behavior that helps a future run. Mem
 
 ## Candidate
 
-A candidate is **Evidence, trigger, behavior, and owner**: a correction, repeated result, or nightly entropy finding; the future situation; the smallest target-state rule; and its one canonical surface.
+A candidate is **Evidence, trigger, behavior, and owner**: a correction or repeated result; the future situation; the smallest target-state rule; and its one canonical surface.
 
 Conversation is evidence, not authority to execute unfinished work. A one-off result, identifier, path, or workaround is not durable unless its future trigger and owner are clear.
 
-## Pass modes
+## Pass
 
-### Turn-window
-
-Use the complete supplied source conversation through its pinned leaf; the turn window controls cadence, not the evidence boundary. Extract candidates, then read one likely owner for each survivor and check it for local garbage collection, even when the candidate is already covered. Delete stale, duplicate, narrower, historical, or overlong guidance without losing live behavior; merge equivalents; rewrite toward one target state. If nothing is removable, leave it unchanged. If no reusable owner is implicated, make no change. Do not inventory unrelated prompts, skills, memory, or usage state.
-
-### Nightly-retrospective
-
-Nightly owns global prompt and skill entropy. It performs the same cleanup, inventories resident prompt baselines, available-skill metadata, and `state/skill-usage.json` once, then ranks candidates before opening bodies.
-
-Use `startedAt` and current time for the observation horizon. Usage is a signal, never a deletion verdict: low count may mean new, rare, or high-consequence. Rank duplicate ownership, retired mechanisms, stale routing, oversized descriptions, and behavior fully absorbed by another owner. Read only bodies needed for top decisions. Delete a fully absorbed skill or retired mechanism after preserving unique live behavior. Do not manufacture work.
+Use the complete supplied source conversation through its pinned leaf; the turn window controls cadence, not the evidence boundary. Extract candidates, then read one likely owner for each survivor and check it for local garbage collection, even when the candidate is already covered. Delete stale, duplicate, narrower, historical, or overlong guidance without losing live behavior; merge equivalents; rewrite toward one target state. If nothing is removable, leave it unchanged. If no reusable owner is implicated, make no change. Do not inventory unrelated prompts, skills, memory, usage state, or unrelated conversations.
 
 ## One loop
 
@@ -28,7 +20,7 @@ Use `startedAt` and current time for the observation horizon. Usage is a signal,
 4. **Reduce first.** Prefer deleting, merging, moving, or rewriting when existing guidance can absorb the candidate; otherwise add the missing behavior. Fix ownership instead of stacking patches, exceptions, fallbacks, or duplicate skills.
 5. **Verify and stop.** Run a future-trigger replay and the smallest deterministic checks for each touched owner. For correction-based or repeated-failure evidence, also verify that no active hit recommends the rejected behavior. Stop when behavior is owned once and touched categories have no unexplained growth.
 
-Turn-window does not open memory-index entries, `short-term-memory/records/`, usage state, or unrelated skills unless its candidate depends on them. Nightly's metadata inventory is the only broader read and does not authorize full-body traversal.
+Turn-window does not open memory-index entries, `short-term-memory/records/`, usage state, or unrelated skills unless its candidate depends on them.
 
 ## Owners
 
@@ -45,9 +37,9 @@ A changed pass must satisfy all of these:
 - one behavior has one owner; obsolete wording and retired owners are removed;
 - edited owners are coherent target states, not additive patches;
 - a new skill is one-in-one-out unless no owner can absorb it;
-- Every changed pass reports before/after bytes for each touched owner and total net delta; nightly also reports before/after bytes for each prompt category, description characters, and skill count;
+- Every changed pass reports before/after bytes for each touched owner and total net delta;
 - net growth explains why existing guidance could not absorb missing behavior; unexplained growth fails;
-- a justified duplicate or retired nightly candidate produces a net decrease; never force deletion when nothing is removable;
+- deleting a justified duplicate or retired owner produces a net decrease; never force deletion when nothing is removable;
 - future-trigger replay selects the intended owner and excludes adjacent non-triggers;
 - files parse, links resolve, metadata obeys its category contract, and product changes pass focused tests;
 - no source task, secret, or bulky transcript enters durable state.

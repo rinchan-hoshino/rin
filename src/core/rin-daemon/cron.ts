@@ -11,7 +11,6 @@ import {
 } from "../rin-lib/frontend-identity.js";
 import { normalizeScheduledTaskSessionMode } from "../scheduled-task-options.js";
 import { getManagedTaskSessionFile } from "../session/managed-paths.js";
-import { buildSelfImproveSleepPrompt } from "../self-improve/prompt.js";
 import { evaluateCronTaskCondition } from "./cron-condition.js";
 import type {
   CronSessionInvocation,
@@ -27,7 +26,6 @@ import type {
 } from "./cron-contract.js";
 import { daemonRecoveryDelayMs } from "./recovery-backoff.js";
 import {
-  appendCronTaskTerminalHistory,
   applyCronTaskTerminalProjection,
   createCronSessionInvocation,
   executeCronSessionInvocation,
@@ -226,66 +224,6 @@ function resolveDedicatedSessionBinding(options: {
   };
 }
 
-function createBuiltInSelfImproveSleepConsolidationTask(
-  agentDir: string,
-): CronTaskRecord {
-  const createdAt = nowIso();
-  const prompt = buildSelfImproveSleepPrompt(agentDir);
-  const task: CronTaskRecord = {
-    id: "builtin_self_improve_sleep_consolidation_daily",
-    builtIn: true,
-    createdAt,
-    updatedAt: createdAt,
-    name: "Consolidate self-improve guidance",
-    enabled: true,
-    thinkingLevel: "medium",
-    trigger: {
-      expression: "43 3 * * *",
-      timezone: "local",
-    },
-    session: { mode: "none" },
-    target: { kind: "agent_prompt", prompt },
-    disabledRinCapabilities: ["self_improve"],
-    quiet: false,
-    runCount: 0,
-    running: false,
-  };
-  task.nextRunAt = computeNextRunAt(task, Date.now());
-  return task;
-}
-
-function mergeBuiltInTaskState(
-  existing: CronTaskRecord | undefined,
-  builtin: CronTaskRecord,
-): CronTaskRecord {
-  if (!existing) return builtin;
-  const triggerChanged =
-    JSON.stringify(existing.trigger || {}) !==
-    JSON.stringify(builtin.trigger || {});
-  const merged: CronTaskRecord = {
-    ...builtin,
-    createdAt: safeString(existing.createdAt).trim() || builtin.createdAt,
-    updatedAt: safeString(existing.updatedAt).trim() || builtin.updatedAt,
-    lastStartedAt: existing.lastStartedAt,
-    lastFinishedAt: existing.lastFinishedAt,
-    lastResultText: existing.lastResultText,
-    lastError: existing.lastError ? safeString(existing.lastError) : undefined,
-    runCount: Number(existing.runCount || 0),
-    condition: builtin.condition,
-    nextRunAt:
-      !triggerChanged && safeString(existing.nextRunAt).trim()
-        ? safeString(existing.nextRunAt).trim()
-        : computeNextRunAt(builtin, Date.now()),
-    running: false,
-  };
-  return merged;
-}
-
-function assertMutableTask(task: CronTaskRecord | undefined) {
-  if (!task) return;
-  if (task.builtIn) throw new Error(`cron_builtin_task_protected:${task.id}`);
-}
-
 function readCronTaskRows(file: string) {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -411,33 +349,19 @@ export class CronScheduler {
     this.save();
   }
 
-  listTasks(
-    options: { includeBuiltIn?: boolean; includeHidden?: boolean } = {},
-  ) {
+  listTasks() {
     return Array.from(this.tasks.values())
-      .filter((task) => options.includeHidden || !task.hidden)
-      .filter((task) => options.includeBuiltIn || !task.builtIn)
       .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
       .map((task) => this.publicTask(task));
   }
 
-  getTask(
-    taskId: string,
-    options: { includeBuiltIn?: boolean; includeHidden?: boolean } = {},
-  ) {
+  getTask(taskId: string) {
     const task = this.tasks.get(taskId);
-    if (!task) return undefined;
-    if (!options.includeHidden && task.hidden) return undefined;
-    if (!options.includeBuiltIn && task.builtIn) return undefined;
-    return this.publicTask(task);
+    return task ? this.publicTask(task) : undefined;
   }
 
-  getStatusSnapshot(
-    options: { includeBuiltIn?: boolean; includeHidden?: boolean } = {},
-  ) {
+  getStatusSnapshot() {
     const tasks = Array.from(this.tasks.values())
-      .filter((task) => options.includeHidden || !task.hidden)
-      .filter((task) => options.includeBuiltIn || !task.builtIn)
       .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
       .map((task) => this.statusTask(task));
     const runningTaskCount = tasks.filter((task) => task.running).length;
@@ -452,9 +376,6 @@ export class CronScheduler {
       taskCount: tasks.length,
       enabledTaskCount,
       runningTaskCount,
-      builtInTaskCount: Array.from(this.tasks.values()).filter(
-        (task) => task.builtIn && !task.hidden,
-      ).length,
       nextRunAt,
       tasks,
     };
@@ -463,7 +384,6 @@ export class CronScheduler {
   upsertTask(input: CronTaskInput, defaults: CronTaskUpsertDefaults = {}) {
     this.assertPersistenceWritable();
     const existing = input.id ? this.tasks.get(String(input.id)) : undefined;
-    assertMutableTask(existing);
     const id =
       existing?.id || safeString(input.id).trim() || createCronTaskId();
     const createdAt = existing?.createdAt || nowIso();
@@ -566,7 +486,6 @@ export class CronScheduler {
   deleteTask(taskId: string) {
     this.assertPersistenceWritable();
     const task = this.tasks.get(taskId);
-    assertMutableTask(task);
     const ok = this.tasks.delete(taskId);
     if (ok) {
       this.terminateTaskSession(task);
@@ -578,7 +497,6 @@ export class CronScheduler {
   completeTask(taskId: string, reason = "completed_by_agent") {
     this.assertPersistenceWritable();
     const task = this.tasks.get(taskId);
-    assertMutableTask(task);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
     task.completedAt = nowIso();
     task.completionReason = safeString(reason).trim() || "completed";
@@ -594,7 +512,6 @@ export class CronScheduler {
   pauseTask(taskId: string) {
     this.assertPersistenceWritable();
     const task = this.tasks.get(taskId);
-    assertMutableTask(task);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
     task.enabled = false;
     task.pausedAt = nowIso();
@@ -609,7 +526,6 @@ export class CronScheduler {
   resumeTask(taskId: string) {
     this.assertPersistenceWritable();
     const task = this.tasks.get(taskId);
-    assertMutableTask(task);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
     task.enabled = true;
     delete task.pausedAt;
@@ -622,7 +538,6 @@ export class CronScheduler {
   rescheduleOneTimeTask(taskId: string, runAt: string) {
     this.assertPersistenceWritable();
     const task = this.tasks.get(taskId);
-    assertMutableTask(task);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
     const nextRunAt =
       normalizeIso(runAt, "runAt") ||
@@ -719,6 +634,7 @@ export class CronScheduler {
     const loadedTasks = new Map<string, CronTaskRecord>();
     try {
       for (const row of rows) {
+        if ((row as any)?.builtIn === true) continue;
         if (!row || typeof row !== "object") {
           throw new Error("cron_tasks_file_invalid");
         }
@@ -785,7 +701,6 @@ export class CronScheduler {
     const previousTasks = this.tasks;
     this.tasks = loadedTasks;
     this.persistenceBlocked = false;
-    this.reconcileBuiltInTasks();
     if (options.terminateRemovedActiveTasks) {
       for (const [taskId, previousTask] of previousTasks) {
         if (!this.activeExecutions.has(taskId)) continue;
@@ -913,20 +828,6 @@ export class CronScheduler {
     return current;
   }
 
-  private reconcileBuiltInTasks() {
-    const builtins = [
-      createBuiltInSelfImproveSleepConsolidationTask(this.options.agentDir),
-    ];
-    const currentIds = new Set(builtins.map((task) => task.id));
-    for (const [taskId, task] of this.tasks) {
-      if (task.builtIn && !currentIds.has(taskId)) this.tasks.delete(taskId);
-    }
-    for (const builtin of builtins) {
-      const existing = this.tasks.get(builtin.id);
-      this.tasks.set(builtin.id, mergeBuiltInTaskState(existing, builtin));
-    }
-  }
-
   private resumeActiveInvocations() {
     let changed = false;
     const now = Date.now();
@@ -963,8 +864,6 @@ export class CronScheduler {
         status: "completed",
         text: result.text,
         sessionFile: result.sessionFile || invocation.sessionFile,
-        audit: result.audit,
-        historyCommitted: result.auditHistoryCommitted,
       };
     } catch (error: any) {
       if (error?.rinTurnTerminal !== true) {
@@ -987,8 +886,6 @@ export class CronScheduler {
       terminal = {
         status: "failed",
         error: safeString(error?.message || error || "cron_task_failed").trim(),
-        audit: error?.selfImproveAudit,
-        historyCommitted: error?.selfImproveAuditHistoryCommitted === true,
       };
     }
 
@@ -1003,22 +900,10 @@ export class CronScheduler {
       ) {
         current.nextRunAt = computeNextRunAt(current, Date.now());
       }
-      if (terminal.audit && !terminal.historyCommitted) {
-        await appendCronTaskTerminalHistory(current, terminal, {
-          agentDir: this.options.agentDir,
-          startedAt: invocation.startedAt,
-        });
-      }
       applyCronTaskTerminalProjection(current, terminal);
       delete current.activeInvocation;
       if (current.completedAt) this.terminateTaskSession(current);
       this.save();
-      if (!terminal.audit && !terminal.historyCommitted) {
-        await appendCronTaskTerminalHistory(current, terminal, {
-          agentDir: this.options.agentDir,
-          startedAt: invocation.startedAt,
-        });
-      }
     } finally {
       this.activeExecutions.delete(taskId);
     }
@@ -1053,9 +938,7 @@ export class CronScheduler {
   }
 
   private terminateTaskSession(task: CronTaskRecord | undefined) {
-    if (!task || task.id.startsWith("builtin_self_improve_")) {
-      return;
-    }
+    if (!task) return;
     const controllerKey =
       task.frontend && task.frontend.kind !== "chat"
         ? task.frontend.key
@@ -1097,10 +980,6 @@ export class CronScheduler {
     };
     applyCronTaskTerminalProjection(task, terminal);
     this.save();
-    void appendCronTaskTerminalHistory(task, terminal, {
-      agentDir: this.options.agentDir,
-      startedAt,
-    }).catch(() => {});
   }
 
   private rescheduleSkippedTask(task: CronTaskRecord, reason: string) {

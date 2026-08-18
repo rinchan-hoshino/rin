@@ -29,6 +29,17 @@ function task(overrides: Record<string, any> = {}) {
   } as any;
 }
 
+function selfImproveTask(overrides: Record<string, any> = {}) {
+  return task({
+    id: "scheduled_self_improve_distillation",
+    target: {
+      kind: "agent_prompt",
+      prompt: "Follow self-improve-distillation.md.",
+    },
+    ...overrides,
+  });
+}
+
 async function withAgentDir(run: (agentDir: string) => Promise<void>) {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-owner-"));
   try {
@@ -447,8 +458,7 @@ test("durable invocations execute agent and continued session snapshots", async 
 test("durable self-improve invocation commits and acknowledges exact audit evidence", async () => {
   await withAgentDir(async (agentDir) => {
     const invocation = cronExecution.createCronSessionInvocation(
-      task({
-        id: "builtin_self_improve_sleep_consolidation_daily",
+      selfImproveTask({
         lastStartedAt: "2026-07-28T18:00:00.000Z",
       }),
       agentDir,
@@ -488,8 +498,7 @@ test("durable self-improve invocation commits and acknowledges exact audit evide
 test("durable self-improve invocation retains failed audit evidence", async () => {
   await withAgentDir(async (agentDir) => {
     const invocation = cronExecution.createCronSessionInvocation(
-      task({
-        id: "builtin_self_improve_sleep_consolidation_daily",
+      selfImproveTask({
         lastStartedAt: "2026-07-28T18:30:00.000Z",
         runCount: 3,
       }),
@@ -559,8 +568,7 @@ test("terminal projection records completion, failure, and stop policies", () =>
 
 test("self-improve cron terminal history is durable and idempotent", async () => {
   await withAgentDir(async (agentDir) => {
-    const ownerTask = task({
-      id: "builtin_self_improve_sleep_consolidation_daily",
+    const ownerTask = selfImproveTask({
       runCount: 4,
       trigger: { expression: "0 3 * * *" },
     });
@@ -619,8 +627,7 @@ test("self-improve cron terminal history is durable and idempotent", async () =>
       "utf8",
     );
     await cronExecution.appendCronTaskTerminalHistory(
-      task({
-        id: "builtin_self_improve_sleep_consolidation_daily",
+      selfImproveTask({
         runCount: 8,
       }),
       { status: "completed", text: "valid tail recovery" },
@@ -628,8 +635,7 @@ test("self-improve cron terminal history is durable and idempotent", async () =>
     );
     await fs.appendFile(historyPath, "{malformed-tail", "utf8");
     await cronExecution.appendCronTaskTerminalHistory(
-      task({
-        id: "builtin_self_improve_sleep_consolidation_daily",
+      selfImproveTask({
         runCount: 9,
       }),
       { status: "completed", text: "invalid tail recovery" },
@@ -642,8 +648,7 @@ test("self-improve cron terminal history is durable and idempotent", async () =>
     assert.equal(recoveredRows.length, 4);
     await fs.writeFile(historyPath, "{malformed-record\n", "utf8");
     await cronExecution.appendCronTaskTerminalHistory(
-      task({
-        id: "builtin_self_improve_sleep_consolidation_daily",
+      selfImproveTask({
         runCount: 10,
       }),
       { status: "completed", text: "recover malformed history tail" },

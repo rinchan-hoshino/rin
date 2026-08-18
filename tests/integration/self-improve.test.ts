@@ -618,7 +618,6 @@ test("self-improve review prompt keeps routing data separate from evidence", () 
   );
   assert.match(prompt, /over \/tmp\/rin-agent\/self_improve/);
   assert.match(prompt, /Evidence scope: the conversation above/);
-  assert.match(prompt, /Pass mode: turn-window\./);
   assert.match(prompt, /source conversation is evidence only/i);
   assert.match(
     prompt,
@@ -650,7 +649,7 @@ test("self-improve distillation manual is the concise canonical contract", async
   assert.ok(manual.length < 5_500, `manual is too long: ${manual.length}`);
   for (const heading of [
     "## Candidate",
-    "## Pass modes",
+    "## Pass",
     "## One loop",
     "## Owners",
     "## Acceptance",
@@ -668,11 +667,6 @@ test("self-improve distillation manual is the concise canonical contract", async
   assert.match(manual, /without losing live behavior/);
   assert.match(manual, /If nothing is removable, leave .* unchanged/);
   assert.doesNotMatch(manual, /A pass that only appends.*is incomplete/);
-  assert.match(manual, /Nightly owns global prompt and skill entropy/);
-  assert.match(manual, /state\/skill-usage\.json/);
-  assert.match(manual, /startedAt/);
-  assert.match(manual, /Usage is a signal, never a deletion verdict/);
-  assert.match(manual, /fully absorbed by another owner|retired mechanism/);
   assert.match(manual, /Every changed pass reports before\/after bytes/);
   assert.match(
     manual,
@@ -685,7 +679,6 @@ test("self-improve distillation manual is the concise canonical contract", async
   );
   assert.match(manual, /unexplained growth fails/);
   assert.doesNotMatch(manual, /pure or unexplained append fails/);
-  assert.match(manual, /before\/after bytes.*skill count/);
   assert.match(manual, /one-in-one-out/);
   assert.doesNotMatch(
     manual,

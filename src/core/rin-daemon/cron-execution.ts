@@ -233,7 +233,6 @@ export function buildCronTaskPromptContext(
 }
 
 function isSelfImproveDistillationTask(task: CronTaskRecord) {
-  if (task.id === "builtin_self_improve_sleep_consolidation_daily") return true;
   if (task.target.kind !== "agent_prompt") return false;
   const prompt = [task.target.prompt, task.target.continuationPrompt]
     .map((value) => String(value || ""))

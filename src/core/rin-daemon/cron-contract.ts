@@ -74,8 +74,6 @@ export type CronTaskRecord = {
   id: string;
   createdAt: string;
   updatedAt: string;
-  builtIn?: boolean;
-  hidden?: boolean;
   createdFrom?: {
     sessionFile?: string;
     sessionId?: string;

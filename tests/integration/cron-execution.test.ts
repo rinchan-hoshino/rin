@@ -20,10 +20,6 @@ const cronMod = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "cron.js"))
     .href
 );
-const selfImprovePromptMod = await import(
-  pathToFileURL(path.join(rootDir, "dist", "core", "self-improve", "prompt.js"))
-    .href
-);
 const runAuditMod = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "self-improve", "run-audit.js"),
@@ -1862,13 +1858,13 @@ test("cron quiet agent task suppresses every automatic frontend delivery", async
   }
 });
 
-test("built-in self-improve cron task keeps audit observational", async () => {
+test("scheduled self-improve distillation keeps audit observational", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const disabledRinCapabilities = ["self_improve"];
   const task = {
-    id: "builtin_self_improve_sleep_consolidation_daily",
+    id: "scheduled_self_improve_distillation",
     session: { mode: "none" },
-    trigger: { expression: "43 3 * * *", timezone: "local" },
+    trigger: { expression: "0 * * * *", timezone: "local" },
     target: {
       kind: "agent_prompt",
       prompt:
@@ -1926,10 +1922,7 @@ test("built-in self-improve cron task keeps audit observational", async () => {
     assert.equal(rows.length, 1);
     assert.equal(rows[0].kind, "self_improve_review");
     assert.equal(rows[0].status, "completed");
-    assert.equal(
-      rows[0].trigger,
-      "cron:builtin_self_improve_sleep_consolidation_daily",
-    );
+    assert.equal(rows[0].trigger, "cron:scheduled_self_improve_distillation");
     assert.match(rows[0].outputPreview, /^distillation done/);
     assert.ok(rows[0].outputPreview.length < fullFinal.length);
     assert.equal(rows[0].sessionFile, undefined);
@@ -1949,7 +1942,7 @@ test("built-in self-improve cron task keeps audit observational", async () => {
     assert.equal(calls[0].shutdownAfterTurn, true);
     assert.deepEqual(calls[0].frontend, {
       kind: "scheduled-task",
-      key: "builtin_self_improve_sleep_consolidation_daily",
+      key: "scheduled_self_improve_distillation",
     });
 
     let repeatedRunCalls = 0;
@@ -1981,7 +1974,7 @@ test("built-in self-improve cron task keeps audit observational", async () => {
   }
 });
 
-test("built-in self-improve cron executes when audit initialization fails", async () => {
+test("scheduled self-improve distillation executes when audit initialization fails", async () => {
   const agentDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "rin-cron-audit-init-failure-"),
   );
@@ -1992,13 +1985,12 @@ test("built-in self-improve cron executes when audit initialization fails", asyn
     await fs.mkdir(outside, { recursive: true });
     await fs.symlink(outside, path.join(stateDir, "run-audits"), "dir");
     const task = {
-      id: "builtin_self_improve_sleep_consolidation_daily",
+      id: "scheduled_self_improve_distillation",
       session: { mode: "none" },
-      trigger: { expression: "43 3 * * *", timezone: "local" },
+      trigger: { expression: "0 * * * *", timezone: "local" },
       target: {
         kind: "agent_prompt",
-        prompt:
-          "Follow the self-improve distillation manual to optimize guidance.",
+        prompt: "Follow self-improve-distillation.md to optimize guidance.",
       },
       disabledRinCapabilities: ["self_improve"],
       runCount: 2,
@@ -2121,7 +2113,7 @@ test("audit history persistence failure does not block cron terminal projection"
     "maintenance-history.jsonl",
   );
   const task = {
-    id: "builtin_self_improve_sleep_consolidation_daily",
+    id: "scheduled_self_improve_distillation",
     name: "Self-improve consolidation",
     enabled: true,
     createdAt: "2026-04-01T00:00:00.000Z",
@@ -2130,7 +2122,10 @@ test("audit history persistence failure does not block cron terminal projection"
     runCount: 1,
     trigger: { expression: "0 4 * * *" },
     session: { mode: "none" },
-    target: { kind: "agent_prompt", prompt: "self improve" },
+    target: {
+      kind: "agent_prompt",
+      prompt: "Follow self-improve-distillation.md.",
+    },
   };
   try {
     const auditCapture = await runAuditMod.beginSelfImproveRunAudit({
@@ -2173,7 +2168,7 @@ test("audited cron history preserves distinct immutable identities for the same 
     path.join(os.tmpdir(), "rin-cron-audit-history-collision-"),
   );
   const makeTask = () => ({
-    id: "builtin_self_improve_sleep_consolidation_daily",
+    id: "scheduled_self_improve_distillation",
     name: "Self-improve consolidation",
     enabled: true,
     createdAt: "2026-04-01T00:00:00.000Z",
@@ -2182,7 +2177,10 @@ test("audited cron history preserves distinct immutable identities for the same 
     runCount: 1,
     trigger: { expression: "0 4 * * *" },
     session: { mode: "none" },
-    target: { kind: "agent_prompt", prompt: "self improve" },
+    target: {
+      kind: "agent_prompt",
+      prompt: "Follow self-improve-distillation.md.",
+    },
   });
   const audit = (value: string) => ({
     version: 1,
@@ -2224,18 +2222,9 @@ test("audited cron history preserves distinct immutable identities for the same 
       .split(/\r?\n/)
       .map((line) => JSON.parse(line));
     assert.equal(rows.length, 2);
-    assert.equal(
-      rows[0].id,
-      "builtin_self_improve_sleep_consolidation_daily:1",
-    );
-    assert.match(
-      rows[1].id,
-      /^builtin_self_improve_sleep_consolidation_daily:1@b{12}$/,
-    );
-    assert.equal(
-      rows[1].runId,
-      "builtin_self_improve_sleep_consolidation_daily:1",
-    );
+    assert.equal(rows[0].id, "scheduled_self_improve_distillation:1");
+    assert.match(rows[1].id, /^scheduled_self_improve_distillation:1@b{12}$/);
+    assert.equal(rows[1].runId, "scheduled_self_improve_distillation:1");
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -2487,75 +2476,6 @@ test("cron task condition accepts function bodies with return", async () => {
   }
 });
 
-test("cron scheduler installs self-improve distillation without daily memory repair", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const scheduler = new cronMod.CronScheduler({ agentDir });
-  try {
-    scheduler.start();
-    assert.equal(
-      scheduler
-        .listTasks()
-        .some((task) => task.id === "builtin_memory_index_repair_daily"),
-      false,
-    );
-    assert.equal(
-      scheduler.getTask("builtin_memory_index_repair_daily", {
-        includeBuiltIn: true,
-      }),
-      undefined,
-    );
-
-    const sleep = scheduler.getTask(
-      "builtin_self_improve_sleep_consolidation_daily",
-      { includeBuiltIn: true },
-    );
-    assert.ok(sleep);
-    assert.equal(sleep.builtIn, true);
-    assert.equal(sleep.trigger.expression, "43 3 * * *");
-    assert.equal(sleep.session.mode, "none");
-    assert.deepEqual(sleep.disabledRinCapabilities, ["self_improve"]);
-    assert.equal(sleep.target.kind, "agent_prompt");
-    assert.equal(
-      sleep.target.prompt,
-      selfImprovePromptMod.buildSelfImproveSleepPrompt(agentDir),
-    );
-    assert.match(
-      sleep.target.prompt,
-      new RegExp(
-        `Follow ${agentDir.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}/docs/rin/docs/self-improve-distillation\\.md as the complete contract`,
-      ),
-    );
-    assert.match(
-      sleep.target.prompt,
-      new RegExp(
-        `over ${agentDir.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}/self_improve`,
-      ),
-    );
-    assert.match(
-      sleep.target.prompt,
-      /Evidence scope: Rin session records from the previous 24 hours/,
-    );
-    assert.match(sleep.target.prompt, /Pass mode: nightly-retrospective\./);
-    const normalizedSleepPrompt = sleep.target.prompt.replaceAll(
-      agentDir,
-      "<agent-dir>",
-    );
-    assert.ok(
-      normalizedSleepPrompt.length < 350,
-      `sleep prompt is too long after path normalization: ${normalizedSleepPrompt.length}`,
-    );
-    assert.doesNotMatch(sleep.target.prompt, /Trigger context/);
-    assert.doesNotMatch(sleep.target.prompt, /conversation above/);
-    assert.doesNotMatch(sleep.target.prompt, /prompt baselines/);
-    assert.doesNotMatch(sleep.target.prompt, /reusable lessons learned/);
-    assert.doesNotMatch(sleep.target.prompt, /Replay the future trigger/);
-    assert.doesNotMatch(sleep.target.prompt, /Report changed artifacts/);
-  } finally {
-    scheduler.stop();
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
 test("cron scheduler migrates persisted chatKey tasks to frontend chat bindings", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
@@ -2600,57 +2520,6 @@ test("cron scheduler migrates persisted chatKey tasks to frontend chat bindings"
     assert.equal("chatKey" in row, false);
   } finally {
     scheduler?.stop();
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("cron scheduler persists built-in task state across restarts while hiding it publicly", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
-  const builtInId = "builtin_self_improve_sleep_consolidation_daily";
-  try {
-    const first = new cronMod.CronScheduler({ agentDir });
-    first.start();
-    first.stop();
-
-    const rows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
-    const row = rows.find((task) => task.id === builtInId);
-    assert.ok(row);
-    row.runCount = 7;
-    row.lastFinishedAt = "2026-04-14T20:17:01.000Z";
-    await fs.writeFile(tasksFile, JSON.stringify(rows, null, 2));
-
-    const second = new cronMod.CronScheduler({ agentDir });
-    second.start();
-    const builtIn = second.getTask(builtInId, { includeBuiltIn: true });
-    assert.equal(second.getTask(builtInId), undefined);
-    assert.ok(builtIn);
-    assert.equal(builtIn.runCount, 7);
-    assert.equal(builtIn.lastFinishedAt, "2026-04-14T20:17:01.000Z");
-    second.stop();
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("cron scheduler protects built-in tasks from public mutation", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const scheduler = new cronMod.CronScheduler({ agentDir });
-  try {
-    scheduler.start();
-    assert.equal(
-      scheduler.getTask("builtin_memory_index_repair_daily", {
-        includeBuiltIn: true,
-      }),
-      undefined,
-    );
-    assert.throws(
-      () =>
-        scheduler.pauseTask("builtin_self_improve_sleep_consolidation_daily"),
-      /cron_builtin_task_protected:builtin_self_improve_sleep_consolidation_daily/,
-    );
-  } finally {
-    scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
@@ -2765,21 +2634,6 @@ test("cron scheduler preserves an agent-chosen recurring next run after executio
 
     const after = scheduler.getTask("cron_recurring_self_next");
     assert.equal(after?.nextRunAt, chosenNextRunAt);
-  } finally {
-    scheduler.stop();
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
-test("cron scheduler does not expose retired daily memory repair for manual runs", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const scheduler = new cronMod.CronScheduler({ agentDir });
-  try {
-    scheduler.start();
-    assert.throws(
-      () => scheduler.runTaskNow("builtin_memory_index_repair_daily"),
-      /cron_task_not_found:builtin_memory_index_repair_daily/,
-    );
   } finally {
     scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });

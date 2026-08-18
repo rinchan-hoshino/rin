@@ -29,10 +29,7 @@ function pastIso(minutes = 1) {
 async function waitForTaskSettled(scheduler: CronScheduler, taskId: string) {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
-    const task = scheduler.getTask(taskId, {
-      includeBuiltIn: true,
-      includeHidden: true,
-    });
+    const task = scheduler.getTask(taskId);
     if (task && !task.running) return task;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
@@ -50,77 +47,48 @@ function shellTaskInput(id: string, overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
-test("cron scheduler installs protected built-ins and exposes filtered status", async () => {
+test("cron scheduler starts without implicit tasks", async () => {
   await withAgentDir(async (agentDir) => {
     const scheduler = new CronScheduler({ agentDir });
     scheduler.start();
     try {
       assert.deepEqual(scheduler.listTasks(), []);
-      const visibleBuiltIns = scheduler.listTasks({ includeBuiltIn: true });
-      assert.equal(visibleBuiltIns.length, 1);
-      assert.equal(
-        visibleBuiltIns.every((task) => task.builtIn),
-        true,
-      );
-      const allBuiltIns = scheduler.listTasks({
-        includeBuiltIn: true,
-        includeHidden: true,
-      });
-      assert.equal(allBuiltIns.length, 1);
-      assert.equal(
-        allBuiltIns.some((task) => task.hidden),
-        false,
-      );
       assert.equal(scheduler.getTask("missing"), undefined);
 
-      const status = scheduler.getStatusSnapshot({
-        includeBuiltIn: true,
-        includeHidden: true,
-      });
-      assert.equal(status.taskCount, 1);
-      assert.equal(status.enabledTaskCount, 1);
+      const status = scheduler.getStatusSnapshot();
+      assert.equal(status.taskCount, 0);
+      assert.equal(status.enabledTaskCount, 0);
       assert.equal(status.runningTaskCount, 0);
-      assert.equal(status.builtInTaskCount, 1);
-      assert.ok(status.nextRunAt);
-      assert.equal(status.tasks[0].target.kind.length > 0, true);
-      assert.equal(Object.hasOwn(status.tasks[0], "lastError"), false);
-
-      assert.equal(
-        scheduler.getTask("builtin_memory_index_repair_daily", {
-          includeBuiltIn: true,
-          includeHidden: true,
-        }),
-        undefined,
-      );
+      assert.equal(status.nextRunAt, undefined);
     } finally {
       scheduler.stop();
     }
-    assert.equal(fs.existsSync(cronTasksPath(agentDir)), true);
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(cronTasksPath(agentDir), "utf8")),
+      [],
+    );
   });
 });
 
-test("cron scheduler removes persisted built-ins that are no longer defined", async () => {
+test("cron load retires previously persisted product-owned tasks", async () => {
   await withAgentDir(async (agentDir) => {
     const filePath = cronTasksPath(agentDir);
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const task = {
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      enabled: true,
+      trigger: { expression: "0 0 * * *", timezone: "local" },
+      session: { mode: "none" },
+      target: { kind: "shell_command", command: "echo owner" },
+      runCount: 0,
+      running: false,
+    };
     fs.writeFileSync(
       filePath,
       `${JSON.stringify([
-        {
-          id: "builtin_retired_example",
-          builtIn: true,
-          hidden: true,
-          createdAt: "2026-01-01T00:00:00.000Z",
-          updatedAt: "2026-01-01T00:00:00.000Z",
-          name: "Retired built-in",
-          enabled: true,
-          trigger: { expression: "0 0 * * *", timezone: "local" },
-          session: { mode: "none" },
-          target: { kind: "shell_command", command: "echo stale" },
-          quiet: true,
-          runCount: 1,
-          running: false,
-        },
+        { ...task, id: "retired-product-task", builtIn: true },
+        { ...task, id: "owner-task" },
       ])}\n`,
       "utf8",
     );
@@ -129,70 +97,15 @@ test("cron scheduler removes persisted built-ins that are no longer defined", as
     scheduler.start();
     scheduler.stop();
 
-    assert.equal(
-      scheduler.getTask("builtin_retired_example", {
-        includeBuiltIn: true,
-        includeHidden: true,
-      }),
-      undefined,
+    assert.deepEqual(
+      scheduler.listTasks().map((row) => row.id),
+      ["owner-task"],
     );
     const persisted = JSON.parse(fs.readFileSync(filePath, "utf8")) as any[];
-    assert.equal(
-      persisted.some((task) => task.id === "builtin_retired_example"),
-      false,
+    assert.deepEqual(
+      persisted.map((row) => row.id),
+      ["owner-task"],
     );
-  });
-});
-
-test("cron reload merges persisted built-in history without accepting stale definitions", async () => {
-  await withAgentDir(async (agentDir) => {
-    const first = new CronScheduler({ agentDir });
-    first.start();
-    first.stop();
-    const filePath = cronTasksPath(agentDir);
-    const rows = JSON.parse(fs.readFileSync(filePath, "utf8")) as any[];
-    rows.push({
-      id: "builtin_memory_index_repair_daily",
-      builtIn: true,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-      name: "Retired daily memory repair",
-      enabled: true,
-      trigger: { expression: "17 4 * * *", timezone: "local" },
-      session: { mode: "none" },
-      target: { kind: "shell_command", command: "rin memory-index repair" },
-      quiet: true,
-      runCount: 9,
-      running: false,
-    });
-    const selfImprove = rows.find(
-      (row) => row.id === "builtin_self_improve_sleep_consolidation_daily",
-    );
-    selfImprove.trigger = { expression: "0 0 * * *", timezone: "local" };
-    selfImprove.lastError = "";
-    selfImprove.runCount = 4;
-    selfImprove.nextRunAt = futureIso(240);
-    fs.writeFileSync(filePath, `${JSON.stringify(rows)}\n`);
-
-    const second = new CronScheduler({ agentDir });
-    const status = second.reloadTasks();
-    assert.equal(status.taskCount, 0);
-    const restoredMemory = second.getTask("builtin_memory_index_repair_daily", {
-      includeBuiltIn: true,
-      includeHidden: true,
-    });
-    assert.equal(restoredMemory, undefined);
-    const restoredSelfImprove = second.getTask(
-      "builtin_self_improve_sleep_consolidation_daily",
-      { includeBuiltIn: true, includeHidden: true },
-    );
-    assert.deepEqual(restoredSelfImprove?.trigger, {
-      expression: "43 3 * * *",
-      timezone: "local",
-    });
-    assert.equal(restoredSelfImprove?.runCount, 4);
-    assert.notEqual(restoredSelfImprove?.nextRunAt, selfImprove.nextRunAt);
-    second.stop();
   });
 });
 

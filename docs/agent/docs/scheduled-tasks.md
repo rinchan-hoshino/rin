@@ -116,5 +116,4 @@ Read `scheduled-tasks-reference.md` before handling any of these:
 - dedicated-session continuation and recovery;
 - `shell_command` exit/stdout/stderr delivery;
 - frontend quiet/manual delivery or quote/session incidents;
-- built-in task restrictions;
 - scheduler lifecycle errors or detailed troubleshooting.
