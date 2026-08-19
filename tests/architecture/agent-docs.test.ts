@@ -450,3 +450,84 @@ test("agent docs expose scheduled task operation workflow", () => {
   );
   assert.match(scheduledTasksEntry, /## Verification/);
 });
+
+test("prompt-engineering skill preserves its design and evaluation contract", () => {
+  const skill = readAgentDoc("builtin-skills/rin-prompt-engineering/SKILL.md");
+  const rubric = readAgentDoc(
+    "builtin-skills/rin-prompt-engineering/references/prompt-review-rubric.md",
+  );
+  const guidance = readAgentDoc(
+    "builtin-skills/rin-prompt-engineering/references/authoritative-guidance.md",
+  );
+  const templates = readAgentDoc(
+    "builtin-skills/rin-prompt-engineering/references/prompt-templates.md",
+  );
+  const packageText = [skill, rubric, guidance, templates].join("\n");
+  const behaviorEvals = JSON.parse(
+    readAgentDoc("builtin-skills/rin-prompt-engineering/evals/evals.json"),
+  ) as {
+    skill_name: string;
+    evals: Array<{ assertions?: string[] }>;
+  };
+  const triggerEvals = JSON.parse(
+    readAgentDoc(
+      "builtin-skills/rin-prompt-engineering/evals/trigger-evals.json",
+    ),
+  ) as Array<{ should_trigger: boolean }>;
+
+  assert.match(
+    skill,
+    /description: .*LLM-facing prompts.*prompt\/model migrations.*human prose.*failures already proved outside model behavior/,
+  );
+  assert.match(skill, /Define (?:measurable )?success/);
+  assert.match(skill, /Closed (?:product )?scope/);
+  assert.match(skill, /fewest assumptions/);
+  assert.match(skill, /set success\/failure thresholds and budgets/);
+  assert.match(
+    skill,
+    /Return (?:only )?the requested artifact|requested artifact is the default output/i,
+  );
+  assert.match(packageText, /target model(?: and version|\/version)/i);
+  assert.match(packageText, /reasoning mode.*sampling/i);
+  assert.match(
+    packageText,
+    /model selection, retrieval, tools, workflow.*fine-tuning/,
+  );
+  assert.match(packageText, /few-shot examples/);
+  assert.match(packageText, /structure.*delimiters|XML structure/i);
+  assert.match(packageText, /long[- ]context/i);
+  assert.match(packageText, /direct and indirect prompt injection/i);
+  assert.match(packageText, /exfiltration|leakage/i);
+  assert.match(packageText, /least privilege/i);
+  assert.match(packageText, /development.*held-out/i);
+  assert.match(packageText, /quality, safety, latency, and cost/i);
+  assert.match(packageText, /input, output, cached.*reasoning tokens/i);
+  assert.match(packageText, /stable.*dynamic content|stable prefix/i);
+  assert.match(packageText, /hidden chain-of-thought/);
+  assert.doesNotMatch(skill, /## Four continuous principles/);
+  assert.doesNotMatch(rubric, /## Four-principle review/);
+
+  assert.match(guidance, /developers\.openai\.com/);
+  assert.match(guidance, /platform\.claude\.com/);
+  assert.match(guidance, /cloud\.google\.com/);
+  assert.match(guidance, /learn\.microsoft\.com/);
+  assert.match(guidance, /prompt-caching/);
+  assert.match(guidance, /Retrieved: 2026-08-19/);
+
+  assert.ok(
+    Buffer.byteLength(skill, "utf8") <= 3_200,
+    "the always-loaded routing and decision core must stay within 3.2 KB",
+  );
+  assert.equal(behaviorEvals.skill_name, "rin-prompt-engineering");
+  assert.ok(behaviorEvals.evals.length >= 17);
+  assert.ok(
+    behaviorEvals.evals.every(
+      (entry) => Array.isArray(entry.assertions) && entry.assertions.length > 0,
+    ),
+  );
+  assert.equal(
+    triggerEvals.filter((entry) => entry.should_trigger).length,
+    triggerEvals.filter((entry) => !entry.should_trigger).length,
+  );
+  assert.ok(triggerEvals.length >= 16);
+});

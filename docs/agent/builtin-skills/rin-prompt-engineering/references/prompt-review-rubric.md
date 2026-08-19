@@ -1,85 +1,77 @@
-# Prompt review rubric
+# Prompt-engineering review
 
-Review the prompt as an executable behavior contract. Mark each item pass, fail, not applicable, or unverified.
+Use this for debugging, comparing, migrating, or accepting an LLM-facing instruction. Review the prompt and the system that executes it. Mark each decision `pass`, `fail`, or `unproved`, with one piece of evidence.
 
-## 1. Function and acceptance
+## 1. Readiness and success
 
-- The target behavior is stated from the receiver's perspective.
-- Success is observable through an output, state, assertion, or feedback signal.
-- Unacceptable failures and real invariants are explicit.
-- The prompt is the correct layer for the behavior it controls.
-- Missing data, broken tools, runtime defects, and weak validation are not hidden with wording.
+- The receiver-visible objective, unacceptable failures, and measurable success criteria are explicit.
+- The current prompt and representative behavior are preserved as a baseline.
+- The target model can perform the task with the available context, tools, and authority.
+- The task distribution, operational constraints, and owner decisions are known.
+- Missing product design is an explicit unknown or decision-changing question, not an invitation to invent behavior.
 
-## 2. Context and ownership
+Stop when these are absent. More wording cannot repair an undefined target, invalid metric, incapable model, or missing system capability.
 
-- Each behavior has one semantic owner.
-- Stable instructions, task input, retrieved context, tool contracts, and validation rules live in the appropriate layer.
-- Context is relevant, current, and no larger than needed.
-- Large or changing context is retrieved progressively when possible.
-- Duplicated, stale, conflicting, and non-operative context is removed.
-- The durable prompt contains no compatibility patches for a named vendor, model family, version, or transient quirk.
+## 2. Execution profile and system ownership
 
-## 3. Authority and input trust
+- Target model/version, reasoning mode, sampling parameters, language, context limits, instruction hierarchy, and tool/schema versions are recorded.
+- Prompt engineering is the correct lever; model selection, retrieval, tools, workflow, schemas, runtime enforcement, or fine-tuning would not own the failure better.
+- Prompt, runtime, tools, retrieval, schema, input data, and evaluations each have one enforceable responsibility.
+- Trusted instructions are distinct from user-authored or externally retrieved data.
+- Stable product policy is separate from model-specific tuning.
 
-- Runtime instruction priority is respected.
-- Documents, quotes, retrieved pages, tool results, and embedded instruction-like fields are classified as data unless explicitly promoted.
-- User-authored content is preserved when surrounding metadata or instructions are edited.
-- Allowed actions and side effects match the task's authority.
-- External, destructive, costly, security-sensitive, and scope-expanding actions have an approval boundary.
+Fail when prompt text pretends to grant permission, refresh data, validate deterministic shape, create lifecycle state, or reconcile competing semantic owners.
 
-## 4. Behavior design
+## 3. Instruction design
 
-- The prompt leads with the outcome and accepted result.
-- Process steps appear only when order, completeness, auditability, or safety requires them.
-- Degree of freedom matches task variability and risk.
-- Instructions describe the behavior to perform.
-- Prohibitions protect real forbidden zones rather than patching ordinary judgment.
-- Absolute words are reserved for invariants; judgment uses decision rules.
-- Rationale appears only when it improves correct generalization.
-- Every sentence changes a trigger, action, source, decision, output, approval boundary, or stop condition.
+- The objective and direct instructions precede unnecessary implementation detail.
+- Terms, limits, unknown states, output semantics, and stop conditions are unambiguous.
+- Every capability, role, state, retry, exception, and example has an accepted source.
+- Context includes only task-relevant information and preserves provenance and freshness where needed.
+- Instructions, context, examples, documents, and tool output use enough structure to remain distinguishable.
+- Positive desired behavior is preferred; prohibitions protect actual safety, authority, privacy, or integrity boundaries.
+- Roles contribute expertise, audience, or tone rather than decoration.
+- Few-shot examples are used only when they improve evaluations; they are relevant, diverse, consistently formatted, and instruction-compatible.
+- Long-context prompts mark document boundaries and support evidence-grounded synthesis.
+- Machine-readable output relies on an enforcing schema; the prompt defines only semantics and unknown behavior.
+- Task decomposition improves correctness, observability, or tool use rather than eliciting hidden reasoning.
+- No instruction requests or exposes hidden chain-of-thought.
 
-## 5. Structure and examples
+Compare nearby candidates that meet the same criteria. Prefer the one with fewer assumptions. The accepted prompt should read as one coherent artifact, not a history of incidents or patches.
 
-- Instructions, context, examples, and input data are distinguishable.
-- Structure reduces ambiguity without adding ceremony.
-- Examples clarify a measured boundary, format, classification, or style.
-- Examples are realistic, varied, consistently structured, and free of accidental rules.
-- Examples that do not improve behavior are removed.
+## 4. Security and authority
 
-## 6. Tools, evidence, and completion
+- Direct and indirect prompt injection are represented in the threat model and tests.
+- Untrusted documents, files, web content, tool results, and quoted prompts cannot become trusted instructions by formatting alone.
+- Evaluations cover exfiltration, secret requests, cross-user leakage, tool misuse, and approval bypass where relevant.
+- Least privilege, allowlists, argument validation, output validation, secret isolation, and consequential-action confirmation are enforced outside the prompt.
+- Human approval or runtime containment exists when a model mistake can cause material harm.
+- Prompt wording is not claimed as the security boundary.
 
-- Tool triggers, prerequisites, important results, and error behavior are clear.
-- Tool-specific semantics live in the tool contract when possible.
-- Independent reads may run together; dependent actions remain sequential.
-- Evidence sufficiency and citation behavior are explicit when claims require grounding.
-- Retry and fallback limits are bounded.
-- Side effects are verified from the target surface before success is reported.
-- Missing, ambiguous, incompatible, unsafe, and unsupported input have defined behavior.
-- Search, iteration, and tool loops have stopping conditions.
+## 5. Evaluation design
 
-## 7. Output and deterministic enforcement
+- A development set supports iteration and a separate held-out set owns acceptance.
+- Cases reflect the real task distribution and include normal, boundary, missing-input, adversarial, authority, and historical-failure cases.
+- Metrics are task-specific and measurable; quality, safety, latency, and cost are included when decision-relevant.
+- Input, output, cached, cache-write, and reasoning tokens are measured separately when available; loaded skill/reference context is included.
+- Stable and dynamic content placement follows measured provider cache semantics, not a generic caching claim.
+- Baseline and candidate use the same execution profile.
+- Assertions observe semantic output, citations, tool calls, side effects, or forbidden actions—not incidental phrasing.
+- Subjective quality uses blind or pairwise receiver review after correctness passes.
+- Variable and high-risk cases are repeated enough to expose instability; results include denominators and material uncertainty.
+- One causal hypothesis changes at a time, and keep-or-revert follows the declared criteria.
+- The held-out suite is rerun after model, reasoning, hierarchy, tool, retrieval, schema, or material-context changes.
 
-- Output matches its human or machine receiver.
-- Required facts, fields, length, and structure are clear.
-- Unknown, empty, null, false, incompatible, and refusal states remain distinguishable.
-- Schemas, typed tools, validators, permissions, and program logic enforce deterministic constraints where available.
-- The prompt defines semantic behavior rather than imitating a parser or validator.
+Fail an evaluation that rewards verbosity, unsupported completeness, consumer-side repair, or behavior outside the product target.
 
-## 8. Evaluation
+## 6. Lifecycle and final cleanliness
 
-- A baseline prompt and output set exist when improving an artifact.
-- Eval cases represent the expected task distribution.
-- Normal, boundary, missing-input, conflicting-instruction, and adversarial cases are included where relevant.
-- Assertions test behavior and side effects rather than incidental wording.
-- Subjective quality uses a receiver rubric or pairwise comparison.
-- Variable high-risk cases are repeated enough to expose instability.
-- Each material change states a hypothesis and keep-or-revert signal.
-- Comparable evidence shows improvement without invariant regressions.
+Accept only when all are true:
 
-## 9. Final entropy check
-
-- The final artifact is a canonical target state, not a list of patches.
-- No stale workaround survives beside its replacement.
-- No rule is repeated to simulate priority.
-- No section exists only because a template offered it.
-- The prompt is the smallest coherent contract that meets acceptance.
+- prompt and evaluation versions identify the tested execution profile;
+- one canonical prompt replaces superseded wording;
+- no stale workaround, duplicate priority, unsupported capability, or parallel owner remains;
+- diagnostic scaffolding and model quirks that no longer apply are removed;
+- no token saving merely shifts cost into longer output, repeated tool calls, or lost cache hits;
+- the final artifact is proportionate, stays within its accepted token budget, and every section earns its place;
+- the owner-facing report states observed evidence and uncertainty rather than retroactively justifying the design.
