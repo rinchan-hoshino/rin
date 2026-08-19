@@ -39,7 +39,7 @@ Every call accepts an optional final `{ timeoutMs, socketPath }` override.
 - recurring schedules, task schema, delivery, or lifecycle: `docs/scheduled-tasks.md`;
 - rich chat parts, attachments, quotes, reactions, or delivery verification: `docs/chat-bridge.md` and `docs/rich-text-output-format.md`;
 - bridge internals or platform actions through `evalBridge`: `docs/chat-bridge.md`;
-- daemon/process diagnosis: `docs/diagnostic-commands.md` and `docs/session-awareness.md`;
+- daemon/process diagnosis: `docs/diagnostic-commands.md`;
 - install paths or target-user ambiguity: `docs/runtime-layout.md` and `docs/execution-environment.md`.
 
 Do not read those larger documents for a simple status, list, get, pause/resume, plain-text send, or stored-message lookup.

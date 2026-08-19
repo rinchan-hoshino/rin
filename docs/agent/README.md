@@ -22,7 +22,6 @@ Use these docs as the Rin-specific layer above upstream Pi docs.
 
 - `docs/execution-environment.md`: agent runtime, loop boundary, environment inspection, self-improvement surfaces, and user-environment ownership.
 - `docs/pi-overrides.md`: how Rin changes interpretation of upstream Pi docs.
-- `docs/session-awareness.md`: inspecting active/recent sessions, processes, worktrees, chat turns, and scheduled/background tasks.
 - `docs/diagnostic-commands.md`: using `doctor`, `status`, and `self-improve` frontend/backend surfaces.
 - `docs/non-interactive-cli.md`: spawning isolated delegated child runs with managed sessions.
 - `docs/runtime-layout.md`: stable paths, launcher ownership, app releases, and paths safe for agents to reference.

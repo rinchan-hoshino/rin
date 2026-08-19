@@ -123,7 +123,7 @@ Then read local project instructions, package scripts, hook config, and CI confi
 
 Rin state can outlive the current turn. Use the state surface that matches the question:
 
-- memory evidence and recall through archived transcripts, memory tools, and session files;
+- memory evidence and recall through archived transcripts and memory tools;
 - distilled self-improve prompt baselines under `~/.rin/self_improve/prompts`;
 - reusable self-improve skills under `~/.rin/self_improve/skills`;
 - scheduled tasks and daemon state under `~/.rin/data/`;
@@ -172,5 +172,4 @@ Report the validation source and the observed state. For multi-step work, keep t
 - Rin-over-Pi authority resolution: `docs/pi-overrides.md`.
 - Installed runtime files and manifests: `docs/runtime-layout.md`.
 - Capability index: `docs/capabilities.md`.
-- Session/process/worktree overlap: `docs/session-awareness.md`.
 - Non-interactive child runs: `docs/non-interactive-cli.md`.

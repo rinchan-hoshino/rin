@@ -23,7 +23,6 @@ test("agent docs expose scheduled task operation workflow", () => {
   const capabilities = readAgentDoc("docs/capabilities.md");
   const executionEnvironment = readAgentDoc("docs/execution-environment.md");
   const builtinCapabilities = readAgentDoc("docs/extensions.md");
-  const sessionAwareness = readAgentDoc("docs/session-awareness.md");
   const nonInteractiveCli = readAgentDoc("docs/non-interactive-cli.md");
   const piOverrides = readAgentDoc("docs/pi-overrides.md");
   const runtimeLayout = readAgentDoc("docs/runtime-layout.md");
@@ -82,23 +81,6 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(capabilities, /docs\/self-improve-distillation\.md/);
   assert.doesNotMatch(capabilities, /TUI `\/notes` command/);
   assert.doesNotMatch(capabilities, /scratch work|scratch text buffer/i);
-  assert.match(sessionAwareness, /## Prompt brief/);
-  assert.match(sessionAwareness, /## Owner evidence map/);
-  assert.match(sessionAwareness, /## Coordination contract/);
-  assert.match(sessionAwareness, /## Freshness contract/);
-  assert.match(sessionAwareness, /## Report contract/);
-  assert.match(sessionAwareness, /Assign one owner to each write boundary/);
-  assert.match(sessionAwareness, /docs\/non-interactive-cli\.md/);
-  assert.match(sessionAwareness, /docs\/scheduled-tasks\.md/);
-  assert.match(sessionAwareness, /Exact recovery of omitted tool history/);
-  assert.match(sessionAwareness, /old tool input omitted/);
-  assert.match(sessionAwareness, /old tool result omitted/);
-  assert.match(sessionAwareness, /PI_SESSION_FILE/);
-  assert.match(sessionAwareness, /toolCallId/);
-  assert.match(
-    sessionAwareness,
-    /do not add the procedure to the resident system prompt/,
-  );
   assert.match(nonInteractiveCli, /--managed-session <leaf>/);
   assert.match(nonInteractiveCli, /sessions\/managed\/<leaf>/);
   assert.match(piOverrides, /## Override contract/);

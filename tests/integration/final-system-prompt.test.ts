@@ -171,9 +171,10 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
       "execution target or live capability uncertainty -> docs/execution-environment.md; Rin/Pi behavior differences -> docs/pi-overrides.md",
     ),
   );
+  assert.equal(baseSystemPrompt.includes("session-awareness"), false);
   assert.ok(
     baseSystemPrompt.includes(
-      "session awareness -> docs/session-awareness.md; subagents -> docs/non-interactive-cli.md; scheduled tasks -> docs/scheduled-tasks.md; SDK imports, execution, and generic errors -> docs/agent-sdk.md",
+      "subagents -> docs/non-interactive-cli.md; scheduled tasks -> docs/scheduled-tasks.md; SDK imports, execution, and generic errors -> docs/agent-sdk.md",
     ),
   );
   assert.ok(
