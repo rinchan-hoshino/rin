@@ -34,11 +34,56 @@ test("Pi session host normalizes modes, auth, and extension context", async () =
     host.getPiSessionExtensionMode({ _extensionMode: "invalid" }),
     "print",
   );
+  assert.equal(host.getPiSessionExtensionMode({}), "print");
   assert.equal(host.shutdownPiSessionExtensionHost(session), "closed");
   assert.deepEqual(host.getPiSessionExtensionUIContext(session), { ui: true });
   assert.deepEqual(host.getPiSessionExtensionCommandContextActions(session), {
     action: true,
   });
+
+  assert.deepEqual(
+    host.readPiSessionBaseSystemPromptOptions({}, "/workspace"),
+    {
+      cwd: "/workspace",
+    },
+  );
+  assert.deepEqual(host.readPiSessionBaseSystemPromptOptions({}, " "), {});
+  assert.deepEqual(
+    host.readPiSessionBaseSystemPromptOptions({
+      _baseSystemPromptOptions: { owner: true },
+    }),
+    { owner: true },
+  );
+
+  const contextSession: any = {
+    agent: {
+      prefix: "owner",
+      transformContext(value: string) {
+        return `${this.prefix}:${value}`;
+      },
+    },
+  };
+  assert.equal(
+    host.bindPiSessionContextTransformer(contextSession)?.("input"),
+    "owner:input",
+  );
+  assert.equal(host.bindPiSessionContextTransformer({}), null);
+  assert.equal(
+    host.replacePiSessionContextTransformer(
+      contextSession,
+      (value: string) => `next:${value}`,
+    ),
+    true,
+  );
+  assert.equal(contextSession.agent.transformContext("input"), "next:input");
+  assert.equal(
+    host.replacePiSessionContextTransformer({}, () => undefined),
+    false,
+  );
+  assert.equal(
+    host.replacePiSessionContextTransformer(contextSession, null),
+    false,
+  );
 });
 
 test("Pi session host clears failed active-tool reload requests", async () => {
@@ -74,6 +119,22 @@ test("Pi session host sparse private boundaries remain inert", () => {
   );
   assert.equal(host.runPiSessionAutoCompaction({}, "manual", false), undefined);
   assert.equal(host.refreshPiSessionToolRegistry({}), undefined);
+  assert.equal(
+    host.installPiSessionCompactionOwner(null, async () => undefined),
+    false,
+  );
+  assert.equal(
+    host.installPiSessionCompactionOwner({}, async () => undefined),
+    false,
+  );
+  assert.equal(
+    host.installPiSessionCompactionOwner(
+      { abort: async () => undefined },
+      async () => undefined,
+    ),
+    false,
+  );
+  assert.equal(host.installPiSessionCompactionOwner({}, null), false);
   assert.equal(host.buildRinCompactionRequest(null), null);
   assert.deepEqual(
     host.buildRinCompactionRequest({
@@ -93,6 +154,20 @@ test("Pi session host sparse private boundaries remain inert", () => {
       customInstructions: host.RIN_COMPACTION_INSTRUCTIONS,
     },
   );
+  const split = host.buildRinCompactionRequest({
+    preparation: {
+      isSplitTurn: true,
+      messagesToSummarize: ["history"],
+      turnPrefixMessages: ["prefix"],
+    },
+    customInstructions: "owner focus",
+  });
+  assert.deepEqual(split.preparation, {
+    isSplitTurn: false,
+    messagesToSummarize: ["history", "prefix"],
+    turnPrefixMessages: [],
+  });
+  assert.match(split.customInstructions, /owner focus/);
 });
 
 test("Pi session host binds, replaces, and invokes private semantic methods", () => {
@@ -239,7 +314,9 @@ test("Pi session host owns compaction without registering core extension handler
     host.installPiSessionCompactionOwner(session, async (event: any) => {
       coreCalls += 1;
       assert.equal(event.type, "session_before_compact");
-      assert.equal(event.customInstructions, "focus");
+      if (event.reason === "manual") {
+        assert.equal(event.customInstructions, "focus");
+      }
       return {
         summary: "Rin summary",
         firstKeptEntryId: "u2",
@@ -277,6 +354,38 @@ test("Pi session host owns compaction without registering core extension handler
   assert.equal(extensionResult.summary, "Extension summary");
   assert.equal(coreCalls, 1);
   assert.equal(appended[1][4], true);
+
+  runner.hasHandlers = () => false;
+  assert.equal(await session._runAutoCompaction("threshold", false), false);
+  session.sessionManager.buildSessionContext = () => ({
+    messages: [
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "retry" }],
+        stopReason: "length",
+        timestamp: 4,
+      },
+    ],
+  });
+  assert.equal(await session._runAutoCompaction("overflow", true), true);
+  assert.notEqual(session.agent.state.messages.at(-1)?.stopReason, "length");
+
+  assert.equal(
+    host.installPiSessionCompactionOwner(session, async () => {
+      throw new Error("owner auto-compaction failed");
+    }),
+    true,
+  );
+  assert.equal(await session._runAutoCompaction("overflow", false), false);
+  assert.equal(
+    events.some(
+      (event) =>
+        event.type === "compaction_end" &&
+        event.errorMessage ===
+          "Context overflow recovery failed: owner auto-compaction failed",
+    ),
+    true,
+  );
 });
 
 test("Pi session host silently defers automatic compaction until a cut point exists", async () => {

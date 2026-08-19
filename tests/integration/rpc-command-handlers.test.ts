@@ -198,12 +198,30 @@ test("RPC auth handler owns validation and login state behind two runtime capabi
       { id: "provider-1", auth: [{ type: "oauth" }] },
     ],
     login: async (
-      _providerId: string,
+      providerId: string,
       _authType: string,
       callbacks: {
-        prompt: (input: { type: string; message: string }) => Promise<string>;
+        notify: (event: Record<string, unknown>) => void;
+        prompt: (input: any) => Promise<string>;
       },
-    ) => await callbacks.prompt({ type: "text", message: "Approval code" }),
+    ) => {
+      callbacks.notify({ type: "auth_url", url: "https://auth.invalid" });
+      callbacks.notify({
+        type: "device_code",
+        userCode: "owner-code",
+        verificationUri: "https://device.invalid",
+      });
+      callbacks.notify({ type: "info", message: "Owner info" });
+      callbacks.notify({ type: "progress", message: "Owner progress" });
+      if (providerId === "provider-select") {
+        return await callbacks.prompt({
+          type: "select",
+          message: "Choose account",
+          options: [{ id: "owner", label: "Owner account" }],
+        });
+      }
+      return await callbacks.prompt({ type: "text", message: "Approval code" });
+    },
   };
   const authContext: RpcAuthCommandContext = {
     getSession: () => fakeSession({ modelRuntime }),
@@ -240,11 +258,46 @@ test("RPC auth handler owns validation and login state behind two runtime capabi
     ),
     true,
   );
+  for (const event of ["auth", "device_code", "info", "progress"]) {
+    assert.equal(
+      outputs.some(
+        (candidate) =>
+          candidate.event === event && candidate.loginId === loginId,
+      ),
+      true,
+    );
+  }
   await auth.oauth_login_cancel(request("oauth_login_cancel", { loginId }));
   await wait();
   assert.equal(
     outputs.some(
       (event) => event.event === "prompt_cancel" && event.loginId === loginId,
+    ),
+    true,
+  );
+  const selectStart = await auth.oauth_login_start(
+    request("oauth_login_start", { providerId: "provider-select" }),
+  );
+  await wait();
+  const selectLoginId = String(selectStart.data.loginId);
+  const selectEvent = outputs.find(
+    (event) => event.event === "select" && event.loginId === selectLoginId,
+  );
+  assert.ok(selectEvent);
+  await auth.oauth_login_respond(
+    request("oauth_login_respond", {
+      loginId: selectLoginId,
+      requestId: selectEvent.requestId,
+      value: "owner",
+    }),
+  );
+  await wait();
+  assert.equal(
+    outputs.some(
+      (event) =>
+        event.event === "complete" &&
+        event.loginId === selectLoginId &&
+        event.success === true,
     ),
     true,
   );

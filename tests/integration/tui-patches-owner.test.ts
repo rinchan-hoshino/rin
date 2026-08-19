@@ -1173,6 +1173,18 @@ test("RPC transport failures defer to the Connecting status owner", async () => 
     new Error("renderer exploded"),
   );
   assert.deepEqual(shown, ["Failed to resume session: renderer exploded"]);
+
+  proto.handleFatalRuntimeError.call(instance, "", "string failure");
+  const hostileError = {
+    toString() {
+      throw new Error("stringification failed");
+    },
+  };
+  proto.handleFatalRuntimeError.call(instance, "", hostileError);
+  assert.deepEqual(shown.slice(-2), [
+    "TUI operation failed: string failure",
+    "TUI operation failed: unknown error",
+  ]);
 });
 
 test("remote selectors keep bounded ownership", async () => {

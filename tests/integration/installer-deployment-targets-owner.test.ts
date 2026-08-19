@@ -50,6 +50,11 @@ assert.equal("installNasTarget" in targets, false);
 assert.equal("installVmTarget" in targets, false);
 assert.equal("withTemporaryCloudInit" in targets, false);
 
+assert.equal(
+  targets.defaultSshControlPath("!!!"),
+  path.join(process.env.RIN_TEST_DEPLOYMENT_TMP, "rin-ssh-target-%C"),
+);
+
 const sshStart = globalThis.__rinDeploymentOwnerEvents.length;
 const ssh = targets.installExistingSshTarget({
   kind: "ssh",

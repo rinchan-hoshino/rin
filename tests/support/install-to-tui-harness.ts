@@ -1,6 +1,7 @@
 import "./require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { execFile, spawn } from "node:child_process";
@@ -28,6 +29,13 @@ const fsUtils = await import(
 );
 const persist = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-install", "persist.js"))
+    .href
+);
+const chatMain = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "chat", "main.js")).href
+);
+const cronModule = await import(
+  pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "cron.js"))
     .href
 );
 export const INNER_CONTAINER_ENV = "RIN_INSTALL_TUI_CONTAINER_INNER";
@@ -233,6 +241,7 @@ export function buildInstallToTuiContainerArgs(options: {
   interactive?: boolean;
   innerArgs?: string[];
   coverageDir?: string;
+  smokeTestFile?: string;
 }) {
   const image = options.image || DEFAULT_CONTAINER_IMAGE;
   const innerCommand =
@@ -244,7 +253,8 @@ export function buildInstallToTuiContainerArgs(options: {
           "--test",
           "--test-reporter",
           "tap",
-          "tests/system/install-to-tui-user-flow.test.ts",
+          options.smokeTestFile ||
+            "tests/system/install-to-tui-user-flow.test.ts",
         ]
       : [
           "node",
@@ -332,15 +342,17 @@ async function rewriteContainerCoveragePaths(
 }
 
 export async function runInstallToTuiSmokeInContainer(
-  options: { failOnUnavailableRuntime: boolean } = {
-    failOnUnavailableRuntime: true,
-  },
+  options: {
+    failOnUnavailableRuntime?: boolean;
+    testFile?: string;
+  } = {},
 ) {
+  const failOnUnavailableRuntime = options.failOnUnavailableRuntime ?? true;
   const runtime = await findContainerRuntime();
   if (!runtime) {
     const message =
       "missing docker or podman for isolated install-to-TUI smoke";
-    if (options.failOnUnavailableRuntime) assert.fail(message);
+    if (failOnUnavailableRuntime) assert.fail(message);
     return { skipped: `runtime-unavailable: ${message}` };
   }
 
@@ -350,7 +362,7 @@ export async function runInstallToTuiSmokeInContainer(
       maxBuffer: 10 * 1024 * 1024,
     });
   } catch (error: any) {
-    if (options.failOnUnavailableRuntime) throw error;
+    if (failOnUnavailableRuntime) throw error;
     const message = String(
       error?.stderr || error?.stdout || error?.message || error,
     )
@@ -379,6 +391,7 @@ export async function runInstallToTuiSmokeInContainer(
       buildInstallToTuiContainerArgs({
         mode: "smoke-test",
         coverageDir: coverageDir || undefined,
+        smokeTestFile: options.testFile,
       }),
       {
         cwd: rootDir,
@@ -440,12 +453,209 @@ export async function runManualHarnessContainer(options: {
     throw new Error(`manual_harness_container_exit:${exitCode}`);
 }
 
-export async function setupIsolatedInstalledRuntime(tempDir: string) {
+async function installJourneyExtension(installDir: string) {
+  const extensionsDir = path.join(installDir, "extensions");
+  await fs.mkdir(extensionsDir, { recursive: true });
+  const extensionPath = path.join(extensionsDir, "k14-journey.ts");
+  await fs.writeFile(
+    extensionPath,
+    `export default function journeyExtension(pi) {
+  pi.registerCommand("journey-smoke", {
+    description: "Prove that the optional journey extension loaded",
+    handler: async (_args, context) => context.ui.notify("JOURNEY_EXTENSION_READY", "info"),
+  });
+}
+`,
+    "utf8",
+  );
+  return extensionPath;
+}
+
+async function installReminderPlatformExtension(installDir: string) {
+  const extensionsDir = path.join(installDir, "extensions");
+  const deliveryPath = path.join(installDir, "journey-reminder-delivery.jsonl");
+  await fs.mkdir(extensionsDir, { recursive: true });
+  const extensionPath = path.join(extensionsDir, "k14-reminder-platform.mjs");
+  await fs.writeFile(
+    extensionPath,
+    `import fs from "node:fs/promises";
+
+export default function reminderPlatformExtension(pi) {
+  pi.events.emit("rin.chat.platform.v1", {
+    apiVersion: 1,
+    platform: "journey",
+    create(input) {
+      const bot = {
+        platform: "journey",
+        selfId: "bot",
+        status: 1,
+        async sendMessage(chatId, content, options) {
+          await fs.appendFile(
+            ${JSON.stringify(deliveryPath)},
+            JSON.stringify({ chatId, content, options }) + "\\n",
+            "utf8",
+          );
+          return ["journey-delivery-1"];
+        },
+      };
+      return {
+        bot,
+        start() {
+          input.updateStatus(bot, 1);
+        },
+        stop() {},
+      };
+    },
+  });
+}
+`,
+    "utf8",
+  );
+  return { deliveryPath, extensionPath };
+}
+
+async function startJourneyProvider() {
+  const requests: string[] = [];
+  const toolResults: string[] = [];
+  const server = http.createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      let prompt = "";
+      let lastRole = "";
+      let lastContent = "";
+      try {
+        const payload = JSON.parse(body);
+        const messages = payload.messages || [];
+        const user = [...messages]
+          .reverse()
+          .find((message) => message.role === "user");
+        const content = user?.content;
+        prompt =
+          typeof content === "string"
+            ? content
+            : Array.isArray(content)
+              ? content
+                  .filter((part) => part.type === "text")
+                  .map((part) => part.text)
+                  .join("\n")
+              : "";
+        const last = messages.at(-1);
+        lastRole = last?.role || "";
+        lastContent =
+          typeof last?.content === "string"
+            ? last.content
+            : Array.isArray(last?.content)
+              ? last.content
+                  .map((part) => part.text || part.content || "")
+                  .join("\n")
+              : "";
+      } catch {}
+      requests.push(prompt);
+      if (lastRole === "tool") toolResults.push(lastContent);
+      const chunk = (choices: unknown[]) =>
+        `data: ${JSON.stringify({
+          id: "journey-response",
+          object: "chat.completion.chunk",
+          created: 0,
+          model: "journey-model",
+          choices,
+        })}\n\n`;
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      });
+      if (
+        prompt.includes("recall journey memory ORCHID-K14-731") &&
+        lastRole !== "tool"
+      ) {
+        response.write(
+          chunk([
+            {
+              index: 0,
+              delta: {
+                role: "assistant",
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call-recall-k14",
+                    type: "function",
+                    function: {
+                      name: "recall",
+                      arguments: JSON.stringify({ query: "ORCHID-K14-731" }),
+                    },
+                  },
+                ],
+              },
+              finish_reason: null,
+            },
+          ]),
+        );
+        response.write(
+          chunk([{ index: 0, delta: {}, finish_reason: "tool_calls" }]),
+        );
+      } else {
+        const text =
+          lastRole === "tool"
+            ? lastContent.includes("ORCHID-K14-731")
+              ? "RECALL_FOUND_ORCHID_K14_731"
+              : "RECALL_MISSING_ORCHID_K14_731"
+            : prompt.includes("store journey memory ORCHID-K14-731")
+              ? "MEMORY_STORED"
+              : prompt.includes("second journey prompt")
+                ? "JOURNEY_REPLY_2"
+                : "JOURNEY_REPLY_1";
+        response.write(
+          chunk([
+            {
+              index: 0,
+              delta: { role: "assistant", content: text },
+              finish_reason: null,
+            },
+          ]),
+        );
+        response.write(chunk([{ index: 0, delta: {}, finish_reason: "stop" }]));
+      }
+      response.end("data: [DONE]\n\n");
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    requests,
+    toolResults,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      }),
+  };
+}
+
+export async function setupIsolatedInstalledRuntime(
+  tempDir: string,
+  options: {
+    journeyExtension?: boolean;
+    journeyProviderBaseUrl?: string;
+  } = {},
+) {
   const sandbox = await createTestSandbox(tempDir, {
     TERM: "xterm-256color",
   });
-  const { home, agentDir, runtimeDir } = sandbox;
+  const { home, agentDir: sandboxAgentDir, runtimeDir } = sandbox;
   const installDir = path.join(tempDir, "install");
+  const agentDir = options.journeyProviderBaseUrl
+    ? installDir
+    : sandboxAgentDir;
   const currentUser = os.userInfo().username || "rin";
   const userRecord = {
     name: currentUser,
@@ -487,11 +697,13 @@ export async function setupIsolatedInstalledRuntime(tempDir: string) {
       currentUser,
       targetUser: currentUser,
       installDir,
-      provider: "openai",
-      modelId: "gpt-test",
+      provider: options.journeyProviderBaseUrl ? "k14-journey" : "openai",
+      modelId: options.journeyProviderBaseUrl ? "journey-model" : "gpt-test",
       thinkingLevel: "off",
       setDefaultTarget: true,
-      authData: { openai: { type: "api_key", key: "test-key" } },
+      authData: options.journeyProviderBaseUrl
+        ? {}
+        : { openai: { type: "api_key", key: "test-key" } },
       release,
       currentReleaseName: path.basename(publishedRuntime.releaseRoot),
       currentReleaseRoot: publishedRuntime.releaseRoot,
@@ -516,6 +728,45 @@ export async function setupIsolatedInstalledRuntime(tempDir: string) {
     },
   );
 
+  const journeyExtensionPath = options.journeyExtension
+    ? await installJourneyExtension(installDir)
+    : undefined;
+  if (options.journeyProviderBaseUrl) {
+    await fs.writeFile(
+      path.join(agentDir, "models.json"),
+      `${JSON.stringify(
+        {
+          providers: {
+            "k14-journey": {
+              baseUrl: options.journeyProviderBaseUrl,
+              api: "openai-completions",
+              apiKey: "test-key",
+              models: [
+                {
+                  id: "journey-model",
+                  name: "Journey Model",
+                  reasoning: false,
+                  input: ["text"],
+                  contextWindow: 128_000,
+                  maxTokens: 1_024,
+                  cost: {
+                    input: 0,
+                    output: 0,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                  },
+                },
+              ],
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+  }
+
   const selfImproveStateDir = path.join(agentDir, "self_improve", "state");
   await fs.mkdir(selfImproveStateDir, { recursive: true });
   await fs.writeFile(
@@ -534,7 +785,12 @@ export async function setupIsolatedInstalledRuntime(tempDir: string) {
     "utf8",
   );
 
-  const env = sandbox.env;
+  const env = {
+    ...sandbox.env,
+    RIN_DIR: agentDir,
+    RIN_AGENT_DIR: agentDir,
+    PI_CODING_AGENT_DIR: agentDir,
+  };
 
   return {
     home,
@@ -563,6 +819,7 @@ export async function setupIsolatedInstalledRuntime(tempDir: string) {
     ),
     publishedRuntime,
     written,
+    journeyExtensionPath,
   };
 }
 
@@ -571,14 +828,21 @@ export async function runRin(
   args: string[],
   env: Record<string, string>,
 ) {
-  const result = await execFileAsync(rinPath, args, {
-    cwd: rootDir,
-    env,
-  });
-  return {
-    stdout: String(result.stdout || ""),
-    stderr: String(result.stderr || ""),
-  };
+  try {
+    const result = await execFileAsync(rinPath, args, {
+      cwd: rootDir,
+      env,
+      timeout: 30_000,
+    });
+    return {
+      stdout: String(result.stdout || ""),
+      stderr: String(result.stderr || ""),
+    };
+  } catch (error: any) {
+    throw new Error(
+      [String(error), error?.stdout, error?.stderr].filter(Boolean).join("\n"),
+    );
+  }
 }
 
 export async function waitForDoctorSocket(
@@ -663,7 +927,7 @@ async function startInstalledDaemon(
         );
       }),
     ]);
-    return { daemon, daemonExit };
+    return { daemon, daemonExit, getOutput: () => daemonOutput };
   } catch (error) {
     await stopDaemon(daemon, daemonExit);
     const output = daemonOutput.trim();
@@ -686,6 +950,11 @@ export async function withInstalledDaemon(
 
   try {
     await fn({ restart });
+  } catch (error) {
+    const output = active.getOutput().trim();
+    throw new Error(
+      output ? `${String(error)}\n[daemon]\n${output}` : String(error),
+    );
   } finally {
     await stopDaemon(active.daemon, active.daemonExit);
   }
@@ -707,81 +976,153 @@ export async function assertInstalledRuntimeSmoke() {
     );
   }
 
-  await withIsolatedTempDir(async (tempDir) => {
-    const flow = await setupIsolatedInstalledRuntime(tempDir);
+  const provider = await startJourneyProvider();
+  try {
+    await withIsolatedTempDir(async (tempDir) => {
+      const flow = await setupIsolatedInstalledRuntime(tempDir, {
+        journeyProviderBaseUrl: provider.baseUrl,
+      });
 
-    const version = await runRin(flow.rinPath, ["version"], flow.env);
-    assert.equal(version.stdout.trim(), "123456789abc");
+      const version = await runRin(flow.rinPath, ["version"], flow.env);
+      assert.equal(version.stdout.trim(), "123456789abc");
 
-    const doctor = await runRin(flow.rinPath, ["doctor", "--json"], flow.env);
-    const doctorStatus = JSON.parse(doctor.stdout);
-    assert.equal(doctorStatus.installDir, flow.installDir);
-    assert.equal(
-      doctorStatus.socketPath,
-      path.join(flow.runtimeDir, "rin-daemon", "daemon.sock"),
-    );
-    assert.equal(doctorStatus.socketReady, false);
+      const modelArgs = ["--model", "k14-journey/journey-model"];
+      const doctor = await runRin(flow.rinPath, ["doctor", "--json"], flow.env);
+      const doctorStatus = JSON.parse(doctor.stdout);
+      assert.equal(doctorStatus.installDir, flow.installDir);
+      assert.equal(
+        doctorStatus.socketPath,
+        path.join(flow.runtimeDir, "rin-daemon", "daemon.sock"),
+      );
+      assert.equal(doctorStatus.socketReady, false);
 
-    await assert.doesNotReject(() =>
-      fs.access(flow.publishedRuntime.currentLink),
-    );
-    await assert.doesNotReject(() => fs.access(flow.written.settingsPath));
-    await assert.doesNotReject(() => fs.access(flow.written.authPath));
-    await assert.doesNotReject(() => fs.access(flow.written.launcherPath));
-    await assert.doesNotReject(() => fs.access(flow.daemonPath));
-    await assert.doesNotReject(() => fs.access(flow.tuiPath));
+      await assert.doesNotReject(() =>
+        fs.access(flow.publishedRuntime.currentLink),
+      );
+      await assert.doesNotReject(() => fs.access(flow.written.settingsPath));
+      await assert.doesNotReject(() => fs.access(flow.written.authPath));
+      await assert.doesNotReject(() => fs.access(flow.written.launcherPath));
+      await assert.doesNotReject(() => fs.access(flow.daemonPath));
+      await assert.doesNotReject(() => fs.access(flow.tuiPath));
 
-    await withInstalledDaemon(flow, async ({ restart }) => {
-      const launcher = startPtyCommand(shellQuote(flow.rinPath), flow.env);
-      let launcherResult: PtyCommandResult;
-      try {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        assert.equal(launcher.child.exitCode, null, launcher.getOutput());
-      } finally {
-        launcherResult = await stopPtyCommand(launcher);
-      }
-      assertExpectedTuiExit(launcherResult);
-      assertHealthyTuiOutput(launcher.getOutput());
+      await withInstalledDaemon(flow, async ({ restart }) => {
+        const tuiInvocation = [flow.rinPath, ...modelArgs]
+          .map(shellQuote)
+          .join(" ");
+        const tui = startPtyCommand(tuiInvocation, flow.env);
 
-      const tui = startPtyCommand(shellQuote(flow.rinPath), flow.env);
+        let tuiResult: PtyCommandResult;
+        try {
+          await waitForVisiblePtyText(
+            tui,
+            /Rin can explain its own features/,
+            15_000,
+          );
 
-      let tuiResult: PtyCommandResult;
-      try {
-        const startupDeadline = Date.now() + 15_000;
-        while (
-          !/Rin can explain its own features/.test(tui.getOutput()) &&
-          Date.now() < startupDeadline
-        ) {
-          assert.equal(tui.child.exitCode, null, tui.getOutput());
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          tui.child.stdin.write("first journey prompt\r");
+          await waitForVisiblePtyText(tui, /JOURNEY_REPLY_1/, 15_000);
+
+          const restartOutputOffset = tui.getOutput().length;
+          await restart();
+          await waitForVisiblePtyText(
+            tui,
+            /journey-model daemon/,
+            15_000,
+            restartOutputOffset,
+          );
+          assert.equal(
+            tui.child.exitCode,
+            null,
+            tui.getOutput().slice(restartOutputOffset),
+          );
+          tui.child.stdin.write("second journey prompt\r");
+          await waitForVisiblePtyText(tui, /JOURNEY_REPLY_2/, 15_000);
+        } finally {
+          tuiResult = await stopPtyCommand(tui);
         }
-        assert.match(tui.getOutput(), /Rin can explain its own features/);
-
-        const restartOutputOffset = tui.getOutput().length;
-        await restart();
-        await new Promise((resolve) => setTimeout(resolve, 2500));
-        assert.equal(
-          tui.child.exitCode,
-          null,
-          tui.getOutput().slice(restartOutputOffset),
-        );
-      } finally {
-        tuiResult = await stopPtyCommand(tui);
-      }
-      assertExpectedTuiExit(tuiResult);
-      assertHealthyTuiOutput(tui.getOutput());
+        assertExpectedTuiExit(tuiResult);
+        assertHealthyTuiOutput(tui.getOutput());
+      });
     });
-  });
+    assert.equal(provider.requests.length, 2);
+    assert.match(provider.requests[0] || "", /first journey prompt$/);
+    assert.match(provider.requests[1] || "", /second journey prompt$/);
+  } finally {
+    await provider.close();
+  }
+}
+
+export async function assertRecallAcrossSessions() {
+  if (process.platform !== "linux") {
+    throw new Error("recall user journey currently requires linux");
+  }
+  if (!(await commandExists("script"))) {
+    throw new Error("recall user journey requires util-linux script");
+  }
+
+  const provider = await startJourneyProvider();
+  try {
+    await withIsolatedTempDir(async (tempDir) => {
+      const flow = await setupIsolatedInstalledRuntime(tempDir, {
+        journeyProviderBaseUrl: provider.baseUrl,
+      });
+      await withInstalledDaemon(flow, async () => {
+        const command = startPtyCommand(
+          [flow.rinPath, "--model", "k14-journey/journey-model"]
+            .map(shellQuote)
+            .join(" "),
+          flow.env,
+        );
+        let result: PtyCommandResult;
+        try {
+          await waitForVisiblePtyText(
+            command,
+            /Rin can explain its own features/,
+            15_000,
+          );
+          command.child.stdin.write("store journey memory ORCHID-K14-731\r");
+          await waitForVisiblePtyText(command, /MEMORY_STORED/, 15_000);
+          command.child.stdin.write("/new\r");
+          await waitForVisiblePtyText(command, /New session started/, 8_000);
+          command.child.stdin.write("recall journey memory ORCHID-K14-731\r");
+          await waitForVisiblePtyText(
+            command,
+            /RECALL_FOUND_ORCHID_K14_731/,
+            15_000,
+          );
+        } finally {
+          result = await stopPtyCommand(command);
+        }
+        assertExpectedTuiExit(result);
+        assertHealthyTuiOutput(command.getOutput());
+      });
+    });
+    assert.ok(
+      provider.requests.some((prompt) =>
+        prompt.includes("store journey memory ORCHID-K14-731"),
+      ),
+    );
+    assert.ok(
+      provider.requests.some((prompt) =>
+        prompt.includes("recall journey memory ORCHID-K14-731"),
+      ),
+    );
+    assert.equal(provider.toolResults.length, 1);
+    assert.match(provider.toolResults[0] || "", /ORCHID-K14-731/);
+  } finally {
+    await provider.close();
+  }
 }
 
 async function waitForVisiblePtyText(
   command: ReturnType<typeof startPtyCommand>,
   pattern: RegExp,
   timeoutMs: number,
+  outputOffset = 0,
 ) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const visible = stripAnsi(command.getOutput());
+    const visible = stripAnsi(command.getOutput().slice(outputOffset));
     if (pattern.test(visible)) return visible;
     if (command.child.exitCode !== null || command.child.signalCode !== null) {
       throw new Error(`ui_process_exited_before_text:${pattern}:${visible}`);
@@ -789,8 +1130,129 @@ async function waitForVisiblePtyText(
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(
-    `ui_visible_text_timeout:${pattern}:${stripAnsi(command.getOutput())}`,
+    `ui_visible_text_timeout:${pattern}:${stripAnsi(
+      command.getOutput().slice(outputOffset),
+    )}`,
   );
+}
+
+export async function assertScheduledReminderDelivery() {
+  if (process.platform !== "linux") {
+    throw new Error("scheduled reminder journey currently requires linux");
+  }
+
+  await withIsolatedTempDir(async (tempDir) => {
+    const sandbox = await createTestSandbox(tempDir);
+    const { agentDir } = sandbox;
+    const { deliveryPath, extensionPath } =
+      await installReminderPlatformExtension(agentDir);
+    const settingsPath = path.join(agentDir, "settings.json");
+    await fs.writeFile(
+      settingsPath,
+      `${JSON.stringify({ chat: { journey: { enabled: true } } }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const previousEnvironment = new Map<string, string | undefined>();
+    for (const [key, value] of Object.entries(sandbox.env)) {
+      previousEnvironment.set(key, process.env[key]);
+      process.env[key] = value;
+    }
+    const previousCwd = process.cwd();
+    let bridge:
+      | Awaited<ReturnType<typeof chatMain.startChatBridge>>
+      | undefined;
+    let scheduler: InstanceType<typeof cronModule.CronScheduler> | undefined;
+    try {
+      bridge = await chatMain.startChatBridge({
+        additionalExtensionPaths: [extensionPath],
+        settingsPath,
+        hosted: true,
+        commandRows: [],
+      });
+      scheduler = new cronModule.CronScheduler({
+        agentDir,
+        chat: bridge,
+      });
+      scheduler.start();
+      const taskId = "cron_k14_reminder_delivery";
+      const created = scheduler.upsertTask({
+        id: taskId,
+        name: "K14 reminder journey",
+        trigger: { runAt: new Date(Date.now() + 250).toISOString() },
+        frontend: { kind: "chat", key: "journey/bot:owner" },
+        session: { mode: "none" },
+        target: {
+          kind: "shell_command",
+          command: "printf REMINDER_DELIVERED_K14",
+        },
+      });
+      assert.equal(created.id, taskId);
+
+      const deadline = Date.now() + 10_000;
+      let delivered = "";
+      while (Date.now() < deadline) {
+        try {
+          delivered = await fs.readFile(deliveryPath, "utf8");
+        } catch (error: any) {
+          if (error?.code !== "ENOENT") throw error;
+        }
+        if (delivered.includes("REMINDER_DELIVERED_K14")) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.match(delivered, /REMINDER_DELIVERED_K14/);
+      assert.match(delivered, /"chatId":"owner"/);
+      const finished = scheduler.getTask(taskId);
+      assert.equal(finished.enabled, false);
+      assert.match(finished.completedAt || "", /^\d{4}-\d{2}-\d{2}T/);
+    } finally {
+      scheduler?.stop();
+      await bridge?.stop();
+      process.chdir(previousCwd);
+      for (const [key, value] of previousEnvironment) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+}
+
+export async function assertOptionalExtensionSmoke() {
+  if (process.platform !== "linux") {
+    throw new Error("optional extension smoke currently requires linux");
+  }
+  if (!(await commandExists("script"))) {
+    throw new Error("optional extension smoke requires util-linux script");
+  }
+
+  await withIsolatedTempDir(async (tempDir) => {
+    const flow = await setupIsolatedInstalledRuntime(tempDir, {
+      journeyExtension: true,
+    });
+    assert.ok(flow.journeyExtensionPath);
+    await withInstalledDaemon(flow, async () => {
+      const command = startPtyCommand(
+        [flow.rinPath, "--extension", flow.journeyExtensionPath]
+          .map(shellQuote)
+          .join(" "),
+        flow.env,
+      );
+      let result: PtyCommandResult;
+      try {
+        await waitForVisiblePtyText(
+          command,
+          /Rin can explain its own features/,
+          15_000,
+        );
+        command.child.stdin.write("/journey-smoke\r");
+        await waitForVisiblePtyText(command, /JOURNEY_EXTENSION_READY/, 8_000);
+      } finally {
+        result = await stopPtyCommand(command);
+      }
+      assertExpectedTuiExit(result);
+      assertHealthyTuiOutput(command.getOutput());
+    });
+  });
 }
 
 export async function runUiOnlyTuiJourney() {

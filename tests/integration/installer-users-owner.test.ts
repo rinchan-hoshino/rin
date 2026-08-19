@@ -209,6 +209,14 @@ test("installer ownership decisions reflect target identity and access", async (
       true,
     );
 
+    const readOnly = path.join(dir, "read-only");
+    await fs.writeFile(readOnly, "owner");
+    await fs.chmod(readOnly, 0o444);
+    assert.equal(
+      users.describeOwnership(currentUser, readOnly).writable,
+      false,
+    );
+
     assert.deepEqual(
       users.describeOwnership("missing-user", path.join(dir, "missing")),
       {
@@ -271,6 +279,29 @@ test("Linux system-user creation is real, idempotent, locked, and platform bound
       shell: "/bin/bash",
     },
   });
+  created = false;
+  calls.length = 0;
+  const shellFallbackDeps = {
+    ...deps,
+    fileExists: (filePath: string) => filePath === "/usr/bin/useradd",
+  };
+  assert.equal(
+    users.ensureLocalSystemUser("rin_shell_owner", shellFallbackDeps).created,
+    true,
+  );
+  assert.deepEqual(calls, [
+    [
+      "/usr/bin/useradd",
+      [
+        "--create-home",
+        "--user-group",
+        "--shell",
+        "/bin/sh",
+        "rin_shell_owner",
+      ],
+    ],
+  ]);
+
   assert.throws(
     () => users.ensureLocalSystemUser("bad name", deps),
     /rin_system_user_name_invalid/,

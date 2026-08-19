@@ -311,7 +311,8 @@
       "suite": "integration",
       "tests": [
         "tests/integration/transcript-search-owner.test.ts",
-        "tests/integration/memory.test.ts"
+        "tests/integration/memory.test.ts",
+        "tests/integration/rin-doctor-owner.test.ts"
       ]
     },
     {
@@ -750,8 +751,12 @@
       "suite": "integration",
       "tests": [
         "tests/integration/rin-runtime-owner.test.ts",
+        "tests/integration/rin-runtime-policy-owner.test.ts",
         "tests/integration/final-system-prompt.test.ts",
-        "tests/integration/rin-extension-stage-b.test.ts"
+        "tests/integration/rin-extension-loader-superset.test.ts",
+        "tests/integration/rin-extension-loader.test.ts",
+        "tests/integration/rin-extension-stage-b.test.ts",
+        "tests/integration/std-mode-runtime.test.ts"
       ]
     },
     {

@@ -78,6 +78,11 @@ test("Pi session host resumes through the session-level runner", async () => {
     chatKey: "discord/1:2",
     selfImproveEligible: true,
   });
+  await resumePiSessionTurn(session, {
+    source: "terminal",
+    promptContext: { source: "terminal" },
+  });
+  assert.equal("__rinFrontend" in session.sessionManager, false);
   await assert.rejects(
     () => resumePiSessionTurn({}),
     /Pi AgentSession continuation runner is unavailable/,

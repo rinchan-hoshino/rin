@@ -132,6 +132,15 @@ All repository test scripts launch Node with a generated HOME, temporary/XDG roo
 
 System tests operate the built product while isolating user state. Use `tests/support/test-sandbox.ts` for temporary HOME, XDG, runtime, cache, and `RIN_DIR` roots. It builds an environment allowlist, enables Rin's real offline/version-check switches, removes provider and unrelated `RIN_*` state, and poisons host proxy routes. Installer and TUI flows use `tests/support/install-to-tui-harness.ts`, whose container has no network, a read-only repository mount, temporary writable filesystems, and no access to the installed Rin state.
 
+The ordinary system gate keeps four independent user outcomes visible:
+
+- an installed TUI sends a prompt through a deterministic loopback provider, receives a reply, reconnects after daemon restart, and receives another reply;
+- one session stores a unique fact and a new session retrieves it through the real `recall` tool;
+- a due scheduled task executes and reaches its bound Chat conversation through the real outbox and an isolated Chat platform;
+- an explicitly selected optional Pi extension loads and serves its user command.
+
+These journeys prove whole outcomes; they do not become coverage owners for every module they cross. Focused unit and integration tests remain responsible for boundary and failure semantics. Do not add an extra startup probe or merge unrelated journeys into one long chain merely to increase end-to-end test count.
+
 The system harness uses the repository's prebuilt `rin-local-ci:latest` Linux image, which contains `npm ci` dependencies, curl, and `util-linux`. It runs with `--pull=never`, copies source without host `node_modules`, and fails when the runtime or image is unavailable rather than downloading or skipping. Build the image before a direct host run:
 
 ```bash

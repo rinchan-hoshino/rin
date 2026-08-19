@@ -22,6 +22,25 @@ test("target names normalize to stable CLI identifiers", () => {
   assert.equal(registry.isValidTargetName("   "), false);
 });
 
+test("container image references reject shell and whitespace syntax", () => {
+  for (const value of [
+    "node:22-bookworm",
+    "ghcr.io/rinchan/rin@sha256:abc123",
+    "registry.test:5000/team/image_v1",
+  ]) {
+    assert.equal(registry.isValidContainerImageReference(value), true);
+  }
+  for (const value of [
+    "",
+    "/absolute/image",
+    "image with spaces",
+    "image;touch-owned",
+    "$(touch-owned)",
+  ]) {
+    assert.equal(registry.isValidContainerImageReference(value), false);
+  }
+});
+
 test("target registry exposes only the three maintained target transports", () => {
   assert.deepEqual(Object.keys(registry.TARGET_KIND_LABELS).sort(), [
     "container",

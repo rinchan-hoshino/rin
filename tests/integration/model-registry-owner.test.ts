@@ -97,6 +97,8 @@ test("model registry synchronizes model and provider state", async () => {
             providerDisplayNames: { anthropic: "Anthropic" },
             providerAuthStatuses: {
               openai: { configured: true, source: "environment" },
+              custom: { configured: true, source: "oauth", label: "Account" },
+              minimal: { configured: false, source: "unknown" },
             },
             modelProviders: [
               {
@@ -115,6 +117,14 @@ test("model registry synchronizes model and provider state", async () => {
                     loginLabel: "Sign in",
                     isSubscription: true,
                   },
+                },
+              },
+              {
+                id: "minimal",
+                name: "Minimal",
+                auth: {
+                  apiKey: { name: "API key", interactive: false },
+                  oauth: { name: "OAuth" },
                 },
               },
             ],
@@ -147,6 +157,14 @@ test("model registry synchronizes model and provider state", async () => {
     configured: true,
     source: "environment",
   });
+  assert.deepEqual(modelRuntime.getProviderAuthStatus("custom"), {
+    configured: true,
+    source: "stored",
+    label: "Account",
+  });
+  assert.deepEqual(modelRuntime.getProviderAuthStatus("minimal"), {
+    configured: false,
+  });
   assert.equal(modelRegistry.isUsingOAuth(allModels[1] as any), true);
   assert.equal(modelRegistry.isUsingOAuth(allModels[0] as any), false);
   assert.equal(modelRuntime.isUsingSubscription("anthropic"), true);
@@ -165,7 +183,29 @@ test("model registry synchronizes model and provider state", async () => {
   assert.equal(modelRuntime.getModel("openai", "gpt-5"), allModels[0]);
   assert.equal(modelRuntime.getProvider(" anthropic ")?.name, "Anthropic");
   const providers = modelRuntime.getProviders();
-  assert.equal(providers.length, 2);
+  assert.equal(providers.length, 3);
+  assert.deepEqual(providers[0].getModels(), [allModels[0]]);
+  assert.equal(providers[2].auth.apiKey?.login, undefined);
+  assert.equal(providers[2].auth.oauth?.loginLabel, undefined);
+  assert.equal(providers[2].auth.oauth?.isSubscription, undefined);
+  assert.deepEqual(modelRuntime.getModels(42 as any), allModels);
+  assert.equal(await providers[0].auth.apiKey?.resolve?.(), undefined);
+  assert.throws(
+    () => providers[0].stream(allModels[0] as any, { messages: [] }),
+    /rin_frontend_model_execution_unsupported/,
+  );
+  assert.throws(
+    () => providers[1].streamSimple(allModels[1] as any, { messages: [] }),
+    /rin_frontend_model_execution_unsupported/,
+  );
+  assert.throws(
+    () => providers[1].auth.oauth?.refresh?.({} as any),
+    /rin_frontend_model_execution_unsupported/,
+  );
+  assert.throws(
+    () => providers[1].auth.oauth?.toAuth?.({} as any),
+    /rin_frontend_model_execution_unsupported/,
+  );
   assert.throws(
     () => providers[0].auth.apiKey?.login?.(),
     /Provider login must be started through modelRuntime.login/,
@@ -185,6 +225,23 @@ test("model registry synchronizes model and provider state", async () => {
   assert.deepEqual(await modelRuntime.listCredentials(), [
     { providerId: "anthropic", type: "oauth" },
   ]);
+  assert.deepEqual(
+    modelRuntime.getCompatibilityRequestConfig(allModels[0] as any),
+    {
+      authHeader: true,
+    },
+  );
+  for (const invoke of [
+    () => modelRuntime.registerNativeProvider({} as any),
+    () => modelRuntime.unregisterProvider("openai"),
+    () => modelRuntime.getRegisteredProviderConfig("openai"),
+    () => modelRuntime.getRegisteredNativeProvider("openai"),
+  ]) {
+    assert.throws(
+      invoke,
+      /rin_frontend_provider_(mutation_unsupported|registry_details_unavailable)/,
+    );
+  }
   assert.deepEqual(sent, [
     "get_all_models",
     "get_available_models",
