@@ -576,7 +576,7 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
   assert.match(builtPrompt, /You are running in the Rin runtime environment/);
   assert.match(
     builtPrompt,
-    /Always check Rin memory and search current authoritative web sources/,
+    /Factual claims require evidence, not model knowledge alone/,
   );
   assert.match(
     builtPrompt,

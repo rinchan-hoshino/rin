@@ -161,7 +161,7 @@ test("no-tools prompt contains no unavailable-tool instructions", () => {
   assert.match(prompt, /Available tools:\n\(none\)/);
   assert.match(
     prompt,
-    /Always check Rin memory and search current authoritative web sources before answering/,
+    /Factual claims require evidence, not model knowledge alone/,
   );
   assert.doesNotMatch(prompt, /Use bash /);
   assert.doesNotMatch(prompt, /Use read /);

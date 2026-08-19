@@ -7,8 +7,8 @@ import {
 
 const PROMPT_PREFIX = "As the assistant, you must fulfill the user's requests.";
 const RUNTIME_AWARENESS = "You are running in the Rin runtime environment.";
-const WEB_SOURCE_REQUIREMENT =
-  "Always check Rin memory and search current authoritative web sources before answering; never rely on model knowledge alone.";
+const FACTUAL_GROUNDING_REQUIREMENT =
+  "Factual claims require evidence, not model knowledge alone. Check Rin memory for historical events; search current authoritative web sources for facts not established by authoritative local evidence.";
 
 const RIN_GENERAL_GUIDELINES = [
   "Show file paths clearly when working with files",
@@ -108,7 +108,9 @@ function buildSkillsBlock(options: RinSystemPromptOptions) {
 export function buildRinSystemPrompt(input: RinSystemPromptInput) {
   const options = input.piOptions;
   const sections = [
-    [PROMPT_PREFIX, RUNTIME_AWARENESS, WEB_SOURCE_REQUIREMENT].join("\n"),
+    [PROMPT_PREFIX, RUNTIME_AWARENESS, FACTUAL_GROUNDING_REQUIREMENT].join(
+      "\n",
+    ),
   ];
 
   if (options.customPrompt) {

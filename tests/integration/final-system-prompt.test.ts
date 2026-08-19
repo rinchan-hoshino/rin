@@ -103,11 +103,11 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
 
   assert.ok(baseSystemPrompt.includes("Available tools:"));
   assert.equal(baseSystemPrompt.includes("Current date:"), false);
-  const webSourceRequirement =
-    "Always check Rin memory and search current authoritative web sources before answering; never rely on model knowledge alone.";
-  assert.ok(baseSystemPrompt.includes(webSourceRequirement));
+  const factualGroundingRequirement =
+    "Factual claims require evidence, not model knowledge alone. Check Rin memory for historical events; search current authoritative web sources for facts not established by authoritative local evidence.";
+  assert.ok(baseSystemPrompt.includes(factualGroundingRequirement));
   assert.ok(
-    baseSystemPrompt.indexOf(webSourceRequirement) <
+    baseSystemPrompt.indexOf(factualGroundingRequirement) <
       baseSystemPrompt.indexOf("Available tools:"),
   );
   assert.equal(baseSystemPrompt.includes("Current working directory:"), false);
@@ -155,7 +155,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
       "You are running in the Rin runtime environment.",
     ),
   );
-  assert.ok(finalSystemPrompt.includes(webSourceRequirement));
+  assert.ok(finalSystemPrompt.includes(factualGroundingRequirement));
   assert.ok(baseSystemPrompt.includes("Rin and Pi documentation:"));
   assert.ok(
     baseSystemPrompt.includes(
