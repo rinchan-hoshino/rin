@@ -70,45 +70,6 @@ test("cron scheduler starts without implicit tasks", async () => {
   });
 });
 
-test("cron load retires previously persisted product-owned tasks", async () => {
-  await withAgentDir(async (agentDir) => {
-    const filePath = cronTasksPath(agentDir);
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    const task = {
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-      enabled: true,
-      trigger: { expression: "0 0 * * *", timezone: "local" },
-      session: { mode: "none" },
-      target: { kind: "shell_command", command: "echo owner" },
-      runCount: 0,
-      running: false,
-    };
-    fs.writeFileSync(
-      filePath,
-      `${JSON.stringify([
-        { ...task, id: "retired-product-task", builtIn: true },
-        { ...task, id: "owner-task" },
-      ])}\n`,
-      "utf8",
-    );
-
-    const scheduler = new CronScheduler({ agentDir });
-    scheduler.start();
-    scheduler.stop();
-
-    assert.deepEqual(
-      scheduler.listTasks().map((row) => row.id),
-      ["owner-task"],
-    );
-    const persisted = JSON.parse(fs.readFileSync(filePath, "utf8")) as any[];
-    assert.deepEqual(
-      persisted.map((row) => row.id),
-      ["owner-task"],
-    );
-  });
-});
-
 test("cron upsert validates trigger, session, target, frontend, condition, and model options", async () => {
   await withAgentDir(async (agentDir) => {
     const scheduler = new CronScheduler({ agentDir });

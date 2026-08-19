@@ -634,7 +634,6 @@ export class CronScheduler {
     const loadedTasks = new Map<string, CronTaskRecord>();
     try {
       for (const row of rows) {
-        if ((row as any)?.builtIn === true) continue;
         if (!row || typeof row !== "object") {
           throw new Error("cron_tasks_file_invalid");
         }
