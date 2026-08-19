@@ -13,13 +13,13 @@ Keep these concepts separate even when implementation paths overlap. For example
 
 ## Surface model
 
-| Concept      | Surface               | Storage                                                                                | Use when                                                                                                                                                   |
-| ------------ | --------------------- | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Memory       | Transcript archives   | archived session memory                                                                | Original conversation text, evidence, wording, chronology, or provenance matters                                                                           |
-| Memory       | Memory index pointers | `self_improve/skills/memory-index/...`                                                 | A compact dated handle helps retrieve original evidence later                                                                                              |
-| Self-improve | Prompt baselines      | `self_improve/prompts/*.md`                                                            | A compact distilled role, identity fact, or methodology invariant must influence most turns                                                                |
-| Self-improve | Reusable skills       | `self_improve/skills/<skill>/`                                                         | A reusable workflow, procedure, playbook, example, owner preference, implicit default, key knowledge, or distilled domain fact should guide matching tasks |
-| Self-improve | Short-term continuity | `self_improve/skills/short-term-memory/SKILL.md` plus narrow record files when present | Active distilled handoff state guides current work                                                                                                         |
+| Concept      | Surface               | Storage                                                                                    | Use when                                                                                    |
+| ------------ | --------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| Memory       | Transcript archives   | archived session memory                                                                    | Original conversation text, evidence, wording, chronology, or provenance matters            |
+| Memory       | Memory index pointers | `self_improve/skills/owner-memory-routing/modules/memory-index/...`                        | A compact dated handle helps retrieve original evidence later                               |
+| Self-improve | Prompt baselines      | `self_improve/prompts/*.md`                                                                | A compact distilled role, identity fact, or methodology invariant must influence most turns |
+| Self-improve | Reusable skills       | `self_improve/skills/<skill>/`                                                             | A reusable workflow belongs in a discoverable skill or one of its routed modules            |
+| Self-improve | Short-term continuity | `self_improve/skills/owner-memory-routing/modules/short-term-memory/GUIDE.md` plus records | Active distilled handoff state guides current work                                          |
 
 Use the least resident self-improve surface that changes future behavior. Use memory retrieval when original evidence matters.
 
@@ -76,7 +76,7 @@ Use composite skills with clear headings for related recurring material. A new s
 
 ### Short-term continuity
 
-Short-term continuity records contain distilled active state, such as current goal, blocker, handoff state, pending validation, or nearby next action. Keep `short-term-memory/SKILL.md` as a light routing/index entry and store bulky active records in narrow files such as `short-term-memory/records/*.md` when available. Read only the matching record(s) for the current domain; remove or merge records when they stop guiding current work.
+Short-term continuity records contain distilled active state, such as current goal, blocker, handoff state, pending validation, or nearby next action. Route through `owner-memory-routing/SKILL.md`, then use `modules/short-term-memory/GUIDE.md` and only the matching `records/*.md`. Remove or merge records when they stop guiding current work.
 
 ## Write-selection flow
 
