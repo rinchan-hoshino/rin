@@ -10,7 +10,7 @@ A candidate is **evidence, future trigger, target-state behavior, and one owner*
 
 Read the complete source conversation through its pinned leaf; the turn window controls cadence only. Extract candidates. For each survivor, read its likely owner and local cleanup neighborhood even when behavior is covered. Remove stale, duplicate, narrower, historical, or overlong guidance without losing live behavior; merge equivalents into one target state. If nothing is removable or no reusable owner is implicated, change nothing. Do not inventory unrelated prompts, skills, memory, usage state, or conversations.
 
-Turn-window review does not open memory-index, `short-term-memory/records/`, usage state, or unrelated skills unless a candidate depends on them.
+Turn-window review does not open `owner-memory-routing` modules, usage state, or unrelated skills unless a candidate depends on them.
 
 ## One loop
 
@@ -22,7 +22,7 @@ Turn-window review does not open memory-index, `short-term-memory/records/`, usa
 
 ## Owners
 
-Use the narrowest owner: product code for deterministic behavior; `agent_profile` for role/voice; `user_profile` for stable facts only; `core_doctrine` for cross-domain invariants; one skill for a repeatable workflow; relationship stores for identity; memory-index for provenance/chronology; `short-term-memory/records/` for unfinished continuity with cleanup.
+Use the narrowest owner: product code for deterministic behavior; `agent_profile` for role/voice; `user_profile` for stable facts only; `core_doctrine` for cross-domain invariants; one skill for a repeatable workflow; `owner-memory-routing` for identity, its `modules/memory-index/` lane for provenance/chronology, and its `modules/short-term-memory/records/` lane for unfinished continuity with cleanup.
 
 Keep discovery metadata narrow: skill descriptions own triggers; tool snippets introductions; tool guidelines trigger conditions. Put behavior, procedures, examples, and syntax in the owned body, documentation, or schema. Never put product defects in prompts, procedures in memory-index, temporary state in skills, or workflow detail in core doctrine. Use `skill-creator` for every skill creation, merge, deletion, or trigger change; preserve unique behavior.
 
