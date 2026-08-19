@@ -3285,7 +3285,26 @@ export class ChatController {
       eventRequestTag &&
       pendingPresentationReplacesCurrent
     ) {
-      await this.adoptBackendAcceptedPendingPresentation(eventRequestTag);
+      try {
+        await this.adoptBackendAcceptedPendingPresentation(eventRequestTag);
+      } catch (error) {
+        if (
+          safeString((error as any)?.message || error).trim() !==
+          "chat_turn_fence_lost"
+        ) {
+          throw error;
+        }
+        if (
+          this.pendingTurnPresentations.get(eventRequestTag) ===
+          pendingPresentation
+        ) {
+          this.pendingTurnPresentations.delete(eventRequestTag);
+        }
+        this.logger.info(
+          `chat stale turn acceptance retired chatKey=${this.chatKey} requestTag=${eventRequestTag}`,
+        );
+        return;
+      }
     }
     if (
       activeRequestTag &&

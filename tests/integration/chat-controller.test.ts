@@ -4259,6 +4259,73 @@ test("chat controller adopts a backend-accepted pending presentation before inte
   );
 });
 
+test("chat controller retires a stale accepted listener after its durable fence rotates", async () => {
+  const logs = [];
+  const controller = await createController("telegram/1:2", {
+    logger: {
+      info(...args) {
+        logs.push(args.join(" "));
+      },
+      warn() {},
+    },
+  });
+  const stale = claimDurableTurnFence(controller, "m-stale-accepted");
+  const current = claimDurableTurnFence(controller, "m-current-owner");
+  const requestTag = "request-stale-accepted";
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "managed",
+    "chat",
+    "stale-accepted.jsonl",
+  );
+  controller.currentTurn = {
+    startedAt: Date.now(),
+    incomingMessageId: current.claim.messageId,
+    replyToMessageId: current.claim.messageId,
+    requestTag: "request-current-owner",
+    outboxTurnFence: current.fence,
+    workingNoticeSent: false,
+  };
+  controller.pendingTurnPresentations.set(requestTag, {
+    incomingMessageId: stale.claim.messageId,
+    replyToMessageId: stale.claim.messageId,
+    requestTag,
+    outboxTurnFence: stale.fence,
+    backendAccepted: false,
+    joinedOwnerTurnId: current.claim.itemId,
+    sessionFile,
+  });
+  openChatDatabase(controller.agentDir)
+    .prepare(
+      `UPDATE inbox_jobs
+       SET owner_epoch = 'replacement-owner', attempt = attempt + 1
+       WHERE turn_id = ?`,
+    )
+    .run(stale.claim.itemId);
+
+  await controller.handleFrontendEvent({
+    type: "turn_accepted",
+    requestTag,
+    sessionFile,
+  });
+  await controller.handleFrontendEvent({
+    type: "turn_accepted",
+    requestTag,
+    sessionFile,
+  });
+
+  assert.equal(controller.pendingTurnPresentations.has(requestTag), false);
+  assert.equal(
+    openChatDatabase(controller.agentDir)
+      .prepare("SELECT accepted_at FROM messages WHERE message_id = ?")
+      .get(stale.claim.messageId).accepted_at,
+    null,
+  );
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /stale turn acceptance retired/);
+});
+
 test("restart recovery joins a native nonterminal from its durable owner request identity", async () => {
   const controller = await createController("telegram/1:2");
   const ownerClaim = claimDurableTurnFence(
