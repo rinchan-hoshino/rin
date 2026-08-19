@@ -67,9 +67,21 @@ test("self-improve format compiles labelled prompt documents", () => {
     ].join("\n"),
   );
   const system = format.buildSystemPromptSelfImprove(result);
-  assert.match(system, /Use this agent profile as the standing role/);
-  assert.match(system, /Follow this core doctrine as the standing methodology/);
-  assert.match(system, /User profile:\nKnown owner/);
+  assert.equal(
+    system,
+    [
+      "Agent profile:",
+      "Standing role, voice, and response contract.",
+      "Concise",
+      "",
+      "Core doctrine:",
+      "Standing method and decision contract.",
+      "Verified",
+      "",
+      "User profile:",
+      "Known owner",
+    ].join("\n"),
+  );
   assert.equal(format.buildCompiledSelfImprovePrompt(null), "");
 });
 

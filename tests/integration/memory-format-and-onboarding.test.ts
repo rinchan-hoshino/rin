@@ -91,14 +91,8 @@ test("self-improve system prompt prefers full docs over preview docs", () => {
   assert.equal((text.match(/Agent profile:/g) || []).length, 1);
   assert.equal((text.match(/User profile:/g) || []).length, 1);
   assert.equal((text.match(/Core doctrine:/g) || []).length, 1);
-  assert.match(
-    text,
-    /Use this agent profile as the standing role, voice, and response-style contract\./,
-  );
-  assert.match(
-    text,
-    /Follow this core doctrine as the standing methodology and decision contract\./,
-  );
+  assert.match(text, /Standing role, voice, and response contract\./);
+  assert.match(text, /Standing method and decision contract\./);
   assert.equal(text.includes("Always use this agent profile"), false);
   assert.equal(text.includes("Always follow this core doctrine"), false);
   assert.match(text, /FULL AGENT PROFILE/);

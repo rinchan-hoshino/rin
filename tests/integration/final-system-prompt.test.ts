@@ -1127,12 +1127,12 @@ test("buildFinalAppSystemPrompt keeps structured context and skills before self-
 
   const projectContextIdx = finalSystemPrompt.indexOf("<project_context>");
   const rolePrefaceIdx = finalSystemPrompt.indexOf(
-    "Use this agent profile as the standing role, voice, and response-style contract.",
+    "Standing role, voice, and response contract.",
   );
   const agentProfileIdx = finalSystemPrompt.indexOf("Agent profile:");
   const promptsIdx = finalSystemPrompt.indexOf("User profile:");
   const methodologyPrefaceIdx = finalSystemPrompt.indexOf(
-    "Follow this core doctrine as the standing methodology and decision contract.",
+    "Standing method and decision contract.",
   );
   const coreDoctrineIdx = finalSystemPrompt.indexOf("Core doctrine:");
   const skillsIdx = finalSystemPrompt.indexOf("<available_skills>");
