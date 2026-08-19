@@ -518,6 +518,7 @@ test("prompt-engineering skill preserves its design and evaluation contract", ()
     Buffer.byteLength(skill, "utf8") <= 3_200,
     "the always-loaded routing and decision core must stay within 3.2 KB",
   );
+  assert.match(skill, /from `references\/`/);
   assert.equal(behaviorEvals.skill_name, "rin-prompt-engineering");
   assert.ok(behaviorEvals.evals.length >= 17);
   assert.ok(

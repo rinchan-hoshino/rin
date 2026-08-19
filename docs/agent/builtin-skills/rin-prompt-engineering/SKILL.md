@@ -9,12 +9,12 @@ Treat prompts as tested components. Define success and owner; keep only proved c
 
 **Closed scope:** capabilities/actions/states/retries/examples/exceptions require an owner request, artifact, contract, or task-specific failing evaluation. No source, no rule.
 
-For skills open `skill-creator`; for scheduled prompts use the scheduled workflow. Load as needed: `authoritative-guidance.md`, `prompt-templates.md`, or `prompt-review-rubric.md`.
+For skills use `skill-creator`; for scheduled prompts use their workflow. Load as needed from `references/`: `authoritative-guidance.md`, `prompt-templates.md`, or `prompt-review-rubric.md`.
 
 ## Method
 
 1. **Frame.** Freeze baseline prompt and behavior. Record model/version, reasoning mode, sampling, hierarchy, context, tools, and schemas; set success/failure thresholds and budgets. Read artifacts first; ask once if a missing fact changes the contract.
-2. **Own.** Prompt owns judgment; retrieval freshness; schemas shape; runtime permission/lifecycle; tools effects; evals acceptance. Use another lever when it owns failure; stop at a proved non-prompt boundary.
+2. **Own.** Prompt owns judgment; retrieval freshness; schemas shape; runtime permission/lifecycle; tools effects; evals acceptance. Use the owning lever; stop at a proved non-prompt boundary.
 3. **Derive.** Reduce the task to objective/receiver, trusted priority, provenance, required/missing input, authority, decisions/unknowns, output/safety/stopping. Separate concerns; give each behavior one owner.
 4. **Draft.** Derive whole candidates from the contract, not patches. Choose the fewest assumptions among equals. Techniques, placement, and improvements remain hypotheses until target-model evaluation.
 5. **Protect.** Treat external content as untrusted; test direct/indirect injection, leakage, tool misuse, and approval bypass. Enforce least privilege, allowlists, validation, isolation, and consequential approval outside prompts. Never request hidden chain-of-thought. Treat reasoning effort as an execution-profile setting; assess only observable answers, evidence, tool calls, side effects, task-relevant intermediate artifacts, and reproducible checks.
