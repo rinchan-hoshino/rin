@@ -51,48 +51,15 @@ function invalidModel(detail: string) {
 }
 
 const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
-  chat_archive_header_compare_and_swap_failed: () =>
-    "Chat archive stopped because the message locator changed during commit.",
-  chat_archive_hot_delete_failed: () =>
-    "Chat archive could not remove the verified duplicate hot payload.",
-  chat_archive_hot_payload_missing: () =>
-    "Chat archive could not find every selected hot payload.",
-  chat_archive_message_identity_required: () =>
-    "Chat archive requires a message id, chat key, and received time.",
-  chat_archive_message_still_operational: () =>
-    "Chat archive cannot move a message that is still being processed.",
-  chat_archive_messages_required: () =>
-    "Chat archive requires at least one message.",
-  chat_archive_payload_hash_mismatch: () =>
-    "Chat archive payload integrity verification failed.",
-  chat_archive_payload_locator_mismatch: () =>
-    "Chat archive message metadata does not match its payload location.",
-  chat_archive_reingest_requires_restore: () =>
-    "Chat archive cannot replace an archived payload before restoring it to the hot store.",
-  chat_archive_rollback_header_mismatch: () =>
-    "Chat archive rollback stopped because the message locator changed.",
-  chat_archive_segment_checksum_mismatch: () =>
-    "Chat archive segment checksum verification failed.",
-  chat_archive_segment_count_mismatch: () =>
-    "Chat archive segment does not contain every selected message.",
-  chat_archive_segment_hash_mismatch: () =>
-    "Chat archive segment contains a payload with an invalid hash.",
-  chat_archive_segment_integrity_failed: () =>
-    "Chat archive segment database integrity verification failed.",
-  chat_archive_segment_missing: (detail) =>
-    withDetail("Chat archive segment is missing", detail),
-  chat_archive_segment_not_committed: () =>
-    "Chat archive rollback requires a committed segment.",
-  chat_archive_segment_reservation_lost: () =>
-    "Chat archive lost ownership of its segment reservation before commit.",
-  chat_archive_single_period_required: () =>
-    "Chat archive can move messages from only one calendar month per segment.",
-  invalid_received_at: () =>
-    "Chat archive message has an invalid received time.",
   transcript_archive_missing: (detail) =>
     withDetail("The canonical transcript archive is missing", detail),
   transcript_search_install_migration_required: () =>
     "Transcript search data must be upgraded by the Rin installer before use.",
+  transcript_search_unsupported_schema: (detail) =>
+    withDetail(
+      "Transcript search data predates the supported upgrade window",
+      detail,
+    ),
   transcript_search_install_migration_incomplete: () =>
     "The Rin installer could not finish upgrading transcript search data.",
   transcript_search_install_staging_schema_mismatch: () =>

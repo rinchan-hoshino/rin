@@ -131,14 +131,6 @@
       "tests": ["tests/integration/inbound-recovery-owner.test.ts"]
     },
     {
-      "source": "src/core/chat/archive-prototype.ts",
-      "suite": "integration",
-      "tests": [
-        "tests/integration/chat-archive-prototype.test.ts",
-        "tests/integration/memory.test.ts"
-      ]
-    },
-    {
       "source": "src/core/chat/boot.ts",
       "suite": "integration",
       "tests": [

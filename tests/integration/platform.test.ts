@@ -36,9 +36,8 @@ test("platform/fs prefer Rin temp roots deterministically", () => {
   const previousTmpDir = process.env.TMPDIR;
   try {
     process.env.TMPDIR = "/tmp/rin-custom-root";
-    assert.deepEqual(fsMod.preferredTempRootCandidates().slice(0, 2), [
+    assert.deepEqual(fsMod.preferredTempRootCandidates(), [
       path.resolve("/tmp/rin-custom-root"),
-      path.resolve("/home/rin/tmp"),
     ]);
   } finally {
     if (previousTmpDir == null) delete process.env.TMPDIR;

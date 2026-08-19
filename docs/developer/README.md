@@ -25,7 +25,7 @@ Do not add planning documents, todo files, or ad-hoc AGENTS-style instruction fi
 - `testing.md`: test bucket and validation rules.
 - `pi-integration.md`: governed Rin/Pi adapter seams for private Pi imports, session host helpers, and TUI patches.
 - `extensions.md`: Pi-compatible session extensions, Rin command metadata, and optional Chat platform contributions.
-- `persistence-write-and-archive.md`: write-reduction invariants, transcript-index experiments, and full-fidelity chat archive tiers.
+- `persistence-write-and-transcript-search.md`: write-reduction invariants and transcript-index design evidence.
 - `releasing.md`: current channel contract and operator workflow for publishing release trains.
 
 ## Maintainer rule of thumb

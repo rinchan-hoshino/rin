@@ -210,13 +210,12 @@ test("commandAsUserInvocation falls back to plain privilege shell command", () =
   assert.deepEqual(invocation.args, ["sh", "-lc", "'node' '--version'"]);
 });
 
-test("installer fs utils prefer Rin temp roots deterministically", () => {
+test("installer fs utils use platform temp roots deterministically", () => {
   const previousTmpDir = process.env.TMPDIR;
   try {
     process.env.TMPDIR = "/tmp/rin-custom-root";
-    assert.deepEqual(fsUtils.installerTempRootCandidates().slice(0, 2), [
+    assert.deepEqual(fsUtils.installerTempRootCandidates(), [
       path.resolve("/tmp/rin-custom-root"),
-      path.resolve(path.sep, "home", "rin", "tmp"),
     ]);
   } finally {
     if (previousTmpDir == null) delete process.env.TMPDIR;

@@ -4,14 +4,26 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 
 const rootDir = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
+);
+const cutoffChatDatabaseFixturePath = path.join(
+  rootDir,
+  "tests",
+  "fixtures",
+  "chat-schema-v5-cf36cf45.sqlite",
+);
+const cutoffChatDatabaseFixtureMetadataPath = path.join(
+  rootDir,
+  "tests",
+  "fixtures",
+  "chat-schema-v5-cf36cf45.json",
 );
 const chatDatabase = {
   ...(await import(
@@ -62,6 +74,28 @@ async function withTempDir(fn) {
     chatDatabase.closeChatDatabase(dir);
     await fs.rm(dir, { recursive: true, force: true });
   }
+}
+
+async function installCutoffChatDatabaseFixture(agentDir) {
+  const bytes = await fs.readFile(cutoffChatDatabaseFixturePath);
+  const metadata = JSON.parse(
+    await fs.readFile(cutoffChatDatabaseFixtureMetadataPath, "utf8"),
+  );
+  assert.deepEqual(
+    {
+      sourceCommit: metadata.sourceCommit,
+      schemaVersion: metadata.schemaVersion,
+      sha256: metadata.sha256,
+    },
+    {
+      sourceCommit: "cf36cf45e512f08c47aa4ffe656927c52f0d8d1f",
+      schemaVersion: 5,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    },
+  );
+  const dbPath = chatDatabase.chatDatabasePath(agentDir);
+  await fs.mkdir(path.dirname(dbPath), { recursive: true });
+  await fs.writeFile(dbPath, bytes);
 }
 
 function dropDurableAdmissionColumns(db) {
@@ -1011,6 +1045,47 @@ test("version 9 terminal index migration rolls back atomically on foreign key mi
   });
 });
 
+test("chat database migrates the oldest supported main-commit schema fixture", async () => {
+  await withTempDir(async (agentDir) => {
+    await installCutoffChatDatabaseFixture(agentDir);
+    const preflight = chatDatabase.preflightChatDatabaseMigration(agentDir);
+    assert.equal(preflight.fromVersion, 5);
+    assert.equal(preflight.toVersion, 10);
+
+    const migrated = chatDatabase.migrateChatDatabase(agentDir, {
+      runtimeQuiesced: true,
+    });
+    assert.equal(migrated.pragma("user_version", { simple: true }), 10);
+    assert.equal(
+      migrated
+        .prepare(`SELECT value FROM schema_meta WHERE key = 'schema_version'`)
+        .get().value,
+      "10",
+    );
+  });
+});
+
+test("chat database rejects schemas older than the supported commit window", async () => {
+  await withTempDir(async (agentDir) => {
+    await installCutoffChatDatabaseFixture(agentDir);
+    const BetterSqlite3 = (await import("better-sqlite3")).default;
+    const db = new BetterSqlite3(chatDatabase.chatDatabasePath(agentDir));
+    db.prepare(
+      `UPDATE schema_meta SET value = '4' WHERE key = 'schema_version'`,
+    ).run();
+    db.pragma("user_version = 4");
+    db.close();
+
+    assert.throws(
+      () =>
+        chatDatabase.migrateChatDatabase(agentDir, {
+          runtimeQuiesced: true,
+        }),
+      /chat_database_unsupported_schema:4/,
+    );
+  });
+});
+
 test("chat database rejects unknown future and partial schemas instead of relabeling them", async () => {
   await withTempDir(async (agentDir) => {
     const db = chatDatabase.openChatDatabase(agentDir);
@@ -1040,216 +1115,6 @@ test("chat database rejects unknown future and partial schemas instead of relabe
     chatDatabase.closeChatDatabase(partialDir);
     await fs.rm(partialDir, { recursive: true, force: true });
   }
-
-  const incompleteDir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "rin-chat-database-incomplete-"),
-  );
-  try {
-    const BetterSqlite3 = (await import("better-sqlite3")).default;
-    const dbPath = chatDatabase.chatDatabasePath(incompleteDir);
-    await fs.mkdir(path.dirname(dbPath), { recursive: true });
-    const incomplete = new BetterSqlite3(dbPath);
-    incomplete.exec(
-      `CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-       INSERT INTO schema_meta (key, value) VALUES ('schema_version', '1');
-       PRAGMA user_version = 1;`,
-    );
-    incomplete.close();
-    assert.throws(
-      () => chatDatabase.migrateChatDatabase(incompleteDir),
-      /chat_database_incomplete_schema/,
-    );
-  } finally {
-    chatDatabase.closeChatDatabase(incompleteDir);
-    await fs.rm(incompleteDir, { recursive: true, force: true });
-  }
-});
-
-test("chat database migrates the version 1 terminal outbox index", async () => {
-  await withTempDir(async (agentDir) => {
-    const db = chatDatabase.openChatDatabase(agentDir);
-    dropDurableAdmissionColumns(db);
-    db.exec(`
-      DROP INDEX outbox_turn_terminal_idx;
-      CREATE UNIQUE INDEX outbox_turn_terminal_idx
-        ON outbox(turn_id)
-        WHERE turn_id IS NOT NULL;
-      ALTER TABLE chat_state DROP COLUMN legacy_session_imported;
-      ALTER TABLE chat_state DROP COLUMN session_file;
-      ALTER TABLE outbox DROP COLUMN dispatch_started_at;
-      DROP INDEX inbound_heads_recovery_idx;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_version;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_next_attempt_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_paused_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_last_failed_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_first_failed_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_failure_count;
-      UPDATE schema_meta SET value = '1' WHERE key = 'schema_version';
-      PRAGMA user_version = 1;
-    `);
-    const objects = db
-      .prepare(
-        `SELECT type, name, sql FROM sqlite_master
-         WHERE type IN ('table', 'index', 'trigger', 'view')
-           AND name NOT LIKE 'sqlite_%'
-           AND sql IS NOT NULL
-         ORDER BY type, name`,
-      )
-      .all();
-    const fingerprint = createHash("sha256")
-      .update(JSON.stringify(objects))
-      .digest("hex");
-    db.prepare(
-      `UPDATE schema_meta SET value = ? WHERE key = 'schema_fingerprint'`,
-    ).run(fingerprint);
-    chatDatabase.closeChatDatabase(agentDir);
-
-    const migrated = chatDatabase.migrateChatDatabase(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 10);
-    assert.equal(
-      migrated
-        .prepare(`SELECT value FROM schema_meta WHERE key = 'schema_version'`)
-        .get().value,
-      "10",
-    );
-    const indexSql = migrated
-      .prepare(
-        `SELECT sql FROM sqlite_master
-         WHERE type = 'index' AND name = 'outbox_turn_terminal_idx'`,
-      )
-      .get().sql;
-    assert.match(indexSql, /outbox_id GLOB 'chat-terminal-\?\*'/);
-    assert.match(indexSql, /post_delivery_json IS NOT NULL/);
-    assert.doesNotMatch(indexSql, /delivery_kind IN/);
-  });
-});
-
-test("chat database migrates version 2 session binding authority", async () => {
-  await withTempDir(async (agentDir) => {
-    const db = chatDatabase.openChatDatabase(agentDir);
-    dropDurableAdmissionColumns(db);
-    db.exec(`
-      ALTER TABLE chat_state DROP COLUMN legacy_session_imported;
-      ALTER TABLE chat_state DROP COLUMN session_file;
-      ALTER TABLE outbox DROP COLUMN dispatch_started_at;
-      DROP INDEX inbound_heads_recovery_idx;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_version;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_next_attempt_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_paused_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_last_failed_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_first_failed_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_failure_count;
-      UPDATE schema_meta SET value = '2' WHERE key = 'schema_version';
-      PRAGMA user_version = 2;
-    `);
-    const objects = db
-      .prepare(
-        `SELECT type, name, sql FROM sqlite_master
-         WHERE type IN ('table', 'index', 'trigger', 'view')
-           AND name NOT LIKE 'sqlite_%'
-           AND sql IS NOT NULL
-         ORDER BY type, name`,
-      )
-      .all();
-    db.prepare(
-      `UPDATE schema_meta SET value = ? WHERE key = 'schema_fingerprint'`,
-    ).run(createHash("sha256").update(JSON.stringify(objects)).digest("hex"));
-    chatDatabase.closeChatDatabase(agentDir);
-
-    const migrated = chatDatabase.migrateChatDatabase(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 10);
-    assert.ok(
-      migrated
-        .prepare(`PRAGMA table_info(chat_state)`)
-        .all()
-        .some((column) => column.name === "session_file"),
-    );
-  });
-});
-
-test("chat database migrates version 3 dispatch evidence", async () => {
-  await withTempDir(async (agentDir) => {
-    const db = chatDatabase.openChatDatabase(agentDir);
-    dropDurableAdmissionColumns(db);
-    db.exec(`
-      ALTER TABLE outbox DROP COLUMN dispatch_started_at;
-      DROP INDEX inbound_heads_recovery_idx;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_version;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_next_attempt_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_paused_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_last_failed_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_first_failed_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_failure_count;
-      UPDATE schema_meta SET value = '3' WHERE key = 'schema_version';
-      PRAGMA user_version = 3;
-    `);
-    const objects = db
-      .prepare(
-        `SELECT type, name, sql FROM sqlite_master
-         WHERE type IN ('table', 'index', 'trigger', 'view')
-           AND name NOT LIKE 'sqlite_%'
-           AND sql IS NOT NULL
-         ORDER BY type, name`,
-      )
-      .all();
-    db.prepare(
-      `UPDATE schema_meta SET value = ? WHERE key = 'schema_fingerprint'`,
-    ).run(createHash("sha256").update(JSON.stringify(objects)).digest("hex"));
-    chatDatabase.closeChatDatabase(agentDir);
-
-    const migrated = chatDatabase.migrateChatDatabase(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 10);
-    assert.ok(
-      migrated
-        .prepare(`PRAGMA table_info(outbox)`)
-        .all()
-        .some((column) => column.name === "dispatch_started_at"),
-    );
-  });
-});
-
-test("chat database migrates version 4 inbound recovery lease state", async () => {
-  await withTempDir(async (agentDir) => {
-    const db = chatDatabase.openChatDatabase(agentDir);
-    dropDurableAdmissionColumns(db);
-    db.exec(`
-      DROP INDEX inbound_heads_recovery_idx;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_version;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_next_attempt_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_paused_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_last_failed_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_first_failed_at;
-      ALTER TABLE inbound_heads DROP COLUMN recovery_failure_count;
-      UPDATE schema_meta SET value = '4' WHERE key = 'schema_version';
-      PRAGMA user_version = 4;
-    `);
-    const objects = db
-      .prepare(
-        `SELECT type, name, sql FROM sqlite_master
-         WHERE type IN ('table', 'index', 'trigger', 'view')
-           AND name NOT LIKE 'sqlite_%'
-           AND sql IS NOT NULL
-         ORDER BY type, name`,
-      )
-      .all();
-    db.prepare(
-      `UPDATE schema_meta SET value = ? WHERE key = 'schema_fingerprint'`,
-    ).run(createHash("sha256").update(JSON.stringify(objects)).digest("hex"));
-    chatDatabase.closeChatDatabase(agentDir);
-
-    const migrated = chatDatabase.migrateChatDatabase(agentDir);
-    assert.equal(migrated.pragma("user_version", { simple: true }), 10);
-    const columns = new Set(
-      migrated
-        .prepare(`PRAGMA table_info(inbound_heads)`)
-        .all()
-        .map((column) => column.name),
-    );
-    assert.ok(columns.has("recovery_failure_count"));
-    assert.ok(columns.has("recovery_paused_at"));
-    assert.ok(columns.has("recovery_next_attempt_at"));
-    assert.ok(columns.has("recovery_version"));
-  });
 });
 
 test("chat database rejects schema objects that drift from the recorded fingerprint", async () => {

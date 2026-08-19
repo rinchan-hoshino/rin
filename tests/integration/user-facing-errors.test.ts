@@ -172,6 +172,10 @@ test("runtime error formatter maps known internal markers to actionable messages
     "Chat migration found an accepted legacy message with incomplete identity.",
   );
   assert.equal(
+    formatRuntimeErrorForUser("transcript_search_unsupported_schema:4"),
+    "Transcript search data predates the supported upgrade window: 4",
+  );
+  assert.equal(
     formatRuntimeErrorForUser(
       "rin_daemon_unavailable: managed daemon service did not become available",
     ),

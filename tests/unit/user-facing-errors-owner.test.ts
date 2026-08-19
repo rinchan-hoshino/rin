@@ -9,24 +9,6 @@ const errors = await import(
 );
 
 const OWNED_MARKERS = `chat_accepted_inbound_turn_not_active
-chat_archive_header_compare_and_swap_failed
-chat_archive_hot_delete_failed
-chat_archive_hot_payload_missing
-chat_archive_message_identity_required
-chat_archive_message_still_operational
-chat_archive_messages_required
-chat_archive_payload_hash_mismatch
-chat_archive_payload_locator_mismatch
-chat_archive_reingest_requires_restore
-chat_archive_rollback_header_mismatch
-chat_archive_segment_checksum_mismatch
-chat_archive_segment_count_mismatch
-chat_archive_segment_hash_mismatch
-chat_archive_segment_integrity_failed
-chat_archive_segment_missing
-chat_archive_segment_not_committed
-chat_archive_segment_reservation_lost
-chat_archive_single_period_required
 chat_bridge_at_id_required
 chat_bridge_chat_required
 chat_bridge_entry_missing
@@ -161,7 +143,6 @@ invalid_model
 invalid_model_ref
 invalid_practices_manifest
 invalid_practices_manifest_path
-invalid_received_at
 invalid_self_improve_interval
 invalid_status_interval
 invalid_status_limit
@@ -352,7 +333,7 @@ web_fetch_invalid_url`
   .split(/\s+/);
 
 test("every owned runtime marker has a human-facing formatter", () => {
-  assert.equal(OWNED_MARKERS.length, 340);
+  assert.equal(OWNED_MARKERS.length, 321);
   assert.equal(new Set(OWNED_MARKERS).size, OWNED_MARKERS.length);
   for (const marker of OWNED_MARKERS) {
     assert.equal(errors.hasUserFacingRuntimeErrorMapping(marker), true, marker);
@@ -368,18 +349,8 @@ test("every owned runtime marker has a human-facing formatter", () => {
   assert.equal(errors.hasUserFacingRuntimeErrorMapping("not_owned"), false);
 });
 
-test("archive and migration marker families execute their dedicated mappings", () => {
+test("migration marker families execute their dedicated mappings", () => {
   for (const marker of [
-    "chat_archive_header_compare_and_swap_failed",
-    "chat_archive_hot_delete_failed",
-    "chat_archive_hot_payload_missing",
-    "chat_archive_message_identity_required",
-    "chat_archive_messages_required",
-    "chat_archive_payload_hash_mismatch",
-    "chat_archive_payload_locator_mismatch",
-    "chat_archive_segment_checksum_mismatch",
-    "chat_archive_segment_count_mismatch",
-    "chat_archive_segment_missing",
     "transcript_archive_missing",
     "transcript_search_install_migration_required",
     "transcript_search_install_migration_incomplete",

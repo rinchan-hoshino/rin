@@ -20,6 +20,8 @@ import {
   writeTranscriptSearchSchemaMarker,
 } from "./transcript-search.js";
 
+export const MIN_SUPPORTED_TRANSCRIPT_SEARCH_SCHEMA_VERSION = 5;
+
 export type TranscriptSearchMigrationPreflight = {
   id: "transcript-search-schema-v6";
   skipped: boolean;
@@ -150,7 +152,10 @@ function cleanupBackupManifestTemps(backupDir: string) {
 function verifyMigratedTranscriptSearchDb(dbPath: string) {
   let db: BetterSqlite3.Database | undefined;
   try {
-    db = new BetterSqlite3(dbPath, { fileMustExist: true });
+    db = new BetterSqlite3(dbPath, {
+      readonly: true,
+      fileMustExist: true,
+    });
     const version = db
       .prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
       .get() as { value?: string } | undefined;
@@ -163,6 +168,14 @@ function verifyMigratedTranscriptSearchDb(dbPath: string) {
     };
   } finally {
     db?.close();
+  }
+}
+
+function readTranscriptSearchDbVersion(dbPath: string) {
+  try {
+    return verifyMigratedTranscriptSearchDb(dbPath).version;
+  } catch {
+    return null;
   }
 }
 
@@ -508,6 +521,20 @@ export function preflightTranscriptSearchMigration(
 ): TranscriptSearchMigrationPreflight {
   const dbPath = resolveTranscriptSearchDbPath(rootOverride);
   const marker = readTranscriptSearchSchemaMarker(dbPath);
+  const dbExists = fs.existsSync(dbPath);
+  const recordedVersion = dbExists
+    ? readTranscriptSearchDbVersion(dbPath)
+    : null;
+  if (
+    dbExists &&
+    !marker &&
+    (recordedVersion === null ||
+      recordedVersion < MIN_SUPPORTED_TRANSCRIPT_SEARCH_SCHEMA_VERSION)
+  ) {
+    throw new Error(
+      `transcript_search_unsupported_schema:${recordedVersion ?? "unmarked"}`,
+    );
+  }
   if (
     !fs.existsSync(dbPath) &&
     marker?.state !== "installer-migrating" &&

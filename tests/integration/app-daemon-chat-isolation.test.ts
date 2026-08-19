@@ -77,7 +77,7 @@ test("app daemon stays available when the hosted chat service cannot start", asy
   try {
     const status = await waitForDegradedChat(socketPath);
     assert.equal(status.chat.ready, false);
-    assert.match(status.chat.error, /chat_database_incomplete_schema/);
+    assert.match(status.chat.error, /chat_database_unsupported_schema:3/);
     assert.equal(child.exitCode, null);
   } catch (error: any) {
     throw new Error(

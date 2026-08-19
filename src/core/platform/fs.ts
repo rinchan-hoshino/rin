@@ -65,7 +65,7 @@ export async function appendJsonLine(filePath: string, value: unknown) {
 export function preferredTempRootCandidates() {
   return Array.from(
     new Set(
-      [process.env.TMPDIR, "/home/rin/tmp", os.tmpdir()]
+      [process.env.TMPDIR, os.tmpdir()]
         .map((value) => String(value || "").trim())
         .filter(Boolean)
         .map((value) => path.resolve(value)),

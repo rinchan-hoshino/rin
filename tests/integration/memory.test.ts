@@ -309,222 +309,21 @@ test("transcript search rebuilds canonical archives when search.db is missing", 
   });
 });
 
-test("installer replaces a schema-v4 transcript index from canonical archives", async () => {
+test("installer rejects transcript indexes older than the supported commit window", async () => {
   await withTempRoot(async (root) => {
-    const canonical = {
-      id: "canonical-v5-rebuild",
-      timestamp: "2026-04-04T11:11:11.000Z",
-      sessionId: "session-schema-rebuild",
-      sessionFile: "/tmp/session-schema-rebuild.jsonl",
-      role: "assistant",
-      text: "schema rebuild fidelity marker",
-    };
-    const archivePath = transcripts.getTranscriptArchivePath(canonical, root);
-    await fs.mkdir(path.dirname(archivePath), { recursive: true });
-    await fs.writeFile(archivePath, `${JSON.stringify(canonical)}\n`);
-
     const dbPath = path.join(root, "memory", "search.db");
     await fs.mkdir(path.dirname(dbPath), { recursive: true });
-    const oldDb = new BetterSqlite3(dbPath);
-    oldDb.pragma("journal_mode = WAL");
-    oldDb.pragma("wal_autocheckpoint = 0");
-    oldDb.exec(`
+    const db = new BetterSqlite3(dbPath);
+    db.exec(`
       CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
       INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
-      CREATE TABLE file_state(
-        archive_path TEXT PRIMARY KEY,
-        mtime_ms INTEGER NOT NULL,
-        size INTEGER NOT NULL
-      );
-      CREATE TABLE entries(
-        row_key TEXT PRIMARY KEY,
-        archive_path TEXT NOT NULL,
-        entry_id TEXT NOT NULL,
-        session_key TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        session_file TEXT NOT NULL,
-        timestamp TEXT NOT NULL,
-        timestamp_ms INTEGER NOT NULL,
-        line_number INTEGER NOT NULL,
-        role TEXT NOT NULL,
-        tool_name TEXT NOT NULL,
-        custom_type TEXT NOT NULL,
-        text TEXT NOT NULL,
-        preview TEXT NOT NULL,
-        entry_json TEXT NOT NULL
-      );
-      CREATE VIRTUAL TABLE entries_fts_token USING fts5(
-        row_key UNINDEXED, session_id, role, tool_name, custom_type, text
-      );
-      CREATE VIRTUAL TABLE entries_fts_trigram USING fts5(
-        row_key UNINDEXED, session_id, role, tool_name, custom_type, text,
-        tokenize = 'trigram'
-      );
     `);
-    const ghost = JSON.stringify({
-      ...canonical,
-      id: "schema-v4-ghost",
-      text: "stale schema v4 ghost marker",
-    });
-    oldDb
-      .prepare(
-        `INSERT INTO entries VALUES(
-          'ghost-row', 'ghost-archive', 'schema-v4-ghost', 'ghost-session',
-          'ghost-session', '/tmp/ghost.jsonl', '2026-04-01T00:00:00.000Z',
-          1, 1, 'assistant', '', '', 'stale schema v4 ghost marker',
-          'stale schema v4 ghost marker', ?
-        )`,
-      )
-      .run(ghost);
-    oldDb
-      .prepare("INSERT INTO entries_fts_token VALUES (?, ?, ?, ?, ?, ?)")
-      .run(
-        "ghost-row",
-        "ghost-session",
-        "assistant",
-        "",
-        "",
-        "stale schema v4 ghost marker",
-      );
-    oldDb
-      .prepare("INSERT INTO entries_fts_trigram VALUES (?, ?, ?, ?, ?, ?)")
-      .run(
-        "ghost-row",
-        "ghost-session",
-        "assistant",
-        "",
-        "",
-        "stale schema v4 ghost marker",
-      );
-    const protectedPaths = [
-      dbPath,
-      `${dbPath}-wal`,
-      `${dbPath}-shm`,
-      `${dbPath}.schema.json`,
-    ];
-    const filesBeforeRuntimeOpen = await snapshotFiles(protectedPaths);
-    assert.ok(filesBeforeRuntimeOpen[0].bytes);
-    assert.ok(filesBeforeRuntimeOpen[1].bytes);
-    assert.ok(filesBeforeRuntimeOpen[2].bytes);
-    assert.equal(filesBeforeRuntimeOpen[3].bytes, null);
+    db.close();
 
-    await assert.rejects(
-      transcripts.searchTranscriptArchive(
-        "schema rebuild fidelity marker",
-        { limit: 8 },
-        root,
-      ),
-      /transcript_search_install_migration_required/,
+    assert.throws(
+      () => transcriptSchemaMigration.preflightTranscriptSearchMigration(root),
+      /transcript_search_unsupported_schema:4/,
     );
-    assert.deepEqual(
-      await snapshotFiles(protectedPaths),
-      filesBeforeRuntimeOpen,
-    );
-    const preflight =
-      transcriptSchemaMigration.preflightTranscriptSearchMigration(root);
-    assert.equal(preflight.action, "rebuild");
-    assert.equal(preflight.currentVersion, null);
-    assert.equal(preflight.reason, "unmarked");
-    assert.deepEqual(
-      await snapshotFiles(protectedPaths),
-      filesBeforeRuntimeOpen,
-    );
-    const prepared =
-      await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
-        root,
-      );
-    assert.equal(prepared.prepared, true);
-    assert.equal(fsSync.existsSync(prepared.stagingDbPath), true);
-    assert.deepEqual(
-      await snapshotFiles(protectedPaths),
-      filesBeforeRuntimeOpen,
-    );
-    await fs.appendFile(
-      archivePath,
-      `${JSON.stringify({
-        ...canonical,
-        id: "canonical-after-preflight",
-        text: "canonical entry appended after migration preparation",
-      })}\n`,
-    );
-    const stillOldDb = new BetterSqlite3(dbPath, { readonly: true });
-    try {
-      assert.equal(
-        stillOldDb
-          .prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
-          .get().value,
-        "4",
-      );
-    } finally {
-      stillOldDb.close();
-      oldDb.close();
-    }
-
-    let publishGuardObserved = false;
-    const migration =
-      await transcriptSchemaMigration.migrateTranscriptSearchIndexForMigration(
-        root,
-        {
-          runtimeQuiesced: true,
-          onPublishGuard() {
-            publishGuardObserved = true;
-            assert.equal(fsSync.statSync(dbPath).isDirectory(), true);
-            assert.throws(() => new BetterSqlite3(dbPath));
-          },
-        },
-      );
-    assert.equal(publishGuardObserved, true);
-    assert.equal(migration.action, "rebuilt");
-    assert.equal(
-      transcriptSchemaMigration.finalizeTranscriptSearchMigrationForMigration(
-        root,
-      ).skipped,
-      false,
-    );
-
-    const results = await transcripts.searchTranscriptArchive(
-      "schema rebuild fidelity marker",
-      { limit: 8 },
-      root,
-    );
-    assert.equal(results[0].sessionId, canonical.sessionId);
-    assert.equal(
-      (
-        await transcripts.searchTranscriptArchive(
-          "canonical entry appended after migration preparation",
-          { limit: 8 },
-          root,
-        )
-      )[0].sessionId,
-      canonical.sessionId,
-    );
-    assert.deepEqual(
-      await transcripts.searchTranscriptArchive(
-        "stale schema v4 ghost marker",
-        { limit: 8, fidelity: "exact" },
-        root,
-      ),
-      [],
-    );
-    const rebuiltDb = new BetterSqlite3(dbPath, { readonly: true });
-    try {
-      assert.equal(
-        rebuiltDb
-          .prepare("SELECT value FROM metadata WHERE key = 'schema_version'")
-          .get().value,
-        "6",
-      );
-      assert.deepEqual(
-        rebuiltDb
-          .prepare(
-            "SELECT name FROM sqlite_master WHERE name IN ('entries_fts_token_content', 'entries_fts_trigram_content')",
-          )
-          .all(),
-        [],
-      );
-    } finally {
-      rebuiltDb.close();
-    }
   });
 });
 
@@ -693,7 +492,7 @@ test("installer publish failure restores the live transcript index", async () =>
     const liveDb = new BetterSqlite3(dbPath);
     liveDb.exec(`
       CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
     `);
     liveDb.close();
     const liveBytes = await fs.readFile(dbPath);
@@ -761,7 +560,7 @@ test("installer completes recovery after interruption following publish", async 
     const liveDb = new BetterSqlite3(dbPath);
     liveDb.exec(`
       CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
     `);
     liveDb.close();
     await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
@@ -805,7 +604,7 @@ test("installer rollback restores legacy bytes before restarting the old runtime
     const liveDb = new BetterSqlite3(dbPath);
     liveDb.exec(`
       CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
     `);
     liveDb.close();
     const legacyBytes = await fs.readFile(dbPath);
@@ -835,7 +634,7 @@ test("installer rollback removes a pre-backup marker before old-runtime restart"
     const liveDb = new BetterSqlite3(dbPath);
     liveDb.exec(`
       CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
     `);
     liveDb.close();
     const legacyBytes = await fs.readFile(dbPath);
@@ -861,7 +660,7 @@ test("installer preserves backup payloads when the backup manifest is invalid", 
     const liveDb = new BetterSqlite3(dbPath);
     liveDb.exec(`
       CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
     `);
     liveDb.close();
     await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
@@ -930,7 +729,7 @@ test("installer rejects a symlinked staging database before live mutation", asyn
     const liveDb = new BetterSqlite3(dbPath);
     liveDb.exec(`
       CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
     `);
     liveDb.close();
     const legacyBytes = await fs.readFile(dbPath);
@@ -964,7 +763,7 @@ test("installer rejects symlink backup payloads before finalization", async (t) 
     const liveDb = new BetterSqlite3(dbPath);
     liveDb.exec(`
       CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
     `);
     liveDb.close();
     await transcriptSchemaMigration.prepareTranscriptSearchMigrationForMigration(
@@ -1000,7 +799,7 @@ test("installer completes rollback after payload restore but before marker clean
     const liveDb = new BetterSqlite3(dbPath);
     liveDb.exec(`
       CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
     `);
     liveDb.close();
     const manifest = {
@@ -1078,7 +877,7 @@ test("installer preflight reuses and catches up a completed staging index", asyn
     const legacyDb = new BetterSqlite3(dbPath);
     legacyDb.exec(`
       CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-      INSERT INTO metadata(key, value) VALUES ('schema_version', '4');
+      INSERT INTO metadata(key, value) VALUES ('schema_version', '5');
     `);
     legacyDb.close();
     const first =
@@ -1161,7 +960,7 @@ test("installer retries an interrupted schema-v6 transcript rebuild", async () =
   });
 });
 
-test("runtime leaves a metadata-less legacy transcript index to the installer", async () => {
+test("installer rejects a metadata-less transcript index outside the supported window", async () => {
   await withTempRoot(async (root) => {
     const dbPath = path.join(root, "memory", "search.db");
     await fs.mkdir(path.dirname(dbPath), { recursive: true });
@@ -1175,10 +974,11 @@ test("runtime leaves a metadata-less legacy transcript index to the installer", 
       /transcript_search_install_migration_required/,
     );
     assert.deepEqual(await fs.readFile(dbPath), beforeRuntimeOpen);
-    const preflight =
-      transcriptSchemaMigration.preflightTranscriptSearchMigration(root);
-    assert.equal(preflight.currentVersion, null);
-    assert.equal(preflight.reason, "unmarked");
+    assert.throws(
+      () => transcriptSchemaMigration.preflightTranscriptSearchMigration(root),
+      /transcript_search_unsupported_schema:unmarked/,
+    );
+    assert.deepEqual(await fs.readFile(dbPath), beforeRuntimeOpen);
   });
 });
 

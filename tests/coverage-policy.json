@@ -110,11 +110,6 @@
       "status": "strict"
     },
     {
-      "source": "src/core/chat/archive-prototype.ts",
-      "ownerSuite": "integration",
-      "status": "strict"
-    },
-    {
       "source": "src/core/chat/boot.ts",
       "ownerSuite": "integration",
       "status": "strict"

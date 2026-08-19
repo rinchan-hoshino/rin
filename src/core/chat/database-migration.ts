@@ -20,6 +20,8 @@ import {
   validateRecordedChatDatabaseSchema,
 } from "./database.js";
 
+export const MIN_SUPPORTED_CHAT_DATABASE_SCHEMA_VERSION = 5;
+
 function retireLegacyTerminalWal(agentDir: string) {
   const source = path.join(agentDir, "data", "chat", "terminal-wal");
   if (!fs.existsSync(source)) return;
@@ -574,6 +576,9 @@ function upgradeRecordedChatDatabase(
     }
     return;
   }
+  if (currentVersion < MIN_SUPPORTED_CHAT_DATABASE_SCHEMA_VERSION) {
+    throw new Error(`chat_database_unsupported_schema:${currentVersion}`);
+  }
 
   validateRecordedChatDatabaseSchema(db, currentVersion);
   if (currentVersion === 9) {
@@ -581,18 +586,6 @@ function upgradeRecordedChatDatabase(
     recordCurrentSchemaVersion(db);
     return;
   }
-  const inboundRecoveryLeaseUpgradeSql = `
-    ALTER TABLE inbound_heads ADD COLUMN recovery_failure_count INTEGER NOT NULL DEFAULT 0
-      CHECK (recovery_failure_count >= 0);
-    ALTER TABLE inbound_heads ADD COLUMN recovery_first_failed_at TEXT;
-    ALTER TABLE inbound_heads ADD COLUMN recovery_last_failed_at TEXT;
-    ALTER TABLE inbound_heads ADD COLUMN recovery_paused_at TEXT;
-    ALTER TABLE inbound_heads ADD COLUMN recovery_next_attempt_at TEXT;
-    ALTER TABLE inbound_heads ADD COLUMN recovery_version INTEGER NOT NULL DEFAULT 0
-      CHECK (recovery_version >= 0);
-    CREATE INDEX inbound_heads_recovery_idx
-      ON inbound_heads(platform, bot_id, recovery_next_attempt_at, chat_key);
-  `;
   const canonicalRunUpgradeSql = `
     CREATE INDEX IF NOT EXISTS turns_run_idx
       ON turns(run_id, state, sequence)
@@ -672,43 +665,7 @@ function upgradeRecordedChatDatabase(
   `;
 
   if (currentVersion <= 6) {
-    if (currentVersion === 1) {
-      db.exec(`
-        DROP INDEX outbox_turn_terminal_idx;
-        CREATE UNIQUE INDEX outbox_turn_terminal_idx
-          ON outbox(turn_id)
-          WHERE ${CHAT_OUTBOX_SETTLEMENT_PREDICATE_SQL};
-        ALTER TABLE chat_state ADD COLUMN session_file TEXT;
-        ALTER TABLE chat_state ADD COLUMN legacy_session_imported INTEGER NOT NULL DEFAULT 0
-          CHECK (legacy_session_imported IN (0, 1));
-        ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
-        ${inboundRecoveryLeaseUpgradeSql}
-        ${durableTurnAdmissionUpgradeSql}
-      `);
-    } else if (currentVersion === 2) {
-      db.exec(`
-        ALTER TABLE chat_state ADD COLUMN session_file TEXT;
-        ALTER TABLE chat_state ADD COLUMN legacy_session_imported INTEGER NOT NULL DEFAULT 0
-          CHECK (legacy_session_imported IN (0, 1));
-        ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
-        ${inboundRecoveryLeaseUpgradeSql}
-        ${durableTurnAdmissionUpgradeSql}
-      `);
-    } else if (currentVersion === 3) {
-      db.exec(`
-        ALTER TABLE outbox ADD COLUMN dispatch_started_at TEXT;
-        ${inboundRecoveryLeaseUpgradeSql}
-        ${durableTurnAdmissionUpgradeSql}
-      `);
-    } else if (currentVersion === 4) {
-      db.exec(
-        `${inboundRecoveryLeaseUpgradeSql}\n${durableTurnAdmissionUpgradeSql}`,
-      );
-    } else if (currentVersion === 5) {
-      db.exec(durableTurnAdmissionUpgradeSql);
-    } else if (currentVersion !== 6) {
-      throw new Error(`chat_database_unsupported_schema:${currentVersion}`);
-    }
+    if (currentVersion === 5) db.exec(durableTurnAdmissionUpgradeSql);
     try {
       const activeRuns = Number(
         (

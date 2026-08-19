@@ -9,7 +9,7 @@ const repoRoot = path.resolve(
   "..",
 );
 const packageJsonPath = path.join(repoRoot, "package.json");
-const preferredTempRoot = [process.env.TMPDIR, "/home/rin/tmp", os.tmpdir()]
+const preferredTempRoot = [process.env.TMPDIR, os.tmpdir()]
   .map((value) => String(value || "").trim())
   .find(Boolean);
 
