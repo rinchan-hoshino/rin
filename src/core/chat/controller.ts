@@ -14,10 +14,6 @@ import {
   type RinFrontendTurnClient,
   type RinChatDeliveryContext,
 } from "../rin-frontend-sdk/index.js";
-import {
-  createRinFrontendTurnCancelledError,
-  isRinFrontendTurnCancelledError,
-} from "../rin-frontend-sdk/lifecycle-errors.js";
 import type { PromptContextMeta } from "../rin-lib/prompt-context.js";
 import { MANAGED_CHAT_SESSION_LEAF } from "../session/managed-paths.js";
 import { nowIso } from "../time-utils.js";
@@ -215,9 +211,6 @@ export class ChatController {
   todoDeliveryQueue: Promise<void> = Promise.resolve();
   latestAssistantSummaryText = "";
   awaitingTurnSettle = false;
-  turnAbortRequested = false;
-  turnAbortGeneration = 0;
-  intentionallyAbortedTurnGenerations = new Set<number>();
   sleepAfterIdleMs = 0;
   lastActivityAt = Date.now();
   commandResponses: {
@@ -356,9 +349,6 @@ export class ChatController {
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
-    this.turnAbortRequested = false;
-    this.turnAbortGeneration += 1;
-    this.intentionallyAbortedTurnGenerations.clear();
     this.pendingTurnPresentations.clear();
     this.driver.dispose();
   }
@@ -379,9 +369,6 @@ export class ChatController {
 
   async clearProcessingState() {
     this.awaitingTurnSettle = false;
-    this.turnAbortRequested = false;
-    this.turnAbortGeneration += 1;
-    this.intentionallyAbortedTurnGenerations.clear();
     this.stagedDelivery = null;
     await this.clearWorkingReaction().catch(() => {});
     await this.clearCompactionWorkingReaction().catch(() => {});
@@ -397,19 +384,6 @@ export class ChatController {
     this.backendAcceptedIncomingMessageId = "";
     this.pendingTurnPresentations.clear();
     this.saveState();
-  }
-
-  private noteIntentionalTurnAbort() {
-    this.intentionallyAbortedTurnGenerations.add(this.turnAbortGeneration);
-  }
-
-  private consumeIntentionalTurnAbort(turnGeneration: number) {
-    const consumed =
-      this.intentionallyAbortedTurnGenerations.delete(turnGeneration);
-    if (this.intentionallyAbortedTurnGenerations.size > 32) {
-      this.intentionallyAbortedTurnGenerations.clear();
-    }
-    return consumed;
   }
 
   private currentIncomingMessageId() {
@@ -2595,8 +2569,6 @@ export class ChatController {
     this.backendAcceptedIncomingMessageId = "";
     this.stagedDelivery = null;
     this.awaitingTurnSettle = false;
-    this.turnAbortRequested = false;
-    this.turnAbortGeneration = 0;
   }
 
   async terminateSession() {
@@ -2743,10 +2715,6 @@ export class ChatController {
         promptContext: commandName === "reload" ? promptMeta : undefined,
         onActiveTurnInterruptionCommitted: interruptingActiveTurn
           ? () => {
-              if (activeTurnInterruptionCommitted) return;
-              this.noteIntentionalTurnAbort();
-              this.turnAbortGeneration += 1;
-              this.turnAbortRequested = true;
               activeTurnInterruptionCommitted = true;
             }
           : undefined,
@@ -2827,7 +2795,6 @@ export class ChatController {
       this.commandUiParts = [];
       if (!interruptingActiveTurn || activeTurnInterruptionCommitted) {
         this.awaitingTurnSettle = false;
-        if (interruptingActiveTurn) this.turnAbortRequested = false;
         await this.clearWorkingReaction().catch(() => {});
         this.clearCurrentTurn();
         this.stagedDelivery = null;
@@ -2933,7 +2900,6 @@ export class ChatController {
         currentTurnBeforeSubmission.incomingMessageId !==
           input.incomingMessageId,
       );
-      const turnAbortGeneration = this.turnAbortGeneration;
       const { sessionFile: rawWantedSessionFile } = normalizeSessionRef(input);
       const wantedSessionFile = resolveSessionFileForUse(
         this.agentDir,
@@ -2980,9 +2946,6 @@ export class ChatController {
       if (this.currentTurn && !preserveCurrentTurn)
         this.currentTurn.requestTag = requestTag || undefined;
       try {
-        if (this.turnAbortGeneration !== turnAbortGeneration) {
-          throw createRinFrontendTurnCancelledError();
-        }
         const messageId = safeString(input.incomingMessageId).trim();
         const chatDeliveryContext =
           input.outboxTurnFence && messageId
@@ -3068,14 +3031,6 @@ export class ChatController {
               }
             : undefined,
         });
-        if (this.consumeIntentionalTurnAbort(turnAbortGeneration)) {
-          return {
-            finalText: "",
-            sessionId: this.currentSessionId() || undefined,
-            sessionFile: this.currentSessionFile(),
-            superseded: true,
-          };
-        }
         this.assertRestoredTurnStayedOnSession(
           restoreSessionFile,
           result.sessionFile || this.driver.currentSessionFile(),
@@ -3129,18 +3084,6 @@ export class ChatController {
           sessionFile: this.currentSessionFile(),
           superseded: result.superseded,
         };
-      } catch (error) {
-        if (this.consumeIntentionalTurnAbort(turnAbortGeneration)) {
-          return {
-            finalText: "",
-            sessionId: this.currentSessionId() || undefined,
-            sessionFile: this.currentSessionFile(),
-            superseded: true,
-          };
-        }
-        if ((error as any)?.rinTurnTerminal) throw error;
-        if (isRinFrontendTurnCancelledError(error)) throw error;
-        throw error;
       } finally {
         if (
           requestTag &&
@@ -3152,9 +3095,7 @@ export class ChatController {
           await this.clearWorkingReactionFor(input.incomingMessageId);
           this.clearCurrentTurnFor(input.incomingMessageId);
         }
-        this.intentionallyAbortedTurnGenerations.delete(turnAbortGeneration);
         this.awaitingTurnSettle = false;
-        this.turnAbortRequested = false;
         this.stagedDelivery = null;
         this.saveState();
       }

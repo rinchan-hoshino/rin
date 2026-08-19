@@ -108,6 +108,7 @@ type RinFrontendIgnoredTerminal = {
   sessionFile?: string;
   chatDeliveryContext?: RinChatDeliveryContext;
   terminalRecord?: RinFrontendTurnResult["terminalRecord"];
+  superseded?: boolean;
 };
 
 type RinFrontendBackendInterruption = {
@@ -979,7 +980,7 @@ export class RinFrontendTurnDriver {
       if (interruption.epoch === this.lifecycleEpoch) {
         for (const target of interruption.targets) {
           const terminal = this.takeBufferedInterruptionTerminal(target);
-          if (terminal) this.settleIgnoredTerminal(terminal);
+          if (terminal) this.settleIgnoredTerminal(terminal, true);
           this.releaseBackendInterruptionTarget(target);
         }
         this.trimIgnoredTerminalRequestTags();
@@ -1063,7 +1064,7 @@ export class RinFrontendTurnDriver {
       target.pendingInterruptions.delete(interruption);
       if (target.committed) {
         const terminal = this.takeBufferedInterruptionTerminal(target);
-        if (terminal) this.settleIgnoredTerminal(terminal);
+        if (terminal) this.settleIgnoredTerminal(terminal, true);
       } else if (target.pendingInterruptions.size === 0) {
         const terminal = this.takeBufferedInterruptionTerminal(target);
         if (terminal) {
@@ -1262,7 +1263,13 @@ export class RinFrontendTurnDriver {
     };
   }
 
-  private settleIgnoredTerminal(terminal: RinFrontendIgnoredTerminal) {
+  private settleIgnoredTerminal(
+    terminal: RinFrontendIgnoredTerminal,
+    superseded = false,
+  ) {
+    const settledTerminal = superseded
+      ? { ...terminal, superseded: true }
+      : terminal;
     const pendingSettlement = this.pendingSubmissionSettlements.get(
       terminal.requestTag,
     );
@@ -1273,13 +1280,14 @@ export class RinFrontendTurnDriver {
     ) {
       this.pendingSubmissionSettlements.delete(terminal.requestTag);
     }
-    if (terminal.event === "complete") {
+    if (superseded || terminal.event === "complete") {
       if (pendingSettlement) {
-        pendingSettlement.settleTerminal(terminal);
+        pendingSettlement.settleTerminal(settledTerminal);
       } else {
-        this.liveTurnForRequestTag(terminal.requestTag)?.resolve(
-          this.ignoredTerminalResult(terminal),
-        );
+        this.liveTurnForRequestTag(terminal.requestTag)?.resolve({
+          ...this.ignoredTerminalResult(terminal),
+          ...(superseded ? { superseded: true } : {}),
+        });
       }
       return;
     }
@@ -1391,7 +1399,11 @@ export class RinFrontendTurnDriver {
       if (this.lifecycleEpoch !== handlingEpoch) return;
       if (target && !ownsTargetEnvelope) return;
       if (!target || target.committed) {
-        this.settleIgnoredTerminal(ignoredTerminal);
+        this.settleIgnoredTerminal(
+          ignoredTerminal,
+          target?.committed === true ||
+            this.ignoredTerminalRequestTags.has(ignoredTerminal.requestTag),
+        );
       } else if (target.pendingInterruptions.size > 0) {
         target.bufferedTerminal ||= ignoredTerminal;
       } else {
@@ -2257,6 +2269,12 @@ export class RinFrontendTurnDriver {
           throw settledSubmission.error;
         }
         if (settledSubmission.kind === "terminal") {
+          if (settledSubmission.terminal.superseded) {
+            return {
+              ...this.ignoredTerminalResult(settledSubmission.terminal),
+              superseded: true,
+            };
+          }
           if (settledSubmission.terminal.event === "error") {
             throw this.ignoredTerminalError(settledSubmission.terminal);
           }
@@ -2359,6 +2377,24 @@ export class RinFrontendTurnDriver {
         sessionFile: targetSessionFile,
         chatDeliveryContext: input.chatDeliveryContext,
       });
+    } catch (error) {
+      if (
+        this.isTurnInterrupted(turnInterruptionSeq) &&
+        isRinFrontendTurnCancelledError(error)
+      ) {
+        return {
+          outcome: "nonterminal",
+          finalText: "",
+          sessionId: this.currentSessionId() || undefined,
+          sessionFile: this.currentSessionFile() || undefined,
+          requestTag:
+            safeString(activeRequestTag || input.requestTag).trim() ||
+            undefined,
+          chatDeliveryContext: input.chatDeliveryContext,
+          superseded: true,
+        };
+      }
+      throw error;
     } finally {
       if (activeRequestTag) this.startedRequestTags.delete(activeRequestTag);
       this.pendingTurnCount = Math.max(0, this.pendingTurnCount - 1);
@@ -2411,6 +2447,7 @@ export class RinFrontendTurnDriver {
       const finalText = safeString(completion?.finalText).trim();
       this.latestAssistantText = finalText;
       return {
+        ...completion,
         outcome: "terminalOwner" as const,
         finalText,
         result: completion?.result,
@@ -2423,6 +2460,12 @@ export class RinFrontendTurnDriver {
               input.sessionFile ||
               this.currentSessionFile(),
           ).trim() || undefined,
+        requestTag:
+          safeString(completion?.requestTag || requestTag).trim() || undefined,
+        chatDeliveryContext:
+          completion?.chatDeliveryContext || input.chatDeliveryContext,
+        terminalRecord: completion?.terminalRecord,
+        superseded: completion?.superseded,
       };
     } finally {
       this.liveTurnRecoveryContext = null;

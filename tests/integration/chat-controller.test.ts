@@ -1773,7 +1773,7 @@ test("chat controller delegates active /abort to the canonical frontend command 
   assert.deepEqual(deliveries, ["Aborted current operation."]);
 });
 
-test("chat controller suppresses an old successful complete after committed /abort", async () => {
+test("chat controller projects frontend supersession without owning abort lifecycle", async () => {
   const controller = await createController();
   const deliveries = [];
   let resolveOldTurn;
@@ -1801,13 +1801,14 @@ test("chat controller suppresses an old successful complete after committed /abo
     options?.onActiveTurnInterruptionCommitted?.();
     resolveOldTurn({
       outcome: "terminalOwner",
-      superseded: false,
-      finalText: "old successful final",
-      result: {
-        parts: [{ type: "text", text: "old successful final" }],
-      },
+      superseded: true,
+      finalText: "",
       requestTag: "request-old-complete",
       sessionFile: controller.driver.currentSessionFile(),
+      terminalRecord: {
+        terminalId: "terminal-old-aborted",
+        state: "error",
+      },
     });
     await new Promise((resolve) => setImmediate(resolve));
     return {
@@ -1858,8 +1859,6 @@ test("chat controller preserves the active turn when backend /abort fails", asyn
   controller.clearWorkingReaction = async () => {
     workingClears += 1;
   };
-  const abortGeneration = controller.turnAbortGeneration;
-
   await assert.rejects(
     controller.runCommand("/abort", "m-abort", "m-abort"),
     /backend abort rejected/,
@@ -1867,8 +1866,6 @@ test("chat controller preserves the active turn when backend /abort fails", asyn
 
   assert.equal(controller.currentTurn, activeTurn);
   assert.equal(controller.awaitingTurnSettle, true);
-  assert.equal(controller.turnAbortGeneration, abortGeneration);
-  assert.equal(controller.intentionallyAbortedTurnGenerations.size, 0);
   assert.equal(workingClears, 0);
 });
 
@@ -8878,13 +8875,6 @@ test("chat controller internal ownership helpers normalize durable and display s
   controller.saveState();
   controller.state.chatType = "unsupported";
   controller.saveState();
-
-  for (let generation = 0; generation < 34; generation += 1) {
-    controller.turnAbortGeneration = generation;
-    controller.noteIntentionalTurnAbort();
-  }
-  assert.equal(controller.consumeIntentionalTurnAbort(1), true);
-  assert.equal(controller.consumeIntentionalTurnAbort(999), false);
 
   assert.equal(controller.requestTagForInboundMessage(""), "");
   const requestTag = controller.requestTagForInboundMessage("message-1");

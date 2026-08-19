@@ -254,7 +254,7 @@ test("chat main answers /status locally while the same chat turn is running", as
   }
 });
 
-test("chat main lets an authorized /abort bypass a running same-chat turn", async () => {
+test("chat main lets authorized /abort bypass and terminalize the current same-chat turn", async () => {
   const tempRoot = os.tmpdir();
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -281,9 +281,12 @@ test("chat main lets an authorized /abort bypass a running same-chat turn", asyn
 
       let runTurnCalls = 0;
       let abortCalls = 0;
+      let settleActiveTurn;
       controllerMod.ChatController.prototype.runTurn = async function () {
         runTurnCalls += 1;
-        await new Promise(() => {});
+        return await new Promise((resolve) => {
+          settleActiveTurn = resolve;
+        });
       };
       controllerMod.ChatController.prototype.hasActiveTurn = function () {
         return runTurnCalls > 0;
@@ -291,6 +294,11 @@ test("chat main lets an authorized /abort bypass a running same-chat turn", asyn
       controllerMod.ChatController.prototype.runCommand = async function (command) {
         if (command !== "/abort") throw new Error("unexpected command: " + command);
         abortCalls += 1;
+        settleActiveTurn?.({
+          outcome: "terminalOwner",
+          finalText: "",
+          superseded: true,
+        });
       };
 
       const { app } = await mainMod.startChatBridge({ commandRows: [{ name: "abort" }] });
@@ -333,11 +341,19 @@ test("chat main lets an authorized /abort bypass a running same-chat turn", asyn
       app.emit("message", makeMessage("m-abort", "/abort"));
       const abortDeadline = Date.now() + 8000;
       let abortItem = null;
+      let activeItem = null;
       while (Date.now() < abortDeadline) {
-        abortItem = inboxMod
-          .listChatInboxItems(agentDir, ["pending", "running", "terminal", "failed"])
-          .find((item) => item.messageId === "m-abort");
-        if (abortCalls === 1 && abortItem?.state === "terminal") break;
+        const items = inboxMod.listChatInboxItems(
+          agentDir,
+          ["pending", "running", "terminal", "failed"],
+        );
+        abortItem = items.find((item) => item.messageId === "m-abort");
+        activeItem = items.find((item) => item.messageId === "m-active");
+        if (
+          abortCalls === 1 &&
+          abortItem?.state === "terminal" &&
+          activeItem?.state === "terminal"
+        ) break;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
       const untrustedAbortItem = inboxMod
@@ -346,11 +362,14 @@ test("chat main lets an authorized /abort bypass a running same-chat turn", asyn
       if (
         abortCalls !== 1 ||
         abortItem?.state !== "terminal" ||
-        untrustedAbortItem?.state !== "pending"
+        activeItem?.state !== "terminal" ||
+        untrustedAbortItem?.state !== "terminal" ||
+        untrustedAbortItem?.admission?.state !== "record_only"
       ) {
         throw new Error(JSON.stringify({
           abortCalls,
           abortItem,
+          activeItem,
           untrustedAbortItem,
           inboundRecovery: app.isInboundRecoveryChat("telegram/1:2"),
         }));

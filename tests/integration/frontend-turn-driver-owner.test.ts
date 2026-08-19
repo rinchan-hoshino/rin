@@ -646,9 +646,15 @@ test("frontend turn owner covers command and prompt boundary alternatives withou
         terminalAt: "2026-08-07T00:00:00.000Z",
       },
     });
-    await assert.rejects(
-      within(interrupted, "long-owner-turn-terminal"),
-      /Request was aborted/,
+    const interruptedResult = await within(
+      interrupted,
+      "long-owner-turn-terminal",
+    );
+    assert.equal(interruptedResult.superseded, true);
+    assert.equal(interruptedResult.outcome, "terminalOwner");
+    assert.equal(
+      interruptedResult.terminalRecord?.terminalId,
+      "terminal-long-owner-turn-aborted",
     );
 
     const createdMissing = createDriver();

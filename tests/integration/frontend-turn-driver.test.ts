@@ -2095,7 +2095,11 @@ test("frontend SDK /abort settles the active turn only from the canonical backen
     },
   };
   await emitDriverEvent(driver, terminalEvent);
-  await assert.rejects(activeTurn, /Request was aborted/);
+  const activeResult = await activeTurn;
+  assert.equal(activeResult.superseded, true);
+  assert.equal(activeResult.outcome, "terminalOwner");
+  assert.equal(activeResult.requestTag, requestTag);
+  assert.deepEqual(activeResult.terminalRecord, terminalEvent.terminalRecord);
   assert.equal(ackAttempts, 1);
   assert.equal(
     projected.some((event) => event.type === "turn_error"),
@@ -2126,6 +2130,75 @@ test("frontend SDK /abort settles the active turn only from the canonical backen
       terminalId: "terminal-aborted-turn",
     },
   });
+});
+
+test("frontend SDK lets Pi abort settle the current turn after a joined input cancels first", async () => {
+  const client = createFrontendClient();
+  const rejectPrompts = new Map<string, (error: Error) => void>();
+  client.prompt = async (_text: string, options: any = {}) =>
+    await new Promise((_resolve, reject) => {
+      rejectPrompts.set(options.requestTag, reject);
+    });
+  client.abort = async () => {
+    client.calls.push({ type: "abort" });
+  };
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+
+  let currentSettled = false;
+  const currentTurn = driver.runTurn({
+    text: "current turn",
+    requestTag: "request-current",
+  });
+  void currentTurn.then(
+    () => {
+      currentSettled = true;
+    },
+    () => {
+      currentSettled = true;
+    },
+  );
+  await waitUntil(
+    () => rejectPrompts.has("request-current"),
+    "current prompt did not start",
+  );
+  const joinedTurn = driver.runTurn({
+    text: "joined input",
+    requestTag: "request-joined",
+  });
+  joinedTurn.catch(() => {});
+  await waitUntil(
+    () => rejectPrompts.has("request-joined"),
+    "joined prompt did not start",
+  );
+
+  await driver.runCommand("/abort");
+  rejectPrompts.get("request-joined")?.(
+    new Error("rin_frontend_turn_cancelled"),
+  );
+  const joinedResult = await joinedTurn;
+  assert.equal(joinedResult.superseded, true);
+  assert.equal(joinedResult.outcome, "nonterminal");
+  assert.equal(currentSettled, false);
+
+  const terminalEvent = {
+    type: "rpc_turn_event",
+    event: "error",
+    requestTag: "request-current",
+    error: "Request was aborted",
+    terminalRecord: {
+      terminalId: "terminal-current-aborted",
+      state: "error",
+      terminalAt: "2026-08-19T09:58:19.276Z",
+    },
+  };
+  await emitDriverEvent(driver, terminalEvent);
+  const currentResult = await currentTurn;
+  assert.equal(currentResult.superseded, true);
+  assert.equal(currentResult.outcome, "terminalOwner");
+  assert.deepEqual(currentResult.terminalRecord, terminalEvent.terminalRecord);
 });
 
 test("frontend SDK restores ordinary terminal handling when backend /abort fails", async () => {
@@ -2257,7 +2330,7 @@ test("frontend SDK commits intentional abort presentation before settling a buff
   releaseAbort();
   await command;
   assert.equal(callbackSawSettled, false);
-  await assert.rejects(activeTurn, /Request was aborted/);
+  assert.equal((await activeTurn).superseded, true);
 });
 
 test("frontend SDK keeps a successful overlapping interruption committed when the first command rolls back during terminal ACK", async () => {
@@ -2349,7 +2422,7 @@ test("frontend SDK keeps a successful overlapping interruption committed when th
 
   releaseAck();
   await terminalDelivery;
-  await assert.rejects(activeTurn, /Request was aborted/);
+  assert.equal((await activeTurn).superseded, true);
   assert.equal(
     projected.some(
       (event) => event.type === "turn_error" && event.requestTag === requestTag,
@@ -2770,7 +2843,9 @@ test("frontend SDK keeps the first immutable terminal across pushed and direct d
 
   releaseAbort();
   await command;
-  await assert.rejects(activeTurn, /first immutable error/);
+  const immutableResult = await activeTurn;
+  assert.equal(immutableResult.superseded, true);
+  assert.deepEqual(immutableResult.terminalRecord, terminalRecord);
   assert.equal(
     client.calls.filter(
       (call: any) =>
@@ -2963,7 +3038,9 @@ test("frontend SDK keeps the first buffered terminal across sequential pushed an
 
   releaseAbort();
   await command;
-  await assert.rejects(activeTurn, /first sequential error/);
+  const sequentialResult = await activeTurn;
+  assert.equal(sequentialResult.superseded, true);
+  assert.deepEqual(sequentialResult.terminalRecord, terminalRecord);
 });
 
 test("frontend SDK ignores a sequential direct duplicate after all interruption participants roll back", async () => {
@@ -4635,7 +4712,7 @@ test("frontend SDK /new lets daemon new_session own active-turn interruption", a
     },
   });
 
-  await assert.rejects(activeTurn, /Request was aborted/);
+  assert.equal((await activeTurn).superseded, true);
   assert.equal(driver.currentSessionFile(), newSessionFile);
 });
 
@@ -4856,11 +4933,13 @@ for (const oldTerminalEvent of ["complete", "error"] as const) {
         ),
       ),
     ]);
-    assert.equal(settledOld.kind, oldTerminalEvent);
-    if (settledOld.kind === "complete") {
+    assert.equal(settledOld.kind, "complete");
+    assert.equal(settledOld.value.superseded, true);
+    if (oldTerminalEvent === "complete") {
       assert.equal(settledOld.value.finalText, "exact old final");
     } else {
-      assert.match(settledOld.error.message, /exact old failure/);
+      assert.equal(settledOld.value.finalText, "");
+      assert.equal(settledOld.value.terminalRecord?.state, "error");
     }
 
     reportStaleOldActive = true;

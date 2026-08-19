@@ -62,7 +62,6 @@ test("ChatController solely owns mutable lifecycle while pure chat decisions use
     "pendingTurnPresentations",
     "stagedDelivery",
     "todoDeliveryQueue",
-    "turnAbortGeneration",
   ]) {
     assert.ok(
       controllerFields.includes(field),
