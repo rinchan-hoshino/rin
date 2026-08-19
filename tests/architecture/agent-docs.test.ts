@@ -443,10 +443,10 @@ test("agent docs expose scheduled task operation workflow", () => {
     scheduledTasksReference.length <= 15_500,
     `Scheduled-task reference is ${scheduledTasksReference.length} characters`,
   );
-  assert.match(selfImproveDistillation, /Run a future-trigger replay/);
+  assert.match(selfImproveDistillation, /replay the future trigger/i);
   assert.match(
     selfImproveDistillation,
-    /For correction-based or repeated-failure evidence, also verify that no active hit recommends the rejected behavior/,
+    /corrections? or repeated failures.*(?:prove|verify).*no active guidance.*rejected behavior/i,
   );
   assert.match(scheduledTasksEntry, /## Verification/);
 });

@@ -45,14 +45,10 @@ function buildPromptBlock(
     if (options.includeSystemPrefaces) {
       const slot = trimText(doc?.self_improve_prompt_slot);
       if (slot === "agent_profile") {
-        lines.push(
-          "Use this agent profile as the standing role, voice, and response-style contract.",
-        );
+        lines.push("Standing role, voice, and response contract.");
       }
       if (slot === "core_doctrine") {
-        lines.push(
-          "Follow this core doctrine as the standing methodology and decision contract.",
-        );
+        lines.push("Standing method and decision contract.");
       }
     }
     lines.push(body);

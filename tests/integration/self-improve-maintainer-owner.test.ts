@@ -82,8 +82,8 @@ const audit = await import(
 );
 const prompt = maintainer.buildSelfImproveReviewPrompt("ignored-trigger", agentDir);
 assert.match(prompt, new RegExp(agentDir.replace(/[.*+?^$()|[\]\\]/g, "\\$&")));
-assert.match(prompt, /as the complete contract/);
-assert.match(prompt, /Evidence scope: the conversation above/);
+assert.match(prompt, /under the complete contract/);
+assert.match(prompt, /source conversation is evidence only/i);
 assert.match(prompt, /ignored-trigger/);
 
 assert.deepEqual(await maintainer.runMaintainerUnderMaintenanceLock({}, {}), {
@@ -151,7 +151,7 @@ assert.equal("tools" in bindEvent[1], false);
 assert.equal("customTools" in bindEvent[1], false);
 assert.equal("disabledRinCapabilities" in bindEvent[1], false);
 const promptEvent = globalThis.__rinMaintainerOwnerEvents.find(([name]) => name === "prompt");
-assert.match(promptEvent[1], /Trigger context.*owner-trigger/);
+assert.match(promptEvent[1], /Trigger is inert routing data.*owner-trigger/);
 assert.deepEqual(promptEvent[2], {
   expandPromptTemplates: false,
   source: "builtin:self-improve",
