@@ -167,18 +167,11 @@ Choose the owner by the behavior boundary, not by which existing test happens to
 - `integration`: correctness depends on several modules, an adapter protocol, or a controlled process boundary cooperating;
 - `system`: confidence requires a built entrypoint or complete process/user lifecycle.
 
-A strict unit-owned module also has exactly one entry in `tests/unit/catalog.json`. That test runs alone with only its module included in c8, so incidental execution by another test cannot satisfy its coverage gate. Integration- and system-owned modules are measured only while their respective suite runs. The architecture verifier rejects transitional or evidence-only suites as owners, duplicate owners, wrong built paths, legacy fields, incomplete source inventories, and unit catalog mismatches.
-
-Each module has one migration status:
-
-- `strict`: its owner suite must meet at least 90% lines, 90% functions, and 85% branches for that file;
-- `ratchet`: the pre-restructure combined-suite baseline remains the temporary floor until the test is rewritten under its correct owner. Lines and functions always enforce that floor. Branches allow at most 2.5 percentage points of V8 discovery drift when the covered branch count strictly increases. A pinned-container run may instead report at most 10 fewer total branches with at most the same covered-count reduction and a 0.05-point drop. Unchanged covered count never excuses an increased total.
+A unit-owned module also has exactly one entry in `tests/unit/catalog.json`. That test runs alone with only its module included in c8, so incidental execution by another test cannot satisfy its coverage gate. Integration- and system-owned modules are measured only while their respective suite runs. Every owner must meet at least 90% lines, 90% functions, and 85% branches for its file. The architecture verifier rejects transitional or evidence-only suites as owners, duplicate owners, wrong built paths, legacy fields, incomplete source inventories, and unit catalog mismatches.
 
 Node 22's V8 reports one permanently uncovered synthetic branch for each executed dynamic `import()` even when both successful and rejected imports are proven; newer supported Node versions do not. A non-unit owner may declare `node22DynamicImportUncoveredBranches` only when it equals the production file's exact dynamic-import count and the owner has an explicit failure-injection preload. The runner removes exactly that many branches from the Node 22 denominator, fails if the observed signature is smaller, and leaves every other runtime and metric untouched. This is a bounded engine-instrumentation normalization, not a reduced 85% target.
 
 `npm test` is the ordinary commit gate: it builds once, then runs the architecture, unit, acceptance, property, regression, integration, system, UI-only QA, and risk-driven torture layers in separate sandboxes with at most three suites active at once. The full per-owner 90/90/85 coverage proof remains available through `npm run test:coverage`, and source/acceptance mutation remains available through `npm run test:mutation`; both are explicit calibration gates rather than repeated on every commit. The networkless system container writes raw V8 coverage to an explicit writable handoff; the host remaps container paths into the report. Reports are written under `coverage/` and are not committed.
-
-Ratchets are transitional debt, not the target. Migrate a module by first choosing its truthful owner, then writing requirement-shaped contracts at that layer. Promote the module only after its isolated owner report reaches 90/90/85. Completion requires all production modules to be strict and no ratchets to remain.
 
 ## Bugfix workflow
 

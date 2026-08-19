@@ -1,27 +1,14 @@
-import { createHash } from "node:crypto";
-
 export const COVERAGE_OWNER_SUITES = ["unit", "integration", "system"] as const;
 
 export type CoverageOwnerSuite = (typeof COVERAGE_OWNER_SUITES)[number];
 export type CoverageMetricName = "lines" | "functions" | "branches";
 export type CoverageThresholds = Record<CoverageMetricName, number>;
-type CoverageModuleBase = {
+export type CoverageModule = {
   source: string;
   ownerSuite: CoverageOwnerSuite;
 };
-export type StrictCoverageModule = CoverageModuleBase & {
-  status: "strict";
-};
-export type RatchetCoverageModule = CoverageModuleBase & {
-  status: "ratchet";
-  baseline: Record<CoverageMetricName, CoverageMetric>;
-};
-export type CoverageModule = StrictCoverageModule | RatchetCoverageModule;
 export type CoveragePolicy = {
-  schemaVersion: 3;
-  productionSourceRef: "fa644064";
-  baselineHarnessVersion: 3;
-  baselineCommand: "npm run test:coverage";
+  schemaVersion: 4;
   thresholds: CoverageThresholds;
   modules: CoverageModule[];
 };
@@ -84,26 +71,10 @@ export function validateCoveragePolicy(
 ): string[] {
   const errors: string[] = [];
   if (!isRecord(value)) return ["coverage_policy_invalid"];
-  if (
-    !hasExactFields(value, [
-      "schemaVersion",
-      "productionSourceRef",
-      "baselineHarnessVersion",
-      "baselineCommand",
-      "thresholds",
-      "modules",
-    ])
-  ) {
+  if (!hasExactFields(value, ["schemaVersion", "thresholds", "modules"])) {
     errors.push("coverage_policy_fields_invalid");
   }
-  if (value.schemaVersion !== 3) errors.push("unsupported_schema:coverage");
-  if (
-    value.productionSourceRef !== "fa644064" ||
-    value.baselineHarnessVersion !== 3 ||
-    value.baselineCommand !== "npm run test:coverage"
-  ) {
-    errors.push("coverage_baseline_provenance_changed");
-  }
+  if (value.schemaVersion !== 4) errors.push("unsupported_schema:coverage");
   if (
     !isRecord(value.thresholds) ||
     JSON.stringify(value.thresholds) !== JSON.stringify(requiredThresholds)
@@ -124,53 +95,15 @@ export function validateCoveragePolicy(
     }
     const source =
       typeof rawModule.source === "string" ? rawModule.source : "?";
-    const status = rawModule.status;
-    const expectedFields =
-      status === "ratchet"
-        ? ["source", "ownerSuite", "status", "baseline"]
-        : ["source", "ownerSuite", "status"];
-    if (!hasExactFields(rawModule, expectedFields)) {
+    if (!hasExactFields(rawModule, ["source", "ownerSuite"])) {
       errors.push(`coverage_module_fields_invalid:${source}`);
-    }
-    if (status !== "strict" && status !== "ratchet") {
-      errors.push(`coverage_status_invalid:${source}:${String(status)}`);
     }
     const owner = rawModule.ownerSuite;
     sources.push(source);
     if (!COVERAGE_OWNER_SUITES.includes(owner as CoverageOwnerSuite)) {
       errors.push(`coverage_owner_invalid:${source}:${String(owner)}`);
-    } else if (owner === "unit" && status === "strict") {
+    } else if (owner === "unit") {
       unitOwners.push(source);
-    }
-    if (status === "ratchet") {
-      if (!isRecord(rawModule.baseline)) {
-        errors.push(`coverage_baseline_invalid:${source}`);
-      } else {
-        for (const metric of metricNames) {
-          const baseline = rawModule.baseline[metric];
-          const total = isRecord(baseline) ? baseline.total : undefined;
-          const covered = isRecord(baseline) ? baseline.covered : undefined;
-          const pct = isRecord(baseline) ? baseline.pct : undefined;
-          const expectedPct =
-            typeof total === "number" &&
-            typeof covered === "number" &&
-            total > 0
-              ? Math.floor((covered / total) * 10_000) / 100
-              : 100;
-          if (
-            !Number.isInteger(total) ||
-            !Number.isInteger(covered) ||
-            typeof pct !== "number" ||
-            (total as number) < (covered as number) ||
-            (covered as number) < 0 ||
-            pct < 0 ||
-            pct > 100 ||
-            Math.abs(pct - expectedPct) > 0.005
-          ) {
-            errors.push(`coverage_baseline_invalid:${source}:${metric}`);
-          }
-        }
-      }
     }
   }
 
@@ -205,30 +138,10 @@ export function buildCoverageOwnerPlans(
     suite,
     tests: [...tests[suite]].sort(),
     includes: policy.modules
-      .filter(
-        (module) => module.ownerSuite === suite && module.status === "strict",
-      )
+      .filter((module) => module.ownerSuite === suite)
       .map((module) => builtPathForSource(module.source))
       .sort(),
   })).filter((plan) => plan.includes.length > 0);
-}
-
-export function ratchetBaselineDigest(policy: CoveragePolicy) {
-  const payload = {
-    productionSourceRef: policy.productionSourceRef,
-    baselineHarnessVersion: policy.baselineHarnessVersion,
-    baselineCommand: policy.baselineCommand,
-    modules: policy.modules
-      .filter((module) => module.status === "ratchet")
-      .map(({ source, ownerSuite, status, baseline }) => ({
-        source,
-        built: builtPathForSource(source),
-        ownerSuite,
-        status,
-        baseline,
-      })),
-  };
-  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
 export function normalizeNode22DynamicImportBranches(
@@ -248,36 +161,6 @@ export function normalizeNode22DynamicImportBranches(
   const pct =
     total > 0 ? Math.floor((metric.covered / total) * 10_000) / 100 : 100;
   return { total, covered: metric.covered, pct };
-}
-
-export function verifyRatchetMetric(
-  name: CoverageMetricName,
-  actual: CoverageMetric,
-  baseline: CoverageMetric,
-): string | undefined {
-  if (
-    name !== "branches" ||
-    actual.total === baseline.total ||
-    actual.pct + 0.005 >= baseline.pct
-  ) {
-    return actual.pct + 0.005 < baseline.pct
-      ? `${name} ${actual.pct.toFixed(2)}% < ${baseline.pct.toFixed(2)}% (coverage ratchet)`
-      : undefined;
-  }
-  const percentageDrop = baseline.pct - actual.pct;
-  const boundedAddedDiscovery =
-    actual.covered > baseline.covered && percentageDrop <= 2.5;
-  const totalDrop = baseline.total - actual.total;
-  const coveredDrop = baseline.covered - actual.covered;
-  const boundedReducedDiscovery =
-    totalDrop > 0 &&
-    totalDrop <= 10 &&
-    coveredDrop >= 0 &&
-    coveredDrop <= totalDrop &&
-    percentageDrop <= 0.05;
-  return boundedAddedDiscovery || boundedReducedDiscovery
-    ? undefined
-    : `${name} ${actual.covered}/${actual.total} (${actual.pct.toFixed(2)}%) < baseline ${baseline.covered}/${baseline.total} (${baseline.pct.toFixed(2)}%) (coverage ratchet)`;
 }
 
 export function verifyOwnedCoverage(

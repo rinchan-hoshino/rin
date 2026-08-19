@@ -861,8 +861,8 @@ export function verifyTestArchitecture() {
     errors.push("torture_gate_not_wired");
   }
 
-  const strictNonUnit = coveragePolicy.modules.filter(
-    (module) => module.status === "strict" && module.ownerSuite !== "unit",
+  const nonUnitOwners = coveragePolicy.modules.filter(
+    (module) => module.ownerSuite !== "unit",
   );
   if (
     JSON.stringify(nonUnitCatalog.thresholds) !==
@@ -873,7 +873,7 @@ export function verifyTestArchitecture() {
   if (
     !sameMembers(
       nonUnitCatalog.modules.map((entry) => entry.source),
-      strictNonUnit.map((module) => module.source),
+      nonUnitOwners.map((module) => module.source),
     )
   ) {
     errors.push("non_unit_catalog_owner_mismatch");
@@ -883,7 +883,7 @@ export function verifyTestArchitecture() {
     "non_unit_source",
   );
   for (const entry of nonUnitCatalog.modules) {
-    const owner = strictNonUnit.find(
+    const owner = nonUnitOwners.find(
       (module) => module.source === entry.source,
     );
     if (

@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["./rin-extension-api.ts"]
+  "include": ["./rin-agent-sdk.ts", "./rin-extension-api.ts"]
 }

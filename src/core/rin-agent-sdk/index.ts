@@ -1,6 +1,7 @@
 import { requestDaemonCommand } from "../rin-daemon/client.js";
 import type { ChatMessageRead } from "../chat/message-query.js";
 import type { RinFrontendIdentity } from "../rin-lib/frontend-identity.js";
+import type { ChatOutboxPayloadInput } from "../rin-lib/chat-outbox-contract.js";
 import type { RinToolStartupOptions } from "../rin-lib/tool-options.js";
 
 export type RinAgentSdkOptions = {
@@ -35,11 +36,12 @@ export type ChatRunTurnOptions = RinToolStartupOptions & {
   promptMeta?: unknown;
 };
 
-export type ChatSendOptions = {
-  chatKey: string;
+export type ChatSendOptions = Omit<
+  ChatOutboxPayloadInput,
+  "createdAt" | "parts"
+> & {
   text?: string;
-  parts?: unknown[];
-  [key: string]: unknown;
+  parts?: ChatOutboxPayloadInput["parts"];
 };
 
 export type ChatTypingOptions =

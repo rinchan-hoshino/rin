@@ -10,9 +10,6 @@ import { importBuiltModule } from "../support/import-built-module.js";
 const store = await importBuiltModule<
   typeof import("../../src/core/self-improve/store.js")
 >("dist/core/self-improve/store.js");
-const core = await importBuiltModule<
-  typeof import("../../src/core/self-improve/core/index.js")
->("dist/core/self-improve/core/index.js");
 
 async function withTempRoot(run: (root: string) => Promise<void>) {
   const root = await fs.mkdtemp(
@@ -25,11 +22,10 @@ async function withTempRoot(run: (root: string) => Promise<void>) {
   }
 }
 
-test("self-improve store owns its layout and public core barrel", async () => {
+test("self-improve store owns its layout", async () => {
   await withTempRoot(async (root) => {
-    assert.equal(core.ensureSelfImproveLayout, store.ensureSelfImproveLayout);
     assert.equal(
-      await core.ensureSelfImproveLayout(root),
+      await store.ensureSelfImproveLayout(root),
       path.join(root, "self_improve"),
     );
     for (const directory of ["prompts", "skills", "state"]) {

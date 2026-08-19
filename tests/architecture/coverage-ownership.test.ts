@@ -5,10 +5,8 @@ import test from "node:test";
 import {
   buildCoverageOwnerPlans,
   normalizeNode22DynamicImportBranches,
-  ratchetBaselineDigest,
   validateCoveragePolicy,
   verifyOwnedCoverage,
-  verifyRatchetMetric,
   type CoveragePolicy,
 } from "../../scripts/test/coverage-ownership.js";
 
@@ -19,26 +17,20 @@ const sources = [
   "src/core/protocol.ts",
 ];
 const policy: CoveragePolicy = {
-  schemaVersion: 3,
-  productionSourceRef: "fa644064",
-  baselineHarnessVersion: 3,
-  baselineCommand: "npm run test:coverage",
+  schemaVersion: 4,
   thresholds,
   modules: [
     {
       source: sources[0],
       ownerSuite: "system",
-      status: "strict",
     },
     {
       source: sources[1],
       ownerSuite: "unit",
-      status: "strict",
     },
     {
       source: sources[2],
       ownerSuite: "integration",
-      status: "strict",
     },
   ],
 };
@@ -58,7 +50,7 @@ test("coverage policy gives every production module one rightful owner suite", (
   assert.deepEqual(validateCoveragePolicy(policy, sources, unitCatalog), []);
 });
 
-test("coverage policy rejects duplicate, transitional, and cross-layer ownership", () => {
+test("coverage policy rejects duplicate and cross-layer ownership", () => {
   const duplicate = structuredClone(policy) as CoveragePolicy;
   duplicate.modules.push({ ...duplicate.modules[0], ownerSuite: "unit" });
   assert.match(
@@ -66,12 +58,12 @@ test("coverage policy rejects duplicate, transitional, and cross-layer ownership
     /coverage_source_duplicates:src\/app\/rin\/main\.ts/,
   );
 
-  const transitional = structuredClone(policy) as unknown as {
+  const invalidOwner = structuredClone(policy) as unknown as {
     modules: Array<Record<string, unknown>>;
   };
-  transitional.modules[0].ownerSuite = "migration";
+  invalidOwner.modules[0].ownerSuite = "migration";
   assert.match(
-    validateCoveragePolicy(transitional, sources, unitCatalog).join("\n"),
+    validateCoveragePolicy(invalidOwner, sources, unitCatalog).join("\n"),
     /coverage_owner_invalid:src\/app\/rin\/main\.ts:migration/,
   );
 
@@ -93,6 +85,15 @@ test("coverage policy rejects legacy fields and an incomplete source inventory",
     /coverage_module_fields_invalid:src\/app\/rin\/main\.ts/,
   );
 
+  const legacyPolicy = {
+    ...structuredClone(policy),
+    productionSourceRef: "historical-ref",
+  };
+  assert.match(
+    validateCoveragePolicy(legacyPolicy, sources, unitCatalog).join("\n"),
+    /coverage_policy_fields_invalid/,
+  );
+
   assert.match(
     validateCoveragePolicy(
       policy,
@@ -103,36 +104,7 @@ test("coverage policy rejects legacy fields and an incomplete source inventory",
   );
 });
 
-test("ratchet ownership is recorded but cannot enter strict owner coverage", () => {
-  const transitional = structuredClone(policy) as CoveragePolicy;
-  transitional.modules[1] = {
-    ...transitional.modules[1],
-    status: "ratchet",
-    baseline: {
-      lines: { total: 10, covered: 5, pct: 50 },
-      functions: { total: 2, covered: 1, pct: 50 },
-      branches: { total: 4, covered: 2, pct: 50 },
-    },
-  };
-
-  assert.deepEqual(
-    validateCoveragePolicy(transitional, sources, {
-      ...unitCatalog,
-      modules: [],
-    }),
-    [],
-  );
-  assert.equal(
-    buildCoverageOwnerPlans(transitional, {
-      unit: ["tests/unit/example.test.ts"],
-      integration: ["tests/integration/protocol.test.ts"],
-      system: ["tests/system/rin.test.ts"],
-    }).some((plan) => plan.includes.includes("dist/core/example.js")),
-    false,
-  );
-});
-
-test("coverage owner plans contain only their own suite tests and strict modules", () => {
+test("coverage owner plans contain only their own suite tests and modules", () => {
   const plans = buildCoverageOwnerPlans(policy, {
     unit: ["tests/unit/example.test.ts"],
     integration: ["tests/integration/protocol.test.ts"],
@@ -165,8 +137,7 @@ test("coverage owner plans contain only their own suite tests and strict modules
   };
   for (const plan of plans) {
     const modules = policy.modules.filter(
-      (module) =>
-        module.status === "strict" && module.ownerSuite === plan.suite,
+      (module) => module.ownerSuite === plan.suite,
     );
     const summary = Object.fromEntries(
       plan.includes.map((built) => [built, passing]),
@@ -177,24 +148,6 @@ test("coverage owner plans contain only their own suite tests and strict modules
       plan.suite,
     );
   }
-});
-
-test("ratchet baselines are immutable evidence rather than editable floors", () => {
-  const transitional = structuredClone(policy) as CoveragePolicy;
-  transitional.modules[2] = {
-    ...transitional.modules[2],
-    status: "ratchet",
-    baseline: {
-      lines: { total: 10, covered: 5, pct: 50 },
-      functions: { total: 2, covered: 1, pct: 50 },
-      branches: { total: 4, covered: 2, pct: 50 },
-    },
-  };
-  const original = ratchetBaselineDigest(transitional);
-  if (transitional.modules[2].status !== "ratchet") assert.fail("fixture");
-  transitional.modules[2].baseline.lines.covered = 4;
-  transitional.modules[2].baseline.lines.pct = 40;
-  assert.notEqual(ratchetBaselineDigest(transitional), original);
 });
 
 test("Node 22 normalization removes only declared dynamic-import branch artifacts", () => {
@@ -222,42 +175,6 @@ test("Node 22 normalization removes only declared dynamic-import branch artifact
         22,
       ),
     /signature_mismatch/,
-  );
-});
-
-test("ratchet validation permits only bounded V8 branch discovery drift", () => {
-  const baseline = { total: 100, covered: 90, pct: 90 };
-  assert.equal(
-    verifyRatchetMetric(
-      "branches",
-      { total: 102, covered: 91, pct: 89.21 },
-      baseline,
-    ),
-    undefined,
-  );
-  assert.match(
-    verifyRatchetMetric(
-      "branches",
-      { total: 102, covered: 90, pct: 88.23 },
-      baseline,
-    ) ?? "",
-    /coverage ratchet/,
-  );
-  assert.equal(
-    verifyRatchetMetric(
-      "branches",
-      { total: 190, covered: 95, pct: 50 },
-      { total: 200, covered: 100, pct: 50 },
-    ),
-    undefined,
-  );
-  assert.match(
-    verifyRatchetMetric(
-      "lines",
-      { total: 100, covered: 89, pct: 89 },
-      baseline,
-    ) ?? "",
-    /coverage ratchet/,
   );
 });
 

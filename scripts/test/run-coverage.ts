@@ -14,7 +14,6 @@ import {
   type UnitCatalog,
   normalizeNode22DynamicImportBranches,
   verifyOwnedCoverage,
-  verifyRatchetMetric,
 } from "./coverage-ownership.js";
 import { networkIsolatedNodeInvocation } from "./network-isolated-process.js";
 import { mapWithConcurrency } from "./parallel.js";
@@ -263,8 +262,8 @@ async function runNonUnitOwnerCoverage(
     thresholds: CoveragePolicy["thresholds"];
     modules: NonUnitEntry[];
   }>("tests/non-unit/catalog.json");
-  const strictModules = policy.modules.filter(
-    (module) => module.status === "strict" && module.ownerSuite !== "unit",
+  const nonUnitModules = policy.modules.filter(
+    (module) => module.ownerSuite !== "unit",
   );
 
   const indexedEntries = catalog.modules
@@ -293,7 +292,7 @@ async function runNonUnitOwnerCoverage(
     async ({ index, entries }) => {
       const failures: string[] = [];
       const owned = entries.flatMap((entry) => {
-        const module = strictModules.find(
+        const module = nonUnitModules.find(
           (candidate) =>
             candidate.source === entry.source &&
             candidate.ownerSuite === entry.suite,
@@ -370,7 +369,7 @@ async function runNonUnitOwnerCoverage(
     const catalogSources = new Set(
       catalog.modules.map((entry) => entry.source),
     );
-    for (const module of strictModules) {
+    for (const module of nonUnitModules) {
       if (!catalogSources.has(module.source)) {
         failures.push(`non_unit_catalog_missing:${module.source}`);
       }
@@ -383,9 +382,7 @@ async function runNonUnitOwnerCoverage(
   const counts = Object.fromEntries(
     ["integration", "system"].map((suite) => [
       suite,
-      policy.modules.filter(
-        (module) => module.status === "strict" && module.ownerSuite === suite,
-      ).length,
+      policy.modules.filter((module) => module.ownerSuite === suite).length,
     ]),
   );
   console.log(
@@ -393,78 +390,38 @@ async function runNonUnitOwnerCoverage(
   );
 }
 
-async function runCombinedRatchetCoverage(policy: CoveragePolicy) {
+async function runCombinedBehaviorSuite() {
   const behaviorSuites = TEST_SUITES.filter(
     (suite) => suite !== "qa" && suite !== "torture",
   );
   const tests = findTestFiles(behaviorSuites);
-  const ratchetCount = policy.modules.filter(
-    (entry) => entry.status === "ratchet",
-  ).length;
-  if (ratchetCount === 0) {
-    const unitCatalog = readJson<UnitCatalog>("tests/unit/catalog.json");
-    const nonUnitCatalog = readJson<{
-      modules: Array<{ tests: string[] }>;
-    }>("tests/non-unit/catalog.json");
-    const ownerTests = new Set([
-      ...unitCatalog.modules.map((entry) => entry.test),
-      ...nonUnitCatalog.modules.flatMap((entry) => entry.tests),
-    ]);
-    const behaviorTests = tests.filter((testFile) => !ownerTests.has(testFile));
-    const result = spawnSync(
-      process.execPath,
-      [
-        "--import",
-        "tsx",
-        "scripts/test/run-test-files.ts",
-        "--concurrency=2",
-        ...behaviorTests,
-      ],
-      { cwd: rootDir, env: process.env, stdio: "inherit" },
-    );
-    if (result.error) throw result.error;
-    if (result.status !== 0) {
-      throw new Error(`combined_behavior_failed:${result.status ?? "unknown"}`);
-    }
-    console.log(
-      `Combined behavior suite: ${behaviorTests.length} non-owner files, no ratchet modules.`,
-    );
-    return;
+  const unitCatalog = readJson<UnitCatalog>("tests/unit/catalog.json");
+  const nonUnitCatalog = readJson<{
+    modules: Array<{ tests: string[] }>;
+  }>("tests/non-unit/catalog.json");
+  const ownerTests = new Set([
+    ...unitCatalog.modules.map((entry) => entry.test),
+    ...nonUnitCatalog.modules.flatMap((entry) => entry.tests),
+  ]);
+  const behaviorTests = tests.filter((testFile) => !ownerTests.has(testFile));
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      "scripts/test/run-test-files.ts",
+      "--concurrency=2",
+      ...behaviorTests,
+    ],
+    { cwd: rootDir, env: process.env, stdio: "inherit" },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`combined_behavior_failed:${result.status ?? "unknown"}`);
   }
-  const summary = await runCoverage({
-    name: "combined",
-    tests,
-    includes: ["dist/**/*.js"],
-    concurrency: 2,
-  });
-  const failures: string[] = [];
-
-  for (const module of policy.modules) {
-    if (module.status !== "ratchet") continue;
-    const built = builtPathForSource(module.source);
-    if (!fs.existsSync(path.join(rootDir, built))) {
-      failures.push(`${built} built module missing`);
-      continue;
-    }
-    const actual = summaryFor(summary, built);
-    if (!actual) {
-      failures.push(`${built} coverage summary missing`);
-      continue;
-    }
-    for (const name of metricNames) {
-      const failure = verifyRatchetMetric(
-        name,
-        actual[name],
-        module.baseline[name],
-      );
-      if (failure) failures.push(`${built} ${failure}`);
-    }
-  }
-
-  if (failures.length > 0) {
-    throw new Error(`combined_coverage_failed:\n${failures.join("\n")}`);
-  }
-  console.log(`Combined behavior suite: ${ratchetCount} ratchets passed.`);
+  console.log(
+    `Combined behavior suite: ${behaviorTests.length} non-owner files.`,
+  );
 }
 
 requireTestContainer();
@@ -488,10 +445,10 @@ if (unitOnly) await runUnitCoverage(selectedOwnerTest);
 else {
   const policy = readJson<CoveragePolicy>("tests/coverage-policy.json");
   if (nonUnitOnly) await runNonUnitOwnerCoverage(policy, selectedSource);
-  else if (combinedOnly) await runCombinedRatchetCoverage(policy);
+  else if (combinedOnly) await runCombinedBehaviorSuite();
   else {
     await runUnitCoverage();
     await runNonUnitOwnerCoverage(policy);
-    await runCombinedRatchetCoverage(policy);
+    await runCombinedBehaviorSuite();
   }
 }

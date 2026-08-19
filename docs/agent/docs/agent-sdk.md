@@ -27,7 +27,7 @@ Use `createRinAgentSdk({ timeoutMs, socketPath })` instead of the singleton only
 - `rin.sessions`: `list({ limit?, offset? })`.
 - `rin.tasks` reads: `list()`, `get(taskId)`.
 - `rin.tasks` writes: `upsert(task, defaults?)`, `delete(taskId)`, `complete(taskId, reason?)`, `pause(taskId)`, `resume(taskId)`, `rescheduleOnce(taskId, runAt)`, `run(taskId)`, `wake(taskId)`, `reload()`.
-- `rin.chat` delivery: `send({ chatKey, text })` or `send({ chatKey, content })`, `typing(chatKey)`, `react(payload)`.
+- `rin.chat` delivery: `send({ chatKey, text })` or `send({ chatKey, parts })`, `typing(chatKey)`, `react(payload)`.
 - `rin.chat` turns: `runTurn(payload)`, `terminateTurn(controllerKey)` or `terminateTurn(payload)`.
 - `rin.chat.messages`: `get({ chatKey, messageId })`, `list({ chatKey, before?, after?, limit? })`.
 - `rin.chat` bridge-local: `evalBridge({ currentChatKey, requestId, code })`.

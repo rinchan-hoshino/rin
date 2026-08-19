@@ -7,10 +7,6 @@
   },
   "modules": [
     {
-      "test": "tests/unit/chat-bridge-prompt-context.test.ts",
-      "source": "src/core/chat-bridge/prompt-context.ts"
-    },
-    {
       "test": "tests/unit/chat-delivery-policy.test.ts",
       "source": "src/core/chat/delivery-policy.ts"
     },
@@ -227,14 +223,6 @@
       "source": "src/core/rin-lib/interruption.ts"
     },
     {
-      "test": "tests/unit/jiti-aliases.test.ts",
-      "source": "src/core/rin-lib/jiti-aliases.ts"
-    },
-    {
-      "test": "tests/unit/memory-task-config.test.ts",
-      "source": "src/core/rin-lib/memory-task-config.ts"
-    },
-    {
       "test": "tests/unit/prompt-context.test.ts",
       "source": "src/core/rin-lib/prompt-context.ts"
     },
@@ -293,10 +281,6 @@
     {
       "test": "tests/unit/run-lite.test.ts",
       "source": "src/core/rin/run-lite.ts"
-    },
-    {
-      "test": "tests/unit/tui-report.test.ts",
-      "source": "src/core/rin/tui-report.ts"
     },
     {
       "test": "tests/unit/scheduled-task-options.test.ts",

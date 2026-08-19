@@ -966,11 +966,6 @@
       "tests": ["tests/integration/self-improve-fixed-window.test.ts"]
     },
     {
-      "source": "src/core/self-improve/core/index.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/self-improve-core-index-owner.test.ts"]
-    },
-    {
       "source": "src/core/self-improve/index.ts",
       "suite": "integration",
       "tests": [
@@ -1027,11 +1022,6 @@
         "tests/integration/session-paged-listing-owner.test.ts",
         "tests/integration/session-paged-listing-fallback-owner.test.ts"
       ]
-    },
-    {
-      "source": "src/core/session/runner.ts",
-      "suite": "integration",
-      "tests": ["tests/integration/session-runner-owner.test.ts"]
     }
   ]
 }
