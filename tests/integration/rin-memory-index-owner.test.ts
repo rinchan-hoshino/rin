@@ -102,7 +102,7 @@ test("memory-index help is handled before loading transcript storage", async () 
   }
   assert.equal(lines.length, 2);
   assert.match(lines[0], /rin memory-index repair/);
-  assert.match(lines[1], /rebuild the recall index/);
+  assert.match(lines[1], /synchronize the recall index/);
 });
 
 test("memory-index repairs the selected local target and reports persisted counts", async () => {
@@ -121,7 +121,7 @@ test("memory-index repairs the selected local target and reports persisted count
     }
 
     assert.equal(lines.length, 1);
-    assert.match(lines[0], /^memory index repaired\n/);
+    assert.match(lines[0], /^memory index synchronized\n/);
     assert.match(
       lines[0],
       new RegExp(
@@ -148,7 +148,7 @@ test("memory-index internal repair honors RIN_DIR over HOME", async () => {
       if (previous === undefined) delete process.env.RIN_DIR;
       else process.env.RIN_DIR = previous;
     }
-    assert.match(lines[0], /memory index repaired/);
+    assert.match(lines[0], /memory index synchronized/);
     assert.match(lines[0], /fileCount=1/);
   });
 });

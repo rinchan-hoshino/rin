@@ -40,7 +40,7 @@ Backend output includes:
 - daemon status, worker status, and chat bridge status when the socket answers;
 - a lightweight, read-only recall-index check covering the schema marker, SQLite metadata, rebuild flag, and stale dirty-writer markers.
 
-A `memoryIndex.status` of `degraded` means recall indexing needs recovery; it does not mean the canonical transcript archive is absent. Normal recall performs dirty-marker/query-time synchronization. Use `rin memory-index repair` only when that recovery cannot restore the derived index.
+A `memoryIndex.status` of `degraded` means recall indexing needs recovery; it does not mean the canonical transcript archive is absent. Recall keeps serving the current derived index instead of performing a long repair inside a query. Use `rin memory-index repair` to synchronize a current-schema index with archived transcripts and clear stale writer markers. Repair keeps the live database in place and fails closed for incompatible or corrupt indexes; staged schema rebuilds remain owned by the normal `rin update` transaction.
 
 Use this backend output for self-repair triage. If daemon socket state and service logs disagree, treat the installed runtime/service boundary as unresolved and inspect `docs/runtime-layout.md` before changing state.
 

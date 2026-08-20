@@ -422,6 +422,165 @@ test("transcript index repair rebuilds changed archives and removes deleted sess
   });
 });
 
+test("recall remains readable while another connection owns the write transaction", async () => {
+  await withSearchRoot(async (root) => {
+    const sessionFile = await createSessionFile(root, "read-during-write");
+    await appendTranscriptArchiveEntry(
+      archiveInput(sessionFile, {
+        id: "read-during-write",
+        text: "read availability during writer marker",
+      }),
+      root,
+    );
+    assert.equal(
+      (await searchTranscriptArchive("read availability", {}, root)).length,
+      1,
+    );
+
+    const writerDb = new BetterSqlite3(resolveTranscriptSearchDbPath(root));
+    writerDb.exec("BEGIN IMMEDIATE");
+    try {
+      assert.equal(
+        (await searchTranscriptArchive("read availability", {}, root)).length,
+        1,
+      );
+    } finally {
+      writerDb.exec("ROLLBACK");
+      writerDb.close();
+    }
+  });
+});
+
+test("recall serves the current index without running a pending repair", async () => {
+  await withSearchRoot(async (root) => {
+    const sessionFile = await createSessionFile(
+      root,
+      "available-during-repair",
+    );
+    await appendTranscriptArchiveEntry(
+      archiveInput(sessionFile, {
+        id: "available-during-repair",
+        text: "already indexed availability marker",
+      }),
+      root,
+    );
+    assert.equal(
+      (await searchTranscriptArchive("already indexed availability", {}, root))
+        .length,
+      1,
+    );
+    const dbPath = resolveTranscriptSearchDbPath(root);
+    const db = new BetterSqlite3(dbPath);
+    db.prepare(
+      "UPDATE metadata SET value = '1' WHERE key = 'rebuild_required'",
+    ).run();
+    db.close();
+
+    const unindexed = archiveInput(sessionFile, {
+      id: "pending-explicit-repair",
+      text: "pending explicit repair marker",
+    });
+    const archivePath = getTranscriptArchivePath(unindexed, root);
+    await fs.appendFile(archivePath, `${JSON.stringify(unindexed)}\n`);
+
+    assert.equal(
+      (await searchTranscriptArchive("already indexed availability", {}, root))
+        .length,
+      1,
+    );
+    assert.deepEqual(
+      await searchTranscriptArchive("pending explicit repair", {}, root),
+      [],
+    );
+    const inspected = new BetterSqlite3(dbPath, { readonly: true });
+    assert.equal(
+      inspected
+        .prepare("SELECT value FROM metadata WHERE key = 'rebuild_required'")
+        .get().value,
+      "1",
+    );
+    inspected.close();
+  });
+});
+
+test("transcript index repair synchronizes a healthy database in place", async () => {
+  await withSearchRoot(async (root) => {
+    const sessionFile = await createSessionFile(root, "repair-in-place");
+    const entry = archiveInput(sessionFile, {
+      id: "repair-in-place",
+      text: "repair in place marker",
+    });
+    const archivePath = getTranscriptArchivePath(entry, root);
+    await fs.mkdir(path.dirname(archivePath), { recursive: true });
+    await fs.writeFile(archivePath, `${JSON.stringify(entry)}\n`);
+    await repairTranscriptSearchIndex(root);
+
+    const dbPath = resolveTranscriptSearchDbPath(root);
+    const inodeBefore = (await fs.stat(dbPath)).ino;
+    const db = new BetterSqlite3(dbPath);
+    db.exec("CREATE TABLE repair_sentinel(value TEXT NOT NULL)");
+    db.prepare("INSERT INTO repair_sentinel(value) VALUES (?)").run("kept");
+    db.close();
+
+    await fs.writeFile(
+      archivePath,
+      `${JSON.stringify({ ...entry, text: "updated in-place repair marker" })}\n`,
+    );
+    await repairTranscriptSearchIndex(root);
+
+    assert.equal((await fs.stat(dbPath)).ino, inodeBefore);
+    const repairedDb = new BetterSqlite3(dbPath, { readonly: true });
+    assert.equal(
+      repairedDb.prepare("SELECT value FROM repair_sentinel").get().value,
+      "kept",
+    );
+    repairedDb.close();
+    assert.equal(
+      (await searchTranscriptArchive("updated in-place", {}, root)).length,
+      1,
+    );
+  });
+});
+
+test("transcript index repair rejects a live repair lock and recovers a stale lock", async () => {
+  await withSearchRoot(async (root) => {
+    await repairTranscriptSearchIndex(root);
+    const lockPath = `${resolveTranscriptSearchDbPath(root)}.repair.lock`;
+    await fs.writeFile(
+      lockPath,
+      JSON.stringify({ pid: process.pid, createdAt: Date.now() }),
+    );
+    await assert.rejects(
+      repairTranscriptSearchIndex(root),
+      /transcript_search_repair_in_progress/,
+    );
+
+    await fs.writeFile(
+      lockPath,
+      JSON.stringify({ pid: 999_999_999, createdAt: Date.now() }),
+    );
+    await repairTranscriptSearchIndex(root);
+    await assert.rejects(fs.access(lockPath));
+  });
+});
+
+test("transcript index repair fails closed without replacing a corrupt live database", async () => {
+  await withSearchRoot(async (root) => {
+    const dbPath = resolveTranscriptSearchDbPath(root);
+    const corruptBytes = Buffer.from("not a sqlite database");
+    await fs.mkdir(path.dirname(dbPath), { recursive: true });
+    await fs.writeFile(dbPath, corruptBytes);
+    writeTranscriptSearchSchemaMarker(dbPath, "current");
+
+    await assert.rejects(
+      repairTranscriptSearchIndex(root),
+      /file is not a database|transcript_search_schema_marker_mismatch/,
+    );
+    assert.deepEqual(await fs.readFile(dbPath), corruptBytes);
+    await assert.rejects(fs.access(`${dbPath}.repair.lock`));
+  });
+});
+
 test("transcript search requires repair for incompatible database files and ignores malformed indexed records", async () => {
   await withSearchRoot(async (root) => {
     const dbPath = resolveTranscriptSearchDbPath(root);

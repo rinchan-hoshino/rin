@@ -1736,7 +1736,7 @@ test("recall handles structured identifiers beyond exact raw substrings", async 
   });
 });
 
-test("recall repairs a writer killed after canonical archive append", async () => {
+test("repair catches up a writer killed after canonical archive append without blocking recall", async () => {
   await withTempRoot(async (root) => {
     const transcriptsUrl = pathToFileURL(
       path.join(rootDir, "dist", "core", "memory", "transcripts.js"),
@@ -1763,6 +1763,17 @@ test("recall repairs a writer killed after canonical archive append", async () =
 
     const markerDir = path.join(root, "memory", "search-writers");
     assert.equal((await fs.readdir(markerDir)).length, 1);
+    assert.deepEqual(
+      await transcripts.searchTranscriptArchive(
+        "killed writer recovery marker",
+        { limit: 8 },
+        root,
+      ),
+      [],
+    );
+    assert.equal((await fs.readdir(markerDir)).length, 1);
+
+    await transcripts.repairTranscriptSearchIndex(root);
     const results = await transcripts.searchTranscriptArchive(
       "killed writer recovery marker",
       { limit: 8 },
@@ -1773,7 +1784,7 @@ test("recall repairs a writer killed after canonical archive append", async () =
   });
 });
 
-test("transcript archive failures preserve the dirty marker for repair", async () => {
+test("transcript archive failures remain visible to recall until explicit repair", async () => {
   await withTempRoot(async (root) => {
     await fs.mkdir(path.join(root, "memory"), { recursive: true });
     await fs.writeFile(path.join(root, "memory", "transcripts"), "blocked");
@@ -1812,6 +1823,8 @@ test("transcript archive failures preserve the dirty marker for repair", async (
       ),
       [],
     );
+    assert.equal((await fs.readdir(markerDir)).length, 1);
+    await transcripts.repairTranscriptSearchIndex(root);
     assert.deepEqual(await fs.readdir(markerDir), []);
   });
 });
@@ -1848,7 +1861,7 @@ test("transcript writers recreate an externally removed owned marker", async () 
   });
 });
 
-test("recall repairs a failed marker even while its PID is alive", async () => {
+test("explicit repair handles a failed marker even while its PID is alive", async () => {
   await withTempRoot(async (root) => {
     assert.deepEqual(
       await transcripts.searchTranscriptArchive(
@@ -1881,6 +1894,16 @@ test("recall repairs a failed marker even while its PID is alive", async () => {
       }),
     );
 
+    assert.deepEqual(
+      await transcripts.searchTranscriptArchive(
+        "failed live writer recovery marker",
+        { limit: 8 },
+        root,
+      ),
+      [],
+    );
+    assert.equal((await fs.readdir(markerDir)).length, 1);
+    await transcripts.repairTranscriptSearchIndex(root);
     const results = await transcripts.searchTranscriptArchive(
       "failed live writer recovery marker",
       { limit: 8 },
@@ -1891,7 +1914,7 @@ test("recall repairs a failed marker even while its PID is alive", async () => {
   });
 });
 
-test("recall rejects a reused PID when the writer start identity differs", async () => {
+test("explicit repair rejects a reused PID marker identity and catches up the archive", async () => {
   await withTempRoot(async (root) => {
     const entry = {
       id: "pid-reuse-1",
@@ -1931,6 +1954,16 @@ test("recall rejects a reused PID when the writer start identity differs", async
       }),
     );
 
+    assert.deepEqual(
+      await transcripts.searchTranscriptArchive(
+        "pid reuse recovery marker",
+        { limit: 8 },
+        root,
+      ),
+      [],
+    );
+    assert.equal((await fs.readdir(markerDir)).length, 1);
+    await transcripts.repairTranscriptSearchIndex(root);
     const results = await transcripts.searchTranscriptArchive(
       "pid reuse recovery marker",
       { limit: 8 },

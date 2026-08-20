@@ -55,6 +55,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     withDetail("The canonical transcript archive is missing", detail),
   transcript_search_install_migration_required: () =>
     "Transcript search data must be upgraded by the Rin installer before use.",
+  transcript_search_repair_in_progress: () =>
+    "A transcript search repair is already running.",
   transcript_search_unsupported_schema: (detail) =>
     withDetail(
       "Transcript search data predates the supported upgrade window",

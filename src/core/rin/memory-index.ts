@@ -29,7 +29,7 @@ function printMemoryIndexHelp() {
       "rin memory-index repair",
       "",
       "Commands:",
-      "  repair    rebuild the recall index from archived transcripts",
+      "  repair    synchronize the recall index with archived transcripts",
       "",
       "Examples:",
       "  rin memory-index repair",
@@ -57,7 +57,7 @@ function renderRepairResult(result: {
   entryCount: number;
 }) {
   return [
-    "memory index repaired",
+    "memory index synchronized",
     `dbPath=${result.dbPath}`,
     `transcriptRoot=${result.transcriptRoot}`,
     `fileCount=${String(result.fileCount)}`,

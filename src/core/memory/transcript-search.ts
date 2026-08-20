@@ -241,10 +241,17 @@ function buildTrigramFtsQuery(value: string): string {
     : "";
 }
 
+function configureTranscriptSearchConnection(
+  db: Database,
+  busyTimeoutMs = 5000,
+) {
+  db.pragma(`busy_timeout = ${Math.max(0, Math.trunc(busyTimeoutMs))}`);
+}
+
 function initializeTranscriptSearchDb(db: Database, busyTimeoutMs = 5000) {
+  configureTranscriptSearchConnection(db, busyTimeoutMs);
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
-  db.pragma(`busy_timeout = ${Math.max(0, Math.trunc(busyTimeoutMs))}`);
   db.exec(`
     CREATE TABLE IF NOT EXISTS metadata (
       key TEXT PRIMARY KEY,
@@ -419,7 +426,8 @@ function openTranscriptSearchDb(
       throw incomplete;
     }
 
-    initializeTranscriptSearchDb(db, busyTimeoutMs);
+    if (version === null) initializeTranscriptSearchDb(db, busyTimeoutMs);
+    else configureTranscriptSearchConnection(db, busyTimeoutMs);
     if (!dbExistedBeforeOpen) {
       db.prepare(
         "UPDATE metadata SET value = '1' WHERE key = 'rebuild_required'",
@@ -513,7 +521,7 @@ function getTranscriptSearchWriteStatements(
     ),
     insertEntry: db.prepare(
       `
-      INSERT INTO entries(
+      INSERT OR IGNORE INTO entries(
         row_key, archive_path, entry_id, session_key, session_id, session_file,
         timestamp, timestamp_ms, line_number, role, tool_name, custom_type, text, preview
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -584,28 +592,32 @@ async function replaceIndexedArchiveEntries(
   state: IndexedTranscriptFileState,
 ) {
   const statements = getTranscriptSearchWriteStatements(db);
-  db.transaction(() => removeIndexedArchiveEntries(db, state.archivePath))();
-  const insertBatch = db.transaction((batch: IndexedEntryInsertValues[]) => {
-    for (const values of batch) statements.insertEntry.run(...values);
-  });
-  let batch: IndexedEntryInsertValues[] = [];
-  let rowIndex = 0;
-  for await (const entry of iterateTranscriptArchiveFile(
-    state.sourcePath || state.archivePath,
-  )) {
-    batch.push(
-      buildIndexedEntryValues(
-        toIndexedEntry(entry, state.archivePath, rowIndex),
-      ),
-    );
-    rowIndex += 1;
-    if (batch.length >= 128) {
-      insertBatch(batch);
-      batch = [];
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    removeIndexedArchiveEntries(db, state.archivePath);
+    let rowIndex = 0;
+    for await (const entry of iterateTranscriptArchiveFile(
+      state.sourcePath || state.archivePath,
+    )) {
+      statements.insertEntry.run(
+        ...buildIndexedEntryValues(
+          toIndexedEntry(entry, state.archivePath, rowIndex),
+        ),
+      );
+      rowIndex += 1;
     }
+    statements.upsertFileState.run(
+      state.archivePath,
+      state.mtimeMs,
+      state.size,
+    );
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {}
+    throw error;
   }
-  if (batch.length) insertBatch(batch);
-  statements.upsertFileState.run(state.archivePath, state.mtimeMs, state.size);
 }
 
 function appendIndexedArchiveEntry(
@@ -1091,6 +1103,42 @@ export async function rebuildTranscriptSearchIndexAtPathForMigration(
   );
 }
 
+function transcriptSearchRepairLockPath(dbPath: string) {
+  return `${dbPath}.repair.lock`;
+}
+
+function acquireTranscriptSearchRepairLock(rootOverride = "") {
+  const dbPath = resolveTranscriptSearchDbPath(rootOverride);
+  const lockPath = transcriptSearchRepairLockPath(dbPath);
+  fssync.mkdirSync(path.dirname(lockPath), { recursive: true, mode: 0o700 });
+  const content = transcriptWriterMarkerContent(false);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      fssync.writeFileSync(lockPath, content, {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      });
+      return () => {
+        try {
+          fssync.unlinkSync(lockPath);
+        } catch {}
+      };
+    } catch (error) {
+      const code = String((error as any)?.code || "");
+      if (code !== "EEXIST") throw error;
+      if (attempt === 0 && processMarkerIsStale(lockPath)) {
+        try {
+          fssync.unlinkSync(lockPath);
+          continue;
+        } catch {}
+      }
+      throw new Error("transcript_search_repair_in_progress");
+    }
+  }
+  throw new Error("transcript_search_repair_in_progress");
+}
+
 export async function repairTranscriptSearchIndex(
   rootOverride = "",
   allowInstallerMigration = false,
@@ -1107,51 +1155,48 @@ export async function repairTranscriptSearchIndex(
   ) {
     throw new Error("transcript_search_install_migration_required");
   }
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+
+  const releaseLock = acquireTranscriptSearchRepairLock(rootOverride);
+  try {
+    const db = openTranscriptSearchDb(
+      rootOverride,
+      false,
+      60_000,
+      allowInstallerMigration,
+    );
     try {
-      for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+      db.prepare(
+        "UPDATE metadata SET value = '1' WHERE key = 'rebuild_required'",
+      ).run();
+      await syncTranscriptSearchIndex(db, rootOverride);
+      db.prepare(
+        "UPDATE metadata SET value = '0' WHERE key = 'rebuild_required'",
+      ).run();
+      for (const markerPath of staleTranscriptWriterMarkers(rootOverride)) {
         try {
-          fssync.rmSync(candidate, { force: true });
+          fssync.unlinkSync(markerPath);
         } catch {}
       }
-      const db = openTranscriptSearchDb(
-        rootOverride,
-        false,
-        60_000,
-        allowInstallerMigration,
-      );
-      try {
-        await syncTranscriptSearchIndex(db, rootOverride);
-        db.prepare(
-          "UPDATE metadata SET value = '0' WHERE key = 'rebuild_required'",
-        ).run();
-        for (const markerPath of staleTranscriptWriterMarkers(rootOverride)) {
-          try {
-            fssync.unlinkSync(markerPath);
-          } catch {}
-        }
-        transcriptSearchNeedsSync.delete(dbPath);
-        const fileCountRow = db
-          .prepare("SELECT COUNT(*) AS count FROM file_state")
-          .get() as { count?: number } | undefined;
-        const entryCountRow = db
-          .prepare("SELECT COUNT(*) AS count FROM entries")
-          .get() as { count?: number } | undefined;
-        return {
-          dbPath,
-          transcriptRoot,
-          fileCount: Number(fileCountRow?.count || 0),
-          entryCount: Number(entryCountRow?.count || 0),
-        };
-      } finally {
-        db.close();
-      }
-    } catch (error) {
-      if (!isSqliteBusyError(error) || attempt >= 3) throw error;
-      await sleep(500 * (attempt + 1));
+      transcriptSearchNeedsSync.delete(dbPath);
+      const fileCountRow = db
+        .prepare("SELECT COUNT(*) AS count FROM file_state")
+        .get() as { count?: number } | undefined;
+      const entryCountRow = db
+        .prepare("SELECT COUNT(*) AS count FROM entries")
+        .get() as { count?: number } | undefined;
+      db.pragma("wal_checkpoint(PASSIVE)");
+      return {
+        dbPath,
+        transcriptRoot,
+        fileCount: Number(fileCountRow?.count || 0),
+        entryCount: Number(entryCountRow?.count || 0),
+      };
+    } finally {
+      db.close();
     }
+  } finally {
+    releaseLock();
   }
-  return { dbPath, transcriptRoot, fileCount: 0, entryCount: 0 };
 }
 
 async function withTranscriptSearchDb<T>(
@@ -1160,26 +1205,14 @@ async function withTranscriptSearchDb<T>(
 ): Promise<T> {
   flushTranscriptIndexWrites(rootOverride);
   const dbPath = resolveTranscriptSearchDbPath(rootOverride);
+  const dbExistedBeforeOpen = fssync.existsSync(dbPath);
   const db = openTranscriptSearchDb(rootOverride);
   try {
-    const staleWriterMarkers = staleTranscriptWriterMarkers(rootOverride);
-    const rebuildRequired = db
-      .prepare("SELECT value FROM metadata WHERE key = 'rebuild_required'")
-      .get() as { value?: string } | undefined;
-    if (
-      transcriptSearchNeedsSync.has(dbPath) ||
-      staleWriterMarkers.length > 0 ||
-      rebuildRequired?.value === "1"
-    ) {
+    if (!dbExistedBeforeOpen) {
       await syncTranscriptSearchIndex(db, rootOverride);
       db.prepare(
         "UPDATE metadata SET value = '0' WHERE key = 'rebuild_required'",
       ).run();
-      for (const markerPath of staleWriterMarkers) {
-        try {
-          fssync.unlinkSync(markerPath);
-        } catch {}
-      }
       transcriptSearchNeedsSync.delete(dbPath);
     }
     return await fn(db);
