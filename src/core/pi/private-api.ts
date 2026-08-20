@@ -6,13 +6,23 @@
 import { basename } from "node:path";
 
 import { estimateTokens } from "@earendil-works/pi-coding-agent";
-import { prepareCompaction } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/compaction/index.js";
+import {
+  prepareCompaction,
+  serializeConversation,
+} from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/compaction/index.js";
+import { convertToLlm } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/messages.js";
 import { builtInExtensions } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/extensions/index.js";
 import { resolveToCwd } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
 
 export function preparePiSessionCompaction(pathEntries: any[], settings: any) {
   return prepareCompaction(pathEntries, settings);
 }
+
+export function serializePiCompactionMessages(messages: any[]) {
+  return serializeConversation(convertToLlm(messages));
+}
+
+export { completeSummarization as completePiCompactionSummary } from "../../../node_modules/@earendil-works/pi-coding-agent/dist/core/compaction/compaction.js";
 
 export function estimatePiMessagesTokens(messages: any[]) {
   return (Array.isArray(messages) ? messages : []).reduce(

@@ -321,9 +321,13 @@ test("Rin owns policy-guided compaction through the private session host", async
     runtimeText.includes("completeRinCompactionSummaryBudgeted"),
     false,
   );
-  assert.match(sessionHostText, /RIN_COMPACTION_INSTRUCTIONS/);
-  assert.match(sessionHostText, /reconstruct the task state at its end/);
-  assert.match(sessionHostText, /latest unresolved user request/);
+  assert.match(sessionHostText, /RIN_COMPACTION_SYSTEM_PROMPT/);
+  assert.match(sessionHostText, /RIN_COMPACTION_PROMPT/);
+  assert.match(sessionHostText, /## Historical Task Snapshot/);
+  assert.match(sessionHostText, /## Completed Actions/);
+  assert.match(sessionHostText, /## Errors & Fixes/);
+  assert.doesNotMatch(sessionHostText, /RIN_COMPACTION_INSTRUCTIONS/);
+  assert.doesNotMatch(sessionHostText, /Additional focus:/);
 });
 
 test("configured Rin sessions install the native Pi compaction delegate", async () => {
