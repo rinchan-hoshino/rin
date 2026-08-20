@@ -2734,7 +2734,7 @@ test("hard Chat process death leaves the claimed inbox lifecycle active", async 
   }
 });
 
-test("chat main resumes joined acceptance across restart without prompt replay or a synthetic terminal", async () => {
+test("chat main asks Pi to rejoin accepted input across restart instead of owning turn recovery", async () => {
   const tempRoot = os.tmpdir();
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -2776,16 +2776,23 @@ test("chat main resumes joined acceptance across restart without prompt replay o
         runTurnCalls += 1;
         const fence = this.turnFenceForInboundMessage(input.incomingMessageId);
         if (!fence) throw new Error("turn fence missing");
-        databaseMod.markChatMessageAcceptedWithFence(agentDir, fence, {
-          acceptedAt: new Date().toISOString(),
-          sessionFile: "managed/chat/backend-accepted.jsonl",
-          joinedTurnId: "terminal-owner-turn",
-        });
-        throw undefined;
+        if (runTurnCalls === 1) {
+          databaseMod.markChatMessageAcceptedWithFence(agentDir, fence, {
+            acceptedAt: new Date().toISOString(),
+            sessionFile: "managed/chat/backend-accepted.jsonl",
+            joinedTurnId: "terminal-owner-turn",
+          });
+          throw undefined;
+        }
+        return {
+          outcome: "rejoined",
+          originalOutcome: "nonterminal",
+          superseded: true,
+        };
       };
-      controllerMod.ChatController.prototype.resumeTurn = async function (_input, options) {
+      controllerMod.ChatController.prototype.resumeTurn = async function () {
         resumeTurnCalls += 1;
-        await options?.connect?.();
+        throw new Error("Rin must not reconstruct Pi turn lifecycle");
       };
       const createBot = () => ({
         platform: "telegram",
@@ -2828,7 +2835,7 @@ test("chat main resumes joined acceptance across restart without prompt replay o
       while (Date.now() < recoveryDeadline) {
         const inboxMod = await import(pathToFileURL(path.join(rootDir, "dist", "core", "chat", "inbox.js")).href);
         if (
-          resumeTurnCalls === 1 &&
+          runTurnCalls === 2 &&
           inboxMod.listChatInboxItems(agentDir, ["terminal"]).length === 1
         ) break;
         await new Promise((resolve) => setTimeout(resolve, 25));
@@ -2847,9 +2854,9 @@ test("chat main resumes joined acceptance across restart without prompt replay o
       const running = inboxMod.listChatInboxItems(agentDir, ["running"]);
       const terminal = inboxMod.listChatInboxItems(agentDir, ["terminal"]);
       if (
-        runTurnCalls !== 1 ||
-        resumeTurnCalls !== 1 ||
-        connectCalls !== 1 ||
+        runTurnCalls !== 2 ||
+        resumeTurnCalls !== 0 ||
+        connectCalls !== 0 ||
         !inbound?.acceptedAt ||
         errors.length !== 0 ||
         running.length !== 0 ||
