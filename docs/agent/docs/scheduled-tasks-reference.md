@@ -102,7 +102,7 @@ Recurring tasks schedule the next tick after a normal execution, run-now executi
 Use `condition` for a cheap, deterministic, read-only boolean gate that avoids an unnecessary target run. For conditional recurrence, add it only when all five are true:
 
 1. the event time is unknown;
-2. the work must continue after the current turn;
+2. checks are requested on a later recurring cadence;
 3. most scheduled checks should do nothing;
 4. the check is cheaper than an agent turn;
 5. one target action is needed when it becomes true.

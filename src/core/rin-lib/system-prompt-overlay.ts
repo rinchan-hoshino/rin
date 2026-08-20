@@ -76,7 +76,6 @@ function buildRinDocsBlock(agentDir: string) {
     "- For Rin runtime, daemon, memory, scheduled task, chat, frontend, layout, update, or capability behavior, read Rin docs first; Rin overrides Pi.",
     "- Read only the narrow Rin topic documents needed for the task, following the routes below.",
     "- Topic routes: execution target or live capability uncertainty -> docs/execution-environment.md; Rin/Pi behavior differences -> docs/pi-overrides.md; subagents -> docs/non-interactive-cli.md; scheduled tasks -> docs/scheduled-tasks.md; SDK imports, execution, and generic errors -> docs/agent-sdk.md; rich chat output -> docs/rich-text-output-format.md; chat bridge -> docs/chat-bridge.md; runtime layout -> docs/runtime-layout.md; capabilities/update/rollback -> docs/capabilities.md.",
-    "- Core scheduled tasks: keep current-turn work in the foreground. Use a real scheduled/background task only for requested work that must run after the current turn, such as a reminder, delayed follow-up, recurrence, or conditional recurrence; do not create one merely to poll, wait for, or defer work that can be completed before the final response.",
     "- Core rich text: use Rin rich text for native mentions, replies/quotes, images, files, audio, video, stickers, and chat attachments.",
     "- Use Pi docs only for topics not covered by Rin docs, after applying Rin overrides.",
   ].join("\n");

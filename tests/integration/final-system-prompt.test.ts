@@ -182,11 +182,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
       "rich chat output -> docs/rich-text-output-format.md",
     ),
   );
-  assert.ok(
-    baseSystemPrompt.includes(
-      "Core scheduled tasks: keep current-turn work in the foreground. Use a real scheduled/background task only for requested work that must run after the current turn, such as a reminder, delayed follow-up, recurrence, or conditional recurrence; do not create one merely to poll, wait for, or defer work that can be completed before the final response.",
-    ),
-  );
+  assert.equal(baseSystemPrompt.includes("Core scheduled tasks:"), false);
   assert.ok(
     baseSystemPrompt.includes(
       "Core rich text: use Rin rich text for native mentions, replies/quotes, images, files, audio, video, stickers, and chat attachments.",

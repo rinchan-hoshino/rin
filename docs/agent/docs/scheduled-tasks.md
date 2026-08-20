@@ -1,6 +1,10 @@
 # Scheduled Tasks
 
-Use scheduled tasks only when work must happen after the current turn: a reminder, delayed follow-up, recurrence, conditional recurrence, or background task.
+Choose the execution owner from the requested timing and lifecycle:
+
+- **Current turn:** finish work whose terminal result is needed for the current response.
+- **Scheduled task:** run work at a requested later time or recurring cadence.
+- **Inspectable producer:** start work now and use `execution-environment.md` to select a persistent service or delegated run when execution must survive the final response.
 
 For an ordinary reminder or recurring report, this file is sufficient. Read `scheduled-tasks-reference.md` only for exact task fields, condition-code execution, termination edge cases, dedicated sessions, shell delivery, quote/session behavior, or lifecycle troubleshooting.
 
@@ -66,12 +70,12 @@ Set an optional field to `null` in `upsert()` to remove it. Do not write schedul
 Use an ordinary `condition` for cheap deduplication or a deterministic no-op gate. For conditional recurrence, all five must be true:
 
 1. the event time is unknown;
-2. the work must continue after the current turn;
+2. checks are requested on a later recurring cadence;
 3. most scheduled checks should do nothing;
 4. the check is cheaper than an agent turn;
 5. one target action is needed when the condition becomes true.
 
-A false recurring condition schedules the next tick without starting the target. For a temporary wait, use `maxRuns: 1` so the first true result runs once, and add `stopAt` so an event that never arrives cannot leave an endless task. Keep side effects in the target. Read the reference before authoring condition code.
+A false recurring condition schedules the next tick without starting the target. For one eventual target action, use `maxRuns: 1` so the first true result runs once, and add `stopAt` to bound the recurrence. Keep side effects in the target. Read the reference before authoring condition code.
 
 ## Delivery decision
 

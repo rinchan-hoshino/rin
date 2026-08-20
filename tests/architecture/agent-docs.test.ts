@@ -276,6 +276,19 @@ test("agent docs expose scheduled task operation workflow", () => {
     initialization,
     /chat-platform interoperation and scheduled tasks/,
   );
+  assert.match(
+    scheduledTasksEntry,
+    /Current turn:\*\* finish work whose terminal result is needed for the current response/,
+  );
+  assert.match(
+    scheduledTasksEntry,
+    /Scheduled task:\*\* run work at a requested later time or recurring cadence/,
+  );
+  assert.match(
+    scheduledTasksEntry,
+    /Inspectable producer:\*\* start work now and use `execution-environment\.md` to select a persistent service or delegated run when execution must survive the final response/,
+  );
+  assert.doesNotMatch(scheduledTasksEntry, /background task|temporary wait/i);
   assert.match(scheduledTasksEntry, /## Minimal create/);
   assert.match(scheduledTasksEntry, /## Method map/);
   assert.match(
@@ -376,7 +389,10 @@ test("agent docs expose scheduled task operation workflow", () => {
   );
   assert.match(scheduledTasksEntry, /## Simple path/);
   assert.match(scheduledTasksReference, /the event time is unknown/);
-  assert.match(scheduledTasksReference, /must continue after the current turn/);
+  assert.match(
+    scheduledTasksReference,
+    /checks are requested on a later recurring cadence/,
+  );
   assert.match(
     scheduledTasksReference,
     /most scheduled checks should do nothing/,
