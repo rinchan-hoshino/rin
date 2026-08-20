@@ -48,7 +48,7 @@ The core todo capability registers the `todo` tool and `/todos` command from Rin
 
 ## Compaction summary policy
 
-Rin owns one complete Hermes-style continuation-checkpoint prompt while reusing Pi's model, authentication, retry, preparation, and file-detail pipeline. Pi's native summary prompt is not prepended. The checkpoint preserves the historical task snapshot, goal, active constraints, concrete completed actions, live state, blockers, decisions, errors and fixes, resolved questions, relevant files, and critical operational details. Its target budget scales with the compacted source and is guidance rather than a hard output cap. When Pi selects a cut inside one tool-using turn, Rin summarizes the older history and the cut turn prefix together in one chronological pass. Todo remains tool-owned branch state and is not copied into the checkpoint.
+Rin owns one complete Hermes-style continuation-checkpoint prompt while reusing Pi's model, authentication, retry, preparation, and file-detail pipeline. Pi's native summary prompt is not prepended. The checkpoint preserves the historical task snapshot, goal, active constraints, concrete completed actions, live state, blockers, decisions, errors and fixes, resolved questions, relevant files, and critical operational details. Its target budget scales with the compacted source and is guidance rather than a hard output cap. Todo remains tool-owned branch state and is not copied into the checkpoint.
 
 ## Chat bridge
 
