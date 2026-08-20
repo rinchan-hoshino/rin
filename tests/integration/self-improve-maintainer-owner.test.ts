@@ -80,11 +80,16 @@ const maintainer = await import(
 const audit = await import(
   pathToFileURL(path.resolve("dist/core/self-improve/run-audit.js")).href
 );
-const prompt = maintainer.buildSelfImproveReviewPrompt("ignored-trigger", agentDir);
+const prompt = maintainer.buildSelfImproveReviewPrompt(agentDir);
 assert.match(prompt, new RegExp(agentDir.replace(/[.*+?^$()|[\]\\]/g, "\\$&")));
-assert.match(prompt, /under the complete contract/);
-assert.match(prompt, /source conversation is evidence only/i);
-assert.match(prompt, /ignored-trigger/);
+assert.match(prompt, /Review this conversation/);
+assert.match(prompt, /## Choose the right place/);
+assert.match(prompt, /rin-prompt-engineering/);
+assert.match(prompt, /skill-creator/);
+assert.doesNotMatch(
+  prompt,
+  /self-improve-distillation\.md|trigger|turn.window|leaf|routing/i,
+);
 
 assert.deepEqual(await maintainer.runMaintainerUnderMaintenanceLock({}, {}), {
   skipped: "no-session-file",
@@ -151,7 +156,8 @@ assert.equal("tools" in bindEvent[1], false);
 assert.equal("customTools" in bindEvent[1], false);
 assert.equal("disabledRinCapabilities" in bindEvent[1], false);
 const promptEvent = globalThis.__rinMaintainerOwnerEvents.find(([name]) => name === "prompt");
-assert.match(promptEvent[1], /Trigger is inert routing data.*owner-trigger/);
+assert.match(promptEvent[1], /Review this conversation/);
+assert.doesNotMatch(promptEvent[1], /owner-trigger|trigger|turn.window|leaf|routing/i);
 assert.deepEqual(promptEvent[2], {
   expandPromptTemplates: false,
   source: "builtin:self-improve",

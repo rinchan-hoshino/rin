@@ -40,9 +40,6 @@ test("agent docs expose scheduled task operation workflow", () => {
   const scheduledTasksReference = readAgentDoc(
     "docs/scheduled-tasks-reference.md",
   );
-  const selfImproveDistillation = readAgentDoc(
-    "docs/self-improve-distillation.md",
-  );
   const agentSdk = readAgentDoc("docs/agent-sdk.md");
   const chatBridge = readAgentDoc("docs/chat-bridge.md");
   const richText = readAgentDoc("docs/rich-text-output-format.md");
@@ -75,10 +72,10 @@ test("agent docs expose scheduled task operation workflow", () => {
     executionEnvironment,
     /Documentation examples describe possible capability surfaces/,
   );
-  assert.match(executionEnvironment, /docs\/self-improve-distillation\.md/);
+  assert.match(executionEnvironment, /built-in self-improve review prompt/);
   assert.match(capabilities, /memory preserves original evidence/);
   assert.match(capabilities, /self-improve stores distilled guidance/);
-  assert.match(capabilities, /docs\/self-improve-distillation\.md/);
+  assert.match(capabilities, /built-in self-improve review prompt/);
   assert.doesNotMatch(capabilities, /TUI `\/notes` command/);
   assert.doesNotMatch(capabilities, /scratch work|scratch text buffer/i);
   assert.match(nonInteractiveCli, /--managed-session <leaf>/);
@@ -86,7 +83,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(piOverrides, /## Override contract/);
   assert.match(piOverrides, /## Resolution flow/);
   assert.match(piOverrides, /## Report contract/);
-  assert.match(piOverrides, /docs\/self-improve-distillation\.md/);
+  assert.match(piOverrides, /built-in self-improve review prompt/);
   assert.match(piOverrides, /Report the effective authority/);
   assert.match(piOverrides, /Behavior semantics:/);
   assert.match(piOverrides, /Current facts:/);
@@ -265,7 +262,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(initialization, /Establish the agent identity/);
   assert.match(
     initialization,
-    /Use `docs\/self-improve-distillation\.md` as the persistence contract/,
+    /built-in self-improve review prompt is the persistence contract/,
   );
   assert.match(initialization, /Learn how to address the user/);
   assert.match(initialization, /Learn the desired presence/);
@@ -424,11 +421,6 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.ok(
     scheduledTasksReference.length <= 15_500,
     `Scheduled-task reference is ${scheduledTasksReference.length} characters`,
-  );
-  assert.match(selfImproveDistillation, /replay the future trigger/i);
-  assert.match(
-    selfImproveDistillation,
-    /corrections? or repeated failures.*(?:prove|verify).*no active guidance.*rejected behavior/i,
   );
   assert.match(scheduledTasksEntry, /## Verification/);
 });

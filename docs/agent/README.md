@@ -28,7 +28,6 @@ Use these docs as the Rin-specific layer above upstream Pi docs.
 - `docs/capabilities.md`: compact behavior and conventions for Rin agent-facing features.
 - `docs/extensions.md`: Pi extension loading, optional Chat platform contributions, and core capability boundaries.
 - `docs/memory-layering.md`: choosing between memory evidence/retrieval and distilled self-improve guidance.
-- `docs/self-improve-distillation.md`: prompt-engineering contract for self-improve distillation passes.
 - `docs/initialization.md`: initialization flow for durable user and assistant preferences.
 - `docs/agent-sdk.md`: local SDK import, execution, and generic error handling.
 - `docs/scheduled-tasks.md`: scheduled task creation, inspection, update, deletion, and verification.

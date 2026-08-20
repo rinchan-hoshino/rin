@@ -52,7 +52,7 @@ Adapt the summary to the details the user actually gave and speak in the user's 
 
 ## Internal persistence
 
-Use `docs/self-improve-distillation.md` as the persistence contract for choosing and writing durable guidance.
+The built-in self-improve review prompt is the persistence contract for choosing and writing durable guidance.
 
 For initialization, emphasize these expected baseline destinations:
 

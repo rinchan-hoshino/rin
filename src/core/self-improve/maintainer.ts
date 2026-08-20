@@ -301,10 +301,7 @@ async function runInMemorySessionSelfImproveReview(options: {
       agentDir: options.agentDir,
       sessionFile: options.sessionFile,
       leafId: options.leafId,
-      prompt: buildSelfImproveReviewPrompt(
-        safeString(options.trigger).trim(),
-        options.agentDir,
-      ),
+      prompt: buildSelfImproveReviewPrompt(options.agentDir),
       additionalExtensionPaths: options.additionalExtensionPaths,
     });
   } catch (error) {

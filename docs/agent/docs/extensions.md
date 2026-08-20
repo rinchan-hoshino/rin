@@ -28,7 +28,7 @@ These capabilities are native Rin behavior rather than optional Pi extensions:
 
 Read the topic document for the capability before operating it:
 
-- memory and self-improve: `docs/memory-layering.md`, `docs/self-improve-distillation.md`.
+- memory and self-improve: `docs/memory-layering.md`; self-improve editing guidance is built into its review prompt.
 - scheduled tasks: `docs/agent-sdk.md`, `docs/scheduled-tasks.md`.
 - chat: `docs/chat-bridge.md`, `docs/rich-text-output-format.md`.
 - delegated child runs: `docs/non-interactive-cli.md`.

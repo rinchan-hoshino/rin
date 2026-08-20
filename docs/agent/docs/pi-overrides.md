@@ -34,7 +34,7 @@ Use Rin terminology:
 - memory preserves original evidence and retrieval;
 - self-improve stores distilled reusable guidance.
 
-Read `docs/memory-layering.md`, `docs/self-improve-distillation.md`, and `docs/capabilities.md` before changing either surface.
+Read `docs/memory-layering.md` and `docs/capabilities.md` before changing either surface. The built-in self-improve review prompt contains its complete editing guidance.
 
 ### Capabilities
 

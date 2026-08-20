@@ -103,7 +103,7 @@ A self-improve consolidation pass should reduce guidance entropy:
 - keep ordinary skill `SKILL.md` files as operational entry points, and move bulky evidence to `references/` or active short-term records to narrow record files;
 - preserve original evidence through memory archives or memory-index pointers when provenance matters.
 
-Use `docs/self-improve-distillation.md` for the full self-improve distillation workflow.
+The built-in self-improve review prompt contains the complete editing guidance.
 
 ## Retrieval flow
 

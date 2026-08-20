@@ -135,7 +135,7 @@ When past work matters, recall or inspect the relevant original files. Store new
 - reusable procedures, examples, and workflows in skills;
 - transient task progress in the active session or a task-specific work file.
 
-Use `docs/memory-layering.md` and `docs/self-improve-distillation.md` for destination choice and distillation work.
+Use `docs/memory-layering.md` for destination choice. The built-in self-improve review prompt contains the complete editing guidance.
 
 ## Target alignment contract
 
