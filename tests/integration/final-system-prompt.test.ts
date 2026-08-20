@@ -184,7 +184,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.ok(
     baseSystemPrompt.includes(
-      "Core scheduled tasks: use real scheduled/background tasks for reminders, delayed follow-ups, recurring work, conditional work, and work that must continue after the current turn.",
+      "Core scheduled tasks: keep current-turn work in the foreground. Use a real scheduled/background task only for requested work that must run after the current turn, such as a reminder, delayed follow-up, recurrence, or conditional recurrence; do not create one merely to poll, wait for, or defer work that can be completed before the final response.",
     ),
   );
   assert.ok(
