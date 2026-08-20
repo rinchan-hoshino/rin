@@ -1146,39 +1146,10 @@ export async function startChatBridge(
 
   const handlePreparedChatTurnSubmission = async (
     submission: FrozenChatTurnSubmission,
-    options: {
-      resume?: boolean;
-      startupRecoveryEstimatedBytes?: number;
-    } = {},
+    options: { startupRecoveryEstimatedBytes?: number } = {},
   ) => {
     const controller = getController(submission.chatKey);
-    if (options.resume) {
-      const resume = (connect?: () => Promise<void>) =>
-        controller.resumeTurn(
-          {
-            replyToMessageId: submission.replyToMessageId,
-            incomingMessageId: submission.incomingMessageId,
-            sessionFile: submission.sessionFile,
-            receivedAt: submission.receivedAt,
-          },
-          { connect },
-        );
-      if (options.startupRecoveryEstimatedBytes) {
-        await runStartupRecoveryWithAdmission({
-          admission: startupRecoveryAdmission,
-          estimatedBytes: options.startupRecoveryEstimatedBytes,
-          label: submission.sessionFile,
-          preconnect: async () => {
-            await controller.connect({
-              restoreSessionFile: submission.sessionFile,
-            });
-          },
-          resume,
-        });
-      } else {
-        await resume();
-      }
-    } else {
+    const submitToPi = async () => {
       await controller.runTurn({
         text: submission.text,
         attachments: submission.attachments,
@@ -1190,6 +1161,21 @@ export async function startChatBridge(
         thinkingLevel: submission.thinkingLevel,
         receivedAt: submission.receivedAt,
       });
+    };
+    if (options.startupRecoveryEstimatedBytes) {
+      await runStartupRecoveryWithAdmission({
+        admission: startupRecoveryAdmission,
+        estimatedBytes: options.startupRecoveryEstimatedBytes,
+        label: submission.sessionFile,
+        preconnect: async () => {
+          await controller.connect({
+            restoreSessionFile: submission.sessionFile,
+          });
+        },
+        resume: submitToPi,
+      });
+    } else {
+      await submitToPi();
     }
     return { disposition: "actionable" as const };
   };
@@ -1359,9 +1345,6 @@ export async function startChatBridge(
             run: () =>
               runClaimedInboxJob(job, () =>
                 handlePreparedChatTurnSubmission(resolved.submission, {
-                  resume:
-                    recoverCommittedWork &&
-                    Boolean(admission.executionSessionFile),
                   startupRecoveryEstimatedBytes:
                     job.startupRecoveryEstimatedBytes,
                 }),
