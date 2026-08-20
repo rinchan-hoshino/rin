@@ -17,7 +17,7 @@ The live tool list remains authoritative for the current turn.
 These capabilities are native Rin behavior rather than optional Pi extensions:
 
 - `memory`: `recall`, transcript archiving, and searchable session-history index.
-- `self-improve`: compact distilled guidance in prompt baselines, agent-managed skills, periodic review, and hidden nightly consolidation.
+- `self-improve`: compact distilled guidance in prompt baselines, agent-managed skills, and periodic review.
 - system prompt assembly: Rin default stance, tool guidance, configured baselines, available skill metadata, and the load-scoped chat/task binding supplied before first materialization.
 - message metadata: turn-local `sent at`, sender, trust, file, and reply context stays with the current user input.
 - frozen session runtime: the complete effective system prompt has one durable owner and remains byte-stable until explicit reload; ordinary turns and group-name changes cannot update it.

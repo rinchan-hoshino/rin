@@ -89,7 +89,7 @@ test("Rin materializes its prompt without mutating Pi's base prompt", async (t) 
   );
   assert.ok(
     baseSystemPrompt.startsWith(
-      "As the assistant, you must fulfill the user's requests.",
+      "You are running in the Rin runtime environment.",
     ),
   );
   assert.ok(baseSystemPrompt.includes("Available tools:"));
@@ -117,7 +117,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.ok(
     baseSystemPrompt.includes(
-      "Use recall when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters",
+      "Use recall when past conversations, original wording, chronology, or cross-session continuity matters",
     ),
   );
   assert.equal(
@@ -147,7 +147,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
 
   assert.ok(
     baseSystemPrompt.startsWith(
-      "As the assistant, you must fulfill the user's requests.\nYou are running in the Rin runtime environment.",
+      "You are running in the Rin runtime environment.",
     ),
   );
   assert.ok(
@@ -183,11 +183,6 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
     ),
   );
   assert.equal(baseSystemPrompt.includes("Core scheduled tasks:"), false);
-  assert.ok(
-    baseSystemPrompt.includes(
-      "Core rich text: use Rin rich text for native mentions, replies/quotes, images, files, audio, video, stickers, and chat attachments.",
-    ),
-  );
   assert.equal(
     baseSystemPrompt.includes("is a lazy reference under the current"),
     false,
@@ -223,7 +218,7 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
 
   assert.ok(
     finalSystemPrompt.includes(
-      "As the assistant, you must fulfill the user's requests.",
+      "You are running in the Rin runtime environment.",
     ),
   );
   assert.ok(!finalSystemPrompt.includes("# Self-improve guidance"));

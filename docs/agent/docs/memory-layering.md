@@ -30,7 +30,7 @@ Memory preserves source material and makes it findable.
 Use `recall` when the task depends on:
 
 - past conversations;
-- unfinished work;
+- unfinished work whose original transcript evidence is needed;
 - original wording;
 - evidence or chronology;
 - cross-session continuity.

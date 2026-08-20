@@ -309,7 +309,7 @@ export default function memoryModule(
         description: "Search or browse archived session history.",
         promptSnippet: "Archived session-history search.",
         promptGuidelines: [
-          "Use recall when past conversations, unfinished work, original wording, chronology, or cross-session continuity matters.",
+          "Use recall when past conversations, original wording, chronology, or cross-session continuity matters.",
         ],
         parameters: recallParams,
         execute: async (_toolCallId, params, signal, onUpdate, ctx) =>

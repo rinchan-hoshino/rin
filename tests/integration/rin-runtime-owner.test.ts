@@ -571,7 +571,7 @@ test("configured runtime integrates profile, services, prompt, compaction, and s
   const builtPrompt = runtime.ensureSessionBaseSystemPrompt(configured.session);
   assert.match(
     builtPrompt,
-    /^As the assistant, you must fulfill the user's requests\./,
+    /^You are running in the Rin runtime environment\./,
   );
   assert.match(builtPrompt, /You are running in the Rin runtime environment/);
   assert.match(
@@ -713,7 +713,7 @@ test("configured prompt reuses persisted state and rebuilds from public resource
   );
   assert.match(
     rebuiltPrompt,
-    /^As the assistant, you must fulfill the user's requests\./,
+    /^You are running in the Rin runtime environment\./,
   );
   assert.doesNotMatch(rebuiltPrompt, /persisted block/);
   assert.equal(eventNames().includes("native-rebuild"), false);

@@ -119,9 +119,15 @@ test("Rin owns a canonical prompt built only from structured resources", () => {
     agentDir: "/tmp/rin-agent",
   });
 
-  assert.match(prompt, /^As the assistant,/);
-  assert.match(prompt, /Available tools:\n- read: Read files/);
-  assert.match(prompt, /Use read for owner-requested files\./);
+  assert.match(prompt, /^You are running in the Rin runtime environment\./);
+  assert.match(
+    prompt,
+    /Available tools:\n- read: Read files\n\nGuidelines:\n- Show file paths clearly when working with files\n- Use read for owner-requested files\./,
+  );
+  assert.match(
+    prompt,
+    /capabilities\/update\/rollback -> docs\/capabilities\.md\.\n- Use Pi docs only/,
+  );
   assert.match(prompt, /Owner append/);
   assert.match(prompt, /Project instruction/);
   assert.doesNotMatch(prompt, /expert coding assistant operating inside pi/);
@@ -300,7 +306,7 @@ test("user extensions receive the Rin-owned prompt first", async () => {
     extensionPath,
     `export default function (pi) {
   pi.on("before_agent_start", (event) => {
-    if (!event.systemPrompt.startsWith("As the assistant, you must fulfill the user's requests.")) {
+    if (!event.systemPrompt.startsWith("You are running in the Rin runtime environment.")) {
       throw new Error("rin_prompt_missing_before_user_extension");
     }
     return { systemPrompt: event.systemPrompt + "\\n\\nUSER EXTENSION BLOCK" };
@@ -384,7 +390,7 @@ test("runtime preserves six structured prompt scenarios", async () => {
     noTools: await buildPromptScenario("noTools", { noTools: "all" }),
   };
   for (const prompt of Object.values(actual)) {
-    assert.match(prompt, /^As the assistant,/);
+    assert.match(prompt, /^You are running in the Rin runtime environment\./);
     assert.doesNotMatch(prompt, /expert coding assistant operating inside pi/);
     assert.doesNotMatch(prompt, /Current working directory:/);
     assert.doesNotMatch(prompt, /Current date:/);

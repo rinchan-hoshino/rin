@@ -23,6 +23,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   const capabilities = readAgentDoc("docs/capabilities.md");
   const executionEnvironment = readAgentDoc("docs/execution-environment.md");
   const builtinCapabilities = readAgentDoc("docs/extensions.md");
+  const memoryLayering = readAgentDoc("docs/memory-layering.md");
   const nonInteractiveCli = readAgentDoc("docs/non-interactive-cli.md");
   const piOverrides = readAgentDoc("docs/pi-overrides.md");
   const runtimeLayout = readAgentDoc("docs/runtime-layout.md");
@@ -64,6 +65,18 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(builtinCapabilities, /agent-sdk\.md/);
   assert.match(builtinCapabilities, /scheduled-tasks\.md/);
   assert.match(capabilities, /Non-interactive child runs/);
+  assert.match(
+    capabilities,
+    /Scheduled tasks\s+\| Reminders, requested later execution, recurring checks, or conditional automation/,
+  );
+  assert.match(
+    builtinCapabilities,
+    /self-improve.*prompt baselines, agent-managed skills, and periodic review\./,
+  );
+  assert.match(
+    memoryLayering,
+    /unfinished work whose original transcript evidence is needed/,
+  );
   assert.match(executionEnvironment, /## Prompt brief/);
   assert.match(executionEnvironment, /## Live capability contract/);
   assert.match(executionEnvironment, /## Target alignment contract/);

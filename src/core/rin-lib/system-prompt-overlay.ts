@@ -5,14 +5,12 @@ import {
   type BuildSystemPromptOptions,
 } from "@earendil-works/pi-coding-agent";
 
-const PROMPT_PREFIX = "As the assistant, you must fulfill the user's requests.";
 const RUNTIME_AWARENESS = "You are running in the Rin runtime environment.";
 const FACTUAL_GROUNDING_REQUIREMENT =
   "Factual claims require evidence, not model knowledge alone. Check Rin memory for historical events; search current authoritative web sources for facts not established by authoritative local evidence.";
 
 const RIN_GENERAL_GUIDELINES = [
   "Show file paths clearly when working with files",
-  "Do not stop after one action if the user's request obviously requires multiple concrete steps",
 ];
 const RIN_BASH_GUIDELINES = [
   "Use bash for file operations like ls, rg, find",
@@ -47,10 +45,7 @@ function buildToolsBlock(options: RinSystemPromptOptions) {
         .map((name) => `- ${name}: ${String(snippets[name]).trim()}`)
         .join("\n")
     : "(none)";
-  return [
-    `Available tools:\n${tools}`,
-    "In addition to the tools above, you may have access to other custom tools depending on the project.",
-  ].join("\n\n");
+  return `Available tools:\n${tools}`;
 }
 
 function buildGuidelinesBlock(options: RinSystemPromptOptions) {
@@ -76,7 +71,6 @@ function buildRinDocsBlock(agentDir: string) {
     "- For Rin runtime, daemon, memory, scheduled task, chat, frontend, layout, update, or capability behavior, read Rin docs first; Rin overrides Pi.",
     "- Read only the narrow Rin topic documents needed for the task, following the routes below.",
     "- Topic routes: execution target or live capability uncertainty -> docs/execution-environment.md; Rin/Pi behavior differences -> docs/pi-overrides.md; subagents -> docs/non-interactive-cli.md; scheduled tasks -> docs/scheduled-tasks.md; SDK imports, execution, and generic errors -> docs/agent-sdk.md; rich chat output -> docs/rich-text-output-format.md; chat bridge -> docs/chat-bridge.md; runtime layout -> docs/runtime-layout.md; capabilities/update/rollback -> docs/capabilities.md.",
-    "- Core rich text: use Rin rich text for native mentions, replies/quotes, images, files, audio, video, stickers, and chat attachments.",
     "- Use Pi docs only for topics not covered by Rin docs, after applying Rin overrides.",
   ].join("\n");
 }
@@ -107,9 +101,7 @@ function buildSkillsBlock(options: RinSystemPromptOptions) {
 export function buildRinSystemPrompt(input: RinSystemPromptInput) {
   const options = input.piOptions;
   const sections = [
-    [PROMPT_PREFIX, RUNTIME_AWARENESS, FACTUAL_GROUNDING_REQUIREMENT].join(
-      "\n",
-    ),
+    [RUNTIME_AWARENESS, FACTUAL_GROUNDING_REQUIREMENT].join("\n"),
   ];
 
   if (options.customPrompt) {
