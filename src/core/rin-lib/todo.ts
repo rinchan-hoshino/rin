@@ -189,7 +189,7 @@ export default function todoCapability(): RinCapabilityDefinition {
     description: "Maintain the current-branch execution checklist.",
     promptSnippet: "Current-branch execution checklist.",
     promptGuidelines: [
-      "Use todo when current-branch work has multiple concrete execution steps that benefit from a visible checklist.",
+      "Use todo proactively for multi-step current-branch work. Read it after compaction, update it as work advances, and remove stale items or clear it when done.",
     ],
     parameters: TodoParams,
 

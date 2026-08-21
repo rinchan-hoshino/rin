@@ -222,7 +222,7 @@ test("todo exposes ranged reads and item-level mutation inputs", async () => {
     "Maintain the current-branch execution checklist.",
   );
   assert.deepEqual(tool.promptGuidelines, [
-    "Use todo when current-branch work has multiple concrete execution steps that benefit from a visible checklist.",
+    "Use todo proactively for multi-step current-branch work. Read it after compaction, update it as work advances, and remove stale items or clear it when done.",
   ]);
   assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
     "action",

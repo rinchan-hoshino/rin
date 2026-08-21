@@ -126,6 +126,17 @@ test("buildFinalAppSystemPrompt includes app-level prompt layers", async () => {
   );
   assert.equal(baseSystemPrompt.includes("- save_prompts:"), false);
   assert.ok(baseSystemPrompt.includes("Guidelines:"));
+  assert.ok(
+    baseSystemPrompt.includes(
+      "Use todo proactively for multi-step current-branch work. Read it after compaction, update it as work advances, and remove stale items or clear it when done.",
+    ),
+  );
+  assert.equal(
+    baseSystemPrompt.includes(
+      "Use todo when current-branch work has multiple concrete execution steps that benefit from a visible checklist.",
+    ),
+    false,
+  );
   assert.equal(baseSystemPrompt.includes("smallest cohesive change"), false);
   assert.equal(
     baseSystemPrompt.includes("When modifying files, prefer targeted edits"),
