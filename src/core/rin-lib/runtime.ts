@@ -58,6 +58,7 @@ import {
   runPiSessionAutoCompaction,
   writePiSessionBaseSystemPrompt,
 } from "../pi/session-host.js";
+import { shouldTriggerRinCompaction } from "../pi/compaction-policy.js";
 
 export function createRinCapabilityDefinitions(
   options: RinCapabilityOptions,
@@ -644,33 +645,6 @@ const PROVIDER_OVERFLOW_PREFLIGHT_KEY = Symbol.for(
 const MID_TURN_THRESHOLD_COMPACTION_KEY = Symbol.for(
   "rin.midTurnThresholdCompaction",
 );
-const DEFAULT_RIN_COMPACTION_TRIGGER_PERCENT = 0.85;
-
-function normalizeCompactionTriggerPercent(value: unknown) {
-  const percent = Number(value);
-  if (!Number.isFinite(percent) || percent <= 0 || percent >= 1) {
-    return DEFAULT_RIN_COMPACTION_TRIGGER_PERCENT;
-  }
-  return percent;
-}
-
-function shouldTriggerRinPercentCompaction(
-  contextTokens: number,
-  contextWindow: number,
-  settings: any,
-) {
-  if (!Number.isFinite(contextTokens) || contextTokens <= 0) return false;
-  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return false;
-  const triggerPercent = normalizeCompactionTriggerPercent(
-    settings?.triggerPercent,
-  );
-  const reserveTokens = Number(settings?.reserveTokens || 0);
-  const reserveThreshold =
-    reserveTokens > 0 ? contextWindow - reserveTokens : contextWindow;
-  const percentThreshold = Math.floor(contextWindow * triggerPercent);
-  const threshold = Math.min(percentThreshold, reserveThreshold);
-  return contextTokens >= threshold;
-}
 
 function estimateCurrentProviderContextTokens(
   messages: any[],
@@ -784,11 +758,7 @@ async function maybeRunRinMidTurnThresholdCompaction(
     assistantMessage?.usage,
   );
   if (
-    !shouldTriggerRinPercentCompaction(
-      Number(contextTokens),
-      contextWindow,
-      settings,
-    )
+    !shouldTriggerRinCompaction(Number(contextTokens), contextWindow, settings)
   ) {
     return false;
   }
@@ -834,9 +804,7 @@ export function applyRinProviderOverflowPreflight(
       providerMessages,
       helpers,
     );
-    if (
-      !shouldTriggerRinPercentCompaction(contextTokens, contextWindow, settings)
-    ) {
+    if (!shouldTriggerRinCompaction(contextTokens, contextWindow, settings)) {
       return providerMessages;
     }
 
@@ -977,13 +945,7 @@ export function applyRinCompactionPercentThreshold(
               helpers,
             )
           : helpers.calculateContextTokens(assistantMessage?.usage);
-      if (
-        shouldTriggerRinPercentCompaction(
-          contextTokens,
-          contextWindow,
-          settings,
-        )
-      ) {
+      if (shouldTriggerRinCompaction(contextTokens, contextWindow, settings)) {
         return await runPiSessionAutoCompaction(this, "threshold", false);
       }
       return false;

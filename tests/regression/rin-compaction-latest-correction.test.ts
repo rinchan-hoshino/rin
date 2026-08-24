@@ -123,8 +123,16 @@ test("split-turn compaction replaces an obsolete reporting cadence with the late
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /Report after every 50 companies/);
   assert.match(prompts[0], /Use batches of 500 instead/);
-  assert.match(prompts[0], /reconstruct the task state at its end/i);
-  assert.match(prompts[0], /supersede incompatible earlier state/i);
+  assert.match(prompts[0], /## Historical Task Snapshot/);
+  assert.match(prompts[0], /## Completed Actions/);
+  assert.match(
+    prompts[0],
+    /later source state replaces incompatible earlier state/i,
+  );
+  assert.doesNotMatch(
+    prompts[0],
+    /The messages above are a conversation to summarize/,
+  );
   assert.doesNotMatch(result.summary, /Turn Context \(split turn\)/);
   assert.match(result.summary, /Report every 500 companies/);
   assert.match(result.summary, /next report at 3,000/);

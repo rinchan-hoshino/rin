@@ -321,6 +321,11 @@
       "tests": ["tests/integration/final-system-prompt.test.ts"]
     },
     {
+      "source": "src/core/pi/compaction-policy.ts",
+      "suite": "integration",
+      "tests": ["tests/integration/pi-session-host-owner.test.ts"]
+    },
+    {
       "source": "src/core/pi/private-api.ts",
       "suite": "integration",
       "tests": [

@@ -6,13 +6,15 @@ import { AgentSession } from "@earendil-works/pi-coding-agent";
 import { importBuiltModule } from "../support/import-built-module.js";
 
 const {
+  buildRinCompactionPrompt,
   buildRinCompactionRequest,
   getPiExtensionRunner,
   getPiSessionExtensionMode,
   reloadPiSessionWithActiveTools,
   restorePiSessionActiveToolsForReload,
   resumePiSessionTurn,
-  RIN_COMPACTION_INSTRUCTIONS,
+  RIN_COMPACTION_PROMPT,
+  RIN_COMPACTION_SYSTEM_PROMPT,
   runPiNativeCompactionWithoutFileSummary,
 } = await importBuiltModule<typeof import("../../src/core/pi/session-host.js")>(
   "dist/core/pi/session-host.js",
@@ -119,6 +121,7 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
   };
   let prompt = "";
+  let systemPrompt = "";
   let requestOptions: any;
   let authModel: any;
   let retrySource: any;
@@ -127,6 +130,7 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
     thinkingLevel: "medium",
     agent: {
       streamFunction: async (_model: any, context: any, options: any) => {
+        systemPrompt = context.systemPrompt;
         prompt = context.messages[0].content[0].text;
         requestOptions = options;
         return {
@@ -206,13 +210,24 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
     "x-provider-route": "oauth-route",
   });
   assert.deepEqual(requestOptions.env, { PROVIDER_REGION: "test-region" });
+  assert.equal("maxTokens" in requestOptions, false);
   assert.equal(typeof requestOptions.sessionId, "string");
   assert.equal(requestOptions.cacheRetention, "none");
-  assert.match(prompt, /## Goal/);
-  assert.match(prompt, /## Constraints & Preferences/);
-  assert.match(prompt, /reconstruct the task state at its end/i);
-  assert.match(prompt, /latest unresolved user request/i);
-  assert.doesNotMatch(prompt, /## Active Task/);
+  assert.equal(systemPrompt, RIN_COMPACTION_SYSTEM_PROMPT);
+  assert.match(prompt, /## Historical Task Snapshot/);
+  assert.match(prompt, /## Completed Actions/);
+  assert.match(prompt, /## Active State/);
+  assert.match(prompt, /## Errors & Fixes/);
+  assert.match(prompt, /## Relevant Files/);
+  assert.match(prompt, /Target ~2,000 tokens/);
+  assert.match(
+    prompt,
+    /later source state replaces incompatible earlier state/i,
+  );
+  assert.doesNotMatch(
+    prompt,
+    /The messages above are a conversation to summarize/,
+  );
   assert.equal(result.summary, "## Goal\nKeep native compaction.");
   assert.doesNotMatch(result.summary, /<read-files>|<modified-files>/);
   assert.deepEqual(result.details, {
@@ -234,7 +249,7 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
   assert.equal(proxyResult.summary, "## Goal\nKeep native compaction.");
 });
 
-test("Rin compaction policy preserves native preparation while adding one canonical instruction owner", () => {
+test("Rin compaction request preserves preparation while leaving the full prompt to Rin", () => {
   const preparation = {
     firstKeptEntryId: "keep",
     messagesToSummarize: [{ role: "user", content: "new correction" }],
@@ -251,18 +266,20 @@ test("Rin compaction policy preserves native preparation while adding one canoni
   const result = buildRinCompactionRequest(event);
 
   assert.equal(result.preparation, preparation);
-  assert.match(
-    result.customInstructions,
-    /reconstruct the task state at its end/i,
-  );
-  assert.match(result.customInstructions, /Preserve exact units/);
-  assert.doesNotMatch(result.customInstructions, /reporting cadence/i);
-  assert.doesNotMatch(result.customInstructions, /owner communication/i);
-  assert.equal(
-    result.customInstructions.startsWith(RIN_COMPACTION_INSTRUCTIONS),
-    true,
-  );
+  assert.equal(result.customInstructions, "Preserve exact units.");
   assert.equal(event.customInstructions, "Preserve exact units.");
+  const prompt = buildRinCompactionPrompt(
+    result.preparation,
+    result.customInstructions,
+  );
+  assert.match(prompt, /<previous-checkpoint>\nstale requirement/);
+  assert.match(prompt, /FOCUS TOPIC: Preserve exact units/);
+  assert.match(prompt, /60–70% of the checkpoint budget/);
+  assert.doesNotMatch(prompt, /Additional focus:/);
+  assert.match(RIN_COMPACTION_PROMPT, /## Historical Task Snapshot/);
+  assert.match(RIN_COMPACTION_PROMPT, /## Completed Actions/);
+  assert.match(RIN_COMPACTION_PROMPT, /## Errors & Fixes/);
+  assert.match(RIN_COMPACTION_PROMPT, /## Relevant Files/);
 });
 
 test("Pi session host prefers the public extension getter", () => {
