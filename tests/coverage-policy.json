@@ -283,6 +283,10 @@
       "ownerSuite": "unit"
     },
     {
+      "source": "src/core/pi/compaction-policy.ts",
+      "ownerSuite": "integration"
+    },
+    {
       "source": "src/core/pi/private-api.ts",
       "ownerSuite": "integration"
     },

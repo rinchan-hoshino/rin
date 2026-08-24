@@ -8,6 +8,7 @@ import {
   preparePiSessionCompaction,
   serializePiCompactionMessages,
 } from "./private-api.js";
+import { withRinProportionalCompactionRetention } from "./compaction-policy.js";
 import { updateSessionCatalogFromSessionManagerSync } from "../session/catalog.js";
 import { normalizeFrontendIdentity } from "../rin-lib/frontend-identity.js";
 
@@ -349,7 +350,10 @@ const RIN_SESSION_COMPACTION_OWNER_KEY = Symbol.for(
 
 function readPiCompactionPreparation(session: any) {
   const pathEntries = session?.sessionManager?.getBranch?.() || [];
-  const settings = session?.settingsManager?.getCompactionSettings?.() || {};
+  const settings = withRinProportionalCompactionRetention(
+    session?.settingsManager?.getCompactionSettings?.(),
+    Number(session?.model?.contextWindow || 0),
+  );
   return {
     pathEntries,
     preparation: preparePiSessionCompaction(pathEntries, settings),

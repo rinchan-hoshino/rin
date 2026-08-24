@@ -136,6 +136,7 @@ test("Pi session host sparse private boundaries remain inert", () => {
   );
   assert.equal(host.installPiSessionCompactionOwner({}, null), false);
   assert.equal(host.buildRinCompactionRequest(null), null);
+  assert.equal("RIN_COMPACTION_INSTRUCTIONS" in host, false);
   assert.deepEqual(
     host.buildRinCompactionRequest({
       preparation: {
@@ -151,7 +152,7 @@ test("Pi session host sparse private boundaries remain inert", () => {
         messagesToSummarize: null,
         turnPrefixMessages: null,
       },
-      customInstructions: host.RIN_COMPACTION_INSTRUCTIONS,
+      customInstructions: undefined,
     },
   );
   const split = host.buildRinCompactionRequest({
@@ -386,6 +387,68 @@ test("Pi session host owns compaction without registering core extension handler
     ),
     true,
   );
+});
+
+test("Pi session host uses a proportional retained-source tail at the cut-point owner", async () => {
+  const oldUser = { role: "user", content: "U".repeat(800), timestamp: 1 };
+  const oldAssistant = {
+    role: "assistant",
+    content: [{ type: "text", text: "A".repeat(800) }],
+    stopReason: "stop",
+    timestamp: 2,
+  };
+  const recentUser = {
+    role: "user",
+    content: "recent request",
+    timestamp: 3,
+  };
+  const pathEntries = [
+    { id: "u1", parentId: null, type: "message", message: oldUser },
+    { id: "a1", parentId: "u1", type: "message", message: oldAssistant },
+    { id: "u2", parentId: "a1", type: "message", message: recentUser },
+  ];
+  const compactionEntry = {
+    id: "c1",
+    type: "compaction",
+    summary: "Rin summary",
+  };
+  const session: any = {
+    model: { provider: "test", id: "model", contextWindow: 1_000 },
+    extensionRunner: { hasHandlers: () => false, async emit() {} },
+    agent: { state: { messages: [oldUser, oldAssistant, recentUser] } },
+    abort: async () => {},
+    _emit() {},
+    _runAutoCompaction: async () => false,
+    settingsManager: {
+      getCompactionSettings: () => ({
+        enabled: true,
+        triggerPercent: 0.8,
+        reserveTokens: 100,
+        keepRecentTokens: 1,
+      }),
+    },
+    sessionManager: {
+      getBranch: () => pathEntries,
+      appendCompaction() {},
+      getEntries: () => [...pathEntries, compactionEntry],
+      buildSessionContext: () => ({ messages: [recentUser] }),
+    },
+  };
+
+  assert.equal(
+    host.installPiSessionCompactionOwner(session, async (event: any) => {
+      assert.equal(event.preparation.settings.keepRecentTokens, 160);
+      return {
+        summary: "Rin summary",
+        firstKeptEntryId: event.preparation.firstKeptEntryId,
+        tokensBefore: event.preparation.tokensBefore,
+        details: {},
+      };
+    }),
+    true,
+  );
+
+  await session.compact();
 });
 
 test("Pi session host silently defers automatic compaction until a cut point exists", async () => {
