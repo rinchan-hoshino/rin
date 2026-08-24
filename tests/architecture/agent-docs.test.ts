@@ -428,7 +428,11 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(selfImproveDistillation, /replay the future trigger/i);
   assert.match(
     selfImproveDistillation,
-    /corrections? or repeated failures.*(?:prove|verify).*no active guidance.*rejected behavior/i,
+    /Lessons learned.*outcomes or corrections.*improve future judgment or action.*retain improved behavior/is,
+  );
+  assert.match(
+    selfImproveDistillation,
+    /higher-value content replaces or compresses lower-value content before net growth/i,
   );
   assert.match(scheduledTasksEntry, /## Verification/);
 });

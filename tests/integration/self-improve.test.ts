@@ -654,18 +654,31 @@ test("self-improve distillation manual is the concise canonical contract", async
   ]) {
     assert.match(manual, new RegExp(heading));
   }
+  assert.match(manual, /resident budget/);
+  assert.match(manual, /highest future value/);
   assert.match(manual, /Memory owns evidence\/retrieval/);
   assert.match(manual, /Self-improve owns behavior/);
+  for (const candidateClass of [
+    "User requirements and preferences",
+    "Reusable workflows",
+    "Lessons learned",
+  ]) {
+    assert.match(manual, new RegExp(candidateClass));
+  }
   assert.match(
     manual,
     /evidence, future trigger, target-state behavior, and one owner/i,
   );
   assert.match(
     manual,
+    /applicability, reuse likelihood, observed impact, evidence strength, and resident cost/,
+  );
+  assert.match(
+    manual,
     /Each pass garbage-collects|Every pass inspects .* for garbage collection/,
   );
   assert.match(manual, /may simplify, add, or make no change/);
-  assert.match(manual, /Turn-window/);
+  assert.match(manual, /turn window controls cadence/i);
   assert.match(manual, /local (?:cleanup neighborhood|garbage collection)/);
   assert.match(manual, /even when (?:behavior|the candidate) is .*covered/);
   assert.match(manual, /without losing live behavior/);
@@ -680,7 +693,10 @@ test("self-improve distillation manual is the concise canonical contract", async
     /delet(?:e|ing), merg(?:e|ing), mov(?:e|ing), or rewrit(?:e|ing)/,
   );
   assert.doesNotMatch(manual, /Delete, merge, move, or rewrite before adding/);
-  assert.match(manual, /net growth/);
+  assert.match(
+    manual,
+    /higher-value content replaces or compresses lower-value content before net growth/,
+  );
   assert.match(manual, /unexplained growth fails/);
   assert.doesNotMatch(manual, /pure or unexplained append fails/);
   assert.match(manual, /one-in-one-out/);
