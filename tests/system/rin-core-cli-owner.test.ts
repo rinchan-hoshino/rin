@@ -78,6 +78,12 @@ try {
   await run(["ext-owner"]);
   globalThis.__rinMainOwnerCrossUser = true;
   await run(["usage", "--days", "7"]);
+  const crossUserUpdateStart = globalThis.__rinMainOwnerEvents.length;
+  await run(["update", "--git", "main", "--yes"]);
+  assert.deepEqual(
+    globalThis.__rinMainOwnerEvents.slice(crossUserUpdateStart),
+    [["delegate-target", "owner", ["update", "--git", "main", "--yes"]]],
+  );
   globalThis.__rinMainOwnerCrossUser = false;
   await run(["target", "list"]);
   assert.equal(await run(["version", "--target=remote"]), 23);

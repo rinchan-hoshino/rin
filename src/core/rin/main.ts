@@ -203,12 +203,13 @@ export async function startRinCli() {
   const isRootHelp =
     strippedArgv.length === 1 &&
     (strippedArgv[0] === "--help" || strippedArgv[0] === "-h");
-  const shouldDelegateCandidate =
-    !candidateCommand &&
-    (isRootHelp ||
-      Boolean(strippedArgv[0] && !strippedArgv[0].startsWith("-")));
+  const shouldDelegateBeforeLocalDispatch =
+    candidateCommand === "update" ||
+    (!candidateCommand &&
+      (isRootHelp ||
+        Boolean(strippedArgv[0] && !strippedArgv[0].startsWith("-"))));
   if (
-    shouldDelegateCandidate &&
+    shouldDelegateBeforeLocalDispatch &&
     launchModule.shouldDelegateCrossUserCli(preliminaryParsed)
   ) {
     return await launchModule.delegateRinCliToTarget(
