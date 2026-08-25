@@ -1,5 +1,177 @@
 # Rin Changelog
 
+## 0.12.0
+
+- TUI startup and reconnect flows now preserve submitted prompts, hidden extensions, native Pi initialization, and current-order todo presentation while keeping internal stable IDs out of the interface.
+- Chat recovery and delivery now isolate active work by session and turn identity, retain editable and localized progress, settle rejoined or aborted input correctly, and preserve rich-delivery failures across restarts.
+- Discord, OneBot, and attachment handling now use explicit attachment syntax, localized acknowledgements, native message segments, requested filenames, and clearer mutation-only todo notices.
+- Scheduled work now runs on durable sessions with isolated condition failures and persistent recovery backoff, while the obsolete built-in nightly review path has been removed.
+- Memory and compaction now migrate archives without binary payloads, expose index health, honor the latest user correction, preserve Pi-native results, and keep prompt ownership stable across proportional context retention.
+- Extensions, CLI, frontend RPC, and target-user execution now keep extension updates and live frontend context intact while using narrower command, model, platform, process, and deployment boundaries.
+- Installer and release handling now bounds memory preflight output, rejects invalid bootstrap manifests, pins bootstrap source identity, and resumes interrupted nightly tags across UTC date changes.
+- Rin now uses Pi 0.84.2, adds time to every model input, grounds factual prompt claims in owned evidence, refreshes prompt-engineering guidance, and aligns installation and SDK documentation across supported languages.
+<!-- rin-changelog-coverage
+ 1b6b6cb test(daemon): observe worker replacement by identity
+ 89a58bf fix(self-improve): preserve fork cache prefix
+ d6ce5d9 fix(daemon): preserve invocation provenance on recovery
+ 7ca75cb fix(chat): require explicit attachment syntax
+ 7d1924b fix(memory): migrate archives without binary payloads
+ 4cfa4e4 refactor(targets): keep maintained deployment modes
+ 7d79c41 fix(installer): bound memory preflight output
+ 99cef96 fix(tui): preserve hidden extensions over RPC
+ 9570345 feat(agent): support ranged item reads
+ 3f7d19a refactor(compaction): keep item state tool-owned
+ 775a56b fix(tui): hide todo stable ids
+ b6f069e fix(tui): render submitted user messages immediately
+ cec60b0 fix(tui): keep startup available during daemon recovery
+ 41ab995 fix(daemon): isolate active turn recovery by session
+ b0b6ad0 fix(tui): label requested maintenance accurately
+ 74bd2bd fix(self-improve): bound temporary context loading
+ ae62e4c refactor(chat): keep working animation extension-owned
+ ed008de fix(cli): preserve extension updates with --all --yes
+ ffea8bf fix(tui): retain prompts while daemon reconnects
+ 3790ae3 fix(chat): keep transient interims in editable progress
+ b87335b fix(chat): localize Discord slash acknowledgement
+ da265a1 fix(daemon): budget worker memory
+ a6415de revert: preserve Pi worker memory behavior
+ db68031 refactor(extensions): remove retired alias migration
+ b97e6ee test(self-improve): cover pinned context boundaries
+ d2af1f5 refactor(pi): minimize private integration seam
+ c48a7b2 fix(chat): stage memory-heavy startup recovery
+ c7af33c fix(chat): preserve startup recovery presentation
+ c6f297a test: stabilize isolated daemon gate ownership
+ 5ad068b refactor(build): remove false core-only entrypoint
+ 641274e fix(cron): isolate condition failures
+ c3f61c3 fix(tui): preserve Pi native initialization
+ 44ede32 fix(tools): align todo and note TUI updates
+ 9b6e9e1 fix(cron): persist recovery backoff
+ 44d2089 fix(chat): bound terminal projection cleanup
+ 4acf9ab fix(prompt): soften note cleanup guidance
+ 3ca527d refactor(chat): settle terminals by turn identity
+ 80b3e94 refactor(prompt): separate routing metadata from guidance
+ ee5d687 fix(chat): commit compact completion receipts
+ d03c9fb fix(chat): join follow-up after restart recovery
+ a6e5d5a refactor(chat): give compact completion one owner
+ 9613ce1 fix(compact): read token count from session branch
+ 3231d9d fix(chat): preserve rich fallback delivery failures
+ 0552bbb fix(compact): preserve Pi-native results
+ 531b018 fix(onebot): upload files with requested names
+ 3c6b781 refactor(onebot): send native message segments
+ 7ecd863 fix(chat): preserve localized compaction progress
+ 0d3b747 refactor(self-improve): simplify run audit evidence
+ e5faf03 fix(installer): fail closed removing stable prepare hook
+ db43855 perf(self-improve): default turn reviews to eight turns
+ f5a5e0f perf(daemon): keep worker supervisor bootstrap lightweight
+ cace5e3 fix(installer): reject invalid bootstrap manifests
+ c8255fe perf(context): prune history by tool call buckets
+ ecd60e0 fix(installer): keep bootstrap source identity fixed
+ dced398 perf(test): shorten commit feedback loop
+ 671414d refactor(core): make JSON fallback ownership explicit
+ 596a407 fix(chat): render item-based todo updates
+ b19b831 fix(test): restore the complete pre-commit gate
+ 0d9f349 fix(frontend): reject empty agent responses
+ f29fecc refactor(core): align item removal contracts
+ 0e4d78a refactor(memory): remove external provider API
+ 208dfba refactor(cron): keep agent execution on durable sessions
+ e791384 fix(compaction): reuse provider-bound context
+ 390a76f refactor(core): split todo completion actions
+ ace059f perf(test): shorten ordinary commit feedback
+ e88cf37 refactor(self-improve): deduplicate reviews by leaf
+ 6288a86 refactor(core): remove empty task capability
+ 607a40d refactor(self-improve): let runtime own initialization state
+ c124acf fix(frontend): keep reconnect event subscription unique
+ 29939f5 chore(upstream): refresh skill-creator mirror provenance
+ 4f79b92 refactor(runtime): separate backend facts from presentation
+ d76a4d3 refactor(chat): isolate daemon integration
+ a5ff135 refactor(runtime): unify target-user execution context
+ 8666036 refactor(runtime): move process lifetime to app entrypoints
+ 8c78927 fix(compaction): honor latest user corrections
+ d60f5cf fix(todo): use current-order item numbers
+ 2f00a26 refactor(chat): move outbox ownership into chat
+ 114410a refactor: defer thinking capabilities to Pi
+ bd06501 fix(release): track recovery test owner
+ 328b799 test(release): keep recovery assertion current
+ f845821 refactor(release): remove unused series state
+ 8416f3e refactor(test): standardize source and format ownership
+ 452f2ec refactor(test): derive coverage build paths
+ 97a7b3d test: converge duplicate test owners
+ cc8741d chore: sync Pi 0.84.2
+ e661d5c test: retire characterization snapshot layer
+ 139de86 test: validate selected suite routes
+ 8523ed9 test: assert prompt semantics without snapshots
+ 831ca0e refactor(prompt): make Rin the system prompt owner
+ cb154eb fix(prompt): require memory and current web evidence
+ 38e3223 fix(tools): use provider-compatible string enums
+ 89089a5 refactor(tools): separate capability and usage metadata
+ 10b75dc refactor(agent-docs): route directly to topic owners
+ 0280647 refactor(prompt): scope quote guidance to chat context
+ ad2b6bb docs(readme): align installation paths across languages
+ edbb501 docs(developer): consolidate current release guidance
+ 88520e6 fix(deps): remove unused direct dependencies
+ f8ccc3e ci: enforce the networkless gate on GitHub
+ dc20522 ci: bound hosted runner test concurrency
+ 86541ad ci: pass hosted concurrency into test container
+ 34fcf20 revert: keep quality gate local to commit hook
+ 4fc2164 test: converge duplicated test owners
+ 34e526d refactor(rpc): split command handler boundaries
+ e00cc9f refactor(rpc): narrow command handler contexts
+ 406d10f refactor(chat): extract controller policies
+ aa0a88f fix(release): install eslint config loader
+ 18bf222 refactor(chat): split platform runtime adapters
+ f67f641 refactor(runtime): break self-improve session cycle
+ e0ce793 refactor(cron): establish DTO contract owner
+ 97a556c fix(chat): show todo notices only for mutations
+ 97b447c fix(self-improve): balance garbage collection
+ bf969b1 refactor(extensions): separate message catalogs from working copy
+ 45f65ca feat: add time to every model input
+ 74518b8 fix: protect new sessions during recovery load
+ 90b59f1 fix: keep recovery admission behavior unchanged
+ 8c3bac7 perf: load session execution modules once
+ 2e60fa1 refactor(chat): simplify core platform ownership
+ 4ff8902 fix(runtime): persist eventless queued input receipts
+ 2014804 refactor(runtime): remove session note feature
+ e331cf9 fix(runtime): expose frontend identity before Pi lifecycle
+ d77cfe9 fix(runtime): retire stale note prompts on resume
+ 14991fa fix(runtime): keep extension frontend context live
+ 84684c7 fix(daemon): keep foreground frontend workers attached
+ d724c84 test: cover daemon worker shutdown signals
+ f075487 fix: generalize Rin CLI help and SDK guide
+ f4abe2d chore(upstream): refresh skill-creator provenance
+ cb9e120 fix(release): resume interrupted nightly tags
+ 1cb335a fix(release): recover nightly tags across UTC dates
+ deec646 fix: escape prompt metadata values
+ c78d1d4 docs: simplify scheduled task decision paths
+ 908df8a refactor(pi): remove internal extension bridge
+ b9987cf fix(chat): settle rejoined input after restart
+ 30c30f8 fix(memory): expose index health and retire daily repair
+ c964657 fix(runtime): reload active tool changes
+ 503426a chore(core): remove retired search residue
+ 4c47b0d refactor(frontend): split RPC model contracts
+ 97849b2 refactor(core): delegate RPC TUI lifecycle to Pi
+ 85b6092 fix(pi): defer compaction until a cut point exists
+ 622afe4 refactor(core): simplify deployment target boundaries
+ 011b872 refactor(core): remove built-in nightly review task
+ 7355553 chore(upstream): refresh skill-creator provenance
+ a3f8ff4 refactor(core): remove retired built-in residue
+ 7e610b7 refactor(core): bound migration compatibility window
+ 8bcc8d7 refactor(agent): rewrite prompt engineering skill
+ c960da8 fix(agent): route prompt engineering references
+ 18ecab8 test(system): prove core user journeys
+ 75e7cd3 refactor(core): retire unreachable modules and coverage ratchets
+ 3884287 refactor(prompt): ground factual claims in owned evidence
+ 4b04df6 refactor(self-improve): reduce resident prompt input
+ b5352e3 fix(chat): preserve native abort terminal outcome
+ c4da9d7 docs(memory): route continuity through merged skills
+ 49d28b6 docs: remove obsolete session awareness guidance
+ e1b6d8e fix(chat): retire stale accepted listeners
+ 749a17a fix(chat): delegate accepted recovery to Pi
+ b0e8a8a fix(todo): keep checklist guidance current
+ 855a8ce chore(upstream): refresh skill-creator provenance
+ d07be20 refactor(self-improve): prioritize durable guidance value
+ 28e1cc3 fix(compaction): restore Rin prompt ownership
+ 662419f fix(compaction): retain source proportionally
+-->
+
 ## 0.11.0
 
 - Chat turns now use a daemon-led durable lifecycle for acceptance, Working state, steering, retries, compaction, terminal settlement, and delivery recovery across sessions, adapters, transport loss, and restarts.
