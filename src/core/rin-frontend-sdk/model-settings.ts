@@ -117,10 +117,17 @@ export async function persistRpcSettingsMutation(
   await settings.flush?.();
 }
 
+type RpcPiPersistenceOptions = { persist?: boolean };
+
+function rpcPiPersistenceCommand(options: RpcPiPersistenceOptions) {
+  return options.persist === false ? { persistSettings: false } : {};
+}
+
 export async function setRpcModel(
   target: any,
   model: any,
   refreshModels: () => Promise<any>,
+  options: RpcPiPersistenceOptions = {},
 ) {
   await runRpcModelMutation(
     target,
@@ -128,6 +135,7 @@ export async function setRpcModel(
       type: "set_model",
       provider: model?.provider,
       modelId: model?.id,
+      ...rpcPiPersistenceCommand(options),
     },
     refreshModels,
   );
@@ -137,10 +145,11 @@ export async function cycleRpcModel(
   target: any,
   _direction: "forward" | "backward" | undefined,
   refreshModels: () => Promise<any>,
+  options: RpcPiPersistenceOptions = {},
 ) {
   return await runRpcModelMutation(
     target,
-    { type: "cycle_model" },
+    { type: "cycle_model", ...rpcPiPersistenceCommand(options) },
     refreshModels,
   );
 }
@@ -148,6 +157,7 @@ export async function cycleRpcModel(
 async function applyRpcThinkingLevel(
   target: any,
   resolveNext: () => ThinkingLevel | undefined,
+  options: RpcPiPersistenceOptions,
 ): Promise<ThinkingLevel | undefined> {
   return await enqueueRpcSettingsMutation(target, "thinkingLevel", async () => {
     const next = resolveNext();
@@ -155,6 +165,7 @@ async function applyRpcThinkingLevel(
     await callRpcSettingsMutation(target, {
       type: "set_thinking_level",
       level: next,
+      ...rpcPiPersistenceCommand(options),
     });
     setRpcTargetState(target, "thinkingLevel", next);
     target.emitEvent?.({ type: "thinking_level_changed", level: next });
@@ -165,22 +176,30 @@ async function applyRpcThinkingLevel(
 export async function setRpcThinkingLevel(
   target: any,
   level: ThinkingLevel,
+  options: RpcPiPersistenceOptions = {},
 ): Promise<ThinkingLevel> {
-  return (await applyRpcThinkingLevel(target, () =>
-    resolveRpcThinkingLevel(target, level),
+  return (await applyRpcThinkingLevel(
+    target,
+    () => resolveRpcThinkingLevel(target, level),
+    options,
   ))!;
 }
 
 export async function cycleRpcThinkingLevel(
   target: any,
+  options: RpcPiPersistenceOptions = {},
 ): Promise<ThinkingLevel | undefined> {
-  return await applyRpcThinkingLevel(target, () => {
-    const levels = getSupportedThinkingLevels(target.model);
-    if (levels.length <= 1) return undefined;
-    return levels[
-      (Math.max(0, levels.indexOf(target.thinkingLevel)) + 1) % levels.length
-    ];
-  });
+  return await applyRpcThinkingLevel(
+    target,
+    () => {
+      const levels = getSupportedThinkingLevels(target.model);
+      if (levels.length <= 1) return undefined;
+      return levels[
+        (Math.max(0, levels.indexOf(target.thinkingLevel)) + 1) % levels.length
+      ];
+    },
+    options,
+  );
 }
 
 async function setRpcModeOption(

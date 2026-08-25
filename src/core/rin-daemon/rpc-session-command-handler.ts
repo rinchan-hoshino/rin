@@ -1,5 +1,4 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import { emitPiSessionEvent } from "../pi/session-host.js";
 import { rawErrorMessage } from "../rin-lib/error-facts.js";
 import { fail } from "../rin-lib/rpc.js";
 import {
@@ -77,24 +76,15 @@ export function setSessionThinkingLevel(
   level: string,
   options: { persistSettings?: boolean } = {},
 ) {
-  if (options.persistSettings !== false) {
-    return session.setThinkingLevel(level);
-  }
   const requested = safeString(level).trim();
-  if (!session?.agent?.state || !requested) {
-    return session.setThinkingLevel(level);
-  }
-  const effectiveLevel = clampSessionThinkingLevel(session, requested);
-  const previousLevel = session.agent.state.thinkingLevel;
-  session.agent.state.thinkingLevel = effectiveLevel;
-  if (effectiveLevel !== previousLevel) {
-    session.sessionManager?.appendThinkingLevelChange?.(effectiveLevel);
-    emitPiSessionEvent(session, {
-      type: "thinking_level_changed",
-      level: effectiveLevel,
-    });
-  }
-  return { level: effectiveLevel };
+  session.setThinkingLevel(requested || level, {
+    persist: options.persistSettings !== false,
+  });
+  return {
+    level:
+      safeString(session?.thinkingLevel).trim() ||
+      clampSessionThinkingLevel(session, requested),
+  };
 }
 
 export async function flushSessionSettings(session: any) {
@@ -166,26 +156,9 @@ export async function setSessionModel(
   model: any,
   options: { persistSettings?: boolean } = {},
 ) {
-  if (options.persistSettings !== false) {
-    await session.setModel(model);
-    return model;
-  }
-  if (!session?.agent?.state) {
-    await session.setModel(model);
-    return model;
-  }
-  const models = sessionModelRuntime(session);
-  const authTarget = session?.modelRuntime ? model?.provider : model;
-  if (
-    typeof models.hasConfiguredAuth === "function" &&
-    !models.hasConfiguredAuth(authTarget)
-  ) {
-    throw new Error(`No API key for ${model.provider}/${model.id}`);
-  }
-  const thinkingLevel = safeString(session.thinkingLevel).trim() || "medium";
-  session.agent.state.model = model;
-  session.sessionManager?.appendModelChange?.(model.provider, model.id);
-  setSessionThinkingLevel(session, thinkingLevel, { persistSettings: false });
+  await session.setModel(model, {
+    persist: options.persistSettings !== false,
+  });
   return model;
 }
 
@@ -268,11 +241,17 @@ export function createRpcSessionCommandHandlers(
   return {
     async cycle_model({ command, id, type }: RpcCommandRequest) {
       const session = getSession();
+      const persistSettings = command.persistSettings !== false;
+      const mutate = () =>
+        session.cycleModel("forward", { persist: persistSettings });
 
       return run(
         id,
         type,
-        () => runPersistedSessionMutation(session, () => session.cycleModel()),
+        () =>
+          persistSettings
+            ? runPersistedSessionMutation(session, mutate)
+            : mutate(),
         (value) => value ?? null,
       );
     },
@@ -314,14 +293,17 @@ export function createRpcSessionCommandHandlers(
     },
     async cycle_thinking_level({ command, id, type }: RpcCommandRequest) {
       const session = getSession();
+      const persistSettings = command.persistSettings !== false;
+      const mutate = () =>
+        session.cycleThinkingLevel({ persist: persistSettings });
 
       return run(
         id,
         type,
         () =>
-          runPersistedSessionMutation(session, () =>
-            session.cycleThinkingLevel(),
-          ),
+          persistSettings
+            ? runPersistedSessionMutation(session, mutate)
+            : mutate(),
         (level) => (level ? { level } : null),
       );
     },

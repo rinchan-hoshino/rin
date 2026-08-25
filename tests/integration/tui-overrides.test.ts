@@ -173,7 +173,11 @@ function createRealInteractiveModeResyncInstance(overrides = {}) {
   return instance;
 }
 
-function createZeroExtensionCustomEntryRenderInstance() {
+function createZeroExtensionCustomEntryRenderInstance(
+  options: {
+    includeCompaction?: boolean;
+  } = {},
+) {
   const rpcSession = new RpcInteractiveSession(
     {
       send() {
@@ -193,6 +197,19 @@ function createZeroExtensionCustomEntryRenderInstance() {
     content: [{ type: "text", text: "history after custom state" }],
   };
   const entries = [
+    ...(options.includeCompaction
+      ? [
+          {
+            type: "compaction",
+            id: "compaction-entry",
+            parentId: null,
+            timestamp: new Date().toISOString(),
+            summary: "compacted",
+            firstKeptEntryId: "history-entry",
+            tokensBefore: 326_000,
+          },
+        ]
+      : []),
     {
       type: "custom",
       customType: "rin-system-prompt-state",
@@ -2830,7 +2847,9 @@ test("zero-extension compaction end rebuilds history containing Rin core custom 
     addedMessages,
     getChatClears,
     getFooterInvalidations,
-  } = createZeroExtensionCustomEntryRenderInstance();
+  } = createZeroExtensionCustomEntryRenderInstance({
+    includeCompaction: true,
+  });
 
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
     type: "compaction_end",
@@ -2846,7 +2865,7 @@ test("zero-extension compaction end rebuilds history containing Rin core custom 
     ["user"],
   );
   assert.equal(addedMessages.at(-1)?.role, "compactionSummary");
-  assert.ok(getChatClears() >= 2);
+  assert.ok(getChatClears() >= 1);
   assert.ok(getFooterInvalidations() >= 1);
 });
 

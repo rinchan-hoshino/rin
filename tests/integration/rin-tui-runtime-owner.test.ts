@@ -871,15 +871,30 @@ test("rpc runtime exposes bound Pi facades, model mutations, and refresh queues"
 
   client.set("set_model", { selected: true });
   await session.setModel({ provider: "anthropic", id: "owner-model" });
+  assert.equal(sentOf(client, "set_model").at(-1)?.persistSettings, false);
+  await session.setModel(
+    { provider: "anthropic", id: "owner-model" },
+    { persist: true },
+  );
+  assert.equal("persistSettings" in sentOf(client, "set_model").at(-1), false);
   session.setScopedModels([
     { model: { provider: "openai", id: "a" }, thinkingLevel: "low" },
   ]);
   assert.equal(session.scopedModels[0].model.id, "a");
   client.set("cycle_model", { cycled: true });
   assert.deepEqual(await session.cycleModel("backward"), { cycled: true });
+  assert.equal(sentOf(client, "cycle_model").at(-1)?.persistSettings, false);
   client.set("set_thinking_level", {});
   assert.equal(await session.setThinkingLevel("high"), "high");
+  assert.equal(
+    sentOf(client, "set_thinking_level").at(-1)?.persistSettings,
+    false,
+  );
   assert.equal(await session.cycleThinkingLevel(), "off");
+  assert.equal(
+    sentOf(client, "set_thinking_level").at(-1)?.persistSettings,
+    false,
+  );
   assert.equal(session.getAvailableThinkingLevels().includes("off"), true);
   client.set("set_steering_mode", {});
   client.set("set_follow_up_mode", {});

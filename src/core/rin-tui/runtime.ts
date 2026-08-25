@@ -748,9 +748,12 @@ export class RpcInteractiveSession {
     return mutation;
   }
 
-  async setModel(model: any) {
-    await setRpcModel(this as any, model, () =>
-      this.refreshState(REFRESH_MODELS),
+  async setModel(model: any, options: { persist?: boolean } = {}) {
+    await setRpcModel(
+      this as any,
+      model,
+      () => this.refreshState(REFRESH_MODELS),
+      { persist: options.persist === true },
     );
   }
 
@@ -764,20 +767,32 @@ export class RpcInteractiveSession {
     this.scopedModels = [...scopedModels];
   }
 
-  async cycleModel(direction?: "forward" | "backward") {
-    return await cycleRpcModel(this as any, direction, () =>
-      this.refreshState(REFRESH_MODELS),
+  async cycleModel(
+    direction?: "forward" | "backward",
+    options: { persist?: boolean } = {},
+  ) {
+    return await cycleRpcModel(
+      this as any,
+      direction,
+      () => this.refreshState(REFRESH_MODELS),
+      { persist: options.persist === true },
     );
   }
 
-  setThinkingLevel(level: ThinkingLevel) {
+  setThinkingLevel(level: ThinkingLevel, options: { persist?: boolean } = {}) {
     return this.reportRpcSettingsMutation(
-      setRpcThinkingLevel(this as any, level),
+      setRpcThinkingLevel(this as any, level, {
+        persist: options.persist === true,
+      }),
     );
   }
 
-  async cycleThinkingLevel(): Promise<ThinkingLevel | undefined> {
-    return await cycleRpcThinkingLevel(this as any);
+  async cycleThinkingLevel(
+    options: { persist?: boolean } = {},
+  ): Promise<ThinkingLevel | undefined> {
+    return await cycleRpcThinkingLevel(this as any, {
+      persist: options.persist === true,
+    });
   }
 
   getAvailableThinkingLevels() {

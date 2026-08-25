@@ -291,6 +291,7 @@ export async function runPiNativeCompactionWithoutFileSummary(
     apiKey: requestAuth?.auth?.apiKey,
     headers,
     env: requestAuth?.env,
+    sessionId: session?.sessionId,
   };
   if (
     model.reasoning &&
@@ -333,6 +334,14 @@ export async function runPiNativeCompactionWithoutFileSummary(
       `Summarization failed: ${response.errorMessage || "Unknown error"}`,
     );
   }
+  if (response.stopReason === "length") {
+    throw new Error(
+      "Summarization failed: generation hit the token cap and the summary is incomplete",
+    );
+  }
+  if (response.content.some((block: any) => block.type === "toolCall")) {
+    throw new Error("Summarization attempted to call a tool");
+  }
   return {
     summary: contentText(response.content),
     firstKeptEntryId: preparation.firstKeptEntryId,
@@ -370,6 +379,7 @@ async function runOwnedPiCompaction(
     compact: RinCompactionOwner;
     pathEntries: any[];
     preparation: any;
+    onSource?: (fromExtension: boolean) => void;
   },
 ) {
   if (!session?.model) {
@@ -393,6 +403,7 @@ async function runOwnedPiCompaction(
   if (extensionResult?.cancel) throw new Error("Compaction cancelled");
 
   const fromExtension = Boolean(extensionResult?.compaction);
+  options.onSource?.(fromExtension);
   const compaction =
     extensionResult?.compaction ?? (await options.compact(event));
   if (options.signal.aborted) throw new Error("Compaction cancelled");
@@ -435,6 +446,21 @@ async function runOwnedPiCompaction(
   };
 }
 
+async function emitPiSessionCompactFailed(
+  session: any,
+  event: {
+    reason: "manual" | "threshold" | "overflow";
+    errorMessage: string;
+    aborted: boolean;
+    willRetry: boolean;
+    fromExtension: boolean;
+  },
+) {
+  const runner = getPiExtensionRunner(session);
+  if (typeof runner?.emit !== "function") return;
+  await runner.emit({ type: "session_compact_failed", ...event });
+}
+
 export function installPiSessionCompactionOwner(
   session: any,
   compact: RinCompactionOwner,
@@ -463,6 +489,7 @@ export function installPiSessionCompactionOwner(
     const controller = new AbortController();
     session[PI_SESSION_PRIVATE.compactionAbortController] = controller;
     emitPiSessionEvent(session, { type: "compaction_start", reason: "manual" });
+    let fromExtension = false;
     try {
       const { pathEntries, preparation } = readPiCompactionPreparation(session);
       if (!preparation) {
@@ -479,6 +506,9 @@ export function installPiSessionCompactionOwner(
         compact: state.compact,
         pathEntries,
         preparation,
+        onSource(value) {
+          fromExtension = value;
+        },
       });
       session[PI_SESSION_PRIVATE.compactionAbortController] = undefined;
       emitPiSessionEvent(session, {
@@ -494,13 +524,21 @@ export function installPiSessionCompactionOwner(
       const aborted =
         message === "Compaction cancelled" || error?.name === "AbortError";
       session[PI_SESSION_PRIVATE.compactionAbortController] = undefined;
+      const errorMessage = aborted ? message : `Compaction failed: ${message}`;
       emitPiSessionEvent(session, {
         type: "compaction_end",
         reason: "manual",
         result: undefined,
         aborted,
         willRetry: false,
-        errorMessage: aborted ? undefined : `Compaction failed: ${message}`,
+        errorMessage: aborted ? undefined : errorMessage,
+      });
+      await emitPiSessionCompactFailed(session, {
+        reason: "manual",
+        errorMessage,
+        aborted,
+        willRetry: false,
+        fromExtension,
       });
       throw error;
     }
@@ -515,6 +553,7 @@ export function installPiSessionCompactionOwner(
       const controller = new AbortController();
       session[PI_SESSION_PRIVATE.autoCompactionAbortController] = controller;
       let started = false;
+      let fromExtension = false;
       try {
         emitPiSessionEvent(session, { type: "compaction_start", reason });
         started = true;
@@ -525,6 +564,9 @@ export function installPiSessionCompactionOwner(
           compact: state.compact,
           pathEntries,
           preparation,
+          onSource(value) {
+            fromExtension = value;
+          },
         });
         emitPiSessionEvent(session, {
           type: "compaction_end",
@@ -550,16 +592,24 @@ export function installPiSessionCompactionOwner(
         if (started) {
           const message =
             error instanceof Error ? error.message : "compaction failed";
+          const errorMessage =
+            reason === "overflow"
+              ? `Context overflow recovery failed: ${message}`
+              : `Auto-compaction failed: ${message}`;
           emitPiSessionEvent(session, {
             type: "compaction_end",
             reason,
             result: undefined,
             aborted: false,
             willRetry: false,
-            errorMessage:
-              reason === "overflow"
-                ? `Context overflow recovery failed: ${message}`
-                : `Auto-compaction failed: ${message}`,
+            errorMessage,
+          });
+          await emitPiSessionCompactFailed(session, {
+            reason,
+            errorMessage,
+            aborted: false,
+            willRetry: false,
+            fromExtension,
           });
         }
         return false;

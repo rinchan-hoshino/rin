@@ -371,6 +371,7 @@ test("Pi session host owns compaction without registering core extension handler
   assert.equal(await session._runAutoCompaction("overflow", true), true);
   assert.notEqual(session.agent.state.messages.at(-1)?.stopReason, "length");
 
+  runner.hasHandlers = (type: string) => type === "session_compact_failed";
   assert.equal(
     host.installPiSessionCompactionOwner(session, async () => {
       throw new Error("owner auto-compaction failed");
@@ -386,6 +387,18 @@ test("Pi session host owns compaction without registering core extension handler
           "Context overflow recovery failed: owner auto-compaction failed",
     ),
     true,
+  );
+  assert.deepEqual(
+    events.find((event) => event.type === "session_compact_failed"),
+    {
+      type: "session_compact_failed",
+      reason: "overflow",
+      errorMessage:
+        "Context overflow recovery failed: owner auto-compaction failed",
+      aborted: false,
+      willRetry: false,
+      fromExtension: false,
+    },
   );
 });
 

@@ -396,8 +396,10 @@ export async function runBuiltinCommand(
       if (!match) {
         throwCommandError("command_model_not_found", nextTargetRef);
       }
-      await session.setModel(match);
-      if (thinkingLevel) await session.setThinkingLevel(thinkingLevel);
+      await session.setModel(match, { persist: true });
+      if (thinkingLevel) {
+        await session.setThinkingLevel(thinkingLevel, { persist: true });
+      }
       return builtinCommandResult("model", {
         selectedModel: modelRef(match),
         thinkingLevel,

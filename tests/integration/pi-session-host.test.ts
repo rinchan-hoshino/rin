@@ -125,7 +125,12 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
   let requestOptions: any;
   let authModel: any;
   let retrySource: any;
+  let responseContent: any[] = [
+    { type: "text", text: "## Goal\nKeep native compaction." },
+  ];
+  let responseStopReason = "stop";
   const session = {
+    sessionId: "owner-session",
     model,
     thinkingLevel: "medium",
     agent: {
@@ -136,14 +141,12 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
         return {
           result: async () => ({
             role: "assistant",
-            content: [
-              { type: "text", text: "## Goal\nKeep native compaction." },
-            ],
+            content: responseContent,
             api: "anthropic-messages",
             provider: "anthropic",
             model: "integration-model",
             usage,
-            stopReason: "stop",
+            stopReason: responseStopReason,
             timestamp: Date.now(),
           }),
         };
@@ -211,8 +214,9 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
   });
   assert.deepEqual(requestOptions.env, { PROVIDER_REGION: "test-region" });
   assert.equal("maxTokens" in requestOptions, false);
-  assert.equal(typeof requestOptions.sessionId, "string");
+  assert.equal(requestOptions.sessionId, "owner-session");
   assert.equal(requestOptions.cacheRetention, "none");
+  assert.equal(requestOptions.toolChoice, "none");
   assert.equal(systemPrompt, RIN_COMPACTION_SYSTEM_PROMPT);
   assert.match(prompt, /## Historical Task Snapshot/);
   assert.match(prompt, /## Completed Actions/);
@@ -247,6 +251,20 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
     event,
   );
   assert.equal(proxyResult.summary, "## Goal\nKeep native compaction.");
+
+  responseStopReason = "length";
+  await assert.rejects(
+    () => runPiNativeCompactionWithoutFileSummary(session, event),
+    /token cap|incomplete/i,
+  );
+  responseStopReason = "stop";
+  responseContent = [
+    { type: "toolCall", id: "tool-1", name: "read", arguments: {} },
+  ];
+  await assert.rejects(
+    () => runPiNativeCompactionWithoutFileSummary(session, event),
+    /Summarization attempted to call a tool/,
+  );
 });
 
 test("Rin compaction request preserves preparation while leaving the full prompt to Rin", () => {

@@ -1416,7 +1416,7 @@ test(
 );
 
 test(
-  "rpc mode applies non-persistent model changes without calling the settings-backed setter or extension events",
+  "rpc mode applies non-persistent model changes through Pi's public persistence option",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -1424,6 +1424,7 @@ test(
     const handlers = new Map();
     const lines = [];
     const appendedModels: string[] = [];
+    const modelOptions: any[] = [];
     const extensionEvents: any[] = [];
 
     process.stdin.on = function (event, handler) {
@@ -1486,8 +1487,11 @@ test(
         getUserMessagesForForking: () => [],
         getLastAssistantText: () => "",
         getAvailableThinkingLevels: () => ["off", "low", "medium", "high"],
-        setModel: () => {
-          throw new Error("persistent setter should not be called");
+        setModel(model: any, options: any) {
+          modelOptions.push(options);
+          assert.deepEqual(options, { persist: false });
+          this.agent.state.model = model;
+          this.sessionManager.appendModelChange(model.provider, model.id);
         },
         setThinkingLevel: () => {
           throw new Error("persistent thinking setter should not be called");
@@ -1532,6 +1536,7 @@ test(
 
       assert.equal(session.agent.state.model, targetModel);
       assert.deepEqual(appendedModels, ["openai-codex/gpt-5.5"]);
+      assert.deepEqual(modelOptions, [{ persist: false }]);
       assert.deepEqual(extensionEvents, []);
       const response = lines
         .map((line) => {
@@ -1639,11 +1644,15 @@ test(
         getUserMessagesForForking: () => [],
         getLastAssistantText: () => "",
         getAvailableThinkingLevels: () => ["off", "low", "medium", "high"],
-        setModel: () => {
-          throw new Error("persistent model setter should not be called");
+        setModel(model: any, options: any) {
+          assert.deepEqual(options, { persist: false });
+          this.agent.state.model = model;
+          this.sessionManager.appendModelChange(model.provider, model.id);
         },
-        setThinkingLevel: () => {
-          throw new Error("persistent thinking setter should not be called");
+        setThinkingLevel(level: string, options: any) {
+          assert.deepEqual(options, { persist: false });
+          this.agent.state.thinkingLevel = level;
+          this.sessionManager.appendThinkingLevelChange(level);
         },
         cycleThinkingLevel: () => undefined,
         setSteeringMode: () => {},
@@ -1859,7 +1868,7 @@ test(
 );
 
 test(
-  "rpc mode applies non-persistent thinking level changes without calling the settings-backed setter",
+  "rpc mode applies non-persistent thinking changes through Pi's public persistence option",
   { concurrency: false },
   async () => {
     const stdinOn = process.stdin.on;
@@ -1913,8 +1922,10 @@ test(
         getUserMessagesForForking: () => [],
         getLastAssistantText: () => "",
         getAvailableThinkingLevels: () => ["off", "low", "medium", "high"],
-        setThinkingLevel: () => {
-          throw new Error("persistent setter should not be called");
+        setThinkingLevel(level: string, options: any) {
+          assert.deepEqual(options, { persist: false });
+          this.agent.state.thinkingLevel = level;
+          this.sessionManager.appendThinkingLevelChange(level);
         },
         cycleThinkingLevel: () => undefined,
         setSteeringMode: () => {},
