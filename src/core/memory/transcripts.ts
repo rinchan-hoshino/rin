@@ -19,6 +19,7 @@ export {
   flushTranscriptSearchIndexWrites,
   loadRecentTranscriptSessions,
   loadTranscriptSessionEntries,
+  recoverTranscriptSearchIndex,
   repairTranscriptSearchIndex,
   searchTranscriptArchive,
 } from "./transcript-search.js";

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { coreDataPath } from "../data-layout.js";
+import { recoverTranscriptSearchIndex } from "../memory/transcripts.js";
 import { ensureDir } from "../platform/fs.js";
 import { nowIso } from "../time-utils.js";
 import {
@@ -127,6 +128,13 @@ export async function startDaemon(options: {
   const instanceLock =
     options.instanceLock ||
     (await acquireDaemonInstanceLock(runtime.agentDir, { socketPath }));
+  try {
+    await recoverTranscriptSearchIndex(runtime.agentDir);
+  } catch (error) {
+    console.warn(
+      `rin memory index startup recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   let sessionManagerModulePromise:
     | ReturnType<typeof loadRinSessionManagerModule>
     | undefined;

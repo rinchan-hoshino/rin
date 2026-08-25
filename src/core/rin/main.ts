@@ -205,6 +205,7 @@ export async function startRinCli() {
     (strippedArgv[0] === "--help" || strippedArgv[0] === "-h");
   const shouldDelegateBeforeLocalDispatch =
     candidateCommand === "update" ||
+    candidateCommand === "doctor" ||
     (!candidateCommand &&
       (isRootHelp ||
         Boolean(strippedArgv[0] && !strippedArgv[0].startsWith("-"))));

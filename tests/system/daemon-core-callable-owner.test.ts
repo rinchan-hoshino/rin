@@ -20,6 +20,7 @@ type RunningDaemon = {
   child: ChildProcess;
   socketPath: string;
   legacyBridgePath: string;
+  memoryWriterMarkerDir: string;
   stdout: () => string;
   stderr: () => string;
 };
@@ -56,6 +57,24 @@ async function startOwnerDaemon(root: string): Promise<RunningDaemon> {
   );
   await fs.mkdir(path.dirname(legacyBridgePath), { recursive: true });
   await fs.writeFile(legacyBridgePath, "legacy");
+  const transcripts = await import(
+    pathToFileURL(path.resolve("dist/core/memory/transcripts.js")).href
+  );
+  await transcripts.repairTranscriptSearchIndex(sandbox.env.RIN_DIR);
+  const memoryWriterMarkerDir = path.join(
+    sandbox.env.RIN_DIR,
+    "memory/search-writers",
+  );
+  await fs.mkdir(memoryWriterMarkerDir, { recursive: true });
+  await fs.writeFile(
+    path.join(memoryWriterMarkerDir, "999999-owner-stale.dirty"),
+    `${JSON.stringify({
+      pid: 999999,
+      processStartIdentity: "dead-owner-writer",
+      createdAt: Date.now(),
+      failed: true,
+    })}\n`,
+  );
   const executable = path.join(
     root,
     `launcher-${Date.now()}-${Math.random()}.mjs`,
@@ -99,6 +118,7 @@ async function startOwnerDaemon(root: string): Promise<RunningDaemon> {
     child,
     socketPath,
     legacyBridgePath,
+    memoryWriterMarkerDir,
     stdout: () => stdout,
     stderr: () => stderr,
   };
@@ -166,6 +186,7 @@ test("callable core daemon routes the complete system-owned RPC while its host o
     await assert.rejects(fs.access(daemon.legacyBridgePath), {
       code: "ENOENT",
     });
+    assert.deepEqual(await fs.readdir(daemon.memoryWriterMarkerDir), []);
     const rpc = connectRpc(daemon.socketPath);
     await new Promise<void>((resolve, reject) => {
       rpc.socket.once("connect", resolve);

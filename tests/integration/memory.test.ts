@@ -1816,7 +1816,7 @@ test("transcript archive failures preserve the dirty marker for repair", async (
   });
 });
 
-test("transcript writers recreate an externally removed owned marker", async () => {
+test("successful transcript index flush closes its crash marker and the next write recreates it", async () => {
   await withTempRoot(async (root) => {
     const base = {
       timestamp: "2026-04-08T09:09:09.000Z",
@@ -1828,11 +1828,10 @@ test("transcript writers recreate an externally removed owned marker", async () 
       { ...base, id: "marker-1", text: "first marker entry" },
       root,
     );
-    transcripts.flushTranscriptSearchIndexWrites(root);
     const markerDir = path.join(root, "memory", "search-writers");
-    const firstMarkers = await fs.readdir(markerDir);
-    assert.equal(firstMarkers.length, 1);
-    await fs.rm(path.join(markerDir, firstMarkers[0]));
+    assert.equal((await fs.readdir(markerDir)).length, 1);
+    transcripts.flushTranscriptSearchIndexWrites(root);
+    assert.deepEqual(await fs.readdir(markerDir), []);
 
     await transcripts.appendTranscriptArchiveEntry(
       { ...base, id: "marker-2", text: "recreated marker entry" },
@@ -1845,6 +1844,13 @@ test("transcript writers recreate an externally removed owned marker", async () 
       root,
     );
     assert.equal(results[0].sessionId, base.sessionId);
+    assert.deepEqual(await fs.readdir(markerDir), []);
+
+    await transcripts.appendTranscriptArchiveEntry(
+      { ...base, id: "ignored-marker", role: "", text: "ignored entry" },
+      root,
+    );
+    assert.deepEqual(await fs.readdir(markerDir), []);
   });
 });
 

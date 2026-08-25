@@ -706,8 +706,10 @@ function flushTranscriptIndexWrites(rootOverride = "") {
     writer.timer = undefined;
   }
   transcriptIndexWriters.delete(dbPath);
+  let committed = false;
   try {
     writer.db.exec("COMMIT");
+    committed = true;
   } catch (error) {
     try {
       writer.db.exec("ROLLBACK");
@@ -717,6 +719,7 @@ function flushTranscriptIndexWrites(rootOverride = "") {
   } finally {
     writer.db.close();
   }
+  if (committed) clearOwnedTranscriptWriterMarker(rootOverride);
 }
 
 function appendTranscriptIndexWrite(
@@ -978,6 +981,16 @@ function markTranscriptWriterFailed(rootOverride = "") {
   }
 }
 
+function clearOwnedTranscriptWriterMarker(rootOverride = "") {
+  const dbPath = resolveTranscriptSearchDbPath(rootOverride);
+  const ownedMarker = ownedTranscriptWriterMarkers.get(dbPath);
+  if (!ownedMarker) return;
+  try {
+    fssync.rmSync(ownedMarker.markerPath, { force: true });
+    ownedTranscriptWriterMarkers.delete(dbPath);
+  } catch {}
+}
+
 function ensureTranscriptWriterMarker(rootOverride = "") {
   const dbPath = resolveTranscriptSearchDbPath(rootOverride);
   const ownedMarker = ownedTranscriptWriterMarkers.get(dbPath);
@@ -1025,7 +1038,12 @@ export async function appendTranscriptArchiveEntry(
     markTranscriptWriterFailed(rootOverride);
     throw error;
   }
-  if (!appended) return;
+  if (!appended) {
+    if (!transcriptIndexWriters.has(dbPath)) {
+      clearOwnedTranscriptWriterMarker(rootOverride);
+    }
+    return;
+  }
   try {
     appendTranscriptIndexWrite(
       appended.fileState,
@@ -1186,6 +1204,15 @@ async function withTranscriptSearchDb<T>(
   } finally {
     db.close();
   }
+}
+
+export async function recoverTranscriptSearchIndex(rootOverride = "") {
+  const health = inspectTranscriptSearchHealth(rootOverride);
+  if (health.staleDirtyMarkerCount === 0 && health.rebuildRequired !== true) {
+    return false;
+  }
+  await withTranscriptSearchDb(rootOverride, () => undefined);
+  return true;
 }
 
 type IndexedEntryRow = {
