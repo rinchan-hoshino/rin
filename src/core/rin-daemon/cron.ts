@@ -593,7 +593,14 @@ export class CronScheduler {
       return this.publicTask(task);
     }
 
-    this.activeExecutions.set(task.id, { startedAt: Date.now() });
+    const previousExecutionState = {
+      lastStartedAt: task.lastStartedAt,
+      runCount: task.runCount,
+      lastError: task.lastError,
+      updatedAt: task.updatedAt,
+      nextRunAt: task.nextRunAt,
+      activeInvocation: task.activeInvocation,
+    };
     task.lastStartedAt = nowIso();
     task.runCount += 1;
     task.lastError = undefined;
@@ -609,7 +616,13 @@ export class CronScheduler {
         this.options.agentDir,
       );
     }
-    this.save();
+    try {
+      this.save();
+    } catch (error) {
+      Object.assign(task, previousExecutionState);
+      throw error;
+    }
+    this.activeExecutions.set(task.id, { startedAt: Date.now() });
     if (task.activeInvocation) {
       this.activeExecutions.set(task.id, {
         startedAt: Date.parse(task.activeInvocation.startedAt) || Date.now(),

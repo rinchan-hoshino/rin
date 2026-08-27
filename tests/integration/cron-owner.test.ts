@@ -435,6 +435,49 @@ test("cron run-now evaluates conditions and executes one-time and recurring shel
   });
 });
 
+test("cron rolls back execution admission when start persistence fails", async () => {
+  await withAgentDir(async (agentDir) => {
+    const scheduler = new CronScheduler({ agentDir });
+    const markerPath = path.join(agentDir, "shell-started");
+    scheduler.upsertTask(
+      shellTaskInput("persist-before-shell-start", {
+        target: {
+          kind: "shell_command",
+          command: `printf started > ${JSON.stringify(markerPath)}`,
+        },
+      }),
+    );
+    const before = scheduler.getTask("persist-before-shell-start");
+    const schedulerDir = path.join(agentDir, "data", "scheduler");
+    await fsp.chmod(schedulerDir, 0o500);
+    try {
+      assert.throws(() => scheduler.runTaskNow("persist-before-shell-start"));
+    } finally {
+      await fsp.chmod(schedulerDir, 0o700);
+    }
+
+    const afterFailure = scheduler.getTask("persist-before-shell-start");
+    assert.equal(afterFailure?.running, false);
+    assert.equal(afterFailure?.runCount, before?.runCount);
+    assert.equal(afterFailure?.lastStartedAt, before?.lastStartedAt);
+    assert.equal(afterFailure?.nextRunAt, before?.nextRunAt);
+    assert.equal(
+      (scheduler as any).activeExecutions.has("persist-before-shell-start"),
+      false,
+    );
+    await assert.rejects(fsp.access(markerPath));
+
+    scheduler.runTaskNow("persist-before-shell-start");
+    const settled = await waitForTaskSettled(
+      scheduler,
+      "persist-before-shell-start",
+    );
+    assert.equal(settled.running, false);
+    assert.equal(await fsp.readFile(markerPath, "utf8"), "started");
+    scheduler.stop();
+  });
+});
+
 test("cron releases shell task execution state after a command timeout", async () => {
   await withAgentDir(async (agentDir) => {
     const scheduler = new CronScheduler({ agentDir });
