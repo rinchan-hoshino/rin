@@ -130,6 +130,37 @@ async function getCronShellConfig(agentDir: string) {
   return { shell: "sh", args: ["-c"] };
 }
 
+export const DEFAULT_CRON_SHELL_TIMEOUT_MS = 30 * 60 * 1000;
+const MIN_CRON_SHELL_TIMEOUT_MS = 100;
+const MAX_CRON_SHELL_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+
+export function normalizeCronShellTimeoutMs(value: unknown) {
+  if (value === undefined) return DEFAULT_CRON_SHELL_TIMEOUT_MS;
+  const timeoutMs = Number(value);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("cron_shell_timeout_invalid");
+  }
+  return Math.min(
+    MAX_CRON_SHELL_TIMEOUT_MS,
+    Math.max(MIN_CRON_SHELL_TIMEOUT_MS, Math.round(timeoutMs)),
+  );
+}
+
+function terminateCronShellProcess(child: ReturnType<typeof spawn>): void {
+  if (process.platform !== "win32" && child.pid) {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+      return;
+    } catch (error: any) {
+      if (error?.code === "ESRCH") return;
+    }
+  }
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    child.kill("SIGKILL");
+  } catch {}
+}
+
 export async function executeCronShellCommand(
   task: CronTaskRecord,
   options: { agentDir: string },
@@ -137,22 +168,51 @@ export async function executeCronShellCommand(
   if (task.target.kind !== "shell_command")
     throw new Error("cron_invalid_shell_task");
   const { command } = task.target;
+  const timeoutMs = normalizeCronShellTimeoutMs(task.target.timeoutMs);
   const { shell, args } = await getCronShellConfig(options.agentDir);
   return await new Promise<string>((resolve, reject) => {
     const child = spawn(shell, [...args, command], {
       cwd: HOME_DIR,
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
     });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const settle = (complete: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      complete();
+    };
+    const timeout = setTimeout(() => {
+      terminateCronShellProcess(child);
+      child.stdout.destroy();
+      child.stderr.destroy();
+      settle(() =>
+        reject(
+          new Error(
+            [
+              `cron_shell_command_timeout:${timeoutMs}`,
+              `Command: ${command}`,
+              stdout.trim() ? `stdout:\n${summarizeText(stdout, 4000)}` : "",
+              stderr.trim() ? `stderr:\n${summarizeText(stderr, 4000)}` : "",
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
+          ),
+        ),
+      );
+    }, timeoutMs);
+    timeout.unref();
     child.stdout.on("data", (chunk) => {
       stdout += String(chunk);
     });
     child.stderr.on("data", (chunk) => {
       stderr += String(chunk);
     });
-    child.on("error", reject);
+    child.on("error", (error) => settle(() => reject(error)));
     child.on("close", (code, signal) => {
       const body = [
         `Command: ${command}`,
@@ -162,8 +222,10 @@ export async function executeCronShellCommand(
       ]
         .filter(Boolean)
         .join("\n\n");
-      if (code === 0 && !signal) resolve(body);
-      else reject(new Error(body || "cron_command_failed"));
+      settle(() => {
+        if (code === 0 && !signal) resolve(body);
+        else reject(new Error(body || "cron_command_failed"));
+      });
     });
   });
 }

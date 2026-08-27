@@ -178,6 +178,52 @@ test("cron shell execution reports command output and failures", async () => {
   });
 });
 
+test("cron shell execution times out instead of retaining active work", async () => {
+  await withAgentDir(async (agentDir) => {
+    const pidPath = path.join(agentDir, "shell.pid");
+    const execution = cronExecution.executeCronShellCommand(
+      task({
+        target: {
+          kind: "shell_command",
+          command: `sleep 30 & printf %s $! > ${JSON.stringify(pidPath)}`,
+          timeoutMs: 100,
+        },
+      }),
+      { agentDir },
+    );
+    const observed = await Promise.race([
+      execution.then(
+        () => ({ status: "resolved" as const }),
+        (error) => ({ status: "rejected" as const, error }),
+      ),
+      new Promise<{ status: "pending" }>((resolve) => {
+        setTimeout(() => resolve({ status: "pending" }), 1_000);
+      }),
+    ]);
+
+    const pid = Number(await fs.readFile(pidPath, "utf8").catch(() => ""));
+    if (observed.status === "pending") {
+      if (pid > 0) process.kill(pid, "SIGKILL");
+      await execution.catch(() => {});
+    }
+
+    assert.equal(observed.status, "rejected");
+    if (observed.status === "rejected") {
+      assert.match(observed.error.message, /cron_shell_command_timeout:100/);
+    }
+    assert.ok(pid > 0);
+    let running = true;
+    for (let attempt = 0; attempt < 50 && running; attempt += 1) {
+      const stat = await fs
+        .readFile(`/proc/${pid}/stat`, "utf8")
+        .catch(() => "");
+      running = Boolean(stat && !/\) Z /.test(stat));
+      if (running) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(running, false);
+  });
+});
+
 test("cron prompt context identifies chat and controller frontends", () => {
   assert.deepEqual(
     cronExecution.buildCronTaskPromptContext(

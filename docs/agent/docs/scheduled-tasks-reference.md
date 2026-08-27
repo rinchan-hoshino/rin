@@ -36,7 +36,7 @@ type WritableTaskPatch = {
   session?: { mode: "none" | "dedicated" };
   target?:
     | { kind: "agent_prompt"; prompt: string; continuationPrompt?: string }
-    | { kind: "shell_command"; command: string };
+    | { kind: "shell_command"; command: string; timeoutMs?: number };
 };
 ```
 
@@ -233,7 +233,7 @@ Runs a shell command from the Rin user's home directory using the configured she
 
 Use this for machine-style diagnostics and stable scripts. If the recipient expects a domain summary, use an `agent_prompt` task that runs the script and summarizes the result. Shell delivery includes machine fields like `Command`, `Exit`, `stdout`, and `stderr`.
 
-Shell stdout/stderr are summarized before storage and delivery.
+Shell stdout/stderr are summarized before storage and delivery. A positive `timeoutMs` bounds one command execution; it defaults to 30 minutes and is normalized to the range from 100 ms through 24 hours. When the deadline expires, Rin terminates the command and its process group where supported, records `cron_shell_command_timeout:<milliseconds>`, and releases the task so later scheduled runs are not blocked.
 
 ## Delivery modes
 

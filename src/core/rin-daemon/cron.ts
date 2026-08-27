@@ -30,6 +30,7 @@ import {
   createCronSessionInvocation,
   executeCronSessionInvocation,
   executeCronShellTask,
+  normalizeCronShellTimeoutMs,
   type CronShellTaskRecord,
   type CronTaskTerminal,
 } from "./cron-execution.js";
@@ -141,6 +142,7 @@ function normalizeTaskTarget(target: CronTaskTarget | undefined) {
     return {
       kind: "shell_command" as const,
       command: requireNonEmptyString(target.command, "cron_command_required"),
+      timeoutMs: normalizeCronShellTimeoutMs(target.timeoutMs),
     };
   }
   throw new Error(
@@ -1013,8 +1015,8 @@ export class CronScheduler {
         task.nextRunAt = computeNextRunAt(task, Date.now());
       }
     } finally {
-      const currentTask = this.mergeFinishedExecutionTask(task);
       this.activeExecutions.delete(task.id);
+      const currentTask = this.mergeFinishedExecutionTask(task);
       if (currentTask?.completedAt) this.terminateTaskSession(currentTask);
       this.save();
     }

@@ -15,6 +15,7 @@ export type CronTaskTarget =
   | {
       kind: Extract<ScheduledTaskTargetKind, "shell_command">;
       command: string;
+      timeoutMs?: number;
     };
 
 export type CronTaskTrigger = {

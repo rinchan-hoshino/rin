@@ -329,6 +329,14 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Scheduled task configuration is not a valid shell task. Fix the task target.",
   cron_invalid_target_kind: () =>
     "Scheduled task target kind is invalid. Choose an agent prompt or shell command target.",
+  cron_shell_command_timeout: (detail) => {
+    const timeoutMs = Number.parseInt(detail, 10);
+    return Number.isFinite(timeoutMs)
+      ? `Scheduled shell command exceeded its ${timeoutMs} ms execution timeout.`
+      : "Scheduled shell command exceeded its execution timeout.";
+  },
+  cron_shell_timeout_invalid: () =>
+    "Scheduled shell command timeout must be a positive number of milliseconds.",
   cron_next_run_not_found: () =>
     "Scheduled task has no next run time. Check the schedule.",
   cron_prompt_required: () =>

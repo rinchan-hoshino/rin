@@ -233,7 +233,11 @@ test("cron upsert validates trigger, session, target, frontend, condition, and m
       condition: null,
       trigger: { expression: "0 * * * *" },
       session: { mode: "none" },
-      target: { kind: "shell_command", command: "printf updated" },
+      target: {
+        kind: "shell_command",
+        command: "printf updated",
+        timeoutMs: 1,
+      },
     });
     assert.equal(updated.createdAt, normalized.createdAt);
     assert.equal(updated.name, undefined);
@@ -243,6 +247,10 @@ test("cron upsert validates trigger, session, target, frontend, condition, and m
     assert.equal(updated.disabledRinCapabilities, undefined);
     assert.equal(updated.termination, undefined);
     assert.equal(updated.condition, undefined);
+    assert.equal(updated.target.kind, "shell_command");
+    if (updated.target.kind === "shell_command") {
+      assert.equal(updated.target.timeoutMs, 100);
+    }
     scheduler.stop();
   });
 });
@@ -263,6 +271,10 @@ test("cron updates retain omitted state and keep completed tasks terminal", asyn
     assert.deepEqual(created.frontend, { key: "owner-frontend" });
     assert.deepEqual(created.disabledRinCapabilities, ["memory"]);
     assert.equal(created.condition?.timeoutMs, 60_000);
+    assert.equal(created.target.kind, "shell_command");
+    if (created.target.kind === "shell_command") {
+      assert.equal(created.target.timeoutMs, 30 * 60_000);
+    }
 
     const conditionSkipped = scheduler.runTaskNow("retained");
     assert.equal(conditionSkipped.condition?.lastResult, false);
@@ -420,6 +432,42 @@ test("cron run-now evaluates conditions and executes one-time and recurring shel
     assert.ok(settled.lastFinishedAt);
     assert.equal(settled.completedAt !== undefined, true);
     scheduler.stop();
+  });
+});
+
+test("cron releases shell task execution state after a command timeout", async () => {
+  await withAgentDir(async (agentDir) => {
+    const scheduler = new CronScheduler({ agentDir });
+    const pidPath = path.join(agentDir, "scheduler-shell.pid");
+    try {
+      scheduler.upsertTask(
+        shellTaskInput("shell-timeout", {
+          target: {
+            kind: "shell_command",
+            command: `printf %s $$ > ${JSON.stringify(pidPath)}; exec sleep 30`,
+            timeoutMs: 100,
+          },
+        }),
+      );
+      const running = scheduler.runTaskNow("shell-timeout");
+      assert.equal(running.running, true);
+
+      const settled = await waitForTaskSettled(scheduler, "shell-timeout");
+      assert.equal(settled.running, false);
+      assert.match(settled.lastError ?? "", /cron_shell_command_timeout:100/);
+      assert.equal(
+        (scheduler as any).activeExecutions.has("shell-timeout"),
+        false,
+      );
+    } finally {
+      const pid = Number(await fsp.readFile(pidPath, "utf8").catch(() => ""));
+      if (pid > 0) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {}
+      }
+      scheduler.stop();
+    }
   });
 });
 
