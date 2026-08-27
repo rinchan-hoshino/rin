@@ -301,55 +301,59 @@ function ghReleaseExists(root, repository, tag) {
   return result.status === 0;
 }
 
-function completedSourceRelease(root, channel, manifest, head) {
-  if (channel !== "nightly") return null;
-  const release = manifest.nightly;
-  if (!trim(release?.version) || !trim(release?.ref)) return null;
-  const expectedMessage = `chore(release): publish nightly ${release.version}`;
-  const metadataCommit = git(
-    [
-      "log",
-      "-1",
-      "--format=%H",
-      "--fixed-strings",
-      `--grep=${expectedMessage}`,
-      head,
-    ],
-    { cwd: root, capture: true },
+function materializeBootstrapManifest(root, tempRoot) {
+  git(
+    ["fetch", "origin", "+refs/heads/bootstrap:refs/remotes/origin/bootstrap"],
+    { cwd: root },
   );
-  if (!metadataCommit) return null;
-  const metadataParent = git(["rev-parse", `${metadataCommit}^`], {
+  const content = git(["show", "origin/bootstrap:release-manifest.json"], {
     cwd: root,
     capture: true,
   });
-  const metadataFiles = git(
-    ["diff", "--name-only", `${metadataParent}..${metadataCommit}`],
-    { cwd: root, capture: true },
+  const manifestPath = path.join(tempRoot, "bootstrap-release-manifest.json");
+  fs.writeFileSync(manifestPath, `${content}\n`, "utf8");
+  return manifestPath;
+}
+
+function materializeBootstrapProjection(root, sourceManifestPath, tempRoot) {
+  const bootstrapManifestPath = materializeBootstrapManifest(root, tempRoot);
+  const manifest = readJson(sourceManifestPath);
+  manifest.nightly = readJson(bootstrapManifestPath).nightly;
+  const projectionPath = path.join(
+    tempRoot,
+    "bootstrap-projection-release-manifest.json",
   );
-  const recoveryFiles = git(
-    ["diff", "--name-only", `${metadataCommit}..${head}`],
-    { cwd: root, capture: true },
-  )
+  fs.writeFileSync(
+    projectionPath,
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    "utf8",
+  );
+  return projectionPath;
+}
+
+function completedNightlyRelease(root, manifest, head) {
+  const release = manifest.nightly;
+  if (!trim(release?.version) || !trim(release?.ref)) return null;
+  if (!isAncestor(root, release.ref, head)) return null;
+  const changes = git(["diff", "--name-only", `${release.ref}..${head}`], {
+    cwd: root,
+    capture: true,
+  })
     .split("\n")
     .filter(Boolean);
-  const releasePathOnly = recoveryFiles.every(
+  const releasePathOnly = changes.every(
     (file) =>
+      file === "release-manifest.json" ||
       file.startsWith("scripts/release/") ||
-      file === "tests/integration/release-scripts.test.ts",
+      file === "tests/integration/release-scripts.test.ts" ||
+      file === "docs/developer/releasing.md",
   );
-  if (
-    metadataParent !== release.ref ||
-    metadataFiles !== "release-manifest.json" ||
-    !releasePathOnly
-  ) {
-    return null;
-  }
-  const repository = repositorySlug(root);
+  if (!releasePathOnly) return null;
   const tag = `v${release.version}`;
   if (
     !release.assets?.["linux-x64"] ||
     !remoteHasTag(root, tag) ||
-    !ghReleaseExists(root, repository, tag)
+    !ghReleaseExists(root, repositorySlug(root), tag)
   ) {
     return null;
   }
@@ -413,7 +417,13 @@ function commitAndPushMain(root, message) {
   }
 }
 
-function publishBootstrap(root, remoteUrl, message, tempRoot) {
+function publishBootstrap(
+  root,
+  remoteUrl,
+  message,
+  tempRoot,
+  manifestPath = "",
+) {
   const branch = "bootstrap";
   const dir = path.join(tempRoot, branch);
   const hasBranch =
@@ -431,12 +441,9 @@ function publishBootstrap(root, remoteUrl, message, tempRoot) {
     git(["-C", dir, "checkout", "--orphan", branch], { cwd: root });
     git(["-C", dir, "remote", "add", "origin", remoteUrl], { cwd: root });
   }
-  tsx(root, "export-bootstrap-branch.ts", [
-    "--output",
-    dir,
-    "--branch",
-    branch,
-  ]);
+  const exportArgs = ["--output", dir, "--branch", branch];
+  if (manifestPath) exportArgs.push("--manifest", manifestPath);
+  tsx(root, "export-bootstrap-branch.ts", exportArgs);
   git(["-C", dir, "add", "."], { cwd: root });
   const staged = spawnSync("git", ["-C", dir, "diff", "--cached", "--quiet"], {
     cwd: root,
@@ -461,6 +468,7 @@ function publishBootstrap(root, remoteUrl, message, tempRoot) {
 
 function updateManifest(
   root,
+  manifestPath,
   channel,
   version,
   ref,
@@ -469,6 +477,8 @@ function updateManifest(
   repository,
 ) {
   const args = [
+    "--manifest",
+    manifestPath,
     "--channel",
     channel,
     "--version",
@@ -489,19 +499,17 @@ function updateManifest(
 }
 
 function releaseSourceChannel(root, channel, noPublish, tempRoot) {
-  const manifest = readJson(path.join(root, "release-manifest.json"));
+  const manifestPath =
+    channel === "nightly"
+      ? materializeBootstrapManifest(root, tempRoot)
+      : path.join(root, "release-manifest.json");
+  const manifest = readJson(manifestPath);
   const ref = git(["rev-parse", "HEAD"], { cwd: root, capture: true });
-  const completed = noPublish
-    ? null
-    : completedSourceRelease(root, channel, manifest, ref);
+  const completed =
+    !noPublish && channel === "nightly"
+      ? completedNightlyRelease(root, manifest, ref)
+      : null;
   if (completed) {
-    const message = `chore(release): publish nightly ${completed.version}`;
-    publishBootstrap(
-      root,
-      git(["remote", "get-url", "origin"], { cwd: root, capture: true }),
-      message,
-      tempRoot,
-    );
     return {
       channel,
       version: completed.version,
@@ -510,10 +518,16 @@ function releaseSourceChannel(root, channel, noPublish, tempRoot) {
       recovered: true,
     };
   }
+  const planArgs = [
+    "--manifest",
+    manifestPath,
+    "--channel",
+    channel,
+    "--ref",
+    ref,
+  ];
   const plan = JSON.parse(
-    tsx(root, "plan-release.ts", ["--channel", channel, "--ref", ref], {
-      capture: true,
-    }),
+    tsx(root, "plan-release.ts", planArgs, { capture: true }),
   );
   const interrupted =
     channel === "nightly"
@@ -572,6 +586,7 @@ function releaseSourceChannel(root, channel, noPublish, tempRoot) {
         : ["--promotion-version", plan.promotionVersion];
     updateManifest(
       root,
+      manifestPath,
       channel,
       release.version,
       release.ref,
@@ -580,13 +595,28 @@ function releaseSourceChannel(root, channel, noPublish, tempRoot) {
       repository,
     );
     const action = channel === "nightly" ? "publish nightly" : "cut beta";
-    commitAndPushMain(root, `chore(release): ${action} ${release.version}`);
-    publishBootstrap(
-      root,
-      git(["remote", "get-url", "origin"], { cwd: root, capture: true }),
-      `chore(release): ${action} ${release.version}`,
-      tempRoot,
-    );
+    const message = `chore(release): ${action} ${release.version}`;
+    const remoteUrl = git(["remote", "get-url", "origin"], {
+      cwd: root,
+      capture: true,
+    });
+    if (channel === "nightly") {
+      publishBootstrap(root, remoteUrl, message, tempRoot, manifestPath);
+    } else {
+      commitAndPushMain(root, message);
+      const bootstrapManifestPath = materializeBootstrapProjection(
+        root,
+        manifestPath,
+        tempRoot,
+      );
+      publishBootstrap(
+        root,
+        remoteUrl,
+        message,
+        tempRoot,
+        bootstrapManifestPath,
+      );
+    }
     return {
       channel,
       version: release.version,
@@ -656,16 +686,31 @@ function releaseCandidateChannel(root, args, tempRoot) {
     const repository = repositorySlug(root);
     publishGitHubBundle(root, repository, version, ref, bundle.bundlePath, "");
     const extra = betaVersion ? ["--from-beta-version", betaVersion] : [];
-    updateManifest(root, "stable", version, ref, extra, bundle, repository);
+    updateManifest(
+      root,
+      path.join(root, "release-manifest.json"),
+      "stable",
+      version,
+      ref,
+      extra,
+      bundle,
+      repository,
+    );
     const action = betaVersion
       ? `promote beta ${betaVersion} to stable ${version}`
       : `publish hotfix ${version}`;
     commitAndPushMain(root, `chore(release): ${action}`);
+    const bootstrapManifestPath = materializeBootstrapProjection(
+      root,
+      path.join(root, "release-manifest.json"),
+      tempRoot,
+    );
     publishBootstrap(
       root,
       git(["remote", "get-url", "origin"], { cwd: root, capture: true }),
       `chore(release): ${action}`,
       tempRoot,
+      bootstrapManifestPath,
     );
     return { channel: args.channel, version, ref, bundle, published: true };
   } finally {

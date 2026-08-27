@@ -21,7 +21,8 @@ This document describes the operator workflow for Rin's fixed-cadence release tr
 ## Source of truth
 
 - `main` is the development source of truth.
-- `release-manifest.json` is the selection and asset-metadata source for stable, beta, and nightly.
+- `release-manifest.json` on `main` owns stable and beta selection metadata.
+- `release-manifest.json` on `bootstrap` owns the latest nightly selection metadata and projects the current stable and beta entries from `main`.
 - `bootstrap` is generated release output; it is never a development branch.
 
 ## Cadence
@@ -60,9 +61,10 @@ The daily scheduler invokes `release:local -- --channel nightly` when a nightly 
 3. validates the focused release test set
 4. builds the nightly `linux-x64` platform bundle with the managed Node runtime
 5. tags the nightly source ref as `v<version>` and uploads the platform bundle to that prerelease GitHub release
-6. updates `release-manifest.json -> nightly` with platform bundle asset metadata
-7. commits the manifest update back to `main`
-8. refreshes `bootstrap`
+6. updates a generated `release-manifest.json -> nightly` with platform bundle asset metadata
+7. refreshes `bootstrap` from that generated manifest without changing `main`
+
+Nightly decisions read their previous state from `bootstrap`. A nightly publication therefore cannot make `main` appear newer to source/git installs.
 
 ### Beta
 
@@ -126,17 +128,19 @@ After a hotfix, merge or cherry-pick the fix back to `main` and into any still-r
 
 Stable, beta, nightly, and hotfix release executors publish a `linux-x64` platform bundle for their selected ref. The bundle contains the built app runtime (`dist`, production `node_modules`, `extensions`, `package.json`) plus a managed Node runtime under `runtime/node/current`. The POSIX bootstrap scripts and the installed updater prefer matching platform bundle metadata; when available, install/update can start the installer/updater with the bundled Node instead of requiring system Node/npm for the prepared runtime.
 
-`release-manifest.json` stores the durable asset URL/checksum metadata under each channel's `assets[platform]`, and `release-assets.env` is a shell-friendly projection for the bootstrap branch. If no matching platform asset is present, bootstrap/update falls back to the legacy source/npm path. Source/git installs still publish a managed Node runtime for launcher and daemon consistency by preserving an existing managed runtime or provisioning the current installer Node into `runtime/node/current`. PowerShell bootstrap remains on the legacy source/npm preparation path until Windows platform bundles are added.
+The authoritative manifest for each channel stores durable asset URL/checksum metadata under `assets[platform]`, and `release-assets.env` is a shell-friendly projection for the bootstrap branch. If no matching platform asset is present, bootstrap/update falls back to the legacy source/npm path. Source/git installs still publish a managed Node runtime for launcher and daemon consistency by preserving an existing managed runtime or provisioning the current installer Node into `runtime/node/current`. PowerShell bootstrap remains on the legacy source/npm preparation path until Windows platform bundles are added.
 
 ## Bootstrap branch
 
 `bootstrap` is generated output, not a development branch. `scripts/release/export-bootstrap-branch.ts` owns the exact payload and generates its README from the same file set. Do not maintain a second file list or hand-edit the branch.
 
-To regenerate locally:
+To regenerate locally from the source-tree manifest:
 
 ```bash
 npm run release:bootstrap -- --output /path/to/bootstrap-worktree
 ```
+
+The nightly executor supplies `--manifest <generated-path>` so the bootstrap export can advance nightly metadata without editing `main`. Beta, stable, and hotfix exports merge the current bootstrap-owned nightly entry into their generated projection, so another channel cannot roll nightly metadata back.
 
 ## Local manifest maintenance
 

@@ -14,19 +14,34 @@ const BOOTSTRAP_PAYLOAD_FILES = Object.freeze([
 
 const BOOTSTRAP_GENERATED_FILES = Object.freeze(["release-assets.env"]);
 
+function nextArgValue(argv, index, option) {
+  const value = argv[index + 1];
+  if (!value || String(value).startsWith("--")) {
+    throw new Error(`missing_value:${option}`);
+  }
+  return String(value).trim();
+}
+
 function parseArgs(argv) {
   const args = {
     output: "",
     branch: "bootstrap",
+    manifest: "",
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--output") args.output = String(argv[++index] || "").trim();
-    else if (arg === "--branch")
-      args.branch = String(argv[++index] || "").trim();
-    else if (arg === "-h" || arg === "--help") {
+    if (arg === "--output") {
+      args.output = nextArgValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--branch") {
+      args.branch = nextArgValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "--manifest") {
+      args.manifest = nextArgValue(argv, index, arg);
+      index += 1;
+    } else if (arg === "-h" || arg === "--help") {
       console.log(
-        "Usage: npx tsx scripts/release/export-bootstrap-branch.ts --output <dir> [--branch bootstrap]",
+        "Usage: npx tsx scripts/release/export-bootstrap-branch.ts --output <dir> [--branch bootstrap] [--manifest <path>]",
       );
       process.exit(0);
     } else {
@@ -75,8 +90,7 @@ function releaseSourceLabel(channel, entry) {
   return `nightly ${version}`;
 }
 
-function writeReleaseAssetsEnv(repoRoot, outputDir) {
-  const manifestPath = path.join(repoRoot, "release-manifest.json");
+function writeReleaseAssetsEnv(manifestPath, outputDir) {
   let manifest = {};
   try {
     manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
@@ -119,8 +133,11 @@ function writeReleaseAssetsEnv(repoRoot, outputDir) {
   );
 }
 
-function copyFile(repoRoot, relativePath, outputDir, args) {
-  const source = path.join(repoRoot, relativePath);
+function copyFile(repoRoot, relativePath, outputDir, args, manifestPath) {
+  const source =
+    relativePath === "release-manifest.json"
+      ? manifestPath
+      : path.join(repoRoot, relativePath);
   const target = path.join(outputDir, relativePath);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   if (relativePath === "install.sh" || relativePath === "install.ps1") {
@@ -143,6 +160,9 @@ const repoRoot = path.resolve(
   "..",
 );
 const outputDir = path.resolve(process.cwd(), args.output);
+const manifestPath = args.manifest
+  ? path.resolve(process.cwd(), args.manifest)
+  : path.join(repoRoot, "release-manifest.json");
 fs.mkdirSync(outputDir, { recursive: true });
 for (const entry of fs.readdirSync(outputDir)) {
   if (entry === ".git") continue;
@@ -150,9 +170,9 @@ for (const entry of fs.readdirSync(outputDir)) {
 }
 
 for (const relativePath of BOOTSTRAP_PAYLOAD_FILES) {
-  copyFile(repoRoot, relativePath, outputDir, args);
+  copyFile(repoRoot, relativePath, outputDir, args, manifestPath);
 }
-writeReleaseAssetsEnv(repoRoot, outputDir);
+writeReleaseAssetsEnv(manifestPath, outputDir);
 
 fs.writeFileSync(
   path.join(outputDir, "README.md"),

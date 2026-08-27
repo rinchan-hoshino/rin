@@ -368,6 +368,7 @@ test("release scripts reject value options without explicit values", () => {
   const cases = [
     ["update-release-manifest.ts", "--manifest"],
     ["update-release-manifest.ts", "--version"],
+    ["export-bootstrap-branch.ts", "--manifest"],
     ["plan-release.ts", "--manifest"],
     ["plan-release.ts", "--channel"],
     ["verify-changelog.ts", "--changelog"],
@@ -545,25 +546,31 @@ test("local candidate releases keep pinned sources independent of moving main", 
   );
 });
 
-test("local nightly recovery resumes bootstrap without minting a metadata-ref release", () => {
+test("local nightly state is bootstrap-owned and never advances main", () => {
   const content = readLocalPublisher();
   const sourceStart = content.indexOf("function releaseSourceChannel");
   const sourceEnd = content.indexOf("function releaseCandidateChannel");
   const sourceChannel = content.slice(sourceStart, sourceEnd);
-
-  assert.match(content, /function completedSourceRelease/);
-  assert.match(content, /metadataFiles !== "release-manifest\.json"/);
-  assert.match(content, /metadataParent !== release\.ref/);
+  assert.match(content, /function materializeBootstrapManifest/);
+  assert.match(
+    content,
+    /refs\/heads\/bootstrap:refs\/remotes\/origin\/bootstrap/,
+  );
+  assert.match(content, /function completedNightlyRelease/);
   assert.match(content, /file\.startsWith\("scripts\/release\/"\)/);
   assert.match(
     content,
     /file === "tests\/integration\/release-scripts\.test\.ts"/,
   );
   assert.ok(
-    sourceChannel.indexOf("completedSourceRelease(") <
+    sourceChannel.indexOf("completedNightlyRelease(") <
       sourceChannel.indexOf("plan-release.ts"),
   );
-  assert.match(sourceChannel, /recovered: true/);
+  assert.match(
+    sourceChannel,
+    /if \(channel === "nightly"\) \{\s*publishBootstrap\(root, remoteUrl, message, tempRoot, manifestPath\);\s*\} else \{\s*commitAndPushMain\(root, message\);/,
+  );
+  assert.match(content, /function materializeBootstrapProjection/);
 });
 
 test("local nightly recovery finishes an unreconciled tag after UTC and main advance", () => {
@@ -921,6 +928,61 @@ test("export-bootstrap-branch script exports bootstrap payload", () => {
       /& node -p "process\.versions\.node" 2>\$null \| Select-Object -First 1/,
     );
     assert.equal(fs.existsSync(path.join(tempDir, "stale.txt")), false);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("export-bootstrap-branch accepts release metadata outside main", () => {
+  const tempDir = makeTempDir(".tmp-bootstrap-manifest-");
+  const outputDir = path.join(tempDir, "output");
+  const manifestPath = path.join(tempDir, "nightly-manifest.json");
+  const manifest = {
+    schemaVersion: 2,
+    stable: { version: "1.0.0" },
+    beta: { version: "1.1.0-beta.20260826" },
+    nightly: {
+      version: "1.1.0-nightly.20260826+abcdef0",
+      ref: "abcdef0123456789",
+      branch: "main",
+      assets: {
+        "linux-x64": {
+          bundleUrl: "https://example.invalid/nightly.tar.gz",
+          sha256: "a".repeat(64),
+          nodeVersion: "24.18.0",
+        },
+      },
+    },
+  };
+  try {
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`, "utf8");
+    execFileSync(
+      process.execPath,
+      [
+        path.join(rootDir, "scripts", "release", "export-bootstrap-branch.ts"),
+        "--output",
+        outputDir,
+        "--manifest",
+        manifestPath,
+      ],
+      { cwd: rootDir, stdio: "pipe" },
+    );
+
+    assert.deepEqual(
+      JSON.parse(
+        fs.readFileSync(path.join(outputDir, "release-manifest.json"), "utf8"),
+      ),
+      manifest,
+    );
+    const assets = fs.readFileSync(
+      path.join(outputDir, "release-assets.env"),
+      "utf8",
+    );
+    assert.match(assets, /RIN_ASSET_NIGHTLY_LINUX_X64_REF='abcdef0123456789'/);
+    assert.match(
+      assets,
+      /RIN_ASSET_NIGHTLY_LINUX_X64_VERSION='1\.1\.0-nightly\.20260826\+abcdef0'/,
+    );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
