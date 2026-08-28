@@ -10,7 +10,7 @@ const RUNTIME_AWARENESS = "You are running in the Rin runtime environment.";
 const FACTUAL_GROUNDING_REQUIREMENT =
   "Factual claims require evidence, not model knowledge alone. Check Rin memory for historical events; search current authoritative web sources for facts not established by authoritative local evidence.";
 const PRUNED_TOOL_RESULT_GUIDANCE =
-  "Tool results marked `pruned` are no longer present in context; obtain the evidence again before relying on their contents, and never guess what they contained.";
+  "Tool results marked `pruned` are absent from context. If a result is needed, obtain it again instead of guessing; otherwise ignore it.";
 
 const RIN_GENERAL_GUIDELINES = [
   "Show file paths clearly when working with files",

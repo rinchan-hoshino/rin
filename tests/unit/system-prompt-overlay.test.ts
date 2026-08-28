@@ -122,7 +122,7 @@ test("Rin owns a canonical prompt built only from structured resources", () => {
   assert.match(prompt, /^As the assistant,/);
   assert.match(
     prompt,
-    /Tool results marked `pruned` are no longer present in context; obtain the evidence again before relying on their contents, and never guess what they contained\./,
+    /Tool results marked `pruned` are absent from context\. If a result is needed, obtain it again instead of guessing; otherwise ignore it\./,
   );
   assert.match(prompt, /Available tools:\n- read: Read files/);
   assert.match(prompt, /Use read for owner-requested files\./);
@@ -196,10 +196,7 @@ test("custom prompt preserves structured append, context, skills, and Rin layers
   });
 
   assert.match(prompt, /CUSTOM BASE/);
-  assert.match(
-    prompt,
-    /Tool results marked `pruned` are no longer present in context/,
-  );
+  assert.match(prompt, /Tool results marked `pruned` are absent from context/);
   assert.match(prompt, /APPEND BLOCK/);
   assert.match(prompt, /<project_instructions path="\/repo\/AGENTS\.md">/);
   assert.match(prompt, /The following skills provide/);
