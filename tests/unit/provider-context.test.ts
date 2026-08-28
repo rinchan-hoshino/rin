@@ -175,7 +175,7 @@ test("provider-bound context omits old tool results when the fourth tool-call bu
     providerContext.buildProviderBoundContextMessages(messages);
 
   assert.notEqual(providerMessages, messages);
-  assert.equal(providerMessages[1].content, "old tool result omitted");
+  assert.equal(providerMessages[1].content, "pruned");
   assert.equal(providerMessages[33], retainedToolResult);
   assert.equal(oldToolResult.content, "result padding-0");
 });
@@ -188,7 +188,7 @@ test("provider-bound context exposes custom tool-call bucket sizing through one 
     { toolCallBucketSize: 2, retainedToolCallBuckets: 2 },
   );
 
-  assert.equal(providerMessages[1].content, "old tool result omitted");
+  assert.equal(providerMessages[1].content, "pruned");
 });
 
 for (const stopReason of ["error", "aborted"] as const) {
@@ -390,7 +390,7 @@ test("provider-bound context maps compaction slices without mutating history", (
 
   assert.notEqual(mapped, summarySlice);
   assert.equal(mapped[0], summarySlice[0]);
-  assert.equal(mapped[1].content, "old tool result omitted");
+  assert.equal(mapped[1].content, "pruned");
   assert.equal(summarySlice[1].content, "huge old output");
 });
 
@@ -410,14 +410,8 @@ test("provider-bound compaction projects both summary slices without mutating th
     { toolCallBucketSize: 2, retainedToolCallBuckets: 2 },
   );
 
-  assert.equal(
-    projected.preparation.messagesToSummarize[1].content,
-    "old tool result omitted",
-  );
-  assert.equal(
-    projected.preparation.turnPrefixMessages[0].content,
-    "old tool result omitted",
-  );
+  assert.equal(projected.preparation.messagesToSummarize[1].content, "pruned");
+  assert.equal(projected.preparation.turnPrefixMessages[0].content, "pruned");
   assert.equal(
     event.preparation.messagesToSummarize[1].content,
     "huge old output",
@@ -442,5 +436,5 @@ test("provider-bound context event uses the same tool-call bucket policy surface
     { toolCallBucketSize: 2, retainedToolCallBuckets: 2 },
   );
 
-  assert.equal(result.messages[1].content, "old tool result omitted");
+  assert.equal(result.messages[1].content, "pruned");
 });

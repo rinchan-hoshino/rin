@@ -326,9 +326,7 @@ test("configured compaction sends the provider-bound event to native Pi", async 
   };
   const projectedEvent = {
     preparation: {
-      messagesToSummarize: [
-        { role: "toolResult", content: "old tool result omitted" },
-      ],
+      messagesToSummarize: [{ role: "toolResult", content: "pruned" }],
       turnPrefixMessages: [],
     },
   };

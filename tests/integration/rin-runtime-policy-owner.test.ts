@@ -693,7 +693,7 @@ test("Rin 85% provider preflight calls Pi overflow auto-compaction before the pr
         return messages.some((message) => message.content === "huge old output")
           ? messages.map((message) =>
               message.content === "huge old output"
-                ? { ...message, content: "old tool result omitted" }
+                ? { ...message, content: "pruned" }
                 : message,
             )
           : messages;
