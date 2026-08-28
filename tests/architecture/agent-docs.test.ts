@@ -311,18 +311,18 @@ test("agent docs expose scheduled task operation workflow", () => {
     scheduledTasksEntry.length <= 7_000,
     `Scheduled-task entry guide is ${scheduledTasksEntry.length} characters`,
   );
-  assert.match(scheduledTasksReference, /`session\.mode: "dedicated"`/);
+  assert.doesNotMatch(scheduledTasksReference, /`session\.mode: "dedicated"`/);
   assert.match(
     scheduledTasksReference,
     /target\.prompt.*target\.continuationPrompt/s,
   );
   assert.match(
     scheduledTasksReference,
-    /Ordinary recurring tasks use external state instead of a dedicated session/,
+    /Reliable task facts, progress, ledgers, and decisions still belong in explicit external state/,
   );
   assert.match(
     scheduledTasksReference,
-    /Store reliable facts, progress, ledgers/,
+    /Reliable task facts, progress, ledgers, and decisions still belong in explicit external state/,
   );
   assert.match(scheduledTasksReference, /code: string/);
   assert.match(
@@ -333,7 +333,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(scheduledTasksEntry, /## Task prompt/);
   assert.match(scheduledTasksReference, /Writable task definition/);
   assert.match(scheduledTasksReference, /type WritableTaskPatch/);
-  assert.match(
+  assert.doesNotMatch(
     scheduledTasksReference,
     /disabledRinCapabilities\?: string\[\] \| null/,
   );
@@ -359,15 +359,15 @@ test("agent docs expose scheduled task operation workflow", () => {
   );
   assert.match(
     scheduledTasksReference,
-    /TUI frontends have no key and cannot be addressed/,
+    /The TUI frontend is the singleton `\{ kind: "tui" \}` identity/,
   );
   assert.match(
     scheduledTasksReference,
-    /without reading or changing the chat's current session binding/,
+    /submits the prompt to that current session/,
   );
   assert.match(
     scheduledTasksReference,
-    /Quoting a delivered task message selects its linked session/,
+    /Quoting a delivered task message contributes quote rich text only and never selects a session/,
   );
   assert.doesNotMatch(
     scheduledTasksReference,
@@ -411,7 +411,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   );
   assert.match(
     scheduledTasksReference,
-    /Quote linkage, delivery idempotency, and chat-session isolation are runtime guarantees, not task options/,
+    /Delivery idempotency and the one-frontend\/one-session invariant are runtime guarantees, not task options/,
   );
   assert.doesNotMatch(
     scheduledTasksReference,

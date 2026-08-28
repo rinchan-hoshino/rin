@@ -335,12 +335,31 @@ export async function startDaemon(options: {
       connection.resourceOptions = command.resourceOptions;
     }
 
-    if (type === "get_state" && !selectorPresent && !selectedSessionPresent) {
-      writeLine(
-        connection.socket,
-        response(id, type, true, emptySessionState()),
-      );
-      return true;
+    if (type === "get_state" && !selectorPresent) {
+      if (!selectedSessionPresent) {
+        writeLine(
+          connection.socket,
+          response(id, type, true, emptySessionState()),
+        );
+        return true;
+      }
+      const frontendStateHint = workerPool.frontendStateHint(connection);
+      if (frontendStateHint && !connection.attachedWorker) {
+        writeLine(
+          connection.socket,
+          response(id, type, true, {
+            ...emptySessionState(),
+            ...frontendStateHint,
+            ...(connection.sessionFile
+              ? { sessionFile: connection.sessionFile }
+              : {}),
+            ...(connection.sessionId
+              ? { sessionId: connection.sessionId }
+              : {}),
+          }),
+        );
+        return true;
+      }
     }
 
     const sessionlessHandler = canHandleWithoutSession(
@@ -655,6 +674,7 @@ export async function startDaemon(options: {
             command?.frontendIdentity,
           );
           if (frontendIdentity) connection.frontendIdentity = frontendIdentity;
+          workerPool.prepareFrontendCommand(connection, command);
 
           if (await selfHandleCommand(connection, command)) {
             workerPool.evictDetachedWorkers();

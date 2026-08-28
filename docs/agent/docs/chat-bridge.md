@@ -117,7 +117,7 @@ Rules:
 - Telegram private/group shape is inferred from `chatId`; negative ids are groups/channels.
 - OneBot private chats commonly use `private:<userId>`; group chats use the group id.
 - Keep `messageId` separate from `chatKey`; quote/reply delivery needs the platform message id.
-- Treat platform metadata as authoritative for `userId`, `nickname`, and `trust`. Adapters must emit replies directly as ID-only structured quote nodes in inbound rich text; the runtime does not translate a separate session quote field.
+- Treat platform metadata as authoritative for `userId`, `nickname`, and `trust`. Adapters must emit replies directly as ID-only structured quote nodes in inbound rich text. Quotes are content only: they never select, resume, or replace a session.
 
 ## Agent SDK chat operations
 
@@ -138,11 +138,10 @@ Agent turn for a chat/frontend identity:
 const result = await rin.chat.runTurn({
   chatKey: "telegram/8623230033:7890",
   text: "Summarize the latest stored status update for this room.",
-  controllerKey: `agent-${Date.now()}`,
-  affectChatBinding: false,
-  disposeAfterTurn: true,
 });
 ```
+
+Each normalized frontend identity has exactly one durable current session. Initial attachment may materialize or restore that binding; afterward only `/new` may replace it. Ordinary prompts, SDK calls, replies, quotes, scheduled inputs, reconnects, and deliveries reuse the binding and cannot select another session. `/resume` is rejected. The daemon-owned frontend-session registry is authoritative across concurrent connections and daemon restarts; Chat's `chat_state` session fields are migration/bootstrap projections only.
 
 Adapter-supported signals and active-turn control:
 
@@ -326,7 +325,7 @@ For a normal agent install, `<agentDir>` is usually `~/.rin`. Session JSONL rema
 The main tables are:
 
 - `messages`: normalized inbound and delivered assistant messages;
-- `chat_state`: per-chat sequence, reset generation, and authoritative session binding;
+- `chat_state`: per-chat sequence, reset generation, and legacy/bootstrap session projection; the daemon frontend-session registry owns the binding;
 - `inbound_heads`: the latest provider recovery cursor per bot/chat without scanning message history;
 - `turns`: inbox classification, retry, lease, fencing, supersession, and terminal ownership;
 - `outbox`: logical outgoing messages and post-delivery actions;
@@ -357,7 +356,7 @@ Common boundary checks:
 
 - **Message stored but turn idle:** inspect `turnPolicy`, trust/allow rules, inbox state, active turn state, and controller errors.
 - **Record-only chat idle:** confirm the scheduled task/background producer that reads stored messages.
-- **Slash command mismatch:** command acknowledgements are config/i18n output; verify the command path switched sessions for `/new`.
+- **Slash command mismatch:** command acknowledgements are config/i18n output; verify that `/new` alone replaced the frontend binding and that `/resume`, quotes, replies, and scheduled turns did not.
 - **OneBot/QQ after platform relogin:** separate platform login from Rin bridge connectivity; check Rin runtime status, WebSocket connection, and an adapter-level login probe.
 - **Outbound text queued:** inspect the outbox quote part, platform error, and message-store accepted/processed state.
 - **Attachment missing:** verify the file exists, rich-object or structured `parts` attachment was sent, and the adapter produced a delivery result.

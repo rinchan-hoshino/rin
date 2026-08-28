@@ -16,10 +16,29 @@ const execMod = await import(
     path.join(rootDir, "dist", "core", "rin-daemon", "cron-execution.js"),
   ).href
 );
-const cronMod = await import(
+const cronRuntimeMod = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "cron.js"))
     .href
 );
+class FrontendBoundCronScheduler extends cronRuntimeMod.CronScheduler {
+  upsertTask(input: any, defaults?: any) {
+    const boundInput =
+      input?.target?.kind === "agent_prompt" &&
+      !input.frontend &&
+      !defaults?.frontend &&
+      input.id !== "cron_none"
+        ? {
+            ...input,
+            frontend: { kind: "chat", key: "discord/1:2" },
+          }
+        : input;
+    return super.upsertTask(boundInput, defaults);
+  }
+}
+const cronMod = {
+  ...cronRuntimeMod,
+  CronScheduler: FrontendBoundCronScheduler,
+};
 const runAuditMod = await import(
   pathToFileURL(
     path.join(rootDir, "dist", "core", "self-improve", "run-audit.js"),
@@ -940,14 +959,14 @@ test("cron scheduler durable invocation keeps the first dedicated prompt initial
     }
     assert.equal(calls.length, 1);
     assert.equal(calls[0].text, "initial prompt");
-    assert.equal(calls[0].createSessionFileIfMissing, true);
+    assert.equal(calls[0].createSessionFileIfMissing, undefined);
   } finally {
     scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
 
-test("cron dedicated agent task creates and then preserves its bound session", async () => {
+test("cron legacy dedicated mode never creates or selects a task-owned session", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const dedicatedSessionFile = path.join(
     agentDir,
@@ -985,11 +1004,9 @@ test("cron dedicated agent task creates and then preserves its bound session", a
       },
     });
     assert.equal(first.text, "done");
-    assert.equal(first.sessionFile, dedicatedSessionFile);
-    assert.equal(task.dedicatedSessionFile, dedicatedSessionFile);
-    await fs.mkdir(path.dirname(dedicatedSessionFile), { recursive: true });
-    await fs.writeFile(dedicatedSessionFile, "session", "utf8");
-    assert.equal(task.dedicatedSessionPersistent, true);
+    assert.equal(first.sessionFile, firstSessionFile);
+    assert.equal(task.dedicatedSessionFile, undefined);
+    assert.equal(task.dedicatedSessionPersistent, undefined);
 
     const second = await execMod.executeCronAgentTask(task, {
       agentDir,
@@ -1006,8 +1023,8 @@ test("cron dedicated agent task creates and then preserves its bound session", a
       },
     });
     assert.equal(second.text, "done again");
-    assert.equal(second.sessionFile, dedicatedSessionFile);
-    assert.equal(task.dedicatedSessionFile, dedicatedSessionFile);
+    assert.equal(second.sessionFile, secondSessionFile);
+    assert.equal(task.dedicatedSessionFile, undefined);
     assert.equal(calls.length, 2);
     assert.deepEqual(
       calls.map((item) => ({
@@ -1024,24 +1041,24 @@ test("cron dedicated agent task creates and then preserves its bound session", a
       [
         {
           chatKey: "telegram/demo:1",
-          controllerKey: "cron_dedicated",
-          affectChatBinding: false,
-          linkDeliveriesToSession: true,
+          controllerKey: "default",
+          affectChatBinding: true,
+          linkDeliveriesToSession: undefined,
           deliverFinal: true,
-          disposeAfterTurn: false,
+          disposeAfterTurn: undefined,
           text: "hello",
-          sessionFile: dedicatedSessionFile,
-          createSessionFileIfMissing: true,
+          sessionFile: undefined,
+          createSessionFileIfMissing: undefined,
         },
         {
           chatKey: "telegram/demo:1",
-          controllerKey: "cron_dedicated",
-          affectChatBinding: false,
-          linkDeliveriesToSession: true,
+          controllerKey: "default",
+          affectChatBinding: true,
+          linkDeliveriesToSession: undefined,
           deliverFinal: true,
-          disposeAfterTurn: false,
-          text: "hello again",
-          sessionFile: dedicatedSessionFile,
+          disposeAfterTurn: undefined,
+          text: "hello",
+          sessionFile: undefined,
           createSessionFileIfMissing: undefined,
         },
       ],
@@ -1097,7 +1114,7 @@ test("cron dedicated agent task resumes an existing canonical session", async ()
         },
       },
     });
-    assert.equal(result.sessionFile, task.dedicatedSessionFile);
+    assert.equal(result.sessionFile, "/tmp/seeded-session-next.jsonl");
     assert.ok(task.dedicatedSessionFile.endsWith("cron_seeded.jsonl"));
     assert.equal(calls.length, 1);
     assert.deepEqual(
@@ -1113,19 +1130,13 @@ test("cron dedicated agent task resumes an existing canonical session", async ()
       },
       {
         chatKey: "telegram/demo:1",
-        controllerKey: "cron_seeded",
-        affectChatBinding: false,
-        linkDeliveriesToSession: true,
+        controllerKey: "default",
+        affectChatBinding: true,
+        linkDeliveriesToSession: undefined,
         deliverFinal: true,
-        disposeAfterTurn: false,
-        text: "hello again",
-        sessionFile: path.join(
-          agentDir,
-          "sessions",
-          "managed",
-          "task",
-          "cron_seeded.jsonl",
-        ),
+        disposeAfterTurn: undefined,
+        text: "hello",
+        sessionFile: undefined,
       },
     );
     assert.equal(calls[0].promptMeta?.taskId, "cron_seeded");
@@ -1150,6 +1161,7 @@ test("cron unbound no-session agent task shuts down and preserves its session fi
     session: { mode: "none" },
     model: "openai-codex/gpt-5.5",
     thinkingLevel: "low",
+    createdFrom: { sessionFile: transientSessionFile },
     target: { kind: "agent_prompt", prompt: "hello" },
   };
   const calls = [];
@@ -1171,7 +1183,7 @@ test("cron unbound no-session agent task shuts down and preserves its session fi
       },
     });
     assert.equal(result.text, "done");
-    assert.equal(result.sessionFile, undefined);
+    assert.equal(result.sessionFile, transientSessionFile);
     assert.equal(
       await fs.readFile(transientSessionFile, "utf8"),
       "temporary session",
@@ -1194,14 +1206,14 @@ test("cron unbound no-session agent task shuts down and preserves its session fi
       {
         controllerKey: "cron_none",
         affectChatBinding: false,
-        disposeAfterTurn: true,
-        shutdownAfterTurn: true,
+        disposeAfterTurn: undefined,
+        shutdownAfterTurn: undefined,
         text: "hello",
-        sessionFile: undefined,
-        managedSessionLeaf: "task",
+        sessionFile: transientSessionFile,
+        managedSessionLeaf: undefined,
         model: "openai-codex/gpt-5.5",
         thinkingLevel: "low",
-        frontend: { kind: "scheduled-task", key: "cron_none" },
+        frontend: undefined,
       },
     );
     assert.equal(calls[0].promptMeta?.source, "scheduled-task");
@@ -1214,14 +1226,19 @@ test("cron unbound no-session agent task shuts down and preserves its session fi
 
 test("cron frontend-bound no-session agent task uses frontend controller without controller auto-delivery", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const sourceSessionFile = path.join(agentDir, "sessions", "source.jsonl");
+  const resultSessionFile = path.join(agentDir, "sessions", "frontend.jsonl");
   const task = {
     id: "cron_frontend_bound",
     frontend: { kind: "sdk", key: "client/main" },
     session: { mode: "none" },
+    createdFrom: { sessionFile: sourceSessionFile },
     target: { kind: "agent_prompt", prompt: "hello" },
   };
   const calls = [];
   try {
+    await fs.mkdir(path.dirname(sourceSessionFile), { recursive: true });
+    await fs.writeFile(sourceSessionFile, "session", "utf8");
     const result = await execMod.executeCronAgentTask(task, {
       agentDir,
       runId: "run-frontend-1",
@@ -1231,18 +1248,19 @@ test("cron frontend-bound no-session agent task uses frontend controller without
           return {
             finalText: "done",
             sessionId: "s1",
-            sessionFile: path.join(agentDir, "sessions", "frontend.jsonl"),
+            sessionFile: resultSessionFile,
           };
         },
       },
     });
     assert.equal(result.text, "done");
-    assert.equal(result.sessionFile, undefined);
+    assert.equal(result.sessionFile, resultSessionFile);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].chatKey, undefined);
     assert.equal(calls[0].controllerKey, "client/main");
     assert.equal(calls[0].affectChatBinding, false);
-    assert.equal(calls[0].shutdownAfterTurn, true);
+    assert.equal(calls[0].shutdownAfterTurn, undefined);
+    assert.equal(calls[0].sessionFile, sourceSessionFile);
     assert.deepEqual(calls[0].promptMeta?.frontend, {
       kind: "sdk",
       key: "client/main",
@@ -1255,24 +1273,21 @@ test("cron frontend-bound no-session agent task uses frontend controller without
   }
 });
 
-test("cron scheduler rejects TUI frontend bindings", () => {
+test("cron scheduler accepts the singleton TUI frontend binding", () => {
   const scheduler = new cronMod.CronScheduler({
     agentDir: "/tmp/rin-agent",
     cwd: process.cwd(),
   });
-  assert.throws(
-    () =>
-      scheduler.upsertTask({
-        trigger: { runAt: "2026-04-10T00:00:00.000Z" },
-        frontend: { kind: "tui", key: "terminal/main" },
-        session: { mode: "none" },
-        target: { kind: "agent_prompt", prompt: "hello" },
-      }),
-    /cron_frontend_tui_unbindable/,
-  );
+  const task = scheduler.upsertTask({
+    trigger: { runAt: "2026-04-10T00:00:00.000Z" },
+    frontend: { kind: "tui", key: "terminal/main" },
+    session: { mode: "none" },
+    target: { kind: "agent_prompt", prompt: "hello" },
+  });
+  assert.deepEqual(task.frontend, { kind: "tui" });
 });
 
-test("cron scheduler keeps TUI creation identity as unbound provenance", async () => {
+test("cron scheduler binds tasks created from the singleton TUI frontend", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
   const scheduler = new cronMod.CronScheduler({ agentDir });
@@ -1286,7 +1301,7 @@ test("cron scheduler keeps TUI creation identity as unbound provenance", async (
       },
       { frontend: { kind: "tui", key: "terminal/main" } },
     );
-    assert.equal(task.frontend, undefined);
+    assert.deepEqual(task.frontend, { kind: "tui" });
     const rows = JSON.parse(await fs.readFile(tasksFile, "utf8"));
     assert.deepEqual(rows[0].createdFrom.frontend, { kind: "tui" });
   } finally {
@@ -1295,7 +1310,7 @@ test("cron scheduler keeps TUI creation identity as unbound provenance", async (
   }
 });
 
-test("cron scheduler rejects persisted TUI frontend bindings", async () => {
+test("cron scheduler accepts persisted TUI frontend bindings", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
   const task = {
@@ -1314,7 +1329,10 @@ test("cron scheduler rejects persisted TUI frontend bindings", async () => {
   await fs.writeFile(tasksFile, `${JSON.stringify([task], null, 2)}\n`, "utf8");
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
-    assert.throws(() => scheduler.reloadTasks(), /cron_tasks_file_invalid/);
+    scheduler.reloadTasks();
+    assert.deepEqual(scheduler.getTask("cron_tui_frontend")?.frontend, {
+      kind: "tui",
+    });
   } finally {
     scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -1372,8 +1390,8 @@ test("cron scheduler startup preserves invalid mixed task files", async () => {
       { ...baseTask, id: "cron_valid_task" },
       {
         ...baseTask,
-        id: "cron_invalid_tui_task",
-        frontend: { kind: "tui", key: "terminal/main" },
+        id: "cron_invalid_frontend_task",
+        frontend: { kind: "sdk" },
       },
     ],
     null,
@@ -1447,7 +1465,7 @@ test("cron scheduler persists disabled Rin capabilities", () => {
   assert.deepEqual(task.disabledRinCapabilities, ["self_improve", "memory"]);
 });
 
-test("cron chat-bound no-session agent task preserves session file for quote resume", async () => {
+test("cron chat-bound agent task submits into the frontend session without creating or switching one", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const transientSessionFile = path.join(
     agentDir,
@@ -1489,12 +1507,16 @@ test("cron chat-bound no-session agent task preserves session file for quote res
       "temporary session",
     );
     assert.equal(calls[0].chatKey, "telegram/demo:1");
-    assert.equal(calls[0].affectChatBinding, false);
-    assert.equal(calls[0].linkDeliveriesToSession, true);
+    assert.equal(calls[0].controllerKey, "default");
+    assert.equal(calls[0].affectChatBinding, true);
+    assert.equal(calls[0].linkDeliveriesToSession, undefined);
+    assert.equal(calls[0].sessionFile, undefined);
+    assert.equal(calls[0].managedSessionLeaf, undefined);
+    assert.equal(calls[0].disposeAfterTurn, undefined);
+    assert.equal(calls[0].shutdownAfterTurn, undefined);
     assert.equal(calls[0].deliverFinal, true);
     assert.equal(calls[0].promptMeta?.source, "scheduled-task");
     assert.equal(calls[0].promptMeta?.taskId, "cron_chat_bound");
-    assert.equal(calls[0].shutdownAfterTurn, true);
     assert.equal(calls[0].promptMeta?.taskName, "Chat Bound Task");
     assert.equal(calls[0].promptMeta?.taskContextKind, "scheduled-task");
     assert.equal("triggerKind" in (calls[0].promptMeta || {}), false);
@@ -1632,12 +1654,12 @@ test("cron quiet agent tasks run without a bound delivery frontend", async () =>
         },
       },
     );
-    assert.equal(calls[0].chatKey, undefined);
+    assert.equal(calls[0].chatKey, "telegram/demo:1");
     assert.equal(calls[0].deliverFinal, false);
     assert.equal(calls[0].quietMode, true);
     assert.deepEqual(calls[0].frontend, {
-      kind: "scheduled-task",
-      key: "cron_quiet_on",
+      kind: "chat",
+      key: "telegram/demo:1",
     });
     assert.equal(calls[1].chatKey, "telegram/demo:1");
     assert.equal(calls[1].deliverFinal, true);
@@ -1701,16 +1723,9 @@ test("cron agent task falls back to canonical turn result text", async () => {
         }),
       },
     });
-    const expectedSessionFile = path.join(
-      agentDir,
-      "sessions",
-      "managed",
-      "task",
-      "cron_result_fallback.jsonl",
-    );
     assert.equal(result.text, "done from result");
-    assert.equal(result.sessionFile, expectedSessionFile);
-    assert.equal(task.dedicatedSessionFile, expectedSessionFile);
+    assert.equal(result.sessionFile, "/tmp/cron-result-fallback.jsonl");
+    assert.equal(task.dedicatedSessionFile, undefined);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
@@ -1804,8 +1819,8 @@ test("cron chat-bound agent task links its delivery without changing chat bindin
     assert.equal(sent.length, 0);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].chatKey, "telegram/demo:1");
-    assert.equal(calls[0].affectChatBinding, false);
-    assert.equal(calls[0].linkDeliveriesToSession, true);
+    assert.equal(calls[0].affectChatBinding, true);
+    assert.equal(calls[0].linkDeliveriesToSession, undefined);
     assert.equal(calls[0].deliverFinal, true);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -1846,12 +1861,12 @@ test("cron quiet agent task suppresses every automatic frontend delivery", async
     assert.equal(result.text, "hidden final");
     assert.equal(sent.length, 0);
     assert.equal(working.length, 0);
-    assert.equal(calls[0].chatKey, undefined);
+    assert.equal(calls[0].chatKey, "telegram/demo:1");
     assert.equal(calls[0].deliverFinal, false);
     assert.equal(calls[0].quietMode, true);
     assert.deepEqual(calls[0].frontend, {
-      kind: "scheduled-task",
-      key: "cron_silent_delivery",
+      kind: "chat",
+      key: "telegram/demo:1",
     });
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -1863,6 +1878,7 @@ test("scheduled self-improve distillation keeps audit observational", async () =
   const disabledRinCapabilities = ["self_improve"];
   const task = {
     id: "scheduled_self_improve_distillation",
+    frontend: { kind: "chat", key: "discord/1:2" },
     session: { mode: "none" },
     trigger: { expression: "0 * * * *", timezone: "local" },
     target: {
@@ -1925,7 +1941,7 @@ test("scheduled self-improve distillation keeps audit observational", async () =
     assert.equal(rows[0].trigger, "cron:scheduled_self_improve_distillation");
     assert.match(rows[0].outputPreview, /^distillation done/);
     assert.ok(rows[0].outputPreview.length < fullFinal.length);
-    assert.equal(rows[0].sessionFile, undefined);
+    assert.equal(rows[0].sessionFile, result.sessionFile);
     assert.equal(rows[0].audit.version, 1);
     assert.equal(rows[0].audit.complete, false);
     assert.equal(rows[0].audit.redacted, true);
@@ -1938,11 +1954,11 @@ test("scheduled self-improve distillation keeps audit observational", async () =
     assert.match(audit.changes[0].patch, /-before/);
     assert.match(audit.changes[0].patch, /\+after/);
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0].disabledRinCapabilities, disabledRinCapabilities);
-    assert.equal(calls[0].shutdownAfterTurn, true);
+    assert.deepEqual(calls[0].disabledRinCapabilities, ["self_improve"]);
+    assert.equal(calls[0].shutdownAfterTurn, undefined);
     assert.deepEqual(calls[0].frontend, {
-      kind: "scheduled-task",
-      key: "scheduled_self_improve_distillation",
+      kind: "chat",
+      key: "discord/1:2",
     });
 
     let repeatedRunCalls = 0;
@@ -1986,6 +2002,7 @@ test("scheduled self-improve distillation executes when audit initialization fai
     await fs.symlink(outside, path.join(stateDir, "run-audits"), "dir");
     const task = {
       id: "scheduled_self_improve_distillation",
+      frontend: { kind: "chat", key: "discord/1:2" },
       session: { mode: "none" },
       trigger: { expression: "0 * * * *", timezone: "local" },
       target: {

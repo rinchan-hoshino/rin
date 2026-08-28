@@ -666,26 +666,8 @@ export class RpcInteractiveSession {
     }
   }
 
-  async switchSession(sessionPath: string, _cwdOverride?: string) {
-    this.setSessionOperationPending(true);
-    try {
-      const data = await this.call("switch_session", {
-        sessionPath,
-        resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
-        frontendIdentity: TUI_FRONTEND_IDENTITY,
-      });
-      if (!data?.cancelled) {
-        this.sessionFile =
-          safeString(data?.sessionFile).trim() ||
-          safeString(sessionPath).trim() ||
-          undefined;
-        this.sessionId = safeString(data?.sessionId).trim() || this.sessionId;
-      }
-      await this.refreshState(REFRESH_ALL);
-      return !Boolean(data?.cancelled);
-    } finally {
-      this.setSessionOperationPending(false);
-    }
+  async switchSession(_sessionPath: string, _cwdOverride?: string) {
+    throw new Error("frontend_session_switch_requires_new");
   }
 
   async renameSession(sessionPath: string, name: string) {
@@ -941,22 +923,7 @@ export class RpcInteractiveSession {
       );
     }
     if (trimmed.startsWith("/resume ")) {
-      const wanted = trimmed.slice("/resume ".length).trim();
-      if (wanted) {
-        const sessions = await this.listSessions("all");
-        const match = sessions.find(
-          (item: any) => String(item?.id || "") === wanted,
-        );
-        if (!match)
-          return { handled: true, text: `Session not found: ${wanted}` };
-        const completed = await this.switchSession(String(match.path || ""));
-        return {
-          handled: true,
-          text: completed
-            ? `Resumed session: ${String(match.id || "")}`
-            : commandResponses.newCancelled,
-        };
-      }
+      throw new Error("frontend_session_switch_requires_new");
     }
     await this.ensureRemoteSession({ persist: true });
     const data = await this.call("run_command", { commandLine });
@@ -1602,7 +1569,7 @@ export class RpcInteractiveSession {
             streamingBehavior: undefined,
             source: operation.source,
             requestTag: operation.requestTag,
-            sessionFile: this.sessionFile,
+            frontendIdentity: TUI_FRONTEND_IDENTITY,
             gate: {
               isCompacting: () => this.isCompacting,
               onWaiting: () => this.emitFrontendStatus(true),
@@ -1738,25 +1705,15 @@ export class RpcInteractiveSession {
       if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
       try {
-        if (this.sessionFile || this.sessionId) {
-          try {
-            await this.call("select_session", {
-              sessionPath: this.sessionFile,
-              sessionId: this.sessionId || undefined,
-            });
-          } catch (error) {
-            if (
-              this.sessionFile ||
-              !/\brin_no_attached_session\b/.test(rawErrorMessage(error))
-            ) {
-              throw error;
-            }
-            // An in-memory session id belongs to one daemon process. If that
-            // daemon was replaced, create a fresh ephemeral session instead of
-            // retrying an identifier that can no longer be resolved.
-            this.sessionId = undefined;
-            await this.ensureRemoteSession();
-          }
+        const remoteState: any = await this.call("get_state");
+        const remoteSessionFile = String(remoteState?.sessionFile || "").trim();
+        const remoteSessionId = String(remoteState?.sessionId || "").trim();
+        if (remoteSessionFile || remoteSessionId) {
+          this.sessionFile = remoteSessionFile || undefined;
+          this.sessionId = remoteSessionId || undefined;
+        } else {
+          this.sessionFile = undefined;
+          this.sessionId = undefined;
         }
         this.setRpcConnected(true);
         this.recoveryPending = true;
@@ -1869,20 +1826,7 @@ export class RpcInteractiveSession {
             serializeRpcResourceOptions(this.extensionOptions),
         }
       : scopedPayload;
-    const hasExplicitSessionTarget = Boolean(
-      withResources.sessionFile ||
-      withResources.sessionPath ||
-      withResources.sessionId,
-    );
-    const shouldAttachSessionFile =
-      isSessionScopedCommand(type) &&
-      type !== "new_session" &&
-      !["select_session", "attach_session", "switch_session"].includes(type) &&
-      !hasExplicitSessionTarget &&
-      this.sessionFile;
-    return shouldAttachSessionFile
-      ? { ...withResources, sessionFile: this.sessionFile }
-      : withResources;
+    return withResources;
   }
 
   private async refreshResourceDiagnostics() {

@@ -499,7 +499,10 @@ test("frontend turn owner integrates fallback session creation and unscoped mode
     disabledRinCapabilities: [],
   });
   assert.equal(managed.finalText, "owner final");
-  assert.ok(fallback.client.calls.some((call) => call.type === "newSession"));
+  assert.equal(
+    fallback.client.calls.some((call) => call.type === "newSession"),
+    false,
+  );
   assert.ok(
     fallback.client.calls.some(
       (call) =>
@@ -534,12 +537,14 @@ test("frontend turn owner integrates fallback session creation and unscoped mode
     cancelled.client.record("newSession", { options });
     return { cancelled: true };
   };
-  await assert.rejects(
-    cancelled.driver.runTurn({
-      text: "cancel",
-      managedSessionLeaf: "owner/cancel",
-    }),
-    /rin_new_session_cancelled/,
+  const ignoredManagedLeaf = await cancelled.driver.runTurn({
+    text: "cancel",
+    managedSessionLeaf: "owner/cancel",
+  });
+  assert.equal(ignoredManagedLeaf.finalText, "owner final");
+  assert.equal(
+    cancelled.client.calls.some((call) => call.type === "newSession"),
+    false,
   );
 });
 
@@ -900,21 +905,19 @@ test("frontend turn owner keeps session and terminal fallbacks deterministic", a
     /owned terminal error/,
   );
 
-  let releaseResume!: () => void;
+  let resumed = false;
   const lateRestore = createDriver();
   lateRestore.client.resumeSession = async () => {
-    await new Promise<void>((resolve) => {
-      releaseResume = resolve;
-    });
+    resumed = true;
   };
-  const restoring = lateRestore.driver.connect({
-    restoreSessionFile: "/tmp/late-restore.jsonl",
-  });
-  await waitFor(() => Boolean(releaseResume), "late restore did not start");
-  const detachRestore = lateRestore.driver.detachForDaemonShutdown();
-  releaseResume();
-  await detachRestore;
-  assert.equal(await restoring, false);
+  assert.equal(
+    await lateRestore.driver.connect({
+      restoreSessionFile: "/tmp/late-restore.jsonl",
+    }),
+    true,
+  );
+  assert.equal(resumed, false);
+  await lateRestore.driver.detachForDaemonShutdown();
 });
 
 test("passive notice deferral follows visible turn state", () => {

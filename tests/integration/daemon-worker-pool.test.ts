@@ -135,6 +135,90 @@ afterEach(async () => {
   activeDirs.clear();
 });
 
+test("daemon enforces one session selection for every frontend identity", () => {
+  const pool = new WorkerPool({
+    workerPath: process.execPath,
+    cwd: process.cwd(),
+    gcIdleMs: 5000,
+  });
+  const first: any = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+    frontendIdentity: { kind: "chat", key: "discord/1:2" },
+  };
+  const second: any = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+    frontendIdentity: { kind: "chat", key: "discord/1:2" },
+  };
+
+  pool.prepareFrontendCommand(first, {
+    type: "select_session",
+    sessionFile: "/tmp/frontend-a.jsonl",
+  });
+  assert.equal(first.sessionFile, "/tmp/frontend-a.jsonl");
+  assert.throws(
+    () =>
+      pool.prepareFrontendCommand(second, {
+        type: "select_session",
+        sessionFile: "/tmp/frontend-b.jsonl",
+      }),
+    /frontend_session_switch_requires_new/,
+  );
+  assert.doesNotThrow(() =>
+    pool.prepareFrontendCommand(second, {
+      type: "new_session",
+    }),
+  );
+});
+
+test("daemon persists the single session selection for a frontend identity", async () => {
+  const agentDir = await makeTempDir("rin-frontend-session-registry-");
+  const options = {
+    workerPath: process.execPath,
+    cwd: process.cwd(),
+    gcIdleMs: 5000,
+    agentDir,
+  };
+  const firstPool = new WorkerPool(options);
+  const first: any = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+    frontendIdentity: { kind: "sdk", key: "client/main" },
+  };
+  firstPool.prepareFrontendCommand(first, {
+    type: "select_session",
+    sessionFile: "/tmp/frontend-persisted.jsonl",
+  });
+  firstPool.prepareFrontendCommand(first, {
+    type: "set_model",
+    provider: "owner-provider",
+    modelId: "owner-model",
+  });
+  firstPool.destroyAll();
+
+  const restoredPool = new WorkerPool(options);
+  const restored: any = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+    frontendIdentity: { kind: "sdk", key: "client/main" },
+  };
+  assert.throws(
+    () =>
+      restoredPool.prepareFrontendCommand(restored, {
+        type: "select_session",
+        sessionFile: "/tmp/frontend-other.jsonl",
+      }),
+    /frontend_session_switch_requires_new/,
+  );
+  restoredPool.prepareFrontendCommand(restored, { type: "get_state" });
+  assert.equal(restored.sessionFile, "/tmp/frontend-persisted.jsonl");
+  assert.deepEqual(restoredPool.frontendStateHint(restored), {
+    model: { provider: "owner-provider", id: "owner-model" },
+  });
+  restoredPool.destroyAll();
+});
+
 test("daemon workers mark cross-platform update ownership", () => {
   const source = fsSync.readFileSync(
     path.join(rootDir, "src", "core", "rin-daemon", "worker-pool.ts"),

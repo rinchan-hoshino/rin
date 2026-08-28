@@ -89,7 +89,7 @@ test("rpc reconnect replaces an ephemeral session lost with the daemon", async (
         ["select_session", "new_session"].includes(payload.type),
       )
       .map((payload) => payload.type),
-    ["select_session", "new_session"],
+    [],
   );
   assert.equal((session as any).sessionId, "replacement-ephemeral");
   assert.equal((session as any).recoveryPending, false);
@@ -151,7 +151,6 @@ test("rpc prompt routes extension slash commands using daemon catalog authority"
     {
       type: "run_command",
       commandLine: "/local hello world",
-      sessionFile: "/tmp/s.jsonl",
     },
   );
 });
@@ -303,7 +302,6 @@ test("rpc prompt routes extension slash commands from command metadata", async (
     {
       type: "run_command",
       commandLine: "/usage",
-      sessionFile: "/tmp/s.jsonl",
     },
   );
 });
@@ -1266,7 +1264,6 @@ test("rpc runtime routes extension slash commands from prompt to daemon", async 
     {
       type: "run_command",
       commandLine: "/usage",
-      sessionFile: "/tmp/rpc-session.jsonl",
     },
   );
   assert.deepEqual(session.getSteeringMessages(), []);
@@ -1319,7 +1316,7 @@ test("rpc runtime lets daemon admission decide ordinary steer prompt mode", asyn
       streamingBehavior: undefined,
       source: undefined,
       requestTag: "<auto>",
-      sessionFile: "/tmp/rpc-session.jsonl",
+      frontendIdentity: { kind: "tui" },
     },
   );
   assert.deepEqual(session.getSteeringMessages(), []);
@@ -1357,12 +1354,10 @@ test("rpc runtime routes session-scoped commands by current session file", async
 
   await session.getActiveTools();
 
-  assert.deepEqual(sent, [
-    { type: "get_active_tools", sessionFile: "/tmp/rpc-session.jsonl" },
-  ]);
+  assert.deepEqual(sent, [{ type: "get_active_tools" }]);
 });
 
-test("rpc runtime switches sessions through the daemon worker", async () => {
+test("rpc runtime rejects session switching outside /new", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({
     send(payload) {
@@ -1414,15 +1409,14 @@ test("rpc runtime switches sessions through the daemon worker", async () => {
   session.rpcConnected = true;
   session.startupPending = false;
 
-  const completed = await session.switchSession("/tmp/s2.jsonl");
-
-  assert.equal(completed, true);
-  assert.equal(sent[0]?.type, "switch_session");
-  assert.equal(sent[0]?.sessionPath, "/tmp/s2.jsonl");
-  assert.ok(sent[0]?.resourceOptions);
+  await assert.rejects(
+    () => session.switchSession("/tmp/s2.jsonl"),
+    /frontend_session_switch_requires_new/,
+  );
+  assert.deepEqual(sent, []);
 });
 
-test("rpc runtime refreshes switched session state using the rebound session file", async () => {
+test("rpc runtime preserves the bound session when switch is requested", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({
     send(payload) {
@@ -1496,21 +1490,13 @@ test("rpc runtime refreshes switched session state using the rebound session fil
   session.rpcConnected = true;
   session.startupPending = false;
 
-  const completed = await session.switchSession("/tmp/new.jsonl");
-
-  assert.equal(completed, true);
-  const stateRequest = sent.find((payload) => payload.type === "get_state");
-  const snapshotRequest = sent.find(
-    (payload) => payload.type === "get_session_snapshot",
+  await assert.rejects(
+    () => session.switchSession("/tmp/new.jsonl"),
+    /frontend_session_switch_requires_new/,
   );
-  assert.equal(stateRequest?.sessionFile, "/tmp/new.jsonl");
-  assert.equal(snapshotRequest?.sessionFile, "/tmp/new.jsonl");
-  assert.equal(session.sessionFile, "/tmp/new.jsonl");
-  assert.equal(session.sessionId, "new-session");
-  assert.deepEqual(
-    session.state.messages.map((message) => message.content),
-    ["fresh history"],
-  );
+  assert.deepEqual(sent, []);
+  assert.equal(session.sessionFile, "/tmp/old.jsonl");
+  assert.equal(session.sessionId, "old-session");
 });
 
 test("rpc runtime refreshes new session state using the created session file", async () => {
@@ -1584,13 +1570,13 @@ test("rpc runtime refreshes new session state using the created session file", a
   const snapshotRequest = sent.find(
     (payload) => payload.type === "get_session_snapshot",
   );
-  assert.equal(stateRequest?.sessionFile, "/tmp/created.jsonl");
-  assert.equal(snapshotRequest?.sessionFile, "/tmp/created.jsonl");
+  assert.equal(stateRequest?.sessionFile, undefined);
+  assert.equal(snapshotRequest?.sessionFile, undefined);
   assert.equal(session.sessionFile, "/tmp/created.jsonl");
   assert.equal(session.sessionId, "created-session");
 });
 
-test("rpc runtime restores active session history from one daemon snapshot", async () => {
+test("rpc runtime does not restore another session through switch", async () => {
   const sent = [];
   const session = new RpcInteractiveSession({
     send(payload) {
@@ -1663,23 +1649,12 @@ test("rpc runtime restores active session history from one daemon snapshot", asy
   session.rpcConnected = true;
   session.startupPending = false;
 
-  const completed = await session.switchSession("/tmp/active.jsonl");
-
-  assert.equal(completed, true);
-  assert.deepEqual(session.messages, [
-    { role: "user", content: "hello" },
-    { role: "assistant", content: "world" },
-  ]);
-  assert.deepEqual(session.sessionManager.buildSessionContext().messages, [
-    { role: "user", content: "hello" },
-    { role: "assistant", content: "world" },
-  ]);
-  const sentTypes = sent.map((payload) => payload.type);
-  assert.equal(
-    sentTypes.filter((type) => type === "get_session_snapshot").length,
-    1,
+  await assert.rejects(
+    () => session.switchSession("/tmp/active.jsonl"),
+    /frontend_session_switch_requires_new/,
   );
-  assert.equal(sentTypes.includes("get_messages"), false);
+  assert.deepEqual(sent, []);
+  assert.deepEqual(session.messages, []);
 });
 
 test("rpc runtime normalizes daemon session listings into canonical session metadata", async () => {
@@ -1861,9 +1836,9 @@ test("rpc runtime promotes a temporary worker session before the first prompt", 
   );
   assert.ok(newSessionPayload);
   assert.deepEqual(newSessionPayload.frontendIdentity, { kind: "tui" });
-  assert.equal(
-    sent.find((payload) => payload.type === "prompt")?.sessionFile,
-    "/tmp/real.jsonl",
+  assert.deepEqual(
+    sent.find((payload) => payload.type === "prompt")?.frontendIdentity,
+    { kind: "tui" },
   );
 });
 

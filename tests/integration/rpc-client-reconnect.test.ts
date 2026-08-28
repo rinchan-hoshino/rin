@@ -790,13 +790,12 @@ test("rpc interactive session keeps the daemon connection while a worker exits m
   ]);
 });
 
-test("rpc interactive session does not self-deadlock when restore sees a disconnected request", async () => {
+test("rpc interactive session does not reattach a local selector during restore", async () => {
+  const calls = [];
   const client = {
     isConnected: () => true,
     send: async (payload) => {
-      if (payload.type === "select_session") {
-        throw new Error("rin_disconnected:req_restore");
-      }
+      calls.push(payload);
       return { success: true, data: {} };
     },
   };
@@ -806,12 +805,14 @@ test("rpc interactive session does not self-deadlock when restore sees a disconn
   session.recoveryPending = true;
   session.reconnectPromise = Promise.resolve();
 
-  await assert.rejects(
-    session.handleConnectionRestored(),
-    /rin_disconnected:req_restore/,
-  );
+  await session.handleConnectionRestored();
 
-  assert.equal(session.recoveryPending, true);
+  assert.equal(
+    calls.some((payload) => payload.type === "select_session"),
+    false,
+  );
+  assert.equal(session.sessionFile, undefined);
+  assert.equal(session.recoveryPending, false);
 });
 
 test("rpc interactive session routes follow-up intent through the ordinary prompt RPC", async () => {
@@ -842,6 +843,7 @@ test("rpc interactive session routes follow-up intent through the ordinary promp
     source: "tui-test",
     streamingBehavior: undefined,
     requestTag: calls[0]?.requestTag,
+    frontendIdentity: { kind: "tui" },
   });
   assert.match(String(calls[0]?.requestTag || ""), /^rin-tui-/);
 });

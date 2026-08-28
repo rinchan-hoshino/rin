@@ -482,15 +482,21 @@ export class RinFrontendTurnDriver {
     const wantedSessionFile = safeString(
       options.restoreSessionFile || "",
     ).trim();
-    if (wantedSessionFile) {
+    await this.refreshFrontendState(undefined, connectionEpoch).catch(() => {});
+    if (
+      wantedSessionFile &&
+      !this.frontendState.sessionFile &&
+      !this.frontendState.sessionId
+    ) {
       this.throwIfLifecycleEpochChanged(connectionEpoch);
       await this.selectSessionTarget(wantedSessionFile, connectionEpoch);
+    }
+    if (wantedSessionFile) {
       const disconnected = await this.disconnectSupersededClient(client);
       this.throwIfLifecycleEpochChanged(connectionEpoch);
       if (disconnected) return false;
       return true;
     }
-    await this.refreshFrontendState(undefined, connectionEpoch).catch(() => {});
     const disconnected = await this.disconnectSupersededClient(client);
     this.throwIfLifecycleEpochChanged(connectionEpoch);
     if (disconnected) return false;
@@ -1528,6 +1534,14 @@ export class RinFrontendTurnDriver {
     await this.disconnectedTurnRecovery;
   }
 
+  private assertSessionSelectionIsCurrent(sessionFile?: string) {
+    const wanted = safeString(sessionFile || "").trim();
+    const current = this.currentSessionFile();
+    if (wanted && current && wanted !== current) {
+      throw new Error("frontend_session_switch_requires_new");
+    }
+  }
+
   private async selectSessionTarget(
     sessionFile?: string,
     selectionEpoch = this.lifecycleEpoch,
@@ -1535,6 +1549,7 @@ export class RinFrontendTurnDriver {
     this.throwIfLifecycleEpochChanged(selectionEpoch);
     const wanted = safeString(sessionFile || "").trim();
     if (!wanted) return { changed: false };
+    this.assertSessionSelectionIsCurrent(wanted);
     if (!this.client) throw new Error("frontend_session_not_connected");
     const client = this.client;
     try {
@@ -1556,9 +1571,10 @@ export class RinFrontendTurnDriver {
   }
 
   async resumeSessionFile(sessionFile: string) {
+    await this.connect();
+    this.assertSessionSelectionIsCurrent(sessionFile);
     if (!sessionFileExists(sessionFile))
       throw missingSessionFileError(sessionFile);
-    await this.connect();
     return await this.selectSessionTarget(sessionFile);
   }
 
@@ -1577,10 +1593,17 @@ export class RinFrontendTurnDriver {
     if (!this.client) throw new Error("frontend_session_not_connected");
     const client = this.client;
     try {
+      this.assertSessionSelectionIsCurrent(restoreSessionFile);
+      const alreadyBound = Boolean(
+        this.currentSessionId() || this.currentSessionFile(),
+      );
+      const effectiveManagedSessionLeaf = alreadyBound
+        ? ""
+        : managedSessionLeaf;
       if (client.ensureSessionReady) {
         const ready = await client.ensureSessionReady(
           restoreSessionFile,
-          managedSessionLeaf,
+          effectiveManagedSessionLeaf,
           toolOptions,
         );
         if (readinessEpoch !== this.lifecycleEpoch) {
@@ -1591,7 +1614,7 @@ export class RinFrontendTurnDriver {
       }
 
       const wanted = safeString(restoreSessionFile || "").trim();
-      const managedLeaf = safeString(managedSessionLeaf || "").trim();
+      const managedLeaf = safeString(effectiveManagedSessionLeaf || "").trim();
       await this.refreshFrontendState(wanted, readinessEpoch).catch(() => {});
       if (readinessEpoch !== this.lifecycleEpoch) {
         throw createRinFrontendTurnCancelledError();
@@ -1809,27 +1832,7 @@ export class RinFrontendTurnDriver {
     }
     const resumeTarget = parseResumeCommandTarget(commandLine);
     if (resumeTarget) {
-      const sessions = await this.client.listSessions();
-      const match = sessions.find(
-        (item: any) =>
-          safeString(item?.id).trim() === resumeTarget ||
-          safeString(item?.path).trim() === resumeTarget,
-      );
-      if (!match) {
-        throw new Error(`session not found: ${resumeTarget}`);
-      }
-      const targetSession =
-        safeString((match as any)?.path).trim() || safeString(match.id).trim();
-      await this.client.resumeSession(targetSession, {
-        frontendIdentity: this.frontendIdentity,
-      });
-      await this.refreshFrontendState(targetSession).catch(() => {});
-      return {
-        handled: true,
-        text: `Resumed session: ${safeString(match.id).trim()}`,
-        sessionId: this.currentSessionId() || undefined,
-        sessionFile: this.currentSessionFile() || targetSession || undefined,
-      };
+      throw new Error("frontend_session_switch_requires_new");
     }
     if (sessionFile) {
       if (!sessionFileExists(sessionFile))

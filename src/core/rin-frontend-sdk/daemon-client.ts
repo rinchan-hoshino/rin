@@ -515,7 +515,15 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
               reject(new Error(`rin_timeout:${commandType}`));
             }, rpcTimeoutMs(command));
       this.pending.set(id, { commandType, resolve, reject, timer });
-      this.socket.write(`${JSON.stringify({ ...command, id })}\n`);
+      this.socket.write(
+        `${JSON.stringify({
+          ...command,
+          ...(command.frontendIdentity || !this.frontendIdentity
+            ? {}
+            : { frontendIdentity: this.frontendIdentity }),
+          id,
+        })}\n`,
+      );
     });
   }
 

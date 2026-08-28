@@ -38,6 +38,11 @@ const cronModule = await import(
   pathToFileURL(path.join(rootDir, "dist", "core", "rin-daemon", "cron.js"))
     .href
 );
+const daemonTurnLedger = await import(
+  pathToFileURL(
+    path.join(rootDir, "dist", "core", "rin-daemon", "turn-ledger.js"),
+  ).href
+);
 export const INNER_CONTAINER_ENV = "RIN_INSTALL_TUI_CONTAINER_INNER";
 export const LOCAL_CI_CONTAINER_ENV = "RIN_SYSTEM_TEST_CONTAINER_INNER";
 export const DEFAULT_CONTAINER_IMAGE = "rin-local-ci:latest";
@@ -1021,6 +1026,7 @@ export async function assertInstalledRuntimeSmoke() {
 
           tui.child.stdin.write("first journey prompt\r");
           await waitForVisiblePtyText(tui, /JOURNEY_REPLY_1/, 15_000);
+          await waitForDaemonTurnsToSettle(flow.agentDir, 5_000);
 
           const restartOutputOffset = tui.getOutput().length;
           await restart();
@@ -1112,6 +1118,15 @@ export async function assertRecallAcrossSessions() {
   } finally {
     await provider.close();
   }
+}
+
+async function waitForDaemonTurnsToSettle(agentDir: string, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (daemonTurnLedger.listActiveDaemonTurns(agentDir).length === 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("daemon_turn_settlement_timeout");
 }
 
 async function waitForVisiblePtyText(

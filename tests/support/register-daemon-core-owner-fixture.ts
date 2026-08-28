@@ -94,6 +94,8 @@ const replacements: Record<string, string> = {
       }
       registerConnection(connection) { this.connection = connection; }
       unregisterConnection(connection) { if (this.connection === connection) this.connection = undefined; }
+      prepareFrontendCommand() {}
+      frontendStateHint() { return undefined; }
       hasSelectedSession(connection) { return Boolean(connection.selectedSession); }
       resolveCurrentWorkerForCommand(connection, command) {
         this.abortCompleted = false;

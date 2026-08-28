@@ -23,6 +23,7 @@ function task(overrides: Record<string, any> = {}) {
     enabled: true,
     trigger: { runAt: "2099-07-17T00:00:00.000Z" },
     session: { mode: "none" },
+    frontend: { kind: "chat", key: "discord/owner:task" },
     target: { kind: "agent_prompt", prompt: "run owner task" },
     runCount: 1,
     ...overrides,
@@ -249,7 +250,7 @@ test("cron prompt context identifies chat and controller frontends", () => {
     {
       source: "scheduled-task",
       sentAt: 456,
-      frontend: undefined,
+      frontend: { kind: "tui", key: "tui" },
       taskId: "cron_owner",
       taskName: undefined,
       taskContextKind: "scheduled-task",
@@ -298,45 +299,36 @@ test("agent tasks preserve owner prompt, frontend, model, and transient session 
       sessionId: "session-owner",
       sessionFile: "/sessions/chat-owner.jsonl",
     });
-    assert.equal(calls[0].controllerKey, "cron_owner");
+    assert.equal(calls[0].controllerKey, "default");
     assert.equal(calls[0].chatKey, "discord/1:2");
-    assert.equal(calls[0].affectChatBinding, false);
+    assert.equal(calls[0].affectChatBinding, true);
     assert.equal(calls[0].deliverFinal, true);
     assert.equal(calls[0].quietMode, false);
-    assert.equal(calls[0].disposeAfterTurn, true);
-    assert.equal(calls[0].shutdownAfterTurn, true);
+    assert.equal(calls[0].disposeAfterTurn, undefined);
+    assert.equal(calls[0].shutdownAfterTurn, undefined);
     assert.equal(calls[0].text, "run owner task");
     assert.equal(calls[0].requestTag, "scheduled:owner");
     assert.equal(calls[0].deliveryIdempotencyKey, "delivery-owner");
     assert.deepEqual(calls[0].model, { provider: "demo", id: "owner-model" });
     assert.equal(calls[0].thinkingLevel, "high");
     assert.deepEqual(calls[0].disabledRinCapabilities, ["memory"]);
-    assert.equal(calls[0].managedSessionLeaf, "task");
+    assert.equal(calls[0].managedSessionLeaf, undefined);
     assert.deepEqual(calls[0].frontend, {
       kind: "chat",
       key: "discord/1:2",
     });
 
-    const detached = await cronExecution.executeCronAgentTask(
-      task({ name: undefined, frontend: undefined }),
-      {
-        agentDir,
-        continuing: false,
-        chat: {
-          runTurn: async (payload) => {
-            calls.push(payload);
-            return { finalText: "detached", sessionFile: "/temporary.jsonl" };
-          },
+    await assert.rejects(
+      cronExecution.executeCronAgentTask(
+        task({ name: undefined, frontend: undefined }),
+        {
+          agentDir,
+          continuing: false,
+          chat: { runTurn: async () => ({ finalText: "detached" }) },
         },
-      },
+      ),
+      /cron_frontend_or_session_required/,
     );
-    assert.equal(detached.text, "detached");
-    assert.equal(detached.sessionFile, undefined);
-    assert.equal(calls[1].affectChatBinding, false);
-    assert.deepEqual(calls[1].frontend, {
-      kind: "scheduled-task",
-      key: "cron_owner",
-    });
   });
 });
 
@@ -363,10 +355,10 @@ test("dedicated agent tasks select initial and continuation prompts", async () =
         },
       },
     });
-    assert.equal(first.sessionFile, sessionFile);
+    assert.equal(first.sessionFile, "/ignored.jsonl");
     assert.equal(prompts[0].text, "initial");
-    assert.equal(prompts[0].createSessionFileIfMissing, true);
-    assert.equal(dedicated.dedicatedSessionPersistent, true);
+    assert.equal(prompts[0].createSessionFileIfMissing, undefined);
+    assert.equal(dedicated.dedicatedSessionPersistent, undefined);
 
     await fs.mkdir(path.dirname(sessionFile), { recursive: true });
     await fs.writeFile(sessionFile, "{}\n");
@@ -381,7 +373,7 @@ test("dedicated agent tasks select initial and continuation prompts", async () =
       },
     });
     assert.equal(next.text, "next");
-    assert.equal(next.sessionFile, sessionFile);
+    assert.equal(next.sessionFile, undefined);
     assert.equal(prompts[1].text, "continue");
     assert.equal(prompts[1].createSessionFileIfMissing, undefined);
 
@@ -435,7 +427,7 @@ test("durable cron invocations snapshot owner execution inputs", async () => {
     assert.equal(invocation.taskId, "cron_owner");
     assert.equal(invocation.runCount, 1);
     assert.equal(invocation.scheduledNextRunAt, "2026-07-18T02:00:00.000Z");
-    assert.match(invocation.sessionFile, /sessions\/managed\/task\//);
+    assert.equal(invocation.sessionFile, undefined);
     assert.equal(invocation.continuing, false);
     assert.notEqual(invocation.session, none.session);
     assert.notEqual(invocation.target, none.target);
@@ -457,10 +449,7 @@ test("durable cron invocations snapshot owner execution inputs", async () => {
       agentDir,
     );
     assert.equal(dedicated.continuing, true);
-    assert.match(
-      dedicated.sessionFile,
-      /sessions\/managed\/task\/cron_owner\.jsonl$/,
-    );
+    assert.equal(dedicated.sessionFile, undefined);
 
     assert.throws(
       () =>
@@ -739,6 +728,9 @@ test("executeCronShellTask owns shell delivery and failure terminals", async () 
       },
     });
     assert.match(controllerShell.lastError, /Exit: 9/);
-    assert.equal(working.length, 2);
+    assert.deepEqual(working.slice(2), [
+      { controllerKey: "tui", visible: true },
+      { controllerKey: "tui", visible: false },
+    ]);
   });
 });

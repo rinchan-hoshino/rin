@@ -331,9 +331,9 @@ test("rpc runtime maps command methods to exact daemon requests and state transi
     nextOffset: 3,
   });
   assert.equal((await session.listSessions())[0].id, "resume-me");
-  assert.equal(
-    await session.switchSession("/owner/sessions/resume.jsonl"),
-    true,
+  await assert.rejects(
+    () => session.switchSession("/owner/sessions/resume.jsonl"),
+    /frontend_session_switch_requires_new/,
   );
   await session.renameSession("/owner/sessions/resume.jsonl", "Renamed");
   assert.deepEqual(await session.fork("user-1"), {
@@ -415,14 +415,14 @@ test("rpc runtime maps command methods to exact daemon requests and state transi
     handled: true,
     text: "Compacted session.",
   });
-  assert.deepEqual(await session.runCommand("/resume missing"), {
-    handled: true,
-    text: "Session not found: missing",
-  });
-  assert.deepEqual(await session.runCommand("/resume resume-me"), {
-    handled: true,
-    text: "Resumed session: resume-me",
-  });
+  await assert.rejects(
+    () => session.runCommand("/resume missing"),
+    /frontend_session_switch_requires_new/,
+  );
+  await assert.rejects(
+    () => session.runCommand("/resume resume-me"),
+    /frontend_session_switch_requires_new/,
+  );
   client.set("run_command", { handled: true, text: "daemon owner" });
   assert.deepEqual(await session.runCommand("/usage"), {
     handled: true,
@@ -444,13 +444,11 @@ test("rpc runtime maps command methods to exact daemon requests and state transi
     type: "bash",
     command: "printf owner",
     excludeFromContext: true,
-    sessionFile: "/owner/sessions/active.jsonl",
   });
   assert.deepEqual(sentOf(client, "set_entry_label").at(-1), {
     type: "set_entry_label",
     entryId: "assistant-1",
     label: "Important",
-    sessionFile: "/owner/sessions/active.jsonl",
   });
 });
 
@@ -496,7 +494,7 @@ test("rpc runtime owns prompt admission, queue visibility, and recovery without 
     images: [{ type: "image", data: "owner" }],
     source: "owner-source",
     requestTag: "owner-request",
-    sessionFile: "/owner/sessions/active.jsonl",
+    frontendIdentity: { kind: "tui" },
     streamingBehavior: undefined,
   });
   assert.equal(
@@ -526,7 +524,7 @@ test("rpc runtime owns prompt admission, queue visibility, and recovery without 
       images: undefined,
       source: "owner",
       requestTag: sentOf(client, "prompt").at(-2)?.requestTag,
-      sessionFile: "/owner/sessions/active.jsonl",
+      frontendIdentity: { kind: "tui" },
       streamingBehavior: undefined,
     },
     {
@@ -535,7 +533,7 @@ test("rpc runtime owns prompt admission, queue visibility, and recovery without 
       images: undefined,
       source: undefined,
       requestTag: "follow",
-      sessionFile: "/owner/sessions/active.jsonl",
+      frontendIdentity: { kind: "tui" },
       streamingBehavior: undefined,
     },
   ]);
@@ -637,7 +635,8 @@ test("rpc runtime owns prompt admission, queue visibility, and recovery without 
   ];
   await session.handleConnectionRestored();
   assert.equal(session.recoveryPending, false);
-  assert.equal(sentOf(client, "select_session").length, 1);
+  assert.equal(sentOf(client, "select_session").length, 0);
+  assert.equal(sentOf(client, "get_state").length > 0, true);
   assert.equal(sentOf(client, "prompt").at(-1)?.message, "timeout me");
 
   unsubscribe();
@@ -1000,7 +999,10 @@ test("rpc runtime rejects malformed RPC results and covers cancelled UI fallback
   client.set("new_session", { cancelled: true });
   assert.equal(await session.newSession(), false);
   client.set("switch_session", { cancelled: true });
-  assert.equal(await session.switchSession(""), false);
+  await assert.rejects(
+    () => session.switchSession(""),
+    /frontend_session_switch_requires_new/,
+  );
   client.set("list_sessions", { sessions: [{ id: "only" }] });
   const fallbackPage = await session.listSessionPage();
   assert.equal(fallbackPage.sessions[0].id, "only");

@@ -2,7 +2,7 @@
 
 Use scheduled tasks only when work must happen after the current turn: a reminder, delayed follow-up, recurrence, conditional recurrence, or background task.
 
-For an ordinary reminder or recurring report, this file is sufficient. Read `scheduled-tasks-reference.md` only for exact task fields, condition-code execution, termination edge cases, dedicated sessions, shell delivery, quote/session behavior, or lifecycle troubleshooting.
+For an ordinary reminder or recurring report, this file is sufficient. Read `scheduled-tasks-reference.md` only for exact task fields, condition-code execution, termination edge cases, source-worker fallback, shell delivery, or lifecycle troubleshooting.
 
 Import the installed Agent SDK exactly as shown in `agent-sdk.md`; examples below assume `const rin = createRinAgentSdk()`.
 
@@ -16,7 +16,7 @@ Choose only what the request needs:
 4. **Delivery:** add an addressable `frontend` only when Rin should deliver automatically.
 5. **Verification:** re-read the task and, for a run, wait for terminal task and external state.
 
-Default to `session: { mode: "none" }`. Do not add `condition`, `dedicated`, `quiet`, model overrides, or `termination` without a specific need.
+Do not add legacy session/model/capability fields. Add `condition`, `quiet`, or `termination` only for a specific need.
 
 ## Minimal create
 
@@ -28,7 +28,6 @@ await rin.tasks.upsert({
   name: "Example reminder",
   enabled: true,
   trigger: { runAt: "2026-08-19T09:00:00+08:00" },
-  session: { mode: "none" },
   target: {
     kind: "agent_prompt",
     prompt:
@@ -55,9 +54,9 @@ Use `reload()` only after an authorized direct edit to `~/.rin/data/scheduler/ta
 
 - **`condition`:** a cheap, deterministic, read-only boolean gate that avoids an unnecessary target run.
 - **`termination`:** `maxRuns` or `stopAt` for bounded recurrence.
-- **`session.mode: "dedicated"`:** only when a persistent task-owned conversation is part of the intended result; otherwise use `none` plus explicit external state.
 - **`quiet: true`:** only when the task prompt deliberately owns separate outbound delivery.
-- **`model`, `thinkingLevel`, `disabledRinCapabilities`:** only when the task requires an override.
+
+An `agent_prompt` task is only a delayed user input to an existing worker. It cannot create, select, resume, configure, or terminate a task-owned session. Legacy `session`, `model`, `thinkingLevel`, and `disabledRinCapabilities` fields may be read during migration but do not alter execution; use `/new` and the frontend's normal session controls outside the task.
 
 Set an optional field to `null` in `upsert()` to remove it. Do not write scheduler-owned lifecycle fields such as `runCount`, `runningAt`, `nextRunAt`, or `lastError` through `upsert()`.
 
@@ -75,11 +74,11 @@ A false recurring condition schedules the next tick without starting the target.
 
 ## Delivery decision
 
-- **Stored only:** omit `frontend`.
-- **Automatic: set `frontend` and keep `quiet: false`.** Rin owns Working, interim, independent-error, and final delivery as one policy.
-- **Manual: set `frontend` and `quiet: true`.** No scheduler-managed message is sent; the authorized task prompt must explicitly perform and verify any outbound SDK action.
+- **Existing source worker only:** omit `frontend` only when task creation captured a valid `createdFrom.sessionFile`; execution fails closed if that session no longer exists.
+- **Automatic: set `frontend` and keep `quiet: false`.** Rin submits the prompt to that frontend's one current session and owns Working, interim, independent-error, and final delivery as one policy.
+- **Manual: set `frontend` and `quiet: true`.** The same bound worker receives the prompt, but no scheduler-managed message is sent; the authorized task prompt must explicitly perform and verify any outbound SDK action.
 
-A Chat frontend uses `{ kind: "chat", key: chatKey }`. TUI has no addressable key. Quote linkage, idempotency, and chat-session isolation are runtime guarantees, not task options.
+A Chat frontend uses `{ kind: "chat", key: chatKey }`; TUI is the singleton `{ kind: "tui" }`. A scheduled turn never changes the frontend binding. Replies to its deliveries remain ordinary quote rich text and never resume a task session.
 
 ## Task prompt
 
@@ -113,7 +112,7 @@ Read `scheduled-tasks-reference.md` before handling any of these:
 
 - exact writable/read-only DTO fields;
 - condition TypeScript context, timeout, output, or failure behavior;
-- dedicated-session continuation and recovery;
+- frontend binding, source-worker fallback, or task-session migration;
 - `shell_command` exit/stdout/stderr delivery;
 - frontend quiet/manual delivery or quote/session incidents;
 - scheduler lifecycle errors or detailed troubleshooting.

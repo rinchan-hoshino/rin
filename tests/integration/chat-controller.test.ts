@@ -1025,7 +1025,7 @@ test("chat controller bootstraps a fresh session before the first command", asyn
   assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
 });
 
-test("chat controller allocates fresh prompt sessions under managed chat", async () => {
+test("chat controller reuses its one logical prompt session instead of allocating another", async () => {
   const controller = await createController();
   const calls = [];
   const deliveries = [];
@@ -1075,11 +1075,10 @@ test("chat controller allocates fresh prompt sessions under managed chat", async
 
   const result = await controller.runTurn({ text: "hello", attachments: [] });
 
-  assert.equal(calls[0], "newSession:chat");
-  assert.deepEqual(calls.slice(1), ["ensureSessionReady", "prompt"]);
+  assert.deepEqual(calls, ["ensureSessionReady", "prompt"]);
   assert.equal(result.finalText, "managed prompt final");
   assert.deepEqual(deliveries, ["managed prompt final"]);
-  assert.match(controller.state.sessionFile || "", /^managed\/chat\//);
+  assert.equal(controller.state.sessionFile, undefined);
 });
 
 test("chat controller forwards startup session names to the frontend turn driver", async () => {
@@ -1321,7 +1320,7 @@ test("chat controller applies turn model options after settings reload", async (
   assert.deepEqual(deliveries, ["model options final"]);
 });
 
-test("chat controller does not bind a transient default session before managed prompt creation", async () => {
+test("chat controller keeps an already-bound default session instead of replacing it", async () => {
   const controller = await createController();
   delete controller.connect;
   controller.commitPendingDelivery = async function () {
@@ -1370,10 +1369,7 @@ test("chat controller does not bind a transient default session before managed p
   await controller.runTurn({ text: "hello", attachments: [] });
 
   assert.deepEqual(observedStateAtPrompt, [undefined]);
-  assert.equal(
-    controller.state.sessionFile,
-    "managed/chat/created-after-connect.jsonl",
-  );
+  assert.equal(controller.state.sessionFile, "default-before-managed.jsonl");
 });
 
 test("chat controller skips recovery bootstrap and uses configured copy for /new", async () => {
@@ -7434,7 +7430,7 @@ test("chat controller never scans stale session text to repair an empty producer
   assert.equal(await controller.pollTyping(), false);
 });
 
-test("chat controller switches to a linked reply session before sending the prompt", async () => {
+test("chat controller rejects a linked reply session as a non-/new switch", async () => {
   const controller = await createController("telegram/1:2");
   const operations = [];
   const linkedSessionFile = path.join(
@@ -7479,18 +7475,18 @@ test("chat controller switches to a linked reply session before sending the prom
     },
   };
 
-  await controller.runTurn({
-    text: "continue",
-    attachments: [],
-    sessionFile: linkedSessionFile,
-  });
+  await assert.rejects(
+    () =>
+      controller.runTurn({
+        text: "continue",
+        attachments: [],
+        sessionFile: linkedSessionFile,
+      }),
+    /frontend_session_switch_requires_new/,
+  );
 
-  assert.deepEqual(operations, [
-    `switchSession:${linkedSessionFile}`,
-    "ensureSessionReady",
-    "prompt",
-  ]);
-  assert.equal(controller.state.sessionFile, "reply-linked.jsonl");
+  assert.deepEqual(operations, []);
+  assert.equal(controller.state.sessionFile, undefined);
 });
 
 test("chat controller fails fast when prompt submission is rejected while disconnected instead of hanging forever", async () => {

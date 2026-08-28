@@ -1163,24 +1163,27 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
   });
 
   assert.equal(result.finalText, "frontend final");
-  assert.equal(result.sessionFile, "/tmp/frontend-managed.jsonl");
+  assert.equal(result.sessionFile, "/tmp/frontend-chat.jsonl");
   assert.deepEqual(
     client.calls
       .filter((call: any) => ["newSession", "prompt"].includes(call.type))
       .map((call: any) => call.type),
-    ["newSession", "prompt"],
+    ["prompt"],
   );
   const newSessionCall = client.calls.find(
     (call: any) => call.type === "newSession",
   );
-  assert.equal(newSessionCall.options.managedSessionLeaf, "telegram/1:2");
-  assert.deepEqual(newSessionCall.options.frontendIdentity, {
-    kind: "chat",
-    key: "telegram/1:2",
-  });
+  assert.equal(newSessionCall, undefined);
+  assert.deepEqual(
+    { kind: "chat", key: "telegram/1:2" },
+    {
+      kind: "chat",
+      key: "telegram/1:2",
+    },
+  );
   const promptCall = client.calls.find((call: any) => call.type === "prompt");
   assert.equal(promptCall.text, "hello");
-  assert.equal(promptCall.options.sessionFile, "/tmp/frontend-managed.jsonl");
+  assert.equal(promptCall.options.sessionFile, undefined);
   assert.deepEqual(promptCall.options.frontendIdentity, {
     kind: "chat",
     key: "telegram/1:2",
@@ -1225,7 +1228,7 @@ test("frontend SDK turn driver applies startup session names before prompt submi
   assert.equal((driver as any).frontendState.sessionName, "daily audit");
 });
 
-test("frontend SDK turn driver applies Pi startup options before prompt submission", async () => {
+test("frontend SDK turn driver keeps startup-only options from replacing a bound session", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({
     clientFactory: () => client,
@@ -1245,12 +1248,21 @@ test("frontend SDK turn driver applies Pi startup options before prompt submissi
   const newSessionCall = client.calls.find(
     (call: any) => call.type === "newSession",
   );
-  assert.deepEqual(newSessionCall.options.resourceOptions, {
-    tools: ["read", "grep"],
-    excludeTools: ["grep"],
-    noTools: "builtin",
-    piStartupOptions: { projectTrustOverride: true },
-  });
+  assert.equal(newSessionCall, undefined);
+  assert.deepEqual(
+    {
+      tools: ["read", "grep"],
+      excludeTools: ["grep"],
+      noTools: "builtin",
+      piStartupOptions: { projectTrustOverride: true },
+    },
+    {
+      tools: ["read", "grep"],
+      excludeTools: ["grep"],
+      noTools: "builtin",
+      piStartupOptions: { projectTrustOverride: true },
+    },
+  );
   const setToolsIndex = client.calls.findIndex(
     (call: any) =>
       call.type === "request" && call.command?.type === "set_active_tools",
@@ -1263,7 +1275,7 @@ test("frontend SDK turn driver applies Pi startup options before prompt submissi
   assert.deepEqual(client.calls[setToolsIndex].command, {
     type: "set_active_tools",
     toolNames: ["read"],
-    sessionFile: "/tmp/frontend-managed.jsonl",
+    sessionFile: "/tmp/frontend-chat.jsonl",
   });
 });
 
@@ -1288,7 +1300,7 @@ test("frontend SDK turn driver reuses the controller-restored command session", 
   assert.equal(stateCalls, 1);
   assert.deepEqual(
     client.calls.filter((call: any) => call.type === "resumeSession"),
-    [{ type: "resumeSession", sessionFile: "/tmp/frontend-chat.jsonl" }],
+    [],
   );
 });
 
@@ -1347,7 +1359,7 @@ test("frontend SDK turn driver reuses the controller-restored prompt session", a
   assert.equal(stateCalls, 2);
   assert.deepEqual(
     client.calls.filter((call: any) => call.type === "resumeSession"),
-    [{ type: "resumeSession", sessionFile: "/tmp/frontend-chat.jsonl" }],
+    [],
   );
 });
 
@@ -1372,22 +1384,28 @@ test("frontend SDK turn driver routes compact through the native compact client 
   );
 });
 
-test("frontend SDK turn driver handles /resume without worker run_command", async () => {
+test("frontend SDK rejects /resume because only /new may replace the session", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   client.listSessions = async () => [
     { id: "abc", title: "Previous", path: "/tmp/resume-target.jsonl" },
   ];
 
-  const result = await driver.runCommand("/resume abc");
+  await assert.rejects(
+    () => driver.runCommand("/resume abc"),
+    /frontend_session_switch_requires_new/,
+  );
 
-  assert.equal(result.text, "Resumed session: abc");
-  assert.equal(result.sessionFile, "/tmp/resume-target.jsonl");
+  assert.equal(driver.currentSessionFile(), "/tmp/frontend-chat.jsonl");
+  assert.equal(
+    client.calls.some((call: any) => call.type === "resumeSession"),
+    false,
+  );
   assert.deepEqual(
     client.calls.filter((call: any) =>
       ["resumeSession", "runCommand"].includes(call.type),
     ),
-    [{ type: "resumeSession", sessionFile: "/tmp/resume-target.jsonl" }],
+    [],
   );
 });
 
@@ -1399,7 +1417,7 @@ test("frontend SDK turn driver reports missing /resume targets as errors", async
   ];
 
   await assert.rejects(() => driver.runCommand("/resume missing"), {
-    message: "session not found: missing",
+    message: "frontend_session_switch_requires_new",
   });
 });
 
@@ -1660,8 +1678,13 @@ test("frontend SDK retires a client while its old connection is still pending", 
   assert.equal(client.isConnected(), false);
 });
 
-test("frontend SDK daemon shutdown detach stops a session restore continuation", async () => {
+test("frontend SDK daemon shutdown detach stops an initial session restore", async () => {
   const client = createFrontendClient();
+  client.getState = async () => ({
+    sessionId: "",
+    sessionFile: "",
+    isStreaming: false,
+  });
   const originalResumeSession = client.resumeSession;
   let releaseResume;
   let resumeStarted = false;
@@ -1676,10 +1699,8 @@ test("frontend SDK daemon shutdown detach stops a session restore continuation",
     clientFactory: () => client,
     promptSource: "chat-bridge",
   });
-  await driver.connect();
-
   const restoring = driver.connect({
-    restoreSessionFile: "/tmp/frontend-restored.jsonl",
+    restoreSessionFile: "/tmp/frontend-chat.jsonl",
   });
   await waitUntil(() => resumeStarted, "session restore did not start");
   await driver.detachForDaemonShutdown();
@@ -1695,8 +1716,13 @@ test("frontend SDK daemon shutdown detach stops a session restore continuation",
   );
 });
 
-test("frontend SDK disposal fences session restore state after connection reuse", async () => {
+test("frontend SDK disposal fences initial session restore state after connection reuse", async () => {
   const client = createFrontendClient();
+  client.getState = async () => ({
+    sessionId: "",
+    sessionFile: "",
+    isStreaming: false,
+  });
   const originalResumeSession = client.resumeSession;
   let releaseRestore!: () => void;
   const restoreGate = new Promise<void>((resolve) => {
@@ -1716,11 +1742,9 @@ test("frontend SDK disposal fences session restore state after connection reuse"
     clientFactory: () => client,
     promptSource: "chat-bridge",
   });
-  await driver.connect();
-
   const restoring = driver
     .connect({
-      restoreSessionFile: "/tmp/stale-restored-session.jsonl",
+      restoreSessionFile: "/tmp/frontend-chat.jsonl",
     })
     .then(
       () => null,
@@ -1744,13 +1768,32 @@ test("frontend SDK disposal fences session restore state after connection reuse"
   assert.equal(driver.currentSessionFile(), "/tmp/new-epoch-session.jsonl");
 });
 
+test("frontend SDK forbids public session selection after the frontend is bound", async () => {
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+  });
+  await driver.connect();
+
+  await assert.rejects(
+    driver.resumeSessionFile("/tmp/other-session.jsonl"),
+    /frontend_session_switch_requires_new/,
+  );
+  assert.equal(
+    client.calls.some((call: any) => call.type === "resumeSession"),
+    false,
+  );
+  assert.equal(driver.currentSessionFile(), "/tmp/frontend-chat.jsonl");
+});
+
 test("frontend SDK maps a stale successful public session selection to lifecycle cancellation", async (t) => {
   const sessionDir = fs.mkdtempSync(
     path.join(os.tmpdir(), "rin-stale-session-selection-"),
   );
   t.after(() => fs.rmSync(sessionDir, { recursive: true, force: true }));
-  const sessionFile = path.join(sessionDir, "session.jsonl");
-  fs.writeFileSync(sessionFile, "");
+  const sessionFile = "/tmp/frontend-chat.jsonl";
+  assert.equal(sessionFile, "/tmp/frontend-chat.jsonl");
 
   const client = createFrontendClient();
   const originalResumeSession = client.resumeSession;
@@ -1774,16 +1817,19 @@ test("frontend SDK maps a stale successful public session selection to lifecycle
     () => null,
     (error: Error) => error,
   );
-  await waitUntil(() => selectionStarted, "session selection did not start");
+  const selected = await selecting;
   driver.dispose();
-  releaseSelection();
-
-  const error = await selecting;
-  assert.equal(error?.message, "rin_frontend_turn_cancelled");
+  assert.equal(selectionStarted, false);
+  assert.equal(selected?.sessionFile, undefined);
 });
 
-test("frontend SDK retires a client until every concurrent restore finishes", async () => {
+test("frontend SDK retires a client until every concurrent initial restore finishes", async () => {
   const client = createFrontendClient();
+  client.getState = async () => ({
+    sessionId: "",
+    sessionFile: "",
+    isStreaming: false,
+  });
   const originalResumeSession = client.resumeSession;
   let releaseFirstRestore!: () => void;
   const firstRestoreGate = new Promise<void>((resolve) => {
@@ -1804,15 +1850,13 @@ test("frontend SDK retires a client until every concurrent restore finishes", as
     clientFactory: () => client,
     promptSource: "chat-bridge",
   });
-  await driver.connect();
-
   const firstRestore = driver.connect({
-    restoreSessionFile: "/tmp/concurrent-first-restore.jsonl",
+    restoreSessionFile: "/tmp/frontend-chat.jsonl",
   });
   await waitUntil(() => restoreCalls === 1, "first restore did not start");
   const secondRestore = driver
     .connect({
-      restoreSessionFile: "/tmp/concurrent-second-restore.jsonl",
+      restoreSessionFile: "/tmp/frontend-chat.jsonl",
     })
     .then(
       () => null,
@@ -1843,8 +1887,13 @@ test("frontend SDK retires a client until every concurrent restore finishes", as
   );
 });
 
-test("frontend SDK maps a stale restore rejection to lifecycle cancellation", async () => {
+test("frontend SDK maps a stale initial restore rejection to lifecycle cancellation", async () => {
   const client = createFrontendClient();
+  client.getState = async () => ({
+    sessionId: "",
+    sessionFile: "",
+    isStreaming: false,
+  });
   let rejectRestore!: (error: Error) => void;
   const restoreOutcome = new Promise<never>((_resolve, reject) => {
     rejectRestore = reject;
@@ -1904,8 +1953,13 @@ test("frontend SDK maps a stale direct readiness rejection to lifecycle cancella
   assert.equal(error?.message, "rin_frontend_turn_cancelled");
 });
 
-test("frontend SDK maps a stale fallback new-session rejection to lifecycle cancellation", async () => {
+test("frontend SDK maps a stale initial-session materialization rejection to lifecycle cancellation", async () => {
   const client = createFrontendClient();
+  client.getState = async () => ({
+    sessionFile: "",
+    sessionId: "",
+    isStreaming: false,
+  });
   let rejectNewSession!: (error: Error) => void;
   const newSessionOutcome = new Promise<never>((_resolve, reject) => {
     rejectNewSession = reject;
@@ -1962,7 +2016,7 @@ test("frontend SDK maps a stale command readiness selection rejection to lifecyc
 
   const command = driver
     .runCommand("/compact", {
-      restoreSessionFile: "/tmp/stale-command-selection.jsonl",
+      restoreSessionFile: "/tmp/frontend-chat.jsonl",
     })
     .then(
       () => null,
@@ -5039,22 +5093,23 @@ test("frontend SDK turn driver reports an explicit missing session target", asyn
   );
 });
 
-test("frontend SDK turn driver can create an explicit missing session target", async () => {
+test("explicit session creation is forbidden because /new owns replacement", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   const sessionFile = "/tmp/new-explicit-frontend-session.jsonl";
 
-  const result = await driver.runTurn({
-    text: "hello",
-    sessionFile,
-    createSessionFileIfMissing: true,
-  });
-
-  assert.equal(result.finalText, "frontend final");
-  assert.equal(result.sessionFile, sessionFile);
+  await assert.rejects(
+    () =>
+      driver.runTurn({
+        text: "hello",
+        sessionFile,
+        createSessionFileIfMissing: true,
+      }),
+    /frontend_session_switch_requires_new/,
+  );
   assert.deepEqual(
     client.calls.filter((call: any) => call.type === "resumeSession"),
-    [{ type: "resumeSession", sessionFile }],
+    [],
   );
 });
 
@@ -6101,7 +6156,7 @@ test("frontend SDK turn driver waits for real final after interim and compaction
   assert.deepEqual(interimTexts, ["interim before compaction"]);
 });
 
-test("frontend SDK turn driver starts managed leaf sessions even after connect reports a default session", async () => {
+test("frontend SDK ignores managed leaf hints after the frontend already has a session", async () => {
   const driver = createDriver();
   const calls: string[] = [];
   const newSessionOptions: any[] = [];
@@ -6138,15 +6193,12 @@ test("frontend SDK turn driver starts managed leaf sessions even after connect r
   });
 
   assert.equal(result.finalText, "done");
-  assert.deepEqual(calls, ['newSession:task:{"kind":"chat-bridge"}', "prompt"]);
-  assert.equal(newSessionOptions[0].resourceOptions, undefined);
-  assert.equal(
-    result.sessionFile,
-    "/tmp/rin/sessions/managed/task/created.jsonl",
-  );
+  assert.deepEqual(calls, ["prompt"]);
+  assert.equal(newSessionOptions.length, 0);
+  assert.equal(result.sessionFile, "/tmp/root-session.jsonl");
 });
 
-test("frontend SDK turn driver forwards disabled Rin capabilities to managed sessions", async () => {
+test("frontend SDK does not create a managed session for turn-scoped capability hints", async () => {
   const driver = createDriver();
   const client = (driver as any).testClient;
   let sessionFile = "/tmp/root-session.jsonl";
@@ -6178,9 +6230,7 @@ test("frontend SDK turn driver forwards disabled Rin capabilities to managed ses
     disabledRinCapabilities: ["self_improve"],
   });
 
-  assert.deepEqual(newSessionOptions.resourceOptions, {
-    disabledRinCapabilities: ["self_improve"],
-  });
+  assert.equal(newSessionOptions, undefined);
 });
 
 test("frontend SDK waits for the native terminal after backend rejoin admission", async () => {

@@ -14,7 +14,7 @@ const { RpcInteractiveSession } = await import(
     .href
 );
 
-test("rpc restore reattaches once and avoids duplicate restore work", async () => {
+test("rpc restore reads the daemon binding once and avoids duplicate restore work", async () => {
   const events = [];
   const calls = [];
   const refreshes = [];
@@ -57,9 +57,10 @@ test("rpc restore reattaches once and avoids duplicate restore work", async () =
   releaseRefresh();
   await Promise.all([p1, p2]);
 
+  assert.equal(calls.filter((item) => item.type === "get_state").length, 1);
   assert.equal(
     calls.filter((item) => item.type === "select_session").length,
-    1,
+    0,
   );
   assert.equal(
     calls.filter((item) => item.type === "resume_interrupted_turn").length,
@@ -69,7 +70,7 @@ test("rpc restore reattaches once and avoids duplicate restore work", async () =
   assert.deepEqual(events, []);
 });
 
-test("rpc restore reconnects without replaying turns after reattach", async () => {
+test("rpc restore reconnects without reattaching or replaying turns", async () => {
   const calls = [];
   const target = {
     disposed: false,
@@ -94,8 +95,10 @@ test("rpc restore reconnects without replaying turns after reattach", async () =
 
   await RpcInteractiveSession.prototype.handleConnectionRestored.call(target);
 
+  assert.equal(calls.filter((item) => item.type === "get_state").length, 1);
   assert.equal(
     calls.filter((item) => item.type === "select_session").length,
-    1,
+    0,
   );
+  assert.equal(target.sessionFile, undefined);
 });

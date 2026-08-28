@@ -139,15 +139,12 @@ test("cron upsert validates trigger, session, target, frontend, condition, and m
         } as any),
       /cron_invalid_target_kind:unknown/,
     );
-    assert.throws(
-      () =>
-        scheduler.upsertTask({
-          trigger: { runAt: futureIso() },
-          frontend: { kind: "tui", key: "terminal" },
-          target: { kind: "shell_command", command: "owner" },
-        } as any),
-      /cron_frontend_tui_unbindable/,
-    );
+    const tuiTask = scheduler.upsertTask({
+      trigger: { runAt: futureIso() },
+      frontend: { kind: "tui", key: "terminal" },
+      target: { kind: "shell_command", command: "owner" },
+    } as any);
+    assert.deepEqual(tuiTask.frontend, { kind: "tui" });
     const defaulted = scheduler.upsertTask({
       id: "defaulted",
       trigger: { runAt: futureIso() },

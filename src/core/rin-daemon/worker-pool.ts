@@ -23,6 +23,7 @@ import {
 } from "./worker-cgroup-isolation.js";
 import { parseJsonl } from "../rin-lib/common.js";
 import { isSessionScopedCommand } from "../rin-lib/rpc.js";
+import { coreDataPath } from "../data-layout.js";
 import type { RinFrontendIdentity } from "../rin-lib/frontend-identity.js";
 import { RIN_DAEMON_WORKER_OWNER_ENV } from "../rin-lib/profile.js";
 import {
@@ -201,6 +202,13 @@ function expectsTerminalTurnEvent(commandType: string, command: any) {
   return requestTag !== undefined && requestTag.length > 0;
 }
 
+function frontendSessionKey(identity: RinFrontendIdentity | undefined) {
+  if (!identity) return undefined;
+  const kind = String(identity.kind || "").trim();
+  if (!kind) return undefined;
+  return `${kind}\u0000${String(identity.key || "").trim()}`;
+}
+
 export class WorkerPool {
   private workers = new Set<WorkerHandle>();
   private workersBySessionFile = new Map<string, WorkerHandle>();
@@ -221,6 +229,15 @@ export class WorkerPool {
   private readonly internalCommandTimeoutMs: number;
   private readonly switchSessionCommandTimeoutMs: number;
   private readonly frontendConnections = new Set<ConnectionState>();
+  private readonly frontendSessionSelections = new Map<
+    string,
+    SessionSelector
+  >();
+  private readonly frontendStateHints = new Map<
+    string,
+    { model?: { provider: string; id: string }; thinkingLevel?: string }
+  >();
+  private readonly frontendSessionSelectionsPath?: string;
   private readonly reaper: NodeJS.Timeout;
 
   constructor(
@@ -241,6 +258,14 @@ export class WorkerPool {
       workerCgroupIsolation?: WorkerCgroupIsolation;
     },
   ) {
+    this.frontendSessionSelectionsPath = options.agentDir
+      ? coreDataPath(
+          options.agentDir,
+          "daemon",
+          "frontend-session-selections.json",
+        )
+      : undefined;
+    this.loadFrontendSessionSelections();
     this.gcIdleMs = Math.max(0, Number(options.gcIdleMs ?? 30_000));
     this.internalCommandTimeoutMs = Math.max(
       1,
@@ -266,6 +291,62 @@ export class WorkerPool {
     this.reaper.unref?.();
   }
 
+  private loadFrontendSessionSelections() {
+    const target = this.frontendSessionSelectionsPath;
+    if (!target || !fs.existsSync(target)) return;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(target, "utf8"));
+      const rows = Array.isArray(parsed?.bindings) ? parsed.bindings : [];
+      for (const row of rows) {
+        const key = String(row?.frontendKey || "").trim();
+        if (!key) continue;
+        const selector = normalizeSessionSelector(row);
+        if (hasSessionSelector(selector)) {
+          this.frontendSessionSelections.set(key, selector);
+        }
+        const provider = String(row?.model?.provider || "").trim();
+        const id = String(row?.model?.id || "").trim();
+        const thinkingLevel = String(row?.thinkingLevel || "").trim();
+        if (provider && id) {
+          this.frontendStateHints.set(key, {
+            model: { provider, id },
+            ...(thinkingLevel ? { thinkingLevel } : {}),
+          });
+        } else if (thinkingLevel) {
+          this.frontendStateHints.set(key, { thinkingLevel });
+        }
+      }
+    } catch (error) {
+      throw new Error(
+        `frontend_session_registry_invalid:${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private persistFrontendSessionSelections() {
+    const target = this.frontendSessionSelectionsPath;
+    if (!target) return;
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const temp = `${target}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    const keys = new Set([
+      ...this.frontendSessionSelections.keys(),
+      ...this.frontendStateHints.keys(),
+    ]);
+    const bindings = Array.from(keys)
+      .sort((left, right) => left.localeCompare(right))
+      .map((frontendKey) => ({
+        frontendKey,
+        ...(this.frontendSessionSelections.get(frontendKey) || {}),
+        ...(this.frontendStateHints.get(frontendKey) || {}),
+      }));
+    fs.writeFileSync(
+      temp,
+      `${JSON.stringify({ version: 1, bindings }, null, 2)}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+    fs.renameSync(temp, target);
+  }
+
   registerConnection(connection: ConnectionState) {
     this.frontendConnections.add(connection);
   }
@@ -277,6 +358,78 @@ export class WorkerPool {
       this.terminalTurnWaiters.delete(waiter);
       waiter.reject(new Error("Frontend connection closed"));
     }
+  }
+
+  prepareFrontendCommand(connection: ConnectionState, command: any) {
+    if (command?.resourceOptions)
+      connection.resourceOptions = command.resourceOptions;
+    const key = frontendSessionKey(connection.frontendIdentity);
+    if (!key) return;
+    const commandType = String(command?.type || "");
+    if (commandType === "set_model") {
+      const provider = String(command?.provider || "").trim();
+      const id = String(command?.modelId || "").trim();
+      if (provider && id) {
+        this.frontendStateHints.set(key, {
+          ...(this.frontendStateHints.get(key) || {}),
+          model: { provider, id },
+        });
+        this.persistFrontendSessionSelections();
+      }
+    } else if (commandType === "set_thinking_level") {
+      const thinkingLevel = String(command?.level || "").trim();
+      if (thinkingLevel) {
+        this.frontendStateHints.set(key, {
+          ...(this.frontendStateHints.get(key) || {}),
+          thinkingLevel,
+        });
+        this.persistFrontendSessionSelections();
+      }
+    }
+    if (commandType === "new_session") return;
+    const bound = this.frontendSessionSelections.get(key);
+    const requested = this.getSessionSelector(command);
+    if (bound && hasSessionSelector(requested)) {
+      if (!sessionMatchesSelector(bound, requested)) {
+        throw new Error("frontend_session_switch_requires_new");
+      }
+    } else if (!bound && hasSessionSelector(requested)) {
+      this.frontendSessionSelections.set(key, requested);
+      this.persistFrontendSessionSelections();
+    }
+    const selected = this.frontendSessionSelections.get(key);
+    if (!selected) return;
+    const current = this.getConnectionSelector(connection);
+    if (
+      hasSessionSelector(current) &&
+      sessionMatchesSelector(current, selected)
+    ) {
+      return;
+    }
+    this.detachWorker(connection, { clearSelection: false });
+    connection.sessionFile = selected.sessionFile;
+    connection.sessionId = selected.sessionId;
+  }
+
+  frontendStateHint(connection: ConnectionState) {
+    const key = frontendSessionKey(connection.frontendIdentity);
+    return key ? this.frontendStateHints.get(key) : undefined;
+  }
+
+  private rememberFrontendStateHint(connection: ConnectionState, state: any) {
+    const key = frontendSessionKey(connection.frontendIdentity);
+    if (!key) return;
+    const provider = String(state?.model?.provider || "").trim();
+    const id = String(state?.model?.id || "").trim();
+    const thinkingLevel = String(state?.thinkingLevel || "").trim();
+    if (!provider && !id && !thinkingLevel) return;
+    const previous = this.frontendStateHints.get(key) || {};
+    this.frontendStateHints.set(key, {
+      ...previous,
+      ...(provider && id ? { model: { provider, id } } : {}),
+      ...(thinkingLevel ? { thinkingLevel } : {}),
+    });
+    this.persistFrontendSessionSelections();
   }
 
   detachWorker(
@@ -713,10 +866,10 @@ export class WorkerPool {
     selector?: SessionSelector,
   ) {
     if (selector) {
-      this.rememberSessionSelection(
-        connection,
-        sessionSelectorFromState(selector),
-      );
+      const requested = sessionSelectorFromState(selector);
+      if (hasSessionSelector(requested)) {
+        this.rememberSessionSelection(connection, requested);
+      }
     }
     const wanted = this.getConnectionSelector(connection);
     if (!hasSessionSelector(wanted)) {
@@ -775,10 +928,10 @@ export class WorkerPool {
 
   resolveWorkerForCommand(connection: ConnectionState, command: any) {
     const type = String(command?.type || "unknown");
+    if (command?.resourceOptions)
+      connection.resourceOptions = command.resourceOptions;
 
     if (type === "new_session") {
-      if (command.resourceOptions)
-        connection.resourceOptions = command.resourceOptions;
       const managedSessionLeaf = String(
         command.managedSessionLeaf || "",
       ).trim();
@@ -1549,7 +1702,6 @@ export class WorkerPool {
     }
     if (payload.type === "rpc_turn_event" && payload.event === "complete") {
       this.setWorkerSessionRefs(worker, sessionSelectorFromState(payload), {
-        syncConnections: false,
         syncRunningWorkerRecord: false,
       });
     }
@@ -1772,6 +1924,9 @@ export class WorkerPool {
               pending.connection,
               this.getWorkerSelector(worker),
             );
+            if (payload?.success === true) {
+              this.rememberFrontendStateHint(pending.connection, payload?.data);
+            }
           }
           pending.finalize?.();
           this.publishWorkerWorkingState(worker);
@@ -2013,6 +2168,27 @@ export class WorkerPool {
     const next = sessionSelectorFromState(selector);
     connection.sessionFile = next.sessionFile;
     connection.sessionId = next.sessionId;
+    if (!hasSessionSelector(next)) return;
+    const key = frontendSessionKey(connection.frontendIdentity);
+    if (!key) return;
+    const previous = this.frontendSessionSelections.get(key);
+    const merged =
+      previous && sessionMatchesSelector(next, previous)
+        ? resolveSessionSelector(next, previous)
+        : next;
+    this.frontendSessionSelections.set(key, merged);
+    this.persistFrontendSessionSelections();
+    if (previous && sessionMatchesSelector(previous, merged)) return;
+    for (const peer of this.frontendConnections) {
+      if (peer === connection) continue;
+      if (frontendSessionKey(peer.frontendIdentity) !== key) continue;
+      if (sessionMatchesSelector(this.getConnectionSelector(peer), merged)) {
+        continue;
+      }
+      this.detachWorker(peer, { clearSelection: false });
+      peer.sessionFile = merged.sessionFile;
+      peer.sessionId = merged.sessionId;
+    }
   }
 
   private async ensureWorkerForSession(

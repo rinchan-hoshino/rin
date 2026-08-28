@@ -44,7 +44,7 @@ export type CronTaskSessionBinding = {
 
 export type CronTaskFrontendBinding = {
   kind?: string;
-  key: string;
+  key?: string;
 };
 
 export type CronTaskThinkingLevel = ThinkingLevel;
@@ -56,7 +56,7 @@ export type CronSessionInvocation = {
   runCount: number;
   startedAt: string;
   scheduledNextRunAt?: string;
-  sessionFile: string;
+  sessionFile?: string;
   continuing?: boolean;
   name?: string;
   frontend?: CronTaskFrontendBinding;

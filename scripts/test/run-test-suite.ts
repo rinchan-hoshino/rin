@@ -63,7 +63,10 @@ export async function runTestSuites(
         "tsx",
         "--test",
         "--test-reporter=tap",
-        `--test-concurrency=${options.concurrency ?? (suites.includes("system") ? 2 : 4)}`,
+        `--test-concurrency=${
+          options.concurrency ??
+          (suites.includes("system") || suites.includes("integration") ? 2 : 4)
+        }`,
         ...(options.extraNodeArgs ?? []),
         ...files,
       ],

@@ -50,11 +50,27 @@ test("frontend input submission forwards normalized prompt metadata", async () =
         },
         frontendIdentity: { kind: "tui" },
         promptContext: { source: "tui" },
-        sessionFile: "/tmp/session.jsonl",
-        sessionId: "session-id",
       },
     },
   ]);
+});
+
+test("frontend input submission preserves an internal selector only without a frontend identity", async () => {
+  const calls: any[] = [];
+  await submission.submitNativeFrontendPromptTurn(
+    {
+      async prompt(text, options) {
+        calls.push({ text, options });
+      },
+    },
+    {
+      text: "internal",
+      sessionFile: " /tmp/session.jsonl ",
+      sessionId: " session-id ",
+    },
+  );
+  assert.equal(calls[0].options.sessionFile, "/tmp/session.jsonl");
+  assert.equal(calls[0].options.sessionId, "session-id");
 });
 
 test("frontend input submission omits blank optional metadata", async () => {

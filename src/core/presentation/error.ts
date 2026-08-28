@@ -319,6 +319,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Scheduled task delivery failed because the target chat is unavailable. Check the task frontend binding.",
   cron_frontend_key_required: () =>
     "Scheduled task frontend binding needs a frontend key. Add the key or remove the binding.",
+  cron_frontend_or_session_required: () =>
+    "Scheduled agent tasks need an existing frontend or session binding before they can run.",
   cron_frontend_tui_unbindable: () =>
     "Scheduled tasks cannot bind to a TUI because TUI frontends are not addressable. Remove the task frontend binding.",
   cron_invalid_agent_task: () =>
@@ -375,6 +377,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
   command_session_not_found: (detail) =>
     withDetail("Session not found", detail),
   frontend_model_not_found: modelNotFound,
+  frontend_session_switch_requires_new: () =>
+    "This frontend can change sessions only through /new.",
   frontend_session_not_connected: () =>
     "Rin is not connected to a session yet. Reconnect or start a new session.",
   frontend_session_restore_mismatch: () =>

@@ -125,6 +125,24 @@ test("split-turn compaction replaces an obsolete reporting cadence with the late
   assert.match(prompts[0], /Use batches of 500 instead/);
   assert.match(prompts[0], /## Historical Task Snapshot/);
   assert.match(prompts[0], /## Completed Actions/);
+  assert.match(prompts[0], /REFERENCE ONLY/i);
+  assert.match(
+    prompts[0],
+    /only the latest real user message after the summary is an active request/i,
+  );
+  assert.match(
+    prompts[0],
+    /stale pending asks are historical evidence, not work to execute/i,
+  );
+  assert.match(prompts[0], /authoritative external source/i);
+  assert.match(
+    prompts[0],
+    /re-read the exact current source before any dependent claim, phase\/order answer, or side effect/i,
+  );
+  assert.match(
+    prompts[0],
+    /never promote a paraphrased workflow from the summary above its producer/i,
+  );
   assert.match(
     prompts[0],
     /later source state replaces incompatible earlier state/i,

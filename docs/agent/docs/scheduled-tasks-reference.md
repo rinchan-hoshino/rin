@@ -1,6 +1,6 @@
 # Scheduled Tasks Reference
 
-Read `scheduled-tasks.md` first. Use this reference only for exact task fields, condition execution, termination, dedicated sessions, targets, delivery lifecycle, examples, or troubleshooting.
+Read `scheduled-tasks.md` first. Use this reference only for exact task fields, condition execution, termination, source-worker fallback, targets, delivery lifecycle, examples, or troubleshooting.
 
 ## Task record reference
 
@@ -13,18 +13,8 @@ type WritableTaskPatch = {
   id?: string;
   name?: string;
   enabled?: boolean;
-  frontend?: { kind?: string; key: string } | null;
+  frontend?: { kind: "chat" | "sdk"; key: string } | { kind: "tui" } | null;
   quiet?: boolean;
-  model?: string;
-  thinkingLevel?:
-    | "off"
-    | "minimal"
-    | "low"
-    | "medium"
-    | "high"
-    | "xhigh"
-    | "max";
-  disabledRinCapabilities?: string[] | null;
   trigger?: {
     expression?: string;
     timezone?: "local";
@@ -33,14 +23,13 @@ type WritableTaskPatch = {
   };
   termination?: { maxRuns?: number; stopAt?: string } | null;
   condition?: { code: string; timeoutMs?: number } | null;
-  session?: { mode: "none" | "dedicated" };
   target?:
     | { kind: "agent_prompt"; prompt: string; continuationPrompt?: string }
     | { kind: "shell_command"; command: string; timeoutMs?: number };
 };
 ```
 
-Creating a task requires both `trigger` and `target`; an update with a matching `id` may omit either field to preserve its existing value. Include only the writable fields you intend to change. Use `frontend: null`, `termination: null`, `condition: null`, or `disabledRinCapabilities: null` to remove those optional fields.
+Creating a task requires both `trigger` and `target`; an update with a matching `id` may omit either field to preserve its existing value. Include only the writable fields you intend to change. Use `frontend: null`, `termination: null`, or `condition: null` to remove those optional fields.
 
 ### Read-only lifecycle state
 
@@ -60,7 +49,6 @@ type ReadOnlyTaskLifecycleState = {
   lastFinishedAt?: string;
   lastResultText?: string;
   lastError?: string;
-  dedicatedSessionFile?: string;
   condition?: {
     code: string;
     timeoutMs?: number;
@@ -73,7 +61,7 @@ type ReadOnlyTaskLifecycleState = {
 
 The daemon loads the persisted task file at startup and when explicitly requested through `rin tasks reload` or `rin.tasks.reload()`: valid JSON edits, additions, and removals take effect without restarting the daemon only after that reload command. Invalid JSON leaves the running daemon schedule unchanged and makes the reload fail, so a partial manual edit does not silently replace the in-memory schedule.
 
-For agent-backed tasks, the scheduler owns the trigger and a durable invocation receipt, while the ordinary session/turn runtime remains authoritative for execution and terminal completion. The receipt snapshots the submitted prompt, session target, frontend policy, and stable turn identity before dispatch. After a daemon restart, Rin attaches to that same turn instead of submitting the prompt again. `running` and the `last*` fields are scheduler projections of this lifecycle; the internal receipt is intentionally omitted from task APIs.
+For agent-backed tasks, the scheduler owns the trigger and a durable invocation receipt, while the ordinary frontend session/turn runtime remains authoritative for execution and terminal completion. The receipt snapshots the submitted prompt, frontend or source-worker reference, and stable turn identity before dispatch. After a daemon restart, Rin attaches to that same turn instead of submitting the prompt again. `running` and the `last*` fields are scheduler projections of this lifecycle; the internal receipt is intentionally omitted from task APIs.
 
 ## Trigger contract
 
@@ -159,7 +147,6 @@ await rin.tasks.upsert({
     }`,
     timeoutMs: 5000,
   },
-  session: { mode: "none" },
   target: {
     kind: "agent_prompt",
     prompt:
@@ -186,36 +173,15 @@ termination: { maxRuns: 7, stopAt: "2026-06-01T00:00:00+08:00" }
 
 ## Session contract
 
-Choose `session.mode` by where the scheduled agent turn should get conversational context. Store reliable facts, progress, ledgers, and decisions in an explicit external surface that each run can read.
+A scheduled `agent_prompt` is a delayed input, not a session owner. It submits `target.prompt` to one already-bound worker and has no operation that can create, select, resume, replace, configure, or terminate a session.
 
-### `session.mode: "none"`
+Resolution order:
 
-Default for reminders, one-time tasks, periodic reports, checks, shell diagnostics, and workflows whose state is stored outside the agent session.
+1. If `frontend` exists, resolve that frontend identity's one durable current session at execution time.
+2. Otherwise use the existing `createdFrom.sessionFile` captured when the task was created.
+3. If neither resolves to an existing worker session, fail with `cron_frontend_or_session_required` or `cron_session_missing:<path>`; never materialize a task-owned fallback.
 
-Use `none` for recurring work when each run can reconstruct context from the task prompt plus external state. Ordinary recurring tasks use external state instead of a dedicated session.
-
-Behavior:
-
-- Agent tasks run in a managed task session for that run.
-- Rin disposes or shuts down the no-session turn after completion, except special self-improve distillation tasks.
-
-### `session.mode: "dedicated"`
-
-Use when the task is intentionally a task-owned agent thread. The clearest signal is a setup `target.prompt` plus a distinct `target.continuationPrompt` for later runs.
-
-Rin derives the session path from the task id:
-
-```text
-~/.rin/sessions/managed/task/<task-id>.jsonl
-```
-
-Behavior:
-
-- First run uses `target.prompt`.
-- Later runs use `target.continuationPrompt` when provided; otherwise they reuse `target.prompt`.
-- The dedicated session persists across runs but never becomes a chat's current session merely because the task runs or delivers there. Quoting a delivered task message selects its linked session through the ordinary user-driven quote path.
-
-Choose `dedicated` when the persistent conversation is part of the intended context, such as an intentionally guided recurring thread.
+The first run uses `target.prompt`; later runs use `target.continuationPrompt` when present and otherwise reuse `target.prompt`. Reliable task facts, progress, ledgers, and decisions still belong in explicit external state. Legacy `session.mode`, dedicated-session paths, and per-task model/capability overrides are migration inputs only and do not affect execution.
 
 ## Target contract
 
@@ -223,7 +189,7 @@ Choose `dedicated` when the persistent conversation is part of the intended cont
 
 Runs an agent turn. Use this for owner-facing reports, summaries, checks that need reasoning, and tasks that should produce polished chat text.
 
-- `model` and `thinkingLevel` override the run when present.
+- The bound frontend session owns model, thinking, tools, and capabilities; the task changes none of them.
 - Rin stores a summarized final result in `lastResultText`.
 - If the agent turn has no canonical final assistant text, the task records `lastError`.
 
@@ -243,9 +209,9 @@ Choose one delivery policy:
 - `frontend` with `quiet: false`: automatic delivery.
 - `frontend` with `quiet: true`: no scheduler-managed delivery; use this only when the authorized task prompt deliberately owns a separate outbound SDK action.
 
-An addressable `frontend` routes execution through a task-owned controller. `frontend: { kind: "chat", key: "..." }` sends automatic output to that Chat destination without reading or changing the chat's current session binding. TUI frontends have no key and cannot be addressed.
+An addressable `frontend` routes execution through that frontend's current worker. `frontend: { kind: "chat", key: "..." }` submits the prompt to that current session and uses the Chat destination for automatic output. The TUI frontend is the singleton `{ kind: "tui" }` identity and reuses its existing worker; it owns no scheduler-created session.
 
-Working, interim, independent-error, and final messages are one automatic delivery policy; do not add separate switches for them. Quote linkage, delivery idempotency, and chat-session isolation are runtime guarantees, not task options. Quoting a delivered task message selects its linked session through the ordinary user-driven quote path.
+Working, interim, independent-error, and final messages are one automatic delivery policy; do not add separate switches for them. Delivery idempotency and the one-frontend/one-session invariant are runtime guarantees, not task options. Quoting a delivered task message contributes quote rich text only and never selects a session.
 
 `quiet` defaults to `false`. When true, Rin still records task result and error state. An explicit outbound SDK send remains a separate side effect governed by the task prompt's authority and verification contract.
 
@@ -262,9 +228,7 @@ await rin.tasks.upsert({
   name: "Daily brief",
   enabled: true,
   frontend: { kind: "chat", key: "telegram/123456:7890" },
-  thinkingLevel: "medium",
   trigger: { expression: "30 8 * * *", timezone: "local" },
-  session: { mode: "none" },
   target: {
     kind: "agent_prompt",
     prompt:
@@ -303,9 +267,8 @@ await rin.tasks.upsert({
   id: "cron_drink_water_once",
   name: "Send water reminder",
   enabled: true,
-  thinkingLevel: "low",
+  frontend: { kind: "chat", key: "telegram/123456:7890" },
   trigger: { runAt: "2026-05-08T13:30:00+08:00" },
-  session: { mode: "none" },
   target: {
     kind: "agent_prompt",
     prompt: "Send the user a concise reminder: drink water.",
@@ -313,24 +276,24 @@ await rin.tasks.upsert({
 });
 ```
 
-### Dedicated recurring thread
+### Recurring frontend input
 
 ```js
 await rin.tasks.upsert({
   id: "cron_guided_thread",
   name: "Guided recurring thread",
   enabled: true,
+  frontend: { kind: "chat", key: "telegram/123456:7890" },
   trigger: { expression: "0 9 * * 1", timezone: "local" },
-  session: { mode: "dedicated" },
   target: {
     kind: "agent_prompt",
     prompt:
-      "Start this task's dedicated agent thread. State the objective once, run the first check, and report setup status.",
-    continuationPrompt:
-      "Continue this task's dedicated agent thread. Run the next check and report new findings, unchanged evidence, or blockers.",
+      "Read the external project state, run the approved weekly check, and report changed findings or blockers.",
   },
 });
 ```
+
+The prompt is submitted to the frontend's current worker each week. It does not own a parallel recurring conversation.
 
 ### Shell check
 
@@ -340,7 +303,6 @@ await rin.tasks.upsert({
   name: "Disk check",
   enabled: true,
   trigger: { expression: "0 * * * *", timezone: "local" },
-  session: { mode: "none" },
   target: { kind: "shell_command", command: "df -h" },
 });
 ```
@@ -351,7 +313,7 @@ Report:
 
 - task id and operation;
 - trigger and local next run time;
-- condition, session, target, delivery, and termination choices;
+- condition, frontend/source-worker, target, delivery, and termination choices;
 - verification source, such as SDK re-read or `rin status --json`;
 - active run status when operation changes a running task;
 - follow-up boundary when the scheduler record is correct but another system must still change.
@@ -360,5 +322,5 @@ Report:
 
 - Task stayed idle: inspect `enabled`, `completedAt`, `pausedAt`, `nextRunAt`, `condition.lastResult`, `lastError`, and `rin status --json`.
 - Run-now finished without a recipient-visible report: inspect `running`, `lastStartedAt`, active frontend turn, `lastError`, `frontend`, and `quiet`.
-- Recurring task is noisy: add a `condition`, persist a deduplication/change-detection key, narrow delivery, or change the prompt to report only changed evidence. Adjust `thinkingLevel` for computation cost, not notification frequency.
+- Recurring task is noisy: add a `condition`, persist a deduplication/change-detection key, narrow delivery, or change the prompt to report only changed evidence.
 - Report formatting is raw: replace direct `shell_command` delivery with an `agent_prompt` wrapper.

@@ -50,21 +50,16 @@ import {
   buildInboundAttachmentNotice,
   getChatId,
   getChatType,
-  lookupReplySession,
   enrichInboundMessageMetadata,
   pickChatName,
   pickMessageId,
-  pickReplyToMessageId,
   pickSenderNickname,
-  pickUnsessionedOwnQuoteText,
   pickUserId,
-  prependQuoteTextToPromptBody,
   renderInboundMessageText,
   renderPromptTextWithSavedAttachments,
   safeString,
   hasInboundChatMessageReplyBoundary,
   isInboundChatMessageProcessed,
-  isReplyToLatestAssistantMessage,
   markProcessedChatMessage,
 } from "./chat-helpers.js";
 import {
@@ -1050,28 +1045,7 @@ export async function startChatBridge(
     receivedAt?: string,
   ): Promise<FrozenChatTurnSubmission> => {
     const messageId = pickMessageId(session);
-    const quotedMessageId = pickReplyToMessageId(elements);
-    const replySession = lookupReplySession(
-      runtime.agentDir,
-      decision.chatKey,
-      quotedMessageId,
-    );
-    const linkedSessionFile = safeString(replySession?.sessionFile).trim();
-    const quotedOwnMessageText = pickUnsessionedOwnQuoteText({
-      senderUserId: pickUserId(session),
-      linked: replySession?.linked,
-      linkedSessionFile,
-    });
-    const shouldOmitPromptReplyTo =
-      quotedOwnMessageText !== null ||
-      isReplyToLatestAssistantMessage(
-        runtime.agentDir,
-        decision.chatKey,
-        quotedMessageId,
-      );
-    const promptElements = shouldOmitPromptReplyTo
-      ? withoutChatQuoteNodes(elements)
-      : elements;
+    const promptElements = elements;
     const { attachments, failures } = await extractInboundAttachments(
       elements,
       chatStateDir(dataDir, decision.chatKey),
@@ -1092,12 +1066,9 @@ export async function startChatBridge(
       );
     }
     const inboundAttachmentNotice = buildInboundAttachmentNotice(failures);
-    const promptText = prependQuoteTextToPromptBody(
-      attachments.length
-        ? renderPromptTextWithSavedAttachments(promptElements, attachments)
-        : renderInboundMessageText(session, promptElements),
-      quotedOwnMessageText ?? "",
-    );
+    const promptText = attachments.length
+      ? renderPromptTextWithSavedAttachments(promptElements, attachments)
+      : renderInboundMessageText(session, promptElements);
     const modelOptions = resolveChatModelOptions(settings, decision.chatKey);
     return {
       version: 1,
@@ -1137,7 +1108,7 @@ export async function startChatBridge(
       },
       incomingMessageId: messageId || undefined,
       replyToMessageId: messageId || undefined,
-      sessionFile: linkedSessionFile || undefined,
+      sessionFile: undefined,
       model: modelOptions.model,
       thinkingLevel: modelOptions.thinkingLevel,
       receivedAt,

@@ -90,7 +90,7 @@ test("local CI runner reuses image dependencies before repo checks", () => {
   assert.doesNotMatch(packageJson.scripts["test:inner"], /npm run build/);
 });
 
-test("the commit gate runs isolated suites concurrently and keeps slow calibration explicit", () => {
+test("the commit gate runs light suites concurrently and heavy suites sequentially", () => {
   const packageJson = JSON.parse(readRepoFile("package.json")) as {
     scripts: Record<string, string>;
   };
@@ -113,7 +113,13 @@ test("the commit gate runs isolated suites concurrently and keeps slow calibrati
   ]) {
     assert.match(commitRunner, new RegExp(`"${suite}"`));
   }
-  assert.match(commitRunner, /mapWithConcurrency\(suites, 3/);
+  assert.match(commitRunner, /mapWithConcurrency\(parallelSuites, 3/);
+  assert.match(commitRunner, /const initialSuite: TestSuite = "integration"/);
+  assert.match(commitRunner, /const finalSuite: TestSuite = "system"/);
+  assert.doesNotMatch(
+    commitRunner.match(/const parallelSuites[\s\S]*?\];/)?.[0] ?? "",
+    /"integration"|"system"/,
+  );
   assert.match(packageJson.scripts["test:inner"], /test:current:run/);
   assert.doesNotMatch(
     packageJson.scripts["test:inner"],
@@ -155,7 +161,10 @@ test("repository test scripts route classified buckets through the shared runner
       assert.doesNotMatch(command, /(^|\s)node\b[^&]*--test\b/);
     }
   }
-  assert.match(runner, /suites\.includes\("system"\) \? 2 : 4/);
+  assert.match(
+    runner,
+    /suites\.includes\("system"\) \|\| suites\.includes\("integration"\) \? 2 : 4/,
+  );
 });
 
 test("selected suite routes reference existing package scripts", () => {

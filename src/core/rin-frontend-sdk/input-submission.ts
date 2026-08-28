@@ -78,9 +78,11 @@ export async function submitNativeFrontendPromptTurn(
   const frontendIdentity = normalizeFrontendIdentity(input.frontendIdentity);
   if (frontendIdentity) promptOptions.frontendIdentity = frontendIdentity;
   if (input.promptContext) promptOptions.promptContext = input.promptContext;
-  const sessionFile = safeString(input.sessionFile || "").trim();
-  if (sessionFile) promptOptions.sessionFile = sessionFile;
-  const sessionId = safeString(input.sessionId || "").trim();
-  if (sessionId) promptOptions.sessionId = sessionId;
+  if (!frontendIdentity) {
+    const sessionFile = safeString(input.sessionFile || "").trim();
+    if (sessionFile) promptOptions.sessionFile = sessionFile;
+    const sessionId = safeString(input.sessionId || "").trim();
+    if (sessionId) promptOptions.sessionId = sessionId;
+  }
   return await client.prompt(input.text, promptOptions);
 }

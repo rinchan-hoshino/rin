@@ -235,7 +235,7 @@ function resolveCronTaskFrontend(task: Pick<CronTaskRecord, "frontend">) {
     | CronTaskFrontendBinding
     | undefined;
   const kind = String(frontend?.kind || "").trim() || undefined;
-  if (kind === "tui") return undefined;
+  if (kind === "tui") return { kind: "tui", key: "tui" };
   const key = String(frontend?.key || "").trim();
   if (!key) return undefined;
   return {
@@ -246,7 +246,8 @@ function resolveCronTaskFrontend(task: Pick<CronTaskRecord, "frontend">) {
 
 function cronTaskRunControllerKey(task: CronTaskRecord) {
   const frontend = resolveCronTaskFrontend(task);
-  return frontend && frontend.kind !== "chat" ? frontend.key : task.id;
+  if (frontend?.kind === "chat") return "default";
+  return frontend ? frontend.key || frontend.kind || task.id : task.id;
 }
 
 function shouldDeliverCronTaskFinal(
@@ -300,10 +301,6 @@ function isSelfImproveDistillationTask(task: CronTaskRecord) {
     .map((value) => String(value || ""))
     .join("\n");
   return prompt.includes("self-improve-distillation.md");
-}
-
-function shouldShutdownTaskSessionAfterRun(sessionMode: string) {
-  return sessionMode === "none";
 }
 
 function recoverCronHistoryText(existing: string) {
@@ -517,68 +514,54 @@ export async function executeCronAgentTask(
   if (typeof options.chat?.runTurn !== "function") {
     throw new Error("cron_chat_unavailable");
   }
-  const sessionMode =
-    normalizeScheduledTaskSessionMode((task.session as any)?.mode) || "none";
-  const dedicatedSessionFile =
-    sessionMode === "dedicated"
-      ? String(task.dedicatedSessionFile || "").trim() ||
-        getManagedTaskSessionFile(options.agentDir, task.id)
-      : undefined;
   const frontend = resolveCronTaskFrontend(task);
   const chatKey = frontend?.kind === "chat" ? frontend.key : undefined;
-  const controllerKey = cronTaskRunControllerKey(task);
-  const sessionFile =
-    String(options.sessionFile || "").trim() ||
-    (await resolveCronSessionFile(task));
+  const existingSessionFile = String(
+    options.sessionFile || task.createdFrom?.sessionFile || "",
+  ).trim();
+  if (!chatKey && !existingSessionFile) {
+    throw new Error("cron_frontend_or_session_required");
+  }
+  if (!chatKey && !existsSync(existingSessionFile)) {
+    throw new Error(`cron_session_missing:${existingSessionFile}`);
+  }
   const continuing =
     typeof options.continuing === "boolean"
       ? options.continuing
-      : Boolean(
-          sessionMode === "dedicated" &&
-          ((sessionFile && existsSync(sessionFile)) || task.runCount > 1),
-        );
+      : task.runCount > 1;
   const basePrompt = continuing
-    ? String(task.target.continuationPrompt || "").trim()
+    ? String(task.target.continuationPrompt || task.target.prompt || "").trim()
     : String(task.target.prompt || "").trim();
   if (!basePrompt) throw new Error("cron_prompt_required");
   const prompt = basePrompt;
   const quiet = task.quiet === true;
-  const deliveryChatKey = quiet ? undefined : chatKey;
   const result = await options.chat.runTurn({
-    controllerKey: quiet ? task.id : controllerKey,
-    ...(deliveryChatKey
-      ? { chatKey: deliveryChatKey, linkDeliveriesToSession: true }
-      : {}),
-    affectChatBinding: false,
+    controllerKey: chatKey ? "default" : cronTaskRunControllerKey(task),
+    ...(chatKey ? { chatKey } : {}),
+    affectChatBinding: Boolean(chatKey),
     deliverFinal: !quiet,
     quietMode: quiet,
-    disposeAfterTurn: sessionMode === "none",
-    shutdownAfterTurn: shouldShutdownTaskSessionAfterRun(sessionMode),
     text: prompt,
-    sessionFile: sessionFile || dedicatedSessionFile,
+    ...(!chatKey && existingSessionFile
+      ? { sessionFile: existingSessionFile }
+      : {}),
     ...(options.runId ? { requestTag: options.runId } : {}),
     ...(options.deliveryIdempotencyKey
       ? { deliveryIdempotencyKey: options.deliveryIdempotencyKey }
       : {}),
-    ...((sessionFile || dedicatedSessionFile) &&
-    !existsSync(String(sessionFile || dedicatedSessionFile))
-      ? { createSessionFileIfMissing: true }
-      : {}),
-    ...(sessionMode === "none"
-      ? { managedSessionLeaf: MANAGED_TASK_SESSION_LEAF }
+    ...(frontend
+      ? {
+          frontend: {
+            kind: frontend.kind,
+            key: frontend.key,
+          },
+        }
       : {}),
     ...(task.model ? { model: task.model } : {}),
     ...(task.thinkingLevel ? { thinkingLevel: task.thinkingLevel } : {}),
     ...(task.disabledRinCapabilities
       ? { disabledRinCapabilities: task.disabledRinCapabilities }
       : {}),
-    frontend:
-      !quiet && frontend
-        ? {
-            kind: frontend.kind || "scheduled-task",
-            key: frontend.key,
-          }
-        : { kind: "scheduled-task", key: task.id },
     promptMeta: options.promptMeta || buildCronTaskPromptContext(task),
   });
   const completion = resolveTurnCompletion(result);
@@ -587,26 +570,11 @@ export async function executeCronAgentTask(
     : completion.finalText;
   const finalText = summarizeText(terminalEvidence, 4000);
   const nextSessionFile = String(result?.sessionFile || "").trim() || undefined;
-  const keepChatBoundSession = Boolean(chatKey && nextSessionFile);
-  if (sessionMode === "dedicated") {
-    if (dedicatedSessionFile) {
-      task.dedicatedSessionFile = dedicatedSessionFile;
-      task.dedicatedSessionPersistent = true;
-    } else {
-      delete task.dedicatedSessionFile;
-      task.dedicatedSessionPersistent = true;
-    }
-  }
   return {
     text: finalText,
     auditOutput: completion.finalText,
     sessionId: String(result?.sessionId || "").trim() || undefined,
-    sessionFile:
-      sessionMode === "none"
-        ? keepChatBoundSession
-          ? nextSessionFile
-          : undefined
-        : dedicatedSessionFile,
+    sessionFile: nextSessionFile,
   };
 }
 
@@ -622,19 +590,20 @@ export type CronTaskTerminal = {
 
 export function createCronSessionInvocation(
   task: CronTaskRecord,
-  agentDir: string,
+  _agentDir: string,
 ): CronSessionInvocation {
   if (task.target.kind !== "agent_prompt") {
     throw new Error("cron_invalid_agent_task");
   }
   const startedAt = task.lastStartedAt || nowIso();
   const id = cronTaskRunId(task, startedAt);
-  const sessionMode = normalizeScheduledTaskSessionMode(task.session.mode);
-  const sessionFile =
-    sessionMode === "dedicated"
-      ? String(task.dedicatedSessionFile || "").trim() ||
-        getManagedTaskSessionFile(agentDir, task.id)
-      : getManagedTaskSessionFile(agentDir, id);
+  const frontend = resolveCronTaskFrontend(task);
+  const chatKey = frontend?.kind === "chat" ? frontend.key : undefined;
+  const sessionFile = chatKey
+    ? undefined
+    : String(
+        task.createdFrom?.sessionFile || task.dedicatedSessionFile || "",
+      ).trim() || undefined;
   return {
     id,
     requestTag: `scheduled:${id}`,
@@ -643,9 +612,7 @@ export function createCronSessionInvocation(
     startedAt,
     scheduledNextRunAt: task.nextRunAt,
     sessionFile,
-    continuing:
-      sessionMode === "dedicated" &&
-      (existsSync(sessionFile) || task.runCount > 1),
+    continuing: task.runCount > 1,
     name: task.name,
     frontend: task.frontend ? { ...task.frontend } : undefined,
     quiet: task.quiet === true,
@@ -672,6 +639,9 @@ function taskFromSessionInvocation(
     updatedAt: invocation.startedAt,
     name: invocation.name,
     enabled: true,
+    createdFrom: invocation.sessionFile
+      ? { sessionFile: invocation.sessionFile }
+      : undefined,
     frontend: invocation.frontend,
     quiet: invocation.quiet === true,
     model: invocation.model,
@@ -680,12 +650,6 @@ function taskFromSessionInvocation(
     trigger: {},
     session: invocation.session,
     target: invocation.target,
-    dedicatedSessionFile:
-      invocation.session.mode === "dedicated"
-        ? invocation.sessionFile
-        : undefined,
-    dedicatedSessionPersistent:
-      invocation.session.mode === "dedicated" ? true : undefined,
     nextRunAt: invocation.scheduledNextRunAt,
     lastStartedAt: invocation.startedAt,
     runCount: invocation.runCount,

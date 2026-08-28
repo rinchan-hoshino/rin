@@ -274,7 +274,8 @@ test("Pi session host owns compaction without registering core extension handler
   const compactionEntry = {
     id: "c1",
     type: "compaction",
-    summary: "Rin summary",
+    summary:
+      "[REFERENCE ONLY — compressed historical state; revalidate external sources]\nRin summary\n[END REFERENCE ONLY]",
   };
   let coreCalls = 0;
   const runner: any = {
@@ -330,7 +331,10 @@ test("Pi session host owns compaction without registering core extension handler
   const result = await session.compact("focus");
 
   assert.equal(coreCalls, 1);
-  assert.equal(result.summary, "Rin summary");
+  assert.equal(
+    result.summary,
+    "[REFERENCE ONLY — compressed historical state; revalidate external sources]\nRin summary\n[END REFERENCE ONLY]",
+  );
   assert.equal(appended[0][4], false);
   assert.equal(runner.hasHandlers("session_before_compact"), false);
   assert.equal(
@@ -352,7 +356,10 @@ test("Pi session host owns compaction without registering core extension handler
     };
   };
   const extensionResult = await session.compact("extension first");
-  assert.equal(extensionResult.summary, "Extension summary");
+  assert.equal(
+    extensionResult.summary,
+    "[REFERENCE ONLY — compressed historical state; revalidate external sources]\nExtension summary\n[END REFERENCE ONLY]",
+  );
   assert.equal(coreCalls, 1);
   assert.equal(appended[1][4], true);
 

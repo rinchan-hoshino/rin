@@ -206,7 +206,12 @@ test("callable core daemon routes the complete system-owned RPC while its host o
     rpc.socket.write("\n{not-json}\n");
     assert.equal((await rpc.next()).error, "invalid_json");
 
-    assert.equal((await request({ type: "get_state" })).success, true);
+    const initialStateResponse = await request({ type: "get_state" });
+    assert.equal(
+      initialStateResponse.success,
+      true,
+      JSON.stringify(initialStateResponse),
+    );
     for (const type of [
       "get_messages",
       "get_session_snapshot",

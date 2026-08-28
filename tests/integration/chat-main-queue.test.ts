@@ -3279,7 +3279,7 @@ test("chat main passes quoted reply rich text through one normal prompt submissi
         first.mode !== undefined ||
         first.text !== "[quote:m-linked]\\ncontinue here" ||
         first.promptMetaReplyTo !== null ||
-        first.sessionFile !== replySessionFile ||
+        first.sessionFile !== null ||
         first.replyToMessageId !== "m-follow" ||
         !Number.isFinite(Date.parse(first.receivedAt || ""))
       ) {
@@ -3306,7 +3306,7 @@ test("chat main passes quoted reply rich text through one normal prompt submissi
   }
 });
 
-test("chat main omits quote rich text when quoting the latest assistant message", async () => {
+test("chat main keeps quote rich text when quoting the latest assistant message", async () => {
   const tempRoot = os.tmpdir();
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -3402,8 +3402,8 @@ test("chat main omits quote rich text when quoting the latest assistant message"
       const first = seen[0];
       if (
         first.mode !== undefined ||
-        first.text !== "continue here" ||
-        first.sessionFile !== replySessionFile ||
+        first.text !== "[quote:m-latest-assistant]\\ncontinue here" ||
+        first.sessionFile !== null ||
         first.replyToMessageId !== "m-follow" ||
         first.promptMetaReplyTo !== null
       ) {
@@ -3430,7 +3430,7 @@ test("chat main omits quote rich text when quoting the latest assistant message"
   }
 });
 
-test("chat main inlines own unsessioned quoted content into the prompt", async () => {
+test("chat main keeps own unsessioned quoted content as quote rich text", async () => {
   const tempRoot = os.tmpdir();
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -3535,7 +3535,7 @@ test("chat main inlines own unsessioned quoted content into the prompt", async (
         first.sessionFile !== null ||
         first.replyToMessageId !== "m-mention-quote" ||
         first.promptMetaReplyTo !== null ||
-        first.text !== "look at this image\\n\\nplease explain this"
+        first.text !== "[quote:m-rich-source]\\nplease explain this"
       ) {
         throw new Error(JSON.stringify({ seen }));
       }
@@ -3685,7 +3685,7 @@ test("chat main keeps another sender's unsessioned quoted content lazy", async (
   }
 });
 
-test("chat main does not downgrade a quoted reply to a plain turn when linked session selection times out", async () => {
+test("chat main never selects a linked session for a quoted reply", async () => {
   const tempRoot = os.tmpdir();
   await fs.mkdir(tempRoot, { recursive: true });
   const agentDir = await fs.mkdtemp(
@@ -3732,10 +3732,11 @@ test("chat main does not downgrade a quoted reply to a plain turn when linked se
       controllerMod.ChatController.prototype.runTurn = async function (input, mode) {
         seen.push({
           mode,
+          text: input?.text || "",
           sessionFile: input?.sessionFile || null,
           replyToMessageId: input?.replyToMessageId || null,
         });
-        throw new Error("rin_timeout:select_session");
+        return { retry: false };
       };
 
       const { app } = await mainMod.startChatBridge({ commandRows: [] });
@@ -3780,7 +3781,8 @@ test("chat main does not downgrade a quoted reply to a plain turn when linked se
       const [first] = seen;
       if (
         first.mode !== undefined ||
-        first.sessionFile !== replySessionFile ||
+        first.text !== "[quote:m-linked]\\ncontinue here" ||
+        first.sessionFile !== null ||
         first.replyToMessageId !== "m-follow"
       ) {
         throw new Error(JSON.stringify({ seen, replySessionFile }));

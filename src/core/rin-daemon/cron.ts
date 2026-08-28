@@ -195,7 +195,7 @@ function normalizeTaskFrontend(
   if (frontend === null) return undefined;
   if (frontend === undefined) return existing?.frontend;
   const kind = safeString((frontend as any).kind).trim() || undefined;
-  if (kind === "tui") throw new Error("cron_frontend_tui_unbindable");
+  if (kind === "tui") return { kind: "tui" };
   const key = requireNonEmptyString(
     (frontend as any).key,
     "cron_frontend_key_required",
@@ -269,10 +269,7 @@ function normalizeCronSessionInvocation(
   if (target.kind !== "agent_prompt") {
     throw new Error("cron_tasks_file_invalid");
   }
-  const sessionFile = requireNonEmptyString(
-    raw.sessionFile,
-    "cron_tasks_file_invalid",
-  );
+  const sessionFile = safeString(raw.sessionFile).trim() || undefined;
   const sentAt = Number(raw.promptMeta?.sentAt);
   if (!Number.isFinite(sentAt) || sentAt <= 0) {
     throw new Error("cron_tasks_file_invalid");
@@ -394,7 +391,12 @@ export class CronScheduler {
       input.name !== undefined
         ? safeString(input.name).trim() || undefined
         : existing?.name;
-    const frontend = normalizeTaskFrontend(input.frontend, existing);
+    const frontend = normalizeTaskFrontend(
+      input.frontend !== undefined
+        ? input.frontend
+        : (existing?.frontend ?? defaults.frontend),
+      existing,
+    );
 
     const normalizedTrigger = normalizeTaskTrigger(
       input.trigger ?? existing?.trigger,
