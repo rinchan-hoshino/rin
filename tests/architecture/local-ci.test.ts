@@ -163,6 +163,10 @@ test("repository test scripts route classified buckets through the shared runner
   }
   assert.match(
     runner,
+    /batchSize = suites\.includes\("integration"\) \? 12 : files\.length/,
+  );
+  assert.match(
+    runner,
     /suites\.includes\("system"\) \|\| suites\.includes\("integration"\) \? 2 : 4/,
   );
 });

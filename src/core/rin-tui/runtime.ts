@@ -666,8 +666,26 @@ export class RpcInteractiveSession {
     }
   }
 
-  async switchSession(_sessionPath: string, _cwdOverride?: string) {
-    throw new Error("frontend_session_switch_requires_new");
+  async switchSession(sessionPath: string, _cwdOverride?: string) {
+    this.setSessionOperationPending(true);
+    try {
+      const data = await this.call("switch_session", {
+        sessionPath,
+        resourceOptions: serializeRpcResourceOptions(this.extensionOptions),
+        frontendIdentity: TUI_FRONTEND_IDENTITY,
+      });
+      if (!data?.cancelled) {
+        this.sessionFile =
+          safeString(data?.sessionFile).trim() ||
+          safeString(sessionPath).trim() ||
+          undefined;
+        this.sessionId = safeString(data?.sessionId).trim() || this.sessionId;
+      }
+      await this.refreshState(REFRESH_ALL);
+      return !Boolean(data?.cancelled);
+    } finally {
+      this.setSessionOperationPending(false);
+    }
   }
 
   async renameSession(sessionPath: string, name: string) {
@@ -923,7 +941,22 @@ export class RpcInteractiveSession {
       );
     }
     if (trimmed.startsWith("/resume ")) {
-      throw new Error("frontend_session_switch_requires_new");
+      const wanted = trimmed.slice("/resume ".length).trim();
+      if (wanted) {
+        const sessions = await this.listSessions("all");
+        const match = sessions.find(
+          (item: any) => String(item?.id || "") === wanted,
+        );
+        if (!match)
+          return { handled: true, text: `Session not found: ${wanted}` };
+        const completed = await this.switchSession(String(match.path || ""));
+        return {
+          handled: true,
+          text: completed
+            ? `Resumed session: ${String(match.id || "")}`
+            : commandResponses.newCancelled,
+        };
+      }
     }
     await this.ensureRemoteSession({ persist: true });
     const data = await this.call("run_command", { commandLine });

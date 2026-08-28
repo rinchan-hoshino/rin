@@ -19,7 +19,6 @@ const PI_CHAT_BUILTIN_COMMAND_NAMES = new Set([
   "model",
   "new",
   "reload",
-  "resume",
   "session",
 ]);
 

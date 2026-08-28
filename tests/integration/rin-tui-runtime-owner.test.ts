@@ -331,9 +331,9 @@ test("rpc runtime maps command methods to exact daemon requests and state transi
     nextOffset: 3,
   });
   assert.equal((await session.listSessions())[0].id, "resume-me");
-  await assert.rejects(
-    () => session.switchSession("/owner/sessions/resume.jsonl"),
-    /frontend_session_switch_requires_new/,
+  assert.equal(
+    await session.switchSession("/owner/sessions/resume.jsonl"),
+    true,
   );
   await session.renameSession("/owner/sessions/resume.jsonl", "Renamed");
   assert.deepEqual(await session.fork("user-1"), {
@@ -415,14 +415,14 @@ test("rpc runtime maps command methods to exact daemon requests and state transi
     handled: true,
     text: "Compacted session.",
   });
-  await assert.rejects(
-    () => session.runCommand("/resume missing"),
-    /frontend_session_switch_requires_new/,
-  );
-  await assert.rejects(
-    () => session.runCommand("/resume resume-me"),
-    /frontend_session_switch_requires_new/,
-  );
+  assert.deepEqual(await session.runCommand("/resume missing"), {
+    handled: true,
+    text: "Session not found: missing",
+  });
+  assert.deepEqual(await session.runCommand("/resume resume-me"), {
+    handled: true,
+    text: "Resumed session: resume-me",
+  });
   client.set("run_command", { handled: true, text: "daemon owner" });
   assert.deepEqual(await session.runCommand("/usage"), {
     handled: true,
@@ -999,10 +999,8 @@ test("rpc runtime rejects malformed RPC results and covers cancelled UI fallback
   client.set("new_session", { cancelled: true });
   assert.equal(await session.newSession(), false);
   client.set("switch_session", { cancelled: true });
-  await assert.rejects(
-    () => session.switchSession(""),
-    /frontend_session_switch_requires_new/,
-  );
+  client.set("switch_session", { cancelled: true });
+  assert.equal(await session.switchSession(""), false);
   client.set("list_sessions", { sessions: [{ id: "only" }] });
   const fallbackPage = await session.listSessionPage();
   assert.equal(fallbackPage.sessions[0].id, "only");

@@ -271,11 +271,11 @@ test("Pi session host owns compaction without registering core extension handler
       message: { role: "user", content: "recent request", timestamp: 3 },
     },
   ];
+  const wrappedRinSummary = host.wrapRinCompactionSummary("Rin summary");
   const compactionEntry = {
     id: "c1",
     type: "compaction",
-    summary:
-      "[REFERENCE ONLY — compressed historical state; revalidate external sources]\nRin summary\n[END REFERENCE ONLY]",
+    summary: wrappedRinSummary,
   };
   let coreCalls = 0;
   const runner: any = {
@@ -331,10 +331,7 @@ test("Pi session host owns compaction without registering core extension handler
   const result = await session.compact("focus");
 
   assert.equal(coreCalls, 1);
-  assert.equal(
-    result.summary,
-    "[REFERENCE ONLY — compressed historical state; revalidate external sources]\nRin summary\n[END REFERENCE ONLY]",
-  );
+  assert.equal(result.summary, wrappedRinSummary);
   assert.equal(appended[0][4], false);
   assert.equal(runner.hasHandlers("session_before_compact"), false);
   assert.equal(
@@ -358,7 +355,7 @@ test("Pi session host owns compaction without registering core extension handler
   const extensionResult = await session.compact("extension first");
   assert.equal(
     extensionResult.summary,
-    "[REFERENCE ONLY — compressed historical state; revalidate external sources]\nExtension summary\n[END REFERENCE ONLY]",
+    host.wrapRinCompactionSummary("Extension summary"),
   );
   assert.equal(coreCalls, 1);
   assert.equal(appended[1][4], true);
@@ -430,7 +427,7 @@ test("Pi session host uses a proportional retained-source tail at the cut-point 
   const compactionEntry = {
     id: "c1",
     type: "compaction",
-    summary: "Rin summary",
+    summary: host.wrapRinCompactionSummary("Rin summary"),
   };
   const session: any = {
     model: { provider: "test", id: "model", contextWindow: 1_000 },

@@ -4,9 +4,16 @@ import assert from "node:assert/strict";
 
 import { importBuiltModule } from "../support/import-built-module.js";
 
-const { runPiNativeCompactionWithoutFileSummary } = await importBuiltModule<
-  typeof import("../../src/core/pi/session-host.js")
->("dist/core/pi/session-host.js");
+const {
+  boundRinCompactionInput,
+  buildRinCompactionPrompt,
+  collectRinPrunedSkillMarkers,
+  preserveRinPrunedSkillMarkers,
+  runPiNativeCompactionWithoutFileSummary,
+  wrapRinCompactionSummary,
+} = await importBuiltModule<typeof import("../../src/core/pi/session-host.js")>(
+  "dist/core/pi/session-host.js",
+);
 
 test("split-turn compaction replaces an obsolete reporting cadence with the latest correction", async () => {
   const model = {
@@ -128,30 +135,69 @@ test("split-turn compaction replaces an obsolete reporting cadence with the late
   assert.match(prompts[0], /REFERENCE ONLY/i);
   assert.match(
     prompts[0],
-    /only the latest real user message after the summary is an active request/i,
+    /only a real user message appearing after the checkpoint can activate work/i,
   );
-  assert.match(
-    prompts[0],
-    /stale pending asks are historical evidence, not work to execute/i,
-  );
+  assert.match(prompts[0], /Historical pending asks are evidence only/i);
   assert.match(prompts[0], /authoritative external source/i);
   assert.match(
     prompts[0],
-    /re-read the exact current source before any dependent claim, phase\/order answer, or side effect/i,
+    /re-read the exact current producer before dependent claims, phase\/order answers, or side effects/i,
   );
+  assert.match(prompts[0], /instead of promoting a paraphrase to authority/i);
   assert.match(
     prompts[0],
-    /never promote a paraphrased workflow from the summary above its producer/i,
+    /Later source state and user corrections replace incompatible earlier state/i,
   );
-  assert.match(
-    prompts[0],
-    /later source state replaces incompatible earlier state/i,
-  );
-  assert.doesNotMatch(
-    prompts[0],
-    /The messages above are a conversation to summarize/,
-  );
+  assert.match(prompts[0], /TURNS TO SUMMARIZE:/);
+  assert.match(prompts[0], /the runtime adds the reference-only boundary/i);
+  assert.doesNotMatch(prompts[0], /<conversation>/);
   assert.doesNotMatch(result.summary, /Turn Context \(split turn\)/);
   assert.match(result.summary, /Report every 500 companies/);
   assert.match(result.summary, /next report at 3,000/);
+});
+
+test("compaction bounds iterative input and deterministically preserves pruned skill reloads", () => {
+  const skillPath = "/home/rin/.rin/self_improve/skills/example/SKILL.md";
+  const messages = [
+    {
+      role: "assistant",
+      content: [
+        {
+          type: "toolCall",
+          name: "read",
+          arguments: { path: skillPath },
+        },
+      ],
+    },
+    {
+      role: "user",
+      content: "Use the current skill source, not this transcript.",
+    },
+  ];
+  const markers = collectRinPrunedSkillMarkers(messages);
+  assert.deepEqual(markers, [
+    `[SKILL_PRUNED: ${skillPath} — reload with read before use]`,
+  ]);
+
+  const prompt = buildRinCompactionPrompt({
+    previousSummary: `old-head\n${"x".repeat(180_000)}\nold-tail`,
+    messagesToSummarize: messages,
+  });
+  assert.match(prompt, /PREVIOUS CHECKPOINT:/);
+  assert.match(prompt, /NEW TURNS TO INCORPORATE:/);
+  assert.match(prompt, /summary input truncated: omitted/);
+  assert.match(prompt, /DETERMINISTIC RELOAD MARKERS:/);
+  assert.match(
+    prompt,
+    new RegExp(skillPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+  );
+  assert.equal(boundRinCompactionInput("small"), "small");
+
+  const restored = preserveRinPrunedSkillMarkers("## Goal\nContinue.", markers);
+  assert.match(restored, /## Pruned Skills/);
+  assert.match(restored, /SKILL_PRUNED/);
+  const wrapped = wrapRinCompactionSummary(restored);
+  assert.match(wrapped, /^\[CONTEXT COMPACTION — REFERENCE ONLY\]/);
+  assert.match(wrapped, /Respond only to the latest real user message/);
+  assert.match(wrapped, /\[END CONTEXT COMPACTION\]$/);
 });

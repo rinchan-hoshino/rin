@@ -172,6 +172,40 @@ test("daemon enforces one session selection for every frontend identity", () => 
   );
 });
 
+test("daemon permits only an explicit TUI switch to request another bound session", () => {
+  const pool = new WorkerPool({
+    workerPath: process.execPath,
+    cwd: process.cwd(),
+    gcIdleMs: 5000,
+  });
+  const connection: any = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+    frontendIdentity: { kind: "tui" },
+  };
+
+  pool.prepareFrontendCommand(connection, {
+    type: "select_session",
+    sessionFile: "/tmp/tui-current.jsonl",
+  });
+  assert.doesNotThrow(() =>
+    pool.prepareFrontendCommand(connection, {
+      type: "switch_session",
+      sessionFile: "/tmp/tui-resumed.jsonl",
+    }),
+  );
+  assert.equal(connection.sessionFile, "/tmp/tui-current.jsonl");
+  assert.throws(
+    () =>
+      pool.prepareFrontendCommand(connection, {
+        type: "select_session",
+        sessionFile: "/tmp/tui-other.jsonl",
+      }),
+    /frontend_session_switch_requires_new/,
+  );
+  pool.destroyAll();
+});
+
 test("daemon persists the single session selection for a frontend identity", async () => {
   const agentDir = await makeTempDir("rin-frontend-session-registry-");
   const options = {

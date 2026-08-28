@@ -324,7 +324,10 @@ test("Rin owns policy-guided compaction through the private session host", async
   assert.match(sessionHostText, /RIN_COMPACTION_SYSTEM_PROMPT/);
   assert.match(sessionHostText, /RIN_COMPACTION_PROMPT/);
   assert.match(sessionHostText, /withRinProportionalCompactionRetention/);
-  assert.match(sessionHostText, /<previous-checkpoint>/);
+  assert.match(sessionHostText, /PREVIOUS CHECKPOINT/);
+  assert.match(sessionHostText, /summary input truncated/);
+  assert.match(sessionHostText, /SKILL_PRUNED/);
+  assert.match(sessionHostText, /CONTEXT COMPACTION — REFERENCE ONLY/);
   assert.match(
     sessionHostText,
     /Preserve all existing information that remains relevant/,

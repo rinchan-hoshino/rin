@@ -226,7 +226,7 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
   assert.match(prompt, /Target ~2,000 tokens/);
   assert.match(
     prompt,
-    /later source state replaces incompatible earlier state/i,
+    /Later source state and user corrections replace incompatible earlier state/i,
   );
   assert.doesNotMatch(
     prompt,
@@ -290,7 +290,8 @@ test("Rin compaction request preserves preparation while leaving the full prompt
     result.preparation,
     result.customInstructions,
   );
-  assert.match(prompt, /<previous-checkpoint>\nstale requirement/);
+  assert.match(prompt, /PREVIOUS CHECKPOINT:\nstale requirement/);
+  assert.match(prompt, /NEW TURNS TO INCORPORATE:\n\[User\]: new correction/);
   assert.match(prompt, /FOCUS TOPIC: Preserve exact units/);
   assert.match(prompt, /60–70% of the checkpoint budget/);
   assert.doesNotMatch(prompt, /Additional focus:/);

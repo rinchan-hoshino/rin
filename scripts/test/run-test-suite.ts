@@ -51,52 +51,60 @@ export async function runTestSuites(
   if (files.length === 0)
     throw new Error(`test_suite_empty:${suites.join(",")}`);
 
-  const sandbox = createTestProcessEnvironment(`test-${suites.join("-")}`);
-  let result: { status: number | null; stdout: string; stderr: string };
-  try {
-    const invocation = networkIsolatedNodeInvocation(
-      [
-        "--import",
-        "tsx",
-        "scripts/test/run-node-tests.ts",
-        "--import",
-        "tsx",
-        "--test",
-        "--test-reporter=tap",
-        `--test-concurrency=${
-          options.concurrency ??
-          (suites.includes("system") || suites.includes("integration") ? 2 : 4)
-        }`,
-        ...(options.extraNodeArgs ?? []),
-        ...files,
-      ],
-      sandbox.env,
+  const batchSize = suites.includes("integration") ? 12 : files.length;
+  const concurrency =
+    options.concurrency ??
+    (suites.includes("system") || suites.includes("integration") ? 2 : 4);
+  for (let offset = 0; offset < files.length; offset += batchSize) {
+    const batch = files.slice(offset, offset + batchSize);
+    const batchNumber = Math.floor(offset / batchSize) + 1;
+    const sandbox = createTestProcessEnvironment(
+      `test-${suites.join("-")}-${batchNumber}`,
     );
-    result = await new Promise((resolve, reject) => {
-      const child = spawn(invocation.command, invocation.args, {
-        cwd: rootDir,
-        env: invocation.env,
-        stdio: ["inherit", "pipe", "pipe"],
-      });
-      const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
-      child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-      child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-      child.once("error", reject);
-      child.once("close", (status) =>
-        resolve({
-          status,
-          stdout: Buffer.concat(stdout).toString("utf8"),
-          stderr: Buffer.concat(stderr).toString("utf8"),
-        }),
+    let result: { status: number | null; stdout: string; stderr: string };
+    try {
+      const invocation = networkIsolatedNodeInvocation(
+        [
+          "--import",
+          "tsx",
+          "scripts/test/run-node-tests.ts",
+          "--import",
+          "tsx",
+          "--test",
+          "--test-reporter=tap",
+          `--test-concurrency=${concurrency}`,
+          ...(options.extraNodeArgs ?? []),
+          ...batch,
+        ],
+        sandbox.env,
       );
-    });
-  } finally {
-    sandbox.cleanup();
+      result = await new Promise((resolve, reject) => {
+        const child = spawn(invocation.command, invocation.args, {
+          cwd: rootDir,
+          env: invocation.env,
+          stdio: ["inherit", "pipe", "pipe"],
+        });
+        const stdout: Buffer[] = [];
+        const stderr: Buffer[] = [];
+        child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+        child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+        child.once("error", reject);
+        child.once("close", (status) =>
+          resolve({
+            status,
+            stdout: Buffer.concat(stdout).toString("utf8"),
+            stderr: Buffer.concat(stderr).toString("utf8"),
+          }),
+        );
+      });
+    } finally {
+      sandbox.cleanup();
+    }
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    if ((result.status ?? 1) !== 0) return result.status ?? 1;
   }
-  if (result.stdout) process.stdout.write(result.stdout);
-  if (result.stderr) process.stderr.write(result.stderr);
-  return result.status ?? 1;
+  return 0;
 }
 
 async function main() {

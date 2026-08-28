@@ -23,6 +23,11 @@ test("rpc command catalog preserves Rin overrides and generic prompt routing", (
     false,
   );
   assert.equal(
+    rpc.BUILTIN_SLASH_COMMANDS.find((command) => command.name === "resume")
+      ?.chat,
+    false,
+  );
+  assert.equal(
     rpc.BUILTIN_SLASH_COMMANDS.some((command) =>
       /\bPi\b|\bpi\b/.test(command.description),
     ),
