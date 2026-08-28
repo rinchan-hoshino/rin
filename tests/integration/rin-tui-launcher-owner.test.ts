@@ -35,7 +35,7 @@ function names() {
   return events.map(([name]) => name);
 }
 
-test("launcher owns terminal animation, clearing, timeout, and recoverable error contracts", async () => {
+test("launcher owns terminal animation, clearing, timeout, and maintenance notices", async () => {
   reset();
   const writes: string[] = [];
   const status = launcher.startTuiStartupStatusAnimation(
@@ -76,24 +76,6 @@ test("launcher owns terminal animation, clearing, timeout, and recoverable error
     /rin_timeout:owner-step/,
   );
 
-  assert.equal(
-    launcher.isRecoverableRpcStartupError(
-      new Error("connect ECONNREFUSED /owner.sock"),
-    ),
-    true,
-  );
-  assert.equal(
-    launcher.isRecoverableRpcStartupError("rin_disconnected:owner"),
-    true,
-  );
-  assert.equal(
-    launcher.isRecoverableRpcStartupError(new Error("rin_worker_exit")),
-    true,
-  );
-  assert.equal(
-    launcher.isRecoverableRpcStartupError(new Error("owner fatal")),
-    false,
-  );
   scenario.formattedError = "";
   assert.equal(
     launcher.formatTuiMaintenanceFallbackNotice(undefined),
@@ -362,6 +344,40 @@ test("startTui owns rpc success, startup cleanup, maintenance fallback, and fata
   scenario.rpcPrepareError = "owner scalar fatal";
   await assert.rejects(launcher.startTui(), /owner scalar fatal/);
   assert.equal(names().includes("rpc-disconnect"), true);
+});
+
+test("startTui sends every daemon-dependent startup failure to maintenance", async (t) => {
+  const failures = [
+    ["rpcConnectError", "owner future connect failure"],
+    ["rpcReadyError", "rin_daemon_recovering"],
+    ["rpcReadyError", "rin_daemon_shutting_down"],
+    ["rpcReadyError", "rin_no_attached_session"],
+    ["rpcReadyError", "rin_session_worker_unavailable"],
+    ["rpcReadyError", "rin_worker_exit"],
+    ["rpcReadyError", "rin_worker_oom"],
+    ["rpcReadyError", "rin_worker_cleanup_failed"],
+    ["rpcReadyError", "rin_worker_state_unavailable"],
+    ["rpcReadyError", "rin_worker_stdin_unavailable:get_state"],
+    ["rpcReadyError", "Rin worker process id is unavailable"],
+    ["rpcReadyError", "owner future session startup failure"],
+    ["rpcNameError", "owner future session name failure"],
+  ] as const;
+
+  for (const [field, message] of failures) {
+    await t.test(`${field}: ${message}`, async () => {
+      reset();
+      scenario[field] = new Error(message);
+      await launcher.startTui();
+      assert.equal(names().includes("rpc-disconnect"), true);
+      assert.equal(names().includes("configured-session"), true);
+      assert.equal(
+        events.some(
+          ([name, role]) => name === "role" && role === "maintenance-tui",
+        ),
+        true,
+      );
+    });
+  }
 });
 
 test("startTui presents explicitly requested maintenance without claiming daemon failure", async () => {

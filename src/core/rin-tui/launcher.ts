@@ -110,10 +110,6 @@ export function clearVisibleTerminalForTuiStartup(
   if (!stdout.isTTY || typeof stdout.write !== "function") return;
   stdout.write("\x1b[2J\x1b[H");
 }
-const RPC_TUI_STARTUP_CONNECT_ERROR_RE =
-  /\bconnect (?:ENOENT|ECONNREFUSED|ECONNRESET|EPIPE)\b/;
-const RPC_TUI_STARTUP_TRANSIENT_ERROR_RE =
-  /\b(?:rin_timeout|rin_disconnected|daemon_timeout):|\brin_tui_not_connected\b|\brin_worker_exit\b/;
 const RPC_STARTUP_DAEMON_STATUS_TIMEOUT_MS = 30_000;
 const RPC_STARTUP_DAEMON_STATUS_POLL_MS = 150;
 const RPC_STARTUP_READY_TIMEOUT_MS = 10_000;
@@ -129,12 +125,17 @@ function asStartupError(error: unknown) {
   return new Error(message || "rin_tui_failed");
 }
 
-export function isRecoverableRpcStartupError(error: unknown) {
-  const message = errorMessage(error);
-  return (
-    RPC_TUI_STARTUP_CONNECT_ERROR_RE.test(message) ||
-    RPC_TUI_STARTUP_TRANSIENT_ERROR_RE.test(message)
-  );
+class RpcTuiStartupUnavailableError extends Error {
+  constructor(error: unknown) {
+    super(errorMessage(error) || "rin_tui_rpc_startup_unavailable");
+    this.name = "RpcTuiStartupUnavailableError";
+  }
+}
+
+function isRpcTuiStartupUnavailableError(
+  error: unknown,
+): error is RpcTuiStartupUnavailableError {
+  return error instanceof RpcTuiStartupUnavailableError;
 }
 
 export function formatTuiMaintenanceModeNotice(requested = false) {
@@ -174,8 +175,17 @@ export async function withTuiStartupTimeout<T>(
   }
 }
 
-function waitForRpcStartupStep<T>(operation: Promise<T>, label: string) {
-  return withTuiStartupTimeout(operation, RPC_STARTUP_READY_TIMEOUT_MS, label);
+async function waitForRpcStartupStep<T>(operation: Promise<T>, label: string) {
+  try {
+    return await withTuiStartupTimeout(
+      operation,
+      RPC_STARTUP_READY_TIMEOUT_MS,
+      label,
+    );
+  } catch (error) {
+    if (isRpcTuiStartupUnavailableError(error)) throw error;
+    throw new RpcTuiStartupUnavailableError(error);
+  }
 }
 
 function sleep(ms: number) {
@@ -486,6 +496,7 @@ export async function startTui(options: StartTuiOptions = {}) {
     initialMessage: parsedTuiOptions.initialMessage,
     initialMessages: parsedTuiOptions.initialMessages,
     verbose: parsedTuiOptions.verbose,
+    sessionName: parsedTuiOptions.sessionName,
   };
   await applyTuiOnboardingStartupState(
     runtime.agentDir,
@@ -509,7 +520,7 @@ export async function startTui(options: StartTuiOptions = {}) {
   try {
     await startRpcTui(resourceOptions, profile, interactiveOptions);
   } catch (error) {
-    if (!isRecoverableRpcStartupError(error)) throw error;
+    if (!isRpcTuiStartupUnavailableError(error)) throw error;
     applyTuiRuntimeRole(true);
     profile.mark("mode=maintenance-after-rpc-startup-failure");
     await startMaintenanceTui(
