@@ -87,6 +87,10 @@ test("launcher owns terminal animation, clearing, timeout, and recoverable error
     true,
   );
   assert.equal(
+    launcher.isRecoverableRpcStartupError(new Error("rin_worker_exit")),
+    true,
+  );
+  assert.equal(
     launcher.isRecoverableRpcStartupError(new Error("owner fatal")),
     false,
   );
@@ -310,6 +314,18 @@ test("startTui owns rpc success, startup cleanup, maintenance fallback, and fata
     events.find(([name]) => name === "interactive-construct")?.[2]
       .rinStartupWarnings[0],
     /Entering temporary maintenance mode/,
+  );
+
+  reset();
+  scenario.rpcReadyError = new Error("rin_worker_exit");
+  await launcher.startTui();
+  assert.equal(names().includes("rpc-disconnect"), true);
+  assert.equal(names().includes("configured-session"), true);
+  assert.equal(
+    events.some(
+      ([name, role]) => name === "role" && role === "maintenance-tui",
+    ),
+    true,
   );
 
   reset();

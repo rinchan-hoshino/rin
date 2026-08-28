@@ -113,7 +113,7 @@ export function clearVisibleTerminalForTuiStartup(
 const RPC_TUI_STARTUP_CONNECT_ERROR_RE =
   /\bconnect (?:ENOENT|ECONNREFUSED|ECONNRESET|EPIPE)\b/;
 const RPC_TUI_STARTUP_TRANSIENT_ERROR_RE =
-  /\b(?:rin_timeout|rin_disconnected|daemon_timeout):|\brin_tui_not_connected\b/;
+  /\b(?:rin_timeout|rin_disconnected|daemon_timeout):|\brin_tui_not_connected\b|\brin_worker_exit\b/;
 const RPC_STARTUP_DAEMON_STATUS_TIMEOUT_MS = 30_000;
 const RPC_STARTUP_DAEMON_STATUS_POLL_MS = 150;
 const RPC_STARTUP_READY_TIMEOUT_MS = 10_000;
