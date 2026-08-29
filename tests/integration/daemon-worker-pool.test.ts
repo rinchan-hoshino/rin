@@ -172,37 +172,63 @@ test("daemon enforces one session selection for every frontend identity", () => 
   );
 });
 
-test("daemon permits only an explicit TUI switch to request another bound session", () => {
+test("daemon permits only explicit frontend-owned session switches", () => {
   const pool = new WorkerPool({
     workerPath: process.execPath,
     cwd: process.cwd(),
     gcIdleMs: 5000,
   });
-  const connection: any = {
+  const tui: any = {
     socket: { destroyed: false, write() {} },
     clientBuffer: "",
     frontendIdentity: { kind: "tui" },
   };
 
-  pool.prepareFrontendCommand(connection, {
+  pool.prepareFrontendCommand(tui, {
     type: "select_session",
     sessionFile: "/tmp/tui-current.jsonl",
   });
   assert.doesNotThrow(() =>
-    pool.prepareFrontendCommand(connection, {
+    pool.prepareFrontendCommand(tui, {
       type: "switch_session",
       sessionFile: "/tmp/tui-resumed.jsonl",
     }),
   );
-  assert.equal(connection.sessionFile, "/tmp/tui-current.jsonl");
+  assert.equal(tui.sessionFile, "/tmp/tui-current.jsonl");
   assert.throws(
     () =>
-      pool.prepareFrontendCommand(connection, {
+      pool.prepareFrontendCommand(tui, {
         type: "select_session",
         sessionFile: "/tmp/tui-other.jsonl",
       }),
     /frontend_session_switch_requires_new/,
   );
+
+  const chat: any = {
+    socket: { destroyed: false, write() {} },
+    clientBuffer: "",
+    frontendIdentity: { kind: "chat", key: "discord/1:2" },
+  };
+  pool.prepareFrontendCommand(chat, {
+    type: "select_session",
+    sessionFile: "/tmp/chat-current.jsonl",
+  });
+  assert.throws(
+    () =>
+      pool.prepareFrontendCommand(chat, {
+        type: "switch_session",
+        sessionFile: "/tmp/chat-other.jsonl",
+      }),
+    /frontend_session_switch_requires_new/,
+  );
+  assert.doesNotThrow(() =>
+    pool.prepareFrontendCommand(chat, {
+      type: "switch_session",
+      sessionFile: "/tmp/chat-quoted.jsonl",
+      selectionSource: "chat_quote",
+    }),
+  );
+  assert.equal(chat.sessionFile, "/tmp/chat-current.jsonl");
   pool.destroyAll();
 });
 

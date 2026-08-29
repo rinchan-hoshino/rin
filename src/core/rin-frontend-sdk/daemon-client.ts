@@ -457,14 +457,19 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
 
   async resumeSession(
     sessionId: string,
-    options: { frontendIdentity?: RinFrontendIdentity } = {},
+    options: {
+      frontendIdentity?: RinFrontendIdentity;
+      selectionSource?: "chat_quote";
+    } = {},
   ): Promise<void> {
     const frontendIdentity =
       normalizeFrontendIdentity(options.frontendIdentity) ||
       this.frontendIdentity;
+    const quoteSelection = options.selectionSource === "chat_quote";
     await this.send({
-      type: "select_session",
+      type: quoteSelection ? "switch_session" : "select_session",
       sessionPath: sessionId,
+      ...(quoteSelection ? { selectionSource: "chat_quote" } : {}),
       ...(frontendIdentity ? { frontendIdentity } : {}),
     });
   }

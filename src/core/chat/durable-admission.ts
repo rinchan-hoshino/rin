@@ -14,6 +14,7 @@ export type FrozenChatTurnSubmission = {
   incomingMessageId: string;
   replyToMessageId?: string;
   sessionFile?: string;
+  sessionSelection?: "quote";
   model?: string;
   thinkingLevel?: string;
   receivedAt?: string;
@@ -223,6 +224,8 @@ function frozenTurnSubmission(
     !Array.isArray(value.attachments) ||
     (!text(value.text) && value.attachments.length === 0) ||
     !promptContextMetaIsValid(value.promptMeta, value.chatKey) ||
+    (value.sessionSelection !== undefined &&
+      value.sessionSelection !== "quote") ||
     !optionalStringsAreValid(value, [
       "replyToMessageId",
       "sessionFile",

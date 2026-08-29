@@ -392,13 +392,18 @@ export class WorkerPool {
     const explicitTuiResume =
       commandType === "switch_session" &&
       connection.frontendIdentity?.kind === "tui";
+    const explicitChatQuoteResume =
+      commandType === "switch_session" &&
+      connection.frontendIdentity?.kind === "chat" &&
+      String(command?.selectionSource || "").trim() === "chat_quote";
+    const explicitFrontendResume = explicitTuiResume || explicitChatQuoteResume;
     if (bound && hasSessionSelector(requested)) {
       if (!sessionMatchesSelector(bound, requested)) {
-        if (explicitTuiResume) return;
+        if (explicitFrontendResume) return;
         throw new Error("frontend_session_switch_requires_new");
       }
     } else if (!bound && hasSessionSelector(requested)) {
-      if (explicitTuiResume) return;
+      if (explicitFrontendResume) return;
       this.frontendSessionSelections.set(key, requested);
       this.persistFrontendSessionSelections();
     }

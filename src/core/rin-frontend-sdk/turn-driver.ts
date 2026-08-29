@@ -1539,17 +1539,23 @@ export class RinFrontendTurnDriver {
   private async selectSessionTarget(
     sessionFile?: string,
     selectionEpoch = this.lifecycleEpoch,
+    options: { selectionSource?: "chat_quote" } = {},
   ) {
     this.throwIfLifecycleEpochChanged(selectionEpoch);
     const wanted = safeString(sessionFile || "").trim();
     if (!wanted) return { changed: false };
-    this.assertSessionSelectionIsCurrent(wanted);
+    if (options.selectionSource !== "chat_quote") {
+      this.assertSessionSelectionIsCurrent(wanted);
+    }
     if (!this.client) throw new Error("frontend_session_not_connected");
     const client = this.client;
     try {
       const before = this.currentSessionFile();
       await client.resumeSession(wanted, {
         frontendIdentity: this.frontendIdentity,
+        ...(options.selectionSource
+          ? { selectionSource: options.selectionSource }
+          : {}),
       });
       this.throwIfLifecycleEpochChanged(selectionEpoch);
       await this.refreshFrontendState(wanted, selectionEpoch).catch(() => {});
@@ -1564,12 +1570,20 @@ export class RinFrontendTurnDriver {
     }
   }
 
-  async resumeSessionFile(sessionFile: string) {
+  async resumeSessionFile(
+    sessionFile: string,
+    options: { selectionSource?: "chat_quote" } = {},
+  ) {
     await this.connect();
-    this.assertSessionSelectionIsCurrent(sessionFile);
+    const quoteSelection =
+      options.selectionSource === "chat_quote" &&
+      this.frontendIdentity?.kind === "chat";
+    if (!quoteSelection) this.assertSessionSelectionIsCurrent(sessionFile);
     if (!sessionFileExists(sessionFile))
       throw missingSessionFileError(sessionFile);
-    return await this.selectSessionTarget(sessionFile);
+    return await this.selectSessionTarget(sessionFile, this.lifecycleEpoch, {
+      ...(quoteSelection ? { selectionSource: "chat_quote" } : {}),
+    });
   }
 
   private async ensureSessionReady(

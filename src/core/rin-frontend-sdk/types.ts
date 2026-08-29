@@ -319,7 +319,10 @@ export interface RinFrontendClient {
   listSessions(): Promise<RinFrontendSessionItem[]>;
   resumeSession(
     sessionId: string,
-    options?: { frontendIdentity?: RinFrontendIdentity },
+    options?: {
+      frontendIdentity?: RinFrontendIdentity;
+      selectionSource?: "chat_quote";
+    },
   ): Promise<void>;
   newSession(options?: RinNewSessionOptions): Promise<RinNewSessionResult>;
   ensureSessionReady?(

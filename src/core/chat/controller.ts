@@ -2587,7 +2587,10 @@ export class ChatController {
     return true;
   }
 
-  async resumeSessionFile(sessionFile: string) {
+  async resumeSessionFile(
+    sessionFile: string,
+    options: { selectionSource?: "chat_quote" } = {},
+  ) {
     const wanted = safeString(sessionFile).trim();
     if (!wanted) {
       return {
@@ -2596,7 +2599,7 @@ export class ChatController {
       };
     }
     if (!sessionFileExists(wanted)) throw missingSessionFileError(wanted);
-    const result = await this.driver.resumeSessionFile(wanted);
+    const result = await this.driver.resumeSessionFile(wanted, options);
     this.updateStoredSessionFile(result?.sessionFile, wanted);
     this.saveState();
     return result;
@@ -2868,6 +2871,7 @@ export class ChatController {
         replyToMessageId?: string;
         incomingMessageId?: string;
         sessionFile?: string;
+        sessionSelection?: "quote";
         sessionName?: string;
         promptMeta?: PromptContextMeta;
         requestTag?: string;
@@ -2919,10 +2923,26 @@ export class ChatController {
           ? safeString(input.managedSessionLeaf).trim() ||
             this.managedSessionLeafForFreshChat()
           : undefined;
-      const { text, images, frontendReady } = await this.prepareTurnPrompt(
-        input,
-        deliverFinal,
-      );
+      const {
+        text,
+        images,
+        frontendReady: preparedFrontendReady,
+      } = await this.prepareTurnPrompt(input, deliverFinal);
+      let frontendReady = preparedFrontendReady;
+      if (
+        input.sessionSelection === "quote" &&
+        wantedSessionFile &&
+        !sessionFilesMatch(
+          this.agentDir,
+          this.driver.currentSessionFile(),
+          wantedSessionFile,
+        )
+      ) {
+        await this.resumeSessionFile(wantedSessionFile, {
+          selectionSource: "chat_quote",
+        });
+        frontendReady = true;
+      }
       const requestTag =
         safeString(input.requestTag).trim() ||
         this.requestTagForInboundMessage(

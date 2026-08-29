@@ -7430,7 +7430,7 @@ test("chat controller never scans stale session text to repair an empty producer
   assert.equal(await controller.pollTyping(), false);
 });
 
-test("chat controller rejects a linked reply session as a non-/new switch", async () => {
+test("chat controller switches only when a linked reply is marked as quote selection", async () => {
   const controller = await createController("telegram/1:2");
   const operations = [];
   const linkedSessionFile = path.join(
@@ -7484,9 +7484,20 @@ test("chat controller rejects a linked reply session as a non-/new switch", asyn
       }),
     /frontend_session_switch_requires_new/,
   );
-
   assert.deepEqual(operations, []);
-  assert.equal(controller.state.sessionFile, undefined);
+
+  await controller.runTurn({
+    text: "continue",
+    attachments: [],
+    sessionFile: linkedSessionFile,
+    sessionSelection: "quote",
+  });
+
+  assert.deepEqual(operations, [
+    `switchSession:${linkedSessionFile}`,
+    "prompt",
+  ]);
+  assert.equal(controller.state.sessionFile, "reply-linked.jsonl");
 });
 
 test("chat controller fails fast when prompt submission is rejected while disconnected instead of hanging forever", async () => {

@@ -304,6 +304,18 @@ test("frontend daemon client owns the complete RPC command surface", async () =>
     await client.resumeSession("/sessions/active.jsonl", {
       frontendIdentity: { kind: "tui", key: "terminal" },
     });
+    await client.resumeSession("/sessions/quoted.jsonl", {
+      selectionSource: "chat_quote",
+    });
+    const quotedSelection = server.requests.find(
+      (item) => item.sessionPath === "/sessions/quoted.jsonl",
+    );
+    assert.equal(quotedSelection.type, "switch_session");
+    assert.equal(quotedSelection.selectionSource, "chat_quote");
+    assert.deepEqual(quotedSelection.frontendIdentity, {
+      kind: "chat",
+      key: "discord/1:2",
+    });
     assert.deepEqual(await client.listModels(), [
       {
         id: "model-a",

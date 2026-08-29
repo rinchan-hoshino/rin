@@ -114,8 +114,12 @@ function createFrontendClient() {
     async terminateSession() {
       calls.push({ type: "terminateSession" });
     },
-    async resumeSession(nextSessionFile: string) {
-      calls.push({ type: "resumeSession", sessionFile: nextSessionFile });
+    async resumeSession(nextSessionFile: string, options: any = {}) {
+      calls.push({
+        type: "resumeSession",
+        sessionFile: nextSessionFile,
+        ...(options.selectionSource ? { options } : {}),
+      });
       sessionFile = nextSessionFile;
     },
     async newSession(options: any = {}) {
@@ -1748,6 +1752,40 @@ test("frontend SDK forbids public session selection after the frontend is bound"
     false,
   );
   assert.equal(driver.currentSessionFile(), "/tmp/frontend-chat.jsonl");
+});
+
+test("frontend SDK permits a session replacement only for a chat quote", async (t) => {
+  const sessionDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "rin-chat-quote-selection-"),
+  );
+  t.after(() => fs.rmSync(sessionDir, { recursive: true, force: true }));
+  const quotedSessionFile = path.join(sessionDir, "quoted.jsonl");
+  fs.writeFileSync(quotedSessionFile, "{}\n", "utf8");
+  const client = createFrontendClient();
+  const driver = new RinFrontendTurnDriver({
+    clientFactory: () => client,
+    promptSource: "chat-bridge",
+    frontendIdentity: { kind: "chat", key: "discord/1:2" },
+  });
+  await driver.connect();
+
+  const result = await driver.resumeSessionFile(quotedSessionFile, {
+    selectionSource: "chat_quote",
+  });
+
+  assert.equal(result.sessionFile, quotedSessionFile);
+  assert.deepEqual(
+    client.calls.find((call: any) => call.type === "resumeSession"),
+    {
+      type: "resumeSession",
+      sessionFile: quotedSessionFile,
+      options: {
+        frontendIdentity: { kind: "chat", key: "discord/1:2" },
+        selectionSource: "chat_quote",
+      },
+    },
+  );
+  assert.equal(driver.currentSessionFile(), quotedSessionFile);
 });
 
 test("frontend SDK maps a stale successful public session selection to lifecycle cancellation", async (t) => {
