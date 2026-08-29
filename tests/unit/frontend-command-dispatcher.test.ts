@@ -24,7 +24,6 @@ test("frontend dispatcher recognizes only complete session commands", () => {
     ["/abort", "abort"],
     [" /new ", "new"],
     ["/compact keep names", "compact"],
-    ["/resume abc", "resume"],
   ]) {
     assert.equal(dispatcher.getRinFrontendSessionCommandSpec(line)?.name, name);
     assert.equal(dispatcher.isFrontendSessionCommandLine(line), true);
@@ -33,7 +32,14 @@ test("frontend dispatcher recognizes only complete session commands", () => {
       name,
     });
   }
-  for (const line of ["", "/resume", "/resume   ", "/abort now", "/unknown"]) {
+  for (const line of [
+    "",
+    "/resume",
+    "/resume   ",
+    "/resume abc",
+    "/abort now",
+    "/unknown",
+  ]) {
     assert.equal(dispatcher.getRinFrontendSessionCommandSpec(line), undefined);
     assert.equal(dispatcher.isFrontendSessionCommandLine(line), false);
   }
@@ -47,6 +53,10 @@ test("frontend dispatcher separates builtins, extensions, and unknown commands",
   assert.deepEqual(dispatcher.classifyRinFrontendCommand("/usage"), {
     kind: "none",
     name: "usage",
+  });
+  assert.deepEqual(dispatcher.classifyRinFrontendCommand("/resume abc"), {
+    kind: "none",
+    name: "resume",
   });
   assert.deepEqual(
     dispatcher.classifyRinFrontendCommand("/local", [

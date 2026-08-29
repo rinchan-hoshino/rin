@@ -234,12 +234,6 @@ function sameFrontendSessionFile(left: unknown, right: unknown) {
   return Boolean(leftText && rightText && leftText === rightText);
 }
 
-function parseResumeCommandTarget(commandLine: string) {
-  const trimmed = safeString(commandLine).trim();
-  if (!trimmed.startsWith("/resume ")) return "";
-  return trimmed.slice("/resume ".length).trim();
-}
-
 function requireNativeInputOutcome(value: unknown) {
   const outcome = safeString((value as any)?.outcome).trim();
   if (
@@ -1829,10 +1823,6 @@ export class RinFrontendTurnDriver {
         sessionId: this.currentSessionId() || undefined,
         sessionFile: this.currentSessionFile() || undefined,
       };
-    }
-    const resumeTarget = parseResumeCommandTarget(commandLine);
-    if (resumeTarget) {
-      throw new Error("frontend_session_switch_requires_new");
     }
     if (sessionFile) {
       if (!sessionFileExists(sessionFile))

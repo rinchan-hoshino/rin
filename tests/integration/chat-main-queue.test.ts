@@ -4071,6 +4071,7 @@ test("chat main owner directly covers private telegram and command normalization
     assert.equal(parseRequest({}, "/", rows).commandLike, false);
     assert.equal(parseRequest({}, "/@rin", rows).commandLike, false);
     assert.equal(parseRequest({}, "/unknown args", rows).command, null);
+    assert.equal(parseRequest({}, "/resume abc", rows).command, null);
     assert.equal(parseRequest({ selfId: "rin" }, "/status@other x", rows).command, null);
     assert.deepEqual(parseRequest({}, "/status@unclaimed", rows).command, { name: "status", argsText: "" });
     assert.deepEqual(parseRequest({ selfId: "rin" }, "/STATUS@@RIN x y", rows).command, { name: "status", argsText: "x y" });

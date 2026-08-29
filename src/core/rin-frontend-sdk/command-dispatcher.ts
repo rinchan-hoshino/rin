@@ -37,14 +37,6 @@ export const RIN_FRONTEND_SESSION_COMMANDS: RinFrontendCommandSpec[] = [
     name: "compact",
     match: (commandLine) => parseFrontendCompactCommand(commandLine).compact,
   },
-  {
-    name: "resume",
-    match: (commandLine) => {
-      const trimmed = safeString(commandLine).trim();
-      if (!trimmed.startsWith("/resume ")) return false;
-      return trimmed.slice("/resume ".length).trim().length > 0;
-    },
-  },
 ];
 
 export function getRinFrontendSessionCommandSpec(commandLine: string) {

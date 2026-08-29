@@ -1384,43 +1384,6 @@ test("frontend SDK turn driver routes compact through the native compact client 
   );
 });
 
-test("frontend SDK rejects /resume because only /new may replace the session", async () => {
-  const driver = createDriver();
-  const client = (driver as any).testClient;
-  client.listSessions = async () => [
-    { id: "abc", title: "Previous", path: "/tmp/resume-target.jsonl" },
-  ];
-
-  await assert.rejects(
-    () => driver.runCommand("/resume abc"),
-    /frontend_session_switch_requires_new/,
-  );
-
-  assert.equal(driver.currentSessionFile(), "/tmp/frontend-chat.jsonl");
-  assert.equal(
-    client.calls.some((call: any) => call.type === "resumeSession"),
-    false,
-  );
-  assert.deepEqual(
-    client.calls.filter((call: any) =>
-      ["resumeSession", "runCommand"].includes(call.type),
-    ),
-    [],
-  );
-});
-
-test("frontend SDK turn driver reports missing /resume targets as errors", async () => {
-  const driver = createDriver();
-  const client = (driver as any).testClient;
-  client.listSessions = async () => [
-    { id: "abc", title: "Previous", path: "/tmp/resume-target.jsonl" },
-  ];
-
-  await assert.rejects(() => driver.runCommand("/resume missing"), {
-    message: "frontend_session_switch_requires_new",
-  });
-});
-
 test("frontend SDK turn driver uses configured built-in command responses", async () => {
   const client = createFrontendClient();
   const driver = new RinFrontendTurnDriver({

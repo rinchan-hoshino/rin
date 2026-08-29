@@ -86,6 +86,7 @@ export function isGenericPromptRunCommandBuiltinSlashCommand(name: unknown) {
   return BUILTIN_SLASH_COMMANDS.some(
     (command) =>
       command.name === commandName &&
+      command.chat !== false &&
       command.genericPromptRoute === "run_command",
   );
 }

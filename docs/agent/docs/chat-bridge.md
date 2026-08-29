@@ -141,7 +141,7 @@ const result = await rin.chat.runTurn({
 });
 ```
 
-Each normalized frontend identity has exactly one durable current session. Initial attachment may materialize or restore that binding. Chat and SDK frontends may replace it only with `/new`; Chat does not advertise `/resume` and rejects a manually entered one. TUI additionally permits the user's explicit `/resume` or session-picker action, which atomically replaces only the TUI binding. Ordinary prompts, SDK calls, replies, quotes, scheduled inputs, reconnects, and deliveries reuse the binding and cannot select another session. The daemon-owned frontend-session registry is authoritative across concurrent connections and daemon restarts; Chat's `chat_state` session fields are migration/bootstrap projections only.
+Each normalized frontend identity has exactly one durable current session. Initial attachment may materialize or restore that binding. Chat and SDK frontends may replace it only with `/new`; Chat does not include `/resume` in its command surface; entered `/resume` text follows the ordinary unmatched-command behavior instead of a resume-specific branch. TUI additionally permits the user's explicit `/resume` or session-picker action, which atomically replaces only the TUI binding. Ordinary prompts, SDK calls, replies, quotes, scheduled inputs, reconnects, and deliveries reuse the binding and cannot select another session. The daemon-owned frontend-session registry is authoritative across concurrent connections and daemon restarts; Chat's `chat_state` session fields are migration/bootstrap projections only.
 
 Adapter-supported signals and active-turn control:
 
@@ -356,7 +356,7 @@ Common boundary checks:
 
 - **Message stored but turn idle:** inspect `turnPolicy`, trust/allow rules, inbox state, active turn state, and controller errors.
 - **Record-only chat idle:** confirm the scheduled task/background producer that reads stored messages.
-- **Slash command mismatch:** command acknowledgements are config/i18n output. For Chat, verify that `/new` alone replaced the binding and `/resume` was neither advertised nor accepted. For TUI, `/new` and an explicit `/resume` may replace only the TUI binding. Quotes, replies, reconnects, and scheduled turns must never replace one.
+- **Slash command mismatch:** command acknowledgements are config/i18n output. For Chat, verify that `/new` alone replaced the binding and `/resume` was neither advertised nor classified as a supported command. For TUI, `/new` and an explicit `/resume` may replace only the TUI binding. Quotes, replies, reconnects, and scheduled turns must never replace one.
 - **OneBot/QQ after platform relogin:** separate platform login from Rin bridge connectivity; check Rin runtime status, WebSocket connection, and an adapter-level login probe.
 - **Outbound text queued:** inspect the outbox quote part, platform error, and message-store accepted/processed state.
 - **Attachment missing:** verify the file exists, rich-object or structured `parts` attachment was sent, and the adapter produced a delivery result.
