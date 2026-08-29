@@ -475,6 +475,71 @@ test("self-improve queues one review after Pi persists each shared turn window f
   assert.equal(definition.hooks.context, undefined);
 });
 
+test("self-improve ignores scheduled-task turns even with stale explicit eligibility", async () => {
+  await withTempRoot(async (root) => {
+    const queued: any[] = [];
+    const sessionFile = path.join(root, "scheduled-task.jsonl");
+    await fs.writeFile(sessionFile, "", "utf8");
+    const branch = Array.from({ length: 4 }, (_, index) => {
+      const turn = index + 1;
+      return [
+        {
+          id: `u${turn}`,
+          type: "message",
+          message: { role: "user", content: `turn ${turn}` },
+        },
+        {
+          id: `a${turn}`,
+          type: "message",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: `done ${turn}` }],
+            stopReason: "stop",
+          },
+        },
+      ];
+    }).flat();
+    const definition = selfImproveIndex.default({
+      selfImproveTurnWindowTurns: 4,
+      async enqueueSelfImproveMaintenanceJob(job) {
+        queued.push(job);
+      },
+    });
+    const ctx = {
+      agentDir: root,
+      frontend: userFrontend(),
+      promptContext: {
+        source: "scheduled-task",
+        taskContextKind: "scheduled-task",
+        selfImproveEligible: true,
+      },
+      source: "scheduled-task",
+      sessionManager: {
+        __rinLastPromptContext: {
+          source: "scheduled-task",
+          taskContextKind: "scheduled-task",
+          selfImproveEligible: true,
+        },
+        __rinLastPromptSource: "scheduled-task",
+        getSessionId: () => "scheduled-task-session",
+        getSessionFile: () => sessionFile,
+        getLeafId: () => branch.at(-1)?.id,
+        getBranch: () => branch,
+        isPersisted: () => true,
+      },
+    };
+
+    await definition.hooks.message_end[0](
+      { type: "message_end", message: branch.at(-1).message },
+      ctx,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    await definition.hooks.session_shutdown[0]({}, ctx);
+
+    assert.deepEqual(queued, []);
+  });
+});
+
 test("turn-window completion followed by shutdown queues only one review", async () => {
   await withTempRoot(async (root) => {
     const sessionFile = path.join(root, "session.jsonl");

@@ -239,7 +239,6 @@ test("cron prompt context identifies chat and controller frontends", () => {
       taskId: "cron_owner",
       taskName: "Owner task",
       taskContextKind: "scheduled-task",
-      selfImproveEligible: true,
     },
   );
   assert.deepEqual(
@@ -254,7 +253,6 @@ test("cron prompt context identifies chat and controller frontends", () => {
       taskId: "cron_owner",
       taskName: undefined,
       taskContextKind: "scheduled-task",
-      selfImproveEligible: true,
     },
   );
   assert.equal(

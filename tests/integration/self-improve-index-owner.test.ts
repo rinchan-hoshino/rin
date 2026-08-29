@@ -118,7 +118,7 @@ test("self-improve message-end accepts only explicit current frontend producers"
         },
       },
       context(branch, { frontend: undefined, promptContext: undefined }),
-      true,
+      false,
     ],
     [
       "scheduled prompt source",
@@ -126,7 +126,7 @@ test("self-improve message-end accepts only explicit current frontend producers"
         promptContext: { source: "scheduled-task", selfImproveEligible: true },
       },
       context(branch, { frontend: undefined, promptContext: undefined }),
-      true,
+      false,
     ],
     [
       "scheduled event source",
@@ -135,7 +135,7 @@ test("self-improve message-end accepts only explicit current frontend producers"
         promptContext: { selfImproveEligible: true },
       },
       context(branch, { frontend: { kind: "custom", key: "owner" } }),
-      true,
+      false,
     ],
     [
       "manager scheduled source",
@@ -148,7 +148,7 @@ test("self-improve message-end accepts only explicit current frontend producers"
           __rinLastPromptSource: "scheduled-task",
         },
       }),
-      true,
+      false,
     ],
     [
       "custom frontend",

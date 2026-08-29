@@ -291,7 +291,6 @@ export function buildCronTaskPromptContext(
     taskId: task.id,
     taskName: taskName || undefined,
     taskContextKind: "scheduled-task",
-    selfImproveEligible: true,
   };
 }
 
