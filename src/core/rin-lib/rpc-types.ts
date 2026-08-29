@@ -6,6 +6,7 @@ type AssertNever<T extends never> = T;
 export type RinPiNativeRpcCommandType =
   | "prompt"
   | "abort"
+  | "clear_queue"
   | "get_state"
   | "cycle_model"
   | "get_messages"
@@ -37,7 +38,6 @@ type _RinPiNativeCommandsMustRemainPiCommands = AssertNever<
 >;
 
 export type RinDaemonRpcCommandType =
-  | "clear_queue"
   | "await_turn_terminal"
   | "ack_turn_terminal"
   | "list_unacknowledged_chat_terminals"

@@ -1945,13 +1945,16 @@ test("rpc transport status cannot synthesize Pi Working", async () => {
     clearStatusIndicator: clearStatusIndicatorForTest,
     setWorkingVisible: (codingAgentModule.InteractiveMode.prototype as any)
       .setWorkingVisible,
+    showWorkingStatusIndicator: (
+      codingAgentModule.InteractiveMode.prototype as any
+    ).showWorkingStatusIndicator,
     activeStatusIndicator: undefined,
   };
 
   try {
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
       instance,
-      { type: "agent_start" },
+      { type: "turn_start" },
     );
     const initialWorkingIndicator = instance.activeStatusIndicator;
     assert.equal(initialWorkingIndicator?.kind, "working");
@@ -2021,12 +2024,15 @@ test("TUI visibility preference can hide Pi Working without changing backend sta
     clearStatusIndicator: clearStatusIndicatorForTest,
     setWorkingVisible: (codingAgentModule.InteractiveMode.prototype as any)
       .setWorkingVisible,
+    showWorkingStatusIndicator: (
+      codingAgentModule.InteractiveMode.prototype as any
+    ).showWorkingStatusIndicator,
     activeStatusIndicator: undefined,
   };
 
   instance.setWorkingVisible(false);
   await codingAgentModule.InteractiveMode.prototype.handleEvent.call(instance, {
-    type: "agent_start",
+    type: "turn_start",
   });
 
   assert.equal(instance.workingVisible, false);
@@ -2034,7 +2040,7 @@ test("TUI visibility preference can hide Pi Working without changing backend sta
   assert.equal(instance.statusContainer.child, undefined);
 });
 
-test("rpc retry completion waits for the next agent_start before Working", async () => {
+test("rpc retry completion waits for the next turn_start before Working", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -2078,13 +2084,16 @@ test("rpc retry completion waits for the next agent_start before Working", async
     clearStatusIndicator: clearStatusIndicatorForTest,
     setWorkingVisible: (codingAgentModule.InteractiveMode.prototype as any)
       .setWorkingVisible,
+    showWorkingStatusIndicator: (
+      codingAgentModule.InteractiveMode.prototype as any
+    ).showWorkingStatusIndicator,
     activeStatusIndicator: undefined,
   };
 
   try {
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
       instance,
-      { type: "agent_start" },
+      { type: "turn_start" },
     );
     assert.equal(instance.activeStatusIndicator?.kind, "working");
 
@@ -2869,7 +2878,7 @@ test("zero-extension compaction end rebuilds history containing Rin core custom 
   assert.ok(getFooterInvalidations() >= 1);
 });
 
-test("rpc compaction end waits for the next agent_start before Working", async () => {
+test("rpc compaction end waits for the next turn_start before Working", async () => {
   await overrides.applyRinTuiOverrides();
   themeModule.initTheme("dark", false);
 
@@ -2925,13 +2934,16 @@ test("rpc compaction end waits for the next agent_start before Working", async (
     clearStatusIndicator: clearStatusIndicatorForTest,
     setWorkingVisible: (codingAgentModule.InteractiveMode.prototype as any)
       .setWorkingVisible,
+    showWorkingStatusIndicator: (
+      codingAgentModule.InteractiveMode.prototype as any
+    ).showWorkingStatusIndicator,
     activeStatusIndicator: undefined,
   };
 
   try {
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
       instance,
-      { type: "agent_start" },
+      { type: "turn_start" },
     );
     assert.equal(instance.activeStatusIndicator?.kind, "working");
 
@@ -3003,13 +3015,16 @@ test("local compaction end renders Pi Working from the streaming session", async
     clearStatusIndicator: clearStatusIndicatorForTest,
     setWorkingVisible: (codingAgentModule.InteractiveMode.prototype as any)
       .setWorkingVisible,
+    showWorkingStatusIndicator: (
+      codingAgentModule.InteractiveMode.prototype as any
+    ).showWorkingStatusIndicator,
     activeStatusIndicator: undefined,
   };
 
   try {
     await codingAgentModule.InteractiveMode.prototype.handleEvent.call(
       instance,
-      { type: "agent_start" },
+      { type: "turn_start" },
     );
     assert.equal(instance.activeStatusIndicator?.kind, "working");
 

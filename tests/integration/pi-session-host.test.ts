@@ -216,7 +216,7 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
   assert.equal("maxTokens" in requestOptions, false);
   assert.equal(requestOptions.sessionId, "owner-session");
   assert.equal(requestOptions.cacheRetention, "none");
-  assert.equal(requestOptions.toolChoice, "none");
+  assert.equal("toolChoice" in requestOptions, false);
   assert.equal(systemPrompt, RIN_COMPACTION_SYSTEM_PROMPT);
   assert.match(prompt, /## Historical Task Snapshot/);
   assert.match(prompt, /## Completed Actions/);
