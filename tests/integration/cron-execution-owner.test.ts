@@ -22,7 +22,6 @@ function task(overrides: Record<string, any> = {}) {
     updatedAt: "2026-07-17T00:00:00.000Z",
     enabled: true,
     trigger: { runAt: "2099-07-17T00:00:00.000Z" },
-    session: { mode: "none" },
     frontend: { kind: "chat", key: "discord/owner:task" },
     target: { kind: "agent_prompt", prompt: "run owner task" },
     runCount: 1,
@@ -91,31 +90,6 @@ test("cron chat delivery requires a sender and preserves conversation binding", 
   assert.equal(sent[0].sessionFile, "/sessions/owner.jsonl");
   assert.equal(sent[1].sessionFile, undefined);
   assert.equal(sent[1].sessionBinding, undefined);
-});
-
-test("cron session resolution accepts only valid owned session modes", async () => {
-  await withAgentDir(async (agentDir) => {
-    const sessionFile = path.join(agentDir, "sessions", "owner.jsonl");
-    const dedicated = task({
-      session: { mode: "dedicated" },
-      dedicatedSessionFile: sessionFile,
-    });
-    assert.equal(
-      await cronExecution.resolveCronSessionFile(dedicated),
-      undefined,
-    );
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "{}\n");
-    assert.equal(
-      await cronExecution.resolveCronSessionFile(dedicated),
-      sessionFile,
-    );
-    assert.equal(await cronExecution.resolveCronSessionFile(task()), undefined);
-    await assert.rejects(
-      cronExecution.resolveCronSessionFile(task({ session: { mode: "bad" } })),
-      /cron_invalid_session_mode:bad/,
-    );
-  });
 });
 
 test("cron shell execution reports command output and failures", async () => {
@@ -264,15 +238,12 @@ test("cron prompt context identifies chat and controller frontends", () => {
   );
 });
 
-test("agent tasks preserve owner prompt, frontend, model, and transient session semantics", async () => {
+test("agent tasks submit one ordinary marked input to the current frontend", async () => {
   await withAgentDir(async (agentDir) => {
     const calls: any[] = [];
     const ownerTask = task({
       frontend: { kind: "chat", key: "discord/1:2" },
       quiet: false,
-      model: { provider: "demo", id: "owner-model" },
-      thinkingLevel: "high",
-      disabledRinCapabilities: ["memory"],
     });
     const result = await cronExecution.executeCronAgentTask(ownerTask, {
       agentDir,
@@ -301,22 +272,23 @@ test("agent tasks preserve owner prompt, frontend, model, and transient session 
     });
     assert.equal(calls[0].controllerKey, "default");
     assert.equal(calls[0].chatKey, "discord/1:2");
-    assert.equal(calls[0].affectChatBinding, true);
+    assert.equal("affectChatBinding" in calls[0], false);
     assert.equal(calls[0].deliverFinal, true);
     assert.equal(calls[0].quietMode, false);
-    assert.equal(calls[0].disposeAfterTurn, undefined);
-    assert.equal(calls[0].shutdownAfterTurn, undefined);
     assert.equal(calls[0].text, "run owner task");
     assert.equal(calls[0].requestTag, "scheduled:owner");
     assert.equal(calls[0].deliveryIdempotencyKey, "delivery-owner");
-    assert.deepEqual(calls[0].model, { provider: "demo", id: "owner-model" });
-    assert.equal(calls[0].thinkingLevel, "high");
-    assert.deepEqual(calls[0].disabledRinCapabilities, ["memory"]);
-    assert.equal(calls[0].managedSessionLeaf, undefined);
+    assert.equal("sessionFile" in calls[0], false);
+    assert.equal("managedSessionLeaf" in calls[0], false);
+    assert.equal("model" in calls[0], false);
+    assert.equal("thinkingLevel" in calls[0], false);
+    assert.equal("disabledRinCapabilities" in calls[0], false);
     assert.deepEqual(calls[0].frontend, {
       kind: "chat",
       key: "discord/1:2",
     });
+    assert.equal(calls[0].promptMeta.source, "scheduled-task");
+    assert.equal(calls[0].promptMeta.taskName, "Owner task");
 
     await assert.rejects(
       cronExecution.executeCronAgentTask(
@@ -327,26 +299,23 @@ test("agent tasks preserve owner prompt, frontend, model, and transient session 
           chat: { runTurn: async () => ({ finalText: "detached" }) },
         },
       ),
-      /cron_frontend_or_session_required/,
+      /cron_frontend_required/,
     );
   });
 });
 
-test("dedicated agent tasks select initial and continuation prompts", async () => {
+test("recurring frontend inputs select initial and continuation prompts", async () => {
   await withAgentDir(async (agentDir) => {
-    const sessionFile = path.join(agentDir, "sessions", "dedicated.jsonl");
     const prompts: any[] = [];
-    const dedicated = task({
+    const recurring = task({
       runCount: 1,
-      session: { mode: "dedicated" },
-      dedicatedSessionFile: sessionFile,
       target: {
         kind: "agent_prompt",
         prompt: "initial",
         continuationPrompt: "continue",
       },
     });
-    const first = await cronExecution.executeCronAgentTask(dedicated, {
+    const first = await cronExecution.executeCronAgentTask(recurring, {
       agentDir,
       chat: {
         runTurn: async (payload) => {
@@ -358,12 +327,9 @@ test("dedicated agent tasks select initial and continuation prompts", async () =
     assert.equal(first.sessionFile, "/ignored.jsonl");
     assert.equal(prompts[0].text, "initial");
     assert.equal(prompts[0].createSessionFileIfMissing, undefined);
-    assert.equal(dedicated.dedicatedSessionPersistent, undefined);
 
-    await fs.mkdir(path.dirname(sessionFile), { recursive: true });
-    await fs.writeFile(sessionFile, "{}\n");
-    dedicated.runCount = 2;
-    const next = await cronExecution.executeCronAgentTask(dedicated, {
+    recurring.runCount = 2;
+    const next = await cronExecution.executeCronAgentTask(recurring, {
       agentDir,
       chat: {
         runTurn: async (payload) => {
@@ -412,14 +378,13 @@ test("dedicated agent tasks select initial and continuation prompts", async () =
 
 test("durable cron invocations snapshot owner execution inputs", async () => {
   await withAgentDir(async (agentDir) => {
-    const none = task({
+    const scheduled = task({
       lastStartedAt: "2026-07-17T02:00:00.000Z",
       nextRunAt: "2026-07-18T02:00:00.000Z",
       frontend: { kind: "chat", key: "discord/1:2" },
-      disabledRinCapabilities: ["browse"],
     });
     const invocation = cronExecution.createCronSessionInvocation(
-      none,
+      scheduled,
       agentDir,
     );
     assert.match(invocation.id, /^cron_owner:/);
@@ -427,19 +392,14 @@ test("durable cron invocations snapshot owner execution inputs", async () => {
     assert.equal(invocation.taskId, "cron_owner");
     assert.equal(invocation.runCount, 1);
     assert.equal(invocation.scheduledNextRunAt, "2026-07-18T02:00:00.000Z");
-    assert.equal(invocation.sessionFile, undefined);
+    assert.equal("sessionFile" in invocation, false);
     assert.equal(invocation.continuing, false);
-    assert.notEqual(invocation.session, none.session);
-    assert.notEqual(invocation.target, none.target);
-    assert.notEqual(
-      invocation.disabledRinCapabilities,
-      none.disabledRinCapabilities,
-    );
+    assert.notEqual(invocation.target, scheduled.target);
+    assert.deepEqual(invocation.frontend, scheduled.frontend);
 
-    const dedicated = cronExecution.createCronSessionInvocation(
+    const continued = cronExecution.createCronSessionInvocation(
       task({
         runCount: 2,
-        session: { mode: "dedicated" },
         target: {
           kind: "agent_prompt",
           prompt: "initial",
@@ -448,8 +408,9 @@ test("durable cron invocations snapshot owner execution inputs", async () => {
       }),
       agentDir,
     );
-    assert.equal(dedicated.continuing, true);
-    assert.equal(dedicated.sessionFile, undefined);
+    assert.equal(continued.continuing, true);
+    assert.equal("session" in continued, false);
+    assert.equal("sessionFile" in continued, false);
 
     assert.throws(
       () =>

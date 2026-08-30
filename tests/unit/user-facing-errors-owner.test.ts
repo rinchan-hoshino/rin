@@ -104,7 +104,7 @@ chat_turn_owner_epoch_required
 chat_turn_request_tag_missing
 cron_chat_unavailable
 cron_frontend_key_required
-cron_frontend_tui_unbindable
+cron_frontend_required
 cron_invalid_agent_task
 cron_invalid_expression
 cron_invalid_shell_task

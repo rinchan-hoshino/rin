@@ -44,41 +44,6 @@ const runAuditMod = await import(
     path.join(rootDir, "dist", "core", "self-improve", "run-audit.js"),
   ).href
 );
-test("cron execution resolves only existing dedicated session files", async () => {
-  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const dedicatedSessionFile = path.join(
-    agentDir,
-    "sessions",
-    "managed",
-    "task",
-    "cron_a.jsonl",
-  );
-  try {
-    assert.equal(
-      await execMod.resolveCronSessionFile({
-        session: { mode: "dedicated" },
-        dedicatedSessionFile,
-      }),
-      undefined,
-    );
-    await fs.mkdir(path.dirname(dedicatedSessionFile), { recursive: true });
-    await fs.writeFile(dedicatedSessionFile, "session", "utf8");
-    assert.equal(
-      await execMod.resolveCronSessionFile({
-        session: { mode: "dedicated" },
-        dedicatedSessionFile,
-      }),
-      dedicatedSessionFile,
-    );
-    assert.equal(
-      await execMod.resolveCronSessionFile({ session: { mode: "none" } }),
-      undefined,
-    );
-  } finally {
-    await fs.rm(agentDir, { recursive: true, force: true });
-  }
-});
-
 test("cron scheduler derives one-time triggers when no interval is set", () => {
   const scheduler = new cronMod.CronScheduler({
     agentDir: "/tmp/rin-agent",
@@ -862,23 +827,20 @@ test("cron scheduler does not resurrect a running task disabled by file edit", a
   }
 });
 
-test("cron scheduler rejects removed specific session mode", () => {
+test("cron scheduler ignores removed session selectors", () => {
   const scheduler = new cronMod.CronScheduler({
     agentDir: "/tmp/rin-agent",
     cwd: process.cwd(),
   });
-  assert.throws(
-    () =>
-      scheduler.upsertTask({
-        trigger: { runAt: "2026-04-10T00:00:00.000Z" },
-        session: { mode: "specific" },
-        target: { kind: "agent_prompt", prompt: "hello" },
-      }),
-    /cron_invalid_session_mode:specific/,
-  );
+  const task = scheduler.upsertTask({
+    trigger: { runAt: "2026-04-10T00:00:00.000Z" },
+    session: { mode: "specific" },
+    target: { kind: "agent_prompt", prompt: "hello" },
+  });
+  assert.equal(Object.hasOwn(task, "session"), false);
 });
 
-test("cron scheduler always derives dedicated session files from task ids", async () => {
+test("cron scheduler never derives task-owned session files", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
@@ -888,23 +850,15 @@ test("cron scheduler always derives dedicated session files from task ids", asyn
       session: { mode: "dedicated" },
       target: { kind: "agent_prompt", prompt: "hello" },
     });
-    assert.equal(
-      task.dedicatedSessionFile,
-      path.join(
-        agentDir,
-        "sessions",
-        "managed",
-        "task",
-        "cron_seeded_dedicated.jsonl",
-      ),
-    );
-    assert.equal(task.dedicatedSessionPersistent, true);
+    assert.equal(task.dedicatedSessionFile, undefined);
+    assert.equal(task.dedicatedSessionPersistent, undefined);
+    assert.equal(task.session, undefined);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
 
-test("cron scheduler assigns task-id-named dedicated session files before first run", async () => {
+test("cron scheduler drops every legacy task-session field before first run", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
@@ -914,23 +868,15 @@ test("cron scheduler assigns task-id-named dedicated session files before first 
       session: { mode: "dedicated" },
       target: { kind: "agent_prompt", prompt: "hello" },
     });
-    assert.equal(
-      task.dedicatedSessionFile,
-      path.join(
-        agentDir,
-        "sessions",
-        "managed",
-        "task",
-        "cron_managed_dedicated.jsonl",
-      ),
-    );
-    assert.equal(task.dedicatedSessionPersistent, true);
+    assert.equal(task.dedicatedSessionFile, undefined);
+    assert.equal(task.dedicatedSessionPersistent, undefined);
+    assert.equal(task.session, undefined);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
 
-test("cron scheduler durable invocation keeps the first dedicated prompt initial", async () => {
+test("cron scheduler durable invocation keeps the first recurring prompt initial", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const calls = [];
   const scheduler = new cronMod.CronScheduler({
@@ -966,7 +912,7 @@ test("cron scheduler durable invocation keeps the first dedicated prompt initial
   }
 });
 
-test("cron legacy dedicated mode never creates or selects a task-owned session", async () => {
+test("cron legacy session fields never create or select a task-owned session", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const dedicatedSessionFile = path.join(
     agentDir,
@@ -1042,7 +988,7 @@ test("cron legacy dedicated mode never creates or selects a task-owned session",
         {
           chatKey: "telegram/demo:1",
           controllerKey: "default",
-          affectChatBinding: true,
+          affectChatBinding: undefined,
           linkDeliveriesToSession: undefined,
           deliverFinal: true,
           disposeAfterTurn: undefined,
@@ -1053,7 +999,7 @@ test("cron legacy dedicated mode never creates or selects a task-owned session",
         {
           chatKey: "telegram/demo:1",
           controllerKey: "default",
-          affectChatBinding: true,
+          affectChatBinding: undefined,
           linkDeliveriesToSession: undefined,
           deliverFinal: true,
           disposeAfterTurn: undefined,
@@ -1074,7 +1020,7 @@ test("cron legacy dedicated mode never creates or selects a task-owned session",
   }
 });
 
-test("cron dedicated agent task resumes an existing canonical session", async () => {
+test("cron legacy session artifacts cannot override the current frontend session", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const task = {
     id: "cron_seeded",
@@ -1131,7 +1077,7 @@ test("cron dedicated agent task resumes an existing canonical session", async ()
       {
         chatKey: "telegram/demo:1",
         controllerKey: "default",
-        affectChatBinding: true,
+        affectChatBinding: undefined,
         linkDeliveriesToSession: undefined,
         deliverFinal: true,
         disposeAfterTurn: undefined,
@@ -1147,84 +1093,29 @@ test("cron dedicated agent task resumes an existing canonical session", async ()
   }
 });
 
-test("cron unbound no-session agent task shuts down and preserves its session file for review", async () => {
+test("cron agent tasks require a frontend instead of a session fallback", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
-  const transientSessionFile = path.join(
-    agentDir,
-    "sessions",
-    "managed",
-    "task",
-    "cron_none.jsonl",
-  );
-  const task = {
-    id: "cron_none",
-    session: { mode: "none" },
-    model: "openai-codex/gpt-5.5",
-    thinkingLevel: "low",
-    createdFrom: { sessionFile: transientSessionFile },
-    target: { kind: "agent_prompt", prompt: "hello" },
-  };
-  const calls = [];
   try {
-    await fs.mkdir(path.dirname(transientSessionFile), { recursive: true });
-    await fs.writeFile(transientSessionFile, "temporary session", "utf8");
-    const result = await execMod.executeCronAgentTask(task, {
-      agentDir,
-      runId: "run-1",
-      chat: {
-        runTurn: async (payload) => {
-          calls.push(payload);
-          return {
-            finalText: "done",
-            sessionId: "s1",
-            sessionFile: transientSessionFile,
-          };
+    await assert.rejects(
+      execMod.executeCronAgentTask(
+        {
+          id: "cron_unbound",
+          createdFrom: { sessionFile: "/tmp/legacy-session.jsonl" },
+          target: { kind: "agent_prompt", prompt: "hello" },
         },
-      },
-    });
-    assert.equal(result.text, "done");
-    assert.equal(result.sessionFile, transientSessionFile);
-    assert.equal(
-      await fs.readFile(transientSessionFile, "utf8"),
-      "temporary session",
+        {
+          agentDir,
+          chat: { runTurn: async () => ({ finalText: "unreachable" }) },
+        },
+      ),
+      /cron_frontend_required/,
     );
-    assert.equal(task.dedicatedSessionFile, undefined);
-    assert.equal(calls.length, 1);
-    assert.deepEqual(
-      {
-        controllerKey: calls[0].controllerKey,
-        affectChatBinding: calls[0].affectChatBinding,
-        disposeAfterTurn: calls[0].disposeAfterTurn,
-        shutdownAfterTurn: calls[0].shutdownAfterTurn,
-        text: calls[0].text,
-        sessionFile: calls[0].sessionFile,
-        managedSessionLeaf: calls[0].managedSessionLeaf,
-        model: calls[0].model,
-        thinkingLevel: calls[0].thinkingLevel,
-        frontend: calls[0].frontend,
-      },
-      {
-        controllerKey: "cron_none",
-        affectChatBinding: false,
-        disposeAfterTurn: undefined,
-        shutdownAfterTurn: undefined,
-        text: "hello",
-        sessionFile: transientSessionFile,
-        managedSessionLeaf: undefined,
-        model: "openai-codex/gpt-5.5",
-        thinkingLevel: "low",
-        frontend: undefined,
-      },
-    );
-    assert.equal(calls[0].promptMeta?.source, "scheduled-task");
-    assert.equal(calls[0].promptMeta?.taskId, "cron_none");
-    assert.equal(calls[0].promptMeta?.taskContextKind, "scheduled-task");
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
 
-test("cron frontend-bound no-session agent task uses frontend controller without controller auto-delivery", async () => {
+test("cron frontend input uses the standard frontend controller and delivery", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const sourceSessionFile = path.join(agentDir, "sessions", "source.jsonl");
   const resultSessionFile = path.join(agentDir, "sessions", "frontend.jsonl");
@@ -1258,9 +1149,9 @@ test("cron frontend-bound no-session agent task uses frontend controller without
     assert.equal(calls.length, 1);
     assert.equal(calls[0].chatKey, undefined);
     assert.equal(calls[0].controllerKey, "client/main");
-    assert.equal(calls[0].affectChatBinding, false);
+    assert.equal("affectChatBinding" in calls[0], false);
     assert.equal(calls[0].shutdownAfterTurn, undefined);
-    assert.equal(calls[0].sessionFile, sourceSessionFile);
+    assert.equal("sessionFile" in calls[0], false);
     assert.deepEqual(calls[0].promptMeta?.frontend, {
       kind: "sdk",
       key: "client/main",
@@ -1451,7 +1342,7 @@ test("cron scheduler startup rejects and preserves malformed task rows", async (
   }
 });
 
-test("cron scheduler persists disabled Rin capabilities", () => {
+test("cron scheduler drops removed capability overrides", () => {
   const scheduler = new cronMod.CronScheduler({
     agentDir: "/tmp/rin-agent",
     cwd: process.cwd(),
@@ -1462,10 +1353,10 @@ test("cron scheduler persists disabled Rin capabilities", () => {
     disabledRinCapabilities: [" self_improve ", "self_improve", "memory"],
     target: { kind: "agent_prompt", prompt: "hello" },
   });
-  assert.deepEqual(task.disabledRinCapabilities, ["self_improve", "memory"]);
+  assert.equal(task.disabledRinCapabilities, undefined);
 });
 
-test("cron chat-bound agent task submits into the frontend session without creating or switching one", async () => {
+test("cron chat-bound agent task submits into the current frontend session", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const transientSessionFile = path.join(
     agentDir,
@@ -1508,7 +1399,7 @@ test("cron chat-bound agent task submits into the frontend session without creat
     );
     assert.equal(calls[0].chatKey, "telegram/demo:1");
     assert.equal(calls[0].controllerKey, "default");
-    assert.equal(calls[0].affectChatBinding, true);
+    assert.equal("affectChatBinding" in calls[0], false);
     assert.equal(calls[0].linkDeliveriesToSession, undefined);
     assert.equal(calls[0].sessionFile, undefined);
     assert.equal(calls[0].managedSessionLeaf, undefined);
@@ -1570,6 +1461,7 @@ test("cron scheduler drops legacy deliverFinal without migrating it to quiet", a
     updatedAt: "2026-01-01T00:00:00.000Z",
     enabled: true,
     deliverFinal: false,
+    frontend: { kind: "chat", key: "discord/1:2" },
     trigger: { runAt: "2099-01-01T00:00:00.000Z" },
     session: { mode: "none" },
     target: { kind: "agent_prompt", prompt: "legacy" },
@@ -1612,7 +1504,7 @@ test("cron scheduler drops legacy deliverFinal without migrating it to quiet", a
   }
 });
 
-test("cron quiet agent tasks run without a bound delivery frontend", async () => {
+test("cron quiet agent tasks keep the frontend turn but suppress automatic delivery", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const calls = [];
   try {
@@ -1669,7 +1561,7 @@ test("cron quiet agent tasks run without a bound delivery frontend", async () =>
   }
 });
 
-test("cron scheduler rejects legacy session instruction task files", async () => {
+test("cron scheduler strips legacy session instructions from task files", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");
   const legacyTask = {
@@ -1677,6 +1569,7 @@ test("cron scheduler rejects legacy session instruction task files", async () =>
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     enabled: true,
+    frontend: { kind: "chat", key: "discord/1:2" },
     trigger: { runAt: "2099-01-01T00:00:00.000Z" },
     session: {
       mode: "session_instruction",
@@ -1694,7 +1587,12 @@ test("cron scheduler rejects legacy session instruction task files", async () =>
   );
   const scheduler = new cronMod.CronScheduler({ agentDir });
   try {
-    assert.throws(() => scheduler.reloadTasks(), /cron_tasks_file_invalid/);
+    scheduler.reloadTasks();
+    const loaded = scheduler.getTask("cron_legacy_instruction");
+    assert.equal(Object.hasOwn(loaded, "session"), false);
+    scheduler.upsertTask({ id: loaded.id, name: "migrated" });
+    const [persisted] = JSON.parse(await fs.readFile(tasksFile, "utf8"));
+    assert.equal(Object.hasOwn(persisted, "session"), false);
   } finally {
     scheduler.stop();
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -1731,7 +1629,7 @@ test("cron agent task falls back to canonical turn result text", async () => {
   }
 });
 
-test("cron dedicated agent task uses separate initial and continuation prompts", async () => {
+test("cron recurring agent task uses separate initial and continuation prompts", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const dedicatedSessionFile = path.join(
     agentDir,
@@ -1783,7 +1681,7 @@ test("cron dedicated agent task uses separate initial and continuation prompts",
   }
 });
 
-test("cron chat-bound agent task links its delivery without changing chat binding", async () => {
+test("cron chat-bound agent task uses standard frontend delivery", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const sessionFile = path.join(
     agentDir,
@@ -1819,7 +1717,7 @@ test("cron chat-bound agent task links its delivery without changing chat bindin
     assert.equal(sent.length, 0);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].chatKey, "telegram/demo:1");
-    assert.equal(calls[0].affectChatBinding, true);
+    assert.equal("affectChatBinding" in calls[0], false);
     assert.equal(calls[0].linkDeliveriesToSession, undefined);
     assert.equal(calls[0].deliverFinal, true);
   } finally {
@@ -1954,7 +1852,7 @@ test("scheduled self-improve distillation keeps audit observational", async () =
     assert.match(audit.changes[0].patch, /-before/);
     assert.match(audit.changes[0].patch, /\+after/);
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0].disabledRinCapabilities, ["self_improve"]);
+    assert.equal("disabledRinCapabilities" in calls[0], false);
     assert.equal(calls[0].shutdownAfterTurn, undefined);
     assert.deepEqual(calls[0].frontend, {
       kind: "chat",
@@ -2247,7 +2145,7 @@ test("audited cron history preserves distinct immutable identities for the same 
   }
 });
 
-test("cron scheduler terminates task sessions when tasks stop", async () => {
+test("cron scheduler terminates active frontend turns when agent tasks stop", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const terminations = [];
   const scheduler = new cronMod.CronScheduler({
@@ -2277,16 +2175,12 @@ test("cron scheduler terminates task sessions when tasks stop", async () => {
       session: { mode: "none" },
       target: { kind: "shell_command", command: "printf hello" },
     });
+    scheduler.activeExecutions.set("cron_stop_me", { startedAt: Date.now() });
     scheduler.pauseTask("cron_stop_me");
     scheduler.deleteTask("cron_stop_me");
     scheduler.pauseTask("cron_unbound_stop_me");
     scheduler.completeTask("cron_none_complete_me", "done");
-    assert.deepEqual(terminations, [
-      "cron_stop_me",
-      "cron_stop_me",
-      "cron_unbound_stop_me",
-      "cron_none_complete_me",
-    ]);
+    assert.deepEqual(terminations, ["default", "default"]);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

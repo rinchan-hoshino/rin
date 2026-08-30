@@ -1,7 +1,5 @@
 import fs from "node:fs";
 
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-
 import { cloneJson } from "../json-utils.js";
 import { writeJsonAtomic } from "../platform/fs.js";
 import { safeString } from "../platform/process.js";
@@ -9,8 +7,6 @@ import {
   normalizeFrontendIdentity,
   type RinFrontendIdentity,
 } from "../rin-lib/frontend-identity.js";
-import { normalizeScheduledTaskSessionMode } from "../scheduled-task-options.js";
-import { getManagedTaskSessionFile } from "../session/managed-paths.js";
 import { evaluateCronTaskCondition } from "./cron-condition.js";
 import type {
   CronSessionInvocation,
@@ -18,10 +14,8 @@ import type {
   CronTaskFrontendBinding,
   CronTaskInput,
   CronTaskRecord,
-  CronTaskSessionBinding,
   CronTaskTarget,
   CronTaskTermination,
-  CronTaskThinkingLevel,
   CronTaskTrigger,
 } from "./cron-contract.js";
 import { daemonRecoveryDelayMs } from "./recovery-backoff.js";
@@ -43,48 +37,12 @@ import {
   nowIso,
 } from "./cron-utils.js";
 
-const CRON_THINKING_LEVELS = [
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-] as const satisfies readonly ThinkingLevel[];
-
 type CronTaskUpsertDefaults = {
   sessionFile?: string;
   sessionId?: string;
   sessionName?: string;
   frontend?: RinFrontendIdentity;
 };
-
-function normalizeThinkingLevel(
-  value: unknown,
-): CronTaskThinkingLevel | undefined {
-  const level = safeString(value).trim();
-  return CRON_THINKING_LEVELS.includes(level as CronTaskThinkingLevel)
-    ? (level as CronTaskThinkingLevel)
-    : undefined;
-}
-
-function normalizeModelOverride(value: unknown) {
-  return safeString(value).trim() || undefined;
-}
-
-function normalizeDisabledRinCapabilities(
-  value: unknown,
-  existing: CronTaskRecord | undefined,
-) {
-  if (value === null) return undefined;
-  if (value === undefined) return existing?.disabledRinCapabilities;
-  const values = Array.isArray(value) ? value : [value];
-  const normalized = [
-    ...new Set(values.map((item) => safeString(item).trim()).filter(Boolean)),
-  ];
-  return normalized.length ? normalized : undefined;
-}
 
 function failCronTaskValidation(errorCode: string): never {
   throw new Error(errorCode);
@@ -112,18 +70,6 @@ function normalizeTaskTrigger(trigger: CronTaskTrigger | undefined) {
         "runAt",
       ) || failCronTaskValidation("cron_runAt_required"),
   };
-}
-
-function normalizeTaskSession(session: CronTaskSessionBinding | undefined) {
-  const requestedMode = normalizeScheduledTaskSessionMode(
-    session?.mode || "none",
-  );
-  if (!requestedMode) {
-    throw new Error(
-      `cron_invalid_session_mode:${safeString((session as any)?.mode).trim() || "unknown"}`,
-    );
-  }
-  return { normalizedSession: { mode: requestedMode } };
 }
 
 function normalizeTaskTarget(target: CronTaskTarget | undefined) {
@@ -206,26 +152,6 @@ function normalizeTaskFrontend(
   };
 }
 
-function resolveDedicatedSessionBinding(options: {
-  agentDir: string;
-  taskId: string;
-  session: CronTaskSessionBinding;
-}) {
-  if (options.session.mode !== "dedicated") {
-    return {
-      dedicatedSessionFile: undefined,
-      dedicatedSessionPersistent: undefined,
-    };
-  }
-  return {
-    dedicatedSessionFile: getManagedTaskSessionFile(
-      options.agentDir,
-      options.taskId,
-    ),
-    dedicatedSessionPersistent: true,
-  };
-}
-
 function readCronTaskRows(file: string) {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -264,12 +190,12 @@ function normalizeCronSessionInvocation(
   if (!Number.isInteger(runCount) || runCount < 1) {
     throw new Error("cron_tasks_file_invalid");
   }
-  const { normalizedSession: session } = normalizeTaskSession(raw.session);
   const target = normalizeTaskTarget(raw.target);
   if (target.kind !== "agent_prompt") {
     throw new Error("cron_tasks_file_invalid");
   }
-  const sessionFile = safeString(raw.sessionFile).trim() || undefined;
+  const frontend = normalizeTaskFrontend(raw.frontend, undefined);
+  if (!frontend) throw new Error("cron_tasks_file_invalid");
   const sentAt = Number(raw.promptMeta?.sentAt);
   if (!Number.isFinite(sentAt) || sentAt <= 0) {
     throw new Error("cron_tasks_file_invalid");
@@ -289,19 +215,11 @@ function normalizeCronSessionInvocation(
     runCount,
     startedAt,
     scheduledNextRunAt: safeString(raw.scheduledNextRunAt).trim() || undefined,
-    sessionFile,
     continuing:
       raw.continuing === undefined ? undefined : Boolean(raw.continuing),
     name: safeString(raw.name).trim() || undefined,
-    frontend: normalizeTaskFrontend(raw.frontend, undefined),
+    frontend,
     quiet: Boolean(raw.quiet),
-    model: normalizeModelOverride(raw.model),
-    thinkingLevel: normalizeThinkingLevel(raw.thinkingLevel),
-    disabledRinCapabilities: normalizeDisabledRinCapabilities(
-      raw.disabledRinCapabilities,
-      undefined,
-    ),
-    session,
     target,
     promptMeta: { ...raw.promptMeta, sentAt },
     retryAttempt: retryAttempt || undefined,
@@ -401,31 +319,12 @@ export class CronScheduler {
     const normalizedTrigger = normalizeTaskTrigger(
       input.trigger ?? existing?.trigger,
     );
-    const rawSession = input.session ?? existing?.session;
-    const { normalizedSession } = normalizeTaskSession(rawSession);
-    const session = normalizedSession;
-    const model =
-      input.model !== undefined
-        ? normalizeModelOverride(input.model)
-        : existing?.model;
-    const thinkingLevel = normalizeThinkingLevel(
-      input.thinkingLevel !== undefined
-        ? input.thinkingLevel
-        : existing?.thinkingLevel,
-    );
-    const disabledRinCapabilities = normalizeDisabledRinCapabilities(
-      input.disabledRinCapabilities,
-      existing,
-    );
     const normalizedTarget = normalizeTaskTarget(
       input.target ?? existing?.target,
     );
-    const { dedicatedSessionFile, dedicatedSessionPersistent } =
-      resolveDedicatedSessionBinding({
-        agentDir: this.options.agentDir,
-        taskId: id,
-        session,
-      });
+    if (normalizedTarget.kind === "agent_prompt" && !frontend) {
+      throw new Error("cron_frontend_required");
+    }
     const termination = normalizeTaskTermination(input.termination, existing);
     const condition = normalizeTaskCondition(input.condition, existing);
 
@@ -453,16 +352,10 @@ export class CronScheduler {
         input.quiet !== undefined
           ? Boolean(input.quiet)
           : (existing?.quiet ?? false),
-      model,
-      thinkingLevel,
-      disabledRinCapabilities,
       trigger: normalizedTrigger,
       termination,
       condition,
-      session: normalizedSession,
       target: normalizedTarget,
-      dedicatedSessionFile,
-      dedicatedSessionPersistent,
       lastStartedAt: existing?.lastStartedAt,
       lastFinishedAt: existing?.lastFinishedAt,
       lastResultText: existing?.lastResultText,
@@ -492,7 +385,7 @@ export class CronScheduler {
     const task = this.tasks.get(taskId);
     const ok = this.tasks.delete(taskId);
     if (ok) {
-      this.terminateTaskSession(task);
+      this.terminateTaskTurn(task);
       this.save();
     }
     return ok;
@@ -508,7 +401,7 @@ export class CronScheduler {
     task.nextRunAt = undefined;
     task.updatedAt = nowIso();
     if (!this.activeExecutions.has(taskId)) delete task.activeInvocation;
-    this.terminateTaskSession(task);
+    this.terminateTaskTurn(task);
     this.save();
     return this.publicTask(task);
   }
@@ -522,7 +415,7 @@ export class CronScheduler {
     task.nextRunAt = undefined;
     task.updatedAt = nowIso();
     if (!this.activeExecutions.has(taskId)) delete task.activeInvocation;
-    this.terminateTaskSession(task);
+    this.terminateTaskTurn(task);
     this.save();
     return this.publicTask(task);
   }
@@ -661,10 +554,14 @@ export class CronScheduler {
         row.id = rowId;
         row.running = false;
         row.lastError = row.lastError ? safeString(row.lastError) : undefined;
-        row.thinkingLevel = normalizeThinkingLevel(row.thinkingLevel);
-        row.model = normalizeModelOverride(row.model);
         row.quiet = Boolean(row.quiet);
         delete (row as any).deliverFinal;
+        delete (row as any).session;
+        delete (row as any).dedicatedSessionFile;
+        delete (row as any).dedicatedSessionPersistent;
+        delete (row as any).model;
+        delete (row as any).thinkingLevel;
+        delete (row as any).disabledRinCapabilities;
         if (row.createdFrom?.frontend) {
           row.createdFrom = {
             ...row.createdFrom,
@@ -674,34 +571,21 @@ export class CronScheduler {
         const legacyChatKey = safeString((row as any).chatKey).trim();
         row.frontend = normalizeTaskFrontend(
           row.frontend ||
+            row.createdFrom?.frontend ||
             (legacyChatKey ? { kind: "chat", key: legacyChatKey } : undefined),
           undefined,
         );
         delete (row as any).chatKey;
-        const rawSessionMode = safeString((row.session as any)?.mode).trim();
-        const normalizedMode =
-          normalizeScheduledTaskSessionMode(rawSessionMode);
-        if (rawSessionMode && !normalizedMode) {
-          throw new Error(`cron_invalid_session_mode:${rawSessionMode}`);
-        }
-        row.session = { mode: normalizedMode || "none" };
         row.trigger = normalizeTaskTrigger(row.trigger);
         row.condition = normalizeTaskCondition(row.condition, undefined);
         row.target = normalizeTaskTarget(row.target);
+        if (row.target.kind === "agent_prompt" && !row.frontend) {
+          throw new Error("cron_frontend_required");
+        }
         row.activeInvocation = normalizeCronSessionInvocation(
           row.activeInvocation,
           String(row.id),
         );
-        if (row.session.mode === "dedicated") {
-          row.dedicatedSessionPersistent = true;
-          row.dedicatedSessionFile = getManagedTaskSessionFile(
-            this.options.agentDir,
-            row.id,
-          );
-        } else {
-          delete row.dedicatedSessionFile;
-          delete row.dedicatedSessionPersistent;
-        }
         row.nextRunAt = row.completedAt
           ? undefined
           : row.activeInvocation
@@ -727,7 +611,7 @@ export class CronScheduler {
           !currentTask.enabled ||
           currentTask.activeInvocation?.id !== previousTask.activeInvocation?.id
         ) {
-          this.terminateTaskSession(previousTask);
+          this.terminateTaskTurn(previousTask);
         }
       }
     }
@@ -770,7 +654,6 @@ export class CronScheduler {
     const {
       frontend,
       createdFrom,
-      dedicatedSessionFile,
       lastError,
       lastResultText,
       target,
@@ -778,7 +661,6 @@ export class CronScheduler {
       ...safeTask
     } = snapshot;
     void createdFrom;
-    void dedicatedSessionFile;
     void lastError;
     void lastResultText;
     void activeInvocation;
@@ -786,7 +668,6 @@ export class CronScheduler {
       ...safeTask,
       hasFrontendBinding: Boolean(frontend),
       frontendKind: frontend?.kind,
-      session: { mode: snapshot.session.mode },
       target: { kind: target.kind },
     });
   }
@@ -826,13 +707,6 @@ export class CronScheduler {
       Number(task.runCount || 0),
     );
     current.updatedAt = task.updatedAt;
-
-    if (task.dedicatedSessionFile) {
-      current.dedicatedSessionFile = task.dedicatedSessionFile;
-    }
-    if (task.dedicatedSessionPersistent !== undefined) {
-      current.dedicatedSessionPersistent = task.dedicatedSessionPersistent;
-    }
 
     if (!currentStopped && !currentNextRunAt) {
       current.completedAt = task.completedAt;
@@ -879,7 +753,7 @@ export class CronScheduler {
       terminal = {
         status: "completed",
         text: result.text,
-        sessionFile: result.sessionFile || invocation.sessionFile,
+        sessionFile: result.sessionFile,
       };
     } catch (error: any) {
       if (error?.rinTurnTerminal !== true) {
@@ -918,7 +792,7 @@ export class CronScheduler {
       }
       applyCronTaskTerminalProjection(current, terminal);
       delete current.activeInvocation;
-      if (current.completedAt) this.terminateTaskSession(current);
+      if (current.completedAt) this.terminateTaskTurn(current);
       this.save();
     } finally {
       this.activeExecutions.delete(taskId);
@@ -953,13 +827,25 @@ export class CronScheduler {
     }
   }
 
-  private terminateTaskSession(task: CronTaskRecord | undefined) {
-    if (!task) return;
+  private terminateTaskTurn(task: CronTaskRecord | undefined) {
+    if (
+      !task ||
+      !this.activeExecutions.has(task.id) ||
+      task.target.kind !== "agent_prompt" ||
+      !task.frontend
+    ) {
+      return;
+    }
     const controllerKey =
-      task.frontend && task.frontend.kind !== "chat"
-        ? task.frontend.key
-        : task.id;
-    void this.options.chat?.terminateTurn?.({ controllerKey }).catch(() => {});
+      task.frontend.kind === "chat"
+        ? "default"
+        : task.frontend.key || task.frontend.kind;
+    void this.options.chat
+      ?.terminateTurn?.({
+        chatKey: task.frontend.kind === "chat" ? task.frontend.key : undefined,
+        controllerKey,
+      })
+      .catch(() => {});
   }
 
   private evaluateCondition(task: CronTaskRecord) {
@@ -1032,7 +918,7 @@ export class CronScheduler {
     } finally {
       this.activeExecutions.delete(task.id);
       const currentTask = this.mergeFinishedExecutionTask(task);
-      if (currentTask?.completedAt) this.terminateTaskSession(currentTask);
+      if (currentTask?.completedAt) this.terminateTaskTurn(currentTask);
       this.save();
     }
   }

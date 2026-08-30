@@ -1,33 +1,12 @@
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-
 import type { RinFrontendIdentity } from "../rin-lib/frontend-identity.js";
-import type {
-  ScheduledTaskSessionMode,
-  ScheduledTaskTargetKind,
-} from "../scheduled-task-options.js";
-
-export type CronTaskTarget =
-  | {
-      kind: Extract<ScheduledTaskTargetKind, "agent_prompt">;
-      prompt?: string;
-      continuationPrompt?: string;
-    }
-  | {
-      kind: Extract<ScheduledTaskTargetKind, "shell_command">;
-      command: string;
-      timeoutMs?: number;
-    };
+import type { PromptContextMeta } from "../rin-lib/prompt-context.js";
+import type { ScheduledTaskTargetKind } from "../scheduled-task-options.js";
 
 export type CronTaskTrigger = {
   startAt?: string;
   expression?: string;
   timezone?: "local";
   runAt?: string;
-};
-
-export type CronTaskTermination = {
-  maxRuns?: number;
-  stopAt?: string;
 };
 
 export type CronTaskCondition = {
@@ -38,16 +17,27 @@ export type CronTaskCondition = {
   lastOutput?: string;
 };
 
-export type CronTaskSessionBinding = {
-  mode: ScheduledTaskSessionMode;
+export type CronTaskTarget =
+  | {
+      kind: Extract<ScheduledTaskTargetKind, "agent_prompt">;
+      prompt: string;
+      continuationPrompt?: string;
+    }
+  | {
+      kind: Extract<ScheduledTaskTargetKind, "shell_command">;
+      command: string;
+      timeoutMs?: number;
+    };
+
+export type CronTaskTermination = {
+  maxRuns?: number;
+  stopAt?: string;
 };
 
 export type CronTaskFrontendBinding = {
   kind?: string;
   key?: string;
 };
-
-export type CronTaskThinkingLevel = ThinkingLevel;
 
 export type CronSessionInvocation = {
   id: string;
@@ -56,23 +46,19 @@ export type CronSessionInvocation = {
   runCount: number;
   startedAt: string;
   scheduledNextRunAt?: string;
-  sessionFile?: string;
   continuing?: boolean;
   name?: string;
-  frontend?: CronTaskFrontendBinding;
+  frontend: CronTaskFrontendBinding;
   quiet?: boolean;
-  model?: string;
-  thinkingLevel?: CronTaskThinkingLevel;
-  disabledRinCapabilities?: string[];
-  session: CronTaskSessionBinding;
   target: Extract<CronTaskTarget, { kind: "agent_prompt" }>;
-  promptMeta: Record<string, unknown> & { sentAt: number };
+  promptMeta: PromptContextMeta & { sentAt: number };
   retryAttempt?: number;
   nextAttemptAt?: string;
 };
 
 export type CronTaskRecord = {
   id: string;
+  name?: string;
   createdAt: string;
   updatedAt: string;
   createdFrom?: {
@@ -81,29 +67,22 @@ export type CronTaskRecord = {
     sessionName?: string;
     frontend?: RinFrontendIdentity;
   };
-  name?: string;
   enabled: boolean;
   completedAt?: string;
   completionReason?: string;
   pausedAt?: string;
   frontend?: CronTaskFrontendBinding;
   quiet?: boolean;
-  model?: string;
-  thinkingLevel?: CronTaskThinkingLevel;
-  disabledRinCapabilities?: string[];
   trigger: CronTaskTrigger;
   termination?: CronTaskTermination;
   condition?: CronTaskCondition;
-  session: CronTaskSessionBinding;
   target: CronTaskTarget;
-  dedicatedSessionFile?: string;
-  dedicatedSessionPersistent?: boolean;
-  nextRunAt?: string;
   lastStartedAt?: string;
   lastFinishedAt?: string;
   lastResultText?: string;
   lastError?: string;
   runCount: number;
+  nextRunAt?: string;
   running: boolean;
   activeStartedAt?: string;
   activeDurationMs?: number;
@@ -116,12 +95,8 @@ export type CronTaskInput = {
   enabled?: boolean;
   frontend?: CronTaskFrontendBinding | null;
   quiet?: boolean;
-  model?: string;
-  thinkingLevel?: CronTaskThinkingLevel;
-  disabledRinCapabilities?: string[] | null;
   trigger?: CronTaskTrigger;
   termination?: CronTaskTermination | null;
   condition?: CronTaskCondition | null;
-  session?: CronTaskSessionBinding;
   target?: CronTaskTarget;
 };

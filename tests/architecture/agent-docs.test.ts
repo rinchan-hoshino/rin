@@ -295,9 +295,17 @@ test("agent docs expose scheduled task operation workflow", () => {
   );
   assert.match(
     scheduledTasksEntry,
-    /Automatic: set `frontend` and keep `quiet: false`/,
+    /Automatic agent input:.*`frontend`.*`quiet: false`/s,
   );
-  assert.match(scheduledTasksEntry, /Manual: set `frontend` and `quiet: true`/);
+  assert.match(
+    scheduledTasksEntry,
+    /Quiet agent input:.*`frontend`.*`quiet: true`/s,
+  );
+  assert.match(scheduledTasksEntry, /⏰ Scheduled task · <name>/);
+  assert.match(
+    scheduledTasksEntry,
+    /create its ordinary initial session when the input arrives/,
+  );
   assert.match(scheduledTasksEntry, /Re-read the task after every mutation/);
   assert.doesNotMatch(
     scheduledTasksEntry,
@@ -359,15 +367,19 @@ test("agent docs expose scheduled task operation workflow", () => {
   );
   assert.match(
     scheduledTasksReference,
-    /The TUI frontend is the singleton `\{ kind: "tui" \}` identity/,
+    /TUI is the singleton `\{ kind: "tui" \}` identity/,
   );
   assert.match(
     scheduledTasksReference,
-    /submits the prompt to that current session/,
+    /routes execution through that frontend's current session/,
   );
   assert.match(
     scheduledTasksReference,
-    /Quoting a delivered task message contributes quote rich text only and never selects a session/,
+    /ordinary first-input initialization and establish the binding/,
+  );
+  assert.match(
+    scheduledTasksReference,
+    /never supplies a session selector.*`affectChatBinding` switch/s,
   );
   assert.doesNotMatch(
     scheduledTasksReference,
@@ -395,19 +407,19 @@ test("agent docs expose scheduled task operation workflow", () => {
   assert.match(scheduledTasksReference, /## Delivery modes/);
   assert.match(
     scheduledTasksReference,
-    /No `frontend`: store the result without automatic delivery/,
+    /Shell task without `frontend`: store the result without automatic delivery/,
   );
   assert.match(
     scheduledTasksReference,
-    /`frontend` with `quiet: false`: automatic delivery/,
+    /Agent task with `frontend` and `quiet: false`: display the marked scheduled input/,
   );
   assert.match(
     scheduledTasksReference,
-    /`frontend` with `quiet: true`: no scheduler-managed delivery/,
+    /Agent task with `frontend` and `quiet: true`: submit the input but suppress automatic frontend messages/,
   );
   assert.match(
     scheduledTasksReference,
-    /Working, interim, independent-error, and final messages are one automatic delivery policy/,
+    /Working, interim, independent-error, and final messages remain the frontend's one automatic delivery policy/,
   );
   assert.match(
     scheduledTasksReference,

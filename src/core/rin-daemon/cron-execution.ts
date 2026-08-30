@@ -8,13 +8,8 @@ import path from "node:path";
 const HOME_DIR = os.homedir();
 
 import type { ChatOutboxPayload } from "../rin-lib/chat-outbox-contract.js";
-import {
-  MANAGED_TASK_SESSION_LEAF,
-  getManagedTaskSessionFile,
-} from "../session/managed-paths.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { cronTaskRunId, nowIso, summarizeText } from "./cron-utils.js";
-import { normalizeScheduledTaskSessionMode } from "../scheduled-task-options.js";
 import {
   acquireSelfImproveMaintenanceLock,
   releaseSelfImproveMaintenanceLock,
@@ -75,18 +70,6 @@ export async function sendChatText(
         }
       : {}),
   });
-}
-
-export async function resolveCronSessionFile(task: CronTaskRecord) {
-  const mode = normalizeScheduledTaskSessionMode((task.session as any)?.mode);
-  if (mode === "dedicated") {
-    const sessionFile = String(task.dedicatedSessionFile || "").trim();
-    return sessionFile && existsSync(sessionFile) ? sessionFile : undefined;
-  }
-  if (mode === "none") return undefined;
-  throw new Error(
-    `cron_invalid_session_mode:${String((task.session as any)?.mode || "unknown")}`,
-  );
 }
 
 function findBashOnPath(): string | null {
@@ -284,13 +267,13 @@ export function buildCronTaskPromptContext(
   const taskName = String(task.name || "").trim();
   const frontend = resolveCronTaskFrontend(task);
   return {
-    source: "scheduled-task",
+    source: "scheduled-task" as const,
     sentAt,
     ...(frontend?.kind === "chat" ? { chatKey: frontend.key } : {}),
     frontend,
     taskId: task.id,
     taskName: taskName || undefined,
-    taskContextKind: "scheduled-task",
+    taskContextKind: "scheduled-task" as const,
     selfImproveEligible: true,
   };
 }
@@ -503,7 +486,6 @@ export async function executeCronAgentTask(
     additionalExtensionPaths?: string[];
     chat?: CronChatCapability;
     runId?: string;
-    sessionFile?: string;
     promptMeta?: Record<string, unknown> & { sentAt: number };
     deliveryIdempotencyKey?: string;
     continuing?: boolean;
@@ -515,16 +497,8 @@ export async function executeCronAgentTask(
     throw new Error("cron_chat_unavailable");
   }
   const frontend = resolveCronTaskFrontend(task);
-  const chatKey = frontend?.kind === "chat" ? frontend.key : undefined;
-  const existingSessionFile = String(
-    options.sessionFile || task.createdFrom?.sessionFile || "",
-  ).trim();
-  if (!chatKey && !existingSessionFile) {
-    throw new Error("cron_frontend_or_session_required");
-  }
-  if (!chatKey && !existsSync(existingSessionFile)) {
-    throw new Error(`cron_session_missing:${existingSessionFile}`);
-  }
+  if (!frontend) throw new Error("cron_frontend_required");
+  const chatKey = frontend.kind === "chat" ? frontend.key : undefined;
   const continuing =
     typeof options.continuing === "boolean"
       ? options.continuing
@@ -538,30 +512,17 @@ export async function executeCronAgentTask(
   const result = await options.chat.runTurn({
     controllerKey: chatKey ? "default" : cronTaskRunControllerKey(task),
     ...(chatKey ? { chatKey } : {}),
-    affectChatBinding: Boolean(chatKey),
     deliverFinal: !quiet,
     quietMode: quiet,
     text: prompt,
-    ...(!chatKey && existingSessionFile
-      ? { sessionFile: existingSessionFile }
-      : {}),
     ...(options.runId ? { requestTag: options.runId } : {}),
     ...(options.deliveryIdempotencyKey
       ? { deliveryIdempotencyKey: options.deliveryIdempotencyKey }
       : {}),
-    ...(frontend
-      ? {
-          frontend: {
-            kind: frontend.kind,
-            key: frontend.key,
-          },
-        }
-      : {}),
-    ...(task.model ? { model: task.model } : {}),
-    ...(task.thinkingLevel ? { thinkingLevel: task.thinkingLevel } : {}),
-    ...(task.disabledRinCapabilities
-      ? { disabledRinCapabilities: task.disabledRinCapabilities }
-      : {}),
+    frontend: {
+      kind: frontend.kind,
+      key: frontend.key,
+    },
     promptMeta: options.promptMeta || buildCronTaskPromptContext(task),
   });
   const completion = resolveTurnCompletion(result);
@@ -598,12 +559,7 @@ export function createCronSessionInvocation(
   const startedAt = task.lastStartedAt || nowIso();
   const id = cronTaskRunId(task, startedAt);
   const frontend = resolveCronTaskFrontend(task);
-  const chatKey = frontend?.kind === "chat" ? frontend.key : undefined;
-  const sessionFile = chatKey
-    ? undefined
-    : String(
-        task.createdFrom?.sessionFile || task.dedicatedSessionFile || "",
-      ).trim() || undefined;
+  if (!frontend) throw new Error("cron_frontend_required");
   return {
     id,
     requestTag: `scheduled:${id}`,
@@ -611,17 +567,10 @@ export function createCronSessionInvocation(
     runCount: task.runCount,
     startedAt,
     scheduledNextRunAt: task.nextRunAt,
-    sessionFile,
     continuing: task.runCount > 1,
     name: task.name,
-    frontend: task.frontend ? { ...task.frontend } : undefined,
+    frontend: { ...frontend },
     quiet: task.quiet === true,
-    model: task.model,
-    thinkingLevel: task.thinkingLevel,
-    disabledRinCapabilities: task.disabledRinCapabilities
-      ? [...task.disabledRinCapabilities]
-      : undefined,
-    session: { ...task.session },
     target: { ...task.target },
     promptMeta: buildCronTaskPromptContext(
       task,
@@ -639,16 +588,9 @@ function taskFromSessionInvocation(
     updatedAt: invocation.startedAt,
     name: invocation.name,
     enabled: true,
-    createdFrom: invocation.sessionFile
-      ? { sessionFile: invocation.sessionFile }
-      : undefined,
     frontend: invocation.frontend,
     quiet: invocation.quiet === true,
-    model: invocation.model,
-    thinkingLevel: invocation.thinkingLevel,
-    disabledRinCapabilities: invocation.disabledRinCapabilities,
     trigger: {},
-    session: invocation.session,
     target: invocation.target,
     nextRunAt: invocation.scheduledNextRunAt,
     lastStartedAt: invocation.startedAt,
@@ -687,7 +629,6 @@ export async function executeCronSessionInvocation(
       const result = await executeCronAgentTask(task, {
         ...options,
         runId: invocation.requestTag,
-        sessionFile: invocation.sessionFile,
         promptMeta: invocation.promptMeta,
         deliveryIdempotencyKey: `scheduled-final:${invocation.id}`,
         continuing: invocation.continuing,

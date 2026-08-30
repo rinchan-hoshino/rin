@@ -2,7 +2,7 @@
 
 Use scheduled tasks only when work must happen after the current turn: a reminder, delayed follow-up, recurrence, conditional recurrence, or background task.
 
-For an ordinary reminder or recurring report, this file is sufficient. Read `scheduled-tasks-reference.md` only for exact task fields, condition-code execution, termination edge cases, source-worker fallback, shell delivery, or lifecycle troubleshooting.
+For an ordinary reminder or recurring report, this file is sufficient. Read `scheduled-tasks-reference.md` only for exact task fields, condition-code execution, termination edge cases, shell delivery, or lifecycle troubleshooting.
 
 Import the installed Agent SDK exactly as shown in `agent-sdk.md`; examples below assume `const rin = createRinAgentSdk()`.
 
@@ -13,7 +13,7 @@ Choose only what the request needs:
 1. **Operation:** create, inspect, update, run, pause, resume, complete, or delete.
 2. **Trigger:** one-time `runAt` or recurring cron `expression` plus `timezone`.
 3. **Target:** `agent_prompt` for reasoning and polished reports; `shell_command` for stable machine output.
-4. **Delivery:** add an addressable `frontend` only when Rin should deliver automatically.
+4. **Frontend:** every `agent_prompt` needs the frontend that will receive the delayed input; add one to `shell_command` only for automatic delivery.
 5. **Verification:** re-read the task and, for a run, wait for terminal task and external state.
 
 Do not add legacy session/model/capability fields. Add `condition`, `quiet`, or `termination` only for a specific need.
@@ -39,7 +39,7 @@ await rin.tasks.upsert({
 const verified = await rin.tasks.get("reminder_example");
 ```
 
-Use a stable descriptive `id`. Omit `frontend` for a task that should only record its result. Creating requires both `trigger` and `target`; updating an existing `id` may send only the fields being changed.
+Use a stable descriptive `id`. An `agent_prompt` requires `frontend`; a `shell_command` may omit it to record only its result. Creating requires both `trigger` and `target`; updating an existing `id` may send only the fields being changed.
 
 ## Method map
 
@@ -56,7 +56,7 @@ Use `reload()` only after an authorized direct edit to `~/.rin/data/scheduler/ta
 - **`termination`:** `maxRuns` or `stopAt` for bounded recurrence.
 - **`quiet: true`:** only when the task prompt deliberately owns separate outbound delivery.
 
-An `agent_prompt` task is only a delayed user input to an existing worker. It cannot create, select, resume, configure, or terminate a task-owned session. Legacy `session`, `model`, `thinkingLevel`, and `disabledRinCapabilities` fields may be read during migration but do not alter execution; use `/new` and the frontend's normal session controls outside the task.
+An `agent_prompt` task is only a delayed frontend input. It never owns or selects a session: the frontend uses its current session and performs its ordinary first-input initialization when none exists. The removed `session`, `model`, `thinkingLevel`, and `disabledRinCapabilities` fields are not task options; persisted legacy copies are stripped during normalization and never alter execution. Use `/new` and the frontend's normal controls outside the task.
 
 Set an optional field to `null` in `upsert()` to remove it. Do not write scheduler-owned lifecycle fields such as `runCount`, `runningAt`, `nextRunAt`, or `lastError` through `upsert()`.
 
@@ -74,11 +74,11 @@ A false recurring condition schedules the next tick without starting the target.
 
 ## Delivery decision
 
-- **Existing source worker only:** omit `frontend` only when task creation captured a valid `createdFrom.sessionFile`; execution fails closed if that session no longer exists.
-- **Automatic: set `frontend` and keep `quiet: false`.** Rin submits the prompt to that frontend's one current session and owns Working, interim, independent-error, and final delivery as one policy.
-- **Manual: set `frontend` and `quiet: true`.** The same bound worker receives the prompt, but no scheduler-managed message is sent; the authorized task prompt must explicitly perform and verify any outbound SDK action.
+- **Automatic agent input:** set `frontend` and keep `quiet: false`. Rin displays `⏰ Scheduled task · <name>` with the submitted prompt, then the frontend's standard Working, interim, independent-error, and final flow takes over.
+- **Quiet agent input:** set `frontend` and `quiet: true`. The same current session receives the prompt without automatic frontend messages; the authorized task prompt must explicitly perform and verify any separate outbound SDK action.
+- **Record-only shell:** omit `frontend` from `shell_command` when no automatic delivery is needed.
 
-A Chat frontend uses `{ kind: "chat", key: chatKey }`; TUI is the singleton `{ kind: "tui" }`. A scheduled turn never changes the frontend binding. Replies to its deliveries remain ordinary quote rich text and never resume a task session.
+A Chat frontend uses `{ kind: "chat", key: chatKey }`; TUI is the singleton `{ kind: "tui" }`. The scheduler never chooses a session or writes a binding. The frontend may create its ordinary initial session when the input arrives and no current session exists. The marked prompt is an automation message, not an impersonated platform-user message.
 
 ## Task prompt
 
@@ -95,7 +95,7 @@ Use `rin-prompt-engineering` when creating or changing `target.prompt` or `targe
 
 ## Verification
 
-Re-read the task after every mutation. Compare the exact fields changed and preserve untouched lifecycle, trigger, session, delivery, and override fields.
+Re-read the task after every mutation. Compare the exact fields changed and preserve untouched lifecycle, trigger, frontend, delivery, and target fields.
 
 For `run()` or `wake()`:
 
@@ -112,7 +112,7 @@ Read `scheduled-tasks-reference.md` before handling any of these:
 
 - exact writable/read-only DTO fields;
 - condition TypeScript context, timeout, output, or failure behavior;
-- frontend binding, source-worker fallback, or task-session migration;
+- frontend initialization or legacy task-field migration;
 - `shell_command` exit/stdout/stderr delivery;
 - frontend quiet/manual delivery or quote/session incidents;
 - scheduler lifecycle errors or detailed troubleshooting.

@@ -1,6 +1,6 @@
 # Scheduled Tasks Reference
 
-Read `scheduled-tasks.md` first. Use this reference only for exact task fields, condition execution, termination, source-worker fallback, targets, delivery lifecycle, examples, or troubleshooting.
+Read `scheduled-tasks.md` first. Use this reference only for exact task fields, condition execution, termination, targets, delivery lifecycle, examples, or troubleshooting.
 
 ## Task record reference
 
@@ -29,7 +29,7 @@ type WritableTaskPatch = {
 };
 ```
 
-Creating a task requires both `trigger` and `target`; an update with a matching `id` may omit either field to preserve its existing value. Include only the writable fields you intend to change. Use `frontend: null`, `termination: null`, or `condition: null` to remove those optional fields.
+Creating a task requires both `trigger` and `target`; an update with a matching `id` may omit either field to preserve its existing value. An `agent_prompt` also requires an addressable `frontend`; `shell_command` may omit it. Include only the writable fields you intend to change. Use `frontend: null` only for shell tasks, and use `termination: null` or `condition: null` to remove those optional fields.
 
 ### Read-only lifecycle state
 
@@ -61,7 +61,7 @@ type ReadOnlyTaskLifecycleState = {
 
 The daemon loads the persisted task file at startup and when explicitly requested through `rin tasks reload` or `rin.tasks.reload()`: valid JSON edits, additions, and removals take effect without restarting the daemon only after that reload command. Invalid JSON leaves the running daemon schedule unchanged and makes the reload fail, so a partial manual edit does not silently replace the in-memory schedule.
 
-For agent-backed tasks, the scheduler owns the trigger and a durable invocation receipt, while the ordinary frontend session/turn runtime remains authoritative for execution and terminal completion. The receipt snapshots the submitted prompt, frontend or source-worker reference, and stable turn identity before dispatch. After a daemon restart, Rin attaches to that same turn instead of submitting the prompt again. `running` and the `last*` fields are scheduler projections of this lifecycle; the internal receipt is intentionally omitted from task APIs.
+For agent-backed tasks, the scheduler owns the trigger and a durable invocation receipt, while the ordinary frontend session/turn runtime remains authoritative for execution and terminal completion. The receipt snapshots the submitted prompt, frontend identity, and stable turn identity before dispatch. After a daemon restart, Rin attaches to that same turn instead of submitting the prompt again. `running` and the `last*` fields are scheduler projections of this lifecycle; the internal receipt is intentionally omitted from task APIs.
 
 ## Trigger contract
 
@@ -138,6 +138,7 @@ await rin.tasks.upsert({
   id: "cron_wait_until_ready",
   name: "Act once when the source becomes ready",
   enabled: true,
+  frontend: { kind: "chat", key: "telegram/123456:7890" },
   trigger: { expression: "*/30 * * * *", timezone: "local" },
   termination: { maxRuns: 1, stopAt: "2026-06-01T00:00:00+08:00" },
   condition: {
@@ -173,15 +174,17 @@ termination: { maxRuns: 7, stopAt: "2026-06-01T00:00:00+08:00" }
 
 ## Session contract
 
-A scheduled `agent_prompt` is a delayed input, not a session owner. It submits `target.prompt` to one already-bound worker and has no operation that can create, select, resume, replace, configure, or terminate a session.
+A scheduled `agent_prompt` is a delayed frontend input, not a session owner. It requires `frontend` and submits `target.prompt` through that frontend's ordinary input path.
 
-Resolution order:
+Resolution is deliberately simple:
 
-1. If `frontend` exists, resolve that frontend identity's one durable current session at execution time.
-2. Otherwise use the existing `createdFrom.sessionFile` captured when the task was created.
-3. If neither resolves to an existing worker session, fail with `cron_frontend_or_session_required` or `cron_session_missing:<path>`; never materialize a task-owned fallback.
+1. Address the configured frontend identity.
+2. If it has a current session, submit there.
+3. If it has no current session, let the frontend perform its ordinary first-input initialization and establish the binding.
 
-The first run uses `target.prompt`; later runs use `target.continuationPrompt` when present and otherwise reuse `target.prompt`. Reliable task facts, progress, ledgers, and decisions still belong in explicit external state. Legacy `session.mode`, dedicated-session paths, and per-task model/capability overrides are migration inputs only and do not affect execution.
+The scheduler never supplies a session selector, restore path, managed-session leaf, model override, capability override, or `affectChatBinding` switch. Missing `frontend` fails with `cron_frontend_required`.
+
+The first run uses `target.prompt`; later runs use `target.continuationPrompt` when present and otherwise reuse `target.prompt`. Reliable task facts, progress, ledgers, and decisions still belong in explicit external state. Removed session/model/capability fields are stripped from legacy persisted records and do not appear in normalized task APIs.
 
 ## Target contract
 
@@ -205,13 +208,15 @@ Shell stdout/stderr are summarized before storage and delivery. A positive `time
 
 Choose one delivery policy:
 
-- No `frontend`: store the result without automatic delivery.
-- `frontend` with `quiet: false`: automatic delivery.
-- `frontend` with `quiet: true`: no scheduler-managed delivery; use this only when the authorized task prompt deliberately owns a separate outbound SDK action.
+- Agent task with `frontend` and `quiet: false`: display the marked scheduled input and all standard turn output.
+- Agent task with `frontend` and `quiet: true`: submit the input but suppress automatic frontend messages; use this only when the authorized task prompt deliberately owns a separate outbound SDK action.
+- Shell task without `frontend`: store the result without automatic delivery.
 
-An addressable `frontend` routes execution through that frontend's current worker. `frontend: { kind: "chat", key: "..." }` submits the prompt to that current session and uses the Chat destination for automatic output. The TUI frontend is the singleton `{ kind: "tui" }` identity and reuses its existing worker; it owns no scheduler-created session.
+An addressable `frontend` routes execution through that frontend's current session and initializes the frontend normally when no current session exists. `frontend: { kind: "chat", key: "..." }` also selects the Chat destination. TUI is the singleton `{ kind: "tui" }` identity.
 
-Working, interim, independent-error, and final messages are one automatic delivery policy; do not add separate switches for them. Delivery idempotency and the one-frontend/one-session invariant are runtime guarantees, not task options. Quoting a delivered task message contributes quote rich text only and never selects a session.
+For visible Chat runs, Rin emits `⏰ Scheduled task · <name>` followed by the exact submitted prompt before Working begins. This bot-authored automation marker is linked to the current frontend session but is not stored as an inbound platform-user message and cannot retrigger ingress.
+
+Working, interim, independent-error, and final messages remain the frontend's one automatic delivery policy; do not add separate scheduler switches for them. Delivery idempotency and the one-frontend/one-session invariant are runtime guarantees, not task options.
 
 `quiet` defaults to `false`. When true, Rin still records task result and error state. An explicit outbound SDK send remains a separate side effect governed by the task prompt's authority and verification contract.
 
@@ -313,7 +318,7 @@ Report:
 
 - task id and operation;
 - trigger and local next run time;
-- condition, frontend/source-worker, target, delivery, and termination choices;
+- condition, frontend, target, delivery, and termination choices;
 - verification source, such as SDK re-read or `rin status --json`;
 - active run status when operation changes a running task;
 - follow-up boundary when the scheduler record is correct but another system must still change.

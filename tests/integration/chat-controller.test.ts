@@ -2882,6 +2882,76 @@ test("chat controller does not replay todo after a new user message", async () =
   assert.deepEqual(deliveries, []);
 });
 
+test("chat controller presents scheduled input with an explicit marker before working", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  const order = [];
+  controller.app.bots[0].sendMessage = async (_session, message) => {
+    deliveries.push(message);
+    order.push("scheduled-input");
+    return ["scheduled-input-1"];
+  };
+  controller.startBackendAcceptedWorkingReaction = async () => {
+    order.push("working");
+    return true;
+  };
+  controller.driver.runTurn = async (input) => {
+    await controller.handleFrontendEvent({
+      type: "user_message_start",
+      text: input.text,
+      requestTag: input.requestTag,
+    });
+    return {
+      outcome: "terminalOwner",
+      requestTag: input.requestTag,
+      finalText: "done",
+    };
+  };
+
+  await controller.runTurn({
+    text: "inspect owner project",
+    attachments: [],
+    requestTag: "scheduled:owner:1",
+    deliverFinal: false,
+    promptMeta: {
+      source: "scheduled-task",
+      taskId: "owner-task",
+      taskName: "Owner check",
+      taskContextKind: "scheduled-task",
+    },
+  });
+
+  assert.deepEqual(order, ["scheduled-input", "working"]);
+  assert.equal(deliveries.length, 1);
+  const scheduledDelivery = listChatOutboxHistoryItems(
+    controller.agentDir,
+    "delivered",
+  ).find((item) => item.idempotencyKey === "scheduled-input:scheduled:owner:1");
+  assert.ok(scheduledDelivery);
+  assert.equal(
+    deliveryText(scheduledDelivery.payload),
+    "⏰ Scheduled task · Owner check\ninspect owner project",
+  );
+
+  await controller.runTurn({
+    text: "keep this scheduled prompt quiet",
+    requestTag: "scheduled:quiet-input",
+    quietMode: true,
+    deliverFinal: false,
+    promptMeta: {
+      source: "scheduled-task",
+      taskId: "cron_quiet_input",
+      taskName: "Quiet task",
+    },
+  });
+  assert.equal(
+    listChatOutboxHistoryItems(controller.agentDir, "delivered").some(
+      (item) => item.idempotencyKey === "scheduled-input:scheduled:quiet-input",
+    ),
+    false,
+  );
+});
+
 test("chat controller ignores persisted-user events instead of replaying session todo", async () => {
   const controller = await createController("example/1:2");
   const sessionFile = path.join(

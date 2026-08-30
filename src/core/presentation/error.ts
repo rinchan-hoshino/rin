@@ -319,10 +319,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Scheduled task delivery failed because the target chat is unavailable. Check the task frontend binding.",
   cron_frontend_key_required: () =>
     "Scheduled task frontend binding needs a frontend key. Add the key or remove the binding.",
-  cron_frontend_or_session_required: () =>
-    "Scheduled agent tasks need an existing frontend or session binding before they can run.",
-  cron_frontend_tui_unbindable: () =>
-    "Scheduled tasks cannot bind to a TUI because TUI frontends are not addressable. Remove the task frontend binding.",
+  cron_frontend_required: () =>
+    "Scheduled agent tasks need a frontend. Add a chat, TUI, or SDK frontend binding.",
   cron_invalid_agent_task: () =>
     "Scheduled task configuration is not a valid agent task. Fix the task target.",
   cron_invalid_expression: () =>

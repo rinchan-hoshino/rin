@@ -341,7 +341,7 @@ process.stdin.on("data", (chunk) => {
         name: "Demo Task",
         enabled: true,
         trigger: { kind: "once", runAt: "2099-01-01T00:00:00.000Z" },
-        session: { mode: "dedicated" },
+        frontend: { kind: "tui" },
         target: { kind: "agent_prompt", prompt: "hello" },
       },
     });

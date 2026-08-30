@@ -111,16 +111,16 @@ function compileStandaloneFixture(fixture: string) {
       "utf8",
     )
     .replace(
-      'import type { ThinkingLevel } from "@earendil-works/pi-agent-core";',
-      'type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";',
-    )
-    .replace(
       'import type { RinFrontendIdentity } from "../rin-lib/frontend-identity.js";',
       "type RinFrontendIdentity = { kind?: string; key?: string };",
     )
     .replace(
-      /import type \{\n {2}ScheduledTaskSessionMode,\n {2}ScheduledTaskTargetKind,\n\} from "\.\.\/scheduled-task-options\.js";/,
-      'type ScheduledTaskSessionMode = "none" | "dedicated";\ntype ScheduledTaskTargetKind = "agent_prompt" | "shell_command";',
+      'import type { PromptContextMeta } from "../rin-lib/prompt-context.js";',
+      "type PromptContextMeta = { source?: string; [key: string]: unknown };",
+    )
+    .replace(
+      'import type { ScheduledTaskTargetKind } from "../scheduled-task-options.js";',
+      'type ScheduledTaskTargetKind = "agent_prompt" | "shell_command";',
     );
   fs.writeFileSync(file, `${contract}\n${fixture}\n`);
   try {
@@ -175,14 +175,14 @@ test("type-only production modules enforce positive and negative compile contrac
 
 test("cron DTO contract enforces scheduler records without runtime exports", async () => {
   const record =
-    '{ id: "task", createdAt: "2026-08-17T00:00:00.000Z", updatedAt: "2026-08-17T00:00:00.000Z", enabled: true, trigger: { runAt: "2026-08-17T01:00:00.000Z" }, session: { mode: "none" }, target: { kind: "agent_prompt", prompt: "hello" }, runCount: 0, running: false }';
+    '{ id: "task", createdAt: "2026-08-17T00:00:00.000Z", updatedAt: "2026-08-17T00:00:00.000Z", enabled: true, frontend: { kind: "tui" }, trigger: { runAt: "2026-08-17T01:00:00.000Z" }, target: { kind: "agent_prompt", prompt: "hello" }, runCount: 0, running: false }';
   assert.deepEqual(
     compileStandaloneFixture(`const value: CronTaskRecord = ${record};`),
     [],
   );
   assert.ok(
     compileStandaloneFixture(
-      `const value: CronTaskRecord = { ...${record}, session: { mode: "invalid" } };`,
+      'const value: CronTaskInput = { trigger: { runAt: "2026-08-17T01:00:00.000Z" }, target: { kind: "agent_prompt", prompt: "hello" }, frontend: { kind: "tui" }, session: { mode: "none" } };',
     ).length > 0,
   );
   const runtime = await importBuiltModule(

@@ -70,7 +70,7 @@ test("cron scheduler starts without implicit tasks", async () => {
   });
 });
 
-test("cron upsert validates trigger, session, target, frontend, condition, and model options", async () => {
+test("cron upsert validates trigger, target, frontend, and condition while dropping retired options", async () => {
   await withAgentDir(async (agentDir) => {
     const scheduler = new CronScheduler({ agentDir });
     assert.throws(
@@ -94,15 +94,6 @@ test("cron upsert validates trigger, session, target, frontend, condition, and m
           target: { kind: "shell_command", command: "owner" },
         } as any),
       /invalid_runAt/,
-    );
-    assert.throws(
-      () =>
-        scheduler.upsertTask({
-          trigger: { runAt: futureIso() },
-          session: { mode: "invalid" },
-          target: { kind: "shell_command", command: "owner" },
-        } as any),
-      /cron_invalid_session_mode/,
     );
     assert.throws(
       () =>
@@ -151,7 +142,7 @@ test("cron upsert validates trigger, session, target, frontend, condition, and m
       frontend: { key: "owner-front" },
       target: { kind: "shell_command", command: "owner" },
     } as any);
-    assert.deepEqual(defaulted.session, { mode: "none" });
+    assert.equal(Object.hasOwn(defaulted, "session"), false);
     assert.deepEqual(defaulted.frontend, { key: "owner-front" });
     assert.throws(
       () =>
@@ -192,7 +183,7 @@ test("cron upsert validates trigger, session, target, frontend, condition, and m
           prompt: " owner prompt ",
           continuationPrompt: " continue owner ",
         },
-      },
+      } as any,
       {
         sessionFile: "/tmp/created.jsonl",
         sessionId: "created-session",
@@ -205,15 +196,15 @@ test("cron upsert validates trigger, session, target, frontend, condition, and m
       kind: "desktop",
       key: "owner-front",
     });
-    assert.equal(normalized.deliverFinal, undefined);
+    assert.equal((normalized as any).deliverFinal, undefined);
     assert.equal(normalized.quiet, false);
-    assert.equal(normalized.model, "owner/model");
-    assert.equal(normalized.thinkingLevel, "high");
-    assert.deepEqual(normalized.disabledRinCapabilities, ["memory", "todo"]);
+    assert.equal(Object.hasOwn(normalized, "model"), false);
+    assert.equal(Object.hasOwn(normalized, "thinkingLevel"), false);
+    assert.equal(Object.hasOwn(normalized, "disabledRinCapabilities"), false);
+    assert.equal(Object.hasOwn(normalized, "session"), false);
+    assert.equal(Object.hasOwn(normalized, "dedicatedSessionFile"), false);
     assert.equal(normalized.termination?.maxRuns, undefined);
     assert.equal(normalized.condition?.timeoutMs, 100);
-    assert.equal(normalized.dedicatedSessionPersistent, true);
-    assert.match(normalized.dedicatedSessionFile ?? "", /normalized\.jsonl$/);
     assert.deepEqual(normalized.createdFrom?.frontend, {
       kind: "chat",
       key: "created-chat",
@@ -235,13 +226,13 @@ test("cron upsert validates trigger, session, target, frontend, condition, and m
         command: "printf updated",
         timeoutMs: 1,
       },
-    });
+    } as any);
     assert.equal(updated.createdAt, normalized.createdAt);
     assert.equal(updated.name, undefined);
     assert.equal(updated.frontend, undefined);
-    assert.equal(updated.model, undefined);
-    assert.equal(updated.thinkingLevel, undefined);
-    assert.equal(updated.disabledRinCapabilities, undefined);
+    assert.equal(Object.hasOwn(updated, "model"), false);
+    assert.equal(Object.hasOwn(updated, "thinkingLevel"), false);
+    assert.equal(Object.hasOwn(updated, "disabledRinCapabilities"), false);
     assert.equal(updated.termination, undefined);
     assert.equal(updated.condition, undefined);
     assert.equal(updated.target.kind, "shell_command");
@@ -263,10 +254,10 @@ test("cron updates retain omitted state and keep completed tasks terminal", asyn
       termination: { maxRuns: 3 },
       condition: { code: "false", timeoutMs: 90_000 },
       target: { kind: "shell_command", command: "printf retained" },
-    });
-    assert.equal(created.session.mode, "none");
+    } as any);
+    assert.equal(Object.hasOwn(created, "session"), false);
     assert.deepEqual(created.frontend, { key: "owner-frontend" });
-    assert.deepEqual(created.disabledRinCapabilities, ["memory"]);
+    assert.equal(Object.hasOwn(created, "disabledRinCapabilities"), false);
     assert.equal(created.condition?.timeoutMs, 60_000);
     assert.equal(created.target.kind, "shell_command");
     if (created.target.kind === "shell_command") {
@@ -281,10 +272,10 @@ test("cron updates retain omitted state and keep completed tasks terminal", asyn
       condition: { code: "true" },
     });
     assert.equal(retained.trigger.expression, "*/10 * * * *");
-    assert.equal(retained.session.mode, "none");
+    assert.equal(Object.hasOwn(retained, "session"), false);
     assert.equal(retained.target.kind, "shell_command");
     assert.deepEqual(retained.frontend, { key: "owner-frontend" });
-    assert.deepEqual(retained.disabledRinCapabilities, ["memory"]);
+    assert.equal(Object.hasOwn(retained, "disabledRinCapabilities"), false);
     assert.equal(retained.termination?.maxRuns, 3);
     assert.equal(retained.condition?.lastResult, false);
     assert.ok(retained.condition?.lastEvaluatedAt);
@@ -292,8 +283,8 @@ test("cron updates retain omitted state and keep completed tasks terminal", asyn
     const cleared = scheduler.upsertTask({
       id: "retained",
       disabledRinCapabilities: [],
-    });
-    assert.equal(cleared.disabledRinCapabilities, undefined);
+    } as any);
+    assert.equal(Object.hasOwn(cleared, "disabledRinCapabilities"), false);
     const recurringReschedule = scheduler.rescheduleOneTimeTask(
       "retained",
       futureIso(120),
@@ -364,8 +355,7 @@ test("cron task controls preserve lifecycle state and reject missing or complete
       /cron_task_not_found/,
     );
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(terminated.length >= 3, true);
-    assert.deepEqual(terminated.at(-1), { controllerKey: "owner-controller" });
+    assert.equal(terminated.length, 0);
     scheduler.stop();
   });
 });
@@ -627,8 +617,9 @@ test("cron reload accepts legacy persisted bindings and rejects invalid task fil
     });
     assert.equal(legacy?.deliverFinal, undefined);
     assert.equal(legacy?.quiet, false);
-    assert.equal(legacy?.thinkingLevel, undefined);
-    assert.equal(legacy?.model, "owner/model");
+    assert.equal(Object.hasOwn(legacy ?? {}, "thinkingLevel"), false);
+    assert.equal(Object.hasOwn(legacy ?? {}, "model"), false);
+    assert.equal(Object.hasOwn(legacy ?? {}, "session"), false);
     assert.equal(legacy?.running, false);
     assert.equal(legacy?.lastError, "42");
 
@@ -647,7 +638,12 @@ test("cron reload accepts legacy persisted bindings and rejects invalid task fil
         },
       ])}\n`,
     );
-    assert.throws(() => scheduler.reloadTasks(), /cron_tasks_file_invalid/);
+    const migrated = scheduler.reloadTasks();
+    assert.equal(migrated.taskCount, 1);
+    assert.equal(
+      Object.hasOwn(scheduler.getTask("invalid-session") ?? {}, "session"),
+      false,
+    );
     scheduler.stop();
   });
 });

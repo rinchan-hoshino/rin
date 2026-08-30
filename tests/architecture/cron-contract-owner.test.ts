@@ -14,10 +14,8 @@ const contractTypes = [
   "CronTaskFrontendBinding",
   "CronTaskInput",
   "CronTaskRecord",
-  "CronTaskSessionBinding",
   "CronTaskTarget",
   "CronTaskTermination",
-  "CronTaskThinkingLevel",
   "CronTaskTrigger",
 ].sort();
 
@@ -109,4 +107,24 @@ test("cron modules depend one-way on the DTO contract", () => {
     ),
     false,
   );
+});
+
+test("cron task contract has no task-owned execution session or runtime overrides", () => {
+  const contract = fs.readFileSync(contractPath, "utf8");
+  const execution = fs.readFileSync(
+    path.join(daemonRoot, "cron-execution.ts"),
+    "utf8",
+  );
+  const options = fs.readFileSync(
+    path.resolve("src/core/scheduled-task-options.ts"),
+    "utf8",
+  );
+
+  assert.doesNotMatch(contract, /CronTaskSessionBinding/);
+  assert.doesNotMatch(contract, /dedicatedSession(File|Persistent)/);
+  assert.doesNotMatch(contract, /disabledRinCapabilities/);
+  assert.doesNotMatch(contract, /thinkingLevel/);
+  assert.doesNotMatch(execution, /affectChatBinding/);
+  assert.doesNotMatch(execution, /managedSessionLeaf/);
+  assert.doesNotMatch(options, /SCHEDULED_TASK_SESSION_MODES/);
 });

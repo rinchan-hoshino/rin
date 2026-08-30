@@ -14,45 +14,24 @@ const scheduledTaskOptionsMod = await import(
     .href
 );
 
-test("scheduled task options expose only independent execution modes", () => {
+test("scheduled task options expose targets and management without session modes", () => {
   assert.deepEqual(scheduledTaskOptionsMod.SCHEDULED_TASK_TARGET_KINDS, [
     "agent_prompt",
     "shell_command",
-  ]);
-  assert.deepEqual(scheduledTaskOptionsMod.SCHEDULED_TASK_SESSION_MODES, [
-    "none",
-    "dedicated",
   ]);
   assert.deepEqual(scheduledTaskOptionsMod.SCHEDULED_TASK_MANAGE_ACTIONS, [
     "delete",
     "pause",
     "resume",
   ]);
+  assert.equal(scheduledTaskOptionsMod.SCHEDULED_TASK_SESSION_MODES, undefined);
   assert.equal(
     scheduledTaskOptionsMod.DEFAULT_SCHEDULED_TASK_SESSION_MODE,
-    "none",
+    undefined,
   );
-});
-
-test("scheduled task session mode normalization accepts only current modes", () => {
-  for (const mode of scheduledTaskOptionsMod.SCHEDULED_TASK_SESSION_MODES) {
-    assert.equal(
-      scheduledTaskOptionsMod.normalizeScheduledTaskSessionMode(` ${mode} `),
-      mode,
-    );
-    assert.equal(
-      scheduledTaskOptionsMod.isScheduledTaskSessionMode(mode),
-      true,
-    );
-  }
-  for (const value of [undefined, null, "", "session_continue", "other", 42]) {
-    assert.equal(
-      scheduledTaskOptionsMod.normalizeScheduledTaskSessionMode(value),
-      undefined,
-    );
-    assert.equal(
-      scheduledTaskOptionsMod.isScheduledTaskSessionMode(value),
-      false,
-    );
-  }
+  assert.equal(
+    scheduledTaskOptionsMod.normalizeScheduledTaskSessionMode,
+    undefined,
+  );
+  assert.equal(scheduledTaskOptionsMod.isScheduledTaskSessionMode, undefined);
 });
