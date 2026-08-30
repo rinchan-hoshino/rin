@@ -513,7 +513,7 @@ export async function executeCronAgentTask(
     controllerKey: chatKey ? "default" : cronTaskRunControllerKey(task),
     ...(chatKey ? { chatKey } : {}),
     deliverFinal: !quiet,
-    quietMode: quiet,
+    ...(quiet ? { quietMode: true } : {}),
     text: prompt,
     ...(options.runId ? { requestTag: options.runId } : {}),
     ...(options.deliveryIdempotencyKey

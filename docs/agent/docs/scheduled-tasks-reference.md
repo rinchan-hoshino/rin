@@ -208,7 +208,7 @@ Shell stdout/stderr are summarized before storage and delivery. A positive `time
 
 Choose one delivery policy:
 
-- Agent task with `frontend` and `quiet: false`: display the marked scheduled input and all standard turn output.
+- Agent task with `frontend` and `quiet: false`: allow automatic final delivery and defer progress visibility to the frontend's own quiet setting. A non-quiet Chat displays the marked scheduled input and progress; a quiet Chat suppresses them.
 - Agent task with `frontend` and `quiet: true`: submit the input but suppress automatic frontend messages; use this only when the authorized task prompt deliberately owns a separate outbound SDK action.
 - Shell task without `frontend`: store the result without automatic delivery.
 

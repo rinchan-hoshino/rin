@@ -1555,7 +1555,7 @@ test("cron quiet agent tasks keep the frontend turn but suppress automatic deliv
     });
     assert.equal(calls[1].chatKey, "telegram/demo:1");
     assert.equal(calls[1].deliverFinal, true);
-    assert.equal(calls[1].quietMode, false);
+    assert.equal("quietMode" in calls[1], false);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

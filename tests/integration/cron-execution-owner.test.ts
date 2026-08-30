@@ -238,7 +238,7 @@ test("cron prompt context identifies chat and controller frontends", () => {
   );
 });
 
-test("agent tasks submit one ordinary marked input to the current frontend", async () => {
+test("agent tasks defer non-quiet progress delivery to the current frontend", async () => {
   await withAgentDir(async (agentDir) => {
     const calls: any[] = [];
     const ownerTask = task({
@@ -274,7 +274,7 @@ test("agent tasks submit one ordinary marked input to the current frontend", asy
     assert.equal(calls[0].chatKey, "discord/1:2");
     assert.equal("affectChatBinding" in calls[0], false);
     assert.equal(calls[0].deliverFinal, true);
-    assert.equal(calls[0].quietMode, false);
+    assert.equal("quietMode" in calls[0], false);
     assert.equal(calls[0].text, "run owner task");
     assert.equal(calls[0].requestTag, "scheduled:owner");
     assert.equal(calls[0].deliveryIdempotencyKey, "delivery-owner");

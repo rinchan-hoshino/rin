@@ -411,7 +411,7 @@ test("agent docs expose scheduled task operation workflow", () => {
   );
   assert.match(
     scheduledTasksReference,
-    /Agent task with `frontend` and `quiet: false`: display the marked scheduled input/,
+    /Agent task with `frontend` and `quiet: false`: allow automatic final delivery and defer progress visibility to the frontend's own quiet setting/,
   );
   assert.match(
     scheduledTasksReference,

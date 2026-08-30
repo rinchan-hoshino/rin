@@ -74,7 +74,7 @@ A false recurring condition schedules the next tick without starting the target.
 
 ## Delivery decision
 
-- **Automatic agent input:** set `frontend` and keep `quiet: false`. Rin displays `⏰ Scheduled task · <name>` with the submitted prompt, then the frontend's standard Working, interim, independent-error, and final flow takes over.
+- **Automatic agent input:** set `frontend` and keep `quiet: false`. Final delivery stays automatic; progress quietness comes from the frontend. A non-quiet Chat displays `⏰ Scheduled task · <name>` plus progress; a quiet Chat suppresses both.
 - **Quiet agent input:** set `frontend` and `quiet: true`. The same current session receives the prompt without automatic frontend messages; the authorized task prompt must explicitly perform and verify any separate outbound SDK action.
 - **Record-only shell:** omit `frontend` from `shell_command` when no automatic delivery is needed.
 
