@@ -48,7 +48,7 @@ export type CronSessionInvocation = {
   scheduledNextRunAt?: string;
   continuing?: boolean;
   name?: string;
-  frontend: CronTaskFrontendBinding;
+  frontend?: CronTaskFrontendBinding;
   quiet?: boolean;
   target: Extract<CronTaskTarget, { kind: "agent_prompt" }>;
   promptMeta: PromptContextMeta & { sentAt: number };
@@ -65,6 +65,7 @@ export type CronTaskRecord = {
     sessionFile?: string;
     sessionId?: string;
     sessionName?: string;
+    chatKey?: string;
     frontend?: RinFrontendIdentity;
   };
   enabled: boolean;

@@ -582,6 +582,98 @@ test("cron session invocations route prompt work through the owned adapter", asy
   });
 });
 
+test("cron startup migrates creator chat keys and preserves unbound legacy agent tasks", async () => {
+  await withAgentDir(async (agentDir) => {
+    const filePath = cronTasksPath(agentDir);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const createdAt = "2026-07-17T00:00:00.000Z";
+    const unboundTarget = { kind: "agent_prompt", prompt: "owner prompt" };
+    fs.writeFileSync(
+      filePath,
+      `${JSON.stringify([
+        {
+          id: "creator-chat-key",
+          createdAt,
+          updatedAt: createdAt,
+          createdFrom: { chatKey: "onebot/bot:owner" },
+          enabled: true,
+          trigger: { runAt: futureIso() },
+          target: unboundTarget,
+          runCount: 0,
+          running: false,
+        },
+        {
+          id: "unbound-due",
+          createdAt,
+          updatedAt: createdAt,
+          createdFrom: {},
+          enabled: true,
+          trigger: { runAt: pastIso() },
+          target: unboundTarget,
+          runCount: 0,
+          running: false,
+        },
+        {
+          id: "unbound-active",
+          createdAt,
+          updatedAt: createdAt,
+          createdFrom: {},
+          enabled: true,
+          trigger: { expression: "5 7 * * *", timezone: "local" },
+          target: unboundTarget,
+          runCount: 1,
+          running: false,
+          activeInvocation: {
+            id: "unbound-active:1:2026-07-17T00:00:00.000Z",
+            requestTag: "scheduled:unbound-active:1:2026-07-17T00:00:00.000Z",
+            taskId: "unbound-active",
+            runCount: 1,
+            startedAt: createdAt,
+            target: unboundTarget,
+            promptMeta: { source: "scheduled-task", sentAt: 1 },
+            retryAttempt: 1,
+            nextAttemptAt: pastIso(),
+          },
+        },
+      ])}\n`,
+    );
+    const turnRequests: unknown[] = [];
+    const scheduler = new CronScheduler({
+      agentDir,
+      chat: {
+        async runTurn(payload) {
+          turnRequests.push(payload);
+          return { finalText: "must not run" };
+        },
+      },
+    });
+    scheduler.start();
+    try {
+      assert.deepEqual(scheduler.getTask("creator-chat-key")?.frontend, {
+        kind: "chat",
+        key: "onebot/bot:owner",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(scheduler.getTask("unbound-due")?.runCount, 0);
+      assert.equal(scheduler.getTask("unbound-due")?.enabled, true);
+      assert.equal(scheduler.getTask("unbound-active")?.running, true);
+      assert.deepEqual(turnRequests, []);
+    } finally {
+      scheduler.stop();
+    }
+    const persisted = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    assert.equal(
+      persisted.find((row: any) => row.id === "unbound-due")?.enabled,
+      true,
+    );
+    assert.equal(
+      persisted.find((row: any) => row.id === "unbound-active")
+        ?.activeInvocation?.requestTag,
+      "scheduled:unbound-active:1:2026-07-17T00:00:00.000Z",
+    );
+  });
+});
+
 test("cron reload accepts legacy persisted bindings and rejects invalid task files", async () => {
   await withAgentDir(async (agentDir) => {
     const filePath = cronTasksPath(agentDir);

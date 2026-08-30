@@ -165,6 +165,7 @@ function readCronTaskRows(file: string) {
 function normalizeCronSessionInvocation(
   value: unknown,
   taskId: string,
+  taskFrontend?: CronTaskFrontendBinding,
 ): CronSessionInvocation | undefined {
   if (value === undefined || value === null) return undefined;
   if (!value || typeof value !== "object") {
@@ -194,8 +195,10 @@ function normalizeCronSessionInvocation(
   if (target.kind !== "agent_prompt") {
     throw new Error("cron_tasks_file_invalid");
   }
-  const frontend = normalizeTaskFrontend(raw.frontend, undefined);
-  if (!frontend) throw new Error("cron_tasks_file_invalid");
+  const frontend = normalizeTaskFrontend(
+    raw.frontend || taskFrontend,
+    undefined,
+  );
   const sentAt = Number(raw.promptMeta?.sentAt);
   if (!Number.isFinite(sentAt) || sentAt <= 0) {
     throw new Error("cron_tasks_file_invalid");
@@ -218,7 +221,7 @@ function normalizeCronSessionInvocation(
     continuing:
       raw.continuing === undefined ? undefined : Boolean(raw.continuing),
     name: safeString(raw.name).trim() || undefined,
-    frontend,
+    ...(frontend ? { frontend } : {}),
     quiet: Boolean(raw.quiet),
     target,
     promptMeta: { ...raw.promptMeta, sentAt },
@@ -364,6 +367,9 @@ export class CronScheduler {
       running: false,
       activeInvocation: existing?.activeInvocation,
     };
+    if (task.activeInvocation && frontend && !task.activeInvocation.frontend) {
+      task.activeInvocation.frontend = { ...frontend };
+    }
 
     task.nextRunAt =
       existing?.activeInvocation && input.trigger === undefined
@@ -473,6 +479,9 @@ export class CronScheduler {
     const task = this.tasks.get(taskId);
     if (!task) throw new Error(`cron_task_not_found:${taskId}`);
     if (task.completedAt) throw new Error(`cron_task_completed:${taskId}`);
+    if (task.target.kind === "agent_prompt" && !task.frontend) {
+      throw new Error("cron_frontend_required");
+    }
     if (this.activeExecutions.has(taskId) || task.activeInvocation) {
       throw new Error(`cron_task_already_running:${taskId}`);
     }
@@ -569,22 +578,25 @@ export class CronScheduler {
           };
         }
         const legacyChatKey = safeString((row as any).chatKey).trim();
+        const creatorChatKey = safeString(row.createdFrom?.chatKey).trim();
         row.frontend = normalizeTaskFrontend(
           row.frontend ||
             row.createdFrom?.frontend ||
-            (legacyChatKey ? { kind: "chat", key: legacyChatKey } : undefined),
+            (creatorChatKey
+              ? { kind: "chat", key: creatorChatKey }
+              : legacyChatKey
+                ? { kind: "chat", key: legacyChatKey }
+                : undefined),
           undefined,
         );
         delete (row as any).chatKey;
         row.trigger = normalizeTaskTrigger(row.trigger);
         row.condition = normalizeTaskCondition(row.condition, undefined);
         row.target = normalizeTaskTarget(row.target);
-        if (row.target.kind === "agent_prompt" && !row.frontend) {
-          throw new Error("cron_frontend_required");
-        }
         row.activeInvocation = normalizeCronSessionInvocation(
           row.activeInvocation,
           String(row.id),
+          row.frontend,
         );
         row.nextRunAt = row.completedAt
           ? undefined
@@ -729,6 +741,11 @@ export class CronScheduler {
         changed = true;
         continue;
       }
+      if (!invocation.frontend) {
+        if (!task.frontend) continue;
+        invocation.frontend = { ...task.frontend };
+        changed = true;
+      }
       const nextAttemptAt = Date.parse(invocation.nextAttemptAt || "");
       if (Number.isFinite(nextAttemptAt) && nextAttemptAt > now) continue;
       delete invocation.nextAttemptAt;
@@ -811,6 +828,7 @@ export class CronScheduler {
             task.enabled &&
             !this.activeExecutions.has(task.id) &&
             !task.completedAt &&
+            (task.target.kind !== "agent_prompt" || Boolean(task.frontend)) &&
             task.nextRunAt &&
             Date.parse(task.nextRunAt) <= now,
         )
