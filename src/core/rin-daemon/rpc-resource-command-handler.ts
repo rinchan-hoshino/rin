@@ -184,17 +184,6 @@ export function createRpcResourceCommandHandlers(
             ) {
               return { handled: false };
             }
-            const manager = (session.extensionRunner?.createCommandContext?.()
-              ?.sessionManager ?? session.sessionManager) as
-              | { __rinFrontend?: typeof frontendIdentity }
-              | undefined;
-            if (manager) {
-              if (frontendIdentity) {
-                manager.__rinFrontend = frontendIdentity;
-              } else {
-                delete manager.__rinFrontend;
-              }
-            }
             const builtinResult = await runBuiltinCommand(
               runtime,
               commandLine,
@@ -210,7 +199,10 @@ export function createRpcResourceCommandHandlers(
               session.extensionRunner?.getCommand?.(commandName)
             ) {
               turnCoordinator.assertAdmissionOpen();
-              await session.prompt(commandLine);
+              await session.prompt(commandLine, {
+                source: "rpc",
+                frontendIdentity,
+              } as any);
               return { handled: true };
             }
             return builtinResult;

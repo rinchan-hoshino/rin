@@ -191,14 +191,10 @@ test("RPC protocol handlers expose narrow extension, resource, and session bound
   );
 });
 
-test("RPC extension commands bind their normalized frontend identity before prompt dispatch", async () => {
+test("RPC extension commands forward normalized frontend identity through prompt invocation", async () => {
   let observedFrontendIdentity: unknown;
-  const sessionManager: Record<string, unknown> = {
-    __rinFrontend: { kind: "stale", key: "old" },
-  };
   const session = fakeSession({
     extensionRunner: {
-      createCommandContext: () => ({ sessionManager }),
       getRegisteredCommands: () => [
         {
           name: "owner",
@@ -209,8 +205,8 @@ test("RPC extension commands bind their normalized frontend identity before prom
       ],
       getCommand: (name: string) => (name === "owner" ? {} : undefined),
     },
-    prompt: async () => {
-      observedFrontendIdentity = sessionManager.__rinFrontend;
+    prompt: async (_commandLine: string, options: Record<string, unknown>) => {
+      observedFrontendIdentity = options.frontendIdentity;
     },
   });
   const handlers = resourceModule.createRpcResourceCommandHandlers({
@@ -234,7 +230,6 @@ test("RPC extension commands bind their normalized frontend identity before prom
     key: "discord/1:2",
   });
 
-  sessionManager.__rinFrontend = { kind: "stale", key: "old" };
   observedFrontendIdentity = "not-called";
   await handlers.run_command(
     request("run_command", { commandLine: "/owner value" }),
