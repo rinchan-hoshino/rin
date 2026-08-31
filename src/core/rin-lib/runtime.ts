@@ -634,8 +634,9 @@ function applyRinPromptBuilder(session: any, state: LazySystemPromptState) {
   clearSessionBaseSystemPrompt(session);
 }
 
-const AUTO_RELOAD_AFTER_COMPACTION_KEY = Symbol.for(
-  "rin.autoReloadAfterCompaction",
+const RIN_SESSION_RELOAD_POLICY_KEY = Symbol.for("rin.sessionReloadPolicy");
+const RIN_SESSION_ACTIVITY_BEFORE_START_KEY = Symbol.for(
+  "rin.sessionActivityBeforeStart",
 );
 const COMPACTION_PERCENT_THRESHOLD_KEY = Symbol.for(
   "rin.compactionPercentThreshold",
@@ -646,6 +647,33 @@ const PROVIDER_OVERFLOW_PREFLIGHT_KEY = Symbol.for(
 const MID_TURN_THRESHOLD_COMPACTION_KEY = Symbol.for(
   "rin.midTurnThresholdCompaction",
 );
+
+const RIN_IDLE_SESSION_RELOAD_MS = 25 * 60 * 60 * 1_000;
+
+type RinSessionActivity = { marker: string; timestamp: number };
+
+function latestRinSessionActivity(
+  session: any,
+): RinSessionActivity | undefined {
+  const branch = session?.sessionManager?.getBranch?.();
+  if (!Array.isArray(branch)) return undefined;
+  let latest: RinSessionActivity | undefined;
+  for (let index = 0; index < branch.length; index += 1) {
+    const entry = branch[index];
+    const rawTimestamp = entry?.timestamp;
+    const timestamp =
+      typeof rawTimestamp === "number" && Number.isFinite(rawTimestamp)
+        ? rawTimestamp
+        : Date.parse(String(rawTimestamp || ""));
+    if (!Number.isFinite(timestamp)) continue;
+    if (latest && latest.timestamp > timestamp) continue;
+    latest = {
+      marker: `${String(entry?.id || index)}:${String(rawTimestamp)}`,
+      timestamp,
+    };
+  }
+  return latest;
+}
 
 function rinProviderPruningOptions(session: any) {
   return {
@@ -995,38 +1023,114 @@ export function applyRinCompactionPercentThreshold(
   session[COMPACTION_PERCENT_THRESHOLD_KEY] = { originalCheckCompaction };
 }
 
-export function applyAutoReloadAfterCompaction(session: any) {
+export function applyRinSessionReloadPolicy(session: any) {
   if (!session || typeof session !== "object") return;
-  if ((session as any)[AUTO_RELOAD_AFTER_COMPACTION_KEY]) return;
+  if ((session as any)[RIN_SESSION_RELOAD_POLICY_KEY]) return;
   if (typeof session.subscribe !== "function") return;
   if (typeof session.reload !== "function") return;
 
-  let reloadInFlight: Promise<void> | null = null;
-  let reloadQueued = false;
+  const originalReload = session.reload.bind(session);
+  type ReloadKind = "compaction" | "explicit" | "idle";
+  type ReloadOptions = {
+    activityMarker?: string;
+    kind?: ReloadKind;
+    reloadArgs?: any[];
+    suppressErrors?: boolean;
+  };
+  type QueuedReload = {
+    options: ReloadOptions;
+    promise: Promise<any>;
+    resolve: (value: any) => void;
+    reject: (error: unknown) => void;
+  };
+
+  let reloadInFlight: Promise<any> | null = null;
+  let reloadInFlightKind: ReloadKind | null = null;
   let reloadScheduled = false;
+  const queuedReloads: QueuedReload[] = [];
+  let lastReloadedActivityMarker = "";
+  let lastReloadCompletedAt = 0;
+  let firstPromptPending = true;
+  const activityBeforeSessionStart = (session as any)[
+    RIN_SESSION_ACTIVITY_BEFORE_START_KEY
+  ] as RinSessionActivity | undefined;
 
-  const runReload = () => {
-    if (reloadInFlight) {
-      reloadQueued = true;
-      return reloadInFlight;
+  const exposedReloadPromise = (
+    promise: Promise<any>,
+    suppressErrors: boolean | undefined,
+  ) => (suppressErrors ? promise.catch(() => undefined) : promise);
+
+  const scheduleNextReload = () => {
+    const next = queuedReloads[0];
+    if (!next) return;
+    if (next.options.kind === "compaction" && agentTurnActive) {
+      reloadAfterAgentEnd = true;
+      return;
     }
+    queuedReloads.shift();
+    reloadScheduled = true;
+    setTimeout(() => {
+      reloadScheduled = false;
+      startReload(next.options).then(next.resolve, next.reject);
+    }, 0);
+  };
 
-    reloadInFlight = (async () => {
-      try {
-        await session.reload();
-      } catch {}
-    })().finally(() => {
-      reloadInFlight = null;
-      if (!reloadQueued) return;
-      reloadQueued = false;
-      reloadScheduled = true;
-      setTimeout(() => {
-        reloadScheduled = false;
-        void requestCompactionReload();
-      }, 0);
+  function startReload(options: ReloadOptions = {}): Promise<any> {
+    const activityBeforeReload = latestRinSessionActivity(session);
+    const refreshedActivityMarker =
+      options.activityMarker ||
+      (firstPromptPending ? activityBeforeSessionStart?.marker : undefined) ||
+      activityBeforeReload?.marker;
+    reloadInFlightKind = options.kind || "idle";
+    reloadInFlight = Promise.resolve()
+      .then(async () => {
+        const result = await originalReload(...(options.reloadArgs || []));
+        lastReloadCompletedAt = Date.now();
+        if (refreshedActivityMarker) {
+          lastReloadedActivityMarker = refreshedActivityMarker;
+        }
+        return result;
+      })
+      .finally(() => {
+        reloadInFlight = null;
+        reloadInFlightKind = null;
+        scheduleNextReload();
+      });
+    return exposedReloadPromise(reloadInFlight, options.suppressErrors);
+  }
+
+  const enqueueReload = (options: ReloadOptions) => {
+    if (options.kind === "compaction") {
+      const queuedCompaction = queuedReloads.find(
+        (entry) => entry.options.kind === "compaction",
+      );
+      if (queuedCompaction) return queuedCompaction.promise;
+    }
+    let resolve!: (value: any) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<any>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
     });
+    queuedReloads.push({ options, promise, resolve, reject });
+    return promise;
+  };
 
-    return reloadInFlight;
+  const runReload = (options: ReloadOptions = {}) => {
+    const kind = options.kind || "idle";
+    if (reloadInFlight || reloadScheduled || queuedReloads.length > 0) {
+      if (kind === "idle" && reloadInFlightKind === "idle" && reloadInFlight) {
+        return exposedReloadPromise(reloadInFlight, options.suppressErrors);
+      }
+      const queued = enqueueReload({ ...options, kind });
+      if (!reloadInFlight && !reloadScheduled) scheduleNextReload();
+      return exposedReloadPromise(queued, options.suppressErrors);
+    }
+    return startReload({ ...options, kind });
+  };
+
+  session.reload = async function trackedRinSessionReload(...args: any[]) {
+    return await runReload({ kind: "explicit", reloadArgs: args });
   };
 
   let compactionDepth = 0;
@@ -1036,10 +1140,14 @@ export function applyAutoReloadAfterCompaction(session: any) {
 
   const requestCompactionReload = async () => {
     if (agentTurnActive) {
+      enqueueReload({ kind: "compaction", suppressErrors: true });
       reloadAfterAgentEnd = true;
       return;
     }
-    await runReload();
+    await runReload({
+      kind: "compaction",
+      suppressErrors: true,
+    });
   };
 
   const finishCompactionReload = async () => {
@@ -1081,27 +1189,63 @@ export function applyAutoReloadAfterCompaction(session: any) {
     };
   }
 
+  const waitForReloadBarrier = async () => {
+    while (
+      reloadInFlight ||
+      reloadScheduled ||
+      queuedReloads.length > 0 ||
+      reloadAfterAgentEnd ||
+      pendingCompactionReload ||
+      compactionDepth > 0
+    ) {
+      if (reloadInFlight) {
+        const currentReload = reloadInFlight;
+        const failPromptOnReloadError =
+          reloadInFlightKind === "idle" || reloadInFlightKind === "explicit";
+        try {
+          await currentReload;
+        } catch (error) {
+          if (failPromptOnReloadError) throw error;
+        }
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+  };
+
   const originalPrompt =
     typeof session.prompt === "function" ? session.prompt.bind(session) : null;
   if (originalPrompt) {
-    session.prompt = async function waitForCompactionReloadBeforePrompt(
+    session.prompt = async function applyReloadPolicyBeforePrompt(
       ...args: any[]
     ) {
-      while (
-        reloadInFlight ||
-        reloadScheduled ||
-        reloadQueued ||
-        reloadAfterAgentEnd ||
-        pendingCompactionReload ||
-        compactionDepth > 0
-      ) {
-        if (reloadInFlight) {
-          await reloadInFlight;
-        } else {
-          await new Promise((resolve) => setTimeout(resolve, 0));
+      await waitForReloadBarrier();
+      if (!agentTurnActive && session.isStreaming !== true) {
+        const activity = firstPromptPending
+          ? activityBeforeSessionStart || latestRinSessionActivity(session)
+          : latestRinSessionActivity(session);
+        const effectiveActivityAt =
+          activity?.marker === lastReloadedActivityMarker
+            ? Math.max(activity.timestamp, lastReloadCompletedAt)
+            : activity?.timestamp;
+        if (
+          activity &&
+          Number.isFinite(effectiveActivityAt) &&
+          Date.now() - Number(effectiveActivityAt) >= RIN_IDLE_SESSION_RELOAD_MS
+        ) {
+          await runReload({
+            activityMarker: activity.marker,
+            kind: "idle",
+          });
+          await waitForReloadBarrier();
         }
       }
-      return await originalPrompt(...args);
+      try {
+        return await originalPrompt(...args);
+      } finally {
+        firstPromptPending = false;
+        delete (session as any)[RIN_SESSION_ACTIVITY_BEFORE_START_KEY];
+      }
     };
   }
 
@@ -1114,7 +1258,7 @@ export function applyAutoReloadAfterCompaction(session: any) {
       agentTurnActive = false;
       if (!reloadAfterAgentEnd) return;
       reloadAfterAgentEnd = false;
-      void runReload();
+      if (!reloadInFlight && !reloadScheduled) scheduleNextReload();
       return;
     }
     if (event?.type !== "compaction_end") return;
@@ -1126,8 +1270,9 @@ export function applyAutoReloadAfterCompaction(session: any) {
     void requestCompactionReload();
   });
 
-  (session as any)[AUTO_RELOAD_AFTER_COMPACTION_KEY] = {
+  (session as any)[RIN_SESSION_RELOAD_POLICY_KEY] = {
     unsubscribe,
+    originalReload,
     originalRunAutoCompaction,
     originalCompact,
     originalPrompt,
@@ -1399,6 +1544,9 @@ export async function createConfiguredAgentSession(
       }),
     });
 
+    const activityBeforeSessionStart = latestRinSessionActivity({
+      sessionManager,
+    });
     const result = await createAgentSessionFromServices({
       ...(options.piAgentSessionOptions ?? {}),
       services,
@@ -1415,6 +1563,10 @@ export async function createConfiguredAgentSession(
       ],
     });
     sessionRef.current = result.session;
+    if (activityBeforeSessionStart) {
+      result.session[RIN_SESSION_ACTIVITY_BEFORE_START_KEY] =
+        activityBeforeSessionStart;
+    }
     if (
       !installPiSessionCompactionOwner(result.session, (event) =>
         runPiNativeCompactionWithoutFileSummary(
@@ -1457,7 +1609,7 @@ export async function createConfiguredAgentSession(
 
     applyRinExtensionContextApi(result.session, agentDir);
     applyRinPromptBuilder(result.session, promptState);
-    applyAutoReloadAfterCompaction(result.session);
+    applyRinSessionReloadPolicy(result.session);
     return {
       ...result,
       services,

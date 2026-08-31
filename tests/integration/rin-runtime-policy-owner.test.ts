@@ -1167,7 +1167,7 @@ test("runtime session shutdown emits Rin capability hooks without extension-runn
   ]);
 });
 
-test("applyAutoReloadAfterCompaction reloads after successful compaction only once per session", async () => {
+test("applyRinSessionReloadPolicy reloads after successful compaction only once per session", async () => {
   const listeners = [];
   let subscribeCount = 0;
   let reloadCount = 0;
@@ -1183,8 +1183,8 @@ test("applyAutoReloadAfterCompaction reloads after successful compaction only on
     },
   };
 
-  runtimeMod.applyAutoReloadAfterCompaction(session);
-  runtimeMod.applyAutoReloadAfterCompaction(session);
+  runtimeMod.applyRinSessionReloadPolicy(session);
+  runtimeMod.applyRinSessionReloadPolicy(session);
 
   assert.equal(subscribeCount, 1);
 
@@ -1201,7 +1201,7 @@ test("applyAutoReloadAfterCompaction reloads after successful compaction only on
   assert.equal(reloadCount, 1);
 });
 
-test("applyAutoReloadAfterCompaction defers an in-turn reload until agent_end", async () => {
+test("applyRinSessionReloadPolicy defers an in-turn reload until agent_end", async () => {
   const listeners = [];
   let reloadCount = 0;
   let promptCount = 0;
@@ -1219,7 +1219,7 @@ test("applyAutoReloadAfterCompaction defers an in-turn reload until agent_end", 
     },
   };
 
-  runtimeMod.applyAutoReloadAfterCompaction(session);
+  runtimeMod.applyRinSessionReloadPolicy(session);
 
   listeners[0]({ type: "agent_start" });
   listeners[0]({
@@ -1240,7 +1240,7 @@ test("applyAutoReloadAfterCompaction defers an in-turn reload until agent_end", 
   assert.equal(promptCount, 1);
 });
 
-test("applyAutoReloadAfterCompaction gates the next prompt on an in-flight reload", async () => {
+test("applyRinSessionReloadPolicy gates the next prompt on an in-flight reload", async () => {
   const listeners = [];
   let releaseReload;
   let promptCount = 0;
@@ -1261,7 +1261,7 @@ test("applyAutoReloadAfterCompaction gates the next prompt on an in-flight reloa
     },
   };
 
-  runtimeMod.applyAutoReloadAfterCompaction(session);
+  runtimeMod.applyRinSessionReloadPolicy(session);
   listeners[0]({
     type: "compaction_end",
     aborted: false,
@@ -1277,7 +1277,7 @@ test("applyAutoReloadAfterCompaction gates the next prompt on an in-flight reloa
   assert.equal(promptCount, 1);
 });
 
-test("applyAutoReloadAfterCompaction queues one extra reload while a reload is in flight", async () => {
+test("applyRinSessionReloadPolicy queues one extra reload while a reload is in flight", async () => {
   const listeners = [];
   let releaseReload;
   let reloadCount = 0;
@@ -1299,7 +1299,7 @@ test("applyAutoReloadAfterCompaction queues one extra reload while a reload is i
     },
   };
 
-  runtimeMod.applyAutoReloadAfterCompaction(session);
+  runtimeMod.applyRinSessionReloadPolicy(session);
 
   listeners[0]({
     type: "compaction_end",
@@ -1357,7 +1357,7 @@ test("manual compaction waits for refresh before returning", async () => {
     },
   };
 
-  runtimeMod.applyAutoReloadAfterCompaction(session);
+  runtimeMod.applyRinSessionReloadPolicy(session);
   await session.compact();
 
   assert.equal(reloadCount, 1);

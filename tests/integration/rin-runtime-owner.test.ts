@@ -1088,10 +1088,393 @@ test("percent compaction preserves native exits, overflow recovery, thresholds, 
   });
 });
 
+test("Rin reloads a session idle for 25 hours before its next prompt", async () => {
+  const events: string[] = [];
+  const staleEntry = {
+    id: "stale-entry",
+    timestamp: new Date(Date.now() - 25 * 60 * 60 * 1_000 - 1).toISOString(),
+  };
+  const session: any = {
+    sessionManager: { getBranch: () => [staleEntry] },
+    subscribe: () => () => {},
+    async reload() {
+      events.push("reload");
+    },
+    async prompt() {
+      events.push("prompt");
+      return "prompted";
+    },
+  };
+
+  runtime.applyRinSessionReloadPolicy(session);
+
+  assert.equal(await session.prompt("continue"), "prompted");
+  assert.deepEqual(events, ["reload", "prompt"]);
+  await session.prompt("continue again");
+  assert.deepEqual(events, ["reload", "prompt", "prompt"]);
+});
+
+test("Rin explicit reload refreshes idle age before the next prompt", async () => {
+  const events: string[] = [];
+  const staleTimestamp = new Date(
+    Date.now() - 26 * 60 * 60 * 1_000,
+  ).toISOString();
+  const session: any = {
+    sessionManager: {
+      getBranch: () => [{ id: "explicit-stale", timestamp: staleTimestamp }],
+    },
+    subscribe: () => () => {},
+    reload: async () => events.push("reload"),
+    prompt: async () => events.push("prompt"),
+  };
+
+  runtime.applyRinSessionReloadPolicy(session);
+  await session.reload();
+  await session.prompt("after explicit reload");
+  assert.deepEqual(events, ["reload", "prompt"]);
+});
+
+test("Rin serializes explicit reloads without dropping arguments or results", async () => {
+  const events: string[] = [];
+  const resolvers: Array<() => void> = [];
+  const session: any = {
+    sessionManager: { getBranch: () => [] },
+    subscribe: () => () => {},
+    async reload(label: string) {
+      events.push(`reload:${label}`);
+      await new Promise<void>((resolve) => resolvers.push(resolve));
+      return `result:${label}`;
+    },
+    async prompt() {},
+  };
+  runtime.applyRinSessionReloadPolicy(session);
+
+  const first = session.reload("first");
+  const second = session.reload("second");
+  while (resolvers.length < 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.deepEqual(events, ["reload:first"]);
+  resolvers[0]();
+  while (resolvers.length < 2) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.deepEqual(events, ["reload:first", "reload:second"]);
+  resolvers[1]();
+  assert.deepEqual(await Promise.all([first, second]), [
+    "result:first",
+    "result:second",
+  ]);
+});
+
+test("Rin preserves reload FIFO when agent_end releases a deferred compaction", async () => {
+  const events: string[] = [];
+  const listeners: any[] = [];
+  const resolvers: Array<() => void> = [];
+  let activeReloads = 0;
+  let maximumActiveReloads = 0;
+  const session: any = {
+    sessionManager: { getBranch: () => [] },
+    subscribe(listener: any) {
+      listeners.push(listener);
+      return () => {};
+    },
+    async reload(label = "compaction") {
+      activeReloads += 1;
+      maximumActiveReloads = Math.max(maximumActiveReloads, activeReloads);
+      events.push(`reload:${label}`);
+      await new Promise<void>((resolve) => resolvers.push(resolve));
+      activeReloads -= 1;
+      return label;
+    },
+    async prompt() {},
+  };
+  runtime.applyRinSessionReloadPolicy(session);
+  listeners[0]({ type: "agent_start" });
+
+  const first = session.reload("first");
+  const second = session.reload("second");
+  while (resolvers.length < 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  listeners[0]({
+    type: "compaction_end",
+    aborted: false,
+    result: { summary: "done" },
+  });
+  listeners[0]({ type: "agent_end" });
+
+  resolvers[0]();
+  while (resolvers.length < 2) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.deepEqual(events, ["reload:first", "reload:second"]);
+  resolvers[1]();
+  while (resolvers.length < 3) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.deepEqual(events, [
+    "reload:first",
+    "reload:second",
+    "reload:compaction",
+  ]);
+  resolvers[2]();
+  assert.deepEqual(await Promise.all([first, second]), ["first", "second"]);
+  assert.equal(maximumActiveReloads, 1);
+});
+
+test("Rin reserves FIFO position for compaction requested before explicit reload", async () => {
+  const events: string[] = [];
+  const listeners: any[] = [];
+  const resolvers: Array<() => void> = [];
+  const session: any = {
+    sessionManager: { getBranch: () => [] },
+    subscribe(listener: any) {
+      listeners.push(listener);
+      return () => {};
+    },
+    async reload(label = "compaction") {
+      events.push(`reload:${label}`);
+      await new Promise<void>((resolve) => resolvers.push(resolve));
+      return label;
+    },
+    async prompt() {},
+  };
+  runtime.applyRinSessionReloadPolicy(session);
+  listeners[0]({ type: "agent_start" });
+  listeners[0]({
+    type: "compaction_end",
+    aborted: false,
+    result: { summary: "done" },
+  });
+  const explicit = session.reload("later");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(events, []);
+
+  listeners[0]({ type: "agent_end" });
+  while (resolvers.length < 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.deepEqual(events, ["reload:compaction"]);
+  resolvers[0]();
+  while (resolvers.length < 2) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.deepEqual(events, ["reload:compaction", "reload:later"]);
+  resolvers[1]();
+  assert.equal(await explicit, "later");
+});
+
+test("Rin reloads the same unchanged activity marker again after another 25 hours", async () => {
+  const originalNow = Date.now;
+  let now = Date.parse("2026-08-31T12:00:00.000Z");
+  const events: string[] = [];
+  const staleTimestamp = new Date(now - 26 * 60 * 60 * 1_000).toISOString();
+  const session: any = {
+    sessionManager: {
+      getBranch: () => [{ id: "unchanged", timestamp: staleTimestamp }],
+    },
+    subscribe: () => () => {},
+    reload: async () => events.push("reload"),
+    prompt: async () => events.push("prompt"),
+  };
+  try {
+    Date.now = () => now;
+    runtime.applyRinSessionReloadPolicy(session);
+    await session.prompt("first");
+    now += 25 * 60 * 60 * 1_000 + 1;
+    await session.prompt("second");
+  } finally {
+    Date.now = originalNow;
+  }
+  assert.deepEqual(events, ["reload", "prompt", "reload", "prompt"]);
+});
+
+test("Rin measures first-prompt idleness before session-start hooks append entries", async () => {
+  const events: string[] = [];
+  const staleActivity = {
+    marker: "prior:stale",
+    timestamp: Date.now() - 26 * 60 * 60 * 1_000,
+  };
+  const session: any = {
+    sessionManager: {
+      getBranch: () => [
+        {
+          id: "startup-hook-entry",
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    },
+    subscribe: () => () => {},
+    reload: async () => events.push("reload"),
+    prompt: async () => events.push("prompt"),
+    [Symbol.for("rin.sessionActivityBeforeStart")]: staleActivity,
+  };
+
+  runtime.applyRinSessionReloadPolicy(session);
+  await session.prompt("resume");
+  assert.deepEqual(events, ["reload", "prompt"]);
+});
+
+test("Rin idle reload policy skips fresh, empty, and active sessions and fails closed", async () => {
+  const makeSession = ({
+    entries,
+    streaming = false,
+    reloadError,
+  }: {
+    entries: any[];
+    streaming?: boolean;
+    reloadError?: Error;
+  }) => {
+    const events: string[] = [];
+    const session: any = {
+      isStreaming: streaming,
+      sessionManager: { getBranch: () => entries },
+      subscribe: () => () => {},
+      async reload() {
+        events.push("reload");
+        if (reloadError) throw reloadError;
+      },
+      async prompt() {
+        events.push("prompt");
+        return "prompted";
+      },
+    };
+    runtime.applyRinSessionReloadPolicy(session);
+    return { session, events };
+  };
+  const fresh = makeSession({
+    entries: [
+      {
+        id: "fresh",
+        timestamp: new Date(Date.now() - 24 * 60 * 60 * 1_000).toISOString(),
+      },
+    ],
+  });
+  assert.equal(await fresh.session.prompt("fresh"), "prompted");
+  assert.deepEqual(fresh.events, ["prompt"]);
+
+  const empty = makeSession({ entries: [] });
+  assert.equal(await empty.session.prompt("new"), "prompted");
+  assert.deepEqual(empty.events, ["prompt"]);
+
+  const active = makeSession({
+    entries: [
+      {
+        id: "active-stale",
+        timestamp: new Date(Date.now() - 26 * 60 * 60 * 1_000).toISOString(),
+      },
+    ],
+    streaming: true,
+  });
+  assert.equal(await active.session.prompt("follow-up"), "prompted");
+  assert.deepEqual(active.events, ["prompt"]);
+
+  const failed = makeSession({
+    entries: [
+      {
+        id: "failed-stale",
+        timestamp: new Date(Date.now() - 26 * 60 * 60 * 1_000).toISOString(),
+      },
+    ],
+    reloadError: new Error("reload failed"),
+  });
+  await assert.rejects(failed.session.prompt("blocked"), /reload failed/);
+  assert.deepEqual(failed.events, ["reload"]);
+});
+
+test("Rin joins concurrent prompts to one idle reload", async () => {
+  const events: string[] = [];
+  const staleTimestamp = new Date(
+    Date.now() - 26 * 60 * 60 * 1_000,
+  ).toISOString();
+  let finishReload!: () => void;
+  const reloadGate = new Promise<void>((resolve) => {
+    finishReload = resolve;
+  });
+  const session: any = {
+    sessionManager: {
+      getBranch: () => [
+        {
+          id: "startup-hook-entry",
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    },
+    [Symbol.for("rin.sessionActivityBeforeStart")]: {
+      marker: `concurrent-stale:${staleTimestamp}`,
+      timestamp: Date.parse(staleTimestamp),
+    },
+    subscribe: () => () => {},
+    reload: async () => {
+      events.push("reload");
+      await reloadGate;
+    },
+    prompt: async (text: string) => {
+      events.push(`prompt:${text}`);
+      return text;
+    },
+  };
+  runtime.applyRinSessionReloadPolicy(session);
+
+  const first = session.prompt("first");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const second = session.prompt("second");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(events, ["reload"]);
+  finishReload();
+  assert.deepEqual(await Promise.all([first, second]), ["first", "second"]);
+  assert.deepEqual(events, ["reload", "prompt:first", "prompt:second"]);
+});
+
+test("Rin keeps an idle prompt behind a compaction reload queued during idle reload", async () => {
+  const events: string[] = [];
+  const listeners: any[] = [];
+  const reloadResolvers: Array<() => void> = [];
+  const staleTimestamp = new Date(
+    Date.now() - 26 * 60 * 60 * 1_000,
+  ).toISOString();
+  const session: any = {
+    sessionManager: {
+      getBranch: () => [{ id: "queued-stale", timestamp: staleTimestamp }],
+    },
+    subscribe(listener: any) {
+      listeners.push(listener);
+      return () => {};
+    },
+    async reload() {
+      events.push("reload");
+      await new Promise<void>((resolve) => reloadResolvers.push(resolve));
+    },
+    async prompt() {
+      events.push("prompt");
+    },
+  };
+  runtime.applyRinSessionReloadPolicy(session);
+
+  const prompt = session.prompt("queued");
+  while (reloadResolvers.length < 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  listeners[0]({
+    type: "compaction_end",
+    aborted: false,
+    result: { summary: "done" },
+  });
+  reloadResolvers[0]();
+  while (reloadResolvers.length < 2) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  assert.deepEqual(events, ["reload", "reload"]);
+  reloadResolvers[1]();
+  await prompt;
+  assert.deepEqual(events, ["reload", "reload", "prompt"]);
+});
+
 test("reload, shutdown, and settings wrappers remain idempotent and failure-safe", async () => {
   resetOwner();
   for (const invalid of [null, {}, { subscribe() {} }, { reload() {} }]) {
-    assert.doesNotThrow(() => runtime.applyAutoReloadAfterCompaction(invalid));
+    assert.doesNotThrow(() => runtime.applyRinSessionReloadPolicy(invalid));
   }
   const listeners: any[] = [];
   const reloadEvents: string[] = [];
@@ -1121,8 +1504,8 @@ test("reload, shutdown, and settings wrappers remain idempotent and failure-safe
       return "manual";
     },
   };
-  runtime.applyAutoReloadAfterCompaction(reloadSession);
-  runtime.applyAutoReloadAfterCompaction(reloadSession);
+  runtime.applyRinSessionReloadPolicy(reloadSession);
+  runtime.applyRinSessionReloadPolicy(reloadSession);
   listeners[0]({ type: "other" });
   listeners[0]({ type: "compaction_end", result: {}, aborted: true });
   listeners[0]({ type: "compaction_end", result: null, aborted: false });
