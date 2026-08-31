@@ -334,6 +334,7 @@ test("chat main lets authorized /abort bypass and terminalize the current same-c
         throw new Error(JSON.stringify({ stage: "turn-not-started", runTurnCalls }));
       }
 
+      app.emit("message", makeMessage("m-queued", "queued before abort"));
       app.emit(
         "message",
         makeMessage("m-untrusted-abort", "/abort", "stranger-1"),
@@ -349,20 +350,30 @@ test("chat main lets authorized /abort bypass and terminalize the current same-c
         );
         abortItem = items.find((item) => item.messageId === "m-abort");
         activeItem = items.find((item) => item.messageId === "m-active");
+        const queuedItem = items.find((item) => item.messageId === "m-queued");
         if (
           abortCalls === 1 &&
           abortItem?.state === "terminal" &&
-          activeItem?.state === "terminal"
+          activeItem?.state === "terminal" &&
+          queuedItem?.state === "terminal"
         ) break;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
-      const untrustedAbortItem = inboxMod
-        .listChatInboxItems(agentDir, ["pending", "running", "terminal", "failed"])
-        .find((item) => item.messageId === "m-untrusted-abort");
+      const allItems = inboxMod.listChatInboxItems(
+        agentDir,
+        ["pending", "running", "terminal", "failed"],
+      );
+      const untrustedAbortItem = allItems.find(
+        (item) => item.messageId === "m-untrusted-abort",
+      );
+      const queuedItem = allItems.find(
+        (item) => item.messageId === "m-queued",
+      );
       if (
         abortCalls !== 1 ||
         abortItem?.state !== "terminal" ||
         activeItem?.state !== "terminal" ||
+        queuedItem?.state !== "terminal" ||
         untrustedAbortItem?.state !== "terminal" ||
         untrustedAbortItem?.admission?.state !== "record_only"
       ) {
@@ -370,6 +381,7 @@ test("chat main lets authorized /abort bypass and terminalize the current same-c
           abortCalls,
           abortItem,
           activeItem,
+          queuedItem,
           untrustedAbortItem,
           inboundRecovery: app.isInboundRecoveryChat("telegram/1:2"),
         }));

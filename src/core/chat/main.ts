@@ -85,6 +85,7 @@ import {
 } from "./durable-admission.js";
 import {
   type ChatInboxItem,
+  abortEarlierChatInboxItems,
   commitClaimedChatInboxAdmission,
   getChatInboxItem,
   restoreChatInboxElements,
@@ -999,6 +1000,7 @@ export async function startChatBridge(
     chatKey: string,
     messageId: string,
     outboxTurnFence: ChatOutboxTurnFence,
+    createdAt: string,
   ) => {
     if (command.name === "help") {
       const lines = commandRows.map(
@@ -1027,6 +1029,20 @@ export async function startChatBridge(
     }
 
     const text = `/${command.name}${command.argsText ? ` ${command.argsText}` : ""}`;
+    if (command.name === "abort") {
+      abortEarlierChatInboxItems(runtime.agentDir, {
+        chatKey,
+        beforeCreatedAt: createdAt,
+      });
+      for (const claimed of claimedInboxJobs.values()) {
+        if (
+          claimed.envelope.chatKey === chatKey &&
+          claimed.envelope.createdAt < createdAt
+        ) {
+          claimedInboxClaimLost.get(claimed.envelope.itemId)?.();
+        }
+      }
+    }
     try {
       await controller.runCommand(
         text,
@@ -1170,6 +1186,7 @@ export async function startChatBridge(
 
   let requestReconcileChatInbox: () => void = () => {};
   const claimedInboxJobs = new Map<string, ClaimedChatInboxJob>();
+  const claimedInboxClaimLost = new Map<string, () => void>();
   const forgetClaimedInboxJob = (job: ClaimedChatInboxJob) => {
     if (claimedInboxJobs.get(job.envelope.itemId) === job) {
       claimedInboxJobs.delete(job.envelope.itemId);
@@ -1218,23 +1235,43 @@ export async function startChatBridge(
       forgetClaimedInboxJob(job);
       return;
     }
+    let claimLost = false;
+    let resolveClaimLost!: () => void;
+    const claimLostPromise = new Promise<undefined>((resolve) => {
+      resolveClaimLost = () => resolve(undefined);
+    });
+    const loseClaim = () => {
+      if (claimLost) return;
+      claimLost = true;
+      clearInterval(heartbeat);
+      const controller = controllers.get(job.envelope.chatKey);
+      if (controller?.ownsOutboxTurnFence(fence)) {
+        void controller
+          .terminateSession()
+          .catch(() => {})
+          .finally(() => {
+            controller.dispose();
+            if (controllers.get(job.envelope.chatKey) === controller) {
+              controllers.delete(job.envelope.chatKey);
+            }
+          });
+      }
+      resolveClaimLost();
+    };
+    claimedInboxClaimLost.set(job.envelope.itemId, loseClaim);
     const heartbeat = setInterval(() => {
       try {
         if (!touchClaimedChatInboxItem(runtime.agentDir, job.envelope)) {
-          logger.warn(
-            `chat inbox heartbeat lost claim chatKey=${job.envelope.chatKey} turn=${job.envelope.itemId}`,
-          );
           const current = getChatInboxItem(
             runtime.agentDir,
             job.envelope.itemId,
           );
-          if (current && current.state !== "terminal") {
-            const controller = controllers.get(job.envelope.chatKey);
-            if (controller?.ownsOutboxTurnFence(fence)) {
-              controller.dispose();
-              controllers.delete(job.envelope.chatKey);
-            }
+          if (!current || current.state !== "terminal") {
+            logger.warn(
+              `chat inbox heartbeat lost claim chatKey=${job.envelope.chatKey} turn=${job.envelope.itemId}`,
+            );
           }
+          loseClaim();
         }
       } catch (error) {
         logger.warn(
@@ -1243,7 +1280,11 @@ export async function startChatBridge(
       }
     }, CHAT_INBOX_PROCESSING_HEARTBEAT_MS);
     try {
-      const result = await runWithChatOutboxTurnFence(fence, run);
+      const result = await Promise.race([
+        runWithChatOutboxTurnFence(fence, run),
+        claimLostPromise,
+      ]);
+      if (claimLost) return;
       finishClaimedInboxJob(job, result);
     } catch (error) {
       logger.warn(
@@ -1252,6 +1293,7 @@ export async function startChatBridge(
       releaseClaimedInboxJob(job);
     } finally {
       clearInterval(heartbeat);
+      claimedInboxClaimLost.delete(job.envelope.itemId);
       forgetClaimedInboxJob(job);
     }
   };
@@ -1310,6 +1352,7 @@ export async function startChatBridge(
                   resolved.chatKey,
                   resolved.messageId,
                   outboxTurnFenceForClaimedJob(job),
+                  envelope.createdAt,
                 ),
               ),
           };

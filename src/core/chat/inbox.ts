@@ -559,6 +559,28 @@ export function touchClaimedChatInboxItem(
   return result.changes === 1;
 }
 
+export function abortEarlierChatInboxItems(
+  agentDir: string,
+  input: { chatKey: string; beforeCreatedAt: string },
+) {
+  const chatKey = safeString(input.chatKey).trim();
+  const beforeCreatedAt = safeString(input.beforeCreatedAt).trim();
+  if (!chatKey || !beforeCreatedAt) return 0;
+  const timestamp = nowIso();
+  const result = openChatDatabase(agentDir)
+    .prepare(
+      `UPDATE inbox_jobs
+       SET state = 'terminal', terminal_kind = 'aborted', owner_epoch = NULL,
+           lease_until = NULL, heartbeat_at = NULL, next_attempt_at = NULL,
+           last_error = NULL, updated_at = ?
+       WHERE chat_key = ? AND created_at < ?
+         AND admission_state = 'actionable'
+         AND state IN ('pending', 'running')`,
+    )
+    .run(timestamp, chatKey, beforeCreatedAt);
+  return result.changes;
+}
+
 export function completeClaimedChatInboxItem(
   agentDir: string,
   item: ClaimedChatInboxItem,
