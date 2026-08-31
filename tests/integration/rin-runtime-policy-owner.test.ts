@@ -494,7 +494,7 @@ test("Rin percent compaction defaults to 85 percent", async () => {
   assert.equal(autoCompactions, 1);
 });
 
-test("Rin threshold pressure drops oldest tool buckets before compaction", async () => {
+test("Rin threshold compacts directly without ratcheting provider tool buckets", async () => {
   let autoCompactions = 0;
   const messages = pruningToolCallPadding(62);
   const session = {
@@ -535,62 +535,10 @@ test("Rin threshold pressure drops oldest tool buckets before compaction", async
       { usage: { totalTokens: 1_000 }, timestamp: Date.now() },
       false,
     ),
-    false,
-  );
-  assert.equal(autoCompactions, 0);
-  assert.equal(runtimeMod.getRinPressureRetainedToolCallBuckets(session), 2);
-});
-
-test("Rin threshold compacts only after one retained tool bucket still exceeds the limit", async () => {
-  let autoCompactions = 0;
-  const listeners: Array<(event: any) => void> = [];
-  const session = {
-    settingsManager: {
-      getCompactionSettings() {
-        return { enabled: true, triggerPercent: 0.85 };
-      },
-    },
-    model: { contextWindow: 1_000 },
-    agent: { state: { messages: pruningToolCallPadding(62) } },
-    sessionManager: { getBranch: () => [] },
-    subscribe(listener: (event: any) => void) {
-      listeners.push(listener);
-      return () => {};
-    },
-    async reload() {},
-    async _checkCompaction() {
-      return false;
-    },
-    async _runAutoCompaction() {
-      autoCompactions += 1;
-      return "compacted";
-    },
-  };
-
-  runtimeMod.applyAutoReloadAfterCompaction(session);
-  runtimeMod.applyRinCompactionPercentThreshold(session, {
-    calculateContextTokens: () => 1_000,
-    estimateContextTokens: () => ({ tokens: 900 }),
-    getLatestCompactionEntry: () => undefined,
-  });
-
-  assert.equal(
-    await session._checkCompaction(
-      { usage: { totalTokens: 1_000 }, timestamp: Date.now() },
-      false,
-    ),
     "compacted",
   );
   assert.equal(autoCompactions, 1);
-  assert.equal(runtimeMod.getRinPressureRetainedToolCallBuckets(session), 1);
-
-  listeners[0]({
-    type: "compaction_end",
-    aborted: false,
-    result: { summary: "compacted" },
-  });
-  await waitForTimers();
-  assert.equal(runtimeMod.getRinPressureRetainedToolCallBuckets(session), 4);
+  assert.equal("getRinPressureRetainedToolCallBuckets" in runtimeMod, false);
 });
 
 test("Rin percent compaction respects the earlier Pi reserve-token threshold", async () => {
@@ -839,7 +787,7 @@ test("Rin 85% provider preflight calls Pi overflow auto-compaction before the pr
   );
 });
 
-test("Rin provider preflight measures bucket savings from transformed provider messages", async () => {
+test("Rin provider preflight evaluates transformed provider messages before compaction", async () => {
   const calls: string[] = [];
   const rawMessages = [
     ...pruningToolCallPadding(62),
