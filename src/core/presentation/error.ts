@@ -329,6 +329,10 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     "Scheduled task configuration is not a valid shell task. Fix the task target.",
   cron_invalid_target_kind: () =>
     "Scheduled task target kind is invalid. Choose an agent prompt or shell command target.",
+  cron_run_id_required: () =>
+    "The scheduled task is missing its durable run identity.",
+  cron_scheduled_input_delivery_failed: () =>
+    "Rin could not confirm the scheduled task input message, so the task was not started.",
   cron_shell_command_timeout: (detail) => {
     const timeoutMs = Number.parseInt(detail, 10);
     return Number.isFinite(timeoutMs)

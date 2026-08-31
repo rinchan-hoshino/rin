@@ -151,11 +151,6 @@ type PendingTurnPresentation = ChatTurnTarget & {
   backendAccepted: boolean;
   joinedOwnerTurnId?: string;
   sessionFile?: string;
-  scheduledInput?: {
-    text: string;
-    taskName?: string;
-    presented?: boolean;
-  };
 };
 
 type ChatTurnMeta = ChatTurnTarget & {
@@ -2157,60 +2152,6 @@ export class ChatController {
     return await this.sendProgressNoticeNow(text, "passive_notice", options);
   }
 
-  private async presentScheduledInput(
-    requestTag: string,
-    presentation: NonNullable<PendingTurnPresentation["scheduledInput"]>,
-  ) {
-    if (
-      presentation.presented ||
-      !this.canDeliverReplies() ||
-      shouldSuppressQuietDelivery(this.isQuietModeEnabled(), "passive_notice")
-    ) {
-      return;
-    }
-    presentation.presented = true;
-    const taskName = safeString(presentation.taskName)
-      .trim()
-      .replace(/\s+/g, " ")
-      .slice(0, 120);
-    const heading = `⏰ Scheduled task${taskName ? ` · ${taskName}` : ""}`;
-    try {
-      const delivery = await this.enqueueAndDrainDelivery(
-        {
-          createdAt: nowIso(),
-          chatKey: this.chatKey,
-          parts: [
-            {
-              type: "text",
-              text: `${heading}\n${presentation.text}`,
-            },
-          ],
-          ...conversationSessionPayload(
-            this.linkDeliveriesToSession,
-            this.currentSessionFile(),
-          ),
-        },
-        {
-          deliveryKind: "passive_notice",
-          idempotencyKey: `scheduled-input:${requestTag}`,
-          waitUntilDeliverySettled: true,
-          requireDelivery: false,
-        },
-      );
-      const messageId = safeString(delivery.messageIds[0]).trim();
-      if (
-        messageId &&
-        safeString(this.currentTurn?.requestTag).trim() === requestTag
-      ) {
-        this.presentationReplyToMessageId = messageId;
-      }
-    } catch (error) {
-      this.logger?.warn?.(
-        `scheduled input presentation failed: ${safeString((error as any)?.message || error).trim() || "unknown delivery error"}`,
-      );
-    }
-  }
-
   private async sendCompactionInterimNow(
     text: string,
     options: Parameters<ChatController["sendProgressNoticeNow"]>[2] = {},
@@ -2996,15 +2937,6 @@ export class ChatController {
           input.incomingMessageId,
           input.outboxTurnFence,
         );
-      const scheduledInput =
-        input.promptMeta?.source === "scheduled-task"
-          ? {
-              text: safeString(input.text).trim(),
-              taskName:
-                safeString((input.promptMeta as any).taskName).trim() ||
-                undefined,
-            }
-          : undefined;
       const pendingPresentation: PendingTurnPresentation = {
         incomingMessageId: input.incomingMessageId,
         replyToMessageId: input.replyToMessageId,
@@ -3016,7 +2948,6 @@ export class ChatController {
           ? currentTurnBeforeSubmission?.outboxTurnFence?.turnId
           : undefined,
         sessionFile: this.driver.currentSessionFile(),
-        scheduledInput,
       };
       if (requestTag) {
         this.pendingTurnPresentations.set(requestTag, pendingPresentation);
@@ -3492,11 +3423,6 @@ export class ChatController {
             : true);
         this.backendAcceptedIncomingMessageId = this.currentIncomingMessageId();
         this.markAcceptedMessage(this.backendAcceptedIncomingMessageId);
-        const scheduledInput =
-          this.pendingTurnPresentations.get(requestTag)?.scheduledInput;
-        if (requestTag && scheduledInput) {
-          await this.presentScheduledInput(requestTag, scheduledInput);
-        }
         if (waitingReactionCleared) {
           if (requestTag) {
             this.deferredWorkingReactionRequestTags.delete(requestTag);

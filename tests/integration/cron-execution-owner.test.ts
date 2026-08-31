@@ -7,9 +7,36 @@ import test from "node:test";
 
 import { importBuiltModule } from "../support/import-built-module.js";
 
-const cronExecution = await importBuiltModule<
+const rawCronExecution = await importBuiltModule<
   typeof import("../../src/core/rin-daemon/cron-execution.js")
 >("dist/core/rin-daemon/cron-execution.js");
+function withScheduledInputDelivery(chat: any) {
+  return chat &&
+    typeof chat.runTurn === "function" &&
+    typeof chat.send !== "function"
+    ? {
+        send: async () => ({
+          delivered: true,
+          messageIds: ["scheduled-owner-input"],
+        }),
+        ...chat,
+      }
+    : chat;
+}
+const cronExecution = {
+  ...rawCronExecution,
+  executeCronAgentTask: (ownerTask: any, options: any) =>
+    rawCronExecution.executeCronAgentTask(ownerTask, {
+      ...options,
+      runId: options?.runId || `test-run:${ownerTask.id}`,
+      chat: withScheduledInputDelivery(options?.chat),
+    }),
+  executeCronSessionInvocation: (invocation: any, options: any) =>
+    rawCronExecution.executeCronSessionInvocation(invocation, {
+      ...options,
+      chat: withScheduledInputDelivery(options?.chat),
+    }),
+};
 const runAudit = await importBuiltModule<
   typeof import("../../src/core/self-improve/run-audit.js")
 >("dist/core/self-improve/run-audit.js");
@@ -254,7 +281,7 @@ test("cron prompt context identifies chat and controller frontends", () => {
   );
 });
 
-test("agent tasks defer non-quiet progress delivery to the current frontend", async () => {
+test("agent tasks deliver visible input before deferring progress to the current frontend", async () => {
   await withAgentDir(async (agentDir) => {
     const calls: any[] = [];
     const ownerTask = task({
@@ -290,7 +317,8 @@ test("agent tasks defer non-quiet progress delivery to the current frontend", as
     assert.equal(calls[0].chatKey, "discord/1:2");
     assert.equal("affectChatBinding" in calls[0], false);
     assert.equal(calls[0].deliverFinal, true);
-    assert.equal("quietMode" in calls[0], false);
+    assert.equal(calls[0].quietMode, false);
+    assert.equal(calls[0].replyToMessageId, "scheduled-owner-input");
     assert.equal(calls[0].text, "run owner task");
     assert.equal(calls[0].requestTag, "scheduled:owner");
     assert.equal(calls[0].deliveryIdempotencyKey, "delivery-owner");
@@ -691,7 +719,10 @@ test("executeCronShellTask owns shell delivery and failure terminals", async () 
           sent.push(payload);
           sendOptions.push(options);
           visibleOrder.push(sent.length === 1 ? "task-input" : "task-output");
-          return { messageIds: [`shell-message-${sent.length}`] };
+          return {
+            delivered: true,
+            messageIds: [`shell-message-${sent.length}`],
+          };
         },
       },
     });
@@ -707,7 +738,9 @@ test("executeCronShellTask owns shell delivery and failure terminals", async () 
       "working-end",
     ]);
     assert.equal(sent.length, 2);
-    assert.deepEqual(sendOptions, [{ waitForDeliveryMs: 30_000 }, undefined]);
+    assert.equal(sendOptions[0].waitForDeliveryMs, 30_000);
+    assert.match(sendOptions[0].idempotencyKey, /^scheduled-input:/);
+    assert.equal(sendOptions[1], undefined);
     assert.equal(sent[0].chatKey, "discord/1:2");
     assert.deepEqual(sent[0].parts, [
       {

@@ -44,7 +44,8 @@ export function createChatDaemonIntegration(options: {
   getBridge: () => Promise<ChatBridgeCommandPort>;
 }): ChatDaemonIntegration {
   const delivery: ChatDaemonDeliveryPort = {
-    send: async (payload) => await (await options.getBridge()).send(payload),
+    send: async (payload, sendOptions) =>
+      await (await options.getBridge()).send(payload, sendOptions),
     runTurn: async (payload) =>
       await (await options.getBridge()).runTurn(payload),
     typing: async (payload) =>

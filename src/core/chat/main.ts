@@ -516,6 +516,7 @@ export type ChatBridgeTurnPayload = RinToolStartupOptions &
     deliverFinal?: boolean;
     quietMode?: boolean;
     text: string;
+    replyToMessageId?: string;
     sessionFile?: string;
     sessionName?: string;
     managedSessionLeaf?: string;
@@ -568,8 +569,19 @@ export type ChatBridgeHandle = {
   getStatus: () => ChatBridgeStatus;
   send: (
     payload: ChatOutboxPayloadInput,
+    options?: {
+      waitUntilDeliverySettled?: boolean;
+      waitForDeliveryMs?: number;
+      idempotencyKey?: string;
+    },
   ) => Promise<
-    { delivered: true } | { delivered: false; pending: true; outboxId: string }
+    | { delivered: true; messageIds?: string[] }
+    | {
+        delivered: false;
+        pending: true;
+        outboxId: string;
+        messageIds?: string[];
+      }
   >;
   typing: (payload: { chatKey?: string }) => Promise<{ sent: boolean }>;
   react: (payload: {
@@ -1624,9 +1636,12 @@ export async function startChatBridge(
     options: {
       waitUntilDeliverySettled?: boolean;
       waitForDeliveryMs?: number;
+      idempotencyKey?: string;
     } = {},
   ) => {
-    const result = await enqueueAndDrainOutbox(payload, "generic");
+    const result = await enqueueAndDrainOutbox(payload, "generic", {
+      idempotencyKey: safeString(options.idempotencyKey).trim() || undefined,
+    });
     const settledMessageIds =
       result.status === "delivered"
         ? result.deliveryResult || []
@@ -1707,6 +1722,8 @@ export async function startChatBridge(
       return await controller.runTurn({
         text,
         attachments: [],
+        replyToMessageId:
+          safeString(payload?.replyToMessageId).trim() || undefined,
         sessionFile,
         sessionName: payload?.sessionName,
         managedSessionLeaf: payload?.managedSessionLeaf,

@@ -74,7 +74,7 @@ A false recurring condition schedules the next tick without starting the target.
 
 ## Delivery decision
 
-- **Automatic agent input:** set `frontend` and `quiet: false`. Chat shows `⏰ Scheduled task · <name>`, the prompt, and progress, then quotes the marker for final output where supported.
+- **Automatic agent input:** set `frontend` and `quiet: false`. The scheduler confirms `⏰ Scheduled task · <name>` and the prompt before starting; Working, progress, and final output quote that marker where supported.
 - **Quiet agent input:** set `frontend` and `quiet: true`. The current session receives the prompt without automatic frontend messages.
 - **Automatic shell output:** a Chat `frontend` with `quiet: false` shows the marker and command, then quotes it with command output where supported.
 - **Record-only shell:** omit `frontend` from `shell_command`.

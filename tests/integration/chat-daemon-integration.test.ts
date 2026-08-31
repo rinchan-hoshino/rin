@@ -40,6 +40,20 @@ test("Chat daemon integration owns delivery and every chat RPC command", async (
       name: "send",
       payload,
     });
+    let observedSendOptions: any;
+    bridge.send = async (sendPayload: any, sendOptions: any) => {
+      calls.push(["send", sendPayload]);
+      observedSendOptions = sendOptions;
+      return { name: "send", payload: sendPayload };
+    };
+    await integration.delivery.send(payload as any, {
+      waitForDeliveryMs: 30_000,
+      idempotencyKey: "scheduled-input:run-1",
+    });
+    assert.deepEqual(observedSendOptions, {
+      waitForDeliveryMs: 30_000,
+      idempotencyKey: "scheduled-input:run-1",
+    });
     assert.deepEqual(await integration.delivery.runTurn(payload as any), {
       name: "runTurn",
       payload,
@@ -123,6 +137,7 @@ test("Chat daemon integration owns delivery and every chat RPC command", async (
       calls.map(([name]) => name),
       [
         "send",
+        "send",
         "runTurn",
         "typing",
         "react",
@@ -141,7 +156,7 @@ test("Chat daemon integration owns delivery and every chat RPC command", async (
         "evalBridge",
       ],
     );
-    assert.deepEqual(calls[6], ["send", {}]);
+    assert.deepEqual(calls[7], ["send", {}]);
     assert.deepEqual(calls.at(-1), ["evalBridge", {}]);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });

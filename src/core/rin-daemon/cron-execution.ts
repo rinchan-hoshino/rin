@@ -34,7 +34,7 @@ import type {
 type CronChatCapability = {
   send?: (
     payload: ChatOutboxPayload,
-    options?: { waitForDeliveryMs?: number },
+    options?: { waitForDeliveryMs?: number; idempotencyKey?: string },
   ) => Promise<any>;
   runTurn?: (payload: any) => Promise<any>;
   setWorkingVisible?: (payload: {
@@ -58,6 +58,7 @@ export async function sendChatText(
     sessionFile?: string;
     replyToMessageId?: string;
     waitForDeliveryMs?: number;
+    idempotencyKey?: string;
   },
 ) {
   if (typeof options.chat?.send !== "function") {
@@ -83,8 +84,15 @@ export async function sendChatText(
           }
         : {}),
     },
-    Number.isFinite(payload.waitForDeliveryMs)
-      ? { waitForDeliveryMs: payload.waitForDeliveryMs }
+    Number.isFinite(payload.waitForDeliveryMs) || payload.idempotencyKey
+      ? {
+          ...(Number.isFinite(payload.waitForDeliveryMs)
+            ? { waitForDeliveryMs: payload.waitForDeliveryMs }
+            : {}),
+          ...(payload.idempotencyKey
+            ? { idempotencyKey: payload.idempotencyKey }
+            : {}),
+        }
       : undefined,
   );
 }
@@ -526,12 +534,35 @@ export async function executeCronAgentTask(
   if (!basePrompt) throw new Error("cron_prompt_required");
   const prompt = basePrompt;
   const quiet = task.quiet === true;
+  let scheduledInputMessageId: string | undefined;
+  if (chatKey && !quiet) {
+    const presentationRunId = safeString(options.runId).trim();
+    if (!presentationRunId) throw new Error("cron_run_id_required");
+    const delivery = await sendChatText(options, {
+      chatKey,
+      taskId: task.id,
+      runId: presentationRunId,
+      text: scheduledTaskInputText(task, prompt),
+      waitForDeliveryMs: 30_000,
+      idempotencyKey: `scheduled-input:${presentationRunId}`,
+    });
+    scheduledInputMessageId =
+      delivery?.delivered === true
+        ? chatDeliveryMessageIds(delivery)[0]
+        : undefined;
+    if (!scheduledInputMessageId) {
+      throw new Error("cron_scheduled_input_delivery_failed");
+    }
+  }
   const result = await options.chat.runTurn({
     controllerKey: chatKey ? "default" : cronTaskRunControllerKey(task),
     ...(chatKey ? { chatKey } : {}),
     deliverFinal: !quiet,
-    ...(quiet ? { quietMode: true } : {}),
+    quietMode: quiet,
     text: prompt,
+    ...(scheduledInputMessageId
+      ? { replyToMessageId: scheduledInputMessageId }
+      : {}),
     ...(options.runId ? { requestTag: options.runId } : {}),
     ...(options.deliveryIdempotencyKey
       ? { deliveryIdempotencyKey: options.deliveryIdempotencyKey }
@@ -810,15 +841,15 @@ export type CronShellTaskRecord = CronTaskRecord & {
   target: Extract<CronTaskRecord["target"], { kind: "shell_command" }>;
 };
 
-function scheduledShellInputText(task: CronShellTaskRecord) {
+function scheduledTaskInputText(
+  task: Pick<CronTaskRecord, "name">,
+  text: string,
+) {
   const taskName = safeString(task.name)
     .trim()
     .replace(/\s+/g, " ")
     .slice(0, 120);
-  return [
-    `⏰ Scheduled task${taskName ? ` · ${taskName}` : ""}`,
-    task.target.command,
-  ]
+  return [`⏰ Scheduled task${taskName ? ` · ${taskName}` : ""}`, text]
     .filter(Boolean)
     .join("\n");
 }
@@ -856,10 +887,17 @@ export async function executeCronShellTask(
         chatKey,
         taskId: task.id,
         runId,
-        text: scheduledShellInputText(task),
+        text: scheduledTaskInputText(task, task.target.command),
         waitForDeliveryMs: 30_000,
-      }).catch(() => undefined);
-      scheduledInputMessageId = chatDeliveryMessageIds(delivery)[0] || "";
+        idempotencyKey: `scheduled-input:${runId}`,
+      });
+      scheduledInputMessageId =
+        delivery?.delivered === true
+          ? chatDeliveryMessageIds(delivery)[0] || ""
+          : "";
+      if (!scheduledInputMessageId) {
+        throw new Error("cron_scheduled_input_delivery_failed");
+      }
     }
     if (showExternalWorking) {
       await setCronTaskFrontendWorking(task, options, true);

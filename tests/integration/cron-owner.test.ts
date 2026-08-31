@@ -544,7 +544,10 @@ test("cron session invocations route prompt work through the owned adapter", asy
         },
         async send(payload) {
           events.push(["send", payload]);
-          return { messageIds: ["owner-message"] };
+          return {
+            delivered: true,
+            messageIds: ["owner-message"],
+          };
         },
         async setWorkingVisible(payload) {
           events.push(["working", payload]);
@@ -574,9 +577,13 @@ test("cron session invocations route prompt work through the owned adapter", asy
     const prompt = await waitForTaskSettled(scheduler, "prompt-task");
     assert.equal(prompt.lastResultText, "owner prompt result");
 
+    assert.deepEqual(
+      events.slice(0, 2).map(([type]) => type),
+      ["send", "runTurn"],
+    );
     assert.equal(
-      events.some(([type]) => type === "runTurn"),
-      true,
+      events.find(([type]) => type === "runTurn")?.[1]?.replyToMessageId,
+      "owner-message",
     );
     scheduler.stop();
   });

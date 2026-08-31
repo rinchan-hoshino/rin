@@ -2971,16 +2971,20 @@ test("chat controller hides an already-completed todo at new message start", asy
   );
 });
 
-test("chat controller presents scheduled input with an explicit marker before working", async () => {
+test("chat controller uses the scheduler-delivered input as the scheduled turn reply owner", async () => {
   const controller = await createController("telegram/1:2");
   const deliveries = [];
   const order = [];
   controller.app.bots[0].sendMessage = async (_session, message) => {
     deliveries.push(message);
-    order.push(deliveries.length === 1 ? "scheduled-input" : "scheduled-final");
-    return [
-      deliveries.length === 1 ? "scheduled-input-1" : "scheduled-final-1",
-    ];
+    const text = message
+      .filter((node) => node?.type === "text")
+      .map((node) => node?.attrs?.text || "")
+      .join("\n");
+    order.push(
+      text.includes("Scheduled task") ? "scheduled-replay" : "scheduled-final",
+    );
+    return ["scheduled-final-1"];
   };
   controller.startBackendAcceptedWorkingReaction = async () => {
     order.push("working");
@@ -3003,6 +3007,7 @@ test("chat controller presents scheduled input with an explicit marker before wo
     text: "inspect owner project",
     attachments: [],
     requestTag: "scheduled:owner:1",
+    replyToMessageId: "scheduled-input-1",
     deliverFinal: true,
     promptMeta: {
       source: "scheduled-task",
@@ -3012,19 +3017,10 @@ test("chat controller presents scheduled input with an explicit marker before wo
     },
   });
 
-  assert.deepEqual(order, ["scheduled-input", "working", "scheduled-final"]);
-  assert.equal(deliveries.length, 2);
-  const scheduledDelivery = listChatOutboxHistoryItems(
-    controller.agentDir,
-    "delivered",
-  ).find((item) => item.idempotencyKey === "scheduled-input:scheduled:owner:1");
-  assert.ok(scheduledDelivery);
+  assert.deepEqual(order, ["working", "scheduled-final"]);
+  assert.equal(deliveries.length, 1);
   assert.equal(
-    deliveryText(scheduledDelivery.payload),
-    "⏰ Scheduled task · Owner check\ninspect owner project",
-  );
-  assert.equal(
-    deliveries[1].find((node) => node?.type === "quote")?.attrs?.id,
+    deliveries[0].find((node) => node?.type === "quote")?.attrs?.id,
     "scheduled-input-1",
   );
 
@@ -3039,12 +3035,7 @@ test("chat controller presents scheduled input with an explicit marker before wo
       taskName: "Quiet task",
     },
   });
-  assert.equal(
-    listChatOutboxHistoryItems(controller.agentDir, "delivered").some(
-      (item) => item.idempotencyKey === "scheduled-input:scheduled:quiet-input",
-    ),
-    false,
-  );
+  assert.equal(deliveries.length, 1);
 });
 
 test("chat controller ignores persisted-user events instead of replaying session todo", async () => {
