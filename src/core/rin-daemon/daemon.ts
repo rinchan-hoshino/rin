@@ -128,13 +128,6 @@ export async function startDaemon(options: {
   const instanceLock =
     options.instanceLock ||
     (await acquireDaemonInstanceLock(runtime.agentDir, { socketPath }));
-  try {
-    await recoverTranscriptSearchIndex(runtime.agentDir);
-  } catch (error) {
-    console.warn(
-      `rin memory index startup recovery failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
   let sessionManagerModulePromise:
     | ReturnType<typeof loadRinSessionManagerModule>
     | undefined;
@@ -159,18 +152,25 @@ export async function startDaemon(options: {
         });
     },
   });
-  await workerPool.recoverActiveDaemonTurns();
-
   const cronScheduler = new CronScheduler({
     agentDir: runtime.agentDir,
     additionalExtensionPaths: options.additionalExtensionPaths,
     chat: options.chat,
   });
-  cronScheduler.start();
-  const selfImproveMaintenanceSupervisor = startQueuedMemoryWorkerSupervisor(
-    runtime.agentDir,
-    { workerPath: selfImproveWorkerPath },
-  );
+  let selfImproveMaintenanceSupervisor:
+    | ReturnType<typeof startQueuedMemoryWorkerSupervisor>
+    | undefined;
+  let startupPhase:
+    | "binding"
+    | "recovering_index"
+    | "recovering_turns"
+    | "ready"
+    | "failed" = "binding";
+  let transcriptSearchRecovery:
+    | "pending"
+    | "recovering"
+    | "ready"
+    | "degraded" = "pending";
 
   for (const candidate of [socketPath, legacyBridgeSocketPath]) {
     if (isWindowsNamedPipePath(candidate)) continue;
@@ -602,6 +602,12 @@ export async function startDaemon(options: {
         cron: cronStatus,
         taskCount: cronStatus.taskCount,
       };
+      const safeExtraStatus =
+        extraStatus && typeof extraStatus === "object"
+          ? Object.fromEntries(
+              Object.entries(extraStatus).filter(([key]) => key !== "startup"),
+            )
+          : undefined;
       writeLine(
         connection.socket,
         response(
@@ -612,9 +618,11 @@ export async function startDaemon(options: {
             ? activity
             : {
                 ...activity,
-                ...(extraStatus && typeof extraStatus === "object"
-                  ? extraStatus
-                  : {}),
+                startup: {
+                  phase: startupPhase,
+                  transcriptSearch: transcriptSearchRecovery,
+                },
+                ...(safeExtraStatus || {}),
               },
         ),
       );
@@ -666,6 +674,22 @@ export async function startDaemon(options: {
             writeLine(
               socket,
               response(undefined, "unknown", false, "invalid_json"),
+            );
+            return;
+          }
+
+          if (
+            startupPhase !== "ready" &&
+            String(command?.type || "unknown") !== "daemon_status"
+          ) {
+            writeLine(
+              socket,
+              response(
+                command?.id,
+                String(command?.type || "unknown"),
+                false,
+                "rin_daemon_recovering",
+              ),
             );
             return;
           }
@@ -732,12 +756,6 @@ export async function startDaemon(options: {
     socket.on("error", cleanup);
   };
 
-  options.registerLocalFrontendConnector?.(() => {
-    const { clientSocket, serverSocket } = createConnectedRpcSocketPair();
-    attachConnectionSocket(serverSocket);
-    return clientSocket;
-  });
-
   const server = net.createServer((socket) => {
     attachConnectionSocket(socket);
   });
@@ -759,11 +777,51 @@ export async function startDaemon(options: {
 
   console.log(`rin daemon listening on ${socketPath}`);
 
+  try {
+    startupPhase = "recovering_index";
+    transcriptSearchRecovery = "recovering";
+    try {
+      await recoverTranscriptSearchIndex(runtime.agentDir);
+      transcriptSearchRecovery = "ready";
+    } catch (error) {
+      transcriptSearchRecovery = "degraded";
+      console.warn(
+        `rin memory index startup recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    startupPhase = "recovering_turns";
+    await workerPool.recoverActiveDaemonTurns();
+    cronScheduler.start();
+    selfImproveMaintenanceSupervisor = startQueuedMemoryWorkerSupervisor(
+      runtime.agentDir,
+      { workerPath: selfImproveWorkerPath },
+    );
+    startupPhase = "ready";
+    options.registerLocalFrontendConnector?.(() => {
+      const { clientSocket, serverSocket } = createConnectedRpcSocketPair();
+      attachConnectionSocket(serverSocket);
+      return clientSocket;
+    });
+  } catch (error) {
+    startupPhase = "failed";
+    cronScheduler.stop();
+    selfImproveMaintenanceSupervisor?.stop();
+    workerPool.beginShutdown();
+    for (const socket of activeSockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    workerPool.destroyAll();
+    await Promise.resolve(options.onShutdown?.()).catch(() => {});
+    await fs.promises.rm(socketPath, { force: true }).catch(() => {});
+    await instanceLock.release().catch(() => {});
+    throw error;
+  }
+
   let shuttingDown = false;
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    selfImproveMaintenanceSupervisor.stop();
+    selfImproveMaintenanceSupervisor?.stop();
     cronScheduler.stop();
     workerPool.destroyAll();
     const teardownDeadline = Date.now() + DAEMON_TEARDOWN_TIMEOUT_MS;

@@ -304,16 +304,23 @@ test("chat snapshots inherited running jobs before adapters can claim new work",
   assert.ok(recoveryRelease >= 0);
 });
 
-test("daemon restart preserves and resumes active durable turns", () => {
+test("daemon listens before durable recovery while adapters remain fenced", () => {
   const daemon = source("src/core/rin-daemon/daemon.ts");
   const workerPool = source("src/core/rin-daemon/worker-pool.ts");
   const destroyBlock = workerPool.slice(
     workerPool.indexOf("  destroyAll()"),
     workerPool.indexOf("  beginShutdown()"),
   );
+  const listen = daemon.indexOf("server.listen(socketPath");
+  const recovery = daemon.indexOf(
+    "await workerPool.recoverActiveDaemonTurns()",
+  );
+  const frontend = daemon.indexOf("options.registerLocalFrontendConnector?.");
 
   assert.doesNotMatch(daemon, /interruptActiveDaemonTurns/);
-  assert.match(daemon, /await workerPool\.recoverActiveDaemonTurns\(\)/);
+  assert.ok(listen >= 0);
+  assert.ok(recovery > listen);
+  assert.ok(frontend > recovery);
   assert.match(destroyBlock, /this\.beginShutdown\(\)/);
   assert.match(destroyBlock, /this\.destroyWorker\(worker\)/);
   assert.match(workerPool, /preserveActiveTurn/);

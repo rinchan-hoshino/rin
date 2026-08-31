@@ -126,7 +126,13 @@ const replacements: Record<string, string> = {
       }
       attachWorkerToConnection(connection, worker) { connection.attachedWorker = worker; connection.selectedSession = { sessionFile: worker.sessionFile, sessionId: worker.sessionId }; }
       terminateWorkerGracefullyIfUnattached() { return Promise.resolve(); }
-      async recoverActiveDaemonTurns() {}
+      async recoverActiveDaemonTurns() {
+        const delayMs = Number(process.env.RIN_TEST_DAEMON_RECOVERY_DELAY_MS || 0);
+        if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+        if (process.env.RIN_TEST_DAEMON_RECOVERY_FAIL === "1") {
+          throw new Error("owner_recovery_failed");
+        }
+      }
       destroyWorker() {}
       evictDetachedWorkers() {}
       async selectSession(connection, selector) {

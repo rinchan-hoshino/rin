@@ -57,12 +57,10 @@ async function main() {
   const stopHostedServices = async () => {
     await hostedChatService.stop();
   };
-
-  try {
-    daemonLock = await acquireDaemonInstanceLock(runtime.agentDir, {
-      socketPath: daemonSocketPath,
-    });
-
+  let hostedChatStartRequested = false;
+  const startHostedChat = () => {
+    if (hostedChatStartRequested) return;
+    hostedChatStartRequested = true;
     void hostedChatService.start(
       async () =>
         await startChatBridge({
@@ -74,6 +72,12 @@ async function main() {
             }),
         }),
     );
+  };
+
+  try {
+    daemonLock = await acquireDaemonInstanceLock(runtime.agentDir, {
+      socketPath: daemonSocketPath,
+    });
 
     const daemon = await startDaemon({
       instanceLock: daemonLock,
@@ -87,6 +91,7 @@ async function main() {
       registerLocalFrontendConnector: (connector) => {
         localFrontendConnectorResolver?.(connector);
         localFrontendConnectorResolver = null;
+        startHostedChat();
       },
       onShutdown: stopHostedServices,
     });

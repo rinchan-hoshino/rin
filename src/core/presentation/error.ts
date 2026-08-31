@@ -554,6 +554,8 @@ const USER_FACING_RUNTIME_ERRORS: Record<string, (detail: string) => string> = {
     ),
   rin_launchd_target_user_not_found: () =>
     "Rin could not find the target launchd user. Check the target user.",
+  rin_core_update_daemon_not_ready: () =>
+    "Rin switched releases, but the daemon did not become ready before the update deadline.",
   rin_daemon_restart_not_ready: () =>
     "Rin restarted the background service, but its socket did not become ready.",
   rin_managed_service_action_failed: () =>
@@ -947,6 +949,18 @@ function findMappedMarker(message: string) {
 export function formatRuntimeErrorForUser(error: unknown) {
   const message = rawErrorMessage(error);
   if (!message) return "unknown error";
+  const primaryLine = message.split(/\r\n?|\n/, 1)[0]?.trim() || "";
+  const primaryError =
+    message.includes("\n") || message.includes("\r")
+      ? INTERNAL_RUNTIME_ERROR_RE.exec(primaryLine)
+      : null;
+  if (primaryError) {
+    const marker = primaryError[1];
+    const detail = primaryError[2] || "";
+    const formatKnownError = USER_FACING_RUNTIME_ERRORS[marker];
+    if (formatKnownError) return formatKnownError(detail);
+    return formatRuntimeMarkerForFrontendDisplay(primaryLine);
+  }
   const systemError = formatSystemErrorForUser(error, message);
   if (systemError) return systemError;
   const internalError = INTERNAL_RUNTIME_ERROR_RE.exec(message);

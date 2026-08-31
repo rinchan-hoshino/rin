@@ -45,7 +45,10 @@ async function waitForSocket(socketPath: string, child: ChildProcess) {
   throw new Error(`daemon_socket_timeout:${socketPath}`);
 }
 
-async function startOwnerDaemon(root: string): Promise<RunningDaemon> {
+async function startOwnerDaemon(
+  root: string,
+  options: { recoveryDelayMs?: number; recoveryFailure?: boolean } = {},
+): Promise<RunningDaemon> {
   const sandbox = await createTestSandbox(root);
   const socketPath = path.join(
     os.tmpdir(),
@@ -89,7 +92,7 @@ async function startOwnerDaemon(root: string): Promise<RunningDaemon> {
       `  additionalExtensionPaths: ["/owner/extensions"],\n` +
       `  workerGcIdleMs: 17, workerSweepIntervalMs: 19, shutdownGraceMs: 40,\n` +
       `  chat: { send: async (payload) => payload },\n` +
-      `  getExtraStatus: async () => ({ extraOwner: true }),\n` +
+      `  getExtraStatus: async () => ({ extraOwner: true, startup: { phase: "fake" } }),\n` +
       `  additionalCommandRouter: async (command) => command.type === "owner_local" ? { data: { local: true } } : command.type === "owner_local_error" ? { success: false, error: "owner-local-error" } : undefined,\n` +
       `  onShutdown: async () => {},\n` +
       `  registerLocalFrontendConnector: (connect) => { const socket = connect(); socket.on("data", () => socket.destroy()); socket.write(JSON.stringify({ id: "local-status", type: "daemon_status" }) + "\\n"); },\n` +
@@ -104,6 +107,8 @@ async function startOwnerDaemon(root: string): Promise<RunningDaemon> {
     env: {
       ...sandbox.env,
       RIN_TEST_DAEMON_CWD: root,
+      RIN_TEST_DAEMON_RECOVERY_DELAY_MS: String(options.recoveryDelayMs || 0),
+      RIN_TEST_DAEMON_RECOVERY_FAIL: options.recoveryFailure ? "1" : "0",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -111,10 +116,7 @@ async function startOwnerDaemon(root: string): Promise<RunningDaemon> {
   let stderr = "";
   child.stdout!.on("data", (chunk) => (stdout += String(chunk)));
   child.stderr!.on("data", (chunk) => (stderr += String(chunk)));
-  await waitForSocket(socketPath, child).catch((error) => {
-    throw new Error(`${error.message}\nstdout=${stdout}\nstderr=${stderr}`);
-  });
-  return {
+  const running = {
     child,
     socketPath,
     legacyBridgePath,
@@ -122,6 +124,13 @@ async function startOwnerDaemon(root: string): Promise<RunningDaemon> {
     stdout: () => stdout,
     stderr: () => stderr,
   };
+  try {
+    await waitForSocket(socketPath, child);
+  } catch (error: any) {
+    if (options.recoveryFailure) return running;
+    throw new Error(`${error.message}\nstdout=${stdout}\nstderr=${stderr}`);
+  }
+  return running;
 }
 
 async function stopOwnerDaemon(daemon: RunningDaemon) {
@@ -173,6 +182,84 @@ function connectRpc(socketPath: string) {
         });
   return { socket, next };
 }
+
+test("core socket is callable while durable turn recovery is still running", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-daemon-core-recovering-"),
+  );
+  let daemon: RunningDaemon | undefined;
+  try {
+    daemon = await startOwnerDaemon(root, { recoveryDelayMs: 1_200 });
+
+    const rpc = connectRpc(daemon.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      rpc.socket.once("connect", resolve);
+      rpc.socket.once("error", reject);
+    });
+    rpc.socket.write(
+      `${JSON.stringify({ id: "recovering-status", type: "daemon_status" })}\n`,
+    );
+    const recovering = await rpc.next();
+    assert.equal(recovering.success, true);
+    assert.match(recovering.data.startup.phase, /^recovering_/);
+
+    rpc.socket.write(
+      `${JSON.stringify({ id: "blocked-command", type: "get_commands" })}\n`,
+    );
+    const blocked = await rpc.next();
+    assert.equal(blocked.success, false);
+    assert.equal(blocked.error, "rin_daemon_recovering");
+
+    await new Promise((resolve) => setTimeout(resolve, 1_250));
+    rpc.socket.write(
+      `${JSON.stringify({ id: "ready-status", type: "daemon_status" })}\n`,
+    );
+    const ready = await rpc.next();
+    assert.equal(ready.success, true);
+    assert.equal(ready.data.startup.phase, "ready");
+    rpc.socket.destroy();
+  } finally {
+    if (daemon) await stopOwnerDaemon(daemon);
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("startup recovery failure closes the early core socket", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-daemon-core-recovery-failure-"),
+  );
+  let daemon: RunningDaemon | undefined;
+  try {
+    daemon = await startOwnerDaemon(root, { recoveryFailure: true });
+    const result =
+      daemon.child.exitCode !== null
+        ? { code: daemon.child.exitCode, signal: daemon.child.signalCode }
+        : await Promise.race([
+            new Promise<{
+              code: number | null;
+              signal: NodeJS.Signals | null;
+            }>((resolve, reject) => {
+              daemon!.child.once("error", reject);
+              daemon!.child.once("exit", (code, signal) =>
+                resolve({ code, signal }),
+              );
+            }),
+            new Promise<never>((_, reject) =>
+              setTimeout(
+                () => reject(new Error("daemon_failure_exit_timeout")),
+                2_000,
+              ),
+            ),
+          ]);
+    assert.equal(result.code, 1);
+    assert.equal(result.signal, null);
+    await assert.rejects(fs.stat(daemon.socketPath), /ENOENT/);
+    assert.match(daemon.stderr(), /owner_recovery_failed/);
+  } finally {
+    if (daemon?.child.exitCode === null) daemon.child.kill("SIGKILL");
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
 
 test("callable core daemon routes the complete system-owned RPC while its host owns shutdown", async () => {
   const root = await fs.mkdtemp(

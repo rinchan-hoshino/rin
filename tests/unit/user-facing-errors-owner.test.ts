@@ -419,6 +419,26 @@ test("error boundaries handle plain, embedded, empty, and system failures", () =
     errors.formatRuntimeErrorForUser("unknown_owner_marker: detail"),
     "unknown owner marker: detail",
   );
+  assert.equal(
+    errors.formatRuntimeErrorForUser(
+      "rin_core_update_daemon_not_ready\ntargetUser=rin\nchat_turn_fence_lost",
+    ),
+    "Rin switched releases, but the daemon did not become ready before the update deadline.",
+  );
+  assert.equal(
+    errors.formatRuntimeErrorForUser(
+      "rin_core_update_daemon_not_ready\rtargetUser=rin\rchat_turn_fence_lost",
+    ),
+    "Rin switched releases, but the daemon did not become ready before the update deadline.",
+  );
+  const nestedSystemError = Object.assign(
+    new Error("rin_core_update_daemon_not_ready\nENOENT: nested diagnostic"),
+    { code: "ENOENT" },
+  );
+  assert.equal(
+    errors.formatRuntimeErrorForUser(nestedSystemError),
+    "Rin switched releases, but the daemon did not become ready before the update deadline.",
+  );
   assert.match(
     errors.formatRuntimeErrorForUser(
       Object.assign(new Error("Unknown system error -122"), {

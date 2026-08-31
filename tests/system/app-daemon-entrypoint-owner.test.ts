@@ -57,6 +57,10 @@ test("app daemon entrypoint only assembles the typed Chat integration", async ()
     /chat_(?:send|run_turn|typing|react|terminate_turn|message_get|message_list|bridge_eval)/,
   );
   assert.doesNotMatch(source, /command\?\.type|command\.type/);
+  assert.match(
+    source,
+    /registerLocalFrontendConnector:[\s\S]*startHostedChat\(\)/,
+  );
 });
 
 test("app daemon assembles hosted services and failure cleanup", async () => {
