@@ -851,6 +851,76 @@ test("Rin provider preflight evaluates transformed provider messages before comp
   assert.deepEqual(loopMessages, compactedMessages);
 });
 
+test("Rin post-compaction provider context keeps the user and only six Hermes lean tool rounds", async () => {
+  const calls: string[] = [];
+  const messages = [
+    { role: "compactionSummary", summary: "progress checkpoint" },
+    { role: "user", content: "finish all four MRs" },
+    ...pruningToolCallPadding(10),
+  ];
+  const session: any = {
+    settingsManager: {
+      getCompactionSettings() {
+        return { enabled: true, triggerPercent: 0.85 };
+      },
+    },
+    model: { contextWindow: 1_000 },
+    get isCompacting() {
+      return false;
+    },
+    agent: {
+      state: { messages },
+      transformContext: async (nextMessages: any[]) => nextMessages,
+    },
+    sessionManager: {
+      getBranch() {
+        return [{ type: "compaction", id: "compact-1" }];
+      },
+      buildSessionContext() {
+        return { messages: session.agent.state.messages };
+      },
+      getCwd() {
+        return "/tmp/rin-hermes-lean";
+      },
+    },
+    async _runAutoCompaction(reason: string, willRetry: boolean) {
+      calls.push(`${reason}:${willRetry}`);
+      return true;
+    },
+  };
+
+  runtimeMod.applyRinProviderOverflowPreflight(session, {
+    estimateContextTokens: (nextMessages: any[]) => ({
+      tokens:
+        nextMessages.filter(
+          (message) =>
+            message.role === "toolResult" && message.content !== "pruned",
+        ).length * 100,
+    }),
+  });
+
+  const providerMessages = await session.agent.transformContext(
+    messages.slice(),
+  );
+  const results = providerMessages.filter(
+    (message: any) => message.role === "toolResult",
+  );
+
+  assert.deepEqual(calls, []);
+  assert.equal(providerMessages[1], messages[1]);
+  assert.deepEqual(
+    results.slice(0, 4).map((message: any) => message.content),
+    Array(4).fill("pruned"),
+  );
+  assert.deepEqual(
+    results.slice(4).map((message: any) => message.content),
+    messages
+      .filter((message: any) => message.role === "toolResult")
+      .slice(4)
+      .map((message: any) => message.content),
+  );
+});
+
 test("Rin provider preflight ignores stale assistant usage kept after compaction", async () => {
   const calls: string[] = [];
   const staleAssistant = {

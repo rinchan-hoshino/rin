@@ -297,14 +297,9 @@ export function buildRinCompactionPrompt(
   preparation: any,
   customInstructions?: string,
 ) {
-  const messages = [
-    ...(Array.isArray(preparation?.messagesToSummarize)
-      ? preparation.messagesToSummarize
-      : []),
-    ...(Array.isArray(preparation?.turnPrefixMessages)
-      ? preparation.turnPrefixMessages
-      : []),
-  ];
+  const messages = Array.isArray(preparation?.messagesToSummarize)
+    ? preparation.messagesToSummarize
+    : [];
   const conversationText = boundRinCompactionInput(
     serializePiCompactionMessages(messages),
   );
@@ -463,6 +458,150 @@ function messageHasUserAuthoredContent(message: any) {
     : false;
 }
 
+function messageHasVisibleAssistantContent(message: any) {
+  if (message?.role !== "assistant") return false;
+  if (messageTextContent(message)) return true;
+  return Array.isArray(message?.content)
+    ? message.content.some(
+        (part: any) =>
+          part &&
+          typeof part === "object" &&
+          part.type !== "text" &&
+          part.type !== "thinking" &&
+          part.type !== "toolCall",
+      )
+    : false;
+}
+
+function pathMessageIndex(pathEntries: any[], message: any) {
+  return pathEntries.findIndex(
+    (entry: any) => entry?.type === "message" && entry?.message === message,
+  );
+}
+
+export function anchorRinCompactionPreparation(
+  pathEntries: any[],
+  preparation: any,
+) {
+  if (!preparation || !Array.isArray(pathEntries) || pathEntries.length === 0) {
+    return preparation;
+  }
+  const firstKeptIndex = pathEntries.findIndex(
+    (entry: any) => entry?.id === preparation.firstKeptEntryId,
+  );
+  if (firstKeptIndex <= 0) return preparation;
+
+  const sourceMessages = [
+    ...(Array.isArray(preparation.messagesToSummarize)
+      ? preparation.messagesToSummarize
+      : []),
+    ...(Array.isArray(preparation.turnPrefixMessages)
+      ? preparation.turnPrefixMessages
+      : []),
+  ];
+  const sourceIndices = sourceMessages
+    .map((message: any) => pathMessageIndex(pathEntries, message))
+    .filter((index: number) => index >= 0);
+  const regionStart = sourceIndices.length
+    ? Math.min(...sourceIndices)
+    : firstKeptIndex;
+
+  let latestUserIndex = -1;
+  let latestAssistantIndex = -1;
+  let latestVisibleAssistantIndex = -1;
+  for (let index = pathEntries.length - 1; index >= regionStart; index -= 1) {
+    const message = pathEntries[index]?.message;
+    if (!message) continue;
+    if (latestUserIndex < 0 && messageHasUserAuthoredContent(message)) {
+      latestUserIndex = index;
+    }
+    if (latestAssistantIndex < 0 && message.role === "assistant") {
+      latestAssistantIndex = index;
+    }
+    if (
+      latestVisibleAssistantIndex < 0 &&
+      messageHasVisibleAssistantContent(message)
+    ) {
+      latestVisibleAssistantIndex = index;
+    }
+    if (
+      latestUserIndex >= 0 &&
+      latestAssistantIndex >= 0 &&
+      latestVisibleAssistantIndex >= 0
+    ) {
+      break;
+    }
+  }
+
+  const toolResultIndices = new Map<string, number>();
+  for (let index = regionStart; index < pathEntries.length; index += 1) {
+    const message = pathEntries[index]?.message;
+    if (message?.role !== "toolResult") continue;
+    const toolCallId = String(message?.toolCallId || "").trim();
+    if (toolCallId) toolResultIndices.set(toolCallId, index);
+  }
+  const splitTurnStartIndex = preparation?.isSplitTurn
+    ? ((preparation.turnPrefixMessages || [])
+        .map((message: any) => pathMessageIndex(pathEntries, message))
+        .find((index: number) => index >= regionStart) ?? -1)
+    : -1;
+  const anchorIndices = [
+    splitTurnStartIndex,
+    latestUserIndex,
+    latestVisibleAssistantIndex,
+  ].filter((index) => index >= regionStart && index < firstKeptIndex);
+  let anchorIndex = anchorIndices.length
+    ? Math.min(...anchorIndices)
+    : firstKeptIndex;
+
+  let movedToolBoundary = true;
+  while (movedToolBoundary) {
+    movedToolBoundary = false;
+    for (let index = regionStart; index < anchorIndex; index += 1) {
+      const message = pathEntries[index]?.message;
+      if (message?.role !== "assistant" || !Array.isArray(message?.content)) {
+        continue;
+      }
+      const crossesAnchor = message.content.some((part: any) => {
+        if (part?.type !== "toolCall") return false;
+        const toolCallId = String(part?.id || "").trim();
+        const resultIndex = toolCallId
+          ? toolResultIndices.get(toolCallId)
+          : undefined;
+        return (
+          (resultIndex !== undefined && resultIndex >= anchorIndex) ||
+          (resultIndex === undefined && index === latestAssistantIndex)
+        );
+      });
+      if (!crossesAnchor) continue;
+      anchorIndex = index;
+      movedToolBoundary = true;
+      break;
+    }
+  }
+
+  if (anchorIndex >= firstKeptIndex) return preparation;
+  const anchorEntry = pathEntries[anchorIndex];
+  if (!anchorEntry?.id) return preparation;
+
+  const messagesToSummarize = (
+    Array.isArray(preparation.messagesToSummarize)
+      ? preparation.messagesToSummarize
+      : []
+  ).filter((message: any) => {
+    const index = pathMessageIndex(pathEntries, message);
+    return index < 0 || index < anchorIndex;
+  });
+
+  return {
+    ...preparation,
+    firstKeptEntryId: anchorEntry.id,
+    messagesToSummarize,
+    turnPrefixMessages: [],
+    isSplitTurn: false,
+  };
+}
+
 function readPiCompactionPreparation(session: any) {
   const pathEntries = session?.sessionManager?.getBranch?.() || [];
   const settings = withRinProportionalCompactionRetention(
@@ -471,7 +610,10 @@ function readPiCompactionPreparation(session: any) {
   );
   return {
     pathEntries,
-    preparation: preparePiSessionCompaction(pathEntries, settings),
+    preparation: anchorRinCompactionPreparation(
+      pathEntries,
+      preparePiSessionCompaction(pathEntries, settings),
+    ),
   };
 }
 

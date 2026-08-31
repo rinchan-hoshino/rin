@@ -229,6 +229,51 @@ test("session pruning counts parallel tool calls separately inside one user turn
   assert.equal(messages[2].content.length, 25_000);
 });
 
+test("session pruning keeps only the newest Hermes lean tool rounds", () => {
+  const rounds = Array.from({ length: 8 }, (_, round) => {
+    const calls = Array.from(
+      { length: round % 2 === 0 ? 2 : 1 },
+      (_, call) => ({
+        type: "toolCall",
+        id: `round-${round}-call-${call}`,
+        name: "bash",
+        arguments: { command: `step ${round}.${call}` },
+      }),
+    );
+    return [
+      { role: "assistant", content: calls },
+      ...calls.map((call) => ({
+        role: "toolResult",
+        toolCallId: call.id,
+        toolName: "bash",
+        content: `result-${call.id}`,
+      })),
+    ];
+  }).flat();
+  const messages = [{ role: "user", content: "keep working" }, ...rounds];
+
+  assert.equal(pruning.findProtectedToolCallRoundStart(messages, 6), 3);
+  const result = pruning.pruneSessionContextMessages(messages, {
+    retainedToolCallRounds: 6,
+  });
+  const toolResults = result.filter(
+    (message: any) => message.role === "toolResult",
+  );
+
+  assert.deepEqual(
+    toolResults.slice(0, 3).map((message: any) => message.content),
+    Array(3).fill(pruning.RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT),
+  );
+  assert.deepEqual(
+    toolResults.slice(3).map((message: any) => message.content),
+    messages
+      .filter((message: any) => message.role === "toolResult")
+      .slice(3)
+      .map((message: any) => message.content),
+  );
+  assert.equal(result[0], messages[0]);
+});
+
 test("session pruning supports small custom tool-call buckets", () => {
   const messages = [
     ...padding(20),

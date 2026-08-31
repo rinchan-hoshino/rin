@@ -37,7 +37,10 @@ import {
   buildProviderBoundContextEvent,
   estimateProviderBoundContextTokens,
 } from "./provider-context.js";
-import { pruneSessionContextMessages } from "./session-pruning.js";
+import {
+  pruneSessionContextMessages,
+  RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_ROUNDS,
+} from "./session-pruning.js";
 import {
   buildRinSystemPrompt,
   readPiPublicSystemPromptOptions,
@@ -676,8 +679,15 @@ function latestRinSessionActivity(
 }
 
 function rinProviderPruningOptions(session: any) {
+  const branch = session?.sessionManager?.getBranch?.() || [];
+  const hasCompaction = branch.some(
+    (entry: any) => entry?.type === "compaction",
+  );
   return {
     cwd: String(session?.sessionManager?.getCwd?.() || process.cwd()),
+    retainedToolCallRounds: hasCompaction
+      ? RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_ROUNDS
+      : undefined,
   };
 }
 

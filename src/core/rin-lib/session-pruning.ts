@@ -3,6 +3,7 @@ import { isPiCompactSkillReadCall } from "../pi/private-api.js";
 
 export const RIN_SESSION_PRUNING_TOOL_CALL_BUCKET_SIZE = 16;
 export const RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_BUCKETS = 4;
+export const RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_ROUNDS = 6;
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT = "old tool input omitted";
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT = "pruned";
 
@@ -47,6 +48,7 @@ export type ToolHistoryPolicy = {
 export type SessionPruningOptions = {
   toolCallBucketSize?: number;
   retainedToolCallBuckets?: number;
+  retainedToolCallRounds?: number;
   cwd?: string;
   toolHistoryPolicies?: Record<string, ToolHistoryPolicy>;
 };
@@ -217,6 +219,32 @@ function resolveToolHistoryPolicy(
   } satisfies ToolHistoryPolicy;
 }
 
+export function findProtectedToolCallRoundStart(
+  messages: any[],
+  retainedToolCallRounds: number,
+) {
+  const { calls, count } = collectToolCalls(messages);
+  if (count === 0 || calls.size === 0) return 0;
+  const retainedRounds = normalizePositiveInteger(
+    retainedToolCallRounds,
+    RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_ROUNDS,
+  );
+  const locations = [...calls.values()].sort(
+    (left, right) => left.ordinal - right.ordinal,
+  );
+  const roundMessageIndices = [
+    ...new Set(locations.map((location) => location.messageIndex)),
+  ];
+  if (roundMessageIndices.length <= retainedRounds) return 0;
+  const firstRetainedMessageIndex =
+    roundMessageIndices[roundMessageIndices.length - retainedRounds];
+  return (
+    locations.find(
+      (location) => location.messageIndex >= firstRetainedMessageIndex,
+    )?.ordinal ?? count
+  );
+}
+
 export function findProtectedToolCallBucketStart(
   messages: any[],
   toolCallBucketSize: number,
@@ -271,11 +299,14 @@ export function pruneSessionContextMessages(
   options: SessionPruningOptions = {},
 ) {
   const input = Array.isArray(messages) ? messages : [];
-  const protectedToolCallStart = findProtectedToolCallBucketStart(
-    input,
-    normalizeToolCallBucketSize(options.toolCallBucketSize),
-    normalizeRetainedToolCallBuckets(options.retainedToolCallBuckets),
-  );
+  const protectedToolCallStart =
+    options.retainedToolCallRounds === undefined
+      ? findProtectedToolCallBucketStart(
+          input,
+          normalizeToolCallBucketSize(options.toolCallBucketSize),
+          normalizeRetainedToolCallBuckets(options.retainedToolCallBuckets),
+        )
+      : findProtectedToolCallRoundStart(input, options.retainedToolCallRounds);
   const context: ToolHistoryPolicyContext = {
     cwd: String(options.cwd || process.cwd()),
     protectedToolCallStart,
