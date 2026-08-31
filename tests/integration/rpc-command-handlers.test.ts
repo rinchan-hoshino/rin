@@ -191,6 +191,57 @@ test("RPC protocol handlers expose narrow extension, resource, and session bound
   );
 });
 
+test("RPC extension commands bind their normalized frontend identity before prompt dispatch", async () => {
+  let observedFrontendIdentity: unknown;
+  const sessionManager: Record<string, unknown> = {
+    __rinFrontend: { kind: "stale", key: "old" },
+  };
+  const session = fakeSession({
+    sessionManager,
+    extensionRunner: {
+      getRegisteredCommands: () => [
+        {
+          name: "owner",
+          invocationName: "owner",
+          description: "Owner command",
+          chat: true,
+        },
+      ],
+      getCommand: (name: string) => (name === "owner" ? {} : undefined),
+    },
+    prompt: async () => {
+      observedFrontendIdentity = sessionManager.__rinFrontend;
+    },
+  });
+  const handlers = resourceModule.createRpcResourceCommandHandlers({
+    getSession: () => session,
+    turnCoordinator: new turnCoordinatorModule.RpcTurnCoordinator(),
+    createExtensionUiContext: () => ({}),
+    SessionManager: {},
+    runtime: {},
+  });
+
+  const result = await handlers.run_command(
+    request("run_command", {
+      commandLine: "/owner value",
+      frontendIdentity: { kind: " chat ", key: " discord/1:2 " },
+    }),
+  );
+
+  assert.deepEqual(result.data, { handled: true });
+  assert.deepEqual(observedFrontendIdentity, {
+    kind: "chat",
+    key: "discord/1:2",
+  });
+
+  sessionManager.__rinFrontend = { kind: "stale", key: "old" };
+  observedFrontendIdentity = "not-called";
+  await handlers.run_command(
+    request("run_command", { commandLine: "/owner value" }),
+  );
+  assert.equal(observedFrontendIdentity, undefined);
+});
+
 test("RPC auth handler owns validation and login state behind two runtime capabilities", async () => {
   const outputs: Array<Record<string, unknown>> = [];
   const modelRuntime = {

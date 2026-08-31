@@ -170,9 +170,10 @@ export function createRpcResourceCommandHandlers(
                 "session replacement commands must be routed through the frontend",
               );
             }
-            const frontendKind =
-              normalizeFrontendIdentity(command.frontendIdentity)?.kind ||
-              "rpc";
+            const frontendIdentity = normalizeFrontendIdentity(
+              command.frontendIdentity,
+            );
+            const frontendKind = frontendIdentity?.kind || "rpc";
             if (
               commandName &&
               !canInvokeRuntimeSlashCommand(
@@ -182,6 +183,16 @@ export function createRpcResourceCommandHandlers(
               )
             ) {
               return { handled: false };
+            }
+            const manager = session.sessionManager as
+              | { __rinFrontend?: typeof frontendIdentity }
+              | undefined;
+            if (manager) {
+              if (frontendIdentity) {
+                manager.__rinFrontend = frontendIdentity;
+              } else {
+                delete manager.__rinFrontend;
+              }
             }
             const builtinResult = await runBuiltinCommand(
               runtime,
