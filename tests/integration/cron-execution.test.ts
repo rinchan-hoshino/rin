@@ -1657,6 +1657,44 @@ test("cron quiet agent tasks keep the frontend turn but suppress automatic deliv
   }
 });
 
+test("chat quiet mode suppresses scheduled input but preserves final delivery", async () => {
+  const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
+  const chatKey = "onebot/demo:quiet-group";
+  await fs.writeFile(
+    path.join(agentDir, "settings.json"),
+    `${JSON.stringify({ chat: { byChatKey: { [chatKey]: { quietMode: true } } } })}\n`,
+    "utf8",
+  );
+  const sends = [];
+  const turns = [];
+  await execMod.executeCronAgentTask(
+    {
+      id: "cron_chat_quiet",
+      name: "quiet group",
+      frontend: { kind: "chat", key: chatKey },
+      target: { kind: "agent_prompt", prompt: "hello" },
+    },
+    {
+      agentDir,
+      runId: "run:chat-quiet",
+      chat: {
+        send: async (payload) => {
+          sends.push(payload);
+          return { delivered: true, messageIds: ["unexpected"] };
+        },
+        runTurn: async (payload) => {
+          turns.push(payload);
+          return { finalText: "done" };
+        },
+      },
+    },
+  );
+  assert.deepEqual(sends, []);
+  assert.equal(turns.length, 1);
+  assert.equal(turns[0].quietMode, true);
+  assert.equal(turns[0].deliverFinal, true);
+});
+
 test("cron scheduler strips legacy session instructions from task files", async () => {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-agent-"));
   const tasksFile = path.join(agentDir, "data", "scheduler", "tasks.json");

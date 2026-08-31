@@ -7,6 +7,8 @@ import path from "node:path";
 
 const HOME_DIR = os.homedir();
 
+import { resolveChatQuietModeEnabled } from "../chat/settings.js";
+import { readJsonFileOrDefault } from "../platform/fs.js";
 import type { ChatOutboxPayload } from "../rin-lib/chat-outbox-contract.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { cronTaskRunId, nowIso, summarizeText } from "./cron-utils.js";
@@ -534,8 +536,15 @@ export async function executeCronAgentTask(
   if (!basePrompt) throw new Error("cron_prompt_required");
   const prompt = basePrompt;
   const quiet = task.quiet === true;
+  const chatQuiet = chatKey
+    ? resolveChatQuietModeEnabled(
+        readJsonFileOrDefault(path.join(options.agentDir, "settings.json"), {}),
+        chatKey,
+      )
+    : false;
+  const presentationQuiet = quiet || chatQuiet;
   let scheduledInputMessageId: string | undefined;
-  if (chatKey && !quiet) {
+  if (chatKey && !presentationQuiet) {
     const presentationRunId = safeString(options.runId).trim();
     if (!presentationRunId) throw new Error("cron_run_id_required");
     const delivery = await sendChatText(options, {
@@ -558,7 +567,7 @@ export async function executeCronAgentTask(
     controllerKey: chatKey ? "default" : cronTaskRunControllerKey(task),
     ...(chatKey ? { chatKey } : {}),
     deliverFinal: !quiet,
-    quietMode: quiet,
+    quietMode: presentationQuiet,
     text: prompt,
     ...(scheduledInputMessageId
       ? { replyToMessageId: scheduledInputMessageId }
