@@ -26,6 +26,7 @@ import {
 export type ChatCommandRow = {
   name: string;
   description?: string;
+  chatConcurrent?: boolean;
 };
 
 type ChatCommandCatalogClient = {
@@ -36,6 +37,7 @@ type ChatCommandCatalogClient = {
       name: string;
       description?: string;
       chat?: boolean;
+      chatConcurrent?: boolean;
     }>
   >;
 };
@@ -47,6 +49,7 @@ export function getChatCommandRows(
     name: string;
     description?: string;
     chat?: boolean;
+    chatConcurrent?: boolean;
   }>,
 ): ChatCommandRow[] {
   const descriptions = createRinI18n().chatCommandDescriptions;
@@ -55,7 +58,18 @@ export function getChatCommandRows(
     .map((command) => ({
       name: command.name,
       description: command.description || descriptions[command.name],
+      ...(command.chatConcurrent === true ? { chatConcurrent: true } : {}),
     }));
+}
+
+export function isChatCommandConcurrent(
+  commandRows: ReadonlyArray<ChatCommandRow>,
+  commandName: string,
+) {
+  return commandRows.some(
+    (command) =>
+      command.name === commandName && command.chatConcurrent === true,
+  );
 }
 
 export async function loadChatCommandRows(

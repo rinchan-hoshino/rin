@@ -35,6 +35,7 @@ import {
 } from "./support.js";
 import {
   drainChatOutbox,
+  isChatCommandConcurrent,
   loadChatCommandRows,
   reconcileCommittedChatOutboxProcessing,
   refreshChatCommandRows,
@@ -439,7 +440,7 @@ function getCommandTargets(session: any) {
 type ParsedInboundCommand = { name: string; argsText: string };
 
 const REMOVED_CHAT_COMMAND_NAMES = new Set(["session"]);
-const ACTIVE_CHAT_KEY_PRIORITY_COMMAND_NAMES = new Set([
+const BUILTIN_ACTIVE_CHAT_KEY_PRIORITY_COMMAND_NAMES = new Set([
   "abort",
   "new",
   "status",
@@ -760,6 +761,9 @@ export async function startChatBridge(
   };
   const frontendClientFactory = options.frontendClientFactory;
   let commandRows: Awaited<ReturnType<typeof loadChatCommandRows>>;
+  const isActiveChatKeyPriorityCommand = (commandName: string) =>
+    BUILTIN_ACTIVE_CHAT_KEY_PRIORITY_COMMAND_NAMES.has(commandName) ||
+    isChatCommandConcurrent(commandRows, commandName);
   try {
     commandRows =
       options.commandRows ??
@@ -1503,7 +1507,7 @@ export async function startChatBridge(
           ? (envelope.admission.decision.command as any)
           : undefined;
       if (frozenCommand) {
-        return ACTIVE_CHAT_KEY_PRIORITY_COMMAND_NAMES.has(
+        return isActiveChatKeyPriorityCommand(
           safeString(frozenCommand.name).trim(),
         );
       }
@@ -1519,9 +1523,7 @@ export async function startChatBridge(
         elementsToCommandText(restoreChatInboxElements(envelope)),
         commandRows,
       );
-      return ACTIVE_CHAT_KEY_PRIORITY_COMMAND_NAMES.has(
-        commandRequest.command?.name || "",
-      );
+      return isActiveChatKeyPriorityCommand(commandRequest.command?.name || "");
     },
     canClaimDuringActiveChatKeyWorker: (envelope) => {
       const admitted = resolveDurableChatAdmission(envelope.admission, {
@@ -1532,7 +1534,7 @@ export async function startChatBridge(
         return (
           admitted.kind === "turn" ||
           (admitted.kind === "command" &&
-            ACTIVE_CHAT_KEY_PRIORITY_COMMAND_NAMES.has(admitted.command.name))
+            isActiveChatKeyPriorityCommand(admitted.command.name))
         );
       }
 
@@ -1553,8 +1555,7 @@ export async function startChatBridge(
       );
       const commandName = commandRequest.command?.name || "";
       if (!commandName) return true;
-      if (!ACTIVE_CHAT_KEY_PRIORITY_COMMAND_NAMES.has(commandName))
-        return false;
+      if (!isActiveChatKeyPriorityCommand(commandName)) return false;
       return resolveChatInputAccess(queuedSession, getIdentity(), {
         addressedToAgent: true,
       }).then((access) => access.allow);

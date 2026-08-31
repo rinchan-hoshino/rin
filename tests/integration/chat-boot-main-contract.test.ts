@@ -32,6 +32,7 @@ test("chat boot projects chat-enabled commands from the runtime catalog", () => 
       description: "Say hello",
       source: "extension",
       chat: true,
+      chatConcurrent: true,
     },
     {
       name: "terminal-only",
@@ -47,9 +48,15 @@ test("chat boot projects chat-enabled commands from the runtime catalog", () => 
     },
   ]);
   assert.deepEqual(rows, [
-    { name: "hello", description: "Say hello" },
+    {
+      name: "hello",
+      description: "Say hello",
+      chatConcurrent: true,
+    },
     { name: "usage", description: "Show Codex quota status" },
   ]);
+  assert.equal(boot.isChatCommandConcurrent(rows, "hello"), true);
+  assert.equal(boot.isChatCommandConcurrent(rows, "usage"), false);
 });
 
 test("chat boot refreshes a live command projection after reload", async () => {

@@ -7,6 +7,7 @@ type SlashCommandEntry = {
   source: string;
   sourceInfo?: unknown;
   chat: boolean;
+  chatConcurrent?: boolean;
 };
 
 type SlashCommandSourceGroup = {
@@ -58,6 +59,7 @@ type SlashCommandCollectorSpec<T> = {
   getDescription?: (value: T) => unknown;
   getSourceInfo?: (value: T) => unknown;
   getChat?: (value: T) => unknown;
+  getChatConcurrent?: (value: T) => unknown;
 };
 
 function trimText(value: unknown) {
@@ -97,6 +99,7 @@ function collectSlashCommandsForSource<T>(
     };
     const sourceInfo = spec.getSourceInfo?.(value);
     if (sourceInfo !== undefined) entry.sourceInfo = sourceInfo;
+    if (spec.getChatConcurrent?.(value) === true) entry.chatConcurrent = true;
     commands.push(entry);
   }
   return commands;
@@ -147,6 +150,7 @@ export function getExtensionSlashCommands(commands: unknown[], source: string) {
     getDescription: (command) => command?.description,
     getSourceInfo: (command) => command?.sourceInfo,
     getChat: (command) => command?.chat,
+    getChatConcurrent: (command) => command?.chatConcurrent,
   });
 }
 

@@ -204,6 +204,7 @@ test("catalog helpers collect runtime slash commands in source order", () => {
         invocationName: "  inspect  ",
         description: "  Inspect chat state.  ",
         chat: true,
+        chatConcurrent: true,
       },
     ],
   });
@@ -214,6 +215,7 @@ test("catalog helpers collect runtime slash commands in source order", () => {
     description: "Inspect chat state.",
     source: "extension",
     chat: true,
+    chatConcurrent: true,
   });
   assert.equal(
     commands.some((command) => command.name === "model"),
