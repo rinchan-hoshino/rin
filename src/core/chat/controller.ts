@@ -196,6 +196,7 @@ export class ChatController {
   compactionTurn: ChatTurnMeta | null = null;
   compactionWorkingIndicators: WorkingIndicator[] = [];
   editableCompactionStatusText = "";
+  editableCompactionRestorePending = false;
   lastCompactionIndicatorAt = 0;
   lastCompactionTypingIndicatorAt = 0;
   compactionIndicatorTick = 0;
@@ -927,6 +928,7 @@ export class ChatController {
     this.backendAcceptedIncomingMessageId = "";
     this.latestAssistantSummaryText = "";
     this.editableCompactionStatusText = "";
+    this.editableCompactionRestorePending = false;
   }
 
   private setActiveCommandTurnInput(input: {
@@ -1215,15 +1217,20 @@ export class ChatController {
     return results.some(Boolean);
   }
 
-  private async clearCompactionWorkingReaction() {
-    const indicators = this.compactionWorkingIndicators.length
-      ? this.compactionWorkingIndicators
-      : this.getWorkingIndicators();
+  private async clearCompactionWorkingReaction(
+    options: {
+      endReason?: "presentation_transferred";
+    } = {},
+  ) {
+    const indicators = [...this.compactionWorkingIndicators];
     this.compactionWorkingIndicators = [];
     this.lastCompactionIndicatorAt = 0;
     this.lastCompactionTypingIndicatorAt = 0;
     this.compactionIndicatorTick = 0;
-    const context = this.compactionWorkingIndicatorContext({ event: "end" });
+    const context = this.compactionWorkingIndicatorContext({
+      event: "end",
+      endReason: options.endReason,
+    });
     const results = await Promise.all(
       selectWorkingIndicatorsForEnd(indicators).map((indicator) =>
         this.callWorkingIndicator(indicator, "end", context).catch(() => false),
@@ -1362,12 +1369,21 @@ export class ChatController {
   }
 
   private async refreshEditableWorkingNotice(
-    options: { force?: boolean; workingStatusText?: string } = {},
+    options: {
+      force?: boolean;
+      workingStatusText?: string;
+      allowDetachedActiveTurn?: boolean;
+      allowPresentationReplacement?: boolean;
+    } = {},
   ) {
+    const ownsEditableProgress = Boolean(
+      (this.currentTurn && this.awaitingTurnSettle) ||
+      (options.allowDetachedActiveTurn && this.hasActiveTurn()),
+    );
     if (
-      !this.currentTurn ||
-      !this.awaitingTurnSettle ||
-      this.hasUnacceptedPendingPresentationReplacement() ||
+      !ownsEditableProgress ||
+      (!options.allowPresentationReplacement &&
+        this.hasUnacceptedPendingPresentationReplacement()) ||
       !this.canDeliverReplies() ||
       shouldSuppressQuietDelivery(
         this.isQuietModeEnabled(),
@@ -1413,6 +1429,14 @@ export class ChatController {
     if (!this.shouldShowTypingIndicator()) {
       await this.clearWorkingReaction().catch(() => {});
       return false;
+    }
+    if (this.editableCompactionRestorePending) {
+      const restored = await this.refreshEditableWorkingNotice({
+        force: true,
+        allowDetachedActiveTurn: true,
+        allowPresentationReplacement: true,
+      }).catch(() => false);
+      this.editableCompactionRestorePending = !restored;
     }
     const indicators = this.getWorkingIndicators();
     const now = Date.now();
@@ -1483,6 +1507,17 @@ export class ChatController {
       );
     }
     if (visibleDue) this.workingIndicatorTick += 1;
+    if (
+      this.editableCompactionRestorePending &&
+      visibleResults.some(
+        (result, index) =>
+          Boolean(result) &&
+          workingIndicatorPresentation(visibleIndicators[index]) ===
+            "editable-message",
+      )
+    ) {
+      this.editableCompactionRestorePending = false;
+    }
     return [...typingResults, ...visibleResults].some(Boolean);
   }
 
@@ -2421,10 +2456,19 @@ export class ChatController {
     this.pendingPassiveNotices = [];
   }
 
-  private async clearCompactionPresentation() {
-    await this.clearCompactionWorkingReaction().catch(() => false);
+  private async clearCompactionPresentation(
+    options: {
+      endReason?: "presentation_transferred";
+    } = {},
+  ) {
+    await this.clearCompactionWorkingReaction(options).catch(() => false);
     this.compactionTurn = null;
+    this.compactionWorkingIndicators = [];
+    this.lastCompactionIndicatorAt = 0;
+    this.lastCompactionTypingIndicatorAt = 0;
+    this.compactionIndicatorTick = 0;
     this.editableCompactionStatusText = "";
+    this.editableCompactionRestorePending = false;
   }
 
   private async deliverManualCompactionCompletion(
@@ -2453,9 +2497,29 @@ export class ChatController {
   private async deliverAutomaticCompactionEndNotice(text: string) {
     if (this.editableCompactionStatusText) {
       await this.clearCompactionPresentation();
-      await this.refreshEditableWorkingNotice({ force: true }).catch(
-        () => false,
-      );
+      const restored = await this.refreshEditableWorkingNotice({
+        force: true,
+        allowDetachedActiveTurn: true,
+        allowPresentationReplacement: true,
+      }).catch(() => false);
+      this.editableCompactionRestorePending = !restored;
+      return true;
+    }
+    const recoveredEditableTurn = Boolean(
+      this.compactionTurn &&
+      this.hasActiveTurn() &&
+      findEditableWorkingIndicator(this.getWorkingIndicators()),
+    );
+    if (recoveredEditableTurn) {
+      await this.clearCompactionPresentation({
+        endReason: "presentation_transferred",
+      });
+      const restored = await this.refreshEditableWorkingNotice({
+        force: true,
+        allowDetachedActiveTurn: true,
+        allowPresentationReplacement: true,
+      }).catch(() => false);
+      this.editableCompactionRestorePending = !restored;
       return true;
     }
     const coalesceReplyToMessageId = safeString(
@@ -2495,15 +2559,17 @@ export class ChatController {
     const manualCompaction = this.ownsManualCompactionPresentation();
     if (
       !manualCompaction &&
-      this.currentTurn &&
-      this.awaitingTurnSettle &&
+      this.hasActiveTurn() &&
       findEditableWorkingIndicator(this.getWorkingIndicators())
     ) {
       this.editableCompactionStatusText = trimmed;
-      return await this.refreshEditableWorkingNotice({
+      const overlaid = await this.refreshEditableWorkingNotice({
         force: true,
         workingStatusText: trimmed,
+        allowDetachedActiveTurn: true,
       });
+      if (overlaid) return true;
+      this.editableCompactionStatusText = "";
     }
 
     try {
@@ -2535,7 +2601,7 @@ export class ChatController {
         this.compactionTurn = {
           startedAt: Date.now(),
           incomingMessageId: messageId,
-          replyToMessageId: coalesceReplyToMessageId || messageId,
+          replyToMessageId: coalesceReplyToMessageId || undefined,
           workingNoticeSent: false,
         };
         if (!manualCompaction) {

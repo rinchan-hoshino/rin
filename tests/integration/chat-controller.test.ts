@@ -2161,6 +2161,7 @@ test("chat controller sends compaction notices as interim progress and reacts on
       .join(" ");
     deliveries.push({
       text,
+      quote: nodes.find((node) => node?.type === "quote")?.attrs?.id,
       kind: options?.deliveryKind,
       coalesce: Boolean(options?.coalesceWithWorkingMessage),
     });
@@ -2176,7 +2177,12 @@ test("chat controller sends compaction notices as interim progress and reacts on
   assert.equal(controller.currentTurn, null);
   assert.equal(controller.compactionTurn?.incomingMessageId, "m-out-1");
   assert.deepEqual(deliveries, [
-    { text: "Compacting...", kind: "interim", coalesce: true },
+    {
+      text: "Compacting...",
+      quote: undefined,
+      kind: "interim",
+      coalesce: true,
+    },
   ]);
   assert.deepEqual(actions, [{ chat_id: "2", action: "typing" }]);
   assert.deepEqual(reactions, [["create", "2", "m-out-1", "🤔"]]);
@@ -2199,9 +2205,15 @@ test("chat controller sends compaction notices as interim progress and reacts on
     ["delete", "2", "m-out-1", "🤔", "1"],
   ]);
   assert.deepEqual(deliveries, [
-    { text: "Compacting...", kind: "interim", coalesce: true },
+    {
+      text: "Compacting...",
+      quote: undefined,
+      kind: "interim",
+      coalesce: true,
+    },
     {
       text: "Compacted from 108,642 tokens",
+      quote: undefined,
       kind: "interim",
       coalesce: true,
     },
@@ -2220,6 +2232,185 @@ test("chat controller sends compaction notices as interim progress and reacts on
       ?.sessionFile,
     sessionFile,
   );
+});
+
+test("chat controller restores editable progress when backend work outlives local turn ownership", async () => {
+  const controller = await createController("telegram/1:2");
+  const editableTicks = [];
+  const deliveries = [];
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick(context) {
+        editableTicks.push({
+          status: context.workingStatusText,
+          summary: context.assistantSummaryText,
+        });
+        return true;
+      },
+      async end() {
+        return false;
+      },
+    },
+  ];
+  controller.app.bots[0].sendMessage = async (...args) => {
+    deliveries.push(args);
+    return [`m-out-${deliveries.length}`];
+  };
+  controller.driver.frontendPhase = "working";
+  controller.driver.frontendState = { isStreaming: true, turnActive: true };
+  controller.currentTurn = null;
+  controller.awaitingTurnSettle = false;
+  controller.latestAssistantSummaryText = "**Running full validation**";
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: { type: "compaction_start", reason: "threshold" },
+  });
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      result: { tokensBefore: 231239 },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(controller.compactionTurn, null);
+  assert.deepEqual(editableTicks, [
+    { status: "Compacting...", summary: "**Running full validation**" },
+    { status: undefined, summary: "**Running full validation**" },
+  ]);
+  assert.equal(deliveries.length, 0);
+});
+
+test("chat controller falls back when editable compaction overlay is not accepted", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick() {
+        return false;
+      },
+      async end() {
+        return false;
+      },
+    },
+  ];
+  controller.app.bots[0].sendMessage = async (...args) => {
+    deliveries.push(args);
+    return [`m-out-${deliveries.length}`];
+  };
+  controller.driver.frontendState = { isStreaming: true, turnActive: true };
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: { type: "compaction_start", reason: "threshold" },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(controller.editableCompactionStatusText, "");
+  assert.equal(controller.compactionTurn?.incomingMessageId, "m-out-1");
+  assert.equal(deliveries.length, 1);
+});
+
+test("chat controller retries a failed editable restore on the next working poll", async () => {
+  const controller = await createController("telegram/1:2");
+  let ticks = 0;
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick() {
+        ticks += 1;
+        return ticks !== 2;
+      },
+      async end() {
+        return false;
+      },
+    },
+  ];
+  controller.driver.frontendState = {
+    working: true,
+    isStreaming: true,
+    turnActive: true,
+  };
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: { type: "compaction_start", reason: "threshold" },
+  });
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      result: { tokensBefore: 231239 },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(controller.editableCompactionRestorePending, true);
+  await controller.pollTyping();
+  assert.equal(controller.editableCompactionRestorePending, false);
+  assert.equal(ticks >= 3, true);
+});
+
+test("chat controller transfers standalone compaction to a recovered editable turn", async () => {
+  const controller = await createController("telegram/1:2");
+  const deliveries = [];
+  const editableEvents = [];
+  controller.app.bots[0].workingIndicators = [];
+  controller.driver.hasActiveTurn = () => false;
+  controller.app.bots[0].sendMessage = async (...args) => {
+    deliveries.push(args);
+    return [`m-out-${deliveries.length}`];
+  };
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: { type: "compaction_start", reason: "threshold" },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(controller.compactionTurn?.incomingMessageId, "m-out-1");
+
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick(context) {
+        editableEvents.push(["tick", context.workingStatusText]);
+        return true;
+      },
+      async end(context) {
+        editableEvents.push(["end", context.endReason]);
+        return true;
+      },
+    },
+  ];
+  controller.driver.hasActiveTurn = () => true;
+  controller.driver.frontendState = { isStreaming: true, turnActive: true };
+
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      result: { tokensBefore: 231239 },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(controller.compactionTurn, null);
+  assert.deepEqual(editableEvents, [["tick", undefined]]);
+  assert.equal(deliveries.length, 1);
 });
 
 test("chat controller coalesces automatic compaction completion into the active chat turn", async () => {
