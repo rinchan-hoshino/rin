@@ -94,6 +94,7 @@ test("frontend daemon client owns the complete RPC command surface", async () =>
             description: "Owner command",
             category: "Rin",
             source: "extension",
+            chatConcurrent: true,
           },
           { id: "fallback-id", name: "fallback" },
         ],
@@ -172,6 +173,7 @@ test("frontend daemon client owns the complete RPC command surface", async () =>
         category: "Rin",
         source: "extension",
         chat: false,
+        chatConcurrent: true,
       },
       {
         id: "fallback",

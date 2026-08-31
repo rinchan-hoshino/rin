@@ -304,6 +304,7 @@ export class RinDaemonFrontendClient implements RpcFrontendClient {
         typeof command.category === "string" ? command.category : undefined,
       source: typeof command.source === "string" ? command.source : undefined,
       chat: command.chat === true,
+      ...(command.chatConcurrent === true ? { chatConcurrent: true } : {}),
     }));
   }
 

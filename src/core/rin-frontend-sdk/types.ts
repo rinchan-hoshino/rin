@@ -214,6 +214,7 @@ export type RinFrontendCommandItem = {
   category?: string;
   source?: string;
   chat: boolean;
+  chatConcurrent?: boolean;
 };
 
 export type RinFrontendSessionItem = {
