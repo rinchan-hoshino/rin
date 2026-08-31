@@ -8,6 +8,7 @@ import { parseJsonl } from "../rin-lib/common.js";
 import { fail } from "../rin-lib/rpc-response.js";
 
 const DEFAULT_ABORT_CONTROL_GRACE_MS = 250;
+const DEFAULT_ABORT_SETTLE_GRACE_MS = 1_000;
 const DEFAULT_EXECUTION_STARTUP_TIMEOUT_MS = 30_000;
 const EXECUTION_STOP_GRACE_MS = 250;
 
@@ -27,6 +28,7 @@ type SupervisorStreams = {
 export type WorkerSupervisorOptions = Partial<SupervisorStreams> & {
   executionPath: string;
   abortGraceMs?: number;
+  abortSettleGraceMs?: number;
   executionStartupTimeoutMs?: number;
   signal?: AbortSignal;
 };
@@ -98,6 +100,10 @@ export async function runWorkerSupervisor(
     options.abortGraceMs,
     DEFAULT_ABORT_CONTROL_GRACE_MS,
   );
+  const abortSettleGraceMs = positiveDuration(
+    options.abortSettleGraceMs,
+    DEFAULT_ABORT_SETTLE_GRACE_MS,
+  );
   const executionStartupTimeoutMs = positiveDuration(
     options.executionStartupTimeoutMs,
     DEFAULT_EXECUTION_STARTUP_TIMEOUT_MS,
@@ -108,6 +114,8 @@ export async function runWorkerSupervisor(
   let activeRequestTag = "";
   let abortAttempt: AbortAttempt | undefined;
   const nativeAbortsInFlight = new Set<string>();
+  const nativeAbortTimers = new Map<string, NodeJS.Timeout>();
+  const queuedAbortLines: string[] = [];
   let recoveringAbort:
     | { id: string; requestTag: string; queuedLines: string[] }
     | undefined;
@@ -137,18 +145,67 @@ export async function runWorkerSupervisor(
     plane.child.stdin.write(`${line}\n`);
   };
 
-  const stopExecution = async (plane: ExecutionPlane | undefined) => {
-    if (!plane || plane.child.exitCode !== null || plane.child.signalCode) {
-      return;
+  const signalExecutionTree = (
+    plane: ExecutionPlane,
+    signal: NodeJS.Signals,
+  ) => {
+    if (process.platform !== "win32" && plane.child.pid) {
+      try {
+        process.kill(-plane.child.pid, signal);
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
     }
+    if (plane.child.exitCode === null && plane.child.signalCode === null) {
+      plane.child.kill(signal);
+    }
+  };
+
+  const stopExecution = async (plane: ExecutionPlane | undefined) => {
+    if (!plane) return;
     plane.expectedExit = true;
     plane.retired = true;
-    plane.child.kill("SIGTERM");
+    signalExecutionTree(plane, "SIGTERM");
     await Promise.race([plane.closed, wait(EXECUTION_STOP_GRACE_MS)]);
+    signalExecutionTree(plane, "SIGKILL");
     if (plane.child.exitCode === null && plane.child.signalCode === null) {
-      plane.child.kill("SIGKILL");
       await plane.closed;
     }
+  };
+
+  const clearNativeAbortTimer = (id: string) => {
+    const timer = nativeAbortTimers.get(id);
+    if (timer) clearTimeout(timer);
+    nativeAbortTimers.delete(id);
+  };
+
+  const clearNativeAbortTimers = () => {
+    for (const timer of nativeAbortTimers.values()) clearTimeout(timer);
+    nativeAbortTimers.clear();
+  };
+
+  const flushQueuedAbortLines = () => {
+    for (const line of queuedAbortLines.splice(0)) {
+      void handleAbort(line, JSON.parse(line)).catch((error) => {
+        writeLine(output, fail(undefined, "abort", error));
+      });
+    }
+  };
+
+  const armNativeAbortTimer = (id: string) => {
+    clearNativeAbortTimer(id);
+    const timer = setTimeout(() => {
+      nativeAbortTimers.delete(id);
+      if (!nativeAbortsInFlight.has(id) || recoveringAbort || stopping) return;
+      void recoverBlockedAbort(id).catch((error) => {
+        recoveringAbort = undefined;
+        nativeAbortsInFlight.delete(id);
+        writeLine(output, fail(id || undefined, "abort", error));
+      });
+    }, abortSettleGraceMs);
+    timer.unref?.();
+    nativeAbortTimers.set(id, timer);
   };
 
   const onExecutionPayload = (plane: ExecutionPlane, payload: any) => {
@@ -186,7 +243,10 @@ export async function runWorkerSupervisor(
       payload.event === "abort_started"
     ) {
       const acknowledgedAbortId = String(payload.id || "");
-      if (acknowledgedAbortId) nativeAbortsInFlight.add(acknowledgedAbortId);
+      if (acknowledgedAbortId) {
+        nativeAbortsInFlight.add(acknowledgedAbortId);
+        armNativeAbortTimer(acknowledgedAbortId);
+      }
       if (
         abortAttempt?.execution === plane &&
         acknowledgedAbortId === abortAttempt.id
@@ -206,8 +266,13 @@ export async function runWorkerSupervisor(
       abortAttempt = undefined;
       attempt.resolveStarted();
     }
-    if (payload?.type === "response" && payload.command === "abort") {
-      nativeAbortsInFlight.delete(String(payload.id || ""));
+    const completedAbortId =
+      payload?.type === "response" && payload.command === "abort"
+        ? String(payload.id || "")
+        : "";
+    if (completedAbortId) {
+      nativeAbortsInFlight.delete(completedAbortId);
+      clearNativeAbortTimer(completedAbortId);
     }
     if (
       payload?.type === "response" &&
@@ -219,13 +284,23 @@ export async function runWorkerSupervisor(
       payload = { ...payload, command: "abort" };
       const queuedLines = recoveringAbort.queuedLines;
       recoveringAbort = undefined;
+      nativeAbortsInFlight.delete(String(payload.id || ""));
+      clearNativeAbortTimer(String(payload.id || ""));
       writeLine(output, payload);
       for (const line of queuedLines) {
-        writeExecutionLine(plane, line);
+        const command = JSON.parse(line);
+        if (command?.type === "abort") {
+          void handleAbort(line, command).catch((error) => {
+            writeLine(output, fail(command?.id, "abort", error));
+          });
+        } else {
+          writeExecutionLine(plane, line);
+        }
       }
       return;
     }
     writeLine(output, payload);
+    if (completedAbortId) flushQueuedAbortLines();
   };
 
   const spawnExecution = async (nextOptions: WorkerResourceOptions) => {
@@ -242,6 +317,7 @@ export async function runWorkerSupervisor(
         cwd: process.cwd(),
         env: process.env,
         stdio: ["pipe", "pipe", "pipe"],
+        detached: process.platform !== "win32",
         windowsHide: true,
       },
     );
@@ -318,8 +394,13 @@ export async function runWorkerSupervisor(
       throw new Error("rin_execution_plane_session_unknown");
     }
     const requestTag = activeRequestTag;
-    recoveringAbort = { id, requestTag, queuedLines: [] };
+    recoveringAbort = {
+      id,
+      requestTag,
+      queuedLines: queuedAbortLines.splice(0),
+    };
     nativeAbortsInFlight.clear();
+    clearNativeAbortTimers();
     previous.retired = true;
     previous.expectedExit = true;
     await stopExecution(previous);
@@ -341,7 +422,7 @@ export async function runWorkerSupervisor(
     const id = String(command?.id || "");
     const plane = execution!;
     if (abortAttempt?.execution === plane || nativeAbortsInFlight.size > 0) {
-      writeExecutionLine(plane, line);
+      queuedAbortLines.push(line);
       return;
     }
     let resolveStarted!: () => void;
@@ -360,6 +441,8 @@ export async function runWorkerSupervisor(
       await recoverBlockedAbort(id);
     } catch (error) {
       recoveringAbort = undefined;
+      nativeAbortsInFlight.delete(id);
+      clearNativeAbortTimer(id);
       writeLine(output, fail(id || undefined, "abort", error));
     }
   };
@@ -403,6 +486,7 @@ export async function runWorkerSupervisor(
   const stop = async () => {
     if (stopping) return;
     stopping = true;
+    clearNativeAbortTimers();
     input.off("data", onInputData);
     input.pause();
     await stopExecution(execution);

@@ -1,4 +1,5 @@
 import "./require-test-sandbox.ts";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import process from "node:process";
 import readline from "node:readline";
@@ -97,6 +98,33 @@ input.on("line", (line) => {
     });
     return;
   }
+  if (command.type === "start_responsive_turn") {
+    log("start-responsive");
+    if (options.fixtureSpawnTurnChild) {
+      const child = spawn(
+        process.execPath,
+        ["-e", "setInterval(() => {}, 1000)"],
+        { stdio: "ignore" },
+      );
+      log(`turn-child:${child.pid}`);
+    }
+    output({
+      type: "response",
+      id: command.id,
+      command: command.type,
+      success: true,
+      data: { sessionFile, sessionId },
+    });
+    output({
+      type: "rpc_turn_event",
+      event: "start",
+      requestTag: command.requestTag,
+      turnGeneration: 1,
+      sessionFile,
+      sessionId,
+    });
+    return;
+  }
   if (command.type === "abort_interrupted_turn") {
     log(`native-abort:${command.requestTag}`);
     output({ type: "agent_start", sessionFile, sessionId });
@@ -126,6 +154,14 @@ input.on("line", (line) => {
   }
   if (command.type === "abort") {
     log(`direct-abort:${command.id}`);
+    if (options.fixtureAbortMode === "ack-hang") {
+      output({
+        type: "rpc_control_event",
+        event: "abort_started",
+        id: command.id,
+      });
+      return;
+    }
     if (options.fixtureAbortMode === "ack-delay") {
       output({
         type: "rpc_control_event",

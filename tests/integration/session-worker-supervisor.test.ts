@@ -1,6 +1,7 @@
 import "../support/require-test-sandbox.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -273,6 +274,129 @@ test("session worker supervisor keeps a responsive Pi execution plane after nati
     );
     assert.equal(log.filter((line) => line.startsWith("open:")).length, 0);
   } finally {
+    input.end();
+    await supervisor;
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("session worker supervisor replaces a native abort that never settles and kills its execution tree", async () => {
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "rin-worker-supervisor-native-hang-owner-"),
+  );
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const outputChunks: string[] = [];
+  output.on("data", (chunk) => outputChunks.push(String(chunk)));
+  const fixtureLogPath = path.join(root, "executor.log");
+  const fixtureSessionFile = path.join(root, "session.jsonl");
+  let turnChildPid = 0;
+  const supervisor = supervisorModule.runWorkerSupervisor(
+    {
+      fixtureLogPath,
+      fixtureSessionFile,
+      fixtureAbortMode: "ack-hang",
+      fixtureSpawnTurnChild: true,
+    },
+    {
+      input,
+      output,
+      errorOutput: new PassThrough(),
+      executionPath: path.join(
+        rootDir,
+        "tests",
+        "support",
+        "session-worker-execution-fixture.ts",
+      ),
+      abortGraceMs: 30,
+      abortSettleGraceMs: 80,
+      executionStartupTimeoutMs: 1_000,
+    },
+  );
+
+  try {
+    input.write(
+      `${JSON.stringify({
+        id: "responsive-turn",
+        type: "start_responsive_turn",
+        requestTag: "responsive-request",
+      })}\n`,
+    );
+    await waitFor(() =>
+      parsedLines(outputChunks).some(
+        (entry) =>
+          entry.type === "rpc_turn_event" &&
+          entry.event === "start" &&
+          entry.requestTag === "responsive-request",
+      ),
+    );
+    await waitFor(() => {
+      try {
+        const lines = fsSync
+          .readFileSync(fixtureLogPath, "utf8")
+          .trim()
+          .split("\n");
+        turnChildPid = Number(
+          lines.find((line) => line.startsWith("turn-child:"))?.split(":")[1],
+        );
+        return turnChildPid > 0;
+      } catch {
+        return false;
+      }
+    });
+
+    const abortStartedAt = Date.now();
+    input.write(
+      `${JSON.stringify({ id: "abort-native-hang", type: "abort" })}\n`,
+    );
+    await waitFor(() =>
+      parsedLines(outputChunks).some(
+        (entry) =>
+          entry.type === "response" &&
+          entry.id === "abort-native-hang" &&
+          entry.command === "abort" &&
+          entry.success === true,
+      ),
+    );
+    assert.ok(Date.now() - abortStartedAt < 1_000);
+
+    const entries = parsedLines(outputChunks);
+    assert.ok(
+      entries.some(
+        (entry) =>
+          entry.type === "rpc_turn_event" &&
+          entry.event === "error" &&
+          entry.requestTag === "responsive-request",
+      ),
+    );
+    const log = (await fs.readFile(fixtureLogPath, "utf8")).trim().split("\n");
+    assert.ok(log.includes("direct-abort:abort-native-hang"));
+    assert.ok(log.includes(`open:${fixtureSessionFile}`));
+    assert.ok(log.includes("native-abort:responsive-request"));
+
+    let childCanRun = true;
+    try {
+      const stat = await fs.readFile(`/proc/${turnChildPid}/stat`, "utf8");
+      const state = stat
+        .slice(stat.lastIndexOf(")") + 1)
+        .trim()
+        .split(/\s+/)[0];
+      childCanRun = state !== "Z" && state !== "X";
+    } catch (error) {
+      if (error?.code === "ENOENT") childCanRun = false;
+      else throw error;
+    }
+    assert.equal(
+      childCanRun,
+      false,
+      "abort recovery must stop tool descendants",
+    );
+  } finally {
+    if (turnChildPid > 0) {
+      try {
+        process.kill(turnChildPid, "SIGKILL");
+      } catch {}
+    }
     input.end();
     await supervisor;
     await fs.rm(root, { recursive: true, force: true });
