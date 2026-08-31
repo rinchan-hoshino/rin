@@ -1205,18 +1205,30 @@ export async function assertScheduledReminderDelivery() {
       assert.equal(created.id, taskId);
 
       const deadline = Date.now() + 10_000;
-      let delivered = "";
+      let deliveries: any[] = [];
       while (Date.now() < deadline) {
         try {
-          delivered = await fs.readFile(deliveryPath, "utf8");
+          deliveries = (await fs.readFile(deliveryPath, "utf8"))
+            .trim()
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => JSON.parse(line));
         } catch (error: any) {
           if (error?.code !== "ENOENT") throw error;
         }
-        if (delivered.includes("REMINDER_DELIVERED_K14")) break;
+        if (deliveries.length >= 2) break;
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
-      assert.match(delivered, /REMINDER_DELIVERED_K14/);
-      assert.match(delivered, /"chatId":"owner"/);
+      assert.equal(deliveries.length, 2);
+      assert.match(
+        JSON.stringify(deliveries[0]),
+        /Scheduled task.*REMINDER_DELIVERED_K14/,
+      );
+      assert.match(
+        JSON.stringify(deliveries[1]),
+        /"type":"quote".*"id":"journey-delivery-1".*stdout.*REMINDER_DELIVERED_K14/,
+      );
+      assert.equal(deliveries[1].chatId, "owner");
       const finished = scheduler.getTask(taskId);
       assert.equal(finished.enabled, false);
       assert.match(finished.completedAt || "", /^\d{4}-\d{2}-\d{2}T/);

@@ -56,6 +56,7 @@ import {
   getActiveChatOutboxTurnFence,
   isChatOutboxTurnFenceActive,
   readChatOutboxItemById,
+  waitForChatOutboxDelivery,
 } from "./outbox.js";
 import { applyPostDelivery, drainChatOutbox } from "./boot.js";
 import {
@@ -97,6 +98,7 @@ import {
   type ChatDeliveryOutcome,
 } from "./delivery-policy.js";
 import { presentTodoNotice } from "./todo-presentation.js";
+import { readTodoSnapshotFromSessionFile } from "../rin-lib/todo-state.js";
 import {
   findEditableWorkingIndicator,
   isWorkingIndicatorPollDue,
@@ -198,6 +200,7 @@ export class ChatController {
   private presentationReplyToMessageId = "";
   compactionTurn: ChatTurnMeta | null = null;
   compactionWorkingIndicators: WorkingIndicator[] = [];
+  editableCompactionStatusText = "";
   lastCompactionIndicatorAt = 0;
   lastCompactionTypingIndicatorAt = 0;
   compactionIndicatorTick = 0;
@@ -699,6 +702,7 @@ export class ChatController {
   }) {
     this.latestTodoNoticeText = "";
     this.latestAssistantSummaryText = "";
+    this.editableCompactionStatusText = "";
     const nextIncomingMessageId =
       safeString(input.incomingMessageId || "").trim() || undefined;
     const nextReplyToMessageId =
@@ -816,7 +820,6 @@ export class ChatController {
       this.lastTypingIndicatorAt = 0;
       this.workingIndicatorTick = 0;
       this.latestAssistantSummaryText = "";
-      this.latestTodoNoticeText = "";
       if (this.currentTurn) this.currentTurn.workingNoticeSent = false;
       if (hasEndIndicator && !cleared) {
         this.logger.warn(
@@ -861,6 +864,7 @@ export class ChatController {
     try {
       const frontendReady = await this.connect();
       if (this.currentTurn) this.currentTurn.frontendReadyAt = Date.now();
+      await this.preloadEditableTodoPresentation();
       return {
         ...(await restorePromptParts({
           text: input.text,
@@ -927,6 +931,7 @@ export class ChatController {
     this.presentationReplyToMessageId = "";
     this.backendAcceptedIncomingMessageId = "";
     this.latestAssistantSummaryText = "";
+    this.editableCompactionStatusText = "";
   }
 
   private setActiveCommandTurnInput(input: {
@@ -1026,8 +1031,32 @@ export class ChatController {
       messageId: this.compactionTurn?.incomingMessageId || undefined,
       replyToMessageId: this.compactionTurn?.replyToMessageId || undefined,
       tick: this.compactionIndicatorTick,
+      ...(this.editableCompactionStatusText
+        ? { workingStatusText: this.editableCompactionStatusText }
+        : {}),
       ...extra,
     });
+  }
+
+  private async preloadEditableTodoPresentation() {
+    if (!findEditableWorkingIndicator(this.getWorkingIndicators())) return;
+    const snapshot = await readTodoSnapshotFromSessionFile(
+      this.driver.currentSessionFile(),
+    );
+    if (!snapshot) return;
+    this.latestTodoNoticeText =
+      snapshot.todos.length > 0 && snapshot.pendingCount > 0
+        ? presentTodoNotice(this.chatKey, snapshot.todos, "").text
+        : "";
+    if (
+      this.driver.isWorking() &&
+      this.currentTurn &&
+      this.awaitingTurnSettle
+    ) {
+      await this.refreshEditableWorkingNotice({ force: true }).catch(
+        () => false,
+      );
+    }
   }
 
   private canDeliverReplies() {
@@ -1338,7 +1367,7 @@ export class ChatController {
   }
 
   private async refreshEditableWorkingNotice(
-    options: { force?: boolean } = {},
+    options: { force?: boolean; workingStatusText?: string } = {},
   ) {
     if (
       !this.currentTurn ||
@@ -1361,6 +1390,9 @@ export class ChatController {
     const context = this.workingIndicatorContext({
       event: "tick",
       tick: this.workingIndicatorTick,
+      ...(options.workingStatusText
+        ? { workingStatusText: options.workingStatusText }
+        : {}),
     });
     const result = await this.callWorkingIndicator(
       editable,
@@ -1395,7 +1427,8 @@ export class ChatController {
     );
     const visibleIndicators =
       this.hasUnacceptedPendingPresentationReplacement() ||
-      this.ownsManualCompactionPresentation()
+      this.ownsManualCompactionPresentation() ||
+      Boolean(this.editableCompactionStatusText)
         ? []
         : selectVisibleWorkingIndicatorsForKind(indicators, "polling");
     const typingDue =
@@ -1693,32 +1726,6 @@ export class ChatController {
     );
   }
 
-  private async waitForOutboxDelivery(
-    id: string,
-    timeoutMs?: number,
-  ): Promise<string[] | null> {
-    const hasDeadline = Number.isFinite(timeoutMs);
-    const deadline = hasDeadline
-      ? Date.now() + Math.max(1, Number(timeoutMs))
-      : 0;
-    while (!hasDeadline || Date.now() <= deadline) {
-      const current = readChatOutboxItemById(this.agentDir, id)?.item;
-      if (current?.status === "delivered") return current.deliveryResult || [];
-      if (current?.status === "failed") {
-        if (current.failureKind === "partial") {
-          return current.deliveryResult || [];
-        }
-        throw new Error(current.lastError || "chat_outbox_delivery_failed");
-      }
-      const lastError = safeString(current?.lastError).trim();
-      if (lastError && !/^chat_outbox_delivery_pending$/.test(lastError)) {
-        throw new Error(lastError);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    return null;
-  }
-
   private async enqueueAndDrainDelivery(
     payload: any,
     options: {
@@ -1864,9 +1871,10 @@ export class ChatController {
       }
       if (own.status === "dispatched") {
         const deliveryResult = options.waitUntilDeliverySettled
-          ? await this.waitForOutboxDelivery(outboxId)
+          ? await waitForChatOutboxDelivery(this.agentDir, outboxId)
           : Number.isFinite(options.waitForDeliveryMs)
-            ? await this.waitForOutboxDelivery(
+            ? await waitForChatOutboxDelivery(
+                this.agentDir,
                 outboxId,
                 options.waitForDeliveryMs,
               )
@@ -2167,7 +2175,7 @@ export class ChatController {
       .slice(0, 120);
     const heading = `⏰ Scheduled task${taskName ? ` · ${taskName}` : ""}`;
     try {
-      await this.enqueueAndDrainDelivery(
+      const delivery = await this.enqueueAndDrainDelivery(
         {
           createdAt: nowIso(),
           chatKey: this.chatKey,
@@ -2189,6 +2197,13 @@ export class ChatController {
           requireDelivery: false,
         },
       );
+      const messageId = safeString(delivery.messageIds[0]).trim();
+      if (
+        messageId &&
+        safeString(this.currentTurn?.requestTag).trim() === requestTag
+      ) {
+        this.presentationReplyToMessageId = messageId;
+      }
     } catch (error) {
       this.logger?.warn?.(
         `scheduled input presentation failed: ${safeString((error as any)?.message || error).trim() || "unknown delivery error"}`,
@@ -2468,6 +2483,7 @@ export class ChatController {
   private async clearCompactionPresentation() {
     await this.clearCompactionWorkingReaction().catch(() => false);
     this.compactionTurn = null;
+    this.editableCompactionStatusText = "";
   }
 
   private async deliverManualCompactionCompletion(
@@ -2494,6 +2510,13 @@ export class ChatController {
   }
 
   private async deliverAutomaticCompactionEndNotice(text: string) {
+    if (this.editableCompactionStatusText) {
+      await this.clearCompactionPresentation();
+      await this.refreshEditableWorkingNotice({ force: true }).catch(
+        () => false,
+      );
+      return true;
+    }
     const coalesceReplyToMessageId = safeString(
       this.compactionTurn?.replyToMessageId || "",
     ).trim();
@@ -2531,24 +2554,14 @@ export class ChatController {
     const manualCompaction = this.ownsManualCompactionPresentation();
     if (
       !manualCompaction &&
+      this.currentTurn &&
+      this.awaitingTurnSettle &&
       findEditableWorkingIndicator(this.getWorkingIndicators())
     ) {
-      this.ensureVisibleCommandTurn();
-      const incomingMessageId =
-        this.currentIncomingMessageId() || commandIncomingMessageId;
-      const replyToMessageId =
-        this.currentReplyToMessageId() ||
-        commandReplyToMessageId ||
-        incomingMessageId;
-      this.compactionTurn = {
-        startedAt: Date.now(),
-        incomingMessageId: incomingMessageId || undefined,
-        replyToMessageId: replyToMessageId || undefined,
-        workingNoticeSent: true,
-      };
-      return await this.sendCompactionInterimNow(trimmed, {
-        replyToMessageId,
-        coalesceWithWorkingMessage: true,
+      this.editableCompactionStatusText = trimmed;
+      return await this.refreshEditableWorkingNotice({
+        force: true,
+        workingStatusText: trimmed,
       });
     }
 
@@ -2890,7 +2903,7 @@ export class ChatController {
       try {
         await (options.connect ? options.connect() : this.connect());
         if (this.currentTurn) this.currentTurn.frontendReadyAt = Date.now();
-        return await this.driver.resumeTurn({
+        const result = await this.driver.resumeTurn({
           requestTag,
           sessionFile,
           chatDeliveryContext:
@@ -2902,6 +2915,8 @@ export class ChatController {
                 }
               : undefined,
         });
+        await this.preloadEditableTodoPresentation();
+        return result;
       } catch (error) {
         if (recoveredTurn && this.currentTurn === recoveredTurn) {
           this.awaitingTurnSettle = false;
@@ -3287,6 +3302,25 @@ export class ChatController {
 
   async handleClientEvent(event: any) {
     await this.driver.handleClientEvent(event);
+    const requestTag = safeString(event?.payload?.requestTag).trim();
+    if (
+      event?.type === "ui" &&
+      event?.payload?.type === "compaction_end" &&
+      this.editableCompactionStatusText &&
+      (!requestTag || this.acceptsScopedTurnEvent(requestTag))
+    ) {
+      const pendingStatus = this.editableCompactionStatusText;
+      await new Promise((resolve) => setImmediate(resolve));
+      if (
+        this.editableCompactionStatusText === pendingStatus &&
+        (!requestTag || this.acceptsScopedTurnEvent(requestTag))
+      ) {
+        await this.clearCompactionPresentation();
+        await this.refreshEditableWorkingNotice({ force: true }).catch(
+          () => false,
+        );
+      }
+    }
   }
 
   async handleSessionEvent(event: any) {

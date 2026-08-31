@@ -209,6 +209,33 @@ export function readChatOutboxItemById(agentDir: string, id: string) {
   return item ? { item } : null;
 }
 
+export async function waitForChatOutboxDelivery(
+  agentDir: string,
+  id: string,
+  timeoutMs?: number,
+): Promise<string[] | null> {
+  const hasDeadline = Number.isFinite(timeoutMs);
+  const deadline = hasDeadline
+    ? Date.now() + Math.max(1, Number(timeoutMs))
+    : 0;
+  while (!hasDeadline || Date.now() <= deadline) {
+    const current = readChatOutboxItemById(agentDir, id)?.item;
+    if (current?.status === "delivered") return current.deliveryResult || [];
+    if (current?.status === "failed") {
+      if (current.failureKind === "partial") {
+        return current.deliveryResult || [];
+      }
+      throw new Error(current.lastError || "chat_outbox_delivery_failed");
+    }
+    const lastError = safeString(current?.lastError).trim();
+    if (lastError && !/^chat_outbox_delivery_pending$/.test(lastError)) {
+      throw new Error(lastError);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return null;
+}
+
 export function listChatOutboxItems(agentDir: string) {
   return openChatDatabase(agentDir)
     .prepare(

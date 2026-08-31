@@ -64,8 +64,15 @@ test("cron chat delivery requires a sender and preserves conversation binding", 
   );
 
   const sent: any[] = [];
-  await cronExecution.sendChatText(
-    { chat: { send: async (payload) => sent.push(payload) } },
+  const firstDelivery = await cronExecution.sendChatText(
+    {
+      chat: {
+        send: async (payload) => {
+          sent.push(payload);
+          return { delivered: true, messageIds: ["scheduled-marker"] };
+        },
+      },
+    },
     {
       chatKey: "discord/1:2",
       taskId: "cron_owner",
@@ -81,15 +88,24 @@ test("cron chat delivery requires a sender and preserves conversation binding", 
       taskId: "cron_owner",
       runId: "run-2",
       text: "plain",
+      replyToMessageId: "scheduled-marker",
     },
   );
 
+  assert.deepEqual(firstDelivery, {
+    delivered: true,
+    messageIds: ["scheduled-marker"],
+  });
   assert.match(sent[0].createdAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.deepEqual(sent[0].parts, [{ type: "text", text: "done" }]);
   assert.equal(sent[0].sessionBinding, "conversation");
   assert.equal(sent[0].sessionFile, "/sessions/owner.jsonl");
   assert.equal(sent[1].sessionFile, undefined);
   assert.equal(sent[1].sessionBinding, undefined);
+  assert.deepEqual(sent[1].parts, [
+    { type: "quote", id: "scheduled-marker" },
+    { type: "text", text: "plain" },
+  ]);
 });
 
 test("cron shell execution reports command output and failures", async () => {
@@ -657,6 +673,8 @@ test("executeCronShellTask owns shell delivery and failure terminals", async () 
   await withAgentDir(async (agentDir) => {
     const working: any[] = [];
     const sent: any[] = [];
+    const sendOptions: any[] = [];
+    const visibleOrder: string[] = [];
     const shell = task({
       trigger: { expression: "* * * * *" },
       frontend: { kind: "chat", key: "discord/1:2" },
@@ -665,8 +683,16 @@ test("executeCronShellTask owns shell delivery and failure terminals", async () 
     await cronExecution.executeCronShellTask(shell, {
       agentDir,
       chat: {
-        setWorkingVisible: async (payload) => working.push(payload),
-        send: async (payload) => sent.push(payload),
+        setWorkingVisible: async (payload) => {
+          working.push(payload);
+          visibleOrder.push(payload.visible ? "working-start" : "working-end");
+        },
+        send: async (payload, options) => {
+          sent.push(payload);
+          sendOptions.push(options);
+          visibleOrder.push(sent.length === 1 ? "task-input" : "task-output");
+          return { messageIds: [`shell-message-${sent.length}`] };
+        },
       },
     });
     assert.match(shell.lastResultText, /stdout:\nshell-owner/);
@@ -674,8 +700,25 @@ test("executeCronShellTask owns shell delivery and failure terminals", async () 
       { chatKey: "discord/1:2", visible: true },
       { chatKey: "discord/1:2", visible: false },
     ]);
-    assert.equal(sent.length, 1);
+    assert.deepEqual(visibleOrder, [
+      "task-input",
+      "working-start",
+      "task-output",
+      "working-end",
+    ]);
+    assert.equal(sent.length, 2);
+    assert.deepEqual(sendOptions, [{ waitForDeliveryMs: 30_000 }, undefined]);
     assert.equal(sent[0].chatKey, "discord/1:2");
+    assert.deepEqual(sent[0].parts, [
+      {
+        type: "text",
+        text: "⏰ Scheduled task · Owner task\nprintf shell-owner",
+      },
+    ]);
+    assert.deepEqual(sent[1].parts.slice(0, 1), [
+      { type: "quote", id: "shell-message-1" },
+    ]);
+    assert.match(sent[1].parts[1].text, /stdout:\nshell-owner/);
 
     const controllerShell = task({
       trigger: { expression: "* * * * *" },

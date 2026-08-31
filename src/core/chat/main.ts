@@ -155,6 +155,7 @@ import {
   enqueueChatOutboxPayload,
   hasCommittedTerminalChatOutbox,
   runWithChatOutboxTurnFence,
+  waitForChatOutboxDelivery,
 } from "./outbox.js";
 import { withChatQuotePart } from "./delivery-presentation.js";
 import {
@@ -1618,14 +1619,38 @@ export async function startChatBridge(
   });
 
   const startedAt = nowIso();
-  const send = async (payload: ChatOutboxPayloadInput) => {
+  const send = async (
+    payload: ChatOutboxPayloadInput,
+    options: {
+      waitUntilDeliverySettled?: boolean;
+      waitForDeliveryMs?: number;
+    } = {},
+  ) => {
     const result = await enqueueAndDrainOutbox(payload, "generic");
-    return result.status === "delivered"
-      ? { delivered: true as const }
+    const settledMessageIds =
+      result.status === "delivered"
+        ? result.deliveryResult || []
+        : result.status === "dispatched" &&
+            (options.waitUntilDeliverySettled ||
+              Number.isFinite(options.waitForDeliveryMs))
+          ? await waitForChatOutboxDelivery(
+              runtime.agentDir,
+              result.id,
+              options.waitForDeliveryMs,
+            )
+          : null;
+    return settledMessageIds
+      ? {
+          delivered: true as const,
+          messageIds: settledMessageIds,
+        }
       : {
           delivered: false as const,
           pending: true as const,
           outboxId: result.id,
+          ...(result.deliveryResult?.length
+            ? { messageIds: result.deliveryResult }
+            : {}),
         };
   };
   const typing = async (payload: { chatKey?: string }) => {

@@ -256,7 +256,7 @@ export function createRinAgentSdk(options: RinAgentSdkOptions = {}) {
     },
     chat: {
       send: async (payload: ChatSendOptions, override?: RinAgentSdkOptions) =>
-        await request<{ delivered?: boolean }>(
+        await request<{ delivered?: boolean; messageIds?: string[] }>(
           { type: "chat_send", payload: normalizeChatSendOptions(payload) },
           override,
         ),

@@ -2296,14 +2296,19 @@ test("chat controller coalesces automatic compaction completion into the active 
   ]);
 });
 
-test("chat controller keeps editable compaction in interim content", async () => {
+test("chat controller restores editable progress after automatic compaction", async () => {
   const controller = await createController("telegram/1:2");
+  const editableTicks = [];
   const deliveries = [];
   controller.app.bots[0].getWorkingIndicators = () => [
     {
       type: "polling",
       presentation: "editable-message",
-      async tick() {
+      async tick(context) {
+        editableTicks.push({
+          status: context.workingStatusText,
+          summary: context.assistantSummaryText,
+        });
         return true;
       },
       async end() {
@@ -2311,12 +2316,8 @@ test("chat controller keeps editable compaction in interim content", async () =>
       },
     },
   ];
-  controller.app.bots[0].sendMessage = async (_chatId, nodes, options) => {
-    deliveries.push({
-      text: nodes.map((node) => node?.attrs?.content || "").join(""),
-      kind: options?.deliveryKind,
-      coalesce: options?.coalesceWithWorkingMessage === true,
-    });
+  controller.app.bots[0].sendMessage = async (...args) => {
+    deliveries.push(args);
     return [`m-out-${deliveries.length}`];
   };
   controller.driver.frontendPhase = "working";
@@ -2328,16 +2329,13 @@ test("chat controller keeps editable compaction in interim content", async () =>
     workingNoticeSent: true,
   };
   controller.awaitingTurnSettle = true;
+  controller.latestAssistantSummaryText = "**Planning the fix**";
 
   await controller.handleClientEvent({
     type: "ui",
     payload: { type: "compaction_start", reason: "threshold" },
   });
   await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(deliveries, [
-    { text: "Compacting...", kind: "interim", coalesce: true },
-  ]);
 
   await controller.handleClientEvent({
     type: "ui",
@@ -2350,14 +2348,31 @@ test("chat controller keeps editable compaction in interim content", async () =>
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(deliveries, [
-    { text: "Compacting...", kind: "interim", coalesce: true },
-    {
-      text: "Compacted from 108,642 tokens",
-      kind: "interim",
-      coalesce: true,
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: { type: "compaction_start", reason: "threshold" },
+  });
+  await controller.handleClientEvent({
+    type: "ui",
+    payload: {
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: true,
     },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(editableTicks, [
+    { status: "Compacting...", summary: "**Planning the fix**" },
+    { status: undefined, summary: "**Planning the fix**" },
+    { status: "Compacting...", summary: "**Planning the fix**" },
+    { status: undefined, summary: "**Planning the fix**" },
   ]);
+  assert.equal(deliveries.length, 1);
+  assert.equal(
+    deliveries[0][1].find((node) => node?.attrs?.content)?.attrs?.content,
+    "Auto-compaction cancelled",
+  );
 });
 
 test("chat controller delivers non-deferred passive notices during active inbox_jobs", async () => {
@@ -2855,31 +2870,105 @@ test("chat controller leaves empty Todo clear to canonical final settlement", as
   assert.deepEqual(contexts, []);
 });
 
-test("chat controller does not replay todo after a new user message", async () => {
-  const controller = await createController("example/1:2");
-  const deliveries = [];
-  controller.currentTurn = {
-    startedAt: Date.now(),
-    incomingMessageId: "m-todo",
-    replyToMessageId: "m-todo",
-    workingNoticeSent: false,
-  };
-  controller.awaitingTurnSettle = true;
-  controller.app.bots[0].sendMessage = async (...args) => {
-    deliveries.push(args);
-    return ["unexpected"];
-  };
+test("chat controller preloads pending todo for editable turn presentation", async () => {
+  const controller = await createController("telegram/1:2");
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick() {
+        return true;
+      },
+    },
+  ];
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "todo-preload.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(
+    sessionFile,
+    `${JSON.stringify({
+      type: "custom",
+      id: "todo-state",
+      parentId: null,
+      customType: "rin.todo",
+      data: {
+        todos: [
+          { id: 1, text: "Keep this visible", done: false },
+          { id: 2, text: "Already finished", done: true },
+        ],
+        nextId: 3,
+      },
+    })}\n`,
+    "utf8",
+  );
+  controller.driver.frontendState = { sessionFile };
 
-  await controller.handleFrontendEvent({
-    type: "user_message_start",
-    text: "continue",
-  });
+  await controller.prepareTurnPrompt(
+    {
+      text: "continue",
+      attachments: [],
+      incomingMessageId: "m-todo",
+      replyToMessageId: "m-todo",
+    },
+    true,
+  );
+
+  assert.equal(
+    controller.workingIndicatorContext({ event: "tick" }).todoNoticeText,
+    "⬜ Keep this visible\n✅ ~~Already finished~~",
+  );
+});
+
+test("chat controller hides an already-completed todo at new message start", async () => {
+  const controller = await createController("telegram/1:2");
+  controller.app.bots[0].getWorkingIndicators = () => [
+    {
+      type: "polling",
+      presentation: "editable-message",
+      async tick() {
+        return true;
+      },
+    },
+  ];
+  const sessionFile = path.join(
+    controller.agentDir,
+    "sessions",
+    "todo-completed-preload.jsonl",
+  );
+  await fs.mkdir(path.dirname(sessionFile), { recursive: true });
+  await fs.writeFile(
+    sessionFile,
+    `${JSON.stringify({
+      type: "custom",
+      id: "todo-state",
+      parentId: null,
+      customType: "rin.todo",
+      data: {
+        todos: [{ id: 1, text: "Already finished", done: true }],
+        nextId: 2,
+      },
+    })}\n`,
+    "utf8",
+  );
+  controller.driver.frontendState = { sessionFile };
+
+  await controller.prepareTurnPrompt(
+    {
+      text: "new work",
+      attachments: [],
+      incomingMessageId: "m-completed-todo",
+      replyToMessageId: "m-completed-todo",
+    },
+    true,
+  );
 
   assert.equal(
     controller.workingIndicatorContext({ event: "tick" }).todoNoticeText,
     undefined,
   );
-  assert.deepEqual(deliveries, []);
 });
 
 test("chat controller presents scheduled input with an explicit marker before working", async () => {
@@ -2888,8 +2977,10 @@ test("chat controller presents scheduled input with an explicit marker before wo
   const order = [];
   controller.app.bots[0].sendMessage = async (_session, message) => {
     deliveries.push(message);
-    order.push("scheduled-input");
-    return ["scheduled-input-1"];
+    order.push(deliveries.length === 1 ? "scheduled-input" : "scheduled-final");
+    return [
+      deliveries.length === 1 ? "scheduled-input-1" : "scheduled-final-1",
+    ];
   };
   controller.startBackendAcceptedWorkingReaction = async () => {
     order.push("working");
@@ -2912,7 +3003,7 @@ test("chat controller presents scheduled input with an explicit marker before wo
     text: "inspect owner project",
     attachments: [],
     requestTag: "scheduled:owner:1",
-    deliverFinal: false,
+    deliverFinal: true,
     promptMeta: {
       source: "scheduled-task",
       taskId: "owner-task",
@@ -2921,8 +3012,8 @@ test("chat controller presents scheduled input with an explicit marker before wo
     },
   });
 
-  assert.deepEqual(order, ["scheduled-input", "working"]);
-  assert.equal(deliveries.length, 1);
+  assert.deepEqual(order, ["scheduled-input", "working", "scheduled-final"]);
+  assert.equal(deliveries.length, 2);
   const scheduledDelivery = listChatOutboxHistoryItems(
     controller.agentDir,
     "delivered",
@@ -2931,6 +3022,10 @@ test("chat controller presents scheduled input with an explicit marker before wo
   assert.equal(
     deliveryText(scheduledDelivery.payload),
     "⏰ Scheduled task · Owner check\ninspect owner project",
+  );
+  assert.equal(
+    deliveries[1].find((node) => node?.type === "quote")?.attrs?.id,
+    "scheduled-input-1",
   );
 
   await controller.runTurn({

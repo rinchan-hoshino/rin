@@ -298,6 +298,7 @@ test("discord adapter replaces editable Working with assistant summary", async (
       config: { token: "discord-token" },
     });
     const adapter = [...app.platforms][0];
+    const h = runtime.createChatNodes();
     const calls: any[] = [];
     const messages = new Map<string, any>();
     const channel = {
@@ -330,6 +331,10 @@ test("discord adapter replaces editable Working with assistant summary", async (
       tick: 1,
       assistantSummaryText: "**Designing casual greeting response**",
     });
+    await app.bots[0].sendMessage("C1", [h.text("Checking files.")], {
+      deliveryKind: "interim",
+      coalesceWithWorkingMessage: true,
+    });
     await editable.tick({
       chatId: "C1",
       tick: 2,
@@ -344,17 +349,24 @@ test("discord adapter replaces editable Working with assistant summary", async (
 
     assert.deepEqual(
       calls.map((entry) => entry.method),
-      ["send", "edit", "edit", "edit"],
+      ["send", "edit", "edit", "edit", "edit"],
     );
     assert.equal(calls[0].payload.content, "... Working...");
     assert.equal(
       calls[1].payload.content,
       "... **Designing casual greeting response**",
     );
-    assert.equal(calls[2].payload.content, "... Compacting...");
+    assert.equal(
+      calls[2].payload.content,
+      "... **Designing casual greeting response**\n\n────────\n\nChecking files.",
+    );
     assert.equal(
       calls[3].payload.content,
-      "... **Designing casual greeting response**",
+      "... Compacting...\n\n────────\n\nChecking files.",
+    );
+    assert.equal(
+      calls[4].payload.content,
+      "... **Designing casual greeting response**\n\n────────\n\nChecking files.",
     );
   });
 });

@@ -10,6 +10,7 @@ const HOME_DIR = os.homedir();
 import type { ChatOutboxPayload } from "../rin-lib/chat-outbox-contract.js";
 import { resolveTurnCompletion } from "../session/turn-result.js";
 import { cronTaskRunId, nowIso, summarizeText } from "./cron-utils.js";
+import { safeString } from "../text-utils.js";
 import {
   acquireSelfImproveMaintenanceLock,
   releaseSelfImproveMaintenanceLock,
@@ -31,7 +32,10 @@ import type {
 } from "./cron-contract.js";
 
 type CronChatCapability = {
-  send?: (payload: ChatOutboxPayload) => Promise<any>;
+  send?: (
+    payload: ChatOutboxPayload,
+    options?: { waitForDeliveryMs?: number },
+  ) => Promise<any>;
   runTurn?: (payload: any) => Promise<any>;
   setWorkingVisible?: (payload: {
     chatKey?: string;
@@ -52,24 +56,37 @@ export async function sendChatText(
     runId: string;
     text: string;
     sessionFile?: string;
+    replyToMessageId?: string;
+    waitForDeliveryMs?: number;
   },
 ) {
   if (typeof options.chat?.send !== "function") {
     throw new Error("cron_chat_unavailable");
   }
-  await options.chat.send({
-    createdAt: nowIso(),
-    chatKey: payload.chatKey,
-    taskId: payload.taskId,
-    runId: payload.runId,
-    parts: [{ type: "text", text: payload.text }],
-    ...(payload.sessionFile
-      ? {
-          sessionFile: payload.sessionFile,
-          sessionBinding: "conversation" as const,
-        }
-      : {}),
-  });
+  const parts: ChatOutboxPayload["parts"] = [
+    ...(payload.replyToMessageId
+      ? [{ type: "quote" as const, id: payload.replyToMessageId }]
+      : []),
+    { type: "text", text: payload.text },
+  ];
+  return await options.chat.send(
+    {
+      createdAt: nowIso(),
+      chatKey: payload.chatKey,
+      taskId: payload.taskId,
+      runId: payload.runId,
+      parts,
+      ...(payload.sessionFile
+        ? {
+            sessionFile: payload.sessionFile,
+            sessionBinding: "conversation" as const,
+          }
+        : {}),
+    },
+    Number.isFinite(payload.waitForDeliveryMs)
+      ? { waitForDeliveryMs: payload.waitForDeliveryMs }
+      : undefined,
+  );
 }
 
 function findBashOnPath(): string | null {
@@ -793,6 +810,29 @@ export type CronShellTaskRecord = CronTaskRecord & {
   target: Extract<CronTaskRecord["target"], { kind: "shell_command" }>;
 };
 
+function scheduledShellInputText(task: CronShellTaskRecord) {
+  const taskName = safeString(task.name)
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
+  return [
+    `⏰ Scheduled task${taskName ? ` · ${taskName}` : ""}`,
+    task.target.command,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function chatDeliveryMessageIds(result: unknown) {
+  const value = result && typeof result === "object" ? (result as any) : null;
+  const ids = Array.isArray(value?.messageIds)
+    ? value.messageIds
+    : Array.isArray(value?.deliveryResult)
+      ? value.deliveryResult
+      : [];
+  return ids.map((id: unknown) => safeString(id).trim()).filter(Boolean);
+}
+
 export async function executeCronShellTask(
   task: CronShellTaskRecord,
   options: {
@@ -803,8 +843,24 @@ export async function executeCronShellTask(
   const startedAt = task.lastStartedAt || nowIso();
   const runId = cronTaskRunId(task, startedAt);
   const showExternalWorking = task.quiet !== true;
+  const frontend = resolveCronTaskFrontend(task);
+  const chatKey =
+    showExternalWorking && frontend?.kind === "chat"
+      ? safeString(frontend.key).trim()
+      : "";
+  let scheduledInputMessageId = "";
   let terminal: CronTaskTerminal;
   try {
+    if (chatKey) {
+      const delivery = await sendChatText(options, {
+        chatKey,
+        taskId: task.id,
+        runId,
+        text: scheduledShellInputText(task),
+        waitForDeliveryMs: 30_000,
+      }).catch(() => undefined);
+      scheduledInputMessageId = chatDeliveryMessageIds(delivery)[0] || "";
+    }
     if (showExternalWorking) {
       await setCronTaskFrontendWorking(task, options, true);
     }
@@ -812,16 +868,18 @@ export async function executeCronShellTask(
       agentDir: options.agentDir,
     });
     terminal = { status: "completed", text };
-    const frontend = resolveCronTaskFrontend(task);
-    const chatKey = shouldDeliverCronTaskFinal(task, frontend)
-      ? frontend?.key
-      : undefined;
-    if (chatKey && text) {
+    const deliveryChatKey = shouldDeliverCronTaskFinal(task, frontend)
+      ? safeString(frontend?.key).trim()
+      : "";
+    if (deliveryChatKey && text) {
       await sendChatText(options, {
-        chatKey,
+        chatKey: deliveryChatKey,
         taskId: task.id,
         runId,
         text,
+        ...(scheduledInputMessageId
+          ? { replyToMessageId: scheduledInputMessageId }
+          : {}),
       }).catch(() => {});
     }
   } catch (error: any) {

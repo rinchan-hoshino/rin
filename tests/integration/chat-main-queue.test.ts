@@ -413,13 +413,31 @@ test("chat send reports adapter dispatch as pending until delivery settles", asy
         platform: "telegram",
         selfId: "1",
         sendMessage() {
-          const delivery = new Promise((resolve) =>
-            setTimeout(() => resolve(["provider-late"]), 100),
-          );
+          const delivery = Promise.resolve(["provider-now"]);
           delivery.dispatched = Promise.resolve();
           return delivery;
         },
       });
+      const immediateResult = await bridge.send(
+        {
+          chatKey: "telegram/1:2",
+          parts: [{ type: "text", text: "immediate delivery" }],
+        },
+        { waitUntilDeliverySettled: true },
+      );
+      if (
+        immediateResult.delivered !== true ||
+        JSON.stringify(immediateResult.messageIds) !== JSON.stringify(["provider-now"])
+      ) {
+        throw new Error(JSON.stringify(immediateResult));
+      }
+      bridge.app.bots[0].sendMessage = () => {
+        const delivery = new Promise((resolve) =>
+          setTimeout(() => resolve(["provider-late"]), 100),
+        );
+        delivery.dispatched = Promise.resolve();
+        return delivery;
+      };
       const result = await bridge.send({
         chatKey: "telegram/1:2",
         parts: [{ type: "text", text: "async delivery" }],

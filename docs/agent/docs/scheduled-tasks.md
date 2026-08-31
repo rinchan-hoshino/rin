@@ -74,11 +74,12 @@ A false recurring condition schedules the next tick without starting the target.
 
 ## Delivery decision
 
-- **Automatic agent input:** set `frontend` and keep `quiet: false`. Final delivery stays automatic; progress quietness comes from the frontend. A non-quiet Chat displays `⏰ Scheduled task · <name>` plus progress; a quiet Chat suppresses both.
-- **Quiet agent input:** set `frontend` and `quiet: true`. The same current session receives the prompt without automatic frontend messages; the authorized task prompt must explicitly perform and verify any separate outbound SDK action.
-- **Record-only shell:** omit `frontend` from `shell_command` when no automatic delivery is needed.
+- **Automatic agent input:** set `frontend` and `quiet: false`. Chat shows `⏰ Scheduled task · <name>`, the prompt, and progress, then quotes the marker for final output where supported.
+- **Quiet agent input:** set `frontend` and `quiet: true`. The current session receives the prompt without automatic frontend messages.
+- **Automatic shell output:** a Chat `frontend` with `quiet: false` shows the marker and command, then quotes it with command output where supported.
+- **Record-only shell:** omit `frontend` from `shell_command`.
 
-A Chat frontend uses `{ kind: "chat", key: chatKey }`; TUI is the singleton `{ kind: "tui" }`. The scheduler never chooses a session or writes a binding. The frontend may create its ordinary initial session when the input arrives and no current session exists. The marked prompt is an automation message, not an impersonated platform-user message.
+A Chat frontend uses `{ kind: "chat", key: chatKey }`; TUI is the singleton `{ kind: "tui" }`. The scheduler never chooses a session or writes a binding. The frontend may create its ordinary initial session when the input arrives and no current session exists. The marked input is an automation message, not an impersonated platform-user message.
 
 ## Task prompt
 

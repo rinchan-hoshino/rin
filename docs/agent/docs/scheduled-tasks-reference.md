@@ -210,11 +210,12 @@ Choose one delivery policy:
 
 - Agent task with `frontend` and `quiet: false`: allow automatic final delivery and defer progress visibility to the frontend's own quiet setting. A non-quiet Chat displays the marked scheduled input and progress; a quiet Chat suppresses them.
 - Agent task with `frontend` and `quiet: true`: submit the input but suppress automatic frontend messages; use this only when the authorized task prompt deliberately owns a separate outbound SDK action.
+- Shell task with a Chat `frontend` and `quiet: false`: display the marked command and automatically deliver its output.
 - Shell task without `frontend`: store the result without automatic delivery.
 
 An addressable `frontend` routes execution through that frontend's current session and initializes the frontend normally when no current session exists. `frontend: { kind: "chat", key: "..." }` also selects the Chat destination. TUI is the singleton `{ kind: "tui" }` identity.
 
-For visible Chat runs, Rin emits `⏰ Scheduled task · <name>` followed by the exact submitted prompt before Working begins. This bot-authored automation marker is linked to the current frontend session but is not stored as an inbound platform-user message and cannot retrigger ingress.
+For visible Chat runs, Rin emits `⏰ Scheduled task · <name>` followed by the exact submitted prompt or shell command before Working begins. Automatic final or shell output replies to that marker where the platform supports quotes. This bot-authored automation marker is linked to an agent task's current frontend session but is not stored as an inbound platform-user message and cannot retrigger ingress.
 
 Working, interim, independent-error, and final messages remain the frontend's one automatic delivery policy; do not add separate scheduler switches for them. Delivery idempotency and the one-frontend/one-session invariant are runtime guarantees, not task options.
 
