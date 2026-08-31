@@ -138,6 +138,79 @@ async function killLoggedProcesses(logPath) {
   }
 }
 
+async function processGroupHasLiveMembers(processGroupId) {
+  if (process.platform !== "linux") {
+    try {
+      process.kill(-processGroupId, 0);
+      return true;
+    } catch (error) {
+      if (error?.code === "ESRCH") return false;
+      throw error;
+    }
+  }
+  const processIds = await fs.readdir("/proc");
+  for (const processId of processIds) {
+    if (!/^\d+$/.test(processId)) continue;
+    let stat;
+    try {
+      stat = await fs.readFile(`/proc/${processId}/stat`, "utf8");
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
+    const fields = stat
+      .slice(stat.lastIndexOf(")") + 1)
+      .trim()
+      .split(/\s+/);
+    const state = fields[0];
+    const memberGroupId = Number(fields[2]);
+    if (memberGroupId === processGroupId && state !== "Z" && state !== "X") {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function stopChildProcess(child, timeoutMs = 5000) {
+  if (!child) return;
+  const processGroupId = process.platform === "win32" ? 0 : child.pid;
+  const parentExited = child.exitCode !== null || child.signalCode !== null;
+  const parentExit = parentExited
+    ? Promise.resolve()
+    : new Promise<void>((resolve) => child.once("exit", () => resolve()));
+
+  try {
+    if (processGroupId) process.kill(-processGroupId, "SIGKILL");
+    else if (!parentExited) child.kill("SIGKILL");
+  } catch (error) {
+    if (error?.code !== "ESRCH") throw error;
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`child_exit_timeout:${child.pid || "unknown"}`)),
+      timeoutMs,
+    );
+    parentExit.then(
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+  while (processGroupId && (await processGroupHasLiveMembers(processGroupId))) {
+    if (Date.now() >= deadline) {
+      throw new Error(`child_group_exit_timeout:${processGroupId}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 function spawnDaemon(agentDir, socketPath, workerPath) {
   return spawn(
     process.execPath,
@@ -152,6 +225,7 @@ function spawnDaemon(agentDir, socketPath, workerPath) {
         ...process.env,
         RIN_DIR: agentDir,
       },
+      detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
@@ -227,11 +301,7 @@ process.stdin.on("data", (chunk) => {
     }
     assert.equal(workerLog.trim(), "");
   } finally {
-    try {
-      daemon.kill("SIGKILL");
-    } catch {
-      // ignore
-    }
+    await stopChildProcess(daemon);
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
@@ -288,11 +358,7 @@ process.stdin.on("data", (chunk) => {
       assert.equal(workerLog.trim(), "");
     });
   } finally {
-    try {
-      daemon.kill("SIGKILL");
-    } catch {
-      // ignore
-    }
+    await stopChildProcess(daemon);
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
@@ -430,11 +496,7 @@ process.stdin.on("data", (chunk) => {
     }
     assert.equal(workerLog.trim(), "");
   } finally {
-    try {
-      daemon.kill("SIGKILL");
-    } catch {
-      // ignore
-    }
+    await stopChildProcess(daemon);
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
@@ -544,11 +606,7 @@ process.stdin.on("data", (chunk) => {
       );
     });
   } finally {
-    try {
-      daemon.kill("SIGKILL");
-    } catch {
-      // ignore
-    }
+    await stopChildProcess(daemon);
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
@@ -615,11 +673,7 @@ process.stdin.on("data", (chunk) => {
       });
     });
   } finally {
-    try {
-      daemon.kill("SIGKILL");
-    } catch {
-      // ignore
-    }
+    await stopChildProcess(daemon);
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
@@ -682,11 +736,7 @@ process.stdin.on("data", (chunk) => {
       assert.deepEqual(await readLogLines(logPath), ["get_state"]);
     });
   } finally {
-    try {
-      daemon.kill("SIGKILL");
-    } catch {
-      // ignore
-    }
+    await stopChildProcess(daemon);
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
@@ -796,11 +846,7 @@ process.stdin.on("data", (chunk) => {
   } finally {
     firstClient?.close();
     secondClient?.close();
-    try {
-      daemon.kill("SIGKILL");
-    } catch {
-      // ignore
-    }
+    await stopChildProcess(daemon);
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
@@ -920,11 +966,7 @@ process.stdin.on("data", (chunk) => {
     assert.equal(second.finalText, "final:chat-inbox-current");
   } finally {
     driver.dispose();
-    try {
-      daemon.kill("SIGKILL");
-    } catch {
-      // ignore
-    }
+    await stopChildProcess(daemon);
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });
@@ -992,8 +1034,7 @@ setInterval(() => {}, 1000);
     assert.equal(prompt.success, true);
     assert.equal(readDaemonTurn(agentDir, requestTag)?.state, "active");
 
-    firstDaemon.kill("SIGKILL");
-    await new Promise((resolve) => firstDaemon.once("exit", resolve));
+    await stopChildProcess(firstDaemon);
     firstDaemon = undefined;
     await killLoggedProcesses(logPath);
 
@@ -1018,12 +1059,7 @@ setInterval(() => {}, 1000);
     assert.equal(commands.filter((type) => type === "resume").length, 1);
   } finally {
     for (const daemon of [firstDaemon, secondDaemon]) {
-      if (!daemon || daemon.exitCode !== null) continue;
-      daemon.kill("SIGKILL");
-      await Promise.race([
-        new Promise((resolve) => daemon.once("exit", resolve)),
-        new Promise((resolve) => setTimeout(resolve, 1000)),
-      ]);
+      await stopChildProcess(daemon);
     }
     await killLoggedProcesses(logPath);
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -1068,11 +1104,7 @@ process.stdin.resume();\n`,
     assert.deepEqual(status.data?.workers || [], []);
     assert.deepEqual(await readLogLines(logPath), []);
   } finally {
-    try {
-      daemon.kill("SIGKILL");
-    } catch {
-      // ignore
-    }
+    await stopChildProcess(daemon);
     await fs.rm(agentDir, { recursive: true, force: true });
   }
 });

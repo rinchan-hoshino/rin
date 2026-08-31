@@ -429,6 +429,10 @@ test("runBuiltinCommand uses runtime for session replacement commands", async ()
   const runtime = {
     session: {
       isStreaming: true,
+      clearQueue: () => {
+        calls.push(["clearQueue"]);
+        return { steering: [], followUp: [] };
+      },
       abort: async () => {
         calls.push(["abort"]);
       },
@@ -513,6 +517,7 @@ test("runBuiltinCommand uses runtime for session replacement commands", async ()
   );
 
   assert.deepEqual(calls, [
+    ["clearQueue"],
     ["abort"],
     ["abort"],
     ["newSession"],

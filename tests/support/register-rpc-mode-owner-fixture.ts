@@ -22,6 +22,7 @@ const modules = {
     "renameBoundSession",
   ],
   "dist/core/rin-daemon/worker-helpers.js": [
+    "abortCurrentSessionOperation",
     "getCommandArgumentCompletions",
     "getOAuthState",
     "getResourceDiagnostics",

@@ -60,6 +60,10 @@ test("builtin command execution does not call the extension API", async () => {
     abortCompaction() {
       calls.push("abortCompaction");
     },
+    clearQueue() {
+      calls.push("clearQueue");
+      return { steering: [], followUp: [] };
+    },
     async abort() {
       calls.push("abort");
     },
@@ -104,6 +108,7 @@ test("builtin command execution does not call the extension API", async () => {
   assert.match(sessionResult.text, /session-1/);
   assert.deepEqual(calls, [
     "abortCompaction",
+    "clearQueue",
     "abort",
     "abortCompaction",
     "abort",

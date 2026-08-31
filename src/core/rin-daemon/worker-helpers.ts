@@ -8,6 +8,14 @@ export function writeJsonLine(value: unknown) {
   process.stdout.write(`${JSON.stringify(value)}\n`);
 }
 
+export async function abortCurrentSessionOperation(session: any) {
+  try {
+    Promise.resolve(session.abortCompaction?.()).catch(() => {});
+  } catch {}
+  session.clearQueue();
+  await session.abort();
+}
+
 export function getSessionState(
   session: any,
   options: { turnActive?: boolean } = {},
@@ -323,8 +331,7 @@ export async function runBuiltinCommand(
   const agentDir = runtimeServicesAgentDir(runtime);
   switch (command) {
     case "abort":
-      session.abortCompaction?.();
-      await session.abort();
+      await abortCurrentSessionOperation(session);
       return builtinCommandResult("abort", {});
     case "new": {
       session.abortCompaction?.();

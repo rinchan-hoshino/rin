@@ -16,7 +16,10 @@ import {
   RpcTurnCoordinator,
   type RpcTurnInterrupt,
 } from "./rpc-turn-coordinator.js";
-import { getSessionState } from "./worker-helpers.js";
+import {
+  abortCurrentSessionOperation,
+  getSessionState,
+} from "./worker-helpers.js";
 import { getSessionEntries } from "./rpc-session-command-handler.js";
 
 export function stableJson(value: any) {
@@ -746,23 +749,8 @@ export function createRpcTurnCommandHandlers(context: RpcTurnCommandContext) {
               event: "abort_started",
               id,
             });
-            const activeTurnToSettle = turnCoordinator.completion;
-            try {
-              Promise.resolve(session.abortCompaction?.()).catch(() => {});
-            } catch {}
-            let abortFailed = false;
-            let abortError: unknown;
-            try {
-              await session.abort();
-            } catch (error) {
-              abortFailed = true;
-              abortError = error;
-            }
-            if (abortFailed) throw abortError;
+            await abortCurrentSessionOperation(session);
             turnCoordinator.cancelActiveTurn();
-            try {
-              await activeTurnToSettle;
-            } catch {}
           },
           { invalidate: true },
         ),

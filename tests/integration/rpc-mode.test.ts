@@ -792,6 +792,10 @@ test(
         abortCompaction: () => {
           calls.push("session.abortCompaction");
         },
+        clearQueue: () => {
+          calls.push("session.clearQueue");
+          return { steering: [], followUp: [] };
+        },
         abort: async () => {
           calls.push("session.abort");
         },
@@ -812,7 +816,11 @@ test(
       onData(Buffer.from(`${JSON.stringify({ id: "1", type: "abort" })}\n`));
       await wait(20);
 
-      assert.deepEqual(calls, ["session.abortCompaction", "session.abort"]);
+      assert.deepEqual(calls, [
+        "session.abortCompaction",
+        "session.clearQueue",
+        "session.abort",
+      ]);
     } finally {
       process.stdin.on = stdinOn;
       process.stdout.write = stdoutWrite;

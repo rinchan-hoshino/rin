@@ -43,6 +43,10 @@ function createRuntime(agentDir: string) {
     },
     modelRegistry: { getAvailable: async () => models },
     abortCompaction: () => calls.push(["abort-compaction"]),
+    clearQueue: () => {
+      calls.push(["clear-queue"]);
+      return { steering: [], followUp: [] };
+    },
     abort: async () => calls.push(["abort"]),
     compact: async (value?: string) => calls.push(["compact", value]),
     reload: async () => calls.push(["reload"]),

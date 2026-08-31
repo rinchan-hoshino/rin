@@ -698,3 +698,46 @@ test("RPC turn owner persists receipts and repairs interrupted tool continuation
   });
   assert.equal(aborted, true);
 });
+
+test("RPC abort clears queued Pi input and acknowledges independently of turn projection", async () => {
+  const calls: string[] = [];
+  let queuedInput = true;
+  const session = fakeSession({
+    abortCompaction: () => undefined,
+    clearQueue: () => {
+      calls.push("clear_queue");
+      queuedInput = false;
+      return { steering: [], followUp: [] };
+    },
+    abort: async () => {
+      calls.push("abort");
+      if (queuedInput) await new Promise(() => {});
+    },
+  });
+  const context = createTurnContext(session);
+  const trackedTurn = context.turnCoordinator.openTurn("active-request");
+  context.turnCoordinator.setCompletion(
+    trackedTurn,
+    new Promise<void>(() => {}),
+  );
+  const handlers = turnModule.createRpcTurnCommandHandlers(context);
+  const timeout = Symbol("timeout");
+  const runAbort = () =>
+    Promise.race([
+      handlers.abort(request("abort")),
+      new Promise<typeof timeout>((resolve) =>
+        setTimeout(() => resolve(timeout), 100),
+      ),
+    ]);
+
+  const first = await runAbort();
+  assert.notEqual(first, timeout, "abort acknowledgement must not hang");
+  assert.equal(first.command, "abort");
+  assert.equal(first.success, true);
+
+  const second = await runAbort();
+  assert.notEqual(second, timeout, "a completed abort must not block the next");
+  assert.equal(second.command, "abort");
+  assert.equal(second.success, true);
+  assert.deepEqual(calls, ["clear_queue", "abort", "clear_queue", "abort"]);
+});
