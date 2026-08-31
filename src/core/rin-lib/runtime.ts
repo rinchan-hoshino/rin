@@ -38,6 +38,10 @@ import {
   estimateProviderBoundContextTokens,
 } from "./provider-context.js";
 import {
+  pruneSessionContextMessages,
+  RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_BUCKETS,
+} from "./session-pruning.js";
+import {
   buildRinSystemPrompt,
   readPiPublicSystemPromptOptions,
   type RinSystemPromptOptions,
@@ -642,18 +646,153 @@ const COMPACTION_PERCENT_THRESHOLD_KEY = Symbol.for(
 const PROVIDER_OVERFLOW_PREFLIGHT_KEY = Symbol.for(
   "rin.providerOverflowPreflight",
 );
+const PRESSURE_RETAINED_TOOL_CALL_BUCKETS_KEY = Symbol.for(
+  "rin.pressureRetainedToolCallBuckets",
+);
+const PRESSURE_PRUNING_GENERATION_KEY = Symbol.for(
+  "rin.pressurePruningGeneration",
+);
 const MID_TURN_THRESHOLD_COMPACTION_KEY = Symbol.for(
   "rin.midTurnThresholdCompaction",
 );
 
+export function getRinPressureRetainedToolCallBuckets(session: any) {
+  const value = Number(session?.[PRESSURE_RETAINED_TOOL_CALL_BUCKETS_KEY]);
+  if (!Number.isFinite(value)) {
+    return RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_BUCKETS;
+  }
+  return Math.max(
+    1,
+    Math.min(RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_BUCKETS, Math.floor(value)),
+  );
+}
+
+function setRinPressureRetainedToolCallBuckets(session: any, value: number) {
+  if (!session || typeof session !== "object") return;
+  const nextValue = Math.max(
+    1,
+    Math.min(RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_BUCKETS, Math.floor(value)),
+  );
+  if (getRinPressureRetainedToolCallBuckets(session) === nextValue) return;
+  session[PRESSURE_RETAINED_TOOL_CALL_BUCKETS_KEY] = nextValue;
+  session[PRESSURE_PRUNING_GENERATION_KEY] =
+    Number(session[PRESSURE_PRUNING_GENERATION_KEY] || 0) + 1;
+}
+
+function getRinPressurePruningGeneration(session: any) {
+  const value = Number(session?.[PRESSURE_PRUNING_GENERATION_KEY] || 0);
+  return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function resetRinPressureRetainedToolCallBuckets(session: any) {
+  setRinPressureRetainedToolCallBuckets(
+    session,
+    RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_BUCKETS,
+  );
+}
+
+function rinPressurePruningOptions(session: any) {
+  return {
+    cwd: String(session?.sessionManager?.getCwd?.() || process.cwd()),
+    retainedToolCallBuckets: getRinPressureRetainedToolCallBuckets(session),
+  };
+}
+
+function withoutAssistantUsage(messages: any[]) {
+  return (messages || []).map((message: any) => {
+    if (message?.role !== "assistant" || !("usage" in message)) return message;
+    const { usage: _usage, ...withoutUsage } = message;
+    return withoutUsage;
+  });
+}
+
+function buildRinPressureContextMessages(messages: any[], options?: any) {
+  const sourceMessages = messages || [];
+  const event = buildProviderBoundContextEvent(
+    { type: "context", messages: sourceMessages },
+    options,
+  );
+  return Array.isArray(event?.messages) ? event.messages : sourceMessages;
+}
+
 function estimateCurrentProviderContextTokens(
   messages: any[],
   helpers: { estimateContextTokens?: (messages: any[]) => any } = {},
+  session?: any,
 ) {
   return estimateProviderBoundContextTokens(
-    messages || [],
+    buildRinPressureContextMessages(
+      messages || [],
+      session ? rinPressurePruningOptions(session) : undefined,
+    ),
     helpers.estimateContextTokens,
   );
+}
+
+function estimateContextAfterPressureStep(
+  messages: any[],
+  contextTokens: number,
+  nextBuckets: number,
+  session: any,
+  helpers: { estimateContextTokens?: (messages: any[]) => any },
+) {
+  const nextMessages = pruneSessionContextMessages(messages || [], {
+    ...rinPressurePruningOptions(session),
+    retainedToolCallBuckets: nextBuckets,
+  });
+  const currentEstimate = estimateProviderBoundContextTokens(
+    withoutAssistantUsage(messages || []),
+    helpers.estimateContextTokens,
+  );
+  const nextEstimate = estimateProviderBoundContextTokens(
+    withoutAssistantUsage(nextMessages),
+    helpers.estimateContextTokens,
+  );
+  const savedTokens = Math.max(0, currentEstimate - nextEstimate);
+  return {
+    contextTokens: Math.max(0, contextTokens - savedTokens),
+    messages: nextMessages,
+  };
+}
+
+function reduceRinPressureBeforeCompaction(
+  session: any,
+  contextTokens: number,
+  contextWindow: number,
+  settings: any,
+  helpers: { estimateContextTokens?: (messages: any[]) => any },
+  providerMessages?: any[],
+) {
+  let reducedMessages =
+    providerMessages ||
+    buildRinPressureContextMessages(
+      getSessionProviderContextMessages(session),
+      rinPressurePruningOptions(session),
+    );
+  let retainedBuckets = getRinPressureRetainedToolCallBuckets(session);
+  let reducedTokens = contextTokens;
+  while (
+    retainedBuckets > 1 &&
+    shouldTriggerRinCompaction(reducedTokens, contextWindow, settings)
+  ) {
+    const nextBuckets = retainedBuckets - 1;
+    const next = estimateContextAfterPressureStep(
+      reducedMessages,
+      reducedTokens,
+      nextBuckets,
+      session,
+      helpers,
+    );
+    reducedMessages = next.messages;
+    reducedTokens = next.contextTokens;
+    retainedBuckets = nextBuckets;
+    setRinPressureRetainedToolCallBuckets(session, retainedBuckets);
+  }
+  return {
+    contextTokens: reducedTokens,
+    retainedBuckets,
+    messages: reducedMessages,
+  };
 }
 
 export function applyRinPrunedContextUsage(
@@ -673,7 +812,11 @@ export function applyRinPrunedContextUsage(
       current.contextWindow || this.model?.contextWindow || 0,
     );
     if (!Number.isFinite(contextWindow) || contextWindow <= 0) return current;
-    const tokens = estimateCurrentProviderContextTokens(this.messages, helpers);
+    const tokens = estimateCurrentProviderContextTokens(
+      getSessionProviderContextMessages(this),
+      helpers,
+      this,
+    );
     return {
       ...current,
       tokens,
@@ -739,6 +882,7 @@ async function maybeRunRinMidTurnThresholdCompaction(
   settings: any,
   helpers: {
     calculateContextTokens?: (usage: any) => number;
+    estimateContextTokens?: (messages: any[]) => any;
     getLatestCompactionEntry?: (entries: any[]) => any;
   },
 ) {
@@ -754,11 +898,28 @@ async function maybeRunRinMidTurnThresholdCompaction(
     return false;
   }
 
-  const contextTokens = helpers.calculateContextTokens?.(
-    assistantMessage?.usage,
+  const messages = getSessionProviderContextMessages(session);
+  const estimatedTokens = estimateCurrentProviderContextTokens(
+    messages,
+    helpers,
+    session,
+  );
+  const usageTokens = Number(
+    helpers.calculateContextTokens?.(assistantMessage?.usage) || 0,
+  );
+  const contextTokens = Math.max(estimatedTokens, usageTokens);
+  if (!shouldTriggerRinCompaction(contextTokens, contextWindow, settings)) {
+    return false;
+  }
+  const pressure = reduceRinPressureBeforeCompaction(
+    session,
+    contextTokens,
+    contextWindow,
+    settings,
+    helpers,
   );
   if (
-    !shouldTriggerRinCompaction(Number(contextTokens), contextWindow, settings)
+    !shouldTriggerRinCompaction(pressure.contextTokens, contextWindow, settings)
   ) {
     return false;
   }
@@ -793,6 +954,10 @@ export function applyRinProviderOverflowPreflight(
     signal?: AbortSignal,
   ) {
     let providerMessages = await originalTransformContext(messages, signal);
+    providerMessages = pruneSessionContextMessages(
+      providerMessages,
+      rinPressurePruningOptions(session),
+    );
     if (!canRunOverflowPreflightFromProviderMessages(providerMessages)) {
       return providerMessages;
     }
@@ -800,11 +965,29 @@ export function applyRinProviderOverflowPreflight(
     if (!settings?.enabled || session.isCompacting) return providerMessages;
 
     const contextWindow = Number(session.model?.contextWindow || 0);
-    const contextTokens = estimateCurrentProviderContextTokens(
+    const contextTokens = estimateProviderBoundContextTokens(
       providerMessages,
-      helpers,
+      helpers.estimateContextTokens,
     );
     if (!shouldTriggerRinCompaction(contextTokens, contextWindow, settings)) {
+      return providerMessages;
+    }
+    const pressure = reduceRinPressureBeforeCompaction(
+      session,
+      contextTokens,
+      contextWindow,
+      settings,
+      helpers,
+      providerMessages,
+    );
+    providerMessages = pressure.messages;
+    if (
+      !shouldTriggerRinCompaction(
+        pressure.contextTokens,
+        contextWindow,
+        settings,
+      )
+    ) {
       return providerMessages;
     }
 
@@ -829,7 +1012,10 @@ export function applyRinProviderOverflowPreflight(
       refreshedMessages,
       signal,
     );
-    return providerMessages;
+    return pruneSessionContextMessages(
+      providerMessages,
+      rinPressurePruningOptions(session),
+    );
   };
 
   session[PROVIDER_OVERFLOW_PREFLIGHT_KEY] = { originalTransformContext };
@@ -938,17 +1124,38 @@ export function applyRinCompactionPercentThreshold(
       // compaction path while preserving pre-prompt checks and overflow recovery.
       if (skipAbortedCheck) return false;
 
+      const estimatedTokens = estimateCurrentProviderContextTokens(
+        getSessionProviderContextMessages(this),
+        helpers,
+        this,
+      );
+      const usageTokens = Number(
+        helpers.calculateContextTokens(assistantMessage?.usage) || 0,
+      );
       const contextTokens =
         assistantMessage?.stopReason === "error"
-          ? estimateCurrentProviderContextTokens(
-              this.agent?.state?.messages,
-              helpers,
-            )
-          : helpers.calculateContextTokens(assistantMessage?.usage);
-      if (shouldTriggerRinCompaction(contextTokens, contextWindow, settings)) {
-        return await runPiSessionAutoCompaction(this, "threshold", false);
+          ? estimatedTokens
+          : Math.max(estimatedTokens, usageTokens);
+      if (!shouldTriggerRinCompaction(contextTokens, contextWindow, settings)) {
+        return false;
       }
-      return false;
+      const pressure = reduceRinPressureBeforeCompaction(
+        this,
+        contextTokens,
+        contextWindow,
+        settings,
+        helpers,
+      );
+      if (
+        !shouldTriggerRinCompaction(
+          pressure.contextTokens,
+          contextWindow,
+          settings,
+        )
+      ) {
+        return false;
+      }
+      return await runPiSessionAutoCompaction(this, "threshold", false);
     },
   );
 
@@ -963,6 +1170,7 @@ export function applyAutoReloadAfterCompaction(session: any) {
 
   let reloadInFlight: Promise<void> | null = null;
   let reloadQueued = false;
+  let reloadScheduled = false;
 
   const runReload = () => {
     if (reloadInFlight) {
@@ -970,16 +1178,27 @@ export function applyAutoReloadAfterCompaction(session: any) {
       return reloadInFlight;
     }
 
+    const pressureGeneration = getRinPressurePruningGeneration(session);
+    let reloadSucceeded = false;
     reloadInFlight = (async () => {
       try {
         await session.reload();
+        reloadSucceeded = true;
       } catch {}
     })().finally(() => {
+      if (
+        reloadSucceeded &&
+        getRinPressurePruningGeneration(session) === pressureGeneration
+      ) {
+        resetRinPressureRetainedToolCallBuckets(session);
+      }
       reloadInFlight = null;
       if (!reloadQueued) return;
       reloadQueued = false;
+      reloadScheduled = true;
       setTimeout(() => {
-        void runReload();
+        reloadScheduled = false;
+        void requestCompactionReload();
       }, 0);
     });
 
@@ -988,12 +1207,22 @@ export function applyAutoReloadAfterCompaction(session: any) {
 
   let compactionDepth = 0;
   let pendingCompactionReload = false;
+  let agentTurnActive = false;
+  let reloadAfterAgentEnd = false;
+
+  const requestCompactionReload = async () => {
+    if (agentTurnActive) {
+      reloadAfterAgentEnd = true;
+      return;
+    }
+    await runReload();
+  };
 
   const finishCompactionReload = async () => {
     compactionDepth -= 1;
     if (compactionDepth > 0 || !pendingCompactionReload) return;
     pendingCompactionReload = false;
-    await runReload();
+    await requestCompactionReload();
   };
 
   const originalRunAutoCompaction = bindPiSessionAutoCompactor(session);
@@ -1028,20 +1257,56 @@ export function applyAutoReloadAfterCompaction(session: any) {
     };
   }
 
+  const originalPrompt =
+    typeof session.prompt === "function" ? session.prompt.bind(session) : null;
+  if (originalPrompt) {
+    session.prompt = async function waitForCompactionReloadBeforePrompt(
+      ...args: any[]
+    ) {
+      while (
+        reloadInFlight ||
+        reloadScheduled ||
+        reloadQueued ||
+        reloadAfterAgentEnd ||
+        pendingCompactionReload ||
+        compactionDepth > 0
+      ) {
+        if (reloadInFlight) {
+          await reloadInFlight;
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      }
+      return await originalPrompt(...args);
+    };
+  }
+
   const unsubscribe = session.subscribe((event: any) => {
+    if (event?.type === "agent_start") {
+      agentTurnActive = true;
+      return;
+    }
+    if (event?.type === "agent_end") {
+      agentTurnActive = false;
+      if (!reloadAfterAgentEnd) return;
+      reloadAfterAgentEnd = false;
+      void runReload();
+      return;
+    }
     if (event?.type !== "compaction_end") return;
     if (event?.aborted || !event?.result) return;
     if (compactionDepth > 0) {
       pendingCompactionReload = true;
       return;
     }
-    void runReload();
+    void requestCompactionReload();
   });
 
   (session as any)[AUTO_RELOAD_AFTER_COMPACTION_KEY] = {
     unsubscribe,
     originalRunAutoCompaction,
     originalCompact,
+    originalPrompt,
   };
 }
 
@@ -1333,7 +1598,12 @@ export async function createConfiguredAgentSession(
           buildProviderBoundCompactionEvent(
             event,
             getSessionProviderContextMessages(result.session),
-            { cwd: runtimeCwd },
+            {
+              cwd: runtimeCwd,
+              retainedToolCallBuckets: getRinPressureRetainedToolCallBuckets(
+                result.session,
+              ),
+            },
           ),
         ),
       )

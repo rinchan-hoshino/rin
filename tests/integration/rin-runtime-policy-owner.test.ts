@@ -324,14 +324,17 @@ test("Rin owns policy-guided compaction through the private session host", async
   assert.match(sessionHostText, /RIN_COMPACTION_SYSTEM_PROMPT/);
   assert.match(sessionHostText, /RIN_COMPACTION_PROMPT/);
   assert.match(sessionHostText, /withRinProportionalCompactionRetention/);
-  assert.match(sessionHostText, /PREVIOUS CHECKPOINT/);
+  assert.match(sessionHostText, /Existing summary/);
   assert.match(sessionHostText, /summary input truncated/);
   assert.match(sessionHostText, /SKILL_PRUNED/);
   assert.match(sessionHostText, /CONTEXT COMPACTION — REFERENCE ONLY/);
   assert.match(
     sessionHostText,
-    /Preserve all existing information that remains relevant/,
+    /PRESERVE all existing information that is still relevant/,
   );
+  assert.doesNotMatch(sessionHostText, /Read source material chronologically/);
+  assert.doesNotMatch(sessionHostText, /re-read the exact current producer/);
+  assert.doesNotMatch(sessionHostText, /live producers|freshness checks/);
   assert.match(sessionHostText, /## Historical Task Snapshot/);
   assert.match(sessionHostText, /## Completed Actions/);
   assert.match(sessionHostText, /## Errors & Fixes/);
@@ -489,6 +492,105 @@ test("Rin percent compaction defaults to 85 percent", async () => {
   );
   assert.equal(nativeChecks, 0);
   assert.equal(autoCompactions, 1);
+});
+
+test("Rin threshold pressure drops oldest tool buckets before compaction", async () => {
+  let autoCompactions = 0;
+  const messages = pruningToolCallPadding(62);
+  const session = {
+    settingsManager: {
+      getCompactionSettings() {
+        return { enabled: true, triggerPercent: 0.85 };
+      },
+    },
+    model: { contextWindow: 1_000 },
+    agent: { state: { messages } },
+    sessionManager: { getBranch: () => [] },
+    async _checkCompaction() {
+      return false;
+    },
+    async _runAutoCompaction() {
+      autoCompactions += 1;
+      return "compacted";
+    },
+  };
+
+  runtimeMod.applyRinCompactionPercentThreshold(session, {
+    calculateContextTokens: () => 1_000,
+    estimateContextTokens: (candidateMessages: any[]) => ({
+      tokens:
+        100 +
+        candidateMessages.filter(
+          (message) =>
+            message.role === "toolResult" &&
+            String(message.content).startsWith("tool output"),
+        ).length *
+          20,
+    }),
+    getLatestCompactionEntry: () => undefined,
+  });
+
+  assert.equal(
+    await session._checkCompaction(
+      { usage: { totalTokens: 1_000 }, timestamp: Date.now() },
+      false,
+    ),
+    false,
+  );
+  assert.equal(autoCompactions, 0);
+  assert.equal(runtimeMod.getRinPressureRetainedToolCallBuckets(session), 2);
+});
+
+test("Rin threshold compacts only after one retained tool bucket still exceeds the limit", async () => {
+  let autoCompactions = 0;
+  const listeners: Array<(event: any) => void> = [];
+  const session = {
+    settingsManager: {
+      getCompactionSettings() {
+        return { enabled: true, triggerPercent: 0.85 };
+      },
+    },
+    model: { contextWindow: 1_000 },
+    agent: { state: { messages: pruningToolCallPadding(62) } },
+    sessionManager: { getBranch: () => [] },
+    subscribe(listener: (event: any) => void) {
+      listeners.push(listener);
+      return () => {};
+    },
+    async reload() {},
+    async _checkCompaction() {
+      return false;
+    },
+    async _runAutoCompaction() {
+      autoCompactions += 1;
+      return "compacted";
+    },
+  };
+
+  runtimeMod.applyAutoReloadAfterCompaction(session);
+  runtimeMod.applyRinCompactionPercentThreshold(session, {
+    calculateContextTokens: () => 1_000,
+    estimateContextTokens: () => ({ tokens: 900 }),
+    getLatestCompactionEntry: () => undefined,
+  });
+
+  assert.equal(
+    await session._checkCompaction(
+      { usage: { totalTokens: 1_000 }, timestamp: Date.now() },
+      false,
+    ),
+    "compacted",
+  );
+  assert.equal(autoCompactions, 1);
+  assert.equal(runtimeMod.getRinPressureRetainedToolCallBuckets(session), 1);
+
+  listeners[0]({
+    type: "compaction_end",
+    aborted: false,
+    result: { summary: "compacted" },
+  });
+  await waitForTimers();
+  assert.equal(runtimeMod.getRinPressureRetainedToolCallBuckets(session), 4);
 });
 
 test("Rin percent compaction respects the earlier Pi reserve-token threshold", async () => {
@@ -735,6 +837,70 @@ test("Rin 85% provider preflight calls Pi overflow auto-compaction before the pr
     ),
     false,
   );
+});
+
+test("Rin provider preflight measures bucket savings from transformed provider messages", async () => {
+  const calls: string[] = [];
+  const rawMessages = [
+    ...pruningToolCallPadding(62),
+    { role: "user", content: "continue" },
+  ];
+  const compactedMessages = [
+    { role: "compactionSummary", summary: "summary" },
+    { role: "user", content: "continue" },
+  ];
+  const session: any = {
+    settingsManager: {
+      getCompactionSettings() {
+        return { enabled: true, triggerPercent: 0.85 };
+      },
+    },
+    model: { contextWindow: 1_000 },
+    get isCompacting() {
+      return false;
+    },
+    agent: {
+      state: { messages: rawMessages },
+      transformContext: async (messages: any[]) =>
+        messages.map((message) =>
+          message.role === "toolResult"
+            ? { ...message, content: "short" }
+            : message,
+        ),
+    },
+    sessionManager: {
+      buildSessionContext() {
+        return { messages: session.agent.state.messages };
+      },
+    },
+    async _runAutoCompaction(reason: string, willRetry: boolean) {
+      calls.push(`${reason}:${willRetry}`);
+      this.agent.state.messages = compactedMessages;
+      return true;
+    },
+  };
+
+  runtimeMod.applyRinProviderOverflowPreflight(session, {
+    estimateContextTokens: (messages: any[]) => ({
+      tokens: messages.some((message) => message.summary === "summary")
+        ? 10
+        : 900 +
+          messages
+            .filter((message) => message.role === "toolResult")
+            .reduce(
+              (sum, message) =>
+                sum + Math.max(0, String(message.content).length - 5),
+              0,
+            ),
+    }),
+  });
+
+  const loopMessages = rawMessages.slice();
+  const providerMessages = await session.agent.transformContext(loopMessages);
+
+  assert.deepEqual(calls, ["overflow:true"]);
+  assert.deepEqual(providerMessages, compactedMessages);
+  assert.deepEqual(loopMessages, compactedMessages);
 });
 
 test("Rin provider preflight ignores stale assistant usage kept after compaction", async () => {
@@ -1087,6 +1253,82 @@ test("applyAutoReloadAfterCompaction reloads after successful compaction only on
   assert.equal(reloadCount, 1);
 });
 
+test("applyAutoReloadAfterCompaction defers an in-turn reload until agent_end", async () => {
+  const listeners = [];
+  let reloadCount = 0;
+  let promptCount = 0;
+  const session = {
+    subscribe(listener) {
+      listeners.push(listener);
+      return () => {};
+    },
+    async reload() {
+      reloadCount += 1;
+    },
+    async prompt(value) {
+      promptCount += 1;
+      return value;
+    },
+  };
+
+  runtimeMod.applyAutoReloadAfterCompaction(session);
+
+  listeners[0]({ type: "agent_start" });
+  listeners[0]({
+    type: "compaction_end",
+    aborted: false,
+    result: { summary: "mid-turn" },
+  });
+  await waitForTimers();
+  assert.equal(reloadCount, 0);
+
+  const promptPromise = session.prompt("queued turn");
+  await waitForTimers();
+  assert.equal(promptCount, 0);
+
+  listeners[0]({ type: "agent_end" });
+  assert.equal(await promptPromise, "queued turn");
+  assert.equal(reloadCount, 1);
+  assert.equal(promptCount, 1);
+});
+
+test("applyAutoReloadAfterCompaction gates the next prompt on an in-flight reload", async () => {
+  const listeners = [];
+  let releaseReload;
+  let promptCount = 0;
+  const pendingReload = new Promise((resolve) => {
+    releaseReload = resolve;
+  });
+  const session = {
+    subscribe(listener) {
+      listeners.push(listener);
+      return () => {};
+    },
+    async reload() {
+      await pendingReload;
+    },
+    async prompt(value) {
+      promptCount += 1;
+      return value;
+    },
+  };
+
+  runtimeMod.applyAutoReloadAfterCompaction(session);
+  listeners[0]({
+    type: "compaction_end",
+    aborted: false,
+    result: { summary: "complete" },
+  });
+
+  const promptPromise = session.prompt("next turn");
+  await waitForTimers();
+  assert.equal(promptCount, 0);
+
+  releaseReload();
+  assert.equal(await promptPromise, "next turn");
+  assert.equal(promptCount, 1);
+});
+
 test("applyAutoReloadAfterCompaction queues one extra reload while a reload is in flight", async () => {
   const listeners = [];
   let releaseReload;
@@ -1125,8 +1367,13 @@ test("applyAutoReloadAfterCompaction queues one extra reload while a reload is i
   await waitForTimers();
   assert.equal(reloadCount, 1);
 
+  listeners[0]({ type: "agent_start" });
   releaseReload();
   await waitForTimers();
+  await waitForTimers();
+  assert.equal(reloadCount, 1);
+
+  listeners[0]({ type: "agent_end" });
   await waitForTimers();
   assert.equal(reloadCount, 2);
 });

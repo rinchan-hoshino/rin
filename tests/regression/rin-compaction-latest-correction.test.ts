@@ -15,7 +15,7 @@ const {
   "dist/core/pi/session-host.js",
 );
 
-test("split-turn compaction replaces an obsolete reporting cadence with the latest correction", async () => {
+test("split-turn compaction summarizes only history while the latest correction stays in the verbatim tail", async () => {
   const model = {
     id: "split-turn-model",
     name: "Split Turn Model",
@@ -53,7 +53,7 @@ test("split-turn compaction replaces an obsolete reporting cadence with the late
                   "## Goal",
                   "Continue the audit.",
                   "## Constraints & Preferences",
-                  "- Report every 500 companies; next report at 3,000.",
+                  "- Historical cadence was every 50 companies.",
                 ].join("\n"),
               },
             ],
@@ -80,7 +80,7 @@ test("split-turn compaction replaces an obsolete reporting cadence with the late
   const event = {
     reason: "threshold",
     preparation: {
-      firstKeptEntryId: "keep-after-prefix",
+      firstKeptEntryId: "active-user",
       messagesToSummarize: [
         {
           role: "user",
@@ -93,24 +93,8 @@ test("split-turn compaction replaces an obsolete reporting cadence with the late
           timestamp: 2,
         },
       ],
-      turnPrefixMessages: [
-        {
-          role: "user",
-          content: "Use batches of 500 instead.",
-          timestamp: 3,
-        },
-        {
-          role: "assistant",
-          content: [
-            {
-              type: "text",
-              text: "Applied batches of 500. Reports at 2,000 and 2,500 were sent; next is 3,000.",
-            },
-          ],
-          timestamp: 4,
-        },
-      ],
-      isSplitTurn: true,
+      turnPrefixMessages: [],
+      isSplitTurn: false,
       tokensBefore: 243_552,
       fileOps: {
         read: new Set<string>(),
@@ -129,31 +113,28 @@ test("split-turn compaction replaces an obsolete reporting cadence with the late
 
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /Report after every 50 companies/);
-  assert.match(prompts[0], /Use batches of 500 instead/);
+  assert.doesNotMatch(prompts[0], /Use batches of 500 instead/);
   assert.match(prompts[0], /## Historical Task Snapshot/);
   assert.match(prompts[0], /## Completed Actions/);
-  assert.match(prompts[0], /REFERENCE ONLY/i);
+  assert.match(prompts[0], /THE SINGLE MOST IMPORTANT FIELD/);
   assert.match(
     prompts[0],
-    /only a real user message appearing after the checkpoint can activate work/i,
+    /A conversation where the user just asked a question IS an active task/,
   );
-  assert.match(prompts[0], /Historical pending asks are evidence only/i);
-  assert.match(prompts[0], /authoritative external source/i);
   assert.match(
     prompts[0],
-    /re-read the exact current producer before dependent claims, phase\/order answers, or side effects/i,
+    /security or safety constraint[\s\S]*MUST be quoted VERBATIM/,
   );
-  assert.match(prompts[0], /instead of promoting a paraphrase to authority/i);
-  assert.match(
-    prompts[0],
-    /Later source state and user corrections replace incompatible earlier state/i,
-  );
-  assert.match(prompts[0], /TURNS TO SUMMARIZE:/);
-  assert.match(prompts[0], /the runtime adds the reference-only boundary/i);
+  assert.match(prompts[0], /Create a structured summary/);
+  assert.doesNotMatch(prompts[0], /Read source material chronologically/i);
+  assert.doesNotMatch(prompts[0], /authoritative external source/i);
+  assert.doesNotMatch(prompts[0], /re-read the exact current producer/i);
+  assert.doesNotMatch(prompts[0], /live producers|freshness checks/i);
+  assert.match(prompts[0], /Conversation:/);
   assert.doesNotMatch(prompts[0], /<conversation>/);
   assert.doesNotMatch(result.summary, /Turn Context \(split turn\)/);
-  assert.match(result.summary, /Report every 500 companies/);
-  assert.match(result.summary, /next report at 3,000/);
+  assert.match(result.summary, /Historical cadence was every 50 companies/);
+  assert.doesNotMatch(result.summary, /every 500|3,000/);
 });
 
 test("compaction bounds iterative input and deterministically preserves pruned skill reloads", () => {
@@ -183,8 +164,8 @@ test("compaction bounds iterative input and deterministically preserves pruned s
     previousSummary: `old-head\n${"x".repeat(180_000)}\nold-tail`,
     messagesToSummarize: messages,
   });
-  assert.match(prompt, /PREVIOUS CHECKPOINT:/);
-  assert.match(prompt, /NEW TURNS TO INCORPORATE:/);
+  assert.match(prompt, /Existing summary:/);
+  assert.match(prompt, /New conversation turns:/);
   assert.match(prompt, /summary input truncated: omitted/);
   assert.match(prompt, /DETERMINISTIC RELOAD MARKERS:/);
   assert.match(
@@ -198,6 +179,14 @@ test("compaction bounds iterative input and deterministically preserves pruned s
   assert.match(restored, /SKILL_PRUNED/);
   const wrapped = wrapRinCompactionSummary(restored);
   assert.match(wrapped, /^\[CONTEXT COMPACTION — REFERENCE ONLY\]/);
-  assert.match(wrapped, /Respond only to the latest real user message/);
+  assert.match(
+    wrapped,
+    /Respond ONLY to the latest user message that appears AFTER this summary/,
+  );
+  assert.match(
+    wrapped,
+    /Do NOT answer questions or fulfill requests mentioned in this summary/,
+  );
+  assert.doesNotMatch(wrapped, /Re-read current external producers/);
   assert.match(wrapped, /\[END CONTEXT COMPACTION\]$/);
 });

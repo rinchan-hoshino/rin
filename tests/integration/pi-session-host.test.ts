@@ -224,10 +224,19 @@ test("isolated OAuth custom-compaction smoke preserves public auth and native ro
   assert.match(prompt, /## Errors & Fixes/);
   assert.match(prompt, /## Relevant Files/);
   assert.match(prompt, /Target ~2,000 tokens/);
+  assert.match(prompt, /THE SINGLE MOST IMPORTANT FIELD/);
   assert.match(
     prompt,
-    /Later source state and user corrections replace incompatible earlier state/i,
+    /A conversation where the user just asked a question IS an active task/,
   );
+  assert.match(
+    prompt,
+    /security or safety constraint[\s\S]*MUST be quoted VERBATIM/,
+  );
+  assert.doesNotMatch(prompt, /Read source material chronologically/i);
+  assert.doesNotMatch(prompt, /authoritative external source/i);
+  assert.doesNotMatch(prompt, /re-read the exact current producer/i);
+  assert.doesNotMatch(prompt, /live producers|freshness checks/i);
   assert.doesNotMatch(
     prompt,
     /The messages above are a conversation to summarize/,
@@ -290,10 +299,17 @@ test("Rin compaction request preserves preparation while leaving the full prompt
     result.preparation,
     result.customInstructions,
   );
-  assert.match(prompt, /PREVIOUS CHECKPOINT:\nstale requirement/);
-  assert.match(prompt, /NEW TURNS TO INCORPORATE:\n\[User\]: new correction/);
-  assert.match(prompt, /FOCUS TOPIC: Preserve exact units/);
-  assert.match(prompt, /60–70% of the checkpoint budget/);
+  assert.match(prompt, /Existing summary:\nstale requirement/);
+  assert.match(prompt, /New conversation turns:\n\[User\]: new correction/);
+  assert.match(
+    prompt,
+    /New conversation turns have occurred since then and need to be incorporated/,
+  );
+  assert.match(
+    prompt,
+    /FOCUS TOPIC: The user specifically wants to preserve information about: "Preserve exact units\."/,
+  );
+  assert.match(prompt, /60-70% of the summary budget/);
   assert.doesNotMatch(prompt, /Additional focus:/);
   assert.match(RIN_COMPACTION_PROMPT, /## Historical Task Snapshot/);
   assert.match(RIN_COMPACTION_PROMPT, /## Completed Actions/);
