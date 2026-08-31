@@ -1033,6 +1033,11 @@ export function applyRinCompactionPercentThreshold(
   session[COMPACTION_PERCENT_THRESHOLD_KEY] = { originalCheckCompaction };
 }
 
+export function refreshRinSessionSystemPrompt(session: any) {
+  clearSessionBaseSystemPrompt(session, { ignorePersistedPrompt: true });
+  return ensureSessionBaseSystemPrompt(session);
+}
+
 export function applyRinSessionReloadPolicy(session: any) {
   if (!session || typeof session !== "object") return;
   if ((session as any)[RIN_SESSION_RELOAD_POLICY_KEY]) return;
@@ -1040,7 +1045,7 @@ export function applyRinSessionReloadPolicy(session: any) {
   if (typeof session.reload !== "function") return;
 
   const originalReload = session.reload.bind(session);
-  type ReloadKind = "compaction" | "explicit" | "idle";
+  type ReloadKind = "explicit" | "idle";
   type ReloadOptions = {
     activityMarker?: string;
     kind?: ReloadKind;
@@ -1073,10 +1078,6 @@ export function applyRinSessionReloadPolicy(session: any) {
   const scheduleNextReload = () => {
     const next = queuedReloads[0];
     if (!next) return;
-    if (next.options.kind === "compaction" && agentTurnActive) {
-      reloadAfterAgentEnd = true;
-      return;
-    }
     queuedReloads.shift();
     reloadScheduled = true;
     setTimeout(() => {
@@ -1110,12 +1111,6 @@ export function applyRinSessionReloadPolicy(session: any) {
   }
 
   const enqueueReload = (options: ReloadOptions) => {
-    if (options.kind === "compaction") {
-      const queuedCompaction = queuedReloads.find(
-        (entry) => entry.options.kind === "compaction",
-      );
-      if (queuedCompaction) return queuedCompaction.promise;
-    }
     let resolve!: (value: any) => void;
     let reject!: (error: unknown) => void;
     const promise = new Promise<any>((resolvePromise, rejectPromise) => {
@@ -1143,71 +1138,10 @@ export function applyRinSessionReloadPolicy(session: any) {
     return await runReload({ kind: "explicit", reloadArgs: args });
   };
 
-  let compactionDepth = 0;
-  let pendingCompactionReload = false;
   let agentTurnActive = false;
-  let reloadAfterAgentEnd = false;
-
-  const requestCompactionReload = async () => {
-    if (agentTurnActive) {
-      enqueueReload({ kind: "compaction", suppressErrors: true });
-      reloadAfterAgentEnd = true;
-      return;
-    }
-    await runReload({
-      kind: "compaction",
-      suppressErrors: true,
-    });
-  };
-
-  const finishCompactionReload = async () => {
-    compactionDepth -= 1;
-    if (compactionDepth > 0 || !pendingCompactionReload) return;
-    pendingCompactionReload = false;
-    await requestCompactionReload();
-  };
-
-  const originalRunAutoCompaction = bindPiSessionAutoCompactor(session);
-  if (originalRunAutoCompaction) {
-    replacePiSessionAutoCompactor(
-      session,
-      async function patchedAutoReloadCompaction(...args: any[]) {
-        compactionDepth += 1;
-        try {
-          return await originalRunAutoCompaction(...args);
-        } finally {
-          await finishCompactionReload();
-        }
-      },
-    );
-  }
-
-  const originalCompact =
-    typeof session.compact === "function"
-      ? session.compact.bind(session)
-      : null;
-  if (originalCompact) {
-    session.compact = async function patchedManualReloadCompaction(
-      ...args: any[]
-    ) {
-      compactionDepth += 1;
-      try {
-        return await originalCompact(...args);
-      } finally {
-        await finishCompactionReload();
-      }
-    };
-  }
 
   const waitForReloadBarrier = async () => {
-    while (
-      reloadInFlight ||
-      reloadScheduled ||
-      queuedReloads.length > 0 ||
-      reloadAfterAgentEnd ||
-      pendingCompactionReload ||
-      compactionDepth > 0
-    ) {
+    while (reloadInFlight || reloadScheduled || queuedReloads.length > 0) {
       if (reloadInFlight) {
         const currentReload = reloadInFlight;
         const failPromptOnReloadError =
@@ -1266,25 +1200,16 @@ export function applyRinSessionReloadPolicy(session: any) {
     }
     if (event?.type === "agent_end") {
       agentTurnActive = false;
-      if (!reloadAfterAgentEnd) return;
-      reloadAfterAgentEnd = false;
-      if (!reloadInFlight && !reloadScheduled) scheduleNextReload();
       return;
     }
     if (event?.type !== "compaction_end") return;
     if (event?.aborted || !event?.result) return;
-    if (compactionDepth > 0) {
-      pendingCompactionReload = true;
-      return;
-    }
-    void requestCompactionReload();
+    refreshRinSessionSystemPrompt(session);
   });
 
   (session as any)[RIN_SESSION_RELOAD_POLICY_KEY] = {
     unsubscribe,
     originalReload,
-    originalRunAutoCompaction,
-    originalCompact,
     originalPrompt,
   };
 }

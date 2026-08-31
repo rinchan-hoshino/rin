@@ -1167,104 +1167,6 @@ test("Rin serializes explicit reloads without dropping arguments or results", as
   ]);
 });
 
-test("Rin preserves reload FIFO when agent_end releases a deferred compaction", async () => {
-  const events: string[] = [];
-  const listeners: any[] = [];
-  const resolvers: Array<() => void> = [];
-  let activeReloads = 0;
-  let maximumActiveReloads = 0;
-  const session: any = {
-    sessionManager: { getBranch: () => [] },
-    subscribe(listener: any) {
-      listeners.push(listener);
-      return () => {};
-    },
-    async reload(label = "compaction") {
-      activeReloads += 1;
-      maximumActiveReloads = Math.max(maximumActiveReloads, activeReloads);
-      events.push(`reload:${label}`);
-      await new Promise<void>((resolve) => resolvers.push(resolve));
-      activeReloads -= 1;
-      return label;
-    },
-    async prompt() {},
-  };
-  runtime.applyRinSessionReloadPolicy(session);
-  listeners[0]({ type: "agent_start" });
-
-  const first = session.reload("first");
-  const second = session.reload("second");
-  while (resolvers.length < 1) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  listeners[0]({
-    type: "compaction_end",
-    aborted: false,
-    result: { summary: "done" },
-  });
-  listeners[0]({ type: "agent_end" });
-
-  resolvers[0]();
-  while (resolvers.length < 2) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  assert.deepEqual(events, ["reload:first", "reload:second"]);
-  resolvers[1]();
-  while (resolvers.length < 3) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  assert.deepEqual(events, [
-    "reload:first",
-    "reload:second",
-    "reload:compaction",
-  ]);
-  resolvers[2]();
-  assert.deepEqual(await Promise.all([first, second]), ["first", "second"]);
-  assert.equal(maximumActiveReloads, 1);
-});
-
-test("Rin reserves FIFO position for compaction requested before explicit reload", async () => {
-  const events: string[] = [];
-  const listeners: any[] = [];
-  const resolvers: Array<() => void> = [];
-  const session: any = {
-    sessionManager: { getBranch: () => [] },
-    subscribe(listener: any) {
-      listeners.push(listener);
-      return () => {};
-    },
-    async reload(label = "compaction") {
-      events.push(`reload:${label}`);
-      await new Promise<void>((resolve) => resolvers.push(resolve));
-      return label;
-    },
-    async prompt() {},
-  };
-  runtime.applyRinSessionReloadPolicy(session);
-  listeners[0]({ type: "agent_start" });
-  listeners[0]({
-    type: "compaction_end",
-    aborted: false,
-    result: { summary: "done" },
-  });
-  const explicit = session.reload("later");
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(events, []);
-
-  listeners[0]({ type: "agent_end" });
-  while (resolvers.length < 1) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  assert.deepEqual(events, ["reload:compaction"]);
-  resolvers[0]();
-  while (resolvers.length < 2) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  assert.deepEqual(events, ["reload:compaction", "reload:later"]);
-  resolvers[1]();
-  assert.equal(await explicit, "later");
-});
-
 test("Rin reloads the same unchanged activity marker again after another 25 hours", async () => {
   const originalNow = Date.now;
   let now = Date.parse("2026-08-31T12:00:00.000Z");
@@ -1427,7 +1329,7 @@ test("Rin joins concurrent prompts to one idle reload", async () => {
   assert.deepEqual(events, ["reload", "prompt:first", "prompt:second"]);
 });
 
-test("Rin keeps an idle prompt behind a compaction reload queued during idle reload", async () => {
+test("Rin does not add a full reload when compaction finishes during idle reload", async () => {
   const events: string[] = [];
   const listeners: any[] = [];
   const reloadResolvers: Array<() => void> = [];
@@ -1462,13 +1364,9 @@ test("Rin keeps an idle prompt behind a compaction reload queued during idle rel
     result: { summary: "done" },
   });
   reloadResolvers[0]();
-  while (reloadResolvers.length < 2) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  assert.deepEqual(events, ["reload", "reload"]);
-  reloadResolvers[1]();
   await prompt;
-  assert.deepEqual(events, ["reload", "reload", "prompt"]);
+  assert.equal(reloadResolvers.length, 1);
+  assert.deepEqual(events, ["reload", "prompt"]);
 });
 
 test("reload, shutdown, and settings wrappers remain idempotent and failure-safe", async () => {
@@ -1511,7 +1409,7 @@ test("reload, shutdown, and settings wrappers remain idempotent and failure-safe
   listeners[0]({ type: "compaction_end", result: null, aborted: false });
   assert.equal(await reloadSession._runAutoCompaction(), "auto");
   assert.equal(await reloadSession.compact(), "manual");
-  assert.deepEqual(reloadEvents, ["reload", "reload"]);
+  assert.deepEqual(reloadEvents, []);
 
   assert.doesNotThrow(() => runtime.patchRinRuntimeSessionShutdown(null));
   const shutdownCalls: any[] = [];

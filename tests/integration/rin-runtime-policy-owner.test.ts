@@ -1237,7 +1237,51 @@ test("runtime session shutdown emits Rin capability hooks without extension-runn
   ]);
 });
 
-test("applyRinSessionReloadPolicy reloads after successful compaction only once per session", async () => {
+test("refreshRinSessionSystemPrompt rebuilds the configured prompt in place", async () => {
+  const agentDir = await fs.mkdtemp("/tmp/rin-prompt-refresh-");
+  const promptsDir = path.join(agentDir, "self_improve", "prompts");
+  await fs.mkdir(promptsDir, { recursive: true });
+  await Promise.all([
+    fs.writeFile(
+      path.join(promptsDir, "agent_profile.md"),
+      "prompt-before-compaction",
+    ),
+    fs.writeFile(path.join(promptsDir, "user_profile.md"), "user-profile"),
+    fs.writeFile(path.join(promptsDir, "core_doctrine.md"), "core-doctrine"),
+  ]);
+  const configured = await runtimeMod.createConfiguredAgentSession({
+    cwd: agentDir,
+    agentDir,
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+    noTools: true,
+  });
+  try {
+    assert.match(
+      runtimeMod.ensureSessionBaseSystemPrompt(configured.session),
+      /prompt-before-compaction/,
+    );
+    await fs.writeFile(
+      path.join(promptsDir, "agent_profile.md"),
+      "prompt-after-compaction",
+    );
+    const refreshed = runtimeMod.refreshRinSessionSystemPrompt(
+      configured.session,
+    );
+    assert.match(refreshed, /prompt-after-compaction/);
+    assert.doesNotMatch(refreshed, /prompt-before-compaction/);
+  } finally {
+    try {
+      await configured.runtime?.dispose?.();
+    } catch {}
+    await fs.rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("applyRinSessionReloadPolicy refreshes the prompt after successful compaction without full reload", async () => {
   const listeners = [];
   let subscribeCount = 0;
   let reloadCount = 0;
@@ -1268,10 +1312,10 @@ test("applyRinSessionReloadPolicy reloads after successful compaction only once 
     result: { summary: "ok" },
   });
   await waitForTimers();
-  assert.equal(reloadCount, 1);
+  assert.equal(reloadCount, 0);
 });
 
-test("applyRinSessionReloadPolicy defers an in-turn reload until agent_end", async () => {
+test("applyRinSessionReloadPolicy admits an in-turn steer after compaction", async () => {
   const listeners = [];
   let reloadCount = 0;
   let promptCount = 0;
@@ -1300,14 +1344,15 @@ test("applyRinSessionReloadPolicy defers an in-turn reload until agent_end", asy
   await waitForTimers();
   assert.equal(reloadCount, 0);
 
-  const promptPromise = session.prompt("queued turn");
-  await waitForTimers();
-  assert.equal(promptCount, 0);
+  assert.equal(
+    await session.prompt("steer", { streamingBehavior: "steer" }),
+    "steer",
+  );
+  assert.equal(reloadCount, 0);
+  assert.equal(promptCount, 1);
 
   listeners[0]({ type: "agent_end" });
-  assert.equal(await promptPromise, "queued turn");
-  assert.equal(reloadCount, 1);
-  assert.equal(promptCount, 1);
+  assert.equal(reloadCount, 0);
 });
 
 test("applyRinSessionReloadPolicy gates the next prompt on an in-flight reload", async () => {
@@ -1332,22 +1377,19 @@ test("applyRinSessionReloadPolicy gates the next prompt on an in-flight reload",
   };
 
   runtimeMod.applyRinSessionReloadPolicy(session);
-  listeners[0]({
-    type: "compaction_end",
-    aborted: false,
-    result: { summary: "complete" },
-  });
+  const reloadPromise = session.reload();
 
   const promptPromise = session.prompt("next turn");
   await waitForTimers();
   assert.equal(promptCount, 0);
 
   releaseReload();
+  await reloadPromise;
   assert.equal(await promptPromise, "next turn");
   assert.equal(promptCount, 1);
 });
 
-test("applyRinSessionReloadPolicy queues one extra reload while a reload is in flight", async () => {
+test("applyRinSessionReloadPolicy queues one extra explicit reload while one is in flight", async () => {
   const listeners = [];
   let releaseReload;
   let reloadCount = 0;
@@ -1371,28 +1413,15 @@ test("applyRinSessionReloadPolicy queues one extra reload while a reload is in f
 
   runtimeMod.applyRinSessionReloadPolicy(session);
 
-  listeners[0]({
-    type: "compaction_end",
-    aborted: false,
-    result: { summary: "first" },
-  });
-  listeners[0]({
-    type: "compaction_end",
-    aborted: false,
-    result: { summary: "second" },
-  });
+  const firstReloadPromise = session.reload();
+  const secondReloadPromise = session.reload();
 
   await waitForTimers();
   assert.equal(reloadCount, 1);
 
-  listeners[0]({ type: "agent_start" });
   releaseReload();
-  await waitForTimers();
-  await waitForTimers();
-  assert.equal(reloadCount, 1);
-
-  listeners[0]({ type: "agent_end" });
-  await waitForTimers();
+  await firstReloadPromise;
+  await secondReloadPromise;
   assert.equal(reloadCount, 2);
 });
 
@@ -1400,7 +1429,7 @@ test("Rin runtime no longer exposes todo compaction summary injection", () => {
   assert.equal(runtimeMod.appendRinTodoSnapshotToCompactionSummary, undefined);
 });
 
-test("manual compaction waits for refresh before returning", async () => {
+test("manual compaction refreshes without a full session reload", async () => {
   const listeners = [];
   let reloadCount = 0;
   const sequence = [];
@@ -1430,6 +1459,6 @@ test("manual compaction waits for refresh before returning", async () => {
   runtimeMod.applyRinSessionReloadPolicy(session);
   await session.compact();
 
-  assert.equal(reloadCount, 1);
-  assert.deepEqual(sequence, ["compact-done", "reload"]);
+  assert.equal(reloadCount, 0);
+  assert.deepEqual(sequence, ["compact-done"]);
 });
