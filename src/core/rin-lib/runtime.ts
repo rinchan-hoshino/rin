@@ -1417,7 +1417,7 @@ export function applyRinExtensionContextApi(session: any, agentDir: string) {
       const rinContext: Record<string, unknown> = { agentDir };
       Object.defineProperty(rinContext, "frontendIdentity", {
         enumerable: true,
-        get: () => session.sessionManager?.__rinFrontend,
+        get: () => context.sessionManager?.__rinFrontend,
       });
       context.rin = rinContext;
       return context;

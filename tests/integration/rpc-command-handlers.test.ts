@@ -197,8 +197,8 @@ test("RPC extension commands bind their normalized frontend identity before prom
     __rinFrontend: { kind: "stale", key: "old" },
   };
   const session = fakeSession({
-    sessionManager,
     extensionRunner: {
+      createCommandContext: () => ({ sessionManager }),
       getRegisteredCommands: () => [
         {
           name: "owner",

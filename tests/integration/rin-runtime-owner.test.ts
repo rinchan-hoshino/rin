@@ -1175,20 +1175,14 @@ test("reload, shutdown, and settings wrappers remain idempotent and failure-safe
 });
 
 test("runtime exposes Rin metadata on extension lifecycle and command contexts", () => {
-  const runner = {
-    createContext: () => ({ kind: "lifecycle" }),
-    createCommandContext: () => ({ kind: "command" }),
-  };
   const sessionManager = {
     __rinFrontend: { kind: "chat", key: "discord/1:2" },
   };
-  runtime.applyRinExtensionContextApi(
-    {
-      extensionRunner: runner,
-      sessionManager,
-    },
-    "/agent",
-  );
+  const runner = {
+    createContext: () => ({ kind: "lifecycle", sessionManager }),
+    createCommandContext: () => ({ kind: "command", sessionManager }),
+  };
+  runtime.applyRinExtensionContextApi({ extensionRunner: runner }, "/agent");
   const lifecycleContext = runner.createContext();
   assert.deepEqual(lifecycleContext.rin, {
     agentDir: "/agent",

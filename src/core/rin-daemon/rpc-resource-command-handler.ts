@@ -184,7 +184,8 @@ export function createRpcResourceCommandHandlers(
             ) {
               return { handled: false };
             }
-            const manager = session.sessionManager as
+            const manager = (session.extensionRunner?.createCommandContext?.()
+              ?.sessionManager ?? session.sessionManager) as
               | { __rinFrontend?: typeof frontendIdentity }
               | undefined;
             if (manager) {
