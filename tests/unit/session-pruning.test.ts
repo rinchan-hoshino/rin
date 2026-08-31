@@ -229,8 +229,8 @@ test("session pruning counts parallel tool calls separately inside one user turn
   assert.equal(messages[2].content.length, 25_000);
 });
 
-test("session pruning keeps only the newest Hermes lean tool rounds", () => {
-  const rounds = Array.from({ length: 8 }, (_, round) => {
+test("session pruning keeps only the newest eight Hermes lean tool rounds", () => {
+  const rounds = Array.from({ length: 10 }, (_, round) => {
     const calls = Array.from(
       { length: round % 2 === 0 ? 2 : 1 },
       (_, call) => ({
@@ -252,9 +252,9 @@ test("session pruning keeps only the newest Hermes lean tool rounds", () => {
   }).flat();
   const messages = [{ role: "user", content: "keep working" }, ...rounds];
 
-  assert.equal(pruning.findProtectedToolCallRoundStart(messages, 6), 3);
+  assert.equal(pruning.findProtectedToolCallRoundStart(messages, 8), 3);
   const result = pruning.pruneSessionContextMessages(messages, {
-    retainedToolCallRounds: 6,
+    retainedToolCallRounds: 8,
   });
   const toolResults = result.filter(
     (message: any) => message.role === "toolResult",

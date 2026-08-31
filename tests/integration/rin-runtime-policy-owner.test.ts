@@ -851,7 +851,7 @@ test("Rin provider preflight evaluates transformed provider messages before comp
   assert.deepEqual(loopMessages, compactedMessages);
 });
 
-test("Rin post-compaction provider context keeps the user and only six Hermes lean tool rounds", async () => {
+test("Rin post-compaction provider context keeps the user and only eight Hermes lean tool rounds", async () => {
   const calls: string[] = [];
   const messages = [
     { role: "compactionSummary", summary: "progress checkpoint" },
@@ -909,14 +909,14 @@ test("Rin post-compaction provider context keeps the user and only six Hermes le
   assert.deepEqual(calls, []);
   assert.equal(providerMessages[1], messages[1]);
   assert.deepEqual(
-    results.slice(0, 4).map((message: any) => message.content),
-    Array(4).fill("pruned"),
+    results.slice(0, 2).map((message: any) => message.content),
+    Array(2).fill("pruned"),
   );
   assert.deepEqual(
-    results.slice(4).map((message: any) => message.content),
+    results.slice(2).map((message: any) => message.content),
     messages
       .filter((message: any) => message.role === "toolResult")
-      .slice(4)
+      .slice(2)
       .map((message: any) => message.content),
   );
 });

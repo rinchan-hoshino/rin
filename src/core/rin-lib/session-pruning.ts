@@ -3,7 +3,7 @@ import { isPiCompactSkillReadCall } from "../pi/private-api.js";
 
 export const RIN_SESSION_PRUNING_TOOL_CALL_BUCKET_SIZE = 16;
 export const RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_BUCKETS = 4;
-export const RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_ROUNDS = 6;
+export const RIN_SESSION_PRUNING_RETAINED_TOOL_CALL_ROUNDS = 8;
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_INPUT = "old tool input omitted";
 export const RIN_SESSION_PRUNING_OMITTED_TOOL_RESULT = "pruned";
 
