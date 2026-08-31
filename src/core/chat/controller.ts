@@ -2743,13 +2743,13 @@ export class ChatController {
     const skipSessionRecovery = commandPolicy.skipSessionRecovery;
     // Slash commands are controls; reply-bound session files belong to prompt inbox_jobs only.
     const explicitSessionFile = "";
-    const restoreSessionFile = skipSessionRecovery
+    const storedRestoreSessionFile = skipSessionRecovery
       ? ""
       : this.getRecoverableSessionFile();
     const managedSessionLeaf =
       commandPolicy.skipSessionRecovery && commandName === "new"
         ? MANAGED_CHAT_SESSION_LEAF
-        : !restoreSessionFile
+        : !storedRestoreSessionFile
           ? this.managedSessionLeafForFreshChat()
           : undefined;
     this.lastActivityAt = Date.now();
@@ -2763,6 +2763,9 @@ export class ChatController {
       const frontendReady = await this.connect({
         restoreSession: !skipSessionRecovery,
       });
+      const restoreSessionFile = skipSessionRecovery
+        ? ""
+        : this.getRecoverableSessionFile() || storedRestoreSessionFile;
       if (commandPolicy.acceptInboundBeforeExecution) {
         this.ensureVisibleCommandTurn();
         this.markAcceptedMessage(incomingMessageId);
