@@ -468,12 +468,11 @@ test("Pi session host uses a proportional retained-source tail at the cut-point 
   await session.compact();
 });
 
-test("Pi session host keeps the latest user turn as original role when the token cut lands mid-turn", () => {
-  const oldUser = { role: "user", content: "old request", timestamp: 1 };
+test("Pi session host preserves Pi's split-turn cut for an oversized active turn", async () => {
   const activeUser = {
     role: "user",
-    content: "current request must remain active",
-    timestamp: 2,
+    content: "current request",
+    timestamp: 1,
   };
   const earlyAssistant = {
     role: "assistant",
@@ -486,14 +485,14 @@ test("Pi session host keeps the latest user turn as original role when the token
       },
     ],
     stopReason: "toolUse",
-    timestamp: 3,
+    timestamp: 2,
   };
   const earlyResult = {
     role: "toolResult",
     toolCallId: "early-call",
     toolName: "read",
-    content: "early result",
-    timestamp: 4,
+    content: "X".repeat(200_000),
+    timestamp: 3,
   };
   const keptAssistant = {
     role: "assistant",
@@ -506,292 +505,99 @@ test("Pi session host keeps the latest user turn as original role when the token
       },
     ],
     stopReason: "toolUse",
-    timestamp: 5,
+    timestamp: 4,
+  };
+  const preparation = {
+    messagesToSummarize: [],
+    turnPrefixMessages: [activeUser, earlyAssistant, earlyResult],
+    firstKeptEntryId: "kept-assistant",
+    isSplitTurn: true,
   };
   const pathEntries = [
-    { id: "old-user", type: "message", message: oldUser },
     { id: "active-user", type: "message", message: activeUser },
     { id: "early-assistant", type: "message", message: earlyAssistant },
     { id: "early-result", type: "message", message: earlyResult },
     { id: "kept-assistant", type: "message", message: keptAssistant },
   ];
-  const preparation = {
-    messagesToSummarize: [oldUser],
-    turnPrefixMessages: [activeUser, earlyAssistant, earlyResult],
-    firstKeptEntryId: "kept-assistant",
-    isSplitTurn: true,
+
+  const compactionEntry = {
+    id: "compaction",
+    type: "compaction",
+    summary: host.wrapRinCompactionSummary("Rin summary"),
   };
-
-  const anchored = host.anchorRinCompactionPreparation(
-    pathEntries,
-    preparation,
-  );
-
-  assert.equal(anchored.firstKeptEntryId, "active-user");
-  assert.deepEqual(anchored.messagesToSummarize, [oldUser]);
-  assert.deepEqual(anchored.turnPrefixMessages, []);
-  assert.equal(anchored.isSplitTurn, false);
-});
-
-test("Pi session host keeps a rich-media user message in its original role", () => {
-  const oldAssistant = {
-    role: "assistant",
-    content: [{ type: "thinking", thinking: "old internal state" }],
-    timestamp: 1,
-  };
-  const imageUser = {
-    role: "user",
-    content: [{ type: "image", data: "synthetic-image" }],
-    timestamp: 2,
-  };
-  const keptAssistant = {
-    role: "assistant",
-    content: [{ type: "toolCall", id: "call-1", name: "read" }],
-    timestamp: 3,
-  };
-  const pathEntries = [
-    { id: "old-assistant", type: "message", message: oldAssistant },
-    { id: "image-user", type: "message", message: imageUser },
-    { id: "kept-assistant", type: "message", message: keptAssistant },
-  ];
-
-  const anchored = host.anchorRinCompactionPreparation(pathEntries, {
-    messagesToSummarize: [oldAssistant],
-    turnPrefixMessages: [imageUser],
-    firstKeptEntryId: "kept-assistant",
-    isSplitTurn: true,
-  });
-
-  assert.equal(anchored.firstKeptEntryId, "image-user");
-  assert.deepEqual(anchored.messagesToSummarize, [oldAssistant]);
-});
-
-test("Pi session host keeps the latest visible assistant reply in the verbatim tail", () => {
-  const oldUser = { role: "user", content: "old request", timestamp: 1 };
-  const visibleAssistant = {
-    role: "assistant",
-    content: [{ type: "text", text: "visible answer" }],
-    stopReason: "stop",
-    timestamp: 2,
-  };
-  const latestUser = { role: "user", content: "follow-up", timestamp: 3 };
-  const pathEntries = [
-    { id: "old-user", type: "message", message: oldUser },
-    { id: "visible-assistant", type: "message", message: visibleAssistant },
-    { id: "latest-user", type: "message", message: latestUser },
-  ];
-  const preparation = {
-    messagesToSummarize: [oldUser, visibleAssistant],
-    turnPrefixMessages: [],
-    firstKeptEntryId: "latest-user",
-    isSplitTurn: false,
-  };
-
-  const anchored = host.anchorRinCompactionPreparation(
-    pathEntries,
-    preparation,
-  );
-
-  assert.equal(anchored.firstKeptEntryId, "visible-assistant");
-  assert.deepEqual(anchored.messagesToSummarize, [oldUser]);
-});
-
-test("Pi session host keeps a trailing in-flight tool call in the verbatim tail", () => {
-  const historicalAssistant = {
-    role: "assistant",
-    content: [{ type: "thinking", thinking: "historical internal state" }],
-    stopReason: "stop",
-    timestamp: 1,
-  };
-  const pendingAssistant = {
-    role: "assistant",
-    content: [
-      {
-        type: "toolCall",
-        id: "pending-call",
-        name: "bash",
-        arguments: { command: "long-running-check" },
+  let prepared: any;
+  const session: any = {
+    model: { provider: "test", id: "model", contextWindow: 1_000 },
+    extensionRunner: { hasHandlers: () => false, async emit() {} },
+    agent: {
+      state: {
+        messages: [activeUser, earlyAssistant, earlyResult, keptAssistant],
       },
-    ],
-    stopReason: "toolUse",
-    timestamp: 2,
-  };
-  const keptCustomEntry = {
-    id: "kept-custom",
-    type: "custom",
-    customType: "rin-provider-time",
-    data: { now: "2026-08-31T12:00:00+08:00" },
-  };
-  const pathEntries = [
-    {
-      id: "historical-assistant",
-      type: "message",
-      message: historicalAssistant,
     },
-    { id: "pending-assistant", type: "message", message: pendingAssistant },
-    keptCustomEntry,
-  ];
-  const preparation = {
-    messagesToSummarize: [historicalAssistant, pendingAssistant],
-    turnPrefixMessages: [],
-    firstKeptEntryId: "kept-custom",
-    isSplitTurn: false,
+    abort: async () => {},
+    _emit() {},
+    _runAutoCompaction: async () => false,
+    settingsManager: {
+      getCompactionSettings: () => ({
+        enabled: true,
+        triggerPercent: 0.8,
+        reserveTokens: 100,
+        keepRecentTokens: 1,
+      }),
+    },
+    sessionManager: {
+      getBranch: () => pathEntries,
+      appendCompaction() {},
+      getEntries: () => [...pathEntries, compactionEntry],
+      buildSessionContext: () => ({ messages: [keptAssistant] }),
+    },
   };
-
-  const anchored = host.anchorRinCompactionPreparation(
-    pathEntries,
-    preparation,
-  );
-
-  assert.equal(anchored.firstKeptEntryId, "pending-assistant");
-  assert.deepEqual(anchored.messagesToSummarize, [historicalAssistant]);
-});
-
-test("Pi session host keeps an assistant-only split-turn prefix before its visible reply", () => {
-  const toolAssistant = {
-    role: "assistant",
-    content: [
-      {
-        type: "toolCall",
-        id: "scheduled-call",
-        name: "read",
-        arguments: { path: "/tmp/scheduled" },
-      },
-    ],
-    stopReason: "toolUse",
-    timestamp: 1,
-  };
-  const toolResult = {
-    role: "toolResult",
-    toolCallId: "scheduled-call",
-    toolName: "read",
-    content: [{ type: "text", text: "scheduled result" }],
-    isError: false,
-    timestamp: 2,
-  };
-  const visibleAssistant = {
-    role: "assistant",
-    content: [{ type: "text", text: "scheduled report" }],
-    stopReason: "stop",
-    timestamp: 3,
-  };
-  const pathEntries = [
-    { id: "tool-assistant", type: "message", message: toolAssistant },
-    { id: "tool-result", type: "message", message: toolResult },
-    { id: "visible-assistant", type: "message", message: visibleAssistant },
-  ];
-
-  const anchored = host.anchorRinCompactionPreparation(pathEntries, {
-    messagesToSummarize: [],
-    turnPrefixMessages: [toolAssistant, toolResult],
-    firstKeptEntryId: "visible-assistant",
-    isSplitTurn: true,
+  host.installPiSessionCompactionOwner(session, async (event: any) => {
+    prepared = event.preparation;
+    return {
+      summary: "Rin summary",
+      firstKeptEntryId: prepared.firstKeptEntryId,
+      tokensBefore: prepared.tokensBefore,
+      details: {},
+    };
   });
 
-  assert.equal(anchored.firstKeptEntryId, "tool-assistant");
-  assert.deepEqual(anchored.messagesToSummarize, []);
+  await session.compact();
+
+  assert.equal(prepared.firstKeptEntryId, preparation.firstKeptEntryId);
+  assert.equal(prepared.isSplitTurn, true);
+  assert.deepEqual(prepared.turnPrefixMessages, preparation.turnPrefixMessages);
 });
 
-test("Pi session host moves a user anchor backward to keep a crossing tool chain whole", () => {
-  const toolAssistant = {
-    role: "assistant",
-    content: [
+test("Pi session host includes the split-turn prefix in Rin's summary input", () => {
+  const prompt = host.buildRinCompactionPrompt({
+    messagesToSummarize: [{ role: "user", content: "old request" }],
+    turnPrefixMessages: [
+      { role: "user", content: "current oversized request" },
       {
-        type: "toolCall",
-        id: "crossing-call",
-        name: "bash",
-        arguments: { command: "crossing-check" },
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "early-call",
+            name: "read",
+            arguments: { path: "/tmp/early" },
+          },
+        ],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "early-call",
+        toolName: "read",
+        content: "critical early result",
       },
     ],
-    stopReason: "toolUse",
-    timestamp: 1,
-  };
-  const interruptingUser = {
-    role: "user",
-    content: "stop after the current check",
-    timestamp: 2,
-  };
-  const toolResult = {
-    role: "toolResult",
-    toolCallId: "crossing-call",
-    toolName: "bash",
-    content: [{ type: "text", text: "done" }],
-    isError: false,
-    timestamp: 3,
-  };
-  const keptAssistant = {
-    role: "assistant",
-    content: [{ type: "text", text: "stopped" }],
-    stopReason: "stop",
-    timestamp: 4,
-  };
-  const pathEntries = [
-    { id: "tool-assistant", type: "message", message: toolAssistant },
-    { id: "interrupting-user", type: "message", message: interruptingUser },
-    { id: "tool-result", type: "message", message: toolResult },
-    { id: "kept-assistant", type: "message", message: keptAssistant },
-  ];
-
-  const anchored = host.anchorRinCompactionPreparation(pathEntries, {
-    messagesToSummarize: [toolAssistant],
-    turnPrefixMessages: [interruptingUser, toolResult],
     firstKeptEntryId: "kept-assistant",
     isSplitTurn: true,
   });
 
-  assert.equal(anchored.firstKeptEntryId, "tool-assistant");
-  assert.deepEqual(anchored.messagesToSummarize, []);
-});
-
-test("Pi session host does not revive an old interrupted tool call as in-flight", () => {
-  const abandonedAssistant = {
-    role: "assistant",
-    content: [
-      {
-        type: "toolCall",
-        id: "abandoned-call",
-        name: "bash",
-        arguments: { command: "old-check" },
-      },
-    ],
-    stopReason: "toolUse",
-    timestamp: 1,
-  };
-  const latestVisibleAssistant = {
-    role: "assistant",
-    content: [{ type: "text", text: "newer completed reply" }],
-    stopReason: "stop",
-    timestamp: 2,
-  };
-  const keptAssistant = {
-    role: "assistant",
-    content: [{ type: "toolCall", id: "kept-call", name: "read" }],
-    stopReason: "toolUse",
-    timestamp: 3,
-  };
-  const pathEntries = [
-    {
-      id: "abandoned-assistant",
-      type: "message",
-      message: abandonedAssistant,
-    },
-    {
-      id: "latest-visible-assistant",
-      type: "message",
-      message: latestVisibleAssistant,
-    },
-    { id: "kept-assistant", type: "message", message: keptAssistant },
-  ];
-
-  const anchored = host.anchorRinCompactionPreparation(pathEntries, {
-    messagesToSummarize: [abandonedAssistant, latestVisibleAssistant],
-    turnPrefixMessages: [],
-    firstKeptEntryId: "kept-assistant",
-    isSplitTurn: false,
-  });
-
-  assert.equal(anchored.firstKeptEntryId, "latest-visible-assistant");
-  assert.deepEqual(anchored.messagesToSummarize, [abandonedAssistant]);
+  assert.match(prompt, /current oversized request/);
+  assert.match(prompt, /critical early result/);
 });
 
 test("Pi session host silently defers automatic compaction until a cut point exists", async () => {

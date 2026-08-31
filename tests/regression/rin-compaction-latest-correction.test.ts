@@ -15,7 +15,7 @@ const {
   "dist/core/pi/session-host.js",
 );
 
-test("split-turn compaction summarizes only history while the latest correction stays in the verbatim tail", async () => {
+test("split-turn compaction summarizes history and the active turn prefix before the verbatim tail", async () => {
   const model = {
     id: "split-turn-model",
     name: "Split Turn Model",
@@ -53,7 +53,7 @@ test("split-turn compaction summarizes only history while the latest correction 
                   "## Goal",
                   "Continue the audit.",
                   "## Constraints & Preferences",
-                  "- Historical cadence was every 50 companies.",
+                  "- The latest cadence is every 500 companies.",
                 ].join("\n"),
               },
             ],
@@ -80,7 +80,7 @@ test("split-turn compaction summarizes only history while the latest correction 
   const event = {
     reason: "threshold",
     preparation: {
-      firstKeptEntryId: "active-user",
+      firstKeptEntryId: "active-assistant",
       messagesToSummarize: [
         {
           role: "user",
@@ -93,8 +93,33 @@ test("split-turn compaction summarizes only history while the latest correction 
           timestamp: 2,
         },
       ],
-      turnPrefixMessages: [],
-      isSplitTurn: false,
+      turnPrefixMessages: [
+        {
+          role: "user",
+          content: "Use batches of 500 instead.",
+          timestamp: 3,
+        },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "batch-check",
+              name: "read",
+              arguments: { path: "/tmp/batch-check" },
+            },
+          ],
+          timestamp: 4,
+        },
+        {
+          role: "toolResult",
+          toolCallId: "batch-check",
+          toolName: "read",
+          content: "Processed 2,000 companies.",
+          timestamp: 5,
+        },
+      ],
+      isSplitTurn: true,
       tokensBefore: 243_552,
       fileOps: {
         read: new Set<string>(),
@@ -113,7 +138,8 @@ test("split-turn compaction summarizes only history while the latest correction 
 
   assert.equal(prompts.length, 1);
   assert.match(prompts[0], /Report after every 50 companies/);
-  assert.doesNotMatch(prompts[0], /Use batches of 500 instead/);
+  assert.match(prompts[0], /Use batches of 500 instead/);
+  assert.match(prompts[0], /Processed 2,000 companies/);
   assert.match(prompts[0], /## Historical Task Snapshot/);
   assert.match(prompts[0], /## Completed Actions/);
   assert.match(prompts[0], /THE SINGLE MOST IMPORTANT FIELD/);
@@ -133,8 +159,7 @@ test("split-turn compaction summarizes only history while the latest correction 
   assert.match(prompts[0], /Conversation:/);
   assert.doesNotMatch(prompts[0], /<conversation>/);
   assert.doesNotMatch(result.summary, /Turn Context \(split turn\)/);
-  assert.match(result.summary, /Historical cadence was every 50 companies/);
-  assert.doesNotMatch(result.summary, /every 500|3,000/);
+  assert.match(result.summary, /latest cadence is every 500 companies/);
 });
 
 test("compaction bounds iterative input and deterministically preserves pruned skill reloads", () => {
