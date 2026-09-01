@@ -19,13 +19,18 @@ const rawExecMod = await import(
 function withScheduledInputDelivery(chat: any) {
   return chat &&
     typeof chat.runTurn === "function" &&
-    typeof chat.send !== "function"
+    typeof chat.submitIncoming !== "function"
     ? {
-        send: async () => ({
-          delivered: true,
-          messageIds: ["scheduled-input-test"],
-        }),
         ...chat,
+        submitIncoming: async (payload: any) =>
+          chat.runTurn({
+            controllerKey: "default",
+            deliverFinal: true,
+            quietMode: false,
+            ...payload,
+            incomingMessageId: "scheduled-input-test",
+            replyToMessageId: "scheduled-input-test",
+          }),
       }
     : chat;
 }
@@ -201,13 +206,10 @@ test("cron scheduler resumes one durable agent invocation after restart", async 
     assert.equal(startedRow.runCount, 1);
     assert.equal(startedRow.activeInvocation?.taskId, taskId);
     assert.equal(startedRow.activeInvocation?.target.prompt, "original prompt");
-    assert.equal(
-      firstCalls[0].requestTag,
-      startedRow.activeInvocation?.requestTag,
-    );
+    assert.equal(firstCalls[0].requestTag, undefined);
     assert.equal(
       firstCalls[0].deliveryIdempotencyKey,
-      `scheduled-final:${startedRow.activeInvocation?.id}`,
+      `scheduled-input:${startedRow.activeInvocation?.requestTag}`,
     );
     assert.equal(
       firstCalls[0].sessionFile,
@@ -240,10 +242,8 @@ test("cron scheduler resumes one durable agent invocation after restart", async 
     assert.equal(secondCalls.length, 1);
     assert.equal(secondCalls[0].requestTag, firstCalls[0].requestTag);
     assert.equal(secondCalls[0].text, "original prompt");
-    assert.equal(
-      secondCalls[0].promptMeta.sentAt,
-      firstCalls[0].promptMeta.sentAt,
-    );
+    assert.equal(secondCalls[0].taskId, firstCalls[0].taskId);
+    assert.equal(secondCalls[0].taskName, firstCalls[0].taskName);
     assert.equal(secondCalls[0].sessionFile, firstCalls[0].sessionFile);
     assert.equal(
       secondCalls[0].deliveryIdempotencyKey,
@@ -1043,7 +1043,7 @@ test("cron legacy session fields never create or select a task-owned session", a
         },
       ],
     );
-    assert.equal(calls[0].promptMeta?.taskId, "cron_dedicated");
+    assert.equal(calls[0].taskId, "cron_dedicated");
     assert.equal("triggerKind" in (calls[0].promptMeta || {}), false);
     assert.equal("taskRunId" in (calls[0].promptMeta || {}), false);
     assert.equal("taskSessionMode" in (calls[0].promptMeta || {}), false);
@@ -1118,7 +1118,7 @@ test("cron legacy session artifacts cannot override the current frontend session
         sessionFile: undefined,
       },
     );
-    assert.equal(calls[0].promptMeta?.taskId, "cron_seeded");
+    assert.equal(calls[0].taskId, "cron_seeded");
     assert.equal("taskSessionMode" in (calls[0].promptMeta || {}), false);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -1407,8 +1407,6 @@ test("cron chat-bound agent task submits into the current frontend session", asy
   const runTurnCalls = [];
   const incomingCalls = [];
   const order = [];
-  const scheduledDeliveries = [];
-  const scheduledDeliveryOptions = [];
   try {
     await fs.mkdir(path.dirname(transientSessionFile), { recursive: true });
     await fs.writeFile(transientSessionFile, "temporary session", "utf8");
@@ -1416,14 +1414,8 @@ test("cron chat-bound agent task submits into the current frontend session", asy
       agentDir,
       runId: "run-chat-1",
       chat: {
-        send: async (payload, options) => {
-          order.push("scheduled-input");
-          scheduledDeliveries.push(payload);
-          scheduledDeliveryOptions.push(options);
-          return {
-            delivered: true,
-            messageIds: ["scheduled-input-1"],
-          };
+        send: async () => {
+          throw new Error("scheduled tasks must not call chat.send");
         },
         runTurn: async (payload) => {
           runTurnCalls.push(payload);
@@ -1436,15 +1428,7 @@ test("cron chat-bound agent task submits into the current frontend session", asy
         },
       },
     });
-    assert.deepEqual(order, ["scheduled-input", "submit-incoming"]);
-    assert.equal(
-      scheduledDeliveries[0].parts.find((part) => part.type === "text")?.text,
-      "⏰ Scheduled task · Chat Bound Task\nhello",
-    );
-    assert.equal(
-      scheduledDeliveryOptions[0].idempotencyKey,
-      "scheduled-input:run-chat-1",
-    );
+    assert.deepEqual(order, ["submit-incoming"]);
     assert.equal(result.text, "");
     assert.equal(result.sessionFile, undefined);
     assert.equal(
@@ -1459,14 +1443,19 @@ test("cron chat-bound agent task submits into the current frontend session", asy
     assert.equal(incomingCalls[0].managedSessionLeaf, undefined);
     assert.equal(incomingCalls[0].disposeAfterTurn, undefined);
     assert.equal(incomingCalls[0].shutdownAfterTurn, undefined);
-    assert.equal(incomingCalls[0].messageId, "scheduled-input-1");
+    assert.equal(incomingCalls[0].messageId, undefined);
+    assert.equal(incomingCalls[0].text, "hello");
     assert.equal(incomingCalls[0].taskId, "cron_chat_bound");
     assert.equal(incomingCalls[0].taskName, "Chat Bound Task");
     assert.equal(incomingCalls[0].promptMeta, undefined);
     assert.equal(incomingCalls[0].requestTag, undefined);
-    assert.equal(incomingCalls[0].deliveryIdempotencyKey, undefined);
-    assert.equal(incomingCalls[0].deliverFinal, undefined);
-    assert.equal(incomingCalls[0].quietMode, undefined);
+    assert.equal(
+      incomingCalls[0].deliveryIdempotencyKey,
+      "scheduled-input:run-chat-1",
+    );
+    assert.equal(incomingCalls[0].showInput, true);
+    assert.equal(incomingCalls[0].deliverFinal, true);
+    assert.equal(incomingCalls[0].quietMode, false);
     assert.equal(incomingCalls[0].systemPromptBlocks, undefined);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
@@ -1492,11 +1481,9 @@ test("cron visible agent task does not start before its input delivery is confir
           agentDir,
           runId: "run-delivery-fence",
           chat: {
-            send: async () => ({
-              delivered: false,
-              pending: true,
-              outboxId: "pending-input",
-            }),
+            submitIncoming: async () => {
+              throw new Error("delivery pending");
+            },
             runTurn: async () => {
               runTurnCalls += 1;
               return { finalText: "should not run" };
@@ -1504,7 +1491,7 @@ test("cron visible agent task does not start before its input delivery is confir
           },
         },
       ),
-      /cron_scheduled_input_delivery_failed/,
+      /delivery pending/,
     );
     assert.equal(runTurnCalls, 0);
   } finally {
@@ -1642,10 +1629,7 @@ test("cron quiet agent tasks keep the frontend turn but suppress automatic deliv
     assert.equal(calls[0].chatKey, "telegram/demo:1");
     assert.equal(calls[0].deliverFinal, false);
     assert.equal(calls[0].quietMode, true);
-    assert.deepEqual(calls[0].frontend, {
-      kind: "chat",
-      key: "telegram/demo:1",
-    });
+    assert.equal(calls[0].showInput, false);
     assert.equal(calls[1].chatKey, "telegram/demo:1");
     assert.equal(calls[1].deliverFinal, true);
     assert.equal(calls[1].quietMode, false);
@@ -1688,7 +1672,8 @@ test("chat quiet mode suppresses scheduled input but preserves final delivery", 
   );
   assert.deepEqual(sends, []);
   assert.equal(turns.length, 1);
-  assert.equal(turns[0].quietMode, true);
+  assert.equal(turns[0].showInput, false);
+  assert.equal(turns[0].quietMode, false);
   assert.equal(turns[0].deliverFinal, true);
 });
 
@@ -1849,9 +1834,9 @@ test("cron chat-bound agent task uses standard frontend delivery", async () => {
         },
       },
     });
-    assert.equal(sent.length, 1);
+    assert.equal(sent.length, 0);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].replyToMessageId, "scheduled-input-delivery");
+    assert.equal(calls[0].replyToMessageId, "scheduled-input-test");
     assert.equal(calls[0].chatKey, "telegram/demo:1");
     assert.equal("affectChatBinding" in calls[0], false);
     assert.equal(calls[0].linkDeliveriesToSession, undefined);
@@ -1898,10 +1883,7 @@ test("cron quiet agent task suppresses every automatic frontend delivery", async
     assert.equal(calls[0].chatKey, "telegram/demo:1");
     assert.equal(calls[0].deliverFinal, false);
     assert.equal(calls[0].quietMode, true);
-    assert.deepEqual(calls[0].frontend, {
-      kind: "chat",
-      key: "telegram/demo:1",
-    });
+    assert.equal(calls[0].showInput, false);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });
   }

@@ -274,6 +274,20 @@ export function getChatInboxItem(agentDir: string, itemId: string) {
   return rowToChatInboxItem(getTurnRow(openChatDatabase(agentDir), itemId));
 }
 
+export function getChatInboxItemByMessageId(
+  agentDir: string,
+  chatKey: string,
+  messageId: string,
+) {
+  const row = openChatDatabase(agentDir)
+    .prepare(
+      `${INBOX_SELECT}
+       WHERE inbox_jobs.chat_key = ? AND messages.message_id = ?`,
+    )
+    .get(safeString(chatKey).trim(), safeString(messageId).trim());
+  return rowToChatInboxItem(row);
+}
+
 export function listChatInboxItems(
   agentDir: string,
   states: ChatInboxItemState[] = ["pending"],
@@ -377,7 +391,6 @@ export function enqueueChatInboxItem(
         db,
         agentDir,
         messageInput,
-        { adoptExistingAsInbound: Boolean(input.preparedAdmission) },
       );
       const messageRow = db
         .prepare(

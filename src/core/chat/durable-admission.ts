@@ -11,6 +11,8 @@ export type FrozenChatTurnSubmission = {
   text: string;
   attachments: any[];
   promptMeta: PromptContextMeta;
+  deliverFinal?: boolean;
+  quietMode?: boolean;
   incomingMessageId: string;
   replyToMessageId?: string;
   sessionFile?: string;

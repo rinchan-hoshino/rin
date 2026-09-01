@@ -326,57 +326,36 @@ export async function executeCronAgentTask(
       )
     : false;
   const presentationQuiet = quiet || chatQuiet;
-  let scheduledInputMessageId: string | undefined;
-  if (chatKey && !presentationQuiet) {
-    const presentationRunId = safeString(options.runId).trim();
-    if (!presentationRunId) throw new Error("cron_run_id_required");
-    const delivery = await sendChatText(options, {
-      chatKey,
-      taskId: task.id,
-      runId: presentationRunId,
-      text: scheduledTaskInputText(task, prompt),
-      waitForDeliveryMs: 30_000,
-      idempotencyKey: `scheduled-input:${presentationRunId}`,
-    });
-    scheduledInputMessageId =
-      delivery?.delivered === true
-        ? chatDeliveryMessageIds(delivery)[0]
-        : undefined;
+  const submitAsIncoming = Boolean(chatKey);
+  if (submitAsIncoming && typeof options.chat?.submitIncoming !== "function") {
+    throw new Error("cron_chat_unavailable");
   }
-  if (chatKey && !presentationQuiet && !scheduledInputMessageId) {
-    throw new Error("cron_scheduled_input_delivery_failed");
-  }
-  const result =
-    chatKey &&
-    scheduledInputMessageId &&
-    typeof options.chat?.submitIncoming === "function"
-      ? await options.chat.submitIncoming({
-          chatKey,
-          messageId: scheduledInputMessageId,
-          text: prompt,
-          taskId: safeString(options.promptMeta?.taskId).trim() || task.id,
-          taskName:
-            safeString(options.promptMeta?.taskName).trim() || task.name,
-        })
-      : await options.chat.runTurn({
-          controllerKey: chatKey ? "default" : cronTaskRunControllerKey(task),
-          ...(chatKey ? { chatKey } : {}),
-          ...(scheduledInputMessageId
-            ? {
-                incomingMessageId: scheduledInputMessageId,
-                replyToMessageId: scheduledInputMessageId,
-              }
-            : {}),
-          deliverFinal: !quiet,
-          quietMode: presentationQuiet,
-          text: prompt,
-          ...(options.runId ? { requestTag: options.runId } : {}),
-          ...(options.deliveryIdempotencyKey
-            ? { deliveryIdempotencyKey: options.deliveryIdempotencyKey }
-            : {}),
-          frontend: { kind: frontend.kind, key: frontend.key },
-          promptMeta: options.promptMeta || buildCronTaskPromptContext(task),
-        });
+  const result = submitAsIncoming
+    ? await options.chat.submitIncoming!({
+        chatKey,
+        text: prompt,
+        taskId: safeString(options.promptMeta?.taskId).trim() || task.id,
+        taskName: safeString(options.promptMeta?.taskName).trim() || task.name,
+        showInput: !presentationQuiet,
+        deliverFinal: !quiet,
+        quietMode: quiet,
+        deliveryIdempotencyKey: `scheduled-input:${
+          safeString(options.runId).trim() || task.id
+        }`,
+      })
+    : await options.chat.runTurn({
+        controllerKey: chatKey ? "default" : cronTaskRunControllerKey(task),
+        ...(chatKey ? { chatKey } : {}),
+        deliverFinal: !quiet,
+        quietMode: presentationQuiet,
+        text: prompt,
+        ...(options.runId ? { requestTag: options.runId } : {}),
+        ...(options.deliveryIdempotencyKey
+          ? { deliveryIdempotencyKey: options.deliveryIdempotencyKey }
+          : {}),
+        frontend: { kind: frontend.kind, key: frontend.key },
+        promptMeta: options.promptMeta || buildCronTaskPromptContext(task),
+      });
   const completion = String(result?.turnId || "").trim()
     ? { finalText: "" }
     : resolveTurnCompletion(result);

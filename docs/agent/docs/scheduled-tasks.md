@@ -1,6 +1,6 @@
 # Scheduled Tasks
 
-Use scheduled tasks only when work must happen after the current turn: a reminder, delayed follow-up, recurrence, conditional recurrence, or background task.
+Use scheduled tasks only when work must happen after the current turn.
 
 For an ordinary reminder or recurring report, this file is sufficient. Read `scheduled-tasks-reference.md` only for exact task fields, condition-code execution, termination edge cases, shell delivery, or lifecycle troubleshooting.
 
@@ -79,7 +79,7 @@ A false recurring condition schedules the next tick without starting the target.
 - **Automatic shell output:** a Chat `frontend` with `quiet: false` shows the marker and command, then quotes it with command output where supported.
 - **Record-only shell:** omit `frontend` from `shell_command`.
 
-A Chat frontend uses `{ kind: "chat", key: chatKey }`; TUI is the singleton `{ kind: "tui" }`. The scheduler never chooses a session or writes a binding. The frontend may create its ordinary initial session when the input arrives and no current session exists. The marker ID is the frontend turn's ordinary incoming and reply identity.
+A Chat frontend uses `{ kind: "chat", key: chatKey }`; TUI is the singleton `{ kind: "tui" }`. The scheduler never chooses a session or writes a binding. The frontend may create its ordinary initial session when the input arrives and no current session exists. Visible input persists its provider marker ID directly as the ordinary incoming and reply identity; hidden input uses a stable internal ID and the same inbox consumer.
 
 ## Task prompt
 

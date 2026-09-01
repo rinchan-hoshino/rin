@@ -181,7 +181,7 @@ Resolution is deliberately simple:
 1. Address the configured frontend identity.
 2. If it has a current session, submit there.
 3. If it has no current session, let the frontend perform its ordinary first-input initialization and establish the binding.
-4. For visible Chat input, use the delivered marker message ID as both the ordinary incoming identity and reply target before entering the turn.
+4. For Chat input, create one first-class incoming message; visible input uses the delivered provider ID, while hidden input uses a stable internal ID.
 
 The scheduler never supplies a session selector, restore path, managed-session leaf, model override, capability override, or `affectChatBinding` switch. Missing `frontend` fails with `cron_frontend_required`.
 
@@ -216,7 +216,7 @@ Choose one delivery policy:
 
 An addressable `frontend` routes execution through that frontend's current session and initializes the frontend normally when no current session exists. `frontend: { kind: "chat", key: "..." }` also selects the Chat destination. TUI is the singleton `{ kind: "tui" }` identity.
 
-For visible Chat runs, Rin emits `⏰ Scheduled task · <name>` followed by the exact submitted prompt or shell command before Working begins. Automatic final or shell output replies to that marker where the platform supports quotes. This bot-authored automation marker is linked to an agent task's current frontend session but is not stored as an inbound platform-user message and cannot retrigger ingress.
+For visible Chat runs, Rin emits `⏰ Scheduled task · <name>` followed by the exact submitted prompt or shell command before Working begins. Automatic final or shell output replies to that marker where the platform supports quotes. Chat persists the provider message ID directly as an unprocessed `user` message and atomically commits its durable inbox item; it never records an assistant output and later converts it. Hidden Chat input skips platform presentation, receives a stable internal ID, and enters the same inbox/admission/turn consumer. Presentation policy changes only visibility, not execution ownership. Only `taskId` and `taskName` extend ordinary Chat prompt metadata; delivery and run identifiers stay in scheduler/outbox provenance.
 
 Working, interim, independent-error, and final messages remain the frontend's one automatic delivery policy; do not add separate scheduler switches for them. Delivery idempotency and the one-frontend/one-session invariant are runtime guarantees, not task options.
 

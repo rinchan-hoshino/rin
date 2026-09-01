@@ -23,6 +23,7 @@ import {
   parseChatKey,
 } from "./support.js";
 import { appendChatLog } from "./chat-log.js";
+import { enqueueChatInboxItem } from "./inbox.js";
 import {
   findChatMessageByChatAndId,
   saveChatMessage,
@@ -421,6 +422,55 @@ type FinalizeDeliveredAssistantInput = DeliveredAssistantRecordInput & {
   logText?: string;
 };
 
+function finalizeDeliveredIncomingMessage(
+  agentDir: string,
+  payload: ChatOutboxPayload,
+  deliveryResult: string[],
+) {
+  const incoming = payload.incomingMessage;
+  if (!incoming) return [] as string[];
+  const messageIds = deliveryResult
+    .map((item) => safeString(item).trim())
+    .filter(Boolean);
+  const messageId = messageIds[0];
+  if (!messageId) throw new Error("chat_send_message_empty_result");
+  const receivedAt =
+    Number((incoming.session as any)?.timestamp || 0) ||
+    Date.parse(payload.createdAt) ||
+    Date.now();
+  enqueueChatInboxItem(agentDir, {
+    chatKey: payload.chatKey,
+    messageId,
+    session: {
+      ...incoming.session,
+      messageId,
+      timestamp: receivedAt,
+      content: incoming.text,
+    },
+    elements: [{ type: "text", text: incoming.text }],
+    preparedAdmission: {
+      decision: {
+        allow: true,
+        reason: "prepared_incoming_message",
+        chatKey: payload.chatKey,
+      },
+      submission: {
+        version: 1,
+        chatKey: payload.chatKey,
+        text: incoming.text,
+        attachments: [],
+        promptMeta: incoming.promptMeta,
+        deliverFinal: incoming.deliverFinal,
+        quietMode: incoming.quietMode,
+        incomingMessageId: messageId,
+        replyToMessageId: messageId,
+        receivedAt: new Date(receivedAt).toISOString(),
+      },
+    },
+  });
+  return messageIds;
+}
+
 function finalizeDeliveredAssistantOutput(
   agentDir: string,
   input: FinalizeDeliveredAssistantInput,
@@ -704,6 +754,13 @@ export function sendOutboxPayload(
       const deliveryResult = await chatDelivery;
 
       try {
+        if (payload.incomingMessage) {
+          return finalizeDeliveredIncomingMessage(
+            agentDir,
+            payload,
+            deliveryResult,
+          );
+        }
         return finalizeDeliveredAssistantOutput(agentDir, {
           chatKey,
           deliveryResult,

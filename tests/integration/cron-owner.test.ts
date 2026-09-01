@@ -542,12 +542,9 @@ test("cron session invocations route prompt work through the owned adapter", asy
             sessionFile: payload.restoreSessionFile,
           };
         },
-        async send(payload) {
-          events.push(["send", payload]);
-          return {
-            delivered: true,
-            messageIds: ["owner-message"],
-          };
+        async submitIncoming(payload) {
+          events.push(["submitIncoming", payload]);
+          return { turnId: "owner-incoming-turn" };
         },
         async setWorkingVisible(payload) {
           events.push(["working", payload]);
@@ -575,15 +572,20 @@ test("cron session invocations route prompt work through the owned adapter", asy
     });
     scheduler.runTaskNow("prompt-task");
     const prompt = await waitForTaskSettled(scheduler, "prompt-task");
-    assert.equal(prompt.lastResultText, "owner prompt result");
+    assert.equal(prompt.lastResultText, "");
 
-    assert.deepEqual(
-      events.slice(0, 2).map(([type]) => type),
-      ["send", "runTurn"],
+    assert.equal(events[0]?.[0], "submitIncoming");
+    assert.equal(
+      events.some(([type]) => type === "send"),
+      false,
     );
     assert.equal(
-      events.find(([type]) => type === "runTurn")?.[1]?.replyToMessageId,
-      "owner-message",
+      events.some(([type]) => type === "runTurn"),
+      false,
+    );
+    assert.match(
+      events[0]?.[1]?.deliveryIdempotencyKey || "",
+      /^scheduled-input:scheduled:prompt-task:1:/,
     );
     scheduler.stop();
   });

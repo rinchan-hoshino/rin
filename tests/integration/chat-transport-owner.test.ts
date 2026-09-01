@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 
 import type { ChatMessagePart } from "../../dist/core/rin-lib/chat-outbox-contract.js";
 import { listChatMessages } from "../../dist/core/chat/message-store.js";
+import { getChatInboxItemByMessageId } from "../../dist/core/chat/inbox.js";
 import * as transport from "../../dist/core/chat/transport.js";
 
 const execFileAsync = promisify(execFile);
@@ -589,6 +590,58 @@ test("chat outbox delivery exposes dispatch, persists records, and validates res
         ),
       /invalid_chatKey:/,
     );
+  });
+});
+
+test("chat outbox persists scheduled delivery first as an unprocessed inbound message", async () => {
+  await withTransportRoot(async (root) => {
+    const { app } = createBot({
+      sendMessage() {
+        return ["incoming-1"];
+      },
+    });
+    const result = await transport.sendOutboxPayload(
+      app,
+      root,
+      {
+        createdAt: "2026-09-01T06:35:01.218Z",
+        chatKey: "telegram/owner-bot:owner-chat",
+        parts: [{ type: "text", text: "Scheduled display" }],
+        incomingMessage: {
+          text: "Run task",
+          session: {
+            platform: "telegram",
+            selfId: "owner-bot",
+            chatId: "owner-chat",
+            userId: "scheduled-message",
+            timestamp: Date.parse("2026-09-01T06:35:01.218Z"),
+          },
+          promptMeta: {
+            source: "chat-bridge",
+            taskId: "task-1",
+            taskName: "Task One",
+          },
+        },
+      },
+      h,
+      "scheduled-incoming-outbox",
+    );
+    assert.deepEqual(result, ["incoming-1"]);
+    const stored = listChatMessages(root, {
+      chatKey: "telegram/owner-bot:owner-chat",
+      limit: 10,
+    });
+    assert.equal(stored.length, 1);
+    assert.equal(stored[0].role, "user");
+    assert.equal(stored[0].processedAt, undefined);
+    assert.equal(stored[0].deliveryKind, undefined);
+    const inboxItem = getChatInboxItemByMessageId(
+      root,
+      "telegram/owner-bot:owner-chat",
+      "incoming-1",
+    );
+    assert.ok(inboxItem);
+    assert.equal(inboxItem.admission.state, "actionable");
   });
 });
 

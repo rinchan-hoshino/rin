@@ -13,13 +13,18 @@ const rawCronExecution = await importBuiltModule<
 function withScheduledInputDelivery(chat: any) {
   return chat &&
     typeof chat.runTurn === "function" &&
-    typeof chat.send !== "function"
+    typeof chat.submitIncoming !== "function"
     ? {
-        send: async () => ({
-          delivered: true,
-          messageIds: ["scheduled-owner-input"],
-        }),
         ...chat,
+        submitIncoming: async (payload: any) =>
+          chat.runTurn({
+            controllerKey: "default",
+            deliverFinal: true,
+            quietMode: false,
+            ...payload,
+            incomingMessageId: "scheduled-owner-input",
+            replyToMessageId: "scheduled-owner-input",
+          }),
       }
     : chat;
 }
@@ -304,19 +309,21 @@ test("agent tasks deliver visible input before deferring progress to the current
     assert.equal(calls[0].quietMode, false);
     assert.equal(calls[0].replyToMessageId, "scheduled-owner-input");
     assert.equal(calls[0].text, "run owner task");
-    assert.equal(calls[0].requestTag, "scheduled:owner");
-    assert.equal(calls[0].deliveryIdempotencyKey, "delivery-owner");
+    assert.equal(calls[0].requestTag, undefined);
+    assert.equal(
+      calls[0].deliveryIdempotencyKey,
+      "scheduled-input:scheduled:owner",
+    );
     assert.equal("sessionFile" in calls[0], false);
     assert.equal("managedSessionLeaf" in calls[0], false);
     assert.equal("model" in calls[0], false);
     assert.equal("thinkingLevel" in calls[0], false);
     assert.equal("disabledRinCapabilities" in calls[0], false);
-    assert.deepEqual(calls[0].frontend, {
-      kind: "chat",
-      key: "discord/1:2",
-    });
-    assert.equal(calls[0].promptMeta.source, "scheduled-task");
-    assert.equal(calls[0].promptMeta.taskName, "Owner task");
+    assert.equal(calls[0].frontend, undefined);
+    assert.equal(calls[0].promptMeta, undefined);
+    assert.equal(calls[0].taskId, "cron_owner");
+    assert.equal(calls[0].taskName, "Owner task");
+    assert.equal(calls[0].showInput, true);
 
     await assert.rejects(
       cronExecution.executeCronAgentTask(
@@ -470,10 +477,10 @@ test("durable invocations execute agent and continued session snapshots", async 
       },
     );
     assert.equal(agentResult.text, "agent invocation");
-    assert.equal(agentCalls[0].requestTag, agentInvocation.requestTag);
+    assert.equal(agentCalls[0].requestTag, undefined);
     assert.equal(
       agentCalls[0].deliveryIdempotencyKey,
-      `scheduled-final:${agentInvocation.id}`,
+      `scheduled-input:${agentInvocation.requestTag}`,
     );
   });
 });

@@ -26,6 +26,14 @@ export type ChatMessagePart =
 
 export type ChatDeliveryKind = "final" | "interim" | "passive_notice" | "error";
 
+export type ChatOutboxIncomingMessage = {
+  text: string;
+  session: Record<string, unknown>;
+  promptMeta: Record<string, unknown>;
+  deliverFinal?: boolean;
+  quietMode?: boolean;
+};
+
 export type ChatOutboxPayload = {
   createdAt: string;
   requestId?: string;
@@ -39,6 +47,7 @@ export type ChatOutboxPayload = {
   sessionFile?: string;
   sessionBinding?: "conversation";
   parts: ChatMessagePart[];
+  incomingMessage?: ChatOutboxIncomingMessage;
 };
 
 export type ChatOutboxPayloadInput =
@@ -56,6 +65,7 @@ export type ChatOutboxPayloadInput =
       sessionFile?: string;
       sessionBinding?: "conversation";
       parts?: ChatMessagePart[];
+      incomingMessage?: ChatOutboxIncomingMessage;
     };
 
 export type ChatOutboxDeliveryKind =
