@@ -976,7 +976,6 @@ export async function startChatBridge(
     trust: string,
   ): PromptContextMeta => ({
     source: "chat-bridge",
-    selfImproveEligible: true,
     sentAt: Number.isFinite(Number(session?.timestamp))
       ? Number(session.timestamp)
       : Date.now(),
@@ -1112,7 +1111,6 @@ export async function startChatBridge(
       attachments,
       promptMeta: {
         source: "chat-bridge",
-        selfImproveEligible: true,
         sentAt: Number.isFinite(Number(session?.timestamp))
           ? Number(session.timestamp)
           : Date.now(),

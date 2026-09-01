@@ -13,8 +13,6 @@ export type PromptContextMeta = {
   requiresMentionToStartTurn?: boolean;
   taskId?: string;
   taskName?: string;
-  taskContextKind?: "scheduled-task";
-  selfImproveEligible?: boolean;
   frontend?: { kind?: string; key?: string } | null;
   runtimeMetadata?: Record<string, unknown>;
   attachedFiles?: Array<{ name?: string; path?: string }>;
@@ -120,23 +118,6 @@ function hasChatPromptHeaderContext(
   );
 }
 
-function isScheduledTaskContext(meta: PromptContextMeta) {
-  return safeString(meta.taskContextKind).trim() === "scheduled-task";
-}
-
-function formatScheduledTaskSystemPromptBlock(
-  meta: PromptContextMeta | null | undefined,
-) {
-  const taskId = formatMetadataValue(meta?.taskId);
-  const taskName = formatMetadataValue(meta?.taskName);
-  const scheduledTaskContext = isScheduledTaskContext(meta || {});
-  if (!taskId && !taskName && !scheduledTaskContext) return "";
-  const lines = ["Scheduled task context:"];
-  if (taskId) lines.push(`- task id: ${taskId}`);
-  if (taskName) lines.push(`- task name: ${taskName}`);
-  return lines.join("\n");
-}
-
 function formatChatSystemPromptBlock(
   meta: PromptContextMeta | null | undefined,
 ) {
@@ -201,22 +182,41 @@ export function formatPromptContextSystemPromptBlock(
   meta: PromptContextMeta | null | undefined,
 ) {
   const blocks = [
-    formatScheduledTaskSystemPromptBlock(meta),
     formatChatSystemPromptBlock(meta),
     formatFrontendSystemPromptBlock(meta),
   ].filter((block) => block.trim());
   return blocks.join("\n\n");
 }
 
+function hasScheduledTaskPromptHeaderContext(
+  meta: PromptContextMeta | null | undefined,
+) {
+  return (
+    safeString(meta?.source).trim() === "scheduled-task" &&
+    Boolean(
+      safeString(meta?.taskId).trim() || safeString(meta?.taskName).trim(),
+    )
+  );
+}
+
 function formatChatPromptHeader(
   meta: PromptContextMeta | null | undefined,
   fallbackTimestamp = Date.now(),
 ) {
-  if (!hasChatPromptHeaderContext(meta)) return [];
+  const chatHeader = hasChatPromptHeaderContext(meta);
+  const scheduledTaskHeader = hasScheduledTaskPromptHeaderContext(meta);
+  if (!chatHeader && !scheduledTaskHeader) return [];
   const lines = [
     `time: ${formatTimestamp(Number(meta?.sentAt) || fallbackTimestamp)}`,
     PROMPT_CONTEXT_HEADER_MARKER,
   ];
+
+  if (scheduledTaskHeader) {
+    lines.push(`task id: ${formatMetadataValue(meta?.taskId) || "unknown"}`);
+    lines.push(
+      `task name: ${formatMetadataValue(meta?.taskName) || "unknown"}`,
+    );
+  }
 
   if (hasSenderContext(meta)) {
     lines.push(

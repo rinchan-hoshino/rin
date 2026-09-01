@@ -1154,7 +1154,6 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
     managedSessionLeaf: "telegram/1:2",
     promptContext: {
       source: "chat-bridge",
-      selfImproveEligible: true,
       chatKey: "telegram/1:2",
       userId: "guest-1",
       nickname: "Guest",
@@ -1190,7 +1189,6 @@ test("frontend SDK turn driver runs turns through a frontend client", async () =
   });
   assert.deepEqual(promptCall.options.promptContext, {
     source: "chat-bridge",
-    selfImproveEligible: true,
     chatKey: "telegram/1:2",
     userId: "guest-1",
     nickname: "Guest",

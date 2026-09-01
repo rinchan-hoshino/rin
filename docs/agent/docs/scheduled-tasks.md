@@ -56,7 +56,7 @@ Use `reload()` only after an authorized direct edit to `~/.rin/data/scheduler/ta
 - **`termination`:** `maxRuns` or `stopAt` for bounded recurrence.
 - **`quiet: true`:** only when the task prompt deliberately owns separate outbound delivery.
 
-An `agent_prompt` task is only a delayed frontend input. It never owns or selects a session: the frontend uses its current session and performs its ordinary first-input initialization when none exists. The removed `session`, `model`, `thinkingLevel`, and `disabledRinCapabilities` fields are not task options; persisted legacy copies are stripped during normalization and never alter execution. Use `/new` and the frontend's normal controls outside the task.
+An `agent_prompt` task is a delayed frontend input. It uses the current session and ordinary first-input initialization. Its user-message header adds only task `id` and `name`; metadata never enters the frozen system prompt, grants self-improve eligibility, or selects special execution. Legacy `session`, `model`, `thinkingLevel`, and `disabledRinCapabilities` fields are stripped. Use `/new` and normal frontend controls outside the task.
 
 Set an optional field to `null` in `upsert()` to remove it. Do not write scheduler-owned lifecycle fields such as `runCount`, `runningAt`, `nextRunAt`, or `lastError` through `upsert()`.
 

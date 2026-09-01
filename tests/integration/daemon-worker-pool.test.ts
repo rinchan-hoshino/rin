@@ -1132,7 +1132,6 @@ setInterval(() => {}, 1000);
     promptContext: {
       source: "chat-bridge",
       chatKey: "discord/1:2",
-      selfImproveEligible: true,
     },
     sessionFile,
   });
@@ -1181,7 +1180,6 @@ setInterval(() => {}, 1000);
     promptContext: {
       source: "chat-bridge",
       chatKey: "discord/1:2",
-      selfImproveEligible: true,
     },
   });
 });

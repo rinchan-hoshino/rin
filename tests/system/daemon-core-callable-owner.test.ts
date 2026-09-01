@@ -45,6 +45,16 @@ async function waitForSocket(socketPath: string, child: ChildProcess) {
   throw new Error(`daemon_socket_timeout:${socketPath}`);
 }
 
+async function waitForEmptyDirectory(directory: string) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 2_000) {
+    const entries = await fs.readdir(directory);
+    if (entries.length === 0) return entries;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return await fs.readdir(directory);
+}
+
 async function startOwnerDaemon(
   root: string,
   options: { recoveryDelayMs?: number; recoveryFailure?: boolean } = {},
@@ -273,7 +283,10 @@ test("callable core daemon routes the complete system-owned RPC while its host o
     await assert.rejects(fs.access(daemon.legacyBridgePath), {
       code: "ENOENT",
     });
-    assert.deepEqual(await fs.readdir(daemon.memoryWriterMarkerDir), []);
+    assert.deepEqual(
+      await waitForEmptyDirectory(daemon.memoryWriterMarkerDir),
+      [],
+    );
     const rpc = connectRpc(daemon.socketPath);
     await new Promise<void>((resolve, reject) => {
       rpc.socket.once("connect", resolve);

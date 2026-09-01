@@ -59,7 +59,6 @@ test("Pi session host resumes through the session-level runner", async () => {
     promptContext: {
       source: "chat-bridge",
       chatKey: "discord/1:2",
-      selfImproveEligible: true,
     },
   });
 
@@ -78,7 +77,6 @@ test("Pi session host resumes through the session-level runner", async () => {
   assert.deepEqual((session.sessionManager as any).__rinLastPromptContext, {
     source: "chat-bridge",
     chatKey: "discord/1:2",
-    selfImproveEligible: true,
   });
   await resumePiSessionTurn(session, {
     source: "terminal",

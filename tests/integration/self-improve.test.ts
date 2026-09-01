@@ -432,7 +432,7 @@ test("self-improve queues one review after Pi persists each shared turn window f
     agentDir: "/tmp/rin-agent",
     cwd: "/tmp/project",
     frontend: userFrontend(),
-    promptContext: { source: "chat-bridge", selfImproveEligible: true },
+    promptContext: { source: "chat-bridge" },
     sessionManager: {
       getSessionId: () => "session-a",
       getSessionFile: () => fileURLToPath(import.meta.url),
@@ -511,7 +511,7 @@ test("turn-window completion followed by shutdown queues only one review", async
     const ctx = {
       agentDir: root,
       frontend: userFrontend(),
-      promptContext: { source: "chat-bridge", selfImproveEligible: true },
+      promptContext: { source: "chat-bridge" },
       sessionManager: {
         getSessionId: () => "session-a",
         getSessionFile: () => sessionFile,
@@ -585,7 +585,7 @@ test("maintenance enqueue failures never fail the source turn", async () => {
   const ctx = {
     agentDir: process.cwd(),
     frontend: userFrontend(),
-    promptContext: { source: "chat-bridge", selfImproveEligible: true },
+    promptContext: { source: "chat-bridge" },
     sessionManager: {
       getSessionId: () => "session-a",
       getSessionFile: () => fileURLToPath(import.meta.url),
@@ -732,7 +732,7 @@ test("automatic self-improve handlers require persisted sessions", async () => {
       agentDir: root,
       cwd: root,
       frontend: userFrontend(),
-      promptContext: { source: "chat-bridge", selfImproveEligible: true },
+      promptContext: { source: "chat-bridge" },
       sessionManager: {
         getSessionId: () => "non-persisted-session-test",
         getSessionFile: () => sessionFile,
@@ -808,7 +808,7 @@ test("real session shutdown leaves self-improve review queued for the daemon wit
     const ctx = {
       agentDir: root,
       frontend: userFrontend(),
-      promptContext: { source: "chat-bridge", selfImproveEligible: true },
+      promptContext: { source: "chat-bridge" },
       emitEvent(event) {
         notices.push(event);
       },

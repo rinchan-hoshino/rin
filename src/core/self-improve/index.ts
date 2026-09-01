@@ -10,7 +10,6 @@ import { enqueueSelfImproveMaintenanceJob } from "./maintenance-queue.js";
 import { readSessionMetadata } from "../session/metadata.js";
 import { recordSelfImproveSkillReadEvent } from "./skill-usage.js";
 
-const SELF_IMPROVE_FRONTEND_KINDS = new Set(["chat", "scheduled-task", "tui"]);
 const SELF_IMPROVE_WINDOW_TRIGGER = "self_improve:turn_window_review";
 
 function shouldSkipAutomaticMaintenance(sessionFile: string) {
@@ -47,33 +46,15 @@ function resolvePromptSource(event: unknown, ctx: any) {
   );
 }
 
-function isScheduledTaskPromptContext(promptContext: unknown) {
-  const context = promptContext as any;
-  return (
-    normalizedText(context?.taskContextKind) === "scheduled-task" ||
-    normalizedText(context?.source) === "scheduled-task"
-  );
-}
-
-function isScheduledTaskProducer(event: unknown, ctx: any) {
-  return (
-    isScheduledTaskPromptContext(resolvePromptContext(event, ctx)) ||
-    resolvePromptSource(event, ctx) === "scheduled-task"
-  );
-}
-
-function hasSelfImproveEligibility(promptContext: unknown) {
-  return Boolean((promptContext as any)?.selfImproveEligible === true);
-}
-
 function isUserFrontendSelfImproveTrigger(event: unknown, ctx: any) {
   const frontend = resolveSelfImproveFrontend(event, ctx);
-  if (frontend?.kind === "chat" && !frontend.key) return false;
   if (frontend?.kind === "tui") return true;
-  const promptContext = resolvePromptContext(event, ctx);
-  if (!hasSelfImproveEligibility(promptContext)) return false;
-  if (frontend && SELF_IMPROVE_FRONTEND_KINDS.has(frontend.kind)) return true;
-  return isScheduledTaskProducer(event, ctx);
+  if (frontend?.kind !== "chat" || !frontend.key) return false;
+  const promptContext = resolvePromptContext(event, ctx) as any;
+  const source = normalizedText(
+    promptContext?.source || resolvePromptSource(event, ctx),
+  );
+  return source === "chat-bridge";
 }
 
 type SelfImproveReviewOptions = {

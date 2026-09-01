@@ -36,7 +36,6 @@ const invocationContext = {
   promptContext: {
     source: "chat-bridge",
     chatKey: "discord/guild/channel",
-    selfImproveEligible: true,
   },
 };
 

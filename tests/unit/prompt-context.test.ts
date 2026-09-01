@@ -223,9 +223,9 @@ test("prompt context system blocks cover binding-only and empty metadata", () =>
     formatPromptContextSystemPromptBlock({ frontend: { key: "desktop" } }),
     /frontend key: desktop/,
   );
-  assert.match(
+  assert.equal(
     formatPromptContextSystemPromptBlock({ taskName: "Named only" }),
-    /task name: Named only/,
+    "",
   );
   assert.match(
     formatPromptContextSystemPromptBlock({
@@ -246,32 +246,28 @@ test("non-chat prompt text stays untouched until Pi finishes command expansion",
   );
 });
 
-test("scheduled task prompt context renders a task block without pretending to be chat", () => {
-  const systemBlock = formatPromptContextSystemPromptBlock({
+test("scheduled task metadata stays out of the frozen system prompt", () => {
+  const meta = {
     source: "scheduled-task",
-    taskId: "cron_demo",
-    taskName: "Demo Task",
-    taskContextKind: "scheduled-task",
-  });
-
-  assert.ok(systemBlock.includes("Scheduled task context:"));
-  assert.ok(systemBlock.includes("- task id: cron_demo"));
-  assert.ok(systemBlock.includes("- task name: Demo Task"));
-  assert.equal(systemBlock.includes("runtime note:"), false);
-  assert.equal(systemBlock.includes("operational rule:"), false);
-  assert.equal(systemBlock.includes("Chat context:"), false);
-  assert.equal(systemBlock.includes("Chat binding context:"), false);
+    taskId: "task-42",
+    taskName: "Nightly owner review",
+  };
+  assert.equal(formatPromptContextSystemPromptBlock(meta), "");
+  assert.match(formatPromptContext(meta, "inspect"), /task id: task-42/);
+  assert.match(
+    formatPromptContext(meta, "inspect"),
+    /task name: Nightly owner review/,
+  );
 });
 
 test("scheduled task prompt context can describe a non-chat frontend binding", () => {
   const systemBlock = formatPromptContextSystemPromptBlock({
     source: "scheduled-task",
     taskId: "cron_frontend_bound",
-    taskContextKind: "scheduled-task",
     frontend: { kind: "sdk", key: "client/main" },
   });
 
-  assert.ok(systemBlock.includes("Scheduled task context:"));
+  assert.equal(systemBlock.includes("Scheduled task context:"), false);
   assert.ok(systemBlock.includes("Frontend binding context:"));
   assert.ok(systemBlock.includes("- frontend kind: sdk"));
   assert.ok(systemBlock.includes("- frontend key: client/main"));
@@ -347,19 +343,21 @@ test("prompt binding composes into the initial whole system prompt", () => {
   assert.equal(combined.includes("- sender user id:"), false);
 });
 
-test("scheduled chat-bound prompt context renders task and chat binding blocks", () => {
+test("scheduled chat-bound prompt keeps task metadata in the turn header", () => {
   const meta = {
     source: "scheduled-task",
     chatKey: "telegram/demo:1",
     taskId: "cron_demo",
     taskName: "Demo Task",
-    taskContextKind: "scheduled-task",
   } as const;
-  assert.equal(formatPromptContext(meta, "scheduled hello"), "scheduled hello");
+  assert.match(
+    formatPromptContext(meta, "scheduled hello"),
+    /task id: cron_demo[\s\S]*task name: Demo Task[\s\S]*---[\s\S]*scheduled hello/,
+  );
   const systemBlock = formatPromptContextSystemPromptBlock(meta);
-  assert.ok(systemBlock.includes("Scheduled task context:"));
-  assert.ok(systemBlock.includes("- task id: cron_demo"));
-  assert.ok(systemBlock.includes("- task name: Demo Task"));
+  assert.equal(systemBlock.includes("Scheduled task context:"), false);
+  assert.equal(systemBlock.includes("- task id: cron_demo"), false);
+  assert.equal(systemBlock.includes("- task name: Demo Task"), false);
   assert.ok(systemBlock.includes("Chat binding context:"));
   assert.ok(systemBlock.includes("- chatKey: telegram/demo:1"));
   assert.ok(systemBlock.includes("rin.chat.messages.get"));

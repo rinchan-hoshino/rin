@@ -45,7 +45,7 @@ function context(
   return {
     agentDir: "/tmp/rin-self-improve-owner",
     frontend: { kind: "chat", key: "owner/chat" },
-    promptContext: { selfImproveEligible: true },
+    promptContext: { source: "chat-bridge" },
     ...contextOverrides,
     sessionManager: {
       getSessionFile: () => fileURLToPath(import.meta.url),
@@ -110,45 +110,25 @@ test("self-improve message-end accepts only explicit current frontend producers"
     ],
     ["eligible chat", {}, context(branch), true],
     [
-      "scheduled task kind",
-      {
-        promptContext: {
-          taskContextKind: "scheduled-task",
-          selfImproveEligible: true,
-        },
-      },
-      context(branch, { frontend: undefined, promptContext: undefined }),
-      true,
-    ],
-    [
       "scheduled prompt source",
-      {
-        promptContext: { source: "scheduled-task", selfImproveEligible: true },
-      },
-      context(branch, { frontend: undefined, promptContext: undefined }),
-      true,
+      { promptContext: { source: "scheduled-task" } },
+      context(branch),
+      false,
     ],
     [
       "scheduled event source",
-      {
-        source: "scheduled-task",
-        promptContext: { selfImproveEligible: true },
-      },
-      context(branch, { frontend: { kind: "custom", key: "owner" } }),
-      true,
+      { source: "scheduled-task" },
+      context(branch, { promptContext: undefined }),
+      false,
     ],
     [
       "manager scheduled source",
       {},
       context(branch, {
-        frontend: undefined,
         promptContext: undefined,
-        sessionManager: {
-          __rinLastPromptContext: { selfImproveEligible: true },
-          __rinLastPromptSource: "scheduled-task",
-        },
+        sessionManager: { __rinLastPromptSource: "scheduled-task" },
       }),
-      true,
+      false,
     ],
     [
       "custom frontend",
@@ -157,13 +137,13 @@ test("self-improve message-end accepts only explicit current frontend producers"
       false,
     ],
     [
-      "missing eligibility",
+      "missing producer source",
       {},
       context(branch, { frontend: undefined, promptContext: undefined }),
       false,
     ],
     [
-      "scheduled without eligibility",
+      "scheduled source remains ineligible",
       { source: "scheduled-task" },
       context(branch, { frontend: undefined, promptContext: undefined }),
       false,

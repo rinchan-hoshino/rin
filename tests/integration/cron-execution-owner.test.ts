@@ -56,17 +56,6 @@ function task(overrides: Record<string, any> = {}) {
   } as any;
 }
 
-function selfImproveTask(overrides: Record<string, any> = {}) {
-  return task({
-    id: "scheduled_self_improve_distillation",
-    target: {
-      kind: "agent_prompt",
-      prompt: "Follow self-improve-distillation.md.",
-    },
-    ...overrides,
-  });
-}
-
 async function withAgentDir(run: (agentDir: string) => Promise<void>) {
   const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "rin-cron-owner-"));
   try {
@@ -255,8 +244,6 @@ test("cron prompt context identifies chat and controller frontends", () => {
       frontend: { kind: "chat", key: "telegram/1:2" },
       taskId: "cron_owner",
       taskName: "Owner task",
-      taskContextKind: "scheduled-task",
-      selfImproveEligible: true,
     },
   );
   assert.deepEqual(
@@ -270,8 +257,6 @@ test("cron prompt context identifies chat and controller frontends", () => {
       frontend: { kind: "tui", key: "tui" },
       taskId: "cron_owner",
       taskName: undefined,
-      taskContextKind: "scheduled-task",
-      selfImproveEligible: true,
     },
   );
   assert.equal(
@@ -309,7 +294,6 @@ test("agent tasks deliver visible input before deferring progress to the current
 
     assert.deepEqual(result, {
       text: "done",
-      auditOutput: "done",
       sessionId: "session-owner",
       sessionFile: "/sessions/chat-owner.jsonl",
     });
@@ -412,7 +396,6 @@ test("recurring frontend inputs select initial and continuation prompts", async 
       }),
       {
         text: "",
-        auditOutput: "",
         sessionId: undefined,
         sessionFile: undefined,
       },
@@ -495,70 +478,6 @@ test("durable invocations execute agent and continued session snapshots", async 
   });
 });
 
-test("durable self-improve invocation commits and acknowledges exact audit evidence", async () => {
-  await withAgentDir(async (agentDir) => {
-    const invocation = cronExecution.createCronSessionInvocation(
-      selfImproveTask({
-        lastStartedAt: "2026-07-28T18:00:00.000Z",
-      }),
-      agentDir,
-    );
-    const result = await cronExecution.executeCronSessionInvocation(
-      invocation,
-      {
-        agentDir,
-        chat: {
-          runTurn: async () => ({ finalText: "audited cron output" }),
-        },
-      },
-    );
-    assert.equal(result.text, "audited cron output");
-    assert.equal(result.auditOutput, "audited cron output");
-    assert.equal(result.audit?.status, "completed");
-    assert.equal(result.auditHistoryCommitted, true);
-
-    const history = (
-      await fs.readFile(
-        path.join(
-          agentDir,
-          "self_improve",
-          "state",
-          "maintenance-history.jsonl",
-        ),
-        "utf8",
-      )
-    )
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    assert.equal(history.at(-1)?.audit?.auditId, result.audit?.auditId);
-  });
-});
-
-test("durable self-improve invocation retains failed audit evidence", async () => {
-  await withAgentDir(async (agentDir) => {
-    const invocation = cronExecution.createCronSessionInvocation(
-      selfImproveTask({
-        lastStartedAt: "2026-07-28T18:30:00.000Z",
-        runCount: 3,
-      }),
-      agentDir,
-    );
-    await assert.rejects(
-      () =>
-        cronExecution.executeCronSessionInvocation(invocation, {
-          agentDir,
-          chat: {
-            runTurn: async () => {
-              throw new Error("audited cron invocation failure");
-            },
-          },
-        }),
-      /audited cron invocation failure/,
-    );
-  });
-});
-
 test("terminal projection records completion, failure, and stop policies", () => {
   const once = task({ nextRunAt: undefined });
   cronExecution.applyCronTaskTerminalProjection(once, {
@@ -604,97 +523,6 @@ test("terminal projection records completion, failure, and stop policies", () =>
   });
   assert.equal(future.enabled, true);
   assert.equal(future.completedAt, undefined);
-});
-
-test("self-improve cron terminal history is durable and idempotent", async () => {
-  await withAgentDir(async (agentDir) => {
-    const ownerTask = selfImproveTask({
-      runCount: 4,
-      trigger: { expression: "0 3 * * *" },
-    });
-    await cronExecution.projectCronTaskTerminal(
-      ownerTask,
-      {
-        status: "completed",
-        text: "x".repeat(900),
-        sessionFile: "/sessions/self-improve.jsonl",
-      },
-      { agentDir, startedAt: "2026-07-17T04:00:00.000Z" },
-    );
-    await cronExecution.appendCronTaskTerminalHistory(
-      ownerTask,
-      { status: "completed", text: "duplicate" },
-      { agentDir, startedAt: "2026-07-17T04:00:00.000Z" },
-    );
-    const historyPath = path.join(
-      agentDir,
-      "self_improve",
-      "state",
-      "maintenance-history.jsonl",
-    );
-    const rows = (await fs.readFile(historyPath, "utf8"))
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].id, `${ownerTask.id}:4`);
-    assert.equal(rows[0].kind, "self_improve_review");
-    assert.equal(rows[0].status, "completed");
-    assert.match(rows[0].outputPreview, /…$/);
-
-    await cronExecution.appendCronTaskTerminalHistory(
-      task({
-        id: "custom_self_improve",
-        target: {
-          kind: "agent_prompt",
-          prompt: "Read self-improve-distillation.md",
-        },
-      }),
-      { status: "failed", error: "review failed" },
-      { agentDir },
-    );
-    const updated = (await fs.readFile(historyPath, "utf8"))
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    assert.equal(updated.length, 2);
-    assert.equal(updated[1].status, "failed");
-    assert.equal(updated[1].error, "review failed");
-
-    await fs.writeFile(
-      historyPath,
-      updated.map((row) => JSON.stringify(row)).join("\n"),
-      "utf8",
-    );
-    await cronExecution.appendCronTaskTerminalHistory(
-      selfImproveTask({
-        runCount: 8,
-      }),
-      { status: "completed", text: "valid tail recovery" },
-      { agentDir, startedAt: "2026-07-28T20:00:00.000Z" },
-    );
-    await fs.appendFile(historyPath, "{malformed-tail", "utf8");
-    await cronExecution.appendCronTaskTerminalHistory(
-      selfImproveTask({
-        runCount: 9,
-      }),
-      { status: "completed", text: "invalid tail recovery" },
-      { agentDir, startedAt: "2026-07-28T21:00:00.000Z" },
-    );
-    const recoveredRows = (await fs.readFile(historyPath, "utf8"))
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    assert.equal(recoveredRows.length, 4);
-    await fs.writeFile(historyPath, "{malformed-record\n", "utf8");
-    await cronExecution.appendCronTaskTerminalHistory(
-      selfImproveTask({
-        runCount: 10,
-      }),
-      { status: "completed", text: "recover malformed history tail" },
-      { agentDir, startedAt: "2026-07-28T22:00:00.000Z" },
-    );
-  });
 });
 
 test("executeCronShellTask owns shell delivery and failure terminals", async () => {

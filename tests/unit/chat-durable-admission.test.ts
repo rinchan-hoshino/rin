@@ -31,6 +31,29 @@ const messageDecision = {
   decision: { allow: true },
 };
 
+test("durable admission accepts and strips legacy self-improve prompt flags", () => {
+  const legacy = {
+    ...frozen,
+    promptMeta: {
+      ...frozen.promptMeta,
+      taskContextKind: "scheduled-task",
+      selfImproveEligible: true,
+    },
+  };
+  const resolved = admission.resolveDurableChatAdmission(
+    {
+      state: "actionable",
+      decision: messageDecision,
+      decisionIntegrity: "valid",
+      submission: legacy,
+      submissionIntegrity: "valid",
+    },
+    turn,
+  );
+  assert.equal(resolved.kind, "turn");
+  assert.deepEqual(resolved.submission.promptMeta, frozen.promptMeta);
+});
+
 test("durable admission resolves only integrity-verified message submissions", () => {
   assert.deepEqual(
     admission.resolveDurableChatAdmission(

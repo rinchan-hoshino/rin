@@ -128,7 +128,6 @@ function promptContextMetaIsValid(
       "identity",
       "taskId",
       "taskName",
-      "taskContextKind",
     ]) ||
     !sameCanonicalIdentity(value.chatKey, requiredChatKey) ||
     (requiredIdentity !== undefined && value.identity !== requiredIdentity) ||
@@ -211,6 +210,13 @@ export function durableAdmissionMatchesTurn(
   return false;
 }
 
+function currentPromptContextMeta(value: PromptContextMeta): PromptContextMeta {
+  const meta = { ...value } as PromptContextMeta & Record<string, unknown>;
+  delete meta.taskContextKind;
+  delete meta.selfImproveEligible;
+  return meta;
+}
+
 function frozenTurnSubmission(
   value: FrozenChatTurnSubmission | undefined,
 ): FrozenChatTurnSubmission | null {
@@ -233,7 +239,7 @@ function frozenTurnSubmission(
   ) {
     return null;
   }
-  return value;
+  return { ...value, promptMeta: currentPromptContextMeta(value.promptMeta) };
 }
 
 export function resolveDurableChatAdmission(
@@ -321,7 +327,7 @@ export function resolveDurableChatAdmission(
         name: decision.command.name,
         argsText: decision.command.argsText,
       },
-      promptMeta: decision.promptMeta,
+      promptMeta: currentPromptContextMeta(decision.promptMeta),
     };
   }
   if (decision.kind === "unmatched_command") {

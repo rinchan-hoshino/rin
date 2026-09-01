@@ -3204,7 +3204,6 @@ test("chat controller uses the scheduler-delivered input as the scheduled turn r
       source: "scheduled-task",
       taskId: "owner-task",
       taskName: "Owner check",
-      taskContextKind: "scheduled-task",
     },
   });
 

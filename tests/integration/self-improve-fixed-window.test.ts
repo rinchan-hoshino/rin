@@ -66,7 +66,7 @@ async function runClosingTurn(windowTurns: number | undefined, turns: number) {
     {
       agentDir: "/tmp/rin-agent",
       frontend: userFrontend(),
-      promptContext: { source: "chat-bridge", selfImproveEligible: true },
+      promptContext: { source: "chat-bridge" },
       sessionManager: {
         getSessionFile: () => path.join(rootDir, "package.json"),
         getLeafId: () => branch.at(-1).id,

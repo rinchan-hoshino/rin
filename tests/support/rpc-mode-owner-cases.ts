@@ -5541,7 +5541,6 @@ test(
             {
               source: "chat-bridge",
               chatKey: "discord/1:2",
-              selfImproveEligible: true,
             },
           );
         },
@@ -5631,7 +5630,6 @@ test(
             promptContext: {
               source: "chat-bridge",
               chatKey: "discord/1:2",
-              selfImproveEligible: true,
             },
           })}\n`,
         ),
