@@ -381,7 +381,9 @@ export async function executeCronAgentTask(
           frontend: { kind: frontend.kind, key: frontend.key },
           promptMeta: options.promptMeta || buildCronTaskPromptContext(task),
         });
-  const completion = resolveTurnCompletion(result);
+  const completion = String(result?.turnId || "").trim()
+    ? { finalText: "" }
+    : resolveTurnCompletion(result);
   const finalText = summarizeText(completion.finalText, 4000);
   const nextSessionFile = String(result?.sessionFile || "").trim() || undefined;
   return {

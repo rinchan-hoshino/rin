@@ -1432,11 +1432,7 @@ test("cron chat-bound agent task submits into the current frontend session", asy
         submitIncoming: async (payload) => {
           order.push("submit-incoming");
           incomingCalls.push(payload);
-          return {
-            finalText: "done",
-            sessionId: "s1",
-            sessionFile: transientSessionFile,
-          };
+          return { turnId: "scheduled-inbox-1" };
         },
       },
     });
@@ -1449,8 +1445,8 @@ test("cron chat-bound agent task submits into the current frontend session", asy
       scheduledDeliveryOptions[0].idempotencyKey,
       "scheduled-input:run-chat-1",
     );
-    assert.equal(result.text, "done");
-    assert.equal(result.sessionFile, transientSessionFile);
+    assert.equal(result.text, "");
+    assert.equal(result.sessionFile, undefined);
     assert.equal(
       await fs.readFile(transientSessionFile, "utf8"),
       "temporary session",
