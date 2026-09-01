@@ -181,6 +181,7 @@ Resolution is deliberately simple:
 1. Address the configured frontend identity.
 2. If it has a current session, submit there.
 3. If it has no current session, let the frontend perform its ordinary first-input initialization and establish the binding.
+4. For visible Chat input, use the delivered marker message ID as both the ordinary incoming identity and reply target before entering the turn.
 
 The scheduler never supplies a session selector, restore path, managed-session leaf, model override, capability override, or `affectChatBinding` switch. Missing `frontend` fails with `cron_frontend_required`.
 

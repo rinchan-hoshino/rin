@@ -570,7 +570,10 @@ export async function executeCronAgentTask(
     quietMode: presentationQuiet,
     text: prompt,
     ...(scheduledInputMessageId
-      ? { replyToMessageId: scheduledInputMessageId }
+      ? {
+          incomingMessageId: scheduledInputMessageId,
+          replyToMessageId: scheduledInputMessageId,
+        }
       : {}),
     ...(options.runId ? { requestTag: options.runId } : {}),
     ...(options.deliveryIdempotencyKey

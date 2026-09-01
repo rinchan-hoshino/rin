@@ -1462,6 +1462,7 @@ test("cron chat-bound agent task submits into the current frontend session", asy
     assert.equal(calls[0].disposeAfterTurn, undefined);
     assert.equal(calls[0].shutdownAfterTurn, undefined);
     assert.equal(calls[0].deliverFinal, true);
+    assert.equal(calls[0].incomingMessageId, "scheduled-input-1");
     assert.equal(calls[0].replyToMessageId, "scheduled-input-1");
     assert.equal(calls[0].promptMeta?.source, "scheduled-task");
     assert.equal(calls[0].promptMeta?.taskId, "cron_chat_bound");

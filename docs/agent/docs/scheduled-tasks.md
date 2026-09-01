@@ -79,7 +79,7 @@ A false recurring condition schedules the next tick without starting the target.
 - **Automatic shell output:** a Chat `frontend` with `quiet: false` shows the marker and command, then quotes it with command output where supported.
 - **Record-only shell:** omit `frontend` from `shell_command`.
 
-A Chat frontend uses `{ kind: "chat", key: chatKey }`; TUI is the singleton `{ kind: "tui" }`. The scheduler never chooses a session or writes a binding. The frontend may create its ordinary initial session when the input arrives and no current session exists. The marked input is an automation message, not an impersonated platform-user message.
+A Chat frontend uses `{ kind: "chat", key: chatKey }`; TUI is the singleton `{ kind: "tui" }`. The scheduler never chooses a session or writes a binding. The frontend may create its ordinary initial session when the input arrives and no current session exists. The marker ID is the frontend turn's ordinary incoming and reply identity.
 
 ## Task prompt
 
