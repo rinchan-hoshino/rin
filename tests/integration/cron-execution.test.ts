@@ -1459,17 +1459,14 @@ test("cron chat-bound agent task submits into the current frontend session", asy
     assert.equal(incomingCalls[0].managedSessionLeaf, undefined);
     assert.equal(incomingCalls[0].disposeAfterTurn, undefined);
     assert.equal(incomingCalls[0].shutdownAfterTurn, undefined);
-    assert.equal(incomingCalls[0].deliverFinal, true);
     assert.equal(incomingCalls[0].messageId, "scheduled-input-1");
-    assert.equal(incomingCalls[0].promptMeta?.source, "scheduled-task");
-    assert.equal(incomingCalls[0].promptMeta?.taskId, "cron_chat_bound");
-    assert.equal(incomingCalls[0].promptMeta?.taskName, "Chat Bound Task");
-    assert.equal("triggerKind" in (incomingCalls[0].promptMeta || {}), false);
-    assert.equal("taskRunId" in (incomingCalls[0].promptMeta || {}), false);
-    assert.equal(
-      "taskSessionMode" in (incomingCalls[0].promptMeta || {}),
-      false,
-    );
+    assert.equal(incomingCalls[0].taskId, "cron_chat_bound");
+    assert.equal(incomingCalls[0].taskName, "Chat Bound Task");
+    assert.equal(incomingCalls[0].promptMeta, undefined);
+    assert.equal(incomingCalls[0].requestTag, undefined);
+    assert.equal(incomingCalls[0].deliveryIdempotencyKey, undefined);
+    assert.equal(incomingCalls[0].deliverFinal, undefined);
+    assert.equal(incomingCalls[0].quietMode, undefined);
     assert.equal(incomingCalls[0].systemPromptBlocks, undefined);
   } finally {
     await fs.rm(agentDir, { recursive: true, force: true });

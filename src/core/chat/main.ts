@@ -191,6 +191,48 @@ const CHAT_INBOX_PROCESSING_HEARTBEAT_MS = 30 * 1000;
 const DETACHED_CONTROLLER_SLEEP_IDLE_MS = 60_000;
 const TELEGRAM_CHAT_THREAD_MARKER = "?thread=";
 
+export function buildChatMessagePromptMeta(input: {
+  session: any;
+  identity: ReturnType<typeof loadIdentity>;
+  chatKey: string;
+  chatType: string;
+  requiresMentionToStartTurn?: boolean;
+  attachments: any[];
+  task?: { id: string; name?: string };
+}): PromptContextMeta {
+  const taskId = safeString(input.task?.id).trim();
+  const taskName = safeString(input.task?.name).trim();
+  return {
+    source: "chat-bridge",
+    sentAt: Number.isFinite(Number(input.session?.timestamp))
+      ? Number(input.session.timestamp)
+      : Date.now(),
+    chatKey: input.chatKey,
+    chatName:
+      pickChatName(input.session) ||
+      (input.chatType === "private" ? pickSenderNickname(input.session) : ""),
+    chatType: input.chatType,
+    userId: pickUserId(input.session),
+    nickname: pickSenderNickname(input.session),
+    identity: trustOf(
+      input.identity,
+      safeString(input.session?.platform).trim(),
+      pickUserId(input.session),
+    ),
+    runtimeMetadata:
+      input.session?.runtimeMetadata &&
+      typeof input.session.runtimeMetadata === "object"
+        ? input.session.runtimeMetadata
+        : undefined,
+    requiresMentionToStartTurn: input.requiresMentionToStartTurn || undefined,
+    attachedFiles: input.attachments
+      .filter((item) => item?.kind === "file")
+      .map((item) => ({ name: item.name, path: item.path })),
+    ...(taskId ? { taskId } : {}),
+    ...(taskName ? { taskName } : {}),
+  };
+}
+
 function isChatPlatformContribution(
   value: unknown,
 ): value is RinChatPlatformContribution {
@@ -598,11 +640,8 @@ export type ChatBridgeHandle = {
     chatKey: string;
     messageId: string;
     text: string;
-    deliverFinal?: boolean;
-    quietMode?: boolean;
-    requestTag?: string;
-    deliveryIdempotencyKey?: string;
-    promptMeta?: Record<string, unknown>;
+    taskId: string;
+    taskName?: string;
   }) => Promise<any>;
   terminateTurn: (payload: {
     controllerKey?: string;
@@ -1121,34 +1160,14 @@ export async function startChatBridge(
         ? `${promptText}\n\n${inboundAttachmentNotice}`
         : promptText,
       attachments,
-      promptMeta: {
-        source: "chat-bridge",
-        sentAt: Number.isFinite(Number(session?.timestamp))
-          ? Number(session.timestamp)
-          : Date.now(),
+      promptMeta: buildChatMessagePromptMeta({
+        session,
+        identity,
         chatKey: decision.chatKey,
-        chatName:
-          pickChatName(session) ||
-          (decision.chatType === "private" ? pickSenderNickname(session) : ""),
         chatType: decision.chatType,
-        userId: pickUserId(session),
-        nickname: pickSenderNickname(session),
-        identity: trustOf(
-          identity,
-          safeString(session?.platform).trim(),
-          pickUserId(session),
-        ),
-        runtimeMetadata:
-          session?.runtimeMetadata &&
-          typeof session.runtimeMetadata === "object"
-            ? session.runtimeMetadata
-            : undefined,
-        requiresMentionToStartTurn:
-          decision.requiresMentionToStartTurn || undefined,
-        attachedFiles: attachments
-          .filter((item) => item?.kind === "file")
-          .map((item) => ({ name: item.name, path: item.path })),
-      },
+        requiresMentionToStartTurn: decision.requiresMentionToStartTurn,
+        attachments,
+      }),
       incomingMessageId: messageId || undefined,
       replyToMessageId: messageId || undefined,
       sessionFile: undefined,
@@ -1766,7 +1785,14 @@ export async function startChatBridge(
       chatKey,
       text,
       attachments: [],
-      promptMeta: input?.promptMeta || {},
+      promptMeta: buildChatMessagePromptMeta({
+        session,
+        identity: getIdentity(),
+        chatKey,
+        chatType: getChatType(session),
+        attachments: [],
+        task: { id: input?.taskId, name: input?.taskName },
+      }),
       incomingMessageId: messageId,
       replyToMessageId: messageId,
       receivedAt: new Date(session.timestamp).toISOString(),

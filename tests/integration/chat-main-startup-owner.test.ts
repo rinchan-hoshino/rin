@@ -8,6 +8,32 @@ const chatMain = await importBuiltModule<
   typeof import("../../src/core/chat/main.js")
 >("dist/core/chat/main.js");
 
+test("scheduled prompt metadata is ordinary chat metadata plus task identity", () => {
+  const input = {
+    session: {
+      platform: "telegram",
+      userId: "owner-1",
+      username: "Owner",
+      timestamp: 1_000,
+    },
+    identity: { aliases: [], persons: {} },
+    chatKey: "telegram/demo:1",
+    chatType: "group",
+    requiresMentionToStartTurn: false,
+    attachments: [],
+  };
+  const ordinary = chatMain.buildChatMessagePromptMeta(input);
+  const scheduled = chatMain.buildChatMessagePromptMeta({
+    ...input,
+    task: { id: "task-1", name: "Task One" },
+  });
+  assert.deepEqual(scheduled, {
+    ...ordinary,
+    taskId: "task-1",
+    taskName: "Task One",
+  });
+});
+
 test("chat main startup cleans up when command-catalog construction fails", async () => {
   let factoryCalls = 0;
   await assert.rejects(

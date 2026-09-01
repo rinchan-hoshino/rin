@@ -354,13 +354,9 @@ export async function executeCronAgentTask(
           chatKey,
           messageId: scheduledInputMessageId,
           text: prompt,
-          deliverFinal: !quiet,
-          quietMode: presentationQuiet,
-          ...(options.runId ? { requestTag: options.runId } : {}),
-          ...(options.deliveryIdempotencyKey
-            ? { deliveryIdempotencyKey: options.deliveryIdempotencyKey }
-            : {}),
-          promptMeta: options.promptMeta || buildCronTaskPromptContext(task),
+          taskId: safeString(options.promptMeta?.taskId).trim() || task.id,
+          taskName:
+            safeString(options.promptMeta?.taskName).trim() || task.name,
         })
       : await options.chat.runTurn({
           controllerKey: chatKey ? "default" : cronTaskRunControllerKey(task),
