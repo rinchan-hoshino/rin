@@ -377,6 +377,7 @@ export function enqueueChatInboxItem(
         db,
         agentDir,
         messageInput,
+        { adoptExistingAsInbound: Boolean(input.preparedAdmission) },
       );
       const messageRow = db
         .prepare(

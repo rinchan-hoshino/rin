@@ -273,6 +273,46 @@ function mergeDuplicateInboundChatMessage(
   return next;
 }
 
+function adoptExistingChatMessageAsInbound(
+  existing: StoredChatMessage,
+  incoming: StoredChatMessage,
+): StoredChatMessage {
+  const adopted: StoredChatMessage = {
+    ...existing,
+    ...definedStoredChatMessagePatch(toStoredChatMessageInput(incoming)),
+    version: 1,
+    recordKey: existing.recordKey,
+    chatKey: existing.chatKey,
+    messageId: existing.messageId,
+    role: incoming.role || "user",
+    receivedAt: incoming.receivedAt,
+    acceptedAt: incoming.acceptedAt,
+    processedAt: incoming.processedAt,
+    sessionId: incoming.sessionId,
+    sessionFile: incoming.sessionFile,
+    deliveryKind: incoming.deliveryKind,
+    replyToMessageId: incoming.replyToMessageId,
+    duplicateCount: Math.max(0, Number(existing.duplicateCount || 0)),
+    lastReceivedAt: incoming.lastReceivedAt || incoming.receivedAt,
+    updatedAt: new Date().toISOString(),
+  };
+  adopted.text = preferRicherStoredString(existing.text, incoming.text);
+  adopted.rawContent = preferRicherStoredString(
+    existing.rawContent,
+    incoming.rawContent,
+  );
+  adopted.strippedContent = preferRicherStoredString(
+    existing.strippedContent,
+    incoming.strippedContent,
+  );
+  adopted.elements = preferRicherStoredElements(
+    existing.elements,
+    incoming.elements,
+  );
+  adopted.quote = incoming.quote;
+  return adopted;
+}
+
 export function normalizeStoredSessionFields<T extends Record<string, any>>(
   agentDir: string,
   input: T,
@@ -536,6 +576,7 @@ export function saveInboundChatMessageInDatabase(
   db: ChatDatabase,
   agentDir: string,
   input: Omit<StoredChatMessage, "version" | "recordKey">,
+  options: { adoptExistingAsInbound?: boolean } = {},
 ) {
   const normalized = buildStoredChatMessage(
     normalizeStoredSessionFields(agentDir, input),
@@ -549,7 +590,9 @@ export function saveInboundChatMessageInDatabase(
   const existing = rowToStoredChatMessage(existingRow)!;
   return updateRecordInDatabase(
     db,
-    mergeDuplicateInboundChatMessage(existing, normalized),
+    options.adoptExistingAsInbound
+      ? adoptExistingChatMessageAsInbound(existing, normalized)
+      : mergeDuplicateInboundChatMessage(existing, normalized),
     existingRow,
   );
 }

@@ -53,8 +53,24 @@ function input(messageId = "m1", chatKey = "telegram/1:2") {
   };
 }
 
-test("prepared incoming is committed as one actionable durable inbox item", async () => {
+test("prepared incoming adopts its delivered marker as one unprocessed user message", async () => {
   const agentDir = await tempDir();
+  messageStore.saveChatMessage(agentDir, {
+    chatKey: "telegram/1:2",
+    platform: "telegram",
+    botId: "1",
+    chatId: "2",
+    chatType: "group",
+    messageId: "prepared-incoming",
+    role: "assistant",
+    receivedAt: "2026-09-01T06:35:01.218Z",
+    acceptedAt: "2026-09-01T06:35:01.218Z",
+    processedAt: "2026-09-01T06:35:01.218Z",
+    sessionId: "scheduled-output-session",
+    sessionFile: "/tmp/scheduled-output-session.jsonl",
+    deliveryKind: "final",
+    text: "scheduled text",
+  });
   const prepared = inbox.enqueueChatInboxItem(agentDir, {
     ...input("prepared-incoming"),
     preparedAdmission: {
@@ -71,6 +87,23 @@ test("prepared incoming is committed as one actionable durable inbox item", asyn
       },
     },
   });
+  const stored = database
+    .openChatDatabase(agentDir)
+    .prepare(
+      "SELECT role, accepted_at, processed_at, delivery_kind, duplicate_count FROM messages WHERE chat_key = ? AND message_id = ?",
+    )
+    .get("telegram/1:2", "prepared-incoming");
+  assert.equal(stored.role, "user");
+  assert.equal(stored.accepted_at, null);
+  assert.equal(stored.processed_at, null);
+  const storedRecord = messageStore
+    .listChatMessages(agentDir)
+    .find((message) => message.messageId === "prepared-incoming");
+  assert.ok(storedRecord);
+  assert.equal(storedRecord.sessionId, undefined);
+  assert.equal(storedRecord.sessionFile, undefined);
+  assert.equal(stored.delivery_kind, null);
+  assert.equal(stored.duplicate_count, 0);
   assert.equal(prepared.item.admission.state, "actionable");
   assert.equal(
     prepared.item.admission.submission.incomingMessageId,
